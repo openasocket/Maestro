@@ -48,8 +48,15 @@ import {
 import { startSteeringServer, type SteeringServer } from './steering-server';
 import { cleanupStreamJsonImages, translateStreamJsonInput } from './stream-json-input';
 import { formatScreenTailReport, idleTimeoutMessage, readyTimeoutMessage } from './timeout-report';
-import { PROMPT_TAB_SPACES, TuiDriver } from './tui-driver';
+import { PROMPT_TAB_SPACES, TuiAdmissionError, TuiDriver } from './tui-driver';
 import { OpenToolCalls, skipsPermissionPrompts, withPermissionBypass } from './open-tool-calls';
+import {
+	readTuiHandshakeEnv,
+	readTuiHandshakeKey,
+	TUI_HANDSHAKE_ENV_VAR,
+	type TuiHandshakeRead,
+} from '../shared/maestro-lib/managed/tui-handshake';
+import { resolveUserDataDir } from '../shared/maestro-lib/paths/userDataDir';
 import {
 	addToCostState,
 	parseCostStateRow,
@@ -139,6 +146,13 @@ const STATUS_ATTEMPT_COST_MS = STATUS_INITIAL_WAIT_MS + STATUS_QUIET_DEBOUNCE_MS
 // were unaffected. Discovery still resolves the instant the file appears, so
 // a larger ceiling costs nothing on the happy path.
 const DISCOVERY_TIMEOUT_FLOOR_MS = 10000;
+// A managed host's admission handshake was offered and the spawn could not be
+// held to it (it did not verify, the binary is not the approved one, a flag is
+// outside the admission). Clear of the codes above (0-6, 9) and of 2, which
+// makes the desktop replay the prompt through the API: a refused admission is
+// never retried on another route.
+const ADMISSION_REFUSED_EXIT_CODE = 10;
+const ADMISSION_REFUSED_ERROR = 'tui_admission_refused';
 
 const program = new Command();
 
@@ -160,6 +174,10 @@ program
 			'Environment:',
 			'  MAESTRO_CLAUDE_BIN  Path to the claude binary (defaults to `claude` on PATH).',
 			'  CLAUDE_CONFIG_DIR   Claude config directory (defaults to ~/.claude); inherited by the TUI.',
+			`  ${TUI_HANDSHAKE_ENV_VAR}`,
+			'                      Set by a managed Maestro host: the signed admission this spawn was',
+			'                      granted (approved claude binary, allowed flags, ceiling). The TUI',
+			'                      refuses to spawn anything else (exit 10). Never set it by hand.',
 		].join('\n')
 	)
 	.version(VERSION, '-v, --version', 'Print the maestro-p version and exit')
@@ -199,6 +217,23 @@ function resolveBinPath(): string {
 		return envBin;
 	}
 	return 'claude';
+}
+
+/**
+ * The managed host's admission handshake, if one was sent (MRC2-03-05). The
+ * key it is verified against lives in the host's data directory, which this
+ * process resolves for itself exactly as the CLI does: a handshake nobody can
+ * verify is a refusal the driver raises before it spawns, never a spawn with
+ * the check skipped. An unmanaged host sends none and the TUI runs as before.
+ */
+function resolveTuiAdmission(): TuiHandshakeRead {
+	return readTuiHandshakeEnv(process.env, {
+		readKey: () => readTuiHandshakeKey(resolveUserDataDir({ env: process.env })),
+	});
+}
+
+function admissionRefusedMessage(reason: string): string {
+	return `maestro-p: the managed admission for this spawn was refused: ${reason}. Nothing was spawned. Failing with ${ADMISSION_REFUSED_ERROR}.\n`;
 }
 
 // Explicit opt-in to answer claude's folder-trust dialog with "Yes". Maestro's
@@ -267,6 +302,8 @@ async function runMode(args: ParsedArgs): Promise<never> {
 	const binPath = resolveBinPath();
 	const emitter = new JsonEmitter();
 	const startMs = Date.now();
+
+	const admission = resolveTuiAdmission();
 
 	// Resuming an id with no transcript behind it cannot work: claude's TUI quits
 	// on it and the turn dies as an anonymous `tui_exited`. That is every tab of
@@ -352,6 +389,7 @@ async function runMode(args: ParsedArgs): Promise<never> {
 		captureScreen: steeringEnabled,
 		acceptWorkspaceTrust: acceptsWorkspaceTrust(),
 		readyTimeoutMs: args.readyTimeoutSeconds * 1000,
+		admission,
 	});
 
 	// A turn on API Usage Billing still completes, so nothing downstream would
@@ -1185,7 +1223,23 @@ async function runMode(args: ParsedArgs): Promise<never> {
 	// second init envelope, attaching a tailer) while the exit is pending.
 	const settled = (): Promise<never> => new Promise<never>(() => undefined);
 
-	await driver.start();
+	try {
+		await driver.start();
+	} catch (err) {
+		// The spawn was held to the managed admission and refused: nothing was
+		// spawned, and the turn ends with its own named error rather than
+		// bubbling to main()'s catch (a bare exit 1 with no result envelope).
+		if (!(err instanceof TuiAdmissionError)) throw err;
+		process.stderr.write(admissionRefusedMessage(err.message));
+		if (!finalized) {
+			finalize({
+				isError: true,
+				error: ADMISSION_REFUSED_ERROR,
+				exitCode: ADMISSION_REFUSED_EXIT_CODE,
+			});
+		}
+		return settled();
+	}
 	if (finalized) return settled();
 
 	// Arm the first-byte timer the moment the TUI is up. It spans the ready
@@ -1332,6 +1386,10 @@ async function statusMode(args: ParsedArgs): Promise<never> {
 		args: args.passThroughArgs,
 		cwd,
 		env: childEnv,
+		// The probe is held to a managed host's admission like a turn: `--status`
+		// spawns the same claude in the same pty, and a handshake that does not
+		// verify, or a binary that is not the approved one, probes nothing.
+		admission: resolveTuiAdmission(),
 		// Parse the /usage panel from the full raw screen, not the `\n`-delimited
 		// 'line' events: heavier panels paint via cursor-addressing with no line
 		// feeds, so the 'line' stream is empty and the content would be lost.
@@ -1405,7 +1463,14 @@ async function statusMode(args: ParsedArgs): Promise<never> {
 	const startedAt = Date.now();
 	const deadline = startedAt + STATUS_RETRY_DEADLINE_MS;
 
-	await driver.start();
+	try {
+		await driver.start();
+	} catch (err) {
+		if (!(err instanceof TuiAdmissionError)) throw err;
+		statusFinalized = true;
+		process.stderr.write(admissionRefusedMessage(err.message));
+		process.exit(ADMISSION_REFUSED_EXIT_CODE);
+	}
 	await waitForEvent(driver, 'ready');
 	if (statusFinalized) return stopped();
 

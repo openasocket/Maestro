@@ -29,6 +29,7 @@ export * from './managed/workflows';
 export * from './managed/events';
 export * from './managed/event-journal';
 export * from './managed/commands';
+export * from './managed/tui-handshake';
 
 // Paths and configuration
 export * from './paths/userDataDir';

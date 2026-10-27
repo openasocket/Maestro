@@ -14,6 +14,7 @@
 import * as os from 'os';
 
 import { STEERING_SOCKET_ENV_VAR } from '../shared/chatSteering';
+import { TUI_HANDSHAKE_ENV_VAR } from '../shared/maestro-lib/managed/tui-handshake';
 
 // Env vars that mark the CURRENT process as running inside a Claude Code
 // session. When maestro-p is invoked from within a Claude agent (or any
@@ -40,8 +41,11 @@ export const CLAUDE_SESSION_IDENTITY_ENV_VARS = [
 // claude TUI and through it every Bash-tool child, so an agent that runs
 // `maestro-p` (or any tool that reads the variable) would try to open a second
 // server on the SAME path - knocking out this turn's steering channel - or could
-// connect to it and type into the very turn that spawned it.
-export const MAESTRO_P_PRIVATE_ENV_VARS = [STEERING_SOCKET_ENV_VAR] as const;
+// connect to it and type into the very turn that spawned it. The managed
+// admission handshake is addressed to this maestro-p alone for the same reason:
+// it names what THIS spawn was admitted on, and a claude below it (or a tool it
+// runs) has no business reading or replaying it.
+export const MAESTRO_P_PRIVATE_ENV_VARS = [STEERING_SOCKET_ENV_VAR, TUI_HANDSHAKE_ENV_VAR] as const;
 
 // The login name, filled in from the OS account when the caller left it unset.
 // With USER missing, claude cannot find the subscription login it keeps in the

@@ -37,6 +37,29 @@ import {
 	editorShowsTypedText,
 } from './steering-screen';
 import type { SteeringRefusal } from '../shared/chatSteering';
+import {
+	checkTuiSpawn,
+	type TuiHandshakeRead,
+	type TuiSpawnRefusalCode,
+} from '../shared/maestro-lib/managed/tui-handshake';
+import { skipsPermissionPrompts } from './open-tool-calls';
+
+/** The spawn was held to a managed host's admission handshake and refused. Nothing was spawned. */
+export class TuiAdmissionError extends Error {
+	readonly code: TuiSpawnRefusalCode;
+	constructor(code: TuiSpawnRefusalCode, reason: string) {
+		super(reason);
+		this.name = 'TuiAdmissionError';
+		this.code = code;
+	}
+}
+
+/** `pty.spawn`'s shape, so a test can hand the driver a fake pty factory. */
+export type PtySpawn = (
+	file: string,
+	args: string[],
+	options: { name: string; cols: number; rows: number; cwd: string; env: Record<string, string> }
+) => IPty;
 
 export interface TuiDriverOptions {
 	binPath: string;
@@ -45,6 +68,18 @@ export interface TuiDriverOptions {
 	env: NodeJS.ProcessEnv;
 	cols?: number;
 	rows?: number;
+	/**
+	 * The managed host's admission handshake as index.ts read it (MRC2-03-05).
+	 * `start()` holds the spawn to it right before `pty.spawn` (binary path and
+	 * digest, every flag, the ceiling) and throws `TuiAdmissionError` instead of
+	 * spawning on a mismatch or on a handshake that did not verify. Absent, or
+	 * read as absent, on an unmanaged host: the spawn is unchanged.
+	 */
+	admission?: TuiHandshakeRead;
+	/** Digests the binary for the admission check; injectable for tests. */
+	digestFile?: (filePath: string) => string;
+	/** The pty factory; defaults to node-pty's `spawn`. */
+	spawnPty?: PtySpawn;
 	// --status only: accumulate the full raw PTY stream so the /usage panel can
 	// be parsed from the complete screen rather than the `\n`-delimited 'line'
 	// events. Claude paints heavier /usage panels (Team/Enterprise accounts, or
@@ -463,11 +498,28 @@ export class TuiDriver extends EventEmitter {
 			throw new Error('TuiDriver.start() called twice');
 		}
 		const { binPath, args, cwd, env, cols = DEFAULT_COLS, rows = DEFAULT_ROWS } = this.options;
+		// Under a managed admission the spawn is held to it here, the one place
+		// every pty the TUI opens passes through. A refusal spawns nothing: the
+		// TUI never falls back to the binary or the flags it was not admitted on.
+		const admission = this.options.admission;
+		if (admission?.status === 'refused') {
+			throw new TuiAdmissionError('handshake-refused', admission.reason);
+		}
+		if (admission?.status === 'ok') {
+			const verdict = checkTuiSpawn(admission.payload, {
+				binPath,
+				args,
+				bypassesPermissions: skipsPermissionPrompts(args),
+				digestFile: this.options.digestFile,
+			});
+			if (!verdict.ok) throw new TuiAdmissionError(verdict.code, verdict.reason);
+		}
 		const ptyEnv: NodeJS.ProcessEnv = {
 			...env,
 			TERM: 'xterm-256color',
 		};
-		this.ptyProcess = pty.spawn(binPath, args, {
+		const spawnPty = this.options.spawnPty ?? pty.spawn;
+		this.ptyProcess = spawnPty(binPath, args, {
 			name: 'xterm-256color',
 			cols,
 			rows,

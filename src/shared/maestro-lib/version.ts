@@ -123,8 +123,13 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * `permission: LaunchPermissionDecision` (requested, ceiling) for the sinks that emit or map access flags;
  * `HeadlessSpawnAuthority.routeCeiling(providerId)` (`./managed/host-adapter`) lends an attached host's
  * route to a headless launch (`HeadlessSpawnHost.routeCeiling`), null on every other standing.
+ * 0.30.0: the host-to-TUI admission handshake (`./managed/tui-handshake`, MRC2-03-05): `TuiHandshakePayload`
+ * (what a managed host admitted a maestro-p spawn on: the approved binary's path and digest, the allowed flags,
+ * the ceiling, the lease's run identity) signed by `encodeTuiHandshake` with the key at the host's data directory
+ * and stamped as `TUI_HANDSHAKE_ENV_VAR` after the environment ceiling; `readTuiHandshakeEnv` and `checkTuiSpawn`
+ * are the TUI's half, run before its own `pty.spawn`. No handshake is unmanaged, unchanged; one that does not verify refuses.
  */
-export const MAESTRO_LIB_VERSION = '0.29.0';
+export const MAESTRO_LIB_VERSION = '0.30.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';
