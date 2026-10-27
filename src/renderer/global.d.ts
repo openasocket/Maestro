@@ -2912,7 +2912,7 @@ interface MaestroAPI {
 				group?: string;
 				task?: string;
 			}
-		) => Promise<{ success: boolean; notificationId?: number; error?: string }>;
+		) => Promise<{ success: boolean; notificationId?: number; error?: string; refused?: boolean }>;
 		stopSpeak: (notificationId: number) => Promise<{ success: boolean; error?: string }>;
 		onCommandCompleted: (handler: (notificationId: number) => void) => () => void;
 		/** @deprecated Use onCommandCompleted instead */

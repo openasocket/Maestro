@@ -27,6 +27,7 @@ export const CONNECTIVITY_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Shell command run when a task completes; the summary is piped to stdin. Runs in a shell (pipes/chains work). Maestro context is exposed via env vars: MAESTRO_NOTIFY_AGENT, MAESTRO_NOTIFY_TAB, MAESTRO_NOTIFY_GROUP, MAESTRO_NOTIFY_TASK. Examples: say on macOS, espeak on Linux.',
 		type: 'string',
 		default: 'say',
+		lockable: true,
 		category: 'notifications',
 	},
 	toastDuration: {
@@ -93,6 +94,7 @@ export const CONNECTIVITY_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Shell command to execute when Maestro becomes idle (no agents or Auto Runs running).',
 		type: 'string',
 		default: 'say Maestro is idle',
+		lockable: true,
 		category: 'notifications',
 	},
 

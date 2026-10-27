@@ -57,6 +57,7 @@ import { evaluateScheduledDispatch } from '../shared/plugins/plugin-dispatch-gat
 import { PermissionBroker } from './plugins/permission-broker';
 import { createPluginPolicySource } from './enterprise/plugin-policy';
 import { createBrowserPolicySource } from './enterprise/browser-policy';
+import { createShellPolicySource } from './enterprise/shell-policy';
 import {
 	createGitExecutionGate,
 	createRepositoryPolicySource,
@@ -985,6 +986,17 @@ app
 							),
 			})
 		);
+		// The shell ceiling (MRC2-04-06): the person's audio feedback and idle
+		// notification commands run through a shell, and under management only
+		// the exact command strings the policy lists run; composed the same way
+		// as the ceilings above and handed to the notification handlers by the
+		// bootstrap. No endpoint operation installs one yet (CP-01): an enrolled
+		// host refuses every configured command `unavailable` by name and the
+		// toast still shows; standalone runs what the person configured.
+		const shellPolicy = createShellPolicySource({
+			identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
+			policy: () => enterpriseService?.policy.status() ?? null,
+		});
 
 		// Serve agent-authored Concerto mockups as real documents with their own
 		// CSP. A srcdoc frame would inherit Maestro's renderer CSP and block the
@@ -3444,6 +3456,7 @@ app
 			getEnterpriseService: () => enterpriseService,
 			getBrowserAuthority: () => browserPolicy,
 			getRepositoryAuthority: () => repositoryPolicy,
+			getShellAuthority: () => shellPolicy,
 			getPluginEventBus: () => pluginEventBus,
 			getInteractiveReplayController: () => interactiveReplayController,
 			setNoteSessionActivated: (fn) => {

@@ -616,12 +616,36 @@ export function triggerCustomNotification(
 			vars === undefined
 				? window.maestro.notification.speak(message!, config.audioFeedbackCommand)
 				: window.maestro.notification.speak(message!, config.audioFeedbackCommand, vars);
-		dispatched.catch((err) => {
-			logger.error('[notificationStore] Custom notification failed:', undefined, err);
-		});
+		dispatched
+			.then((result) => {
+				if (result?.refused) notifyRefusedNotificationCommand('Audio feedback', result.error);
+			})
+			.catch((err) => {
+				logger.error('[notificationStore] Custom notification failed:', undefined, err);
+			});
 		return true;
 	}
 	return false;
+}
+
+/**
+ * The managed shell ceiling refused a configured notification command
+ * (MRC2-04-06): nothing ran on the host. Say so once per distinct reason, as a
+ * toast that fires no command itself, so a denying policy is visible without
+ * a toast storm. `what` names the setting ("Audio feedback", "Idle notification").
+ */
+const reportedRefusedCommands = new Set<string>();
+export function notifyRefusedNotificationCommand(what: string, reason?: string): void {
+	const message = reason ?? 'The managed shell ceiling did not admit the configured command.';
+	const key = `${what}\n${message}`;
+	if (reportedRefusedCommands.has(key)) return;
+	reportedRefusedCommands.add(key);
+	notifyToast({
+		color: 'yellow',
+		title: `${what} command not run`,
+		message,
+		skipCustomNotification: true,
+	});
 }
 
 /** Options for {@link showOsNotification}. */

@@ -5,7 +5,11 @@ import {
 	selectHasAnyRunnableQueuedWork,
 } from '../../stores/sessionStore';
 import { selectHasAnyActiveBatch, useBatchStore } from '../../stores/batchStore';
-import { useNotificationStore, selectConfig } from '../../stores/notificationStore';
+import {
+	useNotificationStore,
+	selectConfig,
+	notifyRefusedNotificationCommand,
+} from '../../stores/notificationStore';
 
 /**
  * Watches for the transition from "any activity" to "fully idle" and fires
@@ -46,6 +50,10 @@ export function useIdleNotification(): void {
 			if (idleNotificationEnabled && idleNotificationCommand) {
 				window.maestro.notification
 					.speak('Maestro is idle', idleNotificationCommand)
+					.then((result) => {
+						if (result?.refused)
+							notifyRefusedNotificationCommand('Idle notification', result.error);
+					})
 					.catch((err) => {
 						console.error('[IdleNotification] Failed to execute idle command:', err);
 					});

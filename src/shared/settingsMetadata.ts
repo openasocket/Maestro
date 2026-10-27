@@ -30,6 +30,12 @@ export interface SettingMetadata {
 	type: SettingType;
 	default: unknown;
 	sensitive?: boolean;
+	/**
+	 * A managed policy may lock this key (and pin its value). Marked on the keys
+	 * whose value reaches a shell, a network or a credential; the lock model
+	 * (P2-06) reads this flag, standalone ignores it.
+	 */
+	lockable?: boolean;
 	category: SettingCategory;
 }
 

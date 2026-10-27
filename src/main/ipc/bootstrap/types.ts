@@ -11,6 +11,7 @@ import type { AuthorizationStore } from '../../plugins/authorization-ledger';
 import type { EnterpriseService } from '../../enterprise/service';
 import type { BrowserEffectAuthority } from '../../enterprise/browser-policy';
 import type { RepositoryEffectAuthority } from '../../enterprise/repository-policy';
+import type { ShellCommandAuthority } from '../../enterprise/shell-policy';
 import type { PluginEventBusImpl } from '../../plugins/plugin-event-bus';
 import type { InteractiveReplayController } from '../../agents/claude-interactive-replay';
 import type { ProcessConfig as ProcessSpawnConfig } from '../../process-manager/types';
@@ -51,6 +52,8 @@ export interface IpcBootstrapDependencies {
 	getBrowserAuthority?: () => BrowserEffectAuthority | null;
 	/** The repository ceiling the Symphony handlers hold every clone, push, draft, finalize and cancel against (MRC-09-05C); null or absent holds nothing. */
 	getRepositoryAuthority?: () => RepositoryEffectAuthority | null;
+	/** The shell ceiling the notification handlers hold every configured command against (MRC2-04-06); null or absent holds nothing. */
+	getShellAuthority?: () => ShellCommandAuthority | null;
 	getPluginEventBus: () => PluginEventBusImpl | null;
 	getInteractiveReplayController: () => InteractiveReplayController<ProcessSpawnConfig> | null;
 	/**

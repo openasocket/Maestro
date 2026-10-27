@@ -29,6 +29,8 @@ export interface NotificationCommandResponse {
 	success: boolean;
 	notificationId?: number;
 	error?: string;
+	/** The managed shell ceiling refused the configured command; nothing ran and `error` names why. */
+	refused?: boolean;
 }
 
 /**

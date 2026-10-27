@@ -559,6 +559,7 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		getMainWindow: deps.getMainWindow,
 		ensureMainWindow: deps.ensureMainWindow,
 		getWindowRegistry: () => deps.windowRegistry,
+		shellAuthority: deps.getShellAuthority,
 	});
 
 	// Register attachments handlers (extracted to handlers/attachments.ts)

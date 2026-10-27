@@ -9,6 +9,12 @@ import { requestFromRenderer } from '../../web-server/callbacks/remoteRequest';
  *
  * Note: Custom notification commands are user-configured and can be any command
  * that accepts text via stdin. The user has full control over what command is executed.
+ *
+ * Under management (MRC2-04-06) that control is the policy's: the exact
+ * command string is held against the shell ceiling right before the shell
+ * starts, by the transport the IPC call was admitted over. A string the ceiling
+ * does not list never spawns and the caller is answered `refused` with the
+ * reason, logged once per reason. Standalone holds nothing and runs as before.
  */
 
 import { ipcMain, Notification, BrowserWindow } from 'electron';
@@ -20,6 +26,9 @@ import { buildSessionDeepLink } from '../../../shared/deep-link-urls';
 import { captureException } from '../../utils/sentry';
 import { parseToastClickAction, type ToastClickAction } from '../../../shared/toastClickAction';
 import type { WindowRegistry } from '../../window-registry';
+import type { ProcessSpawnActor } from '../../process-manager/types';
+import { getActingTransport, transportSpawnActor } from '../../web-server/auth/transport-actor';
+import type { ShellCommandAuthority, ShellCommandDecision } from '../../enterprise/shell-policy';
 
 // ==========================================================================
 // Constants
@@ -68,6 +77,8 @@ export interface NotificationCommandResponse {
 	success: boolean;
 	notificationId?: number;
 	error?: string;
+	/** The managed shell ceiling refused the configured command; nothing ran and `error` names why. */
+	refused?: boolean;
 }
 
 /**
@@ -94,6 +105,8 @@ interface NotificationQueueItem {
 	text: string;
 	command?: string;
 	vars?: NotificationCommandVars;
+	/** The transport the request was admitted over, read when it arrived; the queue runs outside that context. */
+	actor: ProcessSpawnActor;
 	resolve: (result: NotificationCommandResponse) => void;
 }
 
@@ -143,9 +156,41 @@ let isNotificationProcessing = false;
  */
 let commandCompletedSafeSend: SafeSendFn = createSafeSend(() => null);
 
+/**
+ * The shell ceiling every configured command is held to (MRC2-04-06), read
+ * per call so an enrollment that lands later is seen by the next command.
+ * Absent (tests, a host with no ceiling composed) holds nothing: standalone.
+ */
+let shellAuthorityGetter: () => ShellCommandAuthority | null = () => null;
+
+/** Refusal reasons already written to the log, so a denying ceiling is reported once, not per toast. */
+const reportedShellRefusals = new Set<string>();
+
 // ==========================================================================
 // Helper Functions
 // ==========================================================================
+
+/** The surface the shell ceiling names the notification commands by. */
+export const NOTIFICATION_SHELL_SURFACE = 'notification' as const;
+
+/**
+ * Hold the exact command line about to reach the shell against the managed
+ * shell ceiling, as the transport that asked. Standalone (no ceiling composed,
+ * or an unenrolled host) answers allowed with no receipt. A refusal names its
+ * code; the caller runs nothing and reports it.
+ */
+export function holdNotificationCommand(
+	command: string,
+	actor: ProcessSpawnActor
+): ShellCommandDecision {
+	const authority = shellAuthorityGetter();
+	if (!authority) return { allowed: true };
+	return authority.authorize({
+		surface: NOTIFICATION_SHELL_SURFACE,
+		command,
+		actor: { kind: 'transport', actor },
+	});
+}
 
 /**
  * Parse the notification command configuration.
@@ -189,6 +234,8 @@ export function buildNotificationEnv(vars?: NotificationCommandVars): NodeJS.Pro
 interface ExecuteResult {
 	response: NotificationCommandResponse;
 	completed: Promise<void>;
+	/** False when nothing was spawned (a managed refusal), so the queue imposes no spacing for it. */
+	ran: boolean;
 }
 
 /**
@@ -199,6 +246,7 @@ interface ExecuteResult {
  */
 function executeNotificationCommand(
 	text: string,
+	actor: ProcessSpawnActor,
 	command?: string,
 	vars?: NotificationCommandVars
 ): ExecuteResult {
@@ -216,6 +264,27 @@ function executeNotificationCommand(
 		textLength,
 		textPreview,
 	});
+
+	// Under management the exact command string is held before any shell
+	// starts (MRC2-04-06). A refusal runs nothing: the caller is answered by
+	// code, the reason reaches the log once, and the text never leaves memory.
+	const decision = holdNotificationCommand(fullCommand, actor);
+	if (!decision.allowed) {
+		const error = `[managed-${decision.code}] ${decision.message}`;
+		if (!reportedShellRefusals.has(error)) {
+			reportedShellRefusals.add(error);
+			logger.warn(
+				'Notification command refused by the managed shell ceiling; nothing was run',
+				'Notification',
+				{ command: fullCommand, code: decision.code, receipt: decision.managed }
+			);
+		}
+		return {
+			response: { success: false, refused: true, error },
+			completed: Promise.resolve(),
+			ran: false,
+		};
+	}
 
 	try {
 		// Log the full command being executed
@@ -337,6 +406,7 @@ function executeNotificationCommand(
 		return {
 			response: { success: true, notificationId },
 			completed,
+			ran: true,
 		};
 	} catch (error) {
 		void captureException(error);
@@ -348,6 +418,7 @@ function executeNotificationCommand(
 		return {
 			response: { success: false, error: String(error) },
 			completed: Promise.resolve(),
+			ran: true,
 		};
 	}
 }
@@ -389,12 +460,18 @@ async function processNextNotification(): Promise<void> {
 
 	// Execute the notification command - resolve the IPC call immediately
 	// with the notificationId, then await completion for queue spacing
-	const { response, completed } = executeNotificationCommand(item.text, item.command, item.vars);
+	const { response, completed, ran } = executeNotificationCommand(
+		item.text,
+		item.actor,
+		item.command,
+		item.vars
+	);
 	item.resolve(response);
 	await completed;
 
-	// Record when this notification ended
-	lastNotificationEndTime = Date.now();
+	// Record when this notification ended. A refused command made no sound, so
+	// it holds the next one up for nothing.
+	if (ran) lastNotificationEndTime = Date.now();
 	isNotificationProcessing = false;
 
 	// Process next item in queue
@@ -419,6 +496,11 @@ export interface NotificationsHandlerDependencies {
 	 * and tests omit it and fall back to {@link getMainWindow}.
 	 */
 	getWindowRegistry?: () => WindowRegistry | null;
+	/**
+	 * The shell ceiling every configured notification command is held to
+	 * (MRC2-04-06), read per call. Null or absent holds nothing (standalone).
+	 */
+	shellAuthority?: () => ShellCommandAuthority | null;
 }
 
 /**
@@ -492,6 +574,7 @@ export function registerNotificationsHandlers(deps?: NotificationsHandlerDepende
 	// Capture the window getter for the module-level queue helpers so completion
 	// events reach both the desktop renderer and web-desktop bridge clients.
 	commandCompletedSafeSend = createSafeSend(deps?.getMainWindow ?? (() => null));
+	shellAuthorityGetter = deps?.shellAuthority ?? (() => null);
 
 	ipcMain.handle(
 		'notification:navigateToSource',
@@ -613,9 +696,13 @@ export function registerNotificationsHandlers(deps?: NotificationsHandlerDepende
 				};
 			}
 
+			// Who asked, read now: the queue drains later, outside the transport
+			// context this call was admitted in, and the hold binds that actor.
+			const actor = transportSpawnActor(getActingTransport());
+
 			// Add to queue and return a promise that resolves when this notification completes
 			return new Promise<NotificationCommandResponse>((resolve) => {
-				notificationQueue.push({ text, command, vars, resolve });
+				notificationQueue.push({ text, command, vars, actor, resolve });
 				logger.debug(
 					`Notification queued, queue length: ${notificationQueue.length}`,
 					'Notification'
@@ -695,6 +782,7 @@ export function resetNotificationState(): void {
 	notificationProcessIdCounter = 0;
 	lastNotificationEndTime = 0;
 	isNotificationProcessing = false;
+	reportedShellRefusals.clear();
 }
 
 /**
