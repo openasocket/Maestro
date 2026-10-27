@@ -128,6 +128,27 @@ export async function readOriginRemote(repoPath: string): Promise<string | null>
 	return result.exitCode === 0 && url ? url : null;
 }
 
+/**
+ * Hold one remote effect of `repository` right before the `gh` call that
+ * performs it runs in `repoPath` (MRC2-04-04A): the refusal text, or null when
+ * it may run. The hold sits inside the helper that spawns `gh`, so no caller
+ * of the helper can reach the forge around it. Standalone holds nothing and
+ * reads nothing; under a ceiling the effect is held against where origin
+ * points now.
+ */
+export async function holdRemoteEffectBeforeGh(
+	effect: RepositoryEffectKind,
+	repoPath: string,
+	repository: string | null
+): Promise<string | null> {
+	if (!hasRepositoryAuthority()) return null;
+	const decision = holdRepositoryEffect(effect, 'remote', {
+		repository,
+		remote: await readOriginRemote(repoPath),
+	});
+	return decision.allowed ? null : managedRefusal(decision);
+}
+
 export const handlerOpts = (operation: string, logSuccess = true): CreateHandlerOptions => ({
 	context: LOG_CONTEXT,
 	operation,

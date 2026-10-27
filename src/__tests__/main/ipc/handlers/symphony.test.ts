@@ -70,9 +70,11 @@ global.fetch = mockFetch;
 import { execFileNoThrow } from '../../../../main/utils/execFile';
 import { ensureForkSetup } from '../../../../main/utils/symphony-fork';
 import { runAsTransport } from '../../../../main/web-server/auth/transport-actor';
-import type {
-	RepositoryEffectDecision,
-	RepositoryEffectRequest,
+import { setGitExecutionGate } from '../../../../main/utils/remote-git';
+import {
+	createGitExecutionGate,
+	type RepositoryEffectDecision,
+	type RepositoryEffectRequest,
 } from '../../../../main/enterprise/repository-policy';
 
 describe('Symphony IPC handlers', () => {
@@ -6821,6 +6823,103 @@ This is a Symphony task document.
 			expect(state.active[0].status).toBe('failed');
 			expect(state.active[0].error).toBe('[managed-outside-ceiling] no finalize for ada');
 			expect(state.history).toHaveLength(0);
+		});
+
+		it('symphony:complete admitted holds finalize inside each gh helper, right before gh pr ready and gh pr comment (MRC2-04-04A)', async () => {
+			vi.mocked(fs.readFile).mockResolvedValue(stateWithContribution());
+			allGitSucceeds();
+			const auth = authority();
+			registerManaged(auth);
+
+			const result = await handlers.get('symphony:complete')!({} as any, {
+				contributionId: 'contrib_managed',
+			});
+
+			expect(result.prNumber).toBe(99);
+			expect(effects(auth)).toEqual(['finalize', 'finalize']);
+			expect(auth.requests[1]).toMatchObject({
+				effect: 'finalize',
+				resource: 'remote',
+				repository: 'owner/repo',
+				remote: ORIGIN,
+			});
+			// Each hold reads origin and is answered just before its own gh call runs.
+			const order = vi
+				.mocked(execFileNoThrow)
+				.mock.calls.map((c) => `${c[0]} ${(c[1] as string[]).slice(0, 2).join(' ')}`);
+			expect(order).toEqual([
+				'git remote get-url',
+				'gh pr ready',
+				'git remote get-url',
+				'gh pr comment',
+			]);
+			expect(lastStateWrite().history).toHaveLength(1);
+		});
+
+		it('symphony:createDraftPR under a denying ceiling counts commits through the executor as a read, then pushes nothing and opens no PR (MRC2-04-04A)', async () => {
+			const metadata = {
+				contributionId: 'contrib_managed',
+				sessionId: 'session-123',
+				repoSlug: 'owner/repo',
+				issueNumber: 42,
+				issueTitle: 'Test Issue',
+				branchName: 'symphony/issue-42-abc',
+				localPath: '/tmp/symphony/repos/repo-contrib_managed',
+				prCreated: false,
+				upstreamDefaultBranch: 'main',
+			};
+			vi.mocked(fs.readFile).mockImplementation(async (filePath) =>
+				String(filePath).includes('metadata.json')
+					? JSON.stringify(metadata)
+					: stateWithContribution()
+			);
+			vi.mocked(execFileNoThrow).mockImplementation(async (cmd, args) => {
+				if (cmd === 'gh' && args?.[0] === 'auth') return { ...ok, stdout: 'Logged in' };
+				if (cmd === 'git' && args?.[0] === 'rev-list') return { ...ok, stdout: '3' };
+				if (cmd === 'git' && args?.[0] === 'remote') return { ...ok, stdout: ORIGIN };
+				if (cmd === 'git' && args?.[0] === 'rev-parse')
+					return { ...ok, stdout: 'symphony/issue-42-abc' };
+				return ok;
+			});
+			const auth = authority({ push: 'remote-denied' });
+			registerManaged(auth);
+			// The shared git executor under the same (managed, uninstalled) ceiling:
+			// the commit count is a read it classifies and lets through unheld.
+			setGitExecutionGate(
+				createGitExecutionGate({
+					repository: {
+						standing: () => ({
+							standing: 'managed',
+							ceiling: null,
+							policyRevision: 7,
+							reason: 'no repository ceiling is installed for policy revision 7',
+						}),
+						authorize: (request) => auth.authorize(request),
+					},
+				})
+			);
+
+			try {
+				const result = await handlers.get('symphony:createDraftPR')!({} as any, {
+					contributionId: 'contrib_managed',
+				});
+
+				expect(result).toEqual({
+					success: false,
+					error: '[managed-remote-denied] no push for ada',
+				});
+				expect(calls('git', 'rev-list')).toHaveLength(1);
+				// The read never reached the ceiling; only the publication was held, and refused.
+				expect(effects(auth)).toEqual(['push']);
+				expect(calls('git', 'push')).toHaveLength(0);
+				expect(calls('gh', 'pr')).toHaveLength(0);
+				expect(
+					vi.mocked(fs.writeFile).mock.calls.some((c) => String(c[0]).includes('metadata.json'))
+				).toBe(false);
+				expect(lastStateWrite()).toBeNull();
+			} finally {
+				setGitExecutionGate(null);
+			}
 		});
 
 		it('symphony:cancel refused leaves the clone and the state untouched', async () => {

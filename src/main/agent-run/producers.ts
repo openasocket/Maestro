@@ -19,6 +19,14 @@
  * ISC-2.3 (usage best-effort, undefined when no source), ISC-2.4 (recordCheck
  * mapper), ISC-2.5 (ingestReviewFindings mapper), ISC-2.6 (pullRequest via gh),
  * ISC-2.9 (main-only, no shared-core producer code).
+ *
+ * Every producer here only reads, and the default runners keep it that way
+ * under management (MRC2-04-04A): the git runner goes through the shared
+ * executor (`execGit`), whose gate classifies `diff` as a read and never holds
+ * it, and would hold any write-class command line someone later routed through
+ * the same runner; the gh runner runs `gh pr view` and nothing else, so a
+ * forge write can never reach the network from this module. Standalone, both
+ * spawn exactly what they spawned before.
  */
 
 import type {
@@ -32,6 +40,7 @@ import type {
 import { AGENT_RUN_REVIEW_SEVERITIES } from '../../shared/agent-run';
 import type { UsageStats } from '../../shared/types';
 import { execFileNoThrow, type ExecResult } from '../utils/execFile';
+import { execGit } from '../utils/remote-git';
 import { resolveGhPath } from '../utils/cliDetection';
 
 /** Wider than a normal git op; a cold object store on a large worktree is slow. */
@@ -41,6 +50,17 @@ const GH_TIMEOUT_MS = 20_000;
 
 /** Fields we ask `gh pr view` for; mapped onto AgentRunPullRequest below. */
 const PR_JSON_FIELDS = 'number,url,state,mergeable,headRefName,baseRefName';
+
+/** The gh command lines this module runs: reads of the forge, never a write. */
+const GH_READ_COMMANDS: readonly (readonly string[])[] = [['pr', 'view']];
+
+/** The exit code of a gh command the read-only producer runner refused: the process never started. */
+export const GH_READ_ONLY_EXIT_CODE = 'EREADONLY';
+
+/** True when `args` is one of the read-class gh command lines the producers may run. */
+export function isGhReadCommand(args: readonly string[]): boolean {
+	return GH_READ_COMMANDS.some((read) => read.every((word, i) => args[i] === word));
+}
 
 // ---------------------------------------------------------------------------
 // Injectable process boundary (defaults call the real helpers). Kept as deps so
@@ -57,12 +77,32 @@ export interface GhRunner {
 	execFile: (command: string, args: string[], cwd: string) => Promise<ExecResult>;
 }
 
-const defaultGitRunner: GitRunner = (cwd, args) =>
-	execFileNoThrow('git', args, cwd, { timeout: GIT_TIMEOUT_MS });
+/**
+ * The git runner the producers use when none is injected: the shared executor
+ * at a local target, so a managed host classifies the command line (every
+ * producer's is a read, allowed unheld) and would refuse a write by name with
+ * no process; standalone it is `execFileNoThrow('git', ...)` as before.
+ */
+export const defaultGitRunner: GitRunner = (cwd, args) =>
+	execGit(args, cwd, undefined, undefined, { timeout: GIT_TIMEOUT_MS });
 
-const defaultGhRunner: GhRunner = {
+/**
+ * The gh runner the producers use when none is injected: read-class by
+ * construction. A command line that is not one of `GH_READ_COMMANDS` is
+ * answered `GH_READ_ONLY_EXIT_CODE` and never spawned, in every mode.
+ */
+export const defaultGhRunner: GhRunner = {
 	resolveGhPath,
-	execFile: (command, args, cwd) => execFileNoThrow(command, args, cwd, { timeout: GH_TIMEOUT_MS }),
+	execFile: (command, args, cwd) => {
+		if (!isGhReadCommand(args)) {
+			return Promise.resolve({
+				stdout: '',
+				stderr: `the agent-run producers only read the forge: "gh ${args.slice(0, 2).join(' ')}" was not run`,
+				exitCode: GH_READ_ONLY_EXIT_CODE,
+			});
+		}
+		return execFileNoThrow(command, args, cwd, { timeout: GH_TIMEOUT_MS });
+	},
 };
 
 // ---------------------------------------------------------------------------

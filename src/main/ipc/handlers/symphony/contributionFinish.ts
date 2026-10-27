@@ -4,7 +4,7 @@ import path from 'path';
 import { logger } from '../../../utils/logger';
 import { createSafeSend } from '../../../utils/safe-send';
 import { createIpcHandler } from '../../../utils/ipcHandler';
-import { execFileNoThrow } from '../../../utils/execFile';
+import { execGit } from '../../../utils/remote-git';
 import { captureException } from '../../../utils/sentry';
 import { fetchWithTimeout } from '../../../utils/fetchWithTimeout';
 import type { CompletedContribution } from '../../../../shared/symphony-types';
@@ -117,9 +117,12 @@ export function registerContributionFinishHandlers({
 				// Check if there are any commits on this branch
 				// Use rev-list to count commits not in the default branch
 				// Prefer persisted upstream default branch (fork setup may have reconfigured origin)
+				// The count runs through the shared git executor (MRC2-04-04A): a
+				// read-class command the managed gate classifies and never holds,
+				// so standalone and managed hosts spawn the same one process here,
+				// and the publication that follows is held inside createDraftPR.
 				const baseBranch = metadata.upstreamDefaultBranch ?? (await getDefaultBranch(localPath));
-				const commitCheckResult = await execFileNoThrow(
-					'git',
+				const commitCheckResult = await execGit(
 					['rev-list', '--count', `${baseBranch}..HEAD`],
 					localPath
 				);

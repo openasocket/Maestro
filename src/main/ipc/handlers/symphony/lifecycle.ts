@@ -20,10 +20,8 @@ import {
 	writeState,
 	broadcastSymphonyUpdate,
 	isContributionClone,
-	hasRepositoryAuthority,
 	holdRepositoryEffect,
-	managedRefusal,
-	readOriginRemote,
+	holdRemoteEffectBeforeGh,
 	SymphonyHandlerDependencies,
 } from './shared';
 
@@ -33,12 +31,20 @@ import {
  * Only `complete` (below) calls this - it was originally placed near
  * createDraftPR in the source file but a call-site check showed it's never
  * used by the PR-creation handlers, only by the completion flow.
+ *
+ * Under a ceiling the `finalize` effect is held here, right before `gh pr
+ * ready` runs, against `repository` (the upstream of a fork, else the
+ * contribution's own) and where origin points now (MRC2-04-04A); a refusal
+ * answers `refused` with the `[managed-<code>]` text and spawns nothing.
  */
 async function markPRReady(
 	repoPath: string,
 	prNumber: number,
+	repository: string,
 	upstreamSlug?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; refused?: true }> {
+	const refusal = await holdRemoteEffectBeforeGh('finalize', repoPath, repository);
+	if (refusal) return { success: false, error: refusal, refused: true };
 	const ghCommand = await resolveGhPath();
 	const args = ['pr', 'ready', String(prNumber)];
 	if (upstreamSlug) {
@@ -57,7 +63,8 @@ async function markPRReady(
  * Post a comment to a PR with Symphony contribution stats.
  *
  * Only `complete` (below) calls this - same call-site correction as
- * markPRReady above.
+ * markPRReady above. The comment rewrites the draft, so it is the same
+ * `finalize` effect, held by itself right before `gh pr comment` runs.
  */
 async function postPRComment(
 	repoPath: string,
@@ -70,8 +77,11 @@ async function postPRComment(
 		documentsProcessed: number;
 		tasksCompleted: number;
 	},
+	repository: string,
 	upstreamSlug?: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; refused?: true }> {
+	const refusal = await holdRemoteEffectBeforeGh('finalize', repoPath, repository);
+	if (refusal) return { success: false, error: refusal, refused: true };
 	// Format time spent
 	const hours = Math.floor(stats.timeSpentMs / 3600000);
 	const minutes = Math.floor((stats.timeSpentMs % 3600000) / 60000);
@@ -310,27 +320,17 @@ export function registerLifecycleHandlers({
 				// Mark PR as ready (use upstreamSlug for fork contributions)
 				const upstreamSlug =
 					contribution.isFork && contribution.upstreamSlug ? contribution.upstreamSlug : undefined;
-
-				// Under a ceiling the finalization (the draft made ready plus the stats
-				// comment) is held before it runs, against the repository the draft
-				// lands on and where origin points now. A refusal fails the
-				// contribution by name, and the draft stays a draft.
-				if (hasRepositoryAuthority()) {
-					const finalizeHold = holdRepositoryEffect('finalize', 'remote', {
-						repository: upstreamSlug ?? contribution.repoSlug,
-						remote: await readOriginRemote(contribution.localPath),
-					});
-					if (!finalizeHold.allowed) {
-						contribution.status = 'failed';
-						contribution.error = managedRefusal(finalizeHold);
-						await writeState(app, state);
-						return { error: contribution.error };
-					}
-				}
+				// The repository the draft lands on: the upstream of a fork, else the
+				// contribution's own. Each gh helper below holds the `finalize` effect
+				// against it right before its own call, so a refusal fails the
+				// contribution by name through the helper's error and the draft
+				// stays a draft, with no gh process started.
+				const repository = upstreamSlug ?? contribution.repoSlug;
 
 				const readyResult = await markPRReady(
 					contribution.localPath,
 					contribution.draftPrNumber,
+					repository,
 					upstreamSlug
 				);
 				if (!readyResult.success) {
@@ -354,6 +354,7 @@ export function registerLifecycleHandlers({
 					contribution.localPath,
 					contribution.draftPrNumber,
 					commentStats,
+					repository,
 					upstreamSlug
 				);
 
