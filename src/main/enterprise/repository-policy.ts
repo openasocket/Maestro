@@ -20,9 +20,20 @@
  * only, under the enrollment rule the spawn authority uses. No endpoint
  * operation of this build carries a repository ceiling (CP-01), so nothing
  * calls `install()` and an enrolled desktop refuses every effect `unavailable`.
+ *
+ * The shared git executor (`src/main/utils/remote-git.ts`) holds its writes
+ * to the same ceiling (MRC2-04-01): `classifyGitOperation()` names one git
+ * command line a `read`, a `local-write` or a `remote-write` and the ceiling
+ * effect a write is held as, and `createGitExecutionGate()` holds a write
+ * before the process starts, with the actor the call was admitted over, the
+ * repository `origin` names and, for a remote write, the destination. A read
+ * is never held, and a standalone host makes no extra call at all.
  */
 
+import type { SshLaunchTarget } from '../../shared/maestro-lib/launch/ssh-remote-resolver';
 import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
+import type { SshRemoteConfig } from '../../shared/types';
+import { getActingTransport, transportSpawnActor } from '../web-server/auth/transport-actor';
 import {
 	BROWSER_ACTORS,
 	browserActorLabel,
@@ -54,7 +65,8 @@ export type RepositoryEffectActor = BrowserEffectActor;
 export type RepositoryActorKind = BrowserActorKind;
 
 export interface RepositoryEffectRequest {
-	surface: 'symphony-runner' | 'symphony';
+	/** `git` is the shared git executor (`remote-git.ts`), holding a write of any caller. */
+	surface: 'symphony-runner' | 'symphony' | 'git';
 	effect: RepositoryEffectKind;
 	actor: RepositoryEffectActor;
 	/** A remote effect is held against its destination; a local one (a branch, a commit, removing a clone) is not. */
@@ -445,6 +457,592 @@ export function createRepositoryPolicySource(
 					? pairedDeviceActorProblems(request.actor.actor, read)
 					: [];
 			return repositoryEffectVerdict(standing(read), request, unbindable);
+		},
+	};
+}
+
+// ---------------------------------------------------------------------------
+// The shared git executor (MRC2-04-01): one git command line, classified, and
+// its write held before the process starts.
+// ---------------------------------------------------------------------------
+
+export type GitOperationClass = 'read' | 'local-write' | 'remote-write';
+
+export interface GitOperation {
+	/**
+	 * `read` changes nothing and is never held. `local-write` changes this
+	 * repository (its index, its refs, its configuration, its worktrees).
+	 * `remote-write` exchanges with a remote and changes a repository on one
+	 * side of it: a push changes the remote; a clone, a fetch and a pull change
+	 * the local one from it. It is held against the remote's origin.
+	 */
+	class: GitOperationClass;
+	/** The subcommand, after git's own options (`-C`, `-c`, `--git-dir`, ...). */
+	subcommand: string;
+	/**
+	 * The ceiling effect a write is held as: `push` for a push, `clone` for a
+	 * clone, fetch or pull, `branch` for a change to refs or worktrees, `commit`
+	 * for every other local change; null for a read.
+	 */
+	effect: RepositoryEffectKind | null;
+	/** The remote a `remote-write` names on its command line (a name or an address); null when git would pick one. */
+	remote: string | null;
+}
+
+/** Git's own options that consume the next argument (the `--option=value` forms are self-contained). */
+const GIT_GLOBAL_VALUE_OPTIONS = new Set([
+	'-C',
+	'-c',
+	'--git-dir',
+	'--work-tree',
+	'--namespace',
+	'--super-prefix',
+	'--config-env',
+	'--attr-source',
+]);
+
+/** Subcommands that change nothing, whatever their arguments. */
+const READ_SUBCOMMANDS = new Set([
+	'annotate',
+	'archive',
+	'blame',
+	'cat-file',
+	'check-attr',
+	'check-ignore',
+	'check-mailmap',
+	'check-ref-format',
+	'cherry',
+	'column',
+	'count-objects',
+	'describe',
+	'diff',
+	'diff-files',
+	'diff-index',
+	'diff-tree',
+	'for-each-ref',
+	'format-patch',
+	'fsck',
+	'get-tar-commit-id',
+	'grep',
+	'help',
+	'interpret-trailers',
+	'log',
+	'ls-files',
+	'ls-remote',
+	'ls-tree',
+	'mailinfo',
+	'mailsplit',
+	'merge-base',
+	'name-rev',
+	'patch-id',
+	'range-diff',
+	'request-pull',
+	'rev-list',
+	'rev-parse',
+	'shortlog',
+	'show',
+	'show-branch',
+	'show-index',
+	'show-ref',
+	'status',
+	'stripspace',
+	'var',
+	'verify-commit',
+	'verify-pack',
+	'verify-tag',
+	'version',
+	'whatchanged',
+]);
+
+/** Subcommands that change this repository, whatever their arguments. */
+const LOCAL_WRITE_SUBCOMMANDS = new Set([
+	'add',
+	'am',
+	'apply',
+	'bisect',
+	'checkout',
+	'cherry-pick',
+	'clean',
+	'commit',
+	'commit-tree',
+	'fast-import',
+	'filter-branch',
+	'gc',
+	'index-pack',
+	'init',
+	'maintenance',
+	'merge',
+	'mergetool',
+	'mktag',
+	'mktree',
+	'mv',
+	'pack-refs',
+	'prune',
+	'prune-packed',
+	'read-tree',
+	'rebase',
+	'repack',
+	'replace',
+	'rerere',
+	'reset',
+	'restore',
+	'revert',
+	'rm',
+	'sparse-checkout',
+	'switch',
+	'unpack-objects',
+	'update-index',
+	'update-ref',
+	'write-tree',
+]);
+
+/** Local writes whose change is to refs or worktrees: held as a `branch` effect; every other local write is a `commit`. */
+const REF_WRITE_SUBCOMMANDS = new Set([
+	'branch',
+	'checkout',
+	'pack-refs',
+	'reflog',
+	'replace',
+	'switch',
+	'symbolic-ref',
+	'tag',
+	'update-ref',
+	'worktree',
+]);
+
+/** Per subcommand, the options that consume the next argument, so a value is never read as a positional. */
+const FETCH_VALUE_FLAGS = [
+	'--depth',
+	'--deepen',
+	'--shallow-since',
+	'--shallow-exclude',
+	'--upload-pack',
+	'-o',
+	'--server-option',
+	'--negotiation-tip',
+	'-j',
+	'--jobs',
+	'--refmap',
+	'--recurse-submodules-default',
+	'--submodule-prefix',
+	'--filter',
+];
+const SUBCOMMAND_VALUE_FLAGS: Record<string, readonly string[]> = {
+	push: ['-o', '--push-option', '--receive-pack', '--exec', '--repo'],
+	'send-pack': ['--receive-pack', '--exec'],
+	fetch: FETCH_VALUE_FLAGS,
+	'fetch-pack': ['--upload-pack', '--exec', '--depth', '--shallow-since', '--shallow-exclude'],
+	pull: [...FETCH_VALUE_FLAGS, '-s', '--strategy', '-X', '--strategy-option', '-S', '--gpg-sign'],
+	clone: [
+		'-o',
+		'--origin',
+		'-b',
+		'--branch',
+		'-u',
+		'--upload-pack',
+		'--template',
+		'-c',
+		'--config',
+		'--depth',
+		'--shallow-since',
+		'--shallow-exclude',
+		'--reference',
+		'--reference-if-able',
+		'--separate-git-dir',
+		'-j',
+		'--jobs',
+		'--filter',
+		'--bundle-uri',
+		'--server-option',
+	],
+	branch: ['-u', '--set-upstream-to', '--sort', '--format', '--color', '--column'],
+	tag: ['-m', '--message', '-F', '--file', '-u', '--local-user', '--cleanup', '--sort', '--format'],
+	config: ['-f', '--file', '--blob', '--type', '--default'],
+	worktree: ['-b', '-B', '--reason'],
+	'symbolic-ref': ['-m'],
+};
+
+const BRANCH_WRITE_FLAGS = [
+	'-d',
+	'-D',
+	'--delete',
+	'-m',
+	'-M',
+	'--move',
+	'-c',
+	'-C',
+	'--copy',
+	'-u',
+	'--set-upstream-to',
+	'--unset-upstream',
+	'--edit-description',
+];
+const BRANCH_LIST_FLAGS = [
+	'-l',
+	'--list',
+	'-a',
+	'--all',
+	'-r',
+	'--remotes',
+	'--show-current',
+	'--contains',
+	'--no-contains',
+	'--merged',
+	'--no-merged',
+	'--points-at',
+	'-v',
+	'-vv',
+	'--verbose',
+];
+const TAG_WRITE_FLAGS = [
+	'-d',
+	'--delete',
+	'-f',
+	'--force',
+	'-a',
+	'--annotate',
+	'-s',
+	'--sign',
+	'-u',
+	'--local-user',
+	'-m',
+	'--message',
+	'-F',
+	'--file',
+	'-e',
+	'--edit',
+];
+const TAG_LIST_FLAGS = [
+	'-l',
+	'--list',
+	'--contains',
+	'--no-contains',
+	'--points-at',
+	'--merged',
+	'--no-merged',
+	'--sort',
+	'--format',
+	'--column',
+	'-i',
+	'--ignore-case',
+];
+const CONFIG_READ_FLAGS = [
+	'--get',
+	'--get-all',
+	'--get-regexp',
+	'--get-urlmatch',
+	'--list',
+	'-l',
+	'--get-color',
+	'--get-colorbool',
+	'--show-origin',
+	'--show-scope',
+];
+const CONFIG_WRITE_FLAGS = [
+	'--unset',
+	'--unset-all',
+	'--add',
+	'--replace-all',
+	'--rename-section',
+	'--remove-section',
+	'-e',
+	'--edit',
+];
+
+interface SubcommandArgs {
+	/** Option tokens with any `=value` removed. */
+	flags: string[];
+	/** The value of each option that consumed the next argument. */
+	values: Record<string, string>;
+	positionals: string[];
+}
+
+/** Split a subcommand's arguments: `--` ends options; a lone `-` is a positional. */
+function splitSubcommandArgs(
+	rest: readonly string[],
+	valueFlags: readonly string[]
+): SubcommandArgs {
+	const out: SubcommandArgs = { flags: [], values: {}, positionals: [] };
+	for (let i = 0; i < rest.length; i++) {
+		const token = rest[i];
+		if (token === '--') {
+			out.positionals.push(...rest.slice(i + 1));
+			break;
+		}
+		if (token.length > 1 && token.startsWith('-')) {
+			const eq = token.startsWith('--') ? token.indexOf('=') : -1;
+			const flag = eq === -1 ? token : token.slice(0, eq);
+			out.flags.push(flag);
+			if (eq !== -1) out.values[flag] = token.slice(eq + 1);
+			else if (valueFlags.includes(flag) && i + 1 < rest.length) out.values[flag] = rest[++i];
+			continue;
+		}
+		out.positionals.push(token);
+	}
+	return out;
+}
+
+/** The subcommand after git's own options, and what follows it; null when the command line names none. */
+export function splitGitCommandLine(args: readonly string[]): {
+	subcommand: string;
+	rest: string[];
+} | null {
+	for (let i = 0; i < args.length; i++) {
+		const token = args[i];
+		if (token === '--version') return { subcommand: 'version', rest: [] };
+		if (token === '--help' || token === '-h')
+			return { subcommand: 'help', rest: args.slice(i + 1) };
+		if (token.length > 1 && token.startsWith('-')) {
+			if (GIT_GLOBAL_VALUE_OPTIONS.has(token)) i++;
+			continue;
+		}
+		return { subcommand: token, rest: args.slice(i + 1) };
+	}
+	return null;
+}
+
+/**
+ * Name what one git command line does. Pure, and complete for the commands
+ * Maestro runs; a subcommand it cannot name answers null, which the gate
+ * refuses under management rather than guessing a class for it.
+ */
+export function classifyGitOperation(args: readonly string[]): GitOperation | null {
+	const split = splitGitCommandLine(args);
+	if (!split) return null;
+	const { subcommand, rest } = split;
+	const read: GitOperation = { class: 'read', subcommand, effect: null, remote: null };
+	const local = (effect: 'branch' | 'commit'): GitOperation => ({
+		class: 'local-write',
+		subcommand,
+		effect,
+		remote: null,
+	});
+	const remote = (effect: 'clone' | 'push', named: string | null | undefined): GitOperation => ({
+		class: 'remote-write',
+		subcommand,
+		effect,
+		remote: named ?? null,
+	});
+	if (READ_SUBCOMMANDS.has(subcommand)) return read;
+	const { flags, values, positionals } = splitSubcommandArgs(
+		rest,
+		SUBCOMMAND_VALUE_FLAGS[subcommand] ?? []
+	);
+	const has = (names: readonly string[]) => names.some((name) => flags.includes(name));
+	const first = positionals[0];
+	switch (subcommand) {
+		case 'push':
+			return remote('push', values['--repo'] ?? first);
+		case 'send-pack':
+			return remote('push', first);
+		case 'fetch':
+		case 'fetch-pack':
+		case 'pull':
+		case 'clone':
+			return remote('clone', first);
+		case 'branch':
+			if (has(BRANCH_WRITE_FLAGS)) return local('branch');
+			if (has(BRANCH_LIST_FLAGS)) return read;
+			return positionals.length > 0 ? local('branch') : read;
+		case 'tag':
+			if (has(TAG_WRITE_FLAGS)) return local('branch');
+			if (has(TAG_LIST_FLAGS) || flags.some((flag) => flag.startsWith('-n'))) return read;
+			return positionals.length > 0 ? local('branch') : read;
+		case 'remote':
+			if (first === undefined || first === 'show' || first === 'get-url') return read;
+			if (first === 'update') return remote('clone', positionals[1]);
+			return local('commit');
+		case 'worktree':
+			return first === 'list' ? read : local('branch');
+		case 'stash':
+			return first === 'list' || first === 'show' ? read : local('commit');
+		case 'config':
+			if (has(CONFIG_WRITE_FLAGS)) return local('commit');
+			if (has(CONFIG_READ_FLAGS) || first === 'get' || first === 'list') return read;
+			if (first === 'set' || first === 'unset' || first === 'edit') return local('commit');
+			if (first === 'rename-section' || first === 'remove-section') return local('commit');
+			return positionals.length > 1 ? local('commit') : read;
+		case 'submodule':
+			if (first === undefined || first === 'status' || first === 'summary') return read;
+			if (first === 'update') return remote('clone', null);
+			if (first === 'add') return remote('clone', positionals[1]);
+			return local('commit');
+		case 'reflog':
+			return first === 'expire' || first === 'delete' ? local('branch') : read;
+		case 'symbolic-ref':
+			return has(['-d', '--delete']) || positionals.length > 1 ? local('branch') : read;
+		case 'notes':
+			if (first === undefined || first === 'list' || first === 'show' || first === 'get-ref')
+				return read;
+			return local('commit');
+		case 'bundle':
+			return first === 'unbundle' ? local('commit') : read;
+		case 'hash-object':
+			return has(['-w']) ? local('commit') : read;
+		default:
+			if (LOCAL_WRITE_SUBCOMMANDS.has(subcommand))
+				return local(REF_WRITE_SUBCOMMANDS.has(subcommand) ? 'branch' : 'commit');
+			return null;
+	}
+}
+
+/** Where the executor runs the command: a folder on this machine, or a folder on an SSH remote. */
+export type GitExecutionTarget =
+	| { kind: 'local'; cwd: string }
+	| { kind: 'ssh'; remote: SshRemoteConfig; cwd: string | undefined };
+
+export interface GitExecutionRequest {
+	args: readonly string[];
+	target: GitExecutionTarget;
+	/**
+	 * Run a read-class git command where the request runs and answer its
+	 * trimmed stdout, or null when it fails or prints nothing. Called only under
+	 * management, only for a write, and never re-held.
+	 */
+	read(args: string[]): Promise<string | null>;
+}
+
+export type GitExecutionRefusal =
+	| RepositoryEffectDenial
+	| 'operation-unknown'
+	| 'remote-unqualified';
+
+export type GitExecutionDecision =
+	| { allowed: true; operation: GitOperation | null; managed?: RepositoryEffectReceipt }
+	| {
+			allowed: false;
+			operation: GitOperation | null;
+			code: GitExecutionRefusal;
+			message: string;
+			managed?: RepositoryEffectReceipt;
+	  };
+
+/** What the executor holds a command with: the gate, or a test double. */
+export interface GitExecutionGate {
+	hold(request: GitExecutionRequest): Promise<GitExecutionDecision>;
+}
+
+export interface GitExecutionGateDeps {
+	repository: Pick<RepositoryPolicySource, 'standing' | 'authorize'>;
+	/** Who runs the command. Default: the transport this call was admitted over, read from the call's own context. */
+	actor?(): RepositoryEffectActor;
+	/**
+	 * Bind an SSH remote to the enrolled endpoint it attests before a write runs
+	 * there (MRC-08-04); absent, a managed write over SSH is refused by name,
+	 * never run on the remote unmanaged and never run on this machine instead.
+	 */
+	qualifyRemote?(remote: SshRemoteConfig): Promise<SshLaunchTarget>;
+}
+
+const transportActor = (): RepositoryEffectActor => ({
+	kind: 'transport',
+	actor: transportSpawnActor(getActingTransport()),
+});
+
+/** The remote git itself would use for a transfer that names none (`remote.pushDefault`, the branch's remote, `origin`). */
+async function defaultRemoteName(
+	request: GitExecutionRequest,
+	operation: GitOperation
+): Promise<string> {
+	if (operation.effect === 'push') {
+		const pushDefault = await request.read(['config', '--get', 'remote.pushDefault']);
+		if (pushDefault) return pushDefault;
+	}
+	const branch = await request.read(['rev-parse', '--abbrev-ref', 'HEAD']);
+	if (branch && branch !== 'HEAD') {
+		if (operation.effect === 'push') {
+			const pushRemote = await request.read(['config', '--get', `branch.${branch}.pushRemote`]);
+			if (pushRemote) return pushRemote;
+		}
+		const upstream = await request.read(['config', '--get', `branch.${branch}.remote`]);
+		if (upstream) return upstream;
+	}
+	return 'origin';
+}
+
+/**
+ * The gate the shared git executor consults (MRC2-04-01). Standalone answers
+ * allowed at once, with no classification and no git call. Under management a
+ * read is allowed unheld; a write is classified (an operation the classifier
+ * cannot name is refused), an SSH target is bound to its enrolled endpoint
+ * first, the repository and the remote are named through read-class git calls
+ * (only while a ceiling is installed, since an unavailable ceiling refuses
+ * without them) and the effect is held against the ceiling. A refusal names
+ * its code and runs nothing.
+ */
+export function createGitExecutionGate(deps: GitExecutionGateDeps): GitExecutionGate {
+	const actor = deps.actor ?? transportActor;
+	return {
+		async hold(request) {
+			const standing = deps.repository.standing();
+			if (standing.standing === 'standalone') return { allowed: true, operation: null };
+			const operation = classifyGitOperation(request.args);
+			const refuse = (code: GitExecutionRefusal, message: string): GitExecutionDecision => ({
+				allowed: false,
+				operation,
+				code,
+				message,
+			});
+			if (!operation) {
+				const named = splitGitCommandLine(request.args)?.subcommand ?? '(no subcommand)';
+				return refuse(
+					'operation-unknown',
+					`the managed git executor cannot name what "git ${named}" does, so it was not run`
+				);
+			}
+			if (operation.class === 'read') return { allowed: true, operation };
+			if (request.target.kind === 'ssh') {
+				const remote = request.target.remote;
+				const label = remote.name ? `"${remote.name}"` : `"${remote.id}"`;
+				const unqualified = (detail: string) =>
+					refuse(
+						'remote-unqualified',
+						`under management the SSH remote ${label} is not a qualified managed endpoint for a git ${operation.subcommand}: ${detail} Nothing ran on the remote unmanaged, and nothing ran on this machine instead.`
+					);
+				if (!deps.qualifyRemote)
+					return unqualified('this host binds no remote endpoint identity for git commands.');
+				const target = await deps.qualifyRemote(remote);
+				if (target.kind === 'unresolved') return unqualified(target.message);
+				if (target.kind !== 'remote' || !target.endpoint)
+					return unqualified('the remote was resolved but no enrolled endpoint was bound to it.');
+			}
+			let repository: string | null = null;
+			let address: string | null = null;
+			if (standing.ceiling) {
+				if (operation.class === 'remote-write') {
+					const name = operation.remote ?? (await defaultRemoteName(request, operation));
+					address =
+						repositoryRemoteOrigin(name) !== null
+							? name
+							: await request.read(['remote', 'get-url', name]);
+					repository = repositorySlugFromRemote(address);
+				} else {
+					repository = repositorySlugFromRemote(
+						await request.read(['remote', 'get-url', 'origin'])
+					);
+				}
+			}
+			const decision = deps.repository.authorize({
+				surface: 'git',
+				effect: operation.effect as RepositoryEffectKind,
+				actor: actor(),
+				resource: operation.class === 'remote-write' ? 'remote' : 'local',
+				repository,
+				remote: address,
+			});
+			if (decision.allowed)
+				return {
+					allowed: true,
+					operation,
+					...(decision.managed ? { managed: decision.managed } : {}),
+				};
+			return {
+				allowed: false,
+				operation,
+				code: decision.code,
+				message: decision.message,
+				managed: decision.managed,
+			};
 		},
 	};
 }

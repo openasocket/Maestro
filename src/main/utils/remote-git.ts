@@ -14,8 +14,102 @@ import { buildSshCommand, RemoteCommandOptions } from './ssh-command-builder';
 import { logger } from './logger';
 import { isWorktreeAlreadyUsedError, parseWorktreePathForBranch } from '../../shared/gitUtils';
 import { shellEscapeRemotePath } from './shell-escape';
+import type {
+	GitExecutionDecision,
+	GitExecutionGate,
+	GitExecutionTarget,
+} from '../enterprise/repository-policy';
 
 const LOG_CONTEXT = '[RemoteGit]';
+
+/**
+ * The managed repository ceiling every write through this executor is held
+ * to (MRC2-04-01), installed once by the desktop at app-ready
+ * (`createGitExecutionGate` in `src/main/enterprise/repository-policy.ts`).
+ * Null is a standalone host: nothing is held and no extra call is made. A
+ * read-class command (`status`, `log`, `rev-parse`, a branch listing) is never
+ * held, so `execGitReadOnly` and the indicator polls are unaffected either way.
+ */
+let gitExecutionGate: GitExecutionGate | null = null;
+
+export function setGitExecutionGate(gate: GitExecutionGate | null): void {
+	gitExecutionGate = gate;
+}
+
+/** The exit code of a git command the managed ceiling refused: the process never started. */
+export const GIT_REFUSED_EXIT_CODE = 'EMANAGED';
+
+/** True when a git result is a managed refusal rather than an answer from git. */
+export function isGitRefusal(result: ExecResult): boolean {
+	return result.exitCode === GIT_REFUSED_EXIT_CODE;
+}
+
+/** The failure a refused command becomes: named by code, the same `[managed-<code>] <message>` text Symphony reports. */
+function refusalResult(decision: Extract<GitExecutionDecision, { allowed: false }>): ExecResult {
+	return {
+		stdout: '',
+		stderr: `[managed-${decision.code}] ${decision.message}`,
+		exitCode: GIT_REFUSED_EXIT_CODE,
+	};
+}
+
+/** Run one git command where `target` says, with no hold: the gate's own reads come through here. */
+function runGitAt(
+	args: string[],
+	target: GitExecutionTarget,
+	options: { timeout?: number; env?: Record<string, string> } = {}
+): Promise<ExecResult> {
+	const { timeout, env } = options;
+	if (target.kind === 'ssh') {
+		return runGitRemote(args, {
+			sshRemote: target.remote,
+			remoteCwd: target.cwd,
+			...(timeout ? { timeout } : {}),
+			...(env ? { env } : {}),
+		});
+	}
+	// Local execution. `env` replaces the child's environment wholesale, so
+	// extra variables are layered over this process's own.
+	if (!timeout && !env) return execFileNoThrow('git', args, target.cwd);
+	return execFileNoThrow('git', args, target.cwd, {
+		...(timeout ? { timeout } : {}),
+		...(env ? { env: { ...process.env, ...env } } : {}),
+	});
+}
+
+/**
+ * Hold one command against the managed ceiling before it runs. Answers the
+ * refusal to return in place of running, or null to run. The gate's reads
+ * (`remote get-url`, `config --get`) run unheld at the same target.
+ */
+async function holdGit(args: string[], target: GitExecutionTarget): Promise<ExecResult | null> {
+	const gate = gitExecutionGate;
+	if (!gate) return null;
+	const decision = await gate.hold({
+		args,
+		target,
+		read: async (readArgs) => {
+			const result = await runGitAt(readArgs, target);
+			const out = result.stdout.trim();
+			return result.exitCode === 0 && out ? out : null;
+		},
+	});
+	if (decision.allowed) {
+		if (decision.managed) {
+			logger.debug('Git command held within the managed repository ceiling', LOG_CONTEXT, {
+				subcommand: decision.operation?.subcommand,
+				outcome: decision.managed.outcome,
+			});
+		}
+		return null;
+	}
+	logger.warn('Git command refused by the managed repository ceiling', LOG_CONTEXT, {
+		subcommand: decision.operation?.subcommand ?? args[0],
+		code: decision.code,
+		...(target.kind === 'ssh' ? { remoteId: target.remote.id } : { cwd: target.cwd }),
+	});
+	return refusalResult(decision);
+}
 
 /**
  * Options for remote git execution
@@ -55,6 +149,15 @@ export async function execGitRemote(
 	args: string[],
 	options: RemoteGitOptions
 ): Promise<ExecResult> {
+	const refused = await holdGit(args, {
+		kind: 'ssh',
+		remote: options.sshRemote,
+		cwd: options.remoteCwd,
+	});
+	return refused ?? runGitRemote(args, options);
+}
+
+async function runGitRemote(args: string[], options: RemoteGitOptions): Promise<ExecResult> {
 	const { sshRemote, remoteCwd, timeout, env } = options;
 
 	if (!remoteCwd) {
@@ -111,23 +214,11 @@ export async function execGit(
 	remoteCwd?: string,
 	options: { timeout?: number; env?: Record<string, string> } = {}
 ): Promise<ExecResult> {
-	const { timeout, env } = options;
-	if (sshRemote) {
-		return execGitRemote(args, {
-			sshRemote,
-			remoteCwd,
-			...(timeout ? { timeout } : {}),
-			...(env ? { env } : {}),
-		});
-	}
-
-	// Local execution. `env` replaces the child's environment wholesale, so
-	// extra variables are layered over this process's own.
-	if (!timeout && !env) return execFileNoThrow('git', args, localCwd);
-	return execFileNoThrow('git', args, localCwd, {
-		...(timeout ? { timeout } : {}),
-		...(env ? { env: { ...process.env, ...env } } : {}),
-	});
+	const target: GitExecutionTarget = sshRemote
+		? { kind: 'ssh', remote: sshRemote, cwd: remoteCwd }
+		: { kind: 'local', cwd: localCwd };
+	const refused = await holdGit(args, target);
+	return refused ?? runGitAt(args, target, options);
 }
 
 /**

@@ -180,6 +180,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **The plugin ceiling a managed desktop holds plugins to (calls and kept resources):** `createPluginPolicySource()`, `parsePluginPolicyCeiling()` in `src/main/enterprise/plugin-policy.ts`; `PermissionBroker.holds()`, `ceilingVerdict()`, `managedPluginStanding()` in `src/main/plugins/permission-broker.ts`
 - **The browser ceiling a managed desktop holds relay and coworking effects to:** `createBrowserPolicySource()`, `browserEffectVerdict()` in `src/main/enterprise/browser-policy.ts`; `relayEffectOf()` in `src/main/browser/browser-relay.ts`; `coworkingEffectOf()` in `src/main/coworking/coworking-bridge.ts`
 - **The repository ceiling a managed desktop holds Symphony clone, push and PR effects to:** `createRepositoryPolicySource()` in `src/main/enterprise/repository-policy.ts`; `ForkSetupOptions.beforeFork` in `src/main/utils/symphony-fork.ts`; `SymphonyRepositoryGate` in `src/main/services/symphony-runner.ts`
+- **Holding a git write of any caller to the repository ceiling (the shared git executor):** `classifyGitOperation()`, `createGitExecutionGate()` in `src/main/enterprise/repository-policy.ts`; `setGitExecutionGate()`, `isGitRefusal()`, `GIT_REFUSED_EXIT_CODE` in `src/main/utils/remote-git.ts`
 
 #### Providers, accounts, and auth
 

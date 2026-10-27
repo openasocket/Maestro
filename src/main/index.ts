@@ -57,7 +57,11 @@ import { evaluateScheduledDispatch } from '../shared/plugins/plugin-dispatch-gat
 import { PermissionBroker } from './plugins/permission-broker';
 import { createPluginPolicySource } from './enterprise/plugin-policy';
 import { createBrowserPolicySource } from './enterprise/browser-policy';
-import { createRepositoryPolicySource } from './enterprise/repository-policy';
+import {
+	createGitExecutionGate,
+	createRepositoryPolicySource,
+} from './enterprise/repository-policy';
+import { setGitExecutionGate } from './utils/remote-git';
 import { PluginSandboxHost } from './plugins/plugin-sandbox-host';
 import { PluginBackgroundSupervisor } from './plugins/plugin-background-supervisor';
 import { PluginGroupingRegistry } from './plugins/plugin-grouping-registry';
@@ -955,6 +959,12 @@ app
 			identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
 			policy: () => enterpriseService?.policy.status() ?? null,
 		});
+		// The shared git executor holds every write (a commit, a checkout, a
+		// worktree add, a push, a fetch) of every caller to the same ceiling
+		// (MRC2-04-01), with the actor the call was admitted over; reads and the
+		// indicator polls are never held. No remote endpoint qualifier is bound
+		// for git yet, so a managed write over SSH is refused by name.
+		setGitExecutionGate(createGitExecutionGate({ repository: repositoryPolicy }));
 
 		// Serve agent-authored Concerto mockups as real documents with their own
 		// CSP. A srcdoc frame would inherit Maestro's renderer CSP and block the
