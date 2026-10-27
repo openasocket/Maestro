@@ -49,6 +49,7 @@
 
 import { canonicalJson } from '../../canonicalJson';
 import { generateUUID } from '../../uuid';
+import type { ManagedRouteCeiling } from '../launch/env';
 import { providerRouteSupport, type ManagedRoute } from '../providers/capabilities';
 import {
 	leaseAdmission,
@@ -105,6 +106,18 @@ import { endpointWorkflowOwnerPort, type WorkflowOwnerPort } from './workflows';
 // process is an attached host, the adapter above.
 // ---------------------------------------------------------------------------
 
+/**
+ * What an attached host lends a headless spawn authority: its authority and
+ * policy, and, when it composes one, the route ceiling producer the launch
+ * plan bounds a provider's launch with (`ManagedRouteCeiling`, the same
+ * object the desktop port's `routeCeiling` seam hands out). A host with no
+ * producer bounds nothing by route; the admission on the snapshot decides,
+ * as before.
+ */
+export interface HeadlessSpawnHost extends Pick<ManagedHostAdapter, 'authority' | 'policy'> {
+	routeCeiling?(providerId: string): ManagedRouteCeiling | null;
+}
+
 export interface HeadlessSpawnAuthorityDeps {
 	installation: ManagedInstallationIdentity;
 	/** The binding this process read beside the data-dir lock (`createManagedBinding().state()` or the files). */
@@ -114,7 +127,7 @@ export interface HeadlessSpawnAuthorityDeps {
 	 * (`maestro-cli host`); absent for a bare CLI invocation, which then holds
 	 * no authority at all and refuses every managed launch as unavailable.
 	 */
-	host?: Pick<ManagedHostAdapter, 'authority' | 'policy'> | null;
+	host?: HeadlessSpawnHost | null;
 	/** The origin the context carries; `cli` for maestro-cli, `headless` for a host. */
 	origin: Extract<ManagedOrigin, 'cli' | 'headless' | 'cue'>;
 	/** The principal this process acts as; attribution, never authority. */
@@ -152,6 +165,17 @@ export interface HeadlessSpawnAuthority {
 	/** Why the authority is unavailable, when it is; null when it answers. */
 	readonly unavailableReason: string | null;
 	context(input: HeadlessSpawnContextInput): ContextVerification;
+	/**
+	 * The route the attached host's policy pins for one provider
+	 * (MRC2-03-03), handed to the launch plan as `managed.route` so the
+	 * permission mode and the flags that ask for it are measured against its
+	 * `permissionMode`. Null for a standalone binding, an authority with no
+	 * attached host (nothing answers, and the admission refuses as
+	 * unavailable anyway) and a host that composes no producer. Optional, as
+	 * the desktop port's seam is: an authority composed by hand that lends
+	 * none bounds nothing by route and the admission on the snapshot decides.
+	 */
+	routeCeiling?(providerId: string): ManagedRouteCeiling | null;
 }
 
 export function createHeadlessSpawnAuthority(
@@ -162,6 +186,9 @@ export function createHeadlessSpawnAuthority(
 	let authority: HostAuthority;
 	let policy: () => PolicySourceSet;
 	let unavailableReason: string | null = null;
+	// Only an attached host that answers admissions lends a route ceiling;
+	// every other standing bounds nothing by route (and admits nothing).
+	let routeCeiling: (providerId: string) => ManagedRouteCeiling | null = () => null;
 	switch (binding.state) {
 		case 'standalone':
 			authority = unavailableAuthority('This installation holds no enrollment.');
@@ -172,6 +199,7 @@ export function createHeadlessSpawnAuthority(
 				const host = deps.host;
 				authority = host.authority;
 				policy = () => host.policy();
+				routeCeiling = (providerId) => host.routeCeiling?.(providerId) ?? null;
 			} else {
 				unavailableReason = deps.host
 					? `This process is attached to authority ${deps.host.authority.authorityId}, not to the binding's ${binding.record.authorityId}.`
@@ -211,6 +239,7 @@ export function createHeadlessSpawnAuthority(
 		authority,
 		policy,
 		unavailableReason,
+		routeCeiling,
 		context: (input) =>
 			verifier.verify({
 				contractVersion: MANAGED_CONTRACT_VERSION,

@@ -4511,5 +4511,89 @@ Some text with [x] in it that's not a checkbox
 			expect(result.success).toBe(true);
 			expect(host.asked).toHaveLength(0);
 		});
+
+		// MRC2-03-03: the ceiling the attached host's policy pins for a provider
+		// reaches the launch plan as `managed.route`, and a CLI launch whose
+		// unattended default asks for full access is refused before admission.
+		function ceilingRoute(permissionMode: 'readonly' | 'standard' | 'full' | null) {
+			return {
+				providerId: 'codex',
+				model: null,
+				baseUrl: null,
+				accountDir: null,
+				login: 'provider-login' as const,
+				permissionMode,
+			};
+		}
+
+		it('refuses the CLI full-access default under a standard ceiling with zero processes', async () => {
+			const host = hostAuthority(ALLOW);
+			const authority = createHeadlessSpawnAuthority({
+				installation: INSTALLATION,
+				binding: ENROLLED,
+				host: { ...host, routeCeiling: () => ceilingRoute('standard') },
+				origin: 'cli',
+				actor: ACTOR,
+			});
+			const result = await spawnAgent('codex', '/p', 'hi', undefined, { managed: authority });
+
+			expect(result).toMatchObject({
+				success: false,
+				managed: { state: 'denied', code: 'policy-denied' },
+			});
+			expect(result.error).toContain('[managed-denied]');
+			expect(result.error).toContain('The launch asks for more than the policy allows');
+			expect(result.error).toContain('permission mode "full"');
+			expect(result.error).toContain('at most "standard" for codex');
+			expect(mockSpawn).not.toHaveBeenCalled();
+			// Refused by the plan, before any admission was asked for.
+			expect(host.asked).toHaveLength(0);
+		});
+
+		it('refuses a customArgs flag that would widen a standard ceiling in read-only mode', async () => {
+			const host = hostAuthority(ALLOW);
+			const authority = createHeadlessSpawnAuthority({
+				installation: INSTALLATION,
+				binding: ENROLLED,
+				host: { ...host, routeCeiling: () => ceilingRoute('standard') },
+				origin: 'cli',
+				actor: ACTOR,
+			});
+			const result = await spawnAgent('codex', '/p', 'hi', undefined, {
+				managed: authority,
+				readOnlyMode: true,
+				customArgs: '--dangerously-bypass-approvals-and-sandbox',
+			});
+
+			expect(result).toMatchObject({
+				success: false,
+				managed: { state: 'denied', code: 'policy-denied' },
+			});
+			expect(result.error).toContain(
+				'--dangerously-bypass-approvals-and-sandbox asks for full access'
+			);
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(host.asked).toHaveLength(0);
+		});
+
+		it('admits the CLI full-access default under a full ceiling and runs it', async () => {
+			const host = hostAuthority(ALLOW);
+			const authority = createHeadlessSpawnAuthority({
+				installation: INSTALLATION,
+				binding: ENROLLED,
+				host: { ...host, routeCeiling: () => ceilingRoute('full') },
+				origin: 'cli',
+				actor: ACTOR,
+			});
+			const result = await driveSpawnToCompletion(
+				spawnAgent('codex', '/p', 'hi', undefined, { managed: authority }),
+				0,
+				JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'hi' } }) +
+					'\n'
+			);
+			expect(result.success).toBe(true);
+			expect(host.asked).toHaveLength(1);
+			expect(host.asked[0].snapshot.args).toContain('--dangerously-bypass-approvals-and-sandbox');
+		});
 	});
 });

@@ -116,8 +116,15 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * a wider mode than the pin, or a read-only pin the provider's command line cannot enforce or does not
  * carry; `buildAgentArgs` (`./launch/agent-args`) takes `managedCeiling` and throws
  * `ManagedPermissionModeError` instead of a weaker command line; `KNOWN_YOLO_FLAGS` is exported.
+ * 0.29.0: the launch plan's permission decision (`./launch/launch-plan`, MRC2-03-03):
+ * `AgentLaunchInput.permissionMode` (the mode the surface asks for; `defaultLaunchPermissionMode` derives
+ * `readonly` / `standard` when it names none) is measured against `managed.route.permissionMode` before the
+ * flags are, a request above the pin is `managed-route-refused` by name, and every plan carries
+ * `permission: LaunchPermissionDecision` (requested, ceiling) for the sinks that emit or map access flags;
+ * `HeadlessSpawnAuthority.routeCeiling(providerId)` (`./managed/host-adapter`) lends an attached host's
+ * route to a headless launch (`HeadlessSpawnHost.routeCeiling`), null on every other standing.
  */
-export const MAESTRO_LIB_VERSION = '0.28.0';
+export const MAESTRO_LIB_VERSION = '0.29.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

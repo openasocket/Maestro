@@ -22,13 +22,19 @@ import {
 import {
 	buildAgentLaunchPlan,
 	describeUndeliveredSecrets,
+	isManagedLaunchRefusal,
 	type AgentLaunchPlanResult,
+	type ManagedLaunchInput,
 } from '../../shared/maestro-lib/launch/launch-plan';
 import {
 	resolveSystemPromptDelivery,
 	type SystemPromptDelivery,
 } from '../../shared/maestro-lib/launch/prompt-delivery';
-import { buildChildProcessEnv } from '../../shared/maestro-lib/launch/env';
+import {
+	buildChildProcessEnv,
+	fullAccessFlagsOf,
+	type LaunchPermissionMode,
+} from '../../shared/maestro-lib/launch/env';
 import { checkBinaryExists, checkCustomPath } from '../../shared/maestro-lib/launch/path-prober';
 import { BACKGROUND_STOP_GRACE_MS } from '../../shared/maestro-lib/control/termination';
 import {
@@ -361,6 +367,10 @@ function planCliLaunch(
 		cwd: string;
 		prompt: string;
 		readOnlyMode?: boolean;
+		/** The mode the launch asks for (`cliRequestedPermissionMode`); the plan measures it against the ceiling. */
+		permissionMode: LaunchPermissionMode;
+		/** The route a managed host pins for this provider (`cliManagedRoute`); nothing on a standalone host. */
+		managed?: ManagedLaunchInput;
 		agentCustomEnvVars?: Record<string, string>;
 		globalEnvVars?: Record<string, string>;
 		sessionCustomEnvVars?: Record<string, string>;
@@ -380,6 +390,8 @@ function planCliLaunch(
 		agentCustomEnvVars: input.agentCustomEnvVars,
 		sessionCustomEnvVars: input.sessionCustomEnvVars,
 		readOnlyMode: input.readOnlyMode,
+		permissionMode: input.permissionMode,
+		managed: input.managed,
 		batchMode: true,
 		isResuming: input.isResuming,
 		querySource: input.querySource,
@@ -504,8 +516,37 @@ function buildAppendSystemPromptArgs(
 // Claude Code arguments for batch mode (stream-json format)
 const CLAUDE_ARGS = ['--print', '--verbose', '--output-format', 'stream-json'];
 
-// Permission bypass arg for Claude - skipped in read-only mode
-const CLAUDE_YOLO_ARGS = ['--dangerously-skip-permissions'];
+/**
+ * Claude Code's full-access flag, read from its definition (`fullAccessArgs`)
+ * rather than a constant of the CLI's own (MRC2-03-03), so the CLI and the
+ * desktop ask for the mode with the same words and the launch plan's ceiling
+ * sees one vocabulary. Skipped in read-only mode; never skipped to fit a
+ * ceiling, which refuses the launch instead of lowering it in silence.
+ */
+function claudeFullAccessArgs(def: ReturnType<typeof getAgentDefinition>): string[] {
+	return [...(def?.fullAccessArgs ?? def?.yoloModeArgs ?? [])];
+}
+
+/**
+ * The permission mode a CLI launch asks for (MRC2-03-03). Every CLI spawn is
+ * an unattended batch spawn, so outside read-only mode it asks for `full`
+ * wherever its command line carries a flag of the provider's full-access
+ * vocabulary (Claude's `--dangerously-skip-permissions`, Codex's bypass,
+ * Copilot's `--allow-all`, ...) and `standard` where it carries none (Pi, Oh
+ * My Pi). Named to the launch plan, which measures it against the policy's
+ * ceiling and refuses a request above it before anything is spawned; the
+ * flags themselves are checked there too, so a `--customArgs` flag cannot
+ * widen what the ceiling allows.
+ */
+export function cliRequestedPermissionMode(
+	toolType: ToolType,
+	readOnlyMode: boolean | undefined,
+	args: readonly string[]
+): LaunchPermissionMode {
+	if (readOnlyMode) return 'readonly';
+	const fullAccess = fullAccessFlagsOf(toolType);
+	return args.some((arg) => fullAccess.has(arg)) ? 'full' : 'standard';
+}
 
 // Cached paths per agent type (resolved once at startup)
 const cachedPaths: Map<string, string> = new Map();
@@ -782,6 +823,36 @@ function managedRefusal(
 }
 
 /**
+ * The route a managed host's policy pins for this provider, as the launch
+ * plan takes it (MRC2-03-03), so the plan measures the mode the launch asks
+ * for and the flags on its command line against the route's ceiling before
+ * anything is spawned. A standalone host, and a managed host whose
+ * authority lends no route, plan exactly as before: the admission on the
+ * snapshot decides.
+ */
+function cliManagedRoute(
+	authority: HeadlessSpawnAuthority | undefined,
+	toolType: ToolType
+): ManagedLaunchInput | undefined {
+	if (!authority || authority.standing() !== 'managed') return undefined;
+	const route = authority.routeCeiling?.(toolType) ?? null;
+	return route ? { route } : undefined;
+}
+
+/**
+ * A launch the plan refused, as the CLI's result: a managed refusal (the
+ * ceiling, the route, the credentials) is the policy's decision, reported
+ * with the ceiling's own reason and the `managed` field a caller reads;
+ * anything else (an unresolved SSH remote) is the plain failure it was.
+ * Nothing was started either way.
+ */
+function planRefusalResult(result: Extract<AgentLaunchPlanResult, { ok: false }>): AgentResult {
+	return isManagedLaunchRefusal(result.reason)
+		? managedRefusal('denied', 'policy-denied', result.error)
+		: spawnFailureResult(result.error);
+}
+
+/**
  * Admit one CLI launch on the FINAL spec, the way `runAgentTurn` admits a
  * turn: a standalone host needs no admission; a managed host binds the run
  * identity into a verified context, asks its authority with the snapshot of
@@ -886,7 +957,7 @@ async function spawnClaudeAgent(
 	if (readOnlyMode) {
 		if (def?.readOnlyArgs) preOverrideArgs.push(...def.readOnlyArgs);
 	} else {
-		preOverrideArgs.push(...CLAUDE_YOLO_ARGS);
+		preOverrideArgs.push(...claudeFullAccessArgs(def));
 	}
 
 	if (agentSessionId) {
@@ -948,6 +1019,8 @@ async function spawnClaudeAgent(
 		cwd,
 		prompt,
 		readOnlyMode,
+		permissionMode: cliRequestedPermissionMode('claude-code', readOnlyMode, baseArgs),
+		managed: cliManagedRoute(overrides.managed, 'claude-code'),
 		agentCustomEnvVars,
 		globalEnvVars: overrides.globalEnvVars,
 		sessionCustomEnvVars: overrides.customEnvVars,
@@ -957,7 +1030,7 @@ async function spawnClaudeAgent(
 		requiredSecrets: overrides.requiredSecrets,
 	});
 	if (!planResult.ok) {
-		return spawnFailureResult(planResult.error);
+		return planRefusalResult(planResult);
 	}
 	const plan = planResult.plan;
 	const agentCustomPath = getAgentCustomPath('claude-code');
@@ -1490,6 +1563,8 @@ async function spawnJsonLineAgent(
 		cwd,
 		prompt: effectivePrompt,
 		readOnlyMode,
+		permissionMode: cliRequestedPermissionMode(toolType, readOnlyMode, baseArgs),
+		managed: cliManagedRoute(overrides.managed, toolType),
 		agentCustomEnvVars,
 		globalEnvVars: overrides.globalEnvVars,
 		sessionCustomEnvVars: overrides.customEnvVars,
@@ -1499,7 +1574,7 @@ async function spawnJsonLineAgent(
 		requiredSecrets: overrides.requiredSecrets,
 	});
 	if (!planResult.ok) {
-		return spawnFailureResult(planResult.error);
+		return planRefusalResult(planResult);
 	}
 	const plan = planResult.plan;
 

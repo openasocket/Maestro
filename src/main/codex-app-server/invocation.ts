@@ -17,11 +17,21 @@
  *
  * On an SSH remote the config's own args are the ssh client's, so the exec turn
  * is read from `config.codexAppServerSsh` instead (see `ssh-launch.ts`).
+ *
+ * Under management the sandbox and approval choice is the launch plan's
+ * permission decision (`plan.permission`, MRC2-03-03), not the flags' alone:
+ * a sandbox wider than the ceiling allows is REFUSED (`refused: true`, which
+ * a sink must never answer with the exec fallback, since exec would apply
+ * the same flags), and a turn that named no sandbox runs at the ceiling
+ * rather than at whatever `config.toml` says. Unmanaged turns are mapped
+ * exactly as before.
  */
 
 import type { ProcessConfig } from '../process-manager/types';
 import { resolveCodexTransport } from '../../shared/codexTransport';
 import { DEFAULT_QUERY_SOURCE } from '../../shared/querySource';
+import type { LaunchPermissionMode } from '../../shared/maestro-lib/launch/env';
+import type { LaunchPermissionDecision } from '../../shared/maestro-lib/launch/launch-plan';
 
 /** `SandboxMode` on `thread/start` / `thread/resume`. */
 export type CodexAppServerSandbox = 'read-only' | 'workspace-write' | 'danger-full-access';
@@ -32,6 +42,37 @@ const SANDBOX_MODES: readonly CodexAppServerSandbox[] = [
 	'danger-full-access',
 ];
 
+/** How much a sandbox may do; a ceiling pins the widest one a turn may ask for. */
+const SANDBOX_WIDTH: Readonly<Record<CodexAppServerSandbox, number>> = {
+	'read-only': 0,
+	'workspace-write': 1,
+	'danger-full-access': 2,
+};
+
+/**
+ * The widest sandbox a permission ceiling allows a Codex turn (MRC2-03-03):
+ * `readonly` is `read-only`; `standard` is `workspace-write` (writes inside
+ * the workspace, every approval request declined by the spawner outside full
+ * access); `full` pins nothing, as does a ceiling of null. The one table
+ * between `LaunchPermissionMode` and `SandboxMode`, so the plan's decision
+ * and the thread's sandbox cannot drift apart.
+ */
+export function codexSandboxCeiling(
+	ceiling: LaunchPermissionMode | null
+): CodexAppServerSandbox | null {
+	switch (ceiling) {
+		case 'readonly':
+			return 'read-only';
+		case 'standard':
+			return 'workspace-write';
+		default:
+			return null;
+	}
+}
+
+/** The permission decision a Codex turn is mapped under; absent or null for an unmanaged turn. */
+export type CodexPermissionDecision = Pick<LaunchPermissionDecision, 'ceiling'>;
+
 export interface CodexAppServerInvocation {
 	/** Thread to resume (`resume <id>`), or undefined to start a new thread. */
 	resumeId?: string;
@@ -41,9 +82,13 @@ export interface CodexAppServerInvocation {
 	model?: string;
 	/**
 	 * Sandbox for the thread. Undefined when the exec args named none, so the
-	 * thread takes its default from `config.toml` exactly as exec would.
+	 * thread takes its default from `config.toml` exactly as exec would; under
+	 * a ceiling that pins a mode it is the ceiling's sandbox instead
+	 * (`sandboxFromCeiling`), never left to a file the policy did not write.
 	 */
 	sandbox?: CodexAppServerSandbox;
+	/** Set when `sandbox` came from the launch plan's ceiling, not from the args. */
+	sandboxFromCeiling?: true;
 	/** `-c model_reasoning_effort=...`, for `turn/start` `effort`. */
 	effort?: string;
 	/** `-c model_reasoning_summary=...`, for `turn/start` `summary`. */
@@ -58,7 +103,13 @@ export interface CodexAppServerInvocation {
 
 export type CodexAppServerInvocationResult =
 	| { ok: true; invocation: CodexAppServerInvocation }
-	| { ok: false; reason: string };
+	/**
+	 * Not carried by app-server. Without `refused` the turn is one app-server
+	 * cannot express and exec runs it; with `refused: true` the turn asks for
+	 * a sandbox wider than the policy's ceiling and NOTHING may run it: a sink
+	 * reports the reason and starts no process, never the exec fallback.
+	 */
+	| { ok: false; reason: string; refused?: true };
 
 /** Flags exec needs that mean nothing to app-server. */
 const IGNORED_FLAGS = new Set(['--json', '--skip-git-repo-check']);
@@ -141,19 +192,27 @@ export function codexAppServerConfigBlocker(config: ProcessConfig): string | nul
 }
 
 export function parseCodexAppServerInvocation(
-	config: ProcessConfig
+	config: ProcessConfig,
+	permission?: CodexPermissionDecision | null
 ): CodexAppServerInvocationResult {
 	const blocker = codexAppServerConfigBlocker(config);
 	if (blocker) return { ok: false, reason: blocker };
 	const turn = execTurnOf(config);
-	return parseCodexExecArgs(turn.args, turn.cwd);
+	return parseCodexExecArgs(turn.args, turn.cwd, permission);
 }
 
 /**
  * Read a `codex exec` arg list into an app-server invocation. `cwd` is the
- * thread's directory unless the args name one with `-C`.
+ * thread's directory unless the args name one with `-C`. `permission` is
+ * the launch plan's decision for a managed turn: its ceiling bounds the
+ * sandbox (see {@link codexSandboxCeiling}); absent or null maps the args
+ * alone, as an unmanaged turn always was.
  */
-export function parseCodexExecArgs(args: string[], cwd: string): CodexAppServerInvocationResult {
+export function parseCodexExecArgs(
+	args: string[],
+	cwd: string,
+	permission?: CodexPermissionDecision | null
+): CodexAppServerInvocationResult {
 	const out: CodexAppServerInvocation = { cwd, configArgs: [] };
 	let sawExec = false;
 	let bypass = false;
@@ -240,6 +299,24 @@ export function parseCodexExecArgs(args: string[], cwd: string): CodexAppServerI
 	// `--dangerously-bypass-approvals-and-sandbox` nullifies `--sandbox` in exec,
 	// so it wins here too.
 	out.sandbox = bypass ? 'danger-full-access' : sandbox;
+	// The ceiling (MRC2-03-03): a sandbox wider than the policy allows is
+	// refused by name, never narrowed to fit; a turn that named none runs at
+	// the ceiling's sandbox, so `config.toml` cannot widen a managed thread.
+	// A sandbox pinned here is restricted, so `codexThreadPolicyMismatch`
+	// checks the server's echo of it before the prompt goes out.
+	const widest = permission ? codexSandboxCeiling(permission.ceiling) : null;
+	if (widest) {
+		if (out.sandbox === undefined) {
+			out.sandbox = widest;
+			out.sandboxFromCeiling = true;
+		} else if (SANDBOX_WIDTH[out.sandbox] > SANDBOX_WIDTH[widest]) {
+			return {
+				ok: false,
+				refused: true,
+				reason: `sandbox ${out.sandbox} asks for more than the policy's ceiling, which allows at most "${permission?.ceiling}" (${widest}) for codex`,
+			};
+		}
+	}
 	// `--add-dir` widens a workspace-write sandbox, and app-server has no field to
 	// carry it. Under full access it grants nothing the turn does not already
 	// have, so dropping it changes nothing; under any other sandbox (or one left

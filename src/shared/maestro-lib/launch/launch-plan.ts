@@ -48,8 +48,10 @@ import {
 	applyManagedEnvCeiling,
 	buildAgentEnvironment,
 	managedArgsProblems,
+	managedPermissionModeProblem,
 	resolveAgentEnvVars,
 	type AgentEnvSurface,
+	type LaunchPermissionMode,
 	type ManagedEnvCeilingReport,
 	type ManagedRouteCeiling,
 } from './env';
@@ -106,6 +108,16 @@ export interface AgentLaunchInput {
 	sessionCustomEnvVars?: Record<string, string>;
 	/** Applies the provider's `readOnlyEnvOverrides` on top of every user layer. */
 	readOnlyMode?: boolean;
+	/**
+	 * The permission mode this launch asks for, by the surface's own rule
+	 * (MRC2-03-03): the CLI's unattended default is `full`, the desktop's is
+	 * what the request named. Absent derives `readonly` from `readOnlyMode`
+	 * and `standard` otherwise, so a surface whose default is full access
+	 * must say so. Measured against `managed.route.permissionMode` and
+	 * reported back as `plan.permission`, the one decision the sinks that
+	 * emit or map access flags read instead of their own.
+	 */
+	permissionMode?: LaunchPermissionMode;
 	/** Adds the provider's `batchModeEnvVars` (CLI batch spawns only). */
 	batchMode?: boolean;
 	/** Vars Maestro states about this spawn (caller identity and the like). */
@@ -196,6 +208,34 @@ export interface ManagedCredentialReport {
 	ceiling?: { removed: string[]; pinned: string[] };
 }
 
+/**
+ * The permission decision of a planned launch (MRC2-03-03): the mode it asked
+ * for and the widest mode the policy allows on its provider, null when no
+ * ceiling pins one (an unmanaged launch, or a route with no pin). A plan
+ * exists only when the request fits under the ceiling, so a sink that reads
+ * this never sees a request above it: the CLI emits its full-access flags
+ * and the Codex app-server maps its sandbox from here, not from a constant
+ * of their own, and a request the ceiling forbids was refused before any
+ * plan was built.
+ */
+export interface LaunchPermissionDecision {
+	requested: LaunchPermissionMode;
+	ceiling: LaunchPermissionMode | null;
+}
+
+/**
+ * The mode a launch asks for when its surface names none: `readonly` when the
+ * read-only layer is on, `standard` (the provider's own prompting) otherwise.
+ * Never `full`: a surface whose default bypasses approvals names it.
+ */
+export function defaultLaunchPermissionMode(input: {
+	permissionMode?: LaunchPermissionMode;
+	readOnlyMode?: boolean;
+}): LaunchPermissionMode {
+	if (input.permissionMode) return input.permissionMode;
+	return input.readOnlyMode ? 'readonly' : 'standard';
+}
+
 interface LaunchPlanCommon {
 	/** Command and args to hand the process launcher (or the SSH wrapper, for a remote). */
 	command: string;
@@ -220,6 +260,8 @@ interface LaunchPlanCommon {
 	secrets?: LaunchSecretsReport;
 	/** The approved credential references a managed launch was planned with. Names only. */
 	managedCredentials?: ManagedCredentialReport;
+	/** The mode this launch runs with and the ceiling it was measured against. */
+	permission: LaunchPermissionDecision;
 }
 
 export interface LaunchSecretsReport {
@@ -351,12 +393,24 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 
 	const agent = input.agent;
 	const route = input.managed?.route;
+	const requestedMode = defaultLaunchPermissionMode(input);
 	if (route) {
 		if (agent?.id !== undefined && agent.id !== route.providerId) {
 			return {
 				ok: false,
 				reason: 'managed-route-refused',
 				error: `The policy routes this launch to ${route.providerId}, not ${agent.id}.`,
+			};
+		}
+		// The mode itself, before the flags that ask for it: a provider whose
+		// full access is an environment setting or has no flag is held here,
+		// and a request above the pin is refused by name, never lowered to fit.
+		const modeProblem = managedPermissionModeProblem(requestedMode, route);
+		if (modeProblem) {
+			return {
+				ok: false,
+				reason: 'managed-route-refused',
+				error: `The launch asks for more than the policy allows - ${modeProblem}`,
 			};
 		}
 		const argProblems = managedArgsProblems(input.args, route);
@@ -479,6 +533,8 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 						}
 					: {}),
 				...(managedReport ? { managedCredentials: managedReport } : {}),
+				// A managed route never reaches a remote (refused above), so no ceiling.
+				permission: { requested: requestedMode, ceiling: null },
 				env: undefined,
 			},
 		};
@@ -565,6 +621,7 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 					}
 				: {}),
 			...(planReport ? { managedCredentials: planReport } : {}),
+			permission: { requested: requestedMode, ceiling: route?.permissionMode ?? null },
 			env,
 		},
 	};
