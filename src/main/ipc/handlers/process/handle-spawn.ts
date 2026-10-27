@@ -70,6 +70,7 @@ import { getWindowsShellForAgentExecution } from '../../../process-manager/utils
 import { buildChildProcessEnv } from '../../../process-manager/utils/envBuilder';
 import { awaitSynopsisWriters } from '../../../process-manager/utils/synopsisWriterGate';
 import { probeClaudeSlashCommandsCached } from '../../../agents/claude-slash-command-probe';
+import { providerProbeManaged } from '../../../agents/provider-probe';
 import { buildExpandedEnv } from '../../../../shared/pathUtils';
 import type { SshRemoteConfig } from '../../../../shared/types';
 import { powerManager } from '../../../power-manager';
@@ -1291,13 +1292,22 @@ async function handleProcessSpawnImpl(
 		// the user's custom vars or be inherited from whatever launched Maestro.
 		const probeEnv = buildChildProcessEnv(customEnvVarsToPass, false, globalShellEnvVars);
 		delete probeEnv.MAESTRO_CLAUDE_BIN;
-		void probeClaudeSlashCommandsCached(interactiveClaudeBinPath, config.cwd, probeEnv).then(
-			(commands) => {
-				if (commands && commands.length > 0) {
-					safeSend('process:slash-commands', config.sessionId, commands);
-				}
+		// On a managed host the probe is admitted before it starts (MRC2-03-04A):
+		// the port and the actor are resolved here, at the boundary that handles
+		// this request, and the probe asks for `--dangerously-skip-permissions`,
+		// so a `standard` or `readonly` ceiling refuses it by name and starts
+		// nothing (the probe logs the refusal and offers no commands).
+		const probeManaged = providerProbeManaged(processManager.managedPort());
+		void probeClaudeSlashCommandsCached(
+			interactiveClaudeBinPath,
+			config.cwd,
+			probeEnv,
+			probeManaged
+		).then((commands) => {
+			if (commands && commands.length > 0) {
+				safeSend('process:slash-commands', config.sessionId, commands);
 			}
-		);
+		});
 	}
 
 	// Arm the interactive-mode replay controller when this turn ran

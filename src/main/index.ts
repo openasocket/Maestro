@@ -26,6 +26,7 @@ import { ProcessManager } from './process-manager';
 import { WebServer } from './web-server';
 import { AgentDetector } from './agents';
 import { createAgentConfigLookup } from './agents/agent-config-lookup';
+import { providerProbeManaged } from './agents/provider-probe';
 import { shouldDropSentryEvent } from '../shared/sentryFilters';
 import { getBuildProvenance } from './utils/build-provenance';
 import {
@@ -1112,7 +1113,13 @@ app
 			spawnAuthority: () => enterpriseService?.spawnAuthority ?? null,
 		});
 		// Note: webServer is created on-demand when user enables web interface (see setupWebServerCallbacks)
-		agentDetector = new AgentDetector();
+		// Model and option discovery start the provider's own executable, so on
+		// a managed host they are admitted as probes (MRC2-03-04A). The port is
+		// read on every probe: the enterprise service is composed later in
+		// startup, and an enrollment that appears after this point governs it.
+		agentDetector = new AgentDetector(undefined, {
+			managedProbe: () => providerProbeManaged(processManager?.managedPort() ?? null),
+		});
 
 		// Warm the login-shell PATH cache early so the first agent spawn picks up
 		// the user's custom PATH (e.g. node installs outside our hardcoded

@@ -9,10 +9,12 @@
  * `--dangerously-skip-permissions`: on a managed host that was a provider
  * started with full access that no authority had seen.
  *
- * This is the one runner such a probe goes through. A standalone host (no
- * `managed`, or a port whose standing is `standalone`) runs `execFileNoThrow`
- * exactly as before. A managed host admits the probe the way the Codex skill
- * probe is admitted (`discoverCodexSkills`, MRC2-02-04), before any process:
+ * This is the one runner such a probe goes through, and `admitProviderProbe`
+ * is its admission half for a probe that drives its own `startTurn` (the Codex
+ * skill probe speaks JSON-RPC to `codex app-server`, MRC2-02-04 / MRC2-03-04A).
+ * A standalone host (no `managed`, or a port whose standing is `standalone`)
+ * runs `execFileNoThrow` exactly as before. A managed host admits the probe
+ * before any process:
  *
  *   1. a refusal remembered for this authority, policy revision, provider,
  *      actor, probe and directory is answered without asking again;
@@ -39,9 +41,11 @@ import { execFileNoThrow, type ExecResult } from '../utils/execFile';
 import {
 	DispatchRefusedError,
 	startTurn,
+	type StartTurnOptions,
 	type TurnExit,
 	type TurnProcessSpec,
 } from '../../shared/maestro-lib/run/start-turn';
+import type { ManagedRoute } from '../../shared/maestro-lib/providers/capabilities';
 import {
 	admitProbeTurn,
 	createProbeRefusalCache,
@@ -91,14 +95,34 @@ export function providerProbeManaged(
 /** One probe: which provider, what it reads, and exactly what to run. */
 export interface ProviderProbeRequest {
 	providerId: string;
-	/** What the probe reads (`slash-commands`, `models`, `effort-levels`): the trace and the refusal scope. */
+	/**
+	 * What the probe reads (`slash-commands`, `models`, `effort-levels`,
+	 * `skill`): the trace (`<provider>-<kind>-probe:<cwd>`) and the refusal
+	 * scope.
+	 */
 	kind: string;
+	/**
+	 * The route the probe takes, held to its managed standing; `child-process`
+	 * when absent. `runProviderProbe` runs the executable itself and so takes
+	 * only that route; a probe on another one (the Codex app-server) takes
+	 * `admitProviderProbe` and drives its own `startTurn`.
+	 */
+	route?: ManagedRoute;
 	command: string;
 	args: string[];
 	/** Where to run; the process's own directory when absent. */
 	cwd?: string;
 	/** The full environment for the probe; the process's own when absent. */
 	env?: NodeJS.ProcessEnv;
+}
+
+/**
+ * What a probe hands `startTurn`: the spec, and under management the
+ * admission minted on exactly that spec (absent on a standalone host).
+ */
+export interface ProviderProbePlan {
+	spec: TurnProcessSpec;
+	admission?: StartTurnOptions['admission'];
 }
 
 /**
@@ -145,19 +169,65 @@ function execResultOf(exit: TurnExit, stdout: string, stderr: string): ExecResul
 	return { stdout, stderr, exitCode: exit.exitCode ?? exit.signal ?? 1 };
 }
 
-async function admittedProbe(
+/** The spec `startTurn` is handed: the command planned for this platform's shell, in `cwd`, with `env`. */
+function probeSpec(
+	command: string,
+	args: string[],
+	cwd: string,
+	env: NodeJS.ProcessEnv
+): TurnProcessSpec {
+	const shellPlan = planSpawnShell(command, args, {});
+	return { command: shellPlan.command, args: shellPlan.args, shell: shellPlan.shell, cwd, env };
+}
+
+/**
+ * The spec an unadmitted probe starts from: the request as asked, with no
+ * ceiling applied and no admission, exactly what a standalone host spawns.
+ * Synchronous, so a caller with no `managed` half reaches `startTurn` in the
+ * same tick it always did; `admitProviderProbe` answers the same spec for a
+ * standalone standing.
+ */
+export function providerProbeSpec(
+	request: Pick<ProviderProbeRequest, 'command' | 'args' | 'cwd' | 'env'>
+): TurnProcessSpec {
+	return probeSpec(
+		request.command,
+		request.args,
+		request.cwd ?? process.cwd(),
+		request.env ?? process.env
+	);
+}
+
+/**
+ * The admission half of a probe: the spec to start and, on a managed host,
+ * the admission `startTurn` takes as `options.admission`, decided before any
+ * side effect in the order the module comment gives (a remembered refusal,
+ * the route's managed standing, the policy's route ceiling applied to the
+ * probe's own arguments and environment, the actor bound by the port, the
+ * lease minted on the final spec). The spec returned is the one the lease
+ * covers: hand that object, and no other, to `startTurn`. A standalone host
+ * (no `managed`, or a `standalone` standing) returns the spec alone and asks
+ * nobody. Every refusal is remembered and thrown as a `DispatchRefusedError`
+ * with the authority's state and code; nothing falls back to an unmanaged
+ * spawn.
+ */
+export async function admitProviderProbe(
 	request: ProviderProbeRequest,
-	managed: ProviderProbeManaged
-): Promise<ExecResult> {
+	managed?: ProviderProbeManaged
+): Promise<ProviderProbePlan> {
+	if (!managed || managed.port.standing() === 'standalone') {
+		return { spec: providerProbeSpec(request) };
+	}
+	const cwd = request.cwd ?? process.cwd();
 	const { port, actor } = managed;
 	const { providerId, kind } = request;
-	const cwd = request.cwd ?? process.cwd();
+	const route = request.route ?? PROVIDER_PROBE_ROUTE;
 	const policy = port.policy();
 	const key: ProbeRefusalKey = {
 		authorityId: port.authority.authorityId,
 		policyRevision: policy.policyRevision,
 		providerId,
-		route: PROVIDER_PROBE_ROUTE,
+		route,
 		scope: `${probeActorScope(actor)}|${kind}|${cwd}`,
 	};
 	const refuse = (refusal: ProbeTurnRefusal): never => {
@@ -168,8 +238,8 @@ async function admittedProbe(
 	if (remembered) {
 		throw new DispatchRefusedError(remembered.state, remembered.code, remembered.message);
 	}
-	const route = probeRouteRefusal(providerId, PROVIDER_PROBE_ROUTE);
-	if (route) return refuse(route);
+	const routeRefusal = probeRouteRefusal(providerId, route);
+	if (routeRefusal) return refuse(routeRefusal);
 
 	// The policy's route, applied to the probe's own command line and
 	// environment: a flag that asks for more than the pinned mode (the slash
@@ -192,7 +262,7 @@ async function admittedProbe(
 	const verified = port.verify({
 		actor,
 		identity: probeTurnIdentity(),
-		traceId: `${providerId}-probe:${kind}:${cwd}`,
+		traceId: `${providerId}-${kind}-probe:${cwd}`,
 		policyRevision: policy.policyRevision,
 		workflow: null,
 	});
@@ -206,14 +276,7 @@ async function admittedProbe(
 
 	// The one spec: admitted on its snapshot here and spawned from it by
 	// `startTurn`, which checks the lease against the same spec at the sink.
-	const shellPlan = planSpawnShell(request.command, bounded.args, {});
-	const spec: TurnProcessSpec = {
-		command: shellPlan.command,
-		args: shellPlan.args,
-		shell: shellPlan.shell,
-		cwd,
-		env: bounded.customEnvVars ?? {},
-	};
+	const spec = probeSpec(request.command, bounded.args, cwd, bounded.customEnvVars ?? {});
 	const admitted = await admitProbeTurn({
 		authority: port.authority,
 		policy,
@@ -222,7 +285,14 @@ async function admittedProbe(
 		attribution: { provider: providerId, origin: spawnOriginOf(actor), target: { kind: 'local' } },
 	});
 	if (!admitted.ok) return refuse(admitted);
+	return { spec, admission: admitted.admission };
+}
 
+async function admittedProbe(
+	request: ProviderProbeRequest,
+	managed: ProviderProbeManaged
+): Promise<ExecResult> {
+	const { spec, admission } = await admitProviderProbe(request, managed);
 	let stdout = '';
 	let stderr = '';
 	const turn = startTurn(
@@ -236,11 +306,11 @@ async function admittedProbe(
 			},
 		},
 		{
-			admission: admitted.admission,
+			admission,
 			stopGraceMs: 250,
 			stdoutTailLimit: 0,
 			stderrTailLimit: 0,
-			label: `${providerId}-probe:${kind}`,
+			label: `${request.providerId}-probe:${request.kind}`,
 		}
 	);
 	return execResultOf(await turn.done, stdout, stderr);

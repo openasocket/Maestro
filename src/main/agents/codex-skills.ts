@@ -1,24 +1,13 @@
-import {
-	DispatchRefusedError,
-	startTurn,
-	type StartTurnOptions,
-	type TurnProcessSpec,
-} from '../../shared/maestro-lib/run/start-turn';
-import {
-	admitProbeTurn,
-	createProbeRefusalCache,
-	probeRouteRefusal,
-	probeTurnIdentity,
-	type ProbeTurnRefusal,
-} from '../../shared/maestro-lib/managed/host-adapter';
+import { startTurn } from '../../shared/maestro-lib/run/start-turn';
 import { CodexAppServerRpc } from '../codex-app-server/rpc-client';
 import { isCodexResponse } from '../codex-app-server/protocol';
-import { planSpawnShell } from '../process-manager/utils/windowsSpawnShell';
 import {
-	spawnOriginOf,
-	type ProcessSpawnActor,
-	type ProcessSpawnAuthorityPort,
-} from '../process-manager/types';
+	admitProviderProbe,
+	clearProviderProbeRefusals,
+	providerProbeSpec,
+	type ProviderProbeManaged,
+	type ProviderProbeRequest,
+} from './provider-probe';
 
 /** The route the probe takes: Codex's own app-server, driven over JSON-RPC for `skills/list`. */
 export const CODEX_SKILL_PROBE_ROUTE = 'codex-app-server' as const;
@@ -26,109 +15,34 @@ export const CODEX_SKILL_PROBE_ROUTE = 'codex-app-server' as const;
 /**
  * What a caller on a host with a spawn authority hands the probe (MRC2-02-04):
  * the port the process manager admits with (`ProcessManager.managedPort()`)
- * and the actor the transport resolved for the request (`currentSpawnActor`).
- * A caller with no port (a standalone double, a legacy boot path) passes
- * nothing and the probe runs as it always did.
+ * and the actor the transport resolved for the request (`currentSpawnActor`),
+ * the same half every provider probe takes (`providerProbeManaged`). A caller
+ * with no port (a standalone double, a legacy boot path) passes nothing and
+ * the probe runs as it always did.
  */
-export interface CodexSkillProbeManaged {
-	port: Pick<ProcessSpawnAuthorityPort, 'standing' | 'policy' | 'verify' | 'authority'>;
-	actor: ProcessSpawnActor;
-}
+export type CodexSkillProbeManaged = ProviderProbeManaged;
 
 /**
- * Probe refusals remembered across detections, keyed on the authority, its
- * policy revision, the route, the actor's transport and the directory, so
- * a denying policy is not asked again on every agent start; a new revision
- * or the TTL asks again. Admissions are never cached.
+ * Forget every remembered probe refusal (a test, or a host whose policy was
+ * replaced). The skill probe remembers its refusals in the one cache every
+ * provider probe shares (MRC2-03-04A), so this clears that cache.
  */
-const probeRefusals = createProbeRefusalCache();
-
-/** Forget every remembered probe refusal (a test, or a host whose policy was replaced). */
 export function clearCodexSkillProbeRefusals(): void {
-	probeRefusals.clear();
-}
-
-function actorScope(actor: ProcessSpawnActor): string {
-	switch (actor.peer) {
-		case 'web-login':
-			return `web-login:${actor.username}`;
-		case 'device-pairing':
-			return `device-pairing:${actor.deviceId}`;
-		default:
-			return actor.peer;
-	}
-}
-
-/**
- * The admission the probe starts under on a managed host, or undefined on a
- * standalone one. Decided before any side effect, in this order: a refusal
- * remembered for this policy revision is answered without asking; the route
- * is held to its managed standing (`probeRouteRefusal`: the app-server route
- * has no enforcement producer in this build, so a managed host refuses it
- * `unavailable` by name); the actor is bound into a verified context by the
- * port; and the authority is asked for a lease on the snapshot of exactly
- * `spec`. Every refusal is remembered and thrown as a `DispatchRefusedError`
- * with the authority's state and code; nothing is started and nothing falls
- * back to an unmanaged spawn.
- */
-async function codexSkillProbeAdmission(
-	spec: TurnProcessSpec,
-	cwd: string,
-	managed: CodexSkillProbeManaged
-): Promise<StartTurnOptions['admission'] | undefined> {
-	const { port, actor } = managed;
-	if (port.standing() === 'standalone') return undefined;
-	const policy = port.policy();
-	const key = {
-		authorityId: port.authority.authorityId,
-		policyRevision: policy.policyRevision,
-		providerId: 'codex',
-		route: CODEX_SKILL_PROBE_ROUTE,
-		scope: `${actorScope(actor)}|${cwd}`,
-	};
-	const refuse = (refusal: ProbeTurnRefusal): never => {
-		probeRefusals.remember(key, refusal);
-		throw new DispatchRefusedError(refusal.state, refusal.code, refusal.message);
-	};
-	const remembered = probeRefusals.recall(key);
-	if (remembered) {
-		throw new DispatchRefusedError(remembered.state, remembered.code, remembered.message);
-	}
-	const route = probeRouteRefusal('codex', CODEX_SKILL_PROBE_ROUTE);
-	if (route) return refuse(route);
-	const verified = port.verify({
-		actor,
-		identity: probeTurnIdentity(),
-		traceId: `codex-skill-probe:${cwd}`,
-		policyRevision: policy.policyRevision,
-		workflow: null,
-	});
-	if (!verified.ok) {
-		return refuse({
-			state: 'denied',
-			code: verified.code,
-			message: `The probe's actor could not be bound: ${verified.problems.join('; ')}. Nothing was started.`,
-		});
-	}
-	const admitted = await admitProbeTurn({
-		authority: port.authority,
-		policy,
-		context: verified.context,
-		spec,
-		attribution: { provider: 'codex', origin: spawnOriginOf(actor), target: { kind: 'local' } },
-	});
-	if (!admitted.ok) return refuse(admitted);
-	return admitted.admission;
+	clearProviderProbeRefusals();
 }
 
 /** Skills reported by Codex itself, including enabled plugins and system skills.
  * This only reads metadata: no thread or model turn is started.
  *
  * Under management the probe is admitted before it starts (`managed`,
- * MRC2-02-04): a refusal is thrown as a `DispatchRefusedError` naming the
- * authority's state and code, and the caller decides what to offer instead;
- * it never spawns unmanaged. A standalone host, and a caller that passes no
- * `managed`, probe exactly as before.
+ * MRC2-02-04) through the admission every provider probe shares
+ * (`admitProviderProbe`: a remembered refusal, the app-server route held to
+ * its managed standing, the policy's route ceiling on the probe's arguments
+ * and environment, the actor bound by the port, a lease on the final spec):
+ * a refusal is thrown as a `DispatchRefusedError` naming the authority's state
+ * and code, and the caller decides what to offer instead; it never spawns
+ * unmanaged. A standalone host, and a caller that passes no `managed`, probe
+ * exactly as before.
  */
 export async function discoverCodexSkills(
 	command: string,
@@ -140,11 +54,21 @@ export async function discoverCodexSkills(
 		if (!turn.child.stdin?.writable) throw new Error('Codex stdin is closed');
 		turn.child.stdin.write(`${line}\n`);
 	});
-	const shellPlan = planSpawnShell(command, ['app-server'], {});
-	// The one spec: admitted on its snapshot here and spawned from it by
+	const request: ProviderProbeRequest = {
+		providerId: 'codex',
+		kind: 'skill',
+		route: CODEX_SKILL_PROBE_ROUTE,
+		command,
+		args: ['app-server'],
+		cwd,
+		env,
+	};
+	// The one spec: admitted on its snapshot there and spawned from it by
 	// `startTurn`, which checks the lease against the same spec at the sink.
-	const spec: TurnProcessSpec = { ...shellPlan, cwd, env };
-	const admission = managed ? await codexSkillProbeAdmission(spec, cwd, managed) : undefined;
+	// A caller with no managed half starts in this same tick, as it always did.
+	const { spec, admission } = managed
+		? await admitProviderProbe(request, managed)
+		: { spec: providerProbeSpec(request), admission: undefined };
 	const turn = startTurn(
 		spec,
 		{

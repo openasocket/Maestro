@@ -22,10 +22,10 @@ import { capabilitySnapshots } from '../../agents/capability-snapshot';
 import type { AgentCapabilitiesSnapshotMap } from '../../../shared/agentCapabilities';
 import { probeRemoteMaestroP, ensureRemoteMaestroPProbed } from '../../agents/probeRemoteMaestroP';
 import { execFileNoThrow } from '../../utils/execFile';
-import { discoverCodexSkills, type CodexSkillProbeManaged } from '../../agents/codex-skills';
+import { discoverCodexSkills } from '../../agents/codex-skills';
+import { providerProbeManaged, type ProviderProbeManaged } from '../../agents/provider-probe';
 import { DispatchRefusedError } from '../../../shared/maestro-lib/run/start-turn';
 import type { ProcessSpawnAuthorityPort } from '../../process-manager/types';
-import { currentSpawnActor } from '../../web-server/auth/transport-actor';
 import { checkCustomPath } from '../../agents/path-prober';
 import { CodexRpcRequestError, CodexRpcTransportError } from '../../codex-app-server/rpc-client';
 import { buildChildProcessEnv } from '../../process-manager/utils/envBuilder';
@@ -377,7 +377,7 @@ async function discoverCodexSlashCommands(
 	cwd: string,
 	command: string,
 	env: NodeJS.ProcessEnv,
-	managed?: CodexSkillProbeManaged
+	managed?: ProviderProbeManaged
 ): Promise<DiscoveredCommand[]> {
 	const commands = new Map<string, DiscoveredCommand>();
 	let nativeSkillsAvailable = false;
@@ -519,17 +519,17 @@ export type ProcessManagerForAgents = ProcessLivenessProbe & {
 };
 
 /**
- * What the Codex skill probe is admitted with on this host (MRC2-02-04): the
- * port the process manager admits every spawn with and the actor the
- * transport resolved for this request (the keyboard, a Web Login account, the
- * CLI secret or a paired device). A manager with no port, or none at all, is
+ * What a provider probe (the Codex skill probe, Claude's slash-command probe)
+ * is admitted with on this host (MRC2-02-04, MRC2-03-04A): the port the
+ * process manager admits every spawn with and the actor the transport
+ * resolved for this request (the keyboard, a Web Login account, the CLI
+ * secret or a paired device). A manager with no port, or none at all, is
  * standalone by construction and the probe runs unadmitted, as before.
  */
-function codexSkillProbeManaged(
+function probeManagedOf(
 	processManager: ProcessManagerForAgents | null
-): CodexSkillProbeManaged | undefined {
-	const port = processManager?.managedPort?.() ?? null;
-	return port ? { port, actor: currentSpawnActor() } : undefined;
+): ProviderProbeManaged | undefined {
+	return providerProbeManaged(processManager?.managedPort?.() ?? null);
 }
 
 /**
@@ -1859,7 +1859,7 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 					);
 					// Resolved at the boundary, before the probe: the actor is the
 					// transport's answer for THIS request, read here and not later.
-					const managed = codexSkillProbeManaged(deps.getProcessManager?.() ?? null);
+					const managed = probeManagedOf(deps.getProcessManager?.() ?? null);
 					return discoverCodexSlashCommands(cwd, commandPath, env, managed);
 				}
 				if (!agent?.available) {
@@ -1896,8 +1896,17 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 					}
 
 					// The init message of a `/help` probe names every command; see
-					// claude-slash-command-probe.ts.
-					const names = await probeClaudeSlashCommands(commandPath, cwd);
+					// claude-slash-command-probe.ts. On a managed host the probe is
+					// admitted before it starts (MRC2-03-04A), with the port and the
+					// actor resolved here, at the boundary that handles this request;
+					// a refusal is logged there by name and answers null, so the
+					// wizard offers no commands and nothing probes in its place.
+					const names = await probeClaudeSlashCommands(
+						commandPath,
+						cwd,
+						undefined,
+						probeManagedOf(deps.getProcessManager?.() ?? null)
+					);
 					if (!names) return null;
 					logger.info(`Discovered ${names.length} slash commands for ${agentId}`, LOG_CONTEXT);
 					// Description enrichment is best-effort: a permission/IO
