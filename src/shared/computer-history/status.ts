@@ -4,6 +4,7 @@
  */
 
 import type { CaptureRule, HelperStatus, ObservedPlatform, StoredEventKind } from './types';
+import type { ManagedAdmissionRefusal } from '../maestro-lib/managed/host-adapter';
 
 /** Supervisor-level state of the `maestro-computer-history` child process. */
 export type ObserverProcessState =
@@ -12,7 +13,13 @@ export type ObserverProcessState =
 	| 'backing-off'
 	| 'failed'
 	/** No helper binary for this platform/arch was found. Reported, not thrown. */
-	| 'binary-missing';
+	| 'binary-missing'
+	/**
+	 * The managed host refused the helper (or revoked its lease): nothing runs
+	 * and nothing is scheduled; `managed` on the status says why. Reported, not
+	 * retried (MRC2-02-05).
+	 */
+	| 'denied';
 
 /** One word for the UI pill and `status` output. */
 export type RecorderState =
@@ -41,6 +48,8 @@ export interface ObserverProcessStatus {
 	binaryPath: string | null;
 	/** Bounded tail of the helper's stderr (diagnostics only). */
 	recentStderr: string[];
+	/** The managed host's refusal, while the state is `denied`. */
+	managed?: ManagedAdmissionRefusal;
 }
 
 /** Digest scheduler state (15-minute digests and 6-hour roll-ups). */

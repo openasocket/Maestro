@@ -15,6 +15,16 @@
  *
  * Hostile-output guard: a line longer than `maxLineBytes` is discarded up to
  * its newline instead of growing a buffer without bound.
+ *
+ * Under management (MRC2-02-05) the helper is admitted before it starts:
+ * `deps.managedPort` is the host's spawn authority, read on every spawn, and
+ * `admitSupervisorChild` binds this process as the `computer-history` service
+ * and asks the authority for a lease on the exact spawn (`purpose:
+ * supervisor`). A refusal is the reported state `denied` (the authority's
+ * answer in `managed`), never a restart: the backoff ladder is for a helper
+ * that died, and a denied helper is asked again only by the next `start()`.
+ * A revocation stops the helper and leaves it denied. With no port, or a
+ * standalone standing, nothing here changes and the spawn stays synchronous.
  */
 
 import * as fs from 'fs';
@@ -25,6 +35,14 @@ import type {
 	ObserverProcessState,
 	ObserverProcessStatus,
 } from '../../shared/computer-history/status';
+import {
+	admitSupervisorChild,
+	type SupervisedChildLifetime,
+	type SupervisorChildAdmission,
+	type SupervisorChildPort,
+	type SupervisorChildRefusal,
+} from '../../shared/maestro-lib/managed/host-adapter';
+import type { DispatchSpecLike } from '../../shared/maestro-lib/managed/authority';
 
 const MAX_RESTARTS = 5;
 const BACKOFF_BASE_MS = 1000;
@@ -36,6 +54,18 @@ const MAX_STDERR_LINES = 50;
 export const DEFAULT_MAX_LINE_BYTES = 256 * 1024;
 
 export const OBSERVER_BINARY_BASENAME = 'maestro-computer-history';
+
+/** The service this supervisor binds the helper as, and the provider it is admitted under. */
+export const OBSERVER_SUPERVISOR_SERVICE = 'computer-history';
+
+/** The spawn exactly as the supervisor makes it: what the managed authority admits. */
+interface ObserverLaunch extends DispatchSpecLike {
+	command: string;
+	args: string[];
+	cwd: string;
+	env: Record<string, string | undefined>;
+	shell: false;
+}
 
 export type ObserverChildSpawner = (
 	command: string,
@@ -55,6 +85,13 @@ export interface ObserverSupervisorDeps {
 	spawnChild?: ObserverChildSpawner;
 	maxLineBytes?: number;
 	log?: (level: 'info' | 'warn' | 'error', message: string) => void;
+	/**
+	 * The host's spawn authority (the process manager's `managedPort()`), read
+	 * on every spawn so an enrollment that appears later governs the next
+	 * helper. Absent or null, or a standalone standing: the supervisor spawns
+	 * as it always did, synchronously and admitted by nobody.
+	 */
+	managedPort?: () => SupervisorChildPort | null;
 }
 
 /** Platform/arch folder name the build script writes into. */
@@ -128,6 +165,10 @@ export class ObserverSupervisor {
 	private wanted = false;
 	private stdoutBuffer = '';
 	private discarding = false;
+	/** A managed admission is in flight; nothing may start beside it. */
+	private admitting = false;
+	/** The managed host's refusal, while the state is `denied`. */
+	private managed: SupervisorChildRefusal | undefined;
 
 	constructor(deps: ObserverSupervisorDeps) {
 		this.deps = deps;
@@ -135,10 +176,14 @@ export class ObserverSupervisor {
 		this.maxLineBytes = deps.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES;
 	}
 
-	/** Start (or keep) the helper running. Idempotent. */
+	/**
+	 * Start (or keep) the helper running. Idempotent. A denied helper is asked
+	 * of the managed host again here, and only here: nothing retries a refusal
+	 * on a timer.
+	 */
 	start(): void {
 		this.wanted = true;
-		if (this.child || this.state === 'backing-off') return;
+		if (this.child || this.state === 'backing-off' || this.admitting) return;
 		this.restarts = 0;
 		this.spawn();
 	}
@@ -200,6 +245,7 @@ export class ObserverSupervisor {
 		if (typeof this.child?.pid === 'number') out.pid = this.child.pid;
 		if (this.lastError) out.lastError = this.lastError;
 		if (this.startedAt) out.startedAt = this.startedAt;
+		if (this.managed) out.managed = { ...this.managed };
 		return out;
 	}
 
@@ -209,6 +255,12 @@ export class ObserverSupervisor {
 		this.deps.onStateChange?.();
 	}
 
+	/**
+	 * Resolve the helper and launch it. Standalone (no port, or a standalone
+	 * standing) launches synchronously, as it always did. Under management the
+	 * authority is asked first and the launch follows its answer; while it
+	 * answers, `start()` is a no-op.
+	 */
 	private spawn(): void {
 		const binary = this.deps.resolveBinary();
 		this.binaryPath = binary;
@@ -217,14 +269,101 @@ export class ObserverSupervisor {
 			this.setState('binary-missing');
 			return;
 		}
+		// The spawn exactly as it will be made: argv is fixed and empty, the
+		// environment is this process's own, so the authority admits what runs.
+		const launch: ObserverLaunch = {
+			command: binary,
+			args: [],
+			cwd: process.cwd(),
+			env: { ...process.env },
+			shell: false,
+		};
+		const port = this.deps.managedPort?.() ?? null;
+		if (!port || port.standing() !== 'managed') {
+			this.launch(launch, null);
+			return;
+		}
+		this.admitting = true;
+		void this.admitThenLaunch(launch, port);
+	}
+
+	/** Ask the managed host for a lease on the exact launch, then launch on its answer. */
+	private async admitThenLaunch(launch: ObserverLaunch, port: SupervisorChildPort): Promise<void> {
+		let admission: SupervisorChildAdmission;
+		try {
+			admission = await admitSupervisorChild({
+				port,
+				service: OBSERVER_SUPERVISOR_SERVICE,
+				traceId: 'computer-history-observer',
+				spec: launch,
+				attribution: { target: { kind: 'local' }, resourceIds: [`binary:${launch.command}`] },
+			});
+		} catch (error) {
+			// The authority never throws by contract; a port that does is an answer lost.
+			admission = {
+				state: 'unknown',
+				code: 'outcome-unknown',
+				message: `The managed host's answer was lost: ${error instanceof Error ? error.message : String(error)}. Nothing was started.`,
+			};
+		} finally {
+			this.admitting = false;
+		}
+		// stop() ran while the authority answered: a lease nothing starts on is released unused.
+		if (!this.wanted) {
+			if (admission.state === 'admitted') {
+				admission.lifetime.withdraw('the helper was stopped before it started');
+			}
+			this.setState('stopped');
+			return;
+		}
+		if (admission.state === 'standalone') {
+			this.launch(launch, null);
+			return;
+		}
+		if (admission.state !== 'admitted') {
+			this.refuse(admission);
+			return;
+		}
+		this.launch(launch, admission.lifetime);
+	}
+
+	/**
+	 * Record the managed host's refusal: the helper is `denied`, nothing runs,
+	 * nothing is scheduled. Not a failure of the helper, so the restart streak
+	 * is untouched and the backoff ladder is never entered.
+	 */
+	private refuse(refusal: SupervisorChildRefusal): void {
+		this.child = null;
+		this.managed = { state: refusal.state, code: refusal.code, message: refusal.message };
+		this.lastError = `[managed-${refusal.state}] ${refusal.message}`;
+		this.deps.log?.(
+			'warn',
+			`maestro-computer-history not admitted (${refusal.state}, ${refusal.code}): ${refusal.message}`
+		);
+		this.setState('denied');
+	}
+
+	/** Make the launch, driving the lease around the helper when one was admitted. */
+	private launch(launch: ObserverLaunch, lifetime: SupervisedChildLifetime | null): void {
+		if (lifetime) {
+			// The lease sees exactly what spawn sees: nothing runs between the two.
+			const verdict = lifetime.admit();
+			if (!verdict.ok) {
+				this.refuse(verdict);
+				return;
+			}
+		}
 		let child: ChildProcess;
 		try {
-			child = this.spawnChild(binary, [], {
+			child = this.spawnChild(launch.command, launch.args, {
+				cwd: launch.cwd,
+				env: launch.env,
 				stdio: ['pipe', 'pipe', 'pipe'],
 				windowsHide: true,
 				// Not detached: the helper must die with the app.
 			});
 		} catch (error) {
+			lifetime?.spawnFailed(error instanceof Error ? error : new Error(String(error)));
 			this.lastError = error instanceof Error ? error.message : String(error);
 			this.scheduleRestart();
 			return;
@@ -233,7 +372,18 @@ export class ObserverSupervisor {
 		this.startedAt = Date.now();
 		this.stdoutBuffer = '';
 		this.discarding = false;
+		this.managed = undefined;
 		this.setState('running');
+		// The process exists: the protected lifetime begins, and a revocation
+		// from here on stops it and leaves the helper denied.
+		lifetime?.spawned(child);
+		let revokedReason: string | null = null;
+		const unsubscribe = lifetime?.onRevoked((reason) => {
+			if (revokedReason !== null) return;
+			revokedReason = reason;
+			this.deps.log?.('warn', `maestro-computer-history lease revoked, stopping it: ${reason}`);
+			if (this.child === child) this.stop();
+		});
 
 		child.stdout?.setEncoding('utf8');
 		child.stdout?.on('data', (chunk: string) => this.onStdout(chunk));
@@ -248,11 +398,34 @@ export class ObserverSupervisor {
 			this.deps.log?.('warn', `observer process error: ${err.message}`);
 			// 'exit' may never follow a spawn failure (ENOENT, EACCES).
 			if (this.child === child && child.pid === undefined) {
+				unsubscribe?.();
+				lifetime?.spawnFailed(err);
 				this.child = null;
 				this.scheduleRestart();
 			}
 		});
 		child.on('exit', (code, signal) => {
+			unsubscribe?.();
+			lifetime?.exited({
+				exitCode: code,
+				signal,
+				stoppedBy:
+					revokedReason !== null ? 'authority' : this.child !== child ? 'caller' : undefined,
+			});
+			// The managed host revoked the lease: stopped by the authority, denied
+			// from here on, never restarted.
+			if (revokedReason !== null) {
+				// A helper started since (by a later start()) is not this one's business.
+				if (this.child === null) {
+					this.flushStdout();
+					this.refuse({
+						state: 'denied',
+						code: 'lease-invalid',
+						message: `The managed host revoked the helper's lease: ${revokedReason}. It was stopped and is not restarted.`,
+					});
+				}
+				return;
+			}
 			if (this.child !== child) return; // stop() already let go of it
 			this.child = null;
 			this.flushStdout();
