@@ -4,24 +4,26 @@
 	"created": "2026-10-25",
 	"task": "MRC-12-04",
 	"revisions": [
-		"MRC2-01-02 2026-10-26: the word unsupported-by-counterpart and the counterpart section (CP-04, CP-05, CP-06 rows with evidence and owner)"
+		"MRC2-01-02 2026-10-26: the word unsupported-by-counterpart and the counterpart section (CP-04, CP-05, CP-06 rows with evidence and owner)",
+		"MRC2-03-08 2026-10-27: the permissionModes section (per-provider permission-mode table from the MRC2-03-01 ceiling, every requested mode measured under every pin, reconciled with readOnlyCliEnforced and providerRouteSupport); library block refreshed to 0.31.0"
 	],
 	"generated": {
 		"routes": "capabilityMatrix(dist/maestro-lib).routes from scripts/package-mega-maestro-runtime.mjs, folded to routes[agentId][route] = [standalone, managed]; the generator is .maestro/playbooks/Working/12-04-support-matrix.mjs",
 		"counterpart": "authored by hand from COUNTERPART_SUPPORT in src/shared/maestro-lib/managed/compatibility.ts; the 12-04 generator does not emit this section, so keep the two in step when either changes",
 		"library": {
-			"version": "0.24.0",
+			"version": "0.31.0",
 			"managedContract": "maestro-managed/1",
 			"endpointProtocol": 1,
 			"node": ">=20",
-			"sourceRevision": "4a7e5af1523a9f95c0238bf002a29dea7d03746b",
+			"sourceRevision": "2ff8538251aec0b9cb41dd2fa6753e9666f3fec4",
 			"sourceDirty": false
 		},
 		"readOn": {
 			"platform": "darwin",
 			"arch": "arm64",
 			"node": "v26.12.1"
-		}
+		},
+		"permissionModes": "permissionVocabularyOf(), managedArgsProblems(), managedPermissionModeProblem() and buildAgentArgs() in src/shared/maestro-lib/launch (MRC2-03-01) over AGENT_DEFINITIONS, reconciled with readOnlyCliEnforced (providers/definitions.ts) and providerRouteSupport() (providers/capabilities.ts); measured by the parked scratch .maestro/playbooks/Working/p2-03-08/scratch-permission-table.test.ts.txt and folded in by write-matrix.mjs beside it (MRC2-03-08)"
 	},
 	"words": {
 		"implemented": "exercised on this build; a caller may proceed",
@@ -324,5 +326,786 @@
 			"docs/mega-maestro.md is not yet in docs/docs.json navigation (MRC2-07-07)",
 			"contextOf() and lifecycleLineageOf() copy lineage.identity by spread (hardening)"
 		]
+	},
+	"permissionModes": {
+		"task": "MRC2-03-08",
+		"libraryVersion": "0.31.0",
+		"source": "the ceiling of MRC2-03-01: permissionVocabularyOf() reads each provider definition (fullAccessArgs / yoloModeArgs, readOnlyArgs, readOnlyCliEnforced); managedPermissionModeProblem() measures a requested mode against the pin by width (readonly < standard < full); managedArgsProblems() refuses by name every full-access flag and every mode flag whose value names full access under a pin below full, and under readonly refuses a provider that cannot enforce read-only on its command line and a command line that does not carry its read-only flags; buildAgentArgs() under managedCeiling throws the same mode problem before any flag is emitted. Nothing is lowered to fit.",
+		"method": "for every defined provider but the internal terminal, the real batch argument set of each requested mode (buildAgentArgs with the definition, its base args, a prompt and permissionMode) was measured under a ceiling pinning none, readonly, standard and full: the mode check first, then the flag check on the resulting arguments; commandLineReads is what cliRequestedPermissionMode() reads back off that command line (what a CLI or headless surface would hand the plan)",
+		"words": {
+			"verdicts": {
+				"admitted": "the request fits the pin and its arguments carry nothing the pin forbids",
+				"refused-by-mode": "the requested mode is wider than the pin (the one width rule); refused before any flag is looked at",
+				"refused-by-flag": "the mode fits but the arguments the provider would run with carry a flag the pin forbids, or (readonly) the read-only flags are missing or unenforceable; refused by name, never rewritten"
+			},
+			"readOnly": {
+				"enforced": "readOnlyCliEnforced: true with read-only flags: the command line enforces the mode and a readonly pin demands exactly those flags",
+				"enforced-by-default": "readOnlyCliEnforced: true with no flag (Factory Droid exec is read-only unless widened): a readonly pin is satisfied by the absence of a widening flag",
+				"accepted": "readOnlyCliEnforced: false with a flag the provider accepts but does not enforce (prompt-only): a readonly pin refuses the provider by name rather than trusting the flag",
+				"none": "no read-only flag and no enforcement: a readonly pin refuses the provider"
+			},
+			"fullAccess": {
+				"flag": "full access is asked for with a flag on the command line, which the ceiling measures (managedArgsProblems) and which cliRequestedPermissionMode reads back as full",
+				"env-only": "full access is an environment setting (OpenCode OPENCODE_CONFIG_CONTENT with \"*\": \"allow\", set by the definition in every mode but read-only through readOnlyEnvOverrides) that no argument check sees; held at the request level only (the mode a surface names), and the standard arguments run with it",
+				"flagless": "the provider has no full-access flag: a full request leaves the standard arguments, is read back as standard, and is held at the request level only"
+			}
+		},
+		"staticFullAccessFlags": [
+			"--dangerously-skip-permissions",
+			"--dangerously-bypass-approvals-and-sandbox",
+			"--skip-permissions-unsafe",
+			"-y",
+			"--allow-all"
+		],
+		"modeValueFlags": {
+			"--permission-mode": ["bypassPermissions"],
+			"--approval-mode": ["yolo"],
+			"--sandbox": ["danger-full-access"],
+			"--ask-for-approval": ["never"],
+			"-a": ["never"]
+		},
+		"findings": {
+			"standardRequestRefusedUnderStandardPin": {
+				"providers": [
+					"codex",
+					"gemini-cli",
+					"antigravity",
+					"qwen3-coder",
+					"hermes",
+					"factory-droid",
+					"copilot-cli",
+					"grok"
+				],
+				"reason": "batchModeArgs carry a full-access flag, so the standard (headless) argument set itself asks for full access; the ceiling measures the flag, not the mode label, and the command line reads back as full. Only a readonly request of these providers fits under a standard pin. Closing it means a standard batch argument set without the bypass per provider (a definition change that alters the unmanaged default), recorded at MRC2-03-03A and not made in P2-03"
+			},
+			"standardRequestAdmittedUnderStandardPin": {
+				"providers": ["claude-code", "pi", "omp", "opencode"]
+			},
+			"readonlyRequestRefusedUnderReadonlyPin": {
+				"providers": ["gemini-cli", "antigravity", "hermes"],
+				"reason": "gemini-cli: its read-only arguments are -y, a full-access flag, refused by name; antigravity: --sandbox is accepted but not enforced (readOnlyCliEnforced: false); hermes: no read-only flag and no enforcement. A readonly pin refuses these providers rather than trusting a label"
+			},
+			"fullRequestLeavesNoFlag": {
+				"providers": ["pi", "omp", "opencode"],
+				"reason": "no full-access flag (pi, omp) or an environment setting (opencode): a full request is held at the request level (buildAgentArgs under managedCeiling, the launch plan, the desktop handler) and never on the command line; a CLI surface reads it back as standard"
+			},
+			"batchModeArgsCarryFullAccess": {
+				"providers": [
+					"codex",
+					"gemini-cli",
+					"antigravity",
+					"qwen3-coder",
+					"hermes",
+					"factory-droid",
+					"copilot-cli",
+					"grok"
+				]
+			},
+			"envOnlyFullAccess": {
+				"providers": ["opencode"],
+				"reason": "OPENCODE_CONFIG_CONTENT is not a route-controlling name the environment ceiling strips, so a standard OpenCode turn under a standard pin runs with the definition's blanket allow; the ceiling holds the named mode, not the effect"
+			}
+		},
+		"consumers": [
+			"src/shared/maestro-lib/launch/agent-args.ts buildAgentArgs(managedCeiling): the mode, before any flag (MRC2-03-01)",
+			"src/shared/maestro-lib/launch/launch-plan.ts buildAgentLaunchPlan(managed.route): the mode, then managedArgsProblems on the final arguments, reported as plan.permission (MRC2-03-03)",
+			"src/cli/services/agent-spawner.ts cliRequestedPermissionMode + cliManagedRoute: a CLI flag cannot widen the pin; a refusal exits nonzero with zero processes (MRC2-03-03)",
+			"src/main/ipc/handlers/process/handle-spawn.ts: managedPermissionModeRefusal on the request, then the plan; plan.permission stamped on ProcessConfig (MRC2-02-01A, MRC2-03-03A)",
+			"src/main/codex-app-server/invocation.ts codexSandboxCeiling: readonly -> read-only, standard -> workspace-write, full or none -> unpinned; a wider sandbox refused at the app-server sink, never the exec fallback (MRC2-03-03, 03-03A)",
+			"src/main/agents/provider-probe.ts: a probe's own arguments under the route ceiling (boundUtilityRoute), the slash probe's --dangerously-skip-permissions refused under standard or readonly (MRC2-03-04, 04A)",
+			"src/shared/maestro-lib/managed/tui-handshake.ts + src/maestro-p: the handshake carries the ceiling's permissionMode; checkTuiSpawn refuses a bypass above it before pty.spawn and withPermissionBypass withholds it (MRC2-03-05, 05A, 06)"
+		],
+		"producer": "none in this build: ProcessSpawnAuthorityPort.routeCeiling / permissionCeiling (desktop) and HeadlessSpawnAuthority.routeCeiling (CLI, plugins) have no production producer (CP-01); every verdict in this section is the consumer's answer to a ceiling a test port lends, proven by permission-ceiling.test.ts, agent-args.managed.test.ts, handle-spawn.managed.test.ts, agent-spawner.test.ts and invocation.test.ts",
+		"routeReconciliation": "providerRouteSupport() reports managed: implemented on child-process only (the launch admitted at the real spawn) and unsupported on pty, codex-app-server, opencode-server and ssh; P2-03 adds ceiling CONSUMERS at the codex-app-server sink (sandbox) and the local pty the maestro-p TUI uses for claude-code (handshake), but no enforcement producer, so the route words stand unchanged; a managed route on an SSH remote is refused by the plan",
+		"providers": {
+			"claude-code": {
+				"name": "Claude Code",
+				"readOnly": {
+					"args": ["--permission-mode", "plan"],
+					"cliEnforced": true,
+					"capabilitySupportsReadOnlyMode": true,
+					"word": "enforced"
+				},
+				"fullAccess": {
+					"mechanism": "flag",
+					"ownFlags": ["--dangerously-skip-permissions"],
+					"staticFlagsAlsoRefused": [
+						"--dangerously-bypass-approvals-and-sandbox",
+						"--skip-permissions-unsafe",
+						"-y",
+						"--allow-all"
+					],
+					"envVars": []
+				},
+				"batchModeFullAccessFlags": [],
+				"requests": {
+					"readonly": {
+						"args": [
+							"--print",
+							"--verbose",
+							"--output-format",
+							"stream-json",
+							"--permission-mode",
+							"plan"
+						],
+						"commandLineReads": "readonly",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "admitted",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"standard": {
+						"args": ["--print", "--verbose", "--output-format", "stream-json"],
+						"commandLineReads": "standard",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, read-only flags missing",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"full": {
+						"args": [
+							"--print",
+							"--verbose",
+							"--output-format",
+							"stream-json",
+							"--dangerously-skip-permissions"
+						],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, --dangerously-skip-permissions, read-only flags missing",
+							"standard": "refused-by-mode: mode above pin, --dangerously-skip-permissions",
+							"full": "admitted"
+						}
+					}
+				}
+			},
+			"codex": {
+				"name": "Codex",
+				"readOnly": {
+					"args": ["--sandbox", "read-only", "--skip-git-repo-check"],
+					"cliEnforced": true,
+					"capabilitySupportsReadOnlyMode": true,
+					"word": "enforced"
+				},
+				"fullAccess": {
+					"mechanism": "flag",
+					"ownFlags": ["--dangerously-bypass-approvals-and-sandbox"],
+					"staticFlagsAlsoRefused": [
+						"--dangerously-skip-permissions",
+						"--skip-permissions-unsafe",
+						"-y",
+						"--allow-all"
+					],
+					"envVars": []
+				},
+				"batchModeFullAccessFlags": ["--dangerously-bypass-approvals-and-sandbox"],
+				"requests": {
+					"readonly": {
+						"args": ["exec", "--json", "--sandbox", "read-only", "--skip-git-repo-check"],
+						"commandLineReads": "readonly",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "admitted",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"standard": {
+						"args": [
+							"exec",
+							"--dangerously-bypass-approvals-and-sandbox",
+							"--skip-git-repo-check",
+							"--json"
+						],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, --dangerously-bypass-approvals-and-sandbox, read-only flags missing",
+							"standard": "refused-by-flag: --dangerously-bypass-approvals-and-sandbox",
+							"full": "admitted"
+						}
+					},
+					"full": {
+						"args": [
+							"exec",
+							"--dangerously-bypass-approvals-and-sandbox",
+							"--skip-git-repo-check",
+							"--json"
+						],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, --dangerously-bypass-approvals-and-sandbox, read-only flags missing",
+							"standard": "refused-by-mode: mode above pin, --dangerously-bypass-approvals-and-sandbox",
+							"full": "admitted"
+						}
+					}
+				},
+				"codexSandbox": {
+					"none": null,
+					"readonly": "read-only",
+					"standard": "workspace-write",
+					"full": null
+				}
+			},
+			"gemini-cli": {
+				"name": "Gemini CLI",
+				"hidden": true,
+				"readOnly": {
+					"args": ["-y"],
+					"cliEnforced": false,
+					"capabilitySupportsReadOnlyMode": false,
+					"word": "accepted"
+				},
+				"fullAccess": {
+					"mechanism": "flag",
+					"ownFlags": ["-y"],
+					"staticFlagsAlsoRefused": [
+						"--dangerously-skip-permissions",
+						"--dangerously-bypass-approvals-and-sandbox",
+						"--skip-permissions-unsafe",
+						"--allow-all"
+					],
+					"envVars": []
+				},
+				"batchModeFullAccessFlags": ["-y"],
+				"requests": {
+					"readonly": {
+						"args": ["--output-format", "stream-json", "-y"],
+						"commandLineReads": "readonly",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-flag: -y, read-only unenforceable",
+							"standard": "refused-by-flag: -y",
+							"full": "admitted"
+						}
+					},
+					"standard": {
+						"args": ["-y", "--output-format", "stream-json"],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, -y, read-only unenforceable",
+							"standard": "refused-by-flag: -y",
+							"full": "admitted"
+						}
+					},
+					"full": {
+						"args": ["-y", "--output-format", "stream-json"],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, -y, read-only unenforceable",
+							"standard": "refused-by-mode: mode above pin, -y",
+							"full": "admitted"
+						}
+					}
+				}
+			},
+			"antigravity": {
+				"name": "Antigravity CLI",
+				"readOnly": {
+					"args": ["--sandbox"],
+					"cliEnforced": false,
+					"capabilitySupportsReadOnlyMode": false,
+					"word": "accepted"
+				},
+				"fullAccess": {
+					"mechanism": "flag",
+					"ownFlags": ["--dangerously-skip-permissions"],
+					"staticFlagsAlsoRefused": [
+						"--dangerously-bypass-approvals-and-sandbox",
+						"--skip-permissions-unsafe",
+						"-y",
+						"--allow-all"
+					],
+					"envVars": []
+				},
+				"batchModeFullAccessFlags": ["--dangerously-skip-permissions"],
+				"requests": {
+					"readonly": {
+						"args": ["--output-format", "stream-json", "--sandbox"],
+						"commandLineReads": "readonly",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-flag: read-only unenforceable",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"standard": {
+						"args": ["--dangerously-skip-permissions", "--output-format", "stream-json"],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, --dangerously-skip-permissions, read-only unenforceable",
+							"standard": "refused-by-flag: --dangerously-skip-permissions",
+							"full": "admitted"
+						}
+					},
+					"full": {
+						"args": ["--dangerously-skip-permissions", "--output-format", "stream-json"],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, --dangerously-skip-permissions, read-only unenforceable",
+							"standard": "refused-by-mode: mode above pin, --dangerously-skip-permissions",
+							"full": "admitted"
+						}
+					}
+				}
+			},
+			"qwen3-coder": {
+				"name": "Qwen3 Coder",
+				"readOnly": {
+					"args": ["--approval-mode", "plan"],
+					"cliEnforced": true,
+					"capabilitySupportsReadOnlyMode": false,
+					"word": "enforced"
+				},
+				"fullAccess": {
+					"mechanism": "flag",
+					"ownFlags": ["-y"],
+					"staticFlagsAlsoRefused": [
+						"--dangerously-skip-permissions",
+						"--dangerously-bypass-approvals-and-sandbox",
+						"--skip-permissions-unsafe",
+						"--allow-all"
+					],
+					"envVars": []
+				},
+				"batchModeFullAccessFlags": ["-y"],
+				"requests": {
+					"readonly": {
+						"args": ["--output-format", "stream-json", "--approval-mode", "plan"],
+						"commandLineReads": "readonly",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "admitted",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"standard": {
+						"args": ["-y", "--output-format", "stream-json"],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, -y, read-only flags missing",
+							"standard": "refused-by-flag: -y",
+							"full": "admitted"
+						}
+					},
+					"full": {
+						"args": ["-y", "--output-format", "stream-json"],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, -y, read-only flags missing",
+							"standard": "refused-by-mode: mode above pin, -y",
+							"full": "admitted"
+						}
+					}
+				}
+			},
+			"hermes": {
+				"name": "Hermes",
+				"readOnly": {
+					"args": [],
+					"cliEnforced": false,
+					"capabilitySupportsReadOnlyMode": false,
+					"word": "none"
+				},
+				"fullAccess": {
+					"mechanism": "flag",
+					"ownFlags": ["--yolo"],
+					"staticFlagsAlsoRefused": [
+						"--dangerously-skip-permissions",
+						"--dangerously-bypass-approvals-and-sandbox",
+						"--skip-permissions-unsafe",
+						"-y",
+						"--allow-all"
+					],
+					"envVars": []
+				},
+				"batchModeFullAccessFlags": ["--yolo"],
+				"requests": {
+					"readonly": {
+						"args": ["chat"],
+						"commandLineReads": "readonly",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-flag: read-only unenforceable",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"standard": {
+						"args": ["chat", "-Q", "--yolo"],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, --yolo, read-only unenforceable",
+							"standard": "refused-by-flag: --yolo",
+							"full": "admitted"
+						}
+					},
+					"full": {
+						"args": ["chat", "-Q", "--yolo"],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, --yolo, read-only unenforceable",
+							"standard": "refused-by-mode: mode above pin, --yolo",
+							"full": "admitted"
+						}
+					}
+				}
+			},
+			"pi": {
+				"name": "Pi",
+				"readOnly": {
+					"args": ["--tools", "read,grep,find,ls"],
+					"cliEnforced": true,
+					"capabilitySupportsReadOnlyMode": true,
+					"word": "enforced"
+				},
+				"fullAccess": {
+					"mechanism": "flagless",
+					"ownFlags": [],
+					"staticFlagsAlsoRefused": [
+						"--dangerously-skip-permissions",
+						"--dangerously-bypass-approvals-and-sandbox",
+						"--skip-permissions-unsafe",
+						"-y",
+						"--allow-all"
+					],
+					"envVars": []
+				},
+				"batchModeFullAccessFlags": [],
+				"requests": {
+					"readonly": {
+						"args": ["-p", "--mode", "json", "--tools", "read,grep,find,ls"],
+						"commandLineReads": "readonly",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "admitted",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"standard": {
+						"args": ["-p", "--mode", "json"],
+						"commandLineReads": "standard",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, read-only flags missing",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"full": {
+						"args": ["-p", "--mode", "json"],
+						"commandLineReads": "standard",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, read-only flags missing",
+							"standard": "refused-by-mode: mode above pin",
+							"full": "admitted"
+						}
+					}
+				}
+			},
+			"omp": {
+				"name": "Oh My Pi",
+				"readOnly": {
+					"args": ["--tools", "read,grep,glob"],
+					"cliEnforced": true,
+					"capabilitySupportsReadOnlyMode": true,
+					"word": "enforced"
+				},
+				"fullAccess": {
+					"mechanism": "flagless",
+					"ownFlags": [],
+					"staticFlagsAlsoRefused": [
+						"--dangerously-skip-permissions",
+						"--dangerously-bypass-approvals-and-sandbox",
+						"--skip-permissions-unsafe",
+						"-y",
+						"--allow-all"
+					],
+					"envVars": []
+				},
+				"batchModeFullAccessFlags": [],
+				"requests": {
+					"readonly": {
+						"args": ["-p", "--mode", "json", "--tools", "read,grep,glob"],
+						"commandLineReads": "readonly",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "admitted",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"standard": {
+						"args": ["-p", "--mode", "json"],
+						"commandLineReads": "standard",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, read-only flags missing",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"full": {
+						"args": ["-p", "--mode", "json"],
+						"commandLineReads": "standard",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, read-only flags missing",
+							"standard": "refused-by-mode: mode above pin",
+							"full": "admitted"
+						}
+					}
+				}
+			},
+			"opencode": {
+				"name": "OpenCode",
+				"readOnly": {
+					"args": ["--agent", "plan"],
+					"cliEnforced": true,
+					"capabilitySupportsReadOnlyMode": true,
+					"word": "enforced"
+				},
+				"fullAccess": {
+					"mechanism": "env-only",
+					"ownFlags": [],
+					"staticFlagsAlsoRefused": [
+						"--dangerously-skip-permissions",
+						"--dangerously-bypass-approvals-and-sandbox",
+						"--skip-permissions-unsafe",
+						"-y",
+						"--allow-all"
+					],
+					"envVars": ["OPENCODE_CONFIG_CONTENT"]
+				},
+				"batchModeFullAccessFlags": [],
+				"requests": {
+					"readonly": {
+						"args": ["run", "--format", "json", "--agent", "plan"],
+						"commandLineReads": "readonly",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "admitted",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"standard": {
+						"args": ["run", "--format", "json"],
+						"commandLineReads": "standard",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, read-only flags missing",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"full": {
+						"args": ["run", "--format", "json"],
+						"commandLineReads": "standard",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, read-only flags missing",
+							"standard": "refused-by-mode: mode above pin",
+							"full": "admitted"
+						}
+					}
+				}
+			},
+			"factory-droid": {
+				"name": "Factory Droid",
+				"readOnly": {
+					"args": [],
+					"cliEnforced": true,
+					"capabilitySupportsReadOnlyMode": true,
+					"word": "enforced-by-default"
+				},
+				"fullAccess": {
+					"mechanism": "flag",
+					"ownFlags": ["--skip-permissions-unsafe"],
+					"staticFlagsAlsoRefused": [
+						"--dangerously-skip-permissions",
+						"--dangerously-bypass-approvals-and-sandbox",
+						"-y",
+						"--allow-all"
+					],
+					"envVars": []
+				},
+				"batchModeFullAccessFlags": ["--skip-permissions-unsafe"],
+				"requests": {
+					"readonly": {
+						"args": ["exec", "-o", "stream-json"],
+						"commandLineReads": "readonly",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "admitted",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"standard": {
+						"args": ["exec", "--skip-permissions-unsafe", "-o", "stream-json"],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, --skip-permissions-unsafe",
+							"standard": "refused-by-flag: --skip-permissions-unsafe",
+							"full": "admitted"
+						}
+					},
+					"full": {
+						"args": ["exec", "--skip-permissions-unsafe", "-o", "stream-json"],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, --skip-permissions-unsafe",
+							"standard": "refused-by-mode: mode above pin, --skip-permissions-unsafe",
+							"full": "admitted"
+						}
+					}
+				}
+			},
+			"copilot-cli": {
+				"name": "Copilot-CLI",
+				"readOnly": {
+					"args": [
+						"--allow-tool=read,url",
+						"--deny-tool=write,shell,memory,github",
+						"--no-ask-user"
+					],
+					"cliEnforced": true,
+					"capabilitySupportsReadOnlyMode": true,
+					"word": "enforced"
+				},
+				"fullAccess": {
+					"mechanism": "flag",
+					"ownFlags": ["--allow-all"],
+					"staticFlagsAlsoRefused": [
+						"--dangerously-skip-permissions",
+						"--dangerously-bypass-approvals-and-sandbox",
+						"--skip-permissions-unsafe",
+						"-y"
+					],
+					"envVars": []
+				},
+				"batchModeFullAccessFlags": ["--allow-all"],
+				"requests": {
+					"readonly": {
+						"args": [
+							"--output-format",
+							"json",
+							"--allow-tool=read,url",
+							"--deny-tool=write,shell,memory,github",
+							"--no-ask-user"
+						],
+						"commandLineReads": "readonly",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "admitted",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"standard": {
+						"args": ["--allow-all", "--output-format", "json"],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, --allow-all, read-only flags missing",
+							"standard": "refused-by-flag: --allow-all",
+							"full": "admitted"
+						}
+					},
+					"full": {
+						"args": ["--allow-all", "--output-format", "json"],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, --allow-all, read-only flags missing",
+							"standard": "refused-by-mode: mode above pin, --allow-all",
+							"full": "admitted"
+						}
+					}
+				}
+			},
+			"grok": {
+				"name": "Grok CLI",
+				"readOnly": {
+					"args": ["--permission-mode", "plan", "--deny", "Bash(*)"],
+					"cliEnforced": true,
+					"capabilitySupportsReadOnlyMode": true,
+					"word": "enforced"
+				},
+				"fullAccess": {
+					"mechanism": "flag",
+					"ownFlags": ["--always-approve"],
+					"staticFlagsAlsoRefused": [
+						"--dangerously-skip-permissions",
+						"--dangerously-bypass-approvals-and-sandbox",
+						"--skip-permissions-unsafe",
+						"-y",
+						"--allow-all"
+					],
+					"envVars": []
+				},
+				"batchModeFullAccessFlags": ["--always-approve"],
+				"requests": {
+					"readonly": {
+						"args": [
+							"--output-format",
+							"streaming-json",
+							"--permission-mode",
+							"plan",
+							"--deny",
+							"Bash(*)"
+						],
+						"commandLineReads": "readonly",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "admitted",
+							"standard": "admitted",
+							"full": "admitted"
+						}
+					},
+					"standard": {
+						"args": ["--always-approve", "--output-format", "streaming-json"],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, --always-approve, read-only flags missing",
+							"standard": "refused-by-flag: --always-approve",
+							"full": "admitted"
+						}
+					},
+					"full": {
+						"args": ["--always-approve", "--output-format", "streaming-json"],
+						"commandLineReads": "full",
+						"underPin": {
+							"none": "admitted",
+							"readonly": "refused-by-mode: mode above pin, --always-approve, read-only flags missing",
+							"standard": "refused-by-mode: mode above pin, --always-approve",
+							"full": "admitted"
+						}
+					}
+				}
+			}
+		}
 	}
 }
