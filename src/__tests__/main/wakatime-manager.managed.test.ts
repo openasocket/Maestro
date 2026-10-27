@@ -7,12 +7,15 @@
  * pin's source and is extracted only when the bytes on disk carry the pinned
  * digest, a name on PATH never runs, the binary runs only by its bytes, the
  * daily "latest" check is skipped, and an enrollment that lands after a PATH
- * name was cached stops the next heartbeat.
+ * name was cached stops the next heartbeat. Since MRC2-05-02 both GitHub
+ * requests leave through the real fetch chokepoint as `updates`: an egress
+ * ceiling that omits the class refuses the pinned zip before any socket.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import os from 'os';
 import path from 'path';
+import { Writable } from 'stream';
 
 vi.mock('electron', () => ({ app: { getVersion: vi.fn(() => '1.0.0') } }));
 vi.mock('../../main/utils/execFile', () => ({ execFileNoThrow: vi.fn() }));
@@ -35,10 +38,9 @@ vi.mock('fs', () => {
 	};
 	return { default: api, ...api };
 });
-vi.mock('https', () => {
-	const get = vi.fn();
-	return { default: { get }, get };
-});
+// The chokepoint is real; the socket under it is this stub.
+const fetchStub = vi.fn();
+vi.stubGlobal('fetch', fetchStub);
 const { digests } = vi.hoisted(() => ({ digests: new Map<string, string>() }));
 vi.mock('../../shared/maestro-lib/managed/tui-handshake', () => ({
 	createFileDigestCache: () => (file: string) => {
@@ -49,11 +51,12 @@ vi.mock('../../shared/maestro-lib/managed/tui-handshake', () => ({
 }));
 
 import fs from 'fs';
-import https from 'https';
 import { execFileNoThrow } from '../../main/utils/execFile';
 import { logger } from '../../main/utils/logger';
 import { WakaTimeManager } from '../../main/wakatime-manager';
 import { createInstallPolicySource } from '../../main/enterprise/install-policy';
+import { createEgressPolicySource } from '../../main/enterprise/egress-policy';
+import { setEgressAuthority } from '../../main/utils/fetchWithTimeout';
 import type { IdentityRead } from '../../main/enterprise/identity-store';
 
 const PLATFORM = { darwin: 'darwin', win32: 'windows', linux: 'linux' }[process.platform as string];
@@ -77,33 +80,16 @@ function ceiling(pins: Record<string, unknown>[]) {
 const zipPin = { artifact: 'wakatime-cli', file: ZIP, sha256: ZIP_SHA, source: PINNED };
 const binaryPin = { artifact: 'wakatime-cli', file: BINARY, sha256: BIN_SHA };
 
-/** `https.get` answering every request with a 200 whose body "pipes" straight to a finished stream. */
+/** A socket answering every request with a 200 whose body streams into a sink that keeps nothing. */
 function serveDownloads(): string[] {
 	const urls: string[] = [];
-	vi.mocked(fs.createWriteStream).mockImplementation((() => {
-		let finish: (() => void) | null = null;
-		const stream = {
-			on: vi.fn((event: string, cb: () => void) => {
-				if (event === 'finish') finish = cb;
-				return stream;
-			}),
-			close: vi.fn(),
-			settle: () => finish?.(),
-		};
-		return stream;
-	}) as never);
-	vi.mocked(https.get).mockImplementation(((url: unknown, cb: (res: unknown) => void) => {
+	vi.mocked(fs.createWriteStream).mockImplementation(
+		(() => new Writable({ write: (_chunk, _encoding, done) => done() })) as never
+	);
+	fetchStub.mockImplementation(async (url: unknown) => {
 		urls.push(String(url));
-		setTimeout(() => {
-			cb({
-				statusCode: 200,
-				headers: {},
-				resume: vi.fn(),
-				pipe: (stream: { settle: () => void }) => setTimeout(() => stream.settle(), 0),
-			});
-		}, 0);
-		return { on: vi.fn() };
-	}) as never);
+		return new Response('zip-bytes', { status: 200 });
+	});
 	return urls;
 }
 
@@ -118,10 +104,9 @@ describe('WakaTimeManager under the install ceiling', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		// Implementations leak across cases under clearAllMocks; a case that downloads installs its own.
-		vi.mocked(https.get)
-			.mockReset()
-			.mockReturnValue({ on: vi.fn() } as never);
+		fetchStub.mockReset();
 		vi.mocked(fs.createWriteStream).mockReset();
+		setEgressAuthority(null);
 		digests.clear();
 		read = none;
 		source = createInstallPolicySource({
@@ -133,6 +118,10 @@ describe('WakaTimeManager under the install ceiling', () => {
 		// Nothing on PATH or in ~/.wakatime/ unless a case says so.
 		vi.mocked(execFileNoThrow).mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' });
 		vi.mocked(fs.existsSync).mockReturnValue(false);
+	});
+
+	afterEach(() => {
+		setEgressAuthority(null);
 	});
 
 	it('standalone: probes PATH, fetches the latest zip and extracts it without digesting anything', async () => {
@@ -160,7 +149,7 @@ describe('WakaTimeManager under the install ceiling', () => {
 		expect(await manager.ensureCliInstalled()).toBe(false);
 
 		expect(execFileNoThrow).not.toHaveBeenCalled();
-		expect(https.get).not.toHaveBeenCalled();
+		expect(fetchStub).not.toHaveBeenCalled();
 		expect(fs.mkdirSync).not.toHaveBeenCalled();
 		expect(fs.createWriteStream).not.toHaveBeenCalled();
 		// One reason, one line: the PATH probe, the fetch and the second call all name the same missing ceiling.
@@ -177,7 +166,7 @@ describe('WakaTimeManager under the install ceiling', () => {
 
 		expect(await manager.ensureCliInstalled()).toBe(false);
 
-		expect(https.get).not.toHaveBeenCalled();
+		expect(fetchStub).not.toHaveBeenCalled();
 		expect(fs.mkdirSync).not.toHaveBeenCalled();
 		expect(fs.createWriteStream).not.toHaveBeenCalled();
 		expect(warnings()).toContainEqual(
@@ -227,7 +216,48 @@ describe('WakaTimeManager under the install ceiling', () => {
 		expect(commandsRun()).toEqual(['unzip', BINARY_PATH]);
 		expect(vi.mocked(execFileNoThrow).mock.calls[1][1]).toEqual(['--version']);
 		// Under management the pin says what is installed: the "latest" API is never asked.
-		expect(vi.mocked(https.get).mock.calls.map((call) => String(call[0]))).toEqual([PINNED]);
+		expect(fetchStub.mock.calls.map((call) => String(call[0]))).toEqual([PINNED]);
+	});
+
+	it('enrolled with a pinned zip but an egress ceiling that omits updates: refused before any socket, said once', async () => {
+		read = enrolled;
+		source.install(ceiling([zipPin, binaryPin]));
+		const egress = createEgressPolicySource({
+			identity: { read: () => read },
+			policy: () => ({ appliedRevision: 3 }),
+		});
+		expect(
+			egress.install({ policyRevision: 3, classes: [{ class: 'content', destinations: ['*'] }] })
+		).toMatchObject({ installed: true });
+		setEgressAuthority(egress);
+		const urls = serveDownloads();
+
+		expect(await manager.ensureCliInstalled()).toBe(false);
+		expect(await manager.ensureCliInstalled()).toBe(false);
+
+		// The install ceiling admitted the pinned fetch; the egress ceiling held it with no socket and no file.
+		expect(urls).toEqual([]);
+		expect(fetchStub).not.toHaveBeenCalled();
+		expect(fs.createWriteStream).not.toHaveBeenCalled();
+		expect(fs.mkdirSync).not.toHaveBeenCalled();
+		// Said once across both calls (the PATH probes log their own unpinned lines, as before).
+		expect(warnings().filter((line) => line.includes('download refused'))).toEqual([
+			expect.stringMatching(
+				/^WakaTime CLI download refused: \[managed-class-denied\] the egress ceiling admits no updates request for the operator; /
+			),
+		]);
+
+		// The same host once the policy lists updates for the pin's origin: the pinned source is fetched.
+		expect(
+			egress.install({
+				policyRevision: 3,
+				classes: [{ class: 'updates', destinations: ['github.com'] }],
+			})
+		).toMatchObject({ installed: true });
+		digests.set(ZIP_PATH, 'f'.repeat(64));
+		expect(await manager.ensureCliInstalled()).toBe(false);
+		expect(urls).toEqual([PINNED]);
+		expect(warnings()).toContainEqual(expect.stringContaining('[managed-digest-mismatch]'));
 	});
 
 	it('enrolled: a local binary whose bytes are not the pinned ones is never run', async () => {

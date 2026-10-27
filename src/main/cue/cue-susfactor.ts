@@ -30,10 +30,20 @@
 
 import * as crypto from 'crypto';
 import { mapWithConcurrency } from '../utils/concurrency';
-import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { fetchWithTimeout, isEgressDeniedError } from '../utils/fetchWithTimeout';
+import type { EgressClass } from '../enterprise/egress-policy';
 
 const ACCESS_TOKEN_URL = 'https://0din.ai/api/v1/access_tokens';
 const SUS_URL = 'https://defense.0din.ai/api/v1/sus';
+
+/**
+ * The egress class both 0din calls name (MRC2-05-02). The token exchange and the
+ * sus endpoint ship third-party text to a vendor, so a managed host holds them as
+ * `vendor-telemetry`, which the egress ceiling admits only when the policy lists
+ * the class: off by default under management. A refusal opens no socket and is
+ * reported by name in {@link scoreSusFactor}; the item still fails open.
+ */
+const EGRESS_CLASS: EgressClass = 'vendor-telemetry';
 
 /** Per-request budget for a single sus call. */
 const SUS_TIMEOUT_MS = 3_000;
@@ -139,7 +149,8 @@ async function getJwt(now: number, force: boolean): Promise<string | null> {
 	const res = await fetchWithTimeout(
 		ACCESS_TOKEN_URL,
 		{ method: 'POST', headers: { Authorization: apiToken } },
-		TOKEN_TIMEOUT_MS
+		TOKEN_TIMEOUT_MS,
+		EGRESS_CLASS
 	);
 	if (!res.ok) {
 		throw new Error(`0DIN token exchange failed: HTTP ${res.status}`);
@@ -190,7 +201,8 @@ async function scoreChunk(jwt: string, chunk: string): Promise<number | null> {
 			headers: { Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' },
 			body: JSON.stringify({ prompt: chunk }),
 		},
-		SUS_TIMEOUT_MS
+		SUS_TIMEOUT_MS,
+		EGRESS_CLASS
 	);
 	if (res.status === 401) {
 		// Signals the caller to force a token refresh and retry once.
@@ -278,6 +290,15 @@ export async function scoreSusFactor(
 		);
 		return verdict;
 	} catch (err) {
+		if (isEgressDeniedError(err)) {
+			// A managed hold, not an outage: nothing was sent. Named as such so the
+			// line never reads as 0DIN being down, and still fail open.
+			onLog(
+				'warn',
+				`[CUE] SusFactor skipped for ${context}: the managed egress ceiling refused the 0DIN call (${err.message}) - processing normally (fail-open)`
+			);
+			return null;
+		}
 		// Fail open: 0DIN being slow or down must not halt Cue processing.
 		onLog(
 			'warn',

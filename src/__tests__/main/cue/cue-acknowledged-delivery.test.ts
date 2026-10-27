@@ -82,7 +82,8 @@ const sus = vi.hoisted(() => ({
 	waiting: [] as Array<() => void>,
 	calls: 0,
 }));
-vi.mock('../../../main/utils/fetchWithTimeout', () => ({
+vi.mock('../../../main/utils/fetchWithTimeout', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../../main/utils/fetchWithTimeout')>()),
 	fetchWithTimeout: async (url: string) => {
 		if (url.includes('access_tokens')) {
 			return { ok: true, status: 200, json: async () => ({ token: 'jwt' }) };

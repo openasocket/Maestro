@@ -9,7 +9,9 @@
  * If the CLI is not found, it is automatically downloaded and installed
  * from GitHub releases to ~/.wakatime/.
  * Under management (MRC2-04-07) every fetch, extraction and run is held to the
- * install ceiling (pinned source and digest; a PATH name never runs; no "latest").
+ * install ceiling (pinned source and digest; a PATH name never runs; no "latest"),
+ * and (MRC2-05-02) both GitHub requests leave through the fetch chokepoint as
+ * `updates`, so the egress ceiling can refuse them before a socket opens.
  */
 
 import { execFileNoThrow } from './utils/execFile';
@@ -17,9 +19,16 @@ import { logger } from './utils/logger';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
-import https from 'https';
+import { Readable } from 'stream';
+import { pipeline } from 'stream/promises';
+import type { ReadableStream as NodeReadableStream } from 'stream/web';
 import { isWindows } from '../shared/platformDetection';
 import { captureException } from './utils/sentry';
+import {
+	DEFAULT_FETCH_TIMEOUT_MS,
+	fetchWithTimeout,
+	isEgressDeniedError,
+} from './utils/fetchWithTimeout';
 import { createFileDigestCache } from '../shared/maestro-lib/managed/tui-handshake';
 import {
 	formatInstallRefusal,
@@ -32,6 +41,14 @@ import {
 const LOG_CONTEXT = '[WakaTime]';
 const HEARTBEAT_DEBOUNCE_MS = 120_000; // 2 minutes - WakaTime deduplicates within this window
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // Check for CLI updates once per day
+/**
+ * The egress class both GitHub requests name (MRC2-05-02): the release feed and
+ * the zip each fetch or roll forward a binary Maestro did not ship, so a managed
+ * host holds them as `updates`. Standalone nothing is consulted.
+ */
+const WAKATIME_EGRESS_CLASS = 'updates' as const;
+/** GitHub refuses an API request that names no User-Agent. */
+const REQUEST_HEADERS = { 'User-Agent': 'maestro-wakatime' };
 
 /** Map file extensions (without dot, lowercase) to WakaTime language names */
 const EXTENSION_LANGUAGE_MAP = new Map<string, string>([
@@ -156,93 +173,46 @@ function getWakaTimeArch(): string | null {
 	}
 }
 
-/** Download a URL to a file, following redirects (GitHub → S3) */
-function downloadFile(url: string, destPath: string, maxRedirects = 5): Promise<void> {
-	return new Promise((resolve, reject) => {
-		if (maxRedirects <= 0) {
-			reject(new Error('Too many redirects'));
-			return;
-		}
-		https
-			.get(url, (response) => {
-				// Follow redirects (GitHub releases redirect to S3)
-				if (
-					response.statusCode &&
-					response.statusCode >= 300 &&
-					response.statusCode < 400 &&
-					response.headers.location
-				) {
-					response.resume(); // consume response to free up memory
-					downloadFile(response.headers.location, destPath, maxRedirects - 1).then(resolve, reject);
-					return;
-				}
-
-				if (response.statusCode !== 200) {
-					response.resume();
-					reject(new Error(`Download failed with status ${response.statusCode}`));
-					return;
-				}
-
-				const fileStream = fs.createWriteStream(destPath);
-				response.pipe(fileStream);
-				fileStream.on('finish', () => {
-					fileStream.close();
-					resolve();
-				});
-				fileStream.on('error', (err) => {
-					fs.unlink(destPath, () => {}); // clean up partial file
-					reject(err);
-				});
-			})
-			.on('error', reject);
-	});
+/**
+ * Download a URL to a file through the fetch chokepoint. `fetch` follows the
+ * GitHub -> S3 redirect itself; the budget covers the response headers and the
+ * body streams straight to disk. A partial file is the caller's to unlink.
+ */
+async function downloadFile(url: string, destPath: string): Promise<void> {
+	const response = await fetchWithTimeout(
+		url,
+		{ headers: REQUEST_HEADERS },
+		DEFAULT_FETCH_TIMEOUT_MS,
+		WAKATIME_EGRESS_CLASS
+	);
+	if (!response.ok || !response.body) {
+		await response.body?.cancel();
+		throw new Error(`Download failed with status ${response.status}`);
+	}
+	await pipeline(
+		Readable.fromWeb(response.body as unknown as NodeReadableStream),
+		fs.createWriteStream(destPath)
+	);
 }
 
-/** Fetch JSON from a URL, following redirects */
-function fetchJson(url: string, maxRedirects = 5): Promise<unknown> {
-	return new Promise((resolve, reject) => {
-		if (maxRedirects <= 0) {
-			reject(new Error('Too many redirects'));
-			return;
-		}
-		const parsedUrl = new URL(url);
-		const options = {
-			hostname: parsedUrl.hostname,
-			path: parsedUrl.pathname + parsedUrl.search,
-			headers: { 'User-Agent': 'maestro-wakatime' },
-		};
-		https
-			.get(options, (response) => {
-				if (
-					response.statusCode &&
-					response.statusCode >= 300 &&
-					response.statusCode < 400 &&
-					response.headers.location
-				) {
-					response.resume();
-					fetchJson(response.headers.location, maxRedirects - 1).then(resolve, reject);
-					return;
-				}
-				if (response.statusCode !== 200) {
-					response.resume();
-					reject(new Error(`HTTP ${response.statusCode}`));
-					return;
-				}
-				let data = '';
-				response.on('data', (chunk: Buffer) => {
-					data += chunk.toString();
-				});
-				response.on('end', () => {
-					try {
-						resolve(JSON.parse(data));
-					} catch (err) {
-						void captureException(err);
-						reject(err);
-					}
-				});
-			})
-			.on('error', reject);
-	});
+/** Fetch JSON from a URL through the fetch chokepoint (redirects followed by `fetch`). */
+async function fetchJson(url: string): Promise<unknown> {
+	const response = await fetchWithTimeout(
+		url,
+		{ headers: REQUEST_HEADERS },
+		DEFAULT_FETCH_TIMEOUT_MS,
+		WAKATIME_EGRESS_CLASS
+	);
+	if (!response.ok) {
+		await response.body?.cancel();
+		throw new Error(`HTTP ${response.status}`);
+	}
+	try {
+		return await response.json();
+	} catch (err) {
+		void captureException(err);
+		throw err;
+	}
 }
 
 /** How long a successfully-detected branch is cached before re-checking (5 min). */
@@ -332,13 +302,21 @@ export class WakaTimeManager {
 			...step,
 		});
 		if (!decision.allowed) {
-			const line = formatInstallRefusal(decision);
-			if (!this.reportedRefusals.has(line)) {
-				this.reportedRefusals.add(line);
-				logger.warn(`WakaTime CLI ${step.stage} refused: ${line}`, LOG_CONTEXT);
-			}
+			const reason = formatInstallRefusal(decision);
+			this.warnOnce(reason, `WakaTime CLI ${step.stage} refused: ${reason}`);
 		}
 		return decision;
+	}
+
+	/**
+	 * A managed refusal is said once per REASON, whichever stage met it first: a
+	 * heartbeat every two minutes must not repeat it, and the probe, the fetch
+	 * and the run all meet the same missing ceiling.
+	 */
+	private warnOnce(reason: string, line: string): void {
+		if (this.reportedRefusals.has(reason)) return;
+		this.reportedRefusals.add(reason);
+		logger.warn(line, LOG_CONTEXT);
 	}
 
 	/** Hold running the resolved CLI: a path by its bytes, a bare PATH name with no bytes (never under management). */
@@ -509,6 +487,12 @@ export class WakaTimeManager {
 
 			return true;
 		} catch (err) {
+			if (isEgressDeniedError(err)) {
+				// The egress ceiling held the zip: nothing was sent, so this is a
+				// managed refusal said once, not an install failure on every beat.
+				this.warnOnce(err.message, `WakaTime CLI download refused: ${err.message}`);
+				return false;
+			}
 			logger.warn(
 				`Failed to auto-install WakaTime CLI: ${err instanceof Error ? err.message : String(err)}`,
 				LOG_CONTEXT

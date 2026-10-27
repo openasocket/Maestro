@@ -9,7 +9,9 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 const fetchWithTimeout = vi.fn();
-vi.mock('../../../main/utils/fetchWithTimeout', () => ({
+// The real module underneath keeps `isEgressDeniedError` and `EgressDeniedError` honest.
+vi.mock('../../../main/utils/fetchWithTimeout', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../../main/utils/fetchWithTimeout')>()),
 	fetchWithTimeout: (...args: unknown[]) => fetchWithTimeout(...args),
 }));
 
@@ -31,6 +33,7 @@ import {
 	CHUNK_SIZE,
 	CHUNK_OVERLAP,
 } from '../../../main/cue/cue-susfactor';
+import { EgressDeniedError } from '../../../main/utils/fetchWithTimeout';
 
 const TOKEN_URL = 'https://0din.ai/api/v1/access_tokens';
 
@@ -210,6 +213,47 @@ describe('guardGitHubEvent', () => {
 		});
 		const allowed = await guardGitHubEvent(guardParams({ body: 'evil', repo: 'o/r', number: 15 }));
 		expect(allowed).toBe(true);
+	});
+
+	it('names vendor-telemetry on the token exchange and on every sus call (MRC2-05-02)', async () => {
+		mockApi(() => 0.01);
+		await guardGitHubEvent(guardParams({ body: 'x'.repeat(1200), repo: 'o/r', number: 19 }));
+		const calls = fetchWithTimeout.mock.calls;
+		expect(calls.length).toBeGreaterThan(2);
+		expect(calls.map((c) => c[0])).toContain(TOKEN_URL);
+		expect(calls.map((c) => c[3])).toEqual(calls.map(() => 'vendor-telemetry'));
+	});
+
+	it('fails open by name when the managed egress ceiling refuses the 0DIN call', async () => {
+		fetchWithTimeout.mockImplementation(async (url: string) => {
+			throw new EgressDeniedError(
+				{
+					allowed: false,
+					code: 'class-denied',
+					message: 'the egress ceiling admits no vendor-telemetry request for the operator',
+					managed: {
+						policyRevision: 3,
+						class: 'vendor-telemetry',
+						actor: 'the operator',
+						origin: new URL(url).origin,
+						outcome: 'class-denied',
+					},
+				},
+				url
+			);
+		});
+		const allowed = await guardGitHubEvent(guardParams({ body: 'evil', repo: 'o/r', number: 20 }));
+		expect(allowed).toBe(true);
+		expect(recordSusFactorBlock).not.toHaveBeenCalled();
+		// Only the token exchange was attempted; the hold stops before any sus call.
+		expect(fetchWithTimeout.mock.calls.map((c) => c[0])).toEqual([TOKEN_URL]);
+		expect(onLog).toHaveBeenCalledWith(
+			'warn',
+			expect.stringMatching(
+				/^\[CUE\] SusFactor skipped for o\/r#20 \(github\.issue\): the managed egress ceiling refused the 0DIN call \(\[managed-class-denied\] .*\) - processing normally \(fail-open\)$/
+			)
+		);
+		expect(onLog).not.toHaveBeenCalledWith('warn', expect.stringContaining('check failed'));
 	});
 
 	it('re-exchanges the JWT once on a 401 and retries', async () => {

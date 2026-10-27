@@ -12,7 +12,8 @@ import { EventEmitter } from 'events';
 import type * as http from 'http';
 
 const fetchWithTimeout = vi.fn();
-vi.mock('../../../main/utils/fetchWithTimeout', () => ({
+vi.mock('../../../main/utils/fetchWithTimeout', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../../main/utils/fetchWithTimeout')>()),
 	fetchWithTimeout: (...args: unknown[]) => fetchWithTimeout(...args),
 }));
 

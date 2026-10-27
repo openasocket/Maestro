@@ -54,18 +54,25 @@ vi.mock('fs', () => ({
 	unlink: vi.fn(),
 }));
 
-// Mock https
-vi.mock('https', () => ({
-	default: {
-		get: vi.fn(),
-	},
-	get: vi.fn(),
-}));
+// The fetch chokepoint is real (no egress authority installed, so nothing is held);
+// the socket under it is this stub, and the wrapper is spied so the class it was
+// handed is visible.
+const fetchStub = vi.fn();
+vi.stubGlobal('fetch', fetchStub);
+vi.mock('../../main/utils/fetchWithTimeout', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../main/utils/fetchWithTimeout')>();
+	return { ...actual, fetchWithTimeout: vi.fn(actual.fetchWithTimeout) };
+});
 
 import { execFileNoThrow } from '../../main/utils/execFile';
 import { logger } from '../../main/utils/logger';
+import { fetchWithTimeout } from '../../main/utils/fetchWithTimeout';
 import fs from 'fs';
-import https from 'https';
+
+/** Every URL the chokepoint was asked for, in order. */
+const requestedUrls = () => vi.mocked(fetchWithTimeout).mock.calls.map((call) => String(call[0]));
+/** The egress class named on every request through the chokepoint. */
+const requestedClasses = () => vi.mocked(fetchWithTimeout).mock.calls.map((call) => call[3]);
 
 describe('WakaTimeManager', () => {
 	let mockStore: { get: ReturnType<typeof vi.fn> };
@@ -73,6 +80,8 @@ describe('WakaTimeManager', () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
+		// A stub implementation leaks across cases under clearAllMocks; each case installs its own.
+		fetchStub.mockReset();
 		mockStore = {
 			get: vi.fn(),
 		};
@@ -233,21 +242,17 @@ describe('WakaTimeManager', () => {
 				.mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: '' });
 			vi.mocked(fs.existsSync).mockReturnValue(false);
 
-			// Mock https.get to simulate a download error (to test graceful failure)
-			vi.mocked(https.get).mockImplementation((_url: any, _cb: any) => {
-				const req = {
-					on: vi.fn((_event: string, cb: (err: Error) => void) => {
-						// Simulate network error
-						setTimeout(() => cb(new Error('Network error')), 0);
-						return req;
-					}),
-				};
-				return req as any;
-			});
+			// The socket fails (to test graceful failure)
+			fetchStub.mockRejectedValue(new TypeError('fetch failed'));
 
 			const result = await manager.ensureCliInstalled();
 
 			expect(result).toBe(false);
+			// The zip left through the chokepoint as an update.
+			expect(requestedUrls()).toEqual([
+				expect.stringMatching(/releases\/latest\/download\/.*\.zip$/),
+			]);
+			expect(requestedClasses()).toEqual(['updates']);
 			expect(logger.info).toHaveBeenCalledWith(
 				expect.stringContaining('Downloading WakaTime CLI'),
 				'[WakaTime]'
@@ -269,8 +274,7 @@ describe('WakaTimeManager', () => {
 
 			expect(await pending).toEqual([true, true]);
 			// The daily update check may hit the releases API; the zip must not be fetched.
-			const fetched = vi.mocked(https.get).mock.calls.map((call) => String(call[0]));
-			expect(fetched.some((url) => url.endsWith('.zip'))).toBe(false);
+			expect(requestedUrls().some((url) => url.endsWith('.zip'))).toBe(false);
 			expect(logger.info).not.toHaveBeenCalledWith(
 				expect.stringContaining('Downloading WakaTime CLI'),
 				'[WakaTime]'
@@ -282,16 +286,13 @@ describe('WakaTimeManager', () => {
 			vi.mocked(execFileNoThrow).mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' });
 			vi.mocked(fs.existsSync).mockReturnValue(false);
 
-			// Mock download to fail (but slowly, to test concurrency)
-			vi.mocked(https.get).mockImplementation((_url: any, _cb: any) => {
-				const req = {
-					on: vi.fn((_event: string, cb: (err: Error) => void) => {
-						setTimeout(() => cb(new Error('Network error')), 10);
-						return req;
-					}),
-				};
-				return req as any;
-			});
+			// Download fails (but slowly, to test concurrency)
+			fetchStub.mockImplementation(
+				() =>
+					new Promise((_resolve, reject) =>
+						setTimeout(() => reject(new TypeError('fetch failed')), 10)
+					)
+			);
 
 			// Call ensureCliInstalled twice concurrently
 			const [result1, result2] = await Promise.all([
@@ -303,8 +304,8 @@ describe('WakaTimeManager', () => {
 			expect(result1).toBe(false);
 			expect(result2).toBe(false);
 
-			// https.get should only be called once (concurrent guard)
-			expect(https.get).toHaveBeenCalledTimes(1);
+			// One socket (concurrent guard)
+			expect(fetchStub).toHaveBeenCalledTimes(1);
 		});
 	});
 
@@ -445,16 +446,8 @@ describe('WakaTimeManager', () => {
 				.mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: '' });
 			vi.mocked(fs.existsSync).mockReturnValue(false);
 
-			// Mock download failure
-			vi.mocked(https.get).mockImplementation((_url: any, _cb: any) => {
-				const req = {
-					on: vi.fn((_event: string, cb: (err: Error) => void) => {
-						setTimeout(() => cb(new Error('Network error')), 0);
-						return req;
-					}),
-				};
-				return req as any;
-			});
+			// Download failure
+			fetchStub.mockRejectedValue(new TypeError('fetch failed'));
 
 			await manager.sendHeartbeat('session-1', 'My Project');
 
@@ -580,37 +573,20 @@ describe('WakaTimeManager', () => {
 	});
 
 	describe('checkForUpdate (via ensureCliInstalled)', () => {
-		/** Helper: mock https.get to return a JSON response for fetchJson */
+		/** Helper: answer every request with a JSON body (what fetchJson reads). */
 		function mockGithubApiResponse(body: object) {
-			vi.mocked(https.get).mockImplementation((_opts: any, cb: any) => {
-				const json = JSON.stringify(body);
-				const response = {
-					statusCode: 200,
-					headers: {},
-					on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
-						if (event === 'data') handler(Buffer.from(json));
-						if (event === 'end') handler();
-						return response;
-					}),
-					resume: vi.fn(),
-				};
-				cb(response);
-				const req = { on: vi.fn().mockReturnThis() };
-				return req as any;
-			});
+			fetchStub.mockImplementation(
+				async () =>
+					new Response(JSON.stringify(body), {
+						status: 200,
+						headers: { 'content-type': 'application/json' },
+					})
+			);
 		}
 
-		/** Helper: mock https.get to simulate a network error */
+		/** Helper: the socket fails. */
 		function mockGithubApiError() {
-			vi.mocked(https.get).mockImplementation((_opts: any, _cb: any) => {
-				const req = {
-					on: vi.fn((_event: string, cb: (err: Error) => void) => {
-						setTimeout(() => cb(new Error('Network error')), 0);
-						return req;
-					}),
-				};
-				return req as any;
-			});
+			fetchStub.mockRejectedValue(new TypeError('fetch failed'));
 		}
 
 		it('should trigger update check on first ensureCliInstalled when CLI is detected', async () => {
@@ -633,6 +609,14 @@ describe('WakaTimeManager', () => {
 					'[WakaTime]'
 				);
 			});
+			// The release feed left through the chokepoint as an update, with a User-Agent.
+			expect(requestedUrls()).toEqual([
+				'https://api.github.com/repos/wakatime/wakatime-cli/releases/latest',
+			]);
+			expect(requestedClasses()).toEqual(['updates']);
+			expect(fetchStub.mock.calls[0][1]).toMatchObject({
+				headers: { 'User-Agent': 'maestro-wakatime' },
+			});
 		});
 
 		it('should not trigger update check again within 24 hours', async () => {
@@ -648,10 +632,10 @@ describe('WakaTimeManager', () => {
 
 			// Wait for fire-and-forget to complete
 			await vi.waitFor(() => {
-				expect(https.get).toHaveBeenCalledTimes(1);
+				expect(fetchStub).toHaveBeenCalledTimes(1);
 			});
 
-			vi.mocked(https.get).mockClear();
+			fetchStub.mockClear();
 
 			// Second call: should NOT trigger another update check (within 24h interval)
 			await manager.ensureCliInstalled();
@@ -659,7 +643,7 @@ describe('WakaTimeManager', () => {
 			// Allow any pending microtasks
 			await new Promise((resolve) => setTimeout(resolve, 10));
 
-			expect(https.get).not.toHaveBeenCalled();
+			expect(fetchStub).not.toHaveBeenCalled();
 		});
 
 		it('should re-install CLI when version differs from latest', async () => {
@@ -671,9 +655,9 @@ describe('WakaTimeManager', () => {
 			// GitHub returns a newer version
 			mockGithubApiResponse({ tag_name: 'v1.73.1' });
 
-			// Mock the download that doInstall will trigger (network error is fine, we just check it tries)
-			// https.get is already mocked for the API call - doInstall calls downloadFile which also uses https.get
-			// Since the mock returns JSON for all calls, the download will fail, which is expected
+			// The download doInstall triggers goes through the same stub; its JSON body
+			// cannot be written because fs.createWriteStream is a bare mock, so the
+			// install fails, which is expected: this case checks that it tries.
 
 			await manager.ensureCliInstalled();
 
