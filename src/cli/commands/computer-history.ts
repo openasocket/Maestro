@@ -264,6 +264,16 @@ export async function computerHistoryStatus(options: JsonOption): Promise<void> 
 	}
 	if (live?.helper.state === 'binary-missing') {
 		lines.push('Helper:           maestro-computer-history is not installed for this platform');
+	} else if (live?.helper.state === 'denied') {
+		// The managed host's refusal, in the supervisor's words; nothing restarts.
+		const refusal =
+			live.helper.lastError ??
+			(live.helper.managed
+				? `[managed-${live.helper.managed.state}] ${live.helper.managed.message}`
+				: null);
+		lines.push(
+			`Helper:           denied by the managed host; nothing runs and nothing restarts until the policy allows it${refusal ? `. ${refusal}` : ''}`
+		);
 	}
 	if (config.pausedUntil) {
 		lines.push(

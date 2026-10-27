@@ -62,7 +62,12 @@ const STATE_TONES: Record<RecorderState, BannerTone> = {
 	denied: 'error',
 };
 
-function stateDetail(state: RecorderState, eventsStored: number, pausedUntil: string | null) {
+function stateDetail(
+	state: RecorderState,
+	eventsStored: number,
+	pausedUntil: string | null,
+	helperError: string | null
+) {
 	switch (state) {
 		case 'off':
 			return 'Turn Computer History on from the tile header to start recording.';
@@ -83,7 +88,9 @@ function stateDetail(state: RecorderState, eventsStored: number, pausedUntil: st
 		case 'failed':
 			return 'The recorder crashed repeatedly and stopped. Turn Computer History off and on again to retry.';
 		case 'denied':
-			return 'The managed host denied the recorder, so nothing is recorded and nothing restarts.';
+			// The supervisor's own words (`[managed-denied] ...`): the policy's reason,
+			// quoted as it is. Nothing restarts; the policy decides, not a retry.
+			return `The managed host denied the recorder${helperError ? `: ${helperError}` : '.'} Nothing is recorded and nothing restarts until the policy allows it.`;
 	}
 }
 
@@ -93,11 +100,14 @@ function RecorderStatusBanner({
 	state,
 	eventsStored,
 	pausedUntil,
+	helperError,
 }: {
 	theme: Theme;
 	state: RecorderState;
 	eventsStored: number;
 	pausedUntil: string | null;
+	/** The helper's last error; the managed refusal when the state is `denied`. */
+	helperError: string | null;
 }) {
 	const tone = STATE_TONES[state];
 	const color =
@@ -125,7 +135,7 @@ function RecorderStatusBanner({
 					{STATE_LABELS[state]}
 				</div>
 				<p className="text-xs mt-0.5 select-text" style={{ color: theme.colors.textDim }}>
-					{stateDetail(state, eventsStored, pausedUntil)}
+					{stateDetail(state, eventsStored, pausedUntil, helperError)}
 				</p>
 			</div>
 		</div>
@@ -265,6 +275,7 @@ export function ComputerHistorySection({ theme }: ComputerHistorySectionProps) {
 				state={enabled ? (status?.state ?? 'starting') : 'off'}
 				eventsStored={status?.eventsStored ?? 0}
 				pausedUntil={status?.pausedUntil ?? null}
+				helperError={status?.helper.lastError ?? null}
 			/>
 			<div>
 				<SettingsSectionHeading

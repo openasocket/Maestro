@@ -305,7 +305,14 @@ export function ComputerHistoryViewer({ theme, onClose }: ComputerHistoryViewerP
 				? theme.colors.warning
 				: theme.colors.error;
 	const recorderProblem =
-		state === 'blocked' || state === 'binary-missing' || state === 'failed' || state === 'off';
+		state === 'blocked' ||
+		state === 'binary-missing' ||
+		state === 'failed' ||
+		state === 'denied' ||
+		state === 'off';
+	// The managed host's refusal, as the supervisor recorded it (`[managed-denied] ...`).
+	// Standalone never produces the word, so this stays null there.
+	const deniedReason = state === 'denied' ? (status?.helper.lastError ?? null) : null;
 
 	const headerActions = (
 		<>
@@ -313,6 +320,7 @@ export function ComputerHistoryViewer({ theme, onClose }: ComputerHistoryViewerP
 				className="flex items-center gap-1.5 text-xs px-2 py-1 rounded-full"
 				style={{ backgroundColor: theme.colors.bgActivity, color: theme.colors.textDim }}
 				data-testid="computer-history-state"
+				title={deniedReason ?? undefined}
 			>
 				<span
 					className={`w-2 h-2 rounded-full ${state === 'recording' ? 'animate-pulse' : ''}`}
@@ -423,7 +431,7 @@ export function ComputerHistoryViewer({ theme, onClose }: ComputerHistoryViewerP
 							<span className="flex-1">
 								{state === 'off'
 									? 'The recorder is not running. Showing what was recorded before.'
-									: `${STATE_LABELS[state]}. Nothing new is being recorded.`}
+									: `${STATE_LABELS[state]}${deniedReason ? ` (${deniedReason})` : ''}. Nothing new is being recorded.`}
 							</span>
 							<button type="button" className="underline" onClick={openSettings}>
 								Open settings

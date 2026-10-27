@@ -231,6 +231,9 @@ function watchStateColor(theme: Theme, state?: PianolaSupervisedState): string {
 		case 'backing-off':
 			return theme.colors.warning;
 		case 'failed':
+		case 'denied':
+			// A denied target runs nothing and restarts nothing: the error color,
+			// with the managed refusal shown in `lastError` as a crash reason is.
 			return theme.colors.error;
 		default:
 			return theme.colors.textDim;
@@ -265,7 +268,9 @@ function WatchedSection({
 	const canCollapse = watched.length > 5;
 	const collapsed = canCollapse && !expanded;
 	const failingCount = watched.filter(
-		(row) => row.enabled && (row.state === 'failed' || row.state === 'backing-off')
+		(row) =>
+			row.enabled &&
+			(row.state === 'failed' || row.state === 'backing-off' || row.state === 'denied')
 	).length;
 
 	const addButton = (
