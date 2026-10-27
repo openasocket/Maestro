@@ -40,6 +40,7 @@ import {
 	type ManagedRouteCeiling,
 } from '../../shared/maestro-lib/launch/env';
 import type { LaunchPermissionDecision } from '../../shared/maestro-lib/launch/launch-plan';
+import type { SteeringRunIdentity } from '../../shared/chatSteering';
 
 // ============================================================================
 // Managed admission at the process sink
@@ -697,6 +698,22 @@ export interface ManagedProcess {
 	 *  for a standalone spawn, and for a process that predates the enrollment
 	 *  (an unqualified process a managed sink must not drive). */
 	admission?: ProcessSpawnAdmission;
+	/** What a steer of this process must carry (MRC2-03-06A): set by the sink
+	 *  for a local maestro-p launch once the spawner registered the record,
+	 *  read by `ProcessManager.steer()`. Absent for every other process. */
+	steering?: ProcessSteeringCredentials;
+}
+
+/**
+ * The run authority a steer carries: the per-run token the sink minted for a
+ * local maestro-p launch (`STEERING_TOKEN_ENV_VAR` on the TUI's env, never on
+ * the request the lease digests) and, when the launch was admitted, the lease
+ * and attempt the handshake names. maestro-p refuses a frame without them.
+ */
+export interface ProcessSteeringCredentials {
+	token: string;
+	/** Null for a standalone spawn, where the TUI holds the channel to the token alone. */
+	run: SteeringRunIdentity | null;
 }
 
 export interface UsageTotals {

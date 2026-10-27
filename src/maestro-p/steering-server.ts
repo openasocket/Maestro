@@ -37,6 +37,8 @@ import * as fs from 'fs';
 import * as net from 'net';
 
 import {
+	isLocalSocketPath,
+	isNamedPipePath,
 	oversizeSteeringRequestId,
 	parseSteeringRequest,
 	STEERING_SOCKET_ENV_VAR,
@@ -47,6 +49,10 @@ import {
 	type SteeringRunIdentity,
 } from '../shared/chatSteering';
 import type { TuiHandshakeRead } from '../shared/maestro-lib/managed/tui-handshake';
+
+// The one loopback rule lives beside the wire format (MRC2-03-06A) so the main
+// process client dials by the same reading; re-exported for this module's callers.
+export { isLocalSocketPath, isNamedPipePath };
 
 /**
  * What a frame must carry to be acted on. Both halves null means every frame
@@ -146,17 +152,6 @@ export function steeringFrameRefusal(
 		}
 	}
 	return null;
-}
-
-/**
- * Whether `socketPath` is a local socket address: a named pipe or a path. The
- * one string `net.Server.listen` does NOT treat as a path is a numeric one,
- * which it reads as a TCP port on every interface (`listen('8080')`), so that
- * shape is refused rather than opened: the channel never leaves the machine.
- */
-export function isLocalSocketPath(socketPath: string): boolean {
-	if (isNamedPipePath(socketPath)) return true;
-	return !(Number(socketPath) >= 0);
 }
 
 export interface SteeringServer {
@@ -392,11 +387,6 @@ export function startSteeringServer(options: SteeringServerOptions): SteeringSer
  * gone in the meantime (ENOENT), or a path that is not a socket at all (ENOTSOCK).
  */
 const STALE_SOCKET_CODES = new Set(['ECONNREFUSED', 'ENOENT', 'ENOTSOCK']);
-
-/** True for a Windows named-pipe path (`\\.\pipe\name` or `\\?\pipe\name`). */
-export function isNamedPipePath(socketPath: string): boolean {
-	return /^\\\\[.?]\\pipe\\/i.test(socketPath);
-}
 
 /** Cap on one un-terminated control line. A steer is a sentence, not a stream. */
 export const MAX_PENDING_LINE_BYTES = 64 * 1024;

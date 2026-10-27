@@ -1,10 +1,11 @@
 // src/main/process-manager/ProcessManager.ts
 
 import { EventEmitter } from 'events';
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import type {
 	ProcessConfig,
 	ManagedProcess,
+	ProcessSteeringCredentials,
 	SpawnResult,
 	CommandResult,
 	ParsedEvent,
@@ -62,7 +63,12 @@ import { LocalCommandRunner } from './runners/LocalCommandRunner';
 import { SshCommandRunner } from './runners/SshCommandRunner';
 import { opencodeServerManager } from '../opencode-server/OpencodeServerManager';
 import { logger } from '../utils/logger';
-import { STEERING_TURN_FINISHED_DETAIL, type SteeringResultFrame } from '../../shared/chatSteering';
+import {
+	STEERING_TOKEN_BYTES,
+	STEERING_TOKEN_ENV_VAR,
+	STEERING_TURN_FINISHED_DETAIL,
+	type SteeringResultFrame,
+} from '../../shared/chatSteering';
 import { sendSteeringRequest } from './steering-client';
 import { steerCodexAppServerTurn } from '../codex-app-server/steering';
 import { isPidAlive } from './utils/childProcessInfo';
@@ -674,13 +680,24 @@ export class ProcessManager extends EventEmitter {
 				managed: { state: 'denied', code: 'policy-denied' },
 			};
 		}
+		// Every local maestro-p launch, managed or not, gets a per-run steering
+		// token (MRC2-03-06A): minted here at the sink and stamped on the
+		// spawner's env beside the handshake, a host-derived fact the request
+		// the lease digests never carries. Once sent, maestro-p acts on no frame
+		// without it, so the record below is what lets `steer()` prove a frame
+		// is this host's for this run.
+		const steering = this.steeringCredentialsFor(configWithCoworkingSession, lease);
+		const stamped: Record<string, string> = {
+			...(handshake && handshake.ok ? handshake.env : {}),
+			...(steering ? { [STEERING_TOKEN_ENV_VAR]: steering.token } : {}),
+		};
 		const configToSpawn =
-			handshake && handshake.ok
+			Object.keys(stamped).length > 0
 				? {
 						...configWithCoworkingSession,
 						customEnvVars: {
 							...(configWithCoworkingSession.customEnvVars ?? {}),
-							...handshake.env,
+							...stamped,
 						},
 					}
 				: configWithCoworkingSession;
@@ -698,9 +715,36 @@ export class ProcessManager extends EventEmitter {
 			return this.childProcessSpawner.spawn(configToSpawn);
 		});
 
-		if (result.success) this.emitSpawn(config);
+		if (result.success) {
+			// The spawner registered the record synchronously; the token lives
+			// with the process it was minted for and leaves with it on exit.
+			if (steering) {
+				const proc = this.processes.get(config.sessionId);
+				if (proc) proc.steering = steering;
+			}
+			this.emitSpawn(config);
+		}
 
 		return result;
+	}
+
+	/**
+	 * The steering credentials of a local maestro-p launch, or null for every
+	 * other spawn (nothing else serves the channel). The token is fresh per
+	 * run; the identity is the admission's lease and attempt when the launch
+	 * was admitted (the same ids the handshake names, so the TUI's two checks
+	 * agree), null on a standalone host.
+	 */
+	private steeringCredentialsFor(
+		config: ProcessConfig,
+		lease: DispatchLease | null
+	): ProcessSteeringCredentials | null {
+		if (!localTuiLaunchOf(config)) return null;
+		const admission = lease ? config.admission : undefined;
+		return {
+			token: randomBytes(STEERING_TOKEN_BYTES).toString('hex'),
+			run: admission ? { leaseId: admission.leaseId, attemptId: admission.attemptId } : null,
+		};
 	}
 
 	/**
@@ -1124,6 +1168,14 @@ export class ProcessManager extends EventEmitter {
 	 * (`codexAppServer`, present only on the app-server path), so an exec turn has
 	 * none and is refused by the socket client exactly like an unsteerable Claude
 	 * turn.
+	 *
+	 * A maestro-p frame carries the run's authority from the process record
+	 * (MRC2-03-06A): the token this sink minted at spawn and, under management,
+	 * the admission identity. Every surface that steers through here (the
+	 * desktop, `maestro-cli queue steer`, a group chat) therefore carries it
+	 * without knowing it. A `not-authorized` verdict means the TUI holds a
+	 * different token or admission than this record, which cannot happen for a
+	 * process this sink spawned, so it is logged as well as answered.
 	 */
 	async steer(sessionId: string, text: string): Promise<SteeringResultFrame> {
 		const id = randomUUID();
@@ -1142,7 +1194,24 @@ export class ProcessManager extends EventEmitter {
 				this.emit('steering-verdict', sessionId, verdict)
 			);
 		}
-		return sendSteeringRequest({ processKey: sessionId, text, id });
+		const { steering } = process;
+		const result = await sendSteeringRequest({
+			processKey: sessionId,
+			text,
+			id,
+			...(steering ? { token: steering.token } : {}),
+			...(steering?.run ? { run: steering.run } : {}),
+		});
+		if (result.verdict === 'refused' && result.refusal === 'not-authorized') {
+			logger.warn('[ProcessManager] Steer refused as not authorized', 'ProcessManager', {
+				sessionId,
+				steerId: id,
+				hasToken: !!steering,
+				hasRun: !!steering?.run,
+				detail: result.detail,
+			});
+		}
+		return result;
 	}
 
 	/**

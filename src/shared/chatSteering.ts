@@ -79,6 +79,27 @@ export const STEERING_TOKEN_ENV_VAR = 'MAESTRO_P_STEERING_TOKEN';
 /** Longest token accepted on a frame; a host mints 64 hex characters. */
 export const STEERING_TOKEN_MAX_LENGTH = 256;
 
+/** Random bytes in the token a host mints per run (64 hex characters on the wire). */
+export const STEERING_TOKEN_BYTES = 32;
+
+/** True for a Windows named-pipe path (`\\.\pipe\name` or `\\?\pipe\name`). */
+export function isNamedPipePath(socketPath: string): boolean {
+	return /^\\\\[.?]\\pipe\\/i.test(socketPath);
+}
+
+/**
+ * Whether `socketPath` is a local socket address: a named pipe or a path. The
+ * one string `net.Server.listen` does NOT treat as a path is a numeric one,
+ * which it reads as a TCP port on every interface (`listen('8080')`), so that
+ * shape is refused rather than opened: the channel never leaves the machine.
+ * The server (maestro-p) and the client (main) read the same rule, so a path
+ * the server would never open is one the client never dials.
+ */
+export function isLocalSocketPath(socketPath: string): boolean {
+	if (isNamedPipePath(socketPath)) return true;
+	return !(Number(socketPath) >= 0);
+}
+
 /**
  * The admission identity a steer names under management: the lease and attempt
  * the host admitted the maestro-p spawn on (the handshake's `run`). A managed

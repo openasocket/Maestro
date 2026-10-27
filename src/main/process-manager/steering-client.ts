@@ -15,12 +15,14 @@ import * as os from 'os';
 import * as path from 'path';
 
 import {
+	isLocalSocketPath,
 	parseSteeringResult,
 	STEERING_REPLY_TIMEOUT_MS,
 	STEERING_TOO_LONG_DETAIL,
 	steeringTextTooLong,
 	type SteeringResultFrame,
 	type SteeringRequestFrame,
+	type SteeringRunIdentity,
 } from '../../shared/chatSteering';
 import { isWindows } from '../../shared/platformDetection';
 import { logger } from '../utils/logger';
@@ -61,6 +63,13 @@ export { STEERING_REPLY_TIMEOUT_MS } from '../../shared/chatSteering';
  * here is a thing to TELL the user rather than an exception to propagate: a
  * refusal is a normal answer ("a permission prompt is on screen"), and an
  * unreachable socket usually just means this turn is not steerable.
+ *
+ * The frame carries the run's authority when the caller holds it (MRC2-03-06A):
+ * the per-run token the sink minted at spawn and, under management, the
+ * admission identity the TUI was admitted on. maestro-p refuses a frame that
+ * carries neither once a token was sent, so a steer sent through this client
+ * without them is answered `not-authorized`, which is the honest verdict for a
+ * caller that is not the host that spawned the turn.
  */
 export async function sendSteeringRequest(options: {
 	processKey: string;
@@ -68,6 +77,16 @@ export async function sendSteeringRequest(options: {
 	/** Correlation id. Echoed back on the verdict. */
 	id: string;
 	timeoutMs?: number;
+	/** The run's steering token (`STEERING_TOKEN_ENV_VAR`), sent on the frame when given. */
+	token?: string;
+	/** The admission identity of the run being steered, sent on the frame when given. */
+	run?: SteeringRunIdentity;
+	/**
+	 * Where the channel is. Defaults to the path derived from the process key,
+	 * which is the only path the desktop ever opens; named here for a caller
+	 * that holds the address itself.
+	 */
+	socketPath?: string;
 }): Promise<SteeringResultFrame> {
 	// Never sent: the server would refuse it anyway, and the round trip costs a
 	// connection for an answer known here.
@@ -80,9 +99,33 @@ export async function sendSteeringRequest(options: {
 			detail: STEERING_TOO_LONG_DETAIL,
 		};
 	}
-	const socketPath = steeringSocketPathFor(options.processKey);
+	const socketPath = options.socketPath ?? steeringSocketPathFor(options.processKey);
+	// The same rule the server reads before it listens: a numeric string is a
+	// TCP port to `net`, which the server never opens, so nothing of ours
+	// answers there. Refused as not steerable, without dialing.
+	if (!isLocalSocketPath(socketPath)) {
+		logger.warn('Steering channel path is not a local socket', LOG_CONTEXT, {
+			processKey: options.processKey,
+			socketPath,
+		});
+		return {
+			type: 'steering',
+			id: options.id,
+			verdict: 'refused',
+			refusal: 'not-running',
+			detail: 'this turn is not steerable - its steering channel is not a local socket',
+		};
+	}
 	const timeoutMs = options.timeoutMs ?? STEERING_REPLY_TIMEOUT_MS;
-	const frame: SteeringRequestFrame = { type: 'steer', id: options.id, text: options.text };
+	const frame: SteeringRequestFrame = {
+		type: 'steer',
+		id: options.id,
+		text: options.text,
+		...(options.token ? { token: options.token } : {}),
+		...(options.run
+			? { run: { leaseId: options.run.leaseId, attemptId: options.run.attemptId } }
+			: {}),
+	};
 
 	return new Promise<SteeringResultFrame>((resolve) => {
 		let settled = false;
