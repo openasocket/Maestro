@@ -4,9 +4,19 @@ import path from 'path';
 import crypto from 'crypto';
 import { createWriteStream } from 'fs';
 import archiver from 'archiver';
-import { readZipArchive } from '../../utils/zip-archive';
+import { isUnsafeZipEntryName, readZipArchive, type ZipEntry } from '../../utils/zip-archive';
 import { logger } from '../../utils/logger';
 import { createIpcHandler, CreateHandlerOptions } from '../../utils/ipcHandler';
+import {
+	InstallRefusedError,
+	type InstallActor,
+	type InstallAuthority,
+} from '../../enterprise/install-policy';
+import {
+	callingLocalEffectActor,
+	holdDeleteEffect,
+	type LocalEffectAuthority,
+} from '../../enterprise/local-effects-policy';
 
 const LOG_CONTEXT = '[Playbooks]';
 
@@ -24,6 +34,32 @@ export interface PlaybooksHandlerDependencies {
 	mainWindow: BrowserWindow | null;
 	getMainWindow: () => BrowserWindow | null;
 	app: App;
+	/** The managed local-effects ceiling the playbooks file delete is held to (MRC2-04-09A); absent or null holds nothing. */
+	localEffects?: () => LocalEffectAuthority | null;
+	/** The managed install ceiling a ZIP import's entries are held to, by digest (MRC2-04-09A); absent or null holds nothing. */
+	install?: () => InstallAuthority | null;
+}
+
+/**
+ * Hold one archive entry the import reads or writes to the install ceiling
+ * (artifact `playbook-archive`, the bare entry name pinned by the digest of its
+ * bytes). Standalone or with no authority nothing is digested; a refusal is
+ * thrown before the first write.
+ */
+function holdArchiveEntry(
+	authority: InstallAuthority | null,
+	entry: ZipEntry,
+	actor: InstallActor
+): void {
+	if (!authority) return;
+	const decision = authority.authorize({
+		artifact: 'playbook-archive',
+		file: path.basename(entry.entryName),
+		stage: 'execute',
+		digest: () => crypto.createHash('sha256').update(entry.getData()).digest('hex'),
+		actor,
+	});
+	if (!decision.allowed) throw new InstallRefusedError(decision);
 }
 
 /**
@@ -76,6 +112,8 @@ async function writePlaybooks(app: App, sessionId: string, playbooks: any[]): Pr
  */
 export function registerPlaybooksHandlers(deps: PlaybooksHandlerDependencies): void {
 	const { getMainWindow, app } = deps;
+	const localEffects = deps.localEffects ?? (() => null);
+	const install = deps.install ?? (() => null);
 
 	// List all playbooks for a session
 	ipcMain.handle(
@@ -231,7 +269,10 @@ export function registerPlaybooksHandlers(deps: PlaybooksHandlerDependencies): v
 	ipcMain.handle(
 		'playbooks:deleteAll',
 		createIpcHandler(handlerOpts('deleteAll'), async (sessionId: string) => {
+			const actor = callingLocalEffectActor();
 			const filePath = getPlaybooksFilePath(app, sessionId);
+			// Held outside the try so a refusal is never read as a missing file.
+			await holdDeleteEffect(localEffects(), [filePath], actor, LOG_CONTEXT);
 			try {
 				await fs.unlink(filePath);
 				logger.info(`Deleted all playbooks for session ${sessionId}`, LOG_CONTEXT);
@@ -359,6 +400,7 @@ export function registerPlaybooksHandlers(deps: PlaybooksHandlerDependencies): v
 		createIpcHandler(
 			handlerOpts('import'),
 			async (sessionId: string, autoRunFolderPath: string) => {
+				const actor = callingLocalEffectActor();
 				const mainWindow = getMainWindow();
 				if (!mainWindow) {
 					throw new Error('No main window available');
@@ -383,10 +425,28 @@ export function registerPlaybooksHandlers(deps: PlaybooksHandlerDependencies): v
 				const zip = readZipArchive(zipPath);
 				const zipEntries = zip.getEntries();
 
-				// Find and parse manifest
+				// A zip-slip name refuses the whole archive; a basename never hides one.
+				const unsafe = zipEntries.find((e) => isUnsafeZipEntryName(e.entryName));
+				if (unsafe) {
+					throw new Error(`Invalid playbook file: unsafe entry name "${unsafe.entryName}"`);
+				}
+
+				// Find the manifest
 				const manifestEntry = zipEntries.find((e) => e.entryName === 'manifest.json');
 				if (!manifestEntry) {
 					throw new Error('Invalid playbook file: missing manifest.json');
+				}
+				const documentEntries = zipEntries.filter(
+					(e) => e.entryName.startsWith('documents/') && e.entryName.endsWith('.md')
+				);
+				const assetEntries = zipEntries.filter(
+					(e) => e.entryName.startsWith('assets/') && !e.isDirectory
+				);
+
+				// Everything the import reads or writes is held before the first write.
+				const authority = install();
+				for (const entry of [manifestEntry, ...documentEntries, ...assetEntries]) {
+					holdArchiveEntry(authority, entry, actor);
 				}
 
 				const manifest = JSON.parse(manifestEntry.getData().toString('utf-8'));
@@ -398,36 +458,32 @@ export function registerPlaybooksHandlers(deps: PlaybooksHandlerDependencies): v
 
 				// Extract document files to autorun folder
 				const importedDocs: string[] = [];
-				for (const entry of zipEntries) {
-					if (entry.entryName.startsWith('documents/') && entry.entryName.endsWith('.md')) {
-						const filename = path.basename(entry.entryName);
-						const destPath = path.join(autoRunFolderPath, filename);
+				for (const entry of documentEntries) {
+					const filename = path.basename(entry.entryName);
+					const destPath = path.join(autoRunFolderPath, filename);
 
-						// Ensure autorun folder exists
-						await fs.mkdir(autoRunFolderPath, { recursive: true });
+					// Ensure autorun folder exists
+					await fs.mkdir(autoRunFolderPath, { recursive: true });
 
-						// Write document file
-						await fs.writeFile(destPath, entry.getData().toString('utf-8'), 'utf-8');
-						importedDocs.push(filename.replace('.md', ''));
-					}
+					// Write document file
+					await fs.writeFile(destPath, entry.getData().toString('utf-8'), 'utf-8');
+					importedDocs.push(filename.replace('.md', ''));
 				}
 
 				// Extract asset files to assets/ subfolder
 				const importedAssets: string[] = [];
-				for (const entry of zipEntries) {
-					if (entry.entryName.startsWith('assets/') && !entry.isDirectory) {
-						const filename = path.basename(entry.entryName);
-						const assetsDir = path.join(autoRunFolderPath, 'assets');
-						const destPath = path.join(assetsDir, filename);
+				for (const entry of assetEntries) {
+					const filename = path.basename(entry.entryName);
+					const assetsDir = path.join(autoRunFolderPath, 'assets');
+					const destPath = path.join(assetsDir, filename);
 
-						// Ensure assets folder exists
-						await fs.mkdir(assetsDir, { recursive: true });
+					// Ensure assets folder exists
+					await fs.mkdir(assetsDir, { recursive: true });
 
-						// Write asset file (binary-safe)
-						await fs.writeFile(destPath, entry.getData());
-						importedAssets.push(filename);
-						logger.debug(`Imported asset: ${filename}`, LOG_CONTEXT);
-					}
+					// Write asset file (binary-safe)
+					await fs.writeFile(destPath, entry.getData());
+					importedAssets.push(filename);
+					logger.debug(`Imported asset: ${filename}`, LOG_CONTEXT);
 				}
 
 				// Create new playbook entry

@@ -13,6 +13,7 @@
  */
 
 import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
+import { logger } from '../utils/logger';
 import { getActingTransport, transportSpawnActor } from '../web-server/auth/transport-actor';
 import {
 	browserActorLabel,
@@ -366,4 +367,32 @@ export async function holdLocalEffect(
 ): Promise<LocalEffectDecision> {
 	if (!authority) return { allowed: true };
 	return authority.authorize(request);
+}
+
+/**
+ * Hold a delete of one path, or of a batch held ONCE with its count, before
+ * anything is removed, locally or on a remote. Shared by every delete sink
+ * (`fs:delete`, the Auto Run images, backups and folder, the playbooks file,
+ * a Cue backup): a refusal leaves every path in place, reaches the log with
+ * its receipt under the sink's own context, and throws by code.
+ */
+export async function holdDeleteEffect(
+	authority: LocalEffectAuthority | null | undefined,
+	targetPaths: readonly string[],
+	actor: LocalEffectActor,
+	logContext: string
+): Promise<void> {
+	const decision = await holdLocalEffect(authority, {
+		effect: 'delete',
+		actor,
+		target: targetPaths[0] ?? null,
+		count: targetPaths.length,
+	});
+	if (decision.allowed) return;
+	logger.warn(
+		'Delete refused by the managed local-effects ceiling; nothing was removed',
+		logContext,
+		{ code: decision.code, receipt: decision.managed }
+	);
+	throw new LocalEffectRefusedError(decision);
 }

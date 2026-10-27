@@ -23,6 +23,12 @@ import {
 } from '../../utils/remote-fs';
 import { PLAYBOOKS_DIR, LEGACY_PLAYBOOKS_DIR, STATUS_PATH } from '../../../shared/maestro-paths';
 import { WatcherLeases } from '../../utils/watcher-leases';
+import {
+	callingLocalEffectActor,
+	holdDeleteEffect,
+	type LocalEffectActor,
+	type LocalEffectAuthority,
+} from '../../enterprise/local-effects-policy';
 
 const LOG_CONTEXT = '[AutoRun]';
 
@@ -49,6 +55,8 @@ const handlerOpts = (operation: string, logSuccess = true): CreateHandlerOptions
 export interface AutorunHandlerDependencies {
 	/** The settings store (MaestroSettings) - required for SSH remote lookup */
 	settingsStore?: Store<MaestroSettings>;
+	/** The managed local-effects ceiling (MRC2-04-09A) every delete here is held to, read per call; absent or null holds nothing. */
+	localEffects?: () => LocalEffectAuthority | null;
 }
 
 /**
@@ -411,6 +419,11 @@ export function registerAutorunHandlers(
 ): void {
 	const { getMainWindow, app, settingsStore } = deps;
 	const safeSend = createSafeSend(getMainWindow);
+	// A delete (an image, a backup sweep, the playbooks folder) is held once per
+	// call, before the local or remote removal; a refusal is the handler's error.
+	const localEffects = deps.localEffects ?? (() => null);
+	const holdDelete = (paths: readonly string[], actor: LocalEffectActor) =>
+		holdDeleteEffect(localEffects(), paths, actor, LOG_CONTEXT);
 
 	// List markdown files in a directory for Auto Run (with recursive subfolder support)
 	// Supports SSH remote execution via optional sshRemoteId parameter
@@ -719,6 +732,7 @@ export function registerAutorunHandlers(
 		createIpcHandler(
 			handlerOpts('deleteImage'),
 			async (folderPath: string, relativePath: string, sshRemoteId?: string) => {
+				const actor = callingLocalEffectActor();
 				// Sanitize relativePath to prevent directory traversal
 				const normalizedPath = path.normalize(relativePath);
 				const normalizedPathPosix = normalizedPath.replace(/\\/g, '/');
@@ -743,6 +757,7 @@ export function registerAutorunHandlers(
 					logger.debug(`${LOG_CONTEXT} deleteImage via SSH: ${remotePath}`, LOG_CONTEXT);
 
 					// Delete the remote file
+					await holdDelete([remotePath], actor);
 					const result = await deleteRemote(remotePath, sshConfig, false);
 					if (!result.success) {
 						throw new Error(result.error || 'Failed to delete remote image file');
@@ -770,6 +785,7 @@ export function registerAutorunHandlers(
 				}
 
 				// Delete the file
+				await holdDelete([filePath], actor);
 				await fs.unlink(filePath);
 				logger.info(`Deleted Auto Run image: ${relativePath}`, LOG_CONTEXT);
 				return {};
@@ -950,6 +966,7 @@ export function registerAutorunHandlers(
 	ipcMain.handle(
 		'autorun:deleteFolder',
 		createIpcHandler(handlerOpts('deleteFolder'), async (projectPath: string) => {
+			const actor = callingLocalEffectActor();
 			// Validate input
 			if (!projectPath || typeof projectPath !== 'string') {
 				throw new Error('Invalid project path');
@@ -962,6 +979,7 @@ export function registerAutorunHandlers(
 			const canonicalFolder = path.join(projectPath, PLAYBOOKS_DIR);
 			const legacyFolder = path.join(projectPath, LEGACY_PLAYBOOKS_DIR);
 
+			const folders: string[] = [];
 			for (const autoRunFolder of [canonicalFolder, legacyFolder]) {
 				try {
 					const stat = await fs.stat(autoRunFolder);
@@ -975,7 +993,12 @@ export function registerAutorunHandlers(
 				if (!ALLOWED_FOLDER_NAMES.has(folderName)) {
 					throw new Error('Safety check failed: not a playbooks folder');
 				}
+				folders.push(autoRunFolder);
+			}
 
+			// Both folders are one hold (one confirmation, one receipt) before either is removed.
+			if (folders.length > 0) await holdDelete(folders, actor);
+			for (const autoRunFolder of folders) {
 				await fs.rm(autoRunFolder, { recursive: true, force: true });
 				logger.info(`Deleted playbooks folder: ${autoRunFolder}`, LOG_CONTEXT);
 			}
@@ -1200,6 +1223,7 @@ export function registerAutorunHandlers(
 		createIpcHandler(
 			handlerOpts('restoreBackup'),
 			async (folderPath: string, filename: string, sshRemoteId?: string) => {
+				const actor = callingLocalEffectActor();
 				// Reject obvious traversal attempts
 				if (filename.includes('..')) {
 					throw new Error('Invalid filename');
@@ -1230,6 +1254,9 @@ export function registerAutorunHandlers(
 					if (!readResult.success || readResult.data === undefined) {
 						throw new Error('Backup file not found');
 					}
+
+					// A restore consumes its backup: held before the write so a refusal changes nothing.
+					await holdDelete([remoteBackupPath], actor);
 
 					// Write backup content to original file
 					const writeResult = await writeFileRemote(remoteTargetPath, readResult.data, sshConfig);
@@ -1269,6 +1296,9 @@ export function registerAutorunHandlers(
 				} catch {
 					throw new Error('Backup file not found');
 				}
+
+				// A restore consumes its backup: held before the copy so a refusal changes nothing.
+				await holdDelete([backupPath], actor);
 
 				// Copy backup back to original
 				await fs.copyFile(backupPath, targetPath);
@@ -1400,6 +1430,7 @@ export function registerAutorunHandlers(
 		createIpcHandler(
 			handlerOpts('deleteBackups'),
 			async (folderPath: string, sshRemoteId?: string) => {
+				const actor = callingLocalEffectActor();
 				// SSH remote: dispatch to remote operations
 				if (sshRemoteId) {
 					const sshConfig = getSshRemoteById(settingsStore, sshRemoteId);
@@ -1409,10 +1440,8 @@ export function registerAutorunHandlers(
 
 					logger.debug(`${LOG_CONTEXT} deleteBackups via SSH: ${folderPath}`, LOG_CONTEXT);
 
-					// Recursive function to find and delete .backup.md files on remote
-					const deleteBackupsRemoteRecursive = async (dirPath: string): Promise<number> => {
-						let deleted = 0;
-
+					// Recursive function to find .backup.md files on remote
+					const findBackupsRemoteRecursive = async (dirPath: string): Promise<string[]> => {
 						// Read remote directory contents
 						const dirResult = await readDirRemote(dirPath, sshConfig);
 						if (!dirResult.success || !dirResult.data) {
@@ -1421,34 +1450,39 @@ export function registerAutorunHandlers(
 								`${LOG_CONTEXT} Skipping remote directory: ${dirPath} - ${dirResult.error}`,
 								LOG_CONTEXT
 							);
-							return 0;
+							return [];
 						}
 
+						const found: string[] = [];
 						for (const entry of dirResult.data) {
 							const entryPath = `${dirPath}/${entry.name}`;
 
 							if (entry.isDirectory) {
 								// Recurse into subdirectory (including symlinked dirs)
-								deleted += await deleteBackupsRemoteRecursive(entryPath);
+								found.push(...(await findBackupsRemoteRecursive(entryPath)));
 							} else if (!entry.isDirectory && entry.name.endsWith('.backup.md')) {
-								// Delete backup file
-								const deleteResult = await deleteRemote(entryPath, sshConfig, false);
-								if (deleteResult.success) {
-									deleted++;
-									logger.info(`Deleted remote Auto Run backup: ${entry.name}`, LOG_CONTEXT);
-								} else {
-									logger.warn(
-										`${LOG_CONTEXT} Failed to delete remote backup ${entry.name}: ${deleteResult.error}`,
-										LOG_CONTEXT
-									);
-								}
+								found.push(entryPath);
 							}
 						}
-
-						return deleted;
+						return found;
 					};
 
-					const deletedCount = await deleteBackupsRemoteRecursive(folderPath);
+					// The sweep is one hold, with its count, before the first file goes.
+					const backups = await findBackupsRemoteRecursive(folderPath);
+					if (backups.length > 0) await holdDelete(backups, actor);
+					let deletedCount = 0;
+					for (const entryPath of backups) {
+						const deleteResult = await deleteRemote(entryPath, sshConfig, false);
+						if (deleteResult.success) {
+							deletedCount++;
+							logger.info(`Deleted remote Auto Run backup: ${entryPath}`, LOG_CONTEXT);
+						} else {
+							logger.warn(
+								`${LOG_CONTEXT} Failed to delete remote backup ${entryPath}: ${deleteResult.error}`,
+								LOG_CONTEXT
+							);
+						}
+					}
 					logger.info(
 						`Deleted ${deletedCount} remote Auto Run backup(s) in ${folderPath}`,
 						LOG_CONTEXT
@@ -1462,9 +1496,9 @@ export function registerAutorunHandlers(
 					throw new Error('Path is not a directory');
 				}
 
-				// Find and delete all .backup.md files recursively
-				const deleteBackupsRecursive = async (dirPath: string): Promise<number> => {
-					let deleted = 0;
+				// Find all .backup.md files recursively
+				const findBackupsRecursive = async (dirPath: string): Promise<string[]> => {
+					const found: string[] = [];
 					const entries = await fs.readdir(dirPath, { withFileTypes: true });
 
 					for (const entry of entries) {
@@ -1472,19 +1506,23 @@ export function registerAutorunHandlers(
 
 						if (entry.isDirectory()) {
 							// Recurse into subdirectory
-							deleted += await deleteBackupsRecursive(entryPath);
+							found.push(...(await findBackupsRecursive(entryPath)));
 						} else if (entry.isFile() && entry.name.endsWith('.backup.md')) {
-							// Delete backup file
-							await fs.unlink(entryPath);
-							deleted++;
-							logger.info(`Deleted Auto Run backup: ${entry.name}`, LOG_CONTEXT);
+							found.push(entryPath);
 						}
 					}
 
-					return deleted;
+					return found;
 				};
 
-				const deletedCount = await deleteBackupsRecursive(folderPath);
+				// The sweep is one hold, with its count, before the first file goes.
+				const backups = await findBackupsRecursive(folderPath);
+				if (backups.length > 0) await holdDelete(backups, actor);
+				for (const entryPath of backups) {
+					await fs.unlink(entryPath);
+					logger.info(`Deleted Auto Run backup: ${path.basename(entryPath)}`, LOG_CONTEXT);
+				}
+				const deletedCount = backups.length;
 				logger.info(`Deleted ${deletedCount} Auto Run backup(s) in ${folderPath}`, LOG_CONTEXT);
 				return { deletedCount };
 			}

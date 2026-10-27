@@ -157,6 +157,7 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		getMainWindow: deps.getMainWindow,
 		app: deps.app,
 		settingsStore: deps.settingsStore,
+		localEffects: deps.getLocalEffectAuthority,
 	});
 
 	// Playbook operations - extracted to src/main/ipc/handlers/playbooks.ts
@@ -164,6 +165,8 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		mainWindow: deps.getMainWindow(),
 		getMainWindow: deps.getMainWindow,
 		app: deps.app,
+		localEffects: deps.getLocalEffectAuthority,
+		install: deps.getInstallAuthority,
 	});
 
 	// History operations - extracted to src/main/ipc/handlers/history.ts
@@ -212,6 +215,8 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 	// Cue Backup - snapshot / restore .maestro/cue.yaml + prompts (Cue modal Backup tab)
 	registerCueBackupHandlers({
 		sessionsStore: deps.sessionsStore,
+		localEffects: deps.getLocalEffectAuthority,
+		install: deps.getInstallAuthority,
 	});
 	// Cue bundles - export / import pipelines and agents (Cue modal Bundles tab)
 	registerCueBundleHandlers({

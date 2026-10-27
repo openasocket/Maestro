@@ -3498,6 +3498,7 @@ app
 			getRepositoryAuthority: () => repositoryPolicy,
 			getShellAuthority: () => shellPolicy,
 			getLocalEffectAuthority: () => localEffectsPolicy,
+			getInstallAuthority: () => installPolicy,
 			getPluginEventBus: () => pluginEventBus,
 			getInteractiveReplayController: () => interactiveReplayController,
 			setNoteSessionActivated: (fn) => {

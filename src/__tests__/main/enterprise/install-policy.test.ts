@@ -174,6 +174,8 @@ describe('parseInstallPolicyCeiling', () => {
 			'bmad-prompts',
 			'marketplace-playbooks',
 			'coworking-mcp-server',
+			'playbook-archive',
+			'cue-backup',
 		]);
 		const base = 'https://raw.githubusercontent.com/bmad-code-org/BMAD-METHOD/v6.2.0';
 		const parsed = parseInstallPolicyCeiling({

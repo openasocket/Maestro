@@ -61,19 +61,21 @@ vi.mock('archiver', () => ({
 	default: vi.fn(),
 }));
 
-vi.mock('../../../../main/utils/zip-archive', () => ({
+vi.mock('../../../../main/utils/zip-archive', async (importOriginal) => ({
+	// The real zip-slip rule stays; only the archive read is replaced.
+	...(await importOriginal<typeof import('../../../../main/utils/zip-archive')>()),
 	readZipArchive: vi.fn(() => ({
 		getEntries: () => [],
 		getEntry: () => undefined,
 	})),
 }));
 
-// Mock crypto
-vi.mock('crypto', () => ({
-	default: {
-		randomUUID: vi.fn(),
-	},
-}));
+// Mock crypto: only randomUUID is replaced. The managed ceilings the handlers
+// now hold to (MRC2-04-09A) hash at module load, so the real exports stay.
+vi.mock('crypto', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('crypto')>();
+	return { ...actual, default: { ...actual, randomUUID: vi.fn() } };
+});
 
 // Mock the logger
 vi.mock('../../../../main/utils/logger', () => ({

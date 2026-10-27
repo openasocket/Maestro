@@ -19,7 +19,13 @@ import {
 	readLiveCueFile,
 	restoreCueBackupAll,
 	restoreCueBackupFile,
+	type CueBackupEffectOptions,
 } from '../../cue/backup/cue-backup-manager';
+import type { InstallAuthority } from '../../enterprise/install-policy';
+import {
+	callingLocalEffectActor,
+	type LocalEffectAuthority,
+} from '../../enterprise/local-effects-policy';
 import type { SessionsData } from '../../stores/types';
 import type {
 	CueBackupDiffStatusMap,
@@ -37,10 +43,20 @@ const handlerOpts = (operation: string): Pick<CreateHandlerOptions, 'context' | 
 
 export interface CueBackupHandlerDependencies {
 	sessionsStore: Store<SessionsData>;
+	/** The managed local-effects ceiling a backup delete is held to (MRC2-04-09A); absent or null holds nothing. */
+	localEffects?: () => LocalEffectAuthority | null;
+	/** The managed install ceiling a restore holds the archive to, by digest (MRC2-04-09A); absent or null holds nothing. */
+	install?: () => InstallAuthority | null;
 }
 
 export function registerCueBackupHandlers(deps: CueBackupHandlerDependencies): void {
 	const { sessionsStore } = deps;
+	// Read at the boundary, before any await, so a hold binds the transport this call came over.
+	const effects = (): CueBackupEffectOptions => ({
+		localEffects: deps.localEffects?.() ?? null,
+		install: deps.install?.() ?? null,
+		actor: callingLocalEffectActor(),
+	});
 
 	ipcMain.handle(
 		'cueBackup:create',
@@ -100,7 +116,7 @@ export function registerCueBackupHandlers(deps: CueBackupHandlerDependencies): v
 				workspaceId: string;
 				relativePath: string;
 			}): Promise<void> => {
-				restoreCueBackupFile(args.filePath, args.workspaceId, args.relativePath);
+				restoreCueBackupFile(args.filePath, args.workspaceId, args.relativePath, effects());
 			}
 		)
 	);
@@ -110,7 +126,7 @@ export function registerCueBackupHandlers(deps: CueBackupHandlerDependencies): v
 		withIpcErrorLogging(
 			handlerOpts('restoreAll'),
 			async (args: { filePath: string }): Promise<CueBackupRestoreResult> => {
-				return restoreCueBackupAll(args.filePath);
+				return restoreCueBackupAll(args.filePath, effects());
 			}
 		)
 	);
@@ -130,7 +146,7 @@ export function registerCueBackupHandlers(deps: CueBackupHandlerDependencies): v
 		withIpcErrorLogging(
 			handlerOpts('delete'),
 			async (args: { filePath: string }): Promise<void> => {
-				deleteCueBackup(args.filePath);
+				await deleteCueBackup(args.filePath, effects());
 			}
 		)
 	);

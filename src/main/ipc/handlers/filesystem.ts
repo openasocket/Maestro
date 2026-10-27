@@ -65,8 +65,7 @@ import { mapWithConcurrency, LOCAL_FILE_DELETE_CONCURRENCY } from '../../utils/c
 import { getHostDirectoryInfo } from '../../utils/host-directory';
 import {
 	callingLocalEffectActor,
-	holdLocalEffect,
-	LocalEffectRefusedError,
+	holdDeleteEffect,
 	type LocalEffectActor,
 	type LocalEffectAuthority,
 } from '../../enterprise/local-effects-policy';
@@ -277,29 +276,12 @@ export interface FilesystemHandlerDependencies {
 	localEffects?: () => LocalEffectAuthority | null;
 }
 
-/**
- * Hold a delete (one path, or a batch held once) before anything is removed,
- * locally or on a remote. A refusal leaves every path in place, reaches the
- * log with its receipt and rejects the call by code.
- */
-async function holdDelete(
+/** Hold a delete (one path, or a batch held once) before anything is removed; the shared rule, under this sink's log context. */
+const holdDelete = (
 	authority: LocalEffectAuthority | null,
 	targetPaths: readonly string[],
 	actor: LocalEffectActor
-): Promise<void> {
-	const decision = await holdLocalEffect(authority, {
-		effect: 'delete',
-		actor,
-		target: targetPaths[0] ?? null,
-		count: targetPaths.length,
-	});
-	if (decision.allowed) return;
-	logger.warn('Delete refused by the managed local-effects ceiling; nothing was removed', 'FS', {
-		code: decision.code,
-		receipt: decision.managed,
-	});
-	throw new LocalEffectRefusedError(decision);
-}
+) => holdDeleteEffect(authority, targetPaths, actor, 'FS');
 
 export function registerFilesystemHandlers(deps: FilesystemHandlerDependencies = {}): void {
 	const localEffects = deps.localEffects ?? (() => null);

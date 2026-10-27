@@ -13,6 +13,7 @@ import type { BrowserEffectAuthority } from '../../enterprise/browser-policy';
 import type { RepositoryEffectAuthority } from '../../enterprise/repository-policy';
 import type { ShellCommandAuthority } from '../../enterprise/shell-policy';
 import type { LocalEffectAuthority } from '../../enterprise/local-effects-policy';
+import type { InstallAuthority } from '../../enterprise/install-policy';
 import type { PluginEventBusImpl } from '../../plugins/plugin-event-bus';
 import type { InteractiveReplayController } from '../../agents/claude-interactive-replay';
 import type { ProcessConfig as ProcessSpawnConfig } from '../../process-manager/types';
@@ -57,6 +58,8 @@ export interface IpcBootstrapDependencies {
 	getShellAuthority?: () => ShellCommandAuthority | null;
 	/** The local-effects ceiling the system and filesystem handlers hold every open-external, open-path, clipboard write, trash and delete against (MRC2-04-09); null or absent holds nothing. */
 	getLocalEffectAuthority?: () => LocalEffectAuthority | null;
+	/** The install ceiling the playbook and Cue backup handlers hold a ZIP import against (MRC2-04-09A); null or absent holds nothing. */
+	getInstallAuthority?: () => InstallAuthority | null;
 	getPluginEventBus: () => PluginEventBusImpl | null;
 	getInteractiveReplayController: () => InteractiveReplayController<ProcessSpawnConfig> | null;
 	/**

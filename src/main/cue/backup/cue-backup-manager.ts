@@ -28,6 +28,13 @@ import type { StoredSession } from '../../stores/types';
 import { resolveCueConfigPath } from '../config/cue-config-repository';
 import { logger } from '../../utils/logger';
 import { captureException } from '../../utils/sentry';
+import { digestFileSha256 } from '../../../shared/maestro-lib/managed/tui-handshake';
+import { InstallRefusedError, type InstallAuthority } from '../../enterprise/install-policy';
+import {
+	holdDeleteEffect,
+	type LocalEffectActor,
+	type LocalEffectAuthority,
+} from '../../enterprise/local-effects-policy';
 
 const LOG_CONTEXT = '[CueBackup]';
 const BACKUP_DIR_NAME = 'cue-backups';
@@ -43,6 +50,30 @@ const CUE_BACKUP_FULL_READ = {
 	maxEntries: Number.POSITIVE_INFINITY,
 	maxOriginalSize: Number.POSITIVE_INFINITY,
 } as const;
+
+/**
+ * The managed ceilings a restore or a delete is held to (MRC2-04-09A), handed
+ * in by the IPC handler with the transport it was called over; absent (a
+ * standalone caller, a test) nothing is held.
+ */
+export interface CueBackupEffectOptions {
+	localEffects?: LocalEffectAuthority | null;
+	install?: InstallAuthority | null;
+	actor: LocalEffectActor;
+}
+
+/** A restore inflates an archive into live workspaces: held whole, by the digest of its bytes, before it is read. */
+function holdBackupArchive(filePath: string, options: CueBackupEffectOptions | undefined): void {
+	if (!options?.install) return;
+	const decision = options.install.authorize({
+		artifact: 'cue-backup',
+		file: path.basename(filePath),
+		stage: 'execute',
+		digest: () => digestFileSha256(filePath),
+		actor: options.actor,
+	});
+	if (!decision.allowed) throw new InstallRefusedError(decision);
+}
 
 function workspaceZipEntryName(workspaceId: string, relativePath: string): string {
 	return `workspaces/${workspaceId}/${relativePath}`;
@@ -349,9 +380,11 @@ function ensureDir(dir: string): void {
 export function restoreCueBackupFile(
 	filePath: string,
 	workspaceId: string,
-	relativePath: string
+	relativePath: string,
+	options?: CueBackupEffectOptions
 ): void {
 	assertBackupPath(filePath);
+	holdBackupArchive(filePath, options);
 	const zip = readZipArchive(filePath, {
 		...CUE_BACKUP_FULL_READ,
 		names: [MANIFEST_NAME, workspaceZipEntryName(workspaceId, relativePath)],
@@ -389,8 +422,12 @@ export function restoreCueBackupFile(
  * backup, since destructive deletion is much harder to recover from than
  * an extra orphaned prompt.
  */
-export function restoreCueBackupAll(filePath: string): CueBackupRestoreResult {
+export function restoreCueBackupAll(
+	filePath: string,
+	options?: CueBackupEffectOptions
+): CueBackupRestoreResult {
 	assertBackupPath(filePath);
+	holdBackupArchive(filePath, options);
 	const zip = readZipArchive(filePath, CUE_BACKUP_FULL_READ);
 	const manifest = readManifestFromZip(zip);
 	if (!manifest) {
@@ -505,10 +542,14 @@ export function getCueBackupDiffStatus(filePath: string): CueBackupDiffStatusMap
 	return result;
 }
 
-/** Delete a backup zip from the user-data backup directory. */
-export function deleteCueBackup(filePath: string): void {
+/** Delete a backup zip from the user-data backup directory; a destructive effect held before the unlink. */
+export async function deleteCueBackup(
+	filePath: string,
+	options?: CueBackupEffectOptions
+): Promise<void> {
 	assertBackupPath(filePath);
 	if (!fs.existsSync(filePath)) return;
+	if (options) await holdDeleteEffect(options.localEffects, [filePath], options.actor, LOG_CONTEXT);
 	fs.unlinkSync(filePath);
 	logger.info('deleteCueBackup success', LOG_CONTEXT, { filePath });
 }

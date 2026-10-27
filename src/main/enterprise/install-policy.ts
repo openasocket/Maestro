@@ -37,8 +37,10 @@ import { pairedDeviceActorProblems } from './spawn-authority';
  * What is installed: the WakaTime CLI (fetched), the app's bundled maestro-cli
  * (verified, never fetched), the spec tool prompts (Spec Kit, OpenSpec, BMAD)
  * refreshed from GitHub into the user data directory (MRC2-04-08), the
- * playbooks the marketplace imports into an Auto Run folder, and the coworking
- * MCP server script an agent's configuration is pointed at (MRC2-04-08A).
+ * playbooks the marketplace imports into an Auto Run folder, the coworking
+ * MCP server script an agent's configuration is pointed at (MRC2-04-08A), a
+ * playbook archive the person picks for import (held per entry) and a Cue
+ * backup archive restored into its workspaces (held whole) (MRC2-04-09A).
  */
 export const INSTALL_ARTIFACTS = [
 	'wakatime-cli',
@@ -48,6 +50,8 @@ export const INSTALL_ARTIFACTS = [
 	'bmad-prompts',
 	'marketplace-playbooks',
 	'coworking-mcp-server',
+	'playbook-archive',
+	'cue-backup',
 ] as const;
 export type InstallArtifact = (typeof INSTALL_ARTIFACTS)[number];
 
