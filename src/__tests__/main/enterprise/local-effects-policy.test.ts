@@ -8,24 +8,38 @@
  * sink only ever sees allow or deny.
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IdentityRead } from '../../../main/enterprise/identity-store';
 import {
 	LOCAL_EFFECTS,
 	LOCAL_EFFECT_CLASS_OF,
 	LocalEffectRefusedError,
+	callingLocalEffectActor,
 	createLocalEffectsPolicySource,
 	describeLocalEffect,
+	holdDeleteEffect,
 	holdLocalEffect,
+	localEffectActorLabel,
 	localEffectVerdict,
 	managedLocalEffectsStanding,
 	parseLocalEffectsPolicyCeiling,
 	resolveLocalEffectVerdict,
+	type LocalEffectActor,
+	type LocalEffectConfirmer,
 	type LocalEffectRequest,
 	type LocalEffectsPolicyCeiling,
 	type ManagedLocalEffectsStanding,
 } from '../../../main/enterprise/local-effects-policy';
+import { logger } from '../../../main/utils/logger';
+import { runAsTransport } from '../../../main/web-server/auth/transport-actor';
+
+vi.mock('../../../main/utils/logger', () => ({
+	logger: { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() },
+}));
 
 function document(overrides: Record<string, unknown> = {}): Record<string, unknown> {
 	return {
@@ -483,5 +497,157 @@ describe('createLocalEffectsPolicySource and holdLocalEffect', () => {
 		expect(error.code).toBe('unauthenticated');
 		expect(error.receipt).toBe(decision.managed);
 		expect(error.message).toMatch(/^\[managed-unauthenticated\] a paired Lite device \(lite-9\)/);
+	});
+});
+
+describe('holdDeleteEffect and the actor labels (MRC2-04-09A, MRC2-04-12)', () => {
+	const operator: LocalEffectActor = { kind: 'transport', actor: { peer: 'in-process' } };
+	let work: string;
+	beforeEach(() => {
+		work = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-local-effects-'));
+		vi.mocked(logger.warn).mockClear();
+	});
+	afterEach(() => fs.rmSync(work, { recursive: true, force: true }));
+
+	/** Real files on disk: a refusal is proven to leave them, not told to. */
+	function files(...names: string[]): string[] {
+		return names.map((name) => {
+			const file = path.join(work, name);
+			fs.writeFileSync(file, name);
+			return file;
+		});
+	}
+
+	function enrolledSource(
+		doc: Record<string, unknown> = document(),
+		confirm?: LocalEffectConfirmer
+	) {
+		const source = createLocalEffectsPolicySource({
+			identity: { read: () => enrolled },
+			policy: () => ({ appliedRevision: 3 }),
+			...(confirm ? { confirm } : {}),
+		});
+		expect(source.install(doc)).toMatchObject({ installed: true });
+		return source;
+	}
+
+	it('holds nothing with no authority or on a standalone host, and never touches a path itself', async () => {
+		const [a, b] = files('a.txt', 'b.txt');
+		await expect(holdDeleteEffect(null, [a, b], operator, 'FS')).resolves.toBeUndefined();
+		await expect(holdDeleteEffect(undefined, [], operator, 'FS')).resolves.toBeUndefined();
+		const standalone = createLocalEffectsPolicySource({
+			identity: { read: () => ({ status: 'none' }) },
+			policy: () => ({ appliedRevision: 3 }),
+		});
+		const authorize = vi.spyOn(standalone, 'authorize');
+		await expect(holdDeleteEffect(standalone, [a, b], operator, 'FS')).resolves.toBeUndefined();
+		expect(authorize).toHaveBeenCalledTimes(1);
+		expect(fs.existsSync(a)).toBe(true);
+		expect(fs.existsSync(b)).toBe(true);
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it('a batch is one hold of its first path with the count; a denying destructive class throws by code, logs under the sink context and leaves every path', async () => {
+		const [a, b, c] = files('a.txt', 'b.txt', 'c.txt');
+		const source = enrolledSource(
+			document({ classes: [{ class: 'destructive', verdict: 'deny' }] })
+		);
+		const authorize = vi.spyOn(source, 'authorize');
+		const failure = await holdDeleteEffect(source, [a, b, c], operator, 'AutoRun').then(
+			() => null,
+			(error: unknown) => error
+		);
+		expect(failure).toBeInstanceOf(LocalEffectRefusedError);
+		const error = failure as LocalEffectRefusedError;
+		expect(error.code).toBe('denied');
+		expect(error.message).toMatch(/^\[managed-denied\] /);
+		expect(error.receipt).toEqual({
+			policyRevision: 3,
+			class: 'destructive',
+			effect: 'delete',
+			actor: 'the operator',
+			target: a,
+			count: 3,
+			outcome: 'denied',
+		});
+		expect(authorize).toHaveBeenCalledTimes(1);
+		expect(authorize).toHaveBeenCalledWith({
+			effect: 'delete',
+			actor: operator,
+			target: a,
+			count: 3,
+		});
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			'Delete refused by the managed local-effects ceiling; nothing was removed',
+			'AutoRun',
+			{ code: 'denied', receipt: error.receipt }
+		);
+		for (const file of [a, b, c]) expect(fs.existsSync(file)).toBe(true);
+	});
+
+	it('enrolled with no ceiling refuses unavailable before anything; a class the ceiling omits is outside it', async () => {
+		const [a] = files('a.txt');
+		const bare = createLocalEffectsPolicySource({
+			identity: { read: () => enrolled },
+			policy: () => ({ appliedRevision: 3 }),
+		});
+		await expect(holdDeleteEffect(bare, [a], operator, 'FS')).rejects.toMatchObject({
+			name: 'LocalEffectRefusedError',
+			code: 'unavailable',
+			receipt: { policyRevision: 3, effect: 'delete', outcome: 'unavailable' },
+		});
+		const dataOnly = enrolledSource(
+			document({ classes: [{ class: 'data-transfer', verdict: 'allow' }] })
+		);
+		await expect(holdDeleteEffect(dataOnly, [a], operator, 'FS')).rejects.toMatchObject({
+			code: 'outside-ceiling',
+			receipt: { class: 'destructive', outcome: 'outside-ceiling' },
+		});
+		expect(logger.warn).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(logger.warn).mock.calls.map((call) => call[1])).toEqual(['FS', 'FS']);
+		expect(fs.existsSync(a)).toBe(true);
+	});
+
+	it('a confirm class puts the whole batch to the operator once, naming who asked; declined throws declined, confirmed resolves unlogged', async () => {
+		const [a, b] = files('a.txt', 'b.txt');
+		const confirm = vi.fn<LocalEffectConfirmer>(async () => 'declined');
+		const source = enrolledSource(document(), confirm);
+		const plugin: LocalEffectActor = { kind: 'plugin', pluginId: 'p' };
+		await expect(holdDeleteEffect(source, [a, b], plugin, 'FS')).rejects.toMatchObject({
+			code: 'declined',
+			receipt: { actor: 'plugin "p"', count: 2, outcome: 'declined' },
+		});
+		expect(confirm).toHaveBeenCalledTimes(1);
+		expect(confirm.mock.calls[0][0]).toMatchObject({
+			effect: 'delete',
+			class: 'destructive',
+			target: a,
+			count: 2,
+			actor: 'plugin "p"',
+		});
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		confirm.mockResolvedValueOnce('confirmed' as never);
+		await expect(holdDeleteEffect(source, [a, b], operator, 'FS')).resolves.toBeUndefined();
+		expect(confirm).toHaveBeenCalledTimes(2);
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(fs.existsSync(a)).toBe(true);
+		expect(fs.existsSync(b)).toBe(true);
+	});
+
+	it('labels a plugin by id and a transport by its peer; the calling actor is the transport the call was admitted over', () => {
+		expect(localEffectActorLabel({ kind: 'plugin', pluginId: 'p' })).toBe('plugin "p"');
+		expect(localEffectActorLabel(operator)).toBe('the operator');
+		expect(localEffectActorLabel({ kind: 'transport', actor: { peer: 'host-secret' } })).toBe(
+			'maestro-cli'
+		);
+		expect(callingLocalEffectActor()).toEqual({
+			kind: 'transport',
+			actor: { peer: 'in-process' },
+		});
+		expect(runAsTransport({ kind: 'cli' }, () => callingLocalEffectActor())).toEqual({
+			kind: 'transport',
+			actor: { peer: 'host-secret' },
+		});
 	});
 });

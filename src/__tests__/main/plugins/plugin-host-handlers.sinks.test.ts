@@ -33,6 +33,7 @@ import {
 	createLocalEffectsPolicySource,
 	LocalEffectRefusedError,
 	type LocalEffectAuthority,
+	type LocalEffectConfirmer,
 	type LocalEffectDecision,
 	type LocalEffectRequest,
 } from '../../../main/enterprise/local-effects-policy';
@@ -58,10 +59,15 @@ const enrolled: IdentityRead = {
 };
 
 /** The real ceiling source, enrolled at revision 3 unless told otherwise, with every decision it answers recorded. */
-function localEffects(verdict: 'allow' | 'deny' | null, identity: IdentityRead = enrolled) {
+function localEffects(
+	verdict: 'allow' | 'deny' | 'confirm' | null,
+	identity: IdentityRead = enrolled,
+	confirm?: LocalEffectConfirmer
+) {
 	const source = createLocalEffectsPolicySource({
 		identity: { read: () => identity },
 		policy: () => ({ appliedRevision: 3 }),
+		...(confirm ? { confirm } : {}),
 	});
 	if (verdict) {
 		expect(
@@ -361,6 +367,104 @@ describe('createPluginEffectSinks: managed', () => {
 		const { socketId } = await s.netConnect('p', REFUSED_SOCKET_URL, {}, binding);
 		await whenClosed(socketId);
 		expect(pushed.map((e) => (e.payload as { type: string }).type)).toContain('close');
+	});
+
+	it('a confirm class puts the plugin hand-off to the operator with the full URL: declined opens nothing, confirmed opens; a demo instance is held before its no-op', async () => {
+		const port = fakeSpawnPort();
+		const confirm = vi.fn<LocalEffectConfirmer>(async () => 'declined');
+		const asked = localEffects('confirm', enrolled, confirm);
+		const { sinks: s, openExternal } = sinks({
+			spawnAuthority: () => port,
+			localEffects: () => asked.authority,
+		});
+		const url = 'https://docs.example/page?x=1';
+		const failure = await s.openExternal('p', url, undefined, binding).then(
+			() => null,
+			(error: unknown) => error
+		);
+		expect(failure).toBeInstanceOf(LocalEffectRefusedError);
+		expect((failure as LocalEffectRefusedError).code).toBe('declined');
+		expect((failure as LocalEffectRefusedError).receipt).toMatchObject({
+			actor: 'plugin "p"',
+			target: 'https://docs.example',
+			outcome: 'declined',
+		});
+		expect(confirm).toHaveBeenCalledTimes(1);
+		expect(confirm.mock.calls[0][0]).toMatchObject({
+			effect: 'open-external',
+			class: 'data-transfer',
+			target: url,
+			count: 1,
+			actor: 'plugin "p"',
+		});
+		expect(openExternal).not.toHaveBeenCalled();
+		confirm.mockResolvedValueOnce('confirmed' as never);
+		await s.openExternal('p', url, undefined, binding);
+		expect(openExternal).toHaveBeenCalledWith(url, undefined);
+		expect(asked.decisions[1]).toMatchObject({
+			allowed: true,
+			managed: { actor: 'plugin "p"', outcome: 'confirmed' },
+		});
+		// A receipt-less call never reaches the operator on a managed host.
+		await expect(s.openExternal('p', url)).rejects.toThrow(/\[managed-unauthenticated\]/);
+		expect(confirm).toHaveBeenCalledTimes(2);
+
+		// The isolated demo instance: the ceiling is consulted first, so a denied
+		// hand-off is refused there too; an allowed one is the audit no-op.
+		const denied = localEffects('deny');
+		const { sinks: demoRefusing, openExternal: demoRefusedOpen } = sinks({
+			spawnAuthority: () => port,
+			localEffects: () => denied.authority,
+			demoMode: true,
+		});
+		await expect(demoRefusing.openExternal('p', url, undefined, binding)).rejects.toThrow(
+			/\[managed-denied\]/
+		);
+		expect(demoRefusedOpen).not.toHaveBeenCalled();
+		const allowed = localEffects('allow');
+		const { sinks: demo, openExternal: demoOpen } = sinks({
+			spawnAuthority: () => port,
+			localEffects: () => allowed.authority,
+			demoMode: true,
+		});
+		await expect(demo.openExternal('p', url, undefined, binding)).resolves.toBeUndefined();
+		expect(demoOpen).not.toHaveBeenCalled();
+		expect(allowed.decisions).toEqual([
+			expect.objectContaining({
+				allowed: true,
+				managed: expect.objectContaining({ actor: 'plugin "p"' }),
+			}),
+		]);
+	});
+
+	it('a standalone port on an unenrolled host opens and spawns with or without a binding and holds nothing; turning managed refuses the next receipt-less call', async () => {
+		const port = fakeSpawnPort({ standing: 'standalone' });
+		const bare = localEffects(null, { status: 'none' });
+		const { sinks: s, openExternal } = sinks({
+			spawnAuthority: () => port,
+			localEffects: () => bare.authority,
+		});
+		await s.openExternal('p', 'https://docs.example/a');
+		await s.openExternal('p', 'https://docs.example/b', undefined, binding);
+		expect(openExternal).toHaveBeenNthCalledWith(1, 'https://docs.example/a', undefined);
+		expect(openExternal).toHaveBeenNthCalledWith(2, 'https://docs.example/b', undefined);
+		// The standalone source answers with no receipt either way.
+		expect(bare.decisions).toEqual([{ allowed: true }, { allowed: true }]);
+		const marker = path.join(work, 'marker.txt');
+		await expect(s.spawn('p', nodeSpec(marker))).resolves.toMatchObject({ exitCode: 0 });
+		expect(fs.readFileSync(marker, 'utf8')).toBe('ran');
+		expect(port.asked).toHaveLength(0);
+
+		port.setStanding('managed');
+		fs.rmSync(marker);
+		await expect(s.openExternal('p', 'https://docs.example/c')).rejects.toThrow(
+			/\[managed-unauthenticated\]/
+		);
+		await expect(s.spawn('p', nodeSpec(marker))).rejects.toThrow(/\[managed-denied\]/);
+		expect(openExternal).toHaveBeenCalledTimes(2);
+		expect(bare.requests).toHaveLength(2);
+		expect(fs.existsSync(marker)).toBe(false);
+		expect(port.asked).toHaveLength(0);
 	});
 });
 

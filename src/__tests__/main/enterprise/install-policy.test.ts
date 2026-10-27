@@ -463,6 +463,98 @@ describe('createInstallPolicySource', () => {
 		expect(source.authorize(request())).toMatchObject({ allowed: false, code: 'unavailable' });
 	});
 
+	it('answers a download sink and an MCP writer from one document, and follows the revision the host is under (MRC2-04-12)', () => {
+		let revision = 3;
+		const source = createInstallPolicySource({
+			identity: { read: () => enrolled },
+			policy: () => ({ appliedRevision: revision }),
+		});
+		const grant = { agentId: 'claude-code', server: 'maestro-coworking', route: 'child-process' };
+		expect(source.install(document({ mcpServers: [grant] }))).toEqual({
+			installed: true,
+			policyRevision: 3,
+		});
+		const digest = vi.fn(() => ZIP_SHA);
+		const server = (over: Partial<McpServerRequest> = {}): McpServerRequest => ({
+			agentId: 'claude-code',
+			server: 'maestro-coworking',
+			actor: INSTALL_OPERATOR,
+			...over,
+		});
+
+		// The download sink (WakaTime): a zip the ceiling does not pin is refused
+		// at the fetch stage before any byte is requested or written, and at the
+		// execute stage before its bytes are digested; the pinned zip is admitted
+		// with the source it must download from, and its bytes are held on extract.
+		const unpinned = request({ file: 'wakatime-cli-linux-amd64.zip' });
+		expect(source.authorize(unpinned)).toMatchObject({
+			allowed: false,
+			code: 'unpinned',
+			managed: { stage: 'fetch', source: null, expected: null, actual: null },
+		});
+		expect(source.authorize({ ...unpinned, stage: 'execute', digest })).toMatchObject({
+			allowed: false,
+			code: 'unpinned',
+		});
+		expect(digest).not.toHaveBeenCalled();
+		expect(source.authorize(request())).toMatchObject({
+			allowed: true,
+			pin: { source: SOURCE, sha256: ZIP_SHA },
+			managed: { stage: 'fetch', source: SOURCE },
+		});
+		expect(source.authorize(request({ stage: 'execute', digest }))).toMatchObject({
+			allowed: true,
+			managed: { stage: 'execute', actual: ZIP_SHA, outcome: 'within-ceiling' },
+		});
+		expect(digest).toHaveBeenCalledTimes(1);
+
+		// The MCP writer: the grant binds the one agent and server it names; any
+		// other entry is refused server-denied and nothing is written.
+		expect(source.authorizeMcpServer(server())).toMatchObject({
+			allowed: true,
+			grant,
+			managed: { route: 'child-process', outcome: 'within-ceiling' },
+		});
+		expect(source.authorizeMcpServer(server({ agentId: 'codex' }))).toMatchObject({
+			allowed: false,
+			code: 'server-denied',
+			managed: { agentId: 'codex', route: null, outcome: 'server-denied' },
+		});
+		expect(source.authorizeMcpServer(server({ server: 'other-server' }))).toMatchObject({
+			allowed: false,
+			code: 'server-denied',
+		});
+
+		// A revision the host moved past leaves the installed document behind:
+		// both sinks are refused unavailable, by name, until a new one lands.
+		revision = 4;
+		expect(source.authorize(request())).toMatchObject({
+			allowed: false,
+			code: 'unavailable',
+			message: expect.stringContaining('revision 3'),
+			managed: { policyRevision: 4 },
+		});
+		expect(source.authorizeMcpServer(server())).toMatchObject({
+			allowed: false,
+			code: 'unavailable',
+			managed: { policyRevision: 4 },
+		});
+		expect(source.install(document({ policyRevision: 4 }))).toEqual({
+			installed: true,
+			policyRevision: 4,
+		});
+		expect(source.authorize(request())).toMatchObject({
+			allowed: true,
+			managed: { policyRevision: 4 },
+		});
+		// The new document grants no server, so the writer is refused again.
+		expect(source.authorizeMcpServer(server())).toMatchObject({
+			allowed: false,
+			code: 'server-denied',
+			managed: { policyRevision: 4 },
+		});
+	});
+
 	it('refuses a paired device with no registered actor before reading the ceiling', () => {
 		const source = createInstallPolicySource({
 			identity: { read: () => enrolled },
