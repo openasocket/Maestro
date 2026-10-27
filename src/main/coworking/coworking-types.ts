@@ -44,6 +44,84 @@ export const COWORKING_SOCKET_OVERRIDE_ENV_VAR = 'MAESTRO_COWORKING_SOCKET_OVERR
 export const COWORKING_SESSION_ID_ENV_VAR = 'MAESTRO_COWORKING_SESSION_ID';
 
 /**
+ * Env var carrying the run admission identity of the agent process that owns
+ * this MCP subprocess (MRC2-04-08B): the lease the managed desktop sink
+ * admitted the spawn on, stamped beside the session id, so the bundled server
+ * script can carry it into its handshake and the bridge can hold the
+ * connection to the lease still bound to that process. A `MAESTRO_MANAGED_`
+ * name, which the environment ceiling strips from every user layer; a
+ * standalone host stamps nothing.
+ */
+export const COWORKING_RUN_ADMISSION_ENV_VAR = 'MAESTRO_MANAGED_RUN_ADMISSION';
+
+/** The lease's run identity, as the sink stamps it and the handshake carries it. */
+export interface CoworkingRunAdmission {
+	leaseId: string;
+	authorityId: string;
+	attemptId: string;
+	requestId: string;
+	runId: string | null;
+	policyRevision: number | null;
+}
+
+/** The env value: canonical enough for a script that only forwards it unread. */
+export function encodeCoworkingRunAdmission(run: CoworkingRunAdmission): string {
+	return JSON.stringify(run);
+}
+
+export type CoworkingRunAdmissionRead =
+	| { status: 'absent' }
+	| { status: 'ok'; run: CoworkingRunAdmission }
+	| { status: 'invalid'; reason: string };
+
+const isText = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
+
+/**
+ * Read the admission a handshake carries. A missing or blank value is absent;
+ * anything else is the stamped shape or a refusal naming what is wrong, never
+ * a connection bound as if it carried nothing.
+ */
+export function readCoworkingRunAdmission(raw: unknown): CoworkingRunAdmissionRead {
+	if (raw === undefined || raw === null || (typeof raw === 'string' && raw.trim() === '')) {
+		return { status: 'absent' };
+	}
+	if (typeof raw !== 'string')
+		return { status: 'invalid', reason: 'the admission is not a string' };
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch (error) {
+		return { status: 'invalid', reason: `the admission is not JSON: ${(error as Error).message}` };
+	}
+	if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+		return { status: 'invalid', reason: 'the admission is not an object' };
+	}
+	const run = parsed as Record<string, unknown>;
+	for (const field of ['leaseId', 'authorityId', 'attemptId', 'requestId']) {
+		if (!isText(run[field])) {
+			return { status: 'invalid', reason: `the admission's ${field} is not a non-empty string` };
+		}
+	}
+	if (run.runId !== null && !isText(run.runId)) {
+		return { status: 'invalid', reason: "the admission's runId is not a string or null" };
+	}
+	if (run.policyRevision !== null && typeof run.policyRevision !== 'number') {
+		return { status: 'invalid', reason: "the admission's policyRevision is not a number or null" };
+	}
+	return {
+		status: 'ok',
+		run: {
+			leaseId: run.leaseId as string,
+			authorityId: run.authorityId as string,
+			attemptId: run.attemptId as string,
+			requestId: run.requestId as string,
+			runId: run.runId as string | null,
+			policyRevision: run.policyRevision as number | null,
+		},
+	};
+}
+
+/**
  * Description of a terminal tab as advertised to the agent via `list_terminals`.
  * Mirrors `TerminalTab` (renderer-side) but only the MCP-relevant fields and
  * uses the public readable id (`term:N`) instead of the internal UUID.

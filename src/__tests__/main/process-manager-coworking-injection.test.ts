@@ -19,6 +19,10 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import type { ProcessConfig, SpawnResult } from '../../main/process-manager';
 
 // The literal env var names the generated MCP server script actually reads.
@@ -260,5 +264,82 @@ describe('getCoworkingServerScript socket precedence', () => {
 		expect(getCoworkingServerScript()).toContain(
 			'process.env.MAESTRO_COWORKING_SOCKET_OVERRIDE || process.env.MAESTRO_COWORKING_SOCKET'
 		);
+	});
+});
+
+/**
+ * MRC2-04-08B: the generated script dials a local socket path only and
+ * carries the run admission the sink stamped into its handshake.
+ */
+describe('getCoworkingServerScript local socket rule and run admission', () => {
+	type LocalPathRule = (p: unknown) => boolean;
+	function localPathRule(platform: string): LocalPathRule {
+		const script = getCoworkingServerScript();
+		const match = script.match(/function isLocalSocketPath\(p\) \{[\s\S]*?\n\}/);
+		expect(match, 'isLocalSocketPath not found in generated script').not.toBeNull();
+		// Evaluate the real function from the artifact under a controlled platform.
+		const fn = new Function('process', `${match![0]}\nreturn isLocalSocketPath;`) as (proc: {
+			platform: string;
+		}) => LocalPathRule;
+		return fn({ platform });
+	}
+
+	it('admits a Unix socket path on POSIX and a named pipe on Windows, nothing network-shaped', () => {
+		const posix = localPathRule('darwin');
+		expect(posix('/tmp/maestro/coworking.sock')).toBe(true);
+		expect(posix('/tmp/odd:name.sock')).toBe(true);
+		for (const bad of [
+			'127.0.0.1:4000',
+			'localhost:4000',
+			'tcp://127.0.0.1:4000',
+			'ws://x',
+			'relative.sock',
+			'',
+			42,
+		]) {
+			expect(posix(bad), String(bad)).toBe(false);
+		}
+		const win = localPathRule('win32');
+		expect(win('\\\\.\\pipe\\maestro-coworking-abc')).toBe(true);
+		expect(win('\\\\?\\pipe\\maestro-coworking-abc')).toBe(true);
+		for (const bad of [
+			'C:\\Users\\x\\sock',
+			'127.0.0.1:4000',
+			'\\\\server\\share\\x',
+			'/tmp/x.sock',
+		]) {
+			expect(win(bad), bad).toBe(false);
+		}
+	});
+
+	it('refuses a network-shaped socket at startup, before any connection, when run for real', () => {
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'coworking-script-'));
+		try {
+			const scriptPath = path.join(dir, 'coworking-mcp-server.js');
+			fs.writeFileSync(scriptPath, getCoworkingServerScript());
+			const r = spawnSync(process.execPath, [scriptPath], {
+				env: { PATH: process.env.PATH ?? '', MAESTRO_COWORKING_SOCKET: '127.0.0.1:4000' },
+				encoding: 'utf8',
+				timeout: 10_000,
+			});
+			expect(r.status).toBe(1);
+			expect(r.stderr).toContain(
+				'[maestro-coworking] MAESTRO_COWORKING_SOCKET must name a local Unix socket or named pipe, not "127.0.0.1:4000"'
+			);
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	it('connects by path only and forwards the stamped admission in hello, unread', () => {
+		const script = getCoworkingServerScript();
+		expect(script).toContain('net.createConnection({ path: SOCKET_PATH }');
+		expect(script).not.toMatch(/createConnection\([^)]*\b(host|port)\b/);
+		expect(script).toContain(
+			'const RUN_ADMISSION = process.env.MAESTRO_MANAGED_RUN_ADMISSION || null;'
+		);
+		expect(script).toContain('if (RUN_ADMISSION) params.admission = RUN_ADMISSION;');
+		// The stamp is forwarded as the string it was stamped as: nothing parses it here.
+		expect(script).not.toMatch(/JSON\.parse\(RUN_ADMISSION/);
 	});
 });

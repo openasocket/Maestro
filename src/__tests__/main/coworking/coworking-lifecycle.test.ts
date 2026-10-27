@@ -55,11 +55,36 @@ describe('startCoworkingService', () => {
 
 	it('the PID walk asks the process manager the start was given for each candidate pid', async () => {
 		const getSessionIdByPid = vi.fn((pid: number) => (pid === 41 ? 'sess-41' : null));
-		await startCoworkingService(() => ({ getSessionIdByPid }));
+		await startCoworkingService(() => ({ getSessionIdByPid, coworkingAdmissionsOf: () => null }));
 		const options = vi.mocked(startCoworkingBridge).mock.calls[0][0];
 		// A pid the lookup knows resolves without walking the tree.
 		await expect(options?.resolveSessionFromPid?.(41)).resolves.toBe('sess-41');
 		expect(getSessionIdByPid).toHaveBeenCalledWith(41);
+	});
+
+	it('the run admissions a handshake is held to come from the process manager; none yet answers null (MRC2-04-08B)', async () => {
+		const run = {
+			leaseId: 'lease-1',
+			authorityId: 'auth',
+			attemptId: 'att-1',
+			requestId: 'req-1',
+			runId: null,
+			policyRevision: 1,
+		};
+		const coworkingAdmissionsOf = vi.fn((sessionId: string) =>
+			sessionId === 'sess-A' ? [run] : []
+		);
+		let manager: {
+			getSessionIdByPid: () => null;
+			coworkingAdmissionsOf: typeof coworkingAdmissionsOf;
+		} | null = null;
+		await startCoworkingService(() => manager);
+		const options = vi.mocked(startCoworkingBridge).mock.calls[0][0];
+		expect(options?.resolveRunAdmissions?.('sess-A')).toBeNull();
+		manager = { getSessionIdByPid: () => null, coworkingAdmissionsOf };
+		expect(options?.resolveRunAdmissions?.('sess-A')).toEqual([run]);
+		expect(options?.resolveRunAdmissions?.('sess-B')).toEqual([]);
+		expect(coworkingAdmissionsOf).toHaveBeenCalledWith('sess-A');
 	});
 
 	it('a bridge that fails to start is reported and never throws out of the service', async () => {

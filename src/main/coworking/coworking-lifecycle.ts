@@ -13,11 +13,14 @@ import { captureException } from '../utils/sentry';
 import { ensureCoworkingServerScript } from './coworking-server-paths';
 import { startCoworkingBridge, stopCoworkingBridge } from './coworking-bridge';
 import type { BrowserEffectAuthority } from '../enterprise/browser-policy';
+import type { CoworkingRunAdmission } from './coworking-types';
 import { resolveSessionFromPidWalk } from './pid-resolution';
 
 /** The slice of ProcessManager the bridge needs to bind a connection to an agent. */
 export interface CoworkingProcessLookup {
 	getSessionIdByPid(pid: number): string | null;
+	/** The run admissions bound to the agent's live processes; null on a standalone host (MRC2-04-08B). */
+	coworkingAdmissionsOf(sessionId: string): CoworkingRunAdmission[] | null;
 }
 
 /**
@@ -39,6 +42,10 @@ export async function startCoworkingService(
 					pid,
 					(candidate) => getProcessManager()?.getSessionIdByPid(candidate) ?? null
 				),
+			// No process manager yet is a host nothing has spawned on: no MCP
+			// subprocess exists to connect, and nothing is held to a lease.
+			resolveRunAdmissions: (sessionId) =>
+				getProcessManager()?.coworkingAdmissionsOf(sessionId) ?? null,
 		});
 	} catch (err) {
 		// EADDRINUSE means another Maestro process already owns the bridge

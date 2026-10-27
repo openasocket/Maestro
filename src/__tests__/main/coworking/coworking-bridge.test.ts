@@ -46,6 +46,7 @@ describe('coworking-bridge dispatch (handshake + session binding)', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		__testing.setResolveSessionFromPid(null);
+		__testing.setResolveRunAdmissions(null);
 	});
 
 	it('rejects listTerminals before hello', async () => {
@@ -302,5 +303,126 @@ describe('coworking-bridge dispatch (handshake + session binding)', () => {
 			method: 'wat' as 'hello',
 		});
 		expect(resp.error?.code).toBe(-32601);
+	});
+});
+
+/**
+ * MRC2-04-08B: on a managed host the handshake carries the run the owning
+ * agent process was admitted on, and the bridge holds the connection to a
+ * lease still bound to a live process of that session.
+ */
+describe('coworking-bridge hello under management (the run admission)', () => {
+	const run = {
+		leaseId: 'lease-7',
+		authorityId: 'auth-1',
+		attemptId: 'att-7',
+		requestId: 'req-7',
+		runId: null,
+		policyRevision: 3,
+	};
+	const hello = (conn: Socket, params: Record<string, unknown>) =>
+		__testing.dispatch(conn, { id: 1, method: 'hello', params });
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		__testing.setResolveSessionFromPid(null);
+		__testing.setResolveRunAdmissions(null);
+	});
+
+	it('standalone (the resolver answers null, or none is wired): bound as before, with or without an admission', async () => {
+		const a = newConn();
+		__testing.connections.set(a, { sessionId: null });
+		expect(
+			(await hello(a, { sessionId: 'sess-A', admission: JSON.stringify(run) })).result
+		).toEqual({
+			ok: true,
+		});
+		expect(__testing.connections.get(a)).toEqual({ sessionId: 'sess-A', admission: null });
+		const resolver = vi.fn(() => null);
+		__testing.setResolveRunAdmissions(resolver);
+		const b = newConn();
+		__testing.connections.set(b, { sessionId: null });
+		expect((await hello(b, { sessionId: 'sess-B' })).result).toEqual({ ok: true });
+		expect(resolver).toHaveBeenCalledWith('sess-B');
+		expect(__testing.connections.get(b)?.admission).toBeNull();
+	});
+
+	it('managed, no admission carried: refused by name, nothing bound, tools stay closed', async () => {
+		__testing.setResolveRunAdmissions(() => [run]);
+		const conn = newConn();
+		__testing.connections.set(conn, { sessionId: null });
+		const resp = await hello(conn, { sessionId: 'sess-A' });
+		expect(resp.error).toEqual({
+			code: -32002,
+			message:
+				'coworking bridge: [managed-admission-missing] this host runs under management and the handshake for sess-A carries no run admission; the connection is refused',
+		});
+		expect(__testing.connections.get(conn)?.sessionId).toBeNull();
+		const tool = await __testing.dispatch(conn, { id: 2, method: 'listTerminals' });
+		expect(tool.error?.code).toBe(-32002);
+		expect(tools.listTerminals).not.toHaveBeenCalled();
+	});
+
+	it('managed, an admission that is not the stamped shape: refused admission-invalid', async () => {
+		__testing.setResolveRunAdmissions(() => [run]);
+		const conn = newConn();
+		__testing.connections.set(conn, { sessionId: null });
+		expect(
+			(await hello(conn, { sessionId: 'sess-A', admission: '{not json' })).error?.message
+		).toMatch(/^coworking bridge: \[managed-admission-invalid\] the admission is not JSON: /);
+		expect(
+			(
+				await hello(conn, {
+					sessionId: 'sess-A',
+					admission: JSON.stringify({ ...run, leaseId: '' }),
+				})
+			).error?.message
+		).toBe(
+			"coworking bridge: [managed-admission-invalid] the admission's leaseId is not a non-empty string; the connection is refused"
+		);
+		expect((await hello(conn, { sessionId: 'sess-A', admission: 42 })).error?.message).toMatch(
+			/\[managed-admission-invalid\] the admission is not a string/
+		);
+		expect(__testing.connections.get(conn)?.sessionId).toBeNull();
+	});
+
+	it('managed, a lease bound to no live process of the session: refused admission-unbound', async () => {
+		__testing.setResolveRunAdmissions((sessionId) => (sessionId === 'sess-A' ? [run] : []));
+		const conn = newConn();
+		__testing.connections.set(conn, { sessionId: null });
+		const stale = JSON.stringify({ ...run, attemptId: 'att-old' });
+		expect((await hello(conn, { sessionId: 'sess-A', admission: stale })).error?.message).toBe(
+			'coworking bridge: [managed-admission-unbound] lease lease-7 (attempt att-old) is bound to no live process of sess-A; the connection is refused'
+		);
+		// The same admission claimed for another session is unbound there too.
+		expect(
+			(await hello(conn, { sessionId: 'sess-B', admission: JSON.stringify(run) })).error?.message
+		).toMatch(
+			/\[managed-admission-unbound\] lease lease-7 \(attempt att-7\) is bound to no live process of sess-B/
+		);
+		expect(__testing.connections.get(conn)?.sessionId).toBeNull();
+	});
+
+	it('managed, the admission of a live lease: bound, carried on the connection, by sessionId or by ppid', async () => {
+		const resolver = vi.fn((sessionId: string) => (sessionId === 'sess-A' ? [run] : []));
+		__testing.setResolveRunAdmissions(resolver);
+		const conn = newConn();
+		__testing.connections.set(conn, { sessionId: null });
+		expect(
+			(await hello(conn, { sessionId: 'sess-A', admission: JSON.stringify(run) })).result
+		).toEqual({ ok: true });
+		expect(__testing.connections.get(conn)).toEqual({ sessionId: 'sess-A', admission: run });
+		expect(resolver).toHaveBeenCalledWith('sess-A');
+		const tool = await __testing.dispatch(conn, { id: 2, method: 'listTerminals' });
+		expect(tool.error).toBeUndefined();
+		expect(tools.listTerminals).toHaveBeenCalledWith('sess-A');
+		// Resolved through the process tree instead: held to the session the walk found.
+		__testing.setResolveSessionFromPid(async (pid) => (pid === 4242 ? 'sess-A' : null));
+		const byPid = newConn();
+		__testing.connections.set(byPid, { sessionId: null });
+		expect((await hello(byPid, { ppid: 4242, admission: JSON.stringify(run) })).result).toEqual({
+			ok: true,
+		});
+		expect(__testing.connections.get(byPid)?.admission).toEqual(run);
 	});
 });

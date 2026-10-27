@@ -104,6 +104,10 @@ import {
 	tuiHandshakeKeyPath,
 } from '../../../shared/maestro-lib/managed/tui-handshake';
 import { withPermissionBypass } from '../../../maestro-p/open-tool-calls';
+import {
+	COWORKING_RUN_ADMISSION_ENV_VAR,
+	readCoworkingRunAdmission,
+} from '../../../main/coworking/coworking-types';
 import { TuiAdmissionError, TuiDriver, type PtySpawn } from '../../../maestro-p/tui-driver';
 import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
 
@@ -661,5 +665,76 @@ describe('the steering token on a managed host', () => {
 		expect(captured.processes!.has(refused.turn.sessionId)).toBe(false);
 		const steer = await bare.steer(refused.turn.sessionId, 'x');
 		expect(steer).toMatchObject({ verdict: 'refused', refusal: 'not-running' });
+	});
+});
+
+/**
+ * MRC2-04-08B: a managed spawn that carries the coworking env also carries the
+ * run it was admitted on, for the bundled MCP server to forward and the bridge
+ * to hold the connection to; the sink lists the admissions still bound to an
+ * agent's live processes and answers null on a standalone host.
+ */
+describe('the coworking run admission stamp on a managed host', () => {
+	const OWNING = 'tui-launch-agent';
+
+	it('stamps the lease identity on a claude --print spawn and lists it while the lease is bound', async () => {
+		const manager = managedManager();
+		const spawned = await admitAndSpawn(manager, tuiTurn({ command: binPath, args: HOST_ARGS }));
+		expect(spawned.result).toEqual(SPAWN_RESULT);
+		const env = envOf(captured.child[0]);
+		const read = readCoworkingRunAdmission(env[COWORKING_RUN_ADMISSION_ENV_VAR]);
+		expect(read.status).toBe('ok');
+		if (read.status !== 'ok') throw new Error(read.status);
+		expect(read.run).toMatchObject({
+			leaseId: spawned.admission.leaseId,
+			authorityId: spawned.admission.authorityId,
+			attemptId: spawned.admission.attemptId,
+			requestId: spawned.admission.requestId,
+			policyRevision: spawned.admission.policyRevision,
+		});
+		// Stamped at the sink, never on the request the snapshot digests.
+		expect(spawned.turn.customEnvVars?.[COWORKING_RUN_ADMISSION_ENV_VAR]).toBeUndefined();
+		// The sink's own view, by the owning agent the composite tab id resolves to.
+		expect(manager.coworkingAdmissionsOf(OWNING)).toEqual([read.run]);
+		expect(manager.coworkingAdmissionsOf('someone-else')).toEqual([]);
+		// Released with the process: no longer listed, so a stale stamp binds nothing.
+		expect(manager.kill(spawned.turn.sessionId)).toBe(true);
+		expect(manager.coworkingAdmissionsOf(OWNING)).toEqual([]);
+	});
+
+	it('names the same run the signed TUI handshake does on a maestro-p launch', async () => {
+		const manager = managedManager();
+		const spawned = await admitAndSpawn(manager, tuiTurn());
+		expect(spawned.result).toEqual(SPAWN_RESULT);
+		const env = envOf(captured.child[0]);
+		const handshake = readTuiHandshakeEnv(env, { readKey: () => readTuiHandshakeKey(dataDir) });
+		expect(handshake.status).toBe('ok');
+		if (handshake.status !== 'ok') throw new Error(handshake.status);
+		const read = readCoworkingRunAdmission(env[COWORKING_RUN_ADMISSION_ENV_VAR]);
+		expect(read).toEqual({ status: 'ok', run: handshake.payload.run });
+	});
+
+	it('stamps nothing with the coworking flag off, and nothing at all on a standalone host, which lists null', async () => {
+		const port = fakeSpawnPort();
+		const off = new ProcessManager(undefined, {
+			spawnAuthority: () => port,
+			userDataDir: dataDir,
+			isCoworkingEnabled: () => false,
+		});
+		const spawned = await admitAndSpawn(off, tuiTurn({ command: binPath, args: HOST_ARGS }));
+		expect(spawned.result).toEqual(SPAWN_RESULT);
+		expect(envOf(captured.child[0])).not.toHaveProperty(COWORKING_RUN_ADMISSION_ENV_VAR);
+		expect(envOf(captured.child[0])).not.toHaveProperty('MAESTRO_COWORKING_SESSION_ID');
+
+		const standalone = new ProcessManager(undefined, { userDataDir: dataDir });
+		expect(standalone.spawn(tuiTurn({ command: binPath, args: HOST_ARGS }))).toEqual(SPAWN_RESULT);
+		expect(envOf(captured.child[1])).toEqual({
+			MAESTRO_CLAUDE_BIN: binPath,
+			ELECTRON_RUN_AS_NODE: '1',
+			[STEERING_SOCKET_ENV_VAR]: expect.any(String),
+			MAESTRO_COWORKING_SESSION_ID: OWNING,
+			MAESTRO_COWORKING_SOCKET_OVERRIDE: '/tmp/test-bridge.sock',
+		});
+		expect(standalone.coworkingAdmissionsOf(OWNING)).toBeNull();
 	});
 });

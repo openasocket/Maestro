@@ -79,8 +79,11 @@ import { unusableCwdReason } from './utils/spawnCwd';
 import { getDefaultShell } from '../stores/defaults';
 import { captureException } from '../utils/sentry';
 import {
+	COWORKING_RUN_ADMISSION_ENV_VAR,
 	COWORKING_SESSION_ID_ENV_VAR,
 	COWORKING_SOCKET_OVERRIDE_ENV_VAR,
+	encodeCoworkingRunAdmission,
+	type CoworkingRunAdmission,
 } from '../coworking/coworking-types';
 import { resolveOwningMaestroSessionId } from '../coworking/coworking-session-id';
 import { getBridgeSocketPath } from '../coworking/coworking-socket-path';
@@ -638,17 +641,17 @@ export class ProcessManager extends EventEmitter {
 		// OpenCode) bind to the window that spawned them and self-heal when the
 		// config socket is stale. Codex does not propagate env and falls back to the
 		// config socket (single-window).
-		const configWithCoworkingSession =
-			config.toolType === 'terminal' || !this.isCoworkingEnabled()
-				? config
-				: {
-						...config,
-						customEnvVars: {
-							[COWORKING_SESSION_ID_ENV_VAR]: resolveOwningMaestroSessionId(config.sessionId),
-							[COWORKING_SOCKET_OVERRIDE_ENV_VAR]: getBridgeSocketPath(),
-							...(config.customEnvVars ?? {}),
-						},
-					};
+		const coworkingInjected = config.toolType !== 'terminal' && this.isCoworkingEnabled();
+		const configWithCoworkingSession = !coworkingInjected
+			? config
+			: {
+					...config,
+					customEnvVars: {
+						[COWORKING_SESSION_ID_ENV_VAR]: resolveOwningMaestroSessionId(config.sessionId),
+						[COWORKING_SOCKET_OVERRIDE_ENV_VAR]: getBridgeSocketPath(),
+						...(config.customEnvVars ?? {}),
+					},
+				};
 
 		// A managed local interactive Claude turn (maestro-p) carries the host's
 		// signed admission handshake into the TUI's environment (MRC2-03-05A):
@@ -687,9 +690,20 @@ export class ProcessManager extends EventEmitter {
 		// without it, so the record below is what lets `steer()` prove a frame
 		// is this host's for this run.
 		const steering = this.steeringCredentialsFor(configWithCoworkingSession, lease);
+		// A managed spawn that carries the coworking env also carries the run
+		// it was admitted on (MRC2-04-08B): the bundled MCP server forwards it
+		// in its handshake and the bridge holds the connection to the lease
+		// still bound here. Stamped after the ceiling, like the handshake.
+		const runAdmission =
+			lease && coworkingInjected && config.admission
+				? this.runAdmissionOf(config.admission, lease)
+				: null;
 		const stamped: Record<string, string> = {
 			...(handshake && handshake.ok ? handshake.env : {}),
 			...(steering ? { [STEERING_TOKEN_ENV_VAR]: steering.token } : {}),
+			...(runAdmission
+				? { [COWORKING_RUN_ADMISSION_ENV_VAR]: encodeCoworkingRunAdmission(runAdmission) }
+				: {}),
 		};
 		const configToSpawn =
 			Object.keys(stamped).length > 0
@@ -747,6 +761,21 @@ export class ProcessManager extends EventEmitter {
 		};
 	}
 
+	/** The run identity of one admitted spawn: the lease's, as the TUI handshake and the coworking stamp both name it. */
+	private runAdmissionOf(
+		admission: ProcessSpawnAdmission,
+		lease: DispatchLease
+	): CoworkingRunAdmission {
+		return {
+			leaseId: admission.leaseId,
+			authorityId: admission.authorityId,
+			attemptId: admission.attemptId,
+			requestId: admission.requestId,
+			runId: lease.runId,
+			policyRevision: admission.policyRevision,
+		};
+	}
+
 	/**
 	 * The handshake env for a managed spawn, or null when the spawn is not a
 	 * local maestro-p launch (the TUI is the only child that spawns a provider
@@ -781,14 +810,7 @@ export class ProcessManager extends EventEmitter {
 		}
 		const built = buildTuiHandshake({
 			key,
-			run: {
-				leaseId: admission.leaseId,
-				authorityId: admission.authorityId,
-				attemptId: admission.attemptId,
-				requestId: admission.requestId,
-				runId: lease.runId,
-				policyRevision: admission.policyRevision,
-			},
+			run: this.runAdmissionOf(admission, lease),
 			binaryPath: launch.claudeBinPath,
 			args: launch.args,
 			permissionMode: config.permission?.ceiling ?? null,
@@ -1086,6 +1108,25 @@ export class ProcessManager extends EventEmitter {
 	/** The host authority port this manager admits with, read live. */
 	managedPort(): ProcessSpawnAuthorityPort | null {
 		return this.spawnAuthority();
+	}
+
+	/**
+	 * The run admissions still bound to an agent's live processes, by the
+	 * owning Maestro session id the coworking bridge binds a handshake to (a
+	 * tab's composite id resolves to its agent), or null on a standalone host,
+	 * where no spawn carries one and the bridge checks nothing (MRC2-04-08B).
+	 * A released or revoked lease is not listed: its process is gone or going.
+	 */
+	coworkingAdmissionsOf(owningSessionId: string): CoworkingRunAdmission[] | null {
+		const port = this.spawnAuthority();
+		if (!port || port.standing() === 'standalone') return null;
+		const runs: CoworkingRunAdmission[] = [];
+		for (const [sessionId, bound] of this.boundLeases) {
+			if (resolveOwningMaestroSessionId(sessionId) !== owningSessionId) continue;
+			if (bound.lease.state() !== 'bound') continue;
+			runs.push(this.runAdmissionOf(bound.admission, bound.lease));
+		}
+		return runs;
 	}
 
 	/**

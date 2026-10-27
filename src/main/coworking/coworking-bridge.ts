@@ -27,12 +27,22 @@
  *
  * Either source is sufficient. If both are absent, or `ppid` is sent but resolves
  * to no known agent, the bridge rejects the connection - fail closed.
+ *
+ * On a managed host the handshake also carries `admission`, the run the
+ * desktop sink admitted the owning agent process on (MRC2-04-08B, stamped as
+ * `MAESTRO_MANAGED_RUN_ADMISSION`); it must name a lease still bound to a
+ * live process of the bound session (`resolveRunAdmissions`), else the
+ * connection is refused by name. A standalone host stamps and checks nothing.
  */
 
 import * as fs from 'fs';
 import * as net from 'net';
 import { logger } from '../utils/logger';
-import { COWORKING_SOCKET_ENV_VAR } from './coworking-types';
+import {
+	COWORKING_SOCKET_ENV_VAR,
+	readCoworkingRunAdmission,
+	type CoworkingRunAdmission,
+} from './coworking-types';
 import { getBridgeSocketPath } from './coworking-socket-path';
 import type {
 	BrowserOp,
@@ -172,9 +182,22 @@ export type CoworkingSessionFromPidResolver = (pid: number) => Promise<string | 
 
 let resolveSessionFromPid: CoworkingSessionFromPidResolver | null = null;
 
-/** Per-connection state keyed by socket. The sessionId is set on `hello` and
- *  stays put for the lifetime of the connection. */
-const connections = new WeakMap<net.Socket, { sessionId: string | null }>();
+/**
+ * The run admissions still bound to an agent's live processes, or null on a
+ * standalone host. Wired from the process manager at startup; a bridge with
+ * none wired knows of no lease and holds a handshake to nothing.
+ */
+export type CoworkingRunAdmissionResolver = (sessionId: string) => CoworkingRunAdmission[] | null;
+
+let resolveRunAdmissions: CoworkingRunAdmissionResolver | null = null;
+
+/** Per-connection state keyed by socket. The sessionId (and, on a managed host,
+ *  the admission the handshake carried) is set on `hello` and stays put for the
+ *  lifetime of the connection. */
+const connections = new WeakMap<
+	net.Socket,
+	{ sessionId: string | null; admission?: CoworkingRunAdmission | null }
+>();
 
 /** Every open connection, so stopping the bridge can drop them too (a WeakMap
  *  cannot be walked). Closing the server alone only stops NEW connections. */
@@ -197,10 +220,14 @@ let starting: Promise<void> | null = null;
 /** Start the bridge. Idempotent. Must be called inside `app.whenReady`. */
 export async function startCoworkingBridge(options?: {
 	resolveSessionFromPid?: CoworkingSessionFromPidResolver;
+	resolveRunAdmissions?: CoworkingRunAdmissionResolver;
 	browserAuthority?: () => BrowserEffectAuthority | null;
 }): Promise<void> {
 	if (options?.resolveSessionFromPid !== undefined) {
 		resolveSessionFromPid = options.resolveSessionFromPid;
+	}
+	if (options?.resolveRunAdmissions !== undefined) {
+		resolveRunAdmissions = options.resolveRunAdmissions;
 	}
 	if (options?.browserAuthority !== undefined) {
 		browserAuthority = options.browserAuthority;
@@ -413,6 +440,50 @@ function validateInteractionOp(raw: unknown): BrowserOp | null {
 	}
 }
 
+/**
+ * Hold a handshake to the run its owning process was admitted on
+ * (MRC2-04-08B). On a standalone host nothing is bound and nothing is checked.
+ * On a managed host the bundled server carries the stamp the sink put beside
+ * the session id; it must parse and name a lease still bound to a live process
+ * of that agent, else the connection is refused by name before any tool is
+ * reachable. An agent CLI that propagates no env (Codex) carries none and is
+ * refused here on a managed host, explicitly, never bound unchecked.
+ */
+function holdHandshakeAdmission(
+	sessionId: string,
+	offered: unknown
+):
+	| { ok: true; admission: CoworkingRunAdmission | null }
+	| { ok: false; error: { code: number; message: string } } {
+	const bound = resolveRunAdmissions?.(sessionId) ?? null;
+	if (bound === null) return { ok: true, admission: null };
+	const refuse = (code: string, detail: string) => ({
+		ok: false as const,
+		error: {
+			code: -32002,
+			message: `coworking bridge: [managed-${code}] ${detail}; the connection is refused`,
+		},
+	});
+	const read = readCoworkingRunAdmission(offered);
+	if (read.status === 'absent') {
+		return refuse(
+			'admission-missing',
+			`this host runs under management and the handshake for ${sessionId} carries no run admission`
+		);
+	}
+	if (read.status === 'invalid') return refuse('admission-invalid', read.reason);
+	const match = bound.find(
+		(run) => run.leaseId === read.run.leaseId && run.attemptId === read.run.attemptId
+	);
+	if (!match) {
+		return refuse(
+			'admission-unbound',
+			`lease ${read.run.leaseId} (attempt ${read.run.attemptId}) is bound to no live process of ${sessionId}`
+		);
+	}
+	return { ok: true, admission: match };
+}
+
 async function dispatch(
 	conn: net.Socket,
 	req: CoworkingBridgeRequest
@@ -421,7 +492,11 @@ async function dispatch(
 	const state = connections.get(conn);
 	try {
 		if (method === 'hello') {
-			const params = (req.params ?? {}) as { sessionId?: string | null; ppid?: number };
+			const params = (req.params ?? {}) as {
+				sessionId?: string | null;
+				ppid?: number;
+				admission?: unknown;
+			};
 			let bound: string | null = null;
 
 			// Explicit sessionId wins. Agents that propagate env (Claude Code,
@@ -491,7 +566,17 @@ async function dispatch(
 				};
 			}
 
-			if (state) state.sessionId = bound;
+			// The session is resolved; on a managed host the connection is held
+			// to the lease its owning process still runs under before it binds.
+			const held = holdHandshakeAdmission(bound, params.admission);
+			if (!held.ok) {
+				logger.warn(`${LOG_CTX} handshake refused: ${held.error.message}`, 'Coworking');
+				return { id: req.id, error: held.error };
+			}
+			if (state) {
+				state.sessionId = bound;
+				state.admission = held.admission;
+			}
 			return { id: req.id, result: { ok: true } };
 		}
 
@@ -685,6 +770,9 @@ export const __testing = {
 	connections,
 	setResolveSessionFromPid(fn: CoworkingSessionFromPidResolver | null) {
 		resolveSessionFromPid = fn;
+	},
+	setResolveRunAdmissions(fn: CoworkingRunAdmissionResolver | null) {
+		resolveRunAdmissions = fn;
 	},
 	setBrowserAuthority(fn: (() => BrowserEffectAuthority | null) | null) {
 		browserAuthority = fn;

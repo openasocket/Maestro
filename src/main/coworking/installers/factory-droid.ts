@@ -11,6 +11,7 @@ const commentJson = require('comment-json');
 import { atomicWriteFile } from '../../utils/atomic-json-store';
 import { COWORKING_MCP_SERVER_NAME } from '../coworking-types';
 import type { CoworkingMcpServerSpec } from '../coworking-types';
+import { holdMcpServerWrite, type McpInstallOptions } from './managed';
 import type { AgentMcpInstaller } from './types';
 
 function configPath(): string {
@@ -46,7 +47,9 @@ export const factoryDroidInstaller: AgentMcpInstaller = {
 		return !!servers && Object.prototype.hasOwnProperty.call(servers, COWORKING_MCP_SERVER_NAME);
 	},
 
-	async install(spec: CoworkingMcpServerSpec) {
+	async install(spec: CoworkingMcpServerSpec, options: McpInstallOptions = {}) {
+		// Held before the file is read: a managed refusal leaves mcp.json untouched.
+		holdMcpServerWrite('factory-droid', spec, options);
 		const cfg = (await readConfig()) as Record<string, unknown>;
 		if (!cfg.mcpServers || typeof cfg.mcpServers !== 'object') {
 			cfg.mcpServers = commentJson.parse('{}');

@@ -17,6 +17,14 @@
  * reads (`list_browsers`, `get_browser_url`, `read_browser`) and the permission-gated
  * browser interaction tools (`browser_navigate` ... `browser_close_tab`). Anything
  * richer (subscriptions, resource templates, prompts) is a later PR.
+ *
+ * The bridge is the only thing it ever dials, and only as a local socket path
+ * (a Unix-domain socket or a Windows named pipe, `isLocalSocketPath`): a value
+ * shaped like a host and port or a URL is refused before any connection, so no
+ * configuration makes this process a network client (MRC2-04-08B). Under
+ * management it also carries the run admission the desktop sink stamped on the
+ * owning agent process (`MAESTRO_MANAGED_RUN_ADMISSION`) into its handshake,
+ * unread, so the bridge can hold the connection to the lease still bound there.
  */
 
 const COWORKING_SCRIPT_SOURCE = String.raw`#!/usr/bin/env node
@@ -44,6 +52,25 @@ if (!SOCKET_PATH) {
   process.exit(1);
 }
 
+// The bridge is a Unix-domain socket or a Windows named pipe: a local endpoint
+// the OS scopes to this user. Anything else (a host and port, a URL, a relative
+// name resolved against the cwd) is refused before any connection is attempted,
+// so this process never dials a network address, loopback included.
+function isLocalSocketPath(p) {
+  if (typeof p !== 'string' || p.length === 0) return false;
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(p)) return false;
+  if (process.platform === 'win32') return /^\\\\[.?]\\pipe\\[^\\]+$/i.test(p);
+  return p.charAt(0) === '/';
+}
+if (!isLocalSocketPath(SOCKET_PATH)) {
+  process.stderr.write(
+    '[maestro-coworking] MAESTRO_COWORKING_SOCKET must name a local Unix socket or named pipe, not ' +
+      JSON.stringify(SOCKET_PATH) +
+      '\n'
+  );
+  process.exit(1);
+}
+
 // SESSION_ID identifies which Maestro session (left-bar agent) owns this MCP
 // subprocess. The fast path is env injection at agent-CLI spawn time, which
 // works for any agent CLI that propagates parent env to its MCP subprocesses
@@ -54,6 +81,14 @@ if (!SOCKET_PATH) {
 // here would make coworking unusable in Codex; failing closed for unknown
 // callers happens in the bridge instead.
 const SESSION_ID = process.env.MAESTRO_COWORKING_SESSION_ID || null;
+
+// Under management the owning agent process was spawned on a lease, and the
+// desktop sink stamps that run identity beside the session id. This process
+// carries it into the handshake unread: the bridge is what holds the
+// connection to the lease still bound to the owning process, and refuses a
+// handshake on a managed host that carries none. A standalone host stamps
+// nothing and the bridge checks nothing.
+const RUN_ADMISSION = process.env.MAESTRO_MANAGED_RUN_ADMISSION || null;
 
 const SERVER_INFO = { name: 'maestro-coworking', version: '1.0.0' };
 // Listed newest-first. The MCP spec says: if the client requests a version we
@@ -349,6 +384,7 @@ function connectBridge() {
   if (connectPromise) return connectPromise;
 
   connectPromise = new Promise((resolve, reject) => {
+    // A path, never a host or port: SOCKET_PATH passed isLocalSocketPath above.
     const c = net.createConnection({ path: SOCKET_PATH }, () => {
       c.setEncoding('utf8');
       // Reset shared buffer for this fresh connection.
@@ -440,6 +476,7 @@ function bridgeHello(conn) {
   const params = {};
   if (SESSION_ID) params.sessionId = SESSION_ID;
   if (typeof process.ppid === 'number' && process.ppid > 0) params.ppid = process.ppid;
+  if (RUN_ADMISSION) params.admission = RUN_ADMISSION;
   helloPromise = rpc(conn, 'hello', params).catch((err) => {
     helloPromise = null;
     throw err;

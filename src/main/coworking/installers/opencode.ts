@@ -11,6 +11,7 @@ const commentJson = require('comment-json');
 import { atomicWriteFile } from '../../utils/atomic-json-store';
 import { COWORKING_MCP_SERVER_NAME } from '../coworking-types';
 import type { CoworkingMcpServerSpec } from '../coworking-types';
+import { holdMcpServerWrite, type McpInstallOptions } from './managed';
 import type { AgentMcpInstaller } from './types';
 
 function configDir(): string {
@@ -52,7 +53,9 @@ export const opencodeInstaller: AgentMcpInstaller = {
 		return !!mcp && Object.prototype.hasOwnProperty.call(mcp, COWORKING_MCP_SERVER_NAME);
 	},
 
-	async install(spec: CoworkingMcpServerSpec) {
+	async install(spec: CoworkingMcpServerSpec, options: McpInstallOptions = {}) {
+		// Held before the file is read: a managed refusal leaves opencode.json untouched.
+		holdMcpServerWrite('opencode', spec, options);
 		const cfg = (await readConfig()) as Record<string, unknown>;
 		if (!cfg.mcp || typeof cfg.mcp !== 'object') {
 			cfg.mcp = commentJson.parse('{}');

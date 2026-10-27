@@ -21,6 +21,8 @@ import { createInstallPolicySource } from '../../../../main/enterprise/install-p
 import type { IdentityRead } from '../../../../main/enterprise/identity-store';
 import { claudeCodeInstaller } from '../../../../main/coworking/installers/claude-code';
 import { codexInstaller } from '../../../../main/coworking/installers/codex';
+import { factoryDroidInstaller } from '../../../../main/coworking/installers/factory-droid';
+import { opencodeInstaller } from '../../../../main/coworking/installers/opencode';
 import {
 	holdMcpServerWrite,
 	mcpServerScriptPath,
@@ -184,5 +186,78 @@ describe('coworking MCP writers under the install ceiling', () => {
 		await expect(claudeCodeInstaller.install(spec())).rejects.toThrow(
 			/^\[managed-unpinned\] the install ceiling pins no coworking-mcp-server coworking-mcp-server\.js;/
 		);
+	});
+
+	// MRC2-04-08B: the OpenCode and Factory Droid writers hold the same way.
+	describe('the OpenCode and Factory Droid writers', () => {
+		let xdg: string | undefined;
+		beforeEach(() => {
+			xdg = process.env.XDG_CONFIG_HOME;
+			delete process.env.XDG_CONFIG_HOME;
+		});
+		afterEach(() => {
+			if (xdg === undefined) delete process.env.XDG_CONFIG_HOME;
+			else process.env.XDG_CONFIG_HOME = xdg;
+		});
+		const opencodeConfig = () => path.join(tmpHome, '.config', 'opencode', 'opencode.json');
+		const droidConfig = () => path.join(tmpHome, '.factory', 'mcp.json');
+
+		it('standalone: both write their entry as before, with no script on disk', async () => {
+			fs.rmSync(scriptPath);
+			await opencodeInstaller.install(spec());
+			await factoryDroidInstaller.install(spec());
+			expect(
+				JSON.parse(fs.readFileSync(opencodeConfig(), 'utf8')).mcp['maestro-coworking']
+			).toEqual({
+				type: 'local',
+				command: [spec().command, scriptPath],
+				environment: spec().env,
+				enabled: true,
+			});
+			expect(
+				JSON.parse(fs.readFileSync(droidConfig(), 'utf8')).mcpServers['maestro-coworking']
+			).toEqual({ type: 'stdio', ...spec() });
+		});
+
+		it('enrolled with no ceiling: both refused unavailable, no file created', async () => {
+			read = enrolled;
+			const refusal = /^\[managed-unavailable\] the managed install ceiling is unavailable/;
+			await expect(opencodeInstaller.install(spec())).rejects.toThrow(refusal);
+			await expect(factoryDroidInstaller.install(spec())).rejects.toThrow(refusal);
+			expect(fs.existsSync(path.join(tmpHome, '.config'))).toBe(false);
+			expect(fs.existsSync(path.join(tmpHome, '.factory'))).toBe(false);
+		});
+
+		it('the pinned script granted to opencode on the enforced route: written for opencode only, an existing droid file untouched', async () => {
+			read = enrolled;
+			source.install({
+				policyRevision: 3,
+				pins: [pinned()],
+				mcpServers: [grant('opencode'), grant('factory-droid', 'pty')],
+			});
+			const seed = '{\n  // user comment\n  "mcpServers": {}\n}\n';
+			fs.mkdirSync(path.dirname(droidConfig()), { recursive: true });
+			fs.writeFileSync(droidConfig(), seed);
+			const actor = { kind: 'transport', actor: { peer: 'host-secret' } } as const;
+			await opencodeInstaller.install(spec(), { actor });
+			expect(await opencodeInstaller.isInstalled()).toBe(true);
+			await expect(factoryDroidInstaller.install(spec(), { actor })).rejects.toThrow(
+				/^\[managed-route-unsupported\] the maestro-coworking MCP server for factory-droid is granted on pty/
+			);
+			expect(fs.readFileSync(droidConfig(), 'utf8')).toBe(seed);
+			// Other script bytes refuse both before any file is read.
+			source.install({
+				policyRevision: 3,
+				pins: [pinned(`${SCRIPT}// tampered\n`)],
+				mcpServers: [grant('opencode'), grant('factory-droid')],
+			});
+			await expect(opencodeInstaller.install(spec())).rejects.toThrow(
+				/^\[managed-digest-mismatch\]/
+			);
+			await expect(factoryDroidInstaller.install(spec())).rejects.toThrow(
+				/^\[managed-digest-mismatch\]/
+			);
+			expect(fs.readFileSync(droidConfig(), 'utf8')).toBe(seed);
+		});
 	});
 });
