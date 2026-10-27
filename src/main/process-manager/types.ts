@@ -39,6 +39,7 @@ import {
 	type LaunchPermissionMode,
 	type ManagedRouteCeiling,
 } from '../../shared/maestro-lib/launch/env';
+import type { LaunchPermissionDecision } from '../../shared/maestro-lib/launch/launch-plan';
 
 // ============================================================================
 // Managed admission at the process sink
@@ -559,6 +560,14 @@ export interface ProcessConfig {
 	 *  managed host every spawn must carry one that is live for this exact
 	 *  request; on a standalone host it is ignored. */
 	admission?: ProcessSpawnAdmission;
+	/** The launch plan's permission decision for this spawn (MRC2-03-03A): the
+	 *  mode the turn asked for and the ceiling it was measured against, null
+	 *  on an unmanaged launch or a route that pins none. Stamped by the spawn
+	 *  handler off `plan.permission`, host-authoritative (nothing the renderer
+	 *  sends names it), and read by a sink that maps access flags itself (the
+	 *  Codex app-server sandbox) in place of its own reading of the flags. A
+	 *  terminal plans nothing and carries none. */
+	permission?: LaunchPermissionDecision;
 	/** The Auto Run lineage this spawn is one attempt of (the workflow, the
 	 *  run, the task request, this attempt, and the run's owner fence if one
 	 *  exists). `admitSpawn` binds it into the verified context in place of

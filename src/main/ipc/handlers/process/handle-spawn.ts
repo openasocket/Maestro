@@ -89,7 +89,12 @@ import {
 	type SshRemoteEndpointIdentity,
 } from '../../../../shared/maestro-lib/launch/ssh-remote-resolver';
 import type { RemoteEndpointQualifier } from '../../../enterprise/remote';
-import { buildAgentLaunchPlan } from '../../../../shared/maestro-lib/launch/launch-plan';
+import {
+	buildAgentLaunchPlan,
+	isManagedLaunchRefusal,
+	type LaunchPermissionDecision,
+	type ManagedLaunchInput,
+} from '../../../../shared/maestro-lib/launch/launch-plan';
 import { resolvePromptDelivery } from '../../../../shared/maestro-lib/launch/prompt-delivery';
 import { preparePermissionRelayArgs } from '../../../permission-relay';
 import {
@@ -389,8 +394,17 @@ async function handleProcessSpawnImpl(
 	// The prompt delivery the plan reports is decided again at spawn time from
 	// the FINAL prompt (system prompt and preambles folded in), with the same
 	// shared function.
+	// Under management the plan is handed the mode this turn asks for and, when
+	// the port lends the policy's route for this provider, the route itself
+	// (MRC2-03-03A): the plan measures the mode and the final flags against the
+	// route's ceiling and refuses a launch above it by name. Its decision
+	// (`plan.permission`) rides the config to the sink, so a sink that maps
+	// access flags itself (the Codex app-server sandbox) reads the plan's
+	// decision instead of its own reading of the flags. A port lending no
+	// route plans unmanaged, as before, and the decision then names no ceiling.
 	// ========================================================================
 	let effectiveCustomEnvVars: Record<string, string> | undefined;
+	let launchPermission: LaunchPermissionDecision | undefined;
 	if (config.toolType !== 'terminal') {
 		const planResult = buildAgentLaunchPlan({
 			surface: 'desktop',
@@ -404,19 +418,30 @@ async function handleProcessSpawnImpl(
 			agentCustomEnvVars: agentConfigValues.customEnvVars as Record<string, string> | undefined,
 			sessionCustomEnvVars: config.sessionCustomEnvVars,
 			readOnlyMode: isReadOnly,
+			permissionMode: requestedPermissionMode(config),
+			managed: desktopManagedRoute(processManager, config.toolType),
 			sshRemoteConfig: config.sessionSshRemoteConfig,
 			sshStore: createSshRemoteStoreAdapter(settingsStore),
 		});
 		if (!planResult.ok) {
-			logger.error('SSH remote could not be resolved; not spawning', LOG_CONTEXT, {
-				sessionId: config.sessionId,
-				remoteId: config.sessionSshRemoteConfig?.remoteId,
-				reason: planResult.reason,
-			});
+			if (isManagedLaunchRefusal(planResult.reason)) {
+				logger.error('Managed launch plan refused the spawn; not spawning', LOG_CONTEXT, {
+					sessionId: config.sessionId,
+					toolType: config.toolType,
+					reason: planResult.reason,
+				});
+			} else {
+				logger.error('SSH remote could not be resolved; not spawning', LOG_CONTEXT, {
+					sessionId: config.sessionId,
+					remoteId: config.sessionSshRemoteConfig?.remoteId,
+					reason: planResult.reason,
+				});
+			}
 			reportSpawnRefusal(deps, config.sessionId, planResult.error);
 			return { success: false, pid: 0 };
 		}
 		effectiveCustomEnvVars = planResult.plan.envVars;
+		launchPermission = planResult.plan.permission;
 	} else {
 		effectiveCustomEnvVars = configResolution.effectiveCustomEnvVars;
 	}
@@ -1165,6 +1190,9 @@ async function handleProcessSpawnImpl(
 			// The ids the child's stamped record was minted with (see above), so
 			// the sink binds the same request it carries; absent on an undispatched turn.
 			dispatchedAs,
+			// The launch plan's permission decision (MRC2-03-03A), host-authoritative:
+			// the sinks that map access flags read it, never the renderer's word.
+			permission: launchPermission,
 			command: commandToSpawn,
 			args: argsToSpawn,
 			// When using SSH, use user's home directory as local cwd
@@ -1480,6 +1508,26 @@ async function qualifyManagedSshRemote(
  * found before a process exists (an unresolvable SSH remote, the permission
  * relay), which therefore have no exit to report them.
  */
+/**
+ * The route a managed host's policy pins for this provider, as the launch
+ * plan takes it (MRC2-03-03A, the desktop twin of the CLI's `cliManagedRoute`):
+ * the plan then measures the mode the turn asks for and the final flags
+ * against the route's ceiling before anything is spawned, and its decision
+ * rides the config to the sink. A standalone host, and a managed host whose
+ * port composes no route producer (or pins no route on this provider), plan
+ * exactly as before: the admission on the snapshot decides. A terminal is
+ * never asked for.
+ */
+function desktopManagedRoute(
+	processManager: Pick<ProcessManager, 'managedPort'>,
+	toolType: string
+): ManagedLaunchInput | undefined {
+	const port = processManager.managedPort();
+	if (!port || port.standing() !== 'managed') return undefined;
+	const route = port.routeCeiling?.(toolType) ?? null;
+	return route ? { route } : undefined;
+}
+
 export function reportSpawnRefusal(
 	deps: Pick<SpawnHandlerDependencies, 'getMainWindow'>,
 	sessionId: string,

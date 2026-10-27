@@ -80,6 +80,9 @@ export function pluginHeadlessChain(origin: 'user' | 'auto' | 'relay'): ManagedP
  * port's own verifier as an in-process action (no transport carried a plugin)
  * with the chain the caller names, so the lease records the plugin behind the
  * turn. A caller that already carries a chain keeps it; nothing is widened.
+ * The route the port lends for a provider (`routeCeiling`, MRC2-03-03A) is
+ * lent on too, so the launch plan measures the headless turn's mode and
+ * flags against the policy's ceiling; a port with no producer lends null.
  */
 export function pluginHeadlessAuthority(
 	port: ProcessSpawnAuthorityPort,
@@ -92,6 +95,7 @@ export function pluginHeadlessAuthority(
 		},
 		policy: () => port.policy(),
 		unavailableReason: null,
+		routeCeiling: (providerId) => port.routeCeiling?.(providerId) ?? null,
 		context: (input) =>
 			port.verify({
 				actor: { peer: 'in-process' },
@@ -134,6 +138,7 @@ export function pluginBoundHeadlessAuthority(
 		},
 		policy: () => port.policy(),
 		unavailableReason: null,
+		routeCeiling: (providerId) => port.routeCeiling?.(providerId) ?? null,
 		context: (input) => {
 			const problems = delegationContextProblems(binding.delegation).map(
 				(problem) => `the plugin binding is not a delegation context: ${problem}`

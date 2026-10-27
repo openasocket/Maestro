@@ -796,6 +796,110 @@ describe('CodexAppServerSpawner fallback and safety', () => {
 		expect(server.sent('turn/start')).toHaveLength(1);
 	});
 
+	/**
+	 * MRC2-03-03A: the sandbox is read under the launch plan's permission
+	 * decision (`config.permission`). A sandbox wider than the ceiling starts
+	 * nothing on either transport; a turn naming none runs at the ceiling's
+	 * sandbox, verified against the thread echo; no ceiling maps as before.
+	 */
+	describe("the launch plan's permission decision", () => {
+		const NO_SANDBOX_ARGS = ['-C', '/tmp/codex-project', 'exec', '--json', '--skip-git-repo-check'];
+		const STANDARD = { requested: 'standard', ceiling: 'standard' } as const;
+
+		it('refuses a danger-full-access turn under a standard ceiling: no process on either transport, the tab told why', () => {
+			const h = createHarness(new FakeAppServer(() => {}));
+			const result = h.spawner.spawn(
+				h.config({
+					args: BYPASS_ARGS,
+					admission: fakeAdmission(),
+					permission: { requested: 'full', ceiling: 'standard' },
+				})
+			);
+			expect(result).toMatchObject({
+				success: false,
+				pid: 0,
+				managed: { state: 'denied', code: 'policy-denied' },
+			});
+			expect(result.error).toContain(
+				"sandbox danger-full-access asks for more than the policy's ceiling"
+			);
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(h.fallbackToCli).not.toHaveBeenCalled();
+			expect(h.processes.size).toBe(0);
+			expect(h.errors).toHaveLength(1);
+			expect(h.errors[0]).toMatchObject({ type: 'permission_denied', recoverable: false });
+			expect((h.errors[0] as { message: string }).message).toContain(
+				'allows at most "standard" (workspace-write) for codex'
+			);
+		});
+
+		it("runs a turn naming no sandbox at the ceiling's workspace-write, verified against the thread echo", async () => {
+			const server = scriptedServer(
+				(msg, s) => {
+					s.send({ id: msg.id, result: { turn: { id: turnId, status: 'inProgress' } } });
+					s.send({ method: 'turn/started', params: { threadId, turn: { id: turnId } } });
+					s.send({
+						method: 'turn/completed',
+						params: { threadId, turn: { id: turnId, status: 'completed' } },
+					});
+				},
+				{
+					thread: { id: threadId },
+					sandbox: { type: 'workspaceWrite', writableRoots: [] },
+					approvalPolicy: 'never',
+				}
+			);
+			const h = createHarness(server);
+
+			h.spawner.spawn(
+				h.config({ args: NO_SANDBOX_ARGS, admission: fakeAdmission(), permission: STANDARD })
+			);
+			expect(await h.exited).toBe(0);
+			expect(h.fallbackToCli).not.toHaveBeenCalled();
+			expect(server.sent('thread/start')[0].params).toEqual({
+				cwd: '/tmp/codex-project',
+				approvalPolicy: 'never',
+				sandbox: 'workspace-write',
+			});
+			expect(server.sent('turn/start')).toHaveLength(1);
+			expect(h.errors).toEqual([]);
+		});
+
+		it('ends a managed turn whose thread echoes a wider sandbox than the pin, never on exec', async () => {
+			const server = scriptedServer(() => {}, {
+				thread: { id: threadId },
+				sandbox: { type: 'dangerFullAccess' },
+				approvalPolicy: 'never',
+			});
+			const h = createHarness(server);
+
+			h.spawner.spawn(
+				h.config({ args: NO_SANDBOX_ARGS, admission: fakeAdmission(), permission: STANDARD })
+			);
+			expect(await h.exited).toBe(1);
+			expect(h.fallbackToCli).not.toHaveBeenCalled();
+			expect(server.sent('thread/start')[0].params).toMatchObject({ sandbox: 'workspace-write' });
+			expect(server.sent('turn/start')).toEqual([]);
+			expect((h.errors[0] as { message: string }).message).toContain(
+				'exec fallback is not qualified under management'
+			);
+		});
+
+		it('maps a decision naming no ceiling exactly as an unmanaged turn', async () => {
+			const fixture = loadFixture('plain-turn');
+			const server = new FakeAppServer(fixtureDriver(fixture).onClientMessage);
+			const h = createHarness(server);
+
+			h.spawner.spawn(h.config({ permission: { requested: 'full', ceiling: null } }));
+			expect(await h.exited).toBe(0);
+			expect(h.fallbackToCli).not.toHaveBeenCalled();
+			expect(server.sent('thread/start')[0].params).toMatchObject({
+				sandbox: 'danger-full-access',
+			});
+			expect(h.errors).toEqual([]);
+		});
+	});
+
 	describe('stop ladder start on each platform', () => {
 		const originalPlatform = process.platform;
 		const setPlatform = (platform: NodeJS.Platform) =>

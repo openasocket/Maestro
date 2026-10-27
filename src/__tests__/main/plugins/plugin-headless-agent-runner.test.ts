@@ -1029,5 +1029,36 @@ describe('managed admission through the host authority (MRC-09-02)', () => {
 			]);
 			expect(verify).not.toHaveBeenCalled();
 		});
+
+		it("lends the port's route ceiling to both authorities, and null when the port composes none (MRC2-03-03A)", () => {
+			const bare = fakeSpawnPort();
+			expect(bare.routeCeiling).toBeUndefined();
+			expect(pluginHeadlessAuthority(bare, []).routeCeiling?.('codex')).toBeNull();
+			expect(
+				pluginBoundHeadlessAuthority(bare, binding(), 'agent-a').routeCeiling?.('codex')
+			).toBeNull();
+
+			const route = {
+				providerId: 'codex',
+				model: null,
+				baseUrl: null,
+				accountDir: null,
+				login: 'provider-login' as const,
+				permissionMode: 'standard' as const,
+			};
+			const asked: string[] = [];
+			const port = fakeSpawnPort();
+			port.routeCeiling = (providerId: string) => {
+				asked.push(providerId);
+				return providerId === 'codex' ? route : null;
+			};
+			expect(
+				pluginHeadlessAuthority(port, pluginHeadlessChain('relay')).routeCeiling?.('codex')
+			).toBe(route);
+			const bound = pluginBoundHeadlessAuthority(port, binding(), 'agent-a');
+			expect(bound.routeCeiling?.('codex')).toBe(route);
+			expect(bound.routeCeiling?.('claude-code')).toBeNull();
+			expect(asked).toEqual(['codex', 'codex', 'claude-code']);
+		});
 	});
 });

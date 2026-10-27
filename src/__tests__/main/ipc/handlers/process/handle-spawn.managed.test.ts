@@ -397,6 +397,110 @@ describe('process:spawn under management: the permission-mode ceiling', () => {
 	});
 });
 
+/**
+ * MRC2-03-03A: the launch plan is handed the mode the turn asks for and the
+ * route the port lends (`routeCeiling`), measures both against the ceiling,
+ * and its decision (`plan.permission`) rides the config to the sink,
+ * host-authoritative. A port lending no route plans unmanaged, as before.
+ */
+describe("process:spawn under management: the plan's permission decision rides to the sink", () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	const route = (permissionMode: 'readonly' | 'standard' | 'full' | null) => ({
+		providerId: 'codex',
+		model: null,
+		baseUrl: null,
+		accountDir: null,
+		login: 'provider-login' as const,
+		permissionMode,
+	});
+
+	it('hands the plan the lent route and refuses a full request above its ceiling by name, before admission and the sink', async () => {
+		const port = fakeSpawnPort();
+		const asked: string[] = [];
+		port.routeCeiling = (providerId: string) => {
+			asked.push(providerId);
+			return route('standard');
+		};
+		const h = harness(port);
+		const result = await handleProcessSpawn(payload({ permissionMode: 'full' }), h.deps);
+		expect(result).toEqual({ success: false, pid: 0 });
+		expect(asked).toEqual(['codex']);
+		expect(port.asked).toHaveLength(0);
+		expect(h.spawn).not.toHaveBeenCalled();
+		const refusal = refusalSentToTab(h);
+		expect(refusal).toContain('permission mode "full" asks for more than the policy\'s ceiling');
+		expect(refusal).toContain('allows at most "standard" for codex');
+	});
+
+	it('stamps the plan decision on the config the sink is handed for a request within the ceiling', async () => {
+		const port = fakeSpawnPort();
+		port.routeCeiling = () => route('standard');
+		const h = harness(port);
+		const result = await handleProcessSpawn(payload({ permissionMode: 'readonly' }), h.deps);
+		expect(result).toEqual({ pid: 4242, success: true });
+		expect(port.asked).toHaveLength(1);
+		const config = spawned(h);
+		expect(config.permission).toEqual({ requested: 'readonly', ceiling: 'standard' });
+		expect(config.args).toEqual(expect.arrayContaining(['--sandbox', 'read-only']));
+		expect(config.args).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+		expect(config.admission).toBeDefined();
+	});
+
+	it("refuses a standard Codex request under a standard ceiling by the bypass flag the desktop's batch arguments carry, naming the flag", async () => {
+		// Codex's batch arguments add `--dangerously-bypass-approvals-and-sandbox`
+		// in every mode but read-only, so on the desktop a "standard" Codex turn
+		// asks for full access on its command line; the plan's flag check holds
+		// it to the ceiling by name rather than trusting the mode's label.
+		const port = fakeSpawnPort();
+		port.routeCeiling = () => route('standard');
+		const h = harness(port);
+		const result = await handleProcessSpawn(payload({ permissionMode: 'standard' }), h.deps);
+		expect(result).toEqual({ success: false, pid: 0 });
+		expect(port.asked).toHaveLength(0);
+		expect(h.spawn).not.toHaveBeenCalled();
+		const refusal = refusalSentToTab(h);
+		expect(refusal).toContain('The launch arguments route around the policy');
+		expect(refusal).toContain(
+			'--dangerously-bypass-approvals-and-sandbox asks for full access but the policy\'s ceiling allows at most "standard" for codex'
+		);
+	});
+
+	it('names no ceiling when the lent route pins no mode, and runs the full request as asked', async () => {
+		const port = fakeSpawnPort();
+		port.routeCeiling = () => route(null);
+		const h = harness(port);
+		await handleProcessSpawn(payload({ permissionMode: 'full' }), h.deps);
+		const config = spawned(h);
+		expect(config.permission).toEqual({ requested: 'full', ceiling: null });
+		expect(config.args).toContain('--dangerously-bypass-approvals-and-sandbox');
+	});
+
+	it('plans unmanaged when the port lends no route, the decision still stamped and naming no ceiling', async () => {
+		const port = fakeSpawnPort();
+		expect(port.routeCeiling).toBeUndefined();
+		const h = harness(port);
+		await handleProcessSpawn(payload({ permissionMode: 'full' }), h.deps);
+		expect(spawned(h).permission).toEqual({ requested: 'full', ceiling: null });
+	});
+
+	it('never asks a standalone port for a route, and a decision the renderer sends is replaced by the plan', async () => {
+		const port = fakeSpawnPort({ standing: 'standalone' });
+		const consulted = vi.fn(() => route('standard'));
+		port.routeCeiling = consulted;
+		const h = harness(port);
+		const forged = { permission: { requested: 'readonly', ceiling: 'readonly' } };
+		await handleProcessSpawn(
+			{ ...payload({ permissionMode: 'full' }), ...forged } as SpawnProcessConfig,
+			h.deps
+		);
+		expect(consulted).not.toHaveBeenCalled();
+		expect(spawned(h).permission).toEqual({ requested: 'full', ceiling: null });
+	});
+});
+
 describe('process:spawn on a standalone host: unchanged', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();

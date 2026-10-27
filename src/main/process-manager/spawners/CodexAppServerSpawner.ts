@@ -24,6 +24,12 @@
  * whether the prompt is running, so it is reported rather than retried:
  * sending the prompt twice is worse than an error.
  *
+ * The sandbox is read under the launch plan's permission decision
+ * (`config.permission`, MRC2-03-03A): a turn asking for a sandbox wider than
+ * the policy's ceiling is refused by name and starts nothing on either
+ * transport (exec would apply the same flags), and a turn naming none runs
+ * at the ceiling's sandbox. An unmanaged turn maps its flags as before.
+ *
  * On an SSH remote the child is the local ssh client of the launch the spawn
  * handler built (`config.codexAppServerSsh`, see `ssh-launch.ts`). Its launch
  * script goes down stdin first and the JSON-RPC lines follow it. The script
@@ -35,7 +41,7 @@ import { EventEmitter } from 'events';
 import { logger } from '../../utils/logger';
 import { createOutputParser } from '../../parsers';
 import { captureException } from '../../utils/sentry';
-import type { ProcessConfig, ManagedProcess, SpawnResult } from '../types';
+import type { AgentError, ProcessConfig, ManagedProcess, SpawnResult } from '../types';
 import type { DataBufferManager } from '../handlers/DataBufferManager';
 import { StdoutHandler } from '../handlers/StdoutHandler';
 import { StderrHandler } from '../handlers/StderrHandler';
@@ -186,7 +192,15 @@ export class CodexAppServerSpawner {
 	}
 
 	spawn(config: ProcessConfig): SpawnResult {
-		const parsed = parseCodexAppServerInvocation(config);
+		// The launch plan's permission decision bounds the sandbox (MRC2-03-03A):
+		// a turn asking for a wider one than the ceiling allows is refused by
+		// name and starts NOTHING, on this transport or on exec, which would
+		// apply the same flags with approvals bypassed. Unmanaged turns, and a
+		// decision naming no ceiling, map exactly as before.
+		const parsed = parseCodexAppServerInvocation(config, config.permission);
+		if (!parsed.ok && parsed.refused) {
+			return this.refuse(config, parsed.reason);
+		}
 		if (!parsed.ok) {
 			logger.info(
 				'[CodexAppServerSpawner] Turn not carried by app-server; using exec',
@@ -209,6 +223,36 @@ export class CodexAppServerSpawner {
 			});
 			return this.fallbackToCli(config);
 		}
+	}
+
+	/**
+	 * A turn the policy's ceiling forbids: the tab is told why (an agent error,
+	 * since no process exists to report it), nothing is started on either
+	 * transport, and the result names the policy's decision the way the sink's
+	 * own admission refusals do.
+	 */
+	private refuse(config: ProcessConfig, reason: string): SpawnResult {
+		const message = `Codex turn refused under management: ${reason}. Nothing was started.`;
+		logger.error('[CodexAppServerSpawner] Turn refused by the permission ceiling', LOG_CONTEXT, {
+			sessionId: config.sessionId,
+			reason,
+			requested: config.permission?.requested,
+			ceiling: config.permission?.ceiling ?? null,
+		});
+		this.context.emitter.emit('agent-error', config.sessionId, {
+			type: 'permission_denied',
+			message,
+			recoverable: false,
+			agentId: config.toolType,
+			sessionId: config.sessionId,
+			timestamp: Date.now(),
+		} satisfies AgentError);
+		return {
+			pid: 0,
+			success: false,
+			error: message,
+			managed: { state: 'denied', code: 'policy-denied' },
+		};
 	}
 }
 
