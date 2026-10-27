@@ -32,13 +32,23 @@ import type {
 import type { LifecycleFact } from '../../../../shared/maestro-lib/managed/events';
 import type { ManagedDelegationRef } from '../../../../shared/maestro-lib/managed/types';
 import {
+	admitProbeTurn,
 	bindingEnrollment,
 	createManagedHostAdapter,
+	createProbeRefusalCache,
 	installationIdentity,
 	managedAuthorityId,
+	ownRunIdentity,
+	POLICY_FRESHNESS_MS,
+	PROBE_REFUSAL_TTL_MS,
+	probeRouteRefusal,
+	probeTurnIdentity,
 	projectPolicyStatus,
+	type ProbeRefusalKey,
 } from '../../../../shared/maestro-lib/managed/host-adapter';
 import { inProcessContext } from '../../../../shared/maestro-lib/managed/operations';
+import { dispatchSnapshotDigest } from '../../../../shared/maestro-lib/managed/authority';
+import { fakeSpawnPort } from '../../../helpers/managedSpawnPort';
 import {
 	createMaestroRuntime,
 	type MaestroRuntime,
@@ -1128,6 +1138,301 @@ describe('runtime with a host adapter', () => {
 		expect(await untrusted.managedBinding.authority().admit(admission())).toMatchObject({
 			state: 'unavailable',
 			message: 'older copy',
+		});
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Probe turns (MRC2-02-04, tested by MRC2-02-07A): a provider started for its
+// metadata alone, admitted like a turn against the real local authority and
+// the real verifier behind `fakeSpawnPort` (the policy answer is the table).
+// ---------------------------------------------------------------------------
+
+describe('probe turns', () => {
+	const spec = { command: '/bin/codex', args: ['app-server'], cwd: '/work', env: { A: '1' } };
+
+	/** The verified context a host binds a probing actor into. */
+	function probeContext(
+		port: ReturnType<typeof fakeSpawnPort>,
+		traceId = 'codex-skill-probe:/work'
+	) {
+		const verified = port.verify({
+			actor: { peer: 'host-secret' },
+			identity: probeTurnIdentity(),
+			traceId,
+			policyRevision: 1,
+			workflow: null,
+		});
+		if (!verified.ok) throw new Error(verified.problems.join('; '));
+		return verified.context;
+	}
+
+	describe('probeRouteRefusal', () => {
+		it('refuses the Codex app-server route by name on the real table: no enforcement producer in this build', () => {
+			const refusal = probeRouteRefusal('codex', 'codex-app-server');
+			expect(refusal).toMatchObject({ state: 'unavailable', code: 'capability-unsupported' });
+			expect(refusal!.message).toContain('codex');
+			expect(refusal!.message).toContain('codex-app-server');
+			expect(refusal!.message).toContain('Codex app-server transport');
+			expect(refusal!.message).toContain('no managed enforcement producer');
+			expect(refusal!.message).toContain('Nothing was started');
+		});
+
+		it('qualifies the child-process route of a provider with a batch mode, and nothing else', () => {
+			expect(probeRouteRefusal('codex', 'child-process')).toBeNull();
+			expect(probeRouteRefusal('claude-code', 'child-process')).toBeNull();
+			for (const route of ['pty', 'ssh', 'opencode-server'] as const) {
+				expect(probeRouteRefusal('codex', route)).toMatchObject({
+					state: 'unavailable',
+					code: 'capability-unsupported',
+					message: expect.stringContaining(route),
+				});
+			}
+		});
+
+		it('refuses a provider the table does not know, naming the route', () => {
+			expect(probeRouteRefusal('no-such-provider', 'child-process')).toMatchObject({
+				state: 'unavailable',
+				code: 'capability-unsupported',
+				message: expect.stringContaining('no-such-provider'),
+			});
+		});
+	});
+
+	describe('probeTurnIdentity', () => {
+		it('is its own request, one attempt, no run above it', () => {
+			let n = 0;
+			const identity = probeTurnIdentity(() => `id-${++n}`);
+			expect(identity).toEqual({
+				requestId: 'id-1',
+				idempotencyKey: 'id-1',
+				attemptId: 'id-2',
+				runId: null,
+				rootRunId: null,
+				parentRunId: null,
+			});
+			expect(ownRunIdentity(() => 'same')).toEqual({
+				requestId: 'same',
+				idempotencyKey: 'same',
+				attemptId: 'same',
+				runId: null,
+				rootRunId: null,
+				parentRunId: null,
+			});
+		});
+
+		it('mints distinct ids by default, so two probes are never one request', () => {
+			const first = probeTurnIdentity();
+			const second = probeTurnIdentity();
+			expect(first.requestId).not.toBe(second.requestId);
+			expect(first.attemptId).not.toBe(first.requestId);
+			expect(first.runId).toBeNull();
+		});
+	});
+
+	describe('admitProbeTurn', () => {
+		it('asks the authority for a lease on the probe snapshot and returns the lease-backed admission startTurn takes', async () => {
+			const port = fakeSpawnPort();
+			const context = probeContext(port);
+			const admitted = await admitProbeTurn({
+				authority: port.authority,
+				policy: port.policy(),
+				context,
+				spec,
+				attribution: { provider: 'codex', origin: 'cli', target: { kind: 'local' } },
+			});
+			expect(admitted.ok).toBe(true);
+			if (!admitted.ok) return;
+			expect(port.asked).toHaveLength(1);
+			expect(port.asked[0].context).toBe(context);
+			expect(port.asked[0].policy).toEqual(port.policy());
+			expect(port.asked[0].snapshot).toMatchObject({
+				purpose: 'probe',
+				operation: 'start',
+				origin: 'cli',
+				provider: 'codex',
+				executable: '/bin/codex',
+				args: ['app-server'],
+				cwd: '/work',
+				envKeys: ['A'],
+				target: { kind: 'local' },
+			});
+			expect(admitted.admission.attribution).toEqual({
+				provider: 'codex',
+				origin: 'cli',
+				target: { kind: 'local' },
+				operation: 'start',
+				purpose: 'probe',
+			});
+			const live = port.authority.live();
+			expect(live.map((l) => l.leaseId)).toEqual([admitted.leaseId]);
+			expect(live[0].snapshotDigest).toBe(dispatchSnapshotDigest(port.asked[0].snapshot));
+			expect(live[0].state()).toBe('issued');
+
+			// The gate is the real lease admission: the same spec checks out, a
+			// changed one is refused lease-invalid, the pid binds, the exit releases.
+			const { gate, attribution } = admitted.admission;
+			expect(gate.admit(buildDispatchSnapshot(spec, attribution))).toEqual({ ok: true });
+			expect(
+				gate.admit(buildDispatchSnapshot({ ...spec, cwd: '/elsewhere' }, attribution))
+			).toEqual({
+				ok: false,
+				state: 'denied',
+				code: 'lease-invalid',
+				message: expect.stringContaining('snapshot-mismatch'),
+			});
+			expect(
+				gate.admit(buildDispatchSnapshot(spec, { ...attribution, purpose: 'conversation' }))
+			).toMatchObject({ ok: false, code: 'lease-invalid' });
+			gate.bound!(4242);
+			expect(live[0].state()).toBe('bound');
+			expect(live[0].pid()).toBe(4242);
+			gate.released!({
+				exitCode: 0,
+				signal: null,
+				interrupted: false,
+				stderrText: '',
+				stdoutText: '',
+				droppedOutputBytes: 0,
+			});
+			expect(live[0].state()).toBe('released');
+			expect(live[0].ended().release).toEqual({ outcome: 'exited', exitCode: 0, signal: null });
+			expect(port.authority.live()).toHaveLength(0);
+		});
+
+		it('hears a revocation through the gate while bound', async () => {
+			const port = fakeSpawnPort();
+			const admitted = await admitProbeTurn({
+				authority: port.authority,
+				policy: port.policy(),
+				context: probeContext(port),
+				spec,
+				attribution: { provider: 'codex' },
+			});
+			expect(admitted.ok).toBe(true);
+			if (!admitted.ok) return;
+			const heard: string[] = [];
+			admitted.admission.gate.bound!(1);
+			admitted.admission.gate.onRevoked!((reason) => heard.push(reason));
+			expect(port.authority.revoke(admitted.leaseId, 'policy replaced')).toBe(true);
+			expect(heard).toEqual(['policy replaced']);
+			expect(
+				admitted.admission.gate.admit(buildDispatchSnapshot(spec, admitted.admission.attribution))
+			).toMatchObject({
+				ok: false,
+				code: 'lease-invalid',
+				message: expect.stringContaining('revoked'),
+			});
+		});
+
+		it('returns the authority refusal with its state, code and message, and mints no lease', async () => {
+			const denied = fakeSpawnPort({
+				decide: () => ({ decision: 'deny', reason: 'no probes', policyRevision: 1 }),
+			});
+			expect(
+				await admitProbeTurn({
+					authority: denied.authority,
+					policy: denied.policy(),
+					context: probeContext(denied),
+					spec,
+					attribution: { provider: 'codex' },
+				})
+			).toEqual({ ok: false, state: 'denied', code: 'policy-denied', message: 'no probes' });
+			expect(denied.authority.live()).toHaveLength(0);
+
+			const away = fakeSpawnPort({ decide: () => ({ decision: 'unavailable', reason: 'away' }) });
+			expect(
+				await admitProbeTurn({
+					authority: away.authority,
+					policy: away.policy(),
+					context: probeContext(away),
+					spec,
+					attribution: { provider: 'codex' },
+				})
+			).toEqual({ ok: false, state: 'unavailable', code: 'runtime-unavailable', message: 'away' });
+
+			const lost = fakeSpawnPort({ decide: () => ({ decision: 'unknown', reason: 'lost' }) });
+			expect(
+				await admitProbeTurn({
+					authority: lost.authority,
+					policy: lost.policy(),
+					context: probeContext(lost),
+					spec,
+					attribution: { provider: 'codex' },
+				})
+			).toEqual({ ok: false, state: 'unknown', code: 'outcome-unknown', message: 'lost' });
+		});
+	});
+
+	describe('createProbeRefusalCache', () => {
+		const key: ProbeRefusalKey = {
+			authorityId: 'a',
+			policyRevision: 1,
+			providerId: 'codex',
+			route: 'codex-app-server',
+			scope: 'host-secret|/work',
+		};
+		const refusal = { state: 'denied' as const, code: 'policy-denied' as const, message: 'no' };
+
+		it('remembers a refusal for its key until the TTL passes, then forgets it', () => {
+			let t = 0;
+			const cache = createProbeRefusalCache({ now: () => t, ttlMs: 100 });
+			expect(cache.recall(key)).toBeNull();
+			expect(cache.remember(key, refusal)).toBe(refusal);
+			expect(cache.recall(key)).toBe(refusal);
+			expect(cache.size()).toBe(1);
+			t = 99;
+			expect(cache.recall(key)).toBe(refusal);
+			t = 100;
+			expect(cache.recall(key)).toBeNull();
+			expect(cache.size()).toBe(0);
+		});
+
+		it('keys on the authority, the revision, the provider, the route and the scope', () => {
+			const cache = createProbeRefusalCache({ now: () => 0, ttlMs: 100 });
+			cache.remember(key, refusal);
+			expect(cache.recall({ ...key, policyRevision: 2 })).toBeNull();
+			expect(cache.recall({ ...key, policyRevision: null })).toBeNull();
+			expect(cache.recall({ ...key, authorityId: 'b' })).toBeNull();
+			expect(cache.recall({ ...key, providerId: 'claude-code' })).toBeNull();
+			expect(cache.recall({ ...key, route: 'child-process' })).toBeNull();
+			expect(cache.recall({ ...key, scope: 'host-secret|/other' })).toBeNull();
+			expect(cache.recall({ ...key })).toBe(refusal);
+			expect(
+				cache.recall({
+					scope: key.scope,
+					route: key.route,
+					providerId: key.providerId,
+					policyRevision: key.policyRevision,
+					authorityId: key.authorityId,
+				})
+			).toBe(refusal);
+		});
+
+		it('a later refusal for the same key replaces the earlier one; clear forgets all; expired entries are swept on remember', () => {
+			let t = 0;
+			const cache = createProbeRefusalCache({ now: () => t, ttlMs: 100 });
+			cache.remember(key, refusal);
+			const later = {
+				state: 'unavailable' as const,
+				code: 'runtime-unavailable' as const,
+				message: 'away',
+			};
+			cache.remember(key, later);
+			expect(cache.recall(key)).toBe(later);
+			cache.remember({ ...key, scope: 'other' }, refusal);
+			expect(cache.size()).toBe(2);
+			t = 100;
+			cache.remember({ ...key, scope: 'third' }, refusal);
+			expect(cache.size()).toBe(1);
+			cache.clear();
+			expect(cache.size()).toBe(0);
+			expect(cache.recall({ ...key, scope: 'third' })).toBeNull();
+		});
+
+		it('remembers for as long as a policy status is fresh by default', () => {
+			expect(PROBE_REFUSAL_TTL_MS).toBe(POLICY_FRESHNESS_MS);
+			expect(PROBE_REFUSAL_TTL_MS).toBe(5 * 60_000);
 		});
 	});
 });
