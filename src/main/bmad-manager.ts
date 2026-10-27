@@ -16,8 +16,15 @@ import { bmadCatalog } from '../prompts/bmad/catalog';
 import { captureException } from './utils/sentry';
 import { logger } from './utils/logger';
 import { fetchWithTimeout } from './utils/fetchWithTimeout';
+import { InstallRefusedError } from './enterprise/install-policy';
+import {
+	holdSpecPromptBytes,
+	holdSpecPromptFetches,
+	type SpecPromptRefreshOptions,
+} from './spec-prompt-install';
 
 const LOG_CONTEXT = '[BMAD]';
+const INSTALL_ARTIFACT = 'bmad-prompts';
 const BMAD_REPO_URL = 'https://github.com/bmad-code-org/BMAD-METHOD';
 // Pinned to v6.2.0: the last BMAD release whose workflows are self-contained
 // `workflow.md` files usable as paste-in slash-command prompts. v6.2.1+ moved to
@@ -169,6 +176,30 @@ function fetchBmadResource(url: string, timeoutMs = BMAD_FETCH_TIMEOUT_MS): Prom
 	});
 }
 
+/**
+ * Fetch one repository file at the pinned ref and hold it to the install
+ * ceiling (MRC2-04-08): the fetch is held by the exact URL before the request
+ * (BMAD fixes its own ref, and many of its files share the bare name
+ * `workflow.md`, so the pin is matched by source), and the bytes are held by
+ * digest before they are used. Standalone nothing is held.
+ */
+async function fetchHeldRepoFile(
+	repoPath: string,
+	options: SpecPromptRefreshOptions,
+	failure: string
+): Promise<string> {
+	const source = `${BMAD_RAW_BASE}/${repoPath}`;
+	const file = path.posix.basename(repoPath);
+	holdSpecPromptFetches(INSTALL_ARTIFACT, [{ file, source }], options);
+	const response = await fetchBmadResource(source);
+	if (!response.ok) {
+		throw new Error(`${failure}: ${response.statusText}`);
+	}
+	const text = await response.text();
+	holdSpecPromptBytes(INSTALL_ARTIFACT, file, text, { ...options, source });
+	return text;
+}
+
 function resolveReferenceToRepoPath(reference: string, sourcePath: string): string | null {
 	if (reference.startsWith('{project-root}/_bmad/')) {
 		return `src/${reference.slice('{project-root}/_bmad/'.length)}`;
@@ -195,6 +226,7 @@ function resolveReferenceToRepoPath(reference: string, sourcePath: string): stri
 async function collectReferencedAssets(
 	sourcePath: string,
 	content: string,
+	options: SpecPromptRefreshOptions,
 	seen = new Set([sourcePath]),
 	depth = 0
 ): Promise<Array<{ path: string; content: string }>> {
@@ -218,15 +250,23 @@ async function collectReferencedAssets(
 
 		seen.add(repoPath);
 		try {
-			const response = await fetchBmadResource(`${BMAD_RAW_BASE}/${repoPath}`);
-			if (!response.ok) {
-				throw new Error(`Failed to fetch referenced asset ${repoPath}: ${response.statusText}`);
-			}
-			const assetContent = await response.text();
+			const assetContent = await fetchHeldRepoFile(
+				repoPath,
+				options,
+				`Failed to fetch referenced asset ${repoPath}`
+			);
 			assets.push({ path: repoPath, content: assetContent.trim() });
-			const nestedAssets = await collectReferencedAssets(repoPath, assetContent, seen, depth + 1);
+			const nestedAssets = await collectReferencedAssets(
+				repoPath,
+				assetContent,
+				options,
+				seen,
+				depth + 1
+			);
 			assets.push(...nestedAssets);
 		} catch (error) {
+			// A managed refusal fails the refresh; it is never a missing asset.
+			if (error instanceof InstallRefusedError) throw error;
 			void captureException(error);
 			logger.warn(`Could not fetch referenced BMAD asset ${repoPath}: ${error}`, LOG_CONTEXT);
 		}
@@ -544,21 +584,38 @@ async function getLatestVersion(): Promise<string> {
 
 /**
  * Fetch latest prompts from the BMAD GitHub repository.
+ *
+ * Under management (MRC2-04-08) every workflow and every referenced asset is
+ * held to the install ceiling by its exact URL before the request and by
+ * digest before use; a refusal throws before any file changes, and the commit
+ * and version lookups are skipped since the pinned ref is the version.
  */
-export async function refreshBmadPrompts(): Promise<BmadMetadata> {
+export async function refreshBmadPrompts(
+	options: SpecPromptRefreshOptions = {}
+): Promise<BmadMetadata> {
 	return withCustomizationLock(async () => {
 		logger.info('Refreshing BMAD prompts from GitHub...', LOG_CONTEXT);
+
+		// Every workflow is held before the first request: a refusal makes no fetch.
+		const hold = holdSpecPromptFetches(
+			INSTALL_ARTIFACT,
+			BMAD_COMMANDS.map((cmd) => ({
+				file: path.posix.basename(cmd.sourcePath),
+				source: `${BMAD_RAW_BASE}/${cmd.sourcePath}`,
+			})),
+			options
+		);
 
 		const downloadedPrompts: Array<{ id: string; prompt: string }> = [];
 
 		for (const cmd of BMAD_COMMANDS) {
-			const response = await fetchBmadResource(`${BMAD_RAW_BASE}/${cmd.sourcePath}`);
-			if (!response.ok) {
-				throw new Error(`Failed to fetch ${cmd.sourcePath}: ${response.statusText}`);
-			}
-
-			const prompt = applyMaestroRuntimePromptFixes(cmd.id, await response.text());
-			const assets = await collectReferencedAssets(cmd.sourcePath, prompt);
+			const raw = await fetchHeldRepoFile(
+				cmd.sourcePath,
+				options,
+				`Failed to fetch ${cmd.sourcePath}`
+			);
+			const prompt = applyMaestroRuntimePromptFixes(cmd.id, raw);
+			const assets = await collectReferencedAssets(cmd.sourcePath, prompt, options);
 			downloadedPrompts.push({ id: cmd.id, prompt: appendReferencedAssets(prompt, assets) });
 		}
 
@@ -574,10 +631,9 @@ export async function refreshBmadPrompts(): Promise<BmadMetadata> {
 			logger.info(`Updated: bmad.${downloadedPrompt.id}.md`, LOG_CONTEXT);
 		}
 
-		const [commitSha, sourceVersion] = await Promise.all([
-			getLatestCommitSha(),
-			getLatestVersion(),
-		]);
+		const [commitSha, sourceVersion] = hold.managed
+			? [BMAD_REF, BMAD_REF.replace(/^v/, '')]
+			: await Promise.all([getLatestCommitSha(), getLatestVersion()]);
 		const newMetadata: BmadMetadata = {
 			lastRefreshed: new Date().toISOString(),
 			commitSha,

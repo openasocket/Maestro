@@ -21,8 +21,16 @@ import {
 	SpecCommandDefinition,
 	SpecMetadata,
 } from './spec-command-manager';
+import {
+	holdSpecPromptBytes,
+	holdSpecPromptFetches,
+	specPromptSource,
+	specPromptSourceRef,
+	type SpecPromptRefreshOptions,
+} from './spec-prompt-install';
 
 const LOG_CONTEXT = '[SpecKit]';
+const INSTALL_ARTIFACT = 'speckit-prompts';
 
 /** Request budget for spec-kit prompt refreshes from GitHub. */
 const SPECKIT_FETCH_TIMEOUT_MS = 15_000;
@@ -268,19 +276,8 @@ async function fetchRaw(url: string): Promise<string> {
 	return res.text();
 }
 
-/**
- * Fetch latest prompts from GitHub spec-kit repository.
- *
- * Spec-kit no longer ships pre-rendered command ZIPs as release assets; the
- * command templates live at `templates/commands/<cmd>.md` in the repo and are
- * rendered per-agent at install time. We fetch the raw templates at the latest
- * release tag and apply the same substitutions spec-kit would for Claude.
- * Updates all upstream commands except our custom 'implement'.
- */
-export async function refreshSpeckitPrompts(): Promise<SpecKitMetadata> {
-	logger.info('Refreshing spec-kit prompts from GitHub...', LOG_CONTEXT);
-
-	// Get the latest release tag for versioning and as the fetch ref.
+/** The latest release tag, the fetch ref and version of a standalone refresh. */
+async function fetchLatestReleaseTag(): Promise<string> {
 	const releaseResponse = await fetchWithTimeout(
 		'https://api.github.com/repos/github/spec-kit/releases/latest',
 		{ headers: { 'User-Agent': 'Maestro-SpecKit-Refresher' } },
@@ -290,18 +287,56 @@ export async function refreshSpeckitPrompts(): Promise<SpecKitMetadata> {
 		throw new Error(`Failed to fetch release info: ${releaseResponse.statusText}`);
 	}
 	const releaseInfo = (await releaseResponse.json()) as { tag_name: string };
-	const version = releaseInfo.tag_name;
+	return releaseInfo.tag_name;
+}
 
+/**
+ * Fetch latest prompts from GitHub spec-kit repository.
+ *
+ * Spec-kit no longer ships pre-rendered command ZIPs as release assets; the
+ * command templates live at `templates/commands/<cmd>.md` in the repo and are
+ * rendered per-agent at install time. We fetch the raw templates at the latest
+ * release tag and apply the same substitutions spec-kit would for Claude.
+ * Updates all upstream commands except our custom 'implement'.
+ *
+ * Under management (MRC2-04-08) every template is held to the install ceiling
+ * before the first request, fetched from its pin's source instead of the
+ * latest release, and held by digest before the first write; a refusal throws
+ * before any file changes.
+ */
+export async function refreshSpeckitPrompts(
+	options: SpecPromptRefreshOptions = {}
+): Promise<SpecKitMetadata> {
+	logger.info('Refreshing spec-kit prompts from GitHub...', LOG_CONTEXT);
+
+	const files = UPSTREAM_COMMANDS.map((cmd) => ({ cmd, file: `${cmd}.md` }));
+	const hold = holdSpecPromptFetches(INSTALL_ARTIFACT, files, options);
+
+	// The fetch ref and the recorded version: the pinned ref under management,
+	// else the latest release tag.
+	const version = hold.managed
+		? (specPromptSourceRef(hold.sources.get(files[0].file)) ?? 'pinned')
+		: await fetchLatestReleaseTag();
+
+	const downloads: Array<{ name: string; content: string }> = [];
+	for (const { cmd, file } of files) {
+		const url = specPromptSource(
+			hold,
+			file,
+			() =>
+				`https://raw.githubusercontent.com/github/spec-kit/${version}/templates/commands/${file}`
+		);
+		const raw = await fetchRaw(url);
+		holdSpecPromptBytes(INSTALL_ARTIFACT, file, raw, options);
+		downloads.push({ name: `speckit.${cmd}.md`, content: processSpeckitTemplate(raw) });
+	}
+
+	// Every byte is held; only now is anything written.
 	const userPromptsDir = manager.getUserPromptsPath();
 	await fs.mkdir(userPromptsDir, { recursive: true });
-
-	for (const cmd of UPSTREAM_COMMANDS) {
-		const url = `https://raw.githubusercontent.com/github/spec-kit/${version}/templates/commands/${cmd}.md`;
-		const raw = await fetchRaw(url);
-		const content = processSpeckitTemplate(raw);
-		const destPath = path.join(userPromptsDir, `speckit.${cmd}.md`);
-		await fs.writeFile(destPath, content, 'utf8');
-		logger.info(`Updated: speckit.${cmd}.md`, LOG_CONTEXT);
+	for (const { name, content } of downloads) {
+		await fs.writeFile(path.join(userPromptsDir, name), content, 'utf8');
+		logger.info(`Updated: ${name}`, LOG_CONTEXT);
 	}
 
 	// Update metadata with new version info.

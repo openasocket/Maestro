@@ -22,6 +22,7 @@ import {
 	OpenSpecCommand,
 	OpenSpecMetadata,
 } from '../../openspec-manager';
+import { getActingTransport, transportSpawnActor } from '../../web-server/auth/transport-actor';
 
 const LOG_CONTEXT = '[OpenSpec]';
 
@@ -87,7 +88,10 @@ export function registerOpenSpecHandlers(): void {
 	ipcMain.handle(
 		'openspec:refresh',
 		createIpcHandler(handlerOpts('refresh'), async () => {
-			const metadata = await refreshOpenSpecPrompts();
+			// The transport the call was admitted over is read here, at the boundary (MRC2-04-08).
+			const metadata = await refreshOpenSpecPrompts({
+				actor: { kind: 'transport', actor: transportSpawnActor(getActingTransport()) },
+			});
 			logger.info(`Refreshed OpenSpec prompts to commit ${metadata.commitSha}`, LOG_CONTEXT);
 			return { metadata };
 		})

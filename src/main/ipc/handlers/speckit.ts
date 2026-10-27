@@ -22,6 +22,7 @@ import {
 	SpecKitCommand,
 	SpecKitMetadata,
 } from '../../speckit-manager';
+import { getActingTransport, transportSpawnActor } from '../../web-server/auth/transport-actor';
 
 const LOG_CONTEXT = '[SpecKit]';
 
@@ -87,7 +88,10 @@ export function registerSpeckitHandlers(): void {
 	ipcMain.handle(
 		'speckit:refresh',
 		createIpcHandler(handlerOpts('refresh'), async () => {
-			const metadata = await refreshSpeckitPrompts();
+			// The transport the call was admitted over is read here, at the boundary (MRC2-04-08).
+			const metadata = await refreshSpeckitPrompts({
+				actor: { kind: 'transport', actor: transportSpawnActor(getActingTransport()) },
+			});
 			logger.info(`Refreshed spec-kit prompts to ${metadata.sourceVersion}`, LOG_CONTEXT);
 			return { metadata };
 		})

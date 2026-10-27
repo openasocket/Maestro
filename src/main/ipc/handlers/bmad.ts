@@ -22,6 +22,7 @@ import {
 	BmadCommand,
 	BmadMetadata,
 } from '../../bmad-manager';
+import { getActingTransport, transportSpawnActor } from '../../web-server/auth/transport-actor';
 
 const LOG_CONTEXT = '[BMAD]';
 
@@ -80,7 +81,10 @@ export function registerBmadHandlers(): void {
 	ipcMain.handle(
 		'bmad:refresh',
 		createIpcHandler(handlerOpts('refresh'), async () => {
-			const metadata = await refreshBmadPrompts();
+			// The transport the call was admitted over is read here, at the boundary (MRC2-04-08).
+			const metadata = await refreshBmadPrompts({
+				actor: { kind: 'transport', actor: transportSpawnActor(getActingTransport()) },
+			});
 			logger.info(`Refreshed BMAD prompts to ${metadata.sourceVersion}`, LOG_CONTEXT);
 			return { metadata };
 		})

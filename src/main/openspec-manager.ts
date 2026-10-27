@@ -28,8 +28,16 @@ import {
 	SpecCommandDefinition,
 	SpecMetadata,
 } from './spec-command-manager';
+import {
+	holdSpecPromptBytes,
+	holdSpecPromptFetches,
+	specPromptSource,
+	specPromptSourceRef,
+	type SpecPromptRefreshOptions,
+} from './spec-prompt-install';
 
 const LOG_CONTEXT = '[OpenSpec]';
+const INSTALL_ARTIFACT = 'openspec-prompts';
 
 /** Request budget for OpenSpec workflow refreshes from GitHub. */
 const OPENSPEC_FETCH_TIMEOUT_MS = 15_000;
@@ -163,14 +171,8 @@ function extractInstructions(tsSource: string): string | null {
 	return result.trim();
 }
 
-/**
- * Fetch latest prompts from the GitHub OpenSpec repository.
- * Pulls each mapped workflow template and extracts its instructions body.
- */
-export async function refreshOpenSpecPrompts(): Promise<OpenSpecMetadata> {
-	logger.info('Refreshing OpenSpec prompts from GitHub...', LOG_CONTEXT);
-
-	// First, get the latest release info to get the version
+/** The latest release tag of a standalone refresh, or `main` when it cannot be read. */
+async function fetchLatestReleaseTag(): Promise<string> {
 	let version = 'main';
 	try {
 		const releaseResponse = await fetchWithTimeout(
@@ -188,15 +190,41 @@ export async function refreshOpenSpecPrompts(): Promise<OpenSpecMetadata> {
 	} catch {
 		logger.warn('Could not fetch release info, using main branch', LOG_CONTEXT);
 	}
+	return version;
+}
 
-	// Create user prompts directory
-	const userPromptsDir = manager.getUserPromptsPath();
-	await fs.mkdir(userPromptsDir, { recursive: true });
+/**
+ * Fetch latest prompts from the GitHub OpenSpec repository.
+ * Pulls each mapped workflow template and extracts its instructions body.
+ *
+ * Under management (MRC2-04-08) every workflow module is held to the install
+ * ceiling before the first request, fetched from its pin's source instead of
+ * the latest release, and held by digest before the first write; a refusal
+ * throws before any file changes.
+ */
+export async function refreshOpenSpecPrompts(
+	options: SpecPromptRefreshOptions = {}
+): Promise<OpenSpecMetadata> {
+	logger.info('Refreshing OpenSpec prompts from GitHub...', LOG_CONTEXT);
 
-	// Fetch and extract each mapped workflow template.
-	let extractedCount = 0;
+	const hold = holdSpecPromptFetches(
+		INSTALL_ARTIFACT,
+		UPSTREAM_COMMANDS.map(({ sourceFile }) => ({ file: sourceFile })),
+		options
+	);
+	const version = hold.managed
+		? (specPromptSourceRef(hold.sources.get(UPSTREAM_COMMANDS[0].sourceFile)) ?? 'pinned')
+		: await fetchLatestReleaseTag();
+
+	// Fetch and extract each mapped workflow template; nothing is written until every one is held.
+	const extracted: Array<{ id: string; content: string }> = [];
 	for (const { id, sourceFile } of UPSTREAM_COMMANDS) {
-		const url = `https://raw.githubusercontent.com/Fission-AI/OpenSpec/${version}/${WORKFLOWS_BASE_PATH}/${sourceFile}`;
+		const url = specPromptSource(
+			hold,
+			sourceFile,
+			() =>
+				`https://raw.githubusercontent.com/Fission-AI/OpenSpec/${version}/${WORKFLOWS_BASE_PATH}/${sourceFile}`
+		);
 		const response = await fetchWithTimeout(
 			url,
 			{
@@ -208,17 +236,22 @@ export async function refreshOpenSpecPrompts(): Promise<OpenSpecMetadata> {
 			throw new Error(`Failed to fetch ${sourceFile}: ${response.statusText}`);
 		}
 		const tsSource = await response.text();
+		holdSpecPromptBytes(INSTALL_ARTIFACT, sourceFile, tsSource, options);
 		const promptContent = extractInstructions(tsSource);
 		if (promptContent) {
-			const destPath = path.join(userPromptsDir, `openspec.${id}.md`);
-			await fs.writeFile(destPath, promptContent, 'utf8');
-			logger.info(`Updated: openspec.${id}.md`, LOG_CONTEXT);
-			extractedCount++;
+			extracted.push({ id, content: promptContent });
 		} else {
 			logger.warn(`Could not extract instructions from ${sourceFile}`, LOG_CONTEXT);
 		}
 	}
-	logger.info(`Extracted ${extractedCount} OpenSpec workflow prompts`, LOG_CONTEXT);
+
+	const userPromptsDir = manager.getUserPromptsPath();
+	await fs.mkdir(userPromptsDir, { recursive: true });
+	for (const { id, content } of extracted) {
+		await fs.writeFile(path.join(userPromptsDir, `openspec.${id}.md`), content, 'utf8');
+		logger.info(`Updated: openspec.${id}.md`, LOG_CONTEXT);
+	}
+	logger.info(`Extracted ${extracted.length} OpenSpec workflow prompts`, LOG_CONTEXT);
 
 	// Update metadata with new version info
 	const newMetadata: OpenSpecMetadata = {

@@ -27,8 +27,18 @@ import {
 import type { EnterpriseIdentityStore } from './identity-store';
 import { pairedDeviceActorProblems } from './spawn-authority';
 
-/** What is installed: the WakaTime CLI (fetched), or the app's bundled maestro-cli (verified, never fetched). */
-export const INSTALL_ARTIFACTS = ['wakatime-cli', 'maestro-cli'] as const;
+/**
+ * What is installed: the WakaTime CLI (fetched), the app's bundled maestro-cli
+ * (verified, never fetched), and the spec tool prompts (Spec Kit, OpenSpec,
+ * BMAD) refreshed from GitHub into the user data directory (MRC2-04-08).
+ */
+export const INSTALL_ARTIFACTS = [
+	'wakatime-cli',
+	'maestro-cli',
+	'speckit-prompts',
+	'openspec-prompts',
+	'bmad-prompts',
+] as const;
 export type InstallArtifact = (typeof INSTALL_ARTIFACTS)[number];
 
 /** `fetch`: bytes about to be written from a source; `execute`: bytes on disk about to be extracted or run. */
@@ -48,6 +58,8 @@ export interface InstallRequest {
 	stage: InstallStage;
 	/** For `execute`: the hex SHA-256 of the bytes on disk, taken only when a pin asks; null when there are no bytes (a PATH name). */
 	digest?: (() => string) | null;
+	/** The URL the sink itself fixes (a pinned ref); the pin must name exactly it. Omitted: the pin's source is followed. */
+	source?: string;
 	actor: InstallActor;
 }
 
@@ -115,6 +127,11 @@ function parsePin(raw: unknown, at: string, problems: string[]): InstallPin | nu
 	return { artifact, file, sha256, source } as InstallPin;
 }
 
+/** A pin is one artifact, one file, one source: the same file may be pinned from several sources (BMAD's many `workflow.md`). */
+function samePinIdentity(a: InstallPin, b: InstallPin): boolean {
+	return a.artifact === b.artifact && a.file === b.file && a.source === b.source;
+}
+
 /** Validate a document into a fresh value; every problem is named by path and one refuses the whole. */
 export function parseInstallPolicyCeiling(raw: unknown): InstallCeilingParse {
 	if (!isPlainObject(raw)) return { ok: false, problems: ['the install ceiling is not an object'] };
@@ -128,7 +145,7 @@ export function parseInstallPolicyCeiling(raw: unknown): InstallCeilingParse {
 	else
 		raw.pins.forEach((entry, index) => {
 			const pin = parsePin(entry, `pins[${index}]`, problems);
-			if (pin && pins.some((seen) => seen.artifact === pin.artifact && seen.file === pin.file))
+			if (pin && pins.some((seen) => samePinIdentity(seen, pin)))
 				problems.push(`pins[${index}] names ${pin.artifact} ${pin.file} twice`);
 			else if (pin) pins.push(pin);
 		});
@@ -225,11 +242,47 @@ export function installVerdict(
 	if (unbindable.length > 0) return deny('unauthenticated', unbindable.join('; '));
 	if (!standing.ceiling)
 		return deny('unavailable', `the managed install ceiling is unavailable (${standing.reason})`);
-	const pin =
-		standing.ceiling.pins.find((p) => p.artifact === request.artifact && p.file === request.file) ??
-		null;
 	const only = `for ${label} only a file the policy pins by digest is fetched or run`;
+	const named = standing.ceiling.pins.filter(
+		(p) => p.artifact === request.artifact && p.file === request.file
+	);
+	if (request.source !== undefined) {
+		const pin = named.find((p) => p.source === request.source) ?? null;
+		if (!pin)
+			return deny(
+				'unpinned',
+				`the install ceiling pins no ${what} from ${request.source}; ${only}`
+			);
+		return pinnedVerdict(request, pin, what, label, only, receipt, deny);
+	}
+	if (named.length > 1)
+		return deny(
+			'unpinned',
+			`the install ceiling pins ${what} from ${named.length} sources and the sink names none; ${only}`
+		);
+	const pin = named[0] ?? null;
 	if (!pin) return deny('unpinned', `the install ceiling pins no ${what}; ${only}`);
+	return pinnedVerdict(request, pin, what, label, only, receipt, deny);
+}
+
+function pinnedVerdict(
+	request: InstallRequest,
+	pin: InstallPin,
+	what: string,
+	label: string,
+	only: string,
+	receipt: (
+		outcome: InstallReceipt['outcome'],
+		pin: InstallPin | null,
+		actual: string | null
+	) => InstallReceipt,
+	deny: (
+		code: InstallDenial,
+		message: string,
+		pin?: InstallPin | null,
+		actual?: string | null
+	) => InstallDecision
+): InstallDecision {
 	if (request.stage === 'fetch') {
 		if (pin.source === null)
 			return deny(
@@ -250,6 +303,18 @@ export function installVerdict(
 			actual
 		);
 	return { allowed: true, pin, managed: receipt('within-ceiling', pin, actual) };
+}
+
+/** Thrown by a sink that cannot answer a refusal in a result (a refresh that either installs or fails). */
+export class InstallRefusedError extends Error {
+	readonly code: InstallDenial;
+	readonly receipt: InstallReceipt;
+	constructor(decision: Extract<InstallDecision, { allowed: false }>) {
+		super(formatInstallRefusal(decision));
+		this.name = 'InstallRefusedError';
+		this.code = decision.code;
+		this.receipt = decision.managed;
+	}
 }
 
 export type InstallCeilingInstallOutcome =

@@ -59,6 +59,7 @@ import { createPluginPolicySource } from './enterprise/plugin-policy';
 import { createBrowserPolicySource } from './enterprise/browser-policy';
 import { createShellPolicySource } from './enterprise/shell-policy';
 import { createInstallPolicySource } from './enterprise/install-policy';
+import { setSpecPromptInstallAuthority } from './spec-prompt-install';
 import {
 	createGitExecutionGate,
 	createRepositoryPolicySource,
@@ -994,6 +995,8 @@ app
 		});
 		wakatimeManager.setInstallAuthority(installPolicy);
 		maestroCliManager.setInstallAuthority(installPolicy);
+		// The Spec Kit, OpenSpec and BMAD prompt refreshers hold with the same source (MRC2-04-08).
+		setSpecPromptInstallAuthority(installPolicy);
 
 		// Serve agent-authored Concerto mockups as real documents with their own
 		// CSP. A srcdoc frame would inherit Maestro's renderer CSP and block the

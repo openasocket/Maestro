@@ -16,8 +16,10 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { IdentityRead } from '../../../main/enterprise/identity-store';
 import {
+	INSTALL_ARTIFACTS,
 	INSTALL_CEILING_LIMITS,
 	INSTALL_OPERATOR,
+	InstallRefusedError,
 	createInstallPolicySource,
 	formatInstallRefusal,
 	headlessInstallAuthority,
@@ -155,9 +157,47 @@ describe('parseInstallPolicyCeiling', () => {
 		]);
 		const twice = document();
 		pinOf(twice, 1).file = 'wakatime-cli-darwin-arm64.zip';
+		pinOf(twice, 1).source = SOURCE;
 		expect(problemsOf(twice)).toEqual([
 			'pins[1] names wakatime-cli wakatime-cli-darwin-arm64.zip twice',
 		]);
+	});
+
+	it('pins the spec tool prompts, and the same bare name from several sources (MRC2-04-08)', () => {
+		expect(INSTALL_ARTIFACTS).toEqual([
+			'wakatime-cli',
+			'maestro-cli',
+			'speckit-prompts',
+			'openspec-prompts',
+			'bmad-prompts',
+		]);
+		const base = 'https://raw.githubusercontent.com/bmad-code-org/BMAD-METHOD/v6.2.0';
+		const parsed = parseInstallPolicyCeiling({
+			policyRevision: 1,
+			pins: [
+				{
+					artifact: 'speckit-prompts',
+					file: 'plan.md',
+					sha256: 'a'.repeat(64),
+					source:
+						'https://raw.githubusercontent.com/github/spec-kit/v0.0.90/templates/commands/plan.md',
+				},
+				{
+					artifact: 'bmad-prompts',
+					file: 'workflow.md',
+					sha256: 'b'.repeat(64),
+					source: `${base}/src/core/skills/bmad-help/workflow.md`,
+				},
+				{
+					artifact: 'bmad-prompts',
+					file: 'workflow.md',
+					sha256: 'c'.repeat(64),
+					source: `${base}/src/core/tasks/bmad-create-prd/workflow.md`,
+				},
+			],
+		});
+		expect(parsed.ok).toBe(true);
+		if (parsed.ok) expect(parsed.ceiling.pins).toHaveLength(3);
 	});
 
 	it('bounds a file to one bare name and a source to one clean https URL', () => {
@@ -284,6 +324,57 @@ describe('installVerdict', () => {
 			message: expect.stringContaining('pinned for verification only'),
 			managed: { expected: 'c'.repeat(64), source: null },
 		});
+	});
+
+	it('matches a sink-named source exactly, and refuses an ambiguous bare name the sink does not qualify', () => {
+		const base = 'https://raw.githubusercontent.com/bmad-code-org/BMAD-METHOD/v6.2.0';
+		const help = `${base}/src/core/skills/bmad-help/workflow.md`;
+		const prd = `${base}/src/core/tasks/bmad-create-prd/workflow.md`;
+		const ceiling = ceilingOf({
+			policyRevision: 3,
+			pins: [
+				{ artifact: 'bmad-prompts', file: 'workflow.md', sha256: ZIP_SHA, source: help },
+				{ artifact: 'bmad-prompts', file: 'workflow.md', sha256: BIN_SHA, source: prd },
+			],
+		});
+		const workflow = request({ artifact: 'bmad-prompts', file: 'workflow.md' });
+		expect(installVerdict(managed(ceiling), { ...workflow, source: prd })).toMatchObject({
+			allowed: true,
+			pin: { sha256: BIN_SHA, source: prd },
+			managed: { source: prd, expected: BIN_SHA, outcome: 'within-ceiling' },
+		});
+		expect(
+			installVerdict(managed(ceiling), {
+				...workflow,
+				source: `${base}/src/other/workflow.md`,
+			})
+		).toMatchObject({
+			allowed: false,
+			code: 'unpinned',
+			message: `the install ceiling pins no bmad-prompts workflow.md from ${base}/src/other/workflow.md; for the operator only a file the policy pins by digest is fetched or run`,
+		});
+		expect(installVerdict(managed(ceiling), workflow)).toMatchObject({
+			allowed: false,
+			code: 'unpinned',
+			message: expect.stringContaining('from 2 sources and the sink names none'),
+		});
+		// The bytes of a sourced fetch are held against that source's pin, not the first one.
+		const digest = vi.fn(() => BIN_SHA);
+		expect(
+			installVerdict(managed(ceiling), { ...workflow, stage: 'execute', digest, source: prd })
+		).toMatchObject({ allowed: true, managed: { actual: BIN_SHA } });
+		expect(
+			installVerdict(managed(ceiling), { ...workflow, stage: 'execute', digest, source: help })
+		).toMatchObject({ allowed: false, code: 'digest-mismatch', managed: { expected: ZIP_SHA } });
+		// A refusal a sink cannot answer in a result is thrown by code with its receipt.
+		const refused = installVerdict(managed(ceiling), workflow);
+		if (refused.allowed) throw new Error('expected a refusal');
+		const error = new InstallRefusedError(refused);
+		expect(error).toBeInstanceOf(Error);
+		expect(error.name).toBe('InstallRefusedError');
+		expect(error.code).toBe('unpinned');
+		expect(error.receipt).toBe(refused.managed);
+		expect(error.message).toMatch(/^\[managed-unpinned\] the install ceiling pins bmad-prompts/);
 	});
 
 	it('admits a fetch with the pin to follow and a receipt naming the source', () => {
@@ -414,6 +505,8 @@ describe('desktop wiring (src/main/index.ts)', () => {
 		);
 		expect(source).toContain('wakatimeManager.setInstallAuthority(installPolicy);');
 		expect(source).toContain('maestroCliManager.setInstallAuthority(installPolicy);');
+		// The three spec tool prompt refreshers hold with the same source (MRC2-04-08).
+		expect(source).toContain('setSpecPromptInstallAuthority(installPolicy);');
 	});
 
 	it('runs the WakaTime startup install only after the enterprise service is composed', () => {
