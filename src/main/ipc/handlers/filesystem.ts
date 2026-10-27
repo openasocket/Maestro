@@ -63,6 +63,13 @@ import { getSshRemoteById } from '../../stores';
 import { captureException } from '../../utils/sentry';
 import { mapWithConcurrency, LOCAL_FILE_DELETE_CONCURRENCY } from '../../utils/concurrency';
 import { getHostDirectoryInfo } from '../../utils/host-directory';
+import {
+	callingLocalEffectActor,
+	holdLocalEffect,
+	LocalEffectRefusedError,
+	type LocalEffectActor,
+	type LocalEffectAuthority,
+} from '../../enterprise/local-effects-policy';
 
 /**
  * Recursively upload a local directory to a remote host over SSH.
@@ -265,7 +272,37 @@ async function deleteLocalPath(targetPath: string, recursive: boolean): Promise<
 	}
 }
 
-export function registerFilesystemHandlers(): void {
+export interface FilesystemHandlerDependencies {
+	/** The managed local-effects ceiling (MRC2-04-09) the deletes are held to, read per call; absent or null holds nothing. */
+	localEffects?: () => LocalEffectAuthority | null;
+}
+
+/**
+ * Hold a delete (one path, or a batch held once) before anything is removed,
+ * locally or on a remote. A refusal leaves every path in place, reaches the
+ * log with its receipt and rejects the call by code.
+ */
+async function holdDelete(
+	authority: LocalEffectAuthority | null,
+	targetPaths: readonly string[],
+	actor: LocalEffectActor
+): Promise<void> {
+	const decision = await holdLocalEffect(authority, {
+		effect: 'delete',
+		actor,
+		target: targetPaths[0] ?? null,
+		count: targetPaths.length,
+	});
+	if (decision.allowed) return;
+	logger.warn('Delete refused by the managed local-effects ceiling; nothing was removed', 'FS', {
+		code: decision.code,
+		receipt: decision.managed,
+	});
+	throw new LocalEffectRefusedError(decision);
+}
+
+export function registerFilesystemHandlers(deps: FilesystemHandlerDependencies = {}): void {
+	const localEffects = deps.localEffects ?? (() => null);
 	// Get user home directory
 	ipcMain.handle('fs:homeDir', () => {
 		return os.homedir();
@@ -918,6 +955,9 @@ export function registerFilesystemHandlers(): void {
 	ipcMain.handle(
 		'fs:delete',
 		async (_, targetPath: string, options?: { recursive?: boolean; sshRemoteId?: string }) => {
+			const actor = callingLocalEffectActor();
+			// Held outside the try so a refusal is not wrapped as a delete that failed.
+			await holdDelete(localEffects(), [targetPath], actor);
 			try {
 				const sshRemoteId = options?.sshRemoteId;
 
@@ -961,9 +1001,13 @@ export function registerFilesystemHandlers(): void {
 			targetPaths: string[],
 			options?: { recursive?: boolean; sshRemoteId?: string }
 		): Promise<{ results: BulkDeleteResult[] }> => {
+			const actor = callingLocalEffectActor();
 			if (!Array.isArray(targetPaths) || targetPaths.length === 0) {
 				return { results: [] };
 			}
+
+			// One hold for the batch; a refusal fails the whole call like an unresolvable remote does.
+			await holdDelete(localEffects(), targetPaths, actor);
 
 			const recursive = options?.recursive ?? true;
 			const sshRemoteId = options?.sshRemoteId;

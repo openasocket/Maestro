@@ -302,6 +302,7 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		tunnelManager,
 		getWebServer: deps.getWebServer,
 		bootstrapStore: deps.bootstrapStore, // For iCloud/sync settings
+		localEffects: deps.getLocalEffectAuthority,
 	});
 
 	// Claude Code sessions - extracted to src/main/ipc/handlers/claude.ts
@@ -534,8 +535,8 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 	// Setup logger event forwarding to renderer
 	setupLoggerEventForwarding(deps.getMainWindow);
 
-	// Register filesystem handlers (extracted to handlers/filesystem.ts)
-	registerFilesystemHandlers();
+	// Register filesystem handlers (extracted to handlers/filesystem.ts); deletes held to the local-effects ceiling
+	registerFilesystemHandlers({ localEffects: deps.getLocalEffectAuthority });
 
 	// Parquet preview handlers. Registered HERE, not only in registerAllHandlers()
 	// - that function is dead code, so a registration that lives solely there

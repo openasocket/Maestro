@@ -35,6 +35,14 @@ import { MaestroSettings } from './persistence';
 import { captureException } from '../../utils/sentry';
 import { createSafeSend } from '../../utils/safe-send';
 import type { BootstrapSettings } from '../../stores/types';
+import {
+	callingLocalEffectActor,
+	holdLocalEffect,
+	LocalEffectRefusedError,
+	type LocalEffectActor,
+	type LocalEffectAuthority,
+	type LocalEffectKind,
+} from '../../enterprise/local-effects-policy';
 
 // Type for tunnel manager instance
 type TunnelManagerType = typeof tunnelManagerInstance;
@@ -49,6 +57,27 @@ export interface SystemHandlerDependencies {
 	tunnelManager: TunnelManagerType;
 	getWebServer: () => WebServer | null;
 	bootstrapStore?: Store<BootstrapSettings>;
+	/** The managed local-effects ceiling (MRC2-04-09), read per call; absent or null holds nothing. */
+	localEffects?: () => LocalEffectAuthority | null;
+}
+
+/**
+ * Hold one effect right before the Electron call that performs it. A refusal
+ * performs nothing: the receipt reaches the log and the handler rejects by code.
+ */
+async function holdSystemEffect(
+	authority: LocalEffectAuthority | null,
+	effect: LocalEffectKind,
+	target: string | null,
+	actor: LocalEffectActor
+): Promise<void> {
+	const decision = await holdLocalEffect(authority, { effect, actor, target });
+	if (decision.allowed) return;
+	logger.warn(`${effect} refused by the managed local-effects ceiling; nothing was done`, 'Shell', {
+		code: decision.code,
+		receipt: decision.managed,
+	});
+	throw new LocalEffectRefusedError(decision);
 }
 
 /**
@@ -234,7 +263,10 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 	// scheme, with no code execution here, and unlike `file:` (handled above) it cannot reach the filesystem.
 	// The vectors this list exists to stop, `javascript:` and `data:`, remain blocked.
 	const ALLOWED_PROTOCOLS = ['http:', 'https:', 'mailto:', 'clickup:'];
+	// Each hand-off to the OS below is held after its own validation, right before the Electron call.
+	const localEffects = deps.localEffects ?? (() => null);
 	ipcMain.handle('shell:openExternal', async (_event, url: string) => {
+		const actor = callingLocalEffectActor();
 		// Validate URL before opening - Fixes MAESTRO-1S
 		if (!url || typeof url !== 'string') {
 			throw new Error('Invalid URL: URL must be a non-empty string');
@@ -246,6 +278,7 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 			// Detect absolute file paths and redirect to openPath - Fixes MAESTRO-FN/FA/F4
 			if (path.isAbsolute(url)) {
 				if (fsSync.existsSync(url)) {
+					await holdSystemEffect(localEffects(), 'open-path', url, actor);
 					const errorMessage = await shell.openPath(url);
 					if (errorMessage) {
 						throw new Error(errorMessage);
@@ -264,6 +297,7 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 			if (!fsSync.existsSync(filePath)) {
 				throw new Error(`Path does not exist: ${filePath}`);
 			}
+			await holdSystemEffect(localEffects(), 'open-path', filePath, actor);
 			const errorMessage = await shell.openPath(filePath);
 			if (errorMessage) {
 				throw new Error(errorMessage);
@@ -273,6 +307,7 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 		if (!ALLOWED_PROTOCOLS.includes(parsed.protocol)) {
 			throw new Error(`Protocol not allowed: ${parsed.protocol}`);
 		}
+		await holdSystemEffect(localEffects(), 'open-external', url, actor);
 		try {
 			await shell.openExternal(url);
 		} catch (err) {
@@ -288,6 +323,7 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 
 	// Shell operations - move item to system trash
 	ipcMain.handle('shell:trashItem', async (_event, itemPath: string) => {
+		const actor = callingLocalEffectActor();
 		if (!itemPath || typeof itemPath !== 'string') {
 			throw new Error('Invalid path: path must be a non-empty string');
 		}
@@ -300,6 +336,7 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 			logger.warn(`shell:trashItem - path does not exist: ${absolutePath}`, 'Shell');
 			return;
 		}
+		await holdSystemEffect(localEffects(), 'trash', absolutePath, actor);
 		try {
 			await shell.trashItem(absolutePath);
 		} catch (error) {
@@ -337,6 +374,7 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 
 	// Shell operations - open file/folder in default application
 	ipcMain.handle('shell:openPath', async (_event, itemPath: string) => {
+		const actor = callingLocalEffectActor();
 		if (!itemPath || typeof itemPath !== 'string') {
 			throw new Error('Invalid path: path must be a non-empty string');
 		}
@@ -347,6 +385,7 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 			logger.warn(`shell:openPath - path does not exist: ${absolutePath}`, 'Shell');
 			return;
 		}
+		await holdSystemEffect(localEffects(), 'open-path', absolutePath, actor);
 		const errorMessage = await shell.openPath(absolutePath);
 		if (errorMessage) {
 			logger.warn(`shell:openPath failed for ${absolutePath}: ${errorMessage}`, 'Shell');
@@ -354,14 +393,18 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 	});
 
 	// Clipboard operations - copy text/image to system clipboard via Electron native API
+	// (held with no target: the content never enters the ceiling or a receipt)
 	ipcMain.handle('clipboard:writeText', async (_event, text: string) => {
+		const actor = callingLocalEffectActor();
 		if (typeof text !== 'string') {
 			throw new Error('Invalid clipboard text: must be a string');
 		}
+		await holdSystemEffect(localEffects(), 'clipboard-write', null, actor);
 		clipboard.writeText(text);
 	});
 
 	ipcMain.handle('clipboard:writeImage', async (_event, dataUrl: string) => {
+		const actor = callingLocalEffectActor();
 		if (!dataUrl || typeof dataUrl !== 'string') {
 			throw new Error('Invalid data URL: must be a non-empty string');
 		}
@@ -369,6 +412,7 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 		if (img.isEmpty()) {
 			throw new Error('Failed to create image from data URL');
 		}
+		await holdSystemEffect(localEffects(), 'clipboard-write', null, actor);
 		clipboard.writeImage(img);
 	});
 

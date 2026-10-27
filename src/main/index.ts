@@ -59,6 +59,10 @@ import { createPluginPolicySource } from './enterprise/plugin-policy';
 import { createBrowserPolicySource } from './enterprise/browser-policy';
 import { createShellPolicySource } from './enterprise/shell-policy';
 import { createInstallPolicySource } from './enterprise/install-policy';
+import {
+	createLocalEffectsPolicySource,
+	describeLocalEffect,
+} from './enterprise/local-effects-policy';
 import { setSpecPromptInstallAuthority } from './spec-prompt-install';
 import { setMarketplaceInstallAuthority } from './services/marketplace-service';
 import { setMcpInstallAuthority } from './coworking/installers/managed';
@@ -1002,6 +1006,27 @@ app
 		// Marketplace imports and the coworking MCP config writers hold with it too (MRC2-04-08A).
 		setMarketplaceInstallAuthority(installPolicy);
 		setMcpInstallAuthority(installPolicy);
+		// The local-effects ceiling (MRC2-04-09): opens, clipboard writes, trashes
+		// and deletes are held by class (allow, deny, confirm) in the system and
+		// filesystem handlers. A `confirm` is a dialog on the main window; with no
+		// window the effect is refused, never performed unasked. None yet (CP-01).
+		const localEffectsPolicy = createLocalEffectsPolicySource({
+			identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
+			policy: () => enterpriseService?.policy.status() ?? null,
+			confirm: async (prompt) => {
+				if (!mainWindow || mainWindow.isDestroyed()) return 'unavailable';
+				const { response } = await dialog.showMessageBox(mainWindow, {
+					type: 'question',
+					buttons: ['Allow', 'Cancel'],
+					defaultId: 1,
+					cancelId: 1,
+					title: 'Managed policy confirmation',
+					message: `Allow ${describeLocalEffect(prompt)}?`,
+					detail: prompt.message,
+				});
+				return response === 0 ? 'confirmed' : 'declined';
+			},
+		});
 
 		// Serve agent-authored Concerto mockups as real documents with their own
 		// CSP. A srcdoc frame would inherit Maestro's renderer CSP and block the
@@ -3472,6 +3497,7 @@ app
 			getBrowserAuthority: () => browserPolicy,
 			getRepositoryAuthority: () => repositoryPolicy,
 			getShellAuthority: () => shellPolicy,
+			getLocalEffectAuthority: () => localEffectsPolicy,
 			getPluginEventBus: () => pluginEventBus,
 			getInteractiveReplayController: () => interactiveReplayController,
 			setNoteSessionActivated: (fn) => {
