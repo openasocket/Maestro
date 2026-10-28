@@ -80,8 +80,18 @@ function listed(listedCount: number, newlyHeld: number) {
 	};
 }
 
-function stateOf(standing: ManagedStanding, reason: string | null = null): ManagedStateView {
-	return { standing, reason } as ManagedStateView;
+function stateOf(
+	standing: ManagedStanding,
+	reason: string | null = null,
+	holds: Partial<Pick<ManagedStateView, 'egress' | 'update'>> = {}
+): ManagedStateView {
+	return {
+		standing,
+		reason,
+		egress: { held: [] },
+		update: { held: null },
+		...holds,
+	} as ManagedStateView;
 }
 
 function status(
@@ -136,6 +146,84 @@ describe('ManagedStatus', () => {
 		expect(
 			screen.getByText(`${MANAGED_STANDING_COPY.offline.detail} No endpoint connection is open.`)
 		).toBeInTheDocument();
+		// Nothing held: no list, no heading.
+		expect(screen.queryByTestId('managed-holds')).not.toBeInTheDocument();
+		expect(screen.queryByText(STATUS_COPY.holds)).not.toBeInTheDocument();
+	});
+
+	// MRC2-05-04A: what the ceilings hold is listed beside the standing, each as
+	// the one `[managed-<code>] ...` line, from the projection's own records.
+	it('lists the update hold in force and every egress hold under the standing', () => {
+		const update = {
+			code: 'pin-denied',
+			message: 'Policy revision 3 pins this installation to 1.2.0.',
+			policyRevision: 3,
+			candidate: 'v1.3.0',
+		};
+		const egress = [
+			{
+				class: 'vendor-telemetry',
+				code: 'class-denied',
+				origin: 'https://runmaestro.ai',
+				firstAt: '2026-10-28T09:00:00.000Z',
+				lastAt: new Date().toISOString(),
+				count: 3,
+			},
+			{
+				class: 'updates',
+				code: 'unavailable',
+				origin: null,
+				firstAt: '2026-10-28T09:00:00.000Z',
+				lastAt: new Date().toISOString(),
+				count: 1,
+			},
+		];
+		const { rerender } = render(
+			<ManagedStatus
+				theme={mockTheme}
+				status={status(
+					stateOf('managed', null, { egress: { held: egress }, update: { held: update } })
+				)}
+			/>
+		);
+		const list = within(screen.getByTestId('managed-holds'));
+		expect(list.getByText(STATUS_COPY.holds)).toBeInTheDocument();
+		const items = list.getAllByRole('listitem').map((item) => item.textContent);
+		expect(items).toEqual([
+			'Update v1.3.0: [managed-pin-denied] Policy revision 3 pins this installation to 1.2.0.',
+			expect.stringMatching(
+				/^\[managed-class-denied\] 3 vendor-telemetry requests to https:\/\/runmaestro\.ai refused, last /
+			),
+			expect.stringMatching(
+				/^\[managed-unavailable\] 1 updates request to an unnamed destination refused, last /
+			),
+		]);
+		// No control: the list is a record, not a way to lift a hold.
+		expect(screen.queryByRole('button')).not.toBeInTheDocument();
+		// A held check with no candidate names the check itself; egress alone still lists.
+		rerender(
+			<ManagedStatus
+				theme={mockTheme}
+				status={status(
+					stateOf('managed', null, {
+						update: { held: { ...update, code: 'held', candidate: null } },
+					})
+				)}
+			/>
+		);
+		expect(screen.getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+			'Update check: [managed-held] Policy revision 3 pins this installation to 1.2.0.',
+		]);
+		// Compact draws the badge alone, holds or not.
+		rerender(
+			<ManagedStatus
+				theme={mockTheme}
+				status={status(stateOf('managed', null, { egress: { held: egress } }))}
+				compact
+			/>
+		);
+		expect(screen.queryByTestId('managed-holds')).not.toBeInTheDocument();
+		expect(screen.getByTestId('managed-standing')).toBeInTheDocument();
 	});
 
 	it('answers a browser, no service, the first read and a failed read by their sentences', () => {

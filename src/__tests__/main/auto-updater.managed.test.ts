@@ -17,7 +17,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 import type { IdentityRead } from '../../main/enterprise/identity-store';
 import { createUpdatePolicySource } from '../../main/enterprise/update-policy';
 import { heldEgress, setEgressAuthority } from '../../main/utils/fetchWithTimeout';
-import { setUpdateAuthority } from '../../main/update-checker';
+import { heldUpdate, setUpdateAuthority } from '../../main/update-checker';
 import { denyingEgressAuthority } from '../helpers/egressAuthority';
 
 const ipcHandlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -159,6 +159,8 @@ describe('auto-updater under an update authority', () => {
 		expect(mockAutoUpdater.checkForUpdates).not.toHaveBeenCalled();
 		expect(mockAutoUpdater.downloadUpdate).not.toHaveBeenCalled();
 		expect(lastStatus().status).toBe('held-by-policy');
+		// The step it stopped is the hold in force for the status projection (MRC2-05-04A).
+		expect(heldUpdate()).toMatchObject({ code: 'held', candidate: 'v1.3.0' });
 	});
 
 	it('holds an enrolled host with no ceiling unavailable: no feed, no download', async () => {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { UpdateStatus } from '../types';
+import type { UpdateHoldView, UpdateStatus } from '../types';
 import {
 	X,
 	Download,
@@ -12,6 +12,7 @@ import {
 	RotateCcw,
 	FlaskConical,
 	Clock,
+	ShieldAlert,
 } from 'lucide-react';
 import { GhostIconButton } from './ui/GhostIconButton';
 import { Spinner } from './ui/Spinner';
@@ -21,6 +22,7 @@ import { Modal } from './ui/Modal';
 import { useSettings } from '../hooks';
 import { Markdown } from './Markdown';
 import { openUrl } from '../utils/openUrl';
+import { formatManagedHold } from '../../shared/formatters';
 import { selectIsAnySessionBusy, useSessionStore } from '../stores/sessionStore';
 import { selectHasAnyActiveBatch, useBatchStore } from '../stores/batchStore';
 import { useRestartPendingStore } from '../stores/restartPendingStore';
@@ -42,11 +44,72 @@ interface UpdateCheckResult {
 	releasesUrl: string;
 	assetsReady: boolean;
 	error?: string;
+	/** The managed hold on the newest release this host may not roll forward to (MRC2-05-04); absent standalone. */
+	held?: UpdateHoldView;
+}
+
+/**
+ * Every line a managed hold is shown with (MRC2-05-04A). A hold is neither
+ * "up to date" nor a failed download: it names the ceiling's code and sentence
+ * and offers no Download or Install control.
+ */
+export const UPDATE_HOLD_COPY = {
+	title: 'Update held by policy',
+	/** A newer release the check held while an admitted one is offered. */
+	newerHeld: (version: string) => `Newer release ${version} is held by policy:`,
+	/** What stays installed under a held check with nothing offered. */
+	stays: (current: string, candidate: string | null) =>
+		candidate
+			? `${candidate} is held; Maestro v${current} stays installed.`
+			: `Maestro v${current} stays installed.`,
+	viewReleases: 'View releases on GitHub',
+} as const;
+
+/** `v1.3.0` for a held candidate, as the feed spells it. */
+function heldVersion(held: UpdateHoldView): string | null {
+	if (!held.candidate) return null;
+	return held.candidate.startsWith('v') ? held.candidate : `v${held.candidate}`;
 }
 
 interface UpdateCheckModalProps {
 	theme: Theme;
 	onClose: () => void;
+}
+
+/** The hold a step met, drawn where a download error is drawn: the title, the line, the version. */
+function HeldNotice({
+	theme,
+	held,
+	current,
+	testId,
+}: {
+	theme: Theme;
+	held: UpdateHoldView;
+	current: string;
+	testId: string;
+}) {
+	return (
+		<div
+			data-testid={testId}
+			className="p-3 rounded border text-xs select-text"
+			style={{
+				backgroundColor: `${theme.colors.warning}15`,
+				borderColor: theme.colors.warning,
+				color: theme.colors.warning,
+			}}
+		>
+			<div className="flex items-center gap-2 mb-1">
+				<ShieldAlert className="w-4 h-4" />
+				<span className="font-bold">{UPDATE_HOLD_COPY.title}</span>
+			</div>
+			<p className="font-mono" style={{ color: theme.colors.textDim }}>
+				{formatManagedHold(held)}
+			</p>
+			<p className="mt-1" style={{ color: theme.colors.textDim }}>
+				{UPDATE_HOLD_COPY.stays(current, heldVersion(held))}
+			</p>
+		</div>
+	);
 }
 
 export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
@@ -79,6 +142,9 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 			setDownloadStatus(status);
 			if (status.status === 'error' && status.error) {
 				setDownloadError(status.error);
+			} else if (status.status === 'held-by-policy') {
+				// A hold is drawn by name from `status.held`, never as a failed download.
+				setDownloadError(null);
 			}
 		});
 		return () => unsubscribe();
@@ -152,7 +218,11 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 		// `result.releases` is newest-first, so [0] is the version shown to the user.
 		const targetTag = result?.releases?.[0]?.tag_name;
 		const downloadResult = await window.maestro.updates.download(targetTag);
-		if (!downloadResult.success && downloadResult.error) {
+		if (downloadResult.held) {
+			// The managed ceiling held the download before a byte moved: the hold by
+			// name, with no Download or Install control, not "Download failed".
+			setDownloadStatus({ status: 'held-by-policy', held: downloadResult.held });
+		} else if (!downloadResult.success && downloadResult.error) {
 			setDownloadError(downloadResult.error);
 			setDownloadStatus({ status: 'error', error: downloadResult.error });
 		}
@@ -183,6 +253,9 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 
 	const isDownloading = downloadStatus.status === 'downloading';
 	const isDownloaded = downloadStatus.status === 'downloaded';
+	// A check, download or install the managed ceiling stopped (MRC2-05-04): shown by name, no control.
+	const heldStep = downloadStatus.status === 'held-by-policy' ? downloadStatus.held : undefined;
+	const currentVersion = result?.currentVersion || __APP_VERSION__;
 
 	// Custom header with refresh button
 	const customHeader = (
@@ -278,6 +351,24 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 								</div>
 							</div>
 						</div>
+
+						{/* A newer release the managed ceiling held while this one is offered (a pin) */}
+						{result.held && (
+							<div
+								data-testid="update-check-held"
+								className="flex items-start gap-2 text-xs select-text"
+								style={{ color: theme.colors.textDim }}
+							>
+								<ShieldAlert
+									className="w-4 h-4 mt-0.5 shrink-0"
+									style={{ color: theme.colors.warning }}
+								/>
+								<span>
+									{UPDATE_HOLD_COPY.newerHeld(heldVersion(result.held) ?? 'of Maestro')}{' '}
+									<span className="font-mono">{formatManagedHold(result.held)}</span>
+								</span>
+							</div>
+						)}
 
 						{/* Release Notes */}
 						<div>
@@ -375,8 +466,18 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 							</div>
 						</div>
 
+						{/* Held step: the download or the install the managed ceiling stopped */}
+						{heldStep && (
+							<HeldNotice
+								theme={theme}
+								held={heldStep}
+								current={currentVersion}
+								testId="update-step-held"
+							/>
+						)}
+
 						{/* Download Error */}
-						{downloadError && (
+						{downloadError && !heldStep && (
 							<div
 								className="p-3 rounded border text-xs"
 								style={{
@@ -438,7 +539,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 
 						{/* Action Buttons */}
 						<div className="space-y-2">
-							{isDownloaded && restartPending ? (
+							{heldStep ? null : isDownloaded && restartPending ? (
 								<div
 									className="p-3 rounded-lg border space-y-2"
 									style={{
@@ -595,13 +696,39 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 								className="w-full flex items-center justify-center gap-2 p-2 rounded text-xs transition-colors hover:bg-white/5"
 								style={{ color: theme.colors.textDim }}
 							>
-								{result.assetsReady
-									? 'Or download manually from GitHub'
-									: 'Check release page for updates'}
+								{heldStep
+									? UPDATE_HOLD_COPY.viewReleases
+									: result.assetsReady
+										? 'Or download manually from GitHub'
+										: 'Check release page for updates'}
 								<ExternalLink className="w-3 h-3" />
 							</button>
 						</div>
 					</>
+				) : result?.held ? (
+					/* Nothing offered because the managed ceiling held every newer release: the hold, not "up to date" */
+					<div className="flex flex-col items-center justify-center py-8 gap-3">
+						<ShieldAlert className="w-12 h-12" style={{ color: theme.colors.warning }} />
+						<div className="text-center select-text" data-testid="update-check-held">
+							<div className="text-sm font-bold mb-1" style={{ color: theme.colors.textMain }}>
+								{UPDATE_HOLD_COPY.title}
+							</div>
+							<div className="text-xs font-mono mb-1" style={{ color: theme.colors.textDim }}>
+								{formatManagedHold(result.held)}
+							</div>
+							<div className="text-xs" style={{ color: theme.colors.textDim }}>
+								{UPDATE_HOLD_COPY.stays(currentVersion, heldVersion(result.held))}
+							</div>
+						</div>
+						<button
+							onClick={() => openUrl(result.releasesUrl)}
+							className="flex items-center gap-2 text-xs hover:underline mt-2"
+							style={{ color: theme.colors.accent }}
+						>
+							View all releases
+							<ExternalLink className="w-3 h-3" />
+						</button>
+					</div>
 				) : (
 					<div className="flex flex-col items-center justify-center py-8 gap-3">
 						<CheckCircle2 className="w-12 h-12" style={{ color: theme.colors.success }} />
@@ -610,7 +737,7 @@ export function UpdateCheckModal({ theme, onClose }: UpdateCheckModalProps) {
 								You're up to date!
 							</div>
 							<div className="text-xs font-mono" style={{ color: theme.colors.textDim }}>
-								Maestro v{result?.currentVersion || __APP_VERSION__}
+								Maestro v{currentVersion}
 							</div>
 						</div>
 						<button

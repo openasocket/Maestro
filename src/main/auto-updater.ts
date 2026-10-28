@@ -25,6 +25,7 @@ import { holdEgress, isEgressDeniedError } from './utils/fetchWithTimeout';
 import {
 	formatUpdateHold,
 	getReleaseDownloadFeedUrl,
+	recordUpdateHold,
 	RELEASES_ATOM_FEED_URL,
 	updateHoldFor,
 } from './update-checker';
@@ -189,9 +190,10 @@ function heldUpdaterStep(
 	return null;
 }
 
-/** Record a held step as the current status, by name, and tell the renderer. */
+/** Record a held step as the current status and the hold in force, by name, and tell the renderer. */
 function reportHeld(step: string, held: UpdateHold, info?: UpdateInfo): void {
 	logger.info(`Update ${step} held: ${formatUpdateHold(held)}`, 'AutoUpdater');
+	recordUpdateHold(held);
 	currentStatus = { status: 'held-by-policy', info, held };
 	sendStatusToRenderer();
 }

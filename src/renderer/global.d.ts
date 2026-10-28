@@ -2,6 +2,7 @@ import type {
 	TranslationRequest,
 	TranslationReport,
 } from '../shared/maestro-lib/translation/types';
+import type { UpdateHoldView, UpdateStatus } from '../shared/types';
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /**
  * Global type declarations for the renderer process.
@@ -3222,38 +3223,17 @@ interface MaestroAPI {
 			}>;
 			releasesUrl: string;
 			error?: string;
+			/** The managed hold on the newest release this host may not roll forward to (MRC2-05-04); absent standalone. */
+			held?: UpdateHoldView;
 		}>;
 		checkin: () => Promise<void>;
-		download: (targetTag?: string) => Promise<{ success: boolean; error?: string }>;
+		/** A held download answers `success: false` with the hold by name in `held` and its line in `error`. */
+		download: (
+			targetTag?: string
+		) => Promise<{ success: boolean; error?: string; held?: UpdateHoldView }>;
 		install: () => Promise<void>;
-		getStatus: () => Promise<{
-			status:
-				| 'idle'
-				| 'checking'
-				| 'available'
-				| 'not-available'
-				| 'downloading'
-				| 'downloaded'
-				| 'error';
-			info?: { version: string };
-			progress?: { percent: number; bytesPerSecond: number; total: number; transferred: number };
-			error?: string;
-		}>;
-		onStatus: (
-			callback: (status: {
-				status:
-					| 'idle'
-					| 'checking'
-					| 'available'
-					| 'not-available'
-					| 'downloading'
-					| 'downloaded'
-					| 'error';
-				info?: { version: string };
-				progress?: { percent: number; bytesPerSecond: number; total: number; transferred: number };
-				error?: string;
-			}) => void
-		) => () => void;
+		getStatus: () => Promise<UpdateStatus>;
+		onStatus: (callback: (status: UpdateStatus) => void) => () => void;
 		setAllowPrerelease: (allow: boolean) => Promise<void>;
 	};
 	// Debug Package API

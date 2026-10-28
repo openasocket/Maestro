@@ -12,9 +12,16 @@
  * check. With no authority installed (a standalone host, a test) nothing is
  * consulted and the check runs exactly as it always has. The feed request
  * itself leaves as an `updates` request on the egress ceiling.
+ *
+ * The hold in force is also kept here (`heldUpdate()`, MRC2-05-04A): the
+ * newest hold the last check reported, or the hold that stopped the last
+ * electron-updater step, so the managed status projection can list it beside
+ * the egress holds without asking the ceiling again. A check that holds
+ * nothing clears it; so does installing another authority.
  */
 
 import { compareVersions } from '../shared/pathUtils';
+import { formatManagedHold } from '../shared/formatters';
 import { logger } from './utils/logger';
 import { fetchWithTimeout } from './utils/fetchWithTimeout';
 import type { UpdateAuthority, UpdateHold, UpdateRequest } from './enterprise/update-policy';
@@ -31,10 +38,27 @@ export const RELEASES_ATOM_FEED_URL = `https://github.com/${GITHUB_OWNER}/${GITH
 const RELEASES_FETCH_TIMEOUT_MS = 15_000;
 
 let updateAuthority: UpdateAuthority | null = null;
+let currentHold: UpdateHold | null = null;
 
 /** Install (or, with null, remove) the authority every roll-forward of this process is held with. */
 export function setUpdateAuthority(authority: UpdateAuthority | null): void {
 	updateAuthority = authority;
+	currentHold = null;
+}
+
+/**
+ * Record the hold now in force, or with null that the last complete check held
+ * nothing. Called by `checkForUpdates()` with what it reports and by the
+ * auto-updater with the hold that stopped a step; never by a sink that merely
+ * asked. Standalone nothing is ever recorded, since nothing is ever held.
+ */
+export function recordUpdateHold(hold: UpdateHold | null): void {
+	currentHold = hold ? { ...hold } : null;
+}
+
+/** The update hold in force for the status projection, as a copy, or null. */
+export function heldUpdate(): UpdateHold | null {
+	return currentHold ? { ...currentHold } : null;
 }
 
 /**
@@ -54,9 +78,9 @@ export function updateHoldFor(request: UpdateRequest): UpdateHold | null {
 	};
 }
 
-/** The one line a hold is logged and answered as (the policy's `formatUpdateRefusal`, spelled here to keep this module a leaf). */
+/** The one line a hold is logged and answered as (the shared spelling, so the renderer and the log match). */
 export function formatUpdateHold(hold: Pick<UpdateHold, 'code' | 'message'>): string {
-	return `[managed-${hold.code}] ${hold.message}`;
+	return formatManagedHold(hold);
 }
 
 /**
@@ -248,6 +272,7 @@ export async function checkForUpdates(
 		effectivePrerelease = false;
 	} else if (gate) {
 		logger.info(`Update check held: ${formatUpdateHold(gate)}`, 'UpdateChecker');
+		recordUpdateHold(gate);
 		return { ...nothing, held: gate };
 	}
 
@@ -261,6 +286,7 @@ export async function checkForUpdates(
 
 		if (allReleases.length === 0) {
 			logger.info('No eligible releases found on GitHub', 'UpdateChecker');
+			recordUpdateHold(null);
 			return nothing;
 		}
 
@@ -280,6 +306,8 @@ export async function checkForUpdates(
 				'UpdateChecker'
 			);
 		}
+		// A complete check is the word on what is held now: the newest held release, or nothing.
+		recordUpdateHold(held ?? null);
 
 		// What the modal shows as latest, and whose assets are checked: the newest
 		// admitted release, or (with nothing held) the newest release as before.

@@ -15,7 +15,12 @@ import type { IdentityRead } from '../../main/enterprise/identity-store';
 import { createEgressPolicySource } from '../../main/enterprise/egress-policy';
 import { createUpdatePolicySource } from '../../main/enterprise/update-policy';
 import { setEgressAuthority } from '../../main/utils/fetchWithTimeout';
-import { checkForUpdates, setUpdateAuthority } from '../../main/update-checker';
+import {
+	checkForUpdates,
+	heldUpdate,
+	recordUpdateHold,
+	setUpdateAuthority,
+} from '../../main/update-checker';
 import { denyingEgressAuthority } from '../helpers/egressAuthority';
 
 const mockFetch = vi.fn();
@@ -113,6 +118,44 @@ describe('checkForUpdates under an update authority', () => {
 		expect(result.updateAvailable).toBe(false);
 		expect(result.error).toBeUndefined();
 		expect(result.held).toMatchObject({ code: 'held', policyRevision: 3, candidate: null });
+	});
+
+	// MRC2-05-04A: the hold in force is kept for the status projection: what the
+	// last check reported, as a copy; a clean check clears it, so does another
+	// authority; standalone nothing is ever recorded.
+	it('keeps the newest hold the last check reported, and clears it on a clean check', async () => {
+		expect(heldUpdate()).toBeNull();
+		setUpdateAuthority(updateSource({ pin: '1.2.0' }));
+		feed(release('v1.3.0'), release('v1.2.0'), release('v1.0.0'));
+		const pinned = await checkForUpdates('1.0.0');
+		expect(heldUpdate()).toEqual(pinned.held);
+		expect(heldUpdate()).toMatchObject({ code: 'pin-denied', candidate: 'v1.3.0' });
+		expect(heldUpdate()).not.toBe(heldUpdate());
+		// A check that holds nothing is the new word.
+		feed(release('v1.2.0'), release('v1.0.0'));
+		const clean = await checkForUpdates('1.0.0');
+		expect(clean.held).toBeUndefined();
+		expect(heldUpdate()).toBeNull();
+		// A feed-level hold is recorded with no candidate; a new authority forgets it.
+		setUpdateAuthority(updateSource({ hold: true }));
+		await checkForUpdates('1.0.0');
+		expect(heldUpdate()).toMatchObject({ code: 'held', candidate: null });
+		setUpdateAuthority(null);
+		expect(heldUpdate()).toBeNull();
+		// The auto-updater records the step it stopped through the same door.
+		recordUpdateHold({ code: 'held', message: 'm', policyRevision: 3, candidate: '1.3.0' });
+		expect(heldUpdate()).toEqual({
+			code: 'held',
+			message: 'm',
+			policyRevision: 3,
+			candidate: '1.3.0',
+		});
+		recordUpdateHold(null);
+		expect(heldUpdate()).toBeNull();
+		// Standalone: a check records nothing.
+		feed(release('v1.3.0'), release('v1.0.0'));
+		await checkForUpdates('1.0.0');
+		expect(heldUpdate()).toBeNull();
 	});
 
 	it('holds an enrolled host with no ceiling unavailable, reading no feed', async () => {

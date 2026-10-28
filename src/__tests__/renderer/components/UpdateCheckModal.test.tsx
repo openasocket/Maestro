@@ -48,7 +48,7 @@ vi.mock('../../../renderer/contexts/LayerStackContext', () => ({
 }));
 
 // Import component after mocks
-import { UpdateCheckModal } from '../../../renderer/components/UpdateCheckModal';
+import { UpdateCheckModal, UPDATE_HOLD_COPY } from '../../../renderer/components/UpdateCheckModal';
 
 import { createMockTheme } from '../../helpers/mockTheme';
 
@@ -83,6 +83,7 @@ const createMockUpdateResult = (
 		releases: any[];
 		releasesUrl: string;
 		error?: string;
+		held?: UpdateHold;
 	}> = {}
 ) => ({
 	currentVersion: '1.0.0',
@@ -94,6 +95,31 @@ const createMockUpdateResult = (
 	releasesUrl: 'https://github.com/RunMaestro/Maestro/releases',
 	...overrides,
 });
+
+/** The managed hold a check, download or install answers with (MRC2-05-04). */
+type UpdateHold = {
+	code: string;
+	message: string;
+	policyRevision: number | null;
+	candidate: string | null;
+};
+const hold = (over: Partial<UpdateHold> = {}): UpdateHold => ({
+	code: 'held',
+	message: 'Policy revision 3 holds updates on this installation.',
+	policyRevision: 3,
+	candidate: 'v1.3.0',
+	...over,
+});
+
+/** Subscribe the modal's status listener so a test can push an UpdateStatus. */
+function captureStatusCallback(): () => (status: any) => void {
+	let statusCallback: ((status: any) => void) | null = null;
+	(window.maestro.updates.onStatus as any).mockImplementation((cb: any) => {
+		statusCallback = cb;
+		return vi.fn();
+	});
+	return () => statusCallback!;
+}
 
 describe('UpdateCheckModal', () => {
 	beforeEach(() => {
@@ -1137,6 +1163,185 @@ describe('UpdateCheckModal', () => {
 				expect(screen.getByText('Download failed')).toBeInTheDocument();
 				expect(screen.getByText('Connection timed out')).toBeInTheDocument();
 			});
+		});
+	});
+
+	// =============================================================================
+	// MANAGED HOLDS (MRC2-05-04A)
+	// =============================================================================
+	// A hold is neither "up to date" nor "Download failed": the modal names the
+	// ceiling's code and sentence, the version held, and offers no Download or
+	// Install control. Standalone results carry no `held` and draw as before.
+
+	describe('managed holds', () => {
+		const heldLine = '[managed-held] Policy revision 3 holds updates on this installation.';
+
+		it('shows a held check by name in place of "up to date", with no download control', async () => {
+			(window.maestro as any).updates.check.mockResolvedValue(
+				createMockUpdateResult({
+					updateAvailable: false,
+					versionsBehind: 0,
+					latestVersion: '1.0.0',
+					releases: [],
+					held: hold(),
+				})
+			);
+
+			render(<UpdateCheckModal theme={createMockTheme()} onClose={vi.fn()} />);
+
+			await waitFor(() => {
+				expect(screen.getByText(UPDATE_HOLD_COPY.title)).toBeInTheDocument();
+			});
+			expect(screen.getByText(heldLine)).toBeInTheDocument();
+			expect(
+				screen.getByText('v1.3.0 is held; Maestro v1.0.0 stays installed.')
+			).toBeInTheDocument();
+			expect(screen.queryByText("You're up to date!")).not.toBeInTheDocument();
+			expect(screen.queryByText('Update Available!')).not.toBeInTheDocument();
+			expect(screen.queryByText('Download and Install Update')).not.toBeInTheDocument();
+			expect(screen.queryByText('Restart to Update')).not.toBeInTheDocument();
+			expect(screen.queryByText('Download failed')).not.toBeInTheDocument();
+			// The releases page stays a link, not a control.
+			fireEvent.click(screen.getByText('View all releases'));
+			expect(window.maestro.shell.openExternal).toHaveBeenCalledWith(
+				'https://github.com/RunMaestro/Maestro/releases'
+			);
+		});
+
+		it('names the check itself when the hold has no candidate', async () => {
+			(window.maestro as any).updates.check.mockResolvedValue(
+				createMockUpdateResult({
+					updateAvailable: false,
+					versionsBehind: 0,
+					releases: [],
+					held: hold({ code: 'unavailable', message: 'No update ceiling.', candidate: null }),
+				})
+			);
+
+			render(<UpdateCheckModal theme={createMockTheme()} onClose={vi.fn()} />);
+
+			await waitFor(() => {
+				expect(screen.getByText('[managed-unavailable] No update ceiling.')).toBeInTheDocument();
+			});
+			expect(screen.getByText('Maestro v1.0.0 stays installed.')).toBeInTheDocument();
+		});
+
+		it('lists a newer held release beside the admitted update a pin offers', async () => {
+			(window.maestro as any).updates.check.mockResolvedValue(
+				createMockUpdateResult({
+					latestVersion: '1.2.0',
+					releases: [createMockRelease({ tag_name: 'v1.2.0' })],
+					held: hold({
+						code: 'pin-denied',
+						message: 'Policy revision 3 pins this installation to 1.2.0.',
+						candidate: 'v1.3.0',
+					}),
+				})
+			);
+
+			render(<UpdateCheckModal theme={createMockTheme()} onClose={vi.fn()} />);
+
+			await waitFor(() => {
+				expect(screen.getByText('Update Available!')).toBeInTheDocument();
+			});
+			const note = screen.getByTestId('update-check-held');
+			expect(note).toHaveTextContent(UPDATE_HOLD_COPY.newerHeld('v1.3.0'));
+			expect(note).toHaveTextContent(
+				'[managed-pin-denied] Policy revision 3 pins this installation to 1.2.0.'
+			);
+			// The admitted release is still offered.
+			expect(screen.getByText('Download and Install Update')).toBeInTheDocument();
+			expect(screen.getByText(/Latest: v1\.2\.0/)).toBeInTheDocument();
+		});
+
+		it('shows a held download by name, not as "Download failed", and withdraws the download control', async () => {
+			(window.maestro.updates.download as any).mockResolvedValue({
+				success: false,
+				error: heldLine,
+				held: hold(),
+			});
+
+			render(<UpdateCheckModal theme={createMockTheme()} onClose={vi.fn()} />);
+
+			await waitFor(() => {
+				expect(screen.getByText('Download and Install Update')).toBeInTheDocument();
+			});
+			fireEvent.click(screen.getByText('Download and Install Update'));
+
+			const notice = await screen.findByTestId('update-step-held');
+			expect(notice).toHaveTextContent(UPDATE_HOLD_COPY.title);
+			expect(notice).toHaveTextContent(heldLine);
+			expect(notice).toHaveTextContent('v1.3.0 is held; Maestro v1.0.0 stays installed.');
+			expect(screen.queryByText('Download failed')).not.toBeInTheDocument();
+			expect(screen.queryByText('Download manually from GitHub')).not.toBeInTheDocument();
+			expect(screen.queryByText('Download and Install Update')).not.toBeInTheDocument();
+			expect(screen.queryByText('Restart to Update')).not.toBeInTheDocument();
+			expect(screen.getByText(UPDATE_HOLD_COPY.viewReleases)).toBeInTheDocument();
+		});
+
+		it('shows a held status the main process sends, after a download, with no install control', async () => {
+			const status = captureStatusCallback();
+
+			render(<UpdateCheckModal theme={createMockTheme()} onClose={vi.fn()} />);
+
+			await waitFor(() => {
+				expect(screen.getByText('Download and Install Update')).toBeInTheDocument();
+			});
+			status()({ status: 'downloaded', info: { version: '1.1.0' } });
+			await waitFor(() => {
+				expect(screen.getByText('Restart to Update')).toBeInTheDocument();
+			});
+
+			// Install re-held: a pin landed after the download.
+			status()({
+				status: 'held-by-policy',
+				info: { version: '1.1.0' },
+				held: hold({
+					code: 'pin-denied',
+					message: 'Policy revision 4 pins this installation to 1.0.0.',
+					candidate: '1.1.0',
+				}),
+			});
+
+			const notice = await screen.findByTestId('update-step-held');
+			expect(notice).toHaveTextContent(
+				'[managed-pin-denied] Policy revision 4 pins this installation to 1.0.0.'
+			);
+			expect(notice).toHaveTextContent('v1.1.0 is held; Maestro v1.0.0 stays installed.');
+			expect(screen.queryByText('Restart to Update')).not.toBeInTheDocument();
+			expect(screen.queryByText('Download and Install Update')).not.toBeInTheDocument();
+			expect(window.maestro.updates.install).not.toHaveBeenCalled();
+		});
+
+		it('clears an earlier download error when the next step is held, and draws the hold alone', async () => {
+			const status = captureStatusCallback();
+
+			render(<UpdateCheckModal theme={createMockTheme()} onClose={vi.fn()} />);
+
+			await waitFor(() => {
+				expect(screen.getByText('Download and Install Update')).toBeInTheDocument();
+			});
+			status()({ status: 'error', error: 'Connection timed out' });
+			await waitFor(() => {
+				expect(screen.getByText('Download failed')).toBeInTheDocument();
+			});
+			status()({ status: 'held-by-policy', held: hold() });
+			await screen.findByTestId('update-step-held');
+			expect(screen.queryByText('Download failed')).not.toBeInTheDocument();
+			expect(screen.queryByText('Connection timed out')).not.toBeInTheDocument();
+		});
+
+		it('standalone: a result with no hold draws exactly as before', async () => {
+			render(<UpdateCheckModal theme={createMockTheme()} onClose={vi.fn()} />);
+
+			await waitFor(() => {
+				expect(screen.getByText('Update Available!')).toBeInTheDocument();
+			});
+			expect(screen.queryByTestId('update-check-held')).not.toBeInTheDocument();
+			expect(screen.queryByTestId('update-step-held')).not.toBeInTheDocument();
+			expect(screen.queryByText(UPDATE_HOLD_COPY.title)).not.toBeInTheDocument();
+			expect(screen.getByText('Download and Install Update')).toBeInTheDocument();
+			expect(screen.getByText('Or download manually from GitHub')).toBeInTheDocument();
 		});
 	});
 

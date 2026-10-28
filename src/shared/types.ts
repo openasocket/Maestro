@@ -1173,6 +1173,19 @@ export interface DirectoryEntry {
 }
 
 /**
+ * The managed hold on an update as the renderer sees it (the main process's
+ * `UpdateHold`, `src/main/enterprise/update-policy.ts`): the code, the
+ * sentence, the policy revision and the version held (null for the feed
+ * itself). Shown as `formatManagedHold()` (`src/shared/formatters.ts`).
+ */
+export interface UpdateHoldView {
+	code: string;
+	message: string;
+	policyRevision: number | null;
+	candidate: string | null;
+}
+
+/**
  * Update status from electron-updater (serializable subset for IPC).
  */
 export interface UpdateStatus {
@@ -1188,6 +1201,6 @@ export interface UpdateStatus {
 	info?: { version: string };
 	progress?: { percent: number; bytesPerSecond: number; total: number; transferred: number };
 	error?: string;
-	/** The managed hold that stopped a check, download or install (`held-by-policy`): code, sentence, revision, what was held. */
-	held?: { code: string; message: string; policyRevision: number | null; candidate: string | null };
+	/** The managed hold that stopped a check, download or install (`held-by-policy`). */
+	held?: UpdateHoldView;
 }

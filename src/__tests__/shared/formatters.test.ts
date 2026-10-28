@@ -28,6 +28,7 @@ import {
 	joinPath,
 	formatSshTarget,
 	formatTimestamp,
+	formatManagedHold,
 } from '../../shared/formatters';
 
 describe('shared/formatters', () => {
@@ -883,6 +884,23 @@ describe('shared/formatters', () => {
 
 		it('defaults the port to 22 when omitted', () => {
 			expect(formatSshTarget({ host: 'host', username: 'me' })).toBe('me@host:22');
+		});
+	});
+
+	// MRC2-05-04A: the one spelling of a managed refusal, shared by the main
+	// process's logs and answers and the renderer's hold lines.
+	describe('formatManagedHold', () => {
+		it('spells the code in brackets, then the sentence', () => {
+			expect(formatManagedHold({ code: 'held', message: 'Updates are held.' })).toBe(
+				'[managed-held] Updates are held.'
+			);
+			expect(
+				formatManagedHold({
+					code: 'class-denied',
+					message: 'vendor-telemetry is not in the ceiling.',
+					extra: 1,
+				} as { code: string; message: string })
+			).toBe('[managed-class-denied] vendor-telemetry is not in the ceiling.');
 		});
 	});
 

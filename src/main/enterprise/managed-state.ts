@@ -10,8 +10,9 @@
  * manages this installation, what the endpoint answered last, whether this
  * process holds an actor registration, which policy is applied and how fresh
  * that is, which capabilities were negotiated, whether management can be
- * left locally, and what the egress ceiling has refused (once per class, code
- * and origin, from the chokepoint's own ledger; MRC2-05-03). A projection,
+ * left locally, what the egress ceiling has refused (once per class, code
+ * and origin, from the chokepoint's own ledger; MRC2-05-03) and the update
+ * hold in force (the checker's own record; MRC2-05-04A). A projection,
  * never authority: a sink admits on the host adapter's standing, not on the
  * word shown here. No path, digest or secret of the sealed record is in it.
  *
@@ -38,6 +39,7 @@ import type {
 import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
 import type { EgressHold } from '../utils/fetchWithTimeout';
 import type { IdentityCustodyState } from './identity-store';
+import type { UpdateHold } from './update-policy';
 
 /** One word for the standing, in the order a pane sorts them from best to worst. */
 export type ManagedStanding =
@@ -109,6 +111,8 @@ export interface ManagedStateView {
 	};
 	/** What the egress ceiling refused since it was installed, once per class, code and origin: a quiet record, never a toast. */
 	egress: { held: readonly EgressHold[] };
+	/** The update hold in force (the newest release the last check held, or the step the auto-updater stopped); null when nothing is held. */
+	update: { held: UpdateHold | null };
 	localRelease: LocalRelease;
 }
 
@@ -182,6 +186,8 @@ export interface ManagedStateInput {
 	supported: readonly string[];
 	/** The chokepoint's ledger (`heldEgress()`); absent reads as nothing refused. */
 	egress?: readonly EgressHold[];
+	/** The checker's record (`heldUpdate()`); absent reads as nothing held. */
+	update?: UpdateHold | null;
 	now?: number;
 }
 
@@ -241,6 +247,7 @@ export function projectManagedState(input: ManagedStateInput): ManagedStateView 
 			missing: input.supported.filter((name) => !negotiated.includes(name)),
 		},
 		egress: { held: (input.egress ?? []).map((hold) => ({ ...hold })) },
+		update: { held: input.update ? { ...input.update } : null },
 		localRelease: localReleaseOf(status),
 	};
 }

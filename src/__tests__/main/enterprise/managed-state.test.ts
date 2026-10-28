@@ -225,12 +225,32 @@ describe('projectManagedState', () => {
 				missing: ['compatibility', 'telemetry'],
 			},
 			egress: { held: [] },
+			update: { held: null },
 			localRelease: { allowed: false },
 		});
 		const text = JSON.stringify(view);
 		expect(text).not.toContain('/run/endpoint.sock');
 		expect(text).not.toContain('b'.repeat(64));
 		expect(text).not.toContain('socketPath');
+	});
+
+	// MRC2-05-04A: the update hold in force rides along as a copy, so the pane
+	// can list it beside the egress holds; absent or null reads as nothing held.
+	it('carries the update hold it is handed, as a copy, and null when nothing is held', () => {
+		const s = registered();
+		const hold = {
+			code: 'pin-denied' as const,
+			message: 'Policy revision 3 pins this installation to 1.2.0.',
+			policyRevision: 3,
+			candidate: 'v1.3.0',
+		};
+		const base = { status: s, policy: policyOf(s), custody: { state: 'protected' as const } };
+		const view = projectManagedState({ ...base, supported: SUPPORTED, update: hold });
+		expect(view.update).toEqual({ held: hold });
+		expect(view.update.held).not.toBe(hold);
+		expect(projectManagedState({ ...base, supported: SUPPORTED, update: null }).update).toEqual({
+			held: null,
+		});
 	});
 
 	// MRC2-05-03: the chokepoint's ledger rides along as copies, so a pane can

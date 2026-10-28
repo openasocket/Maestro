@@ -23,6 +23,7 @@ export type {
 	AgentConfigOption,
 	DirectoryEntry,
 	ShellInfo,
+	UpdateHoldView,
 	UpdateStatus,
 	ToolType,
 	Group,

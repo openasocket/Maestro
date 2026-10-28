@@ -14,9 +14,17 @@
  * accessible name, and an unmanaged desktop (no service, not enrolled) draws
  * nothing, so the ordinary unmanaged Maestro keeps its header. Every string a
  * person reads lives in `STATUS_COPY`.
+ *
+ * Below the sentence, the full pane lists what the ceilings hold (MRC2-05-03,
+ * MRC2-05-04A): the update hold in force and every egress class refused, each
+ * as one `[managed-<code>] ...` line from the projection's own records. A
+ * quiet record in place of a toast per start; nothing here is a control.
  */
 
+import { formatManagedHold, formatRelativeTime } from '../../../shared/formatters';
 import type { ManagedStanding, ManagedStateView } from '../../../main/enterprise/managed-state';
+import type { EgressHold } from '../../../main/utils/fetchWithTimeout';
+import type { UpdateHoldView } from '../../types';
 import { MANAGED_STANDING_COPY } from '../../hooks/enterprise/useManagedStatus';
 import type { Theme } from '../../types';
 import { MiniBadge } from '../ui/MiniBadge';
@@ -27,7 +35,37 @@ export const STATUS_COPY = {
 	noService: 'The enterprise enrollment service is not running in this desktop.',
 	reading: 'Reading the managed standing...',
 	readFailed: 'Could not read the managed standing. Try again.',
+	holds: 'Held by policy',
+	/** The update hold in force: the version held (or the check itself), then the ceiling's line. */
+	updateHold: (held: UpdateHoldView) =>
+		`Update ${held.candidate ?? 'check'}: ${formatManagedHold(held)}`,
+	/** One egress class refused for one origin, with how often and how recently. */
+	egressHold: (hold: EgressHold) =>
+		formatManagedHold({
+			code: hold.code,
+			message: `${hold.count} ${hold.class} request${hold.count === 1 ? '' : 's'} to ${hold.origin ?? 'an unnamed destination'} refused, last ${formatRelativeTime(hold.lastAt)}`,
+		}),
 } as const;
+
+/** The list under the standing, or null when nothing is held. */
+function Holds({ state }: { state: ManagedStateView }) {
+	const update = state.update.held;
+	const egress = state.egress.held;
+	if (!update && egress.length === 0) return null;
+	return (
+		<div className="text-xs" data-testid="managed-holds">
+			<span className="font-medium">{STATUS_COPY.holds}</span>
+			<ul className="list-disc pl-4 mt-0.5 select-text">
+				{update ? <li>{STATUS_COPY.updateHold(update)}</li> : null}
+				{egress.map((hold) => (
+					<li key={`${hold.class}\n${hold.code}\n${hold.origin ?? ''}`}>
+						{STATUS_COPY.egressHold(hold)}
+					</li>
+				))}
+			</ul>
+		</div>
+	);
+}
 
 export const STANDING_TINT: Record<ManagedStanding, 'success' | 'warning' | 'error' | 'textDim'> = {
 	managed: 'success',
@@ -97,6 +135,7 @@ export function ManagedStatus({
 				<MiniBadge label={copy.label} theme={theme} color={tint} testId={testId} />
 			</div>
 			<p className="text-xs opacity-70">{detail}</p>
+			<Holds state={state} />
 		</>
 	);
 }

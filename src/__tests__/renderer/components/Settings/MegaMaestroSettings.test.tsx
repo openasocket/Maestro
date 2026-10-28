@@ -66,6 +66,8 @@ function view(over: Partial<ManagedStateView> = {}): ManagedStateView {
 			negotiated: ['attachment', 'execution'],
 			missing: ['telemetry'],
 		},
+		egress: { held: [] },
+		update: { held: null },
 		localRelease: {
 			allowed: false,
 			reason: 'required',

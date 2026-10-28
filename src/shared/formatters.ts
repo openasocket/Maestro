@@ -28,6 +28,7 @@
  * - truncateCommand: Truncate command text for display with ellipsis
  * - formatSshTarget: SSH connection target for display (user@host:port)
  * - abbreviateGroupName: Shorten a group name for badge/pill display
+ * - formatManagedHold: The one line a managed refusal is shown as ([managed-<code>] sentence)
  */
 
 // ============================================================================
@@ -739,6 +740,19 @@ export function fileTimestampSlug(dateOrTimestamp: Date | number = new Date()): 
 		`${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}` +
 		`-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
 	);
+}
+
+/**
+ * The one line a managed refusal is shown and logged as: the ceiling's stable
+ * code in brackets, then its sentence. Every hold a managed desktop reports
+ * (an update held, an egress class refused, a dispatch denied) is spelled this
+ * way, so a person and a log reader match on the same text. Pure; takes any
+ * hold or decision that carries `code` and `message`.
+ *
+ * @example formatManagedHold({ code: 'held', message: 'Updates are held.' }) === '[managed-held] Updates are held.'
+ */
+export function formatManagedHold(hold: { code: string; message: string }): string {
+	return `[managed-${hold.code}] ${hold.message}`;
 }
 
 // ============================================================================

@@ -6,8 +6,8 @@
 
 import { ipcRenderer } from 'electron';
 import type { IpcRendererEvent } from 'electron';
-import type { ParsedDeepLink, ShellInfo, UpdateStatus } from '../../shared/types';
-export type { ShellInfo, UpdateStatus } from '../../shared/types';
+import type { ParsedDeepLink, ShellInfo, UpdateHoldView, UpdateStatus } from '../../shared/types';
+export type { ShellInfo, UpdateHoldView, UpdateStatus } from '../../shared/types';
 
 /**
  * Creates the dialog API object for preload exposure
@@ -154,10 +154,16 @@ export function createUpdatesApi() {
 				published_at: string;
 			}>;
 			releasesUrl: string;
+			assetsReady: boolean;
 			error?: string;
+			/** The managed hold on the newest release this host may not roll forward to (MRC2-05-04); absent standalone. */
+			held?: UpdateHoldView;
 		}> => ipcRenderer.invoke('updates:check', includePrerelease),
 		checkin: (): Promise<void> => ipcRenderer.invoke('updates:checkin'),
-		download: (targetTag?: string): Promise<{ success: boolean; error?: string }> =>
+		/** A held download answers `success: false` with the hold by name in `held` and its line in `error`. */
+		download: (
+			targetTag?: string
+		): Promise<{ success: boolean; error?: string; held?: UpdateHoldView }> =>
 			ipcRenderer.invoke('updates:download', targetTag),
 		install: (): Promise<void> => ipcRenderer.invoke('updates:install'),
 		getStatus: (): Promise<UpdateStatus> => ipcRenderer.invoke('updates:getStatus'),

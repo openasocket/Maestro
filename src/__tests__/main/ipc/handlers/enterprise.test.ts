@@ -245,6 +245,7 @@ describe('enterprise handlers', () => {
 			policy: { appliedRevision: 3, freshness: 'stale' },
 			capabilities: { negotiated: [] },
 			egress: { held: [] },
+			update: { held: null },
 			localRelease: { allowed: false, reason: 'required' },
 		});
 		expect(view.capabilities.supported).toContain('execution');
