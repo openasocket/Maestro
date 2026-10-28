@@ -1183,8 +1183,11 @@ export interface UpdateStatus {
 		| 'not-available'
 		| 'downloading'
 		| 'downloaded'
+		| 'held-by-policy'
 		| 'error';
 	info?: { version: string };
 	progress?: { percent: number; bytesPerSecond: number; total: number; transferred: number };
 	error?: string;
+	/** The managed hold that stopped a check, download or install (`held-by-policy`): code, sentence, revision, what was held. */
+	held?: { code: string; message: string; policyRevision: number | null; candidate: string | null };
 }

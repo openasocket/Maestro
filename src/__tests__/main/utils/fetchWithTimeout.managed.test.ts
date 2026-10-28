@@ -22,6 +22,7 @@ import {
 	EgressDeniedError,
 	fetchWithTimeout,
 	heldEgress,
+	holdEgress,
 	isEgressDeniedError,
 	isFetchTimeoutError,
 	MAX_EGRESS_HOLDS,
@@ -122,6 +123,33 @@ describe('fetchWithTimeout under an egress authority', () => {
 		});
 		expect(global.fetch).not.toHaveBeenCalled();
 		expect(timers).not.toHaveBeenCalled();
+	});
+
+	it('holds a request for another HTTP stack the same way, without sending it (MRC2-05-04)', () => {
+		global.fetch = forbiddenFetch() as unknown as typeof fetch;
+		// No authority: nothing consulted, nothing recorded.
+		expect(() =>
+			holdEgress('https://github.com/RunMaestro/Maestro/releases.atom', 'updates')
+		).not.toThrow();
+		expect(heldEgress()).toEqual([]);
+		setEgressAuthority(
+			managedSource({
+				policyRevision: 3,
+				classes: [{ class: 'content', destinations: ['*'] }],
+			})
+		);
+		expect(() => holdEgress('https://github.com/RunMaestro/Maestro/releases.atom')).not.toThrow();
+		expect(() =>
+			holdEgress('https://github.com/RunMaestro/Maestro/releases.atom', 'updates')
+		).toThrow(EgressDeniedError);
+		expect(heldEgress()).toEqual([
+			expect.objectContaining({
+				class: 'updates',
+				code: 'class-denied',
+				origin: 'https://github.com',
+			}),
+		]);
+		expect(global.fetch).not.toHaveBeenCalled();
 	});
 
 	it('denies vendor telemetry by default on a managed host whose ceiling omits the class', async () => {

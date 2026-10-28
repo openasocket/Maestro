@@ -57,6 +57,8 @@ import { createShellPolicySource } from './enterprise/shell-policy';
 import { createInstallPolicySource } from './enterprise/install-policy';
 import { createEgressPolicySource } from './enterprise/egress-policy';
 import { setEgressAuthority } from './utils/fetchWithTimeout';
+import { createUpdatePolicySource } from './enterprise/update-policy';
+import { setUpdateAuthority } from './update-checker';
 import {
 	createLocalEffectsPolicySource,
 	describeLocalEffect,
@@ -1013,6 +1015,17 @@ app
 			policy: () => enterpriseService?.policy.status() ?? null,
 		});
 		setEgressAuthority(egressPolicy);
+		// The update ceiling (MRC2-05-04): the releases checker and electron-updater
+		// hold every roll-forward (a hold, a channel, a pin) before a feed is read
+		// or a byte is downloaded; electron-updater's own feed and download are
+		// held as `updates` on the egress ceiling through `holdEgress()`. None
+		// installed yet (CP-01): an enrolled host offers, downloads and installs
+		// nothing, by name, while standalone updates run as they always have.
+		const updatePolicy = createUpdatePolicySource({
+			identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
+			policy: () => enterpriseService?.policy.status() ?? null,
+		});
+		setUpdateAuthority(updatePolicy);
 		// The local-effects ceiling (MRC2-04-09): opens, clipboard writes, trashes
 		// and deletes are held by class (allow, deny, confirm) in the system and
 		// filesystem handlers. A `confirm` is a dialog on the main window; with no

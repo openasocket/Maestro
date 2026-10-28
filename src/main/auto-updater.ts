@@ -5,14 +5,30 @@
  * Note: electron-updater accesses electron.app at module load time, so we use
  * lazy initialization to avoid "Cannot read properties of undefined" errors
  * when the module is imported before app.whenReady().
+ *
+ * On a managed desktop every step here is held first (MRC2-05-04): the feed
+ * and the installer download as an `updates` request on the egress ceiling
+ * (electron-updater has its own HTTP stack, so `holdEgress()` applies the
+ * chokepoint's verdict to the URL it is about to read), and the candidate
+ * version on the update ceiling (a hold, a channel, a pin) through
+ * `updateHoldFor()`. A held step reads no feed, downloads no byte and installs
+ * nothing; it is reported as `held-by-policy` with the hold by name, never as
+ * an error and never as "no update". Standalone nothing is consulted.
  */
 
 import type { UpdateInfo, ProgressInfo, AppUpdater } from 'electron-updater';
-import { BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain } from 'electron';
 import { logger } from './utils/logger';
 import { captureException } from './utils/sentry';
 import { isWebContentsAvailable } from './utils/safe-send';
-import { getReleaseDownloadFeedUrl } from './update-checker';
+import { holdEgress, isEgressDeniedError } from './utils/fetchWithTimeout';
+import {
+	formatUpdateHold,
+	getReleaseDownloadFeedUrl,
+	RELEASES_ATOM_FEED_URL,
+	updateHoldFor,
+} from './update-checker';
+import type { UpdateHold } from './enterprise/update-policy';
 
 export interface UpdateStatus {
 	status:
@@ -22,10 +38,13 @@ export interface UpdateStatus {
 		| 'not-available'
 		| 'downloading'
 		| 'downloaded'
+		| 'held-by-policy'
 		| 'error';
 	info?: UpdateInfo;
 	progress?: ProgressInfo;
 	error?: string;
+	/** The managed hold that stopped a check, download or install; set with `held-by-policy`. */
+	held?: UpdateHold;
 }
 
 let mainWindow: BrowserWindow | null = null;
@@ -110,6 +129,71 @@ async function withUpdateRetry<T>(label: string, operation: () => Promise<T>): P
 	}
 	// Unreachable: the loop either returns or throws, but satisfies the type checker.
 	throw lastError;
+}
+
+/** The version this process runs. */
+function runningVersion(): string {
+	try {
+		return app.getVersion();
+	} catch {
+		// Only a test double of electron lacks `app`; the real one cannot throw here.
+		return '0.0.0';
+	}
+}
+
+/** The hold a prerelease feed meets under the update ceiling (a stable channel, a hold), or null. */
+function prereleaseCap(): UpdateHold | null {
+	return updateHoldFor({ current: runningVersion(), candidate: null, prerelease: true });
+}
+
+/**
+ * Cap electron-updater's prerelease flag to the channel the ceiling fixes.
+ * Read per call rather than once, so a ceiling installed after the setting
+ * was applied still holds the next check.
+ */
+function applyPrereleaseCeiling(autoUpdater: AppUpdater): void {
+	if (!autoUpdater.allowPrerelease) return;
+	const cap = prereleaseCap();
+	if (cap?.code !== 'channel-denied') return;
+	autoUpdater.allowPrerelease = false;
+	logger.info(
+		`Auto-updater prerelease mode capped to stable by the managed update ceiling: ${formatUpdateHold(cap)}`,
+		'AutoUpdater'
+	);
+}
+
+/**
+ * Hold one step of electron-updater before it leaves: the candidate on the
+ * update ceiling, then the URL it is about to read as an `updates` request on
+ * the egress ceiling. Standalone both answer at once with nothing consulted.
+ * Returns the hold to report, or null when the step may proceed.
+ */
+function heldUpdaterStep(
+	feedUrl: string,
+	candidate: string | null,
+	prerelease?: boolean
+): UpdateHold | null {
+	const hold = updateHoldFor({ current: runningVersion(), candidate, prerelease });
+	if (hold) return hold;
+	try {
+		holdEgress(feedUrl, 'updates');
+	} catch (error) {
+		if (!isEgressDeniedError(error)) throw error;
+		return {
+			code: error.code,
+			message: error.message.replace(/^\[managed-[a-z-]+\] /, ''),
+			policyRevision: error.receipt.policyRevision,
+			candidate,
+		};
+	}
+	return null;
+}
+
+/** Record a held step as the current status, by name, and tell the renderer. */
+function reportHeld(step: string, held: UpdateHold, info?: UpdateInfo): void {
+	logger.info(`Update ${step} held: ${formatUpdateHold(held)}`, 'AutoUpdater');
+	currentStatus = { status: 'held-by-policy', info, held };
+	sendStatusToRenderer();
 }
 
 // Lazy-loaded autoUpdater instance
@@ -239,6 +323,12 @@ function setupIpcHandlers(): void {
 	// Check for updates using electron-updater (different from manual GitHub API check)
 	ipcMain.handle('updates:checkAutoUpdater', async () => {
 		try {
+			applyPrereleaseCeiling(autoUpdater);
+			const gate = heldUpdaterStep(RELEASES_ATOM_FEED_URL, null, autoUpdater.allowPrerelease);
+			if (gate) {
+				reportHeld('check', gate);
+				return { success: true, held: gate };
+			}
 			logger.info(
 				`Checking for updates via electron-updater (allowPrerelease: ${autoUpdater.allowPrerelease})`,
 				'AutoUpdater'
@@ -255,7 +345,16 @@ function setupIpcHandlers(): void {
 					? { version: result.updateInfo.version, releaseDate: result.updateInfo.releaseDate }
 					: undefined
 			);
-			return { success: true, updateInfo: result?.updateInfo };
+			// The version the feed named is held on its own: a pin admits one.
+			const found = result?.updateInfo;
+			const hold = found
+				? updateHoldFor({ current: runningVersion(), candidate: found.version })
+				: null;
+			if (hold) {
+				reportHeld('check', hold, found);
+				return { success: true, held: hold };
+			}
+			return { success: true, updateInfo: found };
 		} catch (error) {
 			const errorMessage = describeUpdateError(error);
 			logger.error(`electron-updater check failed: ${errorMessage}`, 'AutoUpdater', {
@@ -279,8 +378,18 @@ function setupIpcHandlers(): void {
 			// `releases.atom` lookup, which intermittently (sometimes persistently)
 			// returns 504 Gateway Time-out. Falls back to the bundled GitHub provider
 			// when no tag is supplied (e.g. background auto-update paths).
+			//
+			// Held first, before the feed is pointed anywhere: the tag the renderer
+			// offers (or the feed itself, with no tag) on the update ceiling, the
+			// feed URL as an `updates` request on the egress ceiling.
+			applyPrereleaseCeiling(autoUpdater);
+			const feedUrl = targetTag ? getReleaseDownloadFeedUrl(targetTag) : RELEASES_ATOM_FEED_URL;
+			const gate = heldUpdaterStep(feedUrl, targetTag ?? null, autoUpdater.allowPrerelease);
+			if (gate) {
+				reportHeld('download', gate);
+				return { success: false, error: formatUpdateHold(gate), held: gate };
+			}
 			if (targetTag) {
-				const feedUrl = getReleaseDownloadFeedUrl(targetTag);
 				autoUpdater.setFeedURL({ provider: 'generic', url: feedUrl });
 				logger.info(
 					`Pointing electron-updater at CDN release assets for ${targetTag} (bypasses releases.atom): ${feedUrl}`,
@@ -305,6 +414,17 @@ function setupIpcHandlers(): void {
 				currentStatus = { status: 'error', error: 'No update available to download' };
 				sendStatusToRenderer();
 				return { success: false, error: 'No update available to download' };
+			}
+
+			// The version the feed resolved to is what would be downloaded: hold it
+			// by name (a pin, a channel) before a byte moves.
+			const hold = updateHoldFor({
+				current: runningVersion(),
+				candidate: checkResult.updateInfo.version,
+			});
+			if (hold) {
+				reportHeld('download', hold, checkResult.updateInfo);
+				return { success: false, error: formatUpdateHold(hold), held: hold };
 			}
 
 			logger.info(`Starting download of v${checkResult.updateInfo.version}`, 'AutoUpdater', {
@@ -336,6 +456,16 @@ function setupIpcHandlers(): void {
 
 	// Install update (quit and install)
 	ipcMain.handle('updates:install', () => {
+		// A download admitted earlier is held again at install: a ceiling that
+		// landed in between keeps the qualified version where it is.
+		const hold = updateHoldFor({
+			current: runningVersion(),
+			candidate: currentStatus.info?.version ?? null,
+		});
+		if (hold) {
+			reportHeld('install', hold, currentStatus.info);
+			return;
+		}
 		logger.info('Installing update - quitting and restarting app', 'AutoUpdater');
 		// Bypass the busy-agent quit confirmation gate. The user already opted in
 		// via the update modal, and on Windows quitAndInstall spawns the NSIS
@@ -369,17 +499,31 @@ function setupIpcHandlers(): void {
 export async function checkForUpdatesManual(): Promise<UpdateInfo | null> {
 	try {
 		const autoUpdater = getAutoUpdater();
+		applyPrereleaseCeiling(autoUpdater);
+		const gate = heldUpdaterStep(RELEASES_ATOM_FEED_URL, null, autoUpdater.allowPrerelease);
+		if (gate) {
+			logger.info(`Manual update check held: ${formatUpdateHold(gate)}`, 'AutoUpdater');
+			return null;
+		}
 		logger.info(
 			`Manual update check via electron-updater (allowPrerelease: ${autoUpdater.allowPrerelease})`,
 			'AutoUpdater'
 		);
 		const result = await autoUpdater.checkForUpdates();
-		if (result?.updateInfo) {
-			logger.info(`Manual check found update: v${result.updateInfo.version}`, 'AutoUpdater');
+		const found = result?.updateInfo || null;
+		const hold = found
+			? updateHoldFor({ current: runningVersion(), candidate: found.version })
+			: null;
+		if (hold) {
+			logger.info(`Manual check held v${found!.version}: ${formatUpdateHold(hold)}`, 'AutoUpdater');
+			return null;
+		}
+		if (found) {
+			logger.info(`Manual check found update: v${found.version}`, 'AutoUpdater');
 		} else {
 			logger.info('Manual check: no update available', 'AutoUpdater');
 		}
-		return result?.updateInfo || null;
+		return found;
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 		logger.error(`Manual update check failed: ${errorMessage}`, 'AutoUpdater', {
@@ -395,8 +539,16 @@ export async function checkForUpdatesManual(): Promise<UpdateInfo | null> {
  */
 export function setAllowPrerelease(allow: boolean): void {
 	const autoUpdater = getAutoUpdater();
-	autoUpdater.allowPrerelease = allow;
-	logger.info(`Auto-updater prerelease mode: ${allow ? 'enabled' : 'disabled'}`, 'AutoUpdater');
+	// The person's opt-in is capped by the channel the update ceiling fixes;
+	// standalone the cap is null and the setting applies as it always has.
+	const cap = allow ? prereleaseCap() : null;
+	autoUpdater.allowPrerelease = allow && cap === null;
+	logger.info(
+		`Auto-updater prerelease mode: ${autoUpdater.allowPrerelease ? 'enabled' : 'disabled'}${
+			cap ? ` (requested, capped by the managed update ceiling: ${formatUpdateHold(cap)})` : ''
+		}`,
+		'AutoUpdater'
+	);
 }
 /** User-driven connection repair, shared by full host and the isolated Lite picker.
  * Never downloads on check, installs on exit, or takes an update URL from a remote host. */
@@ -412,7 +564,16 @@ export async function connectionUpdateAction(action: string): Promise<typeof con
 	connectionUpdateBusy = true;
 	try {
 		const updater = getAutoUpdater();
+		// The managed hold, worded for this flow: the policy, not a failed check.
+		const heldMessage = (hold: UpdateHold) =>
+			`Updates are held by the managed update policy: ${formatUpdateHold(hold)} No remote host was changed.`;
 		if (action === 'check') {
+			applyPrereleaseCeiling(updater);
+			const gate = heldUpdaterStep(RELEASES_ATOM_FEED_URL, null, updater.allowPrerelease);
+			if (gate) {
+				connectionUpdate = { status: 'held-by-policy', message: heldMessage(gate) };
+				return { ...connectionUpdate };
+			}
 			connectionUpdate = { status: 'checking', message: 'Checking official Maestro releases…' };
 			const result = await withUpdateRetry('connection update check', () =>
 				updater.checkForUpdates()
@@ -420,21 +581,39 @@ export async function connectionUpdateAction(action: string): Promise<typeof con
 			const current = require('electron').app.getVersion();
 			const newer =
 				result?.updateInfo?.version && require('semver').gt(result.updateInfo.version, current);
-			connectionUpdate = newer
+			const hold = newer ? updateHoldFor({ current, candidate: result!.updateInfo.version }) : null;
+			connectionUpdate = hold
 				? {
-						status: 'available',
+						status: 'held-by-policy',
 						version: result!.updateInfo.version,
-						message:
-							'A Maestro update is available. Download on both computers, then explicitly restart to install. Running host work must finish first.',
+						message: heldMessage(hold),
 					}
-				: {
-						status: 'not-available',
-						message:
-							'No newer published update is available. For an unpublished review build, install the supplied matched host and Lite packages on both computers. An older host without discovery must be updated locally; it cannot be identified safely from a missing endpoint.',
-					};
+				: newer
+					? {
+							status: 'available',
+							version: result!.updateInfo.version,
+							message:
+								'A Maestro update is available. Download on both computers, then explicitly restart to install. Running host work must finish first.',
+						}
+					: {
+							status: 'not-available',
+							message:
+								'No newer published update is available. For an unpublished review build, install the supplied matched host and Lite packages on both computers. An older host without discovery must be updated locally; it cannot be identified safely from a missing endpoint.',
+						};
 		} else if (action === 'download') {
 			if (connectionUpdate.status !== 'available')
 				throw new Error('Check for an available update first.');
+			// Held again at download: the version the check offered, and the feed
+			// the installer is read from.
+			const hold = heldUpdaterStep(RELEASES_ATOM_FEED_URL, connectionUpdate.version ?? null);
+			if (hold) {
+				connectionUpdate = {
+					...connectionUpdate,
+					status: 'held-by-policy',
+					message: heldMessage(hold),
+				};
+				return { ...connectionUpdate };
+			}
 			// This flow promises an explicit restart, not installation on a later ordinary quit.
 			updater.autoInstallOnAppQuit = false;
 			connectionUpdate = {

@@ -128,6 +128,27 @@ export function heldEgress(): readonly EgressHold[] {
 }
 
 /**
+ * Hold one outbound request against the installed authority without sending
+ * it: the chokepoint's own first step, on its own for a sink whose bytes
+ * leave through another HTTP stack (electron-updater's release feed and
+ * installer download, MRC2-05-04). With no authority installed nothing is
+ * consulted. A refusal is recorded in the ledger and thrown, exactly as
+ * `fetchWithTimeout()` throws it; a sink that gets no error may proceed.
+ */
+export function holdEgress(
+	url: string,
+	egress: EgressClass | FetchEgressOptions = DEFAULT_CLASS
+): void {
+	if (!egressAuthority) return;
+	const named = typeof egress === 'string' ? { class: egress } : egress;
+	const decision = egressAuthority.evaluateEgress({ url, ...named });
+	if (decision.allowed) return;
+	const refused = new EgressDeniedError(decision, url);
+	recordHold(refused);
+	throw refused;
+}
+
+/**
  * `fetch()` with a request budget.
  *
  * The returned promise rejects when `timeoutMs` elapses before the response
@@ -164,15 +185,7 @@ export async function fetchWithTimeout(
 ): Promise<Response> {
 	// The hold comes first: a refused request starts no timer and opens no
 	// socket, and the authority is read per call so a late install applies.
-	if (egressAuthority) {
-		const named = typeof egress === 'string' ? { class: egress } : egress;
-		const decision = egressAuthority.evaluateEgress({ url, ...named });
-		if (!decision.allowed) {
-			const refused = new EgressDeniedError(decision, url);
-			recordHold(refused);
-			throw refused;
-		}
-	}
+	holdEgress(url, egress);
 
 	const controller = new AbortController();
 	const timeoutId = setTimeout(() => {
