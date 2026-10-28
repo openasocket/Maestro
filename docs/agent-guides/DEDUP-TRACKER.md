@@ -198,11 +198,55 @@ Consolidated tracking of all duplicate/dead code in the Maestro codebase. Grep-v
   distinguishable from a user cancel. `bmad-manager.ts` keeps a thin local
   `fetchBmadResource()` wrapper for its Sentry reporting.
 - **KEEP:** `src/main/utils/fetchWithTimeout.ts` only.
-- **STILL OPEN:** The 12 Symphony fetch sites
+- **RESOLVED 2026-10-27 (remainder):** the 12 Symphony fetch sites
   (`ipc/handlers/symphony/{discovery,sync,contributionStart,contributionFinish}.ts`,
-  `services/symphony-runner.ts`) are excluded pending the #1369 decomposition merge, to
-  avoid conflicting with that refactor. Migrating them is a mechanical follow-up.
+  `services/symphony-runner.ts`) now call `fetchWithTimeout()` with `SYMPHONY_DOCUMENT_FETCH_TIMEOUT_MS`;
+  no bare `fetch()` remains in `src/main` (see #43 for the egress class each caller names).
 - **Estimated savings:** ~60 lines, and removes an unbounded-hang class from 17 call sites
+
+---
+
+### 43. Managed effect holds: per-sink checks folded into the enterprise ceilings (RECORDED 2026-10-27)
+
+- **Evidence:** Phase 2 of the Mega-Maestro integration, `Plans/mega-maestro-rc/evidence/p2-03.md` and
+  `p2-04.md` (commits `bb1c6cccf`..`ffb835fbc` on `feature/mega-maestro-v1.1.0-rc`). Each ceiling below
+  is ONE helper every sink of its family calls; the index entries sit in CLAUDE.md under "Spawning and
+  stopping agents" and "Main process".
+- **Permission width:** `src/main/process-manager/types.ts` carried its own readonly/standard/full width
+  table beside the launch plan's; both now call `permissionModeWithinCeiling()` (`launch/env.ts`) and
+  `SpawnPermissionMode` is an alias of `LaunchPermissionMode`.
+- **Provider probes:** `src/main/agents/codex-skills.ts` kept a private copy of the probe admission
+  (lease, refusal cache, env strip); it is now one `admitProviderProbe()` call
+  (`src/main/agents/provider-probe.ts`), shared with the slash-command probe and the detector's version probe.
+- **Repository writes:** `git/branch.ts`, `git/worktree.ts`, `git/github.ts`, the Symphony handlers
+  (clone, branch, commit, push, pull request, fork, finalize), `feedback/index.ts` (issue, upload),
+  `cue-github-poller.ts` and `agent-run/producers.ts` each ran git or gh on their own; every write now goes
+  through `execGit` and is held once by `holdGitCommand()` / `holdGitForgeEffect()`
+  (`src/main/utils/remote-git.ts`) over `createGitExecutionGate()`.
+- **Install:** the WakaTime download, the CLI shim, the Spec Kit / OpenSpec / BMAD refreshes, marketplace
+  imports, the four coworking MCP installers (`claude-code.ts`, `codex.ts`, `opencode.ts`,
+  `factory-droid.ts`) and the two ZIP importers each validated what they fetched or wrote by hand; one
+  `InstallAuthority.authorize()` (`src/main/enterprise/install-policy.ts`) with `holdSpecPromptFetches()` /
+  `holdSpecPromptBytes()`, `setMarketplaceInstallAuthority()` and `holdMcpServerWrite()` as its thin adapters.
+- **Local effects:** `shell.openPath`, `shell.openExternal`, `shell.trashItem`, `clipboard.writeText` and
+  `clipboard.writeImage` in `handlers/system.ts` and the plugin `openExternal` share `holdLocalEffect()`; the
+  delete sites in `filesystem.ts`, `autorun.ts`, `playbooks.ts` and `cue-backup-manager.ts` share the one
+  `holdDeleteEffect()` (`src/main/enterprise/local-effects-policy.ts`).
+- **Shell:** the two notification commands (`audioFeedbackCommand`, `idleNotificationCommand`) are held by
+  `holdNotificationCommand()` over `shellCommandVerdict()` (`src/main/enterprise/shell-policy.ts`);
+  `src/main/index.ts` no longer holds inline plugin sinks (`execFile`, `new WebSocket`), which moved to
+  `createPluginEffectSinks()` in `plugin-host-handlers.ts`.
+- **Egress:** `wakatime-manager.ts` and `cue-susfactor.ts` dropped their raw `https` requests for
+  `fetchWithTimeout()`, which also closes the #41 remainder; `checkin.ts`, `cue-telemetry.ts` and the six
+  leaderboard verbs name `vendor-telemetry`, WakaTime names `updates` (`src/main/enterprise/egress-policy.ts`).
+- **KEEP:** the enterprise policy modules and the chokepoints named above. Do not add a per-sink check (a
+  width table, a digest check, an allowlist comparison) beside them; a new sink names its class or effect
+  and calls the hold.
+- **STILL OPEN (classified, not held):** the nine standalone-only sinks `p2-04.md` names (local
+  `git:worktreeCheckout` and `git:removeWorktree`, the empty-directory `rmdir` of worktree setup, Symphony's
+  post-fork remote reconfiguration, its `push --delete` and clone removal, the overwrite clear of a remote
+  move, `shell.showItemInFolder`, the subframe `shell.openExternal`); the inbound listeners (P2-05-06) and
+  the settings lock (P2-06) have no helper yet, so nothing is recorded for them here.
 
 ---
 
