@@ -15,9 +15,14 @@
  * where the env dump is planted. The same patterns cover Send Feedback's
  * outbound text through `redactOutbound()` (see redactSecrets.test.ts and
  * feedback/managed.test.ts).
+ *
+ * MRC2-06-09 adds the two credentials the custody ceiling holds (the WakaTime
+ * API key in a settings value and an echoed cfg line, the 0DIN token in an env
+ * dump and its exchanged JWT), absent from the package, and the plain settings
+ * file as the other sink: the real store guard refuses the key by custody.
  */
 
-import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -64,6 +69,15 @@ import {
 	encodeTuiHandshake,
 	TUI_HANDSHAKE_ENV_VAR,
 } from '../../../shared/maestro-lib/managed/tui-handshake';
+import { PLAIN_SETTINGS_CREDENTIAL_KEYS } from '../../../main/enterprise/credential-custody';
+import {
+	createSettingsPolicySource,
+	guardSettingsStore,
+	holdSettingWrite,
+	setSettingsWriteAuthority,
+} from '../../../main/enterprise/settings-policy';
+import { SETTINGS_METADATA } from '../../../shared/settingsMetadata';
+import { installManagedSettingsPolicy } from '../../helpers/managedSettingsPolicy';
 
 const b64 = (n: number) => 'Qz9_-'.repeat(Math.ceil(n / 5)).slice(0, n);
 const CANARIES = {
@@ -74,6 +88,11 @@ const CANARIES = {
 	webAuthToken: 'web-' + 'a9'.repeat(20),
 	codexAccessToken:
 		'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyLUFCQyIsImV4cCI6MTc2MTY2NzIwMH0.c2lnbmF0dXJlLWJ5dGVzLWhlcmUtMTIzNDU2Nzg5MA',
+	// The two credentials the custody ceiling holds (MRC2-06-06).
+	wakatimeApiKey: 'waka_' + 'c7d8'.repeat(9),
+	odinToken: 'odin_' + 'e5f6'.repeat(9),
+	odinJwt:
+		'eyJhbGciOiJIUzI1NiJ9.eyJpc3MiOiIwZGluLmFpIiwiZXhwIjoxNzYxNjY3MjAwfQ.MGRpbi1qd3Qtc2lnbmF0dXJlLWJ5dGVzLTk4NzY1NDMyMTA',
 };
 const HANDSHAKE_KEY = 'ab'.repeat(32);
 const handshake = encodeTuiHandshake(
@@ -168,11 +187,30 @@ describe('support package redaction canaries (MRC2-06-07)', () => {
 				message: `codex auth {"tokens":{"access_token":"${CANARIES.codexAccessToken}"}}`,
 				context: 'Codex',
 			},
+			{
+				timestamp: 6,
+				level: 'debug',
+				message: `wakatime cfg read: [settings] api_key = ${CANARIES.wakatimeApiKey}`,
+				context: 'WakaTime',
+			},
+			{
+				timestamp: 7,
+				level: 'debug',
+				message: `cue env: ODIN_API_TOKEN=${CANARIES.odinToken} CUE_POLL_SECONDS=30`,
+				context: 'Cue',
+			},
+			{
+				timestamp: 8,
+				level: 'debug',
+				message: `0din exchange {"token":"${CANARIES.odinJwt}","expires_in":900}`,
+				context: 'Cue',
+			},
 		] as never);
 		const settingsStore = store({
 			theme: 'dark',
 			webAuthToken: CANARIES.webAuthToken,
 			installSecret: CANARIES.installSecret,
+			wakatimeApiKey: CANARIES.wakatimeApiKey,
 			notes: `anchor installSecret: ${CANARIES.installSecret} seen`,
 		});
 		const sessionsStore = store({ sessions: [] });
@@ -218,10 +256,73 @@ describe('support package redaction canaries (MRC2-06-07)', () => {
 		expect(logs).toContain('x-maestro-cli-secret: [REDACTED_SECRET]');
 		expect(logs).toContain('"dispatchTicket":[REDACTED_SECRET]');
 		expect(logs).toContain('"access_token":[REDACTED_SECRET]');
+		expect(logs).toContain('api_key = [REDACTED_SECRET]');
+		expect(logs).toContain('ODIN_API_TOKEN=[REDACTED_SECRET] CUE_POLL_SECONDS=30');
+		expect(logs).toContain('"token":[REDACTED_SECRET],"expires_in":900');
 		const settings = JSON.parse(entries.find(([name]) => name === 'settings.json')![1]);
 		expect(settings.raw.theme).toBe('dark');
 		expect(settings.raw.webAuthToken).toBe('[REDACTED]');
 		expect(settings.raw.installSecret).toBe('[REDACTED]');
+		expect(settings.raw.wakatimeApiKey).toBe('[REDACTED]');
 		expect(settings.raw.notes).toBe('anchor installSecret: [REDACTED_SECRET] seen');
+	});
+});
+
+describe('the plain settings file, the other sink of the WakaTime key (MRC2-06-09)', () => {
+	const CUSTODY =
+		'the WakaTime API key is not kept on this managed host: maestro-settings.json is a readable file, and a managed host keeps a credential only under the OS key store.';
+	/** A settings store as the desktop guards it (the chokepoint of `stores/instances.ts`). */
+	const guarded = (data: Record<string, unknown>) => {
+		const writes: unknown[][] = [];
+		const store = guardSettingsStore({
+			store: data,
+			get: (key: string) => data[key],
+			set(key: string | Record<string, unknown>, value?: unknown) {
+				const entries = typeof key === 'string' ? [[key, value]] : Object.entries(key);
+				for (const [name, next] of entries) {
+					writes.push([name, next]);
+					data[name as string] = next;
+				}
+			},
+		});
+		return { store, writes, data };
+	};
+	const enrolledWithoutPolicy = () =>
+		createSettingsPolicySource({
+			identity: { read: () => ({ status: 'ok', record: {}, fileExists: true }) as never },
+			policy: () => ({ appliedRevision: 3 }),
+		});
+
+	afterEach(() => setSettingsWriteAuthority(null));
+
+	it('the real store guard refuses the key by custody on an enrolled host, policy or no policy, and writes nothing', () => {
+		for (const source of [enrolledWithoutPolicy(), installManagedSettingsPolicy([])]) {
+			setSettingsWriteAuthority(source);
+			const { store, writes, data } = guarded({ theme: 'dark' });
+
+			expect(() => store.set('wakatimeApiKey', CANARIES.wakatimeApiKey)).toThrow(CUSTODY);
+			// Not even the other keys of a multi-key write land.
+			expect(() => store.set({ theme: 'light', wakatimeApiKey: CANARIES.wakatimeApiKey })).toThrow(
+				CUSTODY
+			);
+
+			expect(writes).toEqual([]);
+			expect(data).toEqual({ theme: 'dark' });
+			expect(holdSettingWrite('wakatimeApiKey')).toMatchObject({
+				allowed: false,
+				code: 'custody',
+				message: CUSTODY,
+			});
+		}
+	});
+
+	it('standalone the key is written as before; the 0DIN token has no settings key to be written to', () => {
+		const { store, writes } = guarded({});
+		store.set('wakatimeApiKey', CANARIES.wakatimeApiKey);
+		expect(writes).toEqual([['wakatimeApiKey', CANARIES.wakatimeApiKey]]);
+		// The package masks it by exact name because the metadata marks it.
+		expect(SETTINGS_METADATA.wakatimeApiKey.sensitive).toBe(true);
+		expect(Object.keys(SETTINGS_METADATA).filter((key) => /odin/i.test(key))).toEqual([]);
+		expect(PLAIN_SETTINGS_CREDENTIAL_KEYS).toEqual({ wakatimeApiKey: 'wakatime.apiKey' });
 	});
 });
