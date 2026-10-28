@@ -10,6 +10,7 @@ import {
 	Menu,
 	dialog,
 	shell,
+	safeStorage,
 } from 'electron';
 import type { Session, Event, DownloadItem, WebContents } from 'electron';
 import path from 'path';
@@ -24,6 +25,7 @@ import { connectionPage } from './ui';
 import { parseSshConfig } from '../utils/ssh-config-parser';
 import { startLiteControlServer } from './control-server';
 import { isListenerDeniedError } from '../enterprise/listener-gate';
+import { installLiteListenerAuthority, liteHostDataDirectory } from './listener-authority';
 import { resolveLiteDataDirectory } from '../../shared/lite-control';
 import type { LiteControlOptions, LiteControlState } from '../../shared/lite-control';
 
@@ -34,6 +36,9 @@ export async function startLite(): Promise<void> {
 	const explicitData = dataFlag < 0 ? undefined : process.argv[dataFlag + 1];
 	if (dataFlag >= 0 && (!explicitData || explicitData.startsWith('--')))
 		throw new Error('--lite-user-data requires a directory.');
+	// The enrolled host installation's data directory, read BEFORE Lite re-points
+	// userData at its own: the listener ceiling below is the host's (MRC2-05-06C).
+	const hostDataDir = liteHostDataDirectory(app.getPath('userData'));
 	const liteData = resolveLiteDataDirectory(explicitData, app.getPath('userData'));
 	app.setName('Maestro Lite');
 	mkdirSync(liteData, { recursive: true });
@@ -44,6 +49,12 @@ export async function startLite(): Promise<void> {
 		return;
 	}
 	await app.whenReady();
+	// The listener ceiling (MRC2-05-06C): composed over the host installation's
+	// enrollment record and installed on the leaf gate before the window, the
+	// control endpoint, a discovery socket or an SSH forward exists. A Lite
+	// that reads no enrollment is standalone by name and binds as it always has;
+	// an enrolled host's Lite refuses every listener by name (no ceiling, CP-01).
+	installLiteListenerAuthority({ hostDataDir, safeStorage });
 	const profiles = new LiteProfiles(app.getPath('userData'));
 	const deviceCredentials = new DeviceCredentials(app.getPath('userData'));
 	let loadError: string | undefined;
