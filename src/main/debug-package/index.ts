@@ -9,6 +9,10 @@
  * - NO conversation content (user messages, AI responses)
  * - NO personal file contents
  * - All file paths sanitized (usernames replaced with ~)
+ * - Every string the collectors kept passes through `redactSecrets()` last
+ *   (`redactPackageContents`), so a credential a collector did not expect by
+ *   key (a managed admission in a log line, a Codex token in an error) is
+ *   replaced by shape before the zip is written (MRC2-06-07).
  */
 
 import { collectSystemInfo, SystemInfo } from './collectors/system';
@@ -35,8 +39,32 @@ import { ProcessManager } from '../process-manager';
 import { WebServer } from '../web-server';
 import Store from 'electron-store';
 import type { DebugPackageOptions } from '../../shared/debugPackage';
+import { redactSecrets } from '../../shared/redactSecrets';
 
 export type { DebugPackageOptions };
+
+/**
+ * The last pass over a package: every string in `value`, at any depth,
+ * through the one redactor, numbers and booleans untouched. The collectors
+ * drop what they know is a secret by key and replace paths and identity;
+ * this catches by shape what no key named (a `MAESTRO_MANAGED_*` value or a
+ * handshake signature in a log line, a provider token in a process argument,
+ * a Codex JWT in an error), so it reaches neither the zip nor the issue the
+ * zip is attached to. Pure; the UI and the CLI share it through
+ * `generateDebugPackage`.
+ */
+export function redactPackageContents<T>(value: T): T {
+	if (typeof value === 'string') return redactSecrets(value).text as T;
+	if (Array.isArray(value)) return value.map(redactPackageContents) as T;
+	if (value && typeof value === 'object') {
+		const out: Record<string, unknown> = {};
+		for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+			out[key] = redactPackageContents(entry);
+		}
+		return out as T;
+	}
+	return value;
+}
 
 export interface DebugPackageResult {
 	success: boolean;
@@ -256,9 +284,10 @@ export async function generateDebugPackage(
 		filesIncluded.push('collection-errors.json');
 	}
 
-	// Create the zip package
+	// Create the zip package. What the collectors kept goes through the
+	// redactor once more, by shape, right before it is written.
 	try {
-		const result = await createZipPackage(outputDir, contents);
+		const result = await createZipPackage(outputDir, redactPackageContents(contents));
 		logger.info(
 			`Debug package created: ${result.path} (${result.sizeBytes} bytes)`,
 			'DebugPackage'

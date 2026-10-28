@@ -17,6 +17,9 @@
  * - `[REDACTED_BEARER_TOKEN]`   the token after `Bearer `
  * - `[REDACTED_CREDIT_CARD]`    13-19 digit runs that pass the Luhn check
  * - `[REDACTED_SECRET]`         key=value secrets, private key blocks, JWTs,
+ *                               managed identifiers (a `MAESTRO_MANAGED_*`
+ *                               value, the TUI handshake signature, a challenge
+ *                               nonce, an install secret, a dispatch ticket),
  *                               and (opt-in) long hex blobs
  *
  * For key=value and Bearer matches the key / `Bearer ` prefix is kept, so the
@@ -143,6 +146,40 @@ const RULES: readonly Rule[] = [
 	// device on a delegation chain and in History) and is left; only the whole
 	// credential is a secret. Fixed length, guarded by lookarounds, linear.
 	{ kind: 'secret', pattern: new RegExp(LITE_PAIRING_CREDENTIAL_SOURCE, 'g') },
+	// Managed identifiers (MRC2-06-07). Each has an innocent twin of the same
+	// shape (43 base64url characters is also a Lite device id, 64 hex a binary
+	// digest, 32 base64url any id), so each rule pairs the NAME the value
+	// travels under with the SHAPE of the value; nothing is redacted on shape
+	// alone. The names are the fields of the identity anchor (`installSecret`),
+	// a registration challenge (`nonce`, `challengeDigest`), an enrollment
+	// request (`invitation`, `keyPossessionProof`), a transport admission
+	// (`cliSecret`, `dispatchTicket`) and the TUI handshake (`signature`).
+	//
+	// A `MAESTRO_MANAGED_*` assignment, as an env dump prints it: the TUI
+	// handshake travels in `MAESTRO_MANAGED_TUI_ADMISSION`, and every name
+	// under the prefix is authority-shaped (`MANAGED_AUTHORITY_ENV_PREFIX`).
+	// The value runs to the end of the line, bounded.
+	{
+		kind: 'secret',
+		pattern: /\b(MAESTRO_MANAGED_[A-Z0-9_]{1,64}=)[^\r\n]{1,16384}/g,
+		keepGroup: 1,
+	},
+	// The handshake's HMAC, the one field that admits a spawn: 64 hex after
+	// `signature`, quoted (the JSON wire shape) or not.
+	{
+		kind: 'secret',
+		pattern: /\b(signature["']?\s*[:=]\s*["']?)[0-9a-fA-F]{64}\b/g,
+		keepGroup: 1,
+	},
+	// Named managed material with a base64url value of 32 or more characters,
+	// in camel, snake or kebab spelling, quoted or not, after `:`, `=` or a
+	// space. The value is matched atomically and bounded (see the JWT rule).
+	{
+		kind: 'secret',
+		pattern:
+			/\b((?:nonce|challenge[_-]?digest|invitation|key[_-]?possession[_-]?proof|install[_-]?secret|cli[_-]?secret|dispatch[_-]?ticket)["']?(?:\s*[:=]\s*|\s{1,3})["']?)(?=([A-Za-z0-9_-]{32,512}))\2(?![A-Za-z0-9_-])/gi,
+		keepGroup: 1,
+	},
 	// `Bearer <token>`, with or without an `Authorization:` header in front.
 	{
 		kind: 'bearer',
@@ -159,6 +196,17 @@ const RULES: readonly Rule[] = [
 		kind: 'secret',
 		pattern:
 			/\b((?:[A-Za-z][A-Za-z0-9]{0,31}[_-]){0,4}(?:api[_-]?key|secret(?:[_-]?(?:access[_-]?)?key)?|token|password|passwd|pwd)["']?\s*[:=]\s*)("[^"\r\n]*"|'[^'\r\n]*'|[^\s"',;&]+)/gi,
+		keepGroup: 1,
+	},
+	// camelCase credential names (`accessToken`, `webAuthToken`, `cliSecret`,
+	// `wakatimeApiKey`): the rule above needs a `_` or `-` before the suffix,
+	// so a record keyed the way Maestro and a Codex `auth.json` key theirs
+	// slipped past it. One word of up to 48 characters before a capitalized
+	// suffix, so each attempt is bounded; `maxTokens: 4096` keeps its `s`.
+	{
+		kind: 'secret',
+		pattern:
+			/\b([a-z][A-Za-z0-9]{0,47}(?:ApiKey|Secret|Token|Password|Passwd|Nonce|Ticket|Proof|Credential)["']?\s*[:=]\s*)("[^"\r\n]*"|'[^'\r\n]*'|[^\s"',;&]+)/g,
 		keepGroup: 1,
 	},
 	// Provider key prefixes.
@@ -225,7 +273,8 @@ const ONE_TIME_CODE_RULES: readonly Rule[] = [
 // ReDoS audit (every rule is exercised on 64 KB adversarial inputs in
 // redactSecrets.test.ts): the remaining unbounded quantifiers either start at
 // a fixed literal and succeed by consuming their run (`sk-`, `ghp_`, `xox*-`,
-// `Bearer`, hex), or are bounded (`{12,18}` card digits, PEM name parts).
+// `Bearer`, hex), or are bounded (`{12,18}` card digits, PEM name parts, the
+// managed value `{32,512}` and the 48-character camelCase word).
 
 /**
  * Replace secret-shaped spans in `text`. Pure; never throws on any string.

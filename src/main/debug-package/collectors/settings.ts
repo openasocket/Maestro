@@ -6,13 +6,16 @@
  * - Usernames, hostnames, and SSH remote identities are replaced with [REDACTED]
  * - Paths are replaced with opaque descriptors (no folder or project names)
  * - Every remaining string is swept for embedded paths, URLs, and identity
+ * - A key the settings registry marks sensitive, or a managed record key
+ *   (`SENSITIVE_KEYS` in settingsMetadata.ts), is masked by its exact name
  */
 
 import Store from 'electron-store';
+import { SENSITIVE_KEYS } from '../../../shared/settingsMetadata';
 import { redactAndTruncate, redactPath } from './sanitize';
 
-// Keys that contain sensitive data (case-insensitive substring matching)
-const SENSITIVE_KEYS = [
+// Key fragments that mark sensitive data (case-insensitive substring matching)
+const SENSITIVE_KEY_FRAGMENTS = [
 	'apikey',
 	'api_key',
 	'authtoken',
@@ -89,7 +92,8 @@ export interface SanitizedSettings {
 function isSensitiveKey(key: string): boolean {
 	const lowerKey = key.toLowerCase();
 	return (
-		SENSITIVE_KEYS.some((sensitiveKey) => lowerKey.includes(sensitiveKey)) ||
+		SENSITIVE_KEYS.has(key) ||
+		SENSITIVE_KEY_FRAGMENTS.some((fragment) => lowerKey.includes(fragment)) ||
 		IDENTITY_KEYS.includes(lowerKey)
 	);
 }

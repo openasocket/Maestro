@@ -76,12 +76,36 @@ export const SETTINGS_METADATA: Record<string, SettingMetadata> = {
 // Helpers
 // ============================================================================
 
-/** All known sensitive setting keys */
-export const SENSITIVE_KEYS = new Set(
-	Object.entries(SETTINGS_METADATA)
+/**
+ * Keys that carry managed material in the records Maestro writes or receives
+ * (MRC2-06-07): the identity anchor, a registration challenge, an enrollment
+ * request, a transport admission, the TUI handshake and a Codex login. No
+ * setting is named after any of them, but a key-based masker (the support
+ * package's settings collector) treats each as a credential wherever it
+ * appears, so a record pasted into a setting by hand still leaves masked.
+ * The shape-based rules for the same material live in `redactSecrets()`.
+ */
+export const MANAGED_SENSITIVE_KEYS: readonly string[] = [
+	'installSecret',
+	'nonce',
+	'challengeDigest',
+	'invitation',
+	'keyPossessionProof',
+	'cliSecret',
+	'dispatchTicket',
+	'signature',
+	'access_token',
+	'id_token',
+	'refresh_token',
+];
+
+/** All known sensitive keys: every setting marked `sensitive`, plus the managed record keys. */
+export const SENSITIVE_KEYS = new Set([
+	...Object.entries(SETTINGS_METADATA)
 		.filter(([, meta]) => meta.sensitive)
-		.map(([key]) => key)
-);
+		.map(([key]) => key),
+	...MANAGED_SENSITIVE_KEYS,
+]);
 
 /** All setting categories in display order */
 export const CATEGORY_LABELS: Record<SettingCategory, string> = {

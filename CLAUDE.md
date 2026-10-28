@@ -95,7 +95,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Reading a zip from disk:** `readZipArchive()`, `extractZipTo()`, `isUnsafeZipEntryName()` in `src/main/utils/zip-archive.ts` (never `adm-zip`)
 - **Guarding a serialized JSON payload before it overwrites a file:** `assertSerializedJsonIsSafe(serialized, target)` in `src/shared/jsonUtils.ts`
 - **Deterministic JSON (same value, same text):** `canonicalJson(value)` in `src/shared/canonicalJson.ts` (never hash or compare `JSON.stringify` output)
-- **Redacting secrets from text you persist or show:** `redactSecrets(text, opts?)`, `passesLuhn()` in `src/shared/redactSecrets.ts`
+- **Redacting secrets from text you persist or show:** `redactSecrets(text, opts?)`, `passesLuhn()` in `src/shared/redactSecrets.ts`; `redactPackageContents()` in `src/main/debug-package/index.ts`; `SENSITIVE_KEYS`, `MANAGED_SENSITIVE_KEYS` in `src/shared/settingsMetadata.ts`
 - **Strip ANSI / collapse progress overwrites:** `stripAnsiCodes()`, `processCarriageReturns()` in `src/shared/stringUtils.ts`
 - **Matching error patterns against an agent's exit output:** `stripJsonEventLines()` in `src/shared/agentErrorPatterns.ts`
 - **Reading what a TUI painted from a raw capture:** `replayTerminalScreen(raw)`, `capturedAlternateScreen(raw)` in `src/maestro-p/screen-replay.ts`

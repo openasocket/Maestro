@@ -129,6 +129,92 @@ describe('redactSecrets - typed placeholders', () => {
 	});
 });
 
+describe('redactSecrets - managed identifiers (MRC2-06-07)', () => {
+	const b64 = (n: number) => 'Qz9_-'.repeat(Math.ceil(n / 5)).slice(0, n);
+	const NONCE = b64(43);
+	const INSTALL_SECRET = 'k' + b64(42);
+	const TICKET = 'T' + b64(31);
+	const HEX64 = 'a1b2c3d4'.repeat(8);
+	const CLI_SECRET = 'f0e1d2c3'.repeat(6);
+	const JWT =
+		'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ1c2VyLUFCQyIsImV4cCI6MTc2MTY2NzIwMH0.c2lnbmF0dXJlLWJ5dGVzLWhlcmUtMTIzNDU2Nzg5MA';
+
+	it.each([
+		[
+			'identity anchor',
+			`{"installSecret":"${INSTALL_SECRET}","epoch":3}`,
+			'{"installSecret":[REDACTED_SECRET],"epoch":3}',
+		],
+		[
+			'snake install secret',
+			`install_secret=${INSTALL_SECRET}`,
+			'install_secret=[REDACTED_SECRET]',
+		],
+		[
+			'challenge nonce',
+			`registration nonce: ${NONCE} shown once`,
+			'registration nonce: [REDACTED_SECRET] shown once',
+		],
+		['nonce after a space', `nonce ${NONCE}`, 'nonce [REDACTED_SECRET]'],
+		['challenge digest', `challengeDigest=${HEX64}`, 'challengeDigest=[REDACTED_SECRET]'],
+		['invitation', `"invitation": "${b64(64)}"`, '"invitation": "[REDACTED_SECRET]"'],
+		[
+			'key possession proof',
+			`key-possession-proof: ${b64(86)}`,
+			'key-possession-proof: [REDACTED_SECRET]',
+		],
+		['dispatch ticket', `{"dispatchTicket":"${TICKET}"}`, '{"dispatchTicket":[REDACTED_SECRET]}'],
+		[
+			'per-boot CLI secret header',
+			`x-maestro-cli-secret: ${CLI_SECRET}`,
+			'x-maestro-cli-secret: [REDACTED_SECRET]',
+		],
+		['per-boot CLI secret field', `cliSecret: ${CLI_SECRET}`, 'cliSecret: [REDACTED_SECRET]'],
+		[
+			'handshake signature',
+			`{"payload":{"version":1},"signature":"${HEX64}"}`,
+			'{"payload":{"version":1},"signature":"[REDACTED_SECRET]"}',
+		],
+		[
+			'managed env assignment',
+			`MAESTRO_MANAGED_TUI_ADMISSION={"payload":{"run":{"leaseId":"L1"}},"signature":"${HEX64}"}\nPATH=/usr/bin`,
+			'MAESTRO_MANAGED_TUI_ADMISSION=[REDACTED_SECRET]\nPATH=/usr/bin',
+		],
+		['camelCase access token', `accessToken: ${CLI_SECRET}`, 'accessToken: [REDACTED_SECRET]'],
+		[
+			'camelCase web auth token',
+			`"webAuthToken": "${CLI_SECRET}"`,
+			'"webAuthToken": [REDACTED_SECRET]',
+		],
+		['camelCase api key', `wakatimeApiKey=waka_${CLI_SECRET}`, 'wakatimeApiKey=[REDACTED_SECRET]'],
+	])('%s', (_name, input, expected) => {
+		expect(redactSecrets(input)).toEqual({ text: expected, redacted: true });
+	});
+
+	it('redacts a Codex auth.json by its token fields, the account id left', () => {
+		const auth = `{"OPENAI_API_KEY":"sk-proj-${CLI_SECRET}","tokens":{"access_token":"${JWT}","account_id":"acct_01","id_token":"${JWT}","refresh_token":"rt-${CLI_SECRET}"}}`;
+		const out = redactSecrets(auth).text;
+		expect(out).toBe(
+			'{"OPENAI_API_KEY":[REDACTED_SECRET],"tokens":{"access_token":[REDACTED_SECRET],"account_id":"acct_01","id_token":[REDACTED_SECRET],"refresh_token":[REDACTED_SECRET]}}'
+		);
+		expect(out).not.toContain(CLI_SECRET);
+	});
+
+	it('leaves the shapes alone without a name: a Lite device id, a digest, an id, a token count', () => {
+		for (const clean of [
+			`lite-device:${NONCE} opened a tab`,
+			`binary digest ${HEX64} verified`,
+			`lease ${TICKET} released`,
+			'maxTokens: 4096 and inputTokens: 12',
+			'the nonce is short',
+			'ticket: MAESTRO-1234',
+			'X-Hub-Signature-256: sha256=' + HEX64,
+		]) {
+			expect(redactSecrets(clean)).toEqual({ text: clean, redacted: false });
+		}
+	});
+});
+
 describe('redactSecrets - options', () => {
 	it('placeholder replaces the whole match, key included', () => {
 		expect(
@@ -178,6 +264,12 @@ describe('redactSecrets - adversarial input stays linear (ReDoS)', () => {
 		'your-word chain': 'your code '.repeat(K / 10),
 		'code with no digits': 'verification code '.repeat(K / 18),
 		'digits before is your': '1234 is your '.repeat(K / 13),
+		'repeated managed env names': 'MAESTRO_MANAGED_A='.repeat(Math.floor(K / 18)),
+		'repeated signature:': 'signature: '.repeat(Math.floor(K / 11)),
+		'repeated nonce:': 'nonce: '.repeat(Math.floor(K / 7)),
+		'nonce before one long word': `nonce ${'a'.repeat(K)}`,
+		'camel suffix chain': 'aToken:'.repeat(Math.floor(K / 7)),
+		'camel words with colons': 'abcdefgh: '.repeat(K / 10),
 	};
 
 	// A linear pass over 64 KB takes about 20 ms on a laptop and about 60 ms on

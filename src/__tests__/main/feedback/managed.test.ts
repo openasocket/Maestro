@@ -168,11 +168,14 @@ function ceiling(effects: readonly RepositoryEffectKind[] | null) {
 	return { requests, effects: () => requests.map((r) => r.effect) };
 }
 
+/** A managed identifier (MRC2-06-07): a registration nonce, 43 base64url characters. */
+const NONCE = 'n' + 'Qz9_-'.repeat(9).slice(0, 42);
+
 const conversation = (overrides: Record<string, unknown> = {}) => ({
 	category: 'bug_report' as const,
 	summary: 'The composer loses my draft',
 	expectedBehavior: 'The draft stays',
-	actualBehavior: `It is gone, and the log shows token ${TOKEN} being sent`,
+	actualBehavior: `It is gone, and the log shows token ${TOKEN} being sent after nonce: ${NONCE}`,
 	...overrides,
 });
 
@@ -207,6 +210,8 @@ describe('Send Feedback under management (MRC2-04-05)', () => {
 		const body = [...written.values()].find((text) => text.includes('## Summary'));
 		expect(body).toContain('[REDACTED_API_KEY]');
 		expect(body).not.toContain(TOKEN);
+		expect(body).toContain('nonce: [REDACTED_SECRET]');
+		expect(body).not.toContain(NONCE);
 	});
 
 	it('managed with no ceiling: the issue is refused up front with zero gh processes and the draft untouched', async () => {
