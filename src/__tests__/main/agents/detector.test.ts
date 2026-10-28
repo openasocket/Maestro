@@ -1266,11 +1266,9 @@ describe('agent-detector', () => {
 					vi.fn().mockResolvedValue({
 						ok: true,
 						status: 200,
-						json: vi
-							.fn()
-							.mockResolvedValue({
-								'github-copilot': { models: { 'gpt-5': {}, 'claude-opus-5-5': {} } },
-							}),
+						json: vi.fn().mockResolvedValue({
+							'github-copilot': { models: { 'gpt-5': {}, 'claude-opus-5-5': {} } },
+						}),
 					})
 				);
 				const seen: EgressRequest[] = [];
