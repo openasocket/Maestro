@@ -26,6 +26,10 @@ import {
 	filterLiveAgents,
 	isAgentDormant,
 } from '../../shared/agentVisibility';
+import {
+	managedBindingPath,
+	readManagedBindingFile,
+} from '../../shared/maestro-lib/managed/binding';
 
 // Get the Maestro config directory path. Delegates to the shared resolver
 // (`src/shared/userDataDir.ts`) so this CLI and the standalone Cue engine
@@ -34,6 +38,16 @@ import {
 // the desktop app.
 export function getConfigDir(): string {
 	return resolveUserDataDir();
+}
+
+/**
+ * Whether the data dir is enrolled with a management peer: a managed binding
+ * file is present (readable or not). A CLI verb then writes nothing around the
+ * desktop's settings authority (MRC2-06-03A/B); with no file, the data dir is
+ * standalone and the file write is the CLI's own, as before.
+ */
+export function dataDirHasManagedBinding(): boolean {
+	return readManagedBindingFile(managedBindingPath(getConfigDir())).status !== 'none';
 }
 
 /**
@@ -360,6 +374,26 @@ export function deleteSettingValue(key: string): boolean {
 		writeStoreFile('maestro-settings.json', settings);
 	}
 	return removed;
+}
+
+/**
+ * The whole top-level value a write to `key` amounts to: `value` itself for a
+ * top-level key; for a dotted path, a copy of `current` (the top-level value
+ * as it is) with the path set, or removed when `value` is undefined. Pure.
+ * This is the shape the desktop's `set_setting` takes, so a nested CLI write
+ * can go through the desktop (MRC2-06-03B).
+ */
+export function settingTopLevelValue(key: string, current: unknown, value: unknown): unknown {
+	const dot = key.indexOf('.');
+	if (dot < 0) return value;
+	const root =
+		typeof current === 'object' && current !== null
+			? (structuredClone(current) as Record<string, unknown>)
+			: {};
+	const rest = key.slice(dot + 1);
+	if (value === undefined) deleteNestedValue(root, rest);
+	else setNestedValue(root, rest, value);
+	return root;
 }
 
 // --- Nested key helpers ---

@@ -190,6 +190,48 @@ describe('the bridge set_setting handler', () => {
 		expect(ctx.callbacks.setSetting).toHaveBeenCalledWith('fontSize', 12);
 		expect(ctx.sendError).toHaveBeenCalledTimes(1);
 	});
+
+	it('admits a lockable top-level key from the CLI alone, so settings set|reset reaches the hold (MRC2-06-03B)', () => {
+		const ctx = { send: vi.fn(), sendError: vi.fn(), callbacks: { setSetting: vi.fn() } };
+		ctx.callbacks.setSetting.mockResolvedValue(true);
+		const send = (client: unknown, key: string, requestId?: string) =>
+			handleSetSetting(
+				ctx as unknown as MessageHandlerContext,
+				client as never,
+				{
+					type: 'set_setting',
+					key,
+					value: '/opt/gh',
+					requestId,
+				} as never
+			);
+		// Standalone: the CLI's write of a lockable key goes to the renderer.
+		send({ cli: true }, 'ghPath');
+		expect(ctx.callbacks.setSetting).toHaveBeenCalledWith('ghPath', '/opt/gh');
+		// A browser, a dotted path and an agentConfig lock key keep the allowlist.
+		for (const [client, key] of [
+			[{ cli: false }, 'ghPath'],
+			[{ cli: true }, 'ghPath.nested'],
+			[{ cli: true }, 'agentConfig.customPath'],
+		] as const) {
+			send(client, key, 'r-1');
+			expect(ctx.sendError).toHaveBeenLastCalledWith(
+				client,
+				`Setting key '${key}' is not modifiable from the web interface`,
+				{ requestId: 'r-1' }
+			);
+		}
+		expect(ctx.callbacks.setSetting).toHaveBeenCalledTimes(1);
+		// Held: the refusal frame carries the request id, so the CLI's call settles on it.
+		installed(document({ locks: [{ key: 'ghPath' }] }));
+		send({ cli: true }, 'ghPath', 'r-2');
+		expect(ctx.sendError).toHaveBeenLastCalledWith(
+			{ cli: true },
+			'the "ghPath" setting is locked by managed policy revision 3',
+			{ key: 'ghPath', managed: { state: 'denied', code: 'locked' }, requestId: 'r-2' }
+		);
+		expect(ctx.callbacks.setSetting).toHaveBeenCalledTimes(1);
+	});
 });
 
 describe('agentConfigWriteVerdict and holdAgentConfigWrite (MRC2-06-03)', () => {

@@ -10,6 +10,7 @@ import type { WebClient, WebClientMessage, MessageHandlerContext } from './types
 import { isRemoteSettingWritable } from '../bridgeDenyList';
 import { holdSettingWrite } from '../../../enterprise/settings-policy';
 import type { AgentConfigWriteRequest } from '../../../agents/agent-config-writes';
+import { LOCKABLE_SETTING_KEYS } from '../../../../shared/managedSettingsLock';
 
 /**
  * Allowlist of setting keys modifiable from the web interface.
@@ -67,14 +68,20 @@ export function handleSetSetting(
 		return;
 	}
 
-	// Only the CLI-secret-authenticated connection may control Encore features.
-	const cliEncoreControl = client.cli === true && key === 'encoreFeatures';
+	// Only the CLI-secret-authenticated connection (the owner's shell on this
+	// machine, which wrote the file directly before) may write a top-level key
+	// the managed settings policy can hold, Encore features among them: that is
+	// how `settings set|reset` reaches the hold below (MRC2-06-03B). A browser
+	// keeps the allowlist.
+	const cliHeldKey = client.cli === true && LOCKABLE_SETTING_KEYS.includes(key);
 	if (
-		!cliEncoreControl &&
+		!cliHeldKey &&
 		(!Object.prototype.hasOwnProperty.call(ALLOWED_SETTING_KEYS, key) ||
 			!isRemoteSettingWritable(key))
 	) {
-		ctx.sendError(client, `Setting key '${key}' is not modifiable from the web interface`);
+		ctx.sendError(client, `Setting key '${key}' is not modifiable from the web interface`, {
+			requestId: message.requestId,
+		});
 		return;
 	}
 
@@ -85,12 +92,14 @@ export function handleSetSetting(
 
 	// A key the managed settings policy holds is refused here by name (MRC2-06-02),
 	// before the renderer round trip would answer a bare `false`; the refusal
-	// carries state and code like every other managed refusal on this bridge.
+	// carries state and code like every other managed refusal on this bridge,
+	// and the request id so the CLI's pending call settles on it.
 	const hold = holdSettingWrite(key);
 	if (!hold.allowed) {
 		ctx.sendError(client, hold.message, {
 			key,
 			managed: { state: hold.code === 'locked' ? 'denied' : 'unavailable', code: hold.code },
+			requestId: message.requestId,
 		});
 		return;
 	}

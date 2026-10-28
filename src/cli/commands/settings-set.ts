@@ -1,10 +1,18 @@
 // Set a single setting value
-// Supports dot-notation, auto type coercion, --raw for explicit JSON
+// Supports dot-notation, auto type coercion, --raw for explicit JSON.
+// A key the managed settings policy can hold is written through the running
+// desktop, which holds it (MRC2-06-03B); the file directly only for any other
+// key, or with no desktop and no managed binding.
 
-import { readSettingValue, writeSettingValue } from '../services/storage';
-import { formatSuccess, formatError, formatWarning } from '../output/formatter';
+import { readSettingValue, writeSettingValue, settingTopLevelValue } from '../services/storage';
+import {
+	reportDesktopWriteFailure,
+	setSettingThroughDesktop,
+} from '../services/managed-desktop-write';
+import { formatSuccess, formatWarning } from '../output/formatter';
 import { emitJsonl } from '../output/jsonl';
 import { SETTINGS_METADATA } from '../../shared/settingsMetadata';
+import { LOCKABLE_SETTING_KEYS } from '../../shared/managedSettingsLock';
 import { resolveMediaModelDirectory } from '../../main/plugins/plugin-media-tools';
 
 interface SettingsSetOptions {
@@ -74,7 +82,18 @@ export async function settingsSet(
 			if (key !== topKey) throw new Error('mediaModelDirectory does not accept nested keys');
 			parsedValue = await resolveMediaModelDirectory(parsedValue);
 		}
-		if (!writeSettingValue(key, parsedValue)) throw new Error('Could not persist setting');
+		// A nested path is folded into its top-level value, the shape the
+		// desktop's set_setting takes; the desktop holds the key to the managed
+		// settings authority. A refusal is thrown as the policy's line.
+		const written =
+			LOCKABLE_SETTING_KEYS.includes(topKey) &&
+			(await setSettingThroughDesktop(
+				topKey,
+				settingTopLevelValue(key, readSettingValue(topKey), parsedValue),
+				options.json
+			));
+		if (!written && !writeSettingValue(key, parsedValue))
+			throw new Error('Could not persist setting');
 
 		if (options.json) {
 			emitJsonl({
@@ -87,12 +106,6 @@ export async function settingsSet(
 			console.log(formatSuccess(`${key} = ${JSON.stringify(parsedValue)}`));
 		}
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		if (options.json) {
-			console.error(JSON.stringify({ error: message }));
-		} else {
-			console.error(formatError(`Failed to set "${key}": ${message}`));
-		}
-		process.exit(1);
+		reportDesktopWriteFailure(error, options.json, `set "${key}"`);
 	}
 }

@@ -4,7 +4,8 @@
 // agent's own settings (the fields `update-agent` writes) from its record.
 // `set` and `reset` write through the running desktop, where the managed
 // settings authority holds the field (MRC2-06-03A); the file is written
-// directly only when no desktop runs and the data dir carries no managed binding.
+// directly only when no desktop runs and the data dir carries no managed
+// binding (the rule in services/managed-desktop-write.ts).
 
 import {
 	readAgentConfigs,
@@ -13,15 +14,8 @@ import {
 	writeAgentConfigValue,
 	deleteAgentConfigValue,
 	getSessionById,
-	getConfigDir,
 } from '../services/storage';
-import { withMaestroClient } from '../services/maestro-client';
-import { MaestroNotRunningError } from '../services/maestro-not-running';
-import { exitIfMaestroNotRunning } from '../services/session-command';
-import {
-	managedBindingPath,
-	readManagedBindingFile,
-} from '../../shared/maestro-lib/managed/binding';
+import { reportDesktopWriteFailure, writeThroughDesktop } from '../services/managed-desktop-write';
 import type {
 	AgentConfigWriteOutcome,
 	AgentConfigWriteRequest,
@@ -342,38 +336,19 @@ export function settingsAgentGet(agentId: string, key: string, options: AgentGet
 	}
 }
 
-/**
- * Write one provider value through the running desktop, which holds the field
- * to the managed settings authority. Null when no desktop runs and the data dir
- * carries no managed binding (the caller then writes the file as before); an
- * enrolled data dir with no desktop is refused by the one not-running outcome.
- */
-async function writeThroughDesktop(
+/** One provider value through the running desktop, which holds the field; null when the file may be written. */
+function writeProviderValue(
 	request: AgentConfigWriteRequest,
 	json: boolean | undefined
 ): Promise<AgentConfigWriteOutcome | null> {
-	try {
-		return await withMaestroClient((client) =>
+	return writeThroughDesktop(
+		(client) =>
 			client.sendCommand<AgentConfigWriteOutcome>(
 				{ ...request, type: `${request.op}_agent_config_value` },
 				`${request.op}_agent_config_value_result`
-			)
-		);
-	} catch (error) {
-		if (!(error instanceof MaestroNotRunningError)) throw error;
-		if (readManagedBindingFile(managedBindingPath(getConfigDir())).status === 'none') return null;
-		if (!json) console.error(formatWarning('Enrolled with a management peer: desktop only.'));
-		throw error;
-	}
-}
-
-function reportWriteFailure(error: unknown, json: boolean | undefined, what: string): never {
-	exitIfMaestroNotRunning(error, { json });
-	const message = error instanceof Error ? error.message : 'Unknown error';
-	const managed = (error as { managed?: unknown }).managed;
-	if (json) console.error(JSON.stringify({ error: message, ...(managed ? { managed } : {}) }));
-	else console.error(formatError(`Failed to ${what}: ${message}`));
-	return process.exit(1);
+			),
+		json
+	);
 }
 
 /**
@@ -399,7 +374,7 @@ export async function settingsAgentSet(
 			parsedValue = parseValue(value);
 		}
 
-		const outcome = await writeThroughDesktop(
+		const outcome = await writeProviderValue(
 			{ op: 'set', providerId: agentId, key, value: parsedValue },
 			options.json
 		);
@@ -420,7 +395,7 @@ export async function settingsAgentSet(
 			console.log(formatSuccess(`${agentId}.${key} = ${JSON.stringify(parsedValue)}`));
 		}
 	} catch (error) {
-		reportWriteFailure(error, options.json, `set "${agentId}.${key}"`);
+		reportDesktopWriteFailure(error, options.json, `set "${agentId}.${key}"`);
 	}
 }
 
@@ -434,7 +409,7 @@ export async function settingsAgentReset(
 ): Promise<void> {
 	try {
 		assertProviderTarget(agentId);
-		const outcome = await writeThroughDesktop(
+		const outcome = await writeProviderValue(
 			{ op: 'reset', providerId: agentId, key },
 			options.json
 		);
@@ -458,6 +433,6 @@ export async function settingsAgentReset(
 			console.log(formatSuccess(`${agentId}.${key} removed`));
 		}
 	} catch (error) {
-		reportWriteFailure(error, options.json, `reset "${agentId}.${key}"`);
+		reportDesktopWriteFailure(error, options.json, `reset "${agentId}.${key}"`);
 	}
 }

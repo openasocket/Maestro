@@ -13,9 +13,6 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 import type { SessionInfo } from '../../../shared/types';
 
 vi.mock('../../../cli/services/storage', () => ({
@@ -25,7 +22,7 @@ vi.mock('../../../cli/services/storage', () => ({
 	writeAgentConfigValue: vi.fn(),
 	deleteAgentConfigValue: vi.fn(),
 	getSessionById: vi.fn(),
-	getConfigDir: vi.fn(),
+	dataDirHasManagedBinding: vi.fn(() => false),
 }));
 
 vi.mock('../../../cli/services/maestro-client', () => ({
@@ -44,11 +41,10 @@ import {
 	writeAgentConfigValue,
 	deleteAgentConfigValue,
 	getSessionById,
-	getConfigDir,
+	dataDirHasManagedBinding,
 } from '../../../cli/services/storage';
 import { withMaestroClient } from '../../../cli/services/maestro-client';
 import { MaestroNotRunningError } from '../../../cli/services/maestro-not-running';
-import { MANAGED_BINDING_FILE_NAME } from '../../../shared/maestro-lib/runtime/data-dir-lock';
 
 const codexAgent: SessionInfo = {
 	id: 'a1b2c3d4-0000-4000-8000-000000000001',
@@ -67,7 +63,6 @@ describe('settings agent', () => {
 	let logSpy: ReturnType<typeof vi.spyOn>;
 	let errorSpy: ReturnType<typeof vi.spyOn>;
 
-	const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-settings-agent-'));
 	/** The desktop answers every write with `outcome`; records what was sent. */
 	const desktop = (outcome: Record<string, unknown>) => {
 		const sendCommand = vi.fn().mockResolvedValue(outcome);
@@ -81,8 +76,7 @@ describe('settings agent', () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks();
-		fs.rmSync(path.join(dataDir, MANAGED_BINDING_FILE_NAME), { force: true });
-		vi.mocked(getConfigDir).mockReturnValue(dataDir);
+		vi.mocked(dataDirHasManagedBinding).mockReturnValue(false);
 		logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 		errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 		vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
@@ -219,8 +213,8 @@ describe('settings agent', () => {
 			await settingsAgentReset('codex', 'contextWindow', { json: true });
 			expect(deleteAgentConfigValue).toHaveBeenCalledWith('codex', 'contextWindow');
 
-			fs.writeFileSync(path.join(dataDir, MANAGED_BINDING_FILE_NAME), '{}');
 			vi.clearAllMocks();
+			vi.mocked(dataDirHasManagedBinding).mockReturnValue(true);
 			await expect(settingsAgentSet('codex', 'contextWindow', '1', { json: true })).rejects.toThrow(
 				'process.exit(3)'
 			);
