@@ -132,6 +132,52 @@ describe('TunnelManager', () => {
 	// START PORT VALIDATION TESTS
 	// =============================================================================
 
+	// MRC2-05-06: the listener ceiling answers before cloudflared is looked for
+	// or spawned; a refusal is the result's error and the status error, by name.
+	describe('start - listener ceiling', () => {
+		it('never spawns cloudflared when the ceiling refuses the tunnel kind', async () => {
+			const gate = await import('../../main/enterprise/listener-gate');
+			const requests: unknown[] = [];
+			gate.setListenerAuthority({
+				evaluateListener(request) {
+					requests.push(request);
+					return {
+						allowed: false,
+						code: 'kind-denied',
+						message: 'the listener ceiling admits no tunnel listener',
+						managed: { ...request, policyRevision: 3, reach: 'public', outcome: 'kind-denied' },
+					};
+				},
+			});
+			try {
+				const result = await tunnelManager.start(3000);
+				expect(result).toMatchObject({
+					success: false,
+					error: '[managed-kind-denied] the listener ceiling admits no tunnel listener',
+					held: { kind: 'tunnel', bind: '127.0.0.1', port: 3000, code: 'kind-denied', count: 1 },
+				});
+				expect(requests).toEqual([{ kind: 'tunnel', bind: '127.0.0.1', port: 3000 }]);
+				expect(mocks.mockSpawn).not.toHaveBeenCalled();
+				expect(mocks.mockIsCloudflaredInstalled).not.toHaveBeenCalled();
+				expect(tunnelManager.getStatus()).toEqual({
+					isRunning: false,
+					url: null,
+					error: result.error,
+				});
+				expect(gate.heldListeners()).toMatchObject([{ kind: 'tunnel', port: 3000 }]);
+			} finally {
+				gate.setListenerAuthority(null);
+			}
+		});
+
+		it('is not consulted standalone: the start reaches the cloudflared check', async () => {
+			mocks.mockIsCloudflaredInstalled.mockResolvedValue(false);
+			const result = await tunnelManager.start(3000);
+			expect(result).toEqual({ success: false, error: 'cloudflared is not installed' });
+			expect(mocks.mockIsCloudflaredInstalled).toHaveBeenCalled();
+		});
+	});
+
 	describe('start - port validation', () => {
 		it('rejects negative port', async () => {
 			const result = await tunnelManager.start(-1);

@@ -276,6 +276,29 @@ describe('projectManagedState', () => {
 		expect(view.egress.held[0]).not.toBe(hold);
 	});
 
+	// MRC2-05-06: the listener gate's ledger rides along the same way, so a
+	// pane can say which listener never bound; absent reads as nothing refused.
+	it('carries the listener holds it is handed, as copies, and none by default', () => {
+		const s = registered();
+		const hold = {
+			kind: 'web',
+			bind: '0.0.0.0',
+			port: 8080,
+			reach: 'any',
+			code: 'reach-denied',
+			message: '[managed-reach-denied] held',
+			policyRevision: 3,
+			firstAt: OBSERVED,
+			lastAt: OBSERVED,
+			count: 1,
+		} as const;
+		const base = { status: s, policy: policyOf(s), custody: { state: 'protected' as const } };
+		const view = projectManagedState({ ...base, supported: SUPPORTED, listeners: [hold] });
+		expect(view.listeners).toEqual({ held: [hold] });
+		expect(view.listeners.held[0]).not.toBe(hold);
+		expect(projectManagedState({ ...base, supported: SUPPORTED }).listeners).toEqual({ held: [] });
+	});
+
 	it('names a custody refusal with its message and no enrollment', () => {
 		const s: ManagedEnrollmentStatus = {
 			...status({ record: null }),

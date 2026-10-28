@@ -16,14 +16,16 @@
  * person reads lives in `STATUS_COPY`.
  *
  * Below the sentence, the full pane lists what the ceilings hold (MRC2-05-03,
- * MRC2-05-04A): the update hold in force and every egress class refused, each
- * as one `[managed-<code>] ...` line from the projection's own records. A
- * quiet record in place of a toast per start; nothing here is a control.
+ * MRC2-05-04A, MRC2-05-06): the update hold in force, every egress class
+ * refused and every listener refused before it bound, each as one
+ * `[managed-<code>] ...` line from the projection's own records. A quiet
+ * record in place of a toast per start; nothing here is a control.
  */
 
 import { formatManagedHold, formatRelativeTime } from '../../../shared/formatters';
 import type { ManagedStanding, ManagedStateView } from '../../../main/enterprise/managed-state';
 import type { EgressHold } from '../../../main/utils/fetchWithTimeout';
+import type { ListenerHold } from '../../../main/enterprise/listener-gate';
 import type { UpdateHoldView } from '../../types';
 import { MANAGED_STANDING_COPY } from '../../hooks/enterprise/useManagedStatus';
 import type { Theme } from '../../types';
@@ -45,13 +47,20 @@ export const STATUS_COPY = {
 			code: hold.code,
 			message: `${hold.count} ${hold.class} request${hold.count === 1 ? '' : 's'} to ${hold.origin ?? 'an unnamed destination'} refused, last ${formatRelativeTime(hold.lastAt)}`,
 		}),
+	/** One listener kind refused at one bind and port, with how often and how recently; the socket never existed. */
+	listenerHold: (hold: ListenerHold) =>
+		formatManagedHold({
+			code: hold.code,
+			message: `${hold.kind} listener on ${hold.bind || '*'}:${hold.port} refused ${hold.count === 1 ? 'once' : `${hold.count} times`}, last ${formatRelativeTime(hold.lastAt)}`,
+		}),
 } as const;
 
 /** The list under the standing, or null when nothing is held. */
 function Holds({ state }: { state: ManagedStateView }) {
 	const update = state.update.held;
 	const egress = state.egress.held;
-	if (!update && egress.length === 0) return null;
+	const listeners = state.listeners.held;
+	if (!update && egress.length === 0 && listeners.length === 0) return null;
 	return (
 		<div className="text-xs" data-testid="managed-holds">
 			<span className="font-medium">{STATUS_COPY.holds}</span>
@@ -60,6 +69,11 @@ function Holds({ state }: { state: ManagedStateView }) {
 				{egress.map((hold) => (
 					<li key={`${hold.class}\n${hold.code}\n${hold.origin ?? ''}`}>
 						{STATUS_COPY.egressHold(hold)}
+					</li>
+				))}
+				{listeners.map((hold) => (
+					<li key={`${hold.kind}\n${hold.code}\n${hold.bind}\n${hold.port}`}>
+						{STATUS_COPY.listenerHold(hold)}
 					</li>
 				))}
 			</ul>

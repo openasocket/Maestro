@@ -51,6 +51,7 @@ import {
 } from '../../enterprise/managed-state';
 import type { PolicyStatusService } from '../../enterprise/policy-status';
 import { ENTERPRISE_SUPPORTED_CAPABILITIES } from '../../enterprise/service';
+import { heldListeners } from '../../enterprise/listener-gate';
 import { heldUpdate } from '../../update-checker';
 import { heldEgress } from '../../utils/fetchWithTimeout';
 import { withIpcErrorLogging } from '../../utils/ipcHandler';
@@ -159,6 +160,7 @@ export function readManagedState(deps: EnterpriseHandlerDependencies): ManagedSt
 		supported: ENTERPRISE_SUPPORTED_CAPABILITIES,
 		egress: heldEgress(),
 		update: heldUpdate(),
+		listeners: heldListeners(),
 	});
 }
 

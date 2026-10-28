@@ -39,6 +39,7 @@ import {
 	readCliServerInfo,
 } from '../../../shared/cli-server-discovery';
 import { getCliSecret } from '../../web-server/auth/cli-secret';
+import { isListenerDeniedError } from '../../enterprise/listener-gate';
 
 /**
  * Timeout for waiting for web server to become active (ms)
@@ -142,10 +143,21 @@ export async function ensureCliServer(deps: WebHandlerDependencies): Promise<boo
 				'CliServer'
 			);
 		} catch (error: any) {
-			logger.error(
-				`Failed to start CLI server (attempt ${attempt}): ${error?.message ?? error}`,
-				'CliServer'
-			);
+			// A managed hold (MRC2-05-06) is a decision, not a transient failure:
+			// nothing bound, nothing broke, and a retry would meet the same answer.
+			// Say so once and leave the CLI unavailable by name.
+			const held = isListenerDeniedError(error);
+			if (held) {
+				logger.warn(
+					`CLI server held by policy: ${error.message}; maestro-cli is unavailable while the hold is in force`,
+					'CliServer'
+				);
+			} else {
+				logger.error(
+					`Failed to start CLI server (attempt ${attempt}): ${error?.message ?? error}`,
+					'CliServer'
+				);
+			}
 			// Tear down the (potentially half-initialized) server so the next
 			// attempt creates a fresh instance instead of reusing a broken one.
 			const existing = getWebServer();
@@ -157,6 +169,7 @@ export async function ensureCliServer(deps: WebHandlerDependencies): Promise<boo
 				}
 				setWebServer(null);
 			}
+			if (held) return false;
 		}
 
 		if (attempt < ENSURE_CLI_MAX_ATTEMPTS) {

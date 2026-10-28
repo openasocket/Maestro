@@ -43,6 +43,7 @@ import { app, type BrowserWindow } from 'electron';
 import { tunnelManager } from '../tunnel-manager';
 import { HostPairingWindow } from '../lite/pairing/host-window';
 import { listenLan, listenTailnet } from '../lite/tailnet-listener';
+import { holdListener, isListenerDeniedError } from '../enterprise/listener-gate';
 import { registerPairingRoutes } from '../lite/pairing/routes';
 
 import { registerLiteConnectionRoutes } from './routes/liteConnectionRoutes';
@@ -1858,6 +1859,11 @@ export class WebServer {
 			// The URL token is a capability, not an authentication scheme, so it
 			// is never put on the network unless the user asked for that.
 			const bindHost = this.lanAccess ? LAN_BIND_HOST : LOOPBACK_BIND_HOST;
+			// The listener ceiling (MRC2-05-06) answers before any route, hook or
+			// socket exists: a managed policy that does not list `web`, or lists
+			// it at loopback while Live Mode asks for every interface, refuses by
+			// name here and nothing below runs. Standalone nothing is consulted.
+			holdListener({ kind: 'web', bind: bindHost, port: this.port });
 			this.localIpAddress = this.lanAccess ? await getLocalIpAddress() : LOOPBACK_BIND_HOST;
 			logger.info(`Listening on ${bindHost}, advertising ${this.localIpAddress}`, LOG_CONTEXT);
 
@@ -1917,6 +1923,11 @@ export class WebServer {
 				url: this.getSecureUrl(),
 			};
 		} catch (error) {
+			if (isListenerDeniedError(error)) {
+				// A policy hold, not a failure: nothing was bound and nothing broke.
+				logger.warn(`Web server held by policy: ${error.message}`, LOG_CONTEXT);
+				throw error;
+			}
 			logger.error('Failed to start server', LOG_CONTEXT, error);
 			throw error;
 		}

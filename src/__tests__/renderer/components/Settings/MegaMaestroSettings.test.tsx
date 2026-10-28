@@ -68,6 +68,7 @@ function view(over: Partial<ManagedStateView> = {}): ManagedStateView {
 		},
 		egress: { held: [] },
 		update: { held: null },
+		listeners: { held: [] },
 		localRelease: {
 			allowed: false,
 			reason: 'required',

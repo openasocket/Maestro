@@ -59,6 +59,8 @@ import { createEgressPolicySource } from './enterprise/egress-policy';
 import { setEgressAuthority } from './utils/fetchWithTimeout';
 import { createUpdatePolicySource } from './enterprise/update-policy';
 import { setUpdateAuthority } from './update-checker';
+import { createListenerPolicySource } from './enterprise/listener-policy';
+import { setListenerAuthority } from './enterprise/listener-gate';
 import {
 	createLocalEffectsPolicySource,
 	describeLocalEffect,
@@ -1026,6 +1028,17 @@ app
 			policy: () => enterpriseService?.policy.status() ?? null,
 		});
 		setUpdateAuthority(updatePolicy);
+		// The listener ceiling (MRC2-05-06): every inbound surface (the web server
+		// behind maestro-cli and Live Mode, the cloudflared tunnel, later the Lite
+		// listeners and the Cue webhook) is held by kind and reach BEFORE it binds,
+		// through the leaf gate the sinks import; a refusal is named, never a port
+		// collision. None installed yet (CP-01): an enrolled host opens no listener,
+		// by name, while standalone binds as it always has.
+		const listenerPolicy = createListenerPolicySource({
+			identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
+			policy: () => enterpriseService?.policy.status() ?? null,
+		});
+		setListenerAuthority(listenerPolicy);
 		// The local-effects ceiling (MRC2-04-09): opens, clipboard writes, trashes
 		// and deletes are held by class (allow, deny, confirm) in the system and
 		// filesystem handlers. A `confirm` is a dialog on the main window; with no

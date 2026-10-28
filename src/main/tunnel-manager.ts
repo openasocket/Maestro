@@ -2,6 +2,7 @@ import { ChildProcess, spawn, execFileSync } from 'child_process';
 import { logger } from './utils/logger';
 import { getCloudflaredPath, isCloudflaredInstalled, getExpandedEnv } from './utils/cliDetection';
 import { isWindows } from '../shared/platformDetection';
+import { listenerHoldFor, type ListenerHold } from './enterprise/listener-gate';
 
 export interface TunnelStatus {
 	isRunning: boolean;
@@ -13,7 +14,17 @@ export interface TunnelResult {
 	success: boolean;
 	url?: string;
 	error?: string;
+	/** The managed hold that stopped the tunnel before cloudflared ran (`error` carries its line). */
+	held?: ListenerHold;
 }
+
+/**
+ * The local target a quick tunnel forwards to. 127.0.0.1, not `localhost`:
+ * the web server listens on IPv4 only, and `localhost` can resolve to ::1
+ * first. Also what the listener ceiling is asked with; a tunnel is public
+ * whatever it forwards to.
+ */
+const TUNNEL_TARGET_HOST = '127.0.0.1';
 
 // Supervision tuning. Quick tunnels (trycloudflare.com) are ephemeral: Cloudflare
 // tears them down on network changes, Wi-Fi roams, and sleep/wake, and the process
@@ -44,6 +55,19 @@ class TunnelManager {
 		// Validate port number
 		if (!Number.isInteger(port) || port < 1 || port > 65535) {
 			return { success: false, error: `Invalid port number: ${port}` };
+		}
+
+		// The listener ceiling (MRC2-05-06): a tunnel publishes the port to the
+		// Internet, so a managed policy that does not list `tunnel` refuses it
+		// by name before cloudflared is looked for or spawned. Any tunnel still
+		// up is stopped, since the policy that holds this one holds it too, and
+		// the hold is reported as the status error. Standalone nothing is asked.
+		const held = listenerHoldFor({ kind: 'tunnel', bind: TUNNEL_TARGET_HOST, port });
+		if (held) {
+			await this.stop();
+			this.error = held.message;
+			logger.info(`Tunnel held by policy: ${held.message}`, 'TunnelManager');
+			return { success: false, error: held.message, held };
 		}
 
 		// Stop any existing tunnel first (also cancels supervision + timers)
@@ -85,11 +109,9 @@ class TunnelManager {
 			// Pass the expanded env so the fallback bare 'cloudflared' name resolves
 			// even when the app was launched from the Dock (no shell PATH). The
 			// absolute path from detection already works; this is belt-and-braces.
-			// 127.0.0.1, not `localhost`: the web server listens on IPv4 only, and
-			// `localhost` can resolve to ::1 first.
 			this.process = spawn(
 				cloudflaredBinary,
-				['tunnel', '--url', `http://127.0.0.1:${port}`, '--protocol', 'http2'],
+				['tunnel', '--url', `http://${TUNNEL_TARGET_HOST}:${port}`, '--protocol', 'http2'],
 				{ env: getExpandedEnv() }
 			);
 

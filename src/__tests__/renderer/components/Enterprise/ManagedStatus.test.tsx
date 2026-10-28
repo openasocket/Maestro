@@ -83,13 +83,14 @@ function listed(listedCount: number, newlyHeld: number) {
 function stateOf(
 	standing: ManagedStanding,
 	reason: string | null = null,
-	holds: Partial<Pick<ManagedStateView, 'egress' | 'update'>> = {}
+	holds: Partial<Pick<ManagedStateView, 'egress' | 'update' | 'listeners'>> = {}
 ): ManagedStateView {
 	return {
 		standing,
 		reason,
 		egress: { held: [] },
 		update: { held: null },
+		listeners: { held: [] },
 		...holds,
 	} as ManagedStateView;
 }
@@ -178,11 +179,30 @@ describe('ManagedStatus', () => {
 				count: 1,
 			},
 		];
+		// MRC2-05-06: a listener the ceiling refused before it bound lists too.
+		const listeners = [
+			{
+				kind: 'tunnel',
+				bind: '127.0.0.1',
+				port: 8080,
+				reach: 'public',
+				code: 'kind-denied',
+				message: '[managed-kind-denied] the listener ceiling admits no tunnel listener',
+				policyRevision: 3,
+				firstAt: '2026-10-28T09:00:00.000Z',
+				lastAt: new Date().toISOString(),
+				count: 2,
+			},
+		] as const;
 		const { rerender } = render(
 			<ManagedStatus
 				theme={mockTheme}
 				status={status(
-					stateOf('managed', null, { egress: { held: egress }, update: { held: update } })
+					stateOf('managed', null, {
+						egress: { held: egress },
+						update: { held: update },
+						listeners: { held: listeners },
+					})
 				)}
 			/>
 		);
@@ -196,6 +216,9 @@ describe('ManagedStatus', () => {
 			),
 			expect.stringMatching(
 				/^\[managed-unavailable\] 1 updates request to an unnamed destination refused, last /
+			),
+			expect.stringMatching(
+				/^\[managed-kind-denied\] tunnel listener on 127\.0\.0\.1:8080 refused 2 times, last /
 			),
 		]);
 		// No control: the list is a record, not a way to lift a hold.

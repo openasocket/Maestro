@@ -39,6 +39,7 @@ import type {
 import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
 import type { EgressHold } from '../utils/fetchWithTimeout';
 import type { IdentityCustodyState } from './identity-store';
+import type { ListenerHold } from './listener-gate';
 import type { UpdateHold } from './update-policy';
 
 /** One word for the standing, in the order a pane sorts them from best to worst. */
@@ -113,6 +114,8 @@ export interface ManagedStateView {
 	egress: { held: readonly EgressHold[] };
 	/** The update hold in force (the newest release the last check held, or the step the auto-updater stopped); null when nothing is held. */
 	update: { held: UpdateHold | null };
+	/** What the listener ceiling refused since it was installed, once per kind, code, bind and port: the socket never existed. */
+	listeners: { held: readonly ListenerHold[] };
 	localRelease: LocalRelease;
 }
 
@@ -188,6 +191,8 @@ export interface ManagedStateInput {
 	egress?: readonly EgressHold[];
 	/** The checker's record (`heldUpdate()`); absent reads as nothing held. */
 	update?: UpdateHold | null;
+	/** The listener gate's ledger (`heldListeners()`); absent reads as nothing refused. */
+	listeners?: readonly ListenerHold[];
 	now?: number;
 }
 
@@ -248,6 +253,7 @@ export function projectManagedState(input: ManagedStateInput): ManagedStateView 
 		},
 		egress: { held: (input.egress ?? []).map((hold) => ({ ...hold })) },
 		update: { held: input.update ? { ...input.update } : null },
+		listeners: { held: (input.listeners ?? []).map((hold) => ({ ...hold })) },
 		localRelease: localReleaseOf(status),
 	};
 }

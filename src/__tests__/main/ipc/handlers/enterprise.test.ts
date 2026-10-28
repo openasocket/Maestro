@@ -246,6 +246,7 @@ describe('enterprise handlers', () => {
 			capabilities: { negotiated: [] },
 			egress: { held: [] },
 			update: { held: null },
+			listeners: { held: [] },
 			localRelease: { allowed: false, reason: 'required' },
 		});
 		expect(view.capabilities.supported).toContain('execution');
