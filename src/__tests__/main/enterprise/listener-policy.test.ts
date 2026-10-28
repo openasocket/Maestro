@@ -30,10 +30,13 @@ import {
 	managedListenerStanding,
 	parseListenerPolicyCeiling,
 	reachWithin,
+	type ListenerKind,
 	type ListenerPolicyCeiling,
+	type ListenerReach,
 	type ListenerRequest,
 	type ManagedListenerStanding,
 } from '../../../main/enterprise/listener-policy';
+import { LITE_CONTROL_DISABLED_BY_POLICY, isLiteControlHeld } from '../../../shared/lite-control';
 import {
 	denyingListenerAuthority,
 	managedListenerAuthority,
@@ -440,6 +443,245 @@ describe('the listener gate', () => {
 			expect(listenerHoldFor(request({ port }))).toMatchObject({ code: 'unavailable', port });
 		}
 		expect(heldListeners()).toHaveLength(MAX_LISTENER_HOLDS);
+	});
+});
+
+describe('one entry per kind', () => {
+	/** The widest reach an entry of the kind may carry: `public` is only for the tunnel. */
+	const widest = (kind: ListenerKind): ListenerReach => (kind === 'tunnel' ? 'public' : 'any');
+	const loopbackRequest = (kind: ListenerKind): ListenerRequest => ({
+		kind,
+		bind: '127.0.0.1',
+		port: 7,
+	});
+	const empty = () => managed(ceilingOf(document({ listeners: [] })));
+
+	it('holds each kind by its own entry alone: the ten others are refused kind-denied under any bind', () => {
+		for (const kind of LISTENER_KINDS) {
+			const alone = managed(ceilingOf(document({ listeners: [{ kind, reach: widest(kind) }] })));
+			expect(listenerVerdict(alone, loopbackRequest(kind))).toMatchObject({
+				allowed: true,
+				managed: { kind, outcome: 'within-ceiling', policyRevision: 3 },
+			});
+			expect(listenerVerdict(alone, { kind, bind: '0.0.0.0', port: 7 })).toMatchObject({
+				allowed: true,
+				managed: { reach: widest(kind) },
+			});
+			for (const other of LISTENER_KINDS) {
+				if (other === kind) continue;
+				for (const bind of ['127.0.0.1', '0.0.0.0', '/tmp/maestro-lite-0f.sock']) {
+					expect(listenerVerdict(alone, { kind: other, bind, port: 7 })).toMatchObject({
+						allowed: false,
+						code: 'kind-denied',
+						managed: { kind: other, bind, port: 7, outcome: 'kind-denied' },
+					});
+				}
+			}
+		}
+	});
+
+	it('an empty ceiling, the strictest install, refuses every kind kind-denied at the gate and never unavailable', () => {
+		const real = managedListenerAuthority([]);
+		setListenerAuthority(real.authority);
+		for (const kind of LISTENER_KINDS) {
+			expect(listenerVerdict(empty(), loopbackRequest(kind))).toMatchObject({
+				allowed: false,
+				code: 'kind-denied',
+			});
+			expect(() => holdListener(loopbackRequest(kind))).toThrow(
+				`[managed-kind-denied] the listener ceiling admits no ${kind} listener`
+			);
+			expect(listenerHoldFor(loopbackRequest(kind))).toMatchObject({
+				kind,
+				code: 'kind-denied',
+				count: 2,
+			});
+		}
+		expect(real.requests).toHaveLength(LISTENER_KINDS.length * 2);
+		const ledger = heldListeners();
+		expect(ledger.map((hold) => hold.kind)).toEqual([...LISTENER_KINDS]);
+		expect(ledger.map((hold) => [hold.code, hold.count, hold.policyRevision])).toEqual(
+			LISTENER_KINDS.map(() => ['kind-denied', 2, 3])
+		);
+	});
+});
+
+describe('the Lite disabled record', () => {
+	it('is the gate hold the control endpoint met (the status word, its code, its line) and never a live discovery', () => {
+		setListenerAuthority(managedListenerAuthority([]).authority);
+		const hold = listenerHoldFor({
+			kind: 'lite-control',
+			bind: '/tmp/maestro-lite-0f.sock',
+			port: 0,
+		});
+		expect(hold).toMatchObject({ kind: 'lite-control', reach: 'loopback', code: 'kind-denied' });
+		const record = {
+			protocolVersion: 1,
+			pid: process.pid,
+			status: LITE_CONTROL_DISABLED_BY_POLICY,
+			code: hold!.code,
+			message: hold!.message,
+		};
+		expect(isLiteControlHeld(record)).toBe(true);
+		expect(record.message).toMatch(/^\[managed-kind-denied\] /);
+		expect(
+			isLiteControlHeld({
+				protocolVersion: 1,
+				pid: 1,
+				endpoint: '/tmp/maestro-lite-0f.sock',
+				secret: 'a'.repeat(64),
+			})
+		).toBe(false);
+		expect(isLiteControlHeld({ ...record, status: 'disabled' })).toBe(false);
+		expect(isLiteControlHeld({ ...record, code: 7 })).toBe(false);
+		expect(isLiteControlHeld(null)).toBe(false);
+	});
+});
+
+describe('sink classification by source', () => {
+	const source = (file: string) => readFileSync(join(process.cwd(), file), 'utf8');
+	/** The gate calls of a file with its comments removed (the status server's doc comment spells one it does not make). */
+	const gateCalls = (text: string) =>
+		text
+			.replace(/\/\*[\s\S]*?\*\//g, '')
+			.replace(/^\s*\/\/.*$/gm, '')
+			.match(/\b(holdListener|listenerHoldFor)\(/g) ?? [];
+
+	/** Every inbound sink: the kind its task assigned, the exact gate call, and the first thing after it that reaches a socket or a process. */
+	const SINKS: ReadonlyArray<{ file: string; kind: ListenerKind; call: string; before: string }> = [
+		{
+			file: 'src/main/web-server/WebServer.ts',
+			kind: 'web',
+			call: "holdListener({ kind: 'web', bind: bindHost, port: this.port })",
+			before: 'this.server.listen(',
+		},
+		{
+			file: 'src/main/tunnel-manager.ts',
+			kind: 'tunnel',
+			call: "listenerHoldFor({ kind: 'tunnel', bind: TUNNEL_TARGET_HOST, port })",
+			before: 'isCloudflaredInstalled()',
+		},
+		{
+			file: 'src/main/lite/tunnel.ts',
+			kind: 'ssh-tunnel',
+			call: "holdListener({ kind: 'ssh-tunnel', bind: '127.0.0.1', port: preferredPort ?? 0 })",
+			before: 'await availablePort(',
+		},
+		{
+			file: 'src/main/lite/control-server.ts',
+			kind: 'lite-control',
+			call: "listenerHoldFor({ kind: 'lite-control', bind: endpoint, port: 0 })",
+			before: 'createServer(',
+		},
+		{
+			file: 'src/main/lite/tailnet-listener.ts',
+			kind: 'tailnet',
+			call: "holdListener({ kind: 'tailnet', bind: address, port: TAILNET_PORT })",
+			before: 'listenDirect(',
+		},
+		{
+			file: 'src/main/lite/tailnet-listener.ts',
+			kind: 'tailnet',
+			call: "holdListener({ kind: 'tailnet', bind: address, port: LAN_PORT })",
+			before: 'server.server.address()',
+		},
+		{
+			file: 'src/main/lite/discovery/mdns.ts',
+			kind: 'mdns',
+			call: "holdListener({ kind: 'mdns', bind: this.address, port: MDNS_PORT })",
+			before: 'this.sockets()',
+		},
+		{
+			file: 'src/main/lite/discovery/advertiser.ts',
+			kind: 'mdns',
+			call: "listenerHoldFor({ kind: 'mdns', bind: address, port: MDNS_PORT })",
+			before: 'this.sockets()',
+		},
+		{
+			file: 'src/main/lite/discovery/tailscale.ts',
+			kind: 'tailnet',
+			call: 'listenerHoldFor(TAILNET_DISCOVERY_LISTENER)',
+			before: 'execFile(',
+		},
+		{
+			file: 'src/main/cue/cue-webhook-server.ts',
+			kind: 'cue-webhook',
+			call: "listenerHoldFor({ kind: 'cue-webhook', bind: host, port })",
+			before: 'http.createServer(',
+		},
+	];
+
+	/** The kinds no sink of this build holds: loopback-only observability and the three OS-local sockets. */
+	const UNHELD: ReadonlyArray<{ file: string; kind: ListenerKind; bind: string }> = [
+		{
+			file: 'src/main/cue/cue-status-server.ts',
+			kind: 'cue-status',
+			bind: 'server.listen(options.port, CUE_STATUS_HOST)',
+		},
+		{
+			file: 'src/main/permission-relay/PermissionRelayServer.ts',
+			kind: 'relay',
+			bind: 'server.listen(socketPath,',
+		},
+		{
+			file: 'src/maestro-p/steering-server.ts',
+			kind: 'steering',
+			bind: 'server.listen(socketPath)',
+		},
+		{
+			file: 'src/main/coworking/coworking-bridge.ts',
+			kind: 'coworking',
+			bind: 'srv.listen(socketPath)',
+		},
+	];
+
+	it('every sink names the kind its task assigned, through the leaf gate, before the first thing that reaches a socket', () => {
+		for (const sink of SINKS) {
+			const text = source(sink.file);
+			expect(text, sink.file).toMatch(/from '(\.\.\/)*(\.\/)?enterprise\/listener-gate'/);
+			expect(text, sink.file).not.toMatch(
+				/import \{[^}]*\b(holdListener|listenerHoldFor)\b[^}]*\} from '[./]*enterprise\/listener-policy'/
+			);
+			const at = text.indexOf(sink.call);
+			expect(at, `${sink.file} holds ${sink.kind}`).toBeGreaterThan(-1);
+			expect(text.indexOf(sink.call, at + 1), `${sink.file} holds ${sink.kind} once`).toBe(-1);
+			expect(
+				text.slice(0, at),
+				`${sink.file} reaches ${sink.before} only after the hold`
+			).not.toContain(sink.before);
+			expect(text.indexOf(sink.before, at), `${sink.file} reaches ${sink.before}`).toBeGreaterThan(
+				at
+			);
+		}
+		const perFile = new Map<string, number>();
+		for (const sink of SINKS) perFile.set(sink.file, (perFile.get(sink.file) ?? 0) + 1);
+		for (const [file, count] of perFile) expect(gateCalls(source(file)), file).toHaveLength(count);
+		expect(source('src/main/lite/discovery/tailscale.ts')).toMatch(
+			/const TAILNET_DISCOVERY_LISTENER = \{[^}]*kind: 'tailnet'[^}]*\} as const satisfies ListenerRequest;/
+		);
+	});
+
+	it('the four kinds no sink holds are loopback-only or OS-local by record, and consult no gate', () => {
+		const held = new Set(SINKS.map((sink) => sink.kind));
+		expect(LISTENER_KINDS.filter((kind) => !held.has(kind))).toEqual(UNHELD.map((u) => u.kind));
+		for (const entry of UNHELD) {
+			const text = source(entry.file);
+			expect(text, entry.file).not.toMatch(/listener-gate'/);
+			expect(gateCalls(text), entry.file).toEqual([]);
+			expect(text, entry.file).toContain(entry.bind);
+			expect(text, entry.file).not.toMatch(/\.listen\([^)]*'(0\.0\.0\.0|::)'/);
+		}
+		expect(source('src/main/cue/cue-status-server.ts')).toContain(
+			"export const CUE_STATUS_HOST = '127.0.0.1';"
+		);
+	});
+
+	it('the gate is a leaf: one runtime import (the formatter) and only types of the policy', () => {
+		const gate = source('src/main/enterprise/listener-gate.ts');
+		expect(gate.match(/^import (?!type )/gm)).toHaveLength(1);
+		expect(gate).toContain("import { formatManagedHold } from '../../shared/formatters';");
+		expect(gate).toMatch(/import type \{[^}]*\} from '\.\/listener-policy';/);
+		expect(gate.match(/from '\.\/listener-policy'/g)).toHaveLength(1);
 	});
 });
 

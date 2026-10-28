@@ -27,9 +27,16 @@ vi.mock('../../../main/utils/cliDetection', async (importOriginal) => ({
 const spawnMock = vi.fn((..._args: unknown[]): never => {
 	throw new Error('spawn must not be called');
 });
+// The default `execSsh` runs ssh through `execFileNoThrow`, which is
+// `promisify(execFile)`: a call here would surface as a failed command, so the
+// mock records it and the test asserts it was never reached.
+const execFileMock = vi.fn((..._args: unknown[]): never => {
+	throw new Error('execFile must not be called');
+});
 vi.mock('child_process', async (importOriginal) => ({
 	...(await importOriginal<typeof import('child_process')>()),
 	spawn: (...args: unknown[]) => spawnMock(...args),
+	execFile: (...args: unknown[]) => execFileMock(...args),
 }));
 
 import {
@@ -574,6 +581,30 @@ describe('remote-fs under the authority', () => {
 		expect(result.error).toContain('[managed-remote-unqualified]');
 		expect(result.error).toContain('a remote read (readDir of /srv)');
 		expect(deps.execSsh).not.toHaveBeenCalled();
+	});
+
+	it('a write through the default SSH execution, not an injected one, is refused with zero child processes', async () => {
+		// The sinks above inject `execSsh`; this one leaves the default in place
+		// (`execFileNoThrow` over `child_process.execFile`, `spawn` for stdin) so
+		// the proof is that neither primitive was reached, not that a mock was.
+		setRemoteAccessAuthority(authority({ qualifyRemote: async (r) => unattested(r) }).authority);
+		const write = await writeFileRemote('/srv/app/out.txt', 'hello', buildBox);
+		expect(write.success).toBe(false);
+		expect(write.error).toContain('[managed-remote-unqualified]');
+		expect(write.error).toContain('a remote write (writeFile of /srv/app/out.txt)');
+		expect(write.error).toContain('No SSH session was opened.');
+		const made = await mkdirRemote('/srv/app/dir', buildBox, true);
+		expect(made.success).toBe(false);
+		expect(made.error).toContain('[managed-remote-unqualified]');
+		const read = await readDirRemote('/srv', buildBox);
+		expect(read.success).toBe(false);
+		expect(read.error).toContain('[managed-remote-unqualified]');
+		expect(execFileMock).not.toHaveBeenCalled();
+		expect(spawnMock).not.toHaveBeenCalled();
+		expect(heldRemoteAccess().map((h) => [h.remoteId, h.class, h.code, h.count])).toEqual([
+			['remote-1', 'write', 'remote-unqualified', 2],
+			['remote-1', 'read', 'remote-unqualified', 1],
+		]);
 	});
 
 	it('the abortable read is held before its own spawn', async () => {

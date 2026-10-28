@@ -49,14 +49,18 @@ afterEach(() => {
 });
 
 /** The route, store and watcher wiring stubbed out, so only the bind decision is under test. */
-function stubbed(server: WebServer) {
+function stubbed(server: WebServer, { spyListen = true } = {}) {
 	const internals = server as any;
 	internals.setupMiddleware = vi.fn();
 	internals.setupRoutes = vi.fn();
 	internals.setupMessageHandlerCallbacks = vi.fn();
 	internals.watchWebUserStore = vi.fn();
 	internals.startAddressWatcher = vi.fn();
-	const listen = vi.spyOn(server.getServer(), 'listen').mockResolvedValue('' as never);
+	// With spyListen off the real fastify listen stays in place, so a test can
+	// prove at the OS that a refused start bound nothing.
+	const listen = spyListen
+		? vi.spyOn(server.getServer(), 'listen').mockResolvedValue('' as never)
+		: null;
 	return { internals, listen };
 }
 
@@ -111,6 +115,54 @@ describe('WebServer under the listener ceiling', () => {
 			{ kind: 'web', bind: '0.0.0.0', port: 0 },
 		]);
 		expect(heldListeners()).toMatchObject([{ kind: 'web', bind: '0.0.0.0', code: 'reach-denied' }]);
+	});
+
+	it('a ceiling that admits web as far as lan still refuses the every-interface bind; one at any admits it', async () => {
+		// Live Mode binds 0.0.0.0, which reaches `any`, not the one LAN
+		// interface a `lan` entry admits: the entry must say so by name.
+		const lanOnly = managedListenerAuthority([{ kind: 'web', reach: 'lan' }]);
+		setListenerAuthority(lanOnly.authority);
+		const lan = new WebServer(0, undefined, { lanAccess: true });
+		const lanBind = stubbed(lan);
+		await expect(lan.start()).rejects.toMatchObject({
+			name: 'ListenerDeniedError',
+			code: 'reach-denied',
+			receipt: { kind: 'web', bind: '0.0.0.0', port: 0, reach: 'any', outcome: 'reach-denied' },
+		});
+		expect(lanBind.listen).not.toHaveBeenCalled();
+		expect(lan.isActive()).toBe(false);
+		expect(heldListeners()).toMatchObject([
+			{ kind: 'web', bind: '0.0.0.0', reach: 'any', code: 'reach-denied', policyRevision: 3 },
+		]);
+
+		const anyReach = managedListenerAuthority([{ kind: 'web', reach: 'any' }]);
+		setListenerAuthority(anyReach.authority);
+		const wide = new WebServer(0, undefined, { lanAccess: true });
+		const wideBind = stubbed(wide);
+		const started = await wide.start();
+		expect(wideBind.listen).toHaveBeenCalledWith({ port: 0, host: '0.0.0.0' });
+		expect(started.url).toMatch(/^http:\/\/192\.168\.1\.50:/);
+		expect(anyReach.requests).toEqual([{ kind: 'web', bind: '0.0.0.0', port: 0 }]);
+		expect(heldListeners()).toEqual([]);
+	});
+
+	it('binds nothing at the OS on a refusal: the http server under fastify never listens', async () => {
+		const denied = denyingListenerAuthority('kind-denied');
+		setListenerAuthority(denied.authority);
+		const server = new WebServer(0);
+		const { internals } = stubbed(server, { spyListen: false });
+		const fastify = server.getServer();
+		await expect(server.start()).rejects.toMatchObject({ name: 'ListenerDeniedError' });
+		expect(fastify.addresses()).toEqual([]);
+		expect(fastify.server.listening).toBe(false);
+		expect(internals.setupRoutes).not.toHaveBeenCalled();
+		expect(server.isActive()).toBe(false);
+		expect(denied.requests).toEqual([{ kind: 'web', bind: '127.0.0.1', port: 0 }]);
+		// A second start asks again (the policy may have changed) and is refused
+		// again; the ledger counts the one row rather than growing.
+		await expect(server.start()).rejects.toMatchObject({ code: 'kind-denied' });
+		expect(fastify.addresses()).toEqual([]);
+		expect(heldListeners()).toMatchObject([{ kind: 'web', bind: '127.0.0.1', count: 2 }]);
 	});
 
 	it('consults nothing standalone and binds as before', async () => {
