@@ -161,9 +161,9 @@ export function composeLiteListenerAuthority(
 	});
 	const enrollment = (): LiteEnrollment => describeRead(store.read(), file);
 	const source = createListenerPolicySource({
-		// The source's rule is `status !== 'none'`; a standalone decision (no
-		// record, or none readable and no file) is handed to it as `none` so the
-		// one rule in the header decides, never the raw custody read.
+		// The source reads `identityStandingOf()`, the same rule as the header's;
+		// a standalone decision (no record, or none readable and no file) is
+		// still handed to it as `none` so the one rule in the header decides.
 		identity: {
 			read: () => {
 				const read = store.read();

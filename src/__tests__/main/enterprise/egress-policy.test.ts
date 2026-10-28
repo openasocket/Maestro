@@ -597,6 +597,28 @@ describe('createEgressPolicySource', () => {
 		if (!decision.allowed) expect(decision.code).toBe('unavailable');
 	});
 
+	it('reads an unprotected custody with no record as standalone, and one with a record as managed (MRC2-05-10A)', () => {
+		const unprotected = (fileExists: boolean): IdentityRead => ({
+			status: 'unprotected',
+			reason: 'seal-not-protected',
+			message: 'safeStorage holds the key as basic_text',
+			fileExists,
+		});
+		// No file: the installed ceiling omits vendor-telemetry, and is not consulted.
+		const standalone = source(unprotected(false));
+		standalone.install(document());
+		expect(standalone.standing()).toEqual({ standing: 'standalone' });
+		expect(
+			standalone.evaluateEgress(
+				request({ class: 'vendor-telemetry', url: 'https://telemetry.example.com/v1' })
+			)
+		).toEqual({ allowed: true });
+		// A file an enrolled run wrote: managed, refused by name, never standalone.
+		const held = source(unprotected(true));
+		expect(held.standing()).toMatchObject({ standing: 'managed', ceiling: null });
+		expect(held.evaluateEgress(request())).toMatchObject({ allowed: false, code: 'unavailable' });
+	});
+
 	it('installs a valid ceiling, keeps the previous one on a refused document, and clears', () => {
 		const s = source(enrolled('actor'));
 		expect(s.install(document())).toEqual({ installed: true, policyRevision: 3 });

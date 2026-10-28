@@ -45,7 +45,7 @@
 
 import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
 import { isPlainObject, unknownKeys } from './browser-policy';
-import type { EnterpriseIdentityStore } from './identity-store';
+import { identityStandingOf, type EnterpriseIdentityStore } from './identity-store';
 
 export {
 	ListenerDeniedError,
@@ -312,7 +312,7 @@ export function createListenerPolicySource(deps: ListenerPolicySourceDeps): List
 	let installed: ListenerPolicyCeiling | null = null;
 	const standing = () =>
 		managedListenerStanding({
-			enrolled: deps.identity.read().status !== 'none',
+			enrolled: identityStandingOf(deps.identity.read()) === 'managed',
 			policy: deps.policy(),
 			ceiling: installed,
 		});

@@ -423,3 +423,34 @@ describe('createCueSpawnAuthority', () => {
 		expect(verified.problems.join('; ')).toContain('workflow.fencingToken');
 	});
 });
+
+describe('standing by custody (MRC2-05-10A)', () => {
+	const unprotected = (fileExists: boolean): IdentityRead => ({
+		status: 'unprotected',
+		reason: 'seal-not-protected',
+		message: 'safeStorage holds the key as basic_text',
+		fileExists,
+	});
+	const untrusted: IdentityRead = {
+		status: 'untrusted',
+		reason: 'rollback',
+		message: 'older epoch',
+	};
+	const cue = (read: IdentityRead) =>
+		createCueSpawnAuthority({
+			installation: INSTALLATION,
+			identity: { read: () => read },
+			host: { policy: () => ({ sources: [], policyRevision: 3 }) },
+			dispatch: { authority: fakeSpawnPort().authority },
+			now: () => 1_000_000,
+		});
+
+	it('reads an unprotected custody with no record as standalone, and every held record as managed', () => {
+		for (const port of [authority, cue]) {
+			expect(port({ status: 'none' }).standing()).toBe('standalone');
+			expect(port(unprotected(false)).standing()).toBe('standalone');
+			expect(port(unprotected(true)).standing()).toBe('managed');
+			expect(port(untrusted).standing()).toBe('managed');
+		}
+	});
+});

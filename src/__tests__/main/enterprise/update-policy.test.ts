@@ -269,6 +269,24 @@ describe('createUpdatePolicySource', () => {
 		expect(decision).toMatchObject({ allowed: false, code: 'unavailable' });
 	});
 
+	it('reads an unprotected custody with no record as standalone, and one with a record as managed (MRC2-05-10A)', () => {
+		const unprotected = (fileExists: boolean): IdentityRead => ({
+			status: 'unprotected',
+			reason: 'anchor-unavailable',
+			message: 'no OS credential store holds an anchor',
+			fileExists,
+		});
+		// No file: a ceiling that holds every roll-forward is installed, and not consulted.
+		const standalone = source(unprotected(false));
+		standalone.install(document({ hold: true }));
+		expect(standalone.standing()).toEqual({ standing: 'standalone' });
+		expect(standalone.evaluateUpdate(request())).toEqual({ allowed: true });
+		// A file an enrolled run wrote: managed, refused by name, never standalone.
+		const held = source(unprotected(true));
+		expect(held.standing()).toMatchObject({ standing: 'managed', ceiling: null });
+		expect(held.evaluateUpdate(request())).toMatchObject({ allowed: false, code: 'unavailable' });
+	});
+
 	it('installs a valid ceiling, keeps the previous one on a refused document, and clears', () => {
 		const s = source(enrolled('actor'));
 		expect(s.install(document())).toEqual({ installed: true, policyRevision: 3 });

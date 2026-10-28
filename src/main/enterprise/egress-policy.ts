@@ -50,7 +50,7 @@ import {
 	unknownKeys,
 	type BrowserEffectActor,
 } from './browser-policy';
-import type { EnterpriseIdentityStore } from './identity-store';
+import { identityStandingOf, type EnterpriseIdentityStore } from './identity-store';
 import { pairedDeviceActorProblems } from './spawn-authority';
 
 export { EgressDeniedError, isEgressDeniedError } from '../utils/fetchWithTimeout';
@@ -348,7 +348,7 @@ export function createEgressPolicySource(deps: EgressPolicySourceDeps): EgressPo
 	let installed: EgressPolicyCeiling | null = null;
 	const standing = (read = deps.identity.read()) =>
 		managedEgressStanding({
-			enrolled: read.status !== 'none',
+			enrolled: identityStandingOf(read) === 'managed',
 			policy: deps.policy(),
 			ceiling: installed,
 		});

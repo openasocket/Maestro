@@ -31,7 +31,7 @@ import {
 	type BrowserEffectActor,
 } from './browser-policy';
 import type { EgressDenial } from './egress-policy';
-import type { EnterpriseIdentityStore } from './identity-store';
+import { identityStandingOf, type EnterpriseIdentityStore } from './identity-store';
 import { pairedDeviceActorProblems } from './spawn-authority';
 
 /** `stable`: no prerelease is consulted or offered, whatever the person set; `prerelease`: the person's setting decides. */
@@ -268,7 +268,7 @@ export function createUpdatePolicySource(deps: UpdatePolicySourceDeps): UpdatePo
 	let installed: UpdatePolicyCeiling | null = null;
 	const standing = (read = deps.identity.read()) =>
 		managedUpdateStanding({
-			enrolled: read.status !== 'none',
+			enrolled: identityStandingOf(read) === 'managed',
 			policy: deps.policy(),
 			ceiling: installed,
 		});

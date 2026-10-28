@@ -371,6 +371,32 @@ describe('createListenerPolicySource', () => {
 		expect(source.standing()).toEqual({ standing: 'standalone' });
 		expect(source.evaluateListener(request({ kind: 'tunnel' }))).toEqual({ allowed: true });
 	});
+
+	it('reads an unprotected custody with no record as standalone, and one with a record as managed (MRC2-05-10A)', () => {
+		const unprotected = (fileExists: boolean): IdentityRead => ({
+			status: 'unprotected',
+			reason: 'encryption-unavailable',
+			message: 'no OS encryption is available',
+			fileExists,
+		});
+		// No file: the installed ceiling omits tunnel, and is not consulted.
+		const standalone = createListenerPolicySource({
+			identity: { read: () => unprotected(false) },
+			policy: () => ({ appliedRevision: 3 }),
+		});
+		standalone.install(document());
+		expect(standalone.standing()).toEqual({ standing: 'standalone' });
+		expect(standalone.evaluateListener(request({ kind: 'tunnel', bind: '0.0.0.0' }))).toEqual({
+			allowed: true,
+		});
+		// A file an enrolled run wrote: managed, refused by name, never standalone.
+		const held = createListenerPolicySource({
+			identity: { read: () => unprotected(true) },
+			policy: () => ({ appliedRevision: 3 }),
+		});
+		expect(held.standing()).toMatchObject({ standing: 'managed' });
+		expect(held.evaluateListener(request())).toMatchObject({ allowed: false, code: 'unavailable' });
+	});
 });
 
 describe('the listener gate', () => {

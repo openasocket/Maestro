@@ -38,7 +38,11 @@ import type { ManagedSshEndpointRef } from '../../shared/maestro-lib/managed/typ
 import { describeSshConnectionError } from '../../shared/sshConnection';
 import type { AgentSshRemoteConfig, SshRemoteConfig } from '../../shared/types';
 import { logger } from '../utils/logger';
-import type { EnterpriseIdentityStore, IdentityRead } from './identity-store';
+import {
+	identityStandingOf,
+	type EnterpriseIdentityStore,
+	type IdentityRead,
+} from './identity-store';
 import {
 	callingLocalEffectActor,
 	type LocalEffectActor,
@@ -416,7 +420,7 @@ export function createRemoteAccessAuthority(
 	return {
 		async hold(request) {
 			const read = deps.identity.read();
-			if (read.status === 'none') return { allowed: true };
+			if (identityStandingOf(read) === 'standalone') return { allowed: true };
 			const label = request.remote.name ? `"${request.remote.name}"` : `"${request.remote.id}"`;
 			const what = describeRemoteAccess(request);
 			const receipt = (

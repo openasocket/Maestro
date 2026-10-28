@@ -52,7 +52,11 @@ import type {
 import type { CueSpawnAuthorityPort } from '../cue/cue-run-router';
 import type { HeadlessSpawnContextInput } from '../../shared/maestro-lib/managed/host-adapter';
 import type { BrokerDispatch } from './dispatch';
-import { publicEnterpriseIdentity, type EnterpriseIdentityStore } from './identity-store';
+import {
+	identityStandingOf,
+	publicEnterpriseIdentity,
+	type EnterpriseIdentityStore,
+} from './identity-store';
 
 export interface ProcessSpawnAuthorityDeps {
 	installation: ManagedInstallationIdentity;
@@ -167,7 +171,7 @@ export function createProcessSpawnAuthority(
 	};
 
 	return {
-		standing: () => (deps.identity.read().status === 'none' ? 'standalone' : 'managed'),
+		standing: () => identityStandingOf(deps.identity.read()),
 		get authority() {
 			return deps.dispatch.authority;
 		},
@@ -249,7 +253,7 @@ export function createCueSpawnAuthority(deps: CueSpawnAuthorityDeps): CueSpawnAu
 				: [`installation ${context.installation.installationId} is not this one`],
 	});
 	return {
-		standing: () => (deps.identity.read().status === 'none' ? 'standalone' : 'managed'),
+		standing: () => identityStandingOf(deps.identity.read()),
 		get authority() {
 			return deps.dispatch.authority;
 		},

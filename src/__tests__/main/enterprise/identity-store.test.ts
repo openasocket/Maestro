@@ -19,8 +19,10 @@ import {
 	ENTERPRISE_IDENTITY_ANCHOR_SERVICE,
 	ENTERPRISE_IDENTITY_FILE_NAME,
 	enterpriseIdentityProblems,
+	identityStandingOf,
 	publicEnterpriseIdentity,
 	type EnterpriseIdentityStore,
+	type IdentityRead,
 	type IdentityWriteInput,
 } from '../../../main/enterprise/identity-store';
 import { COT_STATE_ANCHOR_SERVICE } from '../../../main/cot-export/config-store';
@@ -277,6 +279,33 @@ describe('enterprise identity store', () => {
 			message: 'older copy',
 			record: null,
 		});
+	});
+
+	it('reads an unprotected custody with no file as standalone, and every held record as managed (MRC2-05-10A)', async () => {
+		const unprotected = (fileExists: boolean): IdentityRead => ({
+			status: 'unprotected',
+			reason: 'seal-not-protected',
+			message: 'safeStorage holds the key as basic_text',
+			fileExists,
+		});
+		// The rule over every read shape.
+		expect(identityStandingOf({ status: 'none' })).toBe('standalone');
+		expect(identityStandingOf(unprotected(false))).toBe('standalone');
+		expect(identityStandingOf(unprotected(true))).toBe('managed');
+		expect(
+			identityStandingOf({ status: 'untrusted', reason: 'rollback', message: 'older copy' })
+		).toBe('managed');
+		expect(identityStandingOf(store().read())).toBe('standalone');
+		// The real store: an unprotected custody over an empty directory is
+		// standalone; the same custody over a file a protected run wrote is managed.
+		const unprotectedStore = store({ seal: obscuringSeal() });
+		expect(unprotectedStore.read()).toMatchObject({ status: 'unprotected', fileExists: false });
+		expect(identityStandingOf(unprotectedStore.read())).toBe('standalone');
+		const protectedStore = store();
+		await protectedStore.write(input());
+		expect(identityStandingOf(protectedStore.read())).toBe('managed');
+		expect(unprotectedStore.read()).toMatchObject({ status: 'unprotected', fileExists: true });
+		expect(identityStandingOf(unprotectedStore.read())).toBe('managed');
 	});
 
 	it('shares nothing with Lite pairing, the plugin ledger or the CoT export store', () => {

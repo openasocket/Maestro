@@ -238,6 +238,36 @@ describe('the remote access rule', () => {
 		expect(effects.authorize).not.toHaveBeenCalled();
 	});
 
+	it('an unprotected custody with no record is standalone; with a record it is held (MRC2-05-10A)', async () => {
+		const unprotected = (fileExists: boolean): IdentityRead => ({
+			status: 'unprotected',
+			reason: 'seal-not-protected',
+			message: 'safeStorage holds the key as basic_text',
+			fileExists,
+		});
+		const standalone = authority({ identity: { read: () => unprotected(false) } });
+		for (const cls of REMOTE_ACCESS_CLASSES)
+			expect(
+				await standalone.authority.hold({ class: cls, remote: buildBox, operation: 'x' })
+			).toEqual({ allowed: true });
+		expect(standalone.qualifyRemote).not.toHaveBeenCalled();
+		expect(standalone.effects.authorize).not.toHaveBeenCalled();
+		// A file an enrolled run wrote: the custody is consulted and the remote is held by name.
+		const held = authority({
+			identity: { read: () => unprotected(true) },
+			qualifyRemote: vi.fn(async (remote: SshRemoteConfig) => unattested(remote)),
+		});
+		const decision = await held.authority.hold({
+			class: 'read',
+			remote: buildBox,
+			operation: 'stat',
+		});
+		expect(decision).toMatchObject({ allowed: false, code: 'remote-unqualified' });
+		if (!decision.allowed) expect(decision.message).toContain('No SSH session was opened.');
+		expect(held.qualifyRemote).toHaveBeenCalledTimes(1);
+		expect(held.effects.authorize).not.toHaveBeenCalled();
+	});
+
 	it('refuses an unqualified remote by name for every class, with no effect consulted', async () => {
 		const { authority: a, effects } = authority({
 			qualifyRemote: async (remote) => unattested(remote),

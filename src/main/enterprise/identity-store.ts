@@ -26,8 +26,11 @@
  * protected: no OS encryption, Linux `basic_text`, the built-in obscuring key,
  * or no credential store for the anchor. A store in that state reads
  * `unprotected`, never writes, and never clears what an earlier protected run
- * wrote. There is no session-only mode: an enrollment that lives only in
- * memory would be one that a restart silently loses.
+ * wrote. A sink reads that state through `identityStandingOf()`: standalone
+ * when no file exists (there is no record the custody could be hiding), and
+ * managed, refused by the custody's reason, when one does. There is no
+ * session-only mode: an enrollment that lives only in memory would be one
+ * that a restart silently loses.
  *
  * Everything that changes the record runs inside `exclusive`, one at a time,
  * so an enroll and a revoke cannot interleave on the same file. Tests inject a
@@ -456,5 +459,33 @@ export function publicEnterpriseIdentity(read: IdentityRead): ManagedIdentityVie
 		case 'unprotected':
 		case 'untrusted':
 			return { status: read.status, reason: read.reason, message: read.message, record: null };
+	}
+}
+
+/** What a sink reads of the custody: a standalone desktop, or one under management. */
+export type IdentityStanding = 'standalone' | 'managed';
+
+/**
+ * The one rule a desktop sink reads its enrollment standing by (MRC2-05-10A).
+ *
+ * `none` is standalone. `unprotected` with no file is standalone too: the
+ * custody cannot be used on this machine (Linux `basic_text`, no keyring),
+ * but there is no record it could be hiding, so a desktop that never enrolled
+ * is the same standalone desktop under either custody and refuses nothing.
+ * `ok` is managed. `untrusted`, or `unprotected` with a file present, stays
+ * managed: a record an enrolled run wrote is there and cannot be read or
+ * trusted here, so a sink refuses by the custody's reason and never falls
+ * back to standalone. The Lite composition (`lite/listener-authority.ts`)
+ * spells the same rule with the file it looked for.
+ */
+export function identityStandingOf(read: IdentityRead): IdentityStanding {
+	switch (read.status) {
+		case 'none':
+			return 'standalone';
+		case 'unprotected':
+			return read.fileExists ? 'managed' : 'standalone';
+		case 'ok':
+		case 'untrusted':
+			return 'managed';
 	}
 }
