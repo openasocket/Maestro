@@ -13,7 +13,8 @@ import { spawn } from 'child_process';
 import { SshRemoteConfig } from '../../shared/types';
 import { execFileNoThrow, ExecResult } from './execFile';
 import { shellEscape, shellEscapeRemotePath } from './shell-escape';
-import { sshRemoteManager } from '../ssh-remote-manager';
+import { holdRemoteAccess, remoteAccessRefusal, sshRemoteManager } from '../ssh-remote-manager';
+import type { RemoteAccessRequest } from '../enterprise/remote';
 import { logger } from './logger';
 import { resolveSshPath } from './cliDetection';
 
@@ -67,6 +68,36 @@ export interface RemoteFsDeps {
 	/** Function to build SSH args from config */
 	buildSshArgs: (config: SshRemoteConfig) => string[];
 }
+
+/**
+ * What one remote-fs command is about to do on the remote, declared by every
+ * operation (MRC2-05-07): under management `execRemoteCommand` holds it on the
+ * remote identity before any SSH session opens, and a `write` also on the
+ * local-effects ceiling as the `remote-write` effect. A `delete` binds the
+ * identity only: the delete sinks that call this module already hold the
+ * destructive `delete` effect through `holdDeleteEffect` (remote paths
+ * included). An operation names the path it acts on; a batch names its first
+ * path and its count. Standalone, or with no authority installed, nothing is
+ * consulted.
+ */
+export type RemoteFsAccess = Omit<RemoteAccessRequest, 'remote'>;
+const read = (operation: string, target: string | null = null): RemoteFsAccess => ({
+	class: 'read',
+	operation,
+	target,
+});
+const write = (operation: string, target: string | null, count = 1): RemoteFsAccess => ({
+	class: 'write',
+	operation,
+	target,
+	count,
+});
+const remove = (operation: string, target: string | null, count = 1): RemoteFsAccess => ({
+	class: 'delete',
+	operation,
+	target,
+	count,
+});
 
 /**
  * Default dependencies using real implementations.
@@ -220,15 +251,24 @@ function getBackoffDelay(attempt: number, baseDelay: number, maxDelay: number): 
  *
  * @param config SSH remote configuration
  * @param remoteCommand The shell command to execute on the remote
+ * @param access What the command does there (class, operation, path), held under management
  * @param deps Optional dependencies for testing
  * @returns ExecResult with stdout, stderr, and exitCode
  */
 async function execRemoteCommand(
 	config: SshRemoteConfig,
 	remoteCommand: string,
+	access: RemoteFsAccess,
 	deps: RemoteFsDeps = defaultDeps,
 	input?: string
 ): Promise<ExecResult> {
+	// Under management the remote must qualify as an enrolled endpoint (and a
+	// write must pass the local-effects ceiling) before a session opens: held
+	// first, before the ssh path is resolved or a per-host slot is taken, so a
+	// refusal costs nothing, opens nothing and is never retried (MRC2-05-07).
+	const hold = await holdRemoteAccess({ ...access, remote: config });
+	if (hold) return remoteAccessRefusal(hold);
+
 	const { maxRetries, baseDelayMs, maxDelayMs } = DEFAULT_RETRY_CONFIG;
 	let lastResult: ExecResult | null = null;
 
@@ -338,7 +378,7 @@ export async function readDirRemote(
 		`echo "__SYMDIR__"; ` +
 		symlinkScan;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(sshRemote, remoteCommand, read('readDir', dirPath), deps);
 
 	if (result.exitCode !== 0 && !result.stdout.includes('__LS_ERROR__')) {
 		return {
@@ -459,7 +499,12 @@ export async function listDirWithStatsRemote(
 		`stat -f '%z|%m|%N' ${glob} 2>/dev/null || true; ` +
 		`fi`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('listDirWithStats', dirPath),
+		deps
+	);
 
 	if (result.exitCode !== 0) {
 		return {
@@ -526,7 +571,12 @@ export async function bulkStatFileInSubdirsRemote(
 		`stat -f '%z|%m|%N' */${fileName} 2>/dev/null || true; ` +
 		`fi`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('bulkStatFileInSubdirs', parentDir),
+		deps
+	);
 
 	if (result.exitCode !== 0) {
 		return {
@@ -581,7 +631,12 @@ export async function readFileRemote(
 	// Use cat with explicit error handling
 	const remoteCommand = `cat ${escapedPath}`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('readFile', filePath),
+		deps
+	);
 
 	if (result.exitCode !== 0) {
 		const error = result.stderr || `Failed to read file: ${filePath}`;
@@ -636,7 +691,12 @@ export async function readBinaryFileRemoteAsBase64(
 	const escapedPath = shellEscapeRemotePath(filePath);
 	const remoteCommand = `base64 < ${escapedPath}`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('readBinaryFileAsBase64', filePath),
+		deps
+	);
 
 	if (result.exitCode !== 0) {
 		const error = result.stderr || `Failed to read file: ${filePath}`;
@@ -704,7 +764,12 @@ export async function readBinaryFileBlockRemoteAsBase64(
 	const escapedPath = shellEscapeRemotePath(filePath);
 	const remoteCommand = `dd if=${escapedPath} bs=${blockSize} skip=${blockIndex} count=1 2>/dev/null | base64`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('readBinaryFileBlockAsBase64', filePath),
+		deps
+	);
 
 	if (result.exitCode !== 0) {
 		const error = result.stderr || `Failed to read file: ${filePath}`;
@@ -757,7 +822,12 @@ export async function readFileTailRemote(
 	const startByte = Math.max(0, Math.floor(fromByteOffset)) + 1;
 	const remoteCommand = `tail -c +${startByte} ${escapedPath}`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('readFileTail', filePath),
+		deps
+	);
 
 	if (result.exitCode !== 0) {
 		const error = result.stderr || `Failed to read file: ${filePath}`;
@@ -793,6 +863,13 @@ export async function readFileRemoteAbortable(
 
 	const escapedPath = shellEscapeRemotePath(filePath);
 	const remoteCommand = `cat ${escapedPath}`;
+
+	// Held before the spawn, like every command through execRemoteCommand (MRC2-05-07).
+	const hold = await holdRemoteAccess({
+		...read('readFileAbortable', filePath),
+		remote: sshRemote,
+	});
+	if (hold) return { success: false, error: hold.message };
 
 	const sshPath = await resolveSshPath();
 	const sshArgs = sshRemoteManager.buildSshArgs(sshRemote);
@@ -896,7 +973,7 @@ export async function statRemote(
 	// BSD stat requires $'...' ANSI-C quoting to interpret \n as newlines
 	const remoteCommand = `stat --printf='%s\\n%F\\n%Y' ${escapedPath} 2>/dev/null || stat -f $'%z\\n%HT\\n%m' ${escapedPath}`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(sshRemote, remoteCommand, read('stat', filePath), deps);
 
 	if (result.exitCode !== 0) {
 		const error = result.stderr || `Failed to stat: ${filePath}`;
@@ -971,7 +1048,12 @@ export async function directorySizeRemote(
 	// If -b not available (BSD), use -k and multiply by 1024
 	const remoteCommand = `du -sb ${escapedPath} 2>/dev/null || du -sk ${escapedPath} 2>/dev/null | awk '{print $1 * 1024}'`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('directorySize', dirPath),
+		deps
+	);
 
 	if (result.exitCode !== 0) {
 		const error = result.stderr || `Failed to get directory size: ${dirPath}`;
@@ -1049,7 +1131,13 @@ export async function writeFileRemote(
 	// "/bin/bash: Argument list too long". stdin has no such limit.
 	const remoteCommand = `base64 -d > ${escapedPath}`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps, base64Content);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		write('writeFile', filePath),
+		deps,
+		base64Content
+	);
 
 	if (result.exitCode !== 0) {
 		const error = result.stderr || `Failed to write file: ${filePath}`;
@@ -1082,7 +1170,12 @@ export async function existsRemote(
 	const escapedPath = shellEscapeRemotePath(remotePath);
 	const remoteCommand = `test -e ${escapedPath} && echo "EXISTS" || echo "NOT_EXISTS"`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('exists', remotePath),
+		deps
+	);
 
 	if (result.exitCode !== 0) {
 		return {
@@ -1116,7 +1209,7 @@ export async function mkdirRemote(
 	const mkdirFlag = recursive ? '-p' : '';
 	const remoteCommand = `mkdir ${mkdirFlag} ${escapedPath}`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(sshRemote, remoteCommand, write('mkdir', dirPath), deps);
 
 	if (result.exitCode !== 0) {
 		const error = result.stderr || `Failed to create directory: ${dirPath}`;
@@ -1152,7 +1245,7 @@ export async function renameRemote(
 	const escapedNewPath = shellEscapeRemotePath(newPath);
 	const remoteCommand = `mv ${escapedOldPath} ${escapedNewPath}`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(sshRemote, remoteCommand, write('rename', newPath), deps);
 
 	if (result.exitCode !== 0) {
 		const error = result.stderr || `Failed to rename: ${oldPath}`;
@@ -1190,7 +1283,12 @@ export async function deleteRemote(
 	const rmFlags = recursive ? '-rf' : '-f';
 	const remoteCommand = `rm ${rmFlags} ${escapedPath}`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		remove('delete', targetPath),
+		deps
+	);
 
 	if (result.exitCode !== 0) {
 		const error = result.stderr || `Failed to delete: ${targetPath}`;
@@ -1291,7 +1389,12 @@ export async function deleteManyRemote(
 		const chunkIndices = indices.slice(cursor, cursor + chunk.length);
 		cursor += chunk.length;
 
-		const result = await execRemoteCommand(sshRemote, commandPrefix + chunk.join(' '), deps);
+		const result = await execRemoteCommand(
+			sshRemote,
+			commandPrefix + chunk.join(' '),
+			remove('deleteMany', targetPaths[chunkIndices[0]] ?? null, chunk.length),
+			deps
+		);
 
 		if (result.exitCode === 0) {
 			for (const index of chunkIndices) {
@@ -1342,7 +1445,12 @@ export async function compressFolderRemote(
 	const escapedName = shellEscape(folderName);
 	const remoteCommand = `cd ${escapedParent} && zip -r -q -y ${escapedDest} ${escapedName}`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		write('compressFolder', destZipPath),
+		deps
+	);
 
 	if (result.exitCode !== 0) {
 		const error = result.stderr || `Failed to compress: ${folderPath}`;
@@ -1380,7 +1488,12 @@ export async function countItemsRemote(
 	// -type f for files, -type d for directories (excluding the root dir itself)
 	const remoteCommand = `echo "FILES:$(find ${escapedPath} -type f 2>/dev/null | wc -l)" && echo "DIRS:$(find ${escapedPath} -mindepth 1 -type d 2>/dev/null | wc -l)"`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('countItems', dirPath),
+		deps
+	);
 
 	if (result.exitCode !== 0) {
 		const error = result.stderr || `Failed to count items: ${dirPath}`;
@@ -1515,7 +1628,12 @@ export async function listTreeRemote(
 		`echo "${SEP}"; ` +
 		`${fileFind}`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('listTree', rootPath),
+		deps
+	);
 
 	if (result.exitCode !== 0 && !result.stdout.includes('__CD_ERROR__')) {
 		return {
@@ -1600,7 +1718,12 @@ export async function incrementalScanRemote(
 	const isoDate = new Date(sinceTimestamp * 1000).toISOString();
 	const remoteCommand = `find ${escapedPath} -newermt "${isoDate}" -type f \\( ! -path "*/node_modules/*" ! -path "*/__pycache__/*" \\) 2>/dev/null || true`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('incrementalScan', dirPath),
+		deps
+	);
 
 	// find returns exit code 0 even with no matches, errors go to stderr
 	if (result.exitCode !== 0 && result.stderr) {
@@ -1657,7 +1780,12 @@ export async function listAllFilesRemote(
 	// Exclude node_modules and __pycache__
 	const remoteCommand = `find ${escapedPath} -maxdepth ${maxDepth} -type f \\( ! -path "*/node_modules/*" ! -path "*/__pycache__/*" \\) 2>/dev/null || true`;
 
-	const result = await execRemoteCommand(sshRemote, remoteCommand, deps);
+	const result = await execRemoteCommand(
+		sshRemote,
+		remoteCommand,
+		read('listAllFiles', dirPath),
+		deps
+	);
 
 	if (result.exitCode !== 0 && result.stderr) {
 		return {

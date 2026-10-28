@@ -33,6 +33,8 @@ export const LOCAL_EFFECT_CLASS_OF = {
 	'open-external': 'data-transfer',
 	'open-path': 'data-transfer',
 	'clipboard-write': 'data-transfer',
+	/** Content of this machine put on an SSH remote (a file write, a mkdir, a rename, a zip), MRC2-05-07. */
+	'remote-write': 'data-transfer',
 	trash: 'destructive',
 	delete: 'destructive',
 } as const satisfies Record<string, LocalEffectClass>;
@@ -183,6 +185,8 @@ export function describeLocalEffect(
 			return `opening ${request.target ?? 'a path'} in its default application`;
 		case 'clipboard-write':
 			return 'writing to the system clipboard';
+		case 'remote-write':
+			return `writing ${item} on an SSH remote${many}`;
 		case 'trash':
 			return `moving ${item} to the trash${many}`;
 		case 'delete':

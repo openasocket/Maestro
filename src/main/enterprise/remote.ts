@@ -24,6 +24,7 @@
 import { execFileNoThrow, type ExecResult } from '../../shared/maestro-lib/launch/exec-file';
 import { buildSshCommand } from '../../shared/maestro-lib/launch/ssh-command-builder';
 import {
+	managedSshEndpointRef,
 	qualifySshLaunchTarget,
 	resolveSshLaunchTarget,
 	unqualifiedSshLaunchTarget,
@@ -32,10 +33,19 @@ import {
 	type SshRemoteExpectation,
 	type SshRemoteSettingsStore,
 } from '../../shared/maestro-lib/launch/ssh-remote-resolver';
+import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
+import type { ManagedSshEndpointRef } from '../../shared/maestro-lib/managed/types';
 import { describeSshConnectionError } from '../../shared/sshConnection';
 import type { AgentSshRemoteConfig, SshRemoteConfig } from '../../shared/types';
 import { logger } from '../utils/logger';
 import type { EnterpriseIdentityStore, IdentityRead } from './identity-store';
+import {
+	callingLocalEffectActor,
+	type LocalEffectActor,
+	type LocalEffectAuthority,
+	type LocalEffectDenial,
+	type LocalEffectReceipt,
+} from './local-effects-policy';
 
 const LOG_CONTEXT = '[EnterpriseRemote]';
 
@@ -236,6 +246,232 @@ export function createRemoteEndpointQualifier(
 			);
 			if (target.kind !== 'remote') return target;
 			return qualifyTarget(target, null);
+		},
+	};
+}
+
+// ---------------------------------------------------------------------------
+// Remote file access and connection tests under the remote identity (MRC2-05-07)
+// ---------------------------------------------------------------------------
+
+/**
+ * What a sink is about to do on a remote. Phase 1 bound the remote identity to
+ * a LAUNCH; the File Explorer, Auto Run, session storage, the marketplace and
+ * the connection test open SSH sessions of their own through `remote-fs.ts`
+ * and `ssh-remote-manager.ts`, and under management each of those requires
+ * the same qualified endpoint before a session opens. `read` runs a command
+ * that changes nothing there (ls, cat, stat, find, du); `write` puts content
+ * of this machine there (a file write, a mkdir, a rename, a zip) and also
+ * consults the local-effects ceiling as the `remote-write` effect; `delete`
+ * removes something there (rm) and is held as the destructive `delete` effect
+ * by the delete sink that calls remote-fs (`holdDeleteEffect` covers remote
+ * paths), so this rule binds the identity and does not hold it a second time;
+ * `probe` asks the remote about itself (a connection test, later a `which` or
+ * a version). Standalone (no enrollment) answers allow with no call at all.
+ */
+export const REMOTE_ACCESS_CLASSES = ['read', 'write', 'delete', 'probe'] as const;
+export type RemoteAccessClass = (typeof REMOTE_ACCESS_CLASSES)[number];
+
+export interface RemoteAccessRequest {
+	class: RemoteAccessClass;
+	remote: SshRemoteConfig;
+	/** The operation by name (`readDir`, `writeFile`, `test-connection`). */
+	operation: string;
+	/** The remote path the operation names; null for one that names none. A batch names its first. */
+	target?: string | null;
+	/** How many items one hold covers; 1 when omitted. */
+	count?: number;
+}
+
+export type RemoteAccessDenial = 'remote-unqualified' | LocalEffectDenial;
+
+export interface RemoteAccessReceipt {
+	policyRevision: number | null;
+	class: RemoteAccessClass;
+	operation: string;
+	remoteId: string;
+	target: string | null;
+	count: number;
+	/** The endpoint the remote qualified as; null when it did not. */
+	endpoint: ManagedSshEndpointRef | null;
+	/** The local-effects receipt of a `write`; null for every other class and for an unqualified remote. */
+	effect: LocalEffectReceipt | null;
+	outcome: 'within-ceiling' | RemoteAccessDenial;
+}
+
+export type RemoteAccessDecision =
+	| { allowed: true; managed?: RemoteAccessReceipt }
+	| { allowed: false; code: RemoteAccessDenial; message: string; managed: RemoteAccessReceipt };
+
+/** What a sink holds a remote access with: the authority below, or a test double. */
+export interface RemoteAccessAuthority {
+	hold(request: RemoteAccessRequest): Promise<RemoteAccessDecision>;
+}
+
+/**
+ * How long one remote's qualification is reused. A file tree walk asks for
+ * hundreds of reads in seconds; asking the remote for its standing on each
+ * would open an SSH session per question. An admission is kept for a minute,
+ * a refusal for fifteen seconds (so a remote that comes up is retried soon),
+ * and concurrent askers share one in-flight probe. The key carries the
+ * remote's connection fields and this host's enrollment epoch and applied
+ * revision, so an edited remote or a moved policy is asked again.
+ */
+export const REMOTE_ACCESS_QUALIFICATION_TTL_MS = { admitted: 60_000, refused: 15_000 } as const;
+/** Distinct remotes the cache keeps; past it the cache starts over rather than grow. */
+export const MAX_REMOTE_QUALIFICATION_CACHE = 64;
+
+export function describeRemoteAccess(
+	request: Pick<RemoteAccessRequest, 'class' | 'operation' | 'target' | 'count'>
+): string {
+	const count = request.count ?? 1;
+	const items = count > 1 ? `, ${count} items` : '';
+	const target = request.target ? ` of ${request.target}` : '';
+	return `a remote ${request.class} (${request.operation}${target}${items})`;
+}
+
+export interface RemoteAccessAuthorityDeps {
+	identity: Pick<EnterpriseIdentityStore, 'read'>;
+	policy(): Pick<ManagedPolicyStatus, 'appliedRevision'> | null;
+	/**
+	 * Bind the remote to the enrolled endpoint it attests (the service's
+	 * `remote.qualifyResolved`); absent, every managed access is refused by name.
+	 */
+	qualifyRemote?(remote: SshRemoteConfig): Promise<SshLaunchTarget>;
+	/** The local-effects ceiling a `write` consults; none under management refuses the write `unavailable`. */
+	localEffects(): LocalEffectAuthority | null;
+	/** Who asks. Default: the transport this call was admitted over (AsyncLocalStorage survives the sink's awaits). */
+	actor?(): LocalEffectActor;
+	now?(): number;
+	ttlMs?: Partial<typeof REMOTE_ACCESS_QUALIFICATION_TTL_MS>;
+}
+
+type QualificationEntry =
+	| { until: number; target: SshLaunchTarget }
+	| { until: null; promise: Promise<SshLaunchTarget> };
+
+function remoteQualificationKey(remote: SshRemoteConfig, read: IdentityRead): string {
+	const enrollment =
+		read.status === 'ok' ? `${read.epoch}:${read.record.policy.appliedRevision}` : read.status;
+	return [
+		enrollment,
+		remote.id,
+		remote.host,
+		remote.port,
+		remote.username ?? '',
+		remote.privateKeyPath ?? '',
+		remote.useSshConfig ? 'config' : '',
+		JSON.stringify(remote.sshOptions ?? {}),
+	].join('\n');
+}
+
+/**
+ * The authority every remote-fs command and connection test is held with
+ * under management. The remote must qualify as an enrolled endpoint (the
+ * launch rule, with no provider route to confine since a file command launches
+ * none); a `write` is then held on the local-effects ceiling as `remote-write`
+ * with the path and count. A refusal names the remote, the operation and the
+ * reason, and the sink opens no SSH session: nothing runs on the remote
+ * unmanaged and nothing runs on this machine instead.
+ */
+export function createRemoteAccessAuthority(
+	deps: RemoteAccessAuthorityDeps
+): RemoteAccessAuthority {
+	const now = deps.now ?? Date.now;
+	const ttl = { ...REMOTE_ACCESS_QUALIFICATION_TTL_MS, ...deps.ttlMs };
+	const actor = deps.actor ?? callingLocalEffectActor;
+	const cache = new Map<string, QualificationEntry>();
+
+	const qualify = (remote: SshRemoteConfig, read: IdentityRead): Promise<SshLaunchTarget> => {
+		const key = remoteQualificationKey(remote, read);
+		const seen = cache.get(key);
+		if (seen) {
+			if (seen.until === null) return seen.promise;
+			if (seen.until > now()) return Promise.resolve(seen.target);
+			cache.delete(key);
+		}
+		if (!deps.qualifyRemote)
+			return Promise.resolve(
+				unqualifiedSshLaunchTarget(
+					remote,
+					'this host binds no remote endpoint identity for remote file access.'
+				)
+			);
+		const promise = deps.qualifyRemote(remote).then(
+			(target) => {
+				const admitted = target.kind === 'remote' && target.endpoint !== undefined;
+				if (cache.size >= MAX_REMOTE_QUALIFICATION_CACHE) cache.clear();
+				cache.set(key, { until: now() + (admitted ? ttl.admitted : ttl.refused), target });
+				return target;
+			},
+			(error: unknown) => {
+				cache.delete(key);
+				throw error;
+			}
+		);
+		cache.set(key, { until: null, promise });
+		return promise;
+	};
+
+	return {
+		async hold(request) {
+			const read = deps.identity.read();
+			if (read.status === 'none') return { allowed: true };
+			const label = request.remote.name ? `"${request.remote.name}"` : `"${request.remote.id}"`;
+			const what = describeRemoteAccess(request);
+			const receipt = (
+				outcome: RemoteAccessReceipt['outcome'],
+				endpoint: ManagedSshEndpointRef | null,
+				effect: LocalEffectReceipt | null
+			): RemoteAccessReceipt => ({
+				policyRevision: deps.policy()?.appliedRevision ?? null,
+				class: request.class,
+				operation: request.operation,
+				remoteId: request.remote.id,
+				target: request.target ?? null,
+				count: request.count ?? 1,
+				endpoint,
+				effect,
+				outcome,
+			});
+			const unqualified = (detail: string): RemoteAccessDecision => ({
+				allowed: false,
+				code: 'remote-unqualified',
+				message: `under management the SSH remote ${label} is not a qualified managed endpoint for ${what}: ${detail} No SSH session was opened.`,
+				managed: receipt('remote-unqualified', null, null),
+			});
+			const target = await qualify(request.remote, read);
+			if (target.kind === 'unresolved') return unqualified(target.message);
+			if (target.kind !== 'remote' || !target.endpoint)
+				return unqualified('the remote was resolved but no enrolled endpoint was bound to it.');
+			const endpoint = managedSshEndpointRef(target.endpoint);
+			if (request.class !== 'write')
+				return { allowed: true, managed: receipt('within-ceiling', endpoint, null) };
+			const localEffects = deps.localEffects();
+			if (!localEffects)
+				return {
+					allowed: false,
+					code: 'unavailable',
+					message: `under management ${what} on the SSH remote ${label} is held on the local-effects ceiling, and this host composes none. No SSH session was opened.`,
+					managed: receipt('unavailable', endpoint, null),
+				};
+			const decision = await localEffects.authorize({
+				effect: 'remote-write',
+				actor: actor(),
+				target: request.target ?? null,
+				count: request.count ?? 1,
+			});
+			if (decision.allowed)
+				return {
+					allowed: true,
+					managed: receipt('within-ceiling', endpoint, decision.managed ?? null),
+				};
+			return {
+				allowed: false,
+				code: decision.code,
+				message: `${decision.message} (${what} on the SSH remote ${label}; no SSH session was opened)`,
+				managed: receipt(decision.code, endpoint, decision.managed),
+			};
 		},
 	};
 }

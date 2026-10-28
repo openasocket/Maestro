@@ -22,6 +22,128 @@ import {
 	detectNonPosixRemoteShell,
 	nonPosixRemoteShellRemediation,
 } from '../shared/sshRemoteShell';
+import { formatManagedHold } from '../shared/formatters';
+import { logger } from './utils/logger';
+import type {
+	RemoteAccessAuthority,
+	RemoteAccessClass,
+	RemoteAccessDecision,
+	RemoteAccessDenial,
+	RemoteAccessRequest,
+} from './enterprise/remote';
+
+const LOG_CONTEXT = '[SshRemote]';
+
+/**
+ * The remote identity every SSH session this process opens for a file command
+ * or a connection test is held to under management (MRC2-05-07), and the quiet
+ * record of what it refused. This module is the one `remote-fs.ts` and the
+ * connection test already share, so it holds the authority the desktop installs
+ * at app-ready (`setRemoteAccessAuthority()` from `src/main/index.ts`, composed
+ * by `createRemoteAccessAuthority()` in `src/main/enterprise/remote.ts`, which
+ * is imported here by type only). With none installed nothing is consulted and
+ * a standalone host never pays for the question. A refusal is recorded once per
+ * remote, class and code with a count (`heldRemoteAccess()`) and warned once,
+ * so a file tree walk refused a hundred times is one row, not a hundred toasts.
+ */
+let remoteAccessAuthority: RemoteAccessAuthority | null = null;
+const remoteAccessHolds = new Map<string, RemoteAccessHold>();
+
+/** One refusal a sink carries, and one row of the ledger. */
+export interface RemoteAccessHold {
+	remoteId: string;
+	remoteName: string;
+	class: RemoteAccessClass;
+	operation: string;
+	code: RemoteAccessDenial;
+	/** `[managed-<code>] ...`, the line a sink answers with. */
+	message: string;
+	policyRevision: number | null;
+	firstAt: string;
+	lastAt: string;
+	count: number;
+}
+
+/** Distinct holds the ledger keeps; a refusal past the bound is still answered, only its record is dropped. */
+export const MAX_REMOTE_ACCESS_HOLDS = 64;
+
+/** The exit code of a remote command the managed identity refused: ssh never ran. */
+export const REMOTE_ACCESS_REFUSED_EXIT_CODE = 'EMANAGED';
+
+/** Install (or, with null, remove) the authority every remote access of this process is held with. Clears the ledger. */
+export function setRemoteAccessAuthority(authority: RemoteAccessAuthority | null): void {
+	remoteAccessAuthority = authority;
+	remoteAccessHolds.clear();
+}
+
+function recordRemoteAccessHold(
+	request: RemoteAccessRequest,
+	decision: Extract<RemoteAccessDecision, { allowed: false }>
+): RemoteAccessHold {
+	const key = `${request.remote.id}\n${request.class}\n${decision.code}`;
+	const at = new Date().toISOString();
+	const seen = remoteAccessHolds.get(key);
+	if (seen) {
+		seen.lastAt = at;
+		seen.count += 1;
+		return { ...seen };
+	}
+	const hold: RemoteAccessHold = {
+		remoteId: request.remote.id,
+		remoteName: request.remote.name || request.remote.id,
+		class: request.class,
+		operation: request.operation,
+		code: decision.code,
+		message: formatManagedHold(decision),
+		policyRevision: decision.managed.policyRevision,
+		firstAt: at,
+		lastAt: at,
+		count: 1,
+	};
+	if (remoteAccessHolds.size < MAX_REMOTE_ACCESS_HOLDS) remoteAccessHolds.set(key, hold);
+	logger.warn(
+		'Remote access refused by the managed remote identity; no SSH session was opened',
+		LOG_CONTEXT,
+		{
+			remoteId: request.remote.id,
+			class: request.class,
+			operation: request.operation,
+			code: decision.code,
+			receipt: decision.managed,
+		}
+	);
+	return { ...hold };
+}
+
+/**
+ * The hold a remote access meets, or null when the session may open. With no
+ * authority installed nothing is consulted and the answer is null. A refusal
+ * is recorded before it is answered; the sink opens nothing and answers the
+ * hold's message.
+ */
+export async function holdRemoteAccess(
+	request: RemoteAccessRequest
+): Promise<RemoteAccessHold | null> {
+	if (!remoteAccessAuthority) return null;
+	const decision = await remoteAccessAuthority.hold(request);
+	if (decision.allowed) return null;
+	return recordRemoteAccessHold(request, decision);
+}
+
+/** The result a refused remote command answers in place of ssh's: the hold's line on stderr and an exit code no shell produces. */
+export function remoteAccessRefusal(hold: RemoteAccessHold): ExecResult {
+	return { stdout: '', stderr: hold.message, exitCode: REMOTE_ACCESS_REFUSED_EXIT_CODE };
+}
+
+/** True when a remote command's result is a managed refusal rather than an answer from the remote. */
+export function isRemoteAccessRefusal(result: ExecResult): boolean {
+	return result.exitCode === REMOTE_ACCESS_REFUSED_EXIT_CODE;
+}
+
+/** What the identity has refused since the authority was installed, once per remote, class and code with a count. Copies. */
+export function heldRemoteAccess(): readonly RemoteAccessHold[] {
+	return [...remoteAccessHolds.values()].map((hold) => ({ ...hold }));
+}
 
 /**
  * Validation result for SSH remote configuration.
@@ -171,6 +293,16 @@ export class SshRemoteManager {
 				error: validation.errors.join('; '),
 			};
 		}
+
+		// Under management the remote must qualify as an enrolled endpoint before a
+		// session opens (MRC2-05-07): the refusal is the test's answer, ssh never runs.
+		const hold = await holdRemoteAccess({
+			class: 'probe',
+			remote: config,
+			operation: 'test-connection',
+			target: null,
+		});
+		if (hold) return { success: false, error: hold.message };
 
 		// Build SSH command for connection test
 		const sshArgs = this.buildSshArgs(config);

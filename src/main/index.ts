@@ -73,6 +73,8 @@ import {
 	createRepositoryPolicySource,
 } from './enterprise/repository-policy';
 import { setGitExecutionGate } from './utils/remote-git';
+import { createRemoteAccessAuthority } from './enterprise/remote';
+import { setRemoteAccessAuthority } from './ssh-remote-manager';
 import { PluginSandboxHost } from './plugins/plugin-sandbox-host';
 import { PluginBackgroundSupervisor } from './plugins/plugin-background-supervisor';
 import { PluginGroupingRegistry } from './plugins/plugin-grouping-registry';
@@ -155,7 +157,7 @@ import {
 } from './utils/headless-agent-activity';
 import { createPluginHeadlessAgentRunner } from './plugins/plugin-headless-agent-runner';
 import { generateTabName } from './ipc/handlers/tabNaming';
-import type { SessionInfo } from '../shared/types';
+import type { SessionInfo, SshRemoteConfig } from '../shared/types';
 import { executeCueNotify } from './cue/cue-notify-executor';
 import { executeCueAutoRun } from './cue/cue-autorun-executor';
 import { launchCueAutoRun } from './cue-autorun-launcher';
@@ -968,18 +970,19 @@ app
 		// connection, with no provider route to confine since git launches none;
 		// an unattested remote, or a host with no service composed, is refused by
 		// name and nothing runs on either machine.
+		const qualifyManagedRemote = (remote: SshRemoteConfig) =>
+			enterpriseService
+				? enterpriseService.remote.qualifyResolved(remote)
+				: Promise.resolve(
+						unqualifiedSshLaunchTarget(
+							remote,
+							'this host composes no remote endpoint qualifier (no enterprise service), so the remote cannot be asked for its managed standing.'
+						)
+					);
 		setGitExecutionGate(
 			createGitExecutionGate({
 				repository: repositoryPolicy,
-				qualifyRemote: (remote) =>
-					enterpriseService
-						? enterpriseService.remote.qualifyResolved(remote)
-						: Promise.resolve(
-								unqualifiedSshLaunchTarget(
-									remote,
-									'this host composes no remote endpoint qualifier (no enterprise service), so the remote cannot be asked for its managed standing.'
-								)
-							),
+				qualifyRemote: qualifyManagedRemote,
 			})
 		);
 		// The shell ceiling (MRC2-04-06): the person's audio feedback and idle
@@ -1060,6 +1063,21 @@ app
 				return response === 0 ? 'confirmed' : 'declined';
 			},
 		});
+		// Remote file access and connection tests under the remote identity
+		// (MRC2-05-07): every SSH session remote-fs opens (the File Explorer, Auto
+		// Run, session storage, the marketplace) and every connection test is held
+		// to the same qualified endpoint a launch is, through the holder in
+		// ssh-remote-manager.ts, before a session opens; a write is also held on
+		// the local-effects ceiling above as `remote-write`. An unqualified remote
+		// is refused by name with no SSH session; standalone opens them as before.
+		setRemoteAccessAuthority(
+			createRemoteAccessAuthority({
+				identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
+				policy: () => enterpriseService?.policy.status() ?? null,
+				qualifyRemote: qualifyManagedRemote,
+				localEffects: () => localEffectsPolicy,
+			})
+		);
 
 		// Serve agent-authored Concerto mockups as real documents with their own
 		// CSP. A srcdoc frame would inherit Maestro's renderer CSP and block the

@@ -202,6 +202,7 @@ describe('localEffectVerdict', () => {
 			'open-external': 'data-transfer',
 			'open-path': 'data-transfer',
 			'clipboard-write': 'data-transfer',
+			'remote-write': 'data-transfer',
 			trash: 'destructive',
 			delete: 'destructive',
 		});
