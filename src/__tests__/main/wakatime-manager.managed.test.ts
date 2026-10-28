@@ -55,6 +55,7 @@ import { execFileNoThrow } from '../../main/utils/execFile';
 import { logger } from '../../main/utils/logger';
 import { WakaTimeManager } from '../../main/wakatime-manager';
 import { createInstallPolicySource } from '../../main/enterprise/install-policy';
+import { createCredentialCustodySource } from '../../main/enterprise/credential-custody';
 import { createEgressPolicySource } from '../../main/enterprise/egress-policy';
 import { setEgressAuthority } from '../../main/utils/fetchWithTimeout';
 import type { IdentityRead } from '../../main/enterprise/identity-store';
@@ -295,5 +296,54 @@ describe('WakaTimeManager under the install ceiling', () => {
 				/execute refused: \[managed-unpinned\] the install ceiling pins no wakatime-cli wakatime-cli;/
 			)
 		);
+	});
+});
+
+describe('WakaTimeManager under the credential custody ceiling (MRC2-06-06)', () => {
+	const settingsKey = { get: vi.fn((key: string) => (key === 'wakatimeApiKey' ? 'key-1' : true)) };
+	const noKey = { get: vi.fn((key: string) => (key === 'wakatimeApiKey' ? '' : true)) };
+	let read: IdentityRead;
+	const compose = (store: { get: unknown }) => {
+		const manager = new WakaTimeManager(store as never, '1.0.0');
+		manager.setCredentialAuthority(
+			createCredentialCustodySource({ identity: { read: () => read } })
+		);
+		return manager;
+	};
+	const lastArgs = () => vi.mocked(execFileNoThrow).mock.calls.at(-1)?.[1];
+	const refused = (file: string) =>
+		`WakaTime API key refused: [managed-plain-file] the WakaTime API key is not kept on this managed host: ${file} is a readable file, and a managed host keeps a credential only under the OS key store.`;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		read = none;
+		vi.mocked(execFileNoThrow).mockResolvedValue({
+			exitCode: 0,
+			stdout: 'wakatime-cli 1.73.1',
+			stderr: '',
+		});
+		vi.mocked(fs.existsSync).mockReturnValue(true);
+		vi.mocked(fs.readFileSync).mockReturnValue('[settings]\napi_key = cfg-key\n');
+	});
+
+	it('standalone: the key from the settings, else from ~/.wakatime.cfg, beats as before', async () => {
+		await compose(settingsKey).sendHeartbeat('s1', 'proj');
+		expect(lastArgs()).toEqual(expect.arrayContaining(['--key', 'key-1']));
+		await compose(noKey).sendHeartbeat('s2', 'proj');
+		expect(lastArgs()).toEqual(expect.arrayContaining(['--key', 'cfg-key']));
+		expect(warnings()).toEqual([]);
+	});
+
+	it('enrolled: a key in a plain file is refused once per file by name, the config file is never read, nothing runs', async () => {
+		read = enrolled;
+		const manager = compose(settingsKey);
+		await manager.sendHeartbeat('s1', 'proj');
+		await manager.sendFileHeartbeats([{ filePath: '/p/a.ts', timestamp: 1 }], 'proj');
+		await compose(noKey).sendHeartbeat('s2', 'proj');
+
+		expect(execFileNoThrow).not.toHaveBeenCalled();
+		expect(fs.readFileSync).not.toHaveBeenCalled();
+		expect(warnings()).toEqual([refused('maestro-settings.json'), refused('~/.wakatime.cfg')]);
+		expect(warnings().join('\n')).not.toContain('key-1');
 	});
 });

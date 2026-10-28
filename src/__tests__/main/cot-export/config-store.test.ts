@@ -84,6 +84,12 @@ import {
 	setCotStateAnchor,
 } from '../../../main/cot-export/config-store';
 import type { CotConfigStore, CotConfigStoreDeps } from '../../../main/cot-export/config-store';
+import {
+	createCredentialCustodySource,
+	setCredentialCustodyAuthority,
+} from '../../../main/enterprise/credential-custody';
+import type { IdentityRead } from '../../../main/enterprise/identity-store';
+import { logger } from '../../../main/utils/logger';
 import { turnFilePath } from '../../../main/cot-export/layout';
 import type { Anchor, AnchorStore } from '../../../main/utils/keyring-anchor';
 import { safeStorageSeal } from '../../../main/utils/safe-storage-seal';
@@ -1287,6 +1293,76 @@ describe('cot-export/config-store', () => {
 				message: 'The disk is full.',
 				at: START + 1,
 			});
+		});
+	});
+
+	describe('under the credential custody ceiling (MRC2-06-06)', () => {
+		const anchor: AnchorStore = {
+			available: () => true,
+			read: () => null,
+			write: () => {},
+			clear: () => {},
+		};
+		const managed: IdentityRead = { status: 'ok', record: {} as never, epoch: 1 };
+		let read: IdentityRead;
+		const refusal = (why: string): string =>
+			`the turn log state is not kept on this managed host: ${why}`;
+
+		beforeEach(() => {
+			read = managed;
+			setCredentialCustodyAuthority(
+				createCredentialCustodySource({ identity: { read: () => read } })
+			);
+		});
+
+		afterEach(() => setCredentialCustodyAuthority(null));
+
+		it('managed with no encryption: refuses the change by the custody line, writes nothing, never obscures', () => {
+			electronMock.state.available = false;
+			const store = makeStore({ anchor });
+
+			expect(store.setAgentConfig(AGENT, { enabled: true, folder: logFolder('logs') })).toEqual({
+				ok: false,
+				reason: refusal('The operating system offers no encryption for this app.'),
+			});
+
+			expect(store.isEnabled(AGENT)).toBe(false);
+			expect(fs.existsSync(storeFile())).toBe(false);
+		});
+
+		it('managed with no anchor: refused too; with the key store and an anchor: sealed as before', () => {
+			const config = { enabled: true, folder: logFolder('logs') };
+			expect(makeStore().setAgentConfig(AGENT, config)).toEqual({
+				ok: false,
+				reason: refusal(
+					'no OS credential store holds a freshness anchor, so an older copy could not be told from the newest.'
+				),
+			});
+			expect(fs.existsSync(storeFile())).toBe(false);
+
+			expect(makeStore({ anchor }).setAgentConfig(AGENT, config).ok).toBe(true);
+			expect(Object.keys(readFile())).toEqual(['blob']);
+		});
+
+		it('an obscured file a standalone run wrote is read but never saved again once the host is managed, said once', () => {
+			read = { status: 'none' };
+			electronMock.state.available = false;
+			const logs = logFolder('logs');
+			makeStore().setAgentConfig(AGENT, { enabled: true, folder: logs });
+			const before = fs.readFileSync(storeFile(), 'utf8');
+			vi.mocked(logger.warn).mockClear();
+
+			read = managed;
+			const store = makeStore({ anchor });
+			expect(store.isEnabled(AGENT)).toBe(true);
+			store.setChainHead(AGENT, { folder: logs, head: HASH_A, chainSeq: 1 });
+			store.flushSync();
+			store.flushSync();
+
+			expect(fs.readFileSync(storeFile(), 'utf8')).toBe(before);
+			expect(vi.mocked(logger.warn).mock.calls).toEqual([
+				['Could not save a state file (MANAGED_CUSTODY).', 'Stores'],
+			]);
 		});
 	});
 

@@ -60,6 +60,10 @@ import {
 	setSettingsWriteAuthority,
 } from './enterprise/settings-policy';
 import { createInstallPolicySource } from './enterprise/install-policy';
+import {
+	createCredentialCustodySource,
+	setCredentialCustodyAuthority,
+} from './enterprise/credential-custody';
 import { createEgressPolicySource } from './enterprise/egress-policy';
 import { setEgressAuthority } from './utils/fetchWithTimeout';
 import { createUpdatePolicySource } from './enterprise/update-policy';
@@ -1063,6 +1067,15 @@ app
 		// Marketplace imports and the coworking MCP config writers hold with it too (MRC2-04-08A).
 		setMarketplaceInstallAuthority(installPolicy);
 		setMcpInstallAuthority(installPolicy);
+		// The credential custody ceiling (MRC2-06-06): the turn log state, the
+		// WakaTime API key and Cue's 0DIN token are kept on a managed host only
+		// under the OS key store with an anchor; the obscuring fallback, a plain
+		// file and an environment variable are refused by name. Standalone holds nothing.
+		const credentialCustody = createCredentialCustodySource({
+			identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
+		});
+		setCredentialCustodyAuthority(credentialCustody);
+		wakatimeManager.setCredentialAuthority(credentialCustody);
 		// The egress ceiling (MRC2-05-01): every outbound HTTP request of the main
 		// process leaves through `fetchWithTimeout()`, and under management each
 		// is held by its destination class and origin before a socket opens; a

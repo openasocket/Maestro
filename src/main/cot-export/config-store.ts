@@ -96,6 +96,8 @@ import type {
 	CotLastError,
 	CotPastChain,
 } from '../../shared/cotExport/types';
+import { holdCredentialCustody } from '../enterprise/credential-custody';
+import type { CredentialCustodyDecision } from '../enterprise/credential-custody';
 import { corruptStorePath, createStoreDeserializer } from '../stores/corrupt-store-recovery';
 import { getLiveSessions, getSessionsStore, getSyncPath } from '../stores/getters';
 import { createKeyringAnchor, noAnchor } from '../utils/keyring-anchor';
@@ -236,6 +238,12 @@ export interface CotConfigStoreDeps {
 	 * is never readable text. Defaults to `obscuringSeal()`.
 	 */
 	fallbackSeal?: SealProvider;
+	/**
+	 * Holds every save to the custody a managed host requires (MRC2-06-06):
+	 * refused, nothing is written, not even under `fallbackSeal`. Defaults to
+	 * the one custody authority over `seal` and `anchor`; standalone it admits.
+	 */
+	custody?: () => CredentialCustodyDecision;
 	/** The clock, in epoch milliseconds. Defaults to `Date.now`. */
 	now?: () => number;
 }
@@ -417,8 +425,14 @@ function readFreshness(raw: unknown): { epoch: number; installSecret: string | n
 	};
 }
 
+/** A save the custody ceiling refused: the policy's line, under a code the clock's log can name. */
+class CustodyRefusedError extends Error {
+	readonly code = 'MANAGED_CUSTODY';
+}
+
 /** Why a save failed, in one sentence. */
 function describeSaveError(error: unknown): string {
+	if (error instanceof CustodyRefusedError) return error.message;
 	const code = (error as NodeJS.ErrnoException | null)?.code;
 	return code
 		? `Maestro could not save the change (${code}).`
@@ -433,6 +447,9 @@ export function createCotConfigStore(deps: CotConfigStoreDeps): CotConfigStore {
 	const now = deps.now ?? Date.now;
 	const anchor = deps.anchor ?? noAnchor();
 	const fallbackSeal = deps.fallbackSeal ?? obscuringSeal();
+	const custody =
+		deps.custody ??
+		(() => holdCredentialCustody('cot-export.state', { kind: 'sealed', seal: deps.seal, anchor }));
 	const newSecret = deps.newSecret ?? ((): string => randomBytes(32).toString('hex'));
 	const storePath = path.resolve(deps.cwd, `${COT_CONFIG_STORE_NAME}.json`);
 	const store = new Store<CotStoreFile>({
@@ -487,6 +504,11 @@ export function createCotConfigStore(deps: CotConfigStoreDeps): CotConfigStore {
 		next: Map<string, CotAgentEntry>,
 		freshness: { epoch: number; installSecret: string | null } = { epoch, installSecret }
 	): void {
+		// Under management the state is kept only under the OS key store with an
+		// anchor (MRC2-06-06): the obscuring fallback is refused, never fallen
+		// back to, and the file on disk is not touched. Standalone: admitted.
+		const held = custody();
+		if (!held.allowed) throw new CustodyRefusedError(held.message);
 		if (unreadableOnDisk) {
 			// The bytes this start could not read can be another start's whole
 			// state: a keyring that was locked today, or a build signed with

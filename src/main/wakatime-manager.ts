@@ -12,6 +12,10 @@
  * install ceiling (pinned source and digest; a PATH name never runs; no "latest"),
  * and (MRC2-05-02) both GitHub requests leave through the fetch chokepoint as
  * `updates`, so the egress ceiling can refuse them before a socket opens.
+ * The API key (MRC2-06-06) is read only where the custody ceiling admits it:
+ * standalone from the settings or ~/.wakatime.cfg as before; under management
+ * neither plain file is protected custody, so WakaTime is off on that host by
+ * name and the config file is never read.
  */
 
 import { execFileNoThrow } from './utils/execFile';
@@ -37,6 +41,12 @@ import {
 	type InstallDecision,
 	type InstallRequest,
 } from './enterprise/install-policy';
+import {
+	formatCredentialRefusal,
+	SETTINGS_FILE_CUSTODY,
+	type CredentialCustody,
+	type CredentialCustodyAuthority,
+} from './enterprise/credential-custody';
 
 const LOG_CONTEXT = '[WakaTime]';
 const HEARTBEAT_DEBOUNCE_MS = 120_000; // 2 minutes - WakaTime deduplicates within this window
@@ -49,6 +59,8 @@ const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000; // Check for CLI updates o
 const WAKATIME_EGRESS_CLASS = 'updates' as const;
 /** GitHub refuses an API request that names no User-Agent. */
 const REQUEST_HEADERS = { 'User-Agent': 'maestro-wakatime' };
+/** The custody of a key in the WakaTime CLI's own config file. */
+const WAKATIME_CFG_CUSTODY: CredentialCustody = { kind: 'plain-file', file: '~/.wakatime.cfg' };
 
 /** Map file extensions (without dot, lowercase) to WakaTime language names */
 const EXTENSION_LANGUAGE_MAP = new Map<string, string>([
@@ -266,6 +278,7 @@ export class WakaTimeManager {
 	private installing: Promise<boolean> | null = null;
 	private lastUpdateCheck = 0;
 	private installAuthority: InstallAuthority | null = null;
+	private credentialAuthority: CredentialCustodyAuthority | null = null;
 	/** File digests by identity (read only when a pin asks) and the refusal lines already logged once. */
 	private readonly digestOf = createFileDigestCache();
 	private readonly reportedRefusals = new Set<string>();
@@ -291,6 +304,33 @@ export class WakaTimeManager {
 	/** The install ceiling every fetch, extraction and run is held to; null (the default) holds nothing. */
 	setInstallAuthority(authority: InstallAuthority | null): void {
 		this.installAuthority = authority;
+	}
+
+	/** The custody ceiling the API key is held to (MRC2-06-06); null (the default) holds nothing. */
+	setCredentialAuthority(authority: CredentialCustodyAuthority | null): void {
+		this.credentialAuthority = authority;
+	}
+
+	/** Hold reading the key from where it is kept; a refusal is logged once per reason, never with a value. */
+	private holdApiKey(custody: CredentialCustody): boolean {
+		if (!this.credentialAuthority) return true;
+		const decision = this.credentialAuthority.authorize('wakatime.apiKey', custody);
+		if (!decision.allowed) {
+			const reason = formatCredentialRefusal(decision);
+			this.warnOnce(reason, `WakaTime API key refused: ${reason}`);
+		}
+		return decision.allowed;
+	}
+
+	/**
+	 * The API key from the settings, else from ~/.wakatime.cfg, or '' when
+	 * neither holds one or the custody ceiling refuses the file that does; a
+	 * refused config file is never read.
+	 */
+	private resolveApiKey(): string {
+		const fromSettings = this.settingsStore.get('wakatimeApiKey', '') as string;
+		if (fromSettings) return this.holdApiKey(SETTINGS_FILE_CUSTODY) ? fromSettings : '';
+		return this.holdApiKey(WAKATIME_CFG_CUSTODY) ? this.readApiKeyFromConfig() : '';
 	}
 
 	/** Hold one install step as the operator who enabled WakaTime; a refusal is logged once per reason. */
@@ -671,10 +711,7 @@ export class WakaTimeManager {
 		const enabled = this.settingsStore.get('wakatimeEnabled', false);
 		if (!enabled) return;
 
-		let apiKey = this.settingsStore.get('wakatimeApiKey', '') as string;
-		if (!apiKey) {
-			apiKey = this.readApiKeyFromConfig();
-		}
+		const apiKey = this.resolveApiKey();
 		if (!apiKey) return;
 
 		// Ensure CLI is available (auto-installs if needed)
@@ -747,10 +784,7 @@ export class WakaTimeManager {
 		const detailedTracking = this.settingsStore.get('wakatimeDetailedTracking', false);
 		if (!detailedTracking) return;
 
-		let apiKey = this.settingsStore.get('wakatimeApiKey', '') as string;
-		if (!apiKey) {
-			apiKey = this.readApiKeyFromConfig();
-		}
+		const apiKey = this.resolveApiKey();
 		if (!apiKey) return;
 
 		if (!(await this.ensureCliInstalled())) {

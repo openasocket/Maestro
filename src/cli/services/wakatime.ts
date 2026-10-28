@@ -18,6 +18,7 @@
 import * as path from 'path';
 import { WakaTimeManager, type WakaTimeSettingsSource } from '../../main/wakatime-manager';
 import { headlessInstallAuthority } from '../../main/enterprise/install-policy';
+import { headlessCredentialAuthority } from '../../main/enterprise/credential-custody';
 import { cliSpawnAuthority } from './agent-spawner';
 import { readSettings } from './storage';
 
@@ -65,7 +66,10 @@ function getManager(): WakaTimeManager | null {
 		cached = new WakaTimeManager(settingsAdapter, getCliVersion());
 		// A bare CLI on an enrolled installation holds no authority that could
 		// hold a download to a ceiling, so it fetches and runs nothing (MRC2-04-07).
-		cached.setInstallAuthority(headlessInstallAuthority(cliSpawnAuthority()));
+		const managed = cliSpawnAuthority();
+		cached.setInstallAuthority(headlessInstallAuthority(managed));
+		// Nor a key in a plain file: an enrolled binding reads none (MRC2-06-06).
+		cached.setCredentialAuthority(headlessCredentialAuthority(managed));
 	} catch {
 		// Unreadable settings must not break agent spawning.
 		cached = null;

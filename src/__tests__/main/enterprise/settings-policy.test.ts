@@ -118,6 +118,27 @@ describe('managedSettingsStanding and settingWriteVerdict', () => {
 		expect(current.authorize('fontSize')).toEqual({ allowed: true });
 	});
 
+	it('refuses a credential the plain settings file would keep on every managed host (MRC2-06-06)', () => {
+		const none = managedSettingsStanding({ enrolled: true, policy: null, installed: null });
+		expect(settingWriteVerdict(none, 'wakatimeApiKey')).toEqual({
+			allowed: false,
+			code: 'custody',
+			message:
+				'the WakaTime API key is not kept on this managed host: maestro-settings.json is a readable file, and a managed host keeps a credential only under the OS key store.',
+			policyRevision: null,
+		});
+		expect(installed().authorize('wakatimeApiKey')).toMatchObject({
+			code: 'custody',
+			policyRevision: 3,
+		});
+		expect(() => guardSettingsStore(fakeStore({})).set('wakatimeApiKey', 'k')).toThrow(
+			ManagedSettingLockedError
+		);
+		expect(settingWriteVerdict({ standing: 'standalone' }, 'wakatimeApiKey')).toEqual({
+			allowed: true,
+		});
+	});
+
 	it('keeps the previous policy on a refused document and hears every change', () => {
 		const current = source();
 		const heard = vi.fn();

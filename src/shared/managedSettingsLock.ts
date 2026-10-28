@@ -139,7 +139,8 @@ export function isSettingLockable(key: string): boolean {
 	return MANAGED_LOCK_KEYS.includes(key);
 }
 
-export type ManagedSettingLockCode = 'unavailable' | 'locked';
+/** `custody`: a credential the plain settings file would keep, refused on every managed host (MRC2-06-06). */
+export type ManagedSettingLockCode = 'unavailable' | 'locked' | 'custody';
 
 /** One held key as a Settings pane reads it: the refusal's code and line, and whether a pin holds the value. */
 export interface ManagedSettingLockView {

@@ -26,12 +26,18 @@
  * through and logs at WARN. Fail-closed would let a 0DIN outage halt every
  * GitHub-triggered Cue subscription. The caller treats a null verdict as
  * "not suspicious".
+ *
+ * Under management (MRC2-06-06) the token is held to the credential custody
+ * ceiling before it is read: an environment variable is not protected custody,
+ * so the check is off on that host, said once by name, and every item passes
+ * as it does with no token. Standalone, unchanged.
  */
 
 import * as crypto from 'crypto';
 import { mapWithConcurrency } from '../utils/concurrency';
 import { fetchWithTimeout, isEgressDeniedError } from '../utils/fetchWithTimeout';
 import type { EgressClass } from '../enterprise/egress-policy';
+import { formatCredentialRefusal, holdCredentialCustody } from '../enterprise/credential-custody';
 
 const ACCESS_TOKEN_URL = 'https://0din.ai/api/v1/access_tokens';
 const SUS_URL = 'https://defense.0din.ai/api/v1/sus';
@@ -123,28 +129,40 @@ export function emitSusFactorBlockNotice(notice: SusFactorBlockNotice): void {
 
 let cachedJwt: string | null = null;
 let cachedJwtAt = 0;
+/** The custody refusal already said once; the ceiling is read on every item regardless. */
+let reportedRefusal: string | null = null;
 
 /** Exposed for tests - drops the cached JWT so the next call re-exchanges. */
 export function resetSusFactorTokenCache(): void {
 	cachedJwt = null;
 	cachedJwtAt = 0;
+	reportedRefusal = null;
 }
 
-function readApiToken(): string | null {
+const ODIN_TOKEN_CUSTODY = { kind: 'environment', name: 'ODIN_API_TOKEN' } as const;
+
+/** The token, or why none is read: unset, or refused by the custody ceiling (the line, never the value). */
+function readApiToken():
+	| { token: string; refused: null }
+	| { token: null; refused: string | null } {
 	const raw = process.env.ODIN_API_TOKEN;
-	return raw && raw.trim() !== '' ? raw.trim() : null;
+	if (!raw || raw.trim() === '') return { token: null, refused: null };
+	const held = holdCredentialCustody('cue.odinToken', ODIN_TOKEN_CUSTODY);
+	if (!held.allowed) return { token: null, refused: formatCredentialRefusal(held) };
+	return { token: raw.trim(), refused: null };
 }
 
 export function isSusFactorConfigured(): boolean {
-	return readApiToken() !== null;
+	return readApiToken().token !== null;
 }
 
 async function getJwt(now: number, force: boolean): Promise<string | null> {
+	// The ceiling first: a JWT exchanged before an enrollment landed is not used after it.
+	const apiToken = readApiToken().token;
+	if (!apiToken) return null;
 	if (!force && cachedJwt && now - cachedJwtAt < JWT_REFRESH_AFTER_MS) {
 		return cachedJwt;
 	}
-	const apiToken = readApiToken();
-	if (!apiToken) return null;
 
 	const res = await fetchWithTimeout(
 		ACCESS_TOKEN_URL,
@@ -249,10 +267,8 @@ export async function scoreSusFactor(
 	try {
 		let jwt = await getJwt(startedAt, false);
 		if (!jwt) {
-			onLog(
-				'warn',
-				`[CUE] SusFactor skipped for ${context}: ODIN_API_TOKEN is not set - processing normally`
-			);
+			const why = readApiToken().refused ?? 'ODIN_API_TOKEN is not set';
+			onLog('warn', `[CUE] SusFactor skipped for ${context}: ${why} - processing normally`);
 			return null;
 		}
 
@@ -506,7 +522,20 @@ export async function guardScoredText(params: GuardScoredTextParams): Promise<bo
 
 async function guardScoredTextInner(params: GuardScoredTextParams): Promise<boolean> {
 	const { event, enabled, threshold, onLog, scorableText: text, itemRef } = params;
-	if (!wouldScoreText(enabled, text)) return true;
+	if (!enabled || text.trim() === '') return true;
+	const token = readApiToken();
+	if (token.token === null) {
+		// A held token is said once per reason: off on this host by name, never
+		// silently. An unset token passes the item as it always did.
+		if (token.refused !== null && token.refused !== reportedRefusal) {
+			reportedRefusal = token.refused;
+			onLog(
+				'warn',
+				`[CUE] SusFactor is off on this managed host - processing normally: ${token.refused}`
+			);
+		}
+		return true;
+	}
 
 	const context = `${itemRef} (${event.type})`;
 

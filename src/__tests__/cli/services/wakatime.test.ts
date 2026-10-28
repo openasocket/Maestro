@@ -13,6 +13,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const sendHeartbeat = vi.fn(async () => {});
 const setInstallAuthority = vi.fn();
+const setCredentialAuthority = vi.fn();
 const spawnStanding = vi.fn<() => 'standalone' | 'managed'>(() => 'standalone');
 
 vi.mock('../../../main/wakatime-manager', () => ({
@@ -23,6 +24,7 @@ vi.mock('../../../main/wakatime-manager', () => ({
 		) {}
 		sendHeartbeat = sendHeartbeat;
 		setInstallAuthority = setInstallAuthority;
+		setCredentialAuthority = setCredentialAuthority;
 	},
 }));
 
@@ -145,6 +147,25 @@ describe('CLI WakaTime heartbeats', () => {
 			code: 'unavailable',
 			message:
 				'the managed install ceiling is unavailable (maestro-cli holds no attached host authority.)',
+		});
+	});
+
+	it('hands the manager a credential authority over the same binding: standalone admits, enrolled refuses a plain file (MRC2-06-06)', () => {
+		buildCliWakaTimeHeartbeat('cli:/x', '/x', false);
+		expect(setCredentialAuthority).toHaveBeenCalledTimes(1);
+		const custody = { kind: 'plain-file', file: 'maestro-settings.json' };
+		const standalone = setCredentialAuthority.mock.calls[0][0] as {
+			authorize(credential: string, custody: unknown): { allowed: boolean; code?: string };
+		};
+		expect(standalone.authorize('wakatime.apiKey', custody)).toEqual({ allowed: true });
+
+		resetCliWakaTimeForTests();
+		spawnStanding.mockReturnValue('managed');
+		buildCliWakaTimeHeartbeat('cli:/x', '/x', false);
+		const managed = setCredentialAuthority.mock.calls[1][0] as typeof standalone;
+		expect(managed.authorize('wakatime.apiKey', custody)).toMatchObject({
+			allowed: false,
+			code: 'plain-file',
 		});
 	});
 

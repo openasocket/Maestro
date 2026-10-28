@@ -6,7 +6,7 @@
  * and the override path.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { afterEach, describe, it, expect, beforeEach, vi } from 'vitest';
 
 const fetchWithTimeout = vi.fn();
 // The real module underneath keeps `isEgressDeniedError` and `EgressDeniedError` honest.
@@ -28,11 +28,18 @@ import {
 	chunkForScoring,
 	extractGitHubScorableText,
 	guardGitHubEvent,
+	isSusFactorConfigured,
 	resetSusFactorTokenCache,
+	scoreSusFactor,
 	setSusFactorNotifier,
 	CHUNK_SIZE,
 	CHUNK_OVERLAP,
 } from '../../../main/cue/cue-susfactor';
+import {
+	createCredentialCustodySource,
+	headlessCredentialAuthority,
+	setCredentialCustodyAuthority,
+} from '../../../main/enterprise/credential-custody';
 import { EgressDeniedError } from '../../../main/utils/fetchWithTimeout';
 
 const TOKEN_URL = 'https://0din.ai/api/v1/access_tokens';
@@ -284,6 +291,53 @@ describe('guardGitHubEvent', () => {
 		mockApi(() => 0.99);
 		const allowed = await guardGitHubEvent(guardParams({ repo: 'o/r', number: 18 }));
 		expect(allowed).toBe(true);
+		expect(fetchWithTimeout).not.toHaveBeenCalled();
+	});
+});
+
+describe('under the credential custody ceiling (MRC2-06-06)', () => {
+	afterEach(() => setCredentialCustodyAuthority(null));
+
+	it('enrolled: reads no token, opens no socket, passes every item and says why once, never the value', async () => {
+		setCredentialCustodyAuthority(
+			createCredentialCustodySource({
+				identity: { read: () => ({ status: 'ok', record: {} as never, epoch: 1 }) },
+			})
+		);
+		mockApi(() => 0.99);
+
+		expect(isSusFactorConfigured()).toBe(false);
+		expect(await guardGitHubEvent(guardParams({ body: 'evil', repo: 'o/r', number: 19 }))).toBe(
+			true
+		);
+		expect(await guardGitHubEvent(guardParams({ body: 'evil', repo: 'o/r', number: 20 }))).toBe(
+			true
+		);
+
+		expect(fetchWithTimeout).not.toHaveBeenCalled();
+		expect(recordSusFactorBlock).not.toHaveBeenCalled();
+		const lines = onLog.mock.calls.map((call) => String(call[1]));
+		expect(lines).toEqual([
+			'[CUE] SusFactor is off on this managed host - processing normally: [managed-environment] the 0DIN API token is not kept on this managed host: the ODIN_API_TOKEN environment variable is inherited by every child process and collected by a support package, and a managed host keeps a credential only under the OS key store.',
+		]);
+		expect(await scoreSusFactor('evil', 0.5, onLog, 'o/r#21')).toBeNull();
+		expect(onLog.mock.calls.at(-1)?.[1]).toMatch(
+			/^\[CUE\] SusFactor skipped for o\/r#21: \[managed-environment\] .* - processing normally$/
+		);
+		expect(onLog.mock.calls.flat().join('\n')).not.toContain('test-api-token');
+	});
+
+	it('a JWT exchanged standalone is not used once the host is managed', async () => {
+		mockApi(() => 0.99);
+		expect(await guardGitHubEvent(guardParams({ body: 'evil', repo: 'o/r', number: 22 }))).toBe(
+			false
+		);
+		fetchWithTimeout.mockClear();
+
+		setCredentialCustodyAuthority(headlessCredentialAuthority({ standing: () => 'managed' }));
+		expect(await guardGitHubEvent(guardParams({ body: 'evil', repo: 'o/r', number: 23 }))).toBe(
+			true
+		);
 		expect(fetchWithTimeout).not.toHaveBeenCalled();
 	});
 });

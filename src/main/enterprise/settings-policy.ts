@@ -50,6 +50,11 @@ import {
 	type ManagedSettingLocksView,
 	type ManagedSettingsPolicy,
 } from '../../shared/managedSettingsLock';
+import {
+	PLAIN_SETTINGS_CREDENTIAL_KEYS,
+	SETTINGS_FILE_CUSTODY,
+	credentialCustodyVerdict,
+} from './credential-custody';
 import { identityStandingOf, type EnterpriseIdentityStore } from './identity-store';
 
 export type ManagedSettingsStanding =
@@ -85,20 +90,28 @@ export type SettingWriteDecision =
 
 /**
  * Hold one write against the standing. Pure. Standalone admits everything; a
- * key the metadata never marked lockable is admitted under any standing; a
- * managed host with no usable policy refuses every lockable key by name.
+ * credential key the plain settings file would keep is refused on every
+ * managed host, policy or no policy (MRC2-06-06); a key the metadata never
+ * marked lockable is admitted under any standing; a managed host with no
+ * usable policy refuses every lockable key by name.
  */
 export function settingWriteVerdict(
 	standing: ManagedSettingsStanding,
 	key: string
 ): SettingWriteDecision {
-	if (standing.standing === 'standalone' || !isSettingLockable(key)) return { allowed: true };
+	if (standing.standing === 'standalone') return { allowed: true };
 	const deny = (code: SettingWriteDenial, message: string): SettingWriteDecision => ({
 		allowed: false,
 		code,
 		message,
 		policyRevision: standing.policyRevision,
 	});
+	const credential = PLAIN_SETTINGS_CREDENTIAL_KEYS[key];
+	if (credential !== undefined) {
+		const custody = credentialCustodyVerdict('managed', credential, SETTINGS_FILE_CUSTODY);
+		if (!custody.allowed) return deny('custody', custody.message);
+	}
+	if (!isSettingLockable(key)) return { allowed: true };
 	if (!standing.policy)
 		return deny(
 			'unavailable',

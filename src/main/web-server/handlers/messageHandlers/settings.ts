@@ -98,7 +98,7 @@ export function handleSetSetting(
 	if (!hold.allowed) {
 		ctx.sendError(client, hold.message, {
 			key,
-			managed: { state: hold.code === 'locked' ? 'denied' : 'unavailable', code: hold.code },
+			managed: { state: hold.code === 'unavailable' ? 'unavailable' : 'denied', code: hold.code },
 			requestId: message.requestId,
 		});
 		return;
