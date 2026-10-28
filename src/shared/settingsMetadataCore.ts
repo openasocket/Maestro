@@ -34,12 +34,14 @@ export const CORE_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Agent to use for auxiliary tasks (tab naming, context grooming). When null, uses the session agent.',
 		type: 'string',
 		default: null,
+		lockable: true,
 		category: 'advanced',
 	},
 	utilityModelId: {
 		description: 'Model override for the utility agent. When null, uses the agent default model.',
 		type: 'string',
 		default: null,
+		lockable: true,
 		category: 'advanced',
 	},
 	allowConcurrentSend: {
@@ -56,18 +58,21 @@ export const CORE_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Default shell for terminal sessions. Auto-detected from $SHELL on Unix, PowerShell on Windows.',
 		type: 'string',
 		default: getDefaultShell(),
+		lockable: true,
 		category: 'shell',
 	},
 	customShellPath: {
 		description: 'Custom path to shell binary. Overrides defaultShell when set.',
 		type: 'string',
 		default: '',
+		lockable: true,
 		category: 'shell',
 	},
 	shellArgs: {
 		description: 'Additional arguments passed to the shell on startup.',
 		type: 'string',
 		default: '',
+		lockable: true,
 		category: 'shell',
 	},
 	shellEnvVars: {
@@ -75,6 +80,7 @@ export const CORE_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Extra environment variables injected into shell sessions. Object mapping names to values.',
 		type: 'object',
 		default: {},
+		lockable: true,
 		category: 'shell',
 	},
 	shellEnvVarsDisabled: {
@@ -82,12 +88,14 @@ export const CORE_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Parked environment variables the user switched off in Settings. Same shape as shellEnvVars, but never injected into any process - the editor keeps them here so a variable can be turned back on without retyping it.',
 		type: 'object',
 		default: {},
+		lockable: true,
 		category: 'shell',
 	},
 	ghPath: {
 		description: 'Custom path to the GitHub CLI (gh) binary.',
 		type: 'string',
 		default: '',
+		lockable: true,
 		category: 'shell',
 	},
 

@@ -104,6 +104,7 @@ export const CONNECTIVITY_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Automatically check for Maestro updates on launch and once per day while running. Also sends an anonymous check-in (a random install ID, app version, OS, and theme) so we can count active installs. Turning this off disables both.',
 		type: 'boolean',
 		default: true,
+		lockable: true,
 		category: 'updates',
 	},
 	autoResumeOnLimit: {
@@ -130,12 +131,14 @@ export const CONNECTIVITY_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 		description: 'Opt in to beta release channel for early access to new features.',
 		type: 'boolean',
 		default: false,
+		lockable: true,
 		category: 'updates',
 	},
 	crashReportingEnabled: {
 		description: 'Send anonymous crash reports to help improve Maestro (via Sentry).',
 		type: 'boolean',
 		default: true,
+		lockable: true,
 		category: 'updates',
 	},
 
@@ -144,6 +147,7 @@ export const CONNECTIVITY_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 		description: 'Require authentication token for the web/mobile interface.',
 		type: 'boolean',
 		default: false,
+		lockable: true,
 		category: 'web',
 	},
 	webAuthToken: {
@@ -151,30 +155,35 @@ export const CONNECTIVITY_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 		type: 'string',
 		default: null,
 		sensitive: true,
+		lockable: true,
 		category: 'web',
 	},
 	persistentWebLink: {
 		description: 'Reuse the same web link token across app restarts.',
 		type: 'boolean',
 		default: false,
+		lockable: true,
 		category: 'web',
 	},
 	webInterfaceAutoStart: {
 		description: 'Turn on the full web interface automatically when Maestro starts.',
 		type: 'boolean',
 		default: false,
+		lockable: true,
 		category: 'web',
 	},
 	webInterfaceUseCustomPort: {
 		description: 'Use a custom port for the web interface instead of auto-assigned.',
 		type: 'boolean',
 		default: false,
+		lockable: true,
 		category: 'web',
 	},
 	webInterfaceCustomPort: {
 		description: 'Custom port number for the web interface when webInterfaceUseCustomPort is true.',
 		type: 'number',
 		default: 8080,
+		lockable: true,
 		category: 'web',
 	},
 
@@ -183,12 +192,14 @@ export const CONNECTIVITY_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 		description: 'Configured SSH remote hosts for remote agent execution.',
 		type: 'array',
 		default: [],
+		lockable: true,
 		category: 'ssh',
 	},
 	defaultSshRemoteId: {
 		description: 'ID of the default SSH remote to use for new agents.',
 		type: 'string',
 		default: null,
+		lockable: true,
 		category: 'ssh',
 	},
 	sshRemoteIgnorePatterns: {

@@ -18,6 +18,7 @@ export const FEATURES_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 		description: 'Enable WakaTime integration for coding activity tracking.',
 		type: 'boolean',
 		default: false,
+		lockable: true,
 		category: 'integrations',
 	},
 	wakatimeApiKey: {
@@ -76,6 +77,7 @@ export const FEATURES_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Feature flags for Encore Features. Object with boolean flags; see ENCORE_FEATURE_DEFAULTS.',
 		type: 'object',
 		default: { ...ENCORE_FEATURE_DEFAULTS },
+		lockable: true,
 		category: 'advanced',
 	},
 	pianolaAutoWatchNewAgents: {
@@ -129,6 +131,7 @@ export const FEATURES_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Agent ids (ToolType values) for which Coworking browser interaction tools are allowed. Empty array means all off.',
 		type: 'array',
 		default: [],
+		lockable: true,
 		category: 'advanced',
 	},
 	coworkingBrowserInteractionConfirm: {
@@ -136,6 +139,7 @@ export const FEATURES_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Per-agent policy (off | dangerous | all) for requiring per-call user approval of Coworking browser interaction ops. Missing agents default to "dangerous" (confirm navigate and eval).',
 		type: 'object',
 		default: {},
+		lockable: true,
 		category: 'advanced',
 	},
 	coworkingBackgroundBrowsers: {
@@ -143,6 +147,7 @@ export const FEATURES_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Opt-in: keep hidden background <webview>s alive so a Coworking agent can read and drive its own browser tabs while you are focused on a different agent. Each is a full renderer process.',
 		type: 'boolean',
 		default: false,
+		lockable: true,
 		category: 'advanced',
 	},
 	coworkingBackgroundBrowsersLimit: {
@@ -150,6 +155,7 @@ export const FEATURES_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Maximum number of background Coworking webviews kept alive at once (LRU-evicted, clamped 1-10).',
 		type: 'number',
 		default: 2,
+		lockable: true,
 		category: 'advanced',
 	},
 
@@ -158,6 +164,7 @@ export const FEATURES_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 		description: 'Unique installation identifier generated on first run. Do not modify.',
 		type: 'string',
 		default: null,
+		lockable: true,
 		category: 'internal',
 	},
 	suppressWindowsWarning: {

@@ -65,6 +65,7 @@ export const AUTOMATION_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Show bundled Spec Kit slash commands in the AI command autocomplete. Disable to remove them from the slash command picker.',
 		type: 'boolean',
 		default: true,
+		lockable: true,
 		category: 'integrations',
 	},
 	openspecEnabled: {
@@ -72,6 +73,7 @@ export const AUTOMATION_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Show bundled OpenSpec slash commands in the AI command autocomplete. Disable to remove them from the slash command picker.',
 		type: 'boolean',
 		default: true,
+		lockable: true,
 		category: 'integrations',
 	},
 	bmadEnabled: {
@@ -79,6 +81,7 @@ export const AUTOMATION_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 			'Show bundled BMAD slash commands in the AI command autocomplete. Disable to remove them from the slash command picker.',
 		type: 'boolean',
 		default: true,
+		lockable: true,
 		category: 'integrations',
 	},
 
@@ -87,6 +90,7 @@ export const AUTOMATION_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 		description: 'Enable collection of usage statistics shown in the Usage Dashboard.',
 		type: 'boolean',
 		default: true,
+		lockable: true,
 		category: 'stats',
 	},
 	defaultStatsTimeRange: {
@@ -136,6 +140,7 @@ export const AUTOMATION_SETTINGS_METADATA: Record<string, SettingMetadata> = {
 		description: 'Leaderboard registration info (username, avatar).',
 		type: 'object',
 		default: null,
+		lockable: true,
 		category: 'internal',
 	},
 };
