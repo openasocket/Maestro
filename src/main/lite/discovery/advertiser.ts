@@ -2,6 +2,9 @@ import { createSocket, type Socket } from 'node:dgram';
 import { isIPv4 } from 'node:net';
 import * as dns from 'dns-packet';
 import { advertisement, SERVICE } from './mdns';
+import { listenerHoldFor } from '../../enterprise/listener-gate';
+/** The DNS-SD port the advertiser binds; the listener ceiling is asked for it by name (MRC2-05-06B). */
+const MDNS_PORT = 5353;
 /** Opt-in advertisement for an existing HTTPS or private LAN endpoint. No listener provisioning. */
 export class MdnsAdvertiser {
 	private socket?: Socket;
@@ -19,6 +22,16 @@ export class MdnsAdvertiser {
 		if (!isIPv4(address) || address === '0.0.0.0')
 			throw new Error('Choose an explicit IPv4 multicast interface');
 		this.stop();
+		// The listener ceiling answers before the packet is built or the
+		// socket exists (MRC2-05-06B); a refusal reaches the host the way every
+		// advertisement failure does, with the hold's own line, and nothing is
+		// advertised. The private listener is held separately, so the host
+		// stays reachable at its origin without an advertisement.
+		const hold = listenerHoldFor({ kind: 'mdns', bind: address, port: MDNS_PORT });
+		if (hold) {
+			failed(hold.message);
+			return;
+		}
 		const packet = advertisement(id, name, endpoint);
 		const goodbye = advertisement(id, name, endpoint, 0);
 		const records = dns.decode(packet).answers!;
@@ -28,7 +41,7 @@ export class MdnsAdvertiser {
 		this.socket = socket;
 		let announced = false;
 		const send = (bytes: Buffer) =>
-			socket.send(bytes, 5353, '224.0.0.251', (error) => {
+			socket.send(bytes, MDNS_PORT, '224.0.0.251', (error) => {
 				if (error && this.socket === socket) {
 					this.stop();
 					failed('LAN advertisement failed');
@@ -74,7 +87,7 @@ export class MdnsAdvertiser {
 		this.goodbye = () => {
 			if (announced) {
 				try {
-					socket.send(goodbye, 5353, '224.0.0.251', () => {
+					socket.send(goodbye, MDNS_PORT, '224.0.0.251', () => {
 						try {
 							socket.close();
 						} catch {
@@ -93,7 +106,7 @@ export class MdnsAdvertiser {
 			}
 		};
 		try {
-			socket.bind(5353, '0.0.0.0', () => {
+			socket.bind(MDNS_PORT, '0.0.0.0', () => {
 				if (this.socket !== socket) return;
 				try {
 					socket.addMembership('224.0.0.251', address);

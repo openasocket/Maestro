@@ -22,6 +22,15 @@
  * Cheap by construction: no request body is read, no file is read per
  * request, and the readiness re-check is cached (see `ensureFreshReadiness`).
  * No Electron imports.
+ *
+ * Under the managed listener ceiling (MRC2-05-06B) this server is recorded
+ * as loopback-only observability, kind `cue-status` in the ceiling
+ * vocabulary, and is NOT held at the gate: it binds 127.0.0.1 with no
+ * override, serves nothing an agent acts on, and only the headless engine
+ * (which installs no listener authority) ever starts it. A policy that
+ * forbids loopback observability is the one reason to hold it; that would
+ * be `holdListener({ kind: "cue-status", bind: CUE_STATUS_HOST, port })`
+ * before `createServer` in `startCueStatusServer()`.
  */
 
 import * as http from 'http';

@@ -1,10 +1,13 @@
 import { createSocket, type Socket } from 'node:dgram';
 import { isIPv4 } from 'node:net';
 import * as dns from 'dns-packet';
+import { holdListener, isListenerDeniedError } from '../../enterprise/listener-gate';
 import { candidate, connectionOrigin, type DiscoveryAdapter } from './types';
 import type { Candidate } from '../../../shared/lite-discovery';
 export const SERVICE = '_maestro._tcp.local';
 const GROUP = '224.0.0.251';
+/** The DNS-SD port the browser binds; the listener ceiling is asked for it by name (MRC2-05-06B). */
+const MDNS_PORT = 5353;
 const normalize = (name: string) => name.replace(/\.$/, '').toLowerCase();
 export type SocketFactory = () => Socket;
 const socketFactory: SocketFactory = () => createSocket({ type: 'udp4', reuseAddr: true });
@@ -117,12 +120,24 @@ export class MdnsBrowser implements DiscoveryAdapter {
 		failed: (message: string) => void
 	): Promise<void> {
 		this.stop();
+		// The listener ceiling answers before the socket exists (MRC2-05-06B):
+		// the group membership is the same socket shape the advertiser opens,
+		// so the one `mdns` kind, at the reach of the interface, admits or
+		// refuses both. A refusal is reported on the start failure channel and
+		// rethrown by name, never read as a multicast failure.
+		try {
+			holdListener({ kind: 'mdns', bind: this.address, port: MDNS_PORT });
+		} catch (error) {
+			if (!isListenerDeniedError(error)) throw error;
+			failed(error.message);
+			throw error;
+		}
 		const socket = this.sockets();
 		this.socket = socket;
 		const send = () =>
 			socket.send(
 				dns.encode({ type: 'query', questions: [{ name: SERVICE, type: 'PTR' }] }),
-				5353,
+				MDNS_PORT,
 				GROUP,
 				(error) => {
 					if (error) {
@@ -157,7 +172,7 @@ export class MdnsBrowser implements DiscoveryAdapter {
 		};
 		socket.on('error', fail);
 		try {
-			socket.bind(5353, '0.0.0.0', () => {
+			socket.bind(MDNS_PORT, '0.0.0.0', () => {
 				if (this.socket !== socket) return;
 				try {
 					socket.addMembership(GROUP, this.address);

@@ -25,12 +25,18 @@
  *    over the raw body (GitHub / GitLab `sha256=<hex>` style).
  *  - Auth material is stripped from the headers that reach the event payload,
  *    so secrets never land in a prompt, the activity log, or the Cue DB.
+ *  - Under a managed listener ceiling the bind is held by name before the
+ *    socket exists (`listenerHoldFor`, kind `cue-webhook`; MRC2-05-06B). A
+ *    hold is as sticky as a failed bind and is read back with
+ *    {@link getCueWebhookListenerHold}. The headless engine installs no
+ *    listener authority, so there nothing is consulted.
  */
 
 import * as crypto from 'crypto';
 import * as http from 'http';
 import { normalizeWebhookPath } from '../../shared/cue';
 import type { MainLogLevel } from '../../shared/logger-types';
+import { listenerHoldFor, type ListenerHold } from '../enterprise/listener-gate';
 import { captureException } from '../utils/sentry';
 import { claimWebhookDelivery, isWebhookDeliveryClaimed } from './cue-db';
 
@@ -140,6 +146,8 @@ let boundPort: number | null = null;
 /** Set once we fail to bind so a broken port doesn't log on every delivery
  *  attempt or retry-storm across session refreshes. */
 let bindFailed = false;
+/** The listener ceiling's refusal when the socket was never opened for one (MRC2-05-06B); null otherwise. */
+let held: ListenerHold | null = null;
 /** Open holds; see {@link holdCueWebhookListener}. */
 let holds = 0;
 /** Stand-ins for registrations released while held (see `registerCueWebhook`). */
@@ -165,6 +173,11 @@ export function getCueWebhookPort(): number {
 export function getCueWebhookHost(): string {
 	const raw = process.env.MAESTRO_CUE_WEBHOOK_HOST?.trim();
 	return raw ? raw : '127.0.0.1';
+}
+
+/** The hold the listener ceiling answered, or null when the socket is bound, closed, or failed for another reason. */
+export function getCueWebhookListenerHold(): ListenerHold | null {
+	return held;
 }
 
 /** Delivery URL for a path, for display in logs and the pipeline editor.
@@ -584,6 +597,19 @@ function ensureServerStarted(onLog: (level: MainLogLevel, message: string) => vo
 	const port = getCueWebhookPort();
 	const host = getCueWebhookHost();
 
+	// The listener ceiling answers before the socket exists (MRC2-05-06B). A
+	// hold is as sticky as a failed bind: nothing is asked again per
+	// registration, the line is logged once, and `heldListeners()` carries it
+	// to the managed status pane. A decision, not a transient failure, so no
+	// retry and no port advice.
+	const hold = listenerHoldFor({ kind: 'cue-webhook', bind: host, port });
+	if (hold) {
+		held = hold;
+		bindFailed = true;
+		onLog('warn', `[CUE] webhook listener is not opened: ${hold.message}`);
+		return;
+	}
+
 	const instance = http.createServer((req, res) => {
 		void handleCueWebhookRequest(req, res).catch((err) => {
 			// A throw here means a bug in our own handler, not a bad request -
@@ -694,6 +720,7 @@ export function resetCueWebhookServerForTests(): void {
 	holds = 0;
 	inFlightDeliveries.clear();
 	bindFailed = false;
+	held = null;
 	boundPort = null;
 	if (server) {
 		server.close();
