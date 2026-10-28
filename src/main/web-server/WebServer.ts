@@ -168,6 +168,7 @@ import type {
 	DeletePlaybookCallback,
 	GetSettingsCallback,
 	SetSettingCallback,
+	WriteAgentConfigValueCallback,
 	GetGroupsCallback,
 	CreateGroupCallback,
 	RenameGroupCallback,
@@ -854,6 +855,10 @@ export class WebServer {
 		this.callbackRegistry.setSetSettingCallback(callback);
 	}
 
+	setWriteAgentConfigValueCallback(callback: WriteAgentConfigValueCallback): void {
+		this.callbackRegistry.setWriteAgentConfigValueCallback(callback);
+	}
+
 	setGetGroupsCallback(callback: GetGroupsCallback): void {
 		this.callbackRegistry.setGetGroupsCallback(callback);
 	}
@@ -1480,6 +1485,8 @@ export class WebServer {
 				this.callbackRegistry.deletePlaybook(sessionId, playbookId),
 			getSettings: () => this.callbackRegistry.getSettings(),
 			setSetting: async (key: string, value: any) => this.callbackRegistry.setSetting(key, value),
+			writeAgentConfigValue: async (request) =>
+				this.callbackRegistry.writeAgentConfigValue(request),
 			getGroups: () => this.callbackRegistry.getGroups(),
 			createGroup: async (
 				name: string,

@@ -82,6 +82,7 @@ import type { KnownAuthDirs } from '../../../shared/authPaths';
 import { rememberableEnvVarKeys, type KnownEnvVarKeys } from '../../../shared/envVarCatalog';
 import { agentConfigLockKey, changedAgentConfigFields } from '../../../shared/managedSettingsLock';
 import { ManagedSettingLockedError, holdAgentConfigWrite } from '../../enterprise/settings-policy';
+import { applyAgentConfigWriteStrict } from '../../agents/agent-config-writes';
 
 const LOG_CONTEXT = '[AgentDetector]';
 const CONFIG_LOG_CONTEXT = '[AgentConfig]';
@@ -1584,13 +1585,13 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 		withIpcErrorLogging(
 			handlerOpts('setConfigValue', CONFIG_LOG_CONTEXT),
 			async (agentId: string, key: string, value: unknown) => {
-				holdAgentConfig(agentId, key, value);
-				const allConfigs = agentConfigsStore.get('configs', {});
-				if (!allConfigs[agentId]) {
-					allConfigs[agentId] = {};
-				}
-				allConfigs[agentId][key] = value;
-				agentConfigsStore.set('configs', allConfigs);
+				// The one write the bridge's set_agent_config_value shares (MRC2-06-03A).
+				applyAgentConfigWriteStrict(agentConfigsStore, {
+					op: 'set',
+					providerId: agentId,
+					key,
+					value,
+				});
 				logger.debug(`Updated config ${key} for agent ${agentId}`, CONFIG_LOG_CONTEXT, { value });
 				return true;
 			}

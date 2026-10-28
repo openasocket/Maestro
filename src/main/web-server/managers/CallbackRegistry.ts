@@ -98,6 +98,7 @@ import type {
 	WebPlaybookDocument,
 	GetSettingsCallback,
 	SetSettingCallback,
+	WriteAgentConfigValueCallback,
 	GetGroupsCallback,
 	CreateGroupCallback,
 	RenameGroupCallback,
@@ -263,6 +264,7 @@ export interface WebServerCallbacks {
 	deletePlaybook: DeletePlaybookCallback | null;
 	getSettings: GetSettingsCallback | null;
 	setSetting: SetSettingCallback | null;
+	writeAgentConfigValue: WriteAgentConfigValueCallback | null;
 	getGroups: GetGroupsCallback | null;
 	createGroup: CreateGroupCallback | null;
 	renameGroup: RenameGroupCallback | null;
@@ -378,6 +380,7 @@ export class CallbackRegistry {
 		deletePlaybook: null,
 		getSettings: null,
 		setSetting: null,
+		writeAgentConfigValue: null,
 		getGroups: null,
 		createGroup: null,
 		renameGroup: null,
@@ -922,6 +925,13 @@ export class CallbackRegistry {
 	async setSetting(key: string, value: SettingValue): Promise<boolean> {
 		if (!this.callbacks.setSetting) return false;
 		return this.callbacks.setSetting(key, value);
+	}
+
+	async writeAgentConfigValue(
+		request: Parameters<WriteAgentConfigValueCallback>[0]
+	): ReturnType<WriteAgentConfigValueCallback> {
+		if (!this.callbacks.writeAgentConfigValue) throw new Error('writeAgentConfigValue not set');
+		return this.callbacks.writeAgentConfigValue(request);
 	}
 
 	getGroups(): GroupData[] {
@@ -1508,6 +1518,10 @@ export class CallbackRegistry {
 
 	setSetSettingCallback(callback: SetSettingCallback): void {
 		this.callbacks.setSetting = callback;
+	}
+
+	setWriteAgentConfigValueCallback(callback: WriteAgentConfigValueCallback): void {
+		this.callbacks.writeAgentConfigValue = callback;
 	}
 
 	setGetGroupsCallback(callback: GetGroupsCallback): void {

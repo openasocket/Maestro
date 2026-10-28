@@ -1,3 +1,7 @@
+import type {
+	AgentConfigWriteOutcome,
+	AgentConfigWriteRequest,
+} from '../agents/agent-config-writes';
 import type { TranslationReport } from '../../shared/maestro-lib/translation/types';
 /**
  * Shared type definitions for the web server module.
@@ -1264,6 +1268,10 @@ export interface NotificationEvent {
 
 export type GetSettingsCallback = () => WebSettings;
 export type SetSettingCallback = (key: string, value: SettingValue) => Promise<boolean>;
+/** One per-provider configuration write, held once in main (MRC2-06-03A). */
+export type WriteAgentConfigValueCallback = (
+	request: AgentConfigWriteRequest
+) => Promise<AgentConfigWriteOutcome>;
 export type GetGroupsCallback = () => GroupData[];
 export type CreateGroupCallback = (
 	name: string,

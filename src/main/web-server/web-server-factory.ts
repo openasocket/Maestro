@@ -13,6 +13,7 @@ import { isWebContentsAvailable } from '../utils/safe-send';
 import type { ProcessManager } from '../process-manager';
 import type { SettingsStoreInterface as SettingsStore } from '../stores/types';
 import type { DebugPackageDependencies } from '../debug-package';
+import type { AgentConfigsStore } from '../agents/agent-config-writes';
 import type { CueGraphSession, CueRunResult } from '../../shared/cue/contracts';
 import type { CadenzaPayload } from '../../shared/cadenza-types';
 import { registerSessionCallbacks } from './callbacks/sessionCallbacks';
@@ -63,6 +64,8 @@ export interface WebServerFactoryDependencies {
 	sessionsStore: SessionsStore;
 	/** Groups store for reading group data */
 	groupsStore: GroupsStore;
+	/** Per-provider configuration store; absent = the bridge reports provider writes as unconfigured. */
+	agentConfigsStore?: AgentConfigsStore;
 	/** Function to get the main window reference */
 	getMainWindow: () => BrowserWindow | null;
 	/** Resolve the Electron window that currently owns a session. */

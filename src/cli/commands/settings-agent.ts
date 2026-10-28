@@ -2,6 +2,9 @@
 // Manages per-provider-type settings in maestro-agent-configs.json. `list` and
 // `get` also accept the ID of one agent in the Left Bar, and then read that
 // agent's own settings (the fields `update-agent` writes) from its record.
+// `set` and `reset` write through the running desktop, where the managed
+// settings authority holds the field (MRC2-06-03A); the file is written
+// directly only when no desktop runs and the data dir carries no managed binding.
 
 import {
 	readAgentConfigs,
@@ -10,7 +13,19 @@ import {
 	writeAgentConfigValue,
 	deleteAgentConfigValue,
 	getSessionById,
+	getConfigDir,
 } from '../services/storage';
+import { withMaestroClient } from '../services/maestro-client';
+import { MaestroNotRunningError } from '../services/maestro-not-running';
+import { exitIfMaestroNotRunning } from '../services/session-command';
+import {
+	managedBindingPath,
+	readManagedBindingFile,
+} from '../../shared/maestro-lib/managed/binding';
+import type {
+	AgentConfigWriteOutcome,
+	AgentConfigWriteRequest,
+} from '../../main/agents/agent-config-writes';
 import {
 	readAgentSessionSettings,
 	AGENT_SESSION_SETTING_METADATA,
@@ -328,17 +343,50 @@ export function settingsAgentGet(agentId: string, key: string, options: AgentGet
 }
 
 /**
+ * Write one provider value through the running desktop, which holds the field
+ * to the managed settings authority. Null when no desktop runs and the data dir
+ * carries no managed binding (the caller then writes the file as before); an
+ * enrolled data dir with no desktop is refused by the one not-running outcome.
+ */
+async function writeThroughDesktop(
+	request: AgentConfigWriteRequest,
+	json: boolean | undefined
+): Promise<AgentConfigWriteOutcome | null> {
+	try {
+		return await withMaestroClient((client) =>
+			client.sendCommand<AgentConfigWriteOutcome>(
+				{ ...request, type: `${request.op}_agent_config_value` },
+				`${request.op}_agent_config_value_result`
+			)
+		);
+	} catch (error) {
+		if (!(error instanceof MaestroNotRunningError)) throw error;
+		if (readManagedBindingFile(managedBindingPath(getConfigDir())).status === 'none') return null;
+		if (!json) console.error(formatWarning('Enrolled with a management peer: desktop only.'));
+		throw error;
+	}
+}
+
+function reportWriteFailure(error: unknown, json: boolean | undefined, what: string): never {
+	exitIfMaestroNotRunning(error, { json });
+	const message = error instanceof Error ? error.message : 'Unknown error';
+	const managed = (error as { managed?: unknown }).managed;
+	if (json) console.error(JSON.stringify({ error: message, ...(managed ? { managed } : {}) }));
+	else console.error(formatError(`Failed to ${what}: ${message}`));
+	return process.exit(1);
+}
+
+/**
  * Set a single agent config value.
  */
-export function settingsAgentSet(
+export async function settingsAgentSet(
 	agentId: string,
 	key: string,
 	value: string,
 	options: AgentSetOptions
-): void {
+): Promise<void> {
 	try {
 		assertProviderTarget(agentId);
-		const oldValue = readAgentConfigValue(agentId, key);
 
 		let parsedValue: unknown;
 		if (options.raw !== undefined) {
@@ -351,7 +399,14 @@ export function settingsAgentSet(
 			parsedValue = parseValue(value);
 		}
 
-		writeAgentConfigValue(agentId, key, parsedValue);
+		const outcome = await writeThroughDesktop(
+			{ op: 'set', providerId: agentId, key, value: parsedValue },
+			options.json
+		);
+		// A refusal: the policy's line, with its managed state for --json.
+		if (outcome && !outcome.success) throw Object.assign(new Error(outcome.error), outcome);
+		const oldValue = outcome ? outcome.previous : readAgentConfigValue(agentId, key);
+		if (!outcome) writeAgentConfigValue(agentId, key, parsedValue);
 
 		if (options.json) {
 			emitJsonl({
@@ -365,24 +420,27 @@ export function settingsAgentSet(
 			console.log(formatSuccess(`${agentId}.${key} = ${JSON.stringify(parsedValue)}`));
 		}
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		if (options.json) {
-			console.error(JSON.stringify({ error: message }));
-		} else {
-			console.error(formatError(`Failed to set "${agentId}.${key}": ${message}`));
-		}
-		process.exit(1);
+		reportWriteFailure(error, options.json, `set "${agentId}.${key}"`);
 	}
 }
 
 /**
  * Reset (delete) a single agent config key.
  */
-export function settingsAgentReset(agentId: string, key: string, options: AgentResetOptions): void {
+export async function settingsAgentReset(
+	agentId: string,
+	key: string,
+	options: AgentResetOptions
+): Promise<void> {
 	try {
 		assertProviderTarget(agentId);
-		const oldValue = readAgentConfigValue(agentId, key);
-		const removed = deleteAgentConfigValue(agentId, key);
+		const outcome = await writeThroughDesktop(
+			{ op: 'reset', providerId: agentId, key },
+			options.json
+		);
+		if (outcome && !outcome.success) throw Object.assign(new Error(outcome.error), outcome);
+		const oldValue = outcome ? outcome.previous : readAgentConfigValue(agentId, key);
+		const removed = outcome ? outcome.removed === true : deleteAgentConfigValue(agentId, key);
 
 		if (!removed) {
 			throw new Error(`Key "${key}" not found in agent "${agentId}" config.`);
@@ -400,12 +458,6 @@ export function settingsAgentReset(agentId: string, key: string, options: AgentR
 			console.log(formatSuccess(`${agentId}.${key} removed`));
 		}
 	} catch (error) {
-		const message = error instanceof Error ? error.message : 'Unknown error';
-		if (options.json) {
-			console.error(JSON.stringify({ error: message }));
-		} else {
-			console.error(formatError(`Failed to reset "${agentId}.${key}": ${message}`));
-		}
-		process.exit(1);
+		reportWriteFailure(error, options.json, `reset "${agentId}.${key}"`);
 	}
 }

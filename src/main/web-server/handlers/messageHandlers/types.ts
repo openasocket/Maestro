@@ -1,3 +1,7 @@
+import type {
+	AgentConfigWriteOutcome,
+	AgentConfigWriteRequest,
+} from '../../../agents/agent-config-writes';
 import type { TranslationReport } from '../../../../shared/maestro-lib/translation/types';
 import type {
 	NotificationInboxRequest,
@@ -384,6 +388,8 @@ export interface MessageHandlerCallbacks {
 	deletePlaybook: (sessionId: string, playbookId: string) => Promise<boolean>;
 	getSettings: () => WebSettings;
 	setSetting: (key: string, value: SettingValue) => Promise<boolean>;
+	/** One per-provider configuration write (MRC2-06-03A); absent until the factory wires the store. */
+	writeAgentConfigValue?: (request: AgentConfigWriteRequest) => Promise<AgentConfigWriteOutcome>;
 	getGroups: () => GroupData[];
 	createGroup: (
 		name: string,

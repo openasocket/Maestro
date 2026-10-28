@@ -792,6 +792,7 @@ const createWebServer = createWebServerFactory({
 	settingsStore: store,
 	sessionsStore,
 	groupsStore,
+	agentConfigsStore,
 	getDebugPackageDeps: () => debugPackageDeps,
 	getMainWindow: () => mainWindow,
 	getWindowForSession: resolveWindowForSession,

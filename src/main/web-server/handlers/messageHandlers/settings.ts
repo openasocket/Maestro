@@ -1,13 +1,15 @@
 /**
  * Settings domain WebSocket message handlers.
  *
- * Extracted from WebSocketMessageHandler.ts. Handles: get_settings, set_setting.
+ * Extracted from WebSocketMessageHandler.ts. Handles: get_settings, set_setting,
+ * set_agent_config_value, reset_agent_config_value.
  */
 
 import type { SettingValue } from '../../types';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 import { isRemoteSettingWritable } from '../bridgeDenyList';
 import { holdSettingWrite } from '../../../enterprise/settings-policy';
+import type { AgentConfigWriteRequest } from '../../../agents/agent-config-writes';
 
 /**
  * Allowlist of setting keys modifiable from the web interface.
@@ -110,5 +112,51 @@ export function handleSetSetting(
 		})
 		.catch((error) => {
 			ctx.sendError(client, `Failed to set setting: ${error.message}`);
+		});
+}
+
+/**
+ * Handle set_agent_config_value / reset_agent_config_value - one per-provider
+ * configuration value (MRC2-06-03A) by the service agents:setConfigValue calls,
+ * which holds the field to the managed settings authority once; a refusal is
+ * the typed result. CLI only: a provider's binary path or environment is a
+ * launch, so no signed-in browser, local or through the tunnel, writes it.
+ */
+export function handleAgentConfigValueWrite(
+	ctx: MessageHandlerContext,
+	client: WebClient,
+	message: WebClientMessage,
+	op: 'set' | 'reset'
+): void {
+	const providerId = message.providerId as string;
+	const key = message.key as string;
+	const value = message.value;
+	if (client.cli !== true) {
+		ctx.sendError(client, 'Provider configuration is written from maestro-cli only');
+		return;
+	}
+	if (!providerId || !key || (op === 'set' && value === undefined)) {
+		ctx.sendError(client, 'Missing providerId, key or value');
+		return;
+	}
+	if (!ctx.callbacks.writeAgentConfigValue) {
+		ctx.sendError(client, 'Provider configuration writes not configured');
+		return;
+	}
+	const request: AgentConfigWriteRequest =
+		op === 'set' ? { op, providerId, key, value } : { op, providerId, key };
+	ctx.callbacks
+		.writeAgentConfigValue(request)
+		.then((outcome) => {
+			ctx.send(client, {
+				type: `${op}_agent_config_value_result`,
+				providerId,
+				key,
+				requestId: message.requestId,
+				...outcome,
+			});
+		})
+		.catch((error) => {
+			ctx.sendError(client, `Failed to write provider configuration: ${error.message}`);
 		});
 }

@@ -6,9 +6,16 @@
  * The ID of one Left Bar agent reads that agent's own record, where
  * `update-agent` writes (regression: `get <agent-id> codexTransport` returned
  * nothing after `update-agent --codex-transport app-server`).
+ *
+ * `set` and `reset` write through the running desktop (MRC2-06-03A), where
+ * the managed settings authority holds the field; the file only when no
+ * desktop runs and the data dir carries no managed binding.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import type { SessionInfo } from '../../../shared/types';
 
 vi.mock('../../../cli/services/storage', () => ({
@@ -18,6 +25,11 @@ vi.mock('../../../cli/services/storage', () => ({
 	writeAgentConfigValue: vi.fn(),
 	deleteAgentConfigValue: vi.fn(),
 	getSessionById: vi.fn(),
+	getConfigDir: vi.fn(),
+}));
+
+vi.mock('../../../cli/services/maestro-client', () => ({
+	withMaestroClient: vi.fn(),
 }));
 
 import {
@@ -32,7 +44,11 @@ import {
 	writeAgentConfigValue,
 	deleteAgentConfigValue,
 	getSessionById,
+	getConfigDir,
 } from '../../../cli/services/storage';
+import { withMaestroClient } from '../../../cli/services/maestro-client';
+import { MaestroNotRunningError } from '../../../cli/services/maestro-not-running';
+import { MANAGED_BINDING_FILE_NAME } from '../../../shared/maestro-lib/runtime/data-dir-lock';
 
 const codexAgent: SessionInfo = {
 	id: 'a1b2c3d4-0000-4000-8000-000000000001',
@@ -51,8 +67,22 @@ describe('settings agent', () => {
 	let logSpy: ReturnType<typeof vi.spyOn>;
 	let errorSpy: ReturnType<typeof vi.spyOn>;
 
+	const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-settings-agent-'));
+	/** The desktop answers every write with `outcome`; records what was sent. */
+	const desktop = (outcome: Record<string, unknown>) => {
+		const sendCommand = vi.fn().mockResolvedValue(outcome);
+		vi.mocked(withMaestroClient).mockImplementation(async (action) =>
+			action({ sendCommand } as never)
+		);
+		return sendCommand;
+	};
+	const noDesktop = () =>
+		vi.mocked(withMaestroClient).mockRejectedValue(new MaestroNotRunningError('no-discovery-file'));
+
 	beforeEach(() => {
 		vi.clearAllMocks();
+		fs.rmSync(path.join(dataDir, MANAGED_BINDING_FILE_NAME), { force: true });
+		vi.mocked(getConfigDir).mockReturnValue(dataDir);
 		logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
 		errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 		vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
@@ -128,24 +158,74 @@ describe('settings agent', () => {
 	});
 
 	describe('set / reset', () => {
-		it('refuses to write provider config under an agent ID', () => {
-			expect(() =>
+		it('refuses to write or reset provider config under an agent ID, before any bridge call', async () => {
+			await expect(
 				settingsAgentSet(codexAgent.id, 'codexTransport', 'app-server', { json: true })
-			).toThrow('process.exit(1)');
+			).rejects.toThrow('process.exit(1)');
+			await expect(
+				settingsAgentReset(codexAgent.id, 'codexTransport', { json: true })
+			).rejects.toThrow('process.exit(1)');
+			expect(withMaestroClient).not.toHaveBeenCalled();
 			expect(writeAgentConfigValue).not.toHaveBeenCalled();
+			expect(deleteAgentConfigValue).not.toHaveBeenCalled();
 			expect(String(errorSpy.mock.calls[0][0])).toContain('update-agent');
 		});
 
-		it('refuses to reset provider config under an agent ID', () => {
-			expect(() => settingsAgentReset(codexAgent.id, 'codexTransport', { json: true })).toThrow(
+		it('writes and resets through the running desktop, never the file; a key that was not there is still an error', async () => {
+			const sendCommand = desktop({ success: true, previous: 64000 });
+			await settingsAgentSet('codex', 'contextWindow', '128000', { json: true });
+			expect(sendCommand).toHaveBeenCalledWith(
+				{
+					type: 'set_agent_config_value',
+					op: 'set',
+					providerId: 'codex',
+					key: 'contextWindow',
+					value: 128000,
+				},
+				'set_agent_config_value_result'
+			);
+			expect(jsonLines(logSpy)[0]).toMatchObject({
+				type: 'setting_set',
+				oldValue: 64000,
+				newValue: 128000,
+			});
+			desktop({ success: true, previous: 'x', removed: true });
+			await settingsAgentReset('codex', 'model', { json: true });
+			expect(jsonLines(logSpy)[1]).toMatchObject({ type: 'setting_reset', oldValue: 'x' });
+			desktop({ success: true, previous: undefined, removed: false });
+			await expect(settingsAgentReset('codex', 'model', { json: true })).rejects.toThrow(
 				'process.exit(1)'
 			);
+			expect(writeAgentConfigValue).not.toHaveBeenCalled();
 			expect(deleteAgentConfigValue).not.toHaveBeenCalled();
 		});
 
-		it('still writes provider config for a provider type', () => {
-			settingsAgentSet('codex', 'contextWindow', '128000', { json: true });
+		it("prints the policy's line, with the managed state in JSON, when the desktop refuses", async () => {
+			const managed = { state: 'denied', code: 'locked', policyRevision: 3 };
+			const error = 'the "agentConfig.customPath" setting is locked by managed policy revision 3';
+			desktop({ success: false, error, managed });
+			await expect(
+				settingsAgentSet('codex', 'customPath', '/opt/codex', { json: true })
+			).rejects.toThrow('process.exit(1)');
+			expect(JSON.parse(String(errorSpy.mock.calls[0][0]))).toEqual({ error, managed });
+			expect(writeAgentConfigValue).not.toHaveBeenCalled();
+		});
+
+		it('with no desktop writes the file as before only when the data dir carries no managed binding', async () => {
+			noDesktop();
+			await settingsAgentSet('codex', 'contextWindow', '128000', { json: true });
 			expect(writeAgentConfigValue).toHaveBeenCalledWith('codex', 'contextWindow', 128000);
+			vi.mocked(deleteAgentConfigValue).mockReturnValue(true);
+			await settingsAgentReset('codex', 'contextWindow', { json: true });
+			expect(deleteAgentConfigValue).toHaveBeenCalledWith('codex', 'contextWindow');
+
+			fs.writeFileSync(path.join(dataDir, MANAGED_BINDING_FILE_NAME), '{}');
+			vi.clearAllMocks();
+			await expect(settingsAgentSet('codex', 'contextWindow', '1', { json: true })).rejects.toThrow(
+				'process.exit(3)'
+			);
+			expect(jsonLines(logSpy)[0]).toMatchObject({ success: false, code: 'MAESTRO_NOT_RUNNING' });
+			expect(writeAgentConfigValue).not.toHaveBeenCalled();
 		});
 	});
 });

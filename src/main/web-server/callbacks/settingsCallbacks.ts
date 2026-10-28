@@ -7,15 +7,24 @@ import { isWebContentsAvailable } from '../../utils/safe-send';
 import type { Group } from '../../../shared/types';
 import type { StoredSession } from '../../stores/types';
 import { buildWebSettingsSnapshot } from '../web-settings-snapshot';
+import { applyAgentConfigWrite } from '../../agents/agent-config-writes';
 
 export function registerSettingsCallbacks(
 	server: WebServer,
 	deps: Pick<
 		WebServerFactoryDependencies,
-		'settingsStore' | 'getMainWindow' | 'groupsStore' | 'sessionsStore'
+		'settingsStore' | 'getMainWindow' | 'groupsStore' | 'sessionsStore' | 'agentConfigsStore'
 	>
 ): void {
-	const { settingsStore, getMainWindow, groupsStore, sessionsStore } = deps;
+	const { settingsStore, getMainWindow, groupsStore, sessionsStore, agentConfigsStore } = deps;
+
+	// Per-provider configuration (MRC2-06-03A): the one service agents:setConfigValue
+	// calls, so the managed hold runs once and settings agent set|reset cannot bypass it.
+	if (agentConfigsStore) {
+		server.setWriteAgentConfigValueCallback(async (request) =>
+			applyAgentConfigWrite(agentConfigsStore, request)
+		);
+	}
 
 	// Set up callback for web server to read settings
 	// Shares the exact field mapping the broadcast path uses below, so the two

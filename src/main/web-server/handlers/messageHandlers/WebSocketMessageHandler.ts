@@ -22,6 +22,7 @@
  * - get_file_tree: Read directory tree from filesystem for web file explorer
  * - get_settings: Fetch current web settings
  * - set_setting: Modify a single setting (allowlisted keys only)
+ * - set_agent_config_value / reset_agent_config_value: One per-provider configuration value, CLI only (CLI: `settings agent set|reset`)
  * - list_desktop_sessions: Enumerate open AI tabs across all agents (CLI: `session list`)
  * - get_session_history: Return tab conversation history with --since/--tail filters (CLI: `session show`)
  * - computer_history_command: Computer History writes, CLI clients only (CLI: `computer-history`)
@@ -135,7 +136,7 @@ import {
 	handleOpenTerminalTab,
 	handleNewAITabWithPrompt,
 } from './tabs';
-import { handleGetSettings, handleSetSetting } from './settings';
+import { handleGetSettings, handleSetSetting, handleAgentConfigValueWrite } from './settings';
 import { handleTerminalWrite, handleTerminalResize } from './terminal';
 import {
 	handleGetGitStatus,
@@ -532,6 +533,14 @@ export class WebSocketMessageHandler {
 
 			case 'set_setting':
 				handleSetSetting(this.ctx, client, message);
+				break;
+
+			case 'set_agent_config_value':
+				handleAgentConfigValueWrite(this.ctx, client, message, 'set');
+				break;
+
+			case 'reset_agent_config_value':
+				handleAgentConfigValueWrite(this.ctx, client, message, 'reset');
 				break;
 
 			case 'create_session':
