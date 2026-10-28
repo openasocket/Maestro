@@ -43,6 +43,14 @@ import {
 	type LocalEffectAuthority,
 	type LocalEffectKind,
 } from '../../enterprise/local-effects-policy';
+import { holdManagedKey, type SettingWriteDecision } from '../../enterprise/settings-policy';
+import {
+	SYNC_PATH_LOCK_KEY,
+	TUNNEL_LOCK_KEY,
+	managedSettingPin,
+	type ManagedSettingsPolicyRef,
+} from '../../../shared/managedSettingsLock';
+import { isValidSyncPath } from '../../../shared/syncPath';
 
 // Type for tunnel manager instance
 type TunnelManagerType = typeof tunnelManagerInstance;
@@ -78,6 +86,150 @@ async function holdSystemEffect(
 		receipt: decision.managed,
 	});
 	throw new LocalEffectRefusedError(decision);
+}
+
+/** The refusal a held action answers (MRC2-06-04A): the policy's line with its code and revision, logged once. */
+function managedRefusal(
+	decision: Extract<SettingWriteDecision, { allowed: false }>,
+	what: string,
+	context: string
+) {
+	logger.warn(`${what} refused: ${decision.message}`, context);
+	return {
+		success: false as const,
+		error: decision.message,
+		managed: { code: decision.code, policyRevision: decision.policyRevision },
+	};
+}
+
+/** The synced stores a Storage Location change carries along. */
+const SETTINGS_FILES = [
+	'maestro-settings.json',
+	'maestro-sessions.json',
+	'maestro-groups.json',
+	'maestro-agent-configs.json',
+	'maestro-claude-session-origins.json',
+];
+
+export interface SyncPathResult {
+	success: boolean;
+	migrated?: number;
+	errors?: string[];
+	error?: string;
+	requiresRestart?: boolean;
+}
+
+/**
+ * Move the Storage Location to `newPath` (null: back to the user-data default):
+ * create the folder, copy every synced store (backing up a differing copy at
+ * the destination) and record the choice in the bootstrap store. The stores
+ * already open keep their folder until the next launch.
+ */
+export function applySyncPath(
+	bootstrapStore: Store<BootstrapSettings>,
+	defaultPath: string,
+	newPath: string | null
+): SyncPathResult {
+	const currentCustomPath = bootstrapStore.get('customSyncPath');
+	const currentPath = currentCustomPath || defaultPath;
+	const targetPath = newPath || defaultPath;
+
+	// Don't do anything if paths are the same
+	if (currentPath === targetPath) {
+		return { success: true, migrated: 0 };
+	}
+
+	// Ensure target directory exists
+	if (!fsSync.existsSync(targetPath)) {
+		try {
+			fsSync.mkdirSync(targetPath, { recursive: true });
+		} catch {
+			return { success: false, error: `Cannot create directory: ${targetPath}` };
+		}
+	}
+
+	// Migrate settings files
+	let migratedCount = 0;
+	const errors: string[] = [];
+
+	for (const file of SETTINGS_FILES) {
+		const sourcePath = path.join(currentPath, file);
+		const destPath = path.join(targetPath, file);
+
+		try {
+			if (fsSync.existsSync(sourcePath)) {
+				// Check if destination already exists
+				if (fsSync.existsSync(destPath)) {
+					// Read both files to compare
+					const sourceContent = fsSync.readFileSync(sourcePath, 'utf-8');
+					const destContent = fsSync.readFileSync(destPath, 'utf-8');
+
+					if (sourceContent !== destContent) {
+						// Backup existing destination file
+						const backupPath = destPath + '.backup.' + Date.now();
+						fsSync.copyFileSync(destPath, backupPath);
+						logger.info(`Backed up existing ${file} to ${backupPath}`, 'Sync');
+					}
+				}
+
+				// Copy file to new location
+				fsSync.copyFileSync(sourcePath, destPath);
+				migratedCount++;
+				logger.info(`Migrated ${file} to ${targetPath}`, 'Sync');
+			}
+		} catch (error) {
+			const errMsg = error instanceof Error ? error.message : String(error);
+			errors.push(`Failed to migrate ${file}: ${errMsg}`);
+			logger.error(`Failed to migrate ${file}`, 'Sync', error);
+		}
+	}
+
+	// Update bootstrap store
+	if (newPath) {
+		bootstrapStore.set('customSyncPath', newPath);
+	} else {
+		bootstrapStore.delete('customSyncPath' as keyof BootstrapSettings);
+	}
+
+	// Clear the old iCloudSyncEnabled flag if it exists (legacy cleanup)
+	if (bootstrapStore.get('iCloudSyncEnabled')) {
+		bootstrapStore.delete('iCloudSyncEnabled' as keyof BootstrapSettings);
+	}
+
+	logger.info(`Storage location changed to ${targetPath}, migrated ${migratedCount} files`, 'Sync');
+
+	return {
+		success: errors.length === 0,
+		migrated: migratedCount,
+		errors: errors.length > 0 ? errors : undefined,
+		requiresRestart: true,
+	};
+}
+
+/**
+ * Restore the Storage Location to the folder the policy pins (MRC2-06-04A) by
+ * the same migration the Settings tab runs: the one writer that bypasses the
+ * hold, at startup and on every policy change. Null when nothing is pinned or
+ * the folder is already the pinned one; otherwise the line to log, which names
+ * the next launch (the stores already open keep their folder) or why the pin
+ * was not written (a folder the desktop would reject, a migration that failed).
+ */
+export function restoreManagedSyncPath(
+	bootstrapStore: Store<BootstrapSettings>,
+	defaultPath: string,
+	policy: ManagedSettingsPolicyRef
+): string | null {
+	const pin = managedSettingPin(SYNC_PATH_LOCK_KEY, policy);
+	if (!pin) return null;
+	const target = pin.value as string | null;
+	if ((bootstrapStore.get('customSyncPath') || null) === target) return null;
+	if (target !== null && !isValidSyncPath(target))
+		return `Storage location pinned by managed policy to ${target} is not a usable sync folder; the current folder is kept`;
+	const result = applySyncPath(bootstrapStore, defaultPath, target);
+	const folder = target ?? defaultPath;
+	if (!result.success)
+		return `Storage location pinned by managed policy was not restored to ${folder}: ${result.error ?? result.errors?.join('; ')}`;
+	return `Storage location restored to the managed pin ${folder} (${result.migrated} files migrated); it takes effect at the next launch`;
 }
 
 /**
@@ -468,6 +620,11 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 	});
 
 	ipcMain.handle('tunnel:start', async () => {
+		// A lock on web.tunnel (MRC2-06-04A) refuses the tunnel before the web
+		// server is read; the listener ceiling inside tunnelManager.start() still
+		// holds the publish itself. Standalone: nothing is asked.
+		const held = holdManagedKey(TUNNEL_LOCK_KEY);
+		if (!held.allowed) return managedRefusal(held, 'Tunnel start', 'TunnelManager');
 		const webServer = getWebServer();
 		// Get web server URL (includes the security token)
 		const serverUrl = webServer?.getSecureUrl();
@@ -681,14 +838,6 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 	// ============ Sync (Custom Storage Location) Handlers ============
 
 	// List of settings files that should be migrated
-	const SETTINGS_FILES = [
-		'maestro-settings.json',
-		'maestro-sessions.json',
-		'maestro-groups.json',
-		'maestro-agent-configs.json',
-		'maestro-claude-session-origins.json',
-	];
-
 	// Get the default storage path
 	ipcMain.handle('sync:getDefaultPath', async () => {
 		return app.getPath('userData');
@@ -737,85 +886,12 @@ export function registerSystemHandlers(deps: SystemHandlerDependencies): void {
 		if (!deps.bootstrapStore) {
 			return { success: false, error: 'Bootstrap store not available' };
 		}
-
-		const defaultPath = app.getPath('userData');
-		const currentCustomPath = deps.bootstrapStore.get('customSyncPath');
-		const currentPath = currentCustomPath || defaultPath;
-		const targetPath = newPath || defaultPath;
-
-		// Don't do anything if paths are the same
-		if (currentPath === targetPath) {
-			return { success: true, migrated: 0 };
-		}
-
-		// Ensure target directory exists
-		if (!fsSync.existsSync(targetPath)) {
-			try {
-				fsSync.mkdirSync(targetPath, { recursive: true });
-			} catch {
-				return { success: false, error: `Cannot create directory: ${targetPath}` };
-			}
-		}
-
-		// Migrate settings files
-		let migratedCount = 0;
-		const errors: string[] = [];
-
-		for (const file of SETTINGS_FILES) {
-			const sourcePath = path.join(currentPath, file);
-			const destPath = path.join(targetPath, file);
-
-			try {
-				if (fsSync.existsSync(sourcePath)) {
-					// Check if destination already exists
-					if (fsSync.existsSync(destPath)) {
-						// Read both files to compare
-						const sourceContent = fsSync.readFileSync(sourcePath, 'utf-8');
-						const destContent = fsSync.readFileSync(destPath, 'utf-8');
-
-						if (sourceContent !== destContent) {
-							// Backup existing destination file
-							const backupPath = destPath + '.backup.' + Date.now();
-							fsSync.copyFileSync(destPath, backupPath);
-							logger.info(`Backed up existing ${file} to ${backupPath}`, 'Sync');
-						}
-					}
-
-					// Copy file to new location
-					fsSync.copyFileSync(sourcePath, destPath);
-					migratedCount++;
-					logger.info(`Migrated ${file} to ${targetPath}`, 'Sync');
-				}
-			} catch (error) {
-				const errMsg = error instanceof Error ? error.message : String(error);
-				errors.push(`Failed to migrate ${file}: ${errMsg}`);
-				logger.error(`Failed to migrate ${file}`, 'Sync', error);
-			}
-		}
-
-		// Update bootstrap store
-		if (newPath) {
-			deps.bootstrapStore.set('customSyncPath', newPath);
-		} else {
-			deps.bootstrapStore.delete('customSyncPath' as keyof BootstrapSettings);
-		}
-
-		// Clear the old iCloudSyncEnabled flag if it exists (legacy cleanup)
-		if (deps.bootstrapStore.get('iCloudSyncEnabled')) {
-			deps.bootstrapStore.delete('iCloudSyncEnabled' as keyof BootstrapSettings);
-		}
-
-		logger.info(
-			`Storage location changed to ${targetPath}, migrated ${migratedCount} files`,
-			'Sync'
-		);
-
-		return {
-			success: errors.length === 0,
-			migrated: migratedCount,
-			errors: errors.length > 0 ? errors : undefined,
-			requiresRestart: true,
-		};
+		// A lock on storage.syncPath (MRC2-06-04A) refuses the move before a
+		// folder is created or a file copied; a pinned folder is restored by
+		// restoreManagedSyncPath(), the one writer that bypasses the hold.
+		const held = holdManagedKey(SYNC_PATH_LOCK_KEY);
+		if (!held.allowed) return managedRefusal(held, 'Storage location change', 'Sync');
+		return applySyncPath(deps.bootstrapStore, app.getPath('userData'), newPath);
 	});
 
 	// ============ Power Management Handlers ============

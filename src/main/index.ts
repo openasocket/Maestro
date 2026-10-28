@@ -222,6 +222,8 @@ import {
 import { stopSessionCleanup } from './group-chat/group-chat-moderator';
 import { initializePrompts, getPrompt, savePrompt } from './prompt-manager';
 import { restoreManagedPromptPins } from './ipc/handlers/prompts';
+import { restoreManagedSyncPath } from './ipc/handlers/system';
+import { restoreManagedRemoteAccess } from './ipc/handlers/web';
 import { captureException } from './utils/sentry';
 import {
 	resolveToFilePath,
@@ -1029,6 +1031,24 @@ app
 				(error) => logger.error(`Managed prompt pins not restored: ${error}`, 'Settings')
 			);
 		settingsPolicy.onChange(() => void restorePromptPins());
+		// Remote access and the Storage Location under the lock (MRC2-06-04A): what
+		// a lock on web.liveSessions or web.tunnel refuses to turn on is ended now
+		// and on every policy change, and a pinned sync folder is migrated to
+		// (effective at the next launch). Standalone, and unlocked: nothing happens.
+		const restoreAccessLocks = () =>
+			restoreManagedRemoteAccess({ getWebServer: () => webServer, tunnel: tunnelManager }).then(
+				(ended) => {
+					const sync = restoreManagedSyncPath(
+						bootstrapStore,
+						app.getPath('userData'),
+						settingsPolicy.pins()
+					);
+					for (const line of sync ? [...ended, sync] : ended) logger.info(line, 'Settings');
+				},
+				(error) => logger.error(`Managed access locks not restored: ${error}`, 'Settings')
+			);
+		settingsPolicy.onChange(() => void restoreAccessLocks());
+		void restoreAccessLocks();
 		// The install ceiling (MRC2-04-07): WakaTime's download, extraction and binary
 		// and the maestro-cli shim are held to the policy's pins; none installed yet (CP-01).
 		const installPolicy = createInstallPolicySource({

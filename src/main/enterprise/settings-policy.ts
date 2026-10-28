@@ -18,6 +18,8 @@
  * ceiling would refuse at launch, named at write time instead of silently
  * stripped later. The admin sets (MRC2-06-04) are held by `holdPromptSetWrite()`
  * and `holdPluginSetWrite()`; the SSH remote handlers hold their settings keys.
+ * The Storage Location and the remote-access actions (MRC2-06-04A) are held by
+ * `holdManagedKey()`, the key by its own name; their sinks restore with it.
  */
 
 import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
@@ -286,6 +288,17 @@ export function holdAgentConfigWrite(
 /** Hold a save or reset of a Maestro Prompts customization through the same authority. Standalone: allowed. */
 export function holdPromptSetWrite(): SettingWriteDecision {
 	return writeAuthority ? writeAuthority.authorize(PROMPT_SET_LOCK_KEY) : { allowed: true };
+}
+
+/**
+ * Hold a write to a key held by its own name (`storage.syncPath`,
+ * `web.liveSessions`, `web.tunnel`, `lite.control`; MRC2-06-04A), never split
+ * at a dot. Standalone: allowed. For an action key the same verdict decides the
+ * restore: what it refuses to turn on, the sink ends at startup and on every
+ * policy change.
+ */
+export function holdManagedKey(key: string): SettingWriteDecision {
+	return writeAuthority ? writeAuthority.authorize(key) : { allowed: true };
 }
 
 /** A change to the installed plugin set, held before the files or the ledger are touched. */

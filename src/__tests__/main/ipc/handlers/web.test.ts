@@ -52,6 +52,9 @@ import {
 	startCliDiscoveryWatchdog,
 	stopCliDiscoveryWatchdog,
 } from '../../../../main/ipc/handlers/web';
+import { restoreManagedRemoteAccess } from '../../../../main/ipc/handlers/web';
+import { setSettingsWriteAuthority } from '../../../../main/enterprise/settings-policy';
+import { installManagedSettingsPolicy } from '../../../helpers/managedSettingsPolicy';
 import {
 	writeCliServerInfo,
 	deleteCliServerInfo,
@@ -427,6 +430,45 @@ describe('web handlers', () => {
 			expect((error as Error).message).toBe('Web server failed to start');
 
 			vi.useRealTimers();
+		});
+	});
+
+	describe('live:toggle under the settings lock (MRC2-06-04A)', () => {
+		afterEach(() => setSettingsWriteAuthority(null));
+
+		it('refuses turning a session live by the policy line, and never holds turning one off', async () => {
+			installManagedSettingsPolicy([{ key: 'web.liveSessions' }]);
+			const handler = registeredHandlers.get('live:toggle')!;
+			mockWebServer.isSessionLive.mockReturnValue(false);
+			await expect(handler({}, 'session-123')).rejects.toThrow(
+				'the "web.liveSessions" setting is locked by managed policy revision 3'
+			);
+			expect(mockWebServer.setSessionLive).not.toHaveBeenCalled();
+			mockWebServer.isSessionLive.mockReturnValue(true);
+			await expect(handler({}, 'session-123')).resolves.toEqual({ live: false, url: null });
+			expect(mockWebServer.setSessionOffline).toHaveBeenCalledWith('session-123');
+		});
+
+		it('restoreManagedRemoteAccess ends what the locks refuse to turn on, and nothing unlocked', async () => {
+			const tunnel = {
+				getStatus: vi.fn().mockReturnValue({ isRunning: true }),
+				stop: vi.fn().mockResolvedValue(undefined),
+			};
+			mockWebServer.getLiveSessions.mockReturnValue([{ sessionId: 'a' }, { sessionId: 'b' }]);
+			const deps = { getWebServer: () => mockWebServer, tunnel };
+			await expect(restoreManagedRemoteAccess(deps)).resolves.toEqual([]);
+			installManagedSettingsPolicy([{ key: 'web.liveSessions' }]);
+			await expect(restoreManagedRemoteAccess(deps)).resolves.toEqual([
+				'Live session a set offline: the "web.liveSessions" setting is locked by managed policy revision 3',
+				'Live session b set offline: the "web.liveSessions" setting is locked by managed policy revision 3',
+			]);
+			expect(tunnel.stop).not.toHaveBeenCalled();
+			installManagedSettingsPolicy([{ key: 'web.tunnel' }]);
+			await expect(restoreManagedRemoteAccess(deps)).resolves.toEqual([
+				'Tunnel stopped: the "web.tunnel" setting is locked by managed policy revision 3',
+			]);
+			expect(mockWebServer.setSessionOffline).toHaveBeenCalledTimes(2);
+			expect(tunnel.stop).toHaveBeenCalledTimes(1);
 		});
 	});
 

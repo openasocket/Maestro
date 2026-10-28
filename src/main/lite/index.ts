@@ -25,7 +25,11 @@ import { connectionPage } from './ui';
 import { parseSshConfig } from '../utils/ssh-config-parser';
 import { startLiteControlServer } from './control-server';
 import { isListenerDeniedError } from '../enterprise/listener-gate';
-import { installLiteListenerAuthority, liteHostDataDirectory } from './listener-authority';
+import {
+	installLiteListenerAuthority,
+	liteControlHold,
+	liteHostDataDirectory,
+} from './listener-authority';
 import { resolveLiteDataDirectory } from '../../shared/lite-control';
 import type { LiteControlOptions, LiteControlState } from '../../shared/lite-control';
 
@@ -554,6 +558,17 @@ export async function startLite(): Promise<void> {
 		const cli = options.source === 'cli';
 		if (cli && ['remove', 'trust', 'close'].includes(name) && !options.confirmed)
 			throw new Error(`${name} requires explicit confirmation.`);
+		// A lock on lite.control (MRC2-06-04A) refuses discovering, pairing,
+		// connecting and profile changes by name, from the window and the CLI
+		// alike, before any of them starts; reading, dismissing, disconnecting and
+		// closing are never held. Standalone: nothing is asked.
+		const held = liteControlHold(name);
+		if (!held.allowed) {
+			status = 'Disabled by policy';
+			error = held.message;
+			publish();
+			throw new Error(held.message);
+		}
 		switch (name) {
 			case 'discovery-start':
 			case 'discovery-import':

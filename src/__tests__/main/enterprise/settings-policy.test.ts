@@ -13,6 +13,7 @@ import {
 	createSettingsPolicySource,
 	guardSettingsStore,
 	holdAgentConfigWrite,
+	holdManagedKey,
 	holdPluginSetWrite,
 	holdPromptSetWrite,
 	holdSettingWrite,
@@ -401,5 +402,24 @@ describe('the admin sets: holdPromptSetWrite and holdPluginSetWrite (MRC2-06-04)
 		const store = guardSettingsStore(fakeStore({ ghPath: '/gh' }));
 		expect(restoreManagedSettingPins(store, current.pins())).toEqual([]);
 		expect(store.writes).toEqual([]);
+	});
+});
+
+describe('holdManagedKey (MRC2-06-04A)', () => {
+	it('admits standalone and an unlocked key, refuses unavailable with no usable policy and locked under a lock', () => {
+		expect(holdManagedKey('web.tunnel')).toEqual({ allowed: true });
+		setSettingsWriteAuthority(source(enrolled, null));
+		expect(holdManagedKey('lite.control')).toMatchObject({ code: 'unavailable' });
+		installed(
+			document({
+				locks: [{ key: 'web.liveSessions' }, { key: 'storage.syncPath', pin: { value: null } }],
+			})
+		);
+		expect(holdManagedKey('web.liveSessions')).toMatchObject({
+			code: 'locked',
+			message: 'the "web.liveSessions" setting is locked by managed policy revision 3',
+		});
+		expect(holdManagedKey('storage.syncPath')).toMatchObject({ code: 'locked' });
+		expect(holdManagedKey('web.tunnel')).toEqual({ allowed: true });
 	});
 });

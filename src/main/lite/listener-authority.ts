@@ -33,6 +33,12 @@
  *     name (the macOS Keychain item) the host's record reads `untrusted:
  *     unsealable` here: reported by name, refusing what a missing ceiling would.
  *
+ * The same enrollment composes Lite's settings lock source (MRC2-06-04A), set as
+ * the one write authority of the Lite process: `liteControlHold()` holds the
+ * controls that discover, pair, connect or change a host profile on
+ * `lite.control`, so an enrolled host's Lite refuses them `unavailable` by name
+ * (no settings policy reaches Lite, CP-01) and a standalone Lite is never asked.
+ *
  * Standalone Lite is unchanged; nothing here opens a store, a socket or a runtime.
  */
 
@@ -46,6 +52,14 @@ import {
 	type IdentityRead,
 } from '../enterprise/identity-store';
 import { setListenerAuthority } from '../enterprise/listener-gate';
+import {
+	createSettingsPolicySource,
+	holdManagedKey,
+	setSettingsWriteAuthority,
+	type SettingsPolicySource,
+	type SettingWriteDecision,
+} from '../enterprise/settings-policy';
+import { LITE_CONTROL_LOCK_KEY } from '../../shared/managedSettingsLock';
 import {
 	createListenerPolicySource,
 	type ListenerPolicySource,
@@ -94,6 +108,8 @@ export type LiteEnrollment =
 export interface LiteListenerAuthority {
 	/** The real source over the host's enrollment; what `installLiteListenerAuthority()` puts on the gate. */
 	source: ListenerPolicySource;
+	/** The settings lock source over the same enrollment (MRC2-06-04A); what `liteControlHold()` reads. */
+	settings: SettingsPolicySource;
 	/** The record it reads, under the host directory. */
 	file: string;
 	/** One fresh read, decided by the rule in the header. */
@@ -160,12 +176,12 @@ export function composeLiteListenerAuthority(
 		...(deps.platform ? { platform: deps.platform } : {}),
 	});
 	const enrollment = (): LiteEnrollment => describeRead(store.read(), file);
-	const source = createListenerPolicySource({
-		// The source reads `identityStandingOf()`, the same rule as the header's;
+	const sourceDeps = {
+		// The sources read `identityStandingOf()`, the same rule as the header's;
 		// a standalone decision (no record, or none readable and no file) is
-		// still handed to it as `none` so the one rule in the header decides.
+		// still handed to them as `none` so the one rule in the header decides.
 		identity: {
-			read: () => {
+			read: (): IdentityRead => {
 				const read = store.read();
 				return describeRead(read, file).standing === 'standalone' ? { status: 'none' } : read;
 			},
@@ -175,8 +191,33 @@ export function composeLiteListenerAuthority(
 			const read = store.read();
 			return read.status === 'ok' ? { appliedRevision: read.record.policy.appliedRevision } : null;
 		},
-	});
-	return { source, file, enrollment };
+	};
+	return {
+		source: createListenerPolicySource(sourceDeps),
+		settings: createSettingsPolicySource(sourceDeps),
+		file,
+		enrollment,
+	};
+}
+
+/** The Lite controls a lock on `lite.control` refuses: those that discover, pair, connect or change a host profile. Reading, dismissing, disconnecting and closing are never held. */
+export const LITE_CONTROL_HELD_ACTIONS: readonly string[] = Object.freeze([
+	'discovery-start',
+	'discovery-import',
+	'network-changed',
+	'pair-request',
+	'pair-submit',
+	'connect',
+	'reconnect',
+	'save',
+	'trust',
+]);
+
+/** Hold one Lite control action through the lock the host's enrollment composes; standalone, and an action never held: allowed. */
+export function liteControlHold(name: string): SettingWriteDecision {
+	return LITE_CONTROL_HELD_ACTIONS.includes(name)
+		? holdManagedKey(LITE_CONTROL_LOCK_KEY)
+		: { allowed: true };
 }
 
 /** Compose over the host's enrollment and install on the gate; call before the first sink. */
@@ -185,5 +226,6 @@ export function installLiteListenerAuthority(
 ): LiteListenerAuthority {
 	const authority = composeLiteListenerAuthority(deps);
 	setListenerAuthority(authority.source);
+	setSettingsWriteAuthority(authority.settings);
 	return authority;
 }

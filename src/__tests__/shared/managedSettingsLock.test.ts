@@ -9,6 +9,7 @@ import { describe, it, expect } from 'vitest';
 import {
 	AGENT_CONFIG_LOCK_KEYS,
 	LOCKABLE_SETTING_KEYS,
+	MANAGED_ACTION_LOCK_KEYS,
 	MANAGED_SETTINGS_LIMITS,
 	MANAGED_SET_LOCK_KEYS,
 	SESSION_CONFIG_LOCK_FIELDS,
@@ -102,7 +103,10 @@ describe('parseManagedSettingsPolicy', () => {
 			refused('locks[0].extra is not a known key')
 		);
 		const bound =
-			LOCKABLE_SETTING_KEYS.length + AGENT_CONFIG_LOCK_KEYS.length + MANAGED_SET_LOCK_KEYS.length;
+			LOCKABLE_SETTING_KEYS.length +
+			AGENT_CONFIG_LOCK_KEYS.length +
+			MANAGED_SET_LOCK_KEYS.length +
+			MANAGED_ACTION_LOCK_KEYS.length;
 		const many = Array.from({ length: bound + 1 }, () => ({ key: 'ghPath' }));
 		expect(parse(many)).toEqual(refused(`locks exceeds ${bound} entries`));
 	});
@@ -295,7 +299,7 @@ describe('the admin set namespace (MRC2-06-04)', () => {
 	const PLUGINS = 'plugins.installed';
 
 	it('names the two sets beside the settings keys and pins each to its closed shape', () => {
-		expect(MANAGED_SET_LOCK_KEYS).toEqual([PROMPTS, PLUGINS]);
+		expect(MANAGED_SET_LOCK_KEYS).toEqual([PROMPTS, PLUGINS, 'storage.syncPath']);
 		expect(LOCKABLE_SETTING_KEYS).not.toContain(PROMPTS);
 		expect(isSettingLockable(PLUGINS)).toBe(true);
 		const prompts = { 'wizard-system': 'pinned' };
@@ -319,6 +323,43 @@ describe('the admin set namespace (MRC2-06-04)', () => {
 		const policy = policyOf([{ key: PROMPTS, pin: { value: { 'wizard-system': 'p' } } }]);
 		expect(managedSettingLockReason(PROMPTS, policy)).toBe(
 			'the "prompts.customizations" setting is locked and pinned by managed policy revision 7'
+		);
+		const settings = { ghPath: '/gh' };
+		expect(applyManagedPins(settings, policy)).toEqual({ settings, restored: [] });
+	});
+});
+
+describe('the sync folder and the action keys (MRC2-06-04A)', () => {
+	const SYNC = 'storage.syncPath';
+
+	it('pins the Storage Location to an absolute folder or null, and never pins an action key', () => {
+		expect(MANAGED_ACTION_LOCK_KEYS).toEqual(['web.liveSessions', 'web.tunnel', 'lite.control']);
+		for (const key of MANAGED_ACTION_LOCK_KEYS) {
+			expect(isSettingLockable(key)).toBe(true);
+			expect(parse([{ key }])).toMatchObject({ ok: true });
+			expect(pin(key, false)).toEqual(
+				refused(
+					`locks[0].pin.value pins "${key}", an action key that may be locked but never pinned`
+				)
+			);
+		}
+		expect(pin(SYNC, null)).toMatchObject({ ok: true });
+		expect(pin(SYNC, '/Users/me/Sync/Maestro')).toMatchObject({ ok: true });
+		expect(pin(SYNC, 'C:\\Users\\me\\Maestro')).toMatchObject({ ok: true });
+		expect(pin(SYNC, 'relative/sync')).toEqual(
+			refused('locks[0].pin.value is not an absolute folder path')
+		);
+		expect(pin(SYNC, '/Users/me/../etc')).toEqual(
+			refused('locks[0].pin.value is not a plain absolute folder path')
+		);
+		expect(pin(SYNC, 42)).toEqual(
+			refused('locks[0].pin.value is not an absolute folder path or null')
+		);
+		// Not a settings value: the store restorer leaves the pin to the system handler.
+		const policy = policyOf([{ key: SYNC, pin: { value: '/sync' } }, { key: 'web.tunnel' }]);
+		expect(managedSettingPin(SYNC, policy)).toEqual({ value: '/sync' });
+		expect(managedSettingLockReason('web.tunnel', policy)).toBe(
+			'the "web.tunnel" setting is locked by managed policy revision 7'
 		);
 		const settings = { ghPath: '/gh' };
 		expect(applyManagedPins(settings, policy)).toEqual({ settings, restored: [] });

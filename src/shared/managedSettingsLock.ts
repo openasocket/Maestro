@@ -26,6 +26,14 @@
  * value: the Maestro Prompts customizations (`prompts.customizations`, restored
  * by the prompts handler) and the installed plugin set (`plugins.installed`,
  * held at install and uninstall); `applyManagedPins()` leaves both alone.
+ *
+ * MRC2-06-04A adds the Storage Location sync folder (`storage.syncPath`,
+ * pinned to an absolute folder or null for the user-data default, restored by
+ * the system handler through the migration the Settings tab runs) and three
+ * remote-access ACTION keys, locked and never pinned: `web.liveSessions`,
+ * `web.tunnel` and `lite.control`. A lock on an action key refuses turning
+ * the action on, and its sink ends what is on at startup and on every policy
+ * change; turning an action off is never held.
  */
 
 import { canonicalJson } from './canonicalJson';
@@ -97,19 +105,36 @@ export function agentConfigLockKey(field: string): string | null {
 export const PROMPT_SET_LOCK_KEY = 'prompts.customizations';
 /** The installed community plugin set, pinned as plugin ids. */
 export const PLUGIN_SET_LOCK_KEY = 'plugins.installed';
+/** The Storage Location sync folder (`maestro-bootstrap.json`), pinned as an absolute folder or null for the user-data default. */
+export const SYNC_PATH_LOCK_KEY = 'storage.syncPath';
 export const MANAGED_SET_LOCK_KEYS: readonly string[] = Object.freeze([
 	PROMPT_SET_LOCK_KEY,
 	PLUGIN_SET_LOCK_KEY,
+	SYNC_PATH_LOCK_KEY,
+]);
+
+/** Remote-access actions a policy may hold, locked and never pinned: Live Mode sessions, the cloudflared tunnel, the Lite client's controls. */
+export const LIVE_SESSIONS_LOCK_KEY = 'web.liveSessions';
+export const TUNNEL_LOCK_KEY = 'web.tunnel';
+export const LITE_CONTROL_LOCK_KEY = 'lite.control';
+export const MANAGED_ACTION_LOCK_KEYS: readonly string[] = Object.freeze([
+	LIVE_SESSIONS_LOCK_KEY,
+	TUNNEL_LOCK_KEY,
+	LITE_CONTROL_LOCK_KEY,
 ]);
 
 const LOCK_BOUND =
-	LOCKABLE_SETTING_KEYS.length + AGENT_CONFIG_LOCK_KEYS.length + MANAGED_SET_LOCK_KEYS.length;
+	LOCKABLE_SETTING_KEYS.length +
+	AGENT_CONFIG_LOCK_KEYS.length +
+	MANAGED_SET_LOCK_KEYS.length +
+	MANAGED_ACTION_LOCK_KEYS.length;
 
 export function isSettingLockable(key: string): boolean {
 	return (
 		SETTINGS_METADATA[key]?.lockable === true ||
 		AGENT_CONFIG_LOCK_KEYS.includes(key) ||
-		MANAGED_SET_LOCK_KEYS.includes(key)
+		MANAGED_SET_LOCK_KEYS.includes(key) ||
+		MANAGED_ACTION_LOCK_KEYS.includes(key)
 	);
 }
 
@@ -153,11 +178,21 @@ const MANAGED_SET_PIN_PROBLEM: Record<string, (value: unknown) => string | null>
 		if (bad !== undefined) return `names ${JSON.stringify(bad)}, which is not a plugin id`;
 		return new Set(value).size === value.length ? null : 'names a plugin id twice';
 	},
+	[SYNC_PATH_LOCK_KEY]: (value) => {
+		if (value === null) return null;
+		if (typeof value !== 'string') return 'is not an absolute folder path or null';
+		if (!/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(value)) return 'is not an absolute folder path';
+		if (value.includes('\0') || value.split(/[/\\]/).includes('..'))
+			return 'is not a plain absolute folder path';
+		return null;
+	},
 };
 
 function pinProblem(key: string, raw: unknown): string | null {
 	if (key.startsWith(AGENT_CONFIG_LOCK_PREFIX))
 		return `pins "${key}", a per-provider configuration key that may be locked but never pinned`;
+	if (MANAGED_ACTION_LOCK_KEYS.includes(key))
+		return `pins "${key}", an action key that may be locked but never pinned`;
 	const setProblem = MANAGED_SET_PIN_PROBLEM[key];
 	if (setProblem) return setProblem(raw);
 	const meta = SETTINGS_METADATA[key];

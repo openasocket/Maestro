@@ -19,8 +19,10 @@ vi.mock('child_process', async (importOriginal) => ({
 import {
 	composeLiteListenerAuthority,
 	installLiteListenerAuthority,
+	liteControlHold,
 	liteHostDataDirectory,
 } from '../../../main/lite/listener-authority';
+import { setSettingsWriteAuthority } from '../../../main/enterprise/settings-policy';
 import { startLiteControlServer } from '../../../main/lite/control-server';
 import { openTunnel } from '../../../main/lite/tunnel';
 import {
@@ -51,6 +53,7 @@ const NOW = Date.parse('2026-10-28T12:00:00Z');
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
 	setListenerAuthority(null);
+	setSettingsWriteAuthority(null);
 	vi.clearAllMocks();
 	for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
@@ -193,6 +196,36 @@ describe('Lite listener authority over the host enrollment', () => {
 			{ kind: 'lite-control', code: 'unavailable', reach: 'loopback', count: 1 },
 			{ kind: 'ssh-tunnel', bind: '127.0.0.1', port: 4321, code: 'unavailable', count: 1 },
 		]);
+	});
+
+	it('holds the controls that discover, pair, connect or change a profile on lite.control, by the same enrollment (MRC2-06-04A)', async () => {
+		const hostDir = await directory('host');
+		const holder: { value: Anchor | null } = { value: null };
+		const authority = installLiteListenerAuthority({
+			hostDataDir: hostDir,
+			seal: fakeSeal(),
+			anchor: fakeAnchor(holder),
+			platform: 'darwin',
+		});
+		expect(authority.enrollment().standing).toBe('standalone');
+		expect(liteControlHold('connect')).toEqual({ allowed: true });
+		await enrollHost(hostDir, holder);
+		expect(authority.enrollment().standing).toBe('managed');
+		for (const name of ['discovery-start', 'pair-request', 'connect', 'reconnect', 'save', 'trust'])
+			expect(liteControlHold(name), name).toMatchObject({
+				code: 'unavailable',
+				message: expect.stringContaining('the "lite.control" setting is held by managed policy'),
+			});
+		for (const name of [
+			'status',
+			'read',
+			'dismiss',
+			'disconnect',
+			'close',
+			'remove',
+			'pair-cancel',
+		])
+			expect(liteControlHold(name), name).toEqual({ allowed: true });
 	});
 
 	it('never reads a record that is there but does not open as standalone', async () => {

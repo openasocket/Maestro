@@ -20,10 +20,13 @@ import { createLocalEffectsPolicySource } from '../../../../main/enterprise/loca
 import type { IdentityRead } from '../../../../main/enterprise/identity-store';
 import {
 	registerSystemHandlers,
+	restoreManagedSyncPath,
 	type SystemHandlerDependencies,
 } from '../../../../main/ipc/handlers/system';
 import { logger } from '../../../../main/utils/logger';
 import { runAsTransport } from '../../../../main/web-server/auth/transport-actor';
+import { setSettingsWriteAuthority } from '../../../../main/enterprise/settings-policy';
+import { installManagedSettingsPolicy } from '../../../helpers/managedSettingsPolicy';
 
 vi.mock('electron', () => ({
 	ipcMain: { handle: vi.fn(), on: vi.fn(), removeHandler: vi.fn() },
@@ -306,5 +309,88 @@ describe('system handlers under the local-effects ceiling (MRC2-04-09)', () => {
 		source.install({ policyRevision: 3, classes: [{ class: 'data-transfer', verdict: 'allow' }] });
 		await call('shell:openExternal', 'https://example.com/a');
 		expect(shell.openExternal).toHaveBeenCalledTimes(1);
+	});
+
+	describe('the sync folder and the tunnel under the settings lock (MRC2-06-04A)', () => {
+		const bootstrap = {
+			data: {} as Record<string, unknown>,
+			get: vi.fn((key: string) => bootstrap.data[key]),
+			set: vi.fn((key: string, value: unknown) => void (bootstrap.data[key] = value)),
+			delete: vi.fn((key: string) => void delete bootstrap.data[key]),
+		};
+		const tunnel = { start: vi.fn(), stop: vi.fn(), getStatus: vi.fn() };
+		const registerLocks = () =>
+			registerSystemHandlers({
+				getMainWindow: () => null,
+				app: { getPath: () => '/data' } as never,
+				settingsStore: { get: vi.fn(), set: vi.fn() } as never,
+				tunnelManager: tunnel as never,
+				getWebServer: () => ({ getSecureUrl: () => 'http://127.0.0.1:8080/tok' }) as never,
+				bootstrapStore: bootstrap as never,
+			});
+		beforeEach(() => {
+			bootstrap.data = {};
+			vi.mocked(fsSync.existsSync).mockReturnValue(false);
+		});
+		afterEach(() => setSettingsWriteAuthority(null));
+
+		it('standalone moves the folder and starts the tunnel as before', async () => {
+			registerLocks();
+			tunnel.start.mockResolvedValue({ success: true, url: 'https://x.trycloudflare.com' });
+			await expect(call('sync:setCustomPath', '/Users/me/Sync')).resolves.toMatchObject({
+				success: true,
+				requiresRestart: true,
+			});
+			expect(bootstrap.data.customSyncPath).toBe('/Users/me/Sync');
+			await expect(call('tunnel:start')).resolves.toEqual({
+				success: true,
+				url: 'https://x.trycloudflare.com/tok',
+			});
+			expect(logger.warn).not.toHaveBeenCalled();
+		});
+
+		it('refuses a locked move and a locked tunnel by the policy line before anything is touched', async () => {
+			registerLocks();
+			installManagedSettingsPolicy([
+				{ key: 'storage.syncPath', pin: { value: '/Managed/Sync' } },
+				{ key: 'web.tunnel' },
+			]);
+			await expect(call('sync:setCustomPath', '/Users/me/Sync')).resolves.toEqual({
+				success: false,
+				error: 'the "storage.syncPath" setting is locked and pinned by managed policy revision 3',
+				managed: { code: 'locked', policyRevision: 3 },
+			});
+			expect(fsSync.mkdirSync).not.toHaveBeenCalled();
+			expect(bootstrap.set).not.toHaveBeenCalled();
+			await expect(call('tunnel:start')).resolves.toEqual({
+				success: false,
+				error: 'the "web.tunnel" setting is locked by managed policy revision 3',
+				managed: { code: 'locked', policyRevision: 3 },
+			});
+			expect(tunnel.start).not.toHaveBeenCalled();
+			expect(logger.warn).toHaveBeenCalledTimes(2);
+		});
+
+		it('restores a pinned folder by the same migration, keeps the folder under an unusable pin, and does nothing unpinned', () => {
+			const pinned = installManagedSettingsPolicy([
+				{ key: 'storage.syncPath', pin: { value: '/Managed/Sync' } },
+			]).pins();
+			expect(restoreManagedSyncPath(bootstrap as never, '/data', pinned)).toBe(
+				'Storage location restored to the managed pin /Managed/Sync (0 files migrated); it takes effect at the next launch'
+			);
+			expect(bootstrap.data.customSyncPath).toBe('/Managed/Sync');
+			expect(restoreManagedSyncPath(bootstrap as never, '/data', pinned)).toBeNull();
+			// Too short for isValidSyncPath on every platform: named, never written.
+			const unusable = installManagedSettingsPolicy([
+				{ key: 'storage.syncPath', pin: { value: '/a' } },
+			]).pins();
+			expect(restoreManagedSyncPath(bootstrap as never, '/data', unusable)).toMatch(
+				/^Storage location pinned by managed policy to \/a is not a usable sync folder/
+			);
+			expect(bootstrap.data.customSyncPath).toBe('/Managed/Sync');
+			expect(restoreManagedSyncPath(bootstrap as never, '/data', null)).toBeNull();
+			const unpinned = installManagedSettingsPolicy([{ key: 'storage.syncPath' }]).pins();
+			expect(restoreManagedSyncPath(bootstrap as never, '/data', unpinned)).toBeNull();
+		});
 	});
 });

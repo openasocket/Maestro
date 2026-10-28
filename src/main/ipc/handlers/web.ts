@@ -40,6 +40,8 @@ import {
 } from '../../../shared/cli-server-discovery';
 import { getCliSecret } from '../../web-server/auth/cli-secret';
 import { isListenerDeniedError } from '../../enterprise/listener-gate';
+import { holdManagedKey } from '../../enterprise/settings-policy';
+import { LIVE_SESSIONS_LOCK_KEY, TUNNEL_LOCK_KEY } from '../../../shared/managedSettingsLock';
 
 /**
  * Timeout for waiting for web server to become active (ms)
@@ -50,6 +52,32 @@ const SERVER_STARTUP_TIMEOUT_MS = 5000;
  * Polling interval when waiting for server startup (ms)
  */
 const SERVER_STARTUP_POLL_INTERVAL_MS = 100;
+
+/**
+ * End what a lock on web.liveSessions or web.tunnel refuses to turn on
+ * (MRC2-06-04A): every live session is set offline and a running tunnel is
+ * stopped, by the same verdict the toggles meet. The one restorer, called at
+ * startup and on every policy change; returns a line per thing it ended.
+ */
+export async function restoreManagedRemoteAccess(deps: {
+	getWebServer: () => Pick<WebServer, 'getLiveSessions' | 'setSessionOffline'> | null;
+	tunnel: { getStatus(): { isRunning: boolean }; stop(): Promise<void> };
+}): Promise<string[]> {
+	const lines: string[] = [];
+	const live = holdManagedKey(LIVE_SESSIONS_LOCK_KEY);
+	const webServer = deps.getWebServer();
+	if (!live.allowed && webServer)
+		for (const session of webServer.getLiveSessions()) {
+			webServer.setSessionOffline(session.sessionId);
+			lines.push(`Live session ${session.sessionId} set offline: ${live.message}`);
+		}
+	const tunnel = holdManagedKey(TUNNEL_LOCK_KEY);
+	if (!tunnel.allowed && deps.tunnel.getStatus().isRunning) {
+		await deps.tunnel.stop();
+		lines.push(`Tunnel stopped: ${tunnel.message}`);
+	}
+	return lines;
+}
 
 /**
  * Dependencies required for web handlers
@@ -438,6 +466,13 @@ export function registerWebHandlers(deps: WebHandlerDependencies): void {
 			logger.info(`Session ${sessionId} is now offline`, 'Live');
 			return { live: false, url: null };
 		} else {
+			// A lock on web.liveSessions (MRC2-06-04A) refuses turning a session
+			// live; turning one off is never held. Standalone: nothing is asked.
+			const held = holdManagedKey(LIVE_SESSIONS_LOCK_KEY);
+			if (!held.allowed) {
+				logger.warn(`Live mode for session ${sessionId} refused: ${held.message}`, 'Live');
+				throw new Error(held.message);
+			}
 			// Turn on live mode
 			logger.info(
 				`Enabling live mode for session ${sessionId} (claude: ${agentSessionId || 'none'})`,
