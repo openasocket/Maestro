@@ -70,6 +70,34 @@ export interface LiteControlDiscovery {
 	pid: number;
 }
 
+/** The status word the discovery file carries when the managed listener ceiling refused the control endpoint. */
+export const LITE_CONTROL_DISABLED_BY_POLICY = 'disabled-by-policy';
+
+/**
+ * What a Lite client writes in place of its control endpoint when the
+ * listener ceiling refused it (MRC2-05-06A): no endpoint and no secret exist,
+ * and `maestro-cli lite` reports the hold by name instead of a missing Lite.
+ */
+export interface LiteControlHeldDiscovery {
+	protocolVersion: number;
+	pid: number;
+	status: typeof LITE_CONTROL_DISABLED_BY_POLICY;
+	/** The managed denial code (`kind-denied`, `reach-denied`, `unavailable`). */
+	code: string;
+	/** The one line the hold is shown as, `[managed-<code>] ...`. */
+	message: string;
+}
+
+export function isLiteControlHeld(value: unknown): value is LiteControlHeldDiscovery {
+	if (!value || typeof value !== 'object') return false;
+	const record = value as Partial<LiteControlHeldDiscovery>;
+	return (
+		record.status === LITE_CONTROL_DISABLED_BY_POLICY &&
+		typeof record.code === 'string' &&
+		typeof record.message === 'string'
+	);
+}
+
 export interface LiteControlRequest {
 	protocolVersion: number;
 	secret: string;

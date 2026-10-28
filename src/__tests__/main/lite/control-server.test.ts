@@ -7,15 +7,23 @@ import * as path from 'path';
 import { startLiteControlServer } from '../../../main/lite/control-server';
 import { sendLiteCommand } from '../../../cli/services/lite-client';
 import {
+	LITE_CONTROL_DISABLED_BY_POLICY,
 	LITE_CONTROL_DISCOVERY_FILE,
 	LITE_CONTROL_MAX_BYTES,
 	resolveLiteDataDirectory,
 	isLiteControlEndpoint,
+	isLiteControlHeld,
 } from '../../../shared/lite-control';
 import type { LiteControlDiscovery } from '../../../shared/lite-control';
+import { heldListeners, setListenerAuthority } from '../../../main/enterprise/listener-gate';
+import {
+	denyingListenerAuthority,
+	managedListenerAuthority,
+} from '../../helpers/listenerAuthority';
 
 const cleanups: (() => Promise<unknown>)[] = [];
 afterEach(async () => {
+	setListenerAuthority(null);
 	for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 async function directory(): Promise<string> {
@@ -222,5 +230,98 @@ describe('Lite OS-local control security and lifecycle', () => {
 			if (prior === undefined) delete process.env.MAESTRO_USER_DATA;
 			else process.env.MAESTRO_USER_DATA = prior;
 		}
+	});
+});
+
+describe('Lite control endpoint under the listener ceiling (MRC2-05-06A)', () => {
+	it('listens on nothing under a denying ceiling and reports disabled-by-policy to maestro-cli', async () => {
+		const dir = await directory();
+		const denying = denyingListenerAuthority('kind-denied');
+		setListenerAuthority(denying.authority);
+		let dispatched = 0;
+		const server = await startLiteControlServer(dir, async () => {
+			dispatched++;
+			return {};
+		});
+		cleanups.push(server.close);
+		expect(server.held).toMatchObject({ kind: 'lite-control', port: 0, code: 'kind-denied' });
+		expect(denying.requests).toHaveLength(1);
+		expect(denying.requests[0]).toMatchObject({ kind: 'lite-control', port: 0 });
+		expect(isLiteControlEndpoint(denying.requests[0].bind)).toBe(true);
+		await expect(raw(denying.requests[0].bind, '{}\n')).rejects.toThrow();
+		const record = JSON.parse(
+			await readFile(path.join(dir, LITE_CONTROL_DISCOVERY_FILE), 'utf8')
+		) as unknown;
+		expect(isLiteControlHeld(record)).toBe(true);
+		expect(record).toEqual({
+			protocolVersion: 1,
+			pid: process.pid,
+			status: LITE_CONTROL_DISABLED_BY_POLICY,
+			code: 'kind-denied',
+			message: expect.stringMatching(/^\[managed-kind-denied\] /),
+		});
+		await expect(sendLiteCommand('status', undefined, { userData: dir })).rejects.toThrow(
+			/Maestro Lite local control is disabled-by-policy\. \[managed-kind-denied\]/
+		);
+		expect(dispatched).toBe(0);
+		expect(heldListeners()).toMatchObject([{ kind: 'lite-control', reach: 'loopback', count: 1 }]);
+		await server.close();
+		await server.close();
+		await expect(readFile(path.join(dir, LITE_CONTROL_DISCOVERY_FILE))).rejects.toMatchObject({
+			code: 'ENOENT',
+		});
+	});
+
+	it('still honors a live owner on a hold and never replaces its discovery with a record', async () => {
+		const dir = await directory();
+		const live = await startLiteControlServer(dir, async () => ({}));
+		cleanups.push(live.close);
+		const original = await discovery(dir);
+		setListenerAuthority(denyingListenerAuthority('unavailable').authority);
+		await expect(startLiteControlServer(dir, async () => ({}))).rejects.toThrow(/already owns/);
+		expect(await discovery(dir)).toEqual(original);
+	});
+
+	it('leaves a record it does not own alone on close, and a later standalone start replaces a held record', async () => {
+		const dir = await directory();
+		setListenerAuthority(denyingListenerAuthority('kind-denied').authority);
+		const held = await startLiteControlServer(dir, async () => ({}));
+		cleanups.push(held.close);
+		const foreign = {
+			...JSON.parse(await readFile(path.join(dir, LITE_CONTROL_DISCOVERY_FILE), 'utf8')),
+			pid: Number.MAX_SAFE_INTEGER,
+		};
+		await writeFile(path.join(dir, LITE_CONTROL_DISCOVERY_FILE), JSON.stringify(foreign));
+		await held.close();
+		expect(JSON.parse(await readFile(path.join(dir, LITE_CONTROL_DISCOVERY_FILE), 'utf8'))).toEqual(
+			foreign
+		);
+		setListenerAuthority(null);
+		const server = await startLiteControlServer(dir, async () => ({
+			state: { status: 'Disconnected', picker: true, profiles: [], aliases: [] },
+		}));
+		cleanups.push(server.close);
+		expect(server.held).toBeNull();
+		expect(isLiteControlEndpoint((await discovery(dir)).endpoint)).toBe(true);
+		expect(await sendLiteCommand('status', undefined, { userData: dir })).toMatchObject({
+			success: true,
+		});
+	});
+
+	it('binds under the real ceiling that lists lite-control at loopback, the reach an OS-local endpoint has', async () => {
+		const dir = await directory();
+		const managed = managedListenerAuthority([{ kind: 'lite-control', reach: 'loopback' }]);
+		setListenerAuthority(managed.authority);
+		const server = await startLiteControlServer(dir, async () => ({
+			state: { status: 'Disconnected', picker: true, profiles: [], aliases: [] },
+		}));
+		cleanups.push(server.close);
+		expect(server.held).toBeNull();
+		expect(managed.requests[0]).toMatchObject({ kind: 'lite-control', port: 0 });
+		expect(await sendLiteCommand('status', undefined, { userData: dir })).toMatchObject({
+			success: true,
+			state: { status: 'Disconnected' },
+		});
+		expect(heldListeners()).toEqual([]);
 	});
 });

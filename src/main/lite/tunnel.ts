@@ -4,6 +4,7 @@ import { promisify } from 'util';
 import net from 'net';
 import { buildSshConnectionArgs, describeSshConnectionError } from '../../shared/sshConnection';
 import type { SshRemoteConfig } from '../../shared/types';
+import { holdListener } from '../enterprise/listener-gate';
 
 export function tunnelArgs(config: SshRemoteConfig, endpoint: URL, localPort: number): string[] {
 	if (!Number.isInteger(localPort) || localPort < 1 || localPort > 65535)
@@ -79,6 +80,10 @@ export async function openTunnel(
 	onExit: (message: string) => void,
 	preferredPort?: number
 ): Promise<{ tunnel: OwnedTunnel; url: URL }> {
+	// The managed listener ceiling (MRC2-05-06A) holds the loopback forward
+	// `ssh -L` would bind BEFORE the free-port probe, the `ssh -G` resolution
+	// and the spawn: a refusal throws `ListenerDeniedError` and nothing listens.
+	holdListener({ kind: 'ssh-tunnel', bind: '127.0.0.1', port: preferredPort ?? 0 });
 	const port = await availablePort(preferredPort).catch((error: NodeJS.ErrnoException) => {
 		if (preferredPort && error.code === 'EADDRINUSE') return availablePort();
 		throw error;

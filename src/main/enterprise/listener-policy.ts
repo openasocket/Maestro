@@ -5,20 +5,25 @@
  * and every tunnel that publishes one, is a listener of a closed KIND: `web`
  * (the fastify server behind maestro-cli and Live Mode), `tunnel` (the
  * cloudflared quick tunnel that puts that server on the Internet),
- * `lite-control`, `tailnet` and `mdns` (the Lite host's control server,
- * tailnet listener and discovery advertisement), `cue-webhook` and
- * `cue-status` (the Cue engine's webhook receiver and its loopback status
- * server), `relay` (the permission relay bridge), `steering` (the maestro-p
- * steering socket) and `coworking` (the coworking MCP server). A sink names
- * its kind, the address it is about to bind and the port; the policy answers
- * BEFORE the bind, so a forbidden listener never exists for even a moment.
+ * `ssh-tunnel` (the loopback forward a Lite client opens with `ssh -L` to
+ * reach a host: the opposite direction, so never the cloudflared kind),
+ * `lite-control` (the Lite client's OS-local control endpoint behind
+ * `maestro-cli lite`), `tailnet` (the Lite host's direct listener on a
+ * Tailscale or a LAN interface) and `mdns` (its discovery advertisement),
+ * `cue-webhook` and `cue-status` (the Cue engine's webhook receiver and its
+ * loopback status server), `relay` (the permission relay bridge), `steering`
+ * (the maestro-p steering socket) and `coworking` (the coworking MCP server).
+ * A sink names its kind, the address it is about to bind and the port; the
+ * policy answers BEFORE the bind, so a forbidden listener never exists for
+ * even a moment.
  *
  * What the ceiling says of a kind is how far a socket of that kind may REACH:
  * `loopback` (this machine only), `tailnet` (a Tailscale address), `lan` (one
  * named interface of the local network), `any` (every interface) or `public`
  * (the Internet, which only a tunnel ever is). The reach a request has is
  * read from the bind address (`listenerReach()`); a `tunnel` is `public`
- * whatever local target it forwards to. A kind the ceiling does not list may
+ * whatever local target it forwards to, and an OS-local endpoint (a Unix
+ * socket path, a Windows named pipe) is `loopback`. A kind the ceiling does not list may
  * not bind at all; a listed kind binds only as far as its entry reaches, so a
  * policy that lists `web` at `loopback` keeps the CLI server and refuses Live
  * Mode's `0.0.0.0` by name. Standalone nothing here is consulted and every
@@ -56,6 +61,7 @@ export {
 export const LISTENER_KINDS = [
 	'web',
 	'tunnel',
+	'ssh-tunnel',
 	'lite-control',
 	'tailnet',
 	'mdns',
@@ -112,14 +118,21 @@ function isTailnetAddress(address: string): boolean {
 	return /^fd7a:115c:a1e0:/i.test(address);
 }
 
+/** A Unix socket path or a Windows named pipe: an endpoint only a process on this machine can open. */
+export function isOsLocalEndpoint(bind: string): boolean {
+	return bind.startsWith('/') || /^(\\\\|\/\/)[.?][\\/]pipe[\\/]/i.test(bind);
+}
+
 /**
  * How far a socket bound at `bind` can be reached. The empty string, `0.0.0.0`
- * and `::` are every interface; `localhost`, `127.0.0.0/8` and `::1` are this
- * machine; a Tailscale address is the tailnet; any other address is one
- * interface of the local network. A tunnel is public whatever it forwards to.
+ * and `::` are every interface; `localhost`, `127.0.0.0/8`, `::1` and an
+ * OS-local endpoint are this machine; a Tailscale address is the tailnet; any
+ * other address is one interface of the local network. A tunnel is public
+ * whatever it forwards to.
  */
 export function listenerReach(kind: ListenerKind, bind: string): ListenerReach {
 	if (kind === 'tunnel') return 'public';
+	if (isOsLocalEndpoint(bind)) return 'loopback';
 	const address = bind
 		.trim()
 		.replace(/^\[|\]$/g, '')

@@ -24,6 +24,7 @@ import {
 	LISTENER_KINDS,
 	LISTENER_REACHES,
 	createListenerPolicySource,
+	isOsLocalEndpoint,
 	listenerReach,
 	listenerVerdict,
 	managedListenerStanding,
@@ -78,10 +79,11 @@ function read(status: IdentityRead['status']): IdentityRead {
 afterEach(() => setListenerAuthority(null));
 
 describe('kinds and reach', () => {
-	it('names the ten listener kinds and five reaches in order, narrowest first', () => {
+	it('names the eleven listener kinds and five reaches in order, narrowest first', () => {
 		expect(LISTENER_KINDS).toEqual([
 			'web',
 			'tunnel',
+			'ssh-tunnel',
 			'lite-control',
 			'tailnet',
 			'mdns',
@@ -115,6 +117,44 @@ describe('kinds and reach', () => {
 		expect(listenerReach('web', 'fe80::1%en0')).toBe('lan');
 		expect(listenerReach('tunnel', '127.0.0.1')).toBe('public');
 	});
+
+	it('reads an OS-local endpoint as loopback, and an ssh-tunnel forward off its bind, never as public', () => {
+		expect(isOsLocalEndpoint('/tmp/maestro-lite-0f.sock')).toBe(true);
+		expect(isOsLocalEndpoint('\\\\.\\pipe\\maestro-lite-0f')).toBe(true);
+		expect(isOsLocalEndpoint('\\\\?\\pipe\\maestro-lite-0f')).toBe(true);
+		expect(isOsLocalEndpoint('//./pipe/maestro-lite-0f')).toBe(true);
+		expect(isOsLocalEndpoint('\\\\remote-host\\pipe\\maestro-lite-0f')).toBe(false);
+		expect(isOsLocalEndpoint('127.0.0.1')).toBe(false);
+		expect(isOsLocalEndpoint('')).toBe(false);
+		expect(listenerReach('lite-control', '/tmp/maestro-lite-0f.sock')).toBe('loopback');
+		expect(listenerReach('lite-control', '\\\\.\\pipe\\maestro-lite-0f')).toBe('loopback');
+		expect(listenerReach('lite-control', '\\\\remote-host\\pipe\\maestro-lite-0f')).toBe('lan');
+		expect(listenerReach('ssh-tunnel', '127.0.0.1')).toBe('loopback');
+		expect(listenerReach('ssh-tunnel', '0.0.0.0')).toBe('any');
+		expect(problemsOf(document({ listeners: [{ kind: 'ssh-tunnel', reach: 'public' }] }))).toEqual([
+			'listeners[0].reach "public" is only for the tunnel kind',
+		]);
+		const standing = managed(
+			ceilingOf(
+				document({
+					listeners: [
+						{ kind: 'ssh-tunnel', reach: 'loopback' },
+						{ kind: 'lite-control', reach: 'loopback' },
+					],
+				})
+			)
+		);
+		expect(
+			listenerVerdict(standing, request({ kind: 'ssh-tunnel', bind: '127.0.0.1', port: 4321 }))
+		).toMatchObject({ allowed: true, managed: { reach: 'loopback', outcome: 'within-ceiling' } });
+		expect(
+			listenerVerdict(standing, request({ kind: 'lite-control', bind: '/tmp/x.sock', port: 0 }))
+		).toMatchObject({ allowed: true, managed: { reach: 'loopback' } });
+		expect(listenerVerdict(standing, request({ kind: 'tunnel' }))).toMatchObject({
+			allowed: false,
+			code: 'kind-denied',
+		});
+	});
 });
 
 describe('parseListenerPolicyCeiling', () => {
@@ -147,9 +187,9 @@ describe('parseListenerPolicyCeiling', () => {
 		expect(problemsOf(document({ listeners: 'web' }))).toEqual(['listeners is not an array']);
 		expect(
 			problemsOf(
-				document({ listeners: Array.from({ length: 11 }, () => ({ kind: 'web', reach: 'any' })) })
+				document({ listeners: Array.from({ length: 12 }, () => ({ kind: 'web', reach: 'any' })) })
 			)
-		).toEqual(['listeners exceeds 10 entries']);
+		).toEqual(['listeners exceeds 11 entries']);
 		expect(problemsOf(document({ listeners: ['web'] }))).toEqual(['listeners[0] is not an object']);
 		expect(problemsOf(document({ listeners: [{ kind: 'ftp', reach: 'any' }] }))).toEqual([
 			'listeners[0].kind is not a listener kind',

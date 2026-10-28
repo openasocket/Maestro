@@ -5,8 +5,10 @@ import {
 	LITE_CONTROL_DISCOVERY_FILE,
 	LITE_CONTROL_PROTOCOL_VERSION,
 	LITE_CONTROL_MAX_BYTES,
+	LITE_CONTROL_DISABLED_BY_POLICY,
 	resolveLiteDataDirectory,
 	isLiteControlEndpoint,
+	isLiteControlHeld,
 } from '../../shared/lite-control';
 import type {
 	LiteControlAction,
@@ -40,6 +42,12 @@ export async function sendLiteCommand(
 	if (discovery?.protocolVersion !== LITE_CONTROL_PROTOCOL_VERSION)
 		throw new Error(
 			'Unsupported Lite control protocol. Rebuild/restart Lite and maestro-cli together.'
+		);
+	// The managed listener ceiling refused the control endpoint: Lite is running
+	// and reachable from its own window, and local control is held by name.
+	if (isLiteControlHeld(discovery))
+		throw new Error(
+			`Maestro Lite local control is ${LITE_CONTROL_DISABLED_BY_POLICY}. ${discovery.message}`
 		);
 	if (
 		typeof discovery.secret !== 'string' ||

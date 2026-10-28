@@ -23,6 +23,7 @@ import { validateHandshake, HostConnectionError } from './handshake';
 import { connectionPage } from './ui';
 import { parseSshConfig } from '../utils/ssh-config-parser';
 import { startLiteControlServer } from './control-server';
+import { isListenerDeniedError } from '../enterprise/listener-gate';
 import { resolveLiteDataDirectory } from '../../shared/lite-control';
 import type { LiteControlOptions, LiteControlState } from '../../shared/lite-control';
 
@@ -516,12 +517,20 @@ export async function startLite(): Promise<void> {
 				})();
 			}, 1000);
 		} catch (cause) {
-			if (!signal.aborted)
-				fail(
-					cause instanceof HostConnectionError
-						? cause.message
-						: `Could not connect. Check that the host is awake, Maestro Remote Control is enabled, and the connection details are correct. Then try Connect again.\n\nDetails: ${cause instanceof Error ? cause.message : String(cause)}`
-				);
+			if (!signal.aborted) {
+				if (isListenerDeniedError(cause)) {
+					// The managed listener ceiling refused the SSH forward: not a host
+					// that is asleep, and never retried. Report it by name.
+					fail(cause.message);
+					status = 'Disabled by policy';
+					publish();
+				} else
+					fail(
+						cause instanceof HostConnectionError
+							? cause.message
+							: `Could not connect. Check that the host is awake, Maestro Remote Control is enabled, and the connection details are correct. Then try Connect again.\n\nDetails: ${cause instanceof Error ? cause.message : String(cause)}`
+					);
+			}
 		} finally {
 			initialState?.();
 		}
