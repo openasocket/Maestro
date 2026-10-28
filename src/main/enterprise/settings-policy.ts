@@ -10,11 +10,28 @@
  * startup and on each policy change. No endpoint operation of this build
  * carries a settings policy (CP-01), so nothing calls `install()` yet: an
  * enrolled desktop refuses every lockable key `unavailable`; standalone, none.
+ *
+ * The per-provider configuration (MRC2-06-03: path, arguments, environment,
+ * model, effort) is held the same way through `holdAgentConfigWrite()`, read
+ * by the `agents:setConfig*` IPC handlers and the bridge's
+ * `update_session_config`: the lock first, then what the Phase 1 provider
+ * ceiling would refuse at launch, named at write time instead of silently
+ * stripped later.
  */
 
 import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
+import { parseCustomArgs } from '../../shared/maestro-lib/launch/agent-args';
+import {
+	ALL_ROUTE_ENV_NAMES,
+	MANAGED_AUTHORITY_ENV_NAMES,
+	MANAGED_AUTHORITY_ENV_PREFIX,
+	managedArgsProblems,
+	type ManagedRouteCeiling,
+} from '../../shared/maestro-lib/launch/env';
+import { isWindows } from '../../shared/platformDetection';
 import {
 	LOCKABLE_SETTING_KEYS,
+	agentConfigLockKey,
 	applyManagedPins,
 	isSettingLockable,
 	managedSettingLockReason,
@@ -79,6 +96,82 @@ export function settingWriteVerdict(
 	return reason === null ? { allowed: true } : deny('locked', reason);
 }
 
+export type AgentConfigWriteDenial = SettingWriteDenial | 'ceiling';
+export type AgentConfigWriteDecision =
+	| { allowed: true }
+	| {
+			allowed: false;
+			code: AgentConfigWriteDenial;
+			message: string;
+			policyRevision: number | null;
+	  };
+
+/** A ceiling that pins nothing: only the flags and names no policy admits are a problem. */
+const unpinnedCeiling = (providerId: string): ManagedRouteCeiling => ({
+	providerId,
+	model: null,
+	baseUrl: null,
+	accountDir: null,
+	login: 'provider-login',
+	permissionMode: null,
+});
+
+const removedByEnvCeiling = (name: string): boolean => {
+	const same = (known: string) =>
+		known === name || (isWindows() && known.toUpperCase() === name.toUpperCase());
+	return (
+		ALL_ROUTE_ENV_NAMES.some(same) ||
+		MANAGED_AUTHORITY_ENV_NAMES.some(same) ||
+		name.toUpperCase().startsWith(MANAGED_AUTHORITY_ENV_PREFIX)
+	);
+};
+
+/**
+ * What the Phase 1 provider ceiling would refuse at launch, named at write
+ * time: an argument that routes around it (`managedArgsProblems` under a
+ * ceiling that pins nothing) and an environment name `applyManagedEnvCeiling`
+ * removes. The pinned model, origin, account home and permission mode stay
+ * the launch plan's to hold, so a value admitted here can still be refused there.
+ */
+export function agentConfigCeilingProblems(
+	providerId: string,
+	field: string,
+	value: unknown
+): string[] {
+	if (field === 'customArgs' && typeof value === 'string')
+		return managedArgsProblems(parseCustomArgs(value), unpinnedCeiling(providerId));
+	if (field === 'customEnvVars' && value && typeof value === 'object')
+		return Object.keys(value)
+			.filter(removedByEnvCeiling)
+			.map((name) => `${name} is removed by the managed environment ceiling at launch`);
+	return [];
+}
+
+/**
+ * Hold one per-provider configuration write: the lock (`agentConfig.<field>`,
+ * the rule of `settingWriteVerdict`), then, under a usable policy, the
+ * ceiling. A field no policy may hold, and standalone, admit everything.
+ */
+export function agentConfigWriteVerdict(
+	standing: ManagedSettingsStanding,
+	providerId: string,
+	field: string,
+	value: unknown
+): AgentConfigWriteDecision {
+	const key = agentConfigLockKey(field);
+	if (key === null || standing.standing === 'standalone') return { allowed: true };
+	const lock = settingWriteVerdict(standing, key);
+	if (!lock.allowed) return lock;
+	const problems = agentConfigCeilingProblems(providerId, field, value);
+	if (problems.length === 0) return { allowed: true };
+	return {
+		allowed: false,
+		code: 'ceiling',
+		message: `the ${field} configuration of ${providerId} would route around the managed provider ceiling: ${problems.join('; ')}`,
+		policyRevision: standing.policyRevision,
+	};
+}
+
 export interface SettingsPolicySourceDeps {
 	identity: Pick<EnterpriseIdentityStore, 'read'>;
 	policy(): Pick<ManagedPolicyStatus, 'appliedRevision'> | null;
@@ -87,6 +180,8 @@ export interface SettingsPolicySourceDeps {
 /** What a write path holds a key with: the source, or a test double. */
 export interface SettingsWriteAuthority {
 	authorize(key: string): SettingWriteDecision;
+	/** Hold a per-provider configuration field (`customPath`, `customArgs`, `customEnvVars`, `model`, `reasoningEffort`). */
+	authorizeAgentConfig(providerId: string, field: string, value: unknown): AgentConfigWriteDecision;
 	/** The policy whose pins a store restores, or null when none is usable. */
 	pins(): ManagedSettingsPolicy | null;
 }
@@ -130,6 +225,8 @@ export function createSettingsPolicySource(deps: SettingsPolicySourceDeps): Sett
 			changed();
 		},
 		authorize: (key) => settingWriteVerdict(standing(), key),
+		authorizeAgentConfig: (providerId, field, value) =>
+			agentConfigWriteVerdict(standing(), providerId, field, value),
 		pins() {
 			const current = standing();
 			return current.standing === 'managed' ? current.policy : null;
@@ -145,7 +242,7 @@ export function createSettingsPolicySource(deps: SettingsPolicySourceDeps): Sett
 export class ManagedSettingLockedError extends Error {
 	constructor(
 		readonly key: string,
-		readonly code: SettingWriteDenial,
+		readonly code: AgentConfigWriteDenial,
 		message: string
 	) {
 		super(message);
@@ -164,6 +261,17 @@ export function setSettingsWriteAuthority(authority: SettingsWriteAuthority | nu
 /** Hold a write to `key` (a dotted path is held by its top-level key). Standalone: allowed. */
 export function holdSettingWrite(key: string): SettingWriteDecision {
 	return writeAuthority ? writeAuthority.authorize(key.split('.')[0]) : { allowed: true };
+}
+
+/** Hold a per-provider configuration write for `providerId` through the same authority. Standalone: allowed. */
+export function holdAgentConfigWrite(
+	providerId: string,
+	field: string,
+	value: unknown
+): AgentConfigWriteDecision {
+	return writeAuthority
+		? writeAuthority.authorizeAgentConfig(providerId, field, value)
+		: { allowed: true };
 }
 
 type Setter = (...args: unknown[]) => unknown;

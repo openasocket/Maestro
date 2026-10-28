@@ -80,6 +80,8 @@ import {
 import type { CodexResetCreditConsumeResult } from '../../../shared/codexResetCredits';
 import type { KnownAuthDirs } from '../../../shared/authPaths';
 import { rememberableEnvVarKeys, type KnownEnvVarKeys } from '../../../shared/envVarCatalog';
+import { agentConfigLockKey, changedAgentConfigFields } from '../../../shared/managedSettingsLock';
+import { ManagedSettingLockedError, holdAgentConfigWrite } from '../../enterprise/settings-policy';
 
 const LOG_CONTEXT = '[AgentDetector]';
 const CONFIG_LOG_CONTEXT = '[AgentConfig]';
@@ -94,6 +96,22 @@ const handlerOpts = (
 });
 
 type AuthPathResolver = (env: NodeJS.ProcessEnv) => string;
+
+/**
+ * Hold a per-provider configuration write to the managed policy and the
+ * provider ceiling (MRC2-06-03) before anything is written: a refusal throws
+ * by name, so the renderer and the bridge receive the reason and the store is
+ * untouched. Standalone, or a field no policy may hold: admitted.
+ */
+function holdAgentConfig(agentId: string, field: string, value: unknown): void {
+	const decision = holdAgentConfigWrite(agentId, field, value);
+	if (decision.allowed) return;
+	throw new ManagedSettingLockedError(
+		agentConfigLockKey(field) ?? field,
+		decision.code,
+		decision.message
+	);
+}
 
 function getCustomEnvVars(value: unknown): Record<string, unknown> {
 	if (!value || typeof value !== 'object' || !('customEnvVars' in value)) {
@@ -1527,6 +1545,8 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 			handlerOpts('setConfig', CONFIG_LOG_CONTEXT),
 			async (agentId: string, config: Record<string, unknown>) => {
 				const allConfigs = agentConfigsStore.get('configs', {});
+				for (const field of changedAgentConfigFields(allConfigs[agentId] ?? {}, config))
+					holdAgentConfig(agentId, field, config[field]);
 				allConfigs[agentId] = config;
 				agentConfigsStore.set('configs', allConfigs);
 				logger.info(`Updated config for agent: ${agentId}`, CONFIG_LOG_CONTEXT, config);
@@ -1564,6 +1584,7 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 		withIpcErrorLogging(
 			handlerOpts('setConfigValue', CONFIG_LOG_CONTEXT),
 			async (agentId: string, key: string, value: unknown) => {
+				holdAgentConfig(agentId, key, value);
 				const allConfigs = agentConfigsStore.get('configs', {});
 				if (!allConfigs[agentId]) {
 					allConfigs[agentId] = {};
@@ -1582,6 +1603,7 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 		withIpcErrorLogging(
 			handlerOpts('setCustomPath', CONFIG_LOG_CONTEXT),
 			async (agentId: string, customPath: string | null) => {
+				holdAgentConfig(agentId, 'customPath', customPath);
 				const agentDetector = requireDependency(getAgentDetector, 'Agent detector');
 
 				const allConfigs = agentConfigsStore.get('configs', {});
@@ -1646,6 +1668,7 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 		withIpcErrorLogging(
 			handlerOpts('setCustomArgs', CONFIG_LOG_CONTEXT),
 			async (agentId: string, customArgs: string | null) => {
+				holdAgentConfig(agentId, 'customArgs', customArgs);
 				const allConfigs = agentConfigsStore.get('configs', {});
 				if (!allConfigs[agentId]) {
 					allConfigs[agentId] = {};
@@ -1698,6 +1721,7 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 		withIpcErrorLogging(
 			handlerOpts('setCustomEnvVars', CONFIG_LOG_CONTEXT),
 			async (agentId: string, customEnvVars: Record<string, string> | null) => {
+				holdAgentConfig(agentId, 'customEnvVars', customEnvVars);
 				const allConfigs = agentConfigsStore.get('configs', {});
 				if (!allConfigs[agentId]) {
 					allConfigs[agentId] = {};

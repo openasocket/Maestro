@@ -9,6 +9,8 @@
 
 import { AGENT_IDS } from '../../../../shared/agentIds';
 import { readBackgroundField } from '../../../../shared/focusPlacement';
+import { SESSION_CONFIG_LOCK_FIELDS } from '../../../../shared/managedSettingsLock';
+import { holdAgentConfigWrite } from '../../../enterprise/settings-policy';
 import type { CreateSessionConfig } from '../../types';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 
@@ -391,6 +393,29 @@ export function handleUpdateSessionConfig(
 
 	if (!ctx.callbacks.updateSessionConfig) {
 		ctx.sendError(client, 'Session config updates not configured');
+		return;
+	}
+
+	// A provider field of the agent's own record that the managed policy holds
+	// (path, arguments, environment, model, effort) is refused here by name
+	// (MRC2-06-03), the same check the agents:setConfig* handlers hold, before
+	// the renderer round trip: update-agent and the tab verbs cannot bypass it.
+	// A typed result, so the CLI prints the policy's line, not a bare failure.
+	const providerId =
+		ctx.callbacks.getSessions?.().find((session) => session.id === sessionId)?.toolType ??
+		'unknown';
+	for (const [patchKey, field] of Object.entries(SESSION_CONFIG_LOCK_FIELDS)) {
+		if (!(patchKey in configPatch)) continue;
+		const hold = holdAgentConfigWrite(providerId, field, configPatch[patchKey]);
+		if (hold.allowed) continue;
+		ctx.send(client, {
+			type: responseType,
+			success: false,
+			error: hold.message,
+			sessionId,
+			requestId: message.requestId,
+			managed: { state: hold.code === 'unavailable' ? 'unavailable' : 'denied', code: hold.code },
+		});
 		return;
 	}
 

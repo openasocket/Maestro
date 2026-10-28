@@ -82,7 +82,7 @@ export type AgentConfigResolution = {
 };
 
 /** Parse a space-separated custom args string into an array, respecting quoted segments. */
-function parseCustomArgs(customArgs?: string): string[] {
+export function parseCustomArgs(customArgs?: string): string[] {
 	if (!customArgs || typeof customArgs !== 'string') {
 		return [];
 	}

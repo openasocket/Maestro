@@ -19,8 +19,15 @@ import {
 	CodexRpcTransportError,
 } from '../../../../main/codex-app-server/rpc-client';
 import { captureException } from '../../../../main/utils/sentry';
+import {
+	ManagedSettingLockedError,
+	setSettingsWriteAuthority,
+	type SettingsWriteAuthority,
+} from '../../../../main/enterprise/settings-policy';
 
 vi.mock('../../../../main/utils/sentry', () => ({ captureException: vi.fn() }));
+// The translation archive's TOML codec is never exercised here (as in agents.remoteProbes.managed.test.ts).
+vi.mock('smol-toml', () => ({ parse: () => ({}), stringify: () => '' }));
 
 vi.mock('../../../../main/agents/path-prober', () => ({
 	checkCustomPath: vi.fn(async (requestedPath: string) => ({ exists: true, path: requestedPath })),
@@ -1016,6 +1023,62 @@ describe('agents IPC handlers', () => {
 			expect(mockAgentConfigsStore.set).toHaveBeenCalledWith('configs', {
 				'new-agent': { key: 'value' },
 			});
+		});
+	});
+
+	describe('per-provider configuration under a managed policy (MRC2-06-03)', () => {
+		/** An authority that holds customPath and customEnvVars and admits the rest, by field. */
+		const authority: SettingsWriteAuthority = {
+			authorize: () => ({ allowed: true }),
+			authorizeAgentConfig: (providerId, field) =>
+				field === 'customPath' || field === 'customEnvVars'
+					? {
+							allowed: false,
+							code: 'locked',
+							message: `the "agentConfig.${field}" setting is locked by managed policy revision 5 (${providerId})`,
+							policyRevision: 5,
+						}
+					: { allowed: true },
+			pins: () => null,
+		};
+		beforeEach(() => setSettingsWriteAuthority(authority));
+		afterEach(() => setSettingsWriteAuthority(null));
+
+		it('refuses a held field by name on every write path and writes nothing', async () => {
+			mockAgentConfigsStore.get.mockReturnValue({ 'claude-code': { customPath: '/old' } });
+			await expect(
+				handlers.get('agents:setCustomPath')!({} as any, 'claude-code', '/new')
+			).rejects.toThrow(ManagedSettingLockedError);
+			await expect(
+				handlers.get('agents:setCustomEnvVars')!({} as any, 'claude-code', { A: '1' })
+			).rejects.toThrow(
+				'the "agentConfig.customEnvVars" setting is locked by managed policy revision 5 (claude-code)'
+			);
+			await expect(
+				handlers.get('agents:setConfigValue')!({} as any, 'claude-code', 'customPath', null)
+			).rejects.toMatchObject({ key: 'agentConfig.customPath', code: 'locked' });
+			await expect(
+				handlers.get('agents:setConfig')!({} as any, 'claude-code', { model: 'x' })
+			).rejects.toThrow(ManagedSettingLockedError);
+			expect(mockAgentConfigsStore.set).not.toHaveBeenCalled();
+			expect(mockAgentDetector.setCustomPaths).not.toHaveBeenCalled();
+		});
+
+		it('admits a field the policy does not hold and a whole-config write that leaves held fields alone', async () => {
+			mockAgentConfigsStore.get.mockReturnValue({ 'claude-code': { customPath: '/old' } });
+			await expect(
+				handlers.get('agents:setCustomArgs')!({} as any, 'claude-code', '--verbose')
+			).resolves.toBe(true);
+			await expect(
+				handlers.get('agents:setConfigValue')!({} as any, 'claude-code', 'contextWindow', 9)
+			).resolves.toBe(true);
+			await expect(
+				handlers.get('agents:setConfig')!({} as any, 'claude-code', {
+					customPath: '/old',
+					model: 'x',
+				})
+			).resolves.toBe(true);
+			expect(mockAgentConfigsStore.set).toHaveBeenCalledTimes(3);
 		});
 	});
 

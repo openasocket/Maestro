@@ -14,6 +14,13 @@
  * declared type (or `null` where the default is `null`); a `sensitive` key
  * may be locked but never pinned, since a policy document is ordinary
  * configuration and a credential in it would land in plain settings.
+ *
+ * Beside the settings keys, a policy may hold the per-provider configuration
+ * fields (MRC2-06-03) as `agentConfig.<field>` keys: the binary path, the
+ * arguments, the environment, the model and the effort every agent of a
+ * provider launches with (`maestro-agent-configs.json`) and the same fields on
+ * one agent's own record. Locked, never pinned: what a managed launch may ask
+ * for is the route ceiling's call at spawn, not a settings value.
  */
 
 import { canonicalJson } from './canonicalJson';
@@ -46,8 +53,41 @@ export const LOCKABLE_SETTING_KEYS: readonly string[] = Object.freeze(
 		.map(([key]) => key)
 );
 
+/** The per-provider configuration fields a policy may hold, in registry order. */
+export const AGENT_CONFIG_LOCK_FIELDS = [
+	'customPath',
+	'customArgs',
+	'customEnvVars',
+	'model',
+	'reasoningEffort',
+] as const;
+export type AgentConfigLockField = (typeof AGENT_CONFIG_LOCK_FIELDS)[number];
+export const AGENT_CONFIG_LOCK_PREFIX = 'agentConfig.';
+/** The lock keys of {@link AGENT_CONFIG_LOCK_FIELDS}: `agentConfig.customPath` and so on. */
+export const AGENT_CONFIG_LOCK_KEYS: readonly string[] = Object.freeze(
+	AGENT_CONFIG_LOCK_FIELDS.map((field) => `${AGENT_CONFIG_LOCK_PREFIX}${field}`)
+);
+/** An agent record's own field (`customModel`) to the configuration field it is held as (`model`). */
+export const SESSION_CONFIG_LOCK_FIELDS: Readonly<Record<string, AgentConfigLockField>> =
+	Object.freeze({
+		customPath: 'customPath',
+		customArgs: 'customArgs',
+		customEnvVars: 'customEnvVars',
+		customModel: 'model',
+		customEffort: 'reasoningEffort',
+	});
+
+export function isAgentConfigLockField(field: string): field is AgentConfigLockField {
+	return (AGENT_CONFIG_LOCK_FIELDS as readonly string[]).includes(field);
+}
+
+/** The lock key a per-provider configuration field is held by, or null for a field no policy may hold. */
+export function agentConfigLockKey(field: string): string | null {
+	return isAgentConfigLockField(field) ? `${AGENT_CONFIG_LOCK_PREFIX}${field}` : null;
+}
+
 export function isSettingLockable(key: string): boolean {
-	return SETTINGS_METADATA[key]?.lockable === true;
+	return SETTINGS_METADATA[key]?.lockable === true || AGENT_CONFIG_LOCK_KEYS.includes(key);
 }
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
@@ -75,6 +115,12 @@ function typeProblem(meta: SettingMetadata, value: unknown): string | null {
 
 /** A fresh JSON copy of a pin the caller's input can no longer reach, or the problem. */
 function parsePinValue(key: string, raw: unknown, at: string, problems: string[]): unknown {
+	if (key.startsWith(AGENT_CONFIG_LOCK_PREFIX)) {
+		problems.push(
+			`${at} pins "${key}", a per-provider configuration key that may be locked but never pinned`
+		);
+		return undefined;
+	}
 	const meta = SETTINGS_METADATA[key];
 	if (meta.sensitive) {
 		problems.push(`${at} pins "${key}", a sensitive key that may be locked but never pinned`);
@@ -137,8 +183,10 @@ export function parseManagedSettingsPolicy(raw: unknown): ManagedSettingsPolicyP
 		problems.push('policyRevision is not a policy revision');
 	const locks: ManagedSettingsLock[] = [];
 	if (!Array.isArray(raw.locks)) problems.push('locks is not an array');
-	else if (raw.locks.length > LOCKABLE_SETTING_KEYS.length)
-		problems.push(`locks exceeds ${LOCKABLE_SETTING_KEYS.length} entries`);
+	else if (raw.locks.length > LOCKABLE_SETTING_KEYS.length + AGENT_CONFIG_LOCK_KEYS.length)
+		problems.push(
+			`locks exceeds ${LOCKABLE_SETTING_KEYS.length + AGENT_CONFIG_LOCK_KEYS.length} entries`
+		);
 	else
 		raw.locks.forEach((entry, index) => {
 			const parsed = parseLock(entry, `locks[${index}]`, problems);
@@ -198,6 +246,16 @@ export function managedSettingLockReason(
 	return lock.pin
 		? `the "${key}" setting is locked and pinned by managed policy revision ${policy.policyRevision}`
 		: `the "${key}" setting is locked by managed policy revision ${policy.policyRevision}`;
+}
+
+/** The held fields a whole-config write changes; a write that leaves a held field as it is holds nothing. */
+export function changedAgentConfigFields(
+	before: Record<string, unknown>,
+	after: Record<string, unknown>
+): AgentConfigLockField[] {
+	return AGENT_CONFIG_LOCK_FIELDS.filter(
+		(field) => !sameJson(before[field] ?? null, after[field] ?? null)
+	);
 }
 
 export interface ManagedPinApplication<T> {

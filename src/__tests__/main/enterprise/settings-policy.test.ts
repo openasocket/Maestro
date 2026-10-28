@@ -9,14 +9,17 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { IdentityRead } from '../../../main/enterprise/identity-store';
 import {
 	ManagedSettingLockedError,
+	agentConfigWriteVerdict,
 	createSettingsPolicySource,
 	guardSettingsStore,
+	holdAgentConfigWrite,
 	holdSettingWrite,
 	managedSettingsStanding,
 	restoreManagedSettingPins,
 	setSettingsWriteAuthority,
 	settingWriteVerdict,
 } from '../../../main/enterprise/settings-policy';
+import { handleUpdateSessionConfig } from '../../../main/web-server/handlers/messageHandlers/sessions';
 import { handleSetSetting } from '../../../main/web-server/handlers/messageHandlers/settings';
 import type { MessageHandlerContext } from '../../../main/web-server/handlers/messageHandlers/types';
 
@@ -186,5 +189,129 @@ describe('the bridge set_setting handler', () => {
 		send('fontSize', 12);
 		expect(ctx.callbacks.setSetting).toHaveBeenCalledWith('fontSize', 12);
 		expect(ctx.sendError).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('agentConfigWriteVerdict and holdAgentConfigWrite (MRC2-06-03)', () => {
+	const standalone = managedSettingsStanding({ enrolled: false, policy: null, installed: null });
+	const none = managedSettingsStanding({ enrolled: true, policy: null, installed: null });
+
+	it('admits every field standalone and with no authority composed, and a field no policy may hold anywhere', () => {
+		expect(agentConfigWriteVerdict(standalone, 'codex', 'customArgs', '--api-key k')).toEqual({
+			allowed: true,
+		});
+		expect(agentConfigWriteVerdict(none, 'codex', 'contextWindow', 9)).toEqual({ allowed: true });
+		expect(holdAgentConfigWrite('claude-code', 'customPath', '/x')).toEqual({ allowed: true });
+	});
+
+	it('refuses every held field unavailable with no usable policy, by the field name', () => {
+		expect(agentConfigWriteVerdict(none, 'codex', 'model', 'gpt-5')).toEqual({
+			allowed: false,
+			code: 'unavailable',
+			message:
+				'the "agentConfig.model" setting is held by managed policy and the managed settings policy is unavailable (no applied policy revision is known for this host)',
+			policyRevision: null,
+		});
+	});
+
+	it('holds a locked field by the lock reason, then an admitted one to the provider ceiling', () => {
+		const current = installed(
+			document({ locks: [{ key: 'agentConfig.customPath' }, { key: 'agentConfig.model' }] })
+		);
+		expect(current.authorizeAgentConfig('codex', 'customPath', null)).toEqual({
+			allowed: false,
+			code: 'locked',
+			message: 'the "agentConfig.customPath" setting is locked by managed policy revision 3',
+			policyRevision: 3,
+		});
+		expect(holdAgentConfigWrite('codex', 'reasoningEffort', 'high')).toEqual({ allowed: true });
+		expect(holdAgentConfigWrite('codex', 'customArgs', '--sandbox read-only -m o3')).toEqual({
+			allowed: true,
+		});
+		expect(holdAgentConfigWrite('codex', 'customArgs', '--api-key sk -c model_provider=x')).toEqual(
+			{
+				allowed: false,
+				code: 'ceiling',
+				message:
+					'the customArgs configuration of codex would route around the managed provider ceiling: --api-key is not allowed under management; -c model_provider is not allowed under management',
+				policyRevision: 3,
+			}
+		);
+		expect(
+			holdAgentConfigWrite('claude-code', 'customArgs', '--settings {"env":{"A":"1"},"model":"m"}')
+		).toMatchObject({ code: 'ceiling' });
+		expect(holdAgentConfigWrite('claude-code', 'customEnvVars', { EDITOR: 'vi' })).toEqual({
+			allowed: true,
+		});
+		expect(
+			holdAgentConfigWrite('claude-code', 'customEnvVars', {
+				ANTHROPIC_API_KEY: 'k',
+				MAESTRO_MANAGED_LEASE: 'l',
+				OPENAI_BASE_URL: 'u',
+				HOME: '/h',
+			})
+		).toMatchObject({
+			code: 'ceiling',
+			message:
+				'the customEnvVars configuration of claude-code would route around the managed provider ceiling: ANTHROPIC_API_KEY is removed by the managed environment ceiling at launch; MAESTRO_MANAGED_LEASE is removed by the managed environment ceiling at launch; OPENAI_BASE_URL is removed by the managed environment ceiling at launch',
+		});
+	});
+});
+
+describe('the bridge update_session_config handler', () => {
+	const client = { cli: true } as never;
+	const ctxOf = () => ({
+		send: vi.fn(),
+		sendError: vi.fn(),
+		callbacks: {
+			updateSessionConfig: vi.fn().mockResolvedValue({ success: true }),
+			getSessions: () => [{ id: 'a1', toolType: 'codex' }],
+		},
+	});
+	const send = (ctx: ReturnType<typeof ctxOf>, configPatch: Record<string, unknown>) =>
+		handleUpdateSessionConfig(ctx as unknown as MessageHandlerContext, client, {
+			type: 'update_session_config',
+			sessionId: 'a1',
+			requestId: 'r1',
+			configPatch,
+		} as never);
+
+	it('refuses a held field of the record as a typed result and never reaches the renderer', () => {
+		installed(document({ locks: [{ key: 'agentConfig.customEnvVars' }] }));
+		const ctx = ctxOf();
+		send(ctx, { nudgeMessage: 'hi', customEnvVars: { A: '1' } });
+		expect(ctx.send).toHaveBeenCalledWith(client, {
+			type: 'update_session_config_result',
+			success: false,
+			error: 'the "agentConfig.customEnvVars" setting is locked by managed policy revision 3',
+			sessionId: 'a1',
+			requestId: 'r1',
+			managed: { state: 'denied', code: 'locked' },
+		});
+		send(ctx, { customModel: 'o3', customArgs: '--base-url http://x' });
+		expect(ctx.send).toHaveBeenLastCalledWith(
+			client,
+			expect.objectContaining({ success: false, managed: { state: 'denied', code: 'ceiling' } })
+		);
+		expect(ctx.callbacks.updateSessionConfig).not.toHaveBeenCalled();
+		send(ctx, { nudgeMessage: 'hi', customModel: 'o3', customEffort: null });
+		expect(ctx.callbacks.updateSessionConfig).toHaveBeenCalledWith('a1', {
+			nudgeMessage: 'hi',
+			customModel: 'o3',
+			customEffort: null,
+		});
+	});
+
+	it('answers unavailable on an enrolled host with no policy and passes everything standalone', () => {
+		setSettingsWriteAuthority(source(enrolled, null));
+		const ctx = ctxOf();
+		send(ctx, { customPath: '/bin/codex' });
+		expect(ctx.send).toHaveBeenCalledWith(
+			client,
+			expect.objectContaining({ managed: { state: 'unavailable', code: 'unavailable' } })
+		);
+		setSettingsWriteAuthority(null);
+		send(ctx, { customPath: '/bin/codex', customEnvVars: { ANTHROPIC_API_KEY: 'k' } });
+		expect(ctx.callbacks.updateSessionConfig).toHaveBeenCalledTimes(1);
 	});
 });

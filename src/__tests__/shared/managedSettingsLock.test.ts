@@ -7,9 +7,13 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+	AGENT_CONFIG_LOCK_KEYS,
 	LOCKABLE_SETTING_KEYS,
 	MANAGED_SETTINGS_LIMITS,
+	SESSION_CONFIG_LOCK_FIELDS,
+	agentConfigLockKey,
 	applyManagedPins,
+	changedAgentConfigFields,
 	isSettingLockable,
 	isSettingLocked,
 	lockedSettingKeys,
@@ -96,10 +100,9 @@ describe('parseManagedSettingsPolicy', () => {
 		expect(parse([{ key: 'ghPath', extra: true }])).toEqual(
 			refused('locks[0].extra is not a known key')
 		);
-		const many = Array.from({ length: LOCKABLE_SETTING_KEYS.length + 1 }, () => ({
-			key: 'ghPath',
-		}));
-		expect(parse(many)).toEqual(refused(`locks exceeds ${LOCKABLE_SETTING_KEYS.length} entries`));
+		const bound = LOCKABLE_SETTING_KEYS.length + AGENT_CONFIG_LOCK_KEYS.length;
+		const many = Array.from({ length: bound + 1 }, () => ({ key: 'ghPath' }));
+		expect(parse(many)).toEqual(refused(`locks exceeds ${bound} entries`));
 	});
 
 	it.each([
@@ -224,5 +227,63 @@ describe('applyManagedPins', () => {
 		expect(settings).not.toHaveProperty('utilityAgentId');
 		(applied.settings.encoreFeatures as Record<string, unknown>).maestroCue = true;
 		expect(policy.locks[2].pin).toEqual({ value: { maestroCue: false } });
+	});
+});
+
+describe('the per-provider configuration namespace (MRC2-06-03)', () => {
+	it('names the five fields as agentConfig.* keys beside, not inside, the settings keys', () => {
+		expect(AGENT_CONFIG_LOCK_KEYS).toEqual([
+			'agentConfig.customPath',
+			'agentConfig.customArgs',
+			'agentConfig.customEnvVars',
+			'agentConfig.model',
+			'agentConfig.reasoningEffort',
+		]);
+		expect(AGENT_CONFIG_LOCK_KEYS.every(isSettingLockable)).toBe(true);
+		expect(AGENT_CONFIG_LOCK_KEYS.some((key) => LOCKABLE_SETTING_KEYS.includes(key))).toBe(false);
+		expect(agentConfigLockKey('customArgs')).toBe('agentConfig.customArgs');
+		expect(agentConfigLockKey('contextWindow')).toBeNull();
+		expect(isSettingLockable('agentConfig.contextWindow')).toBe(false);
+		expect(isSettingLockable('agentConfig')).toBe(false);
+		expect(Object.values(SESSION_CONFIG_LOCK_FIELDS).map(agentConfigLockKey)).toEqual(
+			AGENT_CONFIG_LOCK_KEYS
+		);
+	});
+
+	it('parses a lock on an agentConfig key, refuses its pin, and holds it by the one reason', () => {
+		const parsed = parseManagedSettingsPolicy({
+			policyRevision: 2,
+			locks: [{ key: 'agentConfig.customEnvVars' }, { key: 'ghPath' }],
+		});
+		expect(parsed.ok).toBe(true);
+		const policy = parsed.ok ? parsed.policy : null;
+		expect(lockedSettingKeys(policy)).toEqual(['agentConfig.customEnvVars', 'ghPath']);
+		expect(isSettingLocked('agentConfig.customEnvVars', policy)).toBe(true);
+		expect(isSettingLocked('agentConfig.customArgs', policy)).toBe(false);
+		expect(managedSettingLockReason('agentConfig.customEnvVars', policy)).toBe(
+			'the "agentConfig.customEnvVars" setting is locked by managed policy revision 2'
+		);
+		expect(managedSettingPin('agentConfig.customEnvVars', policy)).toBeNull();
+		expect(applyManagedPins({ ghPath: '/g' }, policy).restored).toEqual([]);
+		expect(
+			parseManagedSettingsPolicy({
+				policyRevision: 2,
+				locks: [{ key: 'agentConfig.model', pin: { value: 'gpt-5' } }],
+			})
+		).toEqual({
+			ok: false,
+			problems: [
+				'locks[0].pin.value pins "agentConfig.model", a per-provider configuration key that may be locked but never pinned',
+			],
+		});
+	});
+
+	it('lists only the held fields a whole-config write changes', () => {
+		const before = { customPath: '/a', customEnvVars: { A: '1' }, contextWindow: 5 };
+		expect(changedAgentConfigFields(before, { ...before, contextWindow: 9 })).toEqual([]);
+		expect(changedAgentConfigFields(before, { customEnvVars: { A: '1' } })).toEqual(['customPath']);
+		expect(
+			changedAgentConfigFields(before, { ...before, customArgs: '--x', customEnvVars: { A: '2' } })
+		).toEqual(['customArgs', 'customEnvVars']);
 	});
 });
