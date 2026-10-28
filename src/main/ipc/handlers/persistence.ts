@@ -50,6 +50,7 @@ import {
 } from '../../stores/deferred-session-content';
 import type { SessionTranscriptPatch } from '../../../shared/sessionTranscript';
 import { mergeSessionPersistenceChanges } from '../../../shared/sessionPersistenceMerge';
+import { holdSettingWrite } from '../../enterprise/settings-policy';
 
 /**
  * Shallow-compare cliActivity for the diff broadcast.
@@ -407,6 +408,20 @@ export function registerPersistenceHandlers(
 	);
 
 	ipcMain.handle('settings:set', async (event, key: string, value: any) => {
+		// A key the managed settings policy holds is refused first (MRC2-06-02):
+		// named in the log, and the sender reloads so its copy snaps back to the
+		// held value. Standalone the hold answers allowed. The bridge's set_setting
+		// reaches here through the renderer and holds the key itself before that.
+		const hold = holdSettingWrite(key);
+		if (!hold.allowed) {
+			logger.warn(`Settings write refused (${hold.code}): ${hold.message}`, 'Settings', {
+				key,
+				policyRevision: hold.policyRevision,
+			});
+			if (event?.sender && !event.sender.isDestroyed())
+				event.sender.send('settings:externalChange');
+			return false;
+		}
 		if (key.startsWith('mediaModelDirectory.')) return false;
 		if (key === 'mediaModelDirectory') {
 			try {

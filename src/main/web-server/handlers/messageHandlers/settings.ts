@@ -7,6 +7,7 @@
 import type { SettingValue } from '../../types';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 import { isRemoteSettingWritable } from '../bridgeDenyList';
+import { holdSettingWrite } from '../../../enterprise/settings-policy';
 
 /**
  * Allowlist of setting keys modifiable from the web interface.
@@ -77,6 +78,18 @@ export function handleSetSetting(
 
 	if (value === undefined) {
 		ctx.sendError(client, 'Missing setting value');
+		return;
+	}
+
+	// A key the managed settings policy holds is refused here by name (MRC2-06-02),
+	// before the renderer round trip would answer a bare `false`; the refusal
+	// carries state and code like every other managed refusal on this bridge.
+	const hold = holdSettingWrite(key);
+	if (!hold.allowed) {
+		ctx.sendError(client, hold.message, {
+			key,
+			managed: { state: hold.code === 'locked' ? 'denied' : 'unavailable', code: hold.code },
+		});
 		return;
 	}
 

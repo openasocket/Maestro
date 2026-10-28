@@ -54,6 +54,11 @@ import { PermissionBroker } from './plugins/permission-broker';
 import { createPluginPolicySource } from './enterprise/plugin-policy';
 import { createBrowserPolicySource } from './enterprise/browser-policy';
 import { createShellPolicySource } from './enterprise/shell-policy';
+import {
+	createSettingsPolicySource,
+	restoreManagedSettingPins,
+	setSettingsWriteAuthority,
+} from './enterprise/settings-policy';
 import { createInstallPolicySource } from './enterprise/install-policy';
 import { createEgressPolicySource } from './enterprise/egress-policy';
 import { setEgressAuthority } from './utils/fetchWithTimeout';
@@ -996,6 +1001,24 @@ app
 			identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
 			policy: () => enterpriseService?.policy.status() ?? null,
 		});
+		// The settings lock source (MRC2-06-02): the one authority the store guard,
+		// settings:set and the bridge's set_setting hold every write to. Pins are
+		// restored now and on every install or clear, and every window reloads.
+		// None installed yet (CP-01): an enrolled host refuses every lockable key.
+		const settingsPolicy = createSettingsPolicySource({
+			identity: { read: () => enterpriseService?.identity.read() ?? { status: 'none' } },
+			policy: () => enterpriseService?.policy.status() ?? null,
+		});
+		setSettingsWriteAuthority(settingsPolicy);
+		const restoreSettingsPins = () => {
+			const restored = restoreManagedSettingPins(store, settingsPolicy.pins());
+			if (restored.length === 0) return;
+			logger.info(`Managed settings pins restored: ${restored.join(', ')}`, 'Settings');
+			for (const win of BrowserWindow.getAllWindows())
+				if (isWebContentsAvailable(win)) win.webContents.send('settings:externalChange');
+		};
+		settingsPolicy.onChange(restoreSettingsPins);
+		restoreSettingsPins();
 		// The install ceiling (MRC2-04-07): WakaTime's download, extraction and binary
 		// and the maestro-cli shim are held to the policy's pins; none installed yet (CP-01).
 		const installPolicy = createInstallPolicySource({

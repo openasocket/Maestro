@@ -43,6 +43,7 @@ import { migrateWindowStateToMultiWindow } from './migrations/multi-window-state
 import { readExistingAgentIds } from '../window-state-persistence';
 import { trackStoreWrites } from './write-tracker';
 import { deferStoreWrites, type DeferredWriteStore } from './deferred-writes';
+import { guardSettingsStore } from '../enterprise/settings-policy';
 
 /**
  * `deserialize` hook for the store named `name` under `cwd`.
@@ -121,14 +122,18 @@ export function initializeStores(options: StoreInitOptions): {
 	// 3. Initialize all other stores
 	// Instrumented so the settings file watcher can tell our own writes from an
 	// external edit (maestro-cli, an editor) - see stores/write-tracker.ts.
-	_settingsStore = trackStoreWrites(
-		new Store<MaestroSettings>({
-			name: 'maestro-settings',
-			cwd: _syncPath,
-			defaults: SETTINGS_DEFAULTS,
-			deserialize: deserializeStoreJson('maestro-settings', _syncPath),
-		}),
-		'maestro-settings.json'
+	// Guarded so a direct write to a key the managed settings policy holds is
+	// refused by name at the store itself (MRC2-06-02); standalone, unchanged.
+	_settingsStore = guardSettingsStore(
+		trackStoreWrites(
+			new Store<MaestroSettings>({
+				name: 'maestro-settings',
+				cwd: _syncPath,
+				defaults: SETTINGS_DEFAULTS,
+				deserialize: deserializeStoreJson('maestro-settings', _syncPath),
+			}),
+			'maestro-settings.json'
+		)
 	);
 
 	// The sessions store is read and written far more than any other, and is the

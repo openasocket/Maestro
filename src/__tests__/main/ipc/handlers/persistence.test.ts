@@ -26,6 +26,7 @@ import type Store from 'electron-store';
 import type { StoredSession } from '../../../../main/stores/types';
 import type { WebServer } from '../../../../main/web-server';
 import { broadcastBridgeEvent } from '../../../../main/web-server/handlers/bridgeHandlers';
+import { setSettingsWriteAuthority } from '../../../../main/enterprise/settings-policy';
 
 // Mock electron's ipcMain and app
 vi.mock('electron', () => ({
@@ -426,6 +427,25 @@ describe('persistence IPC handlers', () => {
 	});
 
 	describe('settings:set', () => {
+		it('refuses a key the managed settings policy holds by name, writes nothing, and tells the sender to reload (MRC2-06-02)', async () => {
+			const message = 'the "ghPath" setting is locked by managed policy revision 3';
+			const locked = { allowed: false, code: 'locked', message, policyRevision: 3 } as const;
+			setSettingsWriteAuthority({
+				authorize: (key) => (key === 'ghPath' ? locked : { allowed: true }),
+				pins: () => null,
+			});
+			try {
+				const sender = { isDestroyed: () => false, send: vi.fn() };
+				expect(await handlers.get('settings:set')!({ sender }, 'ghPath', '/x')).toBe(false);
+				expect(mockSettingsStore.set).not.toHaveBeenCalled();
+				expect(sender.send).toHaveBeenCalledWith('settings:externalChange');
+				expect(await handlers.get('settings:set')!({ sender }, 'fontSize', 12)).toBe(true);
+				expect(mockSettingsStore.set).toHaveBeenCalledWith('fontSize', 12);
+			} finally {
+				setSettingsWriteAuthority(null);
+			}
+		});
+
 		it.each(['mediaModelDirectory.child', 'mediaModelDirectory.child.deep'])(
 			'rejects nested media key %s without overwriting the directory',
 			async (key) => {
