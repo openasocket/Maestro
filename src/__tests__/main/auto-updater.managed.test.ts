@@ -15,6 +15,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IdentityRead } from '../../main/enterprise/identity-store';
+import { createEgressPolicySource } from '../../main/enterprise/egress-policy';
 import { createUpdatePolicySource } from '../../main/enterprise/update-policy';
 import { heldEgress, setEgressAuthority } from '../../main/utils/fetchWithTimeout';
 import { heldUpdate, setUpdateAuthority } from '../../main/update-checker';
@@ -135,6 +136,43 @@ describe('auto-updater under an update authority', () => {
 		expect(mockAutoUpdater.setFeedURL).toHaveBeenCalledTimes(1);
 		expect(mockAutoUpdater.downloadUpdate).toHaveBeenCalledTimes(1);
 		expect(lastStatus().status).toBe('downloading');
+	});
+
+	it('passes through standalone authorities with nothing held or recorded (MRC2-05-08)', async () => {
+		// Installed, but over an identity that is not enrolled: the desktop shape
+		// on a standalone host. Every step runs as with no authority at all, each
+		// source is asked and answers allowed, and both ledgers stay empty.
+		const updateSource = createUpdatePolicySource({
+			identity: { read: () => ({ status: 'none' }) },
+			policy: () => null,
+		});
+		const egressSource = createEgressPolicySource({
+			identity: { read: () => ({ status: 'none' }) },
+			policy: () => null,
+		});
+		const evaluateUpdate = vi.spyOn(updateSource, 'evaluateUpdate');
+		const evaluateEgress = vi.spyOn(egressSource, 'evaluateEgress');
+		setUpdateAuthority(updateSource);
+		setEgressAuthority(egressSource);
+
+		const check = await handler('updates:checkAutoUpdater')();
+		expect(check).toEqual({ success: true, updateInfo: { version: '1.3.0' } });
+		const download = await handler('updates:download')({}, 'v1.3.0');
+		expect(download).toEqual({ success: true });
+		expect(mockAutoUpdater.downloadUpdate).toHaveBeenCalledTimes(1);
+		expect(lastStatus().status).toBe('downloading');
+		await expect(mod.checkForUpdatesManual()).resolves.toEqual({ version: '1.3.0' });
+
+		expect(evaluateUpdate).toHaveBeenCalled();
+		expect(evaluateEgress).toHaveBeenCalled();
+		for (const result of [...evaluateUpdate.mock.results, ...evaluateEgress.mock.results]) {
+			expect(result.value).toEqual({ allowed: true });
+		}
+		expect(heldUpdate()).toBeNull();
+		expect(heldEgress()).toEqual([]);
+		expect(sent.every((status) => (status as { status: string }).status !== 'held-by-policy')).toBe(
+			true
+		);
 	});
 
 	it('holds the check by name before the feed is read when the ceiling holds', async () => {
@@ -273,6 +311,33 @@ describe('auto-updater under an update authority', () => {
 		setUpdateAuthority(null);
 		await handler('updates:install')();
 		expect(mockAutoUpdater.quitAndInstall).toHaveBeenCalledWith(false, true);
+	});
+
+	it('keeps the qualified version when a hold lands after an admitted download (MRC2-05-08)', async () => {
+		// The download was admitted; the policy then holds updates entirely. The
+		// install is refused by name, the manual check reads no feed, and the
+		// hold in force is the install step the host stopped at.
+		const source = managed({});
+		await handler('updates:download')({}, 'v1.3.0');
+		const downloaded = mockAutoUpdater.on.mock.calls.find(
+			([event]) => event === 'update-downloaded'
+		);
+		(downloaded![1] as (info: { version: string }) => void)({ version: '1.3.0' });
+		expect(lastStatus().status).toBe('downloaded');
+		mockAutoUpdater.checkForUpdates.mockClear();
+
+		source.install({ policyRevision: 3, hold: true, channel: 'stable', pin: null });
+		await handler('updates:install')();
+		expect(mockAutoUpdater.quitAndInstall).not.toHaveBeenCalled();
+		expect(lastStatus()).toMatchObject({
+			status: 'held-by-policy',
+			info: { version: '1.3.0' },
+			held: { code: 'held', candidate: '1.3.0' },
+		});
+		expect(heldUpdate()).toMatchObject({ code: 'held', candidate: '1.3.0' });
+		await expect(mod.checkForUpdatesManual()).resolves.toBeNull();
+		expect(mockAutoUpdater.checkForUpdates).not.toHaveBeenCalled();
+		expect(await handler('updates:getStatus')()).toMatchObject({ status: 'held-by-policy' });
 	});
 
 	it('holds the Lite connection update flow by name with nothing checked or downloaded', async () => {

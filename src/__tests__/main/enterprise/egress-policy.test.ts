@@ -487,6 +487,40 @@ describe('egressVerdict', () => {
 		).toBe(true);
 	});
 
+	it('holds each class by its own entry alone, so a sink is classified by the class it names (MRC2-05-08)', () => {
+		// A ceiling that lists one class admits exactly that class: the seven
+		// others are refused `class-denied` whatever destination they name, so
+		// a sink that names the wrong class is held, never quietly admitted
+		// under a neighbour's entry.
+		for (const listed of EGRESS_CLASSES) {
+			const entry: Record<string, unknown> = { class: listed, destinations: ['*'] };
+			if (listed === 'provider-account') entry.accounts = [APPROVED_ACCOUNT.accountRef];
+			const standing = managed(ceilingOf(document({ classes: [entry] })));
+			for (const named of EGRESS_CLASSES) {
+				const decision = egressVerdict(
+					standing,
+					request({
+						url: 'https://example.test/path',
+						class: named,
+						...(named === 'provider-account' ? { account: APPROVED_ACCOUNT } : {}),
+					})
+				);
+				if (named === listed) {
+					expect(decision, `${listed} admits ${named}`).toMatchObject({
+						allowed: true,
+						managed: { class: named, outcome: 'within-ceiling' },
+					});
+				} else {
+					expect(decision, `${listed} refuses ${named}`).toMatchObject({
+						allowed: false,
+						code: 'class-denied',
+						managed: { class: named, outcome: 'class-denied' },
+					});
+				}
+			}
+		}
+	});
+
 	it('refuses a URL with no http(s) origin before any class is read', () => {
 		for (const url of ['not a url', 'file:///etc/hosts', 'about:blank', '']) {
 			const decision = egressVerdict(managed(), request({ url, class: 'content' }));
@@ -614,5 +648,173 @@ describe('desktop wiring', () => {
 		expect(source.indexOf('setEgressAuthority(egressPolicy)')).toBeGreaterThan(
 			source.indexOf('setMcpInstallAuthority(installPolicy)')
 		);
+	});
+});
+
+/**
+ * The argument lists of every `<callee>(` call in a source text, each split at
+ * its top-level commas with the whitespace collapsed. Strings, template
+ * literals and nested brackets are skipped as units, so an object literal or a
+ * nested call in an argument never splits it.
+ */
+function callArguments(source: string, callee: string): string[][] {
+	const calls: string[][] = [];
+	let from = 0;
+	for (;;) {
+		const start = source.indexOf(`${callee}(`, from);
+		if (start === -1) return calls;
+		let depth = 0;
+		let quote: string | null = null;
+		const args: string[] = [];
+		let current = '';
+		let i = start + callee.length;
+		for (; i < source.length; i++) {
+			const ch = source[i];
+			if (quote) {
+				current += ch;
+				if (ch === '\\') current += source[++i];
+				else if (ch === quote) quote = null;
+				continue;
+			}
+			if (ch === "'" || ch === '"' || ch === '`') {
+				quote = ch;
+				current += ch;
+				continue;
+			}
+			if (ch === '(' || ch === '{' || ch === '[') {
+				depth++;
+				if (depth > 1) current += ch;
+				continue;
+			}
+			if (ch === ')' || ch === '}' || ch === ']') {
+				depth--;
+				if (depth === 0) break;
+				current += ch;
+				continue;
+			}
+			if (ch === ',' && depth === 1) {
+				args.push(current);
+				current = '';
+				continue;
+			}
+			current += ch;
+		}
+		if (current.trim()) args.push(current);
+		// A bare `callee()` is a doc comment naming the function, not a call site.
+		if (args.length > 0) calls.push(args.map((arg) => arg.replace(/\s+/g, ' ').trim()));
+		from = i;
+	}
+}
+
+describe('sink classification (MRC2-05-02..05-05, recorded by MRC2-05-08)', () => {
+	const read = (file: string) => readFileSync(join(process.cwd(), file), 'utf8');
+
+	/**
+	 * Every sink the P2-05 tasks classified, with the number of chokepoint calls
+	 * it makes and the fourth argument each hands over. A constant is resolved
+	 * against its own definition in the file; a sink that names no class is
+	 * `content` by default and is not listed here.
+	 */
+	const SINKS: ReadonlyArray<{
+		file: string;
+		calls: number;
+		argument: string;
+		class: (typeof EGRESS_CLASSES)[number];
+	}> = [
+		{
+			file: 'src/main/checkin.ts',
+			calls: 1,
+			argument: 'EGRESS_CLASS',
+			class: 'vendor-telemetry',
+		},
+		{
+			file: 'src/main/cue/cue-telemetry.ts',
+			calls: 1,
+			argument: 'EGRESS_CLASS',
+			class: 'vendor-telemetry',
+		},
+		{
+			file: 'src/main/ipc/handlers/leaderboard.ts',
+			calls: 6,
+			argument: 'EGRESS_CLASS',
+			class: 'vendor-telemetry',
+		},
+		{
+			file: 'src/main/cue/cue-susfactor.ts',
+			calls: 2,
+			argument: 'EGRESS_CLASS',
+			class: 'vendor-telemetry',
+		},
+		{
+			file: 'src/main/wakatime-manager.ts',
+			calls: 2,
+			argument: 'WAKATIME_EGRESS_CLASS',
+			class: 'updates',
+		},
+		{ file: 'src/main/update-checker.ts', calls: 1, argument: "'updates'", class: 'updates' },
+		{ file: 'src/main/agents/detector.ts', calls: 1, argument: "'content'", class: 'content' },
+		{
+			file: 'src/main/agents/codex-usage-sampler.ts',
+			calls: 1,
+			argument: 'codexAccountEgress(codexHomeKey)',
+			class: 'provider-account',
+		},
+		{
+			file: 'src/main/agents/codex-reset-credits.ts',
+			calls: 2,
+			argument: 'codexAccountEgress(codexHomeKey)',
+			class: 'provider-account',
+		},
+	];
+
+	it('names a class on every chokepoint call of every classified sink', () => {
+		for (const sink of SINKS) {
+			const calls = callArguments(read(sink.file), 'fetchWithTimeout');
+			expect(calls, sink.file).toHaveLength(sink.calls);
+			for (const args of calls) {
+				expect(args, `${sink.file}: ${args.join(', ')}`).toHaveLength(4);
+				expect(args[3], sink.file).toBe(sink.argument);
+			}
+		}
+	});
+
+	it('resolves each named constant to the class the task assigned', () => {
+		for (const sink of SINKS) {
+			if (sink.argument.startsWith("'")) {
+				expect(sink.argument).toBe(`'${sink.class}'`);
+				continue;
+			}
+			if (sink.argument.startsWith('codexAccountEgress(')) continue;
+			const definition = new RegExp(
+				`const ${sink.argument}(?:: EgressClass)? = '([a-z-]+)'(?: as const)?;`
+			);
+			const match = read(sink.file).match(definition);
+			expect(match, `${sink.file} defines ${sink.argument}`).not.toBeNull();
+			expect(match![1], sink.file).toBe(sink.class);
+			expect(isEgressClass(match![1])).toBe(true);
+		}
+	});
+
+	it('spells the Codex account request once, as provider-account with the opaque account reference', () => {
+		const codexAuth = read('src/main/agents/codex-auth.ts');
+		const body = codexAuth.slice(codexAuth.indexOf('export function codexAccountEgress('));
+		expect(body).toMatch(
+			/class: 'provider-account',\s*account: \{\s*providerId: CODEX_PROVIDER_ID,/
+		);
+		expect(body).toMatch(/accountRef: managedAccountRef\(CODEX_PROVIDER_ID, codexHomeKey\)/);
+	});
+
+	it('holds the electron-updater feed as updates through holdEgress, the one sink with its own HTTP stack', () => {
+		const holds = callArguments(read('src/main/auto-updater.ts'), 'holdEgress');
+		expect(holds).toEqual([['feedUrl', "'updates'"]]);
+	});
+
+	it('classifies every default caller as content: the chokepoint reads it when no class is named', () => {
+		const chokepoint = read('src/main/utils/fetchWithTimeout.ts');
+		expect(chokepoint).toMatch(/const DEFAULT_CLASS: EgressClass = 'content';/);
+		expect(chokepoint).toMatch(
+			/egress: EgressClass \| FetchEgressOptions = DEFAULT_CLASS\n\): Promise<Response> \{/
+		);
+		expect(DEFAULT_EGRESS_CLASS).toBe('content');
 	});
 });

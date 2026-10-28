@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IdentityRead } from '../../../main/enterprise/identity-store';
 import {
+	EGRESS_CLASSES,
 	createEgressPolicySource,
 	type EgressAuthority,
 	type EgressRequest,
@@ -165,6 +166,35 @@ describe('fetchWithTimeout under an egress authority', () => {
 			fetchWithTimeout(URL_UNDER_TEST, { method: 'POST' }, 1000, 'vendor-telemetry')
 		).rejects.toMatchObject({ code: 'class-denied', class: 'vendor-telemetry' });
 		expect(global.fetch).not.toHaveBeenCalled();
+	});
+
+	it('lets nothing of any class leave an enrolled host whose ceiling lists no class (MRC2-05-08)', async () => {
+		// The strictest installed ceiling: a valid document with an empty class
+		// list. Every class, content included, is refused `class-denied` before
+		// a timer starts or a socket opens, and the ledger holds one row per class.
+		global.fetch = forbiddenFetch() as unknown as typeof fetch;
+		const timers = vi.spyOn(global, 'setTimeout');
+		setEgressAuthority(managedSource({ policyRevision: 3, classes: [] }));
+
+		for (const egressClass of EGRESS_CLASSES) {
+			await expect(
+				fetchWithTimeout(`https://${egressClass}.example/path?token=secret`, {}, 1000, egressClass)
+			).rejects.toMatchObject({
+				code: 'class-denied',
+				class: egressClass,
+				receipt: expect.objectContaining({
+					policyRevision: 3,
+					origin: `https://${egressClass}.example`,
+				}),
+			});
+		}
+
+		expect(global.fetch).not.toHaveBeenCalled();
+		expect(timers).not.toHaveBeenCalled();
+		expect(heldEgress().map((hold) => [hold.class, hold.code, hold.count])).toEqual(
+			EGRESS_CLASSES.map((egressClass) => [egressClass, 'class-denied', 1])
+		);
+		expect(JSON.stringify(heldEgress())).not.toContain('secret');
 	});
 
 	it('holds a caller that names no class as content', async () => {
