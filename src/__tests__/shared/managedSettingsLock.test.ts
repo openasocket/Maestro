@@ -365,3 +365,34 @@ describe('the sync folder and the action keys (MRC2-06-04A)', () => {
 		expect(applyManagedPins(settings, policy)).toEqual({ settings, restored: [] });
 	});
 });
+
+describe('pin semantics across a policy change (MRC2-06-08)', () => {
+	it('a later revision moves a pin and holds a new key, a dropped pin leaves the value, the reason follows the revision', () => {
+		const settings = { ghPath: '/usr/bin/gh', defaultShell: 'bash' };
+		const v3 = { policyRevision: 3, locks: [{ key: 'ghPath', pin: { value: '/opt/v3/gh' } }] };
+		const atV3 = applyManagedPins(settings, v3);
+		expect(atV3).toMatchObject({ restored: ['ghPath'], settings: { ghPath: '/opt/v3/gh' } });
+		const v4 = {
+			policyRevision: 4,
+			locks: [{ key: 'ghPath', pin: { value: '/opt/v4/gh' } }, { key: 'defaultShell' }],
+		};
+		const atV4 = applyManagedPins(atV3.settings, v4);
+		expect(atV4).toEqual({
+			restored: ['ghPath'],
+			settings: { ghPath: '/opt/v4/gh', defaultShell: 'bash' },
+		});
+		expect(lockedSettingKeys(v4)).toEqual(['ghPath', 'defaultShell']);
+		expect(managedSettingLockReason('ghPath', v4)).toBe(
+			'the "ghPath" setting is locked and pinned by managed policy revision 4'
+		);
+		expect(managedSettingLockReason('defaultShell', v4)).toBe(
+			'the "defaultShell" setting is locked by managed policy revision 4'
+		);
+		// A revision that drops the pin restores nothing and holds nothing: the value stays.
+		const v5 = { policyRevision: 5, locks: [] };
+		expect(applyManagedPins(atV4.settings, v5)).toEqual({ settings: atV4.settings, restored: [] });
+		expect(isSettingLocked('ghPath', v5)).toBe(false);
+		expect(managedSettingPin('ghPath', v5)).toBeNull();
+		expect(settings).toEqual({ ghPath: '/usr/bin/gh', defaultShell: 'bash' });
+	});
+});
