@@ -215,6 +215,10 @@ describe('fetchWithTimeout under an egress authority', () => {
 			class: 'plugin',
 			actor: { kind: 'agent', sessionId: 's1', agentType: null },
 		});
+		await fetchWithTimeout(URL_UNDER_TEST, {}, 1000, {
+			class: 'provider-account',
+			account: { providerId: 'codex', accountRef: 'ref-1' },
+		});
 
 		expect(seen).toEqual([
 			{
@@ -222,8 +226,59 @@ describe('fetchWithTimeout under an egress authority', () => {
 				class: 'plugin',
 				actor: { kind: 'agent', sessionId: 's1', agentType: null },
 			},
+			{
+				url: URL_UNDER_TEST,
+				class: 'provider-account',
+				account: { providerId: 'codex', accountRef: 'ref-1' },
+			},
 		]);
-		expect(global.fetch).toHaveBeenCalledTimes(1);
+		expect(global.fetch).toHaveBeenCalledTimes(2);
+	});
+
+	it('holds a provider-account request by the account the caller names (MRC2-05-05)', async () => {
+		const mockFetch = vi.fn().mockResolvedValue({ ok: true, status: 200 });
+		global.fetch = mockFetch as unknown as typeof fetch;
+		const approved = { providerId: 'codex', accountRef: 'a'.repeat(64) };
+		const personal = { providerId: 'codex', accountRef: 'b'.repeat(64) };
+		setEgressAuthority(
+			managedSource({
+				policyRevision: 3,
+				classes: [
+					{
+						class: 'provider-account',
+						destinations: ['chatgpt.com'],
+						accounts: [approved.accountRef],
+					},
+				],
+			})
+		);
+		const usage = 'https://chatgpt.com/backend-api/wham/usage';
+
+		await fetchWithTimeout(usage, {}, 1000, { class: 'provider-account', account: approved });
+		expect(mockFetch).toHaveBeenCalledTimes(1);
+
+		await expect(
+			fetchWithTimeout(usage, {}, 1000, { class: 'provider-account', account: personal })
+		).rejects.toMatchObject({
+			code: 'account-denied',
+			class: 'provider-account',
+			receipt: expect.objectContaining({
+				origin: 'https://chatgpt.com',
+				account: personal.accountRef,
+			}),
+		});
+		await expect(fetchWithTimeout(usage, {}, 1000, 'provider-account')).rejects.toMatchObject({
+			code: 'account-denied',
+		});
+		expect(mockFetch).toHaveBeenCalledTimes(1);
+		expect(heldEgress()).toEqual([
+			expect.objectContaining({
+				class: 'provider-account',
+				code: 'account-denied',
+				origin: 'https://chatgpt.com',
+				count: 2,
+			}),
+		]);
 	});
 
 	it('lets a listed request leave with the timeout and the caller options intact', async () => {

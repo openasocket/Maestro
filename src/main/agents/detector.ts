@@ -19,7 +19,7 @@ import * as path from 'path';
 import type { ExecResult } from '../utils/execFile';
 import { DispatchRefusedError } from '../../shared/maestro-lib/run/start-turn';
 import { logger } from '../utils/logger';
-import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { fetchWithTimeout, isEgressDeniedError } from '../utils/fetchWithTimeout';
 import { captureException } from '../utils/sentry';
 import { getAgentCapabilities } from './capabilities';
 import { runProviderProbe, type ProviderProbeManaged } from './provider-probe';
@@ -67,10 +67,20 @@ function readCopilotConfiguredModel(): string | null {
  * Fetch the list of Copilot CLI models from the models.dev catalog.
  * Returns null when the request fails or the schema doesn't match; callers
  * should fall back to the user-configured model in that case.
+ *
+ * The catalog is `content` to the egress ceiling (MRC2-05-05): a managed host
+ * whose policy does not list models.dev refuses it by name before any socket
+ * opens, the hold is recorded in the chokepoint's ledger, and the picker
+ * offers the configured model alone, which is what it offers offline too.
  */
 async function fetchCopilotModelsFromApi(): Promise<string[] | null> {
 	try {
-		const response = await fetchWithTimeout(MODELS_DEV_API_URL, {}, MODELS_DEV_FETCH_TIMEOUT_MS);
+		const response = await fetchWithTimeout(
+			MODELS_DEV_API_URL,
+			{},
+			MODELS_DEV_FETCH_TIMEOUT_MS,
+			'content'
+		);
 		if (!response.ok) {
 			return null;
 		}
@@ -84,6 +94,12 @@ async function fetchCopilotModelsFromApi(): Promise<string[] | null> {
 		}
 		return null;
 	} catch (err) {
+		if (isEgressDeniedError(err)) {
+			logger.info('models.dev catalog held by policy; offering the configured model', LOG_CONTEXT, {
+				hold: err.message,
+			});
+			return null;
+		}
 		logger.warn('Failed to fetch models from models.dev for copilot-cli', LOG_CONTEXT, {
 			error: String(err),
 		});

@@ -31,6 +31,7 @@
  */
 
 import type {
+	EgressAccount,
 	EgressActor,
 	EgressAuthority,
 	EgressClass,
@@ -44,10 +45,16 @@ import type {
  */
 export const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 
-/** What a call names about itself for the egress ceiling: its class, and who asked when it is not the operator. */
+/**
+ * What a call names about itself for the egress ceiling: its class, who asked
+ * when it is not the operator, and for a `provider-account` request the
+ * account whose token it carries (MRC2-05-05), which the ceiling holds by
+ * its opaque reference.
+ */
 export interface FetchEgressOptions {
 	class: EgressClass;
 	actor?: EgressActor;
+	account?: EgressAccount;
 }
 
 /** The class a caller that names none is held as; the policy's `DEFAULT_EGRESS_CLASS`, spelled here to keep this module a leaf. */

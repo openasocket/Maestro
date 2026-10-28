@@ -9,9 +9,9 @@
 
 import type { CodexUsageSnapshot, CodexUsageWindow } from '../stores/codexUsageStore';
 import { resolveCodexHomeKey } from '../stores/codexUsageStore';
-import { codexAuthHeaders, readCodexAuth } from './codex-auth';
+import { codexAccountEgress, codexAuthHeaders, readCodexAuth } from './codex-auth';
 import { captureMessage } from '../utils/sentry';
-import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { fetchWithTimeout, isEgressDeniedError } from '../utils/fetchWithTimeout';
 import { DURATION_LADDER_DAYS, humanizeDuration } from '../../shared/duration';
 
 const CODEX_USAGE_ENDPOINT = 'https://chatgpt.com/backend-api/wham/usage';
@@ -107,9 +107,24 @@ export async function sampleCodexUsage(opts: SampleCodexUsageOptions): Promise<C
 		response = await fetchWithTimeout(
 			CODEX_USAGE_ENDPOINT,
 			{ headers: codexAuthHeaders(auth) },
-			opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+			opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+			codexAccountEgress(codexHomeKey)
 		);
-	} catch {
+	} catch (err) {
+		// A managed host refused the poll by name (the class is off, or this is
+		// not an account the policy approves). Nothing was sent, so this is not a
+		// network failure and not a Sentry report: the snapshot carries the one
+		// managed line and no windows, and it REPLACES the account's last sample,
+		// so the dashboard reads unavailable rather than a stale bar as current.
+		if (isEgressDeniedError(err)) {
+			return {
+				sampledAt,
+				codexHomeKey,
+				authState: 'error',
+				email: auth.email,
+				error: err.message,
+			};
+		}
 		// A thrown fetch means the request never completed: the user is offline,
 		// DNS/TLS failed, the endpoint is unreachable, or our own abort timeout
 		// fired. All are expected, recoverable, user-environment conditions - not

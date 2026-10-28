@@ -14,10 +14,40 @@
  *
  * Auth-bearing values never leave the main process: callers pass the resolved
  * headers straight to `fetchWithTimeout` and return sanitized results.
+ *
+ * Both callers also name the same thing to the egress ceiling (MRC2-05-05):
+ * a `provider-account` request carrying THIS account's token, identified by
+ * the opaque reference `managedAccountRef()` derives from the resolved
+ * CODEX_HOME. `codexAccountEgress()` is that one spelling, so the policy's
+ * approved-account list and the two sinks agree on the digest.
  */
 
 import fs from 'fs/promises';
 import path from 'path';
+
+import { managedAccountRef } from '../../shared/maestro-lib/managed/credentials';
+import type { FetchEgressOptions } from '../utils/fetchWithTimeout';
+
+/** The provider id the account reference is digested under; the agent's `toolType`. */
+const CODEX_PROVIDER_ID = 'codex';
+
+/**
+ * The egress a ChatGPT backend call as this account names: the
+ * `provider-account` class and the account's opaque reference. The reference
+ * is the same digest `resolveAgentAccountRef()` produces for an agent whose
+ * CODEX_HOME resolves to `codexHomeKey`, so a policy that approves the
+ * account for a launch approves it for polling too. Standalone the ceiling
+ * is never consulted and this is a label on the request, nothing more.
+ */
+export function codexAccountEgress(codexHomeKey: string): FetchEgressOptions {
+	return {
+		class: 'provider-account',
+		account: {
+			providerId: CODEX_PROVIDER_ID,
+			accountRef: managedAccountRef(CODEX_PROVIDER_ID, codexHomeKey),
+		},
+	};
+}
 
 interface CodexAuthFileShape {
 	tokens?: {

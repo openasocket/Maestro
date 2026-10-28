@@ -27,6 +27,16 @@
  * endpoint operation of this build carries an egress ceiling (CP-01), so
  * nothing calls `install()` and an enrolled desktop refuses every request
  * `unavailable` by name.
+ *
+ * A `provider-account` request is held once more, by ACCOUNT (MRC2-05-05):
+ * the sink names the account whose token the request carries as an opaque
+ * reference (`managedAccountRef()`, a digest of the provider and the resolved
+ * account directory, never a path, an e-mail or a label), and the ceiling's
+ * `provider-account` class lists the references the policy approves. A
+ * request naming no account, or one the class does not list, is refused
+ * `account-denied`: a personal account is never polled from a managed host,
+ * and a denial leaves the usage display unavailable rather than at a stale
+ * value presented as current. The other classes carry no account.
  */
 
 import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
@@ -70,18 +80,32 @@ export const EGRESS_OPERATOR: EgressActor = {
 	actor: { peer: 'in-process' },
 };
 
+/**
+ * The provider account a `provider-account` request carries the token of:
+ * the provider and the opaque reference `managedAccountRef()` derives from
+ * the resolved account directory. Never a path, an e-mail or a label.
+ */
+export interface EgressAccount {
+	providerId: string;
+	accountRef: string;
+}
+
 export interface EgressRequest {
 	/** The absolute URL the sink is about to request. */
 	url: string;
 	class: EgressClass;
 	/** Absent: the operator (the desktop acting for the person who runs it). */
 	actor?: EgressActor;
+	/** The account a `provider-account` request acts as; a request of that class naming none is refused. */
+	account?: EgressAccount;
 }
 
 export interface EgressCeilingClass {
 	class: EgressClass;
 	/** Destination patterns in the browser ceiling's spelling; empty admits none. */
 	destinations: string[];
+	/** `provider-account` only: the opaque account references the policy approves; absent or empty approves none. */
+	accounts?: string[];
 }
 
 export interface EgressPolicyCeiling {
@@ -90,10 +114,22 @@ export interface EgressPolicyCeiling {
 	classes: EgressCeilingClass[];
 }
 
-export const EGRESS_CEILING_LIMITS = { destinations: 256 } as const;
+export const EGRESS_CEILING_LIMITS = { destinations: 256, accounts: 64, accountRef: 256 } as const;
 
 const CEILING_KEYS = ['policyRevision', 'classes'] as const;
-const CLASS_KEYS = ['class', 'destinations'] as const;
+const CLASS_KEYS = ['class', 'destinations', 'accounts'] as const;
+
+/** The one class held by account; every other class carries none. */
+const ACCOUNT_HELD_CLASS: EgressClass = 'provider-account';
+
+/** An opaque account reference as the policy spells it: a bounded, non-empty token with no path or space in it. */
+export function isEgressAccountRef(value: string): boolean {
+	return (
+		value.length > 0 &&
+		value.length <= EGRESS_CEILING_LIMITS.accountRef &&
+		/^[A-Za-z0-9._:-]+$/.test(value)
+	);
+}
 
 export type EgressCeilingParse =
 	| { ok: true; ceiling: EgressPolicyCeiling }
@@ -119,8 +155,25 @@ function parseClass(raw: unknown, at: string, problems: string[]): EgressCeiling
 		isBrowserDestinationPattern,
 		problems
 	);
-	if (problems.length !== before || !destinations) return null;
-	return { class: raw.class as EgressClass, destinations };
+	let accounts: string[] | null | undefined;
+	if (raw.accounts !== undefined) {
+		if (raw.class === ACCOUNT_HELD_CLASS)
+			accounts = parseStringList(
+				raw.accounts,
+				`${at}.accounts`,
+				EGRESS_CEILING_LIMITS.accounts,
+				'an account reference',
+				isEgressAccountRef,
+				problems
+			);
+		else problems.push(`${at}.accounts is only for the ${ACCOUNT_HELD_CLASS} class`);
+	}
+	if (problems.length !== before || !destinations || accounts === null) return null;
+	return {
+		class: raw.class as EgressClass,
+		destinations,
+		...(accounts === undefined ? {} : { accounts }),
+	};
 }
 
 /**
@@ -179,7 +232,8 @@ export type EgressDenial =
 	| 'unauthenticated'
 	| 'url-invalid'
 	| 'class-denied'
-	| 'destination-denied';
+	| 'destination-denied'
+	| 'account-denied';
 
 export interface EgressReceipt {
 	policyRevision: number | null;
@@ -187,6 +241,8 @@ export interface EgressReceipt {
 	actor: string;
 	/** The origin held (`scheme://host[:port]`), never the path or query, which may carry a token. */
 	origin: string | null;
+	/** The opaque account reference a `provider-account` request named; absent when the request named none. */
+	account?: string;
 	outcome: 'within-ceiling' | EgressDenial;
 }
 
@@ -204,7 +260,8 @@ export function formatEgressRefusal(decision: { code: string; message: string })
  * the caller knows about the actor (a paired device before an actor is
  * registered). The request is held by class and origin; a class the ceiling
  * does not name leaves nothing, and a named class leaves only for the
- * destinations it lists.
+ * destinations it lists. A `provider-account` request leaves only for an
+ * account the class lists, named by its opaque reference.
  */
 export function egressVerdict(
 	standing: ManagedEgressStanding,
@@ -222,6 +279,7 @@ export function egressVerdict(
 		class: request.class,
 		actor: label,
 		origin,
+		...(request.account ? { account: request.account.accountRef } : {}),
 		outcome,
 	});
 	const deny = (code: EgressDenial, message: string): EgressDecision => ({
@@ -249,6 +307,18 @@ export function egressVerdict(
 			'destination-denied',
 			`the egress ceiling does not list ${origin} for ${request.class} requests by ${label}; a request leaves only for a destination the policy lists`
 		);
+	if (request.class === ACCOUNT_HELD_CLASS) {
+		if (!request.account)
+			return deny(
+				'account-denied',
+				`a ${request.class} request for ${label} to ${origin} names no account; a provider account is polled from a managed host only when the policy approves it`
+			);
+		if (!entry.accounts?.includes(request.account.accountRef))
+			return deny(
+				'account-denied',
+				`the egress ceiling approves no ${request.account.providerId} account ${request.account.accountRef.slice(0, 12)} for ${request.class} requests by ${label} to ${origin}; a personal account is never polled from a managed host`
+			);
+	}
 	return { allowed: true, managed: receipt('within-ceiling') };
 }
 

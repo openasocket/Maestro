@@ -13,6 +13,9 @@ vi.mock('../../../main/utils/sentry', () => ({
 }));
 
 import { sampleCodexUsage } from '../../../main/agents/codex-usage-sampler';
+import { heldEgress, setEgressAuthority } from '../../../main/utils/fetchWithTimeout';
+import { managedAccountRef } from '../../../shared/maestro-lib/managed/credentials';
+import { managedEgressAuthority } from '../../helpers/egressAuthority';
 
 // Unique per run: a fixed path collides with a concurrent suite in the same checkout.
 const TEST_ROOT = mkdtempSync(path.join(os.tmpdir(), 'maestro-codex-usage-sampler-'));
@@ -430,6 +433,102 @@ describe('codex-usage-sampler', () => {
 			});
 
 			expect(snapshot.resetCredits).toBeUndefined();
+		});
+	});
+
+	// The poll carries the account's own token to chatgpt.com, so under
+	// management it is a `provider-account` request held by the account it
+	// acts as (MRC2-05-05): only an account the policy approves is polled, a
+	// personal login is refused by name, and the refusal REPLACES the last
+	// sample so the dashboard reads unavailable rather than a stale bar.
+	describe('under an egress authority (MRC2-05-05)', () => {
+		const usageBody = {
+			email: 'codex@example.com',
+			rate_limit: {
+				primary_window: { used_percent: 12, reset_at: 1779550000, limit_window_seconds: 18000 },
+			},
+		};
+		const accountRef = managedAccountRef('codex', TEST_ROOT);
+		const providerAccount = (accounts: string[]) => [
+			{ class: 'provider-account', destinations: ['chatgpt.com'], accounts },
+		];
+
+		afterEach(() => {
+			setEgressAuthority(null);
+		});
+
+		it('names the provider-account class and the account by its opaque reference', async () => {
+			await writeAuth();
+			respondWith(usageBody);
+			const managed = managedEgressAuthority(providerAccount([accountRef]));
+			setEgressAuthority(managed.authority);
+
+			const snapshot = await sampleCodexUsage({ codexHome: TEST_ROOT });
+
+			expect(managed.requests).toEqual([
+				{
+					url: 'https://chatgpt.com/backend-api/wham/usage',
+					class: 'provider-account',
+					account: { providerId: 'codex', accountRef },
+				},
+			]);
+			expect(snapshot.authState).toBe('authenticated');
+			expect(snapshot.session?.percent).toBe(12);
+			expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+			// The reference is a digest of the resolved directory, never the path.
+			expect(accountRef).toMatch(/^[0-9a-f]{64}$/);
+			expect(JSON.stringify(managed.requests)).not.toContain(TEST_ROOT);
+		});
+
+		it('leaves a personal account unpolled and its display unavailable, not stale', async () => {
+			await writeAuth();
+			respondWith(usageBody);
+			// The ceiling admits the class and the destination but approves another account.
+			const managed = managedEgressAuthority(providerAccount(['c'.repeat(64)]));
+			setEgressAuthority(managed.authority);
+
+			const snapshot = await sampleCodexUsage({ codexHome: TEST_ROOT });
+
+			expect(globalThis.fetch).not.toHaveBeenCalled();
+			expect(snapshot).toMatchObject({ codexHomeKey: TEST_ROOT, authState: 'error' });
+			expect(snapshot.error).toMatch(/^\[managed-account-denied\] /);
+			expect(snapshot.error).toContain('a personal account is never polled from a managed host');
+			expect(snapshot.session).toBeUndefined();
+			expect(snapshot.weekly).toBeUndefined();
+			expect(snapshot.additionalLimits).toBeUndefined();
+			expect(snapshot.resetCredits).toBeUndefined();
+			expect(captureMessageMock).not.toHaveBeenCalled();
+			expect(heldEgress()).toEqual([
+				expect.objectContaining({
+					class: 'provider-account',
+					code: 'account-denied',
+					origin: 'https://chatgpt.com',
+					count: 1,
+				}),
+			]);
+		});
+
+		it('is refused by name when the policy omits the class, with nothing sent', async () => {
+			await writeAuth();
+			respondWith(usageBody);
+			const managed = managedEgressAuthority([{ class: 'content', destinations: ['*'] }]);
+			setEgressAuthority(managed.authority);
+
+			const snapshot = await sampleCodexUsage({ codexHome: TEST_ROOT });
+
+			expect(globalThis.fetch).not.toHaveBeenCalled();
+			expect(snapshot.authState).toBe('error');
+			expect(snapshot.error).toMatch(/^\[managed-class-denied\] /);
+		});
+
+		it('never reaches the ceiling for an account that is not logged in', async () => {
+			const managed = managedEgressAuthority(providerAccount([]));
+			setEgressAuthority(managed.authority);
+
+			const snapshot = await sampleCodexUsage({ codexHome: TEST_ROOT });
+
+			expect(snapshot.authState).toBe('missing_auth');
+			expect(managed.requests).toEqual([]);
 		});
 	});
 });

@@ -16,6 +16,9 @@ import {
 	consumeCodexResetCredit,
 	fetchCodexResetCredits,
 } from '../../../main/agents/codex-reset-credits';
+import { heldEgress, setEgressAuthority } from '../../../main/utils/fetchWithTimeout';
+import { managedAccountRef } from '../../../shared/maestro-lib/managed/credentials';
+import { managedEgressAuthority } from '../../helpers/egressAuthority';
 
 // Unique per run: a fixed path collides with a concurrent suite in the same checkout.
 const TEST_ROOT = mkdtempSync(path.join(os.tmpdir(), 'maestro-codex-reset-credits-'));
@@ -284,6 +287,89 @@ describe('codex-reset-credits', () => {
 
 			expect(result.ok).toBe(false);
 			expect(result.message).toContain('may or may not have been spent');
+		});
+	});
+
+	// Both calls carry the account's token to chatgpt.com, so under management
+	// each is a `provider-account` request held by the account it acts as
+	// (MRC2-05-05). A refusal is decided before any socket opens: the read
+	// reports it where it reports any other reason it has nothing to list, and
+	// the spend reports the credit as untouched, never as "may have been spent".
+	describe('under an egress authority (MRC2-05-05)', () => {
+		const accountRef = managedAccountRef('codex', TEST_ROOT);
+		const approving = () =>
+			managedEgressAuthority([
+				{ class: 'provider-account', destinations: ['chatgpt.com'], accounts: [accountRef] },
+			]);
+		const personal = () =>
+			managedEgressAuthority([
+				{ class: 'provider-account', destinations: ['chatgpt.com'], accounts: ['d'.repeat(64)] },
+			]);
+
+		afterEach(() => {
+			setEgressAuthority(null);
+		});
+
+		it('names the class and the account on the read and on the spend', async () => {
+			await writeAuth();
+			vi.mocked(globalThis.fetch).mockResolvedValue(
+				jsonResponse({ credits: [LIVE_CREDIT], available_count: 1 })
+			);
+			const managed = approving();
+			setEgressAuthority(managed.authority);
+
+			const read = await fetchCodexResetCredits({ codexHome: TEST_ROOT });
+			vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse({ code: 'ok', windows_reset: 2 }));
+			const spend = await consumeCodexResetCredit({ codexHome: TEST_ROOT, creditId: 'c1' });
+
+			expect(read.ok).toBe(true);
+			expect(spend).toMatchObject({ ok: true, windowsReset: 2 });
+			expect(managed.requests).toEqual([
+				{
+					url: 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits',
+					class: 'provider-account',
+					account: { providerId: 'codex', accountRef },
+				},
+				{
+					url: 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits/consume',
+					class: 'provider-account',
+					account: { providerId: 'codex', accountRef },
+				},
+			]);
+			expect(JSON.stringify(managed.requests)).not.toContain(TEST_ROOT);
+		});
+
+		it('refuses the read for a personal account by name, with nothing sent', async () => {
+			await writeAuth();
+			setEgressAuthority(personal().authority);
+
+			const result = await fetchCodexResetCredits({ codexHome: TEST_ROOT });
+
+			expect(globalThis.fetch).not.toHaveBeenCalled();
+			expect(result.ok).toBe(false);
+			expect(result.detail).toBeUndefined();
+			expect(result.error).toMatch(/^\[managed-account-denied\] /);
+			expect(captureMessageMock).not.toHaveBeenCalled();
+		});
+
+		it('refuses the spend for a personal account as decided: the credit is untouched', async () => {
+			await writeAuth();
+			setEgressAuthority(personal().authority);
+
+			const result = await consumeCodexResetCredit({
+				codexHome: TEST_ROOT,
+				creditId: 'c1',
+				idempotencyKey: 'stable-key',
+			});
+
+			expect(globalThis.fetch).not.toHaveBeenCalled();
+			expect(result).toMatchObject({ ok: false, windowsReset: 0 });
+			expect(result.code).toBeUndefined();
+			expect(result.message).toMatch(/^\[managed-account-denied\] /);
+			expect(result.message).not.toContain('may or may not');
+			expect(heldEgress()).toEqual([
+				expect.objectContaining({ class: 'provider-account', code: 'account-denied', count: 1 }),
+			]);
 		});
 	});
 });

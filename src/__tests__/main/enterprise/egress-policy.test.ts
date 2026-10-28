@@ -20,6 +20,7 @@ import {
 	createEgressPolicySource,
 	egressVerdict,
 	formatEgressRefusal,
+	isEgressAccountRef,
 	isEgressClass,
 	isEgressDeniedError,
 	managedEgressStanding,
@@ -35,11 +36,20 @@ function document(overrides: Record<string, unknown> = {}): Record<string, unkno
 		classes: [
 			{ class: 'updates', destinations: ['github.com', '*.githubusercontent.com'] },
 			{ class: 'content', destinations: ['*'] },
-			{ class: 'provider-account', destinations: ['https://chatgpt.com:443'] },
+			{
+				class: 'provider-account',
+				destinations: ['https://chatgpt.com:443'],
+				accounts: [APPROVED_ACCOUNT.accountRef],
+			},
 		],
 		...overrides,
 	};
 }
+
+/** An account the fixture ceiling approves, named the way a sink names it. */
+const APPROVED_ACCOUNT = { providerId: 'codex', accountRef: 'a'.repeat(64) } as const;
+/** An account no ceiling here lists: a personal login on a managed host. */
+const PERSONAL_ACCOUNT = { providerId: 'codex', accountRef: 'b'.repeat(64) } as const;
 
 function problemsOf(raw: unknown): readonly string[] {
 	const parsed = parseEgressPolicyCeiling(raw);
@@ -97,7 +107,11 @@ describe('parseEgressPolicyCeiling', () => {
 			classes: [
 				{ class: 'updates', destinations: ['github.com', '*.githubusercontent.com'] },
 				{ class: 'content', destinations: ['*'] },
-				{ class: 'provider-account', destinations: ['https://chatgpt.com:443'] },
+				{
+					class: 'provider-account',
+					destinations: ['https://chatgpt.com:443'],
+					accounts: [APPROVED_ACCOUNT.accountRef],
+				},
 			],
 		});
 		(raw.classes as Array<{ destinations: string[] }>)[0].destinations.push('evil.example');
@@ -140,6 +154,62 @@ describe('parseEgressPolicyCeiling', () => {
 		expect(
 			problemsOf(document({ classes: [{ class: 'github', destinations: 'github.com' }] }))
 		).toEqual(['classes[0].destinations is not an array']);
+	});
+
+	it('accepts approved accounts on the provider-account class alone, as opaque references (MRC2-05-05)', () => {
+		// Absent is not the same as empty: both approve none, and a class that
+		// never named the key stays without it rather than growing an empty list.
+		const bare = ceilingOf(
+			document({ classes: [{ class: 'provider-account', destinations: ['chatgpt.com'] }] })
+		);
+		expect(bare.classes[0]).toEqual({ class: 'provider-account', destinations: ['chatgpt.com'] });
+		expect(bare.classes[0]).not.toHaveProperty('accounts');
+		const empty = ceilingOf(
+			document({
+				classes: [{ class: 'provider-account', destinations: ['chatgpt.com'], accounts: [] }],
+			})
+		);
+		expect(empty.classes[0].accounts).toEqual([]);
+		expect(
+			problemsOf(document({ classes: [{ class: 'content', destinations: ['*'], accounts: [] }] }))
+		).toEqual(['classes[0].accounts is only for the provider-account class']);
+		expect(
+			problemsOf(
+				document({
+					classes: [{ class: 'provider-account', destinations: ['chatgpt.com'], accounts: 'all' }],
+				})
+			)
+		).toEqual(['classes[0].accounts is not an array']);
+		expect(
+			problemsOf(
+				document({
+					classes: [
+						{
+							class: 'provider-account',
+							destinations: ['chatgpt.com'],
+							accounts: ['', '/Users/me/.codex', 'has space', 'x'.repeat(257)],
+						},
+					],
+				})
+			)
+		).toEqual([
+			'classes[0].accounts[0] is not an account reference',
+			'classes[0].accounts[1] is not an account reference',
+			'classes[0].accounts[2] is not an account reference',
+			'classes[0].accounts[3] is not an account reference',
+		]);
+		const many = Array.from({ length: EGRESS_CEILING_LIMITS.accounts + 1 }, (_, i) => `acct-${i}`);
+		expect(
+			problemsOf(
+				document({
+					classes: [{ class: 'provider-account', destinations: ['chatgpt.com'], accounts: many }],
+				})
+			)
+		).toEqual([`classes[0].accounts exceeds ${EGRESS_CEILING_LIMITS.accounts} entries`]);
+		expect(isEgressAccountRef(APPROVED_ACCOUNT.accountRef)).toBe(true);
+		expect(isEgressAccountRef('codex:work-1')).toBe(true);
+		expect(isEgressAccountRef('')).toBe(false);
+		expect(isEgressAccountRef('me@example.com/home')).toBe(false);
 	});
 
 	it('refuses a class named twice and more classes than exist', () => {
@@ -329,8 +399,91 @@ describe('egressVerdict', () => {
 		expect(
 			egressVerdict(
 				managed(),
-				request({ url: 'https://chatgpt.com/backend-api/usage', class: 'provider-account' })
+				request({
+					url: 'https://chatgpt.com/backend-api/usage',
+					class: 'provider-account',
+					account: APPROVED_ACCOUNT,
+				})
 			).allowed
+		).toBe(true);
+	});
+
+	it('holds a provider-account request by the account it names, after the destination (MRC2-05-05)', () => {
+		const poll = (account?: EgressRequest['account'], ceiling = ceilingOf()) =>
+			egressVerdict(
+				managed(ceiling),
+				request({
+					url: 'https://chatgpt.com/backend-api/wham/usage',
+					class: 'provider-account',
+					account,
+				})
+			);
+		const approved = poll(APPROVED_ACCOUNT);
+		expect(approved).toEqual({
+			allowed: true,
+			managed: {
+				policyRevision: 3,
+				class: 'provider-account',
+				actor: 'the operator',
+				origin: 'https://chatgpt.com',
+				account: APPROVED_ACCOUNT.accountRef,
+				outcome: 'within-ceiling',
+			},
+		});
+
+		// A personal login on a managed host: the class and the destination are
+		// listed, the account is not, and the refusal names the account by its
+		// opaque reference, never by a path or an e-mail.
+		const personal = poll(PERSONAL_ACCOUNT);
+		expect(personal.allowed).toBe(false);
+		if (personal.allowed) return;
+		expect(personal.code).toBe('account-denied');
+		expect(personal.message).toBe(
+			`the egress ceiling approves no codex account ${'b'.repeat(12)} for provider-account requests by the operator to https://chatgpt.com; a personal account is never polled from a managed host`
+		);
+		expect(personal.managed).toEqual({
+			policyRevision: 3,
+			class: 'provider-account',
+			actor: 'the operator',
+			origin: 'https://chatgpt.com',
+			account: PERSONAL_ACCOUNT.accountRef,
+			outcome: 'account-denied',
+		});
+
+		// A sink that names no account is refused too: the policy cannot approve
+		// what it cannot see.
+		const anonymous = poll(undefined);
+		expect(anonymous.allowed).toBe(false);
+		if (anonymous.allowed) return;
+		expect(anonymous.code).toBe('account-denied');
+		expect(anonymous.message).toBe(
+			'a provider-account request for the operator to https://chatgpt.com names no account; a provider account is polled from a managed host only when the policy approves it'
+		);
+		expect(anonymous.managed).not.toHaveProperty('account');
+
+		// A class that lists no accounts approves none, even the one a sink names.
+		const unlisted = ceilingOf(
+			document({ classes: [{ class: 'provider-account', destinations: ['chatgpt.com'] }] })
+		);
+		const none = poll(APPROVED_ACCOUNT, unlisted);
+		expect(none.allowed).toBe(false);
+		if (!none.allowed) expect(none.code).toBe('account-denied');
+
+		// The destination is held first, so an unlisted origin never reads as an
+		// account problem; and no other class carries an account.
+		const elsewhere = egressVerdict(
+			managed(),
+			request({
+				url: 'https://evil.example/usage',
+				class: 'provider-account',
+				account: APPROVED_ACCOUNT,
+			})
+		);
+		expect(elsewhere.allowed).toBe(false);
+		if (!elsewhere.allowed) expect(elsewhere.code).toBe('destination-denied');
+		expect(
+			egressVerdict(managed(), request({ url: 'https://models.dev/api.json', class: 'content' }))
+				.allowed
 		).toBe(true);
 	});
 

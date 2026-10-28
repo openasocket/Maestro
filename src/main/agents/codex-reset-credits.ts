@@ -46,8 +46,8 @@ import type {
 } from '../../shared/codexResetCredits';
 import { asResetCreditStatus } from '../../shared/codexResetCredits';
 import { resolveCodexHomeKey } from '../stores/codexUsageStore';
-import { codexAuthHeaders, readCodexAuth } from './codex-auth';
-import { fetchWithTimeout } from '../utils/fetchWithTimeout';
+import { codexAccountEgress, codexAuthHeaders, readCodexAuth } from './codex-auth';
+import { fetchWithTimeout, isEgressDeniedError } from '../utils/fetchWithTimeout';
 import { logger } from '../utils/logger';
 import { captureMessage } from '../utils/sentry';
 
@@ -113,9 +113,14 @@ export async function fetchCodexResetCredits(
 		response = await fetchWithTimeout(
 			CREDITS_ENDPOINT,
 			{ headers: codexAuthHeaders(auth) },
-			opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+			opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+			codexAccountEgress(codexHomeKey)
 		);
-	} catch {
+	} catch (err) {
+		// A managed host refused the read by name; nothing was sent. The panel
+		// shows the managed line where it shows any other reason it has no
+		// credits to list, and the hold sits in the chokepoint's ledger.
+		if (isEgressDeniedError(err)) return { ok: false, error: err.message };
 		// Offline, DNS/TLS failure, unreachable endpoint, or our own abort. All
 		// expected and recoverable - reported through the result, not to Sentry.
 		return { ok: false, error: 'Failed to reach the Codex reset-credit endpoint.' };
@@ -193,9 +198,15 @@ export async function consumeCodexResetCredit(
 				headers: codexAuthHeaders(auth, { 'Content-Type': 'application/json' }),
 				body: JSON.stringify({ credit_id: opts.creditId, redeem_request_id: redeemRequestId }),
 			},
-			opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
+			opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+			codexAccountEgress(codexHomeKey)
 		);
-	} catch {
+	} catch (err) {
+		// A managed refusal is DECIDED: the socket never opened, so the credit
+		// is still there. Say that, not "may or may not have been spent".
+		if (isEgressDeniedError(err)) {
+			return { ok: false, windowsReset: 0, message: err.message };
+		}
 		// A thrown fetch leaves the spend UNDECIDED: the request may have landed.
 		// Say so rather than claiming failure, and keep the idempotency key in the
 		// message so a retry can reuse it instead of risking a second credit.

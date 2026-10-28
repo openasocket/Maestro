@@ -98,6 +98,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { setMaestroLibLogger } from '../../../shared/maestro-lib/host';
+import type { EgressRequest } from '../../../main/enterprise/egress-policy';
+import { setEgressAuthority } from '../../../main/utils/fetchWithTimeout';
+import { denyingEgressAuthority } from '../../helpers/egressAuthority';
 
 // The library logs and reports through its host (shared/maestro-lib/host.ts),
 // which the real desktop modules register into on load. They are mocked here,
@@ -1224,6 +1227,96 @@ describe('agent-detector', () => {
 					},
 				},
 			});
+
+		// The models.dev catalog is `content` to the egress ceiling (MRC2-05-05): a
+		// managed host whose policy omits it is refused by name before any socket
+		// opens and the picker offers the configured model alone.
+		describe('copilot-cli models.dev catalog under an egress authority (MRC2-05-05)', () => {
+			const mockCopilotAvailable = () => {
+				mockExecFileNoThrow.mockImplementation(async (_cmd, args) => {
+					const binaryName = args[0];
+					if (binaryName === 'copilot') {
+						return { stdout: '/usr/bin/copilot\n', stderr: '', exitCode: 0 };
+					}
+					if (binaryName === 'bash') {
+						return { stdout: '/bin/bash\n', stderr: '', exitCode: 0 };
+					}
+					return { stdout: '', stderr: 'not found', exitCode: 1 };
+				});
+				_readFileSync.mockImplementation((filePath: fs.PathOrFileDescriptor) => {
+					if (
+						typeof filePath === 'string' &&
+						filePath.endsWith(path.join('.copilot', 'config.json'))
+					) {
+						return JSON.stringify({ model: 'gpt-5' });
+					}
+					throw new Error('ENOENT');
+				});
+			};
+
+			afterEach(() => {
+				setEgressAuthority(null);
+				vi.unstubAllGlobals();
+			});
+
+			it('names the catalog fetch content and merges the configured model when it leaves', async () => {
+				mockCopilotAvailable();
+				vi.stubGlobal(
+					'fetch',
+					vi.fn().mockResolvedValue({
+						ok: true,
+						status: 200,
+						json: vi
+							.fn()
+							.mockResolvedValue({
+								'github-copilot': { models: { 'gpt-5': {}, 'claude-opus-5-5': {} } },
+							}),
+					})
+				);
+				const seen: EgressRequest[] = [];
+				setEgressAuthority({
+					evaluateEgress(request) {
+						seen.push(request);
+						return { allowed: true };
+					},
+				});
+				detector.clearCache();
+				await detector.detectAgents();
+
+				const models = await detector.discoverModels('copilot-cli');
+
+				expect(seen).toEqual([{ url: 'https://models.dev/api.json', class: 'content' }]);
+				expect(models).toEqual(['claude-opus-5-5', 'gpt-5']);
+			});
+
+			it('offers the configured model alone when the catalog is held, by name and with nothing sent', async () => {
+				mockCopilotAvailable();
+				const fetchMock = vi.fn(async () => {
+					throw new Error('fetch must not be reached under a hold');
+				});
+				vi.stubGlobal('fetch', fetchMock);
+				const { authority, requests } = denyingEgressAuthority('class-denied');
+				setEgressAuthority(authority);
+				detector.clearCache();
+				await detector.detectAgents();
+
+				const models = await detector.discoverModels('copilot-cli');
+
+				expect(models).toEqual(['gpt-5']);
+				expect(fetchMock).not.toHaveBeenCalled();
+				expect(requests).toEqual([{ url: 'https://models.dev/api.json', class: 'content' }]);
+				expect(logger.info).toHaveBeenCalledWith(
+					'models.dev catalog held by policy; offering the configured model',
+					'AgentDetector',
+					{ hold: expect.stringMatching(/^\[managed-class-denied\] /) }
+				);
+				expect(logger.warn).not.toHaveBeenCalledWith(
+					'Failed to fetch models from models.dev for copilot-cli',
+					expect.anything(),
+					expect.anything()
+				);
+			});
+		});
 
 		it('should discover models from the Claude Code model catalog (shape A)', async () => {
 			mockClaudeAvailable();
