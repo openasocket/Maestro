@@ -21,9 +21,16 @@
  * provider launches with (`maestro-agent-configs.json`) and the same fields on
  * one agent's own record. Locked, never pinned: what a managed launch may ask
  * for is the route ceiling's call at spawn, not a settings value.
+ *
+ * And two admin sets (MRC2-06-04), lockable and pinnable, neither a settings
+ * value: the Maestro Prompts customizations (`prompts.customizations`, restored
+ * by the prompts handler) and the installed plugin set (`plugins.installed`,
+ * held at install and uninstall); `applyManagedPins()` leaves both alone.
  */
 
 import { canonicalJson } from './canonicalJson';
+import { PLUGIN_ID_PATTERN } from './plugins/plugin-manifest';
+import { CORE_PROMPTS } from './promptDefinitions';
 import { SETTINGS_METADATA, type SettingMetadata, type SettingType } from './settingsMetadata';
 
 export interface ManagedSettingsLock {
@@ -86,8 +93,24 @@ export function agentConfigLockKey(field: string): string | null {
 	return isAgentConfigLockField(field) ? `${AGENT_CONFIG_LOCK_PREFIX}${field}` : null;
 }
 
+/** The Maestro Prompts customization set, pinned as `{ [promptId]: content }`. */
+export const PROMPT_SET_LOCK_KEY = 'prompts.customizations';
+/** The installed community plugin set, pinned as plugin ids. */
+export const PLUGIN_SET_LOCK_KEY = 'plugins.installed';
+export const MANAGED_SET_LOCK_KEYS: readonly string[] = Object.freeze([
+	PROMPT_SET_LOCK_KEY,
+	PLUGIN_SET_LOCK_KEY,
+]);
+
+const LOCK_BOUND =
+	LOCKABLE_SETTING_KEYS.length + AGENT_CONFIG_LOCK_KEYS.length + MANAGED_SET_LOCK_KEYS.length;
+
 export function isSettingLockable(key: string): boolean {
-	return SETTINGS_METADATA[key]?.lockable === true || AGENT_CONFIG_LOCK_KEYS.includes(key);
+	return (
+		SETTINGS_METADATA[key]?.lockable === true ||
+		AGENT_CONFIG_LOCK_KEYS.includes(key) ||
+		MANAGED_SET_LOCK_KEYS.includes(key)
+	);
 }
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
@@ -113,22 +136,41 @@ function typeProblem(meta: SettingMetadata, value: unknown): string | null {
 	return `is not ${/^[aeiou]/.test(meta.type) ? 'an' : 'a'} ${meta.type}`;
 }
 
+/** What an admin set's pin must be: a closed shape, every member a known id. */
+const MANAGED_SET_PIN_PROBLEM: Record<string, (value: unknown) => string | null> = {
+	[PROMPT_SET_LOCK_KEY]: (value) => {
+		if (!isPlainObject(value)) return 'is not an object of prompt id to content';
+		for (const [id, content] of Object.entries(value)) {
+			if (!CORE_PROMPTS.some((prompt) => prompt.id === id))
+				return `names "${id}", which is not a Maestro prompt id`;
+			if (typeof content !== 'string') return `holds a non-string content for "${id}"`;
+		}
+		return null;
+	},
+	[PLUGIN_SET_LOCK_KEY]: (value) => {
+		if (!Array.isArray(value)) return 'is not an array of plugin ids';
+		const bad = value.find((id) => typeof id !== 'string' || !PLUGIN_ID_PATTERN.test(id));
+		if (bad !== undefined) return `names ${JSON.stringify(bad)}, which is not a plugin id`;
+		return new Set(value).size === value.length ? null : 'names a plugin id twice';
+	},
+};
+
+function pinProblem(key: string, raw: unknown): string | null {
+	if (key.startsWith(AGENT_CONFIG_LOCK_PREFIX))
+		return `pins "${key}", a per-provider configuration key that may be locked but never pinned`;
+	const setProblem = MANAGED_SET_PIN_PROBLEM[key];
+	if (setProblem) return setProblem(raw);
+	const meta = SETTINGS_METADATA[key];
+	if (meta.sensitive) return `pins "${key}", a sensitive key that may be locked but never pinned`;
+	const mismatch = typeProblem(meta, raw);
+	return mismatch ? `${mismatch} (the "${key}" setting is ${meta.type})` : null;
+}
+
 /** A fresh JSON copy of a pin the caller's input can no longer reach, or the problem. */
 function parsePinValue(key: string, raw: unknown, at: string, problems: string[]): unknown {
-	if (key.startsWith(AGENT_CONFIG_LOCK_PREFIX)) {
-		problems.push(
-			`${at} pins "${key}", a per-provider configuration key that may be locked but never pinned`
-		);
-		return undefined;
-	}
-	const meta = SETTINGS_METADATA[key];
-	if (meta.sensitive) {
-		problems.push(`${at} pins "${key}", a sensitive key that may be locked but never pinned`);
-		return undefined;
-	}
-	const mismatch = typeProblem(meta, raw);
-	if (mismatch) {
-		problems.push(`${at} ${mismatch} (the "${key}" setting is ${meta.type})`);
+	const problem = pinProblem(key, raw);
+	if (problem) {
+		problems.push(`${at} ${problem}`);
 		return undefined;
 	}
 	let text: string;
@@ -183,10 +225,7 @@ export function parseManagedSettingsPolicy(raw: unknown): ManagedSettingsPolicyP
 		problems.push('policyRevision is not a policy revision');
 	const locks: ManagedSettingsLock[] = [];
 	if (!Array.isArray(raw.locks)) problems.push('locks is not an array');
-	else if (raw.locks.length > LOCKABLE_SETTING_KEYS.length + AGENT_CONFIG_LOCK_KEYS.length)
-		problems.push(
-			`locks exceeds ${LOCKABLE_SETTING_KEYS.length + AGENT_CONFIG_LOCK_KEYS.length} entries`
-		);
+	else if (raw.locks.length > LOCK_BOUND) problems.push(`locks exceeds ${LOCK_BOUND} entries`);
 	else
 		raw.locks.forEach((entry, index) => {
 			const parsed = parseLock(entry, `locks[${index}]`, problems);
@@ -266,8 +305,9 @@ export interface ManagedPinApplication<T> {
 }
 
 /**
- * Restore every pinned key whose value differs, as a fresh copy. A lock
- * without a pin, a pin already held, or no policy at all changes nothing.
+ * Restore every pinned settings key whose value differs, as a fresh copy. A
+ * lock without a pin, a pin already held, an admin set's pin (not a settings
+ * value), or no policy at all changes nothing.
  */
 export function applyManagedPins<T extends Record<string, unknown>>(
 	settings: T,
@@ -277,7 +317,8 @@ export function applyManagedPins<T extends Record<string, unknown>>(
 	const next: Record<string, unknown> = { ...settings };
 	for (const key of lockedSettingKeys(policy)) {
 		const lock = lockOf(key, policy);
-		if (!lock?.pin || sameJson(settings[key], lock.pin.value)) continue;
+		if (!lock?.pin || !(key in SETTINGS_METADATA) || sameJson(settings[key], lock.pin.value))
+			continue;
 		next[key] = cloneJson(lock.pin.value);
 		restored.push(key);
 	}

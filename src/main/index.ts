@@ -221,6 +221,7 @@ import {
 } from './utils/ssh-remote-resolver';
 import { stopSessionCleanup } from './group-chat/group-chat-moderator';
 import { initializePrompts, getPrompt, savePrompt } from './prompt-manager';
+import { restoreManagedPromptPins } from './ipc/handlers/prompts';
 import { captureException } from './utils/sentry';
 import {
 	resolveToFilePath,
@@ -1020,6 +1021,14 @@ app
 		};
 		settingsPolicy.onChange(restoreSettingsPins);
 		restoreSettingsPins();
+		// The pinned prompt set (MRC2-06-04): restored once the prompts are initialized below, and on every policy change.
+		const restorePromptPins = () =>
+			restoreManagedPromptPins(settingsPolicy.pins()).then(
+				(ids) =>
+					ids.length && logger.info(`Managed prompt pins restored: ${ids.join(', ')}`, 'Settings'),
+				(error) => logger.error(`Managed prompt pins not restored: ${error}`, 'Settings')
+			);
+		settingsPolicy.onChange(() => void restorePromptPins());
 		// The install ceiling (MRC2-04-07): WakaTime's download, extraction and binary
 		// and the maestro-cli shim are held to the policy's pins; none installed yet (CP-01).
 		const installPolicy = createInstallPolicySource({
@@ -1418,6 +1427,7 @@ app
 			app.quit();
 			return;
 		}
+		await restorePromptPins();
 
 		// One-time migration: bake standing instructions into moderator prompt customization
 		const standingInstructions = (store.get('moderatorStandingInstructions', '') as string) || '';

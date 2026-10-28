@@ -25,6 +25,8 @@ import {
 	PIANOLA_FIRST_PARTY_PLUGIN,
 } from '../../../shared/plugins/first-party';
 import { grantsFromRequests, type PermissionGrant } from '../../../shared/plugins/permissions';
+import { setSettingsWriteAuthority } from '../../../main/enterprise/settings-policy';
+import { installManagedSettingsPolicy } from '../../helpers/managedSettingsPolicy';
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
@@ -479,6 +481,50 @@ describe('plugins:first-party-set-enabled routes the marketplace toggle through 
 			const handler = handlers.get('plugins:first-party-set-enabled');
 
 			await expect(handler!(event, 'maestroRun', false)).resolves.toMatchObject({ enabled: false });
+		});
+	});
+});
+
+describe('install, update and uninstall under the managed plugin set (MRC2-06-04)', () => {
+	afterEach(() => setSettingsWriteAuthority(null));
+	/** A manager whose install asks the admission for the manifest id the source carries. */
+	const installing = (id: string) =>
+		Object.assign(register(true), {
+			install: vi.fn((_dir: string, admit?: (m: { id: string }) => string | null) => {
+				const refusal = admit?.({ id });
+				return refusal ? { success: false, error: refusal } : { success: true };
+			}),
+			update: vi.fn(async () => emptyRegistry),
+		});
+	const refused = (error: string) => ({ success: false, error });
+
+	it('a locked set refuses every change by the policy line before the manager or the ledger', async () => {
+		const manager = installing('new-plugin');
+		installManagedSettingsPolicy([{ key: 'plugins.installed' }]);
+		const line = 'the "plugins.installed" setting is locked by managed policy revision 3';
+		await expect(handlers.get('plugins:install')!(event, '/src')).resolves.toEqual(refused(line));
+		await expect(handlers.get('plugins:uninstall')!(event, 'new-plugin')).resolves.toEqual(
+			refused(line)
+		);
+		await expect(handlers.get('plugins:update')!(event, '/src')).rejects.toThrow(line);
+		expect(manager.uninstall).not.toHaveBeenCalled();
+	});
+
+	it('a pinned set admits an install of a listed id, an uninstall of an unlisted one, and an update', async () => {
+		const manager = installing('other');
+		installManagedSettingsPolicy([{ key: 'plugins.installed', pin: { value: ['kept'] } }]);
+		await expect(handlers.get('plugins:install')!(event, '/src')).resolves.toEqual(
+			refused('plugin "other" is not in the plugin set pinned by managed policy revision 3')
+		);
+		await expect(handlers.get('plugins:uninstall')!(event, 'kept')).resolves.toEqual(
+			refused('plugin "kept" is in the plugin set pinned by managed policy revision 3')
+		);
+		expect(manager.uninstall).not.toHaveBeenCalled();
+		await expect(handlers.get('plugins:uninstall')!(event, 'other')).resolves.toEqual({
+			success: true,
+		});
+		await expect(handlers.get('plugins:update')!(event, '/src')).resolves.toMatchObject({
+			plugins: [],
 		});
 	});
 });

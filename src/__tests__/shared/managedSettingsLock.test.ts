@@ -10,6 +10,7 @@ import {
 	AGENT_CONFIG_LOCK_KEYS,
 	LOCKABLE_SETTING_KEYS,
 	MANAGED_SETTINGS_LIMITS,
+	MANAGED_SET_LOCK_KEYS,
 	SESSION_CONFIG_LOCK_FIELDS,
 	agentConfigLockKey,
 	applyManagedPins,
@@ -100,7 +101,8 @@ describe('parseManagedSettingsPolicy', () => {
 		expect(parse([{ key: 'ghPath', extra: true }])).toEqual(
 			refused('locks[0].extra is not a known key')
 		);
-		const bound = LOCKABLE_SETTING_KEYS.length + AGENT_CONFIG_LOCK_KEYS.length;
+		const bound =
+			LOCKABLE_SETTING_KEYS.length + AGENT_CONFIG_LOCK_KEYS.length + MANAGED_SET_LOCK_KEYS.length;
 		const many = Array.from({ length: bound + 1 }, () => ({ key: 'ghPath' }));
 		expect(parse(many)).toEqual(refused(`locks exceeds ${bound} entries`));
 	});
@@ -278,12 +280,47 @@ describe('the per-provider configuration namespace (MRC2-06-03)', () => {
 		});
 	});
 
-	it('lists only the held fields a whole-config write changes', () => {
+	it('lists only the held fields a whole-config write changes (admin sets below)', () => {
 		const before = { customPath: '/a', customEnvVars: { A: '1' }, contextWindow: 5 };
 		expect(changedAgentConfigFields(before, { ...before, contextWindow: 9 })).toEqual([]);
 		expect(changedAgentConfigFields(before, { customEnvVars: { A: '1' } })).toEqual(['customPath']);
 		expect(
 			changedAgentConfigFields(before, { ...before, customArgs: '--x', customEnvVars: { A: '2' } })
 		).toEqual(['customArgs', 'customEnvVars']);
+	});
+});
+
+describe('the admin set namespace (MRC2-06-04)', () => {
+	const PROMPTS = 'prompts.customizations';
+	const PLUGINS = 'plugins.installed';
+
+	it('names the two sets beside the settings keys and pins each to its closed shape', () => {
+		expect(MANAGED_SET_LOCK_KEYS).toEqual([PROMPTS, PLUGINS]);
+		expect(LOCKABLE_SETTING_KEYS).not.toContain(PROMPTS);
+		expect(isSettingLockable(PLUGINS)).toBe(true);
+		const prompts = { 'wizard-system': 'pinned' };
+		expect(pin(PROMPTS, prompts)).toEqual({
+			ok: true,
+			policy: { ...policyOf([{ key: PROMPTS, pin: { value: prompts } }]), policyRevision: 1 },
+		});
+		expect(pin(PLUGINS, ['kept', 'a.b-c'])).toMatchObject({ ok: true });
+		expect(pin(PROMPTS, { nope: 'x' })).toEqual(
+			refused('locks[0].pin.value names "nope", which is not a Maestro prompt id')
+		);
+		expect(pin(PROMPTS, { 'wizard-system': 1 })).toEqual(
+			refused('locks[0].pin.value holds a non-string content for "wizard-system"')
+		);
+		expect(pin(PLUGINS, {})).toEqual(refused('locks[0].pin.value is not an array of plugin ids'));
+		expect(pin(PLUGINS, ['../x'])).toEqual(
+			refused('locks[0].pin.value names "../x", which is not a plugin id')
+		);
+		expect(pin(PLUGINS, ['a', 'a'])).toEqual(refused('locks[0].pin.value names a plugin id twice'));
+		// Held by the one reason; the pin is never written into the settings.
+		const policy = policyOf([{ key: PROMPTS, pin: { value: { 'wizard-system': 'p' } } }]);
+		expect(managedSettingLockReason(PROMPTS, policy)).toBe(
+			'the "prompts.customizations" setting is locked and pinned by managed policy revision 7'
+		);
+		const settings = { ghPath: '/gh' };
+		expect(applyManagedPins(settings, policy)).toEqual({ settings, restored: [] });
 	});
 });

@@ -13,8 +13,11 @@ import {
 	createSettingsPolicySource,
 	guardSettingsStore,
 	holdAgentConfigWrite,
+	holdPluginSetWrite,
+	holdPromptSetWrite,
 	holdSettingWrite,
 	managedSettingsStanding,
+	pluginSetVerdict,
 	restoreManagedSettingPins,
 	setSettingsWriteAuthority,
 	settingWriteVerdict,
@@ -355,5 +358,48 @@ describe('the bridge update_session_config handler', () => {
 		setSettingsWriteAuthority(null);
 		send(ctx, { customPath: '/bin/codex', customEnvVars: { ANTHROPIC_API_KEY: 'k' } });
 		expect(ctx.callbacks.updateSessionConfig).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('the admin sets: holdPromptSetWrite and holdPluginSetWrite (MRC2-06-04)', () => {
+	const PLUGINS = 'plugins.installed';
+	const install = (pluginId: string) => ({ op: 'install' as const, pluginId });
+	const uninstall = (pluginId: string) => ({ op: 'uninstall' as const, pluginId });
+
+	it('admits everything standalone and refuses both sets unavailable with no usable policy', () => {
+		expect(holdPromptSetWrite()).toEqual({ allowed: true });
+		expect(holdPluginSetWrite(install('x'))).toEqual({ allowed: true });
+		setSettingsWriteAuthority(source(enrolled, null));
+		expect(holdPromptSetWrite()).toMatchObject({ code: 'unavailable' });
+		expect(holdPluginSetWrite(uninstall('x'))).toMatchObject({ code: 'unavailable' });
+		expect(holdPluginSetWrite({ op: 'update' })).toMatchObject({ code: 'unavailable' });
+	});
+
+	it('holds a locked set outright, and a pinned plugin set to its ids', () => {
+		const current = installed(
+			document({
+				locks: [{ key: 'prompts.customizations' }, { key: PLUGINS, pin: { value: ['kept'] } }],
+			})
+		);
+		expect(holdPromptSetWrite()).toMatchObject({
+			code: 'locked',
+			message: 'the "prompts.customizations" setting is locked by managed policy revision 3',
+		});
+		expect(holdPluginSetWrite(install('kept'))).toEqual({ allowed: true });
+		expect(holdPluginSetWrite(install('other'))).toMatchObject({
+			code: 'locked',
+			message: 'plugin "other" is not in the plugin set pinned by managed policy revision 3',
+		});
+		expect(holdPluginSetWrite(uninstall('kept'))).toMatchObject({
+			message: 'plugin "kept" is in the plugin set pinned by managed policy revision 3',
+		});
+		expect(holdPluginSetWrite(uninstall('other'))).toEqual({ allowed: true });
+		expect(holdPluginSetWrite({ op: 'update' })).toEqual({ allowed: true });
+		const lock = settingWriteVerdict(current.standing(), PLUGINS);
+		expect(pluginSetVerdict(lock, null, { op: 'update' })).toBe(lock);
+		// The pins are not settings values: the store restorer leaves them alone.
+		const store = guardSettingsStore(fakeStore({ ghPath: '/gh' }));
+		expect(restoreManagedSettingPins(store, current.pins())).toEqual([]);
+		expect(store.writes).toEqual([]);
 	});
 });

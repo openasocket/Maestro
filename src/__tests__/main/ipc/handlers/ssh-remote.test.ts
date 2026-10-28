@@ -10,8 +10,10 @@
  * - ssh-remote:test
  */
 
-import { describe, it, expect, beforeEach, vi, Mock } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, Mock } from 'vitest';
 import { ipcMain } from 'electron';
+import { setSettingsWriteAuthority } from '../../../../main/enterprise/settings-policy';
+import { installManagedSettingsPolicy } from '../../../helpers/managedSettingsPolicy';
 import { registerSshRemoteHandlers } from '../../../../main/ipc/handlers/ssh-remote';
 import { SshRemoteConfig } from '../../../../shared/types';
 import * as sshRemoteManagerModule from '../../../../main/ssh-remote-manager';
@@ -444,6 +446,33 @@ describe('SSH Remote IPC Handlers', () => {
 			expect(result.success).toBe(true); // IPC call succeeded
 			expect(result.result?.success).toBe(false); // But test failed
 			expect(result.result?.error).toBe('Connection refused');
+		});
+	});
+
+	describe('the managed settings lock (MRC2-06-04)', () => {
+		afterEach(() => setSettingsWriteAuthority(null));
+
+		it('refuses a save, delete or default change of a held key by the policy line, writing nothing', async () => {
+			mockSettingsStore.get.mockImplementation((key: string) =>
+				key === 'sshRemotes'
+					? [createMockConfig()]
+					: key === 'defaultSshRemoteId'
+						? 'test-id'
+						: null
+			);
+			installManagedSettingsPolicy([{ key: 'sshRemotes' }, { key: 'defaultSshRemoteId' }]);
+			const line = (key: string) => `the "${key}" setting is locked by managed policy revision 3`;
+			await expect(invokeHandler('ssh-remote:saveConfig', createMockConfig())).resolves.toEqual({
+				success: false,
+				error: line('sshRemotes'),
+			});
+			await expect(invokeHandler('ssh-remote:deleteConfig', 'test-id')).resolves.toMatchObject({
+				error: line('sshRemotes'),
+			});
+			await expect(invokeHandler('ssh-remote:setDefaultId', null)).resolves.toMatchObject({
+				error: line('defaultSshRemoteId'),
+			});
+			expect(mockSettingsStore.set).not.toHaveBeenCalled();
 		});
 	});
 });

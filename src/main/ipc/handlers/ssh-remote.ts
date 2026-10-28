@@ -20,6 +20,7 @@ import { logger } from '../../utils/logger';
 import { MaestroSettings } from './persistence';
 import { parseSshConfig, SshConfigParseResult } from '../../utils/ssh-config-parser';
 import { normalizeSshOptions } from '../../../shared/sshOptions';
+import { ManagedSettingLockedError, holdSettingWrite } from '../../enterprise/settings-policy';
 
 const LOG_CONTEXT = '[SshRemote]';
 
@@ -38,6 +39,16 @@ const handlerOpts = (operation: string, logSuccess = true): CreateHandlerOptions
 export interface SshRemoteHandlerDependencies {
 	/** The settings store (MaestroSettings) */
 	settingsStore: Store<MaestroSettings>;
+}
+
+/**
+ * Hold a settings key before any work (MRC2-06-04): the handler wrapper answers
+ * the policy's line as the error the Settings UI shows, and nothing is written.
+ * Standalone: nothing is held.
+ */
+function holdKey(key: 'sshRemotes' | 'defaultSshRemoteId'): void {
+	const decision = holdSettingWrite(key);
+	if (!decision.allowed) throw new ManagedSettingLockedError(key, decision.code, decision.message);
 }
 
 /**
@@ -95,6 +106,7 @@ export function registerSshRemoteHandlers(deps: SshRemoteHandlerDependencies): v
 		createIpcHandler(
 			handlerOpts('saveConfig'),
 			async (config: Partial<SshRemoteConfig>): Promise<{ config: SshRemoteConfig }> => {
+				holdKey('sshRemotes');
 				const remotes = getSshRemotes(settingsStore);
 
 				// Determine if this is an update or create
@@ -163,6 +175,8 @@ export function registerSshRemoteHandlers(deps: SshRemoteHandlerDependencies): v
 		createIpcHandler(
 			handlerOpts('deleteConfig'),
 			async (id: string): Promise<Record<string, never>> => {
+				holdKey('sshRemotes');
+				if (getDefaultSshRemoteId(settingsStore) === id) holdKey('defaultSshRemoteId');
 				const remotes = getSshRemotes(settingsStore);
 				const index = remotes.findIndex((r) => r.id === id);
 
@@ -227,6 +241,7 @@ export function registerSshRemoteHandlers(deps: SshRemoteHandlerDependencies): v
 		createIpcHandler(
 			handlerOpts('setDefaultId'),
 			async (id: string | null): Promise<Record<string, never>> => {
+				holdKey('defaultSshRemoteId');
 				if (id !== null) {
 					// Validate that the ID exists
 					const remotes = getSshRemotes(settingsStore);

@@ -9,6 +9,9 @@
  * a disabled flag throws `'PluginsDisabled'` so the renderer can tell "feature
  * off" from "no plugins installed". The gate runs OUTSIDE withIpcErrorLogging so
  * the sentinel is not logged as an unexpected IPC failure.
+ *
+ * Install, update and uninstall are held to the managed plugin set (MRC2-06-04):
+ * a held change answers the policy's line before the files or the ledger are touched.
  */
 
 import { ipcMain } from 'electron';
@@ -28,6 +31,7 @@ import {
 	isFirstPartyPluginAvailableOn,
 	type FirstPartyEncoreFlag,
 } from '../../../shared/plugins/first-party';
+import { holdPluginSetWrite, type PluginSetChange } from '../../enterprise/settings-policy';
 
 const LOG_CONTEXT = '[Plugins]';
 
@@ -81,6 +85,12 @@ function isPluginsEnabled(settingsStore: { get: (key: string) => unknown }): boo
 	return ef.plugins === true;
 }
 
+/** The policy's line for a held plugin-set change, or null when admitted. */
+function heldPluginChange(change: PluginSetChange): string | null {
+	const decision = holdPluginSetWrite(change);
+	return decision.allowed ? null : decision.message;
+}
+
 function snapshotOf(registry: PluginRegistry): PluginListSnapshot {
 	return { hostApiVersion: HOST_API_VERSION, plugins: registry.records };
 }
@@ -121,7 +131,9 @@ export function registerPluginsHandlers(deps: PluginsHandlerDependencies): void 
 			if (typeof sourceDir !== 'string' || sourceDir.length === 0) {
 				throw new Error('InvalidSourceDir');
 			}
-			return manager.install(sourceDir);
+			return manager.install(sourceDir, (manifest) =>
+				heldPluginChange({ op: 'install', pluginId: manifest.id })
+			);
 		}
 	);
 	const wrappedUpdate = withIpcErrorLogging(
@@ -130,6 +142,8 @@ export function registerPluginsHandlers(deps: PluginsHandlerDependencies): void 
 			if (typeof sourceDir !== 'string' || sourceDir.length === 0) {
 				throw new Error('InvalidSourceDir');
 			}
+			const held = heldPluginChange({ op: 'update' });
+			if (held) throw new Error(held);
 			return snapshotOf(await manager.update(sourceDir));
 		}
 	);
@@ -138,6 +152,8 @@ export function registerPluginsHandlers(deps: PluginsHandlerDependencies): void 
 		async (id: unknown): Promise<{ success: boolean; error?: string }> => {
 			if (typeof id !== 'string' || id.length === 0) throw new Error('InvalidPluginId');
 			if (!PLUGIN_ID_PATTERN.test(id)) throw new Error('InvalidPluginId');
+			const held = heldPluginChange({ op: 'uninstall', pluginId: id });
+			if (held) return { success: false, error: held };
 			const result = await manager.uninstall(id);
 			// Authoritative removal in the ledger too (tombstone), so a restored folder
 			// is recognized as removed-by-user and cannot silently re-enable.

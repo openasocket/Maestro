@@ -119,6 +119,9 @@ export interface InstallResult {
 	error?: string;
 }
 
+/** The policy's line refusing a validated manifest before anything is copied, or null to admit it. */
+export type InstallAdmission = (manifest: PluginManifest) => string | null;
+
 /**
  * Discovers and tracks installed plugins. Stateless between calls except for a
  * cached registry; discovery re-reads disk so external changes (manual install,
@@ -615,7 +618,7 @@ export class PluginManager {
 	 * Copy a validated plugin source directory into the plugins dir under the
 	 * manifest id. Refuses an invalid manifest, id collision, or symlinked tree.
 	 */
-	private installDirectory(sourceDir: string): InstallResult {
+	private installDirectory(sourceDir: string, admit?: InstallAdmission): InstallResult {
 		const rawManifest = this.readManifest(sourceDir);
 		const { manifest, errors } = validatePluginManifest(rawManifest);
 		if (!manifest) {
@@ -628,6 +631,9 @@ export class PluginManager {
 		if (fs.existsSync(dest)) {
 			return { success: false, error: `plugin "${manifest.id}" is already installed` };
 		}
+		// The managed plugin set (MRC2-06-04) is held by id, before anything is copied.
+		const refusal = admit?.(manifest);
+		if (refusal) return { success: false, error: refusal };
 		// Reject a source tree containing symlinks: they can point outside the
 		// plugin dir (a read/write escape) and would otherwise be copied verbatim.
 		if (containsSymlink(sourceDir)) {
@@ -647,16 +653,16 @@ export class PluginManager {
 	 * reject traversal/link entries before writing, then use the same directory
 	 * install path so manifest validation and symlink checks stay centralized.
 	 */
-	install(sourcePath: string): InstallResult {
+	install(sourcePath: string, admit?: InstallAdmission): InstallResult {
 		if (!this.deps.isEnabled()) return { success: false, error: 'plugins feature is disabled' };
 		const resolvedSource = path.resolve(sourcePath);
 		if (!isPackedPluginArchivePath(resolvedSource)) {
-			return this.installDirectory(resolvedSource);
+			return this.installDirectory(resolvedSource, admit);
 		}
 		let extracted: ExtractedPluginArchive | null = null;
 		try {
 			extracted = extractPluginArchive(resolvedSource);
-			return this.installDirectory(extracted.root);
+			return this.installDirectory(extracted.root, admit);
 		} catch (error) {
 			return { success: false, error: error instanceof Error ? error.message : String(error) };
 		} finally {

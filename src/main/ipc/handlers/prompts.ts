@@ -3,6 +3,10 @@
  *
  * Provides full CRUD for the Maestro Prompts UI tab.
  * Changes are saved to customizations file AND applied immediately in memory.
+ *
+ * Save and reset are held to the managed prompt set (MRC2-06-04): a held write
+ * answers the policy's line and touches nothing; a pinned set is restored by
+ * `restoreManagedPromptPins()`, the one writer that bypasses the hold.
  */
 
 import { app, ipcMain } from 'electron';
@@ -19,8 +23,48 @@ import {
 } from '../../prompt-manager';
 import { logger } from '../../utils/logger';
 import { computerHistoryDir } from '../../../shared/computer-history/paths';
+import {
+	PROMPT_SET_LOCK_KEY,
+	managedSettingPin,
+	type ManagedSettingsPolicy,
+} from '../../../shared/managedSettingsLock';
+import { holdPromptSetWrite } from '../../enterprise/settings-policy';
 
 const LOG_CONTEXT = '[IPC:Prompts]';
+
+/** The refusal a held prompt write answers with, or null when admitted (standalone: always). */
+function heldPromptWrite(op: string, id: string) {
+	const decision = holdPromptSetWrite();
+	if (decision.allowed) return null;
+	logger.warn(`${op} of prompt ${id} refused (${decision.code}): ${decision.message}`, LOG_CONTEXT);
+	return {
+		success: false as const,
+		error: decision.message,
+		managed: { code: decision.code, policyRevision: decision.policyRevision },
+	};
+}
+
+/**
+ * Restore the pinned prompt set (every pinned prompt to its content, every other
+ * customization to the bundled default) at startup and on each policy change;
+ * a lock without a pin, or no policy, changes nothing. Returns the ids changed.
+ */
+export async function restoreManagedPromptPins(
+	policy: ManagedSettingsPolicy | null
+): Promise<string[]> {
+	const pin = managedSettingPin(PROMPT_SET_LOCK_KEY, policy);
+	if (!pin || !arePromptsInitialized()) return [];
+	const pinned = pin.value as Record<string, string>;
+	const changed: string[] = [];
+	for (const prompt of getAllPrompts()) {
+		const content = pinned[prompt.id];
+		if (content !== undefined && content !== prompt.content) await savePrompt(prompt.id, content);
+		else if (content === undefined && prompt.isModified) await resetPrompt(prompt.id);
+		else continue;
+		changed.push(prompt.id);
+	}
+	return changed;
+}
 
 export function registerPromptsHandlers(): void {
 	// Get a single prompt by ID
@@ -71,6 +115,8 @@ export function registerPromptsHandlers(): void {
 			if (!arePromptsInitialized()) {
 				return { success: false, error: 'Prompts not yet initialized' };
 			}
+			const held = heldPromptWrite('save', id);
+			if (held) return held;
 			await savePrompt(id, content);
 			return { success: true };
 		} catch (error) {
@@ -85,6 +131,8 @@ export function registerPromptsHandlers(): void {
 			if (!arePromptsInitialized()) {
 				return { success: false, error: 'Prompts not yet initialized' };
 			}
+			const held = heldPromptWrite('reset', id);
+			if (held) return held;
 			const content = await resetPrompt(id);
 			return { success: true, content };
 		} catch (error) {

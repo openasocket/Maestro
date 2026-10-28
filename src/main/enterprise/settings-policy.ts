@@ -16,7 +16,8 @@
  * by the `agents:setConfig*` IPC handlers and the bridge's
  * `update_session_config`: the lock first, then what the Phase 1 provider
  * ceiling would refuse at launch, named at write time instead of silently
- * stripped later.
+ * stripped later. The admin sets (MRC2-06-04) are held by `holdPromptSetWrite()`
+ * and `holdPluginSetWrite()`; the SSH remote handlers hold their settings keys.
  */
 
 import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
@@ -31,10 +32,13 @@ import {
 import { isWindows } from '../../shared/platformDetection';
 import {
 	LOCKABLE_SETTING_KEYS,
+	PLUGIN_SET_LOCK_KEY,
+	PROMPT_SET_LOCK_KEY,
 	agentConfigLockKey,
 	applyManagedPins,
 	isSettingLockable,
 	managedSettingLockReason,
+	managedSettingPin,
 	parseManagedSettingsPolicy,
 	type ManagedSettingsPolicy,
 } from '../../shared/managedSettingsLock';
@@ -248,6 +252,11 @@ export class ManagedSettingLockedError extends Error {
 		super(message);
 		this.name = 'ManagedSettingLockedError';
 	}
+
+	/** The policy's line alone: a handler wrapper that answers `String(error)` shows no class name. */
+	toString(): string {
+		return this.message;
+	}
 }
 
 // The one authority every settings write path reads. Null until the desktop
@@ -272,6 +281,46 @@ export function holdAgentConfigWrite(
 	return writeAuthority
 		? writeAuthority.authorizeAgentConfig(providerId, field, value)
 		: { allowed: true };
+}
+
+/** Hold a save or reset of a Maestro Prompts customization through the same authority. Standalone: allowed. */
+export function holdPromptSetWrite(): SettingWriteDecision {
+	return writeAuthority ? writeAuthority.authorize(PROMPT_SET_LOCK_KEY) : { allowed: true };
+}
+
+/** A change to the installed plugin set, held before the files or the ledger are touched. */
+export type PluginSetChange = { op: 'install' | 'uninstall'; pluginId: string } | { op: 'update' };
+
+/**
+ * Hold a plugin-set change: the lock's own verdict (`lock`, on `PLUGIN_SET_LOCK_KEY`),
+ * then under a pin the set itself: an install of a listed id, an uninstall of an
+ * unlisted one and an update are admitted; nothing is restored (no source exists).
+ */
+export function pluginSetVerdict(
+	lock: SettingWriteDecision,
+	policy: ManagedSettingsPolicy | null,
+	change: PluginSetChange
+): SettingWriteDecision {
+	if (lock.allowed || lock.code !== 'locked') return lock;
+	const pin = managedSettingPin(PLUGIN_SET_LOCK_KEY, policy);
+	if (!pin) return lock;
+	if (change.op === 'update') return { allowed: true };
+	const listed = (pin.value as string[]).includes(change.pluginId);
+	if (listed === (change.op === 'install')) return { allowed: true };
+	return {
+		...lock,
+		message: `plugin "${change.pluginId}" is ${listed ? 'in' : 'not in'} the plugin set pinned by managed policy revision ${lock.policyRevision}`,
+	};
+}
+
+/** Hold a change to the installed plugin set through the same authority. Standalone: allowed. */
+export function holdPluginSetWrite(change: PluginSetChange): SettingWriteDecision {
+	if (!writeAuthority) return { allowed: true };
+	return pluginSetVerdict(
+		writeAuthority.authorize(PLUGIN_SET_LOCK_KEY),
+		writeAuthority.pins(),
+		change
+	);
 }
 
 type Setter = (...args: unknown[]) => unknown;
