@@ -21,7 +21,13 @@ import {
 import { capabilitySnapshots } from '../../agents/capability-snapshot';
 import type { AgentCapabilitiesSnapshotMap } from '../../../shared/agentCapabilities';
 import { probeRemoteMaestroP, ensureRemoteMaestroPProbed } from '../../agents/probeRemoteMaestroP';
-import { execFileNoThrow } from '../../utils/execFile';
+import { execFileNoThrow, type ExecResult } from '../../utils/execFile';
+import {
+	holdRemoteAccess,
+	isRemoteAccessRefusal,
+	remoteAccessRefusal,
+} from '../../ssh-remote-manager';
+import type { RemoteAccessRequest } from '../../enterprise/remote';
 import { discoverCodexSkills } from '../../agents/codex-skills';
 import { providerProbeManaged, type ProviderProbeManaged } from '../../agents/provider-probe';
 import { DispatchRefusedError } from '../../../shared/maestro-lib/run/start-turn';
@@ -557,6 +563,50 @@ function getSshRemoteById(
 	return config;
 }
 
+/**
+ * Hold one probe or config read of an SSH remote to the managed remote
+ * identity (MRC2-05-07A) BEFORE any ssh command is built, so a refused
+ * remote opens no session, takes no timer and is never retried. Answers the
+ * refusal as the `ExecResult` `remoteAccessRefusal()` spells (exit `EMANAGED`,
+ * the hold's line on stderr), which a caller reads with
+ * `isRemoteAccessRefusal()`; null when the session may open. Standalone, or
+ * with no authority installed, nothing is consulted. The holder records and
+ * warns once per remote, class and code.
+ */
+async function holdRemoteProbe(
+	sshRemote: SshRemoteConfig,
+	access: Omit<RemoteAccessRequest, 'remote'>
+): Promise<ExecResult | null> {
+	const hold = await holdRemoteAccess({ ...access, remote: sshRemote });
+	return hold ? remoteAccessRefusal(hold) : null;
+}
+
+/** The line a refused remote discovery is thrown as: the hold's own, so the caller names the policy. */
+function remoteAccessRefusedError(refusal: ExecResult): Error {
+	const error = new Error(refusal.stderr);
+	error.name = 'RemoteAccessRefusedError';
+	return error;
+}
+
+/**
+ * Build and run one short command on an SSH remote, racing a timeout the
+ * caller names. The caller holds the remote identity first (`holdRemoteProbe`);
+ * this runs only an admitted command.
+ */
+async function execRemoteProbeCommand(
+	sshRemote: SshRemoteConfig,
+	remoteOptions: RemoteCommandOptions,
+	timeoutMs: number,
+	timeoutMessage: string
+): Promise<ExecResult> {
+	const sshCommand = await buildSshCommand(sshRemote, remoteOptions);
+	const resultPromise = execFileNoThrow(sshCommand.command, sshCommand.args);
+	const timeoutPromise = new Promise<ExecResult>((_, reject) => {
+		setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+	});
+	return Promise.race([resultPromise, timeoutPromise]);
+}
+
 /** Drop every function-valued property so the object survives structured clone. */
 function withoutFunctionProps(obj: any) {
 	return Object.fromEntries(Object.entries(obj).filter(([, value]) => typeof value !== 'function'));
@@ -598,6 +648,17 @@ async function detectAgentsRemote(sshRemote: SshRemoteConfig): Promise<any[]> {
 	let connectionSucceeded = false;
 	let connectionError: string | undefined;
 
+	// One hold for the whole detection (MRC2-05-07A): every `command -v` below
+	// probes the same remote, so the managed remote identity is asked once,
+	// before any session opens. A refused remote answers every agent with the
+	// hold's line as its error and its failed snapshot, and runs no ssh.
+	const refusal = await holdRemoteProbe(sshRemote, {
+		class: 'probe',
+		operation: 'detect-agents',
+		target: null,
+		count: AGENT_DEFINITIONS.length,
+	});
+
 	for (const agentDef of AGENT_DEFINITIONS) {
 		// Build SSH command to check for the binary using POSIX 'command -v'.
 		// Preferred over 'which' because it's a shell builtin (no PATH lookup needed),
@@ -609,23 +670,22 @@ async function detectAgentsRemote(sshRemote: SshRemoteConfig): Promise<any[]> {
 		};
 
 		try {
-			const sshCommand = await buildSshCommand(sshRemote, remoteOptions);
+			const result =
+				refusal ??
+				(await execRemoteProbeCommand(
+					sshRemote,
+					remoteOptions,
+					SSH_TIMEOUT_MS,
+					`SSH connection timed out after ${SSH_TIMEOUT_MS / 1000}s`
+				));
 
-			// Execute with timeout
-			const resultPromise = execFileNoThrow(sshCommand.command, sshCommand.args);
-			const timeoutPromise = new Promise<{ exitCode: number; stdout: string; stderr: string }>(
-				(_, reject) => {
-					setTimeout(
-						() => reject(new Error(`SSH connection timed out after ${SSH_TIMEOUT_MS / 1000}s`)),
-						SSH_TIMEOUT_MS
-					);
-				}
-			);
-
-			const result = await Promise.race([resultPromise, timeoutPromise]);
-
-			// Check for SSH connection errors in stderr
-			if (
+			if (isRemoteAccessRefusal(result)) {
+				// The managed remote identity refused the probe; no session was
+				// opened. The hold's line is this agent's error (the holder warned
+				// once), never a connection failure of the host.
+				connectionError = result.stderr;
+			} else if (
+				// Check for SSH connection errors in stderr
 				result.stderr &&
 				(result.stderr.includes('Connection refused') ||
 					result.stderr.includes('Connection timed out') ||
@@ -701,8 +761,9 @@ async function detectAgentsRemote(sshRemote: SshRemoteConfig): Promise<any[]> {
 		}
 	}
 
-	// If no connection succeeded and we have an error, log a summary
-	if (!connectionSucceeded && connectionError) {
+	// If no connection succeeded and we have an error, log a summary (a managed
+	// refusal is not a connection failure and was warned once by the holder)
+	if (!connectionSucceeded && connectionError && !refusal) {
 		logger.error(
 			`Failed to connect to SSH remote ${sshRemote.host}: ${connectionError}`,
 			LOG_CONTEXT
@@ -758,16 +819,23 @@ async function discoverModelsFromRemoteConfigs(sshRemote: SshRemoteConfig): Prom
 		env: sshRemote.remoteEnv,
 	};
 
-	try {
-		const sshCommand = await buildSshCommand(sshRemote, remoteOptions);
-		const resultPromise = execFileNoThrow(sshCommand.command, sshCommand.args);
-		const timeoutPromise = new Promise<{ exitCode: number; stdout: string; stderr: string }>(
-			(_, reject) => {
-				setTimeout(() => reject(new Error('SSH config read timed out')), SSH_MODEL_TIMEOUT_MS);
-			}
-		);
+	// A read of the remote's files (MRC2-05-07A), held outside the try so a
+	// refusal reaches the caller by name instead of reading as a failed read.
+	const refusal = await holdRemoteProbe(sshRemote, {
+		class: 'read',
+		operation: 'read-opencode-configs',
+		target: null,
+		count: configPaths.length,
+	});
+	if (refusal) throw remoteAccessRefusedError(refusal);
 
-		const result = await Promise.race([resultPromise, timeoutPromise]);
+	try {
+		const result = await execRemoteProbeCommand(
+			sshRemote,
+			remoteOptions,
+			SSH_MODEL_TIMEOUT_MS,
+			'SSH config read timed out'
+		);
 
 		if (result.exitCode !== 0 || !result.stdout.includes('___OPENCODE_CONFIG_START___')) {
 			return [];
@@ -852,28 +920,29 @@ async function discoverModelsRemote(
 		env: sshRemote.remoteEnv,
 	};
 
+	// The version-shaped probe of the remote's binary (MRC2-05-07A): a refused
+	// remote is thrown by name to the caller (never an empty model list), and
+	// the cached models above are served without a hold since no session opens.
+	const refusal = await holdRemoteProbe(sshRemote, {
+		class: 'probe',
+		operation: 'discover-models',
+		target: null,
+	});
+	if (refusal) throw remoteAccessRefusedError(refusal);
+
 	try {
-		const sshCommand = await buildSshCommand(sshRemote, remoteOptions);
 		logger.info(
 			`Discovering models for "${agentDef.name}" on remote ${sshRemote.host}`,
 			LOG_CONTEXT
 		);
 
 		// Execute with timeout matching detectAgentsRemote pattern
-		const resultPromise = execFileNoThrow(sshCommand.command, sshCommand.args);
-		const timeoutPromise = new Promise<{ exitCode: number; stdout: string; stderr: string }>(
-			(_, reject) => {
-				setTimeout(
-					() =>
-						reject(
-							new Error(`SSH model discovery timed out after ${SSH_MODEL_TIMEOUT_MS / 1000}s`)
-						),
-					SSH_MODEL_TIMEOUT_MS
-				);
-			}
+		const result = await execRemoteProbeCommand(
+			sshRemote,
+			remoteOptions,
+			SSH_MODEL_TIMEOUT_MS,
+			`SSH model discovery timed out after ${SSH_MODEL_TIMEOUT_MS / 1000}s`
 		);
-
-		const result = await Promise.race([resultPromise, timeoutPromise]);
 
 		if (result.exitCode !== 0) {
 			logger.warn(
@@ -1011,19 +1080,23 @@ async function discoverOpenCodeSlashCommandsRemote(
 		env: sshRemote.remoteEnv,
 	};
 
-	try {
-		const sshCommand = await buildSshCommand(sshRemote, remoteOptions);
-		const resultPromise = execFileNoThrow(sshCommand.command, sshCommand.args);
-		const timeoutPromise = new Promise<{ exitCode: number; stdout: string; stderr: string }>(
-			(_, reject) => {
-				setTimeout(
-					() => reject(new Error('SSH slash command discovery timed out')),
-					SSH_MODEL_TIMEOUT_MS
-				);
-			}
-		);
+	// A read of the remote's command files and configs under the agent's cwd
+	// (MRC2-05-07A); a refused remote is thrown by name, never an empty list.
+	const refusal = await holdRemoteProbe(sshRemote, {
+		class: 'read',
+		operation: 'discover-opencode-commands',
+		target: cwd,
+		count: commandDirs.length + configPaths.length,
+	});
+	if (refusal) throw remoteAccessRefusedError(refusal);
 
-		const result = await Promise.race([resultPromise, timeoutPromise]);
+	try {
+		const result = await execRemoteProbeCommand(
+			sshRemote,
+			remoteOptions,
+			SSH_MODEL_TIMEOUT_MS,
+			'SSH slash command discovery timed out'
+		);
 		if (result.exitCode !== 0 && !result.stdout) {
 			logger.warn(`Remote slash command discovery failed on ${sshRemote.host}`, LOG_CONTEXT, {
 				exitCode: result.exitCode,
@@ -1263,25 +1336,34 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 				};
 
 				try {
-					const sshCommand = await buildSshCommand(sshConfig, remoteOptions);
-					logger.info(`Executing SSH detection command for '${agentDef.binaryName}'`, LOG_CONTEXT, {
-						command: sshCommand.command,
-						args: sshCommand.args,
+					// The managed remote identity is held before the ssh command is
+					// built (MRC2-05-07A); a refusal runs no ssh and is the agent's error.
+					const refusal = await holdRemoteProbe(sshConfig, {
+						class: 'probe',
+						operation: 'detect-agent',
+						target: null,
 					});
+					if (!refusal) {
+						logger.info(
+							`Executing SSH detection command for '${agentDef.binaryName}'`,
+							LOG_CONTEXT,
+							{
+								command: remoteOptions.command,
+								args: remoteOptions.args,
+							}
+						);
+					}
 
 					// Execute with timeout
 					const SSH_TIMEOUT_MS = 10000;
-					const resultPromise = execFileNoThrow(sshCommand.command, sshCommand.args);
-					const timeoutPromise = new Promise<{ exitCode: number; stdout: string; stderr: string }>(
-						(_, reject) => {
-							setTimeout(
-								() => reject(new Error(`SSH connection timed out after ${SSH_TIMEOUT_MS / 1000}s`)),
-								SSH_TIMEOUT_MS
-							);
-						}
-					);
-
-					const result = await Promise.race([resultPromise, timeoutPromise]);
+					const result =
+						refusal ??
+						(await execRemoteProbeCommand(
+							sshConfig,
+							remoteOptions,
+							SSH_TIMEOUT_MS,
+							`SSH connection timed out after ${SSH_TIMEOUT_MS / 1000}s`
+						));
 
 					logger.info(`SSH command result for '${agentDef.binaryName}'`, LOG_CONTEXT, {
 						exitCode: result.exitCode,
@@ -1291,7 +1373,11 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 
 					// Check for SSH connection errors
 					let connectionError: string | undefined;
-					if (
+					if (isRemoteAccessRefusal(result)) {
+						// Refused by the managed remote identity: the hold's line, never
+						// a connection failure of the host.
+						connectionError = result.stderr;
+					} else if (
 						result.stderr &&
 						(result.stderr.includes('Connection refused') ||
 							result.stderr.includes('Connection timed out') ||
@@ -1325,6 +1411,9 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 							}
 						} else if (!connectionError) {
 							capabilitySnapshots.markNotInstalled(agentDef.id, sshConfig.id);
+						} else if (refusal) {
+							// The readiness pill names the policy, not a spinner or a stale ok.
+							capabilitySnapshots.markFailed(agentDef.id, connectionError, sshConfig.id);
 						}
 					}
 

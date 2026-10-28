@@ -21,12 +21,18 @@
  * to piggyback on its connection; the spawn surfaces call
  * {@link ensureRemoteMaestroPProbed} so the cache is warm even when no readiness
  * probe or config modal ran first (the cold-cache first-spawn case).
+ *
+ * Under management the probe is held to the remote identity first
+ * (MRC2-05-07A, class `probe`): a refused remote runs no ssh and leaves the
+ * availability unknown (never a cached false, which would route the agent to
+ * `claude --print` on a remote the launch itself will refuse by name).
  */
 
 import { buildSshCommand, RemoteCommandOptions } from '../utils/ssh-command-builder';
 import { execFileNoThrow } from '../utils/execFile';
 import { stripAnsi } from '../utils/stripAnsi';
 import { logger } from '../utils/logger';
+import { holdRemoteAccess } from '../ssh-remote-manager';
 import type { SshRemoteConfig } from '../../shared/types';
 import {
 	setRemoteMaestroPAvailable,
@@ -59,6 +65,21 @@ export async function probeRemoteMaestroP(sshRemote: SshRemoteConfig): Promise<b
 	};
 
 	try {
+		// Held before the ssh command is built: a refused remote opens no session
+		// and the availability stays unknown. The holder warned once.
+		const hold = await holdRemoteAccess({
+			class: 'probe',
+			remote: sshRemote,
+			operation: 'maestro-p-version',
+			target: null,
+		});
+		if (hold) {
+			logger.info(
+				`maestro-p probe held by the managed remote identity on ${sshRemote.host}; availability left unknown`,
+				LOG_CONTEXT
+			);
+			return null;
+		}
 		const sshCommand = await buildSshCommand(sshRemote, remoteOptions);
 		const resultPromise = execFileNoThrow(sshCommand.command, sshCommand.args);
 		const timeoutPromise = new Promise<{ exitCode: number; stdout: string; stderr: string }>(

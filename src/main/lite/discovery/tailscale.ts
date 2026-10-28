@@ -3,6 +3,8 @@ import { TAILNET_PORT, tailnetIPv4 } from '../tailnet-origin';
 import { candidate, displayName } from './types';
 import type { Candidate, SourceState } from '../../../shared/lite-discovery';
 import { tailscaleExecutable } from './tailscale-command';
+import { listenerHoldFor } from '../../enterprise/listener-gate';
+import type { ListenerRequest } from '../../enterprise/listener-policy';
 
 export type StatusReader = (signal: AbortSignal) => Promise<string>;
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -63,9 +65,30 @@ function commandError(error: unknown, stderr: string, signal: AbortSignal): Erro
 	);
 }
 
+/**
+ * The listener Tailscale discovery is held as (MRC2-05-07A): a Maestro
+ * listener reached over the tailnet. The local daemon is asked for peers and
+ * Services only where this device may open its own tailnet listener, so a
+ * ceiling that omits the `tailnet` kind (or keeps it to loopback) finds no
+ * host over Tailscale either. The CGNAT base names the range: the device's
+ * own address is what the read would tell us. With no authority installed
+ * nothing is consulted.
+ */
+export const TAILNET_DISCOVERY_LISTENER = {
+	kind: 'tailnet',
+	bind: '100.64.0.0',
+	port: TAILNET_PORT,
+} as const satisfies ListenerRequest;
+
 /** Existing CLI owns platform-specific daemon IPC/auth; no configuration or credential reads. */
 function readCommand(args: string[], signal: AbortSignal): Promise<string> {
 	const { promise, resolve, reject } = Promise.withResolvers<string>();
+	const hold = listenerHoldFor(TAILNET_DISCOVERY_LISTENER);
+	if (hold) {
+		// A decision, not a daemon failure: named by its code, never retried here.
+		reject(new TailscaleDiscoveryError('unavailable', hold.message, hold.code));
+		return promise;
+	}
 	try {
 		execFile(
 			tailscaleExecutable(),

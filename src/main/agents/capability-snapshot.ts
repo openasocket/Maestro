@@ -35,10 +35,11 @@ const LOG_CONTEXT = 'CapabilitySnapshot';
  * reprobe of a down host, so reporting each one to Sentry buries genuinely
  * unexpected probe failures under network noise. We still persist the `failed`
  * status (red pill) so the UI reflects reality; we just skip the breadcrumb.
- * Fixes MAESTRO-RA.
+ * Fixes MAESTRO-RA. A managed hold (`[managed-<code>] ...`, MRC2-05-07A) is a
+ * policy decision the holder already recorded, not a probe failure.
  */
 function isExpectedConnectionFailure(error: string): boolean {
-	return /connection timed out|operation timed out|connection refused|connection reset|connection closed|network is unreachable|no route to host|could not resolve hostname|host key verification failed|timed out after \d+s/i.test(
+	return /^\[managed-|connection timed out|operation timed out|connection refused|connection reset|connection closed|network is unreachable|no route to host|could not resolve hostname|host key verification failed|timed out after \d+s/i.test(
 		error
 	);
 }
