@@ -2,6 +2,7 @@ import { ChevronDown } from 'lucide-react';
 import type { Theme } from '../../../../../types';
 import type { StatsTimeRange, WakatimeSettingsState } from '../types';
 import { WakatimeSettings } from './WakatimeSettings';
+import { ManagedSettingSection } from '../../../ManagedSettingSection';
 
 interface UsageStatsSectionProps {
 	theme: Theme;
@@ -31,7 +32,7 @@ export function UsageStatsSection({
 	wakatimeState,
 }: UsageStatsSectionProps) {
 	return (
-		<div data-setting-id="encore-usage-stats" className="space-y-3">
+		<ManagedSettingSection settingId="encore-usage-stats" theme={theme} className="space-y-3">
 			<div className="flex items-center justify-between">
 				<p className="text-sm" style={{ color: theme.colors.textMain }}>
 					Default lookback window
@@ -73,6 +74,6 @@ export function UsageStatsSection({
 				setWakatimeDetailedTracking={setWakatimeDetailedTracking}
 				wakatimeState={wakatimeState}
 			/>
-		</div>
+		</ManagedSettingSection>
 	);
 }

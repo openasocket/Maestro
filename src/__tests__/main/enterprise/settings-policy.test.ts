@@ -19,11 +19,13 @@ import {
 	holdSettingWrite,
 	managedSettingsStanding,
 	pluginSetVerdict,
+	readManagedSettingLocks,
 	restoreManagedSettingPins,
 	setSettingsWriteAuthority,
 	settingWriteVerdict,
 } from '../../../main/enterprise/settings-policy';
 import { handleUpdateSessionConfig } from '../../../main/web-server/handlers/messageHandlers/sessions';
+import { MANAGED_LOCK_KEYS } from '../../../shared/managedSettingsLock';
 import { handleSetSetting } from '../../../main/web-server/handlers/messageHandlers/settings';
 import type { MessageHandlerContext } from '../../../main/web-server/handlers/messageHandlers/types';
 
@@ -421,5 +423,35 @@ describe('holdManagedKey (MRC2-06-04A)', () => {
 		});
 		expect(holdManagedKey('storage.syncPath')).toMatchObject({ code: 'locked' });
 		expect(holdManagedKey('web.tunnel')).toEqual({ allowed: true });
+	});
+});
+
+describe('readManagedSettingLocks (MRC2-06-05)', () => {
+	it('names nothing standalone, every key unavailable with no usable policy, and the held keys with their line and pin', () => {
+		const none = { policyRevision: null, locks: {} };
+		expect(readManagedSettingLocks()).toEqual(none);
+		setSettingsWriteAuthority(source({ status: 'none' } as IdentityRead));
+		expect(readManagedSettingLocks()).toEqual(none);
+		setSettingsWriteAuthority(source(enrolled, null));
+		const unavailable = readManagedSettingLocks();
+		expect(unavailable.policyRevision).toBeNull();
+		expect(Object.keys(unavailable.locks)).toEqual([...MANAGED_LOCK_KEYS]);
+		expect(unavailable.locks.ghPath).toMatchObject({ code: 'unavailable', pinned: false });
+		installed();
+		expect(readManagedSettingLocks()).toEqual({
+			policyRevision: 3,
+			locks: {
+				ghPath: {
+					code: 'locked',
+					message: 'the "ghPath" setting is locked and pinned by managed policy revision 3',
+					pinned: true,
+				},
+				webAuthEnabled: {
+					code: 'locked',
+					message: 'the "webAuthEnabled" setting is locked by managed policy revision 3',
+					pinned: false,
+				},
+			},
+		});
 	});
 });

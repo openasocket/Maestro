@@ -3,6 +3,7 @@ import { Check, ChevronDown, Terminal } from 'lucide-react';
 import type { Theme } from '../../../../../types';
 import type { ShellSettingsState } from '../types';
 import { SettingsSectionHeading } from '../../../SettingsSectionHeading';
+import { ManagedSettingSection } from '../../../ManagedSettingSection';
 
 interface ShellSettingsSectionProps {
 	theme: Theme;
@@ -34,7 +35,7 @@ export function ShellSettingsSection({
 	} = shellState;
 
 	return (
-		<div data-setting-id="general-default-shell">
+		<ManagedSettingSection settingId="general-default-shell" theme={theme}>
 			<SettingsSectionHeading icon={Terminal}>Default Terminal Shell</SettingsSectionHeading>
 			<p className="text-xs opacity-70 mb-2">
 				Choose which shell to use for terminal sessions. Select any shell and configure a custom
@@ -235,6 +236,6 @@ export function ShellSettingsSection({
 					</div>
 				</div>
 			)}
-		</div>
+		</ManagedSettingSection>
 	);
 }

@@ -34,6 +34,9 @@
  * `web.tunnel` and `lite.control`. A lock on an action key refuses turning
  * the action on, and its sink ends what is on at startup and on every policy
  * change; turning an action off is never held.
+ *
+ * What a Settings pane reads of the lock (MRC2-06-05) is `ManagedSettingLocksView`:
+ * every held key by name with the line its refusal is named with.
  */
 
 import { canonicalJson } from './canonicalJson';
@@ -123,20 +126,38 @@ export const MANAGED_ACTION_LOCK_KEYS: readonly string[] = Object.freeze([
 	LITE_CONTROL_LOCK_KEY,
 ]);
 
-const LOCK_BOUND =
-	LOCKABLE_SETTING_KEYS.length +
-	AGENT_CONFIG_LOCK_KEYS.length +
-	MANAGED_SET_LOCK_KEYS.length +
-	MANAGED_ACTION_LOCK_KEYS.length;
+/** Every key a policy may hold, in registry order: the settings keys, the per-provider fields, the admin sets, the actions. */
+export const MANAGED_LOCK_KEYS: readonly string[] = Object.freeze([
+	...LOCKABLE_SETTING_KEYS,
+	...AGENT_CONFIG_LOCK_KEYS,
+	...MANAGED_SET_LOCK_KEYS,
+	...MANAGED_ACTION_LOCK_KEYS,
+]);
+const LOCK_BOUND = MANAGED_LOCK_KEYS.length;
 
 export function isSettingLockable(key: string): boolean {
-	return (
-		SETTINGS_METADATA[key]?.lockable === true ||
-		AGENT_CONFIG_LOCK_KEYS.includes(key) ||
-		MANAGED_SET_LOCK_KEYS.includes(key) ||
-		MANAGED_ACTION_LOCK_KEYS.includes(key)
-	);
+	return MANAGED_LOCK_KEYS.includes(key);
 }
+
+export type ManagedSettingLockCode = 'unavailable' | 'locked';
+
+/** One held key as a Settings pane reads it: the refusal's code and line, and whether a pin holds the value. */
+export interface ManagedSettingLockView {
+	code: ManagedSettingLockCode;
+	message: string;
+	pinned: boolean;
+}
+
+/** What the renderer reads of the lock (`settings:managedLocks`): every held key by name; nothing standalone. */
+export interface ManagedSettingLocksView {
+	policyRevision: number | null;
+	locks: Readonly<Record<string, ManagedSettingLockView>>;
+}
+
+export const NO_MANAGED_SETTING_LOCKS: ManagedSettingLocksView = Object.freeze({
+	policyRevision: null,
+	locks: Object.freeze({}),
+});
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null && !Array.isArray(value);

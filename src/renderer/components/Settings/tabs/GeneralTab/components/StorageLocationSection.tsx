@@ -3,6 +3,7 @@ import type { Theme } from '../../../../../types';
 import { getOpenInLabel } from '../../../../../utils/platformUtils';
 import type { SyncStorageState } from '../types';
 import { SettingsSectionHeading } from '../../../SettingsSectionHeading';
+import { ManagedSettingSection } from '../../../ManagedSettingSection';
 
 interface StorageLocationSectionProps {
 	theme: Theme;
@@ -23,7 +24,7 @@ export function StorageLocationSection({ theme, syncStorage }: StorageLocationSe
 	} = syncStorage;
 
 	return (
-		<div data-setting-id="general-storage">
+		<ManagedSettingSection settingId="general-storage" theme={theme}>
 			<SettingsSectionHeading icon={FolderSync}>Storage Location</SettingsSectionHeading>
 			<div
 				className="p-3 rounded border space-y-3"
@@ -158,6 +159,6 @@ export function StorageLocationSection({ theme, syncStorage }: StorageLocationSe
 					</button>
 				</div>
 			</div>
-		</div>
+		</ManagedSettingSection>
 	);
 }

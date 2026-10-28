@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Bot } from 'lucide-react';
 import type { Theme } from '../../../../../types';
 import { SettingsSectionHeading } from '../../../SettingsSectionHeading';
+import { ManagedSettingSection } from '../../../ManagedSettingSection';
 
 interface UtilityAgentSectionProps {
 	theme: Theme;
@@ -71,7 +72,7 @@ export function UtilityAgentSection({
 	const unmatchedAgentId = missingAgentId ?? unverifiedAgentId;
 
 	return (
-		<div data-setting-id="general-utility-agent">
+		<ManagedSettingSection settingId="general-utility-agent" theme={theme}>
 			<SettingsSectionHeading icon={Bot}>Utility Agent</SettingsSectionHeading>
 			<div
 				className="p-3 rounded border space-y-3"
@@ -151,6 +152,6 @@ export function UtilityAgentSection({
 					</div>
 				)}
 			</div>
-		</div>
+		</ManagedSettingSection>
 	);
 }

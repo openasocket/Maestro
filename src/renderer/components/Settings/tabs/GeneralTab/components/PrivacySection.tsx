@@ -1,6 +1,7 @@
 import { Bug } from 'lucide-react';
 import type { Theme } from '../../../../../types';
 import { SettingCheckbox } from '../../../../SettingCheckbox';
+import { ManagedSettingSection } from '../../../ManagedSettingSection';
 
 interface PrivacySectionProps {
 	theme: Theme;
@@ -14,7 +15,7 @@ export function PrivacySection({
 	setCrashReportingEnabled,
 }: PrivacySectionProps) {
 	return (
-		<div data-setting-id="general-crash-reporting">
+		<ManagedSettingSection settingId="general-crash-reporting" theme={theme}>
 			<SettingCheckbox
 				icon={Bug}
 				sectionLabel="Privacy"
@@ -24,6 +25,6 @@ export function PrivacySection({
 				onChange={setCrashReportingEnabled}
 				theme={theme}
 			/>
-		</div>
+		</ManagedSettingSection>
 	);
 }

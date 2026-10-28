@@ -534,6 +534,15 @@ deliberate design constraints, including protected host consent, are noted below
     is a value (`checkCueReadiness()` in `src/main/cue/cue-readiness.ts`), so a
     Cue modal panel could render its gaps directly; it is CLI first because it
     exists for unattended servers, where nobody opens the desktop.
+17. **Which settings the managed policy holds** (the Managed badge and the
+    disabled section in Settings, MRC2-06-05). The desktop reads
+    `settings:managedLocks` (`readManagedSettingLocks()` in
+    `src/main/enterprise/settings-policy.ts`: every held key with the line a
+    refused write is named with). The CLI meets the same line only by trying
+    the write (`settings set` answers it, exit 3), so an agent cannot list the
+    held keys before acting. The read is a value; the verb is a `settings locks`
+    over the bridge, on a `get_managed_locks` message the handler answers from
+    the same function.
 
 ### Audit backlog (2026-09-27)
 

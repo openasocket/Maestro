@@ -1016,8 +1016,9 @@ app
 		setSettingsWriteAuthority(settingsPolicy);
 		const restoreSettingsPins = () => {
 			const restored = restoreManagedSettingPins(store, settingsPolicy.pins());
-			if (restored.length === 0) return;
-			logger.info(`Managed settings pins restored: ${restored.join(', ')}`, 'Settings');
+			if (restored.length > 0)
+				logger.info(`Managed settings pins restored: ${restored.join(', ')}`, 'Settings');
+			// Pins or not, every window reloads so the Settings badges follow the lock (MRC2-06-05).
 			for (const win of BrowserWindow.getAllWindows())
 				if (isWebContentsAvailable(win)) win.webContents.send('settings:externalChange');
 		};

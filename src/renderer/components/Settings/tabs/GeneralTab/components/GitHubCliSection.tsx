@@ -1,6 +1,7 @@
 import { Terminal } from 'lucide-react';
 import type { Theme } from '../../../../../types';
 import { SettingsSectionHeading } from '../../../SettingsSectionHeading';
+import { ManagedSettingSection } from '../../../ManagedSettingSection';
 
 interface GitHubCliSectionProps {
 	theme: Theme;
@@ -10,7 +11,7 @@ interface GitHubCliSectionProps {
 
 export function GitHubCliSection({ theme, ghPath, setGhPath }: GitHubCliSectionProps) {
 	return (
-		<div data-setting-id="general-gh-path">
+		<ManagedSettingSection settingId="general-gh-path" theme={theme}>
 			<SettingsSectionHeading icon={Terminal}>GitHub CLI (gh) Path</SettingsSectionHeading>
 			<div
 				className="p-3 rounded border"
@@ -50,6 +51,6 @@ export function GitHubCliSection({ theme, ghPath, setGhPath }: GitHubCliSectionP
 					binary if it's not in your PATH. Used for Auto Run worktree features.
 				</p>
 			</div>
-		</div>
+		</ManagedSettingSection>
 	);
 }

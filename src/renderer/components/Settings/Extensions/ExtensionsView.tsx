@@ -10,6 +10,7 @@ import { Search, FolderPlus, Puzzle, ChevronLeft } from 'lucide-react';
 import type { EncoreFeatureFlags, Theme } from '../../../types';
 import type { ReactNode } from 'react';
 import { useModalLayer } from '../../../hooks/ui/useModalLayer';
+import { ManagedSettingSection } from '../ManagedSettingSection';
 import { usePersistedChoice } from '../../../hooks/ui/usePersistedChoice';
 import { useGridColumnCount } from '../../../hooks/ui/useGridColumnCount';
 import { useListNavigation } from '../../../hooks/keyboard/useListNavigation';
@@ -146,7 +147,12 @@ export function ExtensionsView({ theme, settingsBodies, tileRequest }: Extension
 	});
 
 	return (
-		<div data-testid="extensions-view" data-setting-id="encore-plugins">
+		<ManagedSettingSection
+			settingId="encore-plugins"
+			theme={theme}
+			disable={false}
+			testId="extensions-view"
+		>
 			{/* Settings-search anchor: Pianola is managed as a marketplace tile in
 			    this view; the registry/DOM parity contract needs the literal
 			    attribute present where the search should scroll to. */}
@@ -337,6 +343,6 @@ export function ExtensionsView({ theme, settingsBodies, tileRequest }: Extension
 					onCancel={cancelPendingEnable}
 				/>
 			)}
-		</div>
+		</ManagedSettingSection>
 	);
 }

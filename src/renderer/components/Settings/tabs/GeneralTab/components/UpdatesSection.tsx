@@ -2,6 +2,10 @@ import { Download, FlaskConical } from 'lucide-react';
 import type { Theme } from '../../../../../types';
 import { ToggleSwitch } from '../../../../ui/ToggleSwitch';
 import { SettingsSectionHeading } from '../../../SettingsSectionHeading';
+import { ManagedSettingSection } from '../../../ManagedSettingSection';
+
+/** Both rows are one concern to a policy: a lock on either holds the section. */
+const UPDATE_LOCK_KEYS = ['checkForUpdatesOnStartup', 'enableBetaUpdates'];
 
 interface UpdatesSectionProps {
 	theme: Theme;
@@ -19,7 +23,7 @@ export function UpdatesSection({
 	setEnableBetaUpdates,
 }: UpdatesSectionProps) {
 	return (
-		<div>
+		<ManagedSettingSection theme={theme} keys={UPDATE_LOCK_KEYS}>
 			<SettingsSectionHeading icon={Download}>Updates</SettingsSectionHeading>
 			<div
 				className="p-3 rounded border space-y-3"
@@ -91,6 +95,6 @@ export function UpdatesSection({
 					/>
 				</div>
 			</div>
-		</div>
+		</ManagedSettingSection>
 	);
 }

@@ -9,9 +9,11 @@ import { join, resolve } from 'node:path';
 import { describe, it, expect } from 'vitest';
 import {
 	searchSettings,
+	settingKeysOf,
 	ALL_SEARCHABLE_SETTINGS,
 	encoreTileForSetting,
 } from '../../../../renderer/components/Settings/searchableSettings';
+import { LOCKABLE_SETTING_KEYS, isSettingLockable } from '../../../../shared/managedSettingsLock';
 
 const RENDERER_ROOT = resolve(__dirname, '../../../../renderer');
 
@@ -29,7 +31,8 @@ function collectRenderedSettingIds(): { id: string; file: string }[] {
 	const matches: { id: string; file: string }[] = [];
 	// IDs use kebab-case for legacy entries (e.g. `general-thinking-mode`) and
 	// also accept dotted notation that mirrors a `settingsMetadata` key.
-	const re = /data-setting-id=["']([A-Za-z0-9.-]+)["']/g;
+	// A <ManagedSettingSection settingId> root renders the same attribute (MRC2-06-05).
+	const re = /(?:data-setting-id|settingId)=["']([A-Za-z0-9.-]+)["']/g;
 	for (const file of walkTsx(RENDERER_ROOT)) {
 		const src = readFileSync(file, 'utf8');
 		for (const m of src.matchAll(re)) {
@@ -421,5 +424,36 @@ describe('searchableSettings', () => {
 					orphanedRegistry.map((o) => `  - "${o.id}" (${o.tab} / ${o.label})`).join('\n')
 			).toEqual([]);
 		});
+	});
+});
+
+describe('managed locks (MRC2-06-05)', () => {
+	// Lockable keys with no control in the Settings modal: internal, or set from the LIVE overlay.
+	const NO_SETTINGS_CONTROL = new Set([
+		'installationId',
+		'leaderboardRegistration',
+		'webAuthEnabled',
+		'webAuthToken',
+		'persistentWebLink',
+		'webInterfaceUseCustomPort',
+		'webInterfaceCustomPort',
+	]);
+
+	it('declares only keys a policy may hold, and every lockable key with a Settings control', () => {
+		const declared = new Set(ALL_SEARCHABLE_SETTINGS.flatMap((s) => s.settingKeys ?? []));
+		for (const key of declared) expect(isSettingLockable(key), key).toBe(true);
+		for (const key of LOCKABLE_SETTING_KEYS)
+			if (!NO_SETTINGS_CONTROL.has(key)) expect(declared.has(key), key).toBe(true);
+		expect(settingKeysOf('general-gh-path')).toEqual(['ghPath']);
+		expect(settingKeysOf('no-such-id')).toEqual([]);
+	});
+
+	it('finds a held entry as locked or managed, only while its key is held', () => {
+		const ids = (query: string, locked: string[] = []) =>
+			searchSettings(query, [], undefined, locked).map((s) => s.id);
+		expect(ids('locked')).not.toContain('general-gh-path');
+		expect(ids('locked', ['ghPath'])).toContain('general-gh-path');
+		expect(ids('managed gh', ['ghPath'])[0]).toBe('general-gh-path');
+		expect(ids('locked', ['shellArgs'])).not.toContain('general-gh-path');
 	});
 });

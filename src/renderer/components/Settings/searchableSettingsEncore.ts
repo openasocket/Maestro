@@ -11,6 +11,7 @@ import type { SearchableSetting } from './searchableSettings';
 export const ENCORE_SETTINGS: SearchableSetting[] = [
 	{
 		id: 'encore-usage-stats',
+		settingKeys: ['statsCollectionEnabled', 'wakatimeEnabled'],
 		encoreTile: 'usageStats',
 		tab: 'encore',
 		tabLabel: 'Plugins',
@@ -149,6 +150,12 @@ export const ENCORE_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'encore-coworking',
+		settingKeys: [
+			'coworkingBrowserInteraction',
+			'coworkingBrowserInteractionConfirm',
+			'coworkingBackgroundBrowsers',
+			'coworkingBackgroundBrowsersLimit',
+		],
 		encoreTile: 'coworking',
 		tab: 'encore',
 		tabLabel: 'Encore Features',
@@ -173,6 +180,7 @@ export const ENCORE_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'coworking-background-browsers',
+		settingKeys: ['coworkingBackgroundBrowsers', 'coworkingBackgroundBrowsersLimit'],
 		requiresEncore: 'coworking',
 		tab: 'encore',
 		tabLabel: 'Encore Features',
@@ -532,6 +540,7 @@ export const ENCORE_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'encore-plugins',
+		settingKeys: ['encoreFeatures', 'plugins.installed'],
 		tab: 'encore',
 		tabLabel: 'Plugins',
 		label: 'Plugins',

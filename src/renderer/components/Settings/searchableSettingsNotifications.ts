@@ -55,6 +55,7 @@ export const NOTIFICATION_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'notifications-custom',
+		settingKeys: ['audioFeedbackCommand'],
 		tab: 'notifications',
 		tabLabel: 'Notifications',
 		label: 'Custom Notification',
@@ -79,6 +80,7 @@ export const NOTIFICATION_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'notifications-idle',
+		settingKeys: ['idleNotificationCommand'],
 		tab: 'notifications',
 		tabLabel: 'Notifications',
 		label: 'Idle Notification',
@@ -184,6 +186,7 @@ export const AI_COMMANDS_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'aicommands-speckit',
+		settingKeys: ['speckitEnabled'],
 		tab: 'aicommands',
 		tabLabel: 'AI Commands',
 		label: 'Spec-Kit Commands',
@@ -204,6 +207,7 @@ export const AI_COMMANDS_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'aicommands-openspec',
+		settingKeys: ['openspecEnabled'],
 		tab: 'aicommands',
 		tabLabel: 'AI Commands',
 		label: 'OpenSpec Commands',
@@ -222,6 +226,7 @@ export const AI_COMMANDS_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'aicommands-bmad',
+		settingKeys: ['bmadEnabled'],
 		tab: 'aicommands',
 		tabLabel: 'AI Commands',
 		label: 'BMAD Commands',

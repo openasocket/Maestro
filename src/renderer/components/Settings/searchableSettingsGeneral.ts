@@ -43,6 +43,7 @@ export const GENERAL_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'general-default-shell',
+		settingKeys: ['defaultShell', 'customShellPath', 'shellArgs'],
 		tab: 'general',
 		tabLabel: 'General',
 		label: 'Default Terminal Shell',
@@ -75,6 +76,7 @@ export const GENERAL_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'general-gh-path',
+		settingKeys: ['ghPath'],
 		tab: 'general',
 		tabLabel: 'General',
 		label: 'GitHub CLI (gh) Path',
@@ -91,6 +93,7 @@ export const GENERAL_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'general-web-interface-auto-start',
+		settingKeys: ['webInterfaceAutoStart'],
 		tab: 'general',
 		tabLabel: 'General',
 		label: 'Web Interface',
@@ -377,6 +380,7 @@ export const GENERAL_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'general-utility-agent',
+		settingKeys: ['utilityAgentId', 'utilityModelId'],
 		tab: 'general',
 		tabLabel: 'General',
 		label: 'Utility Agent',
@@ -503,6 +507,7 @@ export const GENERAL_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'general-updates',
+		settingKeys: ['checkForUpdatesOnStartup'],
 		tab: 'general',
 		tabLabel: 'General',
 		label: 'Check for Updates on Startup',
@@ -511,6 +516,7 @@ export const GENERAL_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'general-beta-updates',
+		settingKeys: ['enableBetaUpdates'],
 		tab: 'general',
 		tabLabel: 'General',
 		label: 'Pre-release Channel',
@@ -519,6 +525,7 @@ export const GENERAL_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'general-crash-reporting',
+		settingKeys: ['crashReportingEnabled'],
 		tab: 'general',
 		tabLabel: 'General',
 		label: 'Send Anonymous Crash Reports',
@@ -604,6 +611,7 @@ export const GENERAL_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'general-storage',
+		settingKeys: ['storage.syncPath'],
 		tab: 'general',
 		tabLabel: 'General',
 		label: 'Storage Location',

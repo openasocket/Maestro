@@ -50,7 +50,7 @@ import {
 } from '../../stores/deferred-session-content';
 import type { SessionTranscriptPatch } from '../../../shared/sessionTranscript';
 import { mergeSessionPersistenceChanges } from '../../../shared/sessionPersistenceMerge';
-import { holdSettingWrite } from '../../enterprise/settings-policy';
+import { holdSettingWrite, readManagedSettingLocks } from '../../enterprise/settings-policy';
 
 /**
  * Shallow-compare cliActivity for the diff broadcast.
@@ -516,6 +516,9 @@ export function registerPersistenceHandlers(
 		logger.debug('All settings retrieved', 'Settings', { count: Object.keys(settings).length });
 		return settings;
 	});
+
+	// What the Settings badges show (MRC2-06-05): every held key with the policy's line; nothing standalone.
+	ipcMain.handle('settings:managedLocks', async () => readManagedSettingLocks());
 
 	// Sessions persistence
 	const loadStoredSessions = async (): Promise<StoredSession[]> => {

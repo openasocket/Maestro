@@ -9,6 +9,7 @@
 import { Globe } from 'lucide-react';
 import { HostMediaSection } from '../HostMediaSection';
 import { MegaMaestroSettings } from '../MegaMaestroSettings';
+import { ManagedSettingSection } from '../ManagedSettingSection';
 import { useSettings } from '../../../hooks';
 import { useKnownAuthDirs } from '../../../hooks/agent/useKnownAuthDirs';
 import type { Theme } from '../../../types';
@@ -30,7 +31,7 @@ export function EnvironmentTab({ theme }: EnvironmentTabProps) {
 			<MegaMaestroSettings theme={theme} />
 			<HostMediaSection theme={theme} />
 			{/* Global Environment Variables */}
-			<div data-setting-id="environment-global-vars">
+			<ManagedSettingSection settingId="environment-global-vars" theme={theme}>
 				<div className="flex items-center gap-2 mb-1">
 					<Globe className="w-3 h-3" style={{ color: theme.colors.textDim }} />
 					<span className="text-xs font-bold opacity-70 uppercase">
@@ -55,7 +56,7 @@ export function EnvironmentTab({ theme }: EnvironmentTabProps) {
 					description={null}
 					knownAuthDirs={knownAuthDirs}
 				/>
-			</div>
+			</ManagedSettingSection>
 		</div>
 	);
 }

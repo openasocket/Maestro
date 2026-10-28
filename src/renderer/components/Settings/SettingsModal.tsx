@@ -28,6 +28,7 @@ import { OpenSpecCommandsPanel } from '../OpenSpecCommandsPanel';
 import { BmadCommandsPanel } from '../BmadCommandsPanel';
 import { NotificationsPanel } from '../NotificationsPanel';
 import { SshRemotesSection } from './SshRemotesSection';
+import { ManagedSettingSection } from './ManagedSettingSection';
 import { SshRemoteIgnoreSection } from './SshRemoteIgnoreSection';
 import { GeneralTab } from './tabs/GeneralTab';
 import { DisplayTab } from './tabs/DisplayTab';
@@ -647,42 +648,46 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 								<div className="border-t" style={{ borderColor: theme.colors.border }} />
 
 								{/* Spec Kit Commands Section */}
-								<div data-setting-id="aicommands-speckit">
+								<ManagedSettingSection settingId="aicommands-speckit" theme={theme}>
 									<SpecKitCommandsPanel
 										theme={theme}
 										enabled={speckitEnabled}
 										onEnabledChange={setSpeckitEnabled}
 									/>
-								</div>
+								</ManagedSettingSection>
 
 								{/* Divider */}
 								<div className="border-t" style={{ borderColor: theme.colors.border }} />
 
 								{/* OpenSpec Commands Section */}
-								<div data-setting-id="aicommands-openspec">
+								<ManagedSettingSection settingId="aicommands-openspec" theme={theme}>
 									<OpenSpecCommandsPanel
 										theme={theme}
 										enabled={openspecEnabled}
 										onEnabledChange={setOpenspecEnabled}
 									/>
-								</div>
+								</ManagedSettingSection>
 
 								{/* Divider */}
 								<div className="border-t" style={{ borderColor: theme.colors.border }} />
 
 								{/* BMAD Commands Section */}
-								<div data-setting-id="aicommands-bmad">
+								<ManagedSettingSection settingId="aicommands-bmad" theme={theme}>
 									<BmadCommandsPanel
 										theme={theme}
 										enabled={bmadEnabled}
 										onEnabledChange={setBmadEnabled}
 									/>
-								</div>
+								</ManagedSettingSection>
 							</div>
 						)}
 
 						{activeTab === 'prompts' && (
-							<div data-setting-id="prompts-editor" className="prompts-editor-wrapper">
+							<ManagedSettingSection
+								settingId="prompts-editor"
+								theme={theme}
+								className="prompts-editor-wrapper"
+							>
 								<MaestroPromptsTab
 									theme={theme}
 									initialSelectedPromptId={initialSelectedPromptId}
@@ -690,14 +695,14 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 										promptsEscapeHandlerRef.current = handler;
 									}}
 								/>
-							</div>
+							</ManagedSettingSection>
 						)}
 
 						{activeTab === 'ssh' && (
 							<div className="space-y-5">
-								<div data-setting-id="ssh-remotes">
+								<ManagedSettingSection settingId="ssh-remotes" theme={theme}>
 									<SshRemotesSection theme={theme} />
-								</div>
+								</ManagedSettingSection>
 								<div data-setting-id="ssh-ignore-patterns">
 									<SshRemoteIgnoreSection
 										theme={theme}

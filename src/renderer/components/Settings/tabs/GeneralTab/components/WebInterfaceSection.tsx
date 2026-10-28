@@ -1,6 +1,7 @@
 import { Globe2 } from 'lucide-react';
 import type { Theme } from '../../../../../types';
 import { SettingsSectionHeading } from '../../../SettingsSectionHeading';
+import { ManagedSettingSection } from '../../../ManagedSettingSection';
 import { SectionCard } from '../../DisplayTab/components/SectionCard';
 import { ToggleSettingRow } from '../../DisplayTab/components/ToggleSettingRow';
 
@@ -16,7 +17,7 @@ export function WebInterfaceSection({
 	setWebInterfaceAutoStart,
 }: WebInterfaceSectionProps) {
 	return (
-		<div data-setting-id="general-web-interface-auto-start">
+		<ManagedSettingSection settingId="general-web-interface-auto-start" theme={theme}>
 			<SettingsSectionHeading icon={Globe2}>Web Interface</SettingsSectionHeading>
 			<SectionCard theme={theme}>
 				<ToggleSettingRow
@@ -29,6 +30,6 @@ export function WebInterfaceSection({
 					clickableRow
 				/>
 			</SectionCard>
-		</div>
+		</ManagedSettingSection>
 	);
 }

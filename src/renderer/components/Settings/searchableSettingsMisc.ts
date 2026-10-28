@@ -64,6 +64,7 @@ export const THEME_SETTINGS: SearchableSetting[] = [
 export const SSH_SETTINGS: SearchableSetting[] = [
 	{
 		id: 'ssh-remotes',
+		settingKeys: ['sshRemotes', 'defaultSshRemoteId'],
 		tab: 'ssh',
 		tabLabel: 'SSH Hosts',
 		label: 'SSH Remote Hosts',
@@ -162,6 +163,7 @@ export const ENVIRONMENT_SETTINGS: SearchableSetting[] = [
 	},
 	{
 		id: 'environment-global-vars',
+		settingKeys: ['shellEnvVars', 'shellEnvVarsDisabled'],
 		tab: 'environment',
 		tabLabel: 'Environment',
 		label: 'Global Environment Variables',
@@ -172,6 +174,7 @@ export const ENVIRONMENT_SETTINGS: SearchableSetting[] = [
 export const PROMPTS_SETTINGS: SearchableSetting[] = [
 	{
 		id: 'prompts-editor',
+		settingKeys: ['prompts.customizations'],
 		tab: 'prompts',
 		tabLabel: 'Maestro Prompts',
 		label: 'Maestro Prompts',

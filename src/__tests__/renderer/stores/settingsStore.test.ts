@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import {
 	useSettingsStore,
 	loadAllSettings,
+	selectManagedSettingLock,
 	selectIsLeaderboardRegistered,
 	clampAutoRunMaxTaskDurationMin,
 	sanitizeLoadedAutoRunMaxTaskDurationMin,
@@ -2030,6 +2031,26 @@ describe('settingsStore', () => {
 	});
 
 	describe('loadAllSettings', () => {
+		it('hydrates the managed lock from settings.getManagedLocks, and holds nothing where the bridge has no such read', async () => {
+			const view = {
+				policyRevision: 3,
+				locks: { ghPath: { code: 'locked' as const, message: 'held', pinned: true } },
+			};
+			const settings = window.maestro.settings as { getManagedLocks?: unknown };
+			settings.getManagedLocks = vi.fn().mockResolvedValue(view);
+			try {
+				await loadAllSettings();
+				const state = useSettingsStore.getState();
+				expect(state.managedLocks).toEqual(view);
+				expect(selectManagedSettingLock('ghPath')(state)).toEqual(view.locks.ghPath);
+				expect(selectManagedSettingLock('shellArgs')(state)).toBeNull();
+			} finally {
+				delete settings.getManagedLocks;
+			}
+			await loadAllSettings();
+			expect(useSettingsStore.getState().managedLocks).toEqual({ policyRevision: null, locks: {} });
+		});
+
 		it.each([true, false])('restores worktree provider visibility: %s', async (enabled) => {
 			useSettingsStore.setState({ showWorktreeProvider: !enabled });
 			vi.mocked(window.maestro.settings.getAll).mockResolvedValue({

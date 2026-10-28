@@ -39,7 +39,13 @@ export function useSettingsSearch({
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const inputRef = useRef<HTMLInputElement>(null);
 	const encoreFeatures = useSettingsStore((s) => s.encoreFeatures);
-	const results = searchSettings(query, additionalSettings, encoreFeatures);
+	const managedLocks = useSettingsStore((s) => s.managedLocks);
+	const results = searchSettings(
+		query,
+		additionalSettings,
+		encoreFeatures,
+		Object.keys(managedLocks.locks)
+	);
 	const isActive = query.length > 0;
 
 	// Notify parent when search active state changes

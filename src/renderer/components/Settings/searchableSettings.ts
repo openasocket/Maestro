@@ -52,6 +52,13 @@ export interface SearchableSetting {
 	/** Extra keywords for search matching (not displayed) */
 	keywords?: string[];
 	/**
+	 * The settings keys (or managed lock keys) the control under this id
+	 * writes. One declaration serves two readers: a key a managed policy holds
+	 * makes the entry findable as `locked` / `managed`, and
+	 * `<ManagedSettingSection settingId>` disables and badges on it.
+	 */
+	settingKeys?: readonly string[];
+	/**
 	 * Element to scroll to instead of `id`, for a setting whose control lives
 	 * OUTSIDE the Settings modal (the Cue retention dial sits in the Cue
 	 * modal's Activity Log header). Without this the jump would hunt for an id
@@ -111,6 +118,14 @@ export function encoreTileForSetting(settingId: string): keyof EncoreFeatureFlag
 	return entry.encoreTile ?? entry.requiresEncore;
 }
 
+/** The keys the control under a `data-setting-id` writes, as the registry declares them. */
+export function settingKeysOf(settingId: string): readonly string[] {
+	return ALL_SEARCHABLE_SETTINGS.find((s) => s.id === settingId)?.settingKeys ?? [];
+}
+
+/** What a held entry is findable as (MRC2-06-05). */
+export const MANAGED_LOCK_KEYWORDS = ['locked', 'managed'];
+
 /** The entry's `encoreKeywords` whose feature is on (all of them when no flags are given). */
 function activeEncoreKeywords(
 	setting: SearchableSetting,
@@ -133,7 +148,8 @@ function activeEncoreKeywords(
 export function searchSettings(
 	query: string,
 	additional: SearchableSetting[] = [],
-	encoreFeatures?: Partial<EncoreFeatureFlags>
+	encoreFeatures?: Partial<EncoreFeatureFlags>,
+	lockedKeys: readonly string[] = []
 ): SearchableSetting[] {
 	if (!query.trim()) return [];
 	const q = query.toLowerCase().trim();
@@ -153,6 +169,9 @@ export function searchSettings(
 			const keywords = [
 				...(setting.keywords || []),
 				...activeEncoreKeywords(setting, encoreFeatures),
+				...(setting.settingKeys?.some((key) => lockedKeys.includes(key))
+					? MANAGED_LOCK_KEYWORDS
+					: []),
 			]
 				.join(' ')
 				.toLowerCase();

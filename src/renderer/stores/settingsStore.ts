@@ -55,6 +55,10 @@ import {
 } from '../../shared/cue/retention';
 import { resolveEncoreFeatures } from '../../shared/encoreFeatureDefaults';
 import {
+	NO_MANAGED_SETTING_LOCKS,
+	type ManagedSettingLocksView,
+} from '../../shared/managedSettingsLock';
+import {
 	collectBoundShortcuts,
 	countUsedBoundShortcuts,
 	getLevelIndex,
@@ -349,6 +353,8 @@ export interface SettingsStoreState
 		ShortcutsState,
 		ThemeState {
 	settingsLoaded: boolean;
+	/** The keys a managed policy holds, by name, with the line each refusal is named with (MRC2-06-05); nothing standalone. */
+	managedLocks: ManagedSettingLocksView;
 	conductorProfile: string;
 	globalShowHotkey: string[];
 	defaultShell: string;
@@ -689,6 +695,10 @@ export interface SettingsStoreActions
 
 export type SettingsStore = SettingsStoreState & SettingsStoreActions;
 
+/** The lock on one key, or null: a Settings control disables and badges on it (MRC2-06-05). */
+export const selectManagedSettingLock = (key: string) => (state: SettingsStore) =>
+	state.managedLocks.locks[key] ?? null;
+
 /** Shared renderer selector for every Groups+ surface. */
 export const selectGroupsPlusEnabled = (state: SettingsStore) =>
 	state.encoreFeatures.groupsPlus === true;
@@ -760,6 +770,7 @@ export const useSettingsStore = create<SettingsStore>()((set, get, api) => {
 		// ============================================================================
 
 		settingsLoaded: false,
+		managedLocks: NO_MANAGED_SETTING_LOCKS,
 		conductorProfile: '',
 		globalShowHotkey: [],
 		defaultShell: isWindowsPlatform() ? 'powershell' : 'zsh',
@@ -2035,6 +2046,11 @@ export async function loadAllSettings(): Promise<void> {
 
 		// Build a single patch to apply to the store
 		const patch: Partial<SettingsStoreState> = {};
+
+		// The managed lock (MRC2-06-05), read again on every settings:externalChange
+		// so a policy change moves the badges; a browser has no such read.
+		const readLocks = window.maestro.settings.getManagedLocks;
+		patch.managedLocks = readLocks ? await readLocks() : NO_MANAGED_SETTING_LOCKS;
 
 		// --- Simple scalar settings ---
 

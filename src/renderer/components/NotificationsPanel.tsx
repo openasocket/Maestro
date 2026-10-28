@@ -19,6 +19,7 @@ import type { ToastPosition } from '../../shared/toastPosition';
 import { TOAST_DURATION_OFF } from '../../shared/toastDuration';
 import { TOAST_POSITIONS, TOAST_POSITION_LABELS } from '../../shared/toastPosition';
 import { SettingCheckbox } from './SettingCheckbox';
+import { ManagedSettingSection } from './Settings/ManagedSettingSection';
 import { ToggleButtonGroup } from './ToggleButtonGroup';
 import { SettingsSectionHeading } from './Settings/SettingsSectionHeading';
 import { SectionCard } from './Settings/tabs/DisplayTab/components/SectionCard';
@@ -184,7 +185,7 @@ export function NotificationsPanel({
 			</div>
 
 			{/* Custom Notification */}
-			<div data-setting-id="notifications-custom">
+			<ManagedSettingSection settingId="notifications-custom" theme={theme}>
 				<SettingCheckbox
 					icon={Volume2}
 					sectionLabel="Custom Notification"
@@ -362,10 +363,10 @@ export function NotificationsPanel({
 						to log and speak simultaneously.
 					</p>
 				</div>
-			</div>
+			</ManagedSettingSection>
 
 			{/* Idle Notification */}
-			<div data-setting-id="notifications-idle">
+			<ManagedSettingSection settingId="notifications-idle" theme={theme}>
 				<SettingCheckbox
 					icon={Coffee}
 					sectionLabel="Idle Notification"
@@ -493,7 +494,7 @@ export function NotificationsPanel({
 						&quot;Maestro is idle&quot; via stdin.
 					</p>
 				</div>
-			</div>
+			</ManagedSettingSection>
 
 			{/* Toast Duration */}
 			<div data-setting-id="notifications-toast">

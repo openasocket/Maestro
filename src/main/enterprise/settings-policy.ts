@@ -20,6 +20,8 @@
  * and `holdPluginSetWrite()`; the SSH remote handlers hold their settings keys.
  * The Storage Location and the remote-access actions (MRC2-06-04A) are held by
  * `holdManagedKey()`, the key by its own name; their sinks restore with it.
+ * `readManagedSettingLocks()` (MRC2-06-05) is what a Settings pane shows of
+ * the same authority: every key it refuses right now, named with the same line.
  */
 
 import type { ManagedPolicyStatus } from '../../shared/maestro-lib/managed/host-adapter';
@@ -34,6 +36,8 @@ import {
 import { isWindows } from '../../shared/platformDetection';
 import {
 	LOCKABLE_SETTING_KEYS,
+	MANAGED_LOCK_KEYS,
+	NO_MANAGED_SETTING_LOCKS,
 	PLUGIN_SET_LOCK_KEY,
 	PROMPT_SET_LOCK_KEY,
 	agentConfigLockKey,
@@ -42,6 +46,8 @@ import {
 	managedSettingLockReason,
 	managedSettingPin,
 	parseManagedSettingsPolicy,
+	type ManagedSettingLockCode,
+	type ManagedSettingLocksView,
 	type ManagedSettingsPolicy,
 } from '../../shared/managedSettingsLock';
 import { identityStandingOf, type EnterpriseIdentityStore } from './identity-store';
@@ -72,7 +78,7 @@ export function managedSettingsStanding(input: {
 	return { standing: 'managed', policy: input.installed, policyRevision: revision };
 }
 
-export type SettingWriteDenial = 'unavailable' | 'locked';
+export type SettingWriteDenial = ManagedSettingLockCode;
 export type SettingWriteDecision =
 	| { allowed: true }
 	| { allowed: false; code: SettingWriteDenial; message: string; policyRevision: number | null };
@@ -299,6 +305,31 @@ export function holdPromptSetWrite(): SettingWriteDecision {
  */
 export function holdManagedKey(key: string): SettingWriteDecision {
 	return writeAuthority ? writeAuthority.authorize(key) : { allowed: true };
+}
+
+/**
+ * What a Settings pane shows of the lock (MRC2-06-05): every key the authority
+ * refuses right now, with the line a refused write is named with and whether a
+ * pin holds its value. Read by `settings:managedLocks`; standalone, and under
+ * no authority, nothing is held. A projection of the same verdict the write
+ * paths meet, never a second lock read.
+ */
+export function readManagedSettingLocks(): ManagedSettingLocksView {
+	if (!writeAuthority) return NO_MANAGED_SETTING_LOCKS;
+	const policy = writeAuthority.pins();
+	const locks: Record<string, ManagedSettingLocksView['locks'][string]> = {};
+	let policyRevision = policy?.policyRevision ?? null;
+	for (const key of MANAGED_LOCK_KEYS) {
+		const decision = writeAuthority.authorize(key);
+		if (decision.allowed) continue;
+		policyRevision ??= decision.policyRevision;
+		locks[key] = {
+			code: decision.code,
+			message: decision.message,
+			pinned: managedSettingPin(key, policy) !== null,
+		};
+	}
+	return { policyRevision, locks };
 }
 
 /** A change to the installed plugin set, held before the files or the ledger are touched. */

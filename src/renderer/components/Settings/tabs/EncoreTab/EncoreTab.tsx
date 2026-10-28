@@ -3,6 +3,7 @@ import { useSettings } from '../../../../hooks';
 import type { EncoreFeatureFlags } from '../../../../types';
 import { ExtensionsView } from '../../Extensions/ExtensionsView';
 import { CoworkingSetup } from '../../CoworkingSetup';
+import { ManagedSettingSection } from '../../ManagedSettingSection';
 import {
 	ComputerHistorySection,
 	MaestroRunSection,
@@ -89,9 +90,9 @@ export function EncoreTab({ theme, isOpen, tileRequest }: EncoreTabProps) {
 			/>
 		),
 		coworking: (
-			<div data-setting-id="encore-coworking">
+			<ManagedSettingSection settingId="encore-coworking" theme={theme}>
 				<CoworkingSetup theme={theme} />
-			</div>
+			</ManagedSettingSection>
 		),
 		computerHistory: <ComputerHistorySection theme={theme} />,
 		maestroRun: <MaestroRunSection theme={theme} />,

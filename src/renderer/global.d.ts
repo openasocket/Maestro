@@ -317,6 +317,10 @@ interface MaestroAPI {
 		get: (key: string) => Promise<unknown>;
 		set: (key: string, value: unknown) => Promise<boolean>;
 		getAll: () => Promise<Record<string, unknown>>;
+		// Absent in a browser: the web-desktop bridge has no such read (MRC2-06-05).
+		getManagedLocks?: () => Promise<
+			import('../shared/managedSettingsLock').ManagedSettingLocksView
+		>;
 		getMediaStatus?: () => Promise<import('../shared/plugins/media-tools').MediaToolStatus>;
 		onExternalChange: (handler: () => void) => () => void;
 	};
