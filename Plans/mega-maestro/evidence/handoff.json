@@ -6,15 +6,15 @@
 	"agreementDigest": "d9b80b9222e2f31a83192ba62cbbd2ca9f6827ed3737f6c4f6ef0fc7163bdef3",
 	"enforceabilityDigest": "6e85fe9b3d5e9c068fee1839779d7ca935777e2bdbbe66af13e03542acf3a9e0",
 	"documentDigestRule": "sha256 of the raw bytes of each named Mega-Maestro design document; null if none",
-	"repositoryRevision": "6f9e0691199bb1cdac47cdd0d9ff4552cc5e1e5b",
+	"repositoryRevision": "78689ade2015ac7c0669b201aa524c7c34b898e7",
 	"repository": {
 		"branch": "feature/mega-maestro-v1.1.0-rc",
 		"baseRevision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
-		"headCommittedAt": "2026-10-26T17:30:52-04:00",
+		"headCommittedAt": "2026-10-28T23:03:06-04:00",
 		"includedTreeDirty": false,
 		"dirtyIncludedFiles": 0
 	},
-	"sourceTreeDigest": "af9e1126c5696e5136de2cf4d00b790a21612fcacfee2dff6836bc9344eefda8",
+	"sourceTreeDigest": "fbb2199b5f170debeacbb175207e91915a700b477d67f2023eaa93fa42d5bdd6",
 	"sourceTree": {
 		"rules": {
 			"id": "maestro-implementation-tree/1",
@@ -33,7 +33,7 @@
 			],
 			"method": "sha256 of canonicalJson({ rules, files }): files maps each included git-tracked path (POSIX separators, sorted) to the sha256 of its working-tree bytes, or \"deleted\" when the tracked file is absent"
 		},
-		"files": 6496,
+		"files": 6585,
 		"deleted": 0
 	},
 	"artifacts": [
@@ -41,19 +41,19 @@
 			"kind": "maestro-lib",
 			"path": "dist/maestro-lib",
 			"buildCommand": "npm run build:maestro-lib",
-			"version": "0.24.0",
+			"version": "0.32.0",
 			"managedContract": "maestro-managed/1",
 			"appVersion": "1.1.0-RC",
 			"status": "ready",
-			"sourceRevision": "6f9e0691199bb1cdac47cdd0d9ff4552cc5e1e5b",
+			"sourceRevision": "78689ade2015ac7c0669b201aa524c7c34b898e7",
 			"sourceDirty": false,
-			"inputSha256": "2ac3358b87ca352c560af7cfc0f96d4dfe7f53ede421fcfbae8563ee57b4c775",
+			"inputSha256": "5e73adab2a013f9103b2ebbb11486acb6f71ed3bc32118a5df72c1b2d6aae9f2",
 			"entry": {
 				"path": "dist/maestro-lib/index.js",
-				"sha256": "94b7fe9c35c880a1511f4d735d43ba91388e32920f01c93c201c2bf99586efae"
+				"sha256": "133436f732906317e828db99104aa602a8d7a41ef01e61f8379ba6eecccd8682"
 			},
-			"payloadFiles": 293,
-			"payloadDigest": "a9ce50919724b29cae07b72780026f13c55276c54194b5a7968ad99bf4cd18e8",
+			"payloadFiles": 294,
+			"payloadDigest": "3631814197d7e0ea76504f93663cf897f4acea33393b02ead51f14f37d3f3283",
 			"builtWithNode": "26.12.1"
 		}
 	],
@@ -104,7 +104,7 @@
 			"step": "build the library",
 			"command": "npm run build:maestro-lib",
 			"exit": 0,
-			"result": "maestro-lib 0.24.0 from 6f9e0691199bb1cdac47cdd0d9ff4552cc5e1e5b (ready against HEAD)"
+			"result": "maestro-lib 0.32.0 from 78689ade2015ac7c0669b201aa524c7c34b898e7 (ready against HEAD)"
 		},
 		{
 			"step": "pair check",
@@ -170,6 +170,13 @@
 			"producer": "rows endpoint.command, endpoint.workflow, endpoint.offline, endpoint.enrollment, endpoint.budget",
 			"status": "open",
 			"observed": "mega-maestro apps/endpoint/src/ipc/server.ts:65-67"
+		},
+		{
+			"id": "CP-04a",
+			"owner": "mega-maestro",
+			"producer": "rows registration.approval",
+			"status": "open",
+			"observed": "no API or console producer approves the actor registration challenge, so a registration carries no actor and every actor-bound command answers unauthenticated"
 		},
 		{
 			"id": "CP-05",

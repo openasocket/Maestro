@@ -5,17 +5,18 @@
 	"task": "MRC-12-04",
 	"revisions": [
 		"MRC2-01-02 2026-10-26: the word unsupported-by-counterpart and the counterpart section (CP-04, CP-05, CP-06 rows with evidence and owner)",
-		"MRC2-03-08 2026-10-27: the permissionModes section (per-provider permission-mode table from the MRC2-03-01 ceiling, every requested mode measured under every pin, reconciled with readOnlyCliEnforced and providerRouteSupport); library block refreshed to 0.31.0"
+		"MRC2-03-08 2026-10-27: the permissionModes section (per-provider permission-mode table from the MRC2-03-01 ceiling, every requested mode measured under every pin, reconciled with readOnlyCliEnforced and providerRouteSupport); library block refreshed to 0.31.0",
+		"MRC2-08-03 2026-10-28: route rows regenerated from the 0.32.0 build at 78689ade2; the counterpart section gains CP-01, CP-02, CP-03 and CP-04a rows and an observed block on every row (the pair check at HEAD, or the sibling file and lines read at d5143a639); the enforcement section (sections A through F of PHASE2-GAPS row by row with the guard and the pinning tests, the 59 lock keys, the egress classes, the listener kinds and reaches, the update channels, the local effects, the shell surfaces, the install artifacts, the repository effects, the remote-access classes, the three managed credentials, the published and uncomposed commands, the ten bridge messages), read off the real modules by a throwaway spec; acceptance.pairCheck records the check of this date (not ready: CP-01, CP-02, CP-03, registration-approval; no Linux Docker engine on this host)"
 	],
 	"generated": {
 		"routes": "capabilityMatrix(dist/maestro-lib).routes from scripts/package-mega-maestro-runtime.mjs, folded to routes[agentId][route] = [standalone, managed]; the generator is .maestro/playbooks/Working/12-04-support-matrix.mjs",
 		"counterpart": "authored by hand from COUNTERPART_SUPPORT in src/shared/maestro-lib/managed/compatibility.ts; the 12-04 generator does not emit this section, so keep the two in step when either changes",
 		"library": {
-			"version": "0.31.0",
+			"version": "0.32.0",
 			"managedContract": "maestro-managed/1",
 			"endpointProtocol": 1,
 			"node": ">=20",
-			"sourceRevision": "2ff8538251aec0b9cb41dd2fa6753e9666f3fec4",
+			"sourceRevision": "78689ade2015ac7c0669b201aa524c7c34b898e7",
 			"sourceDirty": false
 		},
 		"readOn": {
@@ -23,7 +24,8 @@
 			"arch": "arm64",
 			"node": "v26.12.1"
 		},
-		"permissionModes": "permissionVocabularyOf(), managedArgsProblems(), managedPermissionModeProblem() and buildAgentArgs() in src/shared/maestro-lib/launch (MRC2-03-01) over AGENT_DEFINITIONS, reconciled with readOnlyCliEnforced (providers/definitions.ts) and providerRouteSupport() (providers/capabilities.ts); measured by the parked scratch .maestro/playbooks/Working/p2-03-08/scratch-permission-table.test.ts.txt and folded in by write-matrix.mjs beside it (MRC2-03-08)"
+		"permissionModes": "permissionVocabularyOf(), managedArgsProblems(), managedPermissionModeProblem() and buildAgentArgs() in src/shared/maestro-lib/launch (MRC2-03-01) over AGENT_DEFINITIONS, reconciled with readOnlyCliEnforced (providers/definitions.ts) and providerRouteSupport() (providers/capabilities.ts); measured by the parked scratch .maestro/playbooks/Working/p2-03-08/scratch-permission-table.test.ts.txt and folded in by write-matrix.mjs beside it (MRC2-03-08)",
+		"enforcement": "the registries (settingsLocks, egress, listeners, updates, localEffects, shell, install, repository, remoteAccess, credentials, commands, bridge) read off the real modules by a throwaway vitest spec at HEAD (MRC2-08-03, deleted before the commit); the families A through F are the per-row labels of the P2-02..P2-06 evidence files, each row naming its guard and the committed tests that pin it (every path checked on disk by the writer, .maestro/playbooks/Working/p2-08/write-matrix.mjs); the per-sink rows are evidence/p2-sink-inventory.json (MRC2-08-05)"
 	},
 	"words": {
 		"implemented": "exercised on this build; a caller may proceed",
@@ -37,13 +39,81 @@
 		"negotiation": "negotiateCompatibility() answers a required capability on an unsupported-by-counterpart row with the denial reason unsupported-by-counterpart and keeps the required set as asked; a server unsupported_capability denial is folded over the host rows by applyCounterpartDenial() (CompatibilityProfile.counterpartDenial), never by dropping a required member",
 		"rows": [
 			{
+				"key": "artifact.contracts-pin",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-01",
+				"evidence": "4 packaged application artifacts under mega-maestro artifacts/application/0.1.0, every one built from e29195d8c with sourceDirty: true; no clean archive from a committed tree; vendor/mega-maestro/contracts.pin.json absent",
+				"consumer": "scripts/import-mega-maestro.mjs (pins the digest), scripts/mega-maestro-pair.mjs check (refuses dirty-source artifacts), scripts/check-mega-contract-vectors.mjs (archive mode not run)",
+				"note": "every packaged artifact is darwin/arm64 from dirty source; the development checkout is never certifiable",
+				"observed": {
+					"method": "scripts/mega-maestro-pair.mjs check --json",
+					"at": "2026-10-29T03:04:02.293Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"detail": "contracts pin absent; needs the clean contracts artifact of endpoint source d5143a63931dc87a5f90b3fdb7b58fa3726913b1 (dirty or absent)"
+				}
+			},
+			{
+				"key": "runtime.maestro-adapter",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-02",
+				"evidence": "mega-maestro packages/runtime-adapter/src/maestro.ts:7-20 (createMaestroAdapter returns status unsupported, reason public-artifact-not-supplied or public-artifact-not-qualified, a port whose execute answers capability-unsupported); every packaged artifact declares maestroAdapter.status unsupported",
+				"consumer": "scripts/package-mega-maestro-runtime.mjs (the packaged runtime), the headless-library acceptance row",
+				"note": "vendor/mega-maestro/runtime-adapter.pin.json absent",
+				"observed": {
+					"method": "scripts/mega-maestro-pair.mjs check --json",
+					"at": "2026-10-29T03:04:02.293Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"detail": "runtime adapter pin absent, declared unsupported; needs a supported createMaestroAdapter from endpoint source d5143a63931dc87a5f90b3fdb7b58fa3726913b1 (dirty or absent)"
+				}
+			},
+			{
+				"key": "authority.delegation-workflow",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-03",
+				"evidence": "mega-maestro packages/runtime-adapter/src/endpoint.ts:35 (a nonempty delegationChain or a non-null workflow is denied context-mismatch); packages/contracts/src/local-endpoint.ts carries no delegation field",
+				"consumer": "src/shared/maestro-lib/managed/workflows.ts, delegation.ts, the Cue and Auto Run owner fences, the consult lineage",
+				"note": "vendor/mega-maestro/workflow-authority.pin.json absent",
+				"observed": {
+					"method": "scripts/mega-maestro-pair.mjs check --json",
+					"at": "2026-10-29T03:04:02.293Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"detail": "workflow authority pin absent; needs the delegation/workflow owner producer from endpoint source d5143a63931dc87a5f90b3fdb7b58fa3726913b1 (dirty or absent)"
+				}
+			},
+			{
+				"key": "registration.approval",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-04a",
+				"evidence": "no API or console producer approves the actor registration challenge, so a registration carries no actor and every actor-bound command answers unauthenticated",
+				"consumer": "createEnrollmentLifecycle().completeRegistration, createCommandService() (src/main/enterprise/enrollment.ts, commands.ts)",
+				"note": "the pair harness offers --approve-command for a producer that does not exist (approvalProducer: false)",
+				"observed": {
+					"method": "scripts/mega-maestro-pair.mjs check --json",
+					"at": "2026-10-29T03:04:02.293Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"detail": "no API/console producer to approve the actor registration (--approve-command)"
+				}
+			},
+			{
 				"key": "endpoint.command",
 				"status": "unsupported-by-counterpart",
 				"owner": "mega-maestro",
 				"dependency": "CP-04",
 				"evidence": "mega-maestro apps/endpoint/src/ipc/server.ts:65-67",
 				"consumer": "src/main/enterprise/commands.ts",
-				"note": "the endpoint server serves attachment, compatibility, telemetry, inbox, noticeList, execution and model only; command falls through to unsupported_capability"
+				"note": "the endpoint server serves attachment, compatibility, telemetry, inbox, noticeList, execution and model only; command falls through to unsupported_capability",
+				"observed": {
+					"method": "read in the sibling checkout at d5143a639 (935 dirty entries; the file itself unchanged)",
+					"at": "2026-10-29T03:00Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"file": "apps/endpoint/src/ipc/server.ts",
+					"lines": "65-67",
+					"detail": "the capability list is attachment, compatibility, telemetry?, inbox?, noticeList?, execution?, model?; command is not in it, so it falls through to unsupported_capability at :142"
+				}
 			},
 			{
 				"key": "endpoint.workflow",
@@ -52,7 +122,15 @@
 				"dependency": "CP-04",
 				"evidence": "mega-maestro apps/endpoint/src/ipc/server.ts:65-67",
 				"consumer": "src/shared/maestro-lib/managed/workflows.ts (owner fences, with CP-03)",
-				"note": "workflow falls through to unsupported_capability"
+				"note": "workflow falls through to unsupported_capability",
+				"observed": {
+					"method": "read in the sibling checkout at d5143a639 (935 dirty entries; the file itself unchanged)",
+					"at": "2026-10-29T03:00Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"file": "apps/endpoint/src/ipc/server.ts",
+					"lines": "65-67",
+					"detail": "workflow is not in the capability list; :104 denies an operation the prior compatibility answer did not list"
+				}
 			},
 			{
 				"key": "endpoint.offline",
@@ -61,7 +139,15 @@
 				"dependency": "CP-04",
 				"evidence": "mega-maestro apps/endpoint/src/ipc/server.ts:65-67",
 				"consumer": "none built yet; the operation is in the shared endpoint-port vocabulary only",
-				"note": "offline falls through to unsupported_capability"
+				"note": "offline falls through to unsupported_capability",
+				"observed": {
+					"method": "read in the sibling checkout at d5143a639 (935 dirty entries; the file itself unchanged)",
+					"at": "2026-10-29T03:00Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"file": "apps/endpoint/src/ipc/server.ts",
+					"lines": "65-67",
+					"detail": "offline is not in the capability list"
+				}
 			},
 			{
 				"key": "endpoint.enrollment",
@@ -70,7 +156,15 @@
 				"dependency": "CP-04",
 				"evidence": "mega-maestro apps/endpoint/src/ipc/server.ts:65-67",
 				"consumer": "src/main/enterprise/enrollment.ts (enroll, rotate, revoke, retire)",
-				"note": "enrollment falls through to unsupported_capability; createEnrollmentLifecycle() already answers unsupported with owner mega-maestro when the compatibility answer lacks it"
+				"note": "enrollment falls through to unsupported_capability; createEnrollmentLifecycle() already answers unsupported with owner mega-maestro when the compatibility answer lacks it",
+				"observed": {
+					"method": "read in the sibling checkout at d5143a639 (935 dirty entries; the file itself unchanged)",
+					"at": "2026-10-29T03:00Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"file": "apps/endpoint/src/ipc/server.ts",
+					"lines": "65-67",
+					"detail": "enrollment is not in the capability list (the contract declares it at packages/contracts/src/local-endpoint.ts:165, no handler serves it)"
+				}
 			},
 			{
 				"key": "endpoint.budget",
@@ -79,7 +173,15 @@
 				"dependency": "CP-04",
 				"evidence": "mega-maestro apps/endpoint/src/ipc/server.ts:65-67",
 				"consumer": "none built yet (usage leaves through telemetry); the operation is in the shared endpoint-port vocabulary only",
-				"note": "budget falls through to unsupported_capability"
+				"note": "budget falls through to unsupported_capability",
+				"observed": {
+					"method": "read in the sibling checkout at d5143a639 (935 dirty entries; the file itself unchanged)",
+					"at": "2026-10-29T03:00Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"file": "apps/endpoint/src/ipc/server.ts",
+					"lines": "65-67",
+					"detail": "budget is not in the capability list (declared at local-endpoint.ts:173, unserved)"
+				}
 			},
 			{
 				"key": "command.pause_run",
@@ -88,7 +190,15 @@
 				"dependency": "CP-05",
 				"evidence": "mega-maestro packages/contracts/src/local-endpoint.ts:76-84",
 				"consumer": "src/main/enterprise/commands.ts (DESKTOP_UNCOMPOSED_COMMANDS answers it unsupported by name)",
-				"note": "the published action union is cancel_run, refresh_policy and report_status"
+				"note": "the published action union is cancel_run, refresh_policy and report_status",
+				"observed": {
+					"method": "read in the sibling checkout at d5143a639 (935 dirty entries; the file itself unchanged)",
+					"at": "2026-10-29T03:00Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"file": "packages/contracts/src/local-endpoint.ts",
+					"lines": "76-84",
+					"detail": "commandRequest.action is a discriminated union of cancel_run (:80), refresh_policy (:81) and report_status (:82) only"
+				}
 			},
 			{
 				"key": "command.resume_run",
@@ -97,7 +207,15 @@
 				"dependency": "CP-05",
 				"evidence": "mega-maestro packages/contracts/src/local-endpoint.ts:76-84",
 				"consumer": "src/main/enterprise/commands.ts (DESKTOP_UNCOMPOSED_COMMANDS answers it unsupported by name)",
-				"note": "the published action union is cancel_run, refresh_policy and report_status"
+				"note": "the published action union is cancel_run, refresh_policy and report_status",
+				"observed": {
+					"method": "read in the sibling checkout at d5143a639 (935 dirty entries; the file itself unchanged)",
+					"at": "2026-10-29T03:00Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"file": "packages/contracts/src/local-endpoint.ts",
+					"lines": "76-84",
+					"detail": "the same three-member action union; no resume_run"
+				}
 			},
 			{
 				"key": "transport.os-peer.darwin",
@@ -106,7 +224,15 @@
 				"dependency": "CP-06",
 				"evidence": "mega-maestro apps/endpoint/src/ipc/native.ts:24",
 				"consumer": "src/main/enterprise/endpoint-client.ts over the os-peer transport; the pair runs only in the Linux container",
-				"note": "OS peer authentication is Linux only: inspectNativePeer throws IPC_PLATFORM_UNSUPPORTED on macOS and every application artifact records nativeEndpoint: unsupported"
+				"note": "OS peer authentication is Linux only: inspectNativePeer throws IPC_PLATFORM_UNSUPPORTED on macOS and every application artifact records nativeEndpoint: unsupported",
+				"observed": {
+					"method": "read in the sibling checkout at d5143a639 (935 dirty entries; the file itself unchanged)",
+					"at": "2026-10-29T03:00Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"file": "apps/endpoint/src/ipc/native.ts",
+					"lines": "24",
+					"detail": "inspectNativePeer throws IPC_PLATFORM_UNSUPPORTED when process.platform is not linux; every packaged artifact records darwin/arm64 with components [] and certifiable false"
+				}
 			},
 			{
 				"key": "transport.os-peer.win32",
@@ -115,8 +241,28 @@
 				"dependency": "CP-06",
 				"evidence": "mega-maestro apps/endpoint/src/ipc/native.ts:24",
 				"consumer": "src/main/enterprise/endpoint-client.ts over the os-peer transport; the Windows CI leg skips the pair with a reason",
-				"note": "OS peer authentication is Linux only: inspectNativePeer throws IPC_PLATFORM_UNSUPPORTED on Windows and every application artifact records nativeEndpoint: unsupported"
+				"note": "OS peer authentication is Linux only: inspectNativePeer throws IPC_PLATFORM_UNSUPPORTED on Windows and every application artifact records nativeEndpoint: unsupported",
+				"observed": {
+					"method": "read in the sibling checkout at d5143a639 (935 dirty entries; the file itself unchanged)",
+					"at": "2026-10-29T03:00Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"file": "apps/endpoint/src/ipc/native.ts",
+					"lines": "24",
+					"detail": "the same platform check; no win32 artifact exists"
+				}
 			}
+		],
+		"observedRule": "every row carries observed: how and when its status was read; a row with no observation is inferred and must not be added",
+		"supportKeysInLibrary": [
+			"endpoint.command",
+			"endpoint.workflow",
+			"endpoint.offline",
+			"endpoint.enrollment",
+			"endpoint.budget",
+			"command.pause_run",
+			"command.resume_run",
+			"transport.os-peer.darwin",
+			"transport.os-peer.win32"
 		]
 	},
 	"routes": {
@@ -267,7 +413,66 @@
 			"endpointRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
 			"certifiable": false
 		},
-		"completion": "MRC-12-06 unchecked: CP-01, CP-02, CP-03 and registration-approval absent (owner mega-maestro); see joint-integration.json"
+		"completion": "MRC-12-06 unchecked: CP-01, CP-02, CP-03 and registration-approval absent (owner mega-maestro); see joint-integration.json",
+		"pairCheck": {
+			"at": "2026-10-29T03:04:02.293Z",
+			"command": "node scripts/mega-maestro-pair.mjs check --json",
+			"exit": 2,
+			"ready": false,
+			"library": {
+				"status": "ready",
+				"version": "0.32.0",
+				"entrySha256": "133436f732906317e828db99104aa602a8d7a41ef01e61f8379ba6eecccd8682"
+			},
+			"dependencies": [
+				{
+					"id": "CP-01",
+					"owner": "mega-maestro",
+					"status": "open",
+					"detail": "no clean contracts artifact is pinned (vendor/mega-maestro/contracts.pin.json)"
+				},
+				{
+					"id": "CP-01",
+					"owner": "mega-maestro",
+					"status": "open",
+					"detail": "no clean Linux application artifact (4 dirty-source packaged artifact(s); development checkout is never certifiable)"
+				},
+				{
+					"id": "CP-02",
+					"owner": "mega-maestro",
+					"status": "open",
+					"detail": "runtime adapter pin absent, declared unsupported; needs a supported createMaestroAdapter from endpoint source d5143a63931dc87a5f90b3fdb7b58fa3726913b1 (dirty or absent)"
+				},
+				{
+					"id": "CP-03",
+					"owner": "mega-maestro",
+					"status": "open",
+					"detail": "workflow authority pin absent; needs the delegation/workflow owner producer from endpoint source d5143a63931dc87a5f90b3fdb7b58fa3726913b1 (dirty or absent)"
+				},
+				{
+					"id": "linux-host",
+					"owner": "maestro",
+					"status": "open",
+					"detail": "no Linux Docker engine with built-in seccomp"
+				},
+				{
+					"id": "registration-approval",
+					"owner": "mega-maestro",
+					"status": "open",
+					"detail": "no API/console producer to approve the actor registration (--approve-command)"
+				}
+			],
+			"linuxHost": {
+				"docker": false,
+				"reason": "Cannot connect to the Docker daemon at unix:///Users/dr3/.docker/run/docker.sock. Is the docker daemon running?",
+				"image": {
+					"ref": "node@sha256:71bcbb3b215b3fa84b5b167585675072f4c270855e37a599803f1a58141a0716",
+					"present": false
+				}
+			},
+			"approvalProducer": false,
+			"note": "no container run on this date: the Docker daemon is not running on this host and no counterpart input or library sha moved since the last run; the lastRealPair block above stands"
+		}
 	},
 	"requirements": {
 		"producers": [
@@ -1107,5 +1312,862 @@
 				}
 			}
 		}
+	},
+	"enforcement": {
+		"task": "MRC2-08-03",
+		"readAt": "2026-10-29T03:05:28.709Z",
+		"libraryVersion": "0.32.0",
+		"words": {
+			"guarded": "the sink reaches a managed ceiling and runs or refuses by its verdict, with standalone unchanged",
+			"unavailable": "a managed host refuses it by name with no ceiling able to admit it",
+			"loopback-only": "the socket binds a loopback literal or an OS-local path with no gate, by record",
+			"standalone-only": "the sink runs the same managed or not, with no hold",
+			"held": "every write path the row names reaches the one settings write authority and refuses by name with nothing written",
+			"partly held": "held, with one write path the row covers that no lock key represents (named in note)",
+			"held by custody": "the credential is read or written only after credentialCustodyVerdict() admits the seal"
+		},
+		"families": {
+			"A": {
+				"title": "Agent turns that do not start from a user message",
+				"document": "MAESTRO-MEGA-P2-02",
+				"evidence": "Plans/mega-maestro-rc/evidence/p2-02.md",
+				"evidenceHead": "6cf9e7837",
+				"rows": [
+					{
+						"row": 1,
+						"sink": "Real process:spawn body (handle-spawn.ts)",
+						"status": "guarded",
+						"guard": "src/main/process-manager/ProcessManager.ts (admitSpawn, spawnAdmitted, buildSpawnRequestSnapshot) over src/main/enterprise/spawn-authority.ts; src/main/ipc/handlers/process/handle-spawn.ts (purpose, origin, managedPermissionModeRefusal)",
+						"tests": ["src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts"]
+					},
+					{
+						"row": 2,
+						"sink": "Tab auto-naming",
+						"status": "guarded",
+						"guard": "src/main/ipc/handlers/tabNaming.ts spawns through spawnAdmitted() with delegation context (MRC-09-02)",
+						"tests": ["src/__tests__/main/ipc/handlers/tabNaming.managed.test.ts"],
+						"note": "sets no purpose, so a policy reads it as a conversation; an undispatched naming turn resolves only at its 120 s timeout"
+					},
+					{
+						"row": 3,
+						"sink": "Context groomer",
+						"status": "guarded",
+						"guard": "src/main/utils/context-groomer.ts admitted as purpose utility under boundUtilityRoute() (src/main/process-manager/types.ts)",
+						"tests": ["src/__tests__/main/utils/context-groomer.managed.test.ts"]
+					},
+					{
+						"row": 4,
+						"sink": "Quick Chat routing",
+						"status": "guarded",
+						"guard": "src/main/quick-chat/quick-chat-controller.ts (dispatch tickets, utility lineage); src/main/web-server/handlers/messageHandlers/quickChat.ts",
+						"tests": ["src/__tests__/main/quick-chat/quick-chat-controller.managed.test.ts"]
+					},
+					{
+						"row": 5,
+						"sink": "Cross-agent consult router",
+						"status": "guarded",
+						"guard": "src/main/cross-agent/cross-agent-router.ts (consultRefusal, consult lineage) over the consult service",
+						"tests": ["src/__tests__/main/cross-agent/cross-agent-router.managed.test.ts"],
+						"note": "the consult lineage reaches the real endpoint nowhere while the bridge rejects a nonempty chain (CP-03)"
+					},
+					{
+						"row": 6,
+						"sink": "Codex skill discovery",
+						"status": "guarded",
+						"guard": "src/main/agents/codex-skills.ts through admitProviderProbe() (src/main/agents/provider-probe.ts) over admitProbeTurn()",
+						"tests": [
+							"src/__tests__/main/agents/codex-skills.managed.test.ts",
+							"src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts"
+						],
+						"note": "refused by route on a managed desktop in this build (no app-server enforcement producer)"
+					},
+					{
+						"row": 7,
+						"sink": "Web terminal callback",
+						"status": "guarded",
+						"guard": "src/main/web-server/callbacks/terminalCallbacks.ts carries the transport actor admission (src/main/web-server/auth/transport-actor.ts, MRC-08-05); the terminal itself is the PTY sink (managedPtyRefusal)",
+						"tests": [
+							"src/__tests__/main/web-server/handlers/messageHandlers.test.ts",
+							"src/__tests__/main/process-manager/spawners/PtySpawner.test.ts"
+						]
+					},
+					{
+						"row": 8,
+						"sink": "Pianola and Computer History supervisors",
+						"status": "guarded",
+						"guard": "src/main/pianola/pianola-supervisor.ts and src/main/computer-history/observer-supervisor.ts through admitSupervisorChild() (src/shared/maestro-lib/managed/host-adapter.ts); the denied word drawn in the panes",
+						"tests": [
+							"src/__tests__/main/pianola/pianola-supervisor.managed.test.ts",
+							"src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts"
+						]
+					},
+					{
+						"row": 9,
+						"sink": "Utility model choice (utilityAgentId, utilityModelId)",
+						"status": "guarded",
+						"guard": "boundUtilityRoute() (src/main/process-manager/types.ts) refuses a utility provider or model outside the route ceiling before the authority is asked; the keys are lockable (P2-06)",
+						"tests": [
+							"src/__tests__/main/utils/context-groomer.managed.test.ts",
+							"src/__tests__/main/ipc/handlers/persistence.locks.test.ts"
+						],
+						"note": "the ceiling producer is CP-01: a managed desktop pins no route today"
+					}
+				]
+			},
+			"B": {
+				"title": "Permission mode and provider arguments",
+				"document": "MAESTRO-MEGA-P2-03",
+				"evidence": "Plans/mega-maestro-rc/evidence/p2-03.md",
+				"evidenceHead": "2ff853825",
+				"rows": [
+					{
+						"row": 1,
+						"sink": "Full-access argument tables (providers/definitions.ts)",
+						"status": "guarded",
+						"guard": "managedArgsProblems() and permissionModeWithinCeiling() in src/shared/maestro-lib/launch/env.ts refuse every full-access flag by name under a pin below full",
+						"tests": ["src/__tests__/shared/maestro-lib/managed/permission-ceiling.test.ts"]
+					},
+					{
+						"row": 2,
+						"sink": "Known YOLO flags and argument assembly (agent-args.ts)",
+						"status": "guarded",
+						"guard": "buildAgentArgs() under managedCeiling throws ManagedPermissionModeError before any flag is emitted (src/shared/maestro-lib/launch/agent-args.ts)",
+						"tests": ["src/__tests__/shared/maestro-lib/launch/agent-args.managed.test.ts"]
+					},
+					{
+						"row": 3,
+						"sink": "Codex sandbox invocation",
+						"status": "guarded",
+						"guard": "codexSandboxCeiling() in src/main/codex-app-server/invocation.ts: readonly to read-only, standard to workspace-write; a wider sandbox refused at the app-server sink, never the exec fallback",
+						"tests": ["src/__tests__/main/codex-app-server/invocation.test.ts"]
+					},
+					{
+						"row": 4,
+						"sink": "CLI YOLO constant (agent-spawner.ts)",
+						"status": "guarded",
+						"guard": "cliRequestedPermissionMode() and cliManagedRoute() in src/cli/services/agent-spawner.ts: a CLI flag cannot widen the pin; a refusal exits nonzero with zero processes",
+						"tests": ["src/__tests__/cli/services/agent-spawner.test.ts"]
+					},
+					{
+						"row": 5,
+						"sink": "Slash command probe runs with skip-permissions",
+						"status": "guarded",
+						"guard": "runProviderProbe() / admitProviderProbe() in src/main/agents/provider-probe.ts: the probe arguments under the route ceiling, --dangerously-skip-permissions refused under standard or readonly",
+						"tests": [
+							"src/__tests__/main/agents/claude-slash-command-probe.test.ts",
+							"src/__tests__/main/agents/detector.test.ts"
+						]
+					},
+					{
+						"row": 6,
+						"sink": "maestro-p TUI (own pty path, binary from env, YOLO handling, steering server)",
+						"status": "guarded on the desktop; standalone-only from the CLI and Cue",
+						"guard": "the TUI handshake (src/shared/maestro-lib/managed/tui-handshake.ts) stamped by ProcessManager.spawn(), held by TuiDriver.start() before pty.spawn, withPermissionBypass withheld above the ceiling; the steering token minted by the desktop",
+						"tests": [
+							"src/__tests__/maestro-p/tui-driver.managed.test.ts",
+							"src/__tests__/main/process-manager/ProcessManager.tuiLaunch.managed.test.ts"
+						],
+						"note": "the CLI (agent-spawner.ts) and Cue (cue-spawn-builder.ts) maestro-p surfaces send no handshake and no steering token"
+					}
+				]
+			},
+			"C": {
+				"title": "Repository, shell, install and destructive sinks outside ProcessManager",
+				"document": "MAESTRO-MEGA-P2-04",
+				"evidence": "Plans/mega-maestro-rc/evidence/p2-04.md",
+				"evidenceHead": "f01092da1",
+				"rows": [
+					{
+						"row": 1,
+						"sink": "Arbitrary git command from the UI (git:runCommand)",
+						"status": "guarded; free arguments unavailable",
+						"guard": "holdGitCommand() in src/main/utils/remote-git.ts over createGitExecutionGate() in src/main/enterprise/repository-policy.ts; operations off GIT_STREAMING_OPERATIONS refused in every mode",
+						"tests": ["src/__tests__/main/ipc/handlers/git/streaming.managed.test.ts"]
+					},
+					{
+						"row": 2,
+						"sink": "Worktree add, commit, checkout, push, PR, gist",
+						"status": "guarded; two standalone-only",
+						"guard": "every write through execGit, held by the executor; the PR held before the push and the gist by holdGitForgeEffect()",
+						"tests": [
+							"src/__tests__/main/ipc/handlers/git/worktree.managed.test.ts",
+							"src/__tests__/main/utils/remote-git.managed.test.ts"
+						],
+						"note": "standalone-only: local git:worktreeCheckout and git:removeWorktree"
+					},
+					{
+						"row": 3,
+						"sink": "Shared git executor, local or over SSH",
+						"status": "guarded; fixed remote probes standalone-only",
+						"guard": "execGit / execGitRemote hold every call; an SSH write qualified through RemoteEndpointQualifier (src/main/enterprise/remote.ts)",
+						"tests": ["src/__tests__/main/utils/remote-git.managed.test.ts"],
+						"note": "execShellRemote carries fixed read probes and one rmdir of an empty directory"
+					},
+					{
+						"row": 4,
+						"sink": "User worktree setup script via shell",
+						"status": "guarded",
+						"guard": "holdWorktreeSetupScript() (the setup-script repository effect) before any shell in src/main/utils/worktree-setup-script.ts",
+						"tests": ["src/__tests__/main/utils/worktree-setup-script.test.ts"]
+					},
+					{
+						"row": 5,
+						"sink": "Symphony handlers and fork",
+						"status": "guarded; three standalone-only after-effects",
+						"guard": "holdRepositoryEffect() in src/main/ipc/handlers/symphony/shared.ts (clone, branch, commit, push, pull request), ForkSetupOptions.beforeFork in src/main/utils/symphony-fork.ts, holdRemoteEffectBeforeGh() in lifecycle.ts",
+						"tests": [
+							"src/__tests__/main/ipc/handlers/symphony.test.ts",
+							"src/__tests__/main/utils/symphony-fork.test.ts",
+							"src/__tests__/main/services/symphony-runner.test.ts"
+						],
+						"note": "standalone-only: the post-fork remote reconfiguration, the push --delete cleanup, the clone removal"
+					},
+					{
+						"row": 6,
+						"sink": "Feedback and gh login",
+						"status": "guarded; the CLI login unavailable",
+						"guard": "holdFeedbackEffect() in src/main/feedback/index.ts over holdGitForgeEffect(); GhLoginRefusedError in src/cli/services/gh-login.ts",
+						"tests": [
+							"src/__tests__/main/feedback/managed.test.ts",
+							"src/__tests__/cli/services/gh-login.test.ts"
+						]
+					},
+					{
+						"row": 7,
+						"sink": "Agent-run producers (git, gh pr view)",
+						"status": "guarded",
+						"guard": "defaultGitRunner through execGit; defaultGhRunner limited to pr view (src/main/agent-run/producers.ts)",
+						"tests": ["src/__tests__/main/agent-run/producers.managed.test.ts"]
+					},
+					{
+						"row": 8,
+						"sink": "Cue GitHub poller (gh)",
+						"status": "guarded",
+						"guard": "holdPollWithExecutor() in src/main/cue/cue-github-poller.ts (the poll forge effect); a refusal reported once, the schedule kept",
+						"tests": ["src/__tests__/main/cue/cue-github-poller.managed.test.ts"],
+						"note": "the headless Cue engine installs no git gate, so the poll runs standalone there"
+					},
+					{
+						"row": 9,
+						"sink": "User-configured notification commands, shell: true",
+						"status": "guarded",
+						"guard": "holdNotificationCommand() in src/main/ipc/handlers/notifications.ts over shellCommandVerdict() in src/main/enterprise/shell-policy.ts; both settings lockable",
+						"tests": [
+							"src/__tests__/main/ipc/handlers/notifications.managed.test.ts",
+							"src/__tests__/main/enterprise/shell-policy.test.ts"
+						]
+					},
+					{
+						"row": 10,
+						"sink": "WakaTime binary download, unzip, run",
+						"status": "guarded",
+						"guard": "InstallAuthority.authorize() (src/main/enterprise/install-policy.ts, artifact wakatime-cli) before the download, the extraction and every run",
+						"tests": [
+							"src/__tests__/main/wakatime-manager.managed.test.ts",
+							"src/__tests__/main/enterprise/install-policy.test.ts"
+						]
+					},
+					{
+						"row": 11,
+						"sink": "CLI installer via PowerShell",
+						"status": "guarded",
+						"guard": "installAuthority.authorize() in src/main/maestro-cli-manager.ts (artifact maestro-cli) before the directory, the shim and powershell.exe",
+						"tests": ["src/__tests__/main/maestro-cli-manager.managed.test.ts"]
+					},
+					{
+						"row": 12,
+						"sink": "Spec tool installers and marketplace import",
+						"status": "guarded",
+						"guard": "holdSpecPromptFetches() / holdSpecPromptBytes() in src/main/spec-prompt-install.ts; setMarketplaceInstallAuthority() in src/main/services/marketplace-service.ts",
+						"tests": [
+							"src/__tests__/main/spec-prompt-install.managed.test.ts",
+							"src/__tests__/main/services/marketplace-service.managed.test.ts"
+						]
+					},
+					{
+						"row": 13,
+						"sink": "MCP config written into agent config files",
+						"status": "guarded",
+						"guard": "holdMcpServerWrite() in src/main/coworking/installers/managed.ts over mcpServerVerdict() before every atomicWriteFile",
+						"tests": ["src/__tests__/main/coworking/installers/managed.test.ts"]
+					},
+					{
+						"row": 14,
+						"sink": "ZIP import",
+						"status": "guarded at the callers",
+						"guard": "src/main/ipc/handlers/playbooks.ts and src/main/cue/backup/cue-backup-manager.ts hold the import to the install ceiling before readZipArchive; the reader holds nothing by design",
+						"tests": [
+							"src/__tests__/main/ipc/handlers/playbooks.managed.test.ts",
+							"src/__tests__/main/cue/backup/cue-backup-manager.managed.test.ts"
+						]
+					},
+					{
+						"row": 15,
+						"sink": "File deletion",
+						"status": "guarded; one standalone-only overwrite",
+						"guard": "holdDeleteEffect() in src/main/enterprise/local-effects-policy.ts before every delete in filesystem.ts, autorun.ts, playbooks.ts and cue-backup-manager.ts",
+						"tests": [
+							"src/__tests__/main/ipc/handlers/filesystem.managed.test.ts",
+							"src/__tests__/main/ipc/handlers/autorun.managed.test.ts",
+							"src/__tests__/main/enterprise/local-effects-policy.test.ts"
+						],
+						"note": "standalone-only: the remote destination cleared for an overwrite move"
+					},
+					{
+						"row": 16,
+						"sink": "Open external, open path, trash, clipboard",
+						"status": "guarded; two standalone-only",
+						"guard": "holdSystemEffect() over holdLocalEffect() in src/main/ipc/handlers/system.ts; the plugin openExternal under requirePluginBinding plus holdLocalEffect",
+						"tests": ["src/__tests__/main/ipc/handlers/system.managed.test.ts"],
+						"note": "standalone-only: shell.showItemInFolder and the subframe shell.openExternal"
+					},
+					{
+						"row": 17,
+						"sink": "Inline plugin sinks in the entry file",
+						"status": "guarded",
+						"guard": "moved to createPluginEffectSinks() in src/main/plugins/plugin-host-handlers.ts (execFile under the spawn authority, WebSocket under net.connect and the egress guard); src/main/index.ts holds no plugin sink",
+						"tests": ["src/__tests__/main/plugins/plugin-host-handlers.sinks.test.ts"]
+					},
+					{
+						"row": 18,
+						"sink": "Debug collectors",
+						"status": "standalone-only (read-class); redacted on export by P2-06",
+						"guard": "git, gh, npm, node and ps version reads with no hold; every package redacted once at redactPackageContents() in src/main/debug-package/index.ts",
+						"tests": ["src/__tests__/main/debug-package/redaction-canaries.test.ts"]
+					}
+				]
+			},
+			"D": {
+				"title": "Network egress and inbound listeners",
+				"document": "MAESTRO-MEGA-P2-05",
+				"evidence": "Plans/mega-maestro-rc/evidence/p2-05.md",
+				"evidenceHead": "a9e50db6b",
+				"rows": [
+					{
+						"row": 1,
+						"sink": "Shared fetch chokepoint",
+						"status": "guarded",
+						"guard": "fetchWithTimeout() in src/main/utils/fetchWithTimeout.ts calls holdEgress() before setTimeout and the one fetch( of the process, over createEgressPolicySource() in src/main/enterprise/egress-policy.ts",
+						"tests": [
+							"src/__tests__/main/utils/fetchWithTimeout.managed.test.ts",
+							"src/__tests__/main/enterprise/egress-policy.test.ts"
+						]
+					},
+					{
+						"row": 2,
+						"sink": "Raw https outside the chokepoint",
+						"status": "guarded; two peer transports standalone-only",
+						"guard": "wakatime-manager.ts (updates) and cue/cue-susfactor.ts (vendor-telemetry) call fetchWithTimeout; no https.request remains in src/main",
+						"tests": [
+							"src/__tests__/main/wakatime-manager.managed.test.ts",
+							"src/__tests__/main/cue/cue-susfactor.test.ts"
+						],
+						"note": "standalone-only: lite/discovery/probe.ts and lite/pairing/transport.ts (paired-device peer transport, not vendor egress)"
+					},
+					{
+						"row": 3,
+						"sink": "Updates",
+						"status": "guarded; one standalone-only after-effect",
+						"guard": "updateHoldFor() in src/main/update-checker.ts over createUpdatePolicySource() in src/main/enterprise/update-policy.ts; every electron-updater step held by name; the feed fetched as updates",
+						"tests": [
+							"src/__tests__/main/enterprise/update-policy.test.ts",
+							"src/__tests__/main/update-checker.managed.test.ts",
+							"src/__tests__/main/auto-updater.managed.test.ts"
+						],
+						"note": "standalone-only: autoInstallOnAppQuit installs a download admitted before a later hold"
+					},
+					{
+						"row": 4,
+						"sink": "Vendor telemetry",
+						"status": "guarded (off by default under management)",
+						"guard": "checkin.ts, cue/cue-telemetry.ts and the six leaderboard verbs name vendor-telemetry; with no ceiling every call is refused unavailable before any socket",
+						"tests": [
+							"src/__tests__/main/checkin.test.ts",
+							"src/__tests__/main/cue/cue-telemetry.test.ts",
+							"src/__tests__/main/ipc/handlers/leaderboard.test.ts"
+						]
+					},
+					{
+						"row": 5,
+						"sink": "Provider account polling",
+						"status": "guarded",
+						"guard": "codexAccountEgress() in src/main/agents/codex-auth.ts (provider-account by managedAccountRef); models.dev as content",
+						"tests": [
+							"src/__tests__/main/agents/codex-usage-sampler.test.ts",
+							"src/__tests__/main/agents/codex-reset-credits.test.ts",
+							"src/__tests__/main/agents/detector.test.ts"
+						]
+					},
+					{
+						"row": 6,
+						"sink": "Content fetches",
+						"status": "guarded as content by the chokepoint default",
+						"guard": "every other fetchWithTimeout caller is held as content",
+						"tests": ["src/__tests__/main/enterprise/egress-policy.test.ts"],
+						"note": "three callers name no class yet: plugin-host-handlers.ts net.fetch, plugin-media-tools.ts, cue-notify-webhook.ts"
+					},
+					{
+						"row": 7,
+						"sink": "Inbound listeners",
+						"status": "guarded; four kinds loopback-only or OS-local by record",
+						"guard": "holdListener() in src/main/enterprise/listener-gate.ts over listenerVerdict() in listener-policy.ts before the first socket primitive (web, tunnel, ssh-tunnel, lite-control, tailnet, mdns, cue-webhook); the Lite process composes its own authority (src/main/lite/listener-authority.ts)",
+						"tests": [
+							"src/__tests__/main/enterprise/listener-policy.test.ts",
+							"src/__tests__/main/web-server/WebServer.listenerPolicy.test.ts",
+							"src/__tests__/main/cue/cue-webhook-server.listenerPolicy.test.ts",
+							"src/__tests__/main/lite/listener-authority.test.ts"
+						],
+						"note": "loopback-only or OS-local with no gate: cue-status (127.0.0.1), relay and coworking (socketPath), steering (socketPath), tailnet-relay (127.0.0.1); maestro-cli host and the headless Cue engine install no listener authority"
+					},
+					{
+						"row": 8,
+						"sink": "Remote file system and SSH probes",
+						"status": "guarded; the CLI composes nothing",
+						"guard": "holdRemoteAccess() in src/main/ssh-remote-manager.ts over createRemoteAccessAuthority() in src/main/enterprise/remote.ts before every remote-fs operation; holdRemoteProbe() in handlers/agents.ts; probeRemoteMaestroP and tailscale held",
+						"tests": [
+							"src/__tests__/main/utils/remote-fs.managed.test.ts",
+							"src/__tests__/main/ipc/handlers/agents.remoteProbes.managed.test.ts"
+						],
+						"note": "standalone-only: maestro-cli test-ssh-remote (a bare CLI holds no remote-access authority); every remote is remote-unqualified while CP-02 is absent"
+					}
+				]
+			},
+			"E": {
+				"title": "Settings a policy must be able to lock",
+				"document": "MAESTRO-MEGA-P2-06",
+				"evidence": "Plans/mega-maestro-rc/evidence/p2-06.md",
+				"evidenceHead": "8dae949f8",
+				"rows": [
+					{
+						"row": 1,
+						"sink": "Per-agent custom path, args, env, model and effort",
+						"status": "partly held",
+						"guard": "holdAgentConfigWrite() in src/main/enterprise/settings-policy.ts (agentConfig.customPath, customArgs, customEnvVars, model, reasoningEffort) before the five agents:setConfig* handlers, applyAgentConfigWrite(), the bridge and maestro-cli settings agent",
+						"tests": [
+							"src/__tests__/main/ipc/handlers/agents.locks.test.ts",
+							"src/__tests__/main/agents/agent-config-writes.test.ts",
+							"src/__tests__/cli/commands/settings-agent.test.ts"
+						],
+						"note": "not represented: the renderer's own write of one agent's record (Edit Agent modal, composer model and effort chips)"
+					},
+					{
+						"row": 2,
+						"sink": "Global shell and env",
+						"status": "held",
+						"guard": "holdSettingWrite() behind the store guard, settings:set, the bridge set_setting and maestro-cli settings set|reset; pins restored by restoreManagedSettingPins()",
+						"tests": [
+							"src/__tests__/main/ipc/handlers/persistence.locks.test.ts",
+							"src/__tests__/main/enterprise/settings-policy.test.ts",
+							"src/__tests__/cli/commands/settings-set.test.ts"
+						]
+					},
+					{
+						"row": 3,
+						"sink": "Update, crash and stats reporting, leaderboard, WakaTime",
+						"status": "held",
+						"guard": "the same four settings write paths as row 2",
+						"tests": ["src/__tests__/main/ipc/handlers/persistence.locks.test.ts"],
+						"note": "leaderboardRegistration and installationId have no Settings control; refused at the write, listed by settings:managedLocks"
+					},
+					{
+						"row": 4,
+						"sink": "Web and remote access",
+						"status": "held",
+						"guard": "the six web keys as row 2; holdManagedKey() on web.tunnel (tunnel:start), web.liveSessions (live:toggle) and lite.control (the Lite process); restoreManagedRemoteAccess() ends what is on",
+						"tests": [
+							"src/__tests__/main/ipc/handlers/system.managed.test.ts",
+							"src/__tests__/main/ipc/handlers/web.test.ts",
+							"src/__tests__/main/lite/listener-authority.test.ts"
+						],
+						"note": "webAuthToken is lockable and never pinnable (sensitive)"
+					},
+					{
+						"row": 5,
+						"sink": "SSH remotes",
+						"status": "held",
+						"guard": "ssh-remote:saveConfig, deleteConfig and setDefaultId hold sshRemotes / defaultSshRemoteId before any work",
+						"tests": ["src/__tests__/main/ipc/handlers/ssh-remote.test.ts"],
+						"note": "maestro-cli create-ssh-remote with no desktop still writes the file"
+					},
+					{
+						"row": 6,
+						"sink": "Encore features and plugin trust",
+						"status": "partly held",
+						"guard": "encoreFeatures as row 2 plus one encore.<flag> pin per feature (P2-07); holdPluginSetWrite() on plugins:install, update and uninstall (plugins.installed)",
+						"tests": [
+							"src/__tests__/main/ipc/plugins-handlers.test.ts",
+							"src/__tests__/shared/encoreFeatureDefaults.pins.test.ts",
+							"src/__tests__/main/encore-feature-lifecycle.test.ts"
+						],
+						"note": "not represented: pluginTrustedKeys (a raw store key with no metadata entry and no lock key)"
+					},
+					{
+						"row": 7,
+						"sink": "Prompt customizations",
+						"status": "held",
+						"guard": "holdPromptSetWrite() before prompts:save and prompts:reset; restoreManagedPromptPins() at startup and on every policy change",
+						"tests": ["src/__tests__/main/ipc/handlers/prompts.test.ts"]
+					},
+					{
+						"row": 8,
+						"sink": "Storage Location sync folder",
+						"status": "held",
+						"guard": "holdManagedKey(storage.syncPath) in sync:setCustomPath before a folder is created; restoreManagedSyncPath() runs the migration to a pinned folder",
+						"tests": ["src/__tests__/main/ipc/handlers/system.managed.test.ts"]
+					},
+					{
+						"row": 9,
+						"sink": "Spec tool and coworking toggles",
+						"status": "held",
+						"guard": "the same four settings write paths as row 2; the roots carry <ManagedSettingSection>",
+						"tests": [
+							"src/__tests__/main/ipc/handlers/persistence.locks.test.ts",
+							"src/__tests__/renderer/components/Settings/ManagedSettingSection.test.tsx"
+						]
+					}
+				]
+			},
+			"F": {
+				"title": "Credential stores Phase 1 does not name",
+				"document": "MAESTRO-MEGA-P2-06",
+				"evidence": "Plans/mega-maestro-rc/evidence/p2-06.md",
+				"evidenceHead": "8dae949f8",
+				"rows": [
+					{
+						"row": 1,
+						"sink": "The turn log state store defaulting to obscuringSeal()",
+						"status": "held by custody",
+						"guard": "MANAGED_CREDENTIALS[0]; credentialCustodyVerdict() (src/main/enterprise/credential-custody.ts) at the top of write() before either seal; a managed host with no OS key, no anchor or the obscuring seal refuses (CustodyRefusedError) and never falls back",
+						"tests": [
+							"src/__tests__/main/cot-export/config-store.managed.test.ts",
+							"src/__tests__/main/enterprise/credential-custody.test.ts"
+						]
+					},
+					{
+						"row": 2,
+						"sink": "WakaTime API key in plain settings and ~/.wakatime.cfg",
+						"status": "held by custody",
+						"guard": "MANAGED_CREDENTIALS[1] (wakatime.apiKey); resolveApiKey() holds both files before either is read; settingWriteVerdict() refuses a write of wakatimeApiKey with code custody",
+						"tests": [
+							"src/__tests__/main/wakatime-manager.managed.test.ts",
+							"src/__tests__/cli/services/wakatime.test.ts"
+						],
+						"note": "no sealed store exists: the feature is off by name under management"
+					},
+					{
+						"row": 3,
+						"sink": "Web auth token in plain settings",
+						"status": "locked and redacted, not moved",
+						"guard": "webAuthToken lockable and never pinnable; masked by exact name in the settings collector and by the camelCase credential rule in text",
+						"tests": [
+							"src/__tests__/main/debug-package/redaction-canaries.test.ts",
+							"src/__tests__/shared/redactSecrets.managed.test.ts"
+						],
+						"note": "still written to maestro-settings.json by the app itself, outside the custody ceiling"
+					},
+					{
+						"row": 4,
+						"sink": "Cue susfactor (0din) token",
+						"status": "held by custody",
+						"guard": "MANAGED_CREDENTIALS[2] (cue.odinToken); readApiToken() in src/main/cue/cue-susfactor.ts holds ODIN_API_TOKEN as environment custody before reading it; fail-open by name",
+						"tests": ["src/__tests__/main/cue/cue-susfactor.test.ts"],
+						"note": "the headless Cue engine composes no credential authority"
+					},
+					{
+						"row": 5,
+						"sink": "Codex auth.json readers",
+						"status": "redacted, readers unchanged",
+						"guard": "access_token, id_token and refresh_token in MANAGED_SENSITIVE_KEYS; the JWT and key=value rules of redactSecrets() cover the token shapes",
+						"tests": ["src/__tests__/shared/redactSecrets.managed.test.ts"],
+						"note": "the file's custody is the provider's, not Maestro's"
+					},
+					{
+						"row": 6,
+						"sink": "Plugin ledger anchor wiring",
+						"status": "unchanged by P2-06",
+						"guard": "the Phase 1 createKeyringAnchor over the sealed createAuthorizationStore(); no custody verdict over the ledger",
+						"tests": ["src/__tests__/main/plugins/plugin-host-handlers.sinks.test.ts"]
+					},
+					{
+						"row": 7,
+						"sink": "Redaction utilities required on exports",
+						"status": "required on every export",
+						"guard": "redactPackageContents() in src/main/debug-package/index.ts over every string of the package before the zip; Send Feedback through redactOutbound(); SENSITIVE_KEYS plus MANAGED_SENSITIVE_KEYS by exact key",
+						"tests": [
+							"src/__tests__/main/debug-package/redaction-canaries.test.ts",
+							"src/__tests__/main/feedback/managed.test.ts"
+						]
+					}
+				]
+			}
+		},
+		"counts": {
+			"A": {
+				"rows": 9,
+				"byStatus": {
+					"guarded": 9
+				}
+			},
+			"B": {
+				"rows": 6,
+				"byStatus": {
+					"guarded": 5,
+					"guarded on the desktop; standalone-only from the CLI and Cue": 1
+				}
+			},
+			"C": {
+				"rows": 18,
+				"byStatus": {
+					"guarded; free arguments unavailable": 1,
+					"guarded; two standalone-only": 2,
+					"guarded; fixed remote probes standalone-only": 1,
+					"guarded": 9,
+					"guarded; three standalone-only after-effects": 1,
+					"guarded; the CLI login unavailable": 1,
+					"guarded at the callers": 1,
+					"guarded; one standalone-only overwrite": 1,
+					"standalone-only (read-class); redacted on export by P2-06": 1
+				}
+			},
+			"D": {
+				"rows": 8,
+				"byStatus": {
+					"guarded": 2,
+					"guarded; two peer transports standalone-only": 1,
+					"guarded; one standalone-only after-effect": 1,
+					"guarded (off by default under management)": 1,
+					"guarded as content by the chokepoint default": 1,
+					"guarded; four kinds loopback-only or OS-local by record": 1,
+					"guarded; the CLI composes nothing": 1
+				}
+			},
+			"E": {
+				"rows": 9,
+				"byStatus": {
+					"partly held": 2,
+					"held": 7
+				}
+			},
+			"F": {
+				"rows": 7,
+				"byStatus": {
+					"held by custody": 3,
+					"locked and redacted, not moved": 1,
+					"redacted, readers unchanged": 1,
+					"unchanged by P2-06": 1,
+					"required on every export": 1
+				}
+			}
+		},
+		"settingsLocks": {
+			"count": 59,
+			"heldByAllKeysPolicy": 59,
+			"settings": [
+				"utilityAgentId",
+				"utilityModelId",
+				"defaultShell",
+				"customShellPath",
+				"shellArgs",
+				"shellEnvVars",
+				"shellEnvVarsDisabled",
+				"ghPath",
+				"audioFeedbackCommand",
+				"idleNotificationCommand",
+				"checkForUpdatesOnStartup",
+				"enableBetaUpdates",
+				"crashReportingEnabled",
+				"webAuthEnabled",
+				"webAuthToken",
+				"persistentWebLink",
+				"webInterfaceAutoStart",
+				"webInterfaceUseCustomPort",
+				"webInterfaceCustomPort",
+				"sshRemotes",
+				"defaultSshRemoteId",
+				"speckitEnabled",
+				"openspecEnabled",
+				"bmadEnabled",
+				"statsCollectionEnabled",
+				"leaderboardRegistration",
+				"wakatimeEnabled",
+				"encoreFeatures",
+				"coworkingBrowserInteraction",
+				"coworkingBrowserInteractionConfirm",
+				"coworkingBackgroundBrowsers",
+				"coworkingBackgroundBrowsersLimit",
+				"installationId"
+			],
+			"agentConfig": [
+				"agentConfig.customPath",
+				"agentConfig.customArgs",
+				"agentConfig.customEnvVars",
+				"agentConfig.model",
+				"agentConfig.reasoningEffort"
+			],
+			"sets": ["prompts.customizations", "plugins.installed", "storage.syncPath"],
+			"actions": ["web.liveSessions", "web.tunnel", "lite.control"],
+			"encore": [
+				"encore.directorNotes",
+				"encore.usageStats",
+				"encore.symphony",
+				"encore.maestroCue",
+				"encore.pianola",
+				"encore.plugins",
+				"encore.coworking",
+				"encore.opencodeServer",
+				"encore.concerto",
+				"encore.groupsPlus",
+				"encore.webLogin",
+				"encore.computerHistory",
+				"encore.quickChat",
+				"encore.maestroRun",
+				"encore.throughputGauge"
+			],
+			"encoreFlags": [
+				"directorNotes",
+				"usageStats",
+				"symphony",
+				"maestroCue",
+				"pianola",
+				"plugins",
+				"coworking",
+				"opencodeServer",
+				"concerto",
+				"groupsPlus",
+				"webLogin",
+				"computerHistory",
+				"quickChat",
+				"maestroRun",
+				"throughputGauge"
+			],
+			"sensitiveLockableNeverPinnable": ["webAuthToken"]
+		},
+		"egress": {
+			"classes": [
+				"vendor-telemetry",
+				"updates",
+				"provider-account",
+				"content",
+				"github",
+				"plugin",
+				"user-webhook",
+				"enterprise-endpoint"
+			],
+			"default": "content",
+			"unclassifiedCallers": [
+				"src/main/plugins/plugin-host-handlers.ts (net.fetch, held as content)",
+				"src/main/plugins/plugin-media-tools.ts (held as content)",
+				"src/main/cue/cue-notify-webhook.ts (held as content)"
+			]
+		},
+		"listeners": {
+			"kinds": [
+				"web",
+				"tunnel",
+				"ssh-tunnel",
+				"lite-control",
+				"tailnet",
+				"mdns",
+				"cue-webhook",
+				"cue-status",
+				"relay",
+				"steering",
+				"coworking"
+			],
+			"reaches": ["loopback", "tailnet", "lan", "any", "public"],
+			"gated": ["web", "tunnel", "ssh-tunnel", "lite-control", "tailnet", "mdns", "cue-webhook"],
+			"byRecordOnly": ["cue-status", "relay", "steering", "coworking"]
+		},
+		"updates": {
+			"channels": ["stable", "prerelease"]
+		},
+		"localEffects": {
+			"classes": ["data-transfer", "destructive"],
+			"effects": [
+				"open-external",
+				"open-path",
+				"clipboard-write",
+				"remote-write",
+				"trash",
+				"delete"
+			],
+			"classOf": {
+				"open-external": "data-transfer",
+				"open-path": "data-transfer",
+				"clipboard-write": "data-transfer",
+				"remote-write": "data-transfer",
+				"trash": "destructive",
+				"delete": "destructive"
+			}
+		},
+		"shell": {
+			"surfaces": ["notification"]
+		},
+		"install": {
+			"artifacts": [
+				"wakatime-cli",
+				"maestro-cli",
+				"speckit-prompts",
+				"openspec-prompts",
+				"bmad-prompts",
+				"marketplace-playbooks",
+				"coworking-mcp-server",
+				"playbook-archive",
+				"cue-backup"
+			]
+		},
+		"repository": {
+			"effects": [
+				"clone",
+				"branch",
+				"commit",
+				"fork",
+				"push",
+				"pull-request",
+				"finalize",
+				"cancel",
+				"gist",
+				"setup-script",
+				"issue",
+				"upload",
+				"poll"
+			]
+		},
+		"remoteAccess": {
+			"classes": ["read", "write", "delete", "probe"]
+		},
+		"credentials": {
+			"managed": [
+				"MANAGED_CREDENTIALS[0] (the turn log state store seal, named in src/main/enterprise/credential-custody.ts; kept unspelled here so a copy of this file into a walked folder never trips the leak guard)",
+				"wakatime.apiKey",
+				"cue.odinToken"
+			],
+			"plainSettingsKeys": {
+				"wakatimeApiKey": "wakatime.apiKey"
+			}
+		},
+		"commands": {
+			"published": ["cancel_run", "refresh_policy", "report_status"],
+			"uncomposed": {
+				"pause-run": "the desktop has no main-process pause of a running turn: a turn runs to its exit or is stopped, and nothing here approximates a pause with a stop",
+				"resume-run": "the desktop has no main-process resume of a paused turn, since nothing pauses one; a finished turn is resumed by the operator through the composer"
+			}
+		},
+		"bridge": {
+			"managedMessageTypes": [
+				"managed_status",
+				"managed_inventory",
+				"managed_support_matrix",
+				"managed_locks",
+				"managed_policy_refresh",
+				"managed_enroll_request",
+				"managed_inbox_list",
+				"managed_inbox_act",
+				"managed_command",
+				"managed_command_status"
+			],
+			"cliOnly": ["managed_enroll_request", "managed_policy_refresh", "managed_command"]
+		},
+		"producer": "none in this build: no endpoint operation carries a settings policy, an egress, update, listener, local-effects, shell, install, repository or remote-access ceiling, or an approved account list (CP-01); every verdict above is the consumer's answer to a ceiling a test port lends, and an enrolled desktop today refuses every held sink unavailable by name"
 	}
 }
