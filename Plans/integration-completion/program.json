@@ -426,6 +426,21 @@
           "id": "MCOMP-03-04"
         },
         {
+          "label": "Select the full-pair run's runtime by the committed pin (continuation of MCOMP-03-04)",
+          "kind": "TEST",
+          "targets": [
+            "src/__tests__/integration/mega-maestro/full-pair.test.ts"
+          ],
+          "outcome": "The guarded full-pair case selects the runtime directory to run by the committed runtime pin (readRuntimePin over Plans/integration-completion/runtime-conformance.json, location.directory resolved against the checkout), not by scanning dist/ for an artifact whose source.head is HEAD (format 2 moved HEAD to observed.head, so that scan finds nothing). It asserts the run reports the pinned archive sha256 and that the archive observed HEAD unless the run says coordinationOnly. The prepared patch is .maestro/playbooks/Working/mcomp-03-04/patch-full-pair.mjs (applied, formatted and run green once under MCOMP-03-04, then reverted to keep that task under the 500-line bound). src/ is in the implementation tree, so repackage and re-pin after the commit. Keep 1 authored file and fewer than 100 changed lines.",
+          "backlog": [
+            "BASE-01",
+            "G-04"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-03-04A"
+        },
+        {
           "label": "Verify and publish implementation inputs",
           "kind": "VERIFY",
           "targets": [
@@ -452,7 +467,7 @@
       ],
       "id": "MCOMP-03",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-03.md",
-      "taskCount": 6,
+      "taskCount": 7,
       "stage": "S02"
     },
     {
@@ -6780,7 +6795,7 @@
       ],
       "requires": [],
       "nativeInputs": false,
-      "taskCount": 13
+      "taskCount": 14
     },
     {
       "id": "S03",
@@ -7181,10 +7196,10 @@
       "taskCount": 1
     }
   ],
-  "taskCount": 275,
+  "taskCount": 276,
   "taskCounts": {
     "IMPLEMENT": 177,
-    "TEST": 34,
+    "TEST": 35,
     "VERIFY": 64
   },
   "artifacts": {
