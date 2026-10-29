@@ -312,6 +312,14 @@ Notification center history uses the live desktop `notificationStore` over a req
 | Click a folder link (reveal it in the Files panel)                                                                                                                                                                                                                                                                                                               | `open-file <folder>` (both ride `revealPathInFileTree`)                                                                                                                                                                                                                                                                                                        |
 | Open a modal or dashboard                                                                                                                                                                                                                                                                                                                                        | `open <surface> [--tab]` (registry in `src/shared/uiSurfaces.ts`)                                                                                                                                                                                                                                                                                              |
 | Open the Mega-Maestro management pane (hamburger menu, palette, or Settings > Environment)                                                                                                                                                                                                                                                                       | `open managed-status` (aliases `mega-maestro`, `enterprise`, `managed-inbox`; a `settingsSection` deep link, so the one `openSettings(tab, settingId)` path the pane's search hit takes)                                                                                                                                                                       |
+| The Mega-Maestro pane's standing (enrollment, installation, endpoint, actor, policy, capabilities, admission)                                                                                                                                                                                                                                                    | `managed status` (the one `EnterpriseService.managed` facade the pane and the `enterprise:*` IPC read; exit 3 with no desktop, 4 on an older one, 1 with no service)                                                                                                                                                                                           |
+| The pane's Installation row (what this build is and can do)                                                                                                                                                                                                                                                                                                      | `managed inventory`                                                                                                                                                                                                                                                                                                                                            |
+| The pane's Capabilities row (negotiated capabilities, counterpart rows, per-route support)                                                                                                                                                                                                                                                                       | `managed support-matrix`                                                                                                                                                                                                                                                                                                                                       |
+| Settings: the Managed badge and a disabled section (which keys the policy holds and pins, the Encore flags it pins)                                                                                                                                                                                                                                              | `managed locks` (`readManagedSettingLocks()`, the function `settings:managedLocks` answers)                                                                                                                                                                                                                                                                    |
+| Mega-Maestro pane: Refresh policy                                                                                                                                                                                                                                                                                                                                | `managed policy refresh`                                                                                                                                                                                                                                                                                                                                       |
+| Enrollment request (`window.maestro.enterprise.requestEnrollment`; the endpoint tooling hands the invitation to the person)                                                                                                                                                                                                                                      | `managed enroll request --file <json>` (CLI-secret clients only; the invitation and the key-possession proof stay in the file, never on a command line or in an error)                                                                                                                                                                                         |
+| Managed inbox: Refresh notices                                                                                                                                                                                                                                                                                                                                   | `managed inbox list` (`--held` reads what the host holds without the endpoint; a body prints only under `--bodies`, for the person, never agent input)                                                                                                                                                                                                         |
+| Managed inbox: Mark read / Acknowledge / Reply                                                                                                                                                                                                                                                                                                                   | `managed inbox read <id>` / `ack <id>` / `reply <id> -m <text>` (`--campaign` when one id is held under two); attributed to the transport that admitted the caller                                                                                                                                                                                             |
 | Auto Run: start, stop, resume, skip, abort                                                                                                                                                                                                                                                                                                                       | `auto-run`, `stop-auto-run`, `resume-auto-run`, ...                                                                                                                                                                                                                                                                                                            |
 | Auto Run: save as a playbook (documents must sit in the Auto Run folder)                                                                                                                                                                                                                                                                                         | `auto-run --save-as <name> <docs...>` (read back with `playbook <id> --dry-run`)                                                                                                                                                                                                                                                                               |
 | Settings, theme, Encore features                                                                                                                                                                                                                                                                                                                                 | `settings`, `theme`, `set-theme`, `encore`                                                                                                                                                                                                                                                                                                                     |
@@ -360,6 +368,10 @@ Notification center history uses the live desktop `notificationStore` over a req
 | MaestroRun tile (macOS): Install MaestroRun / Update to <version>                                                                                                                                                                                                                                                                                                | `maestro-run install`, read with `maestro-run status`                                                                                                                                                                                                                                                                                                          |
 | MaestroRun tile (macOS): Open Full Disk Access / Reveal in Finder                                                                                                                                                                                                                                                                                                | `maestro-run grant [--reveal]`, read with `maestro-run status`                                                                                                                                                                                                                                                                                                 |
 | Throughput Gauge: show / hide (hotkey, palette, hamburger menu, close button); gear popover settings (scope, metric, layout, style, window); Reset peak                                                                                                                                                                                                          | `throughput-gauge show`, `throughput-gauge hide`, `throughput-gauge toggle`, `throughput-gauge set [--scope] [--metric] [--layout] [--style] [--window <seconds>]`, `throughput-gauge reset-peak`; read with `throughput-gauge status [--json]` (every write also answers with the status)                                                                     |
+
+### Managed operation (Mega-Maestro)
+
+Every `managed` verb sends one typed message over the bridge (`src/cli/commands/managed.ts`, `src/cli/commands/managed-inbox.ts`) that `src/main/web-server/handlers/messageHandlers/managed.ts` answers from `EnterpriseService.managed`, the facade the pane and the `enterprise:*` IPC handlers read, so the UI and the CLI say the same sentence. Every write prints the durable receipt (the inbox receipt ledger's record, the command ledger's id and evidence digest) or the word `unknown` when this host recorded the act and never saw the endpoint's answer. Nothing printed is a secret: every answer is the pane's projection. `managed command status`, `cancel-run <runId>`, `report-status` and `refresh-policy [--revision n]` are CLI-first: no pane reads the command ledger or issues a local command, and `CommandService.issueLocal()` binds one to the standing of the moment and records it in the same ledger as an endpoint command. The bridge admits exactly `enterprise` `managedState inventory inboxState inboxRefresh inboxAct` and `settings managedLocks` to a web-desktop client (`bridgeDenyList.ts`); an enrollment request, a policy refresh and a command are admitted from a CLI-secret client alone, so a browser never enrolls.
 
 ### Isolated Lite connection controls
 
@@ -433,33 +445,18 @@ acting again.
 Ranked by how often an agent is likely to hit them. Most are not built yet;
 deliberate design constraints, including protected host consent, are noted below.
 
-0. **Enterprise enrollment (`window.maestro.enterprise`).** The `enterprise:*`
-   IPC verbs (status, policy status, the installation inventory, the managed-state
-   projection of MRC-11-03, enrollment request, the browser-approved
-   actor registration, refresh/recover, the explicit local transitions and the
-   identity clear) have no `maestro-cli` verb yet. A CLI verb for the local
-   transitions or the clear must apply `localReleaseOf()` from
-   `src/main/enterprise/managed-state.ts` the way the handler does: required
-   management is not a local setting on any surface. They were added in the
-   Mega-Maestro integration (phase 03) ahead of their CLI counterpart, which
-   belongs with the headless host wiring of a later phase; the service modules
-   under `src/main/enterprise/` are Electron-free so the CLI will reach the
-   same code. Until then the renderer is the only caller: the Mega-Maestro
-   management section of Settings > Environment (`MegaMaestroSettings.tsx`,
-   MRC-11-03A) reads the projection and offers Refresh policy, Recover standing
-   and Complete registration, and nothing on it leaves management. The same
-   pane hosts `<ManagedStatus>` (MRC-11-04) and `<ManagedInbox>` (MRC-11-04A) over the
-   `inboxState` / `inboxRefresh` / `inboxAct` verbs: the notices with their
-   bodies, Mark read, Acknowledge and a private reply. A CLI inbox verb must
-   read `inboxView()` and call `InboxClient.act()` from
-   `src/main/enterprise/inbox.ts` the way the handler does, and must never
-   print a body into an agent-readable stream by default: a notice is for the
-   person (`agentInput: false`). Since MRC-11-05 the service composes the
-   client itself and lists the notices again after every accepted attachment,
-   and `commandStatus` reads the typed command service
-   (`src/main/enterprise/commands.ts`): a CLI status verb reads
-   `CommandService.status()` the same way; no surface, CLI included, delivers
-   a command, since no producer delivers one yet (CP-02).
+0. **Recover standing and Complete registration on the Mega-Maestro pane.**
+   The pane (`MegaMaestroSettings.tsx`, MRC-11-03A) offers three verbs; `managed
+policy refresh` covers the first (MRC2-07-01), and `recoverPolicy` and
+   `completeRegistration` have no verb yet. Each would be one more typed message
+   answered from `EnterpriseService.managed` the way the `enterprise:*` IPC
+   handlers answer it, admitted from a CLI-secret client alone like `enroll
+request`. The registration handoff (`beginRegistration`) hands the person a
+   one-time approval code shown once and never stored, so a CLI form of it must
+   print the code to the terminal for the person and never into `--json` for
+   an agent. Nothing on any surface leaves management: a local retire, revoke
+   or forget still applies `localReleaseOf()` from
+   `src/main/enterprise/managed-state.ts`, and the pane offers none of them.
 
 1. **Interrupt a running turn.** Escape stops a busy agent in the UI. There is
    no CLI equivalent and no WS message behind one. This is the largest remaining
@@ -535,15 +532,16 @@ deliberate design constraints, including protected host consent, are noted below
     is a value (`checkCueReadiness()` in `src/main/cue/cue-readiness.ts`), so a
     Cue modal panel could render its gaps directly; it is CLI first because it
     exists for unattended servers, where nobody opens the desktop.
-17. **Which settings the managed policy holds** (the Managed badge and the
-    disabled section in Settings, MRC2-06-05). The desktop reads
-    `settings:managedLocks` (`readManagedSettingLocks()` in
-    `src/main/enterprise/settings-policy.ts`: every held key with the line a
-    refused write is named with). The CLI meets the same line only by trying
-    the write (`settings set` answers it, exit 3), so an agent cannot list the
-    held keys before acting. The read is a value; the verb is a `settings locks`
-    over the bridge, on a `get_managed_locks` message the handler answers from
-    the same function.
+17. **Pause and resume a managed run.** Neither the Mega-Maestro pane nor
+    `managed command` offers them: the published command action union is
+    `cancel_run`, `refresh_policy` and `report_status`, and
+    `DESKTOP_UNCOMPOSED_COMMANDS` in `src/main/enterprise/commands.ts` answers
+    `pause_run` and `resume_run` unsupported by name until the counterpart
+    publishes the actions (CP-05 in `Plans/mega-maestro-rc/counterpart-requests.md`).
+    When it does, the verb is `managed command pause-run <runId>` /
+    `resume-run <runId>` over `CommandService.issueLocal()`, and the pane gains
+    the same two controls in the same change. (The settings-locks read this
+    item once named is covered: `managed locks`.)
 
 ### Audit backlog (2026-09-27)
 

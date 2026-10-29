@@ -157,6 +157,24 @@ implementation, lockfiles or artifacts therefore invalidate the joint evidence
 by construction, exactly as the design requires. The counterpart has not yet
 published a joint record; the shape above is what the importer reads once it does.
 
+## Documentation and CLI parity (Phase 2)
+
+`docs/mega-maestro.md` is the public handoff page for the branch (MRC-12-04,
+extended by MRC2-07-07 with the `maestro-cli managed` verbs, the settings lock
+model, the egress, listener and update ceilings and the counterpart-unsupported
+rows). It stays OUT of `docs/docs.json` by the MRC-12-04 decision: the page
+describes an integration whose real pair is not certifiable (every acceptance
+row is `passed: false` while CP-01 through CP-06 are open), and a navigation
+entry would present it as a shipped product page. It enters navigation in the
+change that records a certifiable pair, and `support-matrix.json` names the
+absence under its gaps until then. `docs/releases.md` is never edited by hand.
+
+`docs/agent-guides/CLI-UI-PARITY.md` holds one Covered row per action of the
+Mega-Maestro pane and its verb (status, inventory, support matrix, locks,
+policy refresh, enrollment request, the inbox list and its three acts). Recover
+standing and Complete registration have no verb yet, and pause and resume of a
+run exist on no surface (CP-05); both are Open gap rows there, by name.
+
 ## Authoring verification
 
 The structural validator checks task order/uniqueness/counts, one-to-three file
