@@ -394,6 +394,22 @@
           "id": "MCOMP-03-03"
         },
         {
+          "label": "Run the public adapter conformance fixture over the public exports (continuation of MCOMP-03-03)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/__tests__/integration/mega-maestro/fixtures.ts",
+            "src/__tests__/integration/mega-maestro/conformance.test.ts"
+          ],
+          "outcome": "Derive each fixture step's envelope from the published defaults, compose a host from the public exports alone (run journal, context verifier, local authority, standalone binding double, the fixture's agents, approved resources by id, the declared turn-port double scripted by each step), and add the runner that answers every negotiation case and operation step, matching expect as a subset, the requestId echo on every step and sink reach. The test proves every case on the composed host and that a host breaking correlation fails by step id. The fixture stays as published; a mismatch is a named facade or fixture repair, never a loosened expectation. Repackage and re-pin after the commit (src/ is in the implementation tree) and restore the pin file's compact formatting before committing the pin. Keep 1-3 authored files and fewer than 500 changed lines.",
+          "backlog": [
+            "BASE-01",
+            "G-04"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-03-03A"
+        },
+        {
           "label": "Test bootstrap integrity and public loading",
           "kind": "TEST",
           "targets": [
@@ -436,7 +452,7 @@
       ],
       "id": "MCOMP-03",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-03.md",
-      "taskCount": 5,
+      "taskCount": 6,
       "stage": "S02"
     },
     {
@@ -6764,7 +6780,7 @@
       ],
       "requires": [],
       "nativeInputs": false,
-      "taskCount": 12
+      "taskCount": 13
     },
     {
       "id": "S03",
@@ -7165,9 +7181,9 @@
       "taskCount": 1
     }
   ],
-  "taskCount": 274,
+  "taskCount": 275,
   "taskCounts": {
-    "IMPLEMENT": 176,
+    "IMPLEMENT": 177,
     "TEST": 34,
     "VERIFY": 64
   },
