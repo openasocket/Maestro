@@ -7,6 +7,11 @@
  * fault per test, so every refusal is reached by the real check rather than
  * a mocked one. One test runs the command line end to end in a scratch
  * folder under the repository (the importer refuses a destination outside it).
+ *
+ * The last section reads the OTHER direction the same way: a packaged Maestro
+ * runtime artifact (format 2, the bootstrap a counterpart adapter is built
+ * against) as the pinned input of a pair, one fault per synthetic directory,
+ * and the committed runtime pin against the versions this source declares.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
@@ -17,6 +22,18 @@ import path from 'node:path';
 import { gzipSync } from 'node:zlib';
 
 import * as importer from '../../../../../scripts/import-mega-maestro.mjs';
+import { inspectRuntimeArtifact } from '../../../../../scripts/mega-maestro-pair.mjs';
+import {
+	ARTIFACT_FORMAT_VERSION,
+	ARTIFACT_KIND,
+	DEFAULT_OUT_DIR,
+	RUNTIME_PIN_ARTIFACT_ID,
+	RUNTIME_PIN_FILE,
+	readRuntimePin,
+	verifyRuntimeInput,
+	writeRuntimePin,
+} from '../../../../../scripts/package-mega-maestro-runtime.mjs';
+import { SOURCE_TREE_RULES, digestOf } from '../../../../../scripts/write-mega-maestro-handoff.mjs';
 import {
 	MANAGED_CAPABILITIES,
 	MANAGED_CONTRACT_VERSION,
@@ -626,5 +643,306 @@ describe('support matrices', () => {
 			node: '>=20',
 		});
 		expect(MAESTRO_LIB_VERSION_INFO).not.toHaveProperty('app');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The packaged runtime artifact, read back as the bootstrap input of a pair
+// ---------------------------------------------------------------------------
+
+interface RuntimeParts {
+	payload: Record<string, string>;
+	map: { rules: string; files: Record<string, string> };
+	mapDigest?: string;
+	manifestPatch: Record<string, unknown>;
+	besidePatch: Record<string, unknown>;
+	extraEntries: TarInput[];
+	sidecar?: string;
+	dirName?: string;
+}
+
+const RUNTIME_VERSIONS = {
+	app: '1.1.0-RC',
+	library: MAESTRO_LIB_VERSION,
+	managedContract: MANAGED_CONTRACT_VERSION,
+	endpointProtocol: 1,
+};
+
+/**
+ * A format-2 runtime artifact directory as the packager lands it (archive,
+ * sidecar, `artifact.json` with its observations, the directory named by the
+ * digest), consistent unless `mutate` breaks one thing.
+ */
+function makeRuntimeArtifact(parent: string, mutate?: (parts: RuntimeParts) => void) {
+	const parts: RuntimeParts = {
+		payload: {
+			'library/index.js': 'module.exports = { MAESTRO_LIB_VERSION: "synthetic" };\n',
+			'conformance/capabilities.json': '{"routes":[]}\n',
+			'source/library-inputs.json': `{"inputSha256":"${'b'.repeat(64)}","inputs":{}}\n`,
+		},
+		map: {
+			rules: SOURCE_TREE_RULES.id,
+			files: { 'src/a.ts': 'a'.repeat(64), 'src/b.ts': 'c'.repeat(64) },
+		},
+		manifestPatch: {},
+		besidePatch: {},
+		extraEntries: [],
+	};
+	mutate?.(parts);
+	const payload: Record<string, string> = {
+		...parts.payload,
+		'source/implementation.json': JSON.stringify(parts.map),
+	};
+	const manifest = {
+		formatVersion: ARTIFACT_FORMAT_VERSION,
+		kind: ARTIFACT_KIND,
+		versions: RUNTIME_VERSIONS,
+		source: {
+			library: { inputSha256: 'b'.repeat(64), inputs: 'source/library-inputs.json' },
+			implementation: {
+				rules: { id: parts.map.rules },
+				digest: parts.mapDigest ?? digestOf(parts.map),
+				commit: 'd'.repeat(40),
+				fileCount: Object.keys(parts.map.files).length,
+				map: 'source/implementation.json',
+				dirty: false,
+			},
+		},
+		managedPort: {
+			entry: { path: 'library/index.js', sha256: sha256(payload['library/index.js']) },
+		},
+		payloadSha256: Object.fromEntries(Object.entries(payload).map(([f, t]) => [f, sha256(t)])),
+		certifiable: true,
+		...parts.manifestPatch,
+	};
+	const archive = tarGz([
+		...Object.entries(payload).map(([file, text]) => ({
+			name: `package/${file}`,
+			data: Buffer.from(text),
+		})),
+		{ name: 'package/manifest.json', data: Buffer.from(JSON.stringify(manifest)) },
+		...parts.extraEntries,
+	]);
+	const digest = sha256(archive);
+	const dir = path.join(parent, parts.dirName ?? digest);
+	fs.mkdirSync(dir, { recursive: true });
+	fs.writeFileSync(path.join(dir, 'runtime.tgz'), archive);
+	const sidecar = parts.sidecar ?? digest;
+	fs.writeFileSync(path.join(dir, 'runtime.tgz.sha256'), `${sidecar}  runtime.tgz\n`);
+	fs.writeFileSync(
+		path.join(dir, 'artifact.json'),
+		JSON.stringify({
+			...manifest,
+			observed: { head: 'e'.repeat(40) },
+			packagedAt: '2026-10-29T00:00:00.000Z',
+			archive: {
+				file: 'runtime.tgz',
+				sha256: digest,
+				sha512: createHash('sha512').update(archive).digest('hex'),
+				bytes: archive.length,
+			},
+			...parts.besidePatch,
+		})
+	);
+	const tree = { digest: manifest.source.implementation.digest, files: parts.map.files };
+	return { dir, digest, archive, manifest, tree };
+}
+
+describe('the packaged runtime artifact as a bootstrap input', () => {
+	let runtimeN = 0;
+	const runtime = (mutate?: (parts: RuntimeParts) => void) =>
+		makeRuntimeArtifact(path.join(scratch, `runtime-${runtimeN++}`), mutate);
+	const status = (dir: string) => inspectRuntimeArtifact(dir, null).status;
+	let pinFile: string;
+
+	beforeAll(() => {
+		pinFile = path.join(scratch, 'runtime-pin.json');
+	});
+
+	it('binds a consistent artifact by name, sidecar and both digests, and pins it by identity alone', () => {
+		const good = runtime();
+		expect(inspectRuntimeArtifact(good.dir, 'e'.repeat(40))).toMatchObject({
+			status: 'bound',
+			archiveSha256: good.digest,
+			implementationDigest: good.tree.digest,
+		});
+		// The public reader walks it: every entry under package/, every payload file as hashed.
+		const entries = importer.readTarGz(good.archive);
+		for (const entry of entries) expect(entry.path.startsWith('package/')).toBe(true);
+		for (const [file, digest] of Object.entries(good.manifest.payloadSha256)) {
+			const entry = entries.find((e: { path: string }) => e.path === `package/${file}`);
+			expect(sha256(entry!.data), file).toBe(digest);
+		}
+
+		// Current against the (injected) tree, HEAD moved since: a coordination commit alone.
+		const unpinned = verifyRuntimeInput({ runtime: good.dir, pin: pinFile, sourceTree: good.tree });
+		expect(unpinned).toMatchObject({
+			status: 'unpinned',
+			drift: { count: 0, files: [] },
+			libraryInputs: [],
+			coordinationOnly: true,
+			pin: { status: 'absent', committed: false },
+		});
+
+		const written = writeRuntimePin({ runtime: good.dir, pin: pinFile, sourceTree: good.tree });
+		expect(written).toMatchObject({ status: 'ready', pin: { status: 'pinned', committed: false } });
+		const pin = JSON.parse(fs.readFileSync(pinFile, 'utf8'));
+		expect(pin.runtime).toMatchObject({
+			artifactId: RUNTIME_PIN_ARTIFACT_ID,
+			kind: ARTIFACT_KIND,
+			archiveFormatVersion: ARTIFACT_FORMAT_VERSION,
+			archive: { sha256: good.digest, bytes: good.archive.length },
+			versions: RUNTIME_VERSIONS,
+			implementation: { digest: good.tree.digest, commit: 'd'.repeat(40) },
+			location: { directory: `${DEFAULT_OUT_DIR}/${MAESTRO_LIB_VERSION}/${good.digest}` },
+		});
+		expect(JSON.stringify(pin)).not.toMatch(/"(qualifiedAgainst|adapter|qualification|passed)"/);
+	});
+
+	it('refuses traversal, absolute and out-of-package entries, and never loads a forged archive as the pinned input', () => {
+		const forged = {
+			traversal: runtime((p) =>
+				p.extraEntries.push({ name: 'package/../escape.js', data: Buffer.from('x') })
+			),
+			absolute: runtime((p) => p.extraEntries.push({ name: '/tmp/escape.js' })),
+			outside: runtime((p) => p.extraEntries.push({ name: 'other/escape.js' })),
+		};
+		for (const [fault, artifact] of Object.entries(forged)) {
+			expect(() => importer.readTarGz(artifact.archive), fault).toThrow(importer.ImportError);
+			expect(() => importer.readTarGz(artifact.archive), fault).toThrow(/escape\.js/);
+			// Consistent with itself by digest alone, so bound; but not the archive the pin names.
+			expect(status(artifact.dir), fault).toBe('bound');
+			const verified = verifyRuntimeInput({
+				runtime: artifact.dir,
+				pin: pinFile,
+				sourceTree: artifact.tree,
+			});
+			expect(verified.status, fault).toBe('pin-mismatch');
+			expect(verified.problems.join(), fault).toContain('archive.sha256');
+		}
+	});
+
+	it('refuses a digest that is not the archive: a moved byte, a renamed directory, a sidecar or a manifest that disagrees', () => {
+		const tampered = runtime();
+		fs.appendFileSync(path.join(tampered.dir, 'runtime.tgz'), Buffer.from([0]));
+		expect(status(tampered.dir)).toBe('digest-mismatch');
+		expect(status(runtime((p) => (p.dirName = 'not-the-digest')).dir)).toBe('digest-mismatch');
+		expect(status(runtime((p) => (p.sidecar = '0'.repeat(64))).dir)).toBe('digest-mismatch');
+		const sha512 = runtime();
+		const beside = JSON.parse(fs.readFileSync(path.join(sha512.dir, 'artifact.json'), 'utf8'));
+		beside.archive.sha512 = 'f'.repeat(128);
+		fs.writeFileSync(path.join(sha512.dir, 'artifact.json'), JSON.stringify(beside));
+		expect(status(sha512.dir)).toBe('digest-mismatch');
+		const empty = path.join(scratch, 'runtime-empty');
+		fs.mkdirSync(empty);
+		expect(status(empty)).toBe('no-manifest');
+		// A verification stops at the binding: nothing past it is compared.
+		expect(verifyRuntimeInput({ runtime: tampered.dir, pin: pinFile })).toMatchObject({
+			status: 'digest-mismatch',
+			implementation: null,
+			drift: null,
+			problems: ['the artifact directory is digest-mismatch'],
+		});
+	});
+
+	it('refuses a format, kind or certification it was not written against, and a manifest, map or input that drifted', () => {
+		expect(status(runtime((p) => (p.manifestPatch.formatVersion = 1)).dir)).toBe(
+			'unsupported-format'
+		);
+		expect(status(runtime((p) => (p.manifestPatch.kind = 'maestro-contracts')).dir)).toBe(
+			'wrong-kind'
+		);
+		expect(status(runtime((p) => (p.manifestPatch.certifiable = false)).dir)).toBe(
+			'not-certifiable'
+		);
+		// The versions beside the archive are not the versions in it.
+		const bumped = runtime(
+			(p) => (p.besidePatch.versions = { ...RUNTIME_VERSIONS, library: '9.9.9' })
+		);
+		expect(status(bumped.dir)).toBe('bound');
+		expect(
+			verifyRuntimeInput({ runtime: bumped.dir, pin: pinFile, sourceTree: bumped.tree })
+		).toMatchObject({
+			status: 'archive-manifest-mismatch',
+			problems: [expect.stringContaining('not the manifest')],
+		});
+		// The archived map does not reproduce the digest the manifest claims for it.
+		const unproven = runtime((p) => (p.mapDigest = '9'.repeat(64)));
+		expect(
+			verifyRuntimeInput({ runtime: unproven.dir, pin: pinFile, sourceTree: unproven.tree }).status
+		).toBe('implementation-digest');
+		// The tree moved since the archive: named file by file, and no pin cures it.
+		const current = runtime();
+		fs.writeFileSync(pinFile, JSON.stringify({ runtime: { archive: { sha256: current.digest } } }));
+		const drifted = verifyRuntimeInput({
+			runtime: current.dir,
+			pin: pinFile,
+			sourceTree: {
+				digest: 'moved',
+				files: {
+					'src/a.ts': 'a'.repeat(64),
+					'src/b.ts': 'f'.repeat(64),
+					'src/c.ts': '1'.repeat(64),
+				},
+			},
+		});
+		expect(drifted).toMatchObject({
+			status: 'drift',
+			drift: { count: 2, files: ['added src/c.ts', 'changed src/b.ts'] },
+			coordinationOnly: false,
+		});
+		// A recorded library input that moved refuses the archive even with the implementation map current.
+		const inputs = runtime((p) => {
+			p.payload['source/library-inputs.json'] =
+				`{"inputSha256":"${'b'.repeat(64)}","inputs":{"package.json":"${'0'.repeat(64)}"}}\n`;
+		});
+		const moved = verifyRuntimeInput({
+			runtime: inputs.dir,
+			pin: pinFile,
+			sourceTree: inputs.tree,
+		});
+		expect(moved).toMatchObject({ status: 'drift', libraryInputs: ['package.json'] });
+		expect(moved.problems.join()).toContain('library inputs moved');
+	});
+
+	it('the committed runtime pin names this source: its library, contract and app versions, an ancestor commit, and no receipt', () => {
+		const pin = readRuntimePin(path.resolve(REPO_ROOT, RUNTIME_PIN_FILE));
+		expect(pin.status).toBe('pinned');
+		const record = pin.record;
+		const appVersion = JSON.parse(
+			fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8')
+		).version;
+		expect(record).toMatchObject({
+			artifactId: RUNTIME_PIN_ARTIFACT_ID,
+			kind: ARTIFACT_KIND,
+			archiveFormatVersion: ARTIFACT_FORMAT_VERSION,
+			archive: {
+				file: 'runtime.tgz',
+				sha256: expect.stringMatching(/^[a-f0-9]{64}$/),
+				sha512: expect.stringMatching(/^[a-f0-9]{128}$/),
+			},
+			versions: {
+				app: appVersion,
+				library: MAESTRO_LIB_VERSION,
+				managedContract: MANAGED_CONTRACT_VERSION,
+				endpointProtocol: 1,
+			},
+			implementation: {
+				rules: SOURCE_TREE_RULES.id,
+				digest: expect.stringMatching(/^[a-f0-9]{64}$/),
+				commit: expect.stringMatching(/^[a-f0-9]{40}$/),
+			},
+			location: { directory: `${DEFAULT_OUT_DIR}/${MAESTRO_LIB_VERSION}/${record.archive.sha256}` },
+		});
+		const text = JSON.stringify(record);
+		expect(text).not.toMatch(/"(qualifiedAgainst|adapter|qualification|passed)"/);
+		expect(text).not.toContain(os.homedir());
+		// The implementation commit the pin names is in this history.
+		const ancestor = spawnSync(
+			'git',
+			['-C', REPO_ROOT, 'merge-base', '--is-ancestor', record.implementation.commit, 'HEAD'],
+			{ encoding: 'utf8' }
+		);
+		expect(ancestor.status, 'the pinned implementation commit is not an ancestor of HEAD').toBe(0);
 	});
 });

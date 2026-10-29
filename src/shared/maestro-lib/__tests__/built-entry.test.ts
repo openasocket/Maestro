@@ -11,6 +11,13 @@
  * alone: plan, start, stream, resume with the returned session id, and stop.
  * The provider is the fake agent replaying recorded turns. POSIX only, as in
  * `headless-program.test.ts`: the fake agent is started through its shebang.
+ *
+ * The last section goes one step further out: the same build packaged by
+ * `scripts/package-mega-maestro-runtime.mjs` into the runtime archive a
+ * counterpart adapter is built against, extracted and loaded from the
+ * ARCHIVE'S payload in a child Node with no Electron to resolve: the bundle
+ * must say what the manifest says of it, and every managed declaration must
+ * be reachable from the entry declaration.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
@@ -27,6 +34,7 @@ import {
 	CAPTURED_CLAUDE_CODE_SESSION_ID,
 } from '../../../__tests__/main/process-manager/recordings/captured';
 import type { TurnRecording } from '../../../__tests__/main/process-manager/recordings/fixtures';
+import { packageRuntime } from '../../../../scripts/package-mega-maestro-runtime.mjs';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const BUILD_SCRIPT = path.join(REPO_ROOT, 'scripts/build-maestro-lib.mjs');
@@ -135,6 +143,11 @@ beforeAll(() => {
 }, 150_000);
 
 afterAll(() => {
+	// The packager leaves its artifact directory read-only; open it so the scratch can go.
+	const packaged = path.join(scratch, 'runtime', MAESTRO_LIB_VERSION);
+	if (fs.existsSync(packaged)) {
+		for (const digest of fs.readdirSync(packaged)) fs.chmodSync(path.join(packaged, digest), 0o755);
+	}
 	fs.rmSync(scratch, { recursive: true, force: true });
 });
 
@@ -370,4 +383,170 @@ posixOnly('a consumer built only on the entry', () => {
 
 		expect(result.stopped.outcome).toBe('interrupted');
 	}, 60_000);
+});
+
+interface RuntimeManifest {
+	versions: Record<string, string | number>;
+	managedPort: { exports: string[]; declarations: string[]; entry: Record<string, string> };
+	bootstrap: { routes: { total: number; managedImplemented: number; unavailable: object[] } };
+	payloadSha256: Record<string, string>;
+}
+
+/** Every file under `dir`, as a posix path relative to it. */
+function listFiles(dir: string, under = dir): string[] {
+	return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+		const full = path.join(dir, entry.name);
+		if (entry.isDirectory()) return listFiles(full, under);
+		return [path.relative(under, full).split(path.sep).join('/')];
+	});
+}
+
+describe('the packaged runtime archive, as a consumer loads it', () => {
+	let payload: string;
+	let manifest: RuntimeManifest;
+
+	beforeAll(() => {
+		// The scratch build, packaged as the bootstrap archive (the flags only record a
+		// dirty or stale state; the archive is the same payload either way).
+		const report = packageRuntime({
+			library: libDir,
+			out: path.join(scratch, 'runtime'),
+			allowDirty: true,
+			allowStale: true,
+		}) as { dir: string };
+		const extracted = path.join(scratch, 'consumer');
+		fs.mkdirSync(extracted);
+		const tar = spawnSync('tar', ['-xzf', path.join(report.dir, 'runtime.tgz'), '-C', extracted], {
+			encoding: 'utf8',
+		});
+		if (tar.status !== 0) throw new Error(`tar failed: ${tar.stderr}`);
+		payload = path.join(extracted, 'package');
+		manifest = JSON.parse(fs.readFileSync(path.join(payload, 'manifest.json'), 'utf8'));
+	}, 120_000);
+
+	it('loads the archived library in plain Node with no Electron, and the bundle says what the manifest says of it', () => {
+		const entry = path.join(payload, 'library', 'index.js');
+		const loaded = runNode([
+			'-e',
+			`
+			const entry = ${JSON.stringify(entry)};
+			const lib = require(entry);
+			let electron = 'found';
+			try { require.resolve('electron', { paths: [entry] }); } catch { electron = 'absent'; }
+			const port = {};
+			for (const name of ${JSON.stringify(manifest.managedPort.exports)}) port[name] = typeof lib[name];
+			const profile = lib.hostCompatibilityProfile({ providers: lib.getAgentIds() });
+			const request = {
+				contractVersions: [lib.MANAGED_CONTRACT_VERSION],
+				endpointProtocols: [lib.LOCAL_ENDPOINT_PROTOCOL],
+				transport: 'in-process',
+				required: ['capabilities.negotiate'],
+			};
+			const routes = lib.getVisibleAgentDefinitions().map((d) => d.id).flatMap((id) => lib.providerRouteSupport(id));
+			console.log(JSON.stringify({
+				electron,
+				versions: {
+					library: lib.MAESTRO_LIB_VERSION,
+					managedContract: lib.MANAGED_CONTRACT_VERSION,
+					endpointProtocol: lib.LOCAL_ENDPOINT_PROTOCOL,
+					nodeRange: lib.MAESTRO_LIB_VERSION_INFO.node,
+				},
+				port,
+				activated: lib.negotiateCompatibility(profile, request),
+				refused: lib.MANAGED_CAPABILITIES.filter((c) => c !== 'capabilities.negotiate')
+					.map((c) => [c, lib.negotiateCompatibility(profile, { ...request, required: [c] })]),
+				routes: routes.length,
+				unavailable: routes.filter((r) => r.managed !== 'implemented')
+					.map(({ agentId, route, standalone, managed }) => ({ agentId, route, standalone, managed })),
+			}));
+			`,
+		]) as {
+			electron: string;
+			versions: RuntimeManifest['versions'];
+			port: Record<string, string>;
+			activated: { outcome: string; capabilities?: string[] };
+			refused: [string, { outcome: string; reasons?: { reason: string }[] }][];
+			routes: number;
+			unavailable: object[];
+		};
+
+		expect(loaded.electron).toBe('absent');
+		// The manifest names more (app, plugin host API, the contracts it accepts); what the bundle
+		// can say of itself must agree with it.
+		expect(manifest.versions).toMatchObject(loaded.versions);
+		expect(loaded.versions.library).toBe(MAESTRO_LIB_VERSION);
+		for (const name of manifest.managedPort.exports)
+			expect(loaded.port[name], name).toBe('function');
+
+		// The archive's own disclosure: one capability activates, every other is refused by name,
+		// and the routes the bundle reports unavailable are exactly the ones the manifest lists.
+		expect(loaded.activated).toMatchObject({
+			outcome: 'activated',
+			capabilities: ['capabilities.negotiate'],
+		});
+		expect(loaded.refused.length).toBeGreaterThan(0);
+		for (const [capability, outcome] of loaded.refused) {
+			expect(outcome, capability).toMatchObject({
+				outcome: 'denied',
+				reasons: [{ reason: 'missing-required-capability' }],
+			});
+		}
+		expect(loaded.routes).toBe(manifest.bootstrap.routes.total);
+		expect(loaded.unavailable.map((r) => JSON.stringify(r))).toEqual(
+			manifest.bootstrap.routes.unavailable.map((r) => JSON.stringify(r))
+		);
+		expect(manifest.bootstrap.routes.managedImplemented).toBe(
+			loaded.routes - loaded.unavailable.length
+		);
+
+		// Every payload file is the digest the manifest names, and nothing else is in the archive.
+		const files = listFiles(payload).filter((f) => f !== 'manifest.json');
+		expect(files.sort()).toEqual(Object.keys(manifest.payloadSha256).sort());
+		for (const [file, digest] of Object.entries(manifest.payloadSha256)) {
+			const actual = createHash('sha256')
+				.update(fs.readFileSync(path.join(payload, file)))
+				.digest('hex');
+			expect(actual, file).toBe(digest);
+		}
+		expect(manifest.managedPort.entry.sha256).toBe(manifest.payloadSha256['library/index.js']);
+	});
+
+	it('reaches every managed declaration from the entry declaration, and no declaration names Electron', () => {
+		const library = path.join(payload, 'library');
+		expect(fs.readFileSync(path.join(library, 'index.d.ts'), 'utf8')).toBe(
+			"export * from './types/shared/maestro-lib/index';\n"
+		);
+		const types = path.join(library, 'types/shared/maestro-lib');
+		const modules = [
+			...fs.readFileSync(path.join(types, 'index.d.ts'), 'utf8').matchAll(/from '\.\/([^']+)'/g),
+		].map((m) => m[1]);
+		for (const declaration of manifest.managedPort.declarations) {
+			expect(fs.existsSync(path.join(payload, declaration)), declaration).toBe(true);
+			const module = declaration
+				.replace(/^library\/types\/shared\/maestro-lib\//, '')
+				.replace(/\.d\.ts$/, '');
+			expect(modules, declaration).toContain(module);
+		}
+		// Each port export is declared in a module the entry declaration re-exports.
+		const declared = new Map<string, string>();
+		for (const module of modules) {
+			const file = path.join(types, `${module}.d.ts`);
+			if (!fs.existsSync(file)) continue;
+			const text = fs.readFileSync(file, 'utf8');
+			for (const name of manifest.managedPort.exports) {
+				if (new RegExp(`export declare (?:function|const|let|class) ${name}\\b`).test(text)) {
+					declared.set(name, module);
+				}
+			}
+		}
+		expect([...declared.keys()].sort()).toEqual([...manifest.managedPort.exports].sort());
+		expect(declared.get('negotiateCompatibility')).toBe('managed/compatibility');
+
+		const electron = listFiles(path.join(library, 'types')).filter(
+			(file) =>
+				file.endsWith('.d.ts') &&
+				/from ['"]electron['"]/.test(fs.readFileSync(path.join(library, 'types', file), 'utf8'))
+		);
+		expect(electron).toEqual([]);
+	});
 });
