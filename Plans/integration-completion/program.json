@@ -257,6 +257,21 @@
           "id": "MCOMP-01-02A"
         },
         {
+          "label": "Make the Symphony state file write whole under overlapping handler calls (continuation of MCOMP-01-02B, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/main/ipc/handlers/symphony/shared.ts",
+            "src/__tests__/main/ipc/handlers/symphony.test.ts"
+          ],
+          "outcome": "writeState() and writeCache() in shared.ts are a plain fs.writeFile, so two handler calls that overlap (symphony:updateStatus on the 5-second poll beside a symphony:registerActive, or the ten concurrent updates the integration suite fires) truncate and rewrite the same file and a reader lands on a document with trailing bytes of the longer write: after MCOMP-01-02B brought the Symphony integration suite to the current handlers, its concurrent-updates and atomic-write cases read \"Unexpected non-whitespace character after JSON\" in two of three runs on 2026-10-29 and 79 passed in the third, so the suite is flaky on this defect alone. Route both writers through the canonical pair: atomicWriteJson() from src/main/utils/atomic-json-store.ts (a temp file then rename, 2-space output as today) inside a module-level createKeyedWriteQueue() keyed by the file path, because the writer uses one fixed <path>.tmp and two overlapping atomic writes would otherwise tear the temp file or lose the second rename to ENOENT. Serialize the write only; lost updates between overlapping read-modify-write calls stay as they are (both cases accept them, and queueing the whole read-modify-write is a separate decision), so change no handler. The handler unit suite mocks fs/promises with readFile, writeFile, mkdir, rm and access only: give the mock a rename, and move the assertions that find the state write by filtering fs.writeFile calls on symphony-state.json (near line 2374) or by reading mock.calls[0] (near 1163, 1313, 1342) to the <path>.tmp the atomic writer writes, or to the destination of rename. Run src/__tests__/main/ipc/handlers/symphony.test.ts under the default config and the integration suite under vitest.integration.config.ts (--bail=0) three times in a row; when every run reads 79 passed, check MCOMP-01-02B off as well, with a note naming this task. src/ is in the implementation tree, so repackage and re-pin after the commit. Keep 2 authored files and fewer than 500 changed lines.",
+          "backlog": [
+            "BASE-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-02C"
+        },
+        {
           "label": "Bring the Symphony integration suite to the current handlers (continuation of MCOMP-01-02)",
           "kind": "TEST",
           "targets": [
@@ -323,7 +338,7 @@
       ],
       "id": "MCOMP-01",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-01.md",
-      "taskCount": 7,
+      "taskCount": 8,
       "stage": "S02"
     },
     {
@@ -6823,7 +6838,7 @@
       ],
       "requires": [],
       "nativeInputs": false,
-      "taskCount": 16
+      "taskCount": 17
     },
     {
       "id": "S03",
@@ -7224,9 +7239,9 @@
       "taskCount": 1
     }
   ],
-  "taskCount": 278,
+  "taskCount": 279,
   "taskCounts": {
-    "IMPLEMENT": 177,
+    "IMPLEMENT": 178,
     "TEST": 37,
     "VERIFY": 64
   },
@@ -7626,6 +7641,7 @@
       "MCOMP-01-02",
       "MCOMP-01-02A",
       "MCOMP-01-02B",
+      "MCOMP-01-02C",
       "MCOMP-01-04",
       "MCOMP-01-05",
       "MCOMP-02-01",
