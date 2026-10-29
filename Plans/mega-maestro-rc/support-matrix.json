@@ -6,7 +6,7 @@
 	"revisions": [
 		"MRC2-01-02 2026-10-26: the word unsupported-by-counterpart and the counterpart section (CP-04, CP-05, CP-06 rows with evidence and owner)",
 		"MRC2-03-08 2026-10-27: the permissionModes section (per-provider permission-mode table from the MRC2-03-01 ceiling, every requested mode measured under every pin, reconciled with readOnlyCliEnforced and providerRouteSupport); library block refreshed to 0.31.0",
-		"MRC2-08-03 2026-10-28: route rows regenerated from the 0.32.0 build at 78689ade2; the counterpart section gains CP-01, CP-02, CP-03 and CP-04a rows and an observed block on every row (the pair check at HEAD, or the sibling file and lines read at d5143a639); the enforcement section (sections A through F of PHASE2-GAPS row by row with the guard and the pinning tests, the 59 lock keys, the egress classes, the listener kinds and reaches, the update channels, the local effects, the shell surfaces, the install artifacts, the repository effects, the remote-access classes, the three managed credentials, the published and uncomposed commands, the ten bridge messages), read off the real modules by a throwaway spec; acceptance.pairCheck records the check of this date (not ready: CP-01, CP-02, CP-03, registration-approval; no Linux Docker engine on this host)"
+		"MRC2-08-03 2026-10-28: route rows regenerated from the 0.32.0 build at 78689ade2; the counterpart section gains an observed block on every published row (the sibling file and lines read at d5143a639) and a producerRows list for CP-01, CP-02, CP-03 and CP-04a observed by the pair check at HEAD (kept beside rows, which mirror COUNTERPART_SUPPORT row for row, as compatibility.counterpart.test.ts pins; MRC2-08-03A); the enforcement section (sections A through F of PHASE2-GAPS row by row with the guard and the pinning tests, the 59 lock keys, the egress classes, the listener kinds and reaches, the update channels, the local effects, the shell surfaces, the install artifacts, the repository effects, the remote-access classes, the three managed credentials, the published and uncomposed commands, the ten bridge messages), read off the real modules by a throwaway spec; acceptance.pairCheck records the check of this date (not ready: CP-01, CP-02, CP-03, registration-approval; no Linux Docker engine on this host)"
 	],
 	"generated": {
 		"routes": "capabilityMatrix(dist/maestro-lib).routes from scripts/package-mega-maestro-runtime.mjs, folded to routes[agentId][route] = [standalone, managed]; the generator is .maestro/playbooks/Working/12-04-support-matrix.mjs",
@@ -16,7 +16,7 @@
 			"managedContract": "maestro-managed/1",
 			"endpointProtocol": 1,
 			"node": ">=20",
-			"sourceRevision": "78689ade2015ac7c0669b201aa524c7c34b898e7",
+			"sourceRevision": "d43b4f5f69c2963c1bae7b49088b5f94286dd648",
 			"sourceDirty": false
 		},
 		"readOn": {
@@ -38,66 +38,6 @@
 		"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
 		"negotiation": "negotiateCompatibility() answers a required capability on an unsupported-by-counterpart row with the denial reason unsupported-by-counterpart and keeps the required set as asked; a server unsupported_capability denial is folded over the host rows by applyCounterpartDenial() (CompatibilityProfile.counterpartDenial), never by dropping a required member",
 		"rows": [
-			{
-				"key": "artifact.contracts-pin",
-				"status": "unsupported-by-counterpart",
-				"owner": "mega-maestro",
-				"dependency": "CP-01",
-				"evidence": "4 packaged application artifacts under mega-maestro artifacts/application/0.1.0, every one built from e29195d8c with sourceDirty: true; no clean archive from a committed tree; vendor/mega-maestro/contracts.pin.json absent",
-				"consumer": "scripts/import-mega-maestro.mjs (pins the digest), scripts/mega-maestro-pair.mjs check (refuses dirty-source artifacts), scripts/check-mega-contract-vectors.mjs (archive mode not run)",
-				"note": "every packaged artifact is darwin/arm64 from dirty source; the development checkout is never certifiable",
-				"observed": {
-					"method": "scripts/mega-maestro-pair.mjs check --json",
-					"at": "2026-10-29T03:04:02.293Z",
-					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
-					"detail": "contracts pin absent; needs the clean contracts artifact of endpoint source d5143a63931dc87a5f90b3fdb7b58fa3726913b1 (dirty or absent)"
-				}
-			},
-			{
-				"key": "runtime.maestro-adapter",
-				"status": "unsupported-by-counterpart",
-				"owner": "mega-maestro",
-				"dependency": "CP-02",
-				"evidence": "mega-maestro packages/runtime-adapter/src/maestro.ts:7-20 (createMaestroAdapter returns status unsupported, reason public-artifact-not-supplied or public-artifact-not-qualified, a port whose execute answers capability-unsupported); every packaged artifact declares maestroAdapter.status unsupported",
-				"consumer": "scripts/package-mega-maestro-runtime.mjs (the packaged runtime), the headless-library acceptance row",
-				"note": "vendor/mega-maestro/runtime-adapter.pin.json absent",
-				"observed": {
-					"method": "scripts/mega-maestro-pair.mjs check --json",
-					"at": "2026-10-29T03:04:02.293Z",
-					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
-					"detail": "runtime adapter pin absent, declared unsupported; needs a supported createMaestroAdapter from endpoint source d5143a63931dc87a5f90b3fdb7b58fa3726913b1 (dirty or absent)"
-				}
-			},
-			{
-				"key": "authority.delegation-workflow",
-				"status": "unsupported-by-counterpart",
-				"owner": "mega-maestro",
-				"dependency": "CP-03",
-				"evidence": "mega-maestro packages/runtime-adapter/src/endpoint.ts:35 (a nonempty delegationChain or a non-null workflow is denied context-mismatch); packages/contracts/src/local-endpoint.ts carries no delegation field",
-				"consumer": "src/shared/maestro-lib/managed/workflows.ts, delegation.ts, the Cue and Auto Run owner fences, the consult lineage",
-				"note": "vendor/mega-maestro/workflow-authority.pin.json absent",
-				"observed": {
-					"method": "scripts/mega-maestro-pair.mjs check --json",
-					"at": "2026-10-29T03:04:02.293Z",
-					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
-					"detail": "workflow authority pin absent; needs the delegation/workflow owner producer from endpoint source d5143a63931dc87a5f90b3fdb7b58fa3726913b1 (dirty or absent)"
-				}
-			},
-			{
-				"key": "registration.approval",
-				"status": "unsupported-by-counterpart",
-				"owner": "mega-maestro",
-				"dependency": "CP-04a",
-				"evidence": "no API or console producer approves the actor registration challenge, so a registration carries no actor and every actor-bound command answers unauthenticated",
-				"consumer": "createEnrollmentLifecycle().completeRegistration, createCommandService() (src/main/enterprise/enrollment.ts, commands.ts)",
-				"note": "the pair harness offers --approve-command for a producer that does not exist (approvalProducer: false)",
-				"observed": {
-					"method": "scripts/mega-maestro-pair.mjs check --json",
-					"at": "2026-10-29T03:04:02.293Z",
-					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
-					"detail": "no API/console producer to approve the actor registration (--approve-command)"
-				}
-			},
 			{
 				"key": "endpoint.command",
 				"status": "unsupported-by-counterpart",
@@ -252,7 +192,7 @@
 				}
 			}
 		],
-		"observedRule": "every row carries observed: how and when its status was read; a row with no observation is inferred and must not be added",
+		"observedRule": "every row and producer row carries observed: how and when its status was read; a row with no observation is inferred and must not be added",
 		"supportKeysInLibrary": [
 			"endpoint.command",
 			"endpoint.workflow",
@@ -263,7 +203,70 @@
 			"command.resume_run",
 			"transport.os-peer.darwin",
 			"transport.os-peer.win32"
-		]
+		],
+		"producerRows": [
+			{
+				"key": "artifact.contracts-pin",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-01",
+				"evidence": "4 packaged application artifacts under mega-maestro artifacts/application/0.1.0, every one built from e29195d8c with sourceDirty: true; no clean archive from a committed tree; vendor/mega-maestro/contracts.pin.json absent",
+				"consumer": "scripts/import-mega-maestro.mjs (pins the digest), scripts/mega-maestro-pair.mjs check (refuses dirty-source artifacts), scripts/check-mega-contract-vectors.mjs (archive mode not run)",
+				"note": "every packaged artifact is darwin/arm64 from dirty source; the development checkout is never certifiable",
+				"observed": {
+					"method": "scripts/mega-maestro-pair.mjs check --json",
+					"at": "2026-10-29T03:04:02.293Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"detail": "contracts pin absent; needs the clean contracts artifact of endpoint source d5143a63931dc87a5f90b3fdb7b58fa3726913b1 (dirty or absent)"
+				}
+			},
+			{
+				"key": "runtime.maestro-adapter",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-02",
+				"evidence": "mega-maestro packages/runtime-adapter/src/maestro.ts:7-20 (createMaestroAdapter returns status unsupported, reason public-artifact-not-supplied or public-artifact-not-qualified, a port whose execute answers capability-unsupported); every packaged artifact declares maestroAdapter.status unsupported",
+				"consumer": "scripts/package-mega-maestro-runtime.mjs (the packaged runtime), the headless-library acceptance row",
+				"note": "vendor/mega-maestro/runtime-adapter.pin.json absent",
+				"observed": {
+					"method": "scripts/mega-maestro-pair.mjs check --json",
+					"at": "2026-10-29T03:04:02.293Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"detail": "runtime adapter pin absent, declared unsupported; needs a supported createMaestroAdapter from endpoint source d5143a63931dc87a5f90b3fdb7b58fa3726913b1 (dirty or absent)"
+				}
+			},
+			{
+				"key": "authority.delegation-workflow",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-03",
+				"evidence": "mega-maestro packages/runtime-adapter/src/endpoint.ts:35 (a nonempty delegationChain or a non-null workflow is denied context-mismatch); packages/contracts/src/local-endpoint.ts carries no delegation field",
+				"consumer": "src/shared/maestro-lib/managed/workflows.ts, delegation.ts, the Cue and Auto Run owner fences, the consult lineage",
+				"note": "vendor/mega-maestro/workflow-authority.pin.json absent",
+				"observed": {
+					"method": "scripts/mega-maestro-pair.mjs check --json",
+					"at": "2026-10-29T03:04:02.293Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"detail": "workflow authority pin absent; needs the delegation/workflow owner producer from endpoint source d5143a63931dc87a5f90b3fdb7b58fa3726913b1 (dirty or absent)"
+				}
+			},
+			{
+				"key": "registration.approval",
+				"status": "unsupported-by-counterpart",
+				"owner": "mega-maestro",
+				"dependency": "CP-04a",
+				"evidence": "no API or console producer approves the actor registration challenge, so a registration carries no actor and every actor-bound command answers unauthenticated",
+				"consumer": "createEnrollmentLifecycle().completeRegistration, createCommandService() (src/main/enterprise/enrollment.ts, commands.ts)",
+				"note": "the pair harness offers --approve-command for a producer that does not exist (approvalProducer: false)",
+				"observed": {
+					"method": "scripts/mega-maestro-pair.mjs check --json",
+					"at": "2026-10-29T03:04:02.293Z",
+					"counterpartRevision": "d5143a63931dc87a5f90b3fdb7b58fa3726913b1",
+					"detail": "no API/console producer to approve the actor registration (--approve-command)"
+				}
+			}
+		],
+		"producerRowsRule": "the producers Maestro waits on that are not a published contract row (CP-01, CP-02, CP-03, CP-04a); each observed by scripts/mega-maestro-pair.mjs check at HEAD; kept beside rows because rows mirror COUNTERPART_SUPPORT in src/shared/maestro-lib/managed/compatibility.ts row for row"
 	},
 	"routes": {
 		"claude-code": {

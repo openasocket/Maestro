@@ -6,11 +6,11 @@
 	"agreementDigest": "d9b80b9222e2f31a83192ba62cbbd2ca9f6827ed3737f6c4f6ef0fc7163bdef3",
 	"enforceabilityDigest": "6e85fe9b3d5e9c068fee1839779d7ca935777e2bdbbe66af13e03542acf3a9e0",
 	"documentDigestRule": "sha256 of the raw bytes of each named Mega-Maestro design document; null if none",
-	"repositoryRevision": "78689ade2015ac7c0669b201aa524c7c34b898e7",
+	"repositoryRevision": "d43b4f5f69c2963c1bae7b49088b5f94286dd648",
 	"repository": {
 		"branch": "feature/mega-maestro-v1.1.0-rc",
 		"baseRevision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
-		"headCommittedAt": "2026-10-28T23:03:06-04:00",
+		"headCommittedAt": "2026-10-28T23:10:53-04:00",
 		"includedTreeDirty": false,
 		"dirtyIncludedFiles": 0
 	},
@@ -45,7 +45,7 @@
 			"managedContract": "maestro-managed/1",
 			"appVersion": "1.1.0-RC",
 			"status": "ready",
-			"sourceRevision": "78689ade2015ac7c0669b201aa524c7c34b898e7",
+			"sourceRevision": "d43b4f5f69c2963c1bae7b49088b5f94286dd648",
 			"sourceDirty": false,
 			"inputSha256": "5e73adab2a013f9103b2ebbb11486acb6f71ed3bc32118a5df72c1b2d6aae9f2",
 			"entry": {
@@ -104,7 +104,7 @@
 			"step": "build the library",
 			"command": "npm run build:maestro-lib",
 			"exit": 0,
-			"result": "maestro-lib 0.32.0 from 78689ade2015ac7c0669b201aa524c7c34b898e7 (ready against HEAD)"
+			"result": "maestro-lib 0.32.0 from d43b4f5f69c2963c1bae7b49088b5f94286dd648 (ready against HEAD)"
 		},
 		{
 			"step": "pair check",
@@ -170,13 +170,6 @@
 			"producer": "rows endpoint.command, endpoint.workflow, endpoint.offline, endpoint.enrollment, endpoint.budget",
 			"status": "open",
 			"observed": "mega-maestro apps/endpoint/src/ipc/server.ts:65-67"
-		},
-		{
-			"id": "CP-04a",
-			"owner": "mega-maestro",
-			"producer": "rows registration.approval",
-			"status": "open",
-			"observed": "no API or console producer approves the actor registration challenge, so a registration carries no actor and every actor-bound command answers unauthenticated"
 		},
 		{
 			"id": "CP-05",
