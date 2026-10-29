@@ -43,6 +43,12 @@ export interface UiSurface {
 	aliases?: string[];
 	/** `ModalId` the renderer opens. */
 	modal: string;
+	/**
+	 * A section inside Settings rather than a modal of its own: `modal` is
+	 * `settings`, and opening the surface lands on `tab` and scrolls to the
+	 * element marked `data-setting-id={settingId}` (the searchable-settings id).
+	 */
+	settingsSection?: { tab: string; settingId: string };
 	/** One-line description for `open --list` and CLI help. */
 	description: string;
 	/** Deep-linkable tabs, when the surface has them. */
@@ -109,15 +115,33 @@ export const UI_SURFACES: UiSurface[] = [
 		tabs: [
 			{ id: 'general', label: 'General' },
 			{ id: 'display', label: 'Display' },
+			{ id: 'environment', label: 'Environment' },
 			{ id: 'shortcuts', label: 'Shortcuts' },
 			{ id: 'theme', label: 'Theme' },
 			{ id: 'notifications', label: 'Notifications' },
 			{ id: 'aicommands', label: 'AI Commands' },
 			{ id: 'prompts', label: 'Maestro Prompts' },
+			{ id: 'encore', label: 'Plugins' },
 		],
 		shortcutId: 'settings',
 		commandPalette: 'Settings',
 		click: 'the gear icon in the Left Bar footer',
+	},
+	{
+		// Not a modal of its own: the Mega-Maestro management pane is a section of
+		// Settings > Environment (MRC-11-03A), so opening it is a Settings deep
+		// link that scrolls to the pane. `inbox` already names the Notification
+		// Center above, so the managed notice inbox answers to `managed-inbox`.
+		id: 'managed-status',
+		label: 'Mega-Maestro Management',
+		aliases: ['mega-maestro', 'enterprise', 'managed-inbox'],
+		modal: 'settings',
+		settingsSection: { tab: 'environment', settingId: 'environment-mega-maestro' },
+		description:
+			'The managed standing of this desktop, its policy and actor, and the notice inbox (Settings > Environment).',
+		commandPalette: 'Mega-Maestro Management',
+		click:
+			'Mega-Maestro Management in the Left Bar hamburger menu (or the gear icon, then Environment > Mega-Maestro management)',
 	},
 	{
 		id: 'usage-dashboard',

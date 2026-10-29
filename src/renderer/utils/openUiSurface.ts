@@ -47,6 +47,15 @@ export function openUiSurface(surfaceId: string, tabId?: string): OpenUiSurfaceR
 
 	const actions = getModalActions();
 
+	// A section of Settings (the Mega-Maestro pane) is a Settings deep link:
+	// land on its tab and scroll to its `data-setting-id` element, the same path
+	// a settings search hit takes.
+	if (surface.settingsSection) {
+		const { tab: sectionTab, settingId } = surface.settingsSection;
+		actions.openSettings(sectionTab as SettingsTab, settingId);
+		return { ok: true };
+	}
+
 	switch (surface.id) {
 		case 'notification-center': {
 			// Switched off, there is no inbox to open. Say so rather than opening

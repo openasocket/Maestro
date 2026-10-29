@@ -7,7 +7,11 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { openUiSurface } from '../../../renderer/utils/openUiSurface';
-import { selectModalOpen, useModalStore } from '../../../renderer/stores/modalStore';
+import {
+	selectModalData,
+	selectModalOpen,
+	useModalStore,
+} from '../../../renderer/stores/modalStore';
 import { useFeedbackDraftStore } from '../../../renderer/stores/feedbackDraftStore';
 import { useSettingsStore } from '../../../renderer/stores/settingsStore';
 import { useThroughputGaugeStore } from '../../../renderer/stores/throughputGaugeStore';
@@ -32,6 +36,43 @@ describe('openUiSurface - feedback', () => {
 
 		expect(useFeedbackDraftStore.getState().isMinimized).toBe(false);
 		expect(selectModalOpen('feedback')(useModalStore.getState())).toBe(true);
+	});
+});
+
+describe('openUiSurface - managed-status (a section of Settings)', () => {
+	beforeEach(() => {
+		useModalStore.getState().closeModal('settings');
+	});
+
+	afterEach(() => {
+		useModalStore.getState().closeModal('settings');
+	});
+
+	it('opens Settings on the Environment tab, scrolled to the Mega-Maestro pane', () => {
+		expect(openUiSurface('managed-status')).toEqual({ ok: true });
+		const state = useModalStore.getState();
+		expect(selectModalOpen('settings')(state)).toBe(true);
+		expect(selectModalData('settings')(state)).toMatchObject({
+			tab: 'environment',
+			settingId: 'environment-mega-maestro',
+		});
+	});
+
+	it('reaches the same pane by its aliases', () => {
+		for (const name of ['mega-maestro', 'enterprise', 'managed-inbox']) {
+			useModalStore.getState().closeModal('settings');
+			expect(openUiSurface(name), name).toEqual({ ok: true });
+			expect(selectModalData('settings')(useModalStore.getState())?.settingId).toBe(
+				'environment-mega-maestro'
+			);
+		}
+	});
+
+	it('refuses a --tab, since the pane has no tabs of its own', () => {
+		const result = openUiSurface('managed-status', 'inbox');
+		expect(result.ok).toBe(false);
+		expect(result.error).toContain('Unknown tab');
+		expect(selectModalOpen('settings')(useModalStore.getState())).toBe(false);
 	});
 });
 

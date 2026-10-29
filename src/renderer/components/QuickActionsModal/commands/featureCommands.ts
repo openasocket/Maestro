@@ -4,6 +4,7 @@ import { editClipboardImage } from '../../ImageAnnotator/editClipboardImage';
 import { requestEditLastQueuedMessage } from '../../../services/editQueuedMessage';
 import { requestSteerSend } from '../../../services/chatSteering';
 import { useGroupChatStore } from '../../../stores/groupChatStore';
+import { openUiSurface } from '../../../utils/openUiSurface';
 
 interface BuildFeatureCommandsArgs {
 	activeSession: Session | undefined;
@@ -255,6 +256,20 @@ export function buildFeatureCommands({
 			},
 		});
 	}
+
+	// The Mega-Maestro pane is a section of Settings > Environment, present in
+	// every build (it reports the managed standing, or that there is none), so
+	// the entry is unconditional and opens through the same surface registry
+	// `maestro-cli open managed-status` uses.
+	commands.push({
+		id: 'managed-status',
+		label: 'Mega-Maestro Management',
+		subtext: 'Managed standing, policy and the notice inbox (Settings > Environment)',
+		action: () => {
+			openUiSurface('managed-status');
+			setQuickActionOpen(false);
+		},
+	});
 
 	if (activeSession && hasActiveSessionCapability?.('supportsSessionStorage')) {
 		commands.push({

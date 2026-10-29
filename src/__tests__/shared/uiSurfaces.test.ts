@@ -17,6 +17,7 @@ import {
 } from '../../shared/uiSurfaces';
 import { formatShortcutKeysFor } from '../../shared/shortcutKeys';
 import { DEFAULT_SHORTCUTS, FIXED_SHORTCUTS } from '../../renderer/constants/shortcuts';
+import { ENVIRONMENT_SETTINGS } from '../../renderer/components/Settings/searchableSettingsMisc';
 
 describe('UI surface registry', () => {
 	it('has unique ids and aliases across every surface', () => {
@@ -37,6 +38,59 @@ describe('UI surface registry', () => {
 			const ids = surfaceTabIds(surface);
 			expect(new Set(ids).size).toBe(ids.length);
 		}
+	});
+
+	it('makes every Settings section a deep link into the settings modal, never a modal of its own', () => {
+		const sections = UI_SURFACES.filter((surface) => surface.settingsSection);
+		expect(sections.length).toBeGreaterThan(0);
+		const settingsTabs = surfaceTabIds(resolveUiSurface('settings')!);
+		for (const surface of sections) {
+			expect(surface.modal, surface.id).toBe('settings');
+			expect(surface.tabs, surface.id).toBeUndefined();
+			expect(settingsTabs, surface.id).toContain(surface.settingsSection!.tab);
+		}
+	});
+});
+
+describe('the managed pane (managed-status)', () => {
+	it('resolves by id and by every alias, and leaves `inbox` on the Notification Center', () => {
+		for (const name of ['managed-status', 'mega-maestro', 'enterprise', 'managed-inbox']) {
+			expect(resolveUiSurface(name)?.id, name).toBe('managed-status');
+		}
+		expect(resolveUiSurface('inbox')?.id).toBe('notification-center');
+	});
+
+	it('deep-links to the Environment tab and the searchable id the pane is marked with', () => {
+		const surface = resolveUiSurface('managed-status')!;
+		expect(surface.settingsSection).toEqual({
+			tab: 'environment',
+			settingId: 'environment-mega-maestro',
+		});
+		// The id must be one the settings search already scrolls to, so the CLI
+		// and a search hit land on the same element.
+		expect(ENVIRONMENT_SETTINGS.map((setting) => setting.id)).toContain(
+			surface.settingsSection!.settingId
+		);
+		expect(ENVIRONMENT_SETTINGS.find((s) => s.id === 'environment-mega-maestro')?.tab).toBe(
+			surface.settingsSection!.tab
+		);
+	});
+
+	it('is not gated by an Encore Feature and names its palette entry and click path', () => {
+		const surface = resolveUiSurface('managed-status')!;
+		expect(surface.encore).toBeUndefined();
+		expect(surface.shortcutId).toBeUndefined();
+		expect(uiSurfaceRefusal(surface, null, {})).toBeNull();
+		const hint = describeSurfaceAccess(surface);
+		expect(hint).toContain('"Mega-Maestro Management"');
+		expect(hint).toContain('hamburger menu');
+		expect(hint).not.toContain('press');
+	});
+
+	it('lets `open settings --tab environment` reach the tab the pane lives on', () => {
+		const settings = resolveUiSurface('settings')!;
+		expect(resolveUiSurfaceTab(settings, 'environment')?.id).toBe('environment');
+		expect(resolveUiSurfaceTab(settings, 'Plugins')?.id).toBe('encore');
 	});
 });
 

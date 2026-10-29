@@ -8,6 +8,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { HamburgerMenuContent } from '../../../../renderer/components/SessionList/HamburgerMenuContent';
+import {
+	selectModalData,
+	selectModalOpen,
+	useModalStore,
+} from '../../../../renderer/stores/modalStore';
 import { useSettingsStore } from '../../../../renderer/stores/settingsStore';
 import { useThroughputGaugeStore } from '../../../../renderer/stores/throughputGaugeStore';
 import { mockTheme } from '../../../helpers/mockTheme';
@@ -58,5 +63,26 @@ describe('HamburgerMenuContent - Throughput Gauge', () => {
 
 		fireEvent.click(screen.getByRole('button', { name: /Throughput Gauge/ }));
 		expect(useThroughputGaugeStore.getState().visible).toBe(false);
+	});
+});
+
+describe('HamburgerMenuContent - Mega-Maestro Management', () => {
+	afterEach(() => {
+		useModalStore.getState().closeModal('settings');
+	});
+
+	it('is always offered, and opens Settings at the Mega-Maestro pane like `open managed-status`', () => {
+		const closeMenu = vi.fn();
+		renderMenu(closeMenu);
+
+		fireEvent.click(screen.getByRole('button', { name: /Mega-Maestro Management/ }));
+
+		const state = useModalStore.getState();
+		expect(selectModalOpen('settings')(state)).toBe(true);
+		expect(selectModalData('settings')(state)).toMatchObject({
+			tab: 'environment',
+			settingId: 'environment-mega-maestro',
+		});
+		expect(closeMenu).toHaveBeenCalledWith(false);
 	});
 });
