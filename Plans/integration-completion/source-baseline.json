@@ -1,0 +1,362 @@
+{
+	"formatVersion": 1,
+	"owner": "maestro",
+	"artifactId": "MAESTRO-SOURCE-BASELINE",
+	"standing": "checkpoint only: this names the branch, commit, tree digest and refs a build is exported from; MAESTRO-SOURCE-BASELINE-BUILD and MAESTRO-SOURCE-BASELINE are receipts under Plans/integration-completion/evidence/, never this file",
+	"task": "MCOMP-01-01",
+	"backlog": ["BASE-01"],
+	"recordedAt": "2026-10-29T22:49:36.485Z",
+	"node": "v26.12.1",
+	"checkpoint": {
+		"branch": "feature/mega-maestro-v1.1.0-rc",
+		"head": "fdc98ff32156c6a466a927ae0ed8367bd9b74296",
+		"headCommittedAt": "2026-10-29T18:11:03-04:00",
+		"headTree": "65c22eef1107d26023872539a108ac65690da9ab",
+		"describe": "v1.1.0-RC-294-gfdc98ff32",
+		"branchUpstream": null,
+		"rcComparison": {
+			"ref": "v1.1.0-RC",
+			"role": "comparison point",
+			"commit": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+			"committedAt": "2026-10-18T19:57:28-05:00",
+			"mergeBase": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+			"headAhead": 294,
+			"headBehind": 0,
+			"rule": "the old RC tag is a comparison point only: never a reset, checkout or build target; the integration branch continues from HEAD"
+		},
+		"localRefs": [
+			{
+				"ref": "origin/feature/mega-maestro-v1.1.0-rc",
+				"role": "origin tracking ref of this branch",
+				"commit": "0f31023a8f439aac5f3cae784c06571a31dfd3eb",
+				"committedAt": "2026-10-28T23:45:55-04:00",
+				"mergeBase": "0f31023a8f439aac5f3cae784c06571a31dfd3eb",
+				"headAhead": 14,
+				"headBehind": 0
+			},
+			{
+				"ref": "release/v1.1.0-RC",
+				"role": "local release branch at the RC tag",
+				"commit": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+				"committedAt": "2026-10-18T19:57:28-05:00",
+				"mergeBase": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+				"headAhead": 294,
+				"headBehind": 0
+			},
+			{
+				"ref": "origin/rc",
+				"role": "origin rc",
+				"commit": "b70950706c27fcd466c06abe66b8c9973c514145",
+				"committedAt": "2026-10-22T11:46:40+02:00",
+				"mergeBase": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+				"headAhead": 294,
+				"headBehind": 126
+			},
+			{
+				"ref": "upstream/rc",
+				"role": "upstream rc, the candidate for MCOMP-01-03",
+				"commit": "3c85691621acc55aa55309b6676dfb0e759841bd",
+				"committedAt": "2026-10-25T09:59:36+01:00",
+				"mergeBase": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+				"headAhead": 294,
+				"headBehind": 223
+			},
+			{
+				"ref": "upstream/main",
+				"role": "upstream main",
+				"commit": "d74614e8f2cec61aae8461a8dfcfde45429c2379",
+				"committedAt": "2026-10-21T16:30:37-05:00",
+				"mergeBase": "8822d4ec6df6b131be26948d1e83ccd4d5e4e195",
+				"headAhead": 1270,
+				"headBehind": 24
+			}
+		],
+		"refsLastFetchedAt": "2026-10-26T02:29:16.915Z",
+		"fetchedDuringTask": false,
+		"rule": "ahead and behind are local-ref readings against refs as last fetched, not a live remote check; no fetch, reset, checkout or history rewrite ran in this task"
+	},
+	"implementation": {
+		"rules": {
+			"id": "maestro-implementation-tree/1",
+			"include": [
+				"src/",
+				"scripts/",
+				"package.json",
+				"package-lock.json",
+				"tsconfig*.json",
+				"vendor/mega-maestro/contracts.pin.json"
+			],
+			"exclude": ["Plans/", ".maestro/", "docs/"],
+			"method": "sha256 of canonicalJson({ rules, files }): files maps each included git-tracked path (POSIX separators, sorted) to the sha256 of its working-tree bytes, or \"deleted\" when the tracked file is absent"
+		},
+		"digest": "df14858a1e8650d8c2ee391cf757948469a54022065f42a5a78518a80cea6dab",
+		"fileCount": 6587,
+		"deleted": 0,
+		"map": "source/implementation.json inside the pinned runtime archive (runtimeInput.archive); the file map is not repeated here",
+		"dirty": false,
+		"dirtyEntries": 0,
+		"commit": "cf93deb34830232eef4caf3c15be5710120aa768",
+		"committedAt": "2026-10-29T18:10:05-04:00",
+		"coordinationCommitsSinceImplementation": [
+			{
+				"commit": "fdc98ff32156c6a466a927ae0ed8367bd9b74296",
+				"committedAt": "2026-10-29T18:11:03-04:00",
+				"subject": "MAESTRO: MCOMP-03-04A reconcile the program manifest with the inserted continuation: Plans/integ"
+			},
+			{
+				"commit": "030e96f7e861d02fc83893e2b01f8c4ba73e47d9",
+				"committedAt": "2026-10-29T18:10:48-04:00",
+				"subject": "MAESTRO: MCOMP-03-04 re-pin MAESTRO-M0-RUNTIME after the implementation moved: Plans/integration"
+			}
+		],
+		"filesMovedSinceImplementation": [
+			"Plans/integration-completion/program.json",
+			"Plans/integration-completion/runtime-conformance.json"
+		],
+		"filesMovedInsideInputSet": [],
+		"rule": "a build exports from implementation.commit with dirty false; HEAD may sit ahead of it by commits that touch only Plans/, .maestro/ or docs/ (checklist, pin and evidence changes), which are coordination and never dirty application code"
+	},
+	"runtimeInput": {
+		"pinFile": "Plans/integration-completion/runtime-conformance.json",
+		"pinStatus": "pinned",
+		"pinCommitted": true,
+		"artifactId": "MAESTRO-M0-RUNTIME",
+		"archive": {
+			"file": "runtime.tgz",
+			"sha256": "5370aee135eefc563f81e6e2ca3e16ff2765091afaee1ef772eb117a417d3d97",
+			"sha512": "89c06497e1aa9a352b807c8a2442cb0b60fecc90ce10d827da774740f81e0445d04714104372d32269471940c178625961a4735d5ec2af955148d0ef13e0115e",
+			"bytes": 2444736
+		},
+		"location": "dist/mega-maestro-runtime/0.32.0/5370aee135eefc563f81e6e2ca3e16ff2765091afaee1ef772eb117a417d3d97",
+		"present": true,
+		"verified": {
+			"status": "ready",
+			"headMoved": true,
+			"treeDirty": false,
+			"coordinationOnly": true,
+			"drift": {
+				"count": 0,
+				"files": []
+			},
+			"libraryInputsMoved": [],
+			"implementationCommit": "cf93deb34830232eef4caf3c15be5710120aa768",
+			"librarySourceRevision": "955fd7b4d4fd34ad35df4c00ba60c40c8100bb19",
+			"problems": []
+		},
+		"command": "node scripts/package-mega-maestro-runtime.mjs --runtime dist/mega-maestro-runtime/0.32.0/5370aee135eefc563f81e6e2ca3e16ff2765091afaee1ef772eb117a417d3d97 --json"
+	},
+	"reviewedInputs": {
+		"source": "completion-review-2026-10-29.json, the review record of the counterpart program (read once, by value; its location is not an input)",
+		"reviewedRevision": "0f31023a8f439aac5f3cae784c06571a31dfd3eb",
+		"reviewedBranch": "feature/mega-maestro-v1.1.0-rc",
+		"commitsSinceReviewedRevision": 14,
+		"reviewedRevisionIsAncestor": true,
+		"reviewReadings": {
+			"localOriginCommitsNotPresent": 103,
+			"localUpstreamCommitsNotPresent": 223,
+			"refsFetchedDuringReview": false,
+			"rule": "the review counted with refs as it found them; checkpoint.localRefs holds the counts read now from the same local refs"
+		},
+		"files": [
+			{
+				"file": "Plans/mega-maestro-rc/counterpart-requests.md",
+				"reviewed": "a84ba8f64597f3fecd49d7fdacaab987debd0bc5948804ea7832eeb09d0075c6",
+				"current": "a84ba8f64597f3fecd49d7fdacaab987debd0bc5948804ea7832eeb09d0075c6",
+				"moved": false,
+				"inputSet": false
+			},
+			{
+				"file": "Plans/mega-maestro-rc/joint-integration.json",
+				"reviewed": "902b64ecc1f9e47f750385d92100f09f9e356a572dacc2ef6d805d6a866fab5f",
+				"current": "902b64ecc1f9e47f750385d92100f09f9e356a572dacc2ef6d805d6a866fab5f",
+				"moved": false,
+				"inputSet": false
+			},
+			{
+				"file": "Plans/mega-maestro-rc/support-matrix.json",
+				"reviewed": "e7984c7faf77002a0ff12144f69a842618f56b857ed884079b5da4c1c620624f",
+				"current": "e7984c7faf77002a0ff12144f69a842618f56b857ed884079b5da4c1c620624f",
+				"moved": false,
+				"inputSet": false
+			},
+			{
+				"file": "src/shared/maestro-lib/runtime/turns.ts",
+				"reviewed": "d92457ea5bb7fa24d86a12e3b72f418de07ffe38487b86f9f5895ec74f171b08",
+				"current": "05038d7b0dde4b0da8ccdd898069f5e32e83e33377464dba1a78658d66aaec8b",
+				"moved": true,
+				"inputSet": true
+			},
+			{
+				"file": "src/shared/maestro-lib/run/start-turn.ts",
+				"reviewed": "ed68cd306d6b30b1bdf768258734224b1c36bdd35bf5d2960a651aae3ca22199",
+				"current": "ed68cd306d6b30b1bdf768258734224b1c36bdd35bf5d2960a651aae3ca22199",
+				"moved": false,
+				"inputSet": true
+			},
+			{
+				"file": "src/shared/maestro-lib/managed/host-adapter.ts",
+				"reviewed": "208421d4aff8fc8bfaede6cea09bd33430ede478a34f0e6f56fbaeaab41d3d8f",
+				"current": "208421d4aff8fc8bfaede6cea09bd33430ede478a34f0e6f56fbaeaab41d3d8f",
+				"moved": false,
+				"inputSet": true
+			},
+			{
+				"file": "src/cli/services/host-managed.ts",
+				"reviewed": "5c093d53dbb0096cbba2ffa2fa7a50d7c4c531a8cf98d2cd5d062b2324c33df3",
+				"current": "5c093d53dbb0096cbba2ffa2fa7a50d7c4c531a8cf98d2cd5d062b2324c33df3",
+				"moved": false,
+				"inputSet": true
+			},
+			{
+				"file": "src/main/enterprise/service.ts",
+				"reviewed": "55ce01e098ecdee7f611be3ff44bacf1374bb4cb37e48112c7d15b1be080aede",
+				"current": "55ce01e098ecdee7f611be3ff44bacf1374bb4cb37e48112c7d15b1be080aede",
+				"moved": false,
+				"inputSet": true
+			},
+			{
+				"file": "scripts/mega-maestro-pair.mjs",
+				"reviewed": "0ed9446b29d1a0348b23361232df8bdd3c4ee696854cb9fde717eafde5ad87fb",
+				"current": "53ac98141391380156946ad7857086bd925d8741e13c666bc8b8201d8b7a1f00",
+				"moved": true,
+				"inputSet": true
+			},
+			{
+				"file": "src/renderer/components/NewInstanceModal/NewInstanceModal.tsx",
+				"reviewed": "abd55d0ce56efdf7a9aaa580a92368ce5e8dc66303dc8bfc118023975817ea38",
+				"current": "abd55d0ce56efdf7a9aaa580a92368ce5e8dc66303dc8bfc118023975817ea38",
+				"moved": false,
+				"inputSet": true
+			},
+			{
+				"file": "src/renderer/hooks/session/useSessionCrud.ts",
+				"reviewed": "7728d8efe4e1bd12dc9d98e831609eef987e16d59e5506d65d091366c0e9704b",
+				"current": "7728d8efe4e1bd12dc9d98e831609eef987e16d59e5506d65d091366c0e9704b",
+				"moved": false,
+				"inputSet": true
+			},
+			{
+				"file": "src/main/enterprise/settings-policy.ts",
+				"reviewed": "a56283a399c763b2567408f3e022e3c7f3620ab7040f68488438e9a0c95769bc",
+				"current": "a56283a399c763b2567408f3e022e3c7f3620ab7040f68488438e9a0c95769bc",
+				"moved": false,
+				"inputSet": true
+			}
+		],
+		"movedCount": 2
+	},
+	"writers": {
+		"workingTree": {
+			"trackedChanges": 0,
+			"staged": 0,
+			"untracked": [
+				".sloptimize/",
+				"Plans/integration-completion/source-baseline.json",
+				"rustygraphify-out/"
+			],
+			"untrackedInsideInputSet": [],
+			"stashes": 1,
+			"indexLock": false
+		},
+		"worktrees": [
+			{
+				"thisCheckout": true,
+				"location": "this repository",
+				"branch": "refs/heads/feature/mega-maestro-v1.1.0-rc",
+				"head": "fdc98ff32156c6a466a927ae0ed8367bd9b74296"
+			},
+			{
+				"thisCheckout": false,
+				"location": "outside this repository (a separate directory; path withheld)",
+				"branch": "refs/heads/fix/codex-reasoning-upstream-validation",
+				"head": "f36233b8dbdc644add46311a399f3864e94a14b9"
+			}
+		],
+		"agentsOnThisDirectory": [
+			{
+				"id": "e5de8eb6-e05e-49b6-9944-47149ae54c64",
+				"name": "Maestro-Claude",
+				"provider": "claude-code",
+				"executingThisTask": true,
+				"manifestOwner": false
+			},
+			{
+				"id": "9b4b298d-918a-4c8d-a9a8-c9a014a04adb",
+				"name": "Maestro-Codex",
+				"provider": "codex",
+				"executingThisTask": false,
+				"manifestOwner": true
+			}
+		],
+		"rule": "untracked scratch outside the input set is preserved, never staged or deleted; when another writer is editing the tree, prepare an owned worktree with maestro-cli create-worktree --agent <id> --branch <name> (never a bare git worktree add) and work there"
+	},
+	"signing": {
+		"commit.gpgsign": {
+			"repository": "false",
+			"global": "true"
+		},
+		"gpg.format": "ssh",
+		"core.hooksPath": ".husky",
+		"rule": "left as found; a commit made by an unattended task passes -c commit.gpgsign=false on its own invocation and never writes either config"
+	},
+	"exportRules": {
+		"inputSet": {
+			"id": "maestro-implementation-tree/1",
+			"include": [
+				"src/",
+				"scripts/",
+				"package.json",
+				"package-lock.json",
+				"tsconfig*.json",
+				"vendor/mega-maestro/contracts.pin.json"
+			],
+			"exclude": ["Plans/", ".maestro/", "docs/"]
+		},
+		"cleanSnapshot": "package only when implementation.dirty is false; the archive records implementation.commit, and verifyRuntimeInput reads coordinationOnly when HEAD moved while no input moved",
+		"noBypass": "no allow-dirty or stale bypass exists in the packager and none is added; a dirty tree is refused as implementation-dirty",
+		"privateInputs": "nothing under the counterpart repository is imported; it is consumed through vendor/mega-maestro/contracts.pin.json and public archives alone",
+		"recompute": "node scripts/package-mega-maestro-runtime.mjs --json reads the snapshot; this file is regenerated by the generator named in generatedBy"
+	},
+	"reportedBaselineFailures": {
+		"source": "program.json task MCOMP-01-02 (three reported missing packages, four failing integration suites)",
+		"missingPackages": [
+			{
+				"name": "dns-packet",
+				"declaredIn": "dependencies",
+				"range": "5.6.1",
+				"lockVersion": "5.6.1",
+				"installed": false
+			},
+			{
+				"name": "opaque",
+				"declaredIn": "not declared",
+				"range": null,
+				"lockVersion": null,
+				"installed": false
+			},
+			{
+				"name": "smol-toml",
+				"declaredIn": "dependencies",
+				"range": "1.9.1",
+				"lockVersion": "1.9.1",
+				"installed": false
+			}
+		],
+		"failingSuites": {
+			"reported": 4,
+			"named": false,
+			"note": "the review record names no suite; MCOMP-01-02 reproduces them under the installed Node and records each by file"
+		},
+		"repair": "MCOMP-01-02"
+	},
+	"generatedBy": {
+		"generator": ".maestro/playbooks/Working/mcomp-01-01/write-baseline.mjs (outside git, under the Auto Run working folder)",
+		"composes": [
+			"scripts/package-mega-maestro-runtime.mjs: implementationSnapshot, readRuntimePin, verifyRuntimeInput, findCanaries",
+			"scripts/write-mega-maestro-handoff.mjs: SOURCE_TREE_RULES, includedInSourceTree, findAbsolutePaths",
+			"git: rev-parse, rev-list, merge-base, log, diff, status, worktree, config, stash",
+			"maestro-cli list agents --json"
+		],
+		"checks": "findAbsolutePaths over the record and findCanaries over its text must both be empty before it is written"
+	}
+}
