@@ -335,6 +335,11 @@ describe('assembleTurn parity with the desktop', () => {
 	async function runMain(fixture: Fixture, config: SpawnProcessConfig) {
 		const processManager = {
 			spawn: vi.fn((_config: unknown) => ({ success: true, pid: 4242 })),
+			// The handler asks the sink's managed port first (MRC2-02-01A) and spawns
+			// through the admitted path (MRC-06-01); a standalone port is null and the
+			// admitted path is the plain spawn, which is what the parity reads.
+			managedPort: vi.fn(() => null),
+			spawnAdmitted: vi.fn(async (config: unknown) => processManager.spawn(config)),
 			get: vi.fn(),
 			// The synopsis-writer gate scans running processes before every spawn.
 			getAll: vi.fn(() => []),

@@ -100,9 +100,14 @@ export function safeStorageSeal(safeStorage: SafeStorageLike): SealProvider {
 
 /**
  * The key of `obscuringSeal`. It is built into the app on purpose: there is
- * nowhere on a machine with no OS key store to keep a better one.
+ * nowhere on a machine with no OS key store to keep a better one. It is
+ * derived on first use, not at import, so a module that reaches this file
+ * through a policy source (the Cue SusFactor check through the credential
+ * custody ceiling) loads under a test's partial `crypto` double as well.
  */
-const OBSCURING_KEY = createHash('sha256').update('maestro:obscuring-seal:v1', 'utf8').digest();
+let obscuringKey: Buffer | null = null;
+const obscuringKeyOf = (): Buffer =>
+	(obscuringKey ??= createHash('sha256').update('maestro:obscuring-seal:v1', 'utf8').digest());
 const OBSCURING_IV_BYTES = 12;
 const OBSCURING_TAG_BYTES = 16;
 
@@ -125,7 +130,7 @@ export function obscuringSeal(): SealProvider {
 		custody: () => ({ kind: 'obscuring' }),
 		seal: (plaintext) => {
 			const iv = randomBytes(OBSCURING_IV_BYTES);
-			const cipher = createCipheriv('aes-256-gcm', OBSCURING_KEY, iv);
+			const cipher = createCipheriv('aes-256-gcm', obscuringKeyOf(), iv);
 			const body = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
 			return Buffer.concat([iv, cipher.getAuthTag(), body]);
 		},
@@ -134,7 +139,7 @@ export function obscuringSeal(): SealProvider {
 			if (blob.length < headerBytes) throw new Error('The sealed text is too short.');
 			const decipher = createDecipheriv(
 				'aes-256-gcm',
-				OBSCURING_KEY,
+				obscuringKeyOf(),
 				blob.subarray(0, OBSCURING_IV_BYTES)
 			);
 			decipher.setAuthTag(blob.subarray(OBSCURING_IV_BYTES, headerBytes));
