@@ -934,11 +934,15 @@ describe('runtime turns', () => {
 				status: 'ok',
 				value: { binding: 'enrolled-unavailable', authorityId: null },
 			});
-			// Unmanaged sends are not opted into anything: the agent still works standalone.
-			const turn = watch(orphan);
-			value(await orphan.turns.send('a1', 't1', { text: 'plain' }));
-			await turn.outcome();
-			expect(ran()).toHaveLength(1);
+			// A plain send on an enrolled binding nothing answers for is refused before the queue, not
+			// run standalone (MRC3-01-01): no process, no queue item, and nothing more in the journal.
+			const plain = errorOf(await orphan.turns.send('a1', 't1', { text: 'plain' }));
+			expect(plain.code).toBe('rejected');
+			expect(plain.message).toContain('[managed-unavailable]');
+			expect(plain.message).toContain('no authority answers');
+			expect(ran()).toEqual([]);
+			expect(value(await orphan.turns.queue.list('a1'))).toEqual([]);
+			expect(journalRuns()).toHaveLength(1);
 		});
 
 		it('refuses a managed send on a runtime that lost its data directory, before anything is queued or spawned (MRC-08-05)', async () => {

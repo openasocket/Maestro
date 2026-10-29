@@ -58,6 +58,7 @@ import {
 	createHeadlessSpawnAuthority,
 	installationIdentity,
 	managedActorPrincipal,
+	type HeadlessSpawnAuthority,
 	type ManagedHostAdapter,
 } from '../managed/host-adapter';
 import { createManagedOperations, type ApprovedResource } from '../managed/operations';
@@ -79,11 +80,7 @@ import {
 import { getVisibleAgentDefinitions } from '../providers/definitions';
 import type { AgentRecord } from '../store/records';
 import { createBackgroundTurns, type BackgroundTurnDeps } from './background-turns';
-import {
-	createRuntimeConsults,
-	type ConsultSpawnAuthorityPort,
-	type RuntimeConsultsManagedOptions,
-} from './consults';
+import { createRuntimeConsults, type RuntimeConsultsManagedOptions } from './consults';
 import { createRuntimeGroupChats } from './group-chats';
 import { createProcessRegistry } from './processes';
 import { createRuntimeAutoRun, type RuntimeAutoRun, type RuntimeAutoRunHost } from './autorun';
@@ -521,9 +518,10 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 	 * What a consult and a group chat turn are admitted with: the headless spawn authority over the
 	 * binding and that same host, with the enrollment's registered actor as the principal, rebuilt
 	 * on every turn so an enrollment that appeared or lapsed applies to the next one (the Auto Run
-	 * port's recipe). The consult stage and the background runner read the one port.
+	 * port's recipe). The consult stage, the background runner and the turn service's standing
+	 * admission (MRC3-01-01) read the one port.
 	 */
-	const backgroundSpawnPort = (): ConsultSpawnAuthorityPort =>
+	const backgroundSpawnPort = (): HeadlessSpawnAuthority =>
 		createHeadlessSpawnAuthority({
 			installation,
 			binding: binding.state(),
@@ -579,6 +577,16 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			LOG_CONTEXT
 		);
 	}
+	// The run journal, read under the lock before the turn service exists: a plain send on an
+	// enrolled binding is minted a dispatch through it (MRC3-01-01), and the managed facade below
+	// records a peer's submissions in it. A journal that cannot be read admits nothing.
+	const managedNow = deps.now ?? (() => Date.now());
+	const journal = createRunJournal({
+		file: managedRunJournalPath(paths),
+		now: managedNow,
+		newId: deps.rules?.newId ?? generateUUID,
+	});
+	const journalLoaded = await journal.load({ liveRunIds: registry.liveRunIds() });
 	const turns = createRuntimeTurns({
 		paths,
 		repository,
@@ -587,6 +595,13 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		fence,
 		rules: deps.rules,
 		autoRunHolds: (agentId) => autoRun.holds(agentId),
+		// Every plain send is admitted on the binding's standing: an enrolled runtime queues
+		// nothing without a dispatch, a standalone one queues as before.
+		standing: {
+			port: backgroundSpawnPort,
+			journal: () => (journalLoaded.ok ? journal : null),
+			newId: deps.rules?.newId ?? generateUUID,
+		},
 		options: { ...options.turns, lifecycle: options.turns?.lifecycle ?? lifecycle },
 		deps: { probeBinary: deps.probeBinary, ...deps.turns },
 	});
@@ -687,13 +702,6 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 	// own in-process callers, and the bridge, whose request handler admits a
 	// caller on the per-boot secret and stamps `host-secret` on the envelope
 	// (MRC-08-05A). Every other transport waits on its own verifier.
-	const managedNow = deps.now ?? (() => Date.now());
-	const journal = createRunJournal({
-		file: managedRunJournalPath(paths),
-		now: managedNow,
-		newId: deps.rules?.newId ?? generateUUID,
-	});
-	const journalLoaded = await journal.load({ liveRunIds: registry.liveRunIds() });
 	const acceptThisInstallation = (context: ManagedOperationContext): readonly string[] =>
 		context.installation.installationId === installation.installationId
 			? []

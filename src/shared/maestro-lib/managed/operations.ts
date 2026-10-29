@@ -46,7 +46,12 @@ import {
 import type { ManagedBinding } from './binding';
 import type { EventJournal } from './event-journal';
 import type { ManagedPolicyStatus } from './host-adapter';
-import { journalRunRecord, type RunJournal } from './run-journal';
+import {
+	journalRunRecord,
+	type JournalAttempt,
+	type JournalRun,
+	type RunJournal,
+} from './run-journal';
 import {
 	MANAGED_CONTRACT_VERSION,
 	type ManagedAuthenticatedContext,
@@ -107,6 +112,82 @@ export interface ManagedTurnPort {
 	): Promise<ManagedSendResult>;
 	/** Stop or dequeue the attempt serving a run. `none` when nothing of it is held. */
 	cancelRun(runId: string, kind: 'cancel' | 'interrupt'): Promise<'stopped' | 'dequeued' | 'none'>;
+}
+
+/** What one submission needs to become a journaled dispatch. */
+export interface ManagedDispatchMintInput {
+	/** The verified context the attempt is attributed to (its identity names the run and attempt). */
+	context: ManagedAuthenticatedContext;
+	authority: HostAuthority;
+	policy: PolicySourceSet;
+	journal: RunJournal;
+	agentId: string;
+	tabId: string;
+	providerId: string;
+	text: string;
+	resources: readonly ApprovedResource[];
+}
+
+export type ManagedDispatchMint =
+	| { status: 'accepted'; dispatch: ManagedDispatch; run: JournalRun; attempt: JournalAttempt }
+	| { status: 'replayed' | 'conflict' | 'unknown'; run: JournalRun }
+	/** The journal could not be written: nothing is recorded and nothing may start. */
+	| { status: 'unavailable'; message: string };
+
+/**
+ * The one way a submission becomes a `ManagedDispatch`: the attempt is
+ * written to the run journal first (the identity's idempotency key, request,
+ * attempt and run ids, the actor and the trace of the verified context, the
+ * content digest and the approved resource ids), and only an accepted record
+ * yields a dispatch the turn service may queue. The facade's `submit` mints
+ * the peer's submissions this way, and the runtime's turn service mints a
+ * plain send on an enrolled binding the same way (MRC3-01-01), so no item
+ * reaches a queue with an attempt the journal does not know.
+ */
+export async function mintManagedDispatch(
+	input: ManagedDispatchMintInput
+): Promise<ManagedDispatchMint> {
+	const { context, journal } = input;
+	let recorded;
+	try {
+		recorded = await journal.submit({
+			idempotencyKey: context.identity.idempotencyKey,
+			requestId: context.identity.requestId,
+			attemptId: context.identity.attemptId,
+			runId: context.identity.runId,
+			rootRunId: context.identity.rootRunId,
+			parentRunId: context.identity.parentRunId,
+			agentId: input.agentId,
+			tabId: input.tabId,
+			providerId: input.providerId,
+			contentSha256: sha256Hex(input.text),
+			resourceIds: input.resources.map((resource) => resource.id),
+			actor: context.actor,
+			traceId: context.traceId,
+		});
+	} catch (error) {
+		return {
+			status: 'unavailable',
+			message: error instanceof Error ? error.message : String(error),
+		};
+	}
+	if (recorded.disposition !== 'accepted') {
+		return { status: recorded.disposition, run: recorded.run };
+	}
+	return {
+		status: 'accepted',
+		run: recorded.run,
+		attempt: recorded.attempt,
+		dispatch: {
+			context,
+			authority: input.authority,
+			policy: input.policy,
+			journal,
+			runId: recorded.run.runId,
+			attemptId: recorded.attempt.attemptId,
+			resources: input.resources,
+		},
+	};
 }
 
 export interface ManagedOperationsDeps {
@@ -374,36 +455,28 @@ export function createManagedOperations(deps: ManagedOperationsDeps): ManagedApi
 				resources.push(resource);
 			}
 
-			const authority = deps.binding.authority();
-			let recorded;
-			try {
-				recorded = await deps.journal.submit({
-					idempotencyKey: context.identity.idempotencyKey,
-					requestId,
-					attemptId: context.identity.attemptId,
-					runId: context.identity.runId,
-					rootRunId: context.identity.rootRunId,
-					parentRunId: context.identity.parentRunId,
-					agentId: agent.id,
-					tabId,
-					providerId: agent.toolType,
-					contentSha256: input.content.sha256,
-					resourceIds: input.resourceIds ?? [],
-					actor: context.actor,
-					traceId: context.traceId,
-				});
-			} catch (error) {
-				return {
-					ok: true,
-					value: refuse(
-						'unavailable',
-						requestId,
-						'runtime-unavailable',
-						`The run journal could not be written, so nothing was started: ${error instanceof Error ? error.message : String(error)}`
-					),
-				};
-			}
-			switch (recorded.disposition) {
+			const minted = await mintManagedDispatch({
+				context,
+				authority: deps.binding.authority(),
+				policy: deps.policy(),
+				journal: deps.journal,
+				agentId: agent.id,
+				tabId,
+				providerId: agent.toolType,
+				text: input.content.text,
+				resources,
+			});
+			switch (minted.status) {
+				case 'unavailable':
+					return {
+						ok: true,
+						value: refuse(
+							'unavailable',
+							requestId,
+							'runtime-unavailable',
+							`The run journal could not be written, so nothing was started: ${minted.message}`
+						),
+					};
 				case 'conflict':
 					return deny(
 						'idempotency-conflict',
@@ -416,28 +489,25 @@ export function createManagedOperations(deps: ManagedOperationsDeps): ManagedApi
 							'unknown',
 							requestId,
 							'outcome-unknown',
-							`Run ${recorded.run.runId} was dispatched and its outcome is not known; it is not resent.`
+							`Run ${minted.run.runId} was dispatched and its outcome is not known; it is not resent.`
 						),
 					};
 				case 'replayed':
 					return {
 						ok: true,
-						value: ok(requestId, { run: journalRunRecord(recorded.run), disposition: 'replayed' }),
+						value: ok(requestId, { run: journalRunRecord(minted.run), disposition: 'replayed' }),
 					};
 				case 'accepted':
 					break;
 			}
 
-			const sent = await deps.turns.sendManaged(agent.id, tabId, input.content.text, {
-				context,
-				authority,
-				policy: deps.policy(),
-				journal: deps.journal,
-				runId: recorded.run.runId,
-				attemptId: recorded.attempt.attemptId,
-				resources,
-			});
-			const run = deps.journal.get(recorded.run.runId) ?? recorded.run;
+			const sent = await deps.turns.sendManaged(
+				agent.id,
+				tabId,
+				input.content.text,
+				minted.dispatch
+			);
+			const run = deps.journal.get(minted.run.runId) ?? minted.run;
 			if (sent.status === 'refused') {
 				switch (sent.reason) {
 					case 'managed-denied':

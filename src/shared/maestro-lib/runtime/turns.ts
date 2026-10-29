@@ -26,6 +26,12 @@
  * - **Resume belongs to the provider that issued the id.** The session id is written to the slot of
  *   the provider the turn was sent under, so a swap mid-turn, or swap-and-back after one, resumes
  *   the right conversation.
+ * - **On an enrolled binding nothing is queued without a dispatch** (MRC3-01-01). A plain send is
+ *   minted one here from the host's standing (`options.standing`), through the run journal, the way
+ *   the managed facade mints a peer's submission; enrolled with nothing answering, it is refused
+ *   before the queue and nothing is journaled. A managed item that cannot start is dropped, not
+ *   held: its attempt is journaled as failed, and a held copy could be resumed into a second
+ *   dispatch of the same attempt. A standalone binding queues as it always has.
  *
  * The queue is in memory. A host that exits drops what was waiting; a turn that was running is
  * stopped and recorded as interrupted (`stopAll`), which is what the person asked for by quitting.
@@ -67,7 +73,14 @@ import {
 	type LifecycleAdmissionRef,
 	type LifecycleEventSink,
 } from '../managed/events';
-import type { ManagedDispatch, ManagedSendResult, ManagedTurnPort } from '../managed/operations';
+import { ownRunIdentity, type HeadlessSpawnAuthority } from '../managed/host-adapter';
+import {
+	mintManagedDispatch,
+	type ManagedDispatch,
+	type ManagedSendResult,
+	type ManagedTurnPort,
+} from '../managed/operations';
+import type { RunJournal } from '../managed/run-journal';
 import {
 	assembleTurn,
 	type AssembledTurn,
@@ -122,6 +135,24 @@ export interface RuntimeTurnDeps {
 	schedule?(run: () => void, ms: number): () => void;
 }
 
+/**
+ * The standing every plain submission is admitted on (MRC3-01-01). The port is the headless spawn
+ * authority over the binding and the attached host, the one the background turns admit with,
+ * built on every call so an enrollment that appeared, lapsed or changed hands applies to the next
+ * send. Absent (a host composed with no binding, a test over the queue alone): every send is
+ * standalone, which is what no binding means.
+ */
+export interface RuntimeTurnStanding {
+	port(): Pick<
+		HeadlessSpawnAuthority,
+		'standing' | 'authority' | 'policy' | 'unavailableReason' | 'context'
+	>;
+	/** The run journal a minted dispatch is recorded in. Null: the journal could not be loaded. */
+	journal(): RunJournal | null;
+	/** Fresh request and attempt ids for a minted dispatch. */
+	newId(): string;
+}
+
 export interface RuntimeTurnsOptions {
 	paths: MaestroPaths;
 	repository: AgentRepository;
@@ -131,6 +162,8 @@ export interface RuntimeTurnsOptions {
 	rules?: Partial<RuleContext>;
 	/** Does an Auto Run hold this agent's working tree? A write message then waits for the run (AE17). */
 	autoRunHolds?(agentId: string): boolean;
+	/** The binding's standing a plain send is admitted on. Absent: standalone. */
+	standing?: RuntimeTurnStanding;
 	options?: RuntimeTurnOptions;
 	deps?: Partial<RuntimeTurnDeps>;
 }
@@ -603,11 +636,107 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 	// The API
 	// -----------------------------------------------------------------------
 
+	type ManagedRefusalReason = Extract<
+		RunAgentTurnRefusal,
+		'managed-denied' | 'managed-unavailable' | 'managed-unknown'
+	>;
+
 	type Submission =
 		| { status: 'queued'; receipt: Extract<TurnSendReceipt, { status: 'queued' }> }
 		| { status: 'started' }
-		| { status: 'failed'; message: string; reason?: RunAgentTurnRefusal }
+		/** Could not start. `held`: the item stays in the queue; a managed item was dropped instead. */
+		| { status: 'failed'; message: string; reason?: RunAgentTurnRefusal; held: boolean }
+		/** Refused by the binding's standing before anything was queued or journaled. */
+		| { status: 'refused'; message: string; reason: ManagedRefusalReason }
 		| { status: 'not-found' | 'rejected'; message: string };
+
+	type StandingAdmission =
+		| { kind: 'standalone' }
+		| { kind: 'minted'; dispatch: ManagedDispatch }
+		| { kind: 'refused'; reason: ManagedRefusalReason; message: string };
+
+	/**
+	 * The dispatch a plain submission runs under on this binding (MRC3-01-01). Standalone: none, and
+	 * nothing is read or written. Enrolled with an answering authority: minted here from the host's
+	 * standing (the installation, the registered actor, the policy revision of this moment, a fresh
+	 * request and attempt through the run journal), the way the managed facade mints a peer's
+	 * submission. Enrolled with nothing answering (no attached host, a host for another binding, an
+	 * unreadable record, a lost data directory, no journal): refused, and nothing is journaled, since
+	 * a journal entry would name an attempt nothing can admit.
+	 */
+	async function admitStanding(
+		agentId: string,
+		tabId: string,
+		providerId: string,
+		text: string
+	): Promise<StandingAdmission> {
+		const standing = options.standing;
+		if (!standing) return { kind: 'standalone' };
+		const port = standing.port();
+		if (port.standing() === 'standalone') return { kind: 'standalone' };
+		const unavailable = (message: string): StandingAdmission => ({
+			kind: 'refused',
+			reason: 'managed-unavailable',
+			message,
+		});
+		if (port.unavailableReason !== null) {
+			return unavailable(
+				`This installation is enrolled and no authority answers for it, so the message was not queued: ${port.unavailableReason}`
+			);
+		}
+		const writer = options.fence();
+		if (!writer.ok) {
+			return unavailable(`This runtime no longer owns its data directory: ${writer.reason}`);
+		}
+		const journal = standing.journal();
+		if (!journal) {
+			return unavailable(
+				'This installation is enrolled and its run journal could not be loaded, so the message was not queued.'
+			);
+		}
+		const policy = port.policy();
+		const identity = ownRunIdentity(standing.newId);
+		const verified = port.context({
+			identity,
+			traceId: `turn:${identity.requestId}`,
+			policyRevision: policy.policyRevision,
+		});
+		if (!verified.ok) {
+			return {
+				kind: 'refused',
+				reason: 'managed-denied',
+				message: `The turn's context was not accepted: ${verified.problems.join('; ')}`,
+			};
+		}
+		const minted = await mintManagedDispatch({
+			context: verified.context,
+			authority: port.authority,
+			policy,
+			journal,
+			agentId,
+			tabId,
+			providerId,
+			text,
+			resources: [],
+		});
+		switch (minted.status) {
+			case 'accepted':
+				return { kind: 'minted', dispatch: minted.dispatch };
+			case 'unavailable':
+				return unavailable(
+					`The run journal could not be written, so the message was not queued: ${minted.message}`
+				);
+			// A fresh request id cannot replay or collide; an answer that says it did is not a dispatch.
+			case 'replayed':
+			case 'conflict':
+			case 'unknown':
+				return {
+					kind: 'refused',
+					reason: 'managed-unknown',
+					message: `The run journal answered ${minted.status} for a fresh submission (run ${minted.run.runId}); the message was not queued.`,
+				};
+		}
+	}
 
 	/** Build the item and submit it; the two senders word the answer. */
 	async function submitText(
@@ -626,6 +755,17 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		}
 		const tab = toTurnTab(tabRecord);
 
+		// A dispatch the caller brought (the managed facade) or the binding's own; never neither on
+		// an enrolled binding.
+		let dispatch = managed;
+		if (!dispatch) {
+			const admitted = await admitStanding(agentId, tabId, agent.toolType, text);
+			if (admitted.kind === 'refused') {
+				return { status: 'refused', reason: admitted.reason, message: admitted.message };
+			}
+			if (admitted.kind === 'minted') dispatch = admitted.dispatch;
+		}
+
 		const item: TurnItem = {
 			id: ctx.newId(),
 			tabId,
@@ -637,7 +777,7 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 				effort: tab.customEffort ?? agent.customEffort,
 			},
 			settingsProvider: agent.toolType,
-			...(managed ? { managed } : {}),
+			...(dispatch ? { managed: dispatch } : {}),
 		};
 
 		const queue = queueFor(agentId);
@@ -659,7 +799,10 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		}
 		const verdict = await attempt;
 		if (verdict.ok) return { status: 'started' };
-		return { status: 'failed', message: verdict.message, reason: verdict.reason };
+		// The attempt is journaled as failed; the peer decides what follows. A held copy in the
+		// queue could be resumed into a second dispatch of the same attempt, so it goes.
+		if (dispatch) queue.remove(item.id);
+		return { status: 'failed', message: verdict.message, reason: verdict.reason, held: !dispatch };
 	}
 
 	async function send(
@@ -685,21 +828,18 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			case 'not-found':
 			case 'rejected':
 				return fail(method, submitted.status, submitted.message);
+			// The binding's standing refused it: nothing was queued, nothing was journaled.
+			case 'refused':
+				return fail(method, 'rejected', `[${submitted.reason}] ${submitted.message}`);
 			case 'failed':
 				return fail(
 					method,
 					'failed',
-					`${submitted.message} The message is held in the queue; remove it or fix the cause and resume.`
+					submitted.held
+						? `${submitted.message} The message is held in the queue; remove it or fix the cause and resume.`
+						: `${submitted.message} The managed attempt is journaled as failed and the message is not held; send it again for a new attempt.`
 				);
 		}
-	}
-
-	function dropManagedItem(runId: string): boolean {
-		for (const queue of queues.values()) {
-			const held = queue.items().find((item) => item.managed?.runId === runId);
-			if (held && queue.remove(held.id)) return true;
-		}
-		return false;
 	}
 
 	const managedPort: ManagedTurnPort = {
@@ -731,10 +871,11 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 						detail: submitted.message,
 					});
 					return { status: 'refused', reason: 'other', message: submitted.message };
+				// A caller that brought its dispatch is never refused by the standing; kept for the type.
+				case 'refused':
+					return { status: 'refused', reason: submitted.reason, message: submitted.message };
 				case 'failed': {
-					// The attempt is journaled as failed; the peer decides what follows. A held copy in
-					// the queue could be resumed into a second dispatch of the same attempt, so it goes.
-					dropManagedItem(dispatch.runId);
+					// The attempt is journaled as failed and the item was dropped (see `submitText`).
 					const reason =
 						submitted.reason === 'managed-denied' ||
 						submitted.reason === 'managed-unavailable' ||
