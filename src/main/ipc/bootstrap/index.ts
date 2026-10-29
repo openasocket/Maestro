@@ -130,7 +130,7 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 		getLifecycle: () => deps.getEnterpriseService()?.lifecycle ?? null,
 		getPolicyStatus: () => deps.getEnterpriseService()?.policy ?? null,
 		getIdentity: () => deps.getEnterpriseService()?.identity ?? null,
-		getInventory: () => deps.getEnterpriseService()?.inventory ?? null,
+		getManaged: () => deps.getEnterpriseService()?.managed ?? null,
 		getInbox: () => deps.getEnterpriseService()?.inbox ?? null,
 		getCommands: () => deps.getEnterpriseService()?.commands ?? null,
 	});

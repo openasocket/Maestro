@@ -106,6 +106,32 @@ import {
 } from './remote';
 import type { ProcessSpawnAuthorityPort } from '../process-manager/types';
 import type { CueSpawnAuthorityPort } from '../cue/cue-run-router';
+import { PICKABLE_AGENT_IDS } from '../../shared/agentMetadata';
+import {
+	COUNTERPART_SUPPORT,
+	COUNTERPART_SUPPORT_REVISION,
+	MANAGED_CAPABILITY_SUPPORT,
+	MANAGED_ENDPOINT_PROTOCOLS,
+	type SupportEntry,
+} from '../../shared/maestro-lib/managed/compatibility';
+import type {
+	EndpointEnrollmentResult,
+	EndpointStatus,
+} from '../../shared/maestro-lib/managed/endpoint-port';
+import { MANAGED_CONTRACT_VERSION } from '../../shared/maestro-lib/managed/types';
+import {
+	providerRouteSupport,
+	type ProviderRouteSupport,
+} from '../../shared/maestro-lib/providers/capabilities';
+import type { ManagedSettingLocksView } from '../../shared/managedSettingsLock';
+import { heldUpdate } from '../update-checker';
+import { heldEgress, type EgressHold } from '../utils/fetchWithTimeout';
+import type { EnrollmentRequestInput, LifecycleOutcome } from './enrollment';
+import type { InstallationInventory } from './inventory';
+import { heldListeners, type ListenerHold } from './listener-gate';
+import { projectManagedState, type ManagedStateView } from './managed-state';
+import { readManagedSettingLocks } from './settings-policy';
+import type { UpdateHold } from './update-policy';
 
 /** What this host can do over the endpoint socket. Execution is the one it cannot run managed without. */
 export const ENTERPRISE_SUPPORTED_CAPABILITIES: readonly string[] = [
@@ -119,6 +145,109 @@ export const ENTERPRISE_SUPPORTED_CAPABILITIES: readonly string[] = [
 	'command',
 	'workflow',
 ];
+
+/**
+ * What the egress, update and listener ceilings refused, as the status
+ * projection lists them. The desktop reads the real ledgers (the default);
+ * a test or a headless composition names its own.
+ */
+export interface ManagedHolds {
+	egress(): readonly EgressHold[];
+	update(): UpdateHold | null;
+	listeners(): readonly ListenerHold[];
+}
+
+export const DEFAULT_MANAGED_HOLDS: ManagedHolds = {
+	egress: heldEgress,
+	update: heldUpdate,
+	listeners: heldListeners,
+};
+
+/**
+ * This build's managed support matrix: the library and contract it speaks,
+ * the capabilities and counterpart rows of `compatibility.ts`, and every
+ * provider's per-route standalone and managed standing. A build fact, read
+ * through the same facade as the live state so one `maestro-cli managed`
+ * answer names both. `Plans/mega-maestro-rc/support-matrix.json` is its
+ * exported, annotated copy.
+ */
+export interface ManagedSupportMatrix {
+	library: string;
+	contract: string;
+	endpointProtocols: readonly number[];
+	counterpartRevision: string;
+	capabilities: readonly SupportEntry[];
+	counterpart: readonly SupportEntry[];
+	routes: readonly ProviderRouteSupport[];
+}
+
+export interface ManagedOperationsDeps {
+	lifecycle: EnrollmentLifecycle;
+	policy: PolicyStatusService;
+	identity: EnterpriseIdentityStore;
+	inventory: InstallationInventoryService;
+	/** Default: the real ledgers (`DEFAULT_MANAGED_HOLDS`). */
+	holds?: ManagedHolds;
+	/** Default: `readManagedSettingLocks()`, the settings-policy module's own read. */
+	locks?: () => ManagedSettingLocksView;
+	/** The providers the support matrix lists. Default: every pickable provider. */
+	providers?: readonly string[];
+}
+
+/**
+ * The one implementation of the managed status surface (MRC2-07-01): what the
+ * Settings > Environment pane, the `enterprise:*` IPC, the web bridge and
+ * `maestro-cli managed` all answer from. Every value here is already a
+ * projection for a person's screen: no sealed bytes, no socket path, no
+ * invitation, proof, secret or anchor is in any of them, so a caller may
+ * print a whole answer. The enrollment request is the one secret-carrying
+ * input; it is relayed to the lifecycle and never echoed in the outcome.
+ */
+export interface ManagedOperations {
+	/** The narrow standing a settings pane reads (MRC-11-03), with the holds in force. */
+	status(): ManagedStateView;
+	requestEnrollment(
+		input: EnrollmentRequestInput
+	): Promise<LifecycleOutcome<EndpointEnrollmentResult>>;
+	/** An authenticated status update: re-attach over the registered socket. */
+	refreshPolicy(): Promise<LifecycleOutcome<EndpointStatus>>;
+	/** What this installation is and can do (MRC-10-06B): no path, socket or secret. */
+	inventory(): InstallationInventory;
+	supportMatrix(): ManagedSupportMatrix;
+	/** Every settings key the managed policy holds right now, by name (MRC2-06-05). */
+	locks(): ManagedSettingLocksView;
+}
+
+export function createManagedOperations(deps: ManagedOperationsDeps): ManagedOperations {
+	const holds = deps.holds ?? DEFAULT_MANAGED_HOLDS;
+	const locks = deps.locks ?? readManagedSettingLocks;
+	const providers = deps.providers ?? PICKABLE_AGENT_IDS;
+	return {
+		status: () =>
+			projectManagedState({
+				status: deps.lifecycle.status(),
+				policy: deps.policy.status(),
+				custody: deps.identity.custody(),
+				supported: ENTERPRISE_SUPPORTED_CAPABILITIES,
+				egress: holds.egress(),
+				update: holds.update(),
+				listeners: holds.listeners(),
+			}),
+		requestEnrollment: (input) => deps.lifecycle.requestEnrollment(input),
+		refreshPolicy: () => deps.policy.refresh(),
+		inventory: () => deps.inventory.snapshot(),
+		supportMatrix: () => ({
+			library: MAESTRO_LIB_VERSION,
+			contract: MANAGED_CONTRACT_VERSION,
+			endpointProtocols: MANAGED_ENDPOINT_PROTOCOLS,
+			counterpartRevision: COUNTERPART_SUPPORT_REVISION,
+			capabilities: MANAGED_CAPABILITY_SUPPORT,
+			counterpart: COUNTERPART_SUPPORT,
+			routes: providers.flatMap((agentId) => providerRouteSupport(agentId)),
+		}),
+		locks: () => locks(),
+	};
+}
 
 export interface EnterpriseServiceDeps {
 	/** The data directory the sealed record lives in (per device, never the sync folder). */
@@ -147,6 +276,8 @@ export interface EnterpriseServiceDeps {
 	installed?: InventoryDeps['installed'];
 	/** The pinned Mega-Maestro contracts artifact (`vendor/mega-maestro/contracts.pin.json`) to read, or its status. Default: absent (CP-01). */
 	contractsPin?: string | (() => ContractsPinStatus);
+	/** Test seam: the hold ledgers `managed.status()` lists. Default: the real ones. */
+	holds?: ManagedHolds;
 }
 
 export interface EnterpriseService {
@@ -222,6 +353,13 @@ export interface EnterpriseService {
 	 * is its read.
 	 */
 	readonly commands: CommandService;
+	/**
+	 * The managed status surface (MRC2-07-01): status, enrollment request, policy
+	 * refresh, inventory, support matrix and lock listing, as the IPC handlers,
+	 * the web bridge and `maestro-cli managed` all call it. One implementation;
+	 * every answer is printable (nothing sealed or secret is in it).
+	 */
+	readonly managed: ManagedOperations;
 	/**
 	 * The workflow owner fences this installation holds (MRC-07-06), claimed
 	 * through the endpoint's workflow owner operation and kept in
@@ -432,6 +570,16 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		}),
 		now,
 	});
+	// The status surface every caller answers from (MRC2-07-01): the IPC handler,
+	// the bridge and the CLI read this one object, so a held key, a stale policy
+	// or a refused custody is the same sentence on every screen.
+	const managed = createManagedOperations({
+		lifecycle,
+		policy,
+		identity,
+		inventory,
+		...(deps.holds ? { holds: deps.holds } : {}),
+	});
 	return {
 		installation,
 		identity,
@@ -452,6 +600,7 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		inventory,
 		inbox,
 		commands,
+		managed,
 		workflows,
 		claimWorkflowFence,
 		async start() {

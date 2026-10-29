@@ -189,6 +189,14 @@ import { gloss } from './commands/gloss';
 import { themeShow, themeExport, themeImport, themeSet } from './commands/theme';
 import { encoreList, encoreSet } from './commands/encore';
 import {
+	managedStatus,
+	managedInventory,
+	managedSupportMatrix,
+	managedLocks,
+	managedPolicyRefresh,
+	managedEnrollRequest,
+} from './commands/managed';
+import {
 	computerHistoryApps,
 	computerHistoryClear,
 	computerHistoryConfig,
@@ -2417,6 +2425,78 @@ encore
 	.description('Turn a feature off')
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((feature, options) => encoreSet(feature, false, options));
+
+// Managed operation (Mega-Maestro) - the CLI path of the Mega-Maestro section
+// of Settings > Environment. Every verb answers from the same service function
+// the pane reads (`EnterpriseService.managed`), over the running desktop. Not
+// an Encore feature: management is the endpoint's to switch, never the user's.
+const managed = program
+	.command('managed')
+	.description(
+		'Managed operation (Mega-Maestro): standing, enrollment, policy, inventory, support matrix, settings locks'
+	);
+
+managed
+	.command('status')
+	.description('Show the managed standing the Settings > Environment pane shows')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => managedStatus(options));
+
+managed
+	.command('inventory')
+	.description(
+		'Show what this installation is and can do (versions, providers, collection health, gaps)'
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => managedInventory(options));
+
+managed
+	.command('support-matrix')
+	.description(
+		"Show this build's managed support rows: capabilities, counterpart dependencies, per-route"
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => managedSupportMatrix(options));
+
+managed
+	.command('locks')
+	.description(
+		'List every settings key the managed policy holds right now (the Managed badge in Settings)'
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => managedLocks(options));
+
+const managedPolicy = managed.command('policy').description('The policy this host runs under');
+
+managedPolicy
+	.command('refresh')
+	.description(
+		"Re-attach over the registered socket for a fresh policy status (the pane's Refresh policy)"
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => managedPolicyRefresh(options));
+
+const managedEnroll = managed
+	.command('enroll')
+	.description('Enrollment with a Mega-Maestro endpoint');
+
+managedEnroll
+	.command('request')
+	.description(
+		'Relay an enrollment request from a JSON file (socketPath, tenantId, orgId, mode, collectionProfile, trustRootDigest, invitation, keyPossessionProof); secrets stay in the file'
+	)
+	.requiredOption('-f, --file <path>', 'The JSON enrollment request file')
+	.option('--socket <path>', "Override the file's socketPath (the endpoint's Unix socket)")
+	.option('--tenant <id>', "Override the file's tenantId")
+	.option('--org <id>', "Override the file's orgId")
+	.option('--mode <mode>', "Override the file's mode: attended or managed")
+	.option(
+		'--profile <profile>',
+		"Override the file's collectionProfile: metadata, redacted, full or full_vibes"
+	)
+	.option('--trust-root <digest>', "Override the file's trustRootDigest (sha256 hex)")
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => managedEnrollRequest(options));
 
 // Computer History - local record of what the user saw and typed (Encore-gated,
 // off by default). Reads come from disk and work with the app closed; writes go

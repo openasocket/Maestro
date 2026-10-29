@@ -42,18 +42,13 @@ import {
 	type InboxClient,
 	type ManagedInboxView,
 } from '../../enterprise/inbox';
-import type { InstallationInventoryService } from '../../enterprise/inventory';
 import {
 	localReleaseOf,
-	projectManagedState,
 	type LocalRelease,
 	type ManagedStateView,
 } from '../../enterprise/managed-state';
 import type { PolicyStatusService } from '../../enterprise/policy-status';
-import { ENTERPRISE_SUPPORTED_CAPABILITIES } from '../../enterprise/service';
-import { heldListeners } from '../../enterprise/listener-gate';
-import { heldUpdate } from '../../update-checker';
-import { heldEgress } from '../../utils/fetchWithTimeout';
+import type { ManagedOperations } from '../../enterprise/service';
 import { withIpcErrorLogging } from '../../utils/ipcHandler';
 
 const LOG_CONTEXT = '[Enterprise]';
@@ -65,8 +60,12 @@ export interface EnterpriseHandlerDependencies {
 	getLifecycle: () => EnrollmentLifecycle | null;
 	getPolicyStatus: () => PolicyStatusService | null;
 	getIdentity: () => EnterpriseIdentityStore | null;
-	/** The installation inventory (MRC-10-06B); null when no service runs. */
-	getInventory: () => InstallationInventoryService | null;
+	/**
+	 * The managed status surface (`service.ts`, MRC2-07-01): the one implementation
+	 * of status, enrollment request, policy refresh and inventory that the bridge
+	 * and `maestro-cli managed` call too; null when no service runs.
+	 */
+	getManaged: () => ManagedOperations | null;
 	/** The notice and inbox client (MRC-11-04); null when no service runs. */
 	getInbox: () => InboxClient | null;
 	/** The typed runtime command service (MRC-11-05); null when no service runs. Read only: nothing here delivers a command. */
@@ -147,21 +146,13 @@ export function validateInboxAct(raw: unknown): {
 	};
 }
 
-/** The narrow standing a settings pane reads (MRC-11-03), or null without a service. */
+/**
+ * The narrow standing a settings pane reads (MRC-11-03), or null without a
+ * service. The projection itself lives in `service.ts` (`managed.status()`,
+ * MRC2-07-01) so the bridge and the CLI answer with the same sentence.
+ */
 export function readManagedState(deps: EnterpriseHandlerDependencies): ManagedStateView | null {
-	const lifecycle = deps.getLifecycle();
-	const policy = deps.getPolicyStatus();
-	const identity = deps.getIdentity();
-	if (!lifecycle || !policy || !identity) return null;
-	return projectManagedState({
-		status: lifecycle.status(),
-		policy: policy.status(),
-		custody: identity.custody(),
-		supported: ENTERPRISE_SUPPORTED_CAPABILITIES,
-		egress: heldEgress(),
-		update: heldUpdate(),
-		listeners: heldListeners(),
-	});
+	return deps.getManaged()?.status() ?? null;
 }
 
 export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies): void {
@@ -207,7 +198,7 @@ export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies):
 		'enterprise:inventory',
 		withIpcErrorLogging(
 			handlerOpts('inventory'),
-			async () => deps.getInventory()?.snapshot() ?? null
+			async () => deps.getManaged()?.inventory() ?? null
 		)
 	);
 
@@ -254,7 +245,7 @@ export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies):
 		'enterprise:requestEnrollment',
 		withIpcErrorLogging(handlerOpts('requestEnrollment'), async (raw: unknown) => {
 			const input = validateEnrollmentRequest(raw);
-			return lifecycle()?.requestEnrollment(input) ?? NO_SERVICE;
+			return deps.getManaged()?.requestEnrollment(input) ?? NO_SERVICE;
 		})
 	);
 
@@ -283,7 +274,7 @@ export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies):
 		'enterprise:refreshPolicy',
 		withIpcErrorLogging(
 			handlerOpts('refreshPolicy'),
-			async () => deps.getPolicyStatus()?.refresh() ?? NO_SERVICE
+			async () => deps.getManaged()?.refreshPolicy() ?? NO_SERVICE
 		)
 	);
 

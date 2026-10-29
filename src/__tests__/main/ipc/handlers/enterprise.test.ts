@@ -30,6 +30,7 @@ import {
 	registerEnterpriseHandlers,
 	validateEnrollmentRequest,
 } from '../../../../main/ipc/handlers/enterprise';
+import { createManagedOperations } from '../../../../main/enterprise/service';
 
 const lifecycle = {
 	status: vi.fn(),
@@ -127,11 +128,20 @@ describe('enterprise handlers', () => {
 		lifecycle.status.mockReturnValue(UNENROLLED);
 		policyStatus.status.mockReturnValue(POLICY);
 		identity.custody.mockReturnValue({ state: 'protected' });
+		// The REAL facade (MRC2-07-01) over the mocked services and empty hold ledgers: what
+		// the handler answers is what `maestro-cli managed` and the bridge answer.
+		const managed = createManagedOperations({
+			lifecycle: lifecycle as any,
+			policy: policyStatus as any,
+			identity: identity as any,
+			inventory: inventory as any,
+			holds: { egress: () => [], update: () => null, listeners: () => [] },
+		});
 		registerEnterpriseHandlers({
 			getLifecycle: () => lifecycle as any,
 			getPolicyStatus: () => policyStatus as any,
 			getIdentity: () => identity as any,
-			getInventory: () => inventory as any,
+			getManaged: () => managed,
 			getInbox: () => null,
 			getCommands: () => commands as any,
 		});
@@ -303,7 +313,7 @@ describe('enterprise handlers', () => {
 			getLifecycle: () => null,
 			getPolicyStatus: () => null,
 			getIdentity: () => null,
-			getInventory: () => null,
+			getManaged: () => null,
 			getInbox: () => null,
 			getCommands: () => null,
 		});
