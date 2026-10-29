@@ -46,12 +46,21 @@ import {
 	createManagedHostAdapter,
 	type ManagedHostAdapter,
 } from '../../../shared/maestro-lib/managed/host-adapter';
-import { inProcessContext } from '../../../shared/maestro-lib/managed/operations';
+import {
+	inProcessContext,
+	type ManagedSendResult,
+} from '../../../shared/maestro-lib/managed/operations';
+import type { JournalTerminalOutcome } from '../../../shared/maestro-lib/managed/run-journal';
 import { SYNTHETIC_EFFECTS_FILE, SYNTHETIC_PROVIDER_SOURCE } from './journeys';
 import type {
 	ManagedAuthenticatedContext,
+	ManagedCapability,
+	ManagedCapabilityOffer,
 	ManagedInstallationIdentity,
 	ManagedOperationContext,
+	ManagedPeerAuthentication,
+	ManagedPrincipalRef,
+	ManagedRunIdentity,
 } from '../../../shared/maestro-lib/managed/types';
 import {
 	startFakeEndpoint,
@@ -418,3 +427,102 @@ export function verifiedContext(
 	if (!verified.ok) throw new Error(`context refused: ${verified.problems.join('; ')}`);
 	return verified.context;
 }
+
+// ---------------------------------------------------------------------------
+// The public adapter conformance fixture (MCOMP-03-03)
+// ---------------------------------------------------------------------------
+
+/**
+ * The pin file's `conformance` section: a secret-free description of what the
+ * managed facade answers a consumer, published beside the runtime pin so a
+ * counterpart adapter reads the behavior it maps without this repository's
+ * private tests. This file holds the shape and the reader; deriving each
+ * step's envelope, composing a host from the public exports and running the
+ * fixture against it is the continuation's job (MCOMP-03-03A).
+ */
+export const RUNTIME_CONFORMANCE_FILE = path.resolve(
+	process.cwd(),
+	'Plans/integration-completion/runtime-conformance.json'
+);
+
+type ManagedSendRefusal = Extract<ManagedSendResult, { status: 'refused' }>['reason'];
+
+/** What the declared turn-port double answers on one step; absent on a step, the sink must not be reached. */
+export interface ConformanceSinkScript {
+	send?: 'queued' | 'started' | { refused: ManagedSendRefusal; message?: string };
+	then?: Array<'markDispatched' | `markTerminal:${JournalTerminalOutcome}` | 'markUnknown'>;
+	cancel?: 'stopped' | 'dequeued' | 'none';
+}
+
+export type ConformanceOperation = 'submit' | 'inspect' | 'cancel' | 'interrupt';
+
+export interface ConformanceStep {
+	id: string;
+	op: ConformanceOperation;
+	identity?: Partial<ManagedRunIdentity>;
+	caps?: ManagedCapability[];
+	installation?: Partial<ManagedInstallationIdentity>;
+	peer?: ManagedPeerAuthentication;
+	input?: Record<string, unknown>;
+	sink?: ConformanceSinkScript;
+	expect: Record<string, unknown>;
+}
+
+export interface ConformanceNegotiationCase {
+	id: string;
+	offer: ManagedCapabilityOffer;
+	expect: Record<string, unknown>;
+	missingNames?: string[];
+}
+
+export interface AdapterConformanceFixture {
+	artifactId: string;
+	formatVersion: number;
+	standing: string;
+	contract: {
+		managedContract: string;
+		endpointProtocol: number;
+		transport: ManagedPeerAuthentication;
+	};
+	invocation: {
+		entry: string;
+		host: { compose: string[]; rule: string };
+		consumer: Record<string, unknown>;
+	};
+	correlation: string[];
+	semantics: Record<string, string>;
+	host: {
+		installation: ManagedInstallationIdentity;
+		actor: ManagedPrincipalRef;
+		policyRevision: number;
+		agents: Array<{
+			agentId: string;
+			name: string;
+			providerId: string;
+			tabIds: string[];
+			activeTabId: string;
+		}>;
+		approvedResourceIds: string[];
+		content: Record<string, { text: string; sha256: string }>;
+		defaultSubmit: Record<string, unknown>;
+	};
+	negotiation: { minimumStatus: string; note: string; cases: ConformanceNegotiationCase[] };
+	operations: { sink: string; defaults: string; steps: ConformanceStep[] };
+}
+
+/** The `conformance` section of the pin file. Throws when the file holds none. */
+export function readAdapterConformance(file = RUNTIME_CONFORMANCE_FILE): AdapterConformanceFixture {
+	const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as { conformance?: unknown };
+	if (!parsed.conformance || typeof parsed.conformance !== 'object') {
+		throw new Error(`${file} holds no conformance section`);
+	}
+	return parsed.conformance as AdapterConformanceFixture;
+}
+
+/** The capability each operation needs the context to have requested. */
+export const CONFORMANCE_OPERATION_CAPABILITY: Record<ConformanceOperation, ManagedCapability> = {
+	submit: 'runs.submit',
+	inspect: 'runs.inspect',
+	cancel: 'runs.cancel',
+	interrupt: 'runs.interrupt',
+};

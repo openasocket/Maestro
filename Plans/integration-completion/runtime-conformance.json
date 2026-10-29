@@ -40,5 +40,290 @@
 		"receipts": {
 			"rule": "a counterpart adapter records qualifiedAgainst.maestroRuntimeSha256 = archive.sha256 in its own pin, read by scripts/mega-maestro-pair.mjs; nothing an adapter records is written here, so qualification cannot change the archive it names"
 		}
+	},
+	"conformance": {
+		"artifactId": "MAESTRO-M0-ADAPTER-CONFORMANCE",
+		"formatVersion": 1,
+		"standing": "a public, secret-free description of what the managed facade of library/index.js answers a consumer, read by a counterpart adapter as the behavior it maps and proven over the public exports by src/__tests__/integration/mega-maestro/conformance.test.ts; independent of sibling private source and of the acceptance artifacts under Plans/mega-maestro-rc/; it qualifies nothing (no pair, no provider, no lease): the sink it drives is a declared double and the runs it names never start a process",
+		"contract": {
+			"managedContract": "maestro-managed/1",
+			"endpointProtocol": 1,
+			"transport": "in-process"
+		},
+		"invocation": {
+			"entry": "library/index.js",
+			"host": {
+				"compose": [
+					"createRunJournal",
+					"createContextVerifier",
+					"createLocalHostAuthority",
+					"createManagedOperations"
+				],
+				"rule": "a host composes the facade over its own run journal, context verifier, authority, binding, agent repository and turn port; a consumer never composes it, it calls the ManagedApi the host exposes (in process, or over the host bridge as managed.*)"
+			},
+			"consumer": {
+				"negotiate": "negotiate(offer) takes no context: { supportedVersions, required, optional? }",
+				"operations": ["submit", "inspect", "cancel", "interrupt"],
+				"envelope": "{ context, input }; the HOST stamps peer after admitting the caller, a caller never names it",
+				"context": "ManagedOperationContext: contractVersion, installation, origin, actor, delegation, identity, policyRevision, workflow, traceId, requestedCapabilities",
+				"validate": "managedContextProblems(context) is the structural check a consumer can run itself; whether the attribution is true is the host verifier's decision"
+			}
+		},
+		"correlation": [
+			"every ManagedOperationResult carries the requestId of the context it answers, a refusal included; a malformed context is answered with the requestId read off it, or empty",
+			"an accepted submit answers run.runId = identity.runId when the peer named one, else a run id the host minted; rootRunId defaults to the run id; run.attemptId = identity.attemptId",
+			"a replayed submit (same idempotencyKey, same content.sha256) answers the first run with its latest attempt id and reaches no sink",
+			"the same idempotencyKey with other content, or a runId the journal already holds, is denied idempotency-conflict",
+			"inspect, cancel and interrupt address a run by runId; a run the journal does not hold is denied not-found"
+		],
+		"semantics": {
+			"denied": "a decision: unauthenticated (no verifier for the transport, or an attribution the verifier refuses), invalid-input, capability-unsupported (the context did not request the capability of the operation), not-found, context-mismatch, idempotency-conflict, policy-denied",
+			"unsupported": "no code path on this host (policy.status without a host adapter, events.resume without an event journal)",
+			"unavailable": "no decision could be obtained (the run journal could not be written, the sink has no authority); nothing started",
+			"unknown": "a real answer: the host cannot say whether the effect happened; a replay of an unknown run is answered unknown and not resent; cancel of an unknown run, or of a run the sink no longer holds, answers outcome unknown"
+		},
+		"host": {
+			"installation": {
+				"installationId": "inst-conformance",
+				"runtimeId": "runtime-conformance",
+				"processEpoch": "epoch-1"
+			},
+			"actor": { "kind": "service", "id": "adapter-conformance" },
+			"policyRevision": 1,
+			"agents": [
+				{
+					"agentId": "agent-1",
+					"name": "Conformance agent",
+					"providerId": "claude-code",
+					"tabIds": ["tab-1"],
+					"activeTabId": "tab-1"
+				}
+			],
+			"approvedResourceIds": ["res-approved"],
+			"content": {
+				"pong": {
+					"text": "Reply with the single word: pong.",
+					"sha256": "97f0ed1927e40f7d58cb491352dda21373058a37ec8ebbe7f45295a33321907d"
+				},
+				"ping": {
+					"text": "Reply with the single word: ping.",
+					"sha256": "668873f130e65fb64998ea4bf9a55347420a707bf2f97ee43868c9dd959830e6"
+				}
+			},
+			"defaultSubmit": {
+				"agentId": "agent-1",
+				"tabId": "tab-1",
+				"providerId": "claude-code",
+				"modelId": null,
+				"content": "pong",
+				"resourceIds": []
+			}
+		},
+		"negotiation": {
+			"minimumStatus": "locally-verified",
+			"note": "the facade negotiates at the locally-verified minimum, so on this build only capabilities.negotiate activates; the run operations are implemented and answer when a verified context requested them, but a peer that REQUIRES one is refused rather than quietly downgraded",
+			"cases": [
+				{
+					"id": "activate-negotiate",
+					"offer": {
+						"supportedVersions": ["maestro-managed/1"],
+						"required": ["capabilities.negotiate"],
+						"optional": ["runs.submit", "runs.inspect", "runs.cancel"]
+					},
+					"expect": {
+						"outcome": "activated",
+						"contractVersion": "maestro-managed/1",
+						"capabilities": ["capabilities.negotiate"]
+					}
+				},
+				{
+					"id": "deny-required-implemented",
+					"offer": {
+						"supportedVersions": ["maestro-managed/1"],
+						"required": ["capabilities.negotiate", "runs.submit"]
+					},
+					"expect": { "outcome": "denied", "reason": "missing-required-capability" },
+					"missingNames": ["runs.submit"]
+				},
+				{
+					"id": "deny-unsupported-version",
+					"offer": {
+						"supportedVersions": ["maestro-managed/2"],
+						"required": ["capabilities.negotiate"]
+					},
+					"expect": { "outcome": "denied", "reason": "unsupported-version" }
+				},
+				{
+					"id": "deny-unknown-capability",
+					"offer": {
+						"supportedVersions": ["maestro-managed/1"],
+						"required": ["capabilities.negotiate", "runs.teleport"]
+					},
+					"expect": { "outcome": "denied", "reason": "unknown-capability" },
+					"missingNames": ["runs.teleport"]
+				}
+			]
+		},
+		"operations": {
+			"sink": "the declared turn-port double of the fixture: send is what the host's sendManaged answers the facade, then the journal marks runAgentTurn would write before the facade re-reads the run, cancel what cancelRun answers; a step with a sink reaches it exactly once, a step without one must not reach it",
+			"defaults": "identity defaults to requestId req:<id>, idempotencyKey idem:<id>, attemptId att:<id>, runId null; caps to the capability of op; a submit input to host.defaultSubmit with content named by key (an object names the text and the sha256 by separate keys); origin headless, delegation direct, traceId trace:<id>; expect is matched as a subset of the result and requestId is checked on every step",
+			"steps": [
+				{
+					"id": "submit-accepted",
+					"op": "submit",
+					"identity": { "idempotencyKey": "idem-a", "runId": "run-a" },
+					"input": { "resourceIds": ["res-approved"] },
+					"sink": { "send": "queued" },
+					"expect": {
+						"status": "ok",
+						"value": {
+							"disposition": "accepted",
+							"run": {
+								"runId": "run-a",
+								"rootRunId": "run-a",
+								"attemptId": "att:submit-accepted",
+								"state": "queued"
+							}
+						}
+					}
+				},
+				{
+					"id": "inspect-queued",
+					"op": "inspect",
+					"input": { "runId": "run-a" },
+					"expect": {
+						"status": "ok",
+						"value": { "runId": "run-a", "attemptId": "att:submit-accepted", "state": "queued" }
+					}
+				},
+				{
+					"id": "submit-replayed",
+					"op": "submit",
+					"identity": { "idempotencyKey": "idem-a" },
+					"expect": {
+						"status": "ok",
+						"value": {
+							"disposition": "replayed",
+							"run": { "runId": "run-a", "attemptId": "att:submit-accepted" }
+						}
+					}
+				},
+				{
+					"id": "submit-conflict-content",
+					"op": "submit",
+					"identity": { "idempotencyKey": "idem-a" },
+					"input": { "content": "ping" },
+					"expect": { "status": "denied", "code": "idempotency-conflict" }
+				},
+				{
+					"id": "cancel-requested",
+					"op": "cancel",
+					"input": { "runId": "run-a" },
+					"sink": { "cancel": "dequeued" },
+					"expect": { "status": "ok", "value": { "runId": "run-a", "outcome": "requested" } }
+				},
+				{
+					"id": "submit-completed",
+					"op": "submit",
+					"identity": { "runId": "run-c" },
+					"sink": { "send": "started", "then": ["markDispatched", "markTerminal:completed"] },
+					"expect": {
+						"status": "ok",
+						"value": {
+							"disposition": "accepted",
+							"run": { "runId": "run-c", "state": "completed" }
+						}
+					}
+				},
+				{
+					"id": "cancel-already-terminal",
+					"op": "cancel",
+					"input": { "runId": "run-c" },
+					"expect": { "status": "ok", "value": { "runId": "run-c", "outcome": "already-terminal" } }
+				},
+				{
+					"id": "submit-unknown-fate",
+					"op": "submit",
+					"identity": { "idempotencyKey": "idem-d", "runId": "run-d" },
+					"sink": { "send": "started", "then": ["markDispatched", "markUnknown"] },
+					"expect": {
+						"status": "ok",
+						"value": { "disposition": "accepted", "run": { "runId": "run-d", "state": "unknown" } }
+					}
+				},
+				{
+					"id": "cancel-unknown-run",
+					"op": "cancel",
+					"input": { "runId": "run-d" },
+					"expect": { "status": "ok", "value": { "runId": "run-d", "outcome": "unknown" } }
+				},
+				{
+					"id": "submit-replay-of-unknown",
+					"op": "submit",
+					"identity": { "idempotencyKey": "idem-d" },
+					"expect": { "status": "unknown", "code": "outcome-unknown" }
+				},
+				{
+					"id": "inspect-not-found",
+					"op": "inspect",
+					"input": { "runId": "run-missing" },
+					"expect": { "status": "denied", "code": "not-found" }
+				},
+				{
+					"id": "submit-provider-mismatch",
+					"op": "submit",
+					"input": { "providerId": "codex" },
+					"expect": { "status": "denied", "code": "context-mismatch" }
+				},
+				{
+					"id": "submit-digest-mismatch",
+					"op": "submit",
+					"input": { "content": { "text": "pong", "sha256": "ping" } },
+					"expect": { "status": "denied", "code": "invalid-input" }
+				},
+				{
+					"id": "submit-capability-not-requested",
+					"op": "submit",
+					"caps": ["runs.inspect"],
+					"expect": { "status": "denied", "code": "capability-unsupported" }
+				},
+				{
+					"id": "submit-foreign-installation",
+					"op": "submit",
+					"installation": { "installationId": "inst-other" },
+					"expect": { "status": "denied", "code": "unauthenticated" }
+				},
+				{
+					"id": "submit-unverified-transport",
+					"op": "submit",
+					"peer": "os-peer",
+					"expect": { "status": "denied", "code": "unauthenticated" }
+				},
+				{
+					"id": "submit-malformed-context",
+					"op": "submit",
+					"identity": { "requestId": "" },
+					"expect": { "status": "denied", "code": "invalid-input", "requestId": "" }
+				},
+				{
+					"id": "sink-denied",
+					"op": "submit",
+					"sink": { "send": { "refused": "managed-denied" } },
+					"expect": { "status": "denied", "code": "policy-denied" }
+				},
+				{
+					"id": "sink-unavailable",
+					"op": "submit",
+					"sink": { "send": { "refused": "managed-unavailable" } },
+					"expect": { "status": "unavailable", "code": "runtime-unavailable" }
+				},
+				{
+					"id": "sink-unknown",
+					"op": "submit",
+					"sink": { "send": { "refused": "managed-unknown" } },
+					"expect": { "status": "unknown", "code": "outcome-unknown" }
+				}
+			]
+		}
 	}
 }
