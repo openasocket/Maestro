@@ -1,0 +1,44 @@
+{
+	"formatVersion": 1,
+	"owner": "maestro",
+	"runtime": {
+		"artifactId": "MAESTRO-M0-RUNTIME",
+		"standing": "identity only: this names the archive a pair loads; MAESTRO-M0-RUNTIME-BUILD and MAESTRO-M0-RUNTIME are receipts under Plans/integration-completion/evidence/, never this file",
+		"kind": "maestro-runtime",
+		"archiveFormatVersion": 2,
+		"archive": {
+			"file": "runtime.tgz",
+			"sha256": "166bcdfec7b63dadb3bbe907d74603e9f6c25ef3ee4b3d508a7b8d43e3dcb9a5",
+			"sha512": "95e6161a8e263f7af2a71e46827230490a75d97794cb0eea80632c8a88f939284675a509aa357a2125041fb97ff20c66b48c4ead18f04e549b0b0d265721afa1",
+			"bytes": 2444633
+		},
+		"manifestSha256": "d5cdbe4fc47fb3a6db32e74478de82d4d61eb881f7d1f37f6164d46f5359d7d4",
+		"payloadDigest": "962f0f84dfda6072275e9fe8839d50f862ff202bd3a133ee3d124c760dcc55ba",
+		"payloadFiles": 298,
+		"versions": {
+			"app": "1.1.0-RC",
+			"library": "0.32.0",
+			"managedContract": "maestro-managed/1",
+			"endpointProtocol": 1
+		},
+		"implementation": {
+			"rules": "maestro-implementation-tree/1",
+			"digest": "29e594c484a5fa0e4aceb1773b53f714dd556609a67ecc727c676a5f5ff8c430",
+			"commit": "955fd7b4d4fd34ad35df4c00ba60c40c8100bb19",
+			"fileCount": 6585
+		},
+		"library": {
+			"sourceRevision": "955fd7b4d4fd34ad35df4c00ba60c40c8100bb19",
+			"inputSha256": "fd606bdab76b61c5ff7ccf6ea7d26da89d46c5fe49de93a3ae1b6044a2cebde1",
+			"inputFiles": 323,
+			"entrySha256": "b21f1f7d39675d39e8cc2b7468caa7d5a4cfd04b31aa09d64351900f73164f0d"
+		},
+		"location": {
+			"directory": "dist/mega-maestro-runtime/0.32.0/166bcdfec7b63dadb3bbe907d74603e9f6c25ef3ee4b3d508a7b8d43e3dcb9a5",
+			"rule": "obtain the archive by archive.sha256 and verify the sidecar and sha512; the directory is where the packager lands it"
+		},
+		"receipts": {
+			"rule": "a counterpart adapter records qualifiedAgainst.maestroRuntimeSha256 = archive.sha256 in its own pin, read by scripts/mega-maestro-pair.mjs; nothing an adapter records is written here, so qualification cannot change the archive it names"
+		}
+	}
+}
