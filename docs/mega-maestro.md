@@ -105,7 +105,16 @@ node scripts/mega-maestro-pair.mjs check --json   # exit 0: a certifiable pair c
 node scripts/mega-maestro-pair.mjs run --runtime dist/mega-maestro-runtime/<version>/<sha256> --out evidence.json
 ```
 
-`run` needs Docker on a Linux-capable host and the sibling endpoint source or a packaged artifact; it exits 0 for a certifiable pass, 3 for a completed run that is not certifiable (a dirty endpoint source, a stale library or a missing producer), 1 for a container failure. Each run leaves `.maestro/playbooks/Working/pair-<stamp>/` with the driver log and the endpoint's answers. A new commit makes the packaged runtime `stale` until it is repackaged; `--allow-stale` records that instead of refusing.
+`run` needs Docker on a Linux-capable host and the sibling endpoint source or a packaged artifact; it exits 0 for a certifiable pass, 3 for a completed run that is not certifiable (a dirty endpoint source, a stale library or a missing producer), 1 for a container failure. Each run leaves `.maestro/playbooks/Working/pair-<stamp>/` with the driver log and the endpoint's answers.
+
+The archive holds implementation inputs only (HEAD, the branch, tree dirtiness and the acceptance rows are recorded beside it in `artifact.json` and `acceptance.json`), so a commit that touches no implementation file leaves an existing archive current and an implementation change always yields a new digest. The archive a pair loads is the one named by the committed pin, the `runtime` section of `Plans/integration-completion/runtime-conformance.json`:
+
+```bash
+node scripts/package-mega-maestro-runtime.mjs --runtime dist/mega-maestro-runtime/<version>/<sha256>             # exit 0: ready; 2: drift, dirty, unpinned, a foreign pin or a receipt in the pin
+node scripts/package-mega-maestro-runtime.mjs --runtime dist/mega-maestro-runtime/<version>/<sha256> --write-pin # pin a verified archive, then commit the pin
+```
+
+`ready` means the archive is bound to its sidecar and manifest by sha256 and sha512, the archived implementation map and library inputs are the working tree's now, and the pin names it; `drift` lists the files that moved. No flag admits anything else to a run, and `--allow-stale` applies only to `dist/maestro-lib`. The pin is an identity: an adapter's `qualifiedAgainst.maestroRuntimeSha256` names `archive.sha256` in the adapter's own pin, never here, so qualifying an archive cannot change it.
 
 The integration tests under `src/__tests__/integration/mega-maestro/` run without Docker:
 

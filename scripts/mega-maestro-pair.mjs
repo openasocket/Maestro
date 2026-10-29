@@ -18,7 +18,12 @@
  * `--runtime` drives the packaged Maestro runtime artifact
  * (`npm run package:mega-maestro-runtime`) instead of `dist/maestro-lib`: only
  * its `library/` payload is extracted, every file checked against the
- * manifest, and nothing else in the archive is loaded. The producer pins
+ * manifest, and nothing else in the archive is loaded. A runtime is loaded
+ * only as `ready` under the packager's `verifyRuntimeInput()` (bound by
+ * sha256 and sha512, its implementation map the tree's now, named by the
+ * committed pin `Plans/integration-completion/runtime-conformance.json`,
+ * `--runtime-pin` for another); no flag admits a drifted, dirty or unpinned
+ * one, and `--allow-stale` speaks only of `dist/maestro-lib`. The producer pins
  * beside the contracts pin (`runtime-adapter.pin.json` for CP-02,
  * `workflow-authority.pin.json` for CP-03: `sha256`, `sourceRevision`,
  * `sourceDirty`, and for CP-02 `qualifiedAgainst.maestroRuntimeSha256`) are
@@ -103,7 +108,11 @@ export function inspectLibrary(dir, headRevision) {
 		const target = path.join(dir, name);
 		if (!exists(target) || sha256(fs.readFileSync(target)) !== digest) mismatched.push(name);
 	}
-	const stale = headRevision !== null && provenance.sourceRevision !== headRevision;
+	// Stale is "an input moved", not "HEAD moved": a commit that touches no bundled input leaves
+	// the build current. A provenance with no input map (an older build) falls back to HEAD.
+	const headMoved = headRevision !== null && provenance.sourceRevision !== headRevision;
+	const moved = provenance.inputs ? movedInputs(provenance.inputs) : null;
+	const stale = moved ? moved.length > 0 : headMoved;
 	const status = mismatched.length
 		? 'mismatch'
 		: provenance.sourceDirty
@@ -119,7 +128,9 @@ export function inspectLibrary(dir, headRevision) {
 		sourceRevision: provenance.sourceRevision,
 		sourceDirty: provenance.sourceDirty === true,
 		headRevision,
+		headMoved,
 		stale,
+		movedInputs: moved ? moved.slice(0, 20) : null,
 		payloadFiles: Object.keys(provenance.payloadSha256 ?? {}).length,
 		mismatched,
 		entrySha256: exists(path.join(dir, 'index.js'))
@@ -146,14 +157,35 @@ export function inspectPin(file) {
 
 /** The archive name `scripts/package-mega-maestro-runtime.mjs` writes (not imported: that script imports this one). */
 export const RUNTIME_ARCHIVE_NAME = 'runtime.tgz';
+/** The artifact format this harness loads: 2 keeps HEAD and every other observation out of the archive. */
+export const RUNTIME_ARTIFACT_FORMAT_VERSION = 2;
 
-/** One packaged Maestro runtime artifact directory, bound to its digest by name, sidecar and manifest. */
+/** Every recorded input whose working-tree bytes are not the recorded digest (or is gone). */
+export function movedInputs(inputs, root = REPO_ROOT) {
+	return Object.entries(inputs)
+		.filter(([file, digest]) => {
+			const full = path.join(root, file);
+			return !exists(full) || sha256(fs.readFileSync(full)) !== digest;
+		})
+		.map(([file]) => file);
+}
+
+/**
+ * One packaged Maestro runtime artifact directory, bound to its digest by
+ * name, sidecar (sha256) and manifest (sha256 and sha512). `bound` is the
+ * word for a directory that is what it says; whether it is the runtime of
+ * this implementation tree and of the committed pin is the packager's
+ * `verifyRuntimeInput()`, which builds on this record. HEAD is read from the
+ * artifact's `observed` record (it is not in the archive) and only reported.
+ */
 export function inspectRuntimeArtifact(dir, headRevision) {
 	const manifestFile = path.join(dir, 'artifact.json');
 	if (!exists(manifestFile)) return { status: 'no-manifest', dir };
 	const manifest = readJson(manifestFile);
 	const archive = path.join(dir, RUNTIME_ARCHIVE_NAME);
-	const archiveSha256 = exists(archive) ? sha256(fs.readFileSync(archive)) : null;
+	const bytes = exists(archive) ? fs.readFileSync(archive) : null;
+	const archiveSha256 = bytes ? sha256(bytes) : null;
+	const archiveSha512 = bytes ? createHash('sha512').update(bytes).digest('hex') : null;
 	const sidecar = `${archive}.sha256`;
 	const sidecarSha256 = exists(sidecar)
 		? fs.readFileSync(sidecar, 'utf8').trim().split(/\s+/)[0]
@@ -162,28 +194,33 @@ export function inspectRuntimeArtifact(dir, headRevision) {
 		archiveSha256 !== null &&
 		sidecarSha256 === archiveSha256 &&
 		manifest.archive?.sha256 === archiveSha256 &&
+		manifest.archive?.sha512 === archiveSha512 &&
 		path.basename(dir) === archiveSha256;
-	const stale = headRevision !== null && manifest.source?.head !== headRevision;
 	const status =
 		manifest.kind !== 'maestro-runtime'
 			? 'wrong-kind'
-			: !bound
-				? 'digest-mismatch'
-				: manifest.certifiable !== true
-					? 'not-certifiable'
-					: stale
-						? 'stale'
-						: 'ready';
+			: manifest.formatVersion !== RUNTIME_ARTIFACT_FORMAT_VERSION
+				? 'unsupported-format'
+				: !bound
+					? 'digest-mismatch'
+					: manifest.certifiable !== true
+						? 'not-certifiable'
+						: 'bound';
+	const observedHead = manifest.observed?.head ?? null;
 	return {
 		status,
 		dir,
+		formatVersion: manifest.formatVersion ?? null,
 		archiveSha256,
+		archiveSha512,
 		versions: manifest.versions ?? null,
-		sourceHead: manifest.source?.head ?? null,
-		treeDirty: manifest.source?.treeDirty ?? null,
+		observedHead,
+		headMoved: headRevision !== null && observedHead !== headRevision,
+		treeDirty: manifest.observed?.treeDirty ?? null,
 		library: manifest.source?.library ?? null,
+		implementationDigest: manifest.source?.implementation?.digest ?? null,
+		implementationCommit: manifest.source?.implementation?.commit ?? null,
 		contracts: manifest.contracts?.status ?? null,
-		stale,
 		certifiable: manifest.certifiable === true,
 		reasons: manifest.reasons ?? [],
 		payloadSha256: manifest.payloadSha256 ?? {},
@@ -424,7 +461,17 @@ export function assessPair(report) {
 	for (const id of ['CP-02', 'CP-03'])
 		if (!report.producers[id].fresh) open(id, 'mega-maestro', report.producers[id].detail);
 	if (report.runtime && report.runtime.status !== 'ready')
-		open('maestro-runtime', 'maestro', `packaged runtime artifact is ${report.runtime.status}`);
+		open(
+			'maestro-runtime',
+			'maestro',
+			`packaged runtime artifact is ${report.runtime.status}: ${report.runtime.problems.join('; ')}`
+		);
+	else if (report.runtime && !report.runtime.pin.committed)
+		open(
+			'maestro-runtime',
+			'maestro',
+			`the runtime pin ${report.runtime.pin.file} is not committed`
+		);
 	if (!report.linuxHost.linux)
 		open('linux-host', 'maestro', 'no Linux Docker engine with built-in seccomp');
 	else if (!report.linuxHost.image.present)
@@ -449,7 +496,17 @@ export function chooseEndpointSource(report, options) {
 				null);
 }
 
-export function buildCheckReport(options) {
+/**
+ * The implementation binding of a runtime belongs to the packager (it reads
+ * the handoff's tree rules); that module imports this one, so it is loaded
+ * only when a runtime is named, never at this module's top level.
+ */
+async function verifyRuntime(options) {
+	const { verifyRuntimeInput } = await import('./package-mega-maestro-runtime.mjs');
+	return verifyRuntimeInput({ runtime: options.runtime, pin: options.runtimePin });
+}
+
+export async function buildCheckReport(options) {
 	const headRevision = git(REPO_ROOT, ['rev-parse', 'HEAD']);
 	const pinFile = path.resolve(options.pin ?? DEFAULT_PIN_FILE);
 	const endpointSources = [];
@@ -472,9 +529,7 @@ export function buildCheckReport(options) {
 					.filter((l) => l && !/^\?\? /.test(l)).length > 0,
 		},
 		library: inspectLibrary(path.resolve(options.library ?? DEFAULT_LIBRARY_DIR), headRevision),
-		runtime: options.runtime
-			? inspectRuntimeArtifact(path.resolve(options.runtime), headRevision)
-			: null,
+		runtime: options.runtime ? await verifyRuntime(options) : null,
 		pin: inspectPin(pinFile),
 		endpointSources,
 		linuxHost: inspectLinuxHost(options.image ?? DEFAULT_IMAGE),
@@ -682,7 +737,7 @@ const readOut = (dir, name) => {
 };
 
 export async function runPair(options) {
-	const report = buildCheckReport(options);
+	const report = await buildCheckReport(options);
 	const source = chooseEndpointSource(report, options);
 	const refusals = [];
 	const stamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15);
@@ -690,9 +745,12 @@ export async function runPair(options) {
 	let libraryDir = path.resolve(options.library ?? DEFAULT_LIBRARY_DIR);
 	let staged = null;
 	if (report.runtime) {
-		const status = report.runtime.status;
-		if (!['ready', 'stale', 'not-certifiable'].includes(status))
-			refusals.push(`the packaged runtime artifact is ${status}`);
+		// No flag admits a runtime that is not the committed pin of this implementation tree.
+		const { status, pin, problems } = report.runtime;
+		if (status !== 'ready' || !pin.committed)
+			refusals.push(
+				`the packaged runtime is ${status !== 'ready' ? status : 'pinned by an uncommitted file'}${problems.length ? ` (${problems.join('; ')})` : ''}; rebuild, repackage and commit the pin, --allow-stale does not apply to a runtime`
+			);
 		else {
 			libraryDir = path.join(workspace, 'library');
 			staged = stageLibraryFromRuntime(report.runtime, libraryDir);
@@ -795,7 +853,12 @@ export async function runPair(options) {
 		runtime: report.runtime
 			? {
 					archiveSha256: report.runtime.archiveSha256,
-					sourceHead: report.runtime.sourceHead,
+					archiveSha512: report.runtime.archiveSha512,
+					implementationDigest: report.runtime.implementationDigest,
+					implementationCommit: report.runtime.implementationCommit,
+					sourceHead: report.runtime.observedHead,
+					coordinationOnly: report.runtime.coordinationOnly,
+					pin: report.runtime.pin,
 					library: report.runtime.library,
 					staged,
 				}
@@ -860,6 +923,7 @@ export async function main(argv) {
 			artifact: { type: 'string' },
 			library: { type: 'string' },
 			runtime: { type: 'string' },
+			'runtime-pin': { type: 'string' },
 			surfaces: { type: 'string' },
 			pin: { type: 'string' },
 			image: { type: 'string' },
@@ -876,7 +940,7 @@ export async function main(argv) {
 	const command = positionals[0];
 	if (values.help || !['check', 'run'].includes(command)) {
 		process.stdout.write(
-			'usage: mega-maestro-pair.mjs check|run [--sibling DIR] [--artifact DIR] [--library DIR | --runtime DIR] [--surfaces library,headless,desktop] [--image REF] [--approve-command CMD] [--allow-dirty] [--allow-stale] [--timeout-ms N] [--out FILE] [--keep] [--json]\n'
+			'usage: mega-maestro-pair.mjs check|run [--sibling DIR] [--artifact DIR] [--library DIR | --runtime DIR [--runtime-pin FILE]] [--surfaces library,headless,desktop] [--image REF] [--approve-command CMD] [--allow-dirty] [--allow-stale] [--timeout-ms N] [--out FILE] [--keep] [--json]\n'
 		);
 		return values.help ? 0 : 2;
 	}
@@ -885,6 +949,7 @@ export async function main(argv) {
 		artifact: values.artifact,
 		library: values.library,
 		runtime: values.runtime,
+		runtimePin: values['runtime-pin'],
 		surfaces: values.surfaces ? values.surfaces.split(',').filter(Boolean) : undefined,
 		pin: values.pin,
 		image: values.image,
@@ -894,7 +959,7 @@ export async function main(argv) {
 		allowStale: values['allow-stale'] === true,
 		keep: values.keep === true,
 	};
-	const report = command === 'check' ? buildCheckReport(options) : await runPair(options);
+	const report = command === 'check' ? await buildCheckReport(options) : await runPair(options);
 	const text = JSON.stringify(report, null, 2);
 	if (values.out) fs.writeFileSync(values.out, text + '\n');
 	process.stdout.write(text + '\n');

@@ -28,21 +28,42 @@
  * tracked implementation file to its working-tree digest, the same digest
  * `write-mega-maestro-handoff.mjs` reports) and `source/library-inputs.json`
  * the exhaustive esbuild input map the library build recorded; the manifest
- * names the implementation commit (the last one that touched an input), the
- * observed HEAD, whether the implementation tree is dirty, the managed port the
- * bundle must reach (`MANAGED_PORT`: names checked as functions on the loaded
- * bundle, declaration files checked in the payload) and, under `bootstrap`,
- * the routes the bundle itself reports unavailable. A bootstrap advertises
- * what is NOT there as plainly as what is: it needs no Mega adapter, and it
- * claims no paired, provider or native qualification.
+ * names the implementation commit (the last one that touched an input),
+ * whether the implementation tree is dirty, the managed port the bundle must
+ * reach (`MANAGED_PORT`: names checked as functions on the loaded bundle,
+ * declaration files checked in the payload) and, under `bootstrap`, the routes
+ * the bundle itself reports unavailable. A bootstrap advertises what is NOT
+ * there as plainly as what is: it needs no Mega adapter, and it claims no
+ * paired, provider or native qualification.
+ *
+ * Only implementation inputs reach the archive. HEAD, the branch, the tree's
+ * dirtiness, the RC base and the acceptance rows beside their evidence marks
+ * are observations of the packaging run: they live in `artifact.json` under
+ * `observed` and in `acceptance.json` beside it, never under `package/`, and
+ * the tar time is the implementation commit's. So a checklist, receipt, pin or
+ * documentation commit leaves an existing archive current, while an
+ * implementation change always yields a new digest.
+ *
+ * `--runtime <dir>` verifies one packaged artifact as the pinned input of a
+ * pair instead of packaging (`verifyRuntimeInput()`): the archive bound to its
+ * sidecar, manifest and directory name by sha256 and sha512, the manifest in
+ * the archive equal to the one beside it, the archived implementation map
+ * equal to the tree now (`drift` names every file that moved), the archived
+ * library inputs unchanged, and the archive named by the committed runtime
+ * pin (`Plans/integration-completion/runtime-conformance.json`, `runtime`
+ * section, written from a verified artifact by `--write-pin`). The pin is an
+ * identity, never a qualification: a counterpart adapter's `qualifiedAgainst`
+ * receipt names `archive.sha256` in the adapter's own pin, and a runtime pin
+ * that carries one is refused, so qualifying an archive cannot change it.
  *
  * What never goes in: provider profiles, credentials, ledgers, anything read
  * from the sibling Mega-Maestro checkout, or the imported contracts package
  * (the pin names it by digest). Payload text is scanned for secret canaries
  * and for this machine's private paths before anything is written.
  *
- * Exit 0: packaged and certifiable. 3: packaged under an `--allow-*` flag.
- * 2: refused by a named condition. 1: the script itself failed.
+ * Exit 0: packaged and certifiable (or the runtime verified ready). 3: packaged
+ * under an `--allow-*` flag. 2: refused by a named condition (or the runtime
+ * not ready). 1: the script itself failed.
  */
 
 import { createHash } from 'node:crypto';
@@ -64,17 +85,28 @@ import {
 	DEFAULT_LIBRARY_DIR,
 	DEFAULT_PIN_FILE,
 	DEFAULT_SIBLING_DIR,
+	RUNTIME_ARTIFACT_FORMAT_VERSION,
 	inspectLibrary,
 	inspectPin,
+	inspectRuntimeArtifact,
+	movedInputs,
 } from './mega-maestro-pair.mjs';
 import { SOURCE_TREE_RULES, digestOf, sourceTreeDigest } from './write-mega-maestro-handoff.mjs';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const ARTIFACT_FORMAT_VERSION = 1;
+export const ARTIFACT_FORMAT_VERSION = RUNTIME_ARTIFACT_FORMAT_VERSION;
 export const ARTIFACT_KIND = 'maestro-runtime';
 export const ARCHIVE_NAME = 'runtime.tgz';
+/** The acceptance rows and their evidence marks, beside the artifact and outside the archive. */
+export const ACCEPTANCE_NAME = 'acceptance.json';
 export const DEFAULT_OUT_DIR = 'dist/mega-maestro-runtime';
 export const DEFAULT_PLAN_FILE = 'Plans/mega-maestro-rc/execution-plan.json';
+/** The committed runtime pin: the `runtime` section names the archive a pair loads. */
+export const RUNTIME_PIN_FILE = 'Plans/integration-completion/runtime-conformance.json';
+export const RUNTIME_PIN_FORMAT_VERSION = 1;
+export const RUNTIME_PIN_ARTIFACT_ID = 'MAESTRO-M0-RUNTIME';
+/** Keys that make a pin a qualification receipt rather than an identity; a runtime pin may carry none. */
+const RECEIPT_KEYS = ['qualifiedAgainst', 'adapter', 'qualification', 'passed'];
 const EVIDENCE_DIR = 'Plans/mega-maestro-rc/evidence';
 const HOST_API_FILE = 'src/shared/plugins/host-api.ts';
 const PLUGIN_SDK_PACKAGE = 'packages/plugin-sdk/package.json';
@@ -141,7 +173,9 @@ const CANARIES = [
 ];
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+const sha512 = (bytes) => createHash('sha512').update(bytes).digest('hex');
 const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+const posix = (file) => file.split(path.sep).join('/');
 const git = (args) => {
 	try {
 		return execFileSync('git', ['-C', REPO_ROOT, ...args], {
@@ -255,12 +289,13 @@ export function managedPort(libraryDir, provenance) {
  * The implementation snapshot the archive is bound to: the explicit
  * implementation-tree digest under the handoff's rules (tracked files,
  * working-tree bytes), the last commit that touched an implementation input
- * (not HEAD, which a checklist or evidence commit moves), the observed HEAD,
- * and whether the implementation tree holds a change git does not (a tracked
- * edit or an untracked file under the included paths). `files` is the map
- * behind the digest; the manifest carries everything else.
+ * (not HEAD, which a checklist or evidence commit moves) with its time, and
+ * whether the implementation tree holds a change git does not (a tracked edit
+ * or an untracked file under the included paths). `files` is the map behind
+ * the digest; the manifest carries everything else. HEAD is not here: it is
+ * an observation, recorded beside the archive and never in it.
  */
-export function implementationSnapshot(head) {
+export function implementationSnapshot() {
 	let tree;
 	try {
 		tree = sourceTreeDigest(REPO_ROOT);
@@ -276,6 +311,9 @@ export function implementationSnapshot(head) {
 		.split('\n')
 		.filter(Boolean);
 	const dirty = dirtyEntries.length > 0;
+	const [lastCommit, committedAt] = (
+		git(['log', '-1', '--format=%H %cI', '--', ...pathspecs]) ?? ' '
+	).split(' ');
 	return {
 		rules: {
 			id: SOURCE_TREE_RULES.id,
@@ -289,8 +327,8 @@ export function implementationSnapshot(head) {
 		map: 'source/implementation.json',
 		dirty,
 		dirtyEntries: dirtyEntries.length,
-		commit: dirty ? null : (git(['log', '-1', '--format=%H', '--', ...pathspecs]) ?? null),
-		observedHead: head,
+		commit: dirty ? null : lastCommit || null,
+		committedAt: committedAt || null,
 		files,
 	};
 }
@@ -433,10 +471,12 @@ export function packageRuntime(options = {}) {
 	if (library.status === 'stale' && !options.allowStale) {
 		refuse(
 			'library-stale',
-			`the library was built at ${library.sourceRevision}, not HEAD ${head} (pass --allow-stale)`
+			library.movedInputs
+				? `the library's inputs moved since it was built: ${library.movedInputs.join(', ')} (rebuild it, or pass --allow-stale)`
+				: `the library was built at ${library.sourceRevision}, not HEAD ${head} (pass --allow-stale)`
 		);
 	}
-	const { files: implementationFiles, ...implementation } = implementationSnapshot(head);
+	const { files: implementationFiles, ...implementation } = implementationSnapshot();
 	if (implementation.dirty && !options.allowDirty) {
 		refuse(
 			'implementation-dirty',
@@ -460,7 +500,6 @@ export function packageRuntime(options = {}) {
 	const matrix = capabilityMatrix(libraryDir);
 	const port = managedPort(libraryDir, provenance);
 	const acceptance = acceptanceExpectations(plan);
-	const committedAt = git(['log', '-1', '--format=%cI', 'HEAD']);
 	const rcBase = plan.baseRevision ?? null;
 
 	const entries = collectLibrary(libraryDir, library);
@@ -470,10 +509,6 @@ export function packageRuntime(options = {}) {
 	entries.push({
 		path: 'conformance/capabilities.json',
 		data: Buffer.from(`${JSON.stringify(matrix, null, '\t')}\n`),
-	});
-	entries.push({
-		path: 'conformance/acceptance.json',
-		data: Buffer.from(`${JSON.stringify(acceptance, null, '\t')}\n`),
 	});
 	entries.push({
 		path: implementation.map,
@@ -513,16 +548,6 @@ export function packageRuntime(options = {}) {
 			},
 		},
 		source: {
-			rcBaseRef: plan.baseRef ?? null,
-			rcBase,
-			rcBaseIsAncestor:
-				rcBase && head ? git(['merge-base', '--is-ancestor', rcBase, head]) !== null : null,
-			branch: git(['rev-parse', '--abbrev-ref', 'HEAD']),
-			head,
-			headCommittedAt: committedAt,
-			treeDirty:
-				(git(['status', '--porcelain']) ?? '').split('\n').filter((l) => l && !l.startsWith('?? '))
-					.length > 0,
 			library: {
 				sourceRevision: provenance.sourceRevision ?? null,
 				sourceDirty: provenance.sourceDirty ?? null,
@@ -576,14 +601,31 @@ export function packageRuntime(options = {}) {
 		if (found.length > 0) refuse('canary', `${entry.path} carries ${found.join(', ')}`);
 	}
 
-	const mtime = committedAt ? Math.floor(Date.parse(committedAt) / 1000) : 0;
+	// The tar time is the implementation commit's: a commit that touches no input leaves it alone.
+	const mtime = implementation.committedAt
+		? Math.floor(Date.parse(implementation.committedAt) / 1000)
+		: 0;
 	const archive = gzipSync(buildTar(entries, mtime), { level: 9 });
 	const digest = sha256(archive);
 	const finalDir = path.join(outDir, provenance.version, digest);
+	// What the packaging run observed, beside the archive and never in it.
 	const artifact = {
 		...manifest,
+		observed: {
+			head,
+			branch: git(['rev-parse', '--abbrev-ref', 'HEAD']),
+			headCommittedAt: git(['log', '-1', '--format=%cI', 'HEAD']),
+			treeDirty:
+				(git(['status', '--porcelain']) ?? '').split('\n').filter((l) => l && !l.startsWith('?? '))
+					.length > 0,
+			rcBaseRef: plan.baseRef ?? null,
+			rcBase,
+			rcBaseIsAncestor:
+				rcBase && head ? git(['merge-base', '--is-ancestor', rcBase, head]) !== null : null,
+			acceptance: ACCEPTANCE_NAME,
+		},
 		packagedAt: new Date().toISOString(),
-		archive: { file: ARCHIVE_NAME, sha256: digest, bytes: archive.length },
+		archive: { file: ARCHIVE_NAME, sha256: digest, sha512: sha512(archive), bytes: archive.length },
 	};
 	let existing = false;
 	if (fs.existsSync(finalDir)) {
@@ -598,16 +640,220 @@ export function packageRuntime(options = {}) {
 		fs.writeFileSync(path.join(staging, `${ARCHIVE_NAME}.sha256`), `${digest}  ${ARCHIVE_NAME}\n`, {
 			mode: 0o444,
 		});
-		fs.writeFileSync(
-			path.join(staging, 'artifact.json'),
-			`${JSON.stringify(artifact, null, '\t')}\n`,
-			{ mode: 0o444 }
-		);
+		for (const [name, value] of [
+			['artifact.json', artifact],
+			[ACCEPTANCE_NAME, acceptance],
+		]) {
+			fs.writeFileSync(path.join(staging, name), `${JSON.stringify(value, null, '\t')}\n`, {
+				mode: 0o444,
+			});
+		}
 		fs.mkdirSync(path.dirname(finalDir), { recursive: true });
 		fs.renameSync(staging, finalDir);
 		fs.chmodSync(finalDir, 0o555);
 	}
 	return { ...artifact, dir: finalDir, existing, library };
+}
+
+// ---------------------------------------------------------------------------
+// The pinned runtime input
+// ---------------------------------------------------------------------------
+
+/** One entry of the archive through the host tar (the importer's reader bounds files below the source map). */
+const readArchiveEntry = (archive, name) =>
+	execFileSync('tar', ['-xzOf', archive, `package/${name}`], { maxBuffer: 1 << 28 });
+
+/** Every implementation file that moved between an archived map and a tree map, named and bounded. */
+export function implementationDrift(archived, current) {
+	const moved = [];
+	for (const [file, digest] of Object.entries(archived)) {
+		if (!(file in current)) moved.push(`removed ${file}`);
+		else if (current[file] !== digest) moved.push(`changed ${file}`);
+	}
+	for (const file of Object.keys(current)) if (!(file in archived)) moved.push(`added ${file}`);
+	moved.sort();
+	return { count: moved.length, files: moved.slice(0, 20) };
+}
+
+/** The committed runtime pin's `runtime` section, and whether git holds the file unchanged. */
+export function readRuntimePin(file) {
+	const rel = posix(path.relative(REPO_ROOT, file));
+	if (!fs.existsSync(file)) return { status: 'absent', file: rel, committed: false, record: null };
+	let record;
+	try {
+		record = readJson(file).runtime ?? null;
+	} catch (error) {
+		return {
+			status: 'malformed',
+			file: rel,
+			committed: false,
+			record: null,
+			reason: String(error),
+		};
+	}
+	const committed =
+		git(['ls-files', '--error-unmatch', '--', rel]) !== null &&
+		git(['diff', '--quiet', 'HEAD', '--', rel]) !== null;
+	return { status: record ? 'pinned' : 'absent', file: rel, committed, record };
+}
+
+/** The pin an artifact directory is named by: its identity alone, never a qualification of it. */
+export function runtimePinOf(artifactDir) {
+	const artifact = readJson(path.join(artifactDir, 'artifact.json'));
+	const archiveFile = path.join(artifactDir, ARCHIVE_NAME);
+	const archive = fs.readFileSync(archiveFile);
+	const { implementation, library } = artifact.source;
+	const digest = sha256(archive);
+	return {
+		artifactId: RUNTIME_PIN_ARTIFACT_ID,
+		standing:
+			'identity only: this names the archive a pair loads; MAESTRO-M0-RUNTIME-BUILD and MAESTRO-M0-RUNTIME are receipts under Plans/integration-completion/evidence/, never this file',
+		kind: artifact.kind,
+		archiveFormatVersion: artifact.formatVersion,
+		archive: { file: ARCHIVE_NAME, sha256: digest, sha512: sha512(archive), bytes: archive.length },
+		manifestSha256: sha256(readArchiveEntry(archiveFile, 'manifest.json')),
+		payloadDigest: digestOf(artifact.payloadSha256),
+		payloadFiles: Object.keys(artifact.payloadSha256).length,
+		versions: {
+			app: artifact.versions.app,
+			library: artifact.versions.library,
+			managedContract: artifact.versions.managedContract,
+			endpointProtocol: artifact.versions.endpointProtocol,
+		},
+		implementation: {
+			rules: implementation.rules.id,
+			digest: implementation.digest,
+			commit: implementation.commit,
+			fileCount: implementation.fileCount,
+		},
+		library: {
+			sourceRevision: library.sourceRevision,
+			inputSha256: library.inputSha256,
+			inputFiles: library.inputFiles,
+			entrySha256: artifact.managedPort.entry.sha256,
+		},
+		location: {
+			directory: `${DEFAULT_OUT_DIR}/${artifact.versions.library}/${digest}`,
+			rule: 'obtain the archive by archive.sha256 and verify the sidecar and sha512; the directory is where the packager lands it',
+		},
+		receipts: {
+			rule: 'a counterpart adapter records qualifiedAgainst.maestroRuntimeSha256 = archive.sha256 in its own pin, read by scripts/mega-maestro-pair.mjs; nothing an adapter records is written here, so qualification cannot change the archive it names',
+		},
+	};
+}
+
+/**
+ * One packaged artifact as the pinned runtime input of a pair: bound by
+ * digest, its archive the manifest's, its implementation map the tree's now,
+ * its library inputs unchanged, and named by the committed pin. `ready` is
+ * the only status a run loads; `drift` lists what moved; `coordinationOnly`
+ * says HEAD moved while no implementation input did.
+ */
+export function verifyRuntimeInput(options) {
+	const dir = path.resolve(REPO_ROOT, options.runtime);
+	const head = git(['rev-parse', 'HEAD']);
+	const bound = inspectRuntimeArtifact(dir, head);
+	const pin = readRuntimePin(path.resolve(REPO_ROOT, options.pin ?? RUNTIME_PIN_FILE));
+	const problems = [];
+	const record = {
+		...bound,
+		pin: { status: pin.status, file: pin.file, committed: pin.committed },
+		implementation: null,
+		drift: null,
+		libraryInputs: null,
+		coordinationOnly: false,
+		problems,
+	};
+	if (bound.status !== 'bound') {
+		problems.push(`the artifact directory is ${bound.status}`);
+		return record;
+	}
+	const archiveFile = path.join(dir, ARCHIVE_NAME);
+	const manifest = JSON.parse(readArchiveEntry(archiveFile, 'manifest.json').toString('utf8'));
+	const {
+		packagedAt: _at,
+		archive: _archive,
+		observed: _observed,
+		...beside
+	} = readJson(path.join(dir, 'artifact.json'));
+	if (digestOf(beside) !== digestOf(manifest)) {
+		problems.push('artifact.json is not the manifest inside the archive');
+		return { ...record, status: 'archive-manifest-mismatch' };
+	}
+	const map = JSON.parse(
+		readArchiveEntry(archiveFile, manifest.source.implementation.map).toString('utf8')
+	);
+	if (digestOf({ rules: map.rules, files: map.files }) !== manifest.source.implementation.digest) {
+		problems.push('the archived implementation map does not reproduce its digest');
+		return { ...record, status: 'implementation-digest' };
+	}
+	const tree = options.sourceTree ?? sourceTreeDigest(REPO_ROOT);
+	record.implementation = {
+		archived: manifest.source.implementation.digest,
+		current: tree.digest,
+		commit: manifest.source.implementation.commit,
+		dirty: manifest.source.implementation.dirty,
+	};
+	record.drift = implementationDrift(map.files, tree.files);
+	const inputsEntry = manifest.source.library.inputs;
+	record.libraryInputs = inputsEntry
+		? movedInputs(JSON.parse(readArchiveEntry(archiveFile, inputsEntry).toString('utf8')).inputs)
+		: null;
+	record.coordinationOnly = bound.headMoved && record.drift.count === 0;
+	if (record.drift.count > 0) {
+		problems.push(
+			`${record.drift.count} implementation file(s) moved since the archive: ${record.drift.files.join(', ')}`
+		);
+	}
+	if (record.libraryInputs?.length) {
+		problems.push(`library inputs moved since the archive: ${record.libraryInputs.join(', ')}`);
+	}
+	if (problems.length > 0) return { ...record, status: 'drift' };
+	if (pin.status !== 'pinned') {
+		problems.push(`no runtime pin names this archive (${pin.file} is ${pin.status})`);
+		return { ...record, status: pin.status === 'malformed' ? 'pin-malformed' : 'unpinned' };
+	}
+	const text = JSON.stringify(pin.record);
+	if (RECEIPT_KEYS.some((key) => text.includes(`"${key}"`))) {
+		problems.push(`the runtime pin carries a qualification receipt (${RECEIPT_KEYS.join(', ')})`);
+		return { ...record, status: 'pin-not-runtime' };
+	}
+	const mismatch = [
+		['archive.sha256', pin.record.archive?.sha256, bound.archiveSha256],
+		['archive.sha512', pin.record.archive?.sha512, bound.archiveSha512],
+		['implementation.digest', pin.record.implementation?.digest, tree.digest],
+		['payloadDigest', pin.record.payloadDigest, digestOf(manifest.payloadSha256)],
+	].filter(([, pinned, actual]) => pinned !== actual);
+	if (mismatch.length > 0) {
+		problems.push(`the pin names another runtime: ${mismatch.map(([k]) => k).join(', ')} differ`);
+		return { ...record, status: 'pin-mismatch' };
+	}
+	return { ...record, status: 'ready' };
+}
+
+/** Write the `runtime` section of the pin from a verified artifact, keeping every other section of the file. */
+export function writeRuntimePin(options) {
+	const verified = verifyRuntimeInput(options);
+	if (!['ready', 'unpinned', 'pin-mismatch'].includes(verified.status)) {
+		refuse(
+			verified.status,
+			`the artifact cannot be pinned: ${verified.problems.join('; ') || verified.status}`
+		);
+	}
+	const file = path.resolve(REPO_ROOT, options.pin ?? RUNTIME_PIN_FILE);
+	const current = fs.existsSync(file) ? readJson(file) : {};
+	const pinned = {
+		formatVersion: RUNTIME_PIN_FORMAT_VERSION,
+		owner: 'maestro',
+		...current,
+		runtime: runtimePinOf(path.resolve(REPO_ROOT, options.runtime)),
+	};
+	const text = `${JSON.stringify(pinned, null, '\t')}\n`;
+	const found = findCanaries(text);
+	if (found.length > 0) refuse('canary', `the pin would carry ${found.join(', ')}`);
+	fs.mkdirSync(path.dirname(file), { recursive: true });
+	fs.writeFileSync(file, text);
+	return { ...verifyRuntimeInput(options), written: posix(path.relative(REPO_ROOT, file)) };
 }
 
 export function main(argv = process.argv.slice(2)) {
@@ -618,6 +864,9 @@ export function main(argv = process.argv.slice(2)) {
 			out: { type: 'string' },
 			pin: { type: 'string' },
 			plan: { type: 'string' },
+			runtime: { type: 'string' },
+			'runtime-pin': { type: 'string' },
+			'write-pin': { type: 'boolean' },
 			'allow-dirty': { type: 'boolean' },
 			'allow-stale': { type: 'boolean' },
 			json: { type: 'boolean' },
@@ -626,11 +875,22 @@ export function main(argv = process.argv.slice(2)) {
 	});
 	if (values.help) {
 		process.stdout.write(
-			'usage: package-mega-maestro-runtime.mjs [--library DIR] [--out DIR] [--pin FILE] [--plan FILE] [--allow-dirty] [--allow-stale] [--json]\n'
+			'usage: package-mega-maestro-runtime.mjs [--library DIR] [--out DIR] [--pin FILE] [--plan FILE] [--allow-dirty] [--allow-stale] [--json]\n' +
+				'       package-mega-maestro-runtime.mjs --runtime DIR [--runtime-pin FILE] [--write-pin] [--json]\n'
 		);
 		return 0;
 	}
 	try {
+		if (values.runtime) {
+			const input = { runtime: values.runtime, pin: values['runtime-pin'] };
+			const verified = values['write-pin'] ? writeRuntimePin(input) : verifyRuntimeInput(input);
+			process.stdout.write(
+				values.json
+					? `${JSON.stringify(verified, null, 2)}\n`
+					: `runtime ${verified.archiveSha256 ?? path.basename(values.runtime)} is ${verified.status}${verified.written ? ` (pin written to ${verified.written}; commit it)` : ''}${verified.problems.length ? `: ${verified.problems.join('; ')}` : ''}\n`
+			);
+			return verified.status === 'ready' ? 0 : 2;
+		}
 		const report = packageRuntime({
 			library: values.library,
 			out: values.out,

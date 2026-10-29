@@ -14,17 +14,22 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import { MAESTRO_LIB_VERSION } from '../../shared/maestro-lib/version';
 import { MANAGED_CONTRACT_VERSION } from '../../shared/maestro-lib/managed/types';
 import { providerRouteSupport } from '../../shared/maestro-lib/providers/capabilities';
 import { HOST_API_VERSION } from '../../shared/plugins/host-api';
 import { readTarGz } from '../../../scripts/import-mega-maestro.mjs';
 import {
+	ACCEPTANCE_NAME,
 	EXCLUDED_NAME,
 	MANAGED_PORT,
 	buildTar,
 	findCanaries,
+	implementationDrift,
 	managedPort,
+	runtimePinOf,
+	verifyRuntimeInput,
 } from '../../../scripts/package-mega-maestro-runtime.mjs';
 import {
 	SOURCE_TREE_RULES,
@@ -125,10 +130,11 @@ describe('package-mega-maestro-runtime', () => {
 		expect(artifact.archive).toEqual({
 			file: 'runtime.tgz',
 			sha256: digest,
+			sha512: createHash('sha512').update(archive).digest('hex'),
 			bytes: archive.length,
 		});
 		if (process.platform !== 'win32') {
-			for (const file of ['runtime.tgz', 'runtime.tgz.sha256', 'artifact.json']) {
+			for (const file of ['runtime.tgz', 'runtime.tgz.sha256', 'artifact.json', ACCEPTANCE_NAME]) {
 				expect(fs.statSync(path.join(report.dir, file)).mode & 0o222, file).toBe(0);
 			}
 		}
@@ -144,9 +150,14 @@ describe('package-mega-maestro-runtime', () => {
 			acceptedContracts: { package: '@mega-maestro/contracts' },
 		});
 		expect(artifact.source).toMatchObject({
+			library: { inputSha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
+		});
+		// HEAD, the branch, tree dirtiness and the RC base are observations beside the archive, not in it.
+		expect(artifact.observed).toMatchObject({
+			head: expect.stringMatching(/^[a-f0-9]{40}$/),
 			rcBase: plan.baseRevision,
 			rcBaseIsAncestor: true,
-			library: { inputSha256: expect.stringMatching(/^[a-f0-9]{64}$/) },
+			acceptance: ACCEPTANCE_NAME,
 		});
 		expect(artifact.contracts.status).toMatch(/^(pinned|absent)$/);
 		expect(JSON.stringify(artifact)).not.toContain(os.homedir());
@@ -163,7 +174,6 @@ describe('package-mega-maestro-runtime', () => {
 		const extra = [...files.keys()].filter((f) => !f.startsWith('package/library/'));
 		expect(extra.sort()).toEqual(
 			[
-				'package/conformance/acceptance.json',
 				'package/conformance/capabilities.json',
 				'package/manifest.json',
 				'package/source/implementation.json',
@@ -174,9 +184,36 @@ describe('package-mega-maestro-runtime', () => {
 		const {
 			packagedAt: _at,
 			archive: _archive,
+			observed: _observed,
 			...inArtifact
 		} = readJson(path.join(report.dir, 'artifact.json'));
-		expect(JSON.parse(files.get('package/manifest.json')!.toString('utf8'))).toEqual(inArtifact);
+		const manifestText = files.get('package/manifest.json')!.toString('utf8');
+		expect(JSON.parse(manifestText)).toEqual(inArtifact);
+		// Nothing a coordination commit moves is in the archive: no HEAD unless it is the
+		// implementation commit, no branch, no tree dirtiness, no evidence marks.
+		const implementation = inArtifact.source.implementation;
+		expect(Object.keys(inArtifact.source).sort()).toEqual(['implementation', 'library']);
+		expect(implementation).not.toHaveProperty('observedHead');
+		expect(manifestText).not.toMatch(/"(branch|head|headCommittedAt|treeDirty|rcBase)"/);
+		// (The library's own provenance names the revision it was built at; that is the build's, not the packaging's.)
+		const revisionsInside = [implementation.commit, inArtifact.source.library.sourceRevision];
+		if (!revisionsInside.includes(report.observed.head)) {
+			expect(manifestText).not.toContain(report.observed.head);
+		}
+		// The tar time is the implementation commit's (ustar header: name at 0, size at 124, mtime at 136).
+		const tar = gunzipSync(fs.readFileSync(path.join(report.dir, 'runtime.tgz')));
+		let entryTime = -1;
+		for (let at = 0; at + 512 <= tar.length; ) {
+			const name = tar.toString('utf8', at, at + 100).replace(/\0[\s\S]*$/, '');
+			if (!name) break;
+			if (name === 'package/manifest.json') {
+				entryTime = Number.parseInt(tar.toString('utf8', at + 136, at + 148), 8);
+				break;
+			}
+			const size = Number.parseInt(tar.toString('utf8', at + 124, at + 136), 8);
+			at += 512 + Math.ceil(size / 512) * 512;
+		}
+		expect(entryTime).toBe(Math.floor(Date.parse(implementation.committedAt) / 1000));
 
 		const matrix = JSON.parse(files.get('package/conformance/capabilities.json')!.toString('utf8'));
 		expect(matrix.routes.filter((r: { agentId: string }) => r.agentId === 'claude-code')).toEqual(
@@ -185,9 +222,9 @@ describe('package-mega-maestro-runtime', () => {
 		expect(matrix.routes.some((r: { agentId: string }) => r.agentId === 'terminal')).toBe(false);
 		expect(matrix.harness.routeId).toBe('synthetic-harness/node-permission-v1');
 
-		const acceptance = JSON.parse(
-			files.get('package/conformance/acceptance.json')!.toString('utf8')
-		);
+		// The acceptance rows and their evidence marks are beside the archive, never in it.
+		expect(files.has('package/conformance/acceptance.json')).toBe(false);
+		const acceptance = readJson(path.join(report.dir, ACCEPTANCE_NAME));
 		const plan = readJson(path.join(REPO_ROOT, 'Plans/mega-maestro-rc/execution-plan.json'));
 		expect(acceptance.rows.map((r: { id: string }) => r.id)).toEqual(
 			plan.positiveAcceptanceMatrix.map((r: { id: string }) => r.id)
@@ -215,7 +252,7 @@ describe('package-mega-maestro-runtime', () => {
 			digest: sourceTreeDigest().digest,
 			fileCount: Object.keys(map.files).length,
 			map: 'source/implementation.json',
-			observedHead: manifest.source.head,
+			committedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
 		});
 		expect(digestOf({ rules: map.rules, files: map.files })).toBe(implementation.digest);
 		expect(
@@ -273,6 +310,84 @@ describe('package-mega-maestro-runtime', () => {
 		expect(() => managedPort(hollow, { payloadSha256: {} })).toThrow(/managed-port|exports no/);
 		expect(() => managedPort(libDir, { payloadSha256: {} })).toThrow(/carries no types\//);
 	}, 30_000);
+
+	it('verifies a --runtime input against the tree and the committed pin, and refuses drift, a foreign pin and a receipt in the pin', () => {
+		const out = path.join(sandbox, 'out-g');
+		const { report } = run(['--library', libDir, '--out', out, ...flags]);
+		const dir = report.dir as string;
+		const tree = sourceTreeDigest();
+		const pinFile = path.join(sandbox, 'runtime-conformance.json');
+		const expectReady = report.certifiable ? 'ready' : 'not-certifiable';
+
+		// No pin: bound and current, but arbitrary; nothing loads it.
+		const unpinned = verifyRuntimeInput({ runtime: dir, pin: pinFile });
+		expect(unpinned.status).toBe(report.certifiable ? 'unpinned' : 'not-certifiable');
+		if (report.certifiable) {
+			expect(unpinned.drift).toEqual({ count: 0, files: [] });
+			expect(unpinned.libraryInputs).toEqual([]);
+			expect(unpinned.implementation).toMatchObject({
+				archived: tree.digest,
+				current: tree.digest,
+			});
+		}
+
+		// The pin is identity only, with both archive digests, the tree digest and the payload digest.
+		const pin = runtimePinOf(dir);
+		expect(pin).toMatchObject({
+			artifactId: 'MAESTRO-M0-RUNTIME',
+			archive: { sha256: report.archive.sha256, sha512: report.archive.sha512 },
+			implementation: { digest: report.source.implementation.digest },
+			library: { inputSha256: report.source.library.inputSha256 },
+			location: { directory: expect.stringContaining(report.archive.sha256) },
+		});
+		expect(JSON.stringify(pin)).not.toMatch(/"(qualifiedAgainst|adapter|qualification|passed)"/);
+		expect(JSON.stringify(pin)).not.toContain(os.homedir());
+		fs.writeFileSync(pinFile, JSON.stringify({ formatVersion: 1, runtime: pin }));
+		const pinned = verifyRuntimeInput({ runtime: dir, pin: pinFile });
+		expect(pinned.status).toBe(expectReady);
+		expect(pinned.pin).toMatchObject({ status: 'pinned', committed: false });
+
+		// Drift: an implementation file that moved since the archive is named, and no pin cures it.
+		const [first] = Object.keys(tree.files);
+		const moved = { ...tree.files, [first]: 'f'.repeat(64), 'src/new.ts': 'a'.repeat(64) };
+		const drifted = verifyRuntimeInput({
+			runtime: dir,
+			pin: pinFile,
+			sourceTree: { digest: 'moved', files: moved },
+		});
+		if (report.certifiable) {
+			expect(drifted.status).toBe('drift');
+			expect(drifted.drift).toEqual({ count: 2, files: [`added src/new.ts`, `changed ${first}`] });
+			expect(drifted.problems.join()).toContain(first);
+		}
+		expect(implementationDrift({ a: '1', b: '2' }, { b: '3', c: '4' })).toEqual({
+			count: 3,
+			files: ['added c', 'changed b', 'removed a'],
+		});
+
+		// A pin that names another archive, and a pin that carries a qualification receipt.
+		fs.writeFileSync(
+			pinFile,
+			JSON.stringify({ runtime: { ...pin, archive: { ...pin.archive, sha256: '0'.repeat(64) } } })
+		);
+		const foreign = verifyRuntimeInput({ runtime: dir, pin: pinFile });
+		if (report.certifiable) expect(foreign.status).toBe('pin-mismatch');
+		fs.writeFileSync(
+			pinFile,
+			JSON.stringify({ runtime: { ...pin, qualifiedAgainst: { maestroRuntimeSha256: 'x' } } })
+		);
+		const receipt = verifyRuntimeInput({ runtime: dir, pin: pinFile });
+		if (report.certifiable) expect(receipt.status).toBe('pin-not-runtime');
+
+		// A sidecar that does not match the archive is refused before anything is compared.
+		const copy = path.join(sandbox, 'copy', report.archive.sha256);
+		fs.mkdirSync(path.dirname(copy), { recursive: true });
+		fs.cpSync(dir, copy, { recursive: true });
+		unlock(path.dirname(copy));
+		fs.chmodSync(path.join(copy, 'runtime.tgz.sha256'), 0o644);
+		fs.writeFileSync(path.join(copy, 'runtime.tgz.sha256'), `${'0'.repeat(64)}  runtime.tgz\n`);
+		expect(verifyRuntimeInput({ runtime: copy, pin: pinFile }).status).toBe('digest-mismatch');
+	}, 60_000);
 
 	it('is reproducible, immutable, and refuses a moved, unlisted or missing library by name', () => {
 		const first = run(['--library', libDir, '--out', path.join(sandbox, 'out-c'), ...flags]).report;
