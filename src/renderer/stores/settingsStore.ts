@@ -1393,8 +1393,11 @@ export const useSettingsStore = create<SettingsStore>()((set, get, api) => {
 		},
 
 		setEncoreFeatures: (value) => {
-			set({ encoreFeatures: value });
-			window.maestro.settings.set('encoreFeatures', value);
+			// A flag the managed policy pins keeps its pin (MRC2-07-06): the toggle
+			// is a no-op for it here, and the write keeps the pin so main admits it.
+			const next = resolveEncoreFeatures(value, get().managedLocks.encorePins);
+			set({ encoreFeatures: next });
+			window.maestro.settings.set('encoreFeatures', next);
 		},
 
 		setSymphonyRegistryUrls: (value) => {
@@ -1962,10 +1965,11 @@ export const useSettingsStore = create<SettingsStore>()((set, get, api) => {
 			// unbound one can never be fired, so counting it would make the top
 			// level unreachable. Read from the live maps so a binding the user
 			// cleared in Settings leaves the denominator too.
+			const pins = get().managedLocks.encorePins;
 			const bound = collectBoundShortcuts(
-				availableShortcuts(get().shortcuts, get().encoreFeatures),
+				availableShortcuts(get().shortcuts, get().encoreFeatures, pins),
 				get().tabShortcuts,
-				availableShortcuts(FIXED_SHORTCUTS, get().encoreFeatures)
+				availableShortcuts(FIXED_SHORTCUTS, get().encoreFeatures, pins)
 			);
 			const percentage =
 				bound.length > 0
@@ -2609,9 +2613,12 @@ export async function loadAllSettings(): Promise<void> {
 			patch.utilityModelId = allSettings['utilityModelId'] as string | null;
 
 		// Encore Features (merge with defaults so a flag the stored object predates
-		// keeps its default instead of reading as off)
+		// keeps its default instead of reading as off; a managed pin reads as the pin)
 		if (allSettings['encoreFeatures'] !== undefined) {
-			patch.encoreFeatures = resolveEncoreFeatures(allSettings['encoreFeatures']);
+			patch.encoreFeatures = resolveEncoreFeatures(
+				allSettings['encoreFeatures'],
+				patch.managedLocks?.encorePins
+			);
 		}
 
 		// Symphony registry URLs (additional user-configured registries)

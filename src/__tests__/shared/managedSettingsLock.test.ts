@@ -8,14 +8,20 @@
 import { describe, it, expect } from 'vitest';
 import {
 	AGENT_CONFIG_LOCK_KEYS,
+	ENCORE_FLAG_LOCK_KEYS,
 	LOCKABLE_SETTING_KEYS,
 	MANAGED_ACTION_LOCK_KEYS,
+	MANAGED_LOCK_KEYS,
 	MANAGED_SETTINGS_LIMITS,
 	MANAGED_SET_LOCK_KEYS,
 	SESSION_CONFIG_LOCK_FIELDS,
 	agentConfigLockKey,
 	applyManagedPins,
 	changedAgentConfigFields,
+	encoreFeaturesWriteProblem,
+	encoreFlagLock,
+	encoreFlagLockKey,
+	encoreFlagPins,
 	isSettingLockable,
 	isSettingLocked,
 	lockedSettingKeys,
@@ -25,6 +31,7 @@ import {
 	type ManagedSettingsPolicy,
 } from '../../shared/managedSettingsLock';
 import { SETTINGS_METADATA } from '../../shared/settingsMetadata';
+import { ENCORE_FEATURE_DEFAULTS } from '../../shared/encoreFeatureDefaults';
 
 /** The keys P2-06 names, by the surface their value reaches. */
 const EXPECTED_LOCKABLE = [
@@ -106,7 +113,9 @@ describe('parseManagedSettingsPolicy', () => {
 			LOCKABLE_SETTING_KEYS.length +
 			AGENT_CONFIG_LOCK_KEYS.length +
 			MANAGED_SET_LOCK_KEYS.length +
-			MANAGED_ACTION_LOCK_KEYS.length;
+			MANAGED_ACTION_LOCK_KEYS.length +
+			ENCORE_FLAG_LOCK_KEYS.length;
+		expect(MANAGED_LOCK_KEYS).toHaveLength(bound);
 		const many = Array.from({ length: bound + 1 }, () => ({ key: 'ghPath' }));
 		expect(parse(many)).toEqual(refused(`locks exceeds ${bound} entries`));
 	});
@@ -394,5 +403,112 @@ describe('pin semantics across a policy change (MRC2-06-08)', () => {
 		expect(isSettingLocked('ghPath', v5)).toBe(false);
 		expect(managedSettingPin('ghPath', v5)).toBeNull();
 		expect(settings).toEqual({ ghPath: '/usr/bin/gh', defaultShell: 'bash' });
+	});
+});
+
+describe('Encore flag pins (MRC2-07-06)', () => {
+	const ENCORE_PLUGINS = 'encore.plugins';
+
+	it('holds one key per Encore flag, always pinned on or off, never bare', () => {
+		expect(ENCORE_FLAG_LOCK_KEYS).toEqual(
+			Object.keys(ENCORE_FEATURE_DEFAULTS).map((flag) => `encore.${flag}`)
+		);
+		expect(encoreFlagLockKey('plugins')).toBe(ENCORE_PLUGINS);
+		expect(encoreFlagLockKey('telepathy')).toBeNull();
+		for (const key of ENCORE_FLAG_LOCK_KEYS) expect(isSettingLockable(key), key).toBe(true);
+		expect(pin(ENCORE_PLUGINS, false)).toMatchObject({ ok: true });
+		expect(parse([{ key: ENCORE_PLUGINS }])).toEqual(
+			refused(
+				`locks[0] holds "${ENCORE_PLUGINS}" without a pin; an Encore flag is pinned on or off`
+			)
+		);
+		expect(pin(ENCORE_PLUGINS, 'off')).toEqual(
+			refused(
+				`locks[0].pin.value is not a boolean (the "${ENCORE_PLUGINS}" flag is pinned on or off)`
+			)
+		);
+	});
+
+	it('reads the pins off the policy, names the lock as pinned, and folds a pin into encoreFeatures', () => {
+		const policy = policyOf([
+			{ key: ENCORE_PLUGINS, pin: { value: false } },
+			{ key: 'encore.maestroCue', pin: { value: true } },
+			{ key: 'ghPath' },
+		]);
+		expect(encoreFlagPins(policy)).toEqual({ plugins: false, maestroCue: true });
+		expect(encoreFlagPins(null)).toEqual({});
+		expect(isSettingLocked(ENCORE_PLUGINS, policy)).toBe(true);
+		expect(managedSettingPin(ENCORE_PLUGINS, policy)).toEqual({ value: false });
+		expect(managedSettingLockReason(ENCORE_PLUGINS, policy)).toBe(
+			'the "encore.plugins" setting is locked and pinned by managed policy revision 7'
+		);
+		const settings = { encoreFeatures: { plugins: true, symphony: false }, ghPath: '/gh' };
+		const applied = applyManagedPins(settings, policy);
+		// maestroCue defaults on: already at its pin, nothing to restore for it.
+		expect(applied.restored).toEqual([ENCORE_PLUGINS]);
+		expect(applied.settings.encoreFeatures).toEqual({ plugins: false, symphony: false });
+		expect(settings.encoreFeatures.plugins).toBe(true);
+		expect(applyManagedPins(applied.settings, policy)).toEqual({
+			settings: applied.settings,
+			restored: [],
+		});
+		// No stored object at all: a pin the default already satisfies restores nothing,
+		// one that contradicts the default is written into a fresh object.
+		expect(applyManagedPins({}, policy)).toEqual({ settings: {}, restored: [] });
+		const symphonyOff = policyOf([{ key: 'encore.symphony', pin: { value: false } }]);
+		expect(applyManagedPins({}, symphonyOff)).toEqual({
+			settings: { encoreFeatures: { symphony: false } },
+			restored: ['encore.symphony'],
+		});
+	});
+
+	it('restores a flag pin on top of a whole-object pin', () => {
+		const policy = policyOf([
+			{ key: 'encoreFeatures', pin: { value: { plugins: true, maestroCue: false } } },
+			{ key: ENCORE_PLUGINS, pin: { value: false } },
+		]);
+		const applied = applyManagedPins({ encoreFeatures: { plugins: true } }, policy);
+		expect(applied.restored).toEqual(['encoreFeatures', ENCORE_PLUGINS]);
+		expect(applied.settings.encoreFeatures).toEqual({ plugins: false, maestroCue: false });
+	});
+
+	it('refuses a write that flips a pinned flag and admits one that keeps every pin', () => {
+		const policy = policyOf([{ key: ENCORE_PLUGINS, pin: { value: false } }]);
+		const line = 'the "encore.plugins" setting is locked and pinned by managed policy revision 7';
+		expect(encoreFeaturesWriteProblem('encoreFeatures', { plugins: true }, policy)).toBe(line);
+		expect(
+			encoreFeaturesWriteProblem('encoreFeatures', { plugins: false, symphony: false }, policy)
+		).toBeNull();
+		// A write that omits the flag resolves it to its default (off): admitted.
+		expect(encoreFeaturesWriteProblem('encoreFeatures', { symphony: true }, policy)).toBeNull();
+		expect(encoreFeaturesWriteProblem('encoreFeatures', undefined, policy)).toBeNull();
+		expect(encoreFeaturesWriteProblem('encoreFeatures.plugins', true, policy)).toBe(line);
+		expect(encoreFeaturesWriteProblem('encoreFeatures.plugins', false, policy)).toBeNull();
+		expect(encoreFeaturesWriteProblem('encoreFeatures.symphony', true, policy)).toBeNull();
+		expect(encoreFeaturesWriteProblem('encoreFeatures.plugins.deep', true, policy)).toBeNull();
+		expect(encoreFeaturesWriteProblem('ghPath', '/x', policy)).toBeNull();
+		expect(encoreFeaturesWriteProblem('encoreFeatures', { plugins: true }, null)).toBeNull();
+		// A pin against a default-on flag: a removal falls back to the default and is refused.
+		const cueOff = policyOf([{ key: 'encore.maestroCue', pin: { value: false } }]);
+		expect(encoreFeaturesWriteProblem('encoreFeatures', undefined, cueOff)).toBe(
+			'the "encore.maestroCue" setting is locked and pinned by managed policy revision 7'
+		);
+		expect(encoreFeaturesWriteProblem('encoreFeatures.maestroCue', undefined, cueOff)).toMatch(
+			/maestroCue/
+		);
+	});
+
+	it('shows a control the flag pin first, else the whole-object lock, else nothing', () => {
+		const flagLock = { code: 'locked' as const, message: 'flag', pinned: true };
+		const objectLock = { code: 'locked' as const, message: 'object', pinned: false };
+		expect(
+			encoreFlagLock({ [ENCORE_PLUGINS]: flagLock, encoreFeatures: objectLock }, 'plugins')
+		).toEqual({ key: ENCORE_PLUGINS, ...flagLock });
+		expect(encoreFlagLock({ encoreFeatures: objectLock }, 'plugins')).toEqual({
+			key: 'encoreFeatures',
+			...objectLock,
+		});
+		expect(encoreFlagLock({ [ENCORE_PLUGINS]: flagLock }, 'symphony')).toBeNull();
+		expect(encoreFlagLock({}, 'telepathy')).toBeNull();
 	});
 });

@@ -68,3 +68,22 @@ describe('encoreShortcuts', () => {
 		expect(isShortcutAvailable('computerHistory', ALL_ON)).toBe(true);
 	});
 });
+
+describe('managed pins (MRC2-07-06)', () => {
+	it('hides the shortcut of a feature pinned off, whatever the store says', () => {
+		expect(isShortcutAvailable('openCue', ALL_ON, { maestroCue: false })).toBe(false);
+		expect(
+			availableShortcuts(DEFAULT_SHORTCUTS, ALL_ON, { maestroCue: false }).openCue
+		).toBeUndefined();
+	});
+
+	it('lists the shortcut of a feature pinned on and leaves unpinned flags to the store', () => {
+		expect(isShortcutAvailable('openCue', ALL_OFF, { maestroCue: true })).toBe(true);
+		expect(isShortcutAvailable('openSymphony', ALL_OFF, { maestroCue: true })).toBe(false);
+		expect(isShortcutAvailable('quickAction', ALL_OFF, { maestroCue: false })).toBe(true);
+		webDesktop = true;
+		expect(isShortcutAvailable('computerHistory', ALL_OFF, { computerHistory: true })).toBe(false);
+		webDesktop = false;
+		expect(isShortcutAvailable('computerHistory', ALL_OFF, { computerHistory: true })).toBe(true);
+	});
+});

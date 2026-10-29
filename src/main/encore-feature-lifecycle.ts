@@ -14,6 +14,13 @@
  * the bridge holds: `reconcile()` when the flag turned on, `stopAll()` when it
  * turned off. The bridge calling them too is harmless; every hook is idempotent.
  *
+ * A managed policy may pin a flag on or off (MRC2-07-06). The pins are the
+ * third input: `setPins()` records the policy's pins and settles every feature
+ * they change through the same `apply` path a user change takes, against the
+ * last store value seen, so a pin of `plugins: false` stops the plugin host the
+ * moment the policy lands, and a later user write cannot start it (the pin
+ * wins in `resolveEncoreFeatures`, and the store guard refuses the write anyway).
+ *
  * Deliberately NOT `FirstPartyPluginBridge.reconcileBackgroundService()`: that
  * forces a feature OFF when its first-party grants were never minted, which is
  * every default-on feature (Cue, Usage & Stats, ...) on an install that never
@@ -21,7 +28,11 @@
  * grant enforcement stays with the bridge and the broker.
  */
 
-import { resolveEncoreFeatures, type EncoreFeatureDefaults } from '../shared/encoreFeatureDefaults';
+import {
+	resolveEncoreFeatures,
+	type EncoreFeatureDefaults,
+	type EncoreFlagPins,
+} from '../shared/encoreFeatureDefaults';
 import type { FirstPartySupervisorHooks } from './plugins/first-party-bridge';
 
 /** One Encore Feature flag (first-party features plus the community `plugins` switch). */
@@ -41,10 +52,15 @@ export interface EncoreFeatureLifecycle {
 	 * once the services exist; flag changes before that have nothing to settle.
 	 */
 	attach(hooks: EncoreServiceHooks, raw: unknown): void;
-	/** Start `flag`'s background services when its flag is on (boot). */
+	/** Start `flag`'s background services when its flag is on (boot), the pins applied. */
 	startIfEnabled(flag: EncoreFlag, raw: unknown): void;
 	/** Settle every feature whose flag changed since the last call. */
 	apply(raw: unknown): void;
+	/**
+	 * Record the managed policy's pins (none standalone) and settle every
+	 * feature they change, against the last store value, through `apply`.
+	 */
+	setPins(pins: EncoreFlagPins | null | undefined): void;
 }
 
 export function createEncoreFeatureLifecycle(
@@ -52,6 +68,8 @@ export function createEncoreFeatureLifecycle(
 ): EncoreFeatureLifecycle {
 	let hooks: EncoreServiceHooks = {};
 	let applied: EncoreFeatureDefaults | null = null;
+	let lastRaw: unknown;
+	let pins: EncoreFlagPins | null = null;
 
 	const run = (flag: EncoreFlag, phase: 'reconcile' | 'stopAll'): void => {
 		const hook = hooks[flag];
@@ -63,23 +81,31 @@ export function createEncoreFeatureLifecycle(
 		}
 	};
 
+	const apply = (raw: unknown): void => {
+		lastRaw = raw;
+		if (!applied) return;
+		const next = resolveEncoreFeatures(raw, pins);
+		const previous = applied;
+		applied = next;
+		for (const flag of Object.keys(hooks) as EncoreFlag[]) {
+			if (next[flag] === previous[flag]) continue;
+			run(flag, next[flag] ? 'reconcile' : 'stopAll');
+		}
+	};
+
 	return {
 		attach(nextHooks, raw) {
 			hooks = nextHooks;
-			applied = resolveEncoreFeatures(raw);
+			lastRaw = raw;
+			applied = resolveEncoreFeatures(raw, pins);
 		},
 		startIfEnabled(flag, raw) {
-			if (resolveEncoreFeatures(raw)[flag]) run(flag, 'reconcile');
+			if (resolveEncoreFeatures(raw, pins)[flag]) run(flag, 'reconcile');
 		},
-		apply(raw) {
-			if (!applied) return;
-			const next = resolveEncoreFeatures(raw);
-			const previous = applied;
-			applied = next;
-			for (const flag of Object.keys(hooks) as EncoreFlag[]) {
-				if (next[flag] === previous[flag]) continue;
-				run(flag, next[flag] ? 'reconcile' : 'stopAll');
-			}
+		apply,
+		setPins(nextPins) {
+			pins = nextPins ?? null;
+			apply(lastRaw);
 		},
 	};
 }

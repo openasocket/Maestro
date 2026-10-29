@@ -35,6 +35,7 @@ import {
 } from '../../shared/maestro-lib/launch/env';
 import { isWindows } from '../../shared/platformDetection';
 import {
+	ENCORE_LOCK_PREFIX,
 	LOCKABLE_SETTING_KEYS,
 	MANAGED_LOCK_KEYS,
 	NO_MANAGED_SETTING_LOCKS,
@@ -42,6 +43,8 @@ import {
 	PROMPT_SET_LOCK_KEY,
 	agentConfigLockKey,
 	applyManagedPins,
+	encoreFeaturesWriteProblem,
+	encoreFlagPins,
 	isSettingLockable,
 	managedSettingLockReason,
 	managedSettingPin,
@@ -88,16 +91,25 @@ export type SettingWriteDecision =
 	| { allowed: true }
 	| { allowed: false; code: SettingWriteDenial; message: string; policyRevision: number | null };
 
+/** The write itself, when the caller has it: the dotted path and the value (`undefined` for a removal). */
+export interface SettingWrite {
+	path: string;
+	value: unknown;
+}
+
 /**
  * Hold one write against the standing. Pure. Standalone admits everything; a
  * credential key the plain settings file would keep is refused on every
  * managed host, policy or no policy (MRC2-06-06); a key the metadata never
  * marked lockable is admitted under any standing; a managed host with no
- * usable policy refuses every lockable key by name.
+ * usable policy refuses every lockable key by name. With the write at hand, a
+ * write of `encoreFeatures` that would flip a pinned Encore flag is refused by
+ * that flag's lock (MRC2-07-06); one that keeps every pin is admitted.
  */
 export function settingWriteVerdict(
 	standing: ManagedSettingsStanding,
-	key: string
+	key: string,
+	write?: SettingWrite
 ): SettingWriteDecision {
 	if (standing.standing === 'standalone') return { allowed: true };
 	const deny = (code: SettingWriteDenial, message: string): SettingWriteDecision => ({
@@ -118,7 +130,11 @@ export function settingWriteVerdict(
 			`the "${key}" setting is held by managed policy and the managed settings policy is unavailable (${standing.reason})`
 		);
 	const reason = managedSettingLockReason(key, standing.policy);
-	return reason === null ? { allowed: true } : deny('locked', reason);
+	if (reason !== null) return deny('locked', reason);
+	const flagReason = write
+		? encoreFeaturesWriteProblem(write.path, write.value, standing.policy)
+		: null;
+	return flagReason === null ? { allowed: true } : deny('locked', flagReason);
 }
 
 export type AgentConfigWriteDenial = SettingWriteDenial | 'ceiling';
@@ -204,7 +220,8 @@ export interface SettingsPolicySourceDeps {
 
 /** What a write path holds a key with: the source, or a test double. */
 export interface SettingsWriteAuthority {
-	authorize(key: string): SettingWriteDecision;
+	/** Hold a top-level key; with the write at hand, an Encore flag pin is held by value. */
+	authorize(key: string, write?: SettingWrite): SettingWriteDecision;
 	/** Hold a per-provider configuration field (`customPath`, `customArgs`, `customEnvVars`, `model`, `reasoningEffort`). */
 	authorizeAgentConfig(providerId: string, field: string, value: unknown): AgentConfigWriteDecision;
 	/** The policy whose pins a store restores, or null when none is usable. */
@@ -249,7 +266,7 @@ export function createSettingsPolicySource(deps: SettingsPolicySourceDeps): Sett
 			installed = null;
 			changed();
 		},
-		authorize: (key) => settingWriteVerdict(standing(), key),
+		authorize: (key, write) => settingWriteVerdict(standing(), key, write),
 		authorizeAgentConfig: (providerId, field, value) =>
 			agentConfigWriteVerdict(standing(), providerId, field, value),
 		pins() {
@@ -288,9 +305,14 @@ export function setSettingsWriteAuthority(authority: SettingsWriteAuthority | nu
 	writeAuthority = authority;
 }
 
-/** Hold a write to `key` (a dotted path is held by its top-level key). Standalone: allowed. */
-export function holdSettingWrite(key: string): SettingWriteDecision {
-	return writeAuthority ? writeAuthority.authorize(key.split('.')[0]) : { allowed: true };
+/**
+ * Hold a write to `key` (a dotted path is held by its top-level key). Pass the
+ * value when the caller has it, so a pinned Encore flag is held by value and a
+ * removal (`undefined`) by the default it falls back to. Standalone: allowed.
+ */
+export function holdSettingWrite(key: string, write?: { value: unknown }): SettingWriteDecision {
+	if (!writeAuthority) return { allowed: true };
+	return writeAuthority.authorize(key.split('.')[0], write && { path: key, value: write.value });
 }
 
 /** Hold a per-provider configuration write for `providerId` through the same authority. Standalone: allowed. */
@@ -342,7 +364,10 @@ export function readManagedSettingLocks(): ManagedSettingLocksView {
 			pinned: managedSettingPin(key, policy) !== null,
 		};
 	}
-	return { policyRevision, locks };
+	const encorePins = encoreFlagPins(policy);
+	return Object.keys(encorePins).length > 0
+		? { policyRevision, locks, encorePins }
+		: { policyRevision, locks };
 }
 
 /** A change to the installed plugin set, held before the files or the ledger are touched. */
@@ -383,13 +408,20 @@ export function holdPluginSetWrite(change: PluginSetChange): SettingWriteDecisio
 type Setter = (...args: unknown[]) => unknown;
 const unguardedSetters = new WeakMap<object, Setter>();
 
-/** The top-level keys a store mutation reaches: `set(key)`, `set(object)`, `delete`, `reset(...keys)`, `clear()`. */
-function keysOfMutation(method: string, args: unknown[]): readonly string[] {
-	if (method === 'clear') return LOCKABLE_SETTING_KEYS;
-	if (method === 'reset') return args.filter((arg): arg is string => typeof arg === 'string');
-	const [first] = args;
-	if (typeof first === 'string') return [first];
-	if (method === 'set' && typeof first === 'object' && first !== null) return Object.keys(first);
+/**
+ * The keys a store mutation reaches, each with the value it writes (`undefined`
+ * for a removal): `set(key, value)`, `set(object)`, `delete`, `reset(...keys)`, `clear()`.
+ */
+function writesOfMutation(method: string, args: unknown[]): readonly [string, unknown][] {
+	if (method === 'clear') return LOCKABLE_SETTING_KEYS.map((key) => [key, undefined]);
+	if (method === 'reset')
+		return args
+			.filter((arg): arg is string => typeof arg === 'string')
+			.map((key) => [key, undefined]);
+	const [first, second] = args;
+	if (typeof first === 'string') return [[first, method === 'set' ? second : undefined]];
+	if (method === 'set' && typeof first === 'object' && first !== null)
+		return Object.entries(first as Record<string, unknown>);
 	return [];
 }
 
@@ -405,8 +437,8 @@ export function guardSettingsStore<T extends object>(store: T): T {
 		const original = target[method];
 		if (typeof original !== 'function') continue;
 		const wrapped = (...args: unknown[]) => {
-			for (const key of keysOfMutation(method, args)) {
-				const decision = holdSettingWrite(key);
+			for (const [key, value] of writesOfMutation(method, args)) {
+				const decision = holdSettingWrite(key, { value });
 				if (!decision.allowed)
 					throw new ManagedSettingLockedError(key, decision.code, decision.message);
 			}
@@ -417,13 +449,20 @@ export function guardSettingsStore<T extends object>(store: T): T {
 	return store;
 }
 
-/** Restore every pinned key whose value differs, through the unguarded setter; returns the keys restored. */
+/**
+ * Restore every pinned key whose value differs, through the unguarded setter;
+ * returns the keys restored. An `encore.<flag>` pin is written as the
+ * `encoreFeatures` object it was folded into, once for every flag.
+ */
 export function restoreManagedSettingPins(
 	store: { readonly store: object; set(key: string, value: unknown): void },
 	policy: ManagedSettingsPolicy | null
 ): string[] {
 	const applied = applyManagedPins(store.store as Record<string, unknown>, policy);
 	const write = unguardedSetters.get(store) ?? ((key, value) => store.set(key as string, value));
-	for (const key of applied.restored) write(key, applied.settings[key]);
+	const written = new Set(
+		applied.restored.map((key) => (key.startsWith(ENCORE_LOCK_PREFIX) ? 'encoreFeatures' : key))
+	);
+	for (const key of written) write(key, applied.settings[key]);
 	return applied.restored;
 }

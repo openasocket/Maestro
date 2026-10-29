@@ -95,3 +95,27 @@ describe('isEncoreFeatureEnabled / requireEncoreFeature', () => {
 		);
 	});
 });
+
+describe('resolveEncoreFeatures with managed pins (MRC2-07-06)', () => {
+	it('reads a pinned flag as the pin, whatever is stored', () => {
+		expect(resolveEncoreFeatures({ plugins: true }, { plugins: false }).plugins).toBe(false);
+		expect(resolveEncoreFeatures({ maestroCue: false }, { maestroCue: true }).maestroCue).toBe(
+			true
+		);
+		expect(resolveEncoreFeatures(undefined, { plugins: true }).plugins).toBe(true);
+	});
+
+	it('leaves every other flag to the stored value and the defaults', () => {
+		expect(resolveEncoreFeatures({ symphony: false }, { plugins: false })).toEqual({
+			...ENCORE_FEATURE_DEFAULTS,
+			symphony: false,
+		});
+	});
+
+	it('ignores no pins, empty pins and a non-boolean pin', () => {
+		expect(resolveEncoreFeatures({ plugins: true }, null).plugins).toBe(true);
+		expect(resolveEncoreFeatures({ plugins: true }, {}).plugins).toBe(true);
+		const bad = { plugins: 'off' } as unknown as { plugins: boolean };
+		expect(resolveEncoreFeatures({ plugins: true }, bad).plugins).toBe(true);
+	});
+});

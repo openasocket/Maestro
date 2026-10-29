@@ -97,3 +97,36 @@ describe('createEncoreFeatureLifecycle', () => {
 		expect(plugins.reconcile).not.toHaveBeenCalled();
 	});
 });
+
+describe('managed pins (MRC2-07-06)', () => {
+	it('stops a feature the policy pins off through apply, and a user write cannot restart it', () => {
+		const plugins = hooks();
+		const cue = hooks();
+		const lifecycle = createEncoreFeatureLifecycle({ onError: vi.fn() });
+		lifecycle.attach({ plugins, maestroCue: cue }, { plugins: true });
+
+		lifecycle.setPins({ plugins: false });
+		expect(plugins.stopAll).toHaveBeenCalledOnce();
+		expect(cue.stopAll).not.toHaveBeenCalled();
+
+		// The store still says on (the restore has not landed yet): no transition.
+		lifecycle.apply({ plugins: true });
+		expect(plugins.reconcile).not.toHaveBeenCalled();
+		// The pin lifted: the stored value is the state again.
+		lifecycle.setPins(null);
+		expect(plugins.reconcile).toHaveBeenCalledOnce();
+	});
+
+	it('starts a feature pinned on at boot and keeps pins set before the hooks attach', () => {
+		const plugins = hooks();
+		const lifecycle = createEncoreFeatureLifecycle({ onError: vi.fn() });
+		lifecycle.setPins({ plugins: true });
+		lifecycle.attach({ plugins }, { plugins: false });
+		lifecycle.startIfEnabled('plugins', { plugins: false });
+		expect(plugins.reconcile).toHaveBeenCalledOnce();
+		// Attached under the pin: the same pins again are not a transition.
+		lifecycle.setPins({ plugins: true });
+		expect(plugins.stopAll).not.toHaveBeenCalled();
+		expect(plugins.reconcile).toHaveBeenCalledOnce();
+	});
+});

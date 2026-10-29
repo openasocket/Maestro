@@ -59,6 +59,7 @@ import {
 	restoreManagedSettingPins,
 	setSettingsWriteAuthority,
 } from './enterprise/settings-policy';
+import { encoreFlagPins } from '../shared/managedSettingsLock';
 import { createInstallPolicySource } from './enterprise/install-policy';
 import {
 	createCredentialCustodySource,
@@ -1031,6 +1032,13 @@ app
 		};
 		settingsPolicy.onChange(restoreSettingsPins);
 		restoreSettingsPins();
+		// The Encore flags a policy pins (MRC2-07-06) reach the feature lifecycle
+		// as its third input: a pin of `plugins: false` stops the plugin host the
+		// moment the policy lands, through the same apply path a user change takes.
+		// Managed mode is never a flag here; the pins are read from the policy alone.
+		const applyEncorePins = () => encoreLifecycle.setPins(encoreFlagPins(settingsPolicy.pins()));
+		settingsPolicy.onChange(applyEncorePins);
+		applyEncorePins();
 		// The pinned prompt set (MRC2-06-04): restored once the prompts are initialized below, and on every policy change.
 		const restorePromptPins = () =>
 			restoreManagedPromptPins(settingsPolicy.pins()).then(

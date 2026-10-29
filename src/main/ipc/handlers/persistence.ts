@@ -412,7 +412,7 @@ export function registerPersistenceHandlers(
 		// named in the log, and the sender reloads so its copy snaps back to the
 		// held value. Standalone the hold answers allowed. The bridge's set_setting
 		// reaches here through the renderer and holds the key itself before that.
-		const hold = holdSettingWrite(key);
+		const hold = holdSettingWrite(key, { value });
 		if (!hold.allowed) {
 			logger.warn(`Settings write refused (${hold.code}): ${hold.message}`, 'Settings', {
 				key,

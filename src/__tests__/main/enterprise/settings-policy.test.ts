@@ -476,3 +476,61 @@ describe('readManagedSettingLocks (MRC2-06-05)', () => {
 		});
 	});
 });
+
+describe('Encore flag pins (MRC2-07-06)', () => {
+	const pinned = () =>
+		installed(document({ locks: [{ key: 'encore.plugins', pin: { value: false } }] }));
+	const line = 'the "encore.plugins" setting is locked and pinned by managed policy revision 3';
+
+	it('holds a write of encoreFeatures by value: a flipped pin is refused, a kept pin admitted', () => {
+		pinned();
+		expect(holdSettingWrite('encoreFeatures')).toEqual({ allowed: true });
+		expect(holdSettingWrite('encoreFeatures', { value: { plugins: true } })).toMatchObject({
+			code: 'locked',
+			message: line,
+			policyRevision: 3,
+		});
+		expect(
+			holdSettingWrite('encoreFeatures', { value: { plugins: false, symphony: false } })
+		).toEqual({ allowed: true });
+		expect(holdSettingWrite('encoreFeatures.plugins', { value: true })).toMatchObject({
+			code: 'locked',
+			message: line,
+		});
+		expect(holdSettingWrite('encoreFeatures.symphony', { value: true })).toEqual({
+			allowed: true,
+		});
+		// The key itself is held by its own name, never split at the dot.
+		expect(holdManagedKey('encore.plugins')).toMatchObject({ code: 'locked', message: line });
+		expect(holdSettingWrite('encore.plugins')).toEqual({ allowed: true });
+	});
+
+	it('guards the store by value and restores the pin into the stored object', () => {
+		const current = pinned();
+		const store = guardSettingsStore(
+			fakeStore({ encoreFeatures: { plugins: true, symphony: false } })
+		);
+		expect(() => store.set('encoreFeatures', { plugins: true })).toThrow(line);
+		expect(() => store.set({ encoreFeatures: { plugins: true }, fontSize: 1 })).toThrow(
+			ManagedSettingLockedError
+		);
+		store.set('encoreFeatures', { plugins: false, symphony: true });
+		expect(store.writes).toEqual([['encoreFeatures', { plugins: false, symphony: true }]]);
+		// A removal falls back to the default (off): admitted under this pin.
+		store.delete('encoreFeatures');
+		expect(restoreManagedSettingPins(store, current.pins())).toEqual([]);
+		store.store.encoreFeatures = { plugins: true };
+		expect(restoreManagedSettingPins(store, current.pins())).toEqual(['encore.plugins']);
+		expect(store.store.encoreFeatures).toEqual({ plugins: false });
+		expect(store.writes.at(-1)).toEqual(['encoreFeatures', { plugins: false }]);
+	});
+
+	it('shows the pin on the locks view, by key and by flag', () => {
+		pinned();
+		const view = readManagedSettingLocks();
+		expect(view.locks['encore.plugins']).toEqual({ code: 'locked', message: line, pinned: true });
+		expect(view.encorePins).toEqual({ plugins: false });
+		installed();
+		expect(readManagedSettingLocks().encorePins).toBeUndefined();
+	});
+});

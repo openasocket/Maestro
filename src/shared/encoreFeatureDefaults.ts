@@ -35,7 +35,15 @@ export type EncoreFeatureDefaults = {
 };
 
 /**
- * Merge whatever is persisted onto the defaults.
+ * The flags a managed policy pins, on or off (MRC2-07-06). Managed mode itself
+ * is never a flag here: a policy holds a flag through the `encore.<flag>` lock
+ * keys of `src/shared/managedSettingsLock.ts`, and `encoreFlagPins(policy)`
+ * there is the one reading of a policy into this shape. Standalone: none.
+ */
+export type EncoreFlagPins = Readonly<Partial<Record<keyof EncoreFeatureDefaults, boolean>>>;
+
+/**
+ * Merge whatever is persisted onto the defaults, then the policy's pins on top.
  *
  * Only a real boolean overrides a default. A key the user never saw must fall
  * back to its default rather than to `undefined` -> false, which is exactly how
@@ -45,16 +53,25 @@ export type EncoreFeatureDefaults = {
  * off, so on a fresh install - where nothing is persisted yet - the renderer
  * showed Cue ON while the boot gate read OFF and never started the engine.
  *
+ * A pinned flag reads as the pin whatever is stored. The main process also
+ * restores every pin into the stored object (at startup and on each policy
+ * change) and refuses a write that would flip one, so a reader with no pins at
+ * hand still sees the pinned value; passing the pins makes a reader right
+ * between the policy change and the restore, and in a renderer copy a refused
+ * toggle has not snapped back yet.
+ *
  * Keys are derived from `ENCORE_FEATURE_DEFAULTS`, never hand-listed, so a
  * newly graduated feature cannot be left out of the merge.
  */
-export function resolveEncoreFeatures(raw: unknown): EncoreFeatureDefaults {
+export function resolveEncoreFeatures(
+	raw: unknown,
+	pins?: EncoreFlagPins | null
+): EncoreFeatureDefaults {
 	const stored = (raw ?? {}) as Partial<Record<keyof EncoreFeatureDefaults, unknown>>;
 	const resolved = { ...ENCORE_FEATURE_DEFAULTS } as Record<string, boolean>;
-	for (const key of Object.keys(ENCORE_FEATURE_DEFAULTS)) {
-		if (typeof stored[key as keyof EncoreFeatureDefaults] === 'boolean') {
-			resolved[key] = stored[key as keyof EncoreFeatureDefaults] as boolean;
-		}
+	for (const key of Object.keys(ENCORE_FEATURE_DEFAULTS) as (keyof EncoreFeatureDefaults)[]) {
+		if (typeof stored[key] === 'boolean') resolved[key] = stored[key] as boolean;
+		if (typeof pins?.[key] === 'boolean') resolved[key] = pins[key] as boolean;
 	}
 	return resolved as EncoreFeatureDefaults;
 }

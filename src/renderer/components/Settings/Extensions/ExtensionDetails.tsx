@@ -38,6 +38,9 @@ import { pluginSettingsId } from '../../../../shared/plugins/panel-host';
 import { getModalActions, useModalStore } from '../../../stores/modalStore';
 import { launchFromSettings } from '../../../utils/launchFromSettings';
 import type { EncoreTileRequest } from '../tabs/EncoreTab/types';
+import { encoreFlagLockKey } from '../../../../shared/managedSettingsLock';
+import { useManagedSettingLock } from '../ManagedSettingSection';
+import { ManagedLockBadge } from '../../ui/ManagedLockBadge';
 
 interface ExtensionDetailsProps {
 	theme: Theme;
@@ -226,7 +229,13 @@ export function ExtensionDetails({
 
 	const grantedCaps = new Set((grants?.granted ?? []).map((g) => g.capability));
 	const isEnabled = ext.state === 'enabled';
-	const toggleBlocked = busy || (isPlugin && ext.loadStatus !== 'ok');
+	// A built-in flag a managed policy pins (`encore.<flag>`), or holds with the
+	// whole `encoreFeatures` object, shows the lock and cannot be switched
+	// (MRC2-07-06); the main process refuses the write anyway.
+	const flagLock = useManagedSettingLock(
+		ext.flag ? [encoreFlagLockKey(ext.flag) ?? 'encoreFeatures', 'encoreFeatures'] : []
+	);
+	const toggleBlocked = busy || (isPlugin && ext.loadStatus !== 'ok') || flagLock !== null;
 
 	// First-party tiles surface their supervised background services; status
 	// derives from the definition + the bridge-written flag state (enable
@@ -279,6 +288,13 @@ export function ExtensionDetails({
 					</div>
 				</div>
 				<div className="flex items-center gap-2 flex-shrink-0">
+					{flagLock && (
+						<ManagedLockBadge
+							id={`managed-lock-${flagLock.key}`}
+							theme={theme}
+							reason={flagLock.message}
+						/>
+					)}
 					{/* One switch for every tile, always in this spot. The label and
 					    the pill share one role="switch" button (a nested button
 					    would be invalid), the same shape as the Cue header. */}
@@ -287,6 +303,7 @@ export function ExtensionDetails({
 						role="switch"
 						aria-checked={isEnabled}
 						aria-label={isEnabled ? `Disable ${ext.name}` : `Enable ${ext.name}`}
+						aria-describedby={flagLock ? `managed-lock-${flagLock.key}` : undefined}
 						data-testid="extension-enable-toggle"
 						disabled={toggleBlocked}
 						onClick={() => {

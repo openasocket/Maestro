@@ -37,9 +37,23 @@
  *
  * What a Settings pane reads of the lock (MRC2-06-05) is `ManagedSettingLocksView`:
  * every held key by name with the line its refusal is named with.
+ *
+ * MRC2-07-06 adds one lock key per Encore Feature flag (`encore.<flag>`, from
+ * `ENCORE_FEATURE_DEFAULTS`), always pinned on or off and never locked bare:
+ * managed mode is not a flag a person switches, so a policy holds a flag to a
+ * value. The pin lives inside the `encoreFeatures` object: `applyManagedPins()`
+ * restores it there, and a write of `encoreFeatures` (or of one dotted flag)
+ * that would flip a pinned flag is refused by `encoreFeaturesWriteProblem()`
+ * while one that keeps every pin is admitted. The whole-object `encoreFeatures`
+ * lock of P2-06 stays as it is beside these.
  */
 
 import { canonicalJson } from './canonicalJson';
+import {
+	ENCORE_FEATURE_DEFAULTS,
+	resolveEncoreFeatures,
+	type EncoreFlagPins,
+} from './encoreFeatureDefaults';
 import { PLUGIN_ID_PATTERN } from './plugins/plugin-manifest';
 import { CORE_PROMPTS } from './promptDefinitions';
 import { SETTINGS_METADATA, type SettingMetadata, type SettingType } from './settingsMetadata';
@@ -126,12 +140,24 @@ export const MANAGED_ACTION_LOCK_KEYS: readonly string[] = Object.freeze([
 	LITE_CONTROL_LOCK_KEY,
 ]);
 
-/** Every key a policy may hold, in registry order: the settings keys, the per-provider fields, the admin sets, the actions. */
+/** One Encore Feature flag, held as `encore.<flag>` and always pinned on or off (MRC2-07-06). */
+export const ENCORE_LOCK_PREFIX = 'encore.';
+export const ENCORE_FLAG_LOCK_KEYS: readonly string[] = Object.freeze(
+	Object.keys(ENCORE_FEATURE_DEFAULTS).map((flag) => `${ENCORE_LOCK_PREFIX}${flag}`)
+);
+
+/** The lock key an Encore flag is held by, or null for a name that is no flag. */
+export function encoreFlagLockKey(flag: string): string | null {
+	return flag in ENCORE_FEATURE_DEFAULTS ? `${ENCORE_LOCK_PREFIX}${flag}` : null;
+}
+
+/** Every key a policy may hold, in registry order: the settings keys, the per-provider fields, the admin sets, the actions, the Encore flags. */
 export const MANAGED_LOCK_KEYS: readonly string[] = Object.freeze([
 	...LOCKABLE_SETTING_KEYS,
 	...AGENT_CONFIG_LOCK_KEYS,
 	...MANAGED_SET_LOCK_KEYS,
 	...MANAGED_ACTION_LOCK_KEYS,
+	...ENCORE_FLAG_LOCK_KEYS,
 ]);
 const LOCK_BOUND = MANAGED_LOCK_KEYS.length;
 
@@ -153,6 +179,8 @@ export interface ManagedSettingLockView {
 export interface ManagedSettingLocksView {
 	policyRevision: number | null;
 	locks: Readonly<Record<string, ManagedSettingLockView>>;
+	/** The Encore flags the policy pins, by flag; present only when it pins one (MRC2-07-06). */
+	encorePins?: EncoreFlagPins;
 }
 
 export const NO_MANAGED_SETTING_LOCKS: ManagedSettingLocksView = Object.freeze({
@@ -211,6 +239,10 @@ const MANAGED_SET_PIN_PROBLEM: Record<string, (value: unknown) => string | null>
 };
 
 function pinProblem(key: string, raw: unknown): string | null {
+	if (key.startsWith(ENCORE_LOCK_PREFIX))
+		return typeof raw === 'boolean'
+			? null
+			: `is not a boolean (the "${key}" flag is pinned on or off)`;
 	if (key.startsWith(AGENT_CONFIG_LOCK_PREFIX))
 		return `pins "${key}", a per-provider configuration key that may be locked but never pinned`;
 	if (MANAGED_ACTION_LOCK_KEYS.includes(key))
@@ -255,6 +287,8 @@ function parseLock(raw: unknown, at: string, problems: string[]): ManagedSetting
 	if (typeof key !== 'string' || !isSettingLockable(key))
 		problems.push(`${at}.key is not a lockable setting key`);
 	let pin: ManagedSettingsLock['pin'];
+	if (raw.pin === undefined && typeof key === 'string' && key.startsWith(ENCORE_LOCK_PREFIX))
+		problems.push(`${at} holds "${key}" without a pin; an Encore flag is pinned on or off`);
 	if (raw.pin !== undefined) {
 		if (!isPlainObject(raw.pin)) problems.push(`${at}.pin is not an object`);
 		else {
@@ -344,6 +378,57 @@ export function managedSettingLockReason(
 		: `the "${key}" setting is locked by managed policy revision ${policy.policyRevision}`;
 }
 
+/** The Encore flags the policy pins, by flag (MRC2-07-06). Standalone, and under no `encore.*` lock: none. */
+export function encoreFlagPins(policy: ManagedSettingsPolicyRef): EncoreFlagPins {
+	const pins: Record<string, boolean> = {};
+	for (const key of lockedSettingKeys(policy)) {
+		if (!key.startsWith(ENCORE_LOCK_PREFIX)) continue;
+		const pin = managedSettingPin(key, policy);
+		if (pin && typeof pin.value === 'boolean')
+			pins[key.slice(ENCORE_LOCK_PREFIX.length)] = pin.value;
+	}
+	return pins;
+}
+
+/**
+ * The line a write of `encoreFeatures` (the object) or `encoreFeatures.<flag>`
+ * (one dotted flag) is refused with when it would flip a pinned flag, or null
+ * when it keeps every pin. `undefined` is a removal (delete, reset, clear): the
+ * flag falls back to its default, refused only where the default contradicts
+ * the pin. A write that leaves a pinned flag at its pin is admitted, so a
+ * toggle of another flag still works under a pin.
+ */
+export function encoreFeaturesWriteProblem(
+	path: string,
+	value: unknown,
+	policy: ManagedSettingsPolicyRef
+): string | null {
+	const [top, flag, ...rest] = path.split('.');
+	if (top !== 'encoreFeatures' || rest.length > 0) return null;
+	const pins = encoreFlagPins(policy);
+	const next = flag === undefined ? resolveEncoreFeatures(value) : null;
+	for (const [name, pin] of Object.entries(pins)) {
+		if (flag !== undefined && flag !== name) continue;
+		const written = next
+			? next[name as keyof typeof next]
+			: typeof value === 'boolean'
+				? value
+				: resolveEncoreFeatures(undefined)[name as keyof EncoreFlagPins];
+		if (written !== pin) return managedSettingLockReason(`${ENCORE_LOCK_PREFIX}${name}`, policy);
+	}
+	return null;
+}
+
+/** The lock a Settings control for one Encore flag shows: the flag's own pin, else the whole-object lock, else null. */
+export function encoreFlagLock(
+	locks: ManagedSettingLocksView['locks'],
+	flag: string
+): (ManagedSettingLockView & { key: string }) | null {
+	for (const key of [encoreFlagLockKey(flag) ?? '', 'encoreFeatures'])
+		if (key && locks[key]) return { key, ...locks[key] };
+	return null;
+}
+
 /** The held fields a whole-config write changes; a write that leaves a held field as it is holds nothing. */
 export function changedAgentConfigFields(
 	before: Record<string, unknown>,
@@ -364,7 +449,9 @@ export interface ManagedPinApplication<T> {
 /**
  * Restore every pinned settings key whose value differs, as a fresh copy. A
  * lock without a pin, a pin already held, an admin set's pin (not a settings
- * value), or no policy at all changes nothing.
+ * value), or no policy at all changes nothing. An Encore flag pin is restored
+ * INTO the `encoreFeatures` object (after a whole-object pin, on top of it) and
+ * named `encore.<flag>` in `restored`; the writer maps it to that key.
  */
 export function applyManagedPins<T extends Record<string, unknown>>(
 	settings: T,
@@ -378,6 +465,13 @@ export function applyManagedPins<T extends Record<string, unknown>>(
 			continue;
 		next[key] = cloneJson(lock.pin.value);
 		restored.push(key);
+	}
+	const current = resolveEncoreFeatures(next.encoreFeatures);
+	for (const [flag, pin] of Object.entries(encoreFlagPins(policy))) {
+		if (current[flag as keyof typeof current] === pin) continue;
+		const base = isPlainObject(next.encoreFeatures) ? next.encoreFeatures : {};
+		next.encoreFeatures = { ...base, [flag]: pin };
+		restored.push(`${ENCORE_LOCK_PREFIX}${flag}`);
 	}
 	return restored.length === 0 ? { settings, restored } : { settings: next as T, restored };
 }

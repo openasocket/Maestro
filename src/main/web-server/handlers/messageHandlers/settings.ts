@@ -94,7 +94,7 @@ export function handleSetSetting(
 	// before the renderer round trip would answer a bare `false`; the refusal
 	// carries state and code like every other managed refusal on this bridge,
 	// and the request id so the CLI's pending call settles on it.
-	const hold = holdSettingWrite(key);
+	const hold = holdSettingWrite(key, { value });
 	if (!hold.allowed) {
 		ctx.sendError(client, hold.message, {
 			key,
