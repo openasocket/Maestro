@@ -13,6 +13,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { ipcMain } from 'electron';
 
 vi.mock('electron', () => ({
 	app: { getVersion: () => '0.0.0', getAppPath: () => '/repo' },
@@ -42,6 +43,12 @@ import {
 	type ManagedOperations,
 } from '../../../../main/enterprise/service';
 import { PAIRED_DEVICE_USER_ID_PREFIX } from '../../../../main/web-server/auth/transport-actor';
+import { registerEnterpriseHandlers } from '../../../../main/ipc/handlers/enterprise';
+import { createInboxClient, createInboxReceiptLedger } from '../../../../main/enterprise/inbox';
+import type {
+	EndpointInboxRequest,
+	InboxPort,
+} from '../../../../shared/maestro-lib/managed/host-adapter';
 
 const STATE = { standing: 'unenrolled', reason: null };
 const LOCKS = { policyRevision: null, locks: {} };
@@ -354,6 +361,172 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 				action: { kind: 'read' },
 			})
 		).toMatchObject({ success: true, outcome: { status: 'recorded' } });
+	});
+
+	it('records an ack and a reply through the real facade and inbox client, attributed to the transport that sent each: the login account, the CLI; the text reaches the endpoint and never the ledger', async () => {
+		const NOW = Date.parse('2026-10-28T12:00:00.000Z');
+		const MESSAGE = '22222222-2222-4222-8222-222222222222';
+		const acts: EndpointInboxRequest[] = [];
+		const port: InboxPort = {
+			list: async () => ({
+				status: 'ok',
+				payload: {
+					outcome: 'notices',
+					items: [
+						{
+							campaignId: '11111111-1111-4111-8111-111111111111',
+							messageId: MESSAGE,
+							body: 'Planned maintenance on Friday.',
+							expiresAt: new Date(NOW + 86_400_000).toISOString(),
+							kind: 'notice',
+							agentInput: false,
+						},
+					],
+					nextOffset: null,
+				},
+			}),
+			act: async (request) => {
+				acts.push(request);
+				return {
+					status: 'ok',
+					payload: {
+						outcome: 'recorded',
+						messageId: request.messageId,
+						receiptId: `rcpt-${request.action.kind}`,
+						state: request.action.kind === 'reply' ? 'replied' : request.action.kind,
+					},
+				};
+			},
+		};
+		const inbox = createInboxClient({
+			host: {
+				inboxStanding: () => ({
+					standingKey: 'k1',
+					ok: true,
+					binding: {
+						tenantId: 'tenant-1',
+						enrollmentId: 'enr-1',
+						registrationId: 'ch-1',
+						actorId: 'actor-1',
+						installation: { installationId: 'inst-1', runtimeId: 'd-1', processEpoch: 'e-1' },
+						policyRevision: 3,
+						capabilities: { noticeList: true, inbox: true },
+					},
+				}),
+				inbox: port,
+			},
+			ledger: createInboxReceiptLedger({ now: () => NOW }),
+			now: () => NOW,
+		});
+		handler.setCallbacks({
+			getManaged: () =>
+				createManagedOperations({
+					lifecycle: { status: () => ({}) } as never,
+					policy: { status: () => ({}) } as never,
+					identity: { read: () => ({ status: 'none' }), custody: () => ({}) } as never,
+					inventory: { snapshot: () => INVENTORY } as never,
+					inbox,
+					holds: { egress: () => [], update: () => null, listeners: () => [] },
+				}),
+		});
+		// The pane's List (or `managed inbox list`) holds the notice and records delivered.
+		expect(await ask(handler, createClient(), { type: 'managed_inbox_list' })).toMatchObject({
+			success: true,
+			listing: { refresh: { outcome: 'listed', newlyHeld: 1 } },
+		});
+		const ack = await ask(
+			handler,
+			createClient({ user: { id: 'u1', username: 'ada', displayName: 'Ada' } }),
+			{ type: 'managed_inbox_act', messageId: MESSAGE, action: { kind: 'acknowledged' } }
+		);
+		expect(ack).toMatchObject({
+			success: true,
+			actor: 'web-login:ada',
+			user: 'ada',
+			outcome: {
+				status: 'recorded',
+				duplicate: false,
+				record: {
+					action: 'acknowledged',
+					state: 'recorded',
+					actorId: 'actor-1',
+					receipt: { receiptId: 'rcpt-acknowledged', state: 'acknowledged' },
+				},
+			},
+		});
+		const reply = await ask(handler, createClient({ cli: true }), {
+			type: 'managed_inbox_act',
+			messageId: MESSAGE,
+			action: { kind: 'reply', text: 'Thanks, noted.' },
+		});
+		expect(reply).toMatchObject({
+			success: true,
+			actor: 'maestro-cli',
+			user: null,
+			outcome: {
+				status: 'recorded',
+				record: {
+					action: 'reply',
+					reply: { length: 14 },
+					receipt: { receiptId: 'rcpt-reply', state: 'replied' },
+				},
+			},
+		});
+		expect(acts.map((a) => a.action)).toEqual([
+			{ kind: 'delivered' },
+			{ kind: 'acknowledged' },
+			{ kind: 'reply', text: 'Thanks, noted.' },
+		]);
+		expect(JSON.stringify(reply)).not.toContain('Thanks, noted.');
+		// The held view every reader draws carries both receipts.
+		expect(
+			await ask(handler, createClient(), { type: 'managed_inbox_list', refresh: false })
+		).toMatchObject({
+			success: true,
+			listing: {
+				refresh: null,
+				view: {
+					notices: [
+						{
+							messageId: MESSAGE,
+							receipts: { delivered: 'recorded', acknowledged: 'recorded', reply: 'recorded' },
+						},
+					],
+				},
+			},
+		});
+	});
+
+	it('admits over the bridge exactly the five enterprise reads and acts the pane shows, out of every enterprise channel the desktop registers', () => {
+		const channels: string[] = [];
+		vi.mocked(ipcMain.handle).mockImplementation((channel: string) => {
+			channels.push(channel);
+		});
+		registerEnterpriseHandlers({
+			getLifecycle: () => null as never,
+			getPolicyStatus: () => null as never,
+			getIdentity: () => null as never,
+			getManaged: () => null,
+			getInbox: () => null,
+			getCommands: () => null,
+		});
+		expect(channels.length).toBeGreaterThanOrEqual(21);
+		expect(channels.every((channel) => channel.startsWith('enterprise:'))).toBe(true);
+		expect(channels.filter(isRemoteMethodAllowed).sort()).toEqual([
+			'enterprise:inboxAct',
+			'enterprise:inboxRefresh',
+			'enterprise:inboxState',
+			'enterprise:inventory',
+			'enterprise:managedState',
+		]);
+		// Nothing that enrolls, registers, rotates, revokes, retires or clears custody is remote.
+		for (const channel of channels) {
+			if (
+				/enroll|registration|rotation|revocation|retire|identity|custody|connect/i.test(channel)
+			) {
+				expect(isRemoteMethodAllowed(channel), channel).toBe(false);
+			}
+		}
 	});
 
 	it('routes exactly the ten managed message types and admits exactly the intended remote methods', () => {
