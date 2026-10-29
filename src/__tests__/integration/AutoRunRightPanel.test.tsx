@@ -6,18 +6,33 @@
  * - Tab switching preserves Auto Run state
  * - Panel resize doesn't lose content
  * - Expanded modal syncs with panel
+ *
+ * RightPanel reads the active agent, the open/tab/focus state, the panel width,
+ * the file tree and the document list straight from the Zustand stores, so the
+ * harness seeds those stores (the way RightPanel.test.tsx does) and keeps as
+ * props only what RightPanel still takes: the theme, the tab handler, the file
+ * explorer handlers, and the Auto Run callbacks, which here write back to the
+ * session record exactly as useAutoRunHandlers does in the App.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import React, { createRef, useState } from 'react';
+import React, { createRef } from 'react';
 import { RightPanel, RightPanelHandle } from '../../renderer/components/RightPanel';
-import { AutoRun, AutoRunHandle } from '../../renderer/components/AutoRun';
 import type { Session, Shortcut, BatchRunState, RightPanelTab } from '../../renderer/types';
 import { createMockSession as baseCreateMockSession } from '../helpers/mockSession';
 import { LayerStackProvider } from '../../renderer/contexts/LayerStackContext';
-
 import { createMockTheme } from '../helpers/mockTheme';
+import {
+	useSessionStore,
+	selectActiveSession,
+	updateSessionWith,
+} from '../../renderer/stores/sessionStore';
+import { useUIStore } from '../../renderer/stores/uiStore';
+import { useSettingsStore } from '../../renderer/stores/settingsStore';
+import { useFileExplorerStore } from '../../renderer/stores/fileExplorerStore';
+import { useBatchStore } from '../../renderer/stores/batchStore';
+import { RIGHT_PANEL_MIN_WIDTH, RIGHT_PANEL_MAX_WIDTH } from '../../renderer/constants/rightPanel';
 
 // Mock external dependencies
 // CodeMirror cannot lay itself out in jsdom, so the Auto Run source editor is
@@ -48,7 +63,7 @@ vi.mock('react-syntax-highlighter/dist/esm/styles/prism', () => ({
 	vs: {},
 }));
 
-vi.mock('../../renderer/components/AutoRunnerHelpModal', () => ({
+vi.mock('../../renderer/components/AutoRun/AutoRunnerHelpModal', () => ({
 	AutoRunnerHelpModal: ({ onClose }: { onClose: () => void }) => (
 		<div data-testid="help-modal">
 			<button onClick={onClose}>Close</button>
@@ -69,78 +84,60 @@ vi.mock('../../renderer/components/FileExplorerPanel', () => ({
 }));
 
 vi.mock('../../renderer/components/HistoryPanel', () => ({
-	HistoryPanel: vi.fn(() => <div data-testid="history-panel">HistoryPanel</div>),
+	// RightPanel hands HistoryPanel a ref, so the double must accept one.
+	HistoryPanel: React.forwardRef(function MockHistoryPanel(_props, _ref) {
+		return <div data-testid="history-panel">HistoryPanel</div>;
+	}),
 }));
 
-vi.mock('../../renderer/components/AutoRunDocumentSelector', () => ({
-	AutoRunDocumentSelector: ({
-		documents,
-		selectedDocument,
-		onSelectDocument,
-		onRefresh,
-		onChangeFolder,
-		isLoading,
-	}: any) => (
-		<div data-testid="document-selector">
-			<select
-				data-testid="doc-select"
-				value={selectedDocument || ''}
-				onChange={(e) => onSelectDocument(e.target.value)}
-			>
-				{documents.map((doc: string) => (
-					<option key={doc} value={doc}>
-						{doc}
-					</option>
-				))}
-			</select>
-			<button data-testid="refresh-btn" onClick={onRefresh}>
-				Refresh
-			</button>
-			<button data-testid="change-folder-btn" onClick={onChangeFolder}>
-				Change
-			</button>
-			{isLoading && <span data-testid="loading-indicator">Loading...</span>}
-		</div>
-	),
-}));
-
-vi.mock('../../renderer/hooks/useTemplateAutocomplete', () => ({
-	useTemplateAutocomplete: ({ onChange }: { value: string; onChange: (value: string) => void }) => {
-		return {
-			autocompleteState: {
-				isOpen: false,
-				suggestions: [],
-				selectedIndex: 0,
-				position: { top: 0, left: 0 },
-			},
-			handleKeyDown: () => false,
-			handleChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-				onChange(e.target.value);
-			},
-			selectVariable: () => {},
-			closeAutocomplete: () => {},
-			autocompleteRef: { current: null },
-		};
-	},
+vi.mock('../../renderer/components/AutoRun/AutoRunDocumentSelector', () => ({
+	AutoRunDocumentSelector: React.forwardRef(function MockDocumentSelector(
+		{ documents, selectedDocument, onSelectDocument, onRefresh, onChangeFolder, isLoading }: any,
+		_ref
+	) {
+		return (
+			<div data-testid="document-selector">
+				<select
+					data-testid="doc-select"
+					value={selectedDocument || ''}
+					onChange={(e) => onSelectDocument(e.target.value)}
+				>
+					{documents.map((doc: string) => (
+						<option key={doc} value={doc}>
+							{doc}
+						</option>
+					))}
+				</select>
+				<button data-testid="refresh-btn" onClick={onRefresh}>
+					Refresh
+				</button>
+				<button data-testid="change-folder-btn" onClick={onChangeFolder}>
+					Change
+				</button>
+				{isLoading && <span data-testid="loading-indicator">Loading...</span>}
+			</div>
+		);
+	}),
 }));
 
 vi.mock('../../renderer/components/TemplateAutocompleteDropdown', () => ({
 	TemplateAutocompleteDropdown: React.forwardRef(() => null),
 }));
 
-vi.mock('../../renderer/utils/shortcutFormatter', () => ({
-	formatShortcutKeys: vi.fn((keys) => keys?.join('+') || ''),
-	isMacOS: vi.fn(() => false),
-}));
-
-// Setup window.maestro mock
+// Setup window.maestro mock: layer the Auto Run surface this suite drives over
+// the global bridge double from setup.ts, so every other namespace the panel
+// reaches for stays answered.
 const setupMaestroMock = () => {
+	const base = (window as any).maestro ?? {};
 	const mockMaestro = {
+		...base,
 		fs: {
+			...base.fs,
 			readFile: vi.fn().mockResolvedValue('data:image/png;base64,abc123'),
 			readDir: vi.fn().mockResolvedValue([]),
 		},
 		autorun: {
+			...base.autorun,
 			listImages: vi.fn().mockResolvedValue({ success: true, images: [] }),
 			saveImage: vi.fn().mockResolvedValue({ success: true, relativePath: 'images/test-123.png' }),
 			deleteImage: vi.fn().mockResolvedValue({ success: true }),
@@ -156,8 +153,13 @@ const setupMaestroMock = () => {
 	return mockMaestro;
 };
 
+const DEFAULT_CONTENT = '# Test Document\n\n- [ ] Task 1\n- [ ] Task 2';
+const DOCUMENTS = ['Phase 1', 'Phase 2', 'Phase 3'];
+const theme = createMockTheme();
+
 // Thin wrapper: seeds auto run state so the right panel shows the auto
-// run tab with content.
+// run tab with content. The document text and its disk version live on the
+// session record, which is where RightPanel reads them from.
 const createMockSession = (overrides: Partial<Session> = {}): Session =>
 	baseCreateMockSession({
 		id: 'test-session-1',
@@ -176,100 +178,147 @@ const createMockSession = (overrides: Partial<Session> = {}): Session =>
 		autoRunCursorPosition: 0,
 		autoRunEditScrollPos: 0,
 		autoRunPreviewScrollPos: 0,
+		autoRunContent: DEFAULT_CONTENT,
+		autoRunContentVersion: 0,
 		...overrides,
 	});
 
 // Create mock shortcuts
 const createMockShortcuts = (): Record<string, Shortcut> => ({
-	toggleRightPanel: {
-		id: 'toggleRightPanel',
-		name: 'Toggle Right Panel',
-		keys: ['Cmd', 'B'],
-		description: 'Toggle the right panel',
-		category: 'Navigation',
-	},
-	expandAutoRun: {
-		id: 'expandAutoRun',
-		name: 'Expand Auto Run',
-		keys: ['Cmd', 'Shift', 'E'],
-		description: 'Expand Auto Run to modal',
-		category: 'Auto Run',
-	},
+	toggleRightPanel: { id: 'toggleRightPanel', label: 'Toggle Right Panel', keys: ['Cmd', 'B'] },
+	expandAutoRun: { id: 'expandAutoRun', label: 'Expand Auto Run', keys: ['Cmd', 'Shift', 'E'] },
 });
 
-// Wrapper component to test RightPanel with state management
+/**
+ * Seed the five stores RightPanel subscribes to. Auto-follow is off so a
+ * running batch does not move the tab under a case that is driving the tabs
+ * itself; the two batch cases assert the lock the run imposes instead.
+ */
+const seedStores = ({
+	session = createMockSession(),
+	content,
+	tab = 'autorun' as RightPanelTab,
+	width = 400,
+}: {
+	session?: Session;
+	content?: string;
+	tab?: RightPanelTab;
+	width?: number;
+} = {}) => {
+	const seeded = content === undefined ? session : { ...session, autoRunContent: content };
+	useSessionStore.setState({ sessions: [seeded], activeSessionId: seeded.id });
+	useUIStore.setState({
+		rightPanelOpen: true,
+		activeRightTab: tab,
+		activeFocus: 'right',
+		autoFollowEnabled: false,
+	});
+	useSettingsStore.setState({
+		rightPanelWidth: width,
+		shortcuts: createMockShortcuts(),
+		showHiddenFiles: false,
+		autoRunDisabled: false,
+	});
+	useFileExplorerStore.setState({
+		fileTreeFilter: '',
+		fileTreeFilterOpen: false,
+		flatFileList: [],
+		selectedFileIndex: 0,
+		lastGraphFocusFilePath: undefined,
+	});
+	useBatchStore.setState({
+		documentList: DOCUMENTS,
+		documentTree: [] as any,
+		isLoadingDocuments: false,
+		documentTaskCounts: new Map(),
+		batchRunStates: {},
+	});
+};
+
+/** The active agent as the store holds it right now. */
+const activeSession = (): Session => selectActiveSession(useSessionStore.getState())!;
+
+/** Write fields onto the active agent, which is what the App's Auto Run handlers do. */
+const patchActiveSession = (patch: Partial<Session>) => {
+	updateSessionWith(activeSession().id, (s) => ({ ...s, ...patch }));
+};
+
+/** What the folder watcher does after a write: new text on disk, version bumped. */
+const setDiskContent = (content: string) =>
+	act(() => {
+		patchActiveSession({
+			autoRunContent: content,
+			autoRunContentVersion: (activeSession().autoRunContentVersion ?? 0) + 1,
+		});
+	});
+
+/** Drag the resize handle (pointer-captured on the handle, as the hook listens). */
+const dragResizeHandle = (container: HTMLElement, from: number, ...to: number[]) => {
+	const resizeHandle = container.querySelector('.cursor-col-resize') as HTMLElement;
+	expect(resizeHandle).toBeInTheDocument();
+	fireEvent.pointerDown(resizeHandle, { clientX: from, pointerId: 1 });
+	for (const clientX of to) fireEvent.pointerMove(resizeHandle, { clientX });
+	fireEvent.pointerUp(resizeHandle);
+};
+
+const clampWidth = (width: number) =>
+	Math.max(RIGHT_PANEL_MIN_WIDTH, Math.min(RIGHT_PANEL_MAX_WIDTH, width));
+
+const createBatchRunState = (): BatchRunState => ({
+	isRunning: true,
+	isStopping: false,
+	documents: ['Phase 1'],
+	lockedDocuments: ['Phase 1'],
+	currentDocumentIndex: 0,
+	totalTasks: 5,
+	completedTasks: 2,
+	currentTaskIndex: 0,
+	currentDocTasksTotal: 5,
+	currentDocTasksCompleted: 2,
+	totalTasksAcrossAllDocs: 5,
+	completedTasksAcrossAllDocs: 2,
+	loopEnabled: false,
+	loopIteration: 0,
+	folderPath: '/test/folder',
+	worktreeActive: false,
+	originalContent: '',
+	sessionIds: [],
+});
+
+interface AutoRunViewState {
+	mode: 'edit' | 'preview';
+	cursorPosition: number;
+	editScrollPos: number;
+	previewScrollPos: number;
+}
+
+interface WrapperProps {
+	onContentChange?: (content: string) => void;
+	onModeChange?: (mode: 'edit' | 'preview') => void;
+	onStateChange?: (state: AutoRunViewState) => void;
+	batchRunState?: BatchRunState;
+	panelRef?: React.Ref<RightPanelHandle>;
+}
+
+// Wrapper component: the props RightPanel still takes. The tab handler writes
+// the UI store; the Auto Run callbacks write the session record, mirroring
+// useAutoRunHandlers, and report to the spies a case hands in.
 const RightPanelTestWrapper = ({
-	initialTab = 'autorun' as RightPanelTab,
-	initialContent = '# Test Document\n\n- [ ] Task 1\n- [ ] Task 2',
-	initialWidth = 400,
 	onContentChange,
 	onModeChange,
 	onStateChange,
-}: {
-	initialTab?: RightPanelTab;
-	initialContent?: string;
-	initialWidth?: number;
-	onContentChange?: (content: string) => void;
-	onModeChange?: (mode: 'edit' | 'preview') => void;
-	onStateChange?: (state: any) => void;
-}) => {
-	const [activeRightTab, setActiveRightTab] = useState<RightPanelTab>(initialTab);
-	const [rightPanelWidth, setRightPanelWidth] = useState(initialWidth);
-	const [autoRunContent, setAutoRunContent] = useState(initialContent);
-	const [session, setSession] = useState(() => createMockSession());
-	const [rightPanelOpen, setRightPanelOpen] = useState(true);
-	const [activeFocus, setActiveFocus] = useState('right');
-
+	batchRunState,
+	panelRef,
+}: WrapperProps) => {
 	const fileTreeContainerRef = React.useRef<HTMLDivElement>(null);
 	const fileTreeFilterInputRef = React.useRef<HTMLInputElement>(null);
-
-	const handleContentChange = (content: string) => {
-		setAutoRunContent(content);
-		onContentChange?.(content);
-	};
-
-	const handleModeChange = (mode: 'edit' | 'preview') => {
-		setSession((prev) => ({ ...prev, autoRunMode: mode }));
-		onModeChange?.(mode);
-	};
-
-	const handleStateChange = (state: {
-		mode: 'edit' | 'preview';
-		cursorPosition: number;
-		editScrollPos: number;
-		previewScrollPos: number;
-	}) => {
-		setSession((prev) => ({
-			...prev,
-			autoRunMode: state.mode,
-			autoRunCursorPosition: state.cursorPosition,
-			autoRunEditScrollPos: state.editScrollPos,
-			autoRunPreviewScrollPos: state.previewScrollPos,
-		}));
-		onStateChange?.(state);
-	};
 
 	return (
 		<LayerStackProvider>
 			<RightPanel
-				session={session}
-				theme={createMockTheme()}
-				shortcuts={createMockShortcuts()}
-				rightPanelOpen={rightPanelOpen}
-				setRightPanelOpen={setRightPanelOpen}
-				rightPanelWidth={rightPanelWidth}
-				setRightPanelWidthState={setRightPanelWidth}
-				activeRightTab={activeRightTab}
-				setActiveRightTab={setActiveRightTab}
-				activeFocus={activeFocus}
-				setActiveFocus={setActiveFocus}
-				fileTreeFilter=""
-				setFileTreeFilter={() => {}}
-				fileTreeFilterOpen={false}
-				setFileTreeFilterOpen={() => {}}
-				filteredFileTree={[]}
-				selectedFileIndex={0}
-				setSelectedFileIndex={() => {}}
+				ref={panelRef}
+				theme={theme}
+				setActiveRightTab={(tab) => useUIStore.getState().setActiveRightTab(tab)}
 				fileTreeContainerRef={fileTreeContainerRef}
 				fileTreeFilterInputRef={fileTreeFilterInputRef}
 				toggleFolder={() => {}}
@@ -279,31 +328,47 @@ const RightPanelTestWrapper = ({
 				collapseAllFolders={() => {}}
 				updateSessionWorkingDirectory={async () => {}}
 				refreshFileTree={async () => undefined}
-				setSessions={() => {}}
-				showHiddenFiles={false}
-				setShowHiddenFiles={() => {}}
-				autoRunDocumentList={['Phase 1', 'Phase 2', 'Phase 3']}
-				autoRunDocumentTree={[]}
-				autoRunContent={autoRunContent}
-				autoRunContentVersion={0}
-				autoRunIsLoadingDocuments={false}
-				onAutoRunContentChange={handleContentChange}
-				onAutoRunModeChange={handleModeChange}
-				onAutoRunStateChange={handleStateChange}
-				onAutoRunSelectDocument={() => {}}
+				cancelFileTreeLoad={() => {}}
+				onAutoRunContentChange={(content) => {
+					patchActiveSession({ autoRunContent: content });
+					onContentChange?.(content);
+				}}
+				onAutoRunModeChange={(mode) => {
+					patchActiveSession({ autoRunMode: mode });
+					onModeChange?.(mode);
+				}}
+				onAutoRunStateChange={(state) => {
+					patchActiveSession({
+						autoRunMode: state.mode,
+						autoRunCursorPosition: state.cursorPosition,
+						autoRunEditScrollPos: state.editScrollPos,
+						autoRunPreviewScrollPos: state.previewScrollPos,
+					});
+					onStateChange?.(state);
+				}}
+				onAutoRunSelectDocument={(filename) =>
+					patchActiveSession({ autoRunSelectedFile: filename })
+				}
 				onAutoRunCreateDocument={async () => true}
 				onAutoRunRefresh={() => {}}
 				onAutoRunOpenSetup={() => {}}
+				currentSessionBatchState={batchRunState}
 			/>
 		</LayerStackProvider>
 	);
 };
+
+const renderPanel = (props: WrapperProps = {}) => render(<RightPanelTestWrapper {...props} />);
+
+const clickTab = (name: 'Files' | 'History' | 'Auto Run') =>
+	fireEvent.click(screen.getByRole('button', { name }));
 
 describe('Auto Run + RightPanel Integration', () => {
 	let mockMaestro: ReturnType<typeof setupMaestroMock>;
 
 	beforeEach(() => {
 		mockMaestro = setupMaestroMock();
+		seedStores();
 		vi.useFakeTimers({ shouldAdvanceTime: true });
 		vi.spyOn(window, 'requestAnimationFrame').mockImplementation((cb) => {
 			cb(0);
@@ -321,121 +386,50 @@ describe('Auto Run + RightPanel Integration', () => {
 		it('unsaved content changes persist when switching tabs (via shared state)', async () => {
 			// Note: RightPanel manages shared draft state that persists across tab switches.
 			// This allows users to switch tabs without losing their unsaved changes.
-			render(<RightPanelTestWrapper />);
+			renderPanel();
 
 			// Find the textarea in Auto Run
 			const textarea = screen.getByRole('textbox');
-			expect(textarea).toHaveValue('# Test Document\n\n- [ ] Task 1\n- [ ] Task 2');
+			expect(textarea).toHaveValue(DEFAULT_CONTENT);
 
 			// Type some content (updates shared state in RightPanel)
 			fireEvent.change(textarea, { target: { value: 'Modified content' } });
 			expect(textarea).toHaveValue('Modified content');
 
 			// Switch to files tab
-			const filesTab = screen.getByRole('button', { name: 'Files' });
-			fireEvent.click(filesTab);
+			clickTab('Files');
+			expect(useUIStore.getState().activeRightTab).toBe('files');
 
 			// Verify Auto Run is not rendered
 			expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
 			expect(screen.getByTestId('file-explorer-panel')).toBeInTheDocument();
 
 			// Switch back to autorun tab
-			const autorunTab = screen.getByRole('button', { name: 'Auto Run' });
-			fireEvent.click(autorunTab);
+			clickTab('Auto Run');
 
 			// Content is preserved from shared state (not reverted to saved content)
-			const newTextarea = screen.getByRole('textbox');
-			expect(newTextarea).toHaveValue('Modified content');
+			expect(screen.getByRole('textbox')).toHaveValue('Modified content');
 		});
 
 		it('external content changes (via contentVersion) persist across tab switches', async () => {
-			// Test that content persists when parent state is updated via contentVersion
-			const TestComponent = () => {
-				const [activeTab, setActiveTab] = useState<RightPanelTab>('autorun');
-				const [content, setContent] = useState('Initial content');
-				const [version, setVersion] = useState(0);
-				const fileTreeContainerRef = React.useRef<HTMLDivElement>(null);
-				const fileTreeFilterInputRef = React.useRef<HTMLInputElement>(null);
-
-				return (
-					<LayerStackProvider>
-						<div>
-							<button
-								data-testid="external-change"
-								onClick={() => {
-									setContent('Externally updated content');
-									setVersion((v) => v + 1);
-								}}
-							>
-								External Change
-							</button>
-							<RightPanel
-								session={createMockSession()}
-								theme={createMockTheme()}
-								shortcuts={createMockShortcuts()}
-								rightPanelOpen={true}
-								setRightPanelOpen={() => {}}
-								rightPanelWidth={400}
-								setRightPanelWidthState={() => {}}
-								activeRightTab={activeTab}
-								setActiveRightTab={setActiveTab}
-								activeFocus="right"
-								setActiveFocus={() => {}}
-								fileTreeFilter=""
-								setFileTreeFilter={() => {}}
-								fileTreeFilterOpen={false}
-								setFileTreeFilterOpen={() => {}}
-								filteredFileTree={[]}
-								selectedFileIndex={0}
-								setSelectedFileIndex={() => {}}
-								fileTreeContainerRef={fileTreeContainerRef}
-								fileTreeFilterInputRef={fileTreeFilterInputRef}
-								toggleFolder={() => {}}
-								toggleFolderRecursive={() => {}}
-								handleFileClick={async () => {}}
-								expandAllFolders={() => {}}
-								collapseAllFolders={() => {}}
-								updateSessionWorkingDirectory={async () => {}}
-								refreshFileTree={async () => undefined}
-								setSessions={() => {}}
-								showHiddenFiles={false}
-								setShowHiddenFiles={() => {}}
-								autoRunDocumentList={['Phase 1']}
-								autoRunDocumentTree={[]}
-								autoRunContent={content}
-								autoRunContentVersion={version}
-								autoRunIsLoadingDocuments={false}
-								onAutoRunContentChange={setContent}
-								onAutoRunModeChange={() => {}}
-								onAutoRunStateChange={() => {}}
-								onAutoRunSelectDocument={() => {}}
-								onAutoRunCreateDocument={async () => true}
-								onAutoRunRefresh={() => {}}
-								onAutoRunOpenSetup={() => {}}
-							/>
-						</div>
-					</LayerStackProvider>
-				);
-			};
-
-			render(<TestComponent />);
+			// The watcher re-reads the file into the session record with a new version
+			seedStores({ content: 'Initial content' });
+			renderPanel();
 
 			// Initial content
 			expect(screen.getByRole('textbox')).toHaveValue('Initial content');
 
 			// Simulate external change
-			fireEvent.click(screen.getByTestId('external-change'));
+			setDiskContent('Externally updated content');
 
 			// Content should be updated
 			await waitFor(() => {
 				expect(screen.getByRole('textbox')).toHaveValue('Externally updated content');
 			});
 
-			// Switch to files tab
-			fireEvent.click(screen.getByRole('button', { name: 'Files' }));
-
-			// Switch back to autorun tab
-			fireEvent.click(screen.getByRole('button', { name: 'Auto Run' }));
+			// Switch to files tab and back
+			clickTab('Files');
+			clickTab('Auto Run');
 
 			// Content should persist
 			expect(screen.getByRole('textbox')).toHaveValue('Externally updated content');
@@ -443,29 +437,26 @@ describe('Auto Run + RightPanel Integration', () => {
 
 		it('preserves mode (edit/preview) when switching tabs', async () => {
 			const onModeChange = vi.fn();
-			render(<RightPanelTestWrapper onModeChange={onModeChange} />);
+			renderPanel({ onModeChange });
 
 			// Find the mode toggle and switch to preview
-			const previewButton = screen.getByRole('button', { name: /preview/i });
-			fireEvent.click(previewButton);
+			fireEvent.click(screen.getByTitle('Switch to preview'));
 			expect(onModeChange).toHaveBeenCalledWith('preview');
+			expect(activeSession().autoRunMode).toBe('preview');
 
-			// Switch to history tab
-			const historyTab = screen.getByRole('button', { name: 'History' });
-			fireEvent.click(historyTab);
+			// Switch to history tab and back
+			clickTab('History');
+			clickTab('Auto Run');
 
-			// Switch back to autorun tab
-			const autorunTab = screen.getByRole('button', { name: 'Auto Run' });
-			fireEvent.click(autorunTab);
-
-			// Preview mode should still be active (button should be styled as selected)
-			const previewButtonAfter = screen.getByRole('button', { name: /preview/i });
-			expect(previewButtonAfter).toHaveClass('font-semibold');
+			// Preview mode is still active: the toggle offers Edit and the editor is gone
+			expect(screen.getByTitle('Switch to edit')).toBeInTheDocument();
+			expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+			expect(screen.getByTestId('react-markdown')).toBeInTheDocument();
 		});
 
 		it('preserves cursor position when switching tabs', async () => {
 			const onStateChange = vi.fn();
-			render(<RightPanelTestWrapper onStateChange={onStateChange} />);
+			renderPanel({ onStateChange });
 
 			const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 
@@ -476,16 +467,15 @@ describe('Auto Run + RightPanel Integration', () => {
 
 			// The state change should have been triggered (cursor position is saved)
 			// Switch tabs and back
-			fireEvent.click(screen.getByRole('button', { name: 'Files' }));
-			fireEvent.click(screen.getByRole('button', { name: 'Auto Run' }));
+			clickTab('Files');
+			clickTab('Auto Run');
 
 			// Verify the component is still functional
-			const newTextarea = screen.getByRole('textbox');
-			expect(newTextarea).toBeInTheDocument();
+			expect(screen.getByRole('textbox')).toBeInTheDocument();
 		});
 
 		it('dirty state indicator shows when content is modified', async () => {
-			render(<RightPanelTestWrapper />);
+			renderPanel();
 
 			const textarea = screen.getByRole('textbox');
 
@@ -507,7 +497,7 @@ describe('Auto Run + RightPanel Integration', () => {
 
 		it('dirty state persists when switching tabs (via shared state)', async () => {
 			// Note: RightPanel manages shared draft state that includes dirty state tracking
-			render(<RightPanelTestWrapper />);
+			renderPanel();
 
 			const textarea = screen.getByRole('textbox');
 
@@ -521,8 +511,8 @@ describe('Auto Run + RightPanel Integration', () => {
 			});
 
 			// Switch to history tab and back
-			fireEvent.click(screen.getByRole('button', { name: 'History' }));
-			fireEvent.click(screen.getByRole('button', { name: 'Auto Run' }));
+			clickTab('History');
+			clickTab('Auto Run');
 
 			// Dirty state is preserved because shared state includes both local and saved content
 			await waitFor(() => {
@@ -531,60 +521,49 @@ describe('Auto Run + RightPanel Integration', () => {
 		});
 
 		it('preserves document selection when switching tabs', async () => {
-			render(<RightPanelTestWrapper />);
+			renderPanel();
 
 			// Select a different document
-			const docSelect = screen.getByTestId('doc-select');
-			fireEvent.change(docSelect, { target: { value: 'Phase 2' } });
+			fireEvent.change(screen.getByTestId('doc-select'), { target: { value: 'Phase 2' } });
+			expect(activeSession().autoRunSelectedFile).toBe('Phase 2');
 
 			// Switch to files tab and back
-			fireEvent.click(screen.getByRole('button', { name: 'Files' }));
-			fireEvent.click(screen.getByRole('button', { name: 'Auto Run' }));
+			clickTab('Files');
+			clickTab('Auto Run');
 
-			// Document selection should be preserved via session state
-			// (The actual persistence is handled by parent component props)
-			expect(screen.getByTestId('doc-select')).toBeInTheDocument();
+			// Document selection is preserved via session state
+			expect(screen.getByTestId('doc-select')).toHaveValue('Phase 2');
 		});
 
 		it('handles rapid tab switching without crashes', async () => {
 			// Tests that rapid tab switching doesn't cause errors
-			render(<RightPanelTestWrapper />);
+			renderPanel();
 
 			// Rapid tab switching
 			for (let i = 0; i < 5; i++) {
-				fireEvent.click(screen.getByRole('button', { name: 'Files' }));
-				fireEvent.click(screen.getByRole('button', { name: 'History' }));
-				fireEvent.click(screen.getByRole('button', { name: 'Auto Run' }));
+				clickTab('Files');
+				clickTab('History');
+				clickTab('Auto Run');
 			}
 
 			// Component should still be functional
-			const finalTextarea = screen.getByRole('textbox');
-			expect(finalTextarea).toBeInTheDocument();
+			expect(screen.getByRole('textbox')).toBeInTheDocument();
 		});
 	});
 
 	describe('Panel Resize Does Not Lose Content', () => {
 		it('preserves content during panel width resize', async () => {
 			const onContentChange = vi.fn();
-			const { container } = render(<RightPanelTestWrapper onContentChange={onContentChange} />);
+			const { container } = renderPanel({ onContentChange });
 
 			// Modify content
 			const textarea = screen.getByRole('textbox');
 			fireEvent.change(textarea, { target: { value: 'Content during resize' } });
 
-			// Simulate resize interaction
-			const resizeHandle = container.querySelector('.cursor-col-resize') as HTMLElement;
-			expect(resizeHandle).toBeInTheDocument();
-
-			// Start resize
-			fireEvent.mouseDown(resizeHandle, { clientX: 500 });
-
-			// Move to resize
-			fireEvent.mouseMove(document, { clientX: 550 });
-			fireEvent.mouseMove(document, { clientX: 600 });
-
-			// End resize
-			fireEvent.mouseUp(document);
+			// Drag the handle; the width is committed on pointer up
+			dragResizeHandle(container, 500, 550, 600);
+			expect(useSettingsStore.getState().rightPanelWidth).toBe(clampWidth(400 + (500 - 600)));
+			expect(mockMaestro.settings.set).toHaveBeenCalledWith('rightPanelWidth', expect.any(Number));
 
 			// Content should still be preserved
 			expect(screen.getByRole('textbox')).toHaveValue('Content during resize');
@@ -592,7 +571,7 @@ describe('Auto Run + RightPanel Integration', () => {
 
 		it('preserves content when panel is collapsed and reopened', async () => {
 			const onContentChange = vi.fn();
-			render(<RightPanelTestWrapper onContentChange={onContentChange} />);
+			renderPanel({ onContentChange });
 
 			// Modify content
 			const textarea = screen.getByRole('textbox');
@@ -603,38 +582,35 @@ describe('Auto Run + RightPanel Integration', () => {
 			fireEvent.click(toggleButton);
 
 			// Panel should be collapsed
-			// (In the wrapper component, the panel width changes to 0)
+			expect(useUIStore.getState().rightPanelOpen).toBe(false);
 
 			// Reopen panel
 			fireEvent.click(toggleButton);
+			expect(useUIStore.getState().rightPanelOpen).toBe(true);
 
 			// Content should be preserved
-			const reopenedTextarea = screen.getByRole('textbox');
-			expect(reopenedTextarea).toHaveValue('Content before collapse');
+			expect(screen.getByRole('textbox')).toHaveValue('Content before collapse');
 		});
 
 		it('preserves mode during panel resize', async () => {
 			const onModeChange = vi.fn();
-			const { container } = render(<RightPanelTestWrapper onModeChange={onModeChange} />);
+			const { container } = renderPanel({ onModeChange });
 
 			// Switch to preview mode
-			const previewButton = screen.getByRole('button', { name: /preview/i });
-			fireEvent.click(previewButton);
+			fireEvent.click(screen.getByTitle('Switch to preview'));
+			expect(onModeChange).toHaveBeenCalledWith('preview');
 
 			// Simulate resize
-			const resizeHandle = container.querySelector('.cursor-col-resize') as HTMLElement;
-			fireEvent.mouseDown(resizeHandle, { clientX: 500 });
-			fireEvent.mouseMove(document, { clientX: 600 });
-			fireEvent.mouseUp(document);
+			dragResizeHandle(container, 500, 600);
 
 			// Mode should still be preview
-			const previewButtonAfter = screen.getByRole('button', { name: /preview/i });
-			expect(previewButtonAfter).toHaveClass('font-semibold');
+			expect(screen.getByTitle('Switch to edit')).toBeInTheDocument();
+			expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
 		});
 
 		it('maintains scroll position during resize', async () => {
 			const onStateChange = vi.fn();
-			const { container } = render(<RightPanelTestWrapper onStateChange={onStateChange} />);
+			const { container } = renderPanel({ onStateChange });
 
 			const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 
@@ -647,48 +623,37 @@ describe('Auto Run + RightPanel Integration', () => {
 			fireEvent.scroll(textarea);
 
 			// Simulate resize
-			const resizeHandle = container.querySelector('.cursor-col-resize') as HTMLElement;
-			fireEvent.mouseDown(resizeHandle, { clientX: 500 });
-			fireEvent.mouseMove(document, { clientX: 600 });
-			fireEvent.mouseUp(document);
+			dragResizeHandle(container, 500, 600);
 
 			// Textarea should still be present (scroll position is managed internally)
 			expect(screen.getByRole('textbox')).toBeInTheDocument();
 		});
 
 		it('handles resize to minimum width without losing content', async () => {
-			const { container } = render(<RightPanelTestWrapper />);
+			const { container } = renderPanel();
 
 			// Modify content
 			const textarea = screen.getByRole('textbox');
 			fireEvent.change(textarea, { target: { value: 'Content at min width' } });
 
-			// Simulate resize to minimum (384px is min)
-			const resizeHandle = container.querySelector('.cursor-col-resize') as HTMLElement;
-			fireEvent.mouseDown(resizeHandle, { clientX: 500 });
-
-			// Try to resize beyond minimum
-			fireEvent.mouseMove(document, { clientX: 900 }); // This would make it very narrow
-			fireEvent.mouseUp(document);
+			// Try to resize beyond minimum (dragging right narrows the panel)
+			dragResizeHandle(container, 500, 900);
+			expect(useSettingsStore.getState().rightPanelWidth).toBe(RIGHT_PANEL_MIN_WIDTH);
 
 			// Content should still be preserved
 			expect(screen.getByRole('textbox')).toHaveValue('Content at min width');
 		});
 
 		it('handles resize to maximum width without losing content', async () => {
-			const { container } = render(<RightPanelTestWrapper />);
+			const { container } = renderPanel();
 
 			// Modify content
 			const textarea = screen.getByRole('textbox');
 			fireEvent.change(textarea, { target: { value: 'Content at max width' } });
 
-			// Simulate resize to maximum (800px is max)
-			const resizeHandle = container.querySelector('.cursor-col-resize') as HTMLElement;
-			fireEvent.mouseDown(resizeHandle, { clientX: 500 });
-
-			// Try to resize beyond maximum
-			fireEvent.mouseMove(document, { clientX: -500 }); // This would make it very wide
-			fireEvent.mouseUp(document);
+			// Try to resize beyond maximum (dragging left widens the panel)
+			dragResizeHandle(container, 500, -500);
+			expect(useSettingsStore.getState().rightPanelWidth).toBe(RIGHT_PANEL_MAX_WIDTH);
 
 			// Content should still be preserved
 			expect(screen.getByRole('textbox')).toHaveValue('Content at max width');
@@ -697,187 +662,76 @@ describe('Auto Run + RightPanel Integration', () => {
 
 	describe('Expanded Modal Syncs With Panel', () => {
 		it('expanded modal receives same content as panel', async () => {
-			// Use the standalone RightPanel to access expanded modal functionality
-			const TestComponent = () => {
-				const session = createMockSession();
-				const ref = createRef<RightPanelHandle>();
-				const theme = createMockTheme();
-				const [content, setContent] = useState('# Initial Content\n\n- [ ] Task 1');
-				const fileTreeContainerRef = React.useRef<HTMLDivElement>(null);
-				const fileTreeFilterInputRef = React.useRef<HTMLInputElement>(null);
+			seedStores({ content: '# Initial Content\n\n- [ ] Task 1' });
+			renderPanel();
 
-				return (
-					<LayerStackProvider>
-						<RightPanel
-							ref={ref}
-							session={session}
-							theme={theme}
-							shortcuts={createMockShortcuts()}
-							rightPanelOpen={true}
-							setRightPanelOpen={() => {}}
-							rightPanelWidth={400}
-							setRightPanelWidthState={() => {}}
-							activeRightTab="autorun"
-							setActiveRightTab={() => {}}
-							activeFocus="right"
-							setActiveFocus={() => {}}
-							fileTreeFilter=""
-							setFileTreeFilter={() => {}}
-							fileTreeFilterOpen={false}
-							setFileTreeFilterOpen={() => {}}
-							filteredFileTree={[]}
-							selectedFileIndex={0}
-							setSelectedFileIndex={() => {}}
-							fileTreeContainerRef={fileTreeContainerRef}
-							fileTreeFilterInputRef={fileTreeFilterInputRef}
-							toggleFolder={() => {}}
-							toggleFolderRecursive={() => {}}
-							handleFileClick={async () => {}}
-							expandAllFolders={() => {}}
-							collapseAllFolders={() => {}}
-							updateSessionWorkingDirectory={async () => {}}
-							refreshFileTree={async () => undefined}
-							setSessions={() => {}}
-							showHiddenFiles={false}
-							setShowHiddenFiles={() => {}}
-							autoRunDocumentList={['Phase 1']}
-							autoRunDocumentTree={[]}
-							autoRunContent={content}
-							autoRunContentVersion={0}
-							autoRunIsLoadingDocuments={false}
-							onAutoRunContentChange={setContent}
-							onAutoRunModeChange={() => {}}
-							onAutoRunStateChange={() => {}}
-							onAutoRunSelectDocument={() => {}}
-							onAutoRunCreateDocument={async () => true}
-							onAutoRunRefresh={() => {}}
-							onAutoRunOpenSetup={() => {}}
-						/>
-					</LayerStackProvider>
-				);
-			};
-
-			render(<TestComponent />);
-
-			// Verify content is shown
+			// Verify content is shown, then type a draft into the panel
 			const textarea = screen.getByRole('textbox');
 			expect(textarea).toHaveValue('# Initial Content\n\n- [ ] Task 1');
+			fireEvent.change(textarea, { target: { value: 'Draft shared with the modal' } });
 
-			// The expand button should be accessible
-			// Look for the expand/maximize button
-			const expandButton = screen.queryByTitle(/expand/i);
-			expect(expandButton || screen.queryByRole('button')).toBeTruthy(); // Panel should have buttons
+			// Expand: the modal mounts a second AutoRun over the same shared draft
+			fireEvent.click(screen.getByTitle(/expand to full screen/i));
+
+			const editors = screen.getAllByRole('textbox');
+			expect(editors).toHaveLength(2);
+			for (const editor of editors) {
+				expect(editor).toHaveValue('Draft shared with the modal');
+			}
 		});
 
 		it('changes in panel content reflect in session state', async () => {
 			const onStateChange = vi.fn();
-			render(<RightPanelTestWrapper onStateChange={onStateChange} />);
+			renderPanel({ onStateChange });
 
 			const textarea = screen.getByRole('textbox');
 
 			// Make content changes
 			fireEvent.change(textarea, { target: { value: 'Updated content from panel' } });
-
-			// State change handler should be called for mode/position changes
 			fireEvent.blur(textarea);
-
-			// The content change should propagate through the component hierarchy
 			expect(textarea).toHaveValue('Updated content from panel');
+
+			// Save writes the draft to the selected document of this agent
+			fireEvent.click(screen.getByRole('button', { name: /save/i }));
+			await waitFor(() => {
+				expect(mockMaestro.autorun.writeDoc).toHaveBeenCalledWith(
+					'/test/autorun',
+					'Phase 1.md',
+					'Updated content from panel',
+					undefined
+				);
+			});
+			await waitFor(() => {
+				expect(screen.queryByRole('button', { name: /save/i })).not.toBeInTheDocument();
+			});
 		});
 
 		it('mode changes in panel are persisted', async () => {
 			const onModeChange = vi.fn();
-			render(<RightPanelTestWrapper onModeChange={onModeChange} />);
+			renderPanel({ onModeChange });
 
 			// Switch to preview
-			const previewButton = screen.getByRole('button', { name: /preview/i });
-			fireEvent.click(previewButton);
-
+			fireEvent.click(screen.getByTitle('Switch to preview'));
 			expect(onModeChange).toHaveBeenCalledWith('preview');
+			expect(activeSession().autoRunMode).toBe('preview');
 
-			// Switch back to edit - use title selector to be more specific
-			const editButton = screen.getByTitle('Edit document');
-			fireEvent.click(editButton);
-
+			// Switch back to edit
+			fireEvent.click(screen.getByTitle('Switch to edit'));
 			expect(onModeChange).toHaveBeenCalledWith('edit');
+			expect(activeSession().autoRunMode).toBe('edit');
+			expect(screen.getByRole('textbox')).toBeInTheDocument();
 		});
 
 		it('panel updates content version when external changes occur', async () => {
-			// This tests that contentVersion prop triggers re-sync
-			const TestComponent = () => {
-				const [content, setContent] = useState('Initial content');
-				const [version, setVersion] = useState(0);
-				const fileTreeContainerRef = React.useRef<HTMLDivElement>(null);
-				const fileTreeFilterInputRef = React.useRef<HTMLInputElement>(null);
-
-				return (
-					<LayerStackProvider>
-						<div>
-							<button
-								data-testid="external-update"
-								onClick={() => {
-									setContent('External update content');
-									setVersion((v) => v + 1);
-								}}
-							>
-								External Update
-							</button>
-							<RightPanel
-								session={createMockSession()}
-								theme={createMockTheme()}
-								shortcuts={createMockShortcuts()}
-								rightPanelOpen={true}
-								setRightPanelOpen={() => {}}
-								rightPanelWidth={400}
-								setRightPanelWidthState={() => {}}
-								activeRightTab="autorun"
-								setActiveRightTab={() => {}}
-								activeFocus="right"
-								setActiveFocus={() => {}}
-								fileTreeFilter=""
-								setFileTreeFilter={() => {}}
-								fileTreeFilterOpen={false}
-								setFileTreeFilterOpen={() => {}}
-								filteredFileTree={[]}
-								selectedFileIndex={0}
-								setSelectedFileIndex={() => {}}
-								fileTreeContainerRef={fileTreeContainerRef}
-								fileTreeFilterInputRef={fileTreeFilterInputRef}
-								toggleFolder={() => {}}
-								toggleFolderRecursive={() => {}}
-								handleFileClick={async () => {}}
-								expandAllFolders={() => {}}
-								collapseAllFolders={() => {}}
-								updateSessionWorkingDirectory={async () => {}}
-								refreshFileTree={async () => undefined}
-								setSessions={() => {}}
-								showHiddenFiles={false}
-								setShowHiddenFiles={() => {}}
-								autoRunDocumentList={['Phase 1']}
-								autoRunDocumentTree={[]}
-								autoRunContent={content}
-								autoRunContentVersion={version}
-								autoRunIsLoadingDocuments={false}
-								onAutoRunContentChange={setContent}
-								onAutoRunModeChange={() => {}}
-								onAutoRunStateChange={() => {}}
-								onAutoRunSelectDocument={() => {}}
-								onAutoRunCreateDocument={async () => true}
-								onAutoRunRefresh={() => {}}
-								onAutoRunOpenSetup={() => {}}
-							/>
-						</div>
-					</LayerStackProvider>
-				);
-			};
-
-			render(<TestComponent />);
+			// A new contentVersion on the session record triggers the re-sync
+			seedStores({ content: 'Initial content' });
+			renderPanel();
 
 			// Initial content
 			expect(screen.getByRole('textbox')).toHaveValue('Initial content');
 
 			// Simulate external update
-			fireEvent.click(screen.getByTestId('external-update'));
+			setDiskContent('External update content');
 
 			// Content should be updated
 			await waitFor(() => {
@@ -887,142 +741,45 @@ describe('Auto Run + RightPanel Integration', () => {
 
 		it('toggleAutoRunExpanded method works via ref', async () => {
 			const ref = createRef<RightPanelHandle>();
-			const fileTreeContainerRef = React.createRef<HTMLDivElement>();
-			const fileTreeFilterInputRef = React.createRef<HTMLInputElement>();
-
-			render(
-				<LayerStackProvider>
-					<RightPanel
-						ref={ref}
-						session={createMockSession()}
-						theme={createMockTheme()}
-						shortcuts={createMockShortcuts()}
-						rightPanelOpen={true}
-						setRightPanelOpen={() => {}}
-						rightPanelWidth={400}
-						setRightPanelWidthState={() => {}}
-						activeRightTab="autorun"
-						setActiveRightTab={() => {}}
-						activeFocus="right"
-						setActiveFocus={() => {}}
-						fileTreeFilter=""
-						setFileTreeFilter={() => {}}
-						fileTreeFilterOpen={false}
-						setFileTreeFilterOpen={() => {}}
-						filteredFileTree={[]}
-						selectedFileIndex={0}
-						setSelectedFileIndex={() => {}}
-						fileTreeContainerRef={fileTreeContainerRef}
-						fileTreeFilterInputRef={fileTreeFilterInputRef}
-						toggleFolder={() => {}}
-						toggleFolderRecursive={() => {}}
-						handleFileClick={async () => {}}
-						expandAllFolders={() => {}}
-						collapseAllFolders={() => {}}
-						updateSessionWorkingDirectory={async () => {}}
-						refreshFileTree={async () => undefined}
-						setSessions={() => {}}
-						showHiddenFiles={false}
-						setShowHiddenFiles={() => {}}
-						autoRunDocumentList={['Phase 1']}
-						autoRunDocumentTree={[]}
-						autoRunContent="Test content"
-						autoRunContentVersion={0}
-						autoRunIsLoadingDocuments={false}
-						onAutoRunContentChange={() => {}}
-						onAutoRunModeChange={() => {}}
-						onAutoRunStateChange={() => {}}
-						onAutoRunSelectDocument={() => {}}
-						onAutoRunCreateDocument={async () => true}
-						onAutoRunRefresh={() => {}}
-						onAutoRunOpenSetup={() => {}}
-					/>
-				</LayerStackProvider>
-			);
+			renderPanel({ panelRef: ref });
 
 			// Verify ref is available
 			expect(ref.current).toBeTruthy();
 			expect(typeof ref.current?.toggleAutoRunExpanded).toBe('function');
 
-			// Call toggle method
+			// Call toggle method: the expanded modal mounts a second editor
 			act(() => {
 				ref.current?.toggleAutoRunExpanded();
 			});
+			expect(screen.getAllByRole('textbox')).toHaveLength(2);
 
-			// The expanded modal should now be visible (it renders with role="dialog" or similar)
-			// Due to mocking, we can verify the method doesn't throw
+			// Toggle again: back to the panel alone
+			act(() => {
+				ref.current?.toggleAutoRunExpanded();
+			});
+			expect(screen.getAllByRole('textbox')).toHaveLength(1);
 		});
 	});
 
 	describe('Focus Management Between Panel and AutoRun', () => {
 		it('focuses AutoRun when switching to autorun tab', async () => {
-			render(<RightPanelTestWrapper initialTab="files" />);
+			seedStores({ tab: 'files' });
+			renderPanel();
 
 			// Initially on files tab
 			expect(screen.getByTestId('file-explorer-panel')).toBeInTheDocument();
 
 			// Switch to autorun
-			const autorunTab = screen.getByRole('button', { name: 'Auto Run' });
-			fireEvent.click(autorunTab);
+			clickTab('Auto Run');
 
-			// AutoRun should be visible
+			// AutoRun should be visible and hold focus
 			expect(screen.getByRole('textbox')).toBeInTheDocument();
+			expect(screen.getByRole('textbox')).toHaveFocus();
 		});
 
 		it('focusAutoRun ref method works', async () => {
 			const ref = createRef<RightPanelHandle>();
-			const fileTreeContainerRef = React.createRef<HTMLDivElement>();
-			const fileTreeFilterInputRef = React.createRef<HTMLInputElement>();
-
-			render(
-				<LayerStackProvider>
-					<RightPanel
-						ref={ref}
-						session={createMockSession()}
-						theme={createMockTheme()}
-						shortcuts={createMockShortcuts()}
-						rightPanelOpen={true}
-						setRightPanelOpen={() => {}}
-						rightPanelWidth={400}
-						setRightPanelWidthState={() => {}}
-						activeRightTab="autorun"
-						setActiveRightTab={() => {}}
-						activeFocus="right"
-						setActiveFocus={() => {}}
-						fileTreeFilter=""
-						setFileTreeFilter={() => {}}
-						fileTreeFilterOpen={false}
-						setFileTreeFilterOpen={() => {}}
-						filteredFileTree={[]}
-						selectedFileIndex={0}
-						setSelectedFileIndex={() => {}}
-						fileTreeContainerRef={fileTreeContainerRef}
-						fileTreeFilterInputRef={fileTreeFilterInputRef}
-						toggleFolder={() => {}}
-						toggleFolderRecursive={() => {}}
-						handleFileClick={async () => {}}
-						expandAllFolders={() => {}}
-						collapseAllFolders={() => {}}
-						updateSessionWorkingDirectory={async () => {}}
-						refreshFileTree={async () => undefined}
-						setSessions={() => {}}
-						showHiddenFiles={false}
-						setShowHiddenFiles={() => {}}
-						autoRunDocumentList={['Phase 1']}
-						autoRunDocumentTree={[]}
-						autoRunContent="Test content"
-						autoRunContentVersion={0}
-						autoRunIsLoadingDocuments={false}
-						onAutoRunContentChange={() => {}}
-						onAutoRunModeChange={() => {}}
-						onAutoRunStateChange={() => {}}
-						onAutoRunSelectDocument={() => {}}
-						onAutoRunCreateDocument={async () => true}
-						onAutoRunRefresh={() => {}}
-						onAutoRunOpenSetup={() => {}}
-					/>
-				</LayerStackProvider>
-			);
+			renderPanel({ panelRef: ref });
 
 			// Call focusAutoRun
 			expect(() => {
@@ -1030,6 +787,7 @@ describe('Auto Run + RightPanel Integration', () => {
 					ref.current?.focusAutoRun();
 				});
 			}).not.toThrow();
+			expect(screen.getByRole('textbox')).toHaveFocus();
 		});
 	});
 
@@ -1037,11 +795,11 @@ describe('Auto Run + RightPanel Integration', () => {
 		it('AutoRun draft content persists across tab switches via shared state', async () => {
 			// Note: RightPanel now manages shared draft state that persists across tab switches.
 			// This allows users to switch tabs without losing unsaved changes.
-			render(<RightPanelTestWrapper />);
+			renderPanel();
 
 			// Initial content
 			const textarea = screen.getByRole('textbox');
-			expect(textarea).toHaveValue('# Test Document\n\n- [ ] Task 1\n- [ ] Task 2');
+			expect(textarea).toHaveValue(DEFAULT_CONTENT);
 
 			// Modify content (creates dirty state in shared state)
 			fireEvent.change(textarea, { target: { value: 'Modified content' } });
@@ -1052,11 +810,11 @@ describe('Auto Run + RightPanel Integration', () => {
 			});
 
 			// Switch away - AutoRun unmounts but shared state persists in RightPanel
-			fireEvent.click(screen.getByRole('button', { name: 'Files' }));
+			clickTab('Files');
 			expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
 
 			// Switch back - AutoRun remounts with draft content from shared state
-			fireEvent.click(screen.getByRole('button', { name: 'Auto Run' }));
+			clickTab('Auto Run');
 
 			// Content is preserved from the shared draft state
 			await waitFor(() => {
@@ -1065,88 +823,19 @@ describe('Auto Run + RightPanel Integration', () => {
 		});
 
 		it('saved content persists across tab switches', async () => {
-			// Test that saved content persists - we need to simulate a save and content sync
-			const TestComponent = () => {
-				const [activeTab, setActiveTab] = useState<RightPanelTab>('autorun');
-				const [content, setContent] = useState('Initial content');
-				const [version, setVersion] = useState(0);
-				const fileTreeContainerRef = React.useRef<HTMLDivElement>(null);
-				const fileTreeFilterInputRef = React.useRef<HTMLInputElement>(null);
-
-				return (
-					<LayerStackProvider>
-						<div>
-							<button
-								data-testid="simulate-save"
-								onClick={() => {
-									setContent('Saved content');
-									setVersion((v) => v + 1);
-								}}
-							>
-								Simulate Save
-							</button>
-							<RightPanel
-								session={createMockSession()}
-								theme={createMockTheme()}
-								shortcuts={createMockShortcuts()}
-								rightPanelOpen={true}
-								setRightPanelOpen={() => {}}
-								rightPanelWidth={400}
-								setRightPanelWidthState={() => {}}
-								activeRightTab={activeTab}
-								setActiveRightTab={setActiveTab}
-								activeFocus="right"
-								setActiveFocus={() => {}}
-								fileTreeFilter=""
-								setFileTreeFilter={() => {}}
-								fileTreeFilterOpen={false}
-								setFileTreeFilterOpen={() => {}}
-								filteredFileTree={[]}
-								selectedFileIndex={0}
-								setSelectedFileIndex={() => {}}
-								fileTreeContainerRef={fileTreeContainerRef}
-								fileTreeFilterInputRef={fileTreeFilterInputRef}
-								toggleFolder={() => {}}
-								toggleFolderRecursive={() => {}}
-								handleFileClick={async () => {}}
-								expandAllFolders={() => {}}
-								collapseAllFolders={() => {}}
-								updateSessionWorkingDirectory={async () => {}}
-								refreshFileTree={async () => undefined}
-								setSessions={() => {}}
-								showHiddenFiles={false}
-								setShowHiddenFiles={() => {}}
-								autoRunDocumentList={['Phase 1']}
-								autoRunDocumentTree={[]}
-								autoRunContent={content}
-								autoRunContentVersion={version}
-								autoRunIsLoadingDocuments={false}
-								onAutoRunContentChange={setContent}
-								onAutoRunModeChange={() => {}}
-								onAutoRunStateChange={() => {}}
-								onAutoRunSelectDocument={() => {}}
-								onAutoRunCreateDocument={async () => true}
-								onAutoRunRefresh={() => {}}
-								onAutoRunOpenSetup={() => {}}
-							/>
-						</div>
-					</LayerStackProvider>
-				);
-			};
-
-			render(<TestComponent />);
+			// A save echoes back from disk as new content with a new version
+			seedStores({ content: 'Initial content' });
+			renderPanel();
 
 			// Initial content
 			expect(screen.getByRole('textbox')).toHaveValue('Initial content');
 
-			// Simulate save (which would update parent state and version)
-			fireEvent.click(screen.getByTestId('simulate-save'));
+			// Simulate save (which updates the session record and its version)
+			setDiskContent('Saved content');
 
-			// Switch away
-			fireEvent.click(screen.getByRole('button', { name: 'Files' }));
-
-			// Switch back
-			fireEvent.click(screen.getByRole('button', { name: 'Auto Run' }));
+			// Switch away and back
+			clickTab('Files');
+			clickTab('Auto Run');
 
 			// Saved content should persist
 			await waitFor(() => {
@@ -1155,87 +844,28 @@ describe('Auto Run + RightPanel Integration', () => {
 		});
 
 		it('handles session change while on different tab', async () => {
-			const TestComponent = () => {
-				const [activeTab, setActiveTab] = useState<RightPanelTab>('autorun');
-				const [session, setSession] = useState(() => createMockSession({ id: 'session-1' }));
-				const [content, setContent] = useState('Session 1 content');
-				const fileTreeContainerRef = React.useRef<HTMLDivElement>(null);
-				const fileTreeFilterInputRef = React.useRef<HTMLInputElement>(null);
-
-				return (
-					<LayerStackProvider>
-						<div>
-							<button
-								data-testid="switch-session"
-								onClick={() => {
-									setSession(createMockSession({ id: 'session-2', name: 'Session 2' }));
-									setContent('Session 2 content');
-								}}
-							>
-								Switch Session
-							</button>
-							<RightPanel
-								session={session}
-								theme={createMockTheme()}
-								shortcuts={createMockShortcuts()}
-								rightPanelOpen={true}
-								setRightPanelOpen={() => {}}
-								rightPanelWidth={400}
-								setRightPanelWidthState={() => {}}
-								activeRightTab={activeTab}
-								setActiveRightTab={setActiveTab}
-								activeFocus="right"
-								setActiveFocus={() => {}}
-								fileTreeFilter=""
-								setFileTreeFilter={() => {}}
-								fileTreeFilterOpen={false}
-								setFileTreeFilterOpen={() => {}}
-								filteredFileTree={[]}
-								selectedFileIndex={0}
-								setSelectedFileIndex={() => {}}
-								fileTreeContainerRef={fileTreeContainerRef}
-								fileTreeFilterInputRef={fileTreeFilterInputRef}
-								toggleFolder={() => {}}
-								toggleFolderRecursive={() => {}}
-								handleFileClick={async () => {}}
-								expandAllFolders={() => {}}
-								collapseAllFolders={() => {}}
-								updateSessionWorkingDirectory={async () => {}}
-								refreshFileTree={async () => undefined}
-								setSessions={() => {}}
-								showHiddenFiles={false}
-								setShowHiddenFiles={() => {}}
-								autoRunDocumentList={['Phase 1']}
-								autoRunDocumentTree={[]}
-								autoRunContent={content}
-								autoRunContentVersion={0}
-								autoRunIsLoadingDocuments={false}
-								onAutoRunContentChange={setContent}
-								onAutoRunModeChange={() => {}}
-								onAutoRunStateChange={() => {}}
-								onAutoRunSelectDocument={() => {}}
-								onAutoRunCreateDocument={async () => true}
-								onAutoRunRefresh={() => {}}
-								onAutoRunOpenSetup={() => {}}
-							/>
-						</div>
-					</LayerStackProvider>
-				);
-			};
-
-			render(<TestComponent />);
+			const first = createMockSession({ id: 'session-1', autoRunContent: 'Session 1 content' });
+			const second = createMockSession({
+				id: 'session-2',
+				name: 'Session 2',
+				autoRunContent: 'Session 2 content',
+			});
+			seedStores({ session: first });
+			renderPanel();
 
 			// Initial content
 			expect(screen.getByRole('textbox')).toHaveValue('Session 1 content');
 
 			// Switch to files tab
-			fireEvent.click(screen.getByRole('button', { name: 'Files' }));
+			clickTab('Files');
 
 			// Switch session while on files tab
-			fireEvent.click(screen.getByTestId('switch-session'));
+			act(() => {
+				useSessionStore.setState({ sessions: [first, second], activeSessionId: 'session-2' });
+			});
 
 			// Switch back to autorun
-			fireEvent.click(screen.getByRole('button', { name: 'Auto Run' }));
+			clickTab('Auto Run');
 
 			// Should show new session's content
 			expect(screen.getByRole('textbox')).toHaveValue('Session 2 content');
@@ -1244,62 +874,18 @@ describe('Auto Run + RightPanel Integration', () => {
 
 	describe('Edge Cases', () => {
 		it('handles null session gracefully', () => {
-			const fileTreeContainerRef = React.createRef<HTMLDivElement>();
-			const fileTreeFilterInputRef = React.createRef<HTMLInputElement>();
+			useSessionStore.setState({ sessions: [], activeSessionId: '' });
 
-			const { container } = render(
-				<RightPanel
-					session={null}
-					theme={createMockTheme()}
-					shortcuts={createMockShortcuts()}
-					rightPanelOpen={true}
-					setRightPanelOpen={() => {}}
-					rightPanelWidth={400}
-					setRightPanelWidthState={() => {}}
-					activeRightTab="autorun"
-					setActiveRightTab={() => {}}
-					activeFocus="right"
-					setActiveFocus={() => {}}
-					fileTreeFilter=""
-					setFileTreeFilter={() => {}}
-					fileTreeFilterOpen={false}
-					setFileTreeFilterOpen={() => {}}
-					filteredFileTree={[]}
-					selectedFileIndex={0}
-					setSelectedFileIndex={() => {}}
-					fileTreeContainerRef={fileTreeContainerRef}
-					fileTreeFilterInputRef={fileTreeFilterInputRef}
-					toggleFolder={() => {}}
-					toggleFolderRecursive={() => {}}
-					handleFileClick={async () => {}}
-					expandAllFolders={() => {}}
-					collapseAllFolders={() => {}}
-					updateSessionWorkingDirectory={async () => {}}
-					refreshFileTree={async () => undefined}
-					setSessions={() => {}}
-					showHiddenFiles={false}
-					setShowHiddenFiles={() => {}}
-					autoRunDocumentList={[]}
-					autoRunDocumentTree={[]}
-					autoRunContent=""
-					autoRunContentVersion={0}
-					autoRunIsLoadingDocuments={false}
-					onAutoRunContentChange={() => {}}
-					onAutoRunModeChange={() => {}}
-					onAutoRunStateChange={() => {}}
-					onAutoRunSelectDocument={() => {}}
-					onAutoRunCreateDocument={async () => true}
-					onAutoRunRefresh={() => {}}
-					onAutoRunOpenSetup={() => {}}
-				/>
-			);
+			const { container } = renderPanel();
 
-			// Should render nothing when session is null
-			expect(container.firstChild).toBeNull();
+			// Should render nothing when there is no active agent
+			expect(container.querySelector('[data-panel="right"]')).toBeNull();
+			expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
 		});
 
 		it('handles empty content gracefully', () => {
-			render(<RightPanelTestWrapper initialContent="" />);
+			seedStores({ content: '' });
+			renderPanel();
 
 			const textarea = screen.getByRole('textbox');
 			expect(textarea).toHaveValue('');
@@ -1307,16 +893,18 @@ describe('Auto Run + RightPanel Integration', () => {
 
 		it('handles very long content without crashing', () => {
 			const longContent = '# Test\n\n' + '- [ ] Task\n'.repeat(1000);
-			render(<RightPanelTestWrapper initialContent={longContent} />);
+			seedStores({ content: longContent });
+			renderPanel();
 
-			const textarea = screen.getByRole('textbox');
+			const textarea = screen.getByRole('textbox') as HTMLTextAreaElement;
 			expect(textarea.value.length).toBeGreaterThan(10000);
 		});
 
 		it('handles special characters in content', () => {
 			const specialContent =
 				'# Test <script>alert("xss")</script>\n\n- [ ] Task with "quotes" & <brackets>';
-			render(<RightPanelTestWrapper initialContent={specialContent} />);
+			seedStores({ content: specialContent });
+			renderPanel();
 
 			const textarea = screen.getByRole('textbox');
 			expect(textarea).toHaveValue(specialContent);
@@ -1324,7 +912,8 @@ describe('Auto Run + RightPanel Integration', () => {
 
 		it('handles unicode content', () => {
 			const unicodeContent = '# テスト 🎉\n\n- [ ] 任务 一\n- [ ] Tâche avec accénts';
-			render(<RightPanelTestWrapper initialContent={unicodeContent} />);
+			seedStores({ content: unicodeContent });
+			renderPanel();
 
 			const textarea = screen.getByRole('textbox');
 			expect(textarea).toHaveValue(unicodeContent);
@@ -1333,171 +922,32 @@ describe('Auto Run + RightPanel Integration', () => {
 
 	describe('Batch Run State Integration', () => {
 		it('batch run progress shows in RightPanel regardless of active tab', async () => {
-			const fileTreeContainerRef = React.createRef<HTMLDivElement>();
-			const fileTreeFilterInputRef = React.createRef<HTMLInputElement>();
-
-			const batchRunState: BatchRunState = {
-				isRunning: true,
-				isStopping: false,
-				documents: ['Phase 1'],
-				lockedDocuments: ['Phase 1'],
-				currentDocumentIndex: 0,
-				totalTasks: 5,
-				completedTasks: 2,
-				currentTaskIndex: 0,
-				currentDocTasksTotal: 5,
-				currentDocTasksCompleted: 2,
-				totalTasksAcrossAllDocs: 5,
-				completedTasksAcrossAllDocs: 2,
-				loopEnabled: false,
-				loopIteration: 0,
-				folderPath: '/test/folder',
-				worktreeActive: false,
-				originalContent: '',
-			};
-
-			render(
-				<RightPanel
-					session={createMockSession()}
-					theme={createMockTheme()}
-					shortcuts={createMockShortcuts()}
-					rightPanelOpen={true}
-					setRightPanelOpen={() => {}}
-					rightPanelWidth={400}
-					setRightPanelWidthState={() => {}}
-					activeRightTab="files"
-					setActiveRightTab={() => {}}
-					activeFocus="right"
-					setActiveFocus={() => {}}
-					fileTreeFilter=""
-					setFileTreeFilter={() => {}}
-					fileTreeFilterOpen={false}
-					setFileTreeFilterOpen={() => {}}
-					filteredFileTree={[]}
-					selectedFileIndex={0}
-					setSelectedFileIndex={() => {}}
-					fileTreeContainerRef={fileTreeContainerRef}
-					fileTreeFilterInputRef={fileTreeFilterInputRef}
-					toggleFolder={() => {}}
-					toggleFolderRecursive={() => {}}
-					handleFileClick={async () => {}}
-					expandAllFolders={() => {}}
-					collapseAllFolders={() => {}}
-					updateSessionWorkingDirectory={async () => {}}
-					refreshFileTree={async () => undefined}
-					setSessions={() => {}}
-					showHiddenFiles={false}
-					setShowHiddenFiles={() => {}}
-					autoRunDocumentList={['Phase 1']}
-					autoRunDocumentTree={[]}
-					autoRunContent="# Test"
-					autoRunContentVersion={0}
-					autoRunIsLoadingDocuments={false}
-					onAutoRunContentChange={() => {}}
-					onAutoRunModeChange={() => {}}
-					onAutoRunStateChange={() => {}}
-					onAutoRunSelectDocument={() => {}}
-					onAutoRunCreateDocument={async () => true}
-					onAutoRunRefresh={() => {}}
-					onAutoRunOpenSetup={() => {}}
-					currentSessionBatchState={batchRunState}
-				/>
-			);
+			seedStores({ tab: 'files' });
+			renderPanel({ batchRunState: createBatchRunState() });
 
 			// Should show progress even when on files tab
+			expect(useUIStore.getState().activeRightTab).toBe('files');
 			expect(screen.getByText('Auto Run Active')).toBeInTheDocument();
 			expect(screen.getByTestId('autorun-stat-progress-sub')).toHaveTextContent('2 / 5 tasks');
 		});
 
 		it('switching to autorun tab during batch run shows locked editor', async () => {
-			const fileTreeContainerRef = React.createRef<HTMLDivElement>();
-			const fileTreeFilterInputRef = React.createRef<HTMLInputElement>();
-
-			const TestComponent = () => {
-				const [activeTab, setActiveTab] = useState<RightPanelTab>('files');
-
-				const batchRunState: BatchRunState = {
-					isRunning: true,
-					isStopping: false,
-					documents: ['Phase 1'],
-					lockedDocuments: ['Phase 1'],
-					currentDocumentIndex: 0,
-					totalTasks: 5,
-					completedTasks: 2,
-					currentTaskIndex: 0,
-					currentDocTasksTotal: 5,
-					currentDocTasksCompleted: 2,
-					totalTasksAcrossAllDocs: 5,
-					completedTasksAcrossAllDocs: 2,
-					loopEnabled: false,
-					loopIteration: 0,
-					folderPath: '/test/folder',
-					worktreeActive: false,
-					originalContent: '',
-				};
-
-				return (
-					<LayerStackProvider>
-						<RightPanel
-							session={createMockSession()}
-							theme={createMockTheme()}
-							shortcuts={createMockShortcuts()}
-							rightPanelOpen={true}
-							setRightPanelOpen={() => {}}
-							rightPanelWidth={400}
-							setRightPanelWidthState={() => {}}
-							activeRightTab={activeTab}
-							setActiveRightTab={setActiveTab}
-							activeFocus="right"
-							setActiveFocus={() => {}}
-							fileTreeFilter=""
-							setFileTreeFilter={() => {}}
-							fileTreeFilterOpen={false}
-							setFileTreeFilterOpen={() => {}}
-							filteredFileTree={[]}
-							selectedFileIndex={0}
-							setSelectedFileIndex={() => {}}
-							fileTreeContainerRef={fileTreeContainerRef}
-							fileTreeFilterInputRef={fileTreeFilterInputRef}
-							toggleFolder={() => {}}
-							toggleFolderRecursive={() => {}}
-							handleFileClick={async () => {}}
-							expandAllFolders={() => {}}
-							collapseAllFolders={() => {}}
-							updateSessionWorkingDirectory={async () => {}}
-							refreshFileTree={async () => undefined}
-							setSessions={() => {}}
-							showHiddenFiles={false}
-							setShowHiddenFiles={() => {}}
-							autoRunDocumentList={['Phase 1']}
-							autoRunDocumentTree={[]}
-							autoRunContent="# Test content"
-							autoRunContentVersion={0}
-							autoRunIsLoadingDocuments={false}
-							onAutoRunContentChange={() => {}}
-							onAutoRunModeChange={() => {}}
-							onAutoRunStateChange={() => {}}
-							onAutoRunSelectDocument={() => {}}
-							onAutoRunCreateDocument={async () => true}
-							onAutoRunRefresh={() => {}}
-							onAutoRunOpenSetup={() => {}}
-							currentSessionBatchState={batchRunState}
-						/>
-					</LayerStackProvider>
-				);
-			};
-
-			render(<TestComponent />);
+			seedStores({ tab: 'files' });
+			renderPanel({ batchRunState: createBatchRunState() });
 
 			// Initially on files tab
 			expect(screen.getByTestId('file-explorer-panel')).toBeInTheDocument();
 
 			// Switch to autorun
-			fireEvent.click(screen.getByRole('button', { name: 'Auto Run' }));
+			clickTab('Auto Run');
 
-			// Editor should be locked (readonly)
-			const textarea = screen.getByRole('textbox');
-			expect(textarea).toHaveAttribute('readonly');
+			// The run owns the selected document: the editor is forced into preview
+			// and the Edit toggle is held shut until the run lets go.
+			expect(activeSession().autoRunMode).toBe('preview');
+			expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
+			const toggle = screen.getByTitle('Editing disabled while Auto Run active');
+			expect(toggle).toBeDisabled();
+			expect(screen.getByTestId('react-markdown')).toHaveTextContent('Task 1');
 		});
 	});
 });
