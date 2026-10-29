@@ -243,6 +243,34 @@
           "id": "MCOMP-01-02"
         },
         {
+          "label": "Bring the Auto Run + RightPanel integration suite to the store-driven RightPanel (continuation of MCOMP-01-02)",
+          "kind": "TEST",
+          "targets": [
+            "src/__tests__/integration/AutoRunRightPanel.test.tsx"
+          ],
+          "outcome": "After MCOMP-01-02 removed the duplicated import, 28 of the 31 cases fail because RightPanel renders null: since the store migration it reads the active session from useSessionStore, rightPanelOpen / activeRightTab / activeFocus from useUIStore, rightPanelWidth / shortcuts / autoRunDisabled from useSettingsStore, the file tree from useFileExplorerStore and the document list from useBatchStore, while RightPanelTestWrapper still passes all of these as props to a component whose RightPanelProps no longer declare them, and its vi.mock calls name modules at their pre-move paths (components/AutoRunDocumentSelector, components/AutoRunnerHelpModal, hooks/useTemplateAutocomplete, components/FileExplorerPanel). Rewrite the wrapper to seed the five stores the way src/__tests__/renderer/components/RightPanel.test.tsx does (setState in beforeEach; the mode / cursor / scroll callbacks still observed through the props RightPanel keeps), move the mocks to the current module paths, and keep every one of the 31 cases: tab switching, panel resize, expanded-modal sync and focus management must each pass against the real RightPanel and AutoRun. Run under vitest.integration.config.ts (jsdom, --bail=0). Delete or skip no case. src/ is in the implementation tree, so repackage and re-pin after the commit. Keep 1 authored file and fewer than 500 changed lines.",
+          "backlog": [
+            "BASE-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-02A"
+        },
+        {
+          "label": "Bring the Symphony integration suite to the current handlers (continuation of MCOMP-01-02)",
+          "kind": "TEST",
+          "targets": [
+            "src/__tests__/integration/symphony.integration.test.ts"
+          ],
+          "outcome": "After MCOMP-01-02 supplied the settings store and the fork helper gh calls, 18 of the 79 cases still fail against the current handlers, all of them expectation drift since the suite was last touched (e91d18a43, 2026-08-14). (1) getActive, getState and getStats drop contributions whose sessionId is absent from the sessions store (filterOrphanedContributions in dashboard.ts, fc64e4345) while the suite sessionsStore.get answers [], so the concurrent-contributions, recovery-after-restart, state-persistence, input-validation, concurrent-update, XSS, SQL-injection, contribution-id and atomic-write cases read an empty active list; feed the double the sessions the cases register (session-123, session-contrib_a and the rest) rather than removing the filter. (2) symphony:complete counts the streak by ISO week (lifecycle.ts getWeekNumber) while the year-boundary and timezone cases expect calendar-day increments; decide with the person which rule the product means, then make the cases assert that rule honestly (a week rule needs lastContributionDate seeded as a week key). (3) symphony:cloneRepo admits https://github.com/../../../etc/passwd because WHATWG URL parsing folds the .. segments into /etc/passwd before validateGitHubUrl sees it; the case expects a refusal, so either the validator refuses a raw URL containing .. or the case asserts the normalized slug the clone is held against; name the choice. (4) The external-document 404, redirect and large-content cases and the stats-overflow case fail on startContribution and stats paths not yet traced; trace each against the current contributionStart.ts and dashboard.ts and repair the fixture or the expectation, never the guard. Run under vitest.integration.config.ts (--bail=0); the suite must read 79 passed. Delete or skip no case. src/ is in the implementation tree, so repackage and re-pin after the commit. Keep 1 authored file and fewer than 500 changed lines.",
+          "backlog": [
+            "BASE-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-02B"
+        },
+        {
           "label": "Integrate reviewed upstream changes in bounded groups",
           "kind": "IMPLEMENT",
           "targets": [
@@ -295,7 +323,7 @@
       ],
       "id": "MCOMP-01",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-01.md",
-      "taskCount": 5,
+      "taskCount": 7,
       "stage": "S02"
     },
     {
@@ -6795,7 +6823,7 @@
       ],
       "requires": [],
       "nativeInputs": false,
-      "taskCount": 14
+      "taskCount": 16
     },
     {
       "id": "S03",
@@ -7196,10 +7224,10 @@
       "taskCount": 1
     }
   ],
-  "taskCount": 276,
+  "taskCount": 278,
   "taskCounts": {
     "IMPLEMENT": 177,
-    "TEST": 35,
+    "TEST": 37,
     "VERIFY": 64
   },
   "artifacts": {
@@ -7596,6 +7624,8 @@
       "GCOMP-02-01",
       "MCOMP-01-01",
       "MCOMP-01-02",
+      "MCOMP-01-02A",
+      "MCOMP-01-02B",
       "MCOMP-01-04",
       "MCOMP-01-05",
       "MCOMP-02-01",
