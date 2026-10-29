@@ -20,9 +20,11 @@
  *   provenance.json The sha256 of every file in the package, the git revision
  *                  the build was cut from and whether that source was dirty,
  *                  and one digest over every input esbuild bundled
- *                  (`inputSha256`), so a consumer can pin the artifact it
- *                  qualified, not the app name, and two builds of the same
- *                  source can be told apart from two builds of different source.
+ *                  (`inputSha256`) with the per-file map behind it (`inputs`),
+ *                  so a consumer can pin the artifact it qualified, not the
+ *                  app name, two builds of the same source can be told apart
+ *                  from two builds of different source, and the input that
+ *                  moved can be named.
  *
  * node-pty stays external: the library only uses its types, so nothing of it
  * is left in the bundle, and the package lists it as an optional peer for the
@@ -112,17 +114,22 @@ function sourceProvenance() {
  * One digest over every input esbuild bundled, path and content, in sorted
  * order. It names the source the bundle came from independently of git, so a
  * dirty tree still gets a digest and a clean tree gets the same one each time.
+ * `inputs` is the exhaustive map behind that digest (repo-relative POSIX path
+ * to sha256, the dependencies esbuild pulled in included), so a consumer can
+ * tell WHICH input moved, not only that one did.
  */
 function inputDigest(metafile) {
-	const inputs = Object.keys(metafile.inputs).sort();
+	const inputs = {};
 	const hash = createHash('sha256');
-	for (const input of inputs) {
+	for (const input of Object.keys(metafile.inputs).sort()) {
 		const content = createHash('sha256')
 			.update(fs.readFileSync(path.resolve(input)))
 			.digest('hex');
-		hash.update(`${input.split(path.sep).join('/')}\0${content}\n`);
+		const name = input.split(path.sep).join('/');
+		inputs[name] = content;
+		hash.update(`${name}\0${content}\n`);
 	}
-	return { inputFiles: inputs.length, inputSha256: hash.digest('hex') };
+	return { inputFiles: Object.keys(inputs).length, inputSha256: hash.digest('hex'), inputs };
 }
 
 /** Every file under `dir`, repo-style relative paths, sorted. */

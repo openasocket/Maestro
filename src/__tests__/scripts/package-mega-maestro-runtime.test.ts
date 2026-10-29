@@ -21,9 +21,16 @@ import { HOST_API_VERSION } from '../../shared/plugins/host-api';
 import { readTarGz } from '../../../scripts/import-mega-maestro.mjs';
 import {
 	EXCLUDED_NAME,
+	MANAGED_PORT,
 	buildTar,
 	findCanaries,
+	managedPort,
 } from '../../../scripts/package-mega-maestro-runtime.mjs';
+import {
+	SOURCE_TREE_RULES,
+	digestOf,
+	sourceTreeDigest,
+} from '../../../scripts/write-mega-maestro-handoff.mjs';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const BUILD = path.join(REPO_ROOT, 'scripts/build-maestro-lib.mjs');
@@ -102,8 +109,10 @@ describe('package-mega-maestro-runtime', () => {
 	it('packages the built library as a content-addressed, read-only archive with a manifest', () => {
 		const out = path.join(sandbox, 'out-a');
 		const { status, report } = run(['--library', libDir, '--out', out, ...flags]);
-		expect(status).toBe(report.library.status === 'ready' ? 0 : 3);
-		expect(report.certifiable).toBe(report.library.status === 'ready');
+		expect(status).toBe(report.certifiable ? 0 : 3);
+		expect(report.certifiable).toBe(
+			report.library.status === 'ready' && report.source.implementation.dirty === false
+		);
 
 		const digest = report.archive.sha256;
 		expect(report.dir).toBe(path.join(out, MAESTRO_LIB_VERSION, digest));
@@ -157,6 +166,8 @@ describe('package-mega-maestro-runtime', () => {
 				'package/conformance/acceptance.json',
 				'package/conformance/capabilities.json',
 				'package/manifest.json',
+				'package/source/implementation.json',
+				'package/source/library-inputs.json',
 				...(report.contracts.status === 'pinned' ? ['package/contracts/contracts.pin.json'] : []),
 			].sort()
 		);
@@ -189,6 +200,79 @@ describe('package-mega-maestro-runtime', () => {
 			expect(row.tested.passed).toBe(evidence.positiveAcceptanceMatrix[row.id].passed);
 		}
 	});
+
+	it('binds the archive to the implementation tree, the library inputs and the managed port, and discloses what is unavailable', () => {
+		const out = path.join(sandbox, 'out-f');
+		const { report } = run(['--library', libDir, '--out', out, ...flags]);
+		const files = extract(path.join(report.dir, 'runtime.tgz'));
+		const manifest = JSON.parse(files.get('package/manifest.json')!.toString('utf8'));
+
+		// The explicit source-tree digest: the handoff's rules, reproducible from the archived map alone.
+		const implementation = manifest.source.implementation;
+		const map = JSON.parse(files.get('package/source/implementation.json')!.toString('utf8'));
+		expect(implementation).toMatchObject({
+			rules: { id: SOURCE_TREE_RULES.id, include: [...SOURCE_TREE_RULES.include] },
+			digest: sourceTreeDigest().digest,
+			fileCount: Object.keys(map.files).length,
+			map: 'source/implementation.json',
+			observedHead: manifest.source.head,
+		});
+		expect(digestOf({ rules: map.rules, files: map.files })).toBe(implementation.digest);
+		expect(
+			Object.keys(map.files).every((f) => !path.isAbsolute(f) && !f.startsWith('Plans/'))
+		).toBe(true);
+		if (implementation.dirty) expect(implementation.commit).toBeNull();
+		else expect(implementation.commit).toMatch(/^[a-f0-9]{40}$/);
+
+		// The library's exhaustive input map, as the build recorded it.
+		const provenance = readJson(path.join(libDir, 'provenance.json'));
+		const inputs = JSON.parse(files.get('package/source/library-inputs.json')!.toString('utf8'));
+		expect(inputs).toEqual({ inputSha256: provenance.inputSha256, inputs: provenance.inputs });
+		expect(Object.keys(inputs.inputs)).toHaveLength(provenance.inputFiles);
+		expect(manifest.source.library.inputs).toBe('source/library-inputs.json');
+
+		// The managed port, checked on the bundle the archive carries.
+		const lib = require(path.join(libDir, 'index.js')) as Record<string, unknown>;
+		expect(manifest.managedPort.exports).toEqual([...MANAGED_PORT.exports]);
+		for (const name of manifest.managedPort.exports)
+			expect(typeof lib[name], name).toBe('function');
+		for (const file of manifest.managedPort.declarations) {
+			expect(files.has(`package/${file}`), file).toBe(true);
+		}
+		expect(manifest.managedPort.entry.sha256).toBe(provenance.payloadSha256['index.js']);
+
+		// What the bootstrap says is missing is exactly what the bundle's matrix says, and no claim beyond it.
+		const matrix = JSON.parse(files.get('package/conformance/capabilities.json')!.toString('utf8'));
+		const unavailable = matrix.routes.filter(
+			(r: { managed: string }) => r.managed !== 'implemented'
+		);
+		expect(manifest.bootstrap.routes).toMatchObject({
+			total: matrix.routes.length,
+			managedImplemented: matrix.routes.length - unavailable.length,
+		});
+		expect(manifest.bootstrap.routes.unavailable.map((r: object) => JSON.stringify(r))).toEqual(
+			unavailable.map(({ agentId, route, standalone, managed }: Record<string, string>) =>
+				JSON.stringify({ agentId, route, standalone, managed })
+			)
+		);
+		expect(manifest.bootstrap.qualification).toEqual({
+			paired: false,
+			provider: false,
+			native: false,
+		});
+		expect(manifest.bootstrap.counterpart['CP-02'].runtimeAdapter).toBe('absent');
+		expect(manifest.bootstrap.counterpart['CP-01'].contracts).toBe(manifest.contracts.status);
+
+		// A bundle that reaches less than the port is refused by name, in-process, before any write.
+		const hollow = path.join(sandbox, 'hollow');
+		fs.mkdirSync(hollow, { recursive: true });
+		fs.writeFileSync(
+			path.join(hollow, 'index.js'),
+			'module.exports = { installationIdentity() {} };'
+		);
+		expect(() => managedPort(hollow, { payloadSha256: {} })).toThrow(/managed-port|exports no/);
+		expect(() => managedPort(libDir, { payloadSha256: {} })).toThrow(/carries no types\//);
+	}, 30_000);
 
 	it('is reproducible, immutable, and refuses a moved, unlisted or missing library by name', () => {
 		const first = run(['--library', libDir, '--out', path.join(sandbox, 'out-c'), ...flags]).report;
@@ -225,7 +309,7 @@ describe('package-mega-maestro-runtime', () => {
 		expect(moved.status).toBe(2);
 		expect(moved.stderr).toContain('mismatch');
 		expect(moved.stderr).toContain('README.md');
-	});
+	}, 60_000);
 
 	it('names secret canaries and private paths, excludes credential-like names, and writes a deterministic tar', () => {
 		expect(findCanaries('-----BEGIN PRIVATE KEY-----\nabc', [])).toEqual(['private-key']);

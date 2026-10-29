@@ -22,6 +22,20 @@
  * `.sha256` sidecar, every file read-only. A dirty or stale library needs the
  * matching `--allow-*` flag and is recorded with `certifiable: false`.
  *
+ * The archive is also the source-bound bootstrap a counterpart builds its
+ * adapter against before any pair exists. `source/implementation.json` is the
+ * explicit implementation-tree map (the handoff's `SOURCE_TREE_RULES`: every
+ * tracked implementation file to its working-tree digest, the same digest
+ * `write-mega-maestro-handoff.mjs` reports) and `source/library-inputs.json`
+ * the exhaustive esbuild input map the library build recorded; the manifest
+ * names the implementation commit (the last one that touched an input), the
+ * observed HEAD, whether the implementation tree is dirty, the managed port the
+ * bundle must reach (`MANAGED_PORT`: names checked as functions on the loaded
+ * bundle, declaration files checked in the payload) and, under `bootstrap`,
+ * the routes the bundle itself reports unavailable. A bootstrap advertises
+ * what is NOT there as plainly as what is: it needs no Mega adapter, and it
+ * claims no paired, provider or native qualification.
+ *
  * What never goes in: provider profiles, credentials, ledgers, anything read
  * from the sibling Mega-Maestro checkout, or the imported contracts package
  * (the pin names it by digest). Payload text is scanned for secret canaries
@@ -53,6 +67,7 @@ import {
 	inspectLibrary,
 	inspectPin,
 } from './mega-maestro-pair.mjs';
+import { SOURCE_TREE_RULES, digestOf, sourceTreeDigest } from './write-mega-maestro-handoff.mjs';
 
 export const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const ARTIFACT_FORMAT_VERSION = 1;
@@ -63,6 +78,54 @@ export const DEFAULT_PLAN_FILE = 'Plans/mega-maestro-rc/execution-plan.json';
 const EVIDENCE_DIR = 'Plans/mega-maestro-rc/evidence';
 const HOST_API_FILE = 'src/shared/plugins/host-api.ts';
 const PLUGIN_SDK_PACKAGE = 'packages/plugin-sdk/package.json';
+
+/**
+ * The managed port a counterpart adapter is written against: the entry names
+ * the packaged bundle must export as functions (checked on the LOADED bundle,
+ * not the TypeScript beside it) and the declaration files its payload must
+ * carry. A bundle that reaches less than this is refused, not advertised.
+ */
+export const MANAGED_PORT = Object.freeze({
+	exports: Object.freeze([
+		'installationIdentity',
+		'createManagedHostAdapter',
+		'createHeadlessSpawnAuthority',
+		'createLocalHostAuthority',
+		'createContextVerifier',
+		'buildDispatchSnapshot',
+		'negotiateCompatibility',
+		'managedContextProblems',
+		'createManagedBinding',
+		'createRunJournal',
+		'createManagedOperations',
+		'mintManagedDispatch',
+		'frameLocalEndpointRequest',
+		'parseLocalEndpointResponse',
+		'admitProbeTurn',
+		'admitSupervisorChild',
+		'createWorkflowOwnership',
+		'createEventJournal',
+		'createLifecycleProjector',
+		'createCommandExecutor',
+		'providerRouteSupport',
+		'syntheticHarnessRouteSupport',
+	]),
+	declarations: Object.freeze(
+		['types', 'compatibility', 'authority', 'endpoint-port', 'host-adapter', 'provider-route'].map(
+			(name) => `types/shared/maestro-lib/managed/${name}.d.ts`
+		)
+	),
+});
+/**
+ * The implementation inputs as git pathspecs (the same set `SOURCE_TREE_RULES`
+ * includes). A function, not a constant: the handoff script imports this one
+ * too, so the rules binding is read at call time, never while the two modules
+ * are still loading each other.
+ */
+const implementationPathspecs = () =>
+	SOURCE_TREE_RULES.include.map((rule) =>
+		rule === 'tsconfig*.json' ? ':(glob)tsconfig*.json' : rule
+	);
 
 /** Names that are a profile, a credential or a ledger, whatever they hold. */
 export const EXCLUDED_NAME =
@@ -161,6 +224,108 @@ export function capabilityMatrix(libraryDir) {
 			endpointProtocol: lib.LOCAL_ENDPOINT_PROTOCOL,
 			node: lib.MAESTRO_LIB_VERSION_INFO.node,
 		},
+	};
+}
+
+/**
+ * The managed port as the packaged bundle actually reaches it: every name in
+ * `MANAGED_PORT.exports` a function on the loaded bundle, every declaration
+ * file in the hashed payload. Anything short refuses the package by name.
+ */
+export function managedPort(libraryDir, provenance) {
+	const lib = createRequire(import.meta.url)(path.join(libraryDir, 'index.js'));
+	const missing = MANAGED_PORT.exports.filter((name) => typeof lib[name] !== 'function');
+	if (missing.length > 0) {
+		refuse('managed-port', `the bundle exports no ${missing.join(', ')}`);
+	}
+	const payload = provenance.payloadSha256 ?? {};
+	const undeclared = MANAGED_PORT.declarations.filter((file) => !(file in payload));
+	if (undeclared.length > 0) {
+		refuse('declarations', `the library payload carries no ${undeclared.join(', ')}`);
+	}
+	return {
+		readFrom: 'the packaged bundle, loaded by this Node process, and the hashed payload',
+		exports: [...MANAGED_PORT.exports],
+		declarations: MANAGED_PORT.declarations.map((file) => `library/${file}`),
+		entry: { path: 'library/index.js', sha256: payload['index.js'] ?? null },
+	};
+}
+
+/**
+ * The implementation snapshot the archive is bound to: the explicit
+ * implementation-tree digest under the handoff's rules (tracked files,
+ * working-tree bytes), the last commit that touched an implementation input
+ * (not HEAD, which a checklist or evidence commit moves), the observed HEAD,
+ * and whether the implementation tree holds a change git does not (a tracked
+ * edit or an untracked file under the included paths). `files` is the map
+ * behind the digest; the manifest carries everything else.
+ */
+export function implementationSnapshot(head) {
+	let tree;
+	try {
+		tree = sourceTreeDigest(REPO_ROOT);
+	} catch (error) {
+		refuse('no-git', `the implementation tree cannot be read: ${error.message}`);
+	}
+	const { files } = tree;
+	if (digestOf({ rules: SOURCE_TREE_RULES.id, files }) !== tree.digest) {
+		refuse('implementation-digest', 'the implementation map does not reproduce the tree digest');
+	}
+	const pathspecs = implementationPathspecs();
+	const dirtyEntries = (git(['status', '--porcelain', '--', ...pathspecs]) ?? '')
+		.split('\n')
+		.filter(Boolean);
+	const dirty = dirtyEntries.length > 0;
+	return {
+		rules: {
+			id: SOURCE_TREE_RULES.id,
+			include: [...SOURCE_TREE_RULES.include],
+			exclude: [...SOURCE_TREE_RULES.exclude],
+			method: SOURCE_TREE_RULES.method,
+		},
+		digest: tree.digest,
+		fileCount: tree.fileCount,
+		deleted: tree.deleted,
+		map: 'source/implementation.json',
+		dirty,
+		dirtyEntries: dirtyEntries.length,
+		commit: dirty ? null : (git(['log', '-1', '--format=%H', '--', ...pathspecs]) ?? null),
+		observedHead: head,
+		files,
+	};
+}
+
+/** What the bootstrap advertises as missing, read from the bundle's own matrix and the pins: never less. */
+export function bootstrapDisclosure(matrix, pin) {
+	const unavailable = matrix.routes
+		.filter((row) => row.managed !== 'implemented')
+		.map(({ agentId, route, standalone, managed }) => ({ agentId, route, standalone, managed }));
+	return {
+		statement:
+			'compiled inputs for the counterpart adapter: this archive grants no lease or policy authority, enables no provider support and proves no paired, native or provider qualification',
+		routes: {
+			total: matrix.routes.length,
+			managedImplemented: matrix.routes.length - unavailable.length,
+			unavailable,
+			rule: 'a route is unavailable until its enforcement producer exists and is exercised; a consumer that reads unsupported must refuse, not fall back',
+		},
+		harness: {
+			routeId: matrix.harness.routeId,
+			standalone: matrix.harness.standalone,
+			managed: matrix.harness.managed,
+			qualifies: matrix.harness.qualifies,
+			doesNotQualify: matrix.harness.doesNotQualify,
+		},
+		counterpart: {
+			'CP-01': { contracts: pin.status, owner: 'mega-maestro' },
+			'CP-02': {
+				runtimeAdapter: 'absent',
+				owner: 'mega-maestro',
+				note: 'not required by this bootstrap; an adapter qualifies against this archive by its sha256, never the entry file',
+			},
+			'CP-03': { workflowAuthority: 'absent', owner: 'mega-maestro' },
+		},
+		qualification: { paired: false, provider: false, native: false },
 	};
 }
 
@@ -271,8 +436,18 @@ export function packageRuntime(options = {}) {
 			`the library was built at ${library.sourceRevision}, not HEAD ${head} (pass --allow-stale)`
 		);
 	}
-	const certifiable = library.status === 'ready';
-	const reasons = certifiable ? [] : [`library ${library.status}`];
+	const { files: implementationFiles, ...implementation } = implementationSnapshot(head);
+	if (implementation.dirty && !options.allowDirty) {
+		refuse(
+			'implementation-dirty',
+			`the implementation tree holds ${implementation.dirtyEntries} uncommitted change(s) under ${SOURCE_TREE_RULES.include.join(', ')} (pass --allow-dirty to record it as such)`
+		);
+	}
+	const certifiable = library.status === 'ready' && !implementation.dirty;
+	const reasons = [
+		...(library.status === 'ready' ? [] : [`library ${library.status}`]),
+		...(implementation.dirty ? ['implementation dirty'] : []),
+	];
 
 	const plan = fs.existsSync(planFile) ? readJson(planFile) : {};
 	const pin = inspectPin(pinFile);
@@ -283,6 +458,7 @@ export function packageRuntime(options = {}) {
 		.match(/HOST_API_VERSION = '([^']+)'/);
 	const sdk = readJson(path.join(REPO_ROOT, PLUGIN_SDK_PACKAGE));
 	const matrix = capabilityMatrix(libraryDir);
+	const port = managedPort(libraryDir, provenance);
 	const acceptance = acceptanceExpectations(plan);
 	const committedAt = git(['log', '-1', '--format=%cI', 'HEAD']);
 	const rcBase = plan.baseRevision ?? null;
@@ -299,6 +475,21 @@ export function packageRuntime(options = {}) {
 		path: 'conformance/acceptance.json',
 		data: Buffer.from(`${JSON.stringify(acceptance, null, '\t')}\n`),
 	});
+	entries.push({
+		path: implementation.map,
+		data: Buffer.from(
+			`${JSON.stringify({ rules: SOURCE_TREE_RULES.id, files: implementationFiles }, null, '\t')}\n`
+		),
+	});
+	const libraryInputs = provenance.inputs ? 'source/library-inputs.json' : null;
+	if (libraryInputs) {
+		entries.push({
+			path: libraryInputs,
+			data: Buffer.from(
+				`${JSON.stringify({ inputSha256: provenance.inputSha256, inputs: provenance.inputs }, null, '\t')}\n`
+			),
+		});
+	}
 
 	const manifest = {
 		formatVersion: ARTIFACT_FORMAT_VERSION,
@@ -337,8 +528,12 @@ export function packageRuntime(options = {}) {
 				sourceDirty: provenance.sourceDirty ?? null,
 				inputSha256: provenance.inputSha256 ?? null,
 				inputFiles: provenance.inputFiles ?? null,
+				inputs: libraryInputs,
 			},
+			implementation,
 		},
+		managedPort: port,
+		bootstrap: bootstrapDisclosure(matrix, pin),
 		contracts:
 			pin.status === 'pinned'
 				? {
@@ -353,7 +548,7 @@ export function packageRuntime(options = {}) {
 							'no clean Mega-Maestro contracts artifact is pinned in this checkout (CP-01, owner mega-maestro)',
 					},
 		components: Object.fromEntries(
-			['library', 'contracts', 'conformance'].map((c) => [
+			['library', 'contracts', 'conformance', 'source'].map((c) => [
 				c,
 				entries.filter((e) => e.path.startsWith(`${c}/`)).length,
 			])

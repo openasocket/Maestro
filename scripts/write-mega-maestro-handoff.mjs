@@ -121,7 +121,7 @@ export function includedInSourceTree(file) {
 	);
 }
 
-/** The digest over every included tracked file's working-tree bytes, with counts. */
+/** The digest over every included tracked file's working-tree bytes, with counts and the map behind it. */
 export function sourceTreeDigest(root = REPO_ROOT) {
 	const listed = git(['ls-files', '-z']) ?? refuse('no-git', 'git ls-files failed');
 	const files = {};
@@ -132,7 +132,7 @@ export function sourceTreeDigest(root = REPO_ROOT) {
 		files[file] = stat?.isFile() ? sha256(fs.readFileSync(path.join(root, file))) : 'deleted';
 	}
 	const digest = digestOf({ rules: SOURCE_TREE_RULES.id, files });
-	return { digest, fileCount: Object.keys(files).length, deleted };
+	return { digest, fileCount: Object.keys(files).length, deleted, files };
 }
 
 // ---------------------------------------------------------------------------
