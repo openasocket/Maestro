@@ -801,6 +801,9 @@ const createWebServer = createWebServerFactory({
 	groupsStore,
 	agentConfigsStore,
 	getDebugPackageDeps: () => debugPackageDeps,
+	// The managed facade the `managed_*` bridge messages answer from (MRC2-07-03):
+	// the same `EnterpriseService.managed` the enterprise:* IPC handlers read.
+	getManaged: () => enterpriseService?.managed ?? null,
 	getMainWindow: () => mainWindow,
 	getWindowForSession: resolveWindowForSession,
 	deliverCadenza,

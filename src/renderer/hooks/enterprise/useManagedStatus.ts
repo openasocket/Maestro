@@ -6,9 +6,11 @@
  * store, so a pane that unmounts and remounts draws the last answer at once and
  * refreshes it in place, and polls while mounted so an endpoint that comes
  * back, suspends or denies is seen without a click. Three answers are kept
- * apart: `supported: false` is a browser (the web-desktop bridge has no
- * `enterprise` namespace), `state === null` is a desktop running no enrollment
- * service, and a `state` is the projection itself (`src/main/enterprise/managed-state.ts`).
+ * apart: `supported: false` is a surface with no `enterprise` API at all,
+ * `state === null` is a desktop running no enrollment service, and a `state`
+ * is the projection itself (`src/main/enterprise/managed-state.ts`). A browser
+ * reads the state over the bridge (MRC2-07-03); the lifecycle verbs are
+ * desktop-only there, so `run` answers the bridge's refusal as `unavailable`.
  *
  * `run(verb)` is the pane's one way to act: it invokes one of the narrow
  * lifecycle verbs and refreshes the standing afterward. The approval handoff a
@@ -24,6 +26,7 @@ import type {
 } from '../../../main/enterprise/enrollment';
 import type { ManagedStanding, ManagedStateView } from '../../../main/enterprise/managed-state';
 import type { PolicyRecovery } from '../../../main/enterprise/policy-status';
+import { ipcErrorMessage } from '../../utils/ipcErrorMessage';
 import { useCachedResource } from '../utils/useCachedResource';
 
 export const MANAGED_STATE_RESOURCE_KEY = 'enterprise:managedState';
@@ -137,7 +140,7 @@ export function describeManagedOutcome(
 }
 
 export interface UseManagedStatusResult {
-	/** False in a browser: the web-desktop bridge has no `enterprise` namespace. */
+	/** False on a surface with no `enterprise` API; a browser reads the state over the bridge. */
 	supported: boolean;
 	/** Undefined before the first read, null when no service runs in this desktop. */
 	state: ManagedStateView | null | undefined;
@@ -174,7 +177,13 @@ export function useManagedStatus(options: { pollMs?: number } = {}): UseManagedS
 					handoff: null,
 				};
 			}
-			const outcome = await api[verb]();
+			let outcome: Awaited<ReturnType<(typeof api)[typeof verb]>>;
+			try {
+				outcome = await api[verb]();
+			} catch (error) {
+				// The bridge refused the verb (a browser never runs the lifecycle): say so, by name.
+				return { status: 'unavailable', message: ipcErrorMessage(error), handoff: null };
+			}
 			await refresh();
 			return describeManagedOutcome(verb, outcome);
 		},

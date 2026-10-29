@@ -219,6 +219,7 @@ import type {
 	InteractMovementDesignerCallback,
 	NotifyCenterFlashCallback,
 	GetDebugPackageDepsCallback,
+	GetManagedOperationsCallback,
 	GetMarketplaceManifestCallback,
 	GetMarketplaceDocumentCallback,
 	GetMarketplaceReadmeCallback,
@@ -1027,6 +1028,11 @@ export class WebServer {
 		this.callbackRegistry.setGetDebugPackageDepsCallback(callback);
 	}
 
+	/** The managed operation facade `managed_*` messages answer from (MRC2-07-03). */
+	setGetManagedCallback(callback: GetManagedOperationsCallback): void {
+		this.callbackRegistry.setGetManagedCallback(callback);
+	}
+
 	setGetMarketplaceManifestCallback(callback: GetMarketplaceManifestCallback): void {
 		this.callbackRegistry.setGetMarketplaceManifestCallback(callback);
 	}
@@ -1631,6 +1637,7 @@ export class WebServer {
 				this.callbackRegistry.interactMovementDesigner(id, action),
 			notifyCenterFlash: async (params) => this.callbackRegistry.notifyCenterFlash(params),
 			getDebugPackageDeps: () => this.callbackRegistry.getDebugPackageDeps(),
+			getManaged: () => this.callbackRegistry.getManaged(),
 			getMarketplaceManifest: async (options) =>
 				this.callbackRegistry.getMarketplaceManifest(options),
 			getMarketplaceDocument: async (playbookPath: string, filename: string) =>

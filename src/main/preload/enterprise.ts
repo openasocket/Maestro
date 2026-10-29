@@ -2,9 +2,9 @@
  * Preload API for enterprise enrollment (`window.maestro.enterprise`).
  *
  * Mirrors the `enterprise:*` channels registered in
- * `src/main/ipc/handlers/enterprise.ts`. Desktop-only by construction: the
- * web-desktop bridge's method inventory has no `enterprise` namespace, so a
- * browser holds this object and gets nothing back from it. Everything here
+ * `src/main/ipc/handlers/enterprise.ts`. Over the web-desktop bridge a browser
+ * reaches the managed state, the inventory and the inbox alone (MRC2-07-03);
+ * every other verb here is refused by the bridge's inventory. Everything here
  * answers a public projection or a lifecycle outcome; the only secret-shaped
  * answer is the registration approval, a one-time pairing code the actor
  * reads once and types into the console.

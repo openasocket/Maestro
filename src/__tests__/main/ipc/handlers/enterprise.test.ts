@@ -46,7 +46,8 @@ const lifecycle = {
 	close: vi.fn(),
 };
 const policyStatus = { status: vi.fn(), refresh: vi.fn(), recover: vi.fn() };
-const identity = { custody: vi.fn(), clear: vi.fn() };
+// `read` is what the facade's inbox act gates a paired device on (MRC2-07-03); no record here.
+const identity = { custody: vi.fn(), clear: vi.fn(), read: vi.fn(() => ({ status: 'none' })) };
 const inventory = { snapshot: vi.fn(), fact: vi.fn(), record: vi.fn() };
 const commands = { status: vi.fn(), receive: vi.fn() };
 

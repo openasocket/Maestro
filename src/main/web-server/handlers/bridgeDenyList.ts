@@ -34,6 +34,11 @@ const METHODS: Record<string, string> = {
 	'director-notes':
 		'generateSynopsis getGraphData getOffsetForTimestamp getRichOverviewStats getUnifiedHistory',
 	documentGraph: 'unwatchFolder watchFolder',
+	// The managed standing and the notice inbox a signed-in browser may show
+	// (MRC2-07-03): projections and one receipt per act, every one attributed to
+	// the transport that sent it. Enrollment, registration, the lifecycle writes,
+	// identity custody and clearing stay absent from the remote surface by design.
+	enterprise: 'inboxAct inboxRefresh inboxState inventory managedState',
 	feedback:
 		'check-gh-auth compose-prompt drafts:delete drafts:list drafts:save get-conversation-prompt issues:delete issues:list issues:refresh-states search-issues submit submit-conversation subscribe-issue',
 	fonts: 'detect',
@@ -64,7 +69,7 @@ const METHODS: Record<string, string> = {
 	prompts: 'get getAll getAllIds getBundledDefault getPath listFiles reset save',
 	sessions:
 		'getActiveSessionId getAll getBootstrap getDeferredContent setActiveSessionId setAll setMany',
-	settings: 'get getAll set',
+	settings: 'get getAll managedLocks set',
 	shell: 'trashItem',
 	shells: 'detect',
 	speckit: 'getCommand getMetadata getPrompts refresh resetPrompt savePrompt',

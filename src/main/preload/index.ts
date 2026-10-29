@@ -132,7 +132,7 @@ contextBridge.exposeInMainWorld('maestro', {
 	// Web Login API (accounts for the web interface - desktop-only)
 	webLogin: createWebLoginApi(),
 
-	// Enterprise enrollment API (desktop-only; the web bridge inventory has no enterprise namespace)
+	// Enterprise enrollment API (the web bridge admits the managed state, inventory and inbox reads alone)
 	enterprise: createEnterpriseApi(),
 
 	// Computer History API (desktop-only; the web bridge refuses these channels)

@@ -42,6 +42,7 @@ import type {
 } from '../../shared/concerto-html';
 import type { MediaOpenMode } from '../../shared/mediaTypes';
 import type { DebugPackageDependencies } from '../debug-package';
+import type { ManagedOperations } from '../enterprise/service';
 
 // Re-export Theme for convenience
 export type { Theme } from '../../shared/theme-types';
@@ -961,6 +962,8 @@ export type NotifyCenterFlashCallback = (params: NotifyCenterFlashParams) => Pro
  * need it to build the same zip the desktop's Create Debug Package does.
  */
 export type GetDebugPackageDepsCallback = () => DebugPackageDependencies;
+/** The managed operation facade (`EnterpriseService.managed`), or null when no service runs (MRC2-07-03). */
+export type GetManagedOperationsCallback = () => ManagedOperations | null;
 export type ConfigureAutoRunCallback = (
 	sessionId: string,
 	config: {

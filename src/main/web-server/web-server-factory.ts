@@ -13,6 +13,7 @@ import { isWebContentsAvailable } from '../utils/safe-send';
 import type { ProcessManager } from '../process-manager';
 import type { SettingsStoreInterface as SettingsStore } from '../stores/types';
 import type { DebugPackageDependencies } from '../debug-package';
+import type { ManagedOperations } from '../enterprise/service';
 import type { AgentConfigsStore } from '../agents/agent-config-writes';
 import type { CueGraphSession, CueRunResult } from '../../shared/cue/contracts';
 import type { CadenzaPayload } from '../../shared/cadenza-types';
@@ -108,6 +109,10 @@ export interface WebServerFactoryDependencies {
 	 *  `feedback submit --support-package`). Absent = the CLI reports the
 	 *  feature as unconfigured instead of shipping a hollow zip. */
 	getDebugPackageDeps?: () => DebugPackageDependencies;
+	/** The managed operation facade (`EnterpriseService.managed`) the `managed_*`
+	 *  bridge messages answer from (MRC2-07-03). Absent or null = the CLI is told
+	 *  no enrollment service runs in this desktop. */
+	getManaged?: () => ManagedOperations | null;
 }
 
 /**
@@ -224,6 +229,9 @@ export function createWebServerFactory(deps: WebServerFactoryDependencies) {
 
 		if (deps.getDebugPackageDeps) {
 			server.setGetDebugPackageDepsCallback(deps.getDebugPackageDeps);
+		}
+		if (deps.getManaged) {
+			server.setGetManagedCallback(deps.getManaged);
 		}
 
 		return server;

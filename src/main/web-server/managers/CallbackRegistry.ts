@@ -158,6 +158,7 @@ import type {
 	InteractMovementDesignerCallback,
 	NotifyCenterFlashCallback,
 	GetDebugPackageDepsCallback,
+	GetManagedOperationsCallback,
 	NotifyToastParams,
 	NotifyCenterFlashParams,
 	GetMarketplaceManifestCallback,
@@ -307,6 +308,7 @@ export interface WebServerCallbacks {
 	interactMovementDesigner: InteractMovementDesignerCallback | null;
 	notifyCenterFlash: NotifyCenterFlashCallback | null;
 	getDebugPackageDeps: GetDebugPackageDepsCallback | null;
+	getManaged: GetManagedOperationsCallback | null;
 	getMarketplaceManifest: GetMarketplaceManifestCallback | null;
 	getMarketplaceDocument: GetMarketplaceDocumentCallback | null;
 	getMarketplaceReadme: GetMarketplaceReadmeCallback | null;
@@ -423,6 +425,7 @@ export class CallbackRegistry {
 		interactMovementDesigner: null,
 		notifyCenterFlash: null,
 		getDebugPackageDeps: null,
+		getManaged: null,
 		getMarketplaceManifest: null,
 		getMarketplaceDocument: null,
 		getMarketplaceReadme: null,
@@ -1221,6 +1224,10 @@ export class CallbackRegistry {
 		return this.callbacks.getDebugPackageDeps?.() ?? null;
 	}
 
+	getManaged(): ReturnType<GetManagedOperationsCallback> {
+		return this.callbacks.getManaged?.() ?? null;
+	}
+
 	async getMarketplaceManifest(options?: {
 		refresh?: boolean;
 	}): Promise<MarketplaceManifestResult | null> {
@@ -1690,6 +1697,10 @@ export class CallbackRegistry {
 
 	setGetDebugPackageDepsCallback(callback: GetDebugPackageDepsCallback): void {
 		this.callbacks.getDebugPackageDeps = callback;
+	}
+
+	setGetManagedCallback(callback: GetManagedOperationsCallback): void {
+		this.callbacks.getManaged = callback;
 	}
 
 	setGetMarketplaceManifestCallback(callback: GetMarketplaceManifestCallback): void {

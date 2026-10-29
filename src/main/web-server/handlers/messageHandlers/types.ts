@@ -59,6 +59,7 @@ import type {
 	OpenFileTabOptions,
 } from '../../types';
 import type { DebugPackageDependencies } from '../../../debug-package';
+import type { ManagedOperations } from '../../../enterprise/service';
 import type {
 	CueBundleExportOutcome,
 	CueBundleExportRequest,
@@ -504,6 +505,8 @@ export interface MessageHandlerCallbacks {
 	notifyCenterFlash: (params: NotifyCenterFlashParams) => Promise<boolean>;
 	/** Collectors for a support package; `null` until the factory wires them. */
 	getDebugPackageDeps: () => DebugPackageDependencies | null;
+	/** The managed operation facade (MRC2-07-03, `EnterpriseService.managed`); `null` when no service runs. */
+	getManaged?: () => ManagedOperations | null;
 	getMarketplaceManifest: (options?: {
 		refresh?: boolean;
 	}) => Promise<MarketplaceManifestResult | null>;

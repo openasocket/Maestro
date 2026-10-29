@@ -27,6 +27,9 @@
  * - get_session_history: Return tab conversation history with --since/--tail filters (CLI: `session show`)
  * - computer_history_command: Computer History writes, CLI clients only (CLI: `computer-history`)
  * - throughput_gauge_command: Show, hide, configure, or read the Throughput Gauge (CLI: `throughput-gauge`)
+ * - managed_status / managed_inventory / managed_support_matrix / managed_locks / managed_inbox_list /
+ *   managed_inbox_act / managed_command_status: the managed standing and inbox (CLI: `managed ...`)
+ * - managed_enroll_request / managed_policy_refresh / managed_command: the managed writes, CLI clients only
  *
  * Auto Run message types (refresh_auto_run_docs, configure_auto_run, get_auto_run_docs,
  * get_auto_run_state, get_auto_run_document, save_auto_run_document, stop_auto_run, etc.)
@@ -95,6 +98,7 @@ import {
 	handleMarketplaceGetReadme,
 	handleMarketplaceImportPlaybook,
 } from './marketplace';
+import { handleManagedMessage } from './managed';
 import { handlePluginsListTools, handlePluginsCallTool, handlePluginsSendAgent } from './plugins';
 import {
 	handleRefreshAutoRunDocs,
@@ -797,6 +801,21 @@ export class WebSocketMessageHandler {
 
 			case 'feedback_diagnose':
 				void handleFeedbackDiagnose(this.ctx, client, message);
+				break;
+
+			// The managed operation surface (CLI: `managed ...`), answered from the one
+			// facade the Settings > Environment pane reads; see ./managed for who may send what.
+			case 'managed_status':
+			case 'managed_inventory':
+			case 'managed_support_matrix':
+			case 'managed_locks':
+			case 'managed_policy_refresh':
+			case 'managed_enroll_request':
+			case 'managed_inbox_list':
+			case 'managed_inbox_act':
+			case 'managed_command':
+			case 'managed_command_status':
+				void handleManagedMessage(this.ctx, client, message);
 				break;
 
 			case 'marketplace_get_manifest':

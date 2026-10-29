@@ -5,7 +5,7 @@
  * Reads `window.maestro.enterprise.inboxState()` through the cached-resource
  * store, so the surface that shows it draws the last answer at once and
  * refreshes it in place. Three answers are kept apart: `supported: false` is a
- * browser (the web-desktop bridge has no `enterprise` namespace), `view ===
+ * surface with no `enterprise` API (a browser reads and acts over the bridge), `view ===
  * null` is a desktop whose service composes no inbox client yet, and a `view`
  * is the client's status with the held notices, bodies included.
  *
@@ -102,7 +102,7 @@ export function describeInboxList(outcome: InboxRefresh | null): InboxListResult
 }
 
 export interface UseManagedInboxResult {
-	/** False in a browser: the bridge has no `enterprise` namespace. */
+	/** False on a surface with no `enterprise` API; a browser reads and acts over the bridge (MRC2-07-03). */
 	supported: boolean;
 	/** undefined while reading, null when the desktop composes no inbox client. */
 	view: ManagedInboxView | null | undefined;

@@ -2,12 +2,14 @@
  * Enterprise enrollment IPC: the narrow set of lifecycle and status requests
  * the renderer may make of the main-process enrollment service.
  *
- * Desktop-only by construction: `enterprise:*` is not in the web bridge's
- * method inventory (`src/main/web-server/handlers/bridgeDenyList.ts`), so a
- * browser client cannot reach any of these. What crosses the bridge is the
- * public projection only (`ManagedEnrollmentStatus`, `ManagedPolicyStatus`,
- * the lifecycle's outcome records): no sealed bytes, no install secret, no
- * anchor, nothing the endpoint holds. The one secret-shaped value is the
+ * Over the web bridge (`src/main/web-server/handlers/bridgeDenyList.ts`) a
+ * signed-in browser reaches the managed state, the inventory and the inbox
+ * (state, refresh, act) alone (MRC2-07-03); enrollment, registration, the
+ * lifecycle writes, custody and clearing are desktop-only by construction.
+ * What crosses the bridge is the public projection only
+ * (`ManagedEnrollmentStatus`, `ManagedPolicyStatus`, the lifecycle's outcome
+ * records): no sealed bytes, no install secret, no anchor, nothing the
+ * endpoint holds. The one secret-shaped value is the
  * registration approval (`beginRegistration`), a one-time pairing code the
  * actor must read off the screen and type into the console; it is returned
  * once and never persisted or logged anywhere in main.
@@ -42,6 +44,7 @@ import {
 	type InboxClient,
 	type ManagedInboxView,
 } from '../../enterprise/inbox';
+import { NO_INBOX_OUTCOME, type ManagedInboxActInput } from '../../enterprise/service';
 import {
 	localReleaseOf,
 	type LocalRelease,
@@ -123,24 +126,22 @@ function installationInput(raw: unknown): { installationId: string } {
 
 const NO_SERVICE_MESSAGE = 'The enterprise enrollment service is not running in this desktop.';
 const NO_SERVICE: LifecycleOutcome<never> = { status: 'unavailable', message: NO_SERVICE_MESSAGE };
-const NO_INBOX: InboxActionOutcome = {
-	status: 'unavailable',
-	detail: 'No notice inbox is composed in this desktop.',
-};
 const MAX_ID = 256;
 
-/** One inbox act as the renderer may send it; refused here, by name, before the client sees it. */
-export function validateInboxAct(raw: unknown): {
-	campaignId: string;
-	messageId: string;
-	action: EndpointInboxAction;
-} {
+/**
+ * One inbox act as the renderer may send it; refused here, by name, before the
+ * facade sees it. The campaign is optional: the facade resolves it from the
+ * held notices (MRC2-07-02), and refuses an id held under two by name.
+ */
+export function validateInboxAct(raw: unknown): ManagedInboxActInput {
 	if (typeof raw !== 'object' || raw === null) throw new Error('An inbox act must be an object.');
 	const input = raw as Record<string, unknown>;
 	const problem = inboxActionProblem(input.action);
 	if (problem) throw new Error(`action: ${problem}.`);
 	return {
-		campaignId: text(input.campaignId, 'campaignId', MAX_ID),
+		...(input.campaignId === undefined
+			? {}
+			: { campaignId: text(input.campaignId, 'campaignId', MAX_ID) }),
 		messageId: text(input.messageId, 'messageId', MAX_ID),
 		action: input.action as EndpointInboxAction,
 	};
@@ -219,13 +220,17 @@ export function registerEnterpriseHandlers(deps: EnterpriseHandlerDependencies):
 		withIpcErrorLogging(handlerOpts('inboxRefresh'), async () => deps.getInbox()?.refresh() ?? null)
 	);
 
+	// Through the one facade (MRC2-07-03): the standing first, the campaign from
+	// the held set, the caller's transport gated (a paired device with no
+	// registered actor is refused), then the client. The bridge and the CLI
+	// answer from the same function.
 	ipcMain.handle(
 		'enterprise:inboxAct',
 		withIpcErrorLogging(
 			handlerOpts('inboxAct'),
 			async (raw: unknown): Promise<InboxActionOutcome> => {
 				const input = validateInboxAct(raw);
-				return deps.getInbox()?.act(input) ?? NO_INBOX;
+				return deps.getManaged()?.inboxAct(input) ?? NO_INBOX_OUTCOME;
 			}
 		)
 	);

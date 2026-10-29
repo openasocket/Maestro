@@ -105,7 +105,12 @@ import {
 	type InventoryDeps,
 } from './inventory';
 import { createPolicyStatusService, type PolicyStatusService } from './policy-status';
-import { createCueSpawnAuthority, createProcessSpawnAuthority } from './spawn-authority';
+import {
+	createCueSpawnAuthority,
+	createProcessSpawnAuthority,
+	pairedDeviceActorProblems,
+} from './spawn-authority';
+import { getActingTransport, transportSpawnActor } from '../web-server/auth/transport-actor';
 import { buildVibesRecordedGraph, type VibesRecordedGraph } from './vibes';
 import {
 	createTelemetryClient,
@@ -117,7 +122,7 @@ import {
 	type RemoteEndpointProbe,
 	type RemoteEndpointQualifier,
 } from './remote';
-import type { ProcessSpawnAuthorityPort } from '../process-manager/types';
+import type { ProcessSpawnActor, ProcessSpawnAuthorityPort } from '../process-manager/types';
 import type { CueSpawnAuthorityPort } from '../cue/cue-run-router';
 import { PICKABLE_AGENT_IDS } from '../../shared/agentMetadata';
 import {
@@ -222,6 +227,13 @@ export interface ManagedInboxActInput {
 	messageId: string;
 	campaignId?: string;
 	action: EndpointInboxAction;
+	/**
+	 * The caller the receipt is attributed to (MRC-08-01). Default: the transport
+	 * the current call was admitted over (`getActingTransport()`): the keyboard
+	 * and the bare path token are the operator, a Web Login cookie its account,
+	 * the CLI secret a process on this machine, a Lite pairing the device.
+	 */
+	actor?: ProcessSpawnActor;
 }
 
 export const NO_INBOX_OUTCOME: InboxActionOutcome = {
@@ -306,12 +318,23 @@ export function createManagedOperations(deps: ManagedOperationsDeps): ManagedOpe
 			const refresh = options.refresh === false ? null : await inbox.refresh();
 			return { refresh, view: inboxView(inbox) };
 		},
-		async inboxAct({ messageId, campaignId, action }) {
+		async inboxAct({ messageId, campaignId, action, actor }) {
 			const inbox = deps.inbox;
 			if (!inbox) return NO_INBOX_OUTCOME;
 			// The standing first: an unmanaged host is told so, not that it holds no message.
 			const standing = inbox.status().standing;
 			if (!standing.ok) return { status: 'unavailable', detail: standing.reason };
+			// A receipt is the person's act. A paired Lite device admits a transport
+			// and names a device; until the enrollment registers an actor it stands
+			// for nobody here, so its act is refused by name (the MRC-08-03 rule the
+			// spawn sinks apply), never recorded as the operator's.
+			const problems = pairedDeviceActorProblems(
+				actor ?? transportSpawnActor(getActingTransport()),
+				deps.identity.read()
+			);
+			if (problems.length > 0) {
+				return { status: 'denied', reason: 'unauthenticated', detail: problems[0], record: null };
+			}
 			const held = inbox
 				.notices()
 				.filter(
