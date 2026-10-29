@@ -41,8 +41,21 @@
  * Maestro runtime yet: the sibling's local socket serves no `command`
  * operation (CP-02, owner mega-maestro). `createEnterpriseService` composes
  * this in MRC-11-05; nothing here reaches Electron or the IPC layer.
+ *
+ * `issueLocal()` (MRC2-07-02) is the local operator's path, `maestro-cli
+ * managed command`: a typed command this host issues to itself under the
+ * registered actor, through the same executor and ledger as an endpoint
+ * command, so the receipt is the ledger's and a refusal is by the same name.
+ * It is not an endpoint command and delivers none: its id carries
+ * `LOCAL_COMMAND_ID_PREFIX`, its issuer is `LOCAL_COMMAND_ISSUER`, and it
+ * binds the standing of the moment (tenant, enrollment, actor, applied
+ * revision), so an unmanaged host answers `unavailable` with its standing and
+ * a registration that names no actor answers `unauthenticated`, nothing run.
  */
 
+import { randomUUID } from 'crypto';
+import { canonicalJson } from '../../shared/canonicalJson';
+import { sha256Hex } from '../../shared/maestro-lib/managed/authority';
 import {
 	commandCapability,
 	createCommandExecutor,
@@ -55,6 +68,7 @@ import {
 	type CommandLedgerState,
 	type CommandPortAnswer,
 	type CommandPorts,
+	type ManagedCommandAction,
 	type ManagedCommandKind,
 	type ManagedRuntimeCommand,
 } from '../../shared/maestro-lib/managed/commands';
@@ -101,6 +115,17 @@ export interface UncomposedCommand {
 	reason: string;
 }
 
+/** The actions a local operator may issue (MRC2-07-02); pause and resume are not among them (CP-05). */
+export type LocalCommandAction =
+	| { kind: 'cancel-run'; runId: string }
+	| { kind: 'report-status' }
+	| { kind: 'refresh-policy'; desiredRevision?: number };
+
+export const LOCAL_COMMAND_ISSUER = 'maestro-cli';
+export const LOCAL_COMMAND_ID_PREFIX = 'local-';
+/** A local command is decided at once; the window only has to outlast the dispatch. */
+export const LOCAL_COMMAND_WINDOW_MS = 60_000;
+
 export interface CommandServiceStatus {
 	file: string | null;
 	/** Whether the ledger file loaded; `receive` answers `unavailable` until it has. */
@@ -123,6 +148,8 @@ export interface CommandService {
 	unsupported(): readonly UncomposedCommand[];
 	/** The one inbound entry: a value a verified endpoint port delivered, answered with the published disposition. */
 	receive(raw: unknown): Promise<CommandExecution>;
+	/** A local operator's command (`maestro-cli managed command`), through the same executor and ledger. */
+	issueLocal(action: LocalCommandAction): Promise<CommandExecution>;
 	/** A port's requested effect ended (a `prompt` port that answered `accepted`): settle the record. */
 	settle: CommandExecutor['settle'];
 	status(): CommandServiceStatus;
@@ -345,6 +372,80 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 		return named;
 	};
 
+	/**
+	 * The command a local operator's action becomes: bound to this host's standing
+	 * right now, so the executor's own checks decide it (an unknown run is
+	 * `stale-run`, an uncomposed action `unsupported-capability`), and recorded
+	 * under a `local-` id the ledger keeps beside the endpoint's.
+	 */
+	async function issueLocal(action: LocalCommandAction): Promise<CommandExecution> {
+		const b = binding();
+		if (!b.standing.ok) {
+			return {
+				status: 'unavailable',
+				commandId: null,
+				detail: `No command runs on this host: ${b.standing.reason}`,
+			};
+		}
+		if (b.actorId === null) {
+			return {
+				status: 'denied',
+				commandId: null,
+				reason: 'unauthenticated',
+				detail: 'the registration this process holds names no actor',
+			};
+		}
+		if (b.tenantId === null || b.enrollmentId === null || b.policyRevision === null) {
+			return {
+				status: 'unavailable',
+				commandId: null,
+				detail: 'the standing names no tenant, enrollment or applied policy revision',
+			};
+		}
+		let typed: ManagedCommandAction;
+		if (action.kind === 'refresh-policy') {
+			const desiredRevision = action.desiredRevision ?? deps.host.policyStatus().desiredRevision;
+			if (desiredRevision === null) {
+				return {
+					status: 'unavailable',
+					commandId: null,
+					detail: 'no desired policy revision is known on this host; name one',
+				};
+			}
+			typed = { kind: 'refresh-policy', desiredRevision };
+		} else typed = { kind: action.kind };
+		const issuedAt = now();
+		const command: ManagedRuntimeCommand = {
+			commandId: `${LOCAL_COMMAND_ID_PREFIX}${randomUUID()}`,
+			tenantId: b.tenantId,
+			issuerId: LOCAL_COMMAND_ISSUER,
+			recipient: {
+				actorId: b.actorId,
+				enrollmentId: b.enrollmentId,
+				installationId: deps.installation.installationId,
+				runtimeId: deps.installation.runtimeId,
+				processEpoch: deps.installation.processEpoch,
+				runId: action.kind === 'cancel-run' ? action.runId : null,
+			},
+			action: typed,
+			preconditions: {
+				policyRevision: b.policyRevision,
+				requiredCapability: commandCapability(typed.kind),
+				policyDigest: null,
+				bindingDigest: null,
+			},
+			approval: { kind: 'policy-not-required', policyRevision: b.policyRevision },
+			issuedAt: new Date(issuedAt).toISOString(),
+			expiresAt: new Date(issuedAt + LOCAL_COMMAND_WINDOW_MS).toISOString(),
+			nonce: randomUUID(),
+			idempotencyKey: randomUUID(),
+			payloadDigest: '',
+			releaseId: null,
+		};
+		command.payloadDigest = sha256Hex(canonicalJson({ ...command, payloadDigest: null }));
+		return executor.execute(command);
+	}
+
 	return {
 		ledger,
 		async load() {
@@ -354,6 +455,7 @@ export function createCommandService(deps: CommandServiceDeps): CommandService {
 		capabilities: () => executor.capabilities(),
 		unsupported,
 		receive: (raw) => executor.execute(raw),
+		issueLocal,
 		settle: (commandId, effect, detail) => executor.settle(commandId, effect, detail),
 		status() {
 			const records = ledger.list();

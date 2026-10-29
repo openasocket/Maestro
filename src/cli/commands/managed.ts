@@ -74,8 +74,9 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
  * Ask the desktop one managed question and return the answer's `field`. A
  * missing app is exit 3, an old app exit 4, a hung one exit 5; a desktop
  * with no service answers `success: false` and is exit 1 with its own line.
+ * Shared with the inbox and command verbs in `managed-inbox.ts`.
  */
-async function askDesktop<T>(
+export async function askDesktop<T>(
 	message: Record<string, unknown>,
 	responseType: string,
 	field: string,

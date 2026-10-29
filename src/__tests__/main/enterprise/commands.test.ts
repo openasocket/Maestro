@@ -470,4 +470,58 @@ describe('the desktop command service', () => {
 			await fake.close();
 		}
 	});
+
+	it('issues a local operator command through the same executor and ledger (MRC2-07-02): completed under a local- id, an unknown run stale-run, the desired revision defaulted, no actor unauthenticated and no standing unavailable with nothing recorded', async () => {
+		const h = harness();
+		await h.lease('run-1', 'req-1');
+		const cancel = await h.service.issueLocal({ kind: 'cancel-run', runId: 'run-1' });
+		expect(cancel).toMatchObject({
+			status: 'completed',
+			commandId: expect.stringMatching(/^local-/),
+			duplicate: false,
+			evidenceDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+		});
+		expect(liveRuns(h)).toEqual([]);
+		expect(h.service.ledger.get(cancel.commandId!)).toMatchObject({
+			kind: 'cancel-run',
+			runId: 'run-1',
+			actorId: 'actor-1',
+			policyRevision: 3,
+			state: 'completed',
+		});
+		expect(await h.service.issueLocal({ kind: 'cancel-run', runId: 'run-9' })).toMatchObject({
+			status: 'denied',
+			reason: 'stale-run',
+			detail: expect.stringContaining('run-9'),
+		});
+		expect(await h.service.issueLocal({ kind: 'report-status' })).toMatchObject({
+			status: 'completed',
+			facts: expect.objectContaining({ runs: { live: 0, liveLeases: 0, receipts: 1 } }),
+		});
+		expect(await h.service.issueLocal({ kind: 'refresh-policy' })).toMatchObject({
+			status: 'completed',
+			detail: 'the endpoint applies revision 3',
+		});
+		expect(
+			await h.service.issueLocal({ kind: 'refresh-policy', desiredRevision: 4 })
+		).toMatchObject({ status: 'failed', detail: expect.stringContaining('not 4') });
+		expect(h.refreshes()).toBe(2);
+		const recorded = h.service.ledger.list().length;
+		h.state.actorId = null;
+		expect(await h.service.issueLocal({ kind: 'report-status' })).toMatchObject({
+			status: 'denied',
+			commandId: null,
+			reason: 'unauthenticated',
+			detail: expect.stringContaining('names no actor'),
+		});
+		h.state.actorId = 'actor-1';
+		h.state.authority = 'revoked';
+		h.state.reason = REVOKED;
+		expect(await h.service.issueLocal({ kind: 'report-status' })).toMatchObject({
+			status: 'unavailable',
+			commandId: null,
+			detail: expect.stringContaining(REVOKED),
+		});
+		expect(h.service.ledger.list()).toHaveLength(recorded);
+	});
 });

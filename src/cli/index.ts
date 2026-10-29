@@ -197,6 +197,12 @@ import {
 	managedEnrollRequest,
 } from './commands/managed';
 import {
+	managedInboxList,
+	managedInboxAct,
+	managedCommand,
+	managedCommandStatus,
+} from './commands/managed-inbox';
+import {
 	computerHistoryApps,
 	computerHistoryClear,
 	computerHistoryConfig,
@@ -2497,6 +2503,91 @@ managedEnroll
 	.option('--trust-root <digest>', "Override the file's trustRootDigest (sha256 hex)")
 	.option('--json', 'Output as JSON (for scripting)')
 	.action((options) => managedEnrollRequest(options));
+
+// The Managed inbox (notices the endpoint addressed to this desktop) and the
+// typed runtime commands this desktop executes. Every write prints the durable
+// receipt or `unknown`; an unmanaged host refuses each with its standing.
+const managedInbox = managed
+	.command('inbox')
+	.description(
+		'Notices the endpoint addressed to this desktop (the Managed inbox in Settings > Environment); a body is for the person at the terminal, never agent input'
+	);
+
+managedInbox
+	.command('list')
+	.description(
+		"List the endpoint's notices (records delivered for every notice newly held) with their ids and receipt states"
+	)
+	.option('--held', 'Show what this host already holds without asking the endpoint again')
+	.option('--bodies', 'Print the notice bodies (for the person reading the terminal)')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => managedInboxList(options));
+
+managedInbox
+	.command('read <messageId>')
+	.description("Record that the person read a held notice (the pane's Mark read)")
+	.option('--campaign <id>', 'The campaign, when the message id is held under more than one')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((messageId, options) => managedInboxAct('read', messageId, options));
+
+managedInbox
+	.command('ack <messageId>')
+	.description("Acknowledge a held notice (the pane's Acknowledge)")
+	.option('--campaign <id>', 'The campaign, when the message id is held under more than one')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((messageId, options) => managedInboxAct('acknowledged', messageId, options));
+
+managedInbox
+	.command('reply <messageId>')
+	.description(
+		"Reply privately to a held notice (the pane's Reply privately); the text is sent once and kept nowhere"
+	)
+	.requiredOption('-m, --message <text>', 'The reply (1 to 8192 characters)')
+	.option('--campaign <id>', 'The campaign, when the message id is held under more than one')
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((messageId, options) => managedInboxAct('reply', messageId, options));
+
+const managedCommandGroup = managed
+	.command('command')
+	.description(
+		"Typed runtime commands this desktop executes, issued here under the registered actor and recorded in the same ledger as the endpoint's. Pause and resume are not offered: the command contract has no such action (CP-05)"
+	);
+
+managedCommandGroup
+	.command('status')
+	.description(
+		'Show what this desktop executes and refuses by name, the command ledger counts and the standing'
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => managedCommandStatus(options));
+
+managedCommandGroup
+	.command('cancel-run <runId>')
+	.description(
+		'Revoke every live dispatch lease of a managed run on this host (each sink stops its process under the revoked lease); a run this host does not know is refused stale-run'
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((runId, options) => managedCommand({ kind: 'cancel-run', runId }, options));
+
+managedCommandGroup
+	.command('report-status')
+	.description(
+		'Run a status report from the installation inventory and the policy standing (identifiers, versions, revisions, counts, gaps; never content)'
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => managedCommand({ kind: 'report-status' }, options));
+
+managedCommandGroup
+	.command('refresh-policy')
+	.description(
+		'Re-attach for a fresh policy status and compare the revision the endpoint applies with the desired one: completed when they agree, failed with both named otherwise'
+	)
+	.option(
+		'--revision <n>',
+		'The revision expected to apply (default: the one this host knows is desired)'
+	)
+	.option('--json', 'Output as JSON (for scripting)')
+	.action((options) => managedCommand({ kind: 'refresh-policy' }, options));
 
 // Computer History - local record of what the user saw and typed (Encore-gated,
 // off by default). Reads come from disk and work with the app closed; writes go

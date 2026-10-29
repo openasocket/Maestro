@@ -62,14 +62,27 @@ import {
 } from '../../shared/maestro-lib/managed/workflows';
 import type { AnchorStore } from '../utils/keyring-anchor';
 import { safeStorageSeal, type SafeStorageLike } from '../utils/safe-storage-seal';
-import { MANAGED_COMMAND_LEDGER_FILE_NAME } from '../../shared/maestro-lib/managed/commands';
-import { createCommandService, type CommandService } from './commands';
+import {
+	MANAGED_COMMAND_LEDGER_FILE_NAME,
+	type CommandExecution,
+} from '../../shared/maestro-lib/managed/commands';
+import type { EndpointInboxAction } from '../../shared/maestro-lib/managed/host-adapter';
+import {
+	createCommandService,
+	type CommandService,
+	type CommandServiceStatus,
+	type LocalCommandAction,
+} from './commands';
 import { createBrokerDispatch, DISPATCH_RECEIPTS_FILE_NAME, type BrokerDispatch } from './dispatch';
 import {
 	createInboxClient,
 	createInboxReceiptLedger,
+	inboxView,
 	MANAGED_INBOX_RECEIPTS_FILE_NAME,
+	type InboxActionOutcome,
 	type InboxClient,
+	type InboxRefresh,
+	type ManagedInboxView,
 } from './inbox';
 import { createLocalEndpointClient } from './endpoint-client';
 import { createEnrollmentLifecycle, type EnrollmentLifecycle } from './enrollment';
@@ -192,7 +205,29 @@ export interface ManagedOperationsDeps {
 	locks?: () => ManagedSettingLocksView;
 	/** The providers the support matrix lists. Default: every pickable provider. */
 	providers?: readonly string[];
+	/** The notice inbox (MRC-11-02A); absent on a host that composes none. */
+	inbox?: InboxClient;
+	/** The command service (MRC-11-01B); absent on a host that composes none. */
+	commands?: CommandService;
 }
+
+/** One `managed inbox list`: the endpoint's answer to the listing (null when only the held set was read) and the view the pane draws. */
+export interface ManagedInboxListing {
+	refresh: InboxRefresh | null;
+	view: ManagedInboxView;
+}
+
+/** One inbox act named by message; the campaign is resolved from the held notices unless named. */
+export interface ManagedInboxActInput {
+	messageId: string;
+	campaignId?: string;
+	action: EndpointInboxAction;
+}
+
+export const NO_INBOX_OUTCOME: InboxActionOutcome = {
+	status: 'unavailable',
+	detail: 'No notice inbox is composed in this desktop.',
+};
 
 /**
  * The one implementation of the managed status surface (MRC2-07-01): what the
@@ -216,12 +251,31 @@ export interface ManagedOperations {
 	supportMatrix(): ManagedSupportMatrix;
 	/** Every settings key the managed policy holds right now, by name (MRC2-06-05). */
 	locks(): ManagedSettingLocksView;
+	/**
+	 * The notices addressed to this desktop (MRC2-07-02): listed from the endpoint
+	 * (`refresh`, the pane's List, which records `delivered` for every notice
+	 * newly held) or the held set alone. Null when no inbox is composed. A body
+	 * reaches the person's surface and nothing else (`agentInput: false`).
+	 */
+	inboxList(options?: { refresh?: boolean }): Promise<ManagedInboxListing | null>;
+	/** Record one receipt (read, acknowledged, reply) on a held notice; the campaign is resolved from the held set. */
+	inboxAct(input: ManagedInboxActInput): Promise<InboxActionOutcome>;
+	/** A local operator's typed command (`commands.ts` `issueLocal`): unavailable, with the standing, on an unmanaged host. */
+	command(action: LocalCommandAction): Promise<CommandExecution>;
+	/** What this desktop executes and refuses by name, the ledger's counts and the standing; null when no service is composed. */
+	commandStatus(): CommandServiceStatus | null;
 }
 
 export function createManagedOperations(deps: ManagedOperationsDeps): ManagedOperations {
 	const holds = deps.holds ?? DEFAULT_MANAGED_HOLDS;
 	const locks = deps.locks ?? readManagedSettingLocks;
 	const providers = deps.providers ?? PICKABLE_AGENT_IDS;
+	const denied = (detail: string): InboxActionOutcome => ({
+		status: 'denied',
+		reason: 'unknown-message',
+		detail,
+		record: null,
+	});
 	return {
 		status: () =>
 			projectManagedState({
@@ -246,6 +300,41 @@ export function createManagedOperations(deps: ManagedOperationsDeps): ManagedOpe
 			routes: providers.flatMap((agentId) => providerRouteSupport(agentId)),
 		}),
 		locks: () => locks(),
+		async inboxList(options = {}) {
+			const inbox = deps.inbox;
+			if (!inbox) return null;
+			const refresh = options.refresh === false ? null : await inbox.refresh();
+			return { refresh, view: inboxView(inbox) };
+		},
+		async inboxAct({ messageId, campaignId, action }) {
+			const inbox = deps.inbox;
+			if (!inbox) return NO_INBOX_OUTCOME;
+			// The standing first: an unmanaged host is told so, not that it holds no message.
+			const standing = inbox.status().standing;
+			if (!standing.ok) return { status: 'unavailable', detail: standing.reason };
+			const held = inbox
+				.notices()
+				.filter(
+					(n) =>
+						n.messageId === messageId && (campaignId === undefined || n.campaignId === campaignId)
+				);
+			if (held.length === 0) {
+				return denied(`message ${messageId} is not held on this host; list the inbox first`);
+			}
+			if (held.length > 1) {
+				return denied(`message ${messageId} is held under ${held.length} campaigns; name one`);
+			}
+			return inbox.act({ campaignId: held[0].campaignId, messageId, action });
+		},
+		command: (action) =>
+			deps.commands
+				? deps.commands.issueLocal(action)
+				: Promise.resolve({
+						status: 'unavailable',
+						commandId: null,
+						detail: 'No command service is composed in this desktop.',
+					}),
+		commandStatus: () => deps.commands?.status() ?? null,
 	};
 }
 
@@ -578,6 +667,8 @@ export function createEnterpriseService(deps: EnterpriseServiceDeps): Enterprise
 		policy,
 		identity,
 		inventory,
+		inbox,
+		commands,
 		...(deps.holds ? { holds: deps.holds } : {}),
 	});
 	return {

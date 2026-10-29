@@ -307,6 +307,70 @@ describe('enterprise handlers', () => {
 		});
 	});
 
+	it('resolves an inbox act by message through the one facade (MRC2-07-02): the standing first, then the held set, then the client; a host with no inbox or command service answers unavailable', async () => {
+		const act = vi.fn().mockResolvedValue({ status: 'recorded', duplicate: false, record: {} });
+		const notices = [
+			{ campaignId: 'c1', messageId: 'm1' },
+			{ campaignId: 'c2', messageId: 'm2' },
+			{ campaignId: 'c3', messageId: 'm2' },
+		];
+		const inbox = {
+			status: vi.fn(() => ({ standing: { ok: true } })),
+			notices: () => notices,
+			act,
+			refresh: vi.fn().mockResolvedValue({ outcome: 'listed' }),
+		};
+		const managed = createManagedOperations({
+			lifecycle: lifecycle as any,
+			policy: policyStatus as any,
+			identity: identity as any,
+			inventory: inventory as any,
+			inbox: inbox as any,
+		});
+		const read = { kind: 'read' } as const;
+		expect(await managed.inboxAct({ messageId: 'm1', action: read })).toMatchObject({
+			status: 'recorded',
+		});
+		expect(act).toHaveBeenCalledWith({ campaignId: 'c1', messageId: 'm1', action: read });
+		expect(await managed.inboxAct({ messageId: 'm2', action: read })).toMatchObject({
+			status: 'denied',
+			reason: 'unknown-message',
+			detail: expect.stringContaining('2 campaigns'),
+		});
+		expect(
+			await managed.inboxAct({ messageId: 'm2', campaignId: 'c3', action: read })
+		).toMatchObject({ status: 'recorded' });
+		expect(await managed.inboxAct({ messageId: 'm9', action: read })).toMatchObject({
+			status: 'denied',
+			reason: 'unknown-message',
+			detail: expect.stringContaining('not held'),
+		});
+		inbox.status.mockReturnValue({ standing: { ok: false, reason: 'No registered standing.' } });
+		expect(await managed.inboxAct({ messageId: 'm1', action: read })).toEqual({
+			status: 'unavailable',
+			detail: 'No registered standing.',
+		});
+		expect(act).toHaveBeenCalledTimes(2);
+		expect(await managed.inboxList({ refresh: false })).toMatchObject({ refresh: null });
+		expect(inbox.refresh).not.toHaveBeenCalled();
+		expect(await managed.inboxList()).toMatchObject({ refresh: { outcome: 'listed' } });
+		const bare = createManagedOperations({
+			lifecycle: lifecycle as any,
+			policy: policyStatus as any,
+			identity: identity as any,
+			inventory: inventory as any,
+		});
+		expect(await bare.inboxList()).toBeNull();
+		expect(await bare.inboxAct({ messageId: 'm1', action: read })).toMatchObject({
+			status: 'unavailable',
+		});
+		expect(await bare.command({ kind: 'report-status' })).toMatchObject({
+			status: 'unavailable',
+			commandId: null,
+		});
+		expect(bare.commandStatus()).toBeNull();
+	});
+
 	it('answers unavailable, not a throw, when no service runs in this desktop', async () => {
 		registeredHandlers.clear();
 		registerEnterpriseHandlers({
