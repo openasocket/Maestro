@@ -234,11 +234,19 @@ describe('Symphony Integration Tests', () => {
 			set: vi.fn(),
 		};
 
+		// Setup mock settings store: the Encore gate reads `encoreFeatures` off it
+		// on every channel, and the default resolves Symphony to enabled.
+		const mockSettingsStore = {
+			get: vi.fn().mockReturnValue(undefined),
+			set: vi.fn(),
+		};
+
 		// Setup dependencies
 		mockDeps = {
 			app: mockApp,
 			getMainWindow: () => mockMainWindow,
 			sessionsStore: mockSessionsStore as any,
+			settingsStore: mockSettingsStore as any,
 		};
 
 		// Default fetch mock (successful responses)
@@ -269,6 +277,14 @@ describe('Symphony Integration Tests', () => {
 			// gh auth status - authenticated
 			if (cmd === 'gh' && args?.[0] === 'auth' && args?.[1] === 'status') {
 				return { stdout: 'Logged in to github.com', stderr: '', exitCode: 0 };
+			}
+			// gh api user - the fork helper reads the login before deciding on a fork
+			if (cmd === 'gh' && args?.[0] === 'api' && args?.[1] === 'user') {
+				return { stdout: 'test-owner', stderr: '', exitCode: 0 };
+			}
+			// gh api repos/<slug> --jq .permissions.push - push access, no fork needed
+			if (cmd === 'gh' && args?.[0] === 'api' && String(args?.[1]).startsWith('repos/')) {
+				return { stdout: 'true', stderr: '', exitCode: 0 };
 			}
 			// git clone
 			if (cmd === 'git' && args?.[0] === 'clone') {

@@ -14,7 +14,6 @@ import React, { createRef, useState } from 'react';
 import { RightPanel, RightPanelHandle } from '../../renderer/components/RightPanel';
 import { AutoRun, AutoRunHandle } from '../../renderer/components/AutoRun';
 import type { Session, Shortcut, BatchRunState, RightPanelTab } from '../../renderer/types';
-import type { Session, Shortcut, BatchRunState, RightPanelTab } from '../../renderer/types';
 import { createMockSession as baseCreateMockSession } from '../helpers/mockSession';
 import { LayerStackProvider } from '../../renderer/contexts/LayerStackContext';
 
