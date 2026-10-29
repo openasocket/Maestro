@@ -3,9 +3,12 @@
  * section of the runtime pin file is well formed, secret-free, independent of
  * the sibling's private source and of the acceptance artifacts, names only
  * functions the public entry exports, and speaks only published statuses,
- * codes and capabilities. Deriving each step's envelope and running the
- * fixture against a host composed from the public exports is the
- * continuation's job (MCOMP-03-03A).
+ * codes and capabilities. Then (MCOMP-03-03A) each step's envelope is derived
+ * from the fixture's defaults and the whole fixture runs against a host
+ * composed from the public exports alone (`conformance-host.ts`): every case
+ * passes there, and a host that breaks correlation (a dropped requestId, a
+ * missing run answered ok) fails by step id. The fixture is read as published:
+ * a mismatch is a facade or fixture repair, never a loosened expectation.
  */
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
@@ -23,10 +26,15 @@ import {
 	RUNTIME_PIN_FILE,
 	findCanaries,
 } from '../../../../scripts/package-mega-maestro-runtime.mjs';
+import type { ManagedApi } from '../../../shared/maestro-lib/client/types';
+import { composeConformanceHost, runAdapterConformance } from './conformance-host';
 import {
 	CONFORMANCE_OPERATION_CAPABILITY,
 	RUNTIME_CONFORMANCE_FILE,
+	conformanceEnvelope,
 	readAdapterConformance,
+	subsetProblems,
+	type ConformanceStep,
 } from './fixtures';
 
 const fixture = readAdapterConformance();
@@ -93,6 +101,148 @@ describe('the public adapter conformance fixture', () => {
 			expect(STATUSES, step.id).toContain(step.expect.status);
 			if ('code' in step.expect) expect(CODES, step.id).toContain(step.expect.code);
 			for (const capability of step.caps ?? []) expect(MANAGED_CAPABILITIES).toContain(capability);
+		}
+	});
+});
+
+const stepNamed = (id: string): ConformanceStep => {
+	const step = fixture.operations.steps.find((candidate) => candidate.id === id);
+	if (!step) throw new Error(`the fixture has no step ${id}`);
+	return step;
+};
+
+describe('the fixture over a host composed from the public exports (MCOMP-03-03A)', () => {
+	it('derives each step envelope from the published defaults', () => {
+		const accepted = conformanceEnvelope(fixture, stepNamed('submit-accepted'));
+		expect(accepted.peer).toBeUndefined();
+		expect(accepted.context).toMatchObject({
+			contractVersion: MANAGED_CONTRACT_VERSION,
+			installation: fixture.host.installation,
+			origin: 'headless',
+			actor: fixture.host.actor,
+			delegation: { chain: [], grantRef: null },
+			identity: {
+				requestId: 'req:submit-accepted',
+				idempotencyKey: 'idem-a',
+				attemptId: 'att:submit-accepted',
+				runId: 'run-a',
+				rootRunId: null,
+				parentRunId: null,
+			},
+			policyRevision: fixture.host.policyRevision,
+			workflow: null,
+			traceId: 'trace:submit-accepted',
+			requestedCapabilities: ['runs.submit'],
+		});
+		expect(accepted.input).toEqual({
+			...fixture.host.defaultSubmit,
+			content: fixture.host.content.pong,
+			resourceIds: ['res-approved'],
+		});
+		// An object names the text and the digest by separate keys; the digest then does not match.
+		const mismatch = conformanceEnvelope(fixture, stepNamed('submit-digest-mismatch'));
+		expect(mismatch.input).toMatchObject({
+			content: { text: fixture.host.content.pong.text, sha256: fixture.host.content.ping.sha256 },
+		});
+		expect(
+			conformanceEnvelope(fixture, stepNamed('submit-capability-not-requested')).context
+		).toMatchObject({ requestedCapabilities: ['runs.inspect'] });
+		expect(conformanceEnvelope(fixture, stepNamed('submit-unverified-transport')).peer).toBe(
+			'os-peer'
+		);
+		expect(
+			conformanceEnvelope(fixture, stepNamed('submit-malformed-context')).context
+		).toMatchObject({ identity: { requestId: '' } });
+		const inspect = conformanceEnvelope(fixture, stepNamed('inspect-queued'));
+		expect(inspect.input).toEqual({ runId: 'run-a' });
+		expect(inspect.context.requestedCapabilities).toEqual(['runs.inspect']);
+		expect(subsetProblems({ a: 1, b: [1, { c: 2 }] }, { b: [1, { c: 2 }] })).toEqual([]);
+		expect(subsetProblems({ a: 1, b: [1] }, { a: 2, b: [1, 2], c: {} })).toEqual([
+			'result.a is 1, expected 2',
+			'result.b has 1 item(s), expected 2',
+			'result.c is not an object',
+		]);
+	});
+
+	it('passes every negotiation case and operation step, reaching the declared sink as scripted', async () => {
+		const host = await composeConformanceHost(fixture);
+		try {
+			const report = await runAdapterConformance(host.api, fixture, host.sink);
+			expect(report.cases.map((c) => c.id)).toEqual([
+				...fixture.negotiation.cases.map((c) => c.id),
+				...fixture.operations.steps.map((step) => step.id),
+			]);
+			expect(report.cases.filter((c) => c.problems.length > 0)).toEqual([]);
+			expect(report.failed).toEqual([]);
+			// The runs the fixture named are journaled; none was ever handed a process.
+			const runs = host.journal.list({ cursor: null, limit: 100 }).items;
+			expect(runs.map((run) => run.runId)).toEqual(
+				expect.arrayContaining(['run-a', 'run-c', 'run-d'])
+			);
+			for (const run of runs) {
+				for (const attempt of run.attempts) expect(attempt.pid).toBeNull();
+			}
+			expect(fs.existsSync(host.journal.file)).toBe(true);
+		} finally {
+			host.close();
+		}
+	});
+
+	it('fails by step id on a host that breaks correlation', async () => {
+		const host = await composeConformanceHost(fixture);
+		try {
+			const broken: ManagedApi = {
+				...host.api,
+				// Drops the requestId echo on every submit.
+				submit: async (envelope) => {
+					const answered = await host.api.submit(envelope);
+					return answered.ok
+						? { ok: true, value: { ...answered.value, requestId: 'dropped' } }
+						: answered;
+				},
+				// Answers a run the journal does not hold as if it existed.
+				inspect: async (envelope) => {
+					const answered = await host.api.inspect(envelope);
+					if (!answered.ok || answered.value.status !== 'denied') return answered;
+					const { runId } = envelope.input;
+					return {
+						ok: true,
+						value: {
+							status: 'ok',
+							requestId: answered.value.requestId,
+							value: {
+								runId,
+								rootRunId: runId,
+								parentRunId: null,
+								attemptId: '',
+								agentId: '',
+								providerSessionId: null,
+								state: 'queued',
+							},
+						},
+					};
+				},
+			};
+			const report = await runAdapterConformance(broken, fixture, host.sink);
+			const submits = fixture.operations.steps
+				.filter((step) => step.op === 'submit')
+				.map((step) => step.id);
+			expect(report.failed).toEqual(
+				fixture.operations.steps
+					.map((step) => step.id)
+					.filter((id) => submits.includes(id) || id === 'inspect-not-found')
+			);
+			const notFound = report.cases.find((c) => c.id === 'inspect-not-found');
+			expect(notFound?.problems).toEqual([
+				'result.status is "ok", expected "denied"',
+				'result.code is undefined, expected "not-found"',
+			]);
+			const accepted = report.cases.find((c) => c.id === 'submit-accepted');
+			expect(accepted?.problems).toEqual([
+				'result.requestId is "dropped", the context sent "req:submit-accepted"',
+			]);
+		} finally {
+			host.close();
 		}
 	});
 });

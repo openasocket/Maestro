@@ -58,6 +58,7 @@ import type {
 	ManagedCapabilityOffer,
 	ManagedInstallationIdentity,
 	ManagedOperationContext,
+	ManagedOperationEnvelope,
 	ManagedPeerAuthentication,
 	ManagedPrincipalRef,
 	ManagedRunIdentity,
@@ -436,9 +437,10 @@ export function verifiedContext(
  * The pin file's `conformance` section: a secret-free description of what the
  * managed facade answers a consumer, published beside the runtime pin so a
  * counterpart adapter reads the behavior it maps without this repository's
- * private tests. This file holds the shape and the reader; deriving each
- * step's envelope, composing a host from the public exports and running the
- * fixture against it is the continuation's job (MCOMP-03-03A).
+ * private tests. This file holds the shape, the reader, the derivation of the
+ * exact envelope each step sends (the consumer invocation) and the subset
+ * matcher an answer is read against; the host composed from the public
+ * exports, its declared sink and the runner live in `conformance-host.ts`.
  */
 export const RUNTIME_CONFORMANCE_FILE = path.resolve(
 	process.cwd(),
@@ -526,3 +528,82 @@ export const CONFORMANCE_OPERATION_CAPABILITY: Record<ConformanceOperation, Mana
 	cancel: 'runs.cancel',
 	interrupt: 'runs.interrupt',
 };
+
+/** The context a step sends: the fixture's defaults (`operations.defaults`) under the step's overrides. */
+export function conformanceContext(
+	fixture: AdapterConformanceFixture,
+	step: ConformanceStep
+): ManagedOperationContext {
+	const { host } = fixture;
+	return inProcessContext({
+		installation: { ...host.installation, ...step.installation },
+		origin: 'headless',
+		actor: host.actor,
+		delegation: { chain: [], grantRef: null },
+		identity: {
+			requestId: `req:${step.id}`,
+			idempotencyKey: `idem:${step.id}`,
+			attemptId: `att:${step.id}`,
+			runId: null,
+			rootRunId: null,
+			parentRunId: null,
+			...step.identity,
+		},
+		policyRevision: host.policyRevision,
+		workflow: null,
+		traceId: `trace:${step.id}`,
+		requestedCapabilities: step.caps ?? [CONFORMANCE_OPERATION_CAPABILITY[step.op]],
+	});
+}
+
+/** The input a step sends. A submit names its content by key; an object names the text and the digest by separate keys. */
+export function conformanceInput(
+	fixture: AdapterConformanceFixture,
+	step: ConformanceStep
+): Record<string, unknown> {
+	if (step.op !== 'submit') return step.input ?? {};
+	const merged = { ...fixture.host.defaultSubmit, ...step.input };
+	const named = merged.content as string | { text: string; sha256: string };
+	const text = fixture.host.content[typeof named === 'string' ? named : named.text];
+	const digest = fixture.host.content[typeof named === 'string' ? named : named.sha256];
+	if (!text || !digest) throw new Error(`step ${step.id} names content the fixture does not hold`);
+	return { ...merged, content: { text: text.text, sha256: digest.sha256 } };
+}
+
+/** The envelope a consumer sends for a step, with `peer` only when the step says the host stamped one. */
+export function conformanceEnvelope(
+	fixture: AdapterConformanceFixture,
+	step: ConformanceStep
+): ManagedOperationEnvelope<unknown> {
+	return {
+		context: conformanceContext(fixture, step),
+		input: conformanceInput(fixture, step),
+		...(step.peer ? { peer: step.peer } : {}),
+	};
+}
+
+/**
+ * Where `actual` departs from `expected`, read as a subset: every key of an
+ * expected object must match, arrays element for element, primitives exactly.
+ * Empty means the answer is what the fixture says.
+ */
+export function subsetProblems(actual: unknown, expected: unknown, at = 'result'): string[] {
+	if (Array.isArray(expected)) {
+		if (!Array.isArray(actual)) return [`${at} is not an array`];
+		if (actual.length !== expected.length) {
+			return [`${at} has ${actual.length} item(s), expected ${expected.length}`];
+		}
+		return expected.flatMap((item, i) => subsetProblems(actual[i], item, `${at}[${i}]`));
+	}
+	if (expected !== null && typeof expected === 'object') {
+		if (actual === null || typeof actual !== 'object' || Array.isArray(actual)) {
+			return [`${at} is not an object`];
+		}
+		return Object.entries(expected).flatMap(([key, item]) =>
+			subsetProblems((actual as Record<string, unknown>)[key], item, `${at}.${key}`)
+		);
+	}
+	return Object.is(actual, expected)
+		? []
+		: [`${at} is ${JSON.stringify(actual)}, expected ${JSON.stringify(expected)}`];
+}
