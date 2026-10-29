@@ -242,11 +242,39 @@ Consolidated tracking of all duplicate/dead code in the Maestro codebase. Grep-v
 - **KEEP:** the enterprise policy modules and the chokepoints named above. Do not add a per-sink check (a
   width table, a digest check, an allowlist comparison) beside them; a new sink names its class or effect
   and calls the hold.
+- **Inbound listeners (P2-05, recorded 2026-10-28):** the web server, the cloudflared tunnel, the Lite
+  `ssh -L` tunnel, the Lite control server, the two tailnet listeners, both mDNS sockets, the Tailscale read
+  and the Cue webhook each bound a socket on their own judgment; every one now calls `holdListener()`
+  (`src/main/enterprise/listener-gate.ts`) over `listenerVerdict()` in `listener-policy.ts` before the first
+  socket primitive (`listener-policy.test.ts` pins each call's order against its bind), and the Lite process
+  composes the same authority over the host record (`src/main/lite/listener-authority.ts`). The four
+  loopback-only or OS-local servers (Cue status, permission relay, coworking bridge, maestro-p steering)
+  hold nothing, by record. The plan's `evaluateListener()` is `listenerVerdict()` in the tree.
+- **Egress classes (P2-05):** the vendor-telemetry callers (`checkin.ts`, `cue-telemetry.ts`, the six
+  leaderboard verbs), the two update feeds, the Codex account pollers and the models.dev read each name
+  their class on the fourth `fetchWithTimeout()` argument instead of keeping a private allowlist;
+  `egress-policy.test.ts` reads every classified call off the source.
+- **Settings lock (P2-06, P2-07):** the settings store guard, `settings:set`, the bridge `set_setting`, the
+  four CLI settings verbs, the five `agents:setConfig*` handlers and `applyAgentConfigWrite()`, the SSH
+  remote, prompt and plugin handlers, `sync:setCustomPath`, `tunnel:start`, `live:toggle` and the Lite
+  controls each decided a write on their own; all of them now hold the one write authority of
+  `src/main/enterprise/settings-policy.ts` (`holdSettingWrite()`, `holdAgentConfigWrite()`,
+  `holdManagedKey()`, `holdPromptSetWrite()`, `holdPluginSetWrite()`) over the pure model in
+  `src/shared/managedSettingsLock.ts` (59 keys: 33 settings, 5 `agentConfig.*`, 3 admin sets, 3 action
+  keys, 15 `encore.<flag>` pins), and the Settings pane reads the same verdict through
+  `readManagedSettingLocks()` rather than a second lock table. The Encore pins fold into the same model
+  (`encoreFlagPins()`, `resolveEncoreFeatures(raw, pins)`), so the lifecycle, the shortcuts and the store
+  carry no second "is this feature forced" check.
+- **Credential custody and redaction (P2-06):** the turn log state store, the WakaTime key and the 0DIN
+  token each judged their own seal; they now hold `credentialCustodyVerdict()`
+  (`src/main/enterprise/credential-custody.ts`), and the support package redacts once at
+  `redactPackageContents()` (`src/main/debug-package/index.ts`) over `redactSecrets()` instead of per
+  collector.
 - **STILL OPEN (classified, not held):** the nine standalone-only sinks `p2-04.md` names (local
   `git:worktreeCheckout` and `git:removeWorktree`, the empty-directory `rmdir` of worktree setup, Symphony's
   post-fork remote reconfiguration, its `push --delete` and clone removal, the overwrite clear of a remote
-  move, `shell.showItemInFolder`, the subframe `shell.openExternal`); the inbound listeners (P2-05-06) and
-  the settings lock (P2-06) have no helper yet, so nothing is recorded for them here.
+  move, `shell.showItemInFolder`, the subframe `shell.openExternal`), and the two P2-06 write paths no lock
+  key represents (the renderer's own write of one agent's record, `pluginTrustedKeys`).
 
 ---
 
