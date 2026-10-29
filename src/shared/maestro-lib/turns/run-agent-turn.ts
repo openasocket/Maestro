@@ -147,6 +147,12 @@ export interface RunAgentTurnOptions {
 	/** The managed authority this turn runs under. Absent: an unmanaged turn. */
 	managed?: ManagedTurnAuthority;
 	/**
+	 * The host's standing (MRC3-01-02). `enrolled`: the turn runs under `managed` or not at all, and
+	 * one that arrives with none is refused as `managed-unavailable` before anything is planned,
+	 * written or started. `standalone` or absent: an unmanaged turn is what it always was.
+	 */
+	standing?: 'standalone' | 'enrolled';
+	/**
 	 * Names the turn to the outcome resolver (`<agent id>-ai-<tab id>`), which exempts a few
 	 * session shapes from its empty-answer rule by name.
 	 */
@@ -334,6 +340,14 @@ export async function runAgentTurn(
 	const sshEnabled = sshConfig?.enabled === true;
 	const deps = options.deps ?? {};
 
+	// The standing gate comes first (MRC3-01-02): on an enrolled host a turn with no managed
+	// authority is never a plain turn, whatever else it carries.
+	if (options.standing === 'enrolled' && !options.managed) {
+		return refuse(
+			'managed-unavailable',
+			'This installation is enrolled and the turn carries no managed dispatch, so it was not started.'
+		);
+	}
 	if (launch.hasImages) {
 		return refuse(
 			'images-unsupported',

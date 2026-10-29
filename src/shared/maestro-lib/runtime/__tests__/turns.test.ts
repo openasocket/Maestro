@@ -173,18 +173,22 @@ describe('runtime turns', () => {
 						},
 					});
 				}),
-			started: () =>
-				new Promise<void>((resolve, reject) => {
-					const timer = setTimeout(() => reject(new Error('no turn started')), 8_000);
-					const poll = setInterval(() => {
-						if (events.some((event) => event.kind === 'started')) {
-							clearInterval(poll);
-							clearTimeout(timer);
-							resolve();
-						}
-					}, 10);
-				}),
+			started: () => saw('started'),
+			saw,
 		};
+		/** Resolves once an event of the kind has been seen. */
+		function saw(kind: TurnEvent['kind']): Promise<void> {
+			return new Promise<void>((resolve, reject) => {
+				const timer = setTimeout(() => reject(new Error(`no ${kind} event`)), 8_000);
+				const poll = setInterval(() => {
+					if (events.some((event) => event.kind === kind)) {
+						clearInterval(poll);
+						clearTimeout(timer);
+						resolve();
+					}
+				}, 10);
+			});
+		}
 	}
 
 	const transcript = async (runtime: MaestroRuntime, tabId = 't1') =>
@@ -943,6 +947,72 @@ describe('runtime turns', () => {
 			expect(ran()).toEqual([]);
 			expect(value(await orphan.turns.queue.list('a1'))).toEqual([]);
 			expect(journalRuns()).toHaveLength(1);
+		});
+
+		it('drops, never starts, a message queued without a dispatch once the binding is enrolled (MRC3-01-02)', async () => {
+			const authority = managedAuthority();
+			const runtime = await startManaged(authority);
+			const turn = watch(runtime);
+			hold = true;
+			value(await runtime.turns.send('a1', 't1', { text: 'before enrollment' }));
+			await turn.started();
+			hold = false;
+			// Queued behind the running turn on a standalone binding: no dispatch was minted for it.
+			expect(value(await runtime.turns.send('a1', 't1', { text: 'waiting' }))).toMatchObject({
+				status: 'queued',
+				position: 1,
+			});
+			expect(journalRuns()).toEqual([]);
+
+			// The enrollment lands while the message waits, and the runtime reads it.
+			const binding = createManagedBinding({
+				paths: { userDataDir: dir, productionDataDir: dir },
+				fence: () => ({ ok: true }),
+				authority,
+				now: () => T0,
+			});
+			expect(
+				(
+					await binding.enroll({
+						installationId: runtime.installation.installationId,
+						authorityId: 'fleet-authority',
+						endpointRef: 'ep',
+						policySources: [],
+						policyRevision: 1,
+					})
+				).ok
+			).toBe(true);
+			expect(runtime.managedBinding.reload()).toMatchObject({ state: 'enrolled' });
+
+			// The running turn ends and the queue reaches the waiting item: refused at the dequeue,
+			// dropped, no process, nothing journaled (no attempt exists to record).
+			value(await runtime.turns.interrupt('a1', 't1'));
+			await turn.outcome();
+			await turn.saw('error');
+			const refusal = turn.events.find((event) => event.kind === 'error');
+			expect(refusal).toMatchObject({
+				kind: 'error',
+				error: { message: expect.stringContaining('dropped from the queue') },
+			});
+			expect(refusal && refusal.kind === 'error' ? refusal.error.message : '').toContain(
+				'carries no managed dispatch'
+			);
+			expect(value(await runtime.turns.queue.list('a1'))).toEqual([]);
+			// The provider layer was asked once, for the turn that ran; never for the dropped item.
+			expect(argvFiles).toHaveLength(1);
+			expect(journalRuns()).toEqual([]);
+			expect(turn.events.filter((event) => event.kind === 'started')).toHaveLength(1);
+
+			// A message sent now is minted its dispatch at the queue (MRC3-01-01) and runs admitted.
+			value(await runtime.turns.send('a1', 't1', { text: 'after enrollment' }));
+			await turn.outcome(2);
+			expect(turn.outcomes()).toEqual(['interrupted', 'completed']);
+			expect(argvFiles).toHaveLength(2);
+			expect(journalRuns()).toHaveLength(1);
+			expect(journalRuns()[0]).toMatchObject({
+				state: 'completed',
+				attempts: [expect.objectContaining({ phase: 'terminal', leaseId: 'lease-1' })],
+			});
 		});
 
 		it('refuses a managed send on a runtime that lost its data directory, before anything is queued or spawned (MRC-08-05)', async () => {

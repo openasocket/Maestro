@@ -32,6 +32,12 @@
  *   before the queue and nothing is journaled. A managed item that cannot start is dropped, not
  *   held: its attempt is journaled as failed, and a held copy could be resumed into a second
  *   dispatch of the same attempt. A standalone binding queues as it always has.
+ * - **The standing is checked again at the dequeue, unconditionally** (MRC3-01-02). An item that
+ *   reaches `start` with no dispatch while the binding is enrolled (queued before the enrollment
+ *   landed, or by an older process) is refused before the provider layer and dropped, never
+ *   started, and the provider layer refuses the same on its own (`standing: 'enrolled'`). A
+ *   managed item whose attempt went terminal at its start is dropped too, with the attempt
+ *   journaled, so no held copy can be resumed into a second dispatch of one attempt.
  *
  * The queue is in memory. A host that exits drops what was waiting; a turn that was running is
  * stopped and recorded as interrupted (`stopAll`), which is what the person asked for by quitting.
@@ -193,9 +199,15 @@ interface TurnItem extends QueueItem {
 	managed?: ManagedDispatch;
 }
 
-type Verdict = { ok: true } | { ok: false; message: string; reason?: RunAgentTurnRefusal };
+type Verdict =
+	| { ok: true }
+	/** `dropped`: the queue let the item go (a terminal managed attempt, a refused admission). */
+	| { ok: false; message: string; reason?: RunAgentTurnRefusal; dropped: boolean };
 
-/** A start the provider layer refused, with its reason, so a managed caller hears which. */
+/**
+ * A start the admission or the provider layer refused, with its reason, so a managed caller hears
+ * which. The queue drops an item refused this way: the attempt is terminal, or never existed.
+ */
 class TurnStartRefusal extends Error {
 	constructor(
 		readonly reason: RunAgentTurnRefusal,
@@ -275,6 +287,9 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 	// Starting one turn (the queue's `start`)
 	// -----------------------------------------------------------------------
 
+	/** Is the binding enrolled right now? Read at every dequeue, so an enrollment that landed while an item waited counts. */
+	const enrolledStanding = (): boolean => options.standing?.port().standing() === 'managed';
+
 	async function startItem(agentId: string, item: TurnItem): Promise<QueuedTurnHandle> {
 		const record = repository.getAgent(agentId);
 		if (!record) throw new Error(`No agent ${agentId}.`);
@@ -282,6 +297,18 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		if (!tabRecord) throw new Error(`The tab ${item.tabId} no longer exists.`);
 		// The tab's previous process has not gone yet: a timing collision, not a verdict on the item.
 		if (registry.isBusy(agentId, item.tabId)) throw new TurnCollisionError();
+
+		// The dequeue admission (MRC3-01-02), before anything is read for the turn: on an enrolled
+		// binding an item with no dispatch is refused and dropped, never started, and nothing is
+		// journaled, since no attempt exists to record. A standalone binding reads nothing here.
+		const enrolled = enrolledStanding();
+		const managed = item.managed;
+		if (enrolled && !managed) {
+			throw new TurnStartRefusal(
+				'managed-unavailable',
+				'This installation is enrolled and the queued message carries no managed dispatch (it was queued before the enrollment, or by an older process), so it was dropped rather than started; send it again.'
+			);
+		}
 
 		const agent = toTurnAgent(record);
 		if (!agent) throw new Error('The agent has no working directory to run in.');
@@ -315,7 +342,6 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		const turn: AssembledTurn = assembled.turn;
 		const provider = turn.settings.provider;
 
-		const managed = item.managed;
 		// The single-writer check, before the spawn (MRC-08-05): a runtime that lost its data directory
 		// starts nothing (its records would be refused once the process existed); a managed attempt is journaled.
 		const writer = options.fence();
@@ -343,6 +369,8 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			sshStore,
 			claudeTokenSource: getClaudeTokenSourceFields(record as ClaudeTokenSourceFields),
 			maestroPBinPath: host.maestroPBinPath ?? null,
+			// The provider layer holds the same rule on its own: enrolled, a turn runs managed or not at all.
+			standing: enrolled ? 'enrolled' : 'standalone',
 			...(managed
 				? {
 						managed: {
@@ -574,25 +602,54 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 				verdicts.delete(event.item.id);
 				break;
 			case 'dispatch-failed': {
+				// Dropped, not held (MRC3-01-02): an item the admission refused (no dispatch on an
+				// enrolled binding) and a managed item whose attempt is terminal now. A held copy could be
+				// resumed into a second dispatch of one attempt, or started with no dispatch at all.
+				const managed = event.item.managed;
+				const refusal = event.error instanceof TurnStartRefusal;
+				const dropped = event.held && (managed !== undefined || refusal);
+				if (dropped) queues.get(agentId)?.remove(event.item.id);
 				if (event.held) {
 					logger.warn(`A turn could not start: ${event.error.message}`, LOG_CONTEXT);
 					emitTurn(agentId, event.item.tabId, {
 						kind: 'error',
 						error: {
 							type: 'unknown',
-							message: `The message was not sent: ${event.error.message}`,
+							message: dropped
+								? `The message was not sent and was dropped from the queue: ${event.error.message}`
+								: `The message was not sent: ${event.error.message}`,
 							recoverable: true,
 							agentId: repository.getAgent(agentId)?.toolType ?? 'unknown',
 							timestamp: deps.now(),
 						},
 					});
 				}
-				verdicts.get(event.item.id)?.({
-					ok: false,
-					message: event.error.message,
-					...(event.error instanceof TurnStartRefusal ? { reason: event.error.reason } : {}),
-				});
+				// A managed item dropped on a cause nobody journaled (the tab went, the context could not
+				// be loaded, the message could not be recorded, the collision cap): its attempt is written
+				// down as failed, since the queue let the item go on that record, and the verdict follows
+				// the record. A refusal journaled itself; a collision under the cap retries the attempt.
+				const journaled =
+					dropped && managed && !refusal
+						? managed.journal
+								.markTerminal(managed.runId, managed.attemptId, {
+									outcome: 'failed',
+									detail: `launch: ${event.error.message}`,
+								})
+								.catch((error) =>
+									logger.warn(`The run journal was not written: ${errorText(error)}`, LOG_CONTEXT)
+								)
+						: Promise.resolve();
+				const verdict = verdicts.get(event.item.id);
 				verdicts.delete(event.item.id);
+				const { error } = event;
+				void journaled.then(() =>
+					verdict?.({
+						ok: false,
+						message: error.message,
+						dropped,
+						...(error instanceof TurnStartRefusal ? { reason: error.reason } : {}),
+					})
+				);
 				break;
 			}
 			default:
@@ -799,10 +856,14 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		}
 		const verdict = await attempt;
 		if (verdict.ok) return { status: 'started' };
-		// The attempt is journaled as failed; the peer decides what follows. A held copy in the
-		// queue could be resumed into a second dispatch of the same attempt, so it goes.
-		if (dispatch) queue.remove(item.id);
-		return { status: 'failed', message: verdict.message, reason: verdict.reason, held: !dispatch };
+		// A managed item, or one the admission refused, was dropped by the queue as it failed (its
+		// attempt journaled as failed); any other item is held with its cause.
+		return {
+			status: 'failed',
+			message: verdict.message,
+			reason: verdict.reason,
+			held: !verdict.dropped,
+		};
 	}
 
 	async function send(
@@ -837,7 +898,7 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 					'failed',
 					submitted.held
 						? `${submitted.message} The message is held in the queue; remove it or fix the cause and resume.`
-						: `${submitted.message} The managed attempt is journaled as failed and the message is not held; send it again for a new attempt.`
+						: `${submitted.message} The message was dropped, not held; send it again for a new attempt.`
 				);
 		}
 	}
@@ -875,7 +936,7 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 				case 'refused':
 					return { status: 'refused', reason: submitted.reason, message: submitted.message };
 				case 'failed': {
-					// The attempt is journaled as failed and the item was dropped (see `submitText`).
+					// The attempt is journaled as failed and the queue dropped the item (see `onQueueEvent`).
 					const reason =
 						submitted.reason === 'managed-denied' ||
 						submitted.reason === 'managed-unavailable' ||
