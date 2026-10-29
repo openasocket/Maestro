@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "profile": "maestro-rc-integration-phase3",
+  "created": "2026-10-29",
+  "executionMode": "task-based",
+  "executionRoot": "maestro",
+  "branch": "feature/mega-maestro-v1.1.0-rc",
+  "baseRef": "v1.1.0-RC",
+  "baseRevision": "6400a6da0cfbae97bd90c4b361eea163fc3a1223",
+  "authoredAtHead": "0f31023a8",
+  "sourceDocument": "/Users/dr3/dev-shit/mega-maestro/docs/design/maestro-rc/INTEGRATION-COMPLETION-2026-10-29.md",
+  "sourceBacklog": "/Users/dr3/dev-shit/mega-maestro/docs/design/maestro-rc/integration-completion-plan.json",
+  "backlogItemsCovered": [
+    "M-01",
+    "M-02",
+    "M-03 (consumer half)",
+    "M-04 (consumer half)",
+    "M-05",
+    "M-06 (consumer half)",
+    "BASE-02",
+    "G-02 (Maestro half)",
+    "G-07 (Maestro half)",
+    "G-08 (Maestro half)",
+    "VERIFY-01 (Maestro half)"
+  ],
+  "counterpartItemsRequired": [
+    "G-01",
+    "G-03",
+    "G-04",
+    "G-05",
+    "G-06",
+    "G-09",
+    "PAIR-01",
+    "PAIR-02"
+  ],
+  "guardedRealPairTasks": [
+    "MRC3-03-06",
+    "MRC3-04-07",
+    "MRC3-06-07"
+  ],
+  "plan": "Plans/mega-maestro-rc/PHASE3-PLAN.md",
+  "documents": [
+    {
+      "path": "/Users/dr3/dev-shit/Maestro/.maestro/playbooks/2026-10-29-Maestro-Mega-Integration-P3/MAESTRO-MEGA-P3-01.md",
+      "title": "Mandatory headless admission",
+      "backlogItems": "M-01",
+      "taskCount": 6
+    },
+    {
+      "path": "/Users/dr3/dev-shit/Maestro/.maestro/playbooks/2026-10-29-Maestro-Mega-Integration-P3/MAESTRO-MEGA-P3-02.md",
+      "title": "Protected installation standing and headless custody",
+      "backlogItems": "M-02",
+      "taskCount": 5
+    },
+    {
+      "path": "/Users/dr3/dev-shit/Maestro/.maestro/playbooks/2026-10-29-Maestro-Mega-Integration-P3/MAESTRO-MEGA-P3-03.md",
+      "title": "Effect authority, harness probe and the approval bridge",
+      "backlogItems": "M-03, G-02 (Maestro half)",
+      "taskCount": 6
+    },
+    {
+      "path": "/Users/dr3/dev-shit/Maestro/.maestro/playbooks/2026-10-29-Maestro-Mega-Integration-P3/MAESTRO-MEGA-P3-04.md",
+      "title": "Negotiated workflow and delegation, run control, usage",
+      "backlogItems": "M-04, G-07 (Maestro half), G-08 (Maestro half)",
+      "taskCount": 7
+    },
+    {
+      "path": "/Users/dr3/dev-shit/Maestro/.maestro/playbooks/2026-10-29-Maestro-Mega-Integration-P3/MAESTRO-MEGA-P3-05.md",
+      "title": "Remaining effect, custody and lock gaps",
+      "backlogItems": "M-05",
+      "taskCount": 11
+    },
+    {
+      "path": "/Users/dr3/dev-shit/Maestro/.maestro/playbooks/2026-10-29-Maestro-Mega-Integration-P3/MAESTRO-MEGA-P3-06.md",
+      "title": "Policy-governed desktop authoring (Maestro half of M-06)",
+      "backlogItems": "M-06 (consumer half; G-09 owns the policy projection)",
+      "taskCount": 8
+    },
+    {
+      "path": "/Users/dr3/dev-shit/Maestro/.maestro/playbooks/2026-10-29-Maestro-Mega-Integration-P3/MAESTRO-MEGA-P3-07.md",
+      "title": "Upstream integration in an isolated worktree",
+      "backlogItems": "BASE-02",
+      "taskCount": 4
+    },
+    {
+      "path": "/Users/dr3/dev-shit/Maestro/.maestro/playbooks/2026-10-29-Maestro-Mega-Integration-P3/MAESTRO-MEGA-P3-08.md",
+      "title": "Repairs, whole-repository verification and completion report",
+      "backlogItems": "VERIFY-01 (Maestro half)",
+      "taskCount": 5
+    }
+  ],
+  "taskCount": 52,
+  "taskCounts": {
+    "IMPLEMENT": 35,
+    "TEST": 8,
+    "VERIFY": 9
+  },
+  "loopEnabled": false,
+  "resetOnCompletion": false,
+  "automaticHandoffs": false,
+  "autoRunPrompt": "Execute Phase 3 of the Maestro managed integration per Plans/mega-maestro-rc/EXECUTION-RULES.md, PHASE3-PLAN.md and counterpart-requests.md on branch feature/mega-maestro-v1.1.0-rc with Node 26. Fresh-context tasks, ordered documents, no loop, reset or peer dispatch. Never touch the five guarded Phase 1 VERIFY tasks. Extend existing seams under src/main/enterprise and src/shared/maestro-lib/managed before creating new ones. Standalone behavior unchanged; managed denials explicit; a consumer with no counterpart producer is built against an injected port and its real-pair VERIFY stays unchecked under the guard."
+}
