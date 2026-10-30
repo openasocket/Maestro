@@ -36,14 +36,25 @@ import {
 	type ProcessSpawnActor,
 	type ProcessSpawnAuthorityPort,
 	type UtilityTurnLineage,
+	type ProcessConfig,
 } from '../process-manager/types';
+import {
+	resolvePromptDelivery,
+	selectPromptFileDestination,
+	type PromptDelivery,
+} from '../../shared/maestro-lib/launch/prompt-delivery';
+import { newRemotePromptFileDestination } from '../../shared/maestro-lib/launch/ssh-command-builder';
+import { argsResumeSession, resumeIdFromArgs } from '../../shared/maestro-lib/run/pipe-spawn';
 import type { DispatchPurpose } from '../../shared/maestro-lib/managed/authority';
 import type { ManagedDenialCode, ManagedOrigin } from '../../shared/maestro-lib/managed/types';
 
 const LOG_CONTEXT = '[ContextGroomer]';
 
 /** The spawn config a grooming turn hands the process manager. */
-export interface GroomingSpawnConfig {
+export interface GroomingSpawnConfig extends Pick<
+	ProcessConfig,
+	'promptArtifact' | 'agentSessionId'
+> {
 	sessionId: string;
 	toolType: string;
 	cwd: string;
@@ -218,7 +229,8 @@ export interface GroomContextOptions {
 	 * Set it for pure text transforms. Without it, a task-shaped prompt makes the
 	 * model run a full agentic session - reading files, grepping - instead of
 	 * answering, which blows the timeout and returns nothing. Agents that define
-	 * no `noToolsArgs` are left untouched.
+	 * no `noToolsArgs` are left untouched on legacy routes; an explicit prompt-file
+	 * route refuses when it cannot enforce the requested restriction.
 	 */
 	disableTools?: boolean;
 	/** Agent-level config values (from agent config store) for override resolution */
@@ -278,13 +290,26 @@ export async function groomContext(
 	processManager: GroomingProcessManager,
 	agentDetector: AgentDetector
 ): Promise<GroomContextResult> {
+	let groomerSessionId = `groomer-${uuidv4()}`;
+	const controller = new AbortController();
+	activeGroomingSessions.set(groomerSessionId, {
+		groomerSessionId,
+		startTime: Date.now(),
+		cancel: () => controller.abort(new Error('Grooming cancelled by user')),
+	});
 	try {
-		return await groomContextOnce(options, processManager, agentDetector);
+		return await groomContextOnce(
+			options,
+			processManager,
+			agentDetector,
+			groomerSessionId,
+			controller.signal
+		);
 	} catch (error) {
 		// Grok callers provide no automatic-hint provenance or validated distinct
 		// fallback. Clearing this value can inherit the same refusal or silently
 		// change an explicit selection. The process error listener still records it.
-		if (options.agentType === 'grok') throw error;
+		if (options.agentType === 'grok' || controller.signal.aborted) throw error;
 
 		// The provider refused the effort level this turn asked for (see
 		// `shared/effortRejection.ts`). Callers pass an effort Maestro picked off
@@ -303,19 +328,58 @@ export async function groomContext(
 			LOG_CONTEXT,
 			{ agentType: options.agentType, effort: options.sessionCustomEffort, ...rejection }
 		);
-		return groomContextOnce(
+		activeGroomingSessions.delete(groomerSessionId);
+		groomerSessionId = `groomer-${uuidv4()}`;
+		activeGroomingSessions.set(groomerSessionId, {
+			groomerSessionId,
+			startTime: Date.now(),
+			cancel: () => controller.abort(new Error('Grooming cancelled by user')),
+		});
+		return await groomContextOnce(
 			{ ...options, sessionCustomEffort: undefined },
 			processManager,
-			agentDetector
+			agentDetector,
+			groomerSessionId,
+			controller.signal
 		);
+	} finally {
+		activeGroomingSessions.delete(groomerSessionId);
 	}
 }
 
 async function groomContextOnce(
 	options: GroomContextOptions,
 	processManager: GroomingProcessManager,
-	agentDetector: AgentDetector
+	agentDetector: AgentDetector,
+	groomerSessionId: string,
+	signal: AbortSignal
 ): Promise<GroomContextResult> {
+	// Hold the selected account and host across detector/probe/SSH awaits.
+	const remotes = options.sessionSshRemoteConfig?.enabled
+		? options.sshStore?.getSshRemotes().map((remote) => ({
+				...remote,
+				remoteEnv: remote.remoteEnv ? { ...remote.remoteEnv } : undefined,
+				sshOptions: remote.sshOptions ? { ...remote.sshOptions } : undefined,
+			}))
+		: undefined;
+	options = {
+		...options,
+		sessionSshRemoteConfig: options.sessionSshRemoteConfig
+			? { ...options.sessionSshRemoteConfig }
+			: undefined,
+		sessionCustomEnvVars: options.sessionCustomEnvVars
+			? { ...options.sessionCustomEnvVars }
+			: undefined,
+		agentConfigValues: options.agentConfigValues
+			? {
+					...options.agentConfigValues,
+					customEnvVars: options.agentConfigValues.customEnvVars
+						? { ...options.agentConfigValues.customEnvVars }
+						: undefined,
+				}
+			: undefined,
+		sshStore: remotes ? { getSshRemotes: () => remotes } : options.sshStore,
+	};
 	const {
 		projectRoot,
 		agentType,
@@ -340,7 +404,6 @@ async function groomContextOnce(
 		lineage,
 	} = options;
 
-	const groomerSessionId = `groomer-${uuidv4()}`;
 	const startTime = Date.now();
 
 	logger.info('Starting context grooming', LOG_CONTEXT, {
@@ -355,8 +418,19 @@ async function groomContextOnce(
 
 	// Get agent configuration
 	const agent = await agentDetector.getAgent(agentType);
+	signal.throwIfAborted();
 	if (!agent || !agent.available) {
 		throw new Error(`Agent ${agentType} is not available`);
+	}
+	if (agent.promptFile && disableTools && !agent.noToolsArgs?.length) {
+		throw new Error('Prompt-file grooming cannot enforce disabled tools.');
+	}
+	if (
+		agent.promptFile &&
+		readOnlyMode &&
+		(!agent.readOnlyArgs?.length || agent.readOnlyCliEnforced === false)
+	) {
+		throw new Error('Prompt-file grooming cannot enforce read-only mode.');
 	}
 
 	// Build args using the unified buildAgentArgs utility
@@ -367,7 +441,8 @@ async function groomContextOnce(
 		readOnlyMode,
 		modelId,
 		yoloMode: false,
-		permissionMode: 'standard' as const,
+		permissionMode: readOnlyMode ? 'readonly' : 'standard',
+		forceBatchMode: !!agent.promptFile,
 		agentSessionId,
 	});
 
@@ -435,11 +510,8 @@ async function groomContextOnce(
 	// `agent.path || agent.command`; the fallback keeps working on platforms
 	// where the bare command is already on PATH and `path` is unset.
 	//
-	// `agent.path` is a LOCAL path. Grooming only ever spawns locally today (see
-	// the note on the spawn call below), so that is correct as written - but
-	// whoever routes grooming through SSH must not send this to a remote host,
-	// which has its own filesystem. Remote execution uses the agent's
-	// `binaryName`; `wrapSpawnWithSsh` handles that.
+	// `agent.path` is local. Remote execution uses the explicit session custom
+	// path or the agent's binaryName through wrapSpawnWithSsh below.
 	const resolvedCommand = sessionCustomPath || agent.path || agent.command;
 
 	// Apply SSH wrapping when the session runs on a remote host. ProcessManager
@@ -456,6 +528,47 @@ async function groomContextOnce(
 	let sshStdinScript: string | undefined;
 	let sshRemoteCommand: string | undefined;
 	let sshRemoteUsed: SshRemoteConfig | null = null;
+	let fileDelivery: Extract<PromptDelivery, { via: 'file' }> | undefined;
+	let spawnAgentSessionId = agentSessionId;
+	if (agent.promptFile) {
+		const argumentSessionId = resumeIdFromArgs(resolvedArgs);
+		if (
+			(agentSessionId !== undefined && agentSessionId !== argumentSessionId) ||
+			(argsResumeSession(resolvedArgs) && !argumentSessionId)
+		) {
+			throw new Error('Prompt-file resume identity does not match its launch arguments.');
+		}
+		spawnAgentSessionId = argumentSessionId;
+		const remote = sessionSshRemoteConfig?.enabled
+			? sshStore &&
+				getSshRemoteConfig(sshStore, { sessionSshConfig: sessionSshRemoteConfig }).config
+			: undefined;
+		if (sessionSshRemoteConfig?.enabled && !remote) {
+			throw new Error(sshUnresolvedRemoteMessage(sessionSshRemoteConfig));
+		}
+		let delivery: PromptDelivery;
+		try {
+			delivery = resolvePromptDelivery({
+				agent,
+				prompt,
+				args: resolvedArgs,
+				isWindowsHost: isWindows(),
+				sshRemote: !!remote,
+				sshRemoteId: remote?.id,
+				promptFileDestination: remote
+					? newRemotePromptFileDestination(remote.id, agent.promptFile.format)
+					: selectPromptFileDestination(agent, undefined),
+			});
+		} catch {
+			throw new Error('Prompt-file grooming preparation unavailable.');
+		}
+		if (delivery.via === 'refused') throw new Error(delivery.error);
+		if (delivery.via !== 'file') throw new Error('Prompt-file grooming preparation unavailable.');
+		fileDelivery = delivery;
+		spawnArgs = [...resolvedArgs, ...delivery.args];
+		spawnPrompt = undefined;
+	}
+	const deliveryArgs = spawnArgs;
 
 	// Claude token source: an agent set to TUI runs this turn through maestro-p,
 	// the same as its chat turns. Same resolve-then-apply sequence as
@@ -469,6 +582,7 @@ async function groomContextOnce(
 				sessionSshConfig: sessionSshRemoteConfig,
 			}).config;
 			if (sshRemote) sshMaestroPAvailable = await ensureRemoteMaestroPProbed(sshRemote);
+			signal.throwIfAborted();
 		}
 		claudeDecision = resolveClaudeSpawnMode({
 			agent,
@@ -486,7 +600,7 @@ async function groomContextOnce(
 				decision: claudeDecision,
 				interactiveModeArgs: agent.interactiveModeArgs,
 				command: resolvedCommand,
-				args: resolvedArgs,
+				args: deliveryArgs,
 				customEnvVars: resolvedEnvVars,
 				maxWaitSeconds: Math.ceil(timeoutMs / 1000),
 			});
@@ -528,10 +642,11 @@ async function groomContextOnce(
 			{
 				command: resolvedCommand,
 				args: remoteInteractive
-					? [...remoteInteractive.prependArgs, ...resolvedArgs]
-					: resolvedArgs,
+					? [...remoteInteractive.prependArgs, ...deliveryArgs]
+					: deliveryArgs,
 				cwd: remoteCwd,
-				prompt,
+				prompt: spawnPrompt,
+				...(fileDelivery ? { promptArtifact: fileDelivery.artifact } : {}),
 				customEnvVars: remoteInteractive
 					? { ...(resolvedEnvVars ?? {}), ...remoteInteractive.env }
 					: resolvedEnvVars,
@@ -548,13 +663,26 @@ async function groomContextOnce(
 			},
 			sessionSshRemoteConfig,
 			sshStore
-		);
+		).catch((error: unknown) => {
+			if (fileDelivery) throw new Error('Remote prompt preparation unavailable.');
+			throw error;
+		});
+		signal.throwIfAborted();
 
 		// wrapSpawnWithSsh falls back to the unmodified local config when the
 		// remote can't be resolved. Fail loudly instead - the user opted into SSH,
 		// so a local run is the wrong answer, not a graceful degradation.
 		if (!wrapped.sshRemoteUsed) {
 			throw new Error(sshUnresolvedRemoteMessage(sessionSshRemoteConfig));
+		}
+		if (
+			fileDelivery &&
+			(fileDelivery.artifact.owner !== 'remote' ||
+				wrapped.sshRemoteUsed.id !== fileDelivery.artifact.sshRemoteId ||
+				wrapped.promptArtifactPath !== fileDelivery.artifact.path ||
+				!wrapped.sshStdinScript)
+		) {
+			throw new Error('Prompt-file delivery does not match its host plan.');
 		}
 
 		spawnCommand = wrapped.command;
@@ -574,17 +702,20 @@ async function groomContextOnce(
 			viaStdinScript: !!sshStdinScript,
 		});
 	}
+	signal.throwIfAborted();
 
 	// Create a promise that collects the response
 	return new Promise<GroomContextResult>((resolve, reject) => {
 		let responseBuffer = '';
 		let lastDataTime = Date.now();
 		let idleCheckInterval: NodeJS.Timeout | null = null;
+		let overallTimeout: NodeJS.Timeout | null = null;
 		let resolved = false;
 		let chunkCount = 0;
 		let cancelled = false;
 
 		const cleanup = () => {
+			if (overallTimeout) clearTimeout(overallTimeout);
 			if (idleCheckInterval) {
 				clearInterval(idleCheckInterval);
 				idleCheckInterval = null;
@@ -623,6 +754,17 @@ async function groomContextOnce(
 		const finishWithResponse = (reason: string) => {
 			if (resolved || cancelled) return;
 			resolved = true;
+			// The existing sink owns file cleanup until its reader closes. Stop a
+			// file-backed reader when an idle/deadline result abandons the turn.
+			if (fileDelivery && !reason.startsWith('process exited')) {
+				try {
+					processManager.kill(groomerSessionId);
+				} catch {
+					cleanup();
+					reject(new Error('Prompt-file grooming stop unavailable.'));
+					return;
+				}
+			}
 			cleanup();
 
 			const durationMs = Date.now() - startTime;
@@ -711,7 +853,7 @@ async function groomContextOnce(
 		// limit (ENAMETOOLONG on spawn). Route the prompt via stdin instead.
 		// SSH spawns already carry the prompt in the wrapped command (or in
 		// `sshStdinScript`, which owns the child's stdin), so skip it there.
-		const useStdinForPrompt = isWindows() && !sshRemoteUsed;
+		const useStdinForPrompt = !fileDelivery && isWindows() && !sshRemoteUsed;
 
 		// The batch-mode spawn. Classified as a `utility` turn of Maestro's own,
 		// raised by the surface the actor came in through, serving the agent and
@@ -724,6 +866,8 @@ async function groomContextOnce(
 			command: spawnCommand,
 			args: spawnArgs,
 			prompt: spawnPrompt, // Triggers batch mode (no PTY); undefined for SSH
+			...(fileDelivery ? { promptArtifact: fileDelivery.artifact } : {}),
+			...(spawnAgentSessionId ? { agentSessionId: spawnAgentSessionId } : {}),
 			// For agents using flag-based prompt (e.g., OpenCode -p). Harmless for
 			// SSH: the wrapper already applied them and `spawnPrompt` is undefined.
 			promptArgs: agent.promptArgs,
@@ -746,7 +890,20 @@ async function groomContextOnce(
 		) => {
 			// A refusal at the sink already arrived as an `agent-error` for this
 			// session and settled the promise through `onError`; nothing to add.
-			if (resolved) return;
+			if (resolved) {
+				// Cancellation may beat asynchronous admission. A late child still
+				// belongs to this owner and must be stopped, including its artifact.
+				if (cancelled && spawnResult && spawnResult.pid > 0) {
+					try {
+						processManager.kill(groomerSessionId);
+					} catch {
+						logger.error('Cancelled grooming process could not be stopped', LOG_CONTEXT, {
+							groomerSessionId,
+						});
+					}
+				}
+				return;
+			}
 			if (!spawnResult || spawnResult.pid <= 0 || spawnResult.success === false) {
 				cleanup();
 				resolved = true;
@@ -774,7 +931,7 @@ async function groomContextOnce(
 			}, 1000);
 
 			// Overall timeout
-			setTimeout(() => {
+			overallTimeout = setTimeout(() => {
 				if (!resolved) {
 					logger.warn('Grooming timeout', LOG_CONTEXT, {
 						groomerSessionId,
@@ -810,10 +967,22 @@ async function groomContextOnce(
 				if (resolved) return;
 				cleanup();
 				resolved = true;
-				reject(error instanceof Error ? error : new Error(String(error)));
+				reject(
+					fileDelivery
+						? new Error('Prompt-file grooming spawn unavailable.')
+						: error instanceof Error
+							? error
+							: new Error(String(error))
+				);
 			});
 		} else {
-			armAfterSpawn(processManager.spawn(spawnConfig));
+			try {
+				armAfterSpawn(processManager.spawn(spawnConfig));
+			} catch (error) {
+				cleanup();
+				resolved = true;
+				reject(fileDelivery ? new Error('Prompt-file grooming spawn unavailable.') : error);
+			}
 		}
 	});
 }

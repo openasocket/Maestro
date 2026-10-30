@@ -36,11 +36,12 @@ import {
 	resolveClaudeSpawnModeCore,
 	createStandaloneClaudeSpawnCoreDeps,
 } from '../launch/interactive-mode';
-import type { SshRemoteSettingsStore } from '../launch/ssh-remote-resolver';
+import { resolveSshLaunchTarget, type SshRemoteSettingsStore } from '../launch/ssh-remote-resolver';
 import { createOutputParser } from '../parsers/parser-factory';
 import type { MaestroPaths } from '../paths/resolve';
 import {
 	buildDispatchSnapshot,
+	type DispatchLease,
 	type HostAuthority,
 	type PolicySourceSet,
 } from '../managed/authority';
@@ -50,7 +51,12 @@ import {
 	type ManagedDelegationContext,
 } from '../managed/delegation';
 import type { ManagedAuthenticatedContext, ManagedDenialCode } from '../managed/types';
-import { planPipeSpawn, removeTempFiles, resumeIdFromArgs } from '../run/pipe-spawn';
+import {
+	argsResumeSession,
+	planPipeSpawn,
+	removeTempFiles,
+	resumeIdFromArgs,
+} from '../run/pipe-spawn';
 import {
 	runTurn,
 	type CompletedTurn,
@@ -216,6 +222,8 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 
 	/** Turns running, by their full process id: what Stop reaches, through the guarded stops. */
 	const running = new Map<string, { turn: RunningTurn; stops: GuardedTurnStops }>();
+	// Stop must also reach a turn waiting for system delivery, SSH preparation or admission.
+	const preparing = new Map<string, AbortController>();
 	// A turn stays in the process registry until `done` settles, which is after its end has been
 	// reported (and the moderator's report starts the participants). `running` drops it earlier.
 	const registered = new Map<string, Promise<void>>();
@@ -328,6 +336,72 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		owner: string,
 		hooks: TurnHooks
 	): Promise<GroupChatTurnStart> {
+		if (preparing.has(spawn.processId) || running.has(spawn.processId)) {
+			return { success: false, error: 'A background turn with this process id already exists.' };
+		}
+		const abort = new AbortController();
+		const processId = spawn.processId;
+		const privatePrompt = !!spawn.agent.promptFile;
+		const preparationFiles: string[] = [];
+		let started = false;
+		preparing.set(processId, abort);
+		try {
+			const result = await launchPrepared(spawn, owner, hooks, abort.signal, preparationFiles);
+			started = result.success;
+			return result;
+		} catch (error) {
+			if (privatePrompt) throw new Error('Prompt-file background preparation unavailable.');
+			throw error;
+		} finally {
+			if (!started) removeTempFiles(preparationFiles);
+			preparing.delete(processId);
+		}
+	}
+
+	async function launchPrepared(
+		spawn: GroupChatSpawn,
+		owner: string,
+		hooks: TurnHooks,
+		signal: AbortSignal,
+		preparationFiles: string[]
+	): Promise<GroupChatTurnStart> {
+		// Keep selected account, model, host and arguments stable across preparation's awaits.
+		spawn = {
+			...spawn,
+			agent: {
+				...spawn.agent,
+				capabilities: spawn.agent.capabilities ? { ...spawn.agent.capabilities } : undefined,
+				promptFile: spawn.agent.promptFile
+					? {
+							...spawn.agent.promptFile,
+							exclusivePromptFlags: [...spawn.agent.promptFile.exclusivePromptFlags],
+						}
+					: undefined,
+			},
+			args: [...spawn.args],
+			customEnvVars: spawn.customEnvVars ? { ...spawn.customEnvVars } : undefined,
+			agentConfigValues: spawn.agentConfigValues ? { ...spawn.agentConfigValues } : undefined,
+			sshRemoteConfig: spawn.sshRemoteConfig ? { ...spawn.sshRemoteConfig } : spawn.sshRemoteConfig,
+		};
+		const privatePrompt = !!spawn.agent.promptFile;
+		// Pin the selected endpoint before system delivery yields. The shared preparer
+		// and SSH wrapper must read the same host even if settings change meanwhile.
+		const preparation = spawnDeps();
+		const target = resolveSshLaunchTarget(sshStore, spawn.sshRemoteConfig);
+		if (target.kind === 'unresolved') throw new Error(target.message);
+		if (target.kind === 'remote') {
+			const remote = structuredClone(target.remote);
+			preparation.sshStore = { getSshRemotes: () => [structuredClone(remote)] };
+		}
+		const isResume = !!spawn.isResume || (privatePrompt && argsResumeSession(spawn.args));
+		if (privatePrompt && isResume && !resumeIdFromArgs(spawn.args)) {
+			throw new Error('Prompt-file resume requires an explicit provider session identity.');
+		}
+		spawn.isResume = isResume;
+		const cancelled: GroupChatTurnStart = {
+			success: false,
+			error: 'Background turn cancelled before spawn.',
+		};
 		// The lineage first: what the turn is bound as, and what its process is stamped with, so
 		// what the agent itself asks or dispatches from its shell carries the chain one link deeper.
 		// Stamped BEFORE the SSH wrap, so it reaches the remote agent and not only the ssh client.
@@ -345,23 +419,44 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 			prompt: spawn.prompt,
 			systemPrompt: spawn.appendSystemPrompt,
 			supportsAppendSystemPrompt: !!spawn.agent.capabilities?.supportsAppendSystemPrompt,
-			isResume: !!spawn.isResume,
+			isResume,
 			isSshSession: !!spawn.sshRemoteConfig?.enabled,
 			sessionId: spawn.processId,
 			agentId: spawn.providerId,
 			logContext: LOG_CONTEXT,
+		}).catch((error: unknown) => {
+			if (privatePrompt) throw new Error('Prompt-file system preparation unavailable.');
+			throw error;
 		});
+		if (delivered.tempFile) preparationFiles.push(delivered.tempFile);
+		if (signal.aborted) return cancelled;
 		const prepared = await prepareGroupChatSpawn(
 			{ ...spawn, args: delivered.args, prompt: delivered.prompt, customEnvVars },
-			spawnDeps()
-		);
+			preparation
+		).catch((error: unknown) => {
+			if (privatePrompt) throw new Error('Prompt-file background preparation unavailable.');
+			throw error;
+		});
+		if (signal.aborted) return cancelled;
+		const artifact = prepared.promptDelivery?.artifact;
+		if (
+			artifact?.owner === 'remote' &&
+			(!spawn.sshRemoteConfig?.enabled ||
+				artifact.sshRemoteId !== spawn.sshRemoteConfig.remoteId ||
+				prepared.promptArtifactPath !== artifact.path)
+		) {
+			throw new Error('Prompt-file delivery does not match its host plan.');
+		}
 		const plan = planPipeSpawn({
 			sessionId: prepared.processId,
 			toolType: prepared.providerId,
 			cwd: prepared.cwd,
 			command: prepared.command,
 			args: prepared.args,
-			prompt: prepared.prompt,
+			prompt: artifact ? undefined : prepared.prompt,
+			// startTurn owns local files; the SSH script and guarded remote stop own remote files.
+			promptDelivery: artifact?.owner === 'local' ? prepared.promptDelivery : undefined,
+			promptArtifactPath: prepared.promptArtifactPath,
 			promptArgs: prepared.promptArgs,
 			noPromptSeparator: prepared.noPromptSeparator,
 			// Group chat turns get no global Settings -> Environment variables: their environment is
@@ -369,11 +464,13 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 			customEnvVars: prepared.customEnvVars,
 			runInShell: prepared.runInShell,
 			shell: prepared.shell,
-			sendPromptViaStdin: prepared.sendPromptViaStdin,
-			sendPromptViaStdinRaw: prepared.sendPromptViaStdinRaw,
+			sendPromptViaStdin: artifact ? false : prepared.sendPromptViaStdin,
+			sendPromptViaStdinRaw: artifact ? false : prepared.sendPromptViaStdinRaw,
 			sshStdinScript: prepared.sshStdinScript,
 			hasOutputParser: createOutputParser(prepared.providerId) !== null,
 		});
+		preparationFiles.push(...plan.tempFiles);
+		if (delivered.tempFile) plan.tempFiles.push(delivered.tempFile);
 		const claudeResume = readClaudeResumeBaseline({
 			providerId: prepared.providerId,
 			// An SSH spawn's arguments hold no resume flag of their own (the remote command does), so
@@ -388,19 +485,24 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 		// spawned, and the lease it grants is checked again inside `startTurn` against the spec that
 		// reaches `spawn`, so a replaced spec fails there rather than running.
 		let admission: RunTurnOptions['admission'];
+		let lease: DispatchLease | undefined;
 		if (managedTurn.managed && delegation) {
 			const attribution = groupChatTurnAttribution(
 				spawn,
 				spawn.cwd,
 				options.managed?.account ?? null
 			);
-			const admitted = await managedTurn.authority.admit({
-				context: managedTurn.context,
-				snapshot: buildDispatchSnapshot(plan.spec, attribution),
-				policy: managedTurn.policy,
-			});
+			const admitted = await managedTurn.authority
+				.admit({
+					context: managedTurn.context,
+					snapshot: buildDispatchSnapshot(plan.spec, attribution),
+					policy: managedTurn.policy,
+				})
+				.catch((error: unknown) => {
+					if (privatePrompt) throw new Error('Prompt-file admission unavailable.');
+					throw error;
+				});
 			if (admitted.state !== 'admitted') {
-				removeTempFiles(plan.tempFiles);
 				return managedRefusal(
 					spawn.processId,
 					delegation,
@@ -409,16 +511,30 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 					admitted.message
 				);
 			}
-			options.managed?.onAdmission?.({
-				kind: 'admitted',
-				processId: spawn.processId,
-				delegation,
-				leaseId: admitted.lease.leaseId,
-			});
-			const gate: DispatchAdmission = leaseAdmission(managedTurn.authority, admitted.lease);
-			admission = { gate, attribution };
+			lease = admitted.lease;
+			try {
+				options.managed?.onAdmission?.({
+					kind: 'admitted',
+					processId: spawn.processId,
+					delegation,
+					leaseId: admitted.lease.leaseId,
+				});
+				const gate: DispatchAdmission = leaseAdmission(managedTurn.authority, admitted.lease);
+				admission = { gate, attribution };
+			} catch (error) {
+				lease.release({
+					outcome: 'spawn-failed',
+					message: 'Background admission could not be recorded.',
+				});
+				if (privatePrompt) throw new Error('Prompt-file admission unavailable.');
+				throw error;
+			}
 		}
 
+		if (signal.aborted) {
+			lease?.release({ outcome: 'stopped', by: 'caller' });
+			return cancelled;
+		}
 		let turn: RunningTurn;
 		try {
 			turn = deps.runTurn(
@@ -430,6 +546,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 					stdoutTailLimit: DEFAULT_STDOUT_TAIL_LIMIT,
 					keepStdinOpen: plan.keepStdinOpen,
 					label: spawn.debugLabel,
+					signal,
 					...(admission ? { admission } : {}),
 				},
 				{
@@ -442,14 +559,23 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 				}
 			);
 		} catch (error) {
-			removeTempFiles(plan.tempFiles);
+			// The sink may throw before taking ownership (for example, parser construction).
+			lease?.release({
+				outcome: 'spawn-failed',
+				message: 'Background process could not be started.',
+			});
 			// The lease did not cover the spec that reached the spawn: a decision, nothing started.
 			if (error instanceof DispatchRefusedError) {
 				return managedRefusal(spawn.processId, delegation, error.state, error.code, error.message);
 			}
 			// An unknown provider, or an option the process could not be created with.
-			return { success: false, error: errorText(error) };
+			return {
+				success: false,
+				error: privatePrompt ? 'Prompt-file process could not be started.' : errorText(error),
+			};
 		}
+		// The running turn now owns legacy preparation cleanup through its completion.
+		preparationFiles.length = 0;
 		// Before the first line is read, which is on a later tick.
 		primeClaudeResume(turn.handle.parser, claudeResume);
 		const stops = guardTurn(turn.handle, {
@@ -457,6 +583,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 			graceMs: BACKGROUND_STOP_GRACE_MS,
 			remote: plan.remoteAgent,
 		});
+		if (signal.aborted) stops.terminate();
 		const ended = turn.completed.then((completed) => {
 			removeTempFiles(plan.tempFiles);
 			noteEffortRefusal(prepared.providerId, completed);
@@ -468,7 +595,9 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 			const failed = await ended;
 			return {
 				success: false,
-				error: failed.exit.spawnError?.message ?? 'The process could not be started.',
+				error: privatePrompt
+					? 'Prompt-file process could not be started.'
+					: (failed.exit.spawnError?.message ?? 'The process could not be started.'),
 			};
 		}
 
@@ -520,6 +649,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 				});
 			},
 			stop: (processId) => {
+				preparing.get(processId)?.abort();
 				running.get(processId)?.stops.terminate();
 			},
 		}),
@@ -548,10 +678,13 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 								readText: () => completed.answerText ?? '',
 							});
 						},
+					}).finally(() => {
+						if (!running.has(processId)) detached.delete(processId);
 					});
 				},
 				stop: (processId) => {
 					detached.add(processId);
+					preparing.get(processId)?.abort();
 					const entry = running.get(processId);
 					const partial = entry?.turn.answerSoFar() ?? '';
 					entry?.stops.terminate();
