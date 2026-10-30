@@ -19,6 +19,8 @@ import {
 	CodexRpcTransportError,
 } from '../../../../main/codex-app-server/rpc-client';
 import { captureException } from '../../../../main/utils/sentry';
+import { logger } from '../../../../main/utils/logger';
+import type { AgentDiscoveryRequest } from '../../../../shared/types';
 import {
 	ManagedSettingLockedError,
 	setSettingsWriteAuthority,
@@ -56,6 +58,7 @@ vi.mock('../../../../main/agents', async () => {
 			{ id: 'codex', name: 'Codex', binaryName: 'codex', configOptions: [] },
 			{ id: 'opencode', name: 'OpenCode', binaryName: 'opencode', configOptions: [] },
 			{ id: 'omp', name: 'Oh My Pi', binaryName: 'omp', configOptions: [] },
+			{ id: 'grok', name: 'Grok CLI', binaryName: 'grok', configOptions: [] },
 			{ id: 'terminal', name: 'Terminal', binaryName: 'bash', configOptions: [] },
 		],
 		DEFAULT_CAPABILITIES: {
@@ -1418,6 +1421,253 @@ describe('agents IPC handlers', () => {
 
 			expect(await handler!({} as any)).toEqual({ byProvider: {}, global: [] });
 		});
+	});
+
+	describe('selected Grok discovery', () => {
+		const cwd = path.resolve('synthetic-discovery');
+		const providerEnv = { GROK_HOME: path.join(cwd, 'provider'), XAI_API_KEY: 'provider-secret' };
+		const globalEnv = { XAI_API_KEY: '', GROK_AUTH: 'global-secret' };
+		let settingsStore: { get: ReturnType<typeof vi.fn> };
+		let sessionsStore: { get: ReturnType<typeof vi.fn> };
+
+		beforeEach(() => {
+			mockAgentConfigsStore.get.mockReturnValue({
+				grok: {
+					customPath: path.join(cwd, 'provider-grok'),
+					customEnvVars: providerEnv,
+					model: 'saved-model',
+					reasoningEffort: 'high',
+				},
+			});
+			settingsStore = {
+				get: vi.fn((key, fallback) => {
+					if (key === 'shellEnvVars') return globalEnv;
+					if (key === 'sshRemotes')
+						return [
+							{ id: 'remote', enabled: true },
+							{ id: 'disabled', enabled: false },
+						];
+					return fallback;
+				}),
+			};
+			sessionsStore = {
+				get: vi.fn().mockReturnValue(
+					['alice', 'bob', 'mismatch'].map((id) => ({
+						id,
+						toolType: id === 'mismatch' ? 'codex' : 'grok',
+						cwd: path.join(cwd, id),
+						customPath: path.join(cwd, id, 'grok'),
+						customEnvVars: { GROK_HOME: path.join(cwd, id, 'state'), XAI_API_KEY: `${id}-secret` },
+						customModel: `${id}-model`,
+						customEffort: 'low',
+					}))
+				),
+			};
+			registerAgentsHandlers({
+				...deps,
+				settingsStore: settingsStore as any,
+				sessionsStore: sessionsStore as any,
+			});
+			mockAgentDetector.discoverModels.mockResolvedValue(['catalog-model']);
+		});
+
+		it('builds distinct saved account contexts on the host and ignores forged execution fields', async () => {
+			const handler = handlers.get('agents:getModels')!;
+			for (const [index, id] of ['alice', 'bob'].entries()) {
+				const context = {
+					kind: 'agent',
+					sessionId: id,
+					model: '',
+					effort: '',
+					cwd: 'forged-cwd',
+					customPath: 'forged-path',
+					customEnvVars: { GROK_HOME: 'forged-root' },
+					environment: { surface: 'forged' },
+					target: { kind: 'local' },
+					configGeneration: 999,
+				};
+				const request = { providerId: 'grok', forceRefresh: true, context };
+				const result = await handler({} as never, request as never);
+				expect(mockAgentDetector.discoverModels).toHaveBeenNthCalledWith(index + 1, 'grok', true, {
+					target: { kind: 'local' },
+					cwd: path.join(cwd, id),
+					customPath: path.join(cwd, id, 'grok'),
+					model: undefined,
+					effort: 'low',
+					environment: {
+						surface: 'desktop',
+						defaultEnvVars: undefined,
+						globalShellEnvVars: globalEnv,
+						agentCustomEnvVars: providerEnv,
+						sessionCustomEnvVars: {
+							GROK_HOME: path.join(cwd, id, 'state'),
+							XAI_API_KEY: `${id}-secret`,
+						},
+					},
+				});
+				expect(result).toEqual({
+					status: 'discovered',
+					options: ['catalog-model', `${id}-model`],
+					configuredValue: `${id}-model`,
+				});
+				expect(JSON.stringify(result)).not.toContain('secret');
+				expect(JSON.stringify(result)).not.toContain(cwd);
+			}
+		});
+
+		it.each(['draft', 'provider-settings'] as const)(
+			'preserves absent, empty and blank %s environment selections',
+			async (kind) => {
+				for (const customEnvVars of [undefined, {}, { GROK_HOME: '', XAI_API_KEY: '  ' }]) {
+					const request: AgentDiscoveryRequest = {
+						providerId: 'grok',
+						context: {
+							kind,
+							cwd,
+							customPath: path.join(cwd, 'custom grok'),
+							customEnvVars,
+							model: 'manual-model',
+							effort: 'max',
+						},
+					};
+					await handlers.get('agents:getModels')!({} as never, request as never);
+					const [, refresh, selected] = mockAgentDetector.discoverModels.mock.lastCall!;
+					expect(refresh).toBe(false);
+					expect(selected).toMatchObject({
+						cwd,
+						customPath: path.join(cwd, 'custom grok'),
+						effort: 'max',
+					});
+					expect(selected.environment).toEqual({
+						surface: 'desktop',
+						defaultEnvVars: undefined,
+						sessionCustomEnvVars: customEnvVars,
+						agentCustomEnvVars: providerEnv,
+						globalShellEnvVars: globalEnv,
+					});
+				}
+			}
+		);
+
+		it.each`
+			selection                                                                                           | reason                              | options
+			${undefined}                                                                                        | ${'missing-context'}                | ${[]}
+			${{ kind: 'agent', sessionId: 'missing' }}                                                          | ${'missing-context'}                | ${[]}
+			${{ kind: 'agent', sessionId: 'mismatch' }}                                                         | ${'missing-context'}                | ${[]}
+			${{}}                                                                                               | ${'missing-context'}                | ${['saved-model']}
+			${{ cwd: 'relative' }}                                                                              | ${'missing-context'}                | ${['saved-model']}
+			${{ cwd, customEnvVars: { GROK_HOME: null } }}                                                      | ${'invalid-context'}                | ${[]}
+			${{ cwd, sessionSshRemoteConfig: false }}                                                           | ${'invalid-context'}                | ${['saved-model']}
+			${{ cwd, sessionSshRemoteConfig: null }}                                                            | ${'invalid-context'}                | ${['saved-model']}
+			${{ kind: 'provider-settings', cwd, customPath: '' }}                                               | ${'executable-context-unavailable'} | ${['saved-model']}
+			${{ cwd, sshRemoteId: 'remote' }}                                                                   | ${'remote-unqualified'}             | ${['saved-model']}
+			${{ cwd, sessionSshRemoteConfig: { enabled: true, remoteId: 'remote' } }}                           | ${'remote-unqualified'}             | ${['saved-model']}
+			${{ cwd, sessionSshRemoteConfig: { enabled: true, remoteId: null } }}                               | ${'remote-unresolved'}              | ${['saved-model']}
+			${{ cwd, sshRemoteId: 'absent' }}                                                                   | ${'remote-unresolved'}              | ${['saved-model']}
+			${{ cwd, sshRemoteId: 'disabled' }}                                                                 | ${'remote-unresolved'}              | ${['saved-model']}
+			${{ cwd, sshRemoteId: 'remote', sessionSshRemoteConfig: { enabled: false, remoteId: 'remote' } }}   | ${'remote-unresolved'}              | ${['saved-model']}
+			${{ cwd, sshRemoteId: 'remote', sessionSshRemoteConfig: { enabled: true, remoteId: 'different' } }} | ${'remote-unresolved'}              | ${['saved-model']}
+		`(
+			'refuses unqualified context $selection ($reason)',
+			async ({ selection, reason, options }) => {
+				const context = selection && { kind: 'draft', ...selection };
+				const request = { providerId: 'grok', context };
+				const result = await handlers.get('agents:getModels')!({} as never, request as never);
+				expect(result).toMatchObject({ reason, options });
+				expect(mockAgentDetector.discoverModels).not.toHaveBeenCalled();
+				expect(buildSshCommand).not.toHaveBeenCalled();
+				expect(execFileNoThrow).not.toHaveBeenCalled();
+			}
+		);
+
+		it('refuses managed discovery before calling the detector, without trusting draft authority', async () => {
+			registerAgentsHandlers({
+				...deps,
+				settingsStore: settingsStore as any,
+				getProcessManager: () => ({ managedPort: () => ({ standing: () => 'managed' }) }) as any,
+			});
+			const context = { kind: 'draft', cwd, managed: { port: { standing: 'standalone' } } };
+			const request = { providerId: 'grok', context };
+			const result = await handlers.get('agents:getModels')!({} as never, request as never);
+			expect(result).toMatchObject({
+				status: 'configured-fallback',
+				reason: 'managed-unqualified',
+			});
+			expect(mockAgentDetector.discoverModels).not.toHaveBeenCalled();
+			expect(execFileNoThrow).not.toHaveBeenCalled();
+		});
+
+		it('keeps cleared provider settings unavailable rather than restoring saved model or effort', async () => {
+			mockAgentDetector.discoverModels.mockResolvedValue([]);
+			const request: AgentDiscoveryRequest = {
+				providerId: 'grok',
+				context: { kind: 'provider-settings', cwd, model: '', effort: '' },
+			};
+			expect(await handlers.get('agents:getModels')!({} as never, request as never)).toEqual({
+				status: 'unavailable',
+				options: [],
+				reason: 'discovery-unavailable',
+			});
+			expect(
+				await handlers.get('agents:getConfigOptions')!(
+					{} as never,
+					request as never,
+					'reasoningEffort' as never
+				)
+			).toEqual({ status: 'unavailable', options: [], reason: 'metadata-unavailable' });
+			expect(mockAgentDetector.discoverModels).toHaveBeenCalledTimes(1);
+		});
+
+		it.each([false, true])(
+			'returns only configured values when discovery is empty or fails (throws=%s)',
+			async (throws) => {
+				if (throws)
+					mockAgentDetector.discoverModels.mockRejectedValue(
+						new Error('GROK_AUTH=synthetic-private-bundle')
+					);
+				else mockAgentDetector.discoverModels.mockResolvedValue([]);
+				const request: AgentDiscoveryRequest = {
+					providerId: 'grok',
+					context: { kind: 'draft', cwd, customEnvVars: { GROK_AUTH: 'synthetic-private-bundle' } },
+				};
+				const result = await handlers.get('agents:getModels')!({} as never, request as never);
+				expect(result).toEqual({
+					status: 'configured-fallback',
+					options: ['saved-model'],
+					configuredValue: 'saved-model',
+					reason: 'discovery-unavailable',
+				});
+				expect(mockAgentDetector.discoverModels).toHaveBeenCalledTimes(1);
+				if (throws)
+					expect(captureException).toHaveBeenCalledWith(
+						new Error('Selected agent discovery failed'),
+						{ operation: 'agent:discovery' }
+					);
+				const diagnostics = JSON.stringify([
+					result,
+					...vi.mocked(captureException).mock.calls.map(([error]) => String(error)),
+					...vi.mocked(logger.error).mock.calls,
+					...vi.mocked(logger.warn).mock.calls,
+					...vi.mocked(logger.info).mock.calls,
+					...vi.mocked(logger.debug).mock.calls,
+				]);
+				expect(diagnostics).not.toContain('synthetic-private-bundle');
+				expect(diagnostics).not.toContain('provider-secret');
+				expect(diagnostics).not.toContain('global-secret');
+			}
+		);
+
+		it.each(['agents:getModels', 'agents:getConfigOptions'])(
+			'rejects unscoped legacy Grok requests through %s',
+			async (channel) => {
+				await expect(
+					handlers.get(channel)!({} as never, 'grok' as never, 'reasoningEffort' as never)
+				).rejects.toThrow(
+					'Grok discovery requires selected agent, draft or provider-settings context'
+				);
+				expect(mockAgentDetector.discoverModels).not.toHaveBeenCalled();
+			}
+		);
 	});
 
 	describe('agents:getModels', () => {

@@ -24,7 +24,7 @@
  * `fakeSpawnPort`; `startTurn` and `execFileNoThrow` are mocked so no provider
  * is ever started.
  */
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('../../../../shared/maestro-lib/run/start-turn', async (importOriginal) => {
 	const actual =
@@ -333,8 +333,11 @@ describe('provider probes under admission', () => {
 	const actor = { peer: 'host-secret' } as const;
 	const initLine = (commands: string[]) =>
 		JSON.stringify({ type: 'system', subtype: 'init', slash_commands: commands }) + '\n';
-	const calls: Array<{ spec: TurnProcessSpec; options: StartTurnOptions }> = [];
+	const calls: Array<{ spec: TurnProcessSpec; options: StartTurnOptions; handlers: TurnHandlers }> =
+		[];
 	let stdoutText = '';
+	let probeFinished: Promise<void> | undefined;
+	let exitOverrides: Partial<TurnExit> = {};
 
 	async function refusalOf(promise: Promise<unknown>): Promise<DispatchRefusedError> {
 		const error = await promise.then(
@@ -349,19 +352,21 @@ describe('provider probes under admission', () => {
 		vi.clearAllMocks();
 		calls.length = 0;
 		stdoutText = '';
+		probeFinished = undefined;
+		exitOverrides = {};
 		clearProviderProbeRefusals();
 		clearClaudeSlashCommandCache();
 		// The sink: the gate sees the spec it is handed the instant before spawn,
 		// the turn prints `stdoutText` and exits 0, and the lease is released.
 		vi.mocked(startTurn).mockImplementation((spec, handlers: TurnHandlers, options) => {
-			calls.push({ spec, options });
+			calls.push({ spec, options, handlers });
 			const verdict = options.admission?.gate.admit(
 				buildDispatchSnapshot(spec, options.admission.attribution)
 			);
 			if (verdict && !verdict.ok)
 				throw new DispatchRefusedError(verdict.state, verdict.code, verdict.message);
 			options.admission?.gate.bound?.(4242);
-			const done = Promise.resolve().then(() => {
+			const done = Promise.resolve(probeFinished).then(() => {
 				handlers.onStdout?.(stdoutText);
 				const exit: TurnExit = {
 					exitCode: 0,
@@ -370,6 +375,7 @@ describe('provider probes under admission', () => {
 					stderrText: '',
 					stdoutText: '',
 					droppedOutputBytes: 0,
+					...exitOverrides,
 				};
 				options.admission?.gate.released?.(exit);
 				return exit;
@@ -454,6 +460,7 @@ describe('provider probes under admission', () => {
 				env: { PATH: '/bin' },
 			});
 			expect(calls[0].options.label).toBe('opencode-probe:models');
+			expect(calls[0].options.trackDescendants).toBeUndefined();
 			expect(port.authority.live()).toHaveLength(0);
 		});
 
@@ -570,6 +577,190 @@ describe('provider probes under admission', () => {
 			expect(unbound.message).toContain('not this installation');
 			expect(startTurn).not.toHaveBeenCalled();
 		});
+	});
+
+	describe('bounded discovery probes', () => {
+		const request = {
+			providerId: 'opencode',
+			kind: 'models',
+			command: '/custom/bin/provider',
+			args: ['models'],
+			cwd: '/synthetic/project',
+			env: { API_KEY: 'synthetic-probe-secret' },
+			limits: { timeoutMs: 100, maxOutputBytes: 8 },
+		};
+		beforeEach(() => vi.useFakeTimers());
+		afterEach(() => {
+			vi.useRealTimers();
+			vi.restoreAllMocks();
+		});
+
+		it.each(['darwin', 'linux', 'win32'])(
+			'refuses Grok on %s before admission, with no unbounded retry',
+			async (platform) => {
+				const original = Object.getOwnPropertyDescriptor(process, 'platform')!;
+				Object.defineProperty(process, 'platform', { value: platform });
+				try {
+					const port = fakeSpawnPort();
+					const verify = vi.spyOn(port, 'verify');
+					for (const kind of ['version', 'models']) {
+						for (const limits of [undefined, request.limits]) {
+							for (const managed of [undefined, { port, actor }]) {
+								const error = await refusalOf(
+									runProviderProbe({ ...request, providerId: 'grok', kind, limits }, managed)
+								);
+								expect(error).toMatchObject({ state: 'unavailable', code: 'runtime-unavailable' });
+								expect(error.message).toBe(
+									'Grok discovery unavailable: this host cannot guarantee finite probe lifetime. Nothing was started.'
+								);
+							}
+						}
+					}
+					expect(verify).not.toHaveBeenCalled();
+					expect(port.asked).toHaveLength(0);
+					expect(port.authority.live()).toHaveLength(0);
+					expect(startTurn).not.toHaveBeenCalled();
+					expect(execFileNoThrow).not.toHaveBeenCalled();
+					expect(vi.getTimerCount()).toBe(0);
+				} finally {
+					Object.defineProperty(process, 'platform', original);
+				}
+			}
+		);
+
+		it.each([
+			{ timeoutMs: 0, maxOutputBytes: 8 },
+			{ timeoutMs: Infinity, maxOutputBytes: 8 },
+			{ timeoutMs: 2 ** 31, maxOutputBytes: 8 },
+			{ timeoutMs: 1.5, maxOutputBytes: 8 },
+			{ timeoutMs: 100, maxOutputBytes: 0 },
+			{ timeoutMs: 100, maxOutputBytes: Infinity },
+			{ timeoutMs: 100, maxOutputBytes: Number.MAX_SAFE_INTEGER + 1 },
+		])('rejects invalid limits before Grok containment admission: %j', async (limits) => {
+			await expect(runProviderProbe({ ...request, providerId: 'grok', limits })).rejects.toThrow(
+				RangeError
+			);
+			expect(startTurn).not.toHaveBeenCalled();
+			expect(execFileNoThrow).not.toHaveBeenCalled();
+		});
+
+		it('returns pre-aborted cancellation before any Grok refusal or admission', async () => {
+			const controller = new AbortController();
+			controller.abort();
+			const port = fakeSpawnPort();
+			await expect(
+				runProviderProbe(
+					{ ...request, providerId: 'grok', signal: controller.signal },
+					{ port, actor }
+				)
+			).resolves.toEqual({ stdout: '', stderr: 'Provider probe canceled.', exitCode: 'ECANCELED' });
+			expect(port.asked).toHaveLength(0);
+			expect(startTurn).not.toHaveBeenCalled();
+			expect(execFileNoThrow).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			['timeout', 'ETIMEDOUT', 'Provider probe exceeded its time budget.'],
+			['output', 'ENOBUFS', 'Provider probe exceeded its output limit.'],
+			['cancel', 'ECANCELED', 'Provider probe canceled.'],
+			['success', 0, ''],
+			['failure', 'ESPAWN', 'Provider probe failed.'],
+		] as const)(
+			'joins controlled %s cleanup before releasing the lease',
+			async (mode, exitCode, stderr) => {
+				let finish!: () => void;
+				probeFinished = new Promise<void>((resolve) => {
+					finish = resolve;
+				});
+				const port = fakeSpawnPort();
+				const controller = new AbortController();
+				const removeListener = vi.spyOn(controller.signal, 'removeEventListener');
+				const pending = runProviderProbe(
+					{ ...request, signal: controller.signal },
+					{ port, actor }
+				);
+				let settled = false;
+				void pending.then(() => {
+					settled = true;
+				});
+				await vi.advanceTimersByTimeAsync(0);
+				const { handlers, options, spec } = calls[0];
+				const released = vi.spyOn(options.admission!.gate, 'released');
+				expect(spec).toMatchObject({
+					command: request.command,
+					cwd: request.cwd,
+					env: request.env,
+				});
+				expect(options).toMatchObject({
+					trackDescendants: true,
+					stopGraceMs: 250,
+					stdoutTailLimit: 0,
+					stderrTailLimit: 0,
+				});
+				if (mode === 'timeout') await vi.advanceTimersByTimeAsync(50);
+				handlers.onStdout?.('éé');
+				handlers.onStderr?.('éé');
+				expect(options.signal?.aborted).toBe(false);
+				if (mode === 'timeout') await vi.advanceTimersByTimeAsync(50);
+				if (mode === 'output') handlers.onStderr?.('x');
+				if (mode === 'cancel') controller.abort();
+				if (mode === 'failure')
+					exitOverrides = { exitCode: 1, spawnError: new Error('synthetic-probe-secret') };
+				const stopped = ['timeout', 'output', 'cancel'].includes(mode);
+				expect(options.signal?.aborted).toBe(stopped);
+				if (stopped) handlers.onStdout?.('synthetic-probe-secret');
+				expect(settled).toBe(false);
+				expect(released).not.toHaveBeenCalled();
+				expect(port.authority.live()).toHaveLength(1);
+				finish();
+				const result = await pending;
+				expect(result).toEqual({ stdout: mode === 'success' ? 'éé' : '', stderr, exitCode });
+				expect(JSON.stringify(result)).not.toContain('synthetic-probe-secret');
+				expect(released).toHaveBeenCalledOnce();
+				expect(port.authority.live()).toHaveLength(0);
+				expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
+				expect(vi.getTimerCount()).toBe(0);
+				expect(execFileNoThrow).not.toHaveBeenCalled();
+			}
+		);
+
+		it('releases admission canceled while pending without starting a child', async () => {
+			const controller = new AbortController();
+			const port = fakeSpawnPort({
+				decide: async () => {
+					controller.abort();
+					return { decision: 'allow', policyRevision: 1 };
+				},
+			});
+			await expect(
+				runProviderProbe({ ...request, signal: controller.signal }, { port, actor })
+			).resolves.toEqual({ stdout: '', stderr: 'Provider probe canceled.', exitCode: 'ECANCELED' });
+			expect(port.asked).toHaveLength(1);
+			expect(port.authority.live()).toHaveLength(0);
+			expect(startTurn).not.toHaveBeenCalled();
+			expect(execFileNoThrow).not.toHaveBeenCalled();
+			expect(vi.getTimerCount()).toBe(0);
+		});
+
+		it.each([false, true])(
+			'releases a synchronous spawn failure or sink refusal (%s) without retry',
+			async (refused) => {
+				const port = fakeSpawnPort();
+				const error = refused
+					? new DispatchRefusedError('denied', 'policy-denied', 'Probe held.')
+					: new Error('synthetic-probe-secret');
+				vi.mocked(startTurn).mockImplementationOnce(() => {
+					throw error;
+				});
+				await expect(runProviderProbe(request, { port, actor })).rejects.toEqual(
+					refused ? error : new Error('Provider probe could not be started.')
+				);
+				expect(port.authority.live()).toHaveLength(0);
+				expect(startTurn).toHaveBeenCalledOnce();
+				expect(execFileNoThrow).not.toHaveBeenCalled();
+				expect(vi.getTimerCount()).toBe(0);
+			}
+		);
 	});
 
 	describe('the slash-command probe', () => {

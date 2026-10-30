@@ -14,6 +14,7 @@ vi.mock('electron', () => ({
 }));
 
 import { createAgentsApi } from '../../../main/preload/agents';
+import type { AgentDiscoveryRequest, AgentDiscoveryResult } from '../../../shared/types';
 
 describe('Agents Preload API', () => {
 	let api: ReturnType<typeof createAgentsApi>;
@@ -368,6 +369,70 @@ describe('Agents Preload API', () => {
 
 			expect(mockInvoke).toHaveBeenCalledWith('agents:getModels', 'opencode', true, undefined);
 		});
+	});
+
+	describe.each(['getModels', 'getConfigOptions'] as const)('%s selected discovery', (method) => {
+		it.each<AgentDiscoveryRequest['context']>([
+			{ kind: 'agent', sessionId: 'selected-agent', model: 'manual-model', effort: 'high' },
+			{
+				kind: 'draft',
+				cwd: '/remote/workspace',
+				customPath: '/custom bin/grok',
+				customEnvVars: { GROK_HOME: '/account-a', GROK_AUTH: '', XAI_API_KEY: 'synthetic-key' },
+				sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-a' },
+				sshRemoteId: 'remote-a',
+			},
+			{ kind: 'provider-settings', cwd: '/workspace', customEnvVars: {}, model: '', effort: '' },
+		])('forwards the complete $kind selection without positional defaults', async (context) => {
+			const request: AgentDiscoveryRequest = { providerId: 'grok', forceRefresh: true, context };
+			const response: AgentDiscoveryResult =
+				context.kind === 'provider-settings'
+					? { status: 'unavailable', options: [], reason: 'managed-unqualified' }
+					: {
+							status: context.kind === 'agent' ? 'discovered' : 'configured-fallback',
+							options: ['manual-model'],
+							configuredValue: 'manual-model',
+							...(context.kind === 'draft' ? { reason: 'remote-unqualified' as const } : {}),
+						};
+			mockInvoke.mockResolvedValue(response);
+			const result =
+				method === 'getModels'
+					? await api.getModels(request)
+					: await api.getConfigOptions(request, 'reasoningEffort');
+			expect(mockInvoke.mock.calls).toEqual([
+				method === 'getModels'
+					? ['agents:getModels', request]
+					: ['agents:getConfigOptions', request, 'reasoningEffort'],
+			]);
+			expect(result).toBe(response);
+			expect(JSON.stringify(result)).not.toContain('synthetic-key');
+		});
+
+		it('propagates IPC rejection without retrying legacy host discovery', async () => {
+			const request: AgentDiscoveryRequest = {
+				providerId: 'grok',
+				context: { kind: 'agent', sessionId: 'missing' },
+			};
+			const error = new Error('Selected discovery context required');
+			mockInvoke.mockRejectedValueOnce(error);
+			const pending =
+				method === 'getModels'
+					? api.getModels(request)
+					: api.getConfigOptions(request, 'reasoningEffort');
+			await expect(pending).rejects.toBe(error);
+			expect(mockInvoke).toHaveBeenCalledTimes(1);
+		});
+	});
+
+	it('preserves legacy model SSH and config option positional signatures', async () => {
+		const options = ['configured-option'];
+		mockInvoke.mockResolvedValue(options);
+		expect(await api.getModels('opencode', true, 'remote-legacy')).toBe(options);
+		expect(await api.getConfigOptions('codex', 'reasoningEffort', true)).toBe(options);
+		expect(mockInvoke.mock.calls).toEqual([
+			['agents:getModels', 'opencode', true, 'remote-legacy'],
+			['agents:getConfigOptions', 'codex', 'reasoningEffort', true],
+		]);
 	});
 
 	describe('discoverSlashCommands', () => {
