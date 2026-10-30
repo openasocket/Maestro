@@ -10,7 +10,7 @@
 		"commit": "1b1737e8b611a87a21acb35e6a51ac5056894e87",
 		"aheadBehind": [2, 3]
 	},
-	"scope": "Required user-visible union of Claude Code, Codex and Antigravity, retaining Grok identity. This initial source audit does not execute the later hardcoded-branch audit, design or verification tasks.",
+	"scope": "Required user-visible union of Claude Code, Codex and Antigravity, retaining Grok identity. Initial registry audit plus GT1-01-03 hardcoded consumer audit; implementation, protocol design and behavioral qualification remain pending.",
 	"statusSemantics": {
 		"pending": "Full required implementation not established; currentEvidence can describe existing partial code.",
 		"not-run": "Acceptance not executed in this audit, even if legacy comments claim verification.",
@@ -214,7 +214,13 @@
 			"S28",
 			"S29",
 			"S30",
-			"S31"
+			"S31",
+			"S32",
+			"S33",
+			"S34",
+			"S35",
+			"S36",
+			"S37"
 		],
 		"laterAuditOwners": ["GT1-01-03", "GT1-01-07", "GT1-11-01"]
 	},
@@ -240,6 +246,12 @@
 		"phase01-audit": {
 			"path": "Plans/grok-tier1/evidence/01.md#gt1-01-02-parity-audit",
 			"sourceCommit": "afd764f2e7efb9892c645c3def957287ba749b58",
+			"provenance": "source-supported",
+			"acceptanceRun": false
+		},
+		"phase01-branches": {
+			"path": "Plans/grok-tier1/evidence/01.md#gt1-01-03-provider-branch-audit",
+			"sourceCommit": "81080100b939c0497874b3998dd77546b670cc0d",
 			"provenance": "source-supported",
 			"acceptanceRun": false
 		}
@@ -816,6 +828,566 @@
 		"F143": {
 			"path": "src/main/agents/capabilities.ts",
 			"sha256": "641d7a15cec051b4f94aad178065664e9e3daddcf63d512890dbee05190a6939"
+		},
+		"F144": {
+			"path": "src/shared/agent-run/types.ts",
+			"sha256": "66f455848c965a4f5e17125619b518d321a0e9e443b26bae928c30fc558450c0"
+		},
+		"F145": {
+			"path": "src/shared/agent-run/provider.ts",
+			"sha256": "d51e1ac4e8e269339d77645c4ed91d54e907ae1462c8b94e469d8e2f56f23810"
+		},
+		"F146": {
+			"path": "src/main/agent-run/capture-service.ts",
+			"sha256": "e9d2ae037f619fd17c379adb8e21124fed6948df5554da3ea2b9479ff0787837"
+		},
+		"F147": {
+			"path": "src/cli/services/agent-run-capture.ts",
+			"sha256": "40354edd0b26e38bcd96c8e8a7269512df536bb5783e65eceaa3344a6f07b2cb"
+		},
+		"F148": {
+			"path": "src/shared/feedbackAccounts.ts",
+			"sha256": "671497b06e3271b973ae6ff34ec97aa212d5e986bd8678536a0b82edb1e6a185"
+		},
+		"F149": {
+			"path": "docs/feedback.md",
+			"sha256": "851160eaee80fb3f93a8fca58f47a60fd7b6d909c8c2c5e855bc5e90de1934bf"
+		},
+		"F150": {
+			"path": "src/shared/contextCompaction.ts",
+			"sha256": "36f797ddd110d4964c2704d3d2d2b8ba1ad06391140d89ed4b156a40d6a8d3e2"
+		},
+		"F151": {
+			"path": "src/renderer/services/contextCompaction.ts",
+			"sha256": "7470998cede328b457312cd76aaca7ec7bc6d5fbdbc1a14490017cd3372cf0d8"
+		},
+		"F152": {
+			"path": "src/renderer/stores/retryStore.ts",
+			"sha256": "bc1891467942e9d8bfb5c5977a82c789398fa5d7b3a2f13ec39fde0283ea90db"
+		},
+		"F153": {
+			"path": "docs/agent-guides/CANONICAL-UTILITIES.md",
+			"sha256": "a3b35b2acc2e0392a34fa8e4d74d4d43210dde1bcd85146019f5e48ecdeb21a0"
+		},
+		"F154": {
+			"path": "src/main/coworking/installers/index.ts",
+			"sha256": "d66393a784171012f1b64bbac8addd7cc4f5eade9b9c7bf53b930366f1585c72"
+		},
+		"F155": {
+			"path": "src/main/coworking/coworking-installer.ts",
+			"sha256": "40b1ed5c5a0b1fa936bddc374a2d736f3fdad3e398f040eac569313a3de00514"
+		},
+		"F156": {
+			"path": "src/main/cue/bundle/cue-bundle-exporter.ts",
+			"sha256": "c23f6da4aeb0ce37f3c963ce1f1bd4f485a92b6341217127257944c45ff3688b"
+		},
+		"F157": {
+			"path": "src/main/cue/bundle/cue-bundle-importer.ts",
+			"sha256": "827cf3249bc32f448d98ce766b618056ca1f3ca1572edea73b3a28c7420041f9"
+		},
+		"F158": {
+			"path": "src/main/preload/sessions.ts",
+			"sha256": "fdb6aa92e07eee865e110a54db1b1360d50a3555827127146a60c504e9eae13c"
+		},
+		"F159": {
+			"path": "src/renderer/hooks/stats/useGlobalAgentStats.ts",
+			"sha256": "9dd7aeae7b095ddb434151a7fc8824fc660ca53c992239a9d785fcc77a9607d8"
+		},
+		"F160": {
+			"path": "src/renderer/components/AboutModal.tsx",
+			"sha256": "528b82fa90c37ddc629c8a4216c422ceec4409a95c8f09f609385307d4293da0"
+		},
+		"F161": {
+			"path": "src/renderer/components/AchievementShareButton.tsx",
+			"sha256": "3463b3211014a5d4727f8a7c8a1b092eeb84275feb8158d2ec2bc2715a87797b"
+		},
+		"F162": {
+			"path": "src/__tests__/shared/agent-run/provider.test.ts",
+			"sha256": "a4989cef053f56ebddea869236490258e11b67bc7f8b463c534e1de6c6c662ff"
+		},
+		"F163": {
+			"path": "src/__tests__/main/agent-run/capture-service.test.ts",
+			"sha256": "9a99bc67b20f79a5b131773b2f17731fca210a716ef7030228c111107d31a7ca"
+		},
+		"F164": {
+			"path": "src/__tests__/shared/feedbackAccounts.test.ts",
+			"sha256": "ce95fc771a1e0f3da927e31a5da0d007ad1b7ed998cb89ae63a323255062eb10"
+		},
+		"F165": {
+			"path": "src/__tests__/renderer/services/contextCompaction.test.ts",
+			"sha256": "def83fd3ade7b824d294017281150aed4a8ceeb1c6c9329c2d551cb77df9da8d"
+		},
+		"F166": {
+			"path": "src/cli/commands/list-sessions.ts",
+			"sha256": "ad199a4f89f49a26112afe05f52325ca7e8fa04cc0516bb8724090079ef562d2"
+		},
+		"F167": {
+			"path": "src/__tests__/cli/commands/list-sessions.test.ts",
+			"sha256": "7da91d62c55c44d031bad0e33329b4e9169faf26a5a9a6cb8d2961d4286c4cec"
+		},
+		"F168": {
+			"path": "src/shared/maestro-lib/runtime/providers.ts",
+			"sha256": "2b0fcaf29adc0f69c4f561580c138da7593d3748b17e150764cae90eaf1f0682"
+		},
+		"F169": {
+			"path": "src/shared/maestro-lib/runtime/__tests__/providers.test.ts",
+			"sha256": "792e1936a53d7a6562a62b3e2a68de7153a481b3f3368a9a672e5dd634c0e51a"
+		},
+		"F170": {
+			"path": "src/__tests__/cli/services/agent-spawner.test.ts",
+			"sha256": "9616b4a45f3437ea509ceaf5e0198bdb391a8139966b0f306aeb31806a241032"
+		},
+		"F171": {
+			"path": "src/shared/maestro-lib/launch/env.ts",
+			"sha256": "4aca7fa1485b6c07c61cfa0579294a3b60e02c4894eeb5e3ef262fb93b3b50fa"
+		},
+		"F172": {
+			"path": "src/shared/envVarCatalog.ts",
+			"sha256": "452de9639586916f77c49a4e898962f7795a9b600df9a2211cbb59bd8e0c63ce"
+		},
+		"F173": {
+			"path": "src/__tests__/shared/maestro-lib/launch/launch-plan-secrets.test.ts",
+			"sha256": "f8bc7483d5a78ffa8a5c1bda118ec1c9cb0bcd9e4944046efe0bb50313bf884e"
+		},
+		"F174": {
+			"path": "src/__tests__/shared/providerProfiles.test.ts",
+			"sha256": "8e40a840c88e19c37f1575db90e6fe686e888c6d7cb9944423057e4e29dada38"
+		},
+		"F175": {
+			"path": "src/shared/maestro-lib/translation/resources.ts",
+			"sha256": "8fa6c3b00f18ecf0aa574e500b6ef05d06eca327e842590a1aa484350c27024f"
+		},
+		"F176": {
+			"path": "src/shared/maestro-lib/launch/launch-plan.ts",
+			"sha256": "9706b3d79f2c04f5c6ff178e9f59d63d41dc4ba8028b115590562cc109a0bb94"
+		},
+		"F177": {
+			"path": "src/__tests__/shared/maestro-lib/translation-native.test.ts",
+			"sha256": "f46a82bbf9fa828d8a898e5196d35acd6d56887b321ad624e3aad04efc40554f"
+		},
+		"F178": {
+			"path": "src/__tests__/shared/maestro-lib/translation-reconcile.test.ts",
+			"sha256": "875dd8d3e60a00c5ead6f82c8ba4ddbe0255eae4040ca11ecbf2157082eec3ca"
+		},
+		"F179": {
+			"path": "src/__tests__/shared/modelTiers.test.ts",
+			"sha256": "c5782b74f452ce4925133ca6aa3a59a1011cbe96b1ade5c6b6022927362280de"
+		},
+		"F180": {
+			"path": "docs/cli-reference.md",
+			"sha256": "725f41bddaad80a6512d4c96bfd5fd7a45d3730e946dc78e9ebb91e68b5d4256"
+		},
+		"F181": {
+			"path": "src/__tests__/cli/commands/pianola-learn.test.ts",
+			"sha256": "bb61417af01a284311f0a77657abeb2cdad9ef23bf8b7f0982bbf3c8a9122eac"
+		},
+		"F182": {
+			"path": "src/__tests__/shared/pianola/transcript-mining.test.ts",
+			"sha256": "12eeba62d411cb87b1e77320e56dc987559e1228f61deabe1cfd0678a1170442"
+		},
+		"F183": {
+			"path": "src/cli/commands/send.ts",
+			"sha256": "58ab0a873723a5d67cee3bde066903508d9da7993fc180374be94369ce6ca5d3"
+		},
+		"F184": {
+			"path": "src/__tests__/shared/plugins/mcp-agent-config.test.ts",
+			"sha256": "83cc468b1eb7643f75e31065eac63cadd090fd18744bb627986815864514b25c"
+		},
+		"F185": {
+			"path": "src/__tests__/shared/maestro-lib/managed/contracts.test.ts",
+			"sha256": "5a8904c60d4e7aa6f67ff2ebad7981c8b446f79cae56e560af37c89060209835"
+		},
+		"F186": {
+			"path": "src/shared/maestro-lib/run/turn-capture.ts",
+			"sha256": "61e72787f08422df193008131920575c544f80bbce2db5ebee3c33cf0cc90cca"
+		},
+		"F187": {
+			"path": "src/shared/maestro-lib/streaming/__tests__/turn-outcome.test.ts",
+			"sha256": "332bb378f43034a27865f9303dceab00f8c6553cb5fdd26555a6955f72b88bce"
+		},
+		"F188": {
+			"path": "docs/cli.md",
+			"sha256": "40db88b12271382d6e21ac8f29475a7dcbf0a0f9a8d442111529bfed90f34515"
+		},
+		"F189": {
+			"path": "docs/provider-notes.md",
+			"sha256": "8160cb13904f2d9eefae927bc4632097f5443711fc9c5d26657940ea9dfb3d81"
+		},
+		"F190": {
+			"path": "docs/getting-started.md",
+			"sha256": "5fd8394d4e24e41b6a0b03f537eb8b93bf695dd31551c9566c944d22a7ce6656"
+		},
+		"F191": {
+			"path": "docs/features.md",
+			"sha256": "a2b0e79d2d69b131755a847b8999a383190ddc8ecae7a90c4c90a376b266c660"
+		},
+		"F192": {
+			"path": "docs/index.md",
+			"sha256": "03cd49fb5e2aec4e2398023b03f43d02f359b33fccb243ca7e9655d8befc4066"
+		},
+		"F193": {
+			"path": "src/__tests__/renderer/components/NewInstanceModal/AgentPickerGrid.test.tsx",
+			"sha256": "9f52fa7574b4db9ac4bab63ec3ca509918d2e8ab775c8502d9b40e0699525662"
+		},
+		"F194": {
+			"path": "src/renderer/constants/agentIcons.ts",
+			"sha256": "c3c7713de2fa266727d5dcb1093c3cb476cdb5dcf563d980267da4185992a050"
+		},
+		"F195": {
+			"path": "src/renderer/components/Wizard/screens/ConversationScreen/utils/providerName.ts",
+			"sha256": "6b7b270547ad0dbba373501685f010fd693ef4473a529c1f12fa2b4e5a1b1ddd"
+		},
+		"F196": {
+			"path": "src/__tests__/renderer/components/Wizard/screens/ConversationScreen/utils.test.ts",
+			"sha256": "ba6099d0f9ad8a4d013b9e40cfcf01c63d553ac1933d894fed3a6433ccb4b4d3"
+		},
+		"F197": {
+			"path": "src/renderer/hooks/wizard/useWizardHandlers.ts",
+			"sha256": "499ba8994837774b8531346aaea0a4e0cb9fb3e77fc402cc8b3fb1cde2df78c7"
+		},
+		"F198": {
+			"path": "src/__tests__/renderer/hooks/useWizardHandlers.test.ts",
+			"sha256": "60941df292d824ea71d6dfc8db464ba8b7cd3b056700f24e753d338c7c89483b"
+		},
+		"F199": {
+			"path": "src/renderer/hooks/input/useInputProcessing.ts",
+			"sha256": "e3093a4e152526ff74f1e568c2f9a3b6e45947b355ba02994eaf9a7ad36ef936"
+		},
+		"F200": {
+			"path": "src/__tests__/renderer/hooks/useInputProcessing.test.ts",
+			"sha256": "9caa8d03715f61813d08ee75b68d0af072e4da91b79331c1b288787b71d3e1a9"
+		},
+		"F201": {
+			"path": "src/shared/authPaths.ts",
+			"sha256": "1c2cb1b789cb823e548f12929fead10b4a031c025f2e3622a14d474b89b8c99f"
+		},
+		"F202": {
+			"path": "src/renderer/hooks/agent/useKnownAuthDirs.ts",
+			"sha256": "c70affe3c4bc3497ee29bb0bac41c62634c1580aebd069e6e0689ff77095f151"
+		},
+		"F203": {
+			"path": "src/renderer/components/shared/AuthPathValueInput.tsx",
+			"sha256": "95838373e27cbb445a2704f621c1f8d974a0c1b7c8fd759b3b9a34cafea7c782"
+		},
+		"F204": {
+			"path": "src/renderer/components/Settings/EnvVarsEditor.tsx",
+			"sha256": "adc9e099a8bfc723893d2f02d67efb508292ec37f3b853332eb5c328cc213d62"
+		},
+		"F205": {
+			"path": "src/renderer/components/shared/AgentConfigPanel.tsx",
+			"sha256": "82d4216ee2480195f7e7e02b8b2b4541745a00cde8eb843a589163e2fe68aa4e"
+		},
+		"F206": {
+			"path": "src/__tests__/renderer/hooks/agent/useKnownAuthDirs.test.ts",
+			"sha256": "e957df9ed858609f2a0ade05bfbccebaa4e005b53a8a236544fbbb40d88b05f6"
+		},
+		"F207": {
+			"path": "src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx",
+			"sha256": "15f97aa2757eb25a2bf84414cfaa91a9dc8a46f1224b31c3049dbccf07d165bd"
+		},
+		"F208": {
+			"path": "src/__tests__/main/ipc/handlers/agents.test.ts",
+			"sha256": "3a4a6fa1a4b643091cbf93cf1caf3d21406968f9398203df15ac793091cb105c"
+		},
+		"F209": {
+			"path": "src/renderer/types/index.ts",
+			"sha256": "0b9cb1c33da43fbf51175cb9e48c00375cf93910cdebf65252960c822e83fd05"
+		},
+		"F210": {
+			"path": "src/__tests__/renderer/utils/worktreeSession.test.ts",
+			"sha256": "a034b6606b8027a89c09e8fdefcd7242a254fbf7f0bce494c8ab5c87ef7057c6"
+		},
+		"F211": {
+			"path": "src/__tests__/renderer/utils/worktreeSpawn.test.ts",
+			"sha256": "d0a7384ab97f4738a7e1d55040bb7205a31df05fde19c7dc54ac3d96db614581"
+		},
+		"F212": {
+			"path": "src/renderer/hooks/remote/useRemoteIntegration.ts",
+			"sha256": "f76bb201b54719d7d59b7d7a0891ddad752a3b6daca971c3d9833a69a0bdb4ad"
+		},
+		"F213": {
+			"path": "src/renderer/services/contextGroomer.ts",
+			"sha256": "847ff389afe81439cfaad97587682ca379c24eb2fb854880d1fff0996fc31832"
+		},
+		"F214": {
+			"path": "src/renderer/hooks/agent/useSendToAgent.ts",
+			"sha256": "46879656fb7856808690bb15b32dfd780871e0bd85141828da75e8fa74ec76a3"
+		},
+		"F215": {
+			"path": "src/renderer/hooks/agent/useSessionRecovery.ts",
+			"sha256": "d5ba10fcb07338edc985ccf86c214680f373bbac52e425dbc343616478c890df"
+		},
+		"F216": {
+			"path": "src/__tests__/renderer/services/contextGroomer.test.ts",
+			"sha256": "ec50a2abb42e0bca9b3a17bc99eaaceaa717f7cf6be0c9b4bc824548946bb039"
+		},
+		"F217": {
+			"path": "src/__tests__/renderer/hooks/useSendToAgent.test.ts",
+			"sha256": "6bb9f5d93f63e3e82ab14e5b2f3cf74ae0d856ad021e70cdc8f5ea2f72c51694"
+		},
+		"F218": {
+			"path": "src/renderer/utils/starredSessions.ts",
+			"sha256": "f547c46dc8985e1a1069876eff7b9721b048d10ac3c38994aa8da2d27a3bb047"
+		},
+		"F219": {
+			"path": "src/renderer/hooks/agent/useSessionPagination.ts",
+			"sha256": "9d97457fa78bd1de771cc89a6cd28cd003b431354b7e68e29b28d9b0fa8c1ec5"
+		},
+		"F220": {
+			"path": "src/renderer/services/resumableSession.ts",
+			"sha256": "727456bea4fb1cea313e17950277ef9eefff4dce5c7f37f7affa900a3f279fb6"
+		},
+		"F221": {
+			"path": "src/__tests__/renderer/hooks/useSessionPagination.test.ts",
+			"sha256": "4d1b50570ddb05f9deaa7c3ea1e65d9d9265976fb55d2d6b87f6766fbcf49c5e"
+		},
+		"F222": {
+			"path": "src/__tests__/renderer/services/resumableSession.relay.test.ts",
+			"sha256": "c35fa929659eff988660dae75f18eb09d5635662bcdd78f0427417194307a594"
+		},
+		"F223": {
+			"path": "src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsAggregateStats.ts",
+			"sha256": "f6ffbb74e89c0d612715c31712d145d421033be626cae50e4e8ec283c9699a1d"
+		},
+		"F224": {
+			"path": "src/__tests__/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsAggregateStats.test.ts",
+			"sha256": "8e0cb754d1d5810f97972cd16b74216e695c1e3dc6be2553b2bc0398b2b397aa"
+		},
+		"F225": {
+			"path": "src/renderer/utils/sendMenu.ts",
+			"sha256": "5a1f24e0b87ce715df2e307099c0218e7e8a0c395b586f68fbdc1567a20aea75"
+		},
+		"F226": {
+			"path": "src/renderer/utils/executionQueue.ts",
+			"sha256": "94fb5e057ee94519c6ea0b2e108b1f8dfa7f33c2b4e9bb1d0bfc1baae50d11f3"
+		},
+		"F227": {
+			"path": "src/__tests__/renderer/utils/sendMenu.test.ts",
+			"sha256": "b5478a274f2abf881f46c6bf55562164cbf7bebb8e33ab4fbf1e8b5db8bea70e"
+		},
+		"F228": {
+			"path": "src/__tests__/renderer/components/InputArea/components/SendMenuPopover.test.tsx",
+			"sha256": "4ee6f836932567b49b261c21e52aaac5ab64326f27cfd08c572c9b6f4a581296"
+		},
+		"F229": {
+			"path": "src/renderer/services/codexAutoReset.ts",
+			"sha256": "ca17c34540479f196d56169ccbfaa21be921d88fbff7e271c7ea210465459ad6"
+		},
+		"F230": {
+			"path": "src/__tests__/renderer/components/MainPanel/MainPanelHeader.test.tsx",
+			"sha256": "53deebbfd8dc3541ae87bbab9a56fb685b8bca1344f4b0e575569b1edda5d9df"
+		},
+		"F231": {
+			"path": "src/renderer/components/TerminalOutput/TerminalOutput.tsx",
+			"sha256": "128a5bf15fb1eb141d96c4ec24a340eaedc077ba28d8cf67d02c1256b03cc68b"
+		},
+		"F232": {
+			"path": "src/renderer/services/codexFollowup.ts",
+			"sha256": "61ed879c0d31e1ae70e45f6a39a84c29a38dbd04056ce85689c39054991e76ba"
+		},
+		"F233": {
+			"path": "src/web/hooks/useAgentManagement.ts",
+			"sha256": "0cb5b88acec5966e6df6c7015c243e792071e1ebad0e31ad0847fc0706b8812c"
+		},
+		"F234": {
+			"path": "src/web/hooks/useMobileSessionManagement.ts",
+			"sha256": "f58b8941df5593804a43ada9f381e3c3c09b4492791e5c264020445b265ba9d1"
+		},
+		"F235": {
+			"path": "src/renderer/hooks/remote/useAppRemoteEventListeners.ts",
+			"sha256": "e319c45982456fdcd03751e40a538bdd32f9139883c78d6488f0a74084b6c8c5"
+		},
+		"F236": {
+			"path": "src/__tests__/main/coworking/installers/codex.test.ts",
+			"sha256": "b802c039dc79a3db67978d84b3b9d3190978d52c0e8deec3da192795a2fa8cd4"
+		},
+		"F237": {
+			"path": "src/__tests__/main/coworking/installers/claude-code.test.ts",
+			"sha256": "712b0eb1b324a87ea35bb15a2787f583afb0902b4e2024775b4373217d831958"
+		},
+		"F238": {
+			"path": "src/__tests__/main/coworking/installers/managed.test.ts",
+			"sha256": "e7d86a930e55c8390da4631d89e8326ebcaec3ede64322fe00d40f08e88c8731"
+		},
+		"F239": {
+			"path": "src/__tests__/main/ipc/handlers/coworking.test.ts",
+			"sha256": "e3527a06a8247c29424e6c8beaae9058a6a750fe55028836c87685f96fd4e666"
+		},
+		"F240": {
+			"path": "src/__tests__/main/cue/bundle/cue-bundle-claude-roundtrip.test.ts",
+			"sha256": "e99aa28e38e957d7c4b9aaa39b5cf1cb3fb48f74ff2c9728bf4564e3b3044a26"
+		},
+		"F241": {
+			"path": "src/__tests__/main/cue/bundle/cue-bundle-roundtrip.test.ts",
+			"sha256": "9c6681d305286cd0705ce5168e3ac96843e3e7aa715643e95350d763e845531b"
+		},
+		"F242": {
+			"path": "src/__tests__/main/cue/bundle/cue-bundle-importer.test.ts",
+			"sha256": "d4435d9d4427882d11d07c438d3fd48b1da9be1599a410db8dc1cd053ace61ae"
+		},
+		"F243": {
+			"path": "src/__tests__/main/ipc/handlers/agentSessions.test.ts",
+			"sha256": "79adff58118a2f4559ff9a8d1c3c7de9c211df7b9cc7ad0285d3809f79f76670"
+		},
+		"F244": {
+			"path": "src/__tests__/main/agents/codex-skills.test.ts",
+			"sha256": "75297c66819ba1ec1cb8f09a9e5c1f4b55b6108e1df124e2f7d4a2ca9da3786d"
+		},
+		"F245": {
+			"path": "src/main/ipc/handlers/memory.ts",
+			"sha256": "5a57dee393a9e7d737320dd8284c8809fc80dafcacb27e8a1d2c564fff44d8ca"
+		},
+		"F246": {
+			"path": "src/__tests__/main/memory-manager.test.ts",
+			"sha256": "c3d95899477cdbe5a6f33b0671f8d9a45bf07e2fea81193f0230f6e00f001b34"
+		},
+		"F247": {
+			"path": "src/__tests__/main/agents/provider-account-dirs.test.ts",
+			"sha256": "33699cab04a063d30652999ace7e2bddd9802dfc6226bbda55380521288da904"
+		},
+		"F248": {
+			"path": "src/__tests__/main/storage/grok-session-storage.test.ts",
+			"sha256": "f8842c38074a8f56d88820b758cd3424d65d8c001f21fb5963f8864d59e8d7e5"
+		},
+		"F249": {
+			"path": "src/__tests__/main/stats/token-usage/token-usage-accessor.test.ts",
+			"sha256": "d5f8c753f7bbfa006a9cea65e342de089ec8836d557441b677d6e82cb33e1696"
+		},
+		"F250": {
+			"path": "src/__tests__/main/agents/detector.test.ts",
+			"sha256": "f48f15b2fca8f6afa8fb270e891d484e1fb2e3ee83dc31c3ac2ef4c690f2b847"
+		},
+		"F251": {
+			"path": "src/__tests__/main/agents/capability-snapshot.test.ts",
+			"sha256": "8bbeb41d211a9fe48ccab080d60a6bdefdd97f92580417ded4ee9c23a2edd026"
+		},
+		"F252": {
+			"path": "src/__tests__/main/plugins/plugin-headless-agent-runner.test.ts",
+			"sha256": "4719f45c5f29469cdca5eb24df2ea05838b525d1a8376d02fdc92491475d1a73"
+		},
+		"F253": {
+			"path": "src/__tests__/main/cue/cue-spawn-builder.test.ts",
+			"sha256": "9fcf39c59df16a08ad4d365cecb222a1e212535da2b39b67bdc5cb0c1992afd2"
+		},
+		"F254": {
+			"path": "src/__tests__/main/cue/cue-process-lifecycle.test.ts",
+			"sha256": "7384639e3269807f49d2e2ff3d665961e95181a1ab7b1b5e48ecdcb5fea30c1e"
+		},
+		"F255": {
+			"path": "src/__tests__/main/cue/cue-process-lifecycle.managed.test.ts",
+			"sha256": "6290e14574c4c7b9721c360aba9273d201917bae9643469a3546cadda28467aa"
+		},
+		"F256": {
+			"path": "src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts",
+			"sha256": "290cde687e051fc69fe326f14d4da5b17fef2bf4464bb39e5d5b0f2c87b96c6f"
+		},
+		"F257": {
+			"path": "src/__tests__/main/group-chat/output-parser.test.ts",
+			"sha256": "eecdc42f5a2dabc31a6d3f044005896110e4c5ed6177a0006c3d9cecc2c8442c"
+		},
+		"F258": {
+			"path": "src/main/cross-agent/cross-agent-router.ts",
+			"sha256": "84f9b0b5ac786d22bd1924bd8e1630f004f37cdd2ef48f4710812cbda4522da6"
+		},
+		"F259": {
+			"path": "src/main/cross-agent/consult-runner.ts",
+			"sha256": "d423040591f86ecdfba9952560a1f55351e040d084480536cb6ad6bf050e76e2"
+		},
+		"F260": {
+			"path": "src/__tests__/main/cross-agent/cross-agent-router.managed.test.ts",
+			"sha256": "8cb3e68dc549d3887eb2b6f5cf6f8bea2f33ece80da61ac82ff539aa73f99e21"
+		},
+		"F261": {
+			"path": "src/__tests__/main/cross-agent-router.test.ts",
+			"sha256": "a8b1d34c2d8eb5658a3358fefc294dd0669e58f73aaf5849a209c855c9b76902"
+		},
+		"F262": {
+			"path": "src/__tests__/main/utils/context-groomer.test.ts",
+			"sha256": "92c52d8194e81ba32d0e00abdf9bbb0d0a17a31a68157e1063b6adbf04e1527d"
+		},
+		"F263": {
+			"path": "src/__tests__/main/utils/context-groomer.managed.test.ts",
+			"sha256": "296652f4e622863da57667d34a1fe252b1d6a4af6e3f6af52e20f0af8ea237d0"
+		},
+		"F264": {
+			"path": "src/__tests__/main/process-manager/ProcessManager.tuiLaunch.managed.test.ts",
+			"sha256": "4f539a28c6d405a687dde9bdbcd3f3869dd4b5697370f8368d39eda2907e1e68"
+		},
+		"F265": {
+			"path": "src/__tests__/main/process-manager/handlers/StdoutHandler.test.ts",
+			"sha256": "0a1df4692aec683f60777992b2ac5cb4c48b02fa64a1377f27eaa79635976cb5"
+		},
+		"F266": {
+			"path": "src/__tests__/main/parsers/grok-output-parser.test.ts",
+			"sha256": "ec274ec1cc4f9c0663d685daccc723aceadb11efe6a720cdb5624bc3a8c9de0e"
+		},
+		"F267": {
+			"path": "src/main/agents/limitResetEstimator.ts",
+			"sha256": "b9d0b9fa9c6875c4bb90080bd0224763098f69c2e1b099743ec7dd90c120423a"
+		},
+		"F268": {
+			"path": "src/renderer/hooks/agent/internal/useAgentErrorListener.ts",
+			"sha256": "1cbc45913afd690885ded3e49e13e097c375bc59fd6626a6b31d4f2069131c84"
+		},
+		"F269": {
+			"path": "src/__tests__/main/agents/limitResetEstimator.test.ts",
+			"sha256": "e3c510373e09531b4eaaf733b614c7147f7e1809c1854355189bc0b89b627d3d"
+		},
+		"F270": {
+			"path": "src/__tests__/main/cue/cue-token-accessor.test.ts",
+			"sha256": "bce64fcc1400a963c50d627553ee7f7216d453aa7fff94d16a17ed2510493185"
+		},
+		"F271": {
+			"path": "src/main/index.ts",
+			"sha256": "1591c281802ef56bde64a352ef97880cf4834c9adfa77bcc96273d1ef4c55d11"
+		},
+		"F272": {
+			"path": "src/cli/services/autorun-cli-deps.ts",
+			"sha256": "27f7f7d3e4f7fa44f6aaeb8ff96cdf18e6f7091f50e30318cfaf8f2e7ec38f52"
+		},
+		"F273": {
+			"path": "src/shared/maestro-lib/autorun/__tests__/policy-branches.test.ts",
+			"sha256": "49db8f7932c146b15fd302789c4ee288803d2bb463bbc7cdb8fcd7125ec61539"
+		},
+		"F274": {
+			"path": "src/shared/maestro-lib/autorun/__tests__/run-control.test.ts",
+			"sha256": "e5a848265dcf34522b8d31c8bc5e3b79b3f200ad79b264664cb0c3c65289e3c9"
+		},
+		"F275": {
+			"path": "src/shared/maestro-lib/runtime/__tests__/autorun-turns.test.ts",
+			"sha256": "0f1b5b7aeb8682bb9ae72638c180609cacb001580c5341d9470c65246abfb7af"
+		},
+		"F276": {
+			"path": "src/__tests__/main/services/symphony-runner.test.ts",
+			"sha256": "432c9dcc8006ce02be05df3aed128bbf3d9b7e2b349ec5e657b58d6cf8505e8c"
+		},
+		"F277": {
+			"path": "src/__tests__/renderer/components/NewInstanceModal.test.tsx",
+			"sha256": "2bd6bb364fc9232d6c83a01b6c4fd127daa540bcdeaa2ba234e7a5660e189faa"
+		},
+		"F278": {
+			"path": "src/cli/commands/pianola-orchestrate.ts",
+			"sha256": "6783503a84196413da741143deb9c9da04b6fa67f6f12c378f0bec6e39815b68"
+		},
+		"F279": {
+			"path": "src/__tests__/shared/pianola/pianola-agent-select.test.ts",
+			"sha256": "6431ae5c7efc88f0c88f529ba08ba7b70605eddd212b28184e29fdefb2863088"
+		},
+		"F280": {
+			"path": "src/__tests__/shared/pianola/pianola-orchestrator.test.ts",
+			"sha256": "48016b87e15f0a27a1afb581dda153c3da5aef15698896dde42df0093e50c825"
+		},
+		"F281": {
+			"path": "src/__tests__/main/pianola/pianola-supervisor.test.ts",
+			"sha256": "7f1e84660e059a34d2830f01ae3c0742980ae419df075ddad2fe3ab836410b98"
+		},
+		"F282": {
+			"path": "docs/multi-provider.md",
+			"sha256": "9fb4e3d6a32a5c13044c0af03ba9f7d6c21a752be590b68497a2f0b26fdb8381"
+		},
+		"F283": {
+			"path": "CLAUDE-AGENTS.md",
+			"sha256": "6cce94af6856f748d70011b16b8dfed09c5dba8d4d3b8675fac3b0c1cb73c2a5"
 		}
 	},
 	"rows": [
@@ -945,7 +1517,10 @@
 				"src/main/agents/path-prober.ts",
 				"src/main/agents/detector.ts",
 				"src/main/agents/provider-probe.ts",
-				"src/main/agents/capability-snapshot.ts"
+				"src/main/agents/capability-snapshot.ts",
+				"src/main/agents/provider-account-dirs.ts",
+				"src/main/stats/token-usage/token-usage-accessor.ts",
+				"src/main/storage/grok-session-storage.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-01-04", "GT1-02-05", "GT1-10-06"],
@@ -999,7 +1574,8 @@
 				}
 			],
 			"phase": "01",
-			"supportingRows": ["REG-DISCOVERY"]
+			"supportingRows": ["REG-DISCOVERY"],
+			"branchAuditRefs": ["B35"]
 		},
 		{
 			"id": "P03",
@@ -1099,7 +1675,8 @@
 				}
 			],
 			"phase": "02",
-			"supportingRows": ["REG-DISCOVERY", "REG-DEFINITIONS"]
+			"supportingRows": ["REG-DISCOVERY", "REG-DEFINITIONS"],
+			"branchAuditRefs": ["B36"]
 		},
 		{
 			"id": "P04",
@@ -1137,7 +1714,19 @@
 				"src/shared/agentAccountDir.ts",
 				"src/main/agents/provider-account-dirs.ts",
 				"src/main/stats/token-usage/token-usage-accessor.ts",
-				"src/main/ipc/handlers/agentSessions.ts"
+				"src/main/ipc/handlers/agentSessions.ts",
+				"src/shared/feedbackAccounts.ts",
+				"docs/feedback.md",
+				"src/shared/maestro-lib/launch/env.ts",
+				"src/shared/envVarCatalog.ts",
+				"src/shared/authPaths.ts",
+				"src/renderer/hooks/agent/useKnownAuthDirs.ts",
+				"src/renderer/components/shared/AuthPathValueInput.tsx",
+				"src/renderer/components/Settings/EnvVarsEditor.tsx",
+				"src/renderer/components/shared/AgentConfigPanel.tsx",
+				"src/shared/pianola/pianola-agent-select.ts",
+				"src/cli/commands/pianola-orchestrate.ts",
+				"src/main/pianola/pianola-supervisor.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-02-01", "GT1-04-01", "GT1-04-11"],
@@ -1197,7 +1786,8 @@
 				}
 			],
 			"phase": "02",
-			"supportingRows": ["REG-PROFILE"]
+			"supportingRows": ["REG-PROFILE"],
+			"branchAuditRefs": ["B02", "B06", "B18", "B47"]
 		},
 		{
 			"id": "P05",
@@ -1349,7 +1939,8 @@
 				"src/shared/modelTiers.ts",
 				"src/shared/effortRejection.ts",
 				"src/shared/types.ts",
-				"src/shared/maestro-lib/providers/capabilities.ts"
+				"src/shared/maestro-lib/providers/capabilities.ts",
+				"src/shared/directorNotesProvider.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-02-05", "GT1-02-07"],
@@ -1409,7 +2000,8 @@
 				}
 			],
 			"phase": "02",
-			"supportingRows": ["C-supportsModelSelection", "REG-MODEL", "META-06", "REG-DEFINITIONS"]
+			"supportingRows": ["C-supportsModelSelection", "REG-MODEL", "META-06", "REG-DEFINITIONS"],
+			"branchAuditRefs": ["B08"]
 		},
 		{
 			"id": "P07",
@@ -1841,7 +2433,8 @@
 				"REG-MANAGED-ROUTES",
 				"S20",
 				"S22"
-			]
+			],
+			"branchAuditRefs": ["B11"]
 		},
 		{
 			"id": "P10",
@@ -1970,7 +2563,17 @@
 				"src/cli/services/agent-spawner.ts",
 				"src/main/codex-app-server/steering.ts",
 				"src/shared/types.ts",
-				"src/shared/maestro-lib/turns/assemble.ts"
+				"src/shared/maestro-lib/turns/assemble.ts",
+				"src/shared/contextCompaction.ts",
+				"src/renderer/services/contextCompaction.ts",
+				"src/renderer/stores/retryStore.ts",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"src/main/cue/cue-spawn-builder.ts",
+				"src/main/cue/cue-process-lifecycle.ts",
+				"src/main/agents/limitResetEstimator.ts",
+				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts",
+				"src/main/stats/token-usage/token-usage-accessor.ts",
+				"src/main/cue/stats/cue-token-accessor.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -2077,7 +2680,8 @@
 				"S20",
 				"S21",
 				"REG-DEFINITIONS"
-			]
+			],
+			"branchAuditRefs": ["B03", "B38", "B42", "B43"]
 		},
 		{
 			"id": "P11",
@@ -2123,7 +2727,13 @@
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
-				"src/renderer/utils/contextUsage.ts"
+				"src/renderer/utils/contextUsage.ts",
+				"src/shared/maestro-lib/run/turn-capture.ts",
+				"src/main/cue/cue-spawn-builder.ts",
+				"src/main/cue/cue-process-lifecycle.ts",
+				"src/main/process-manager/handlers/StdoutHandler.ts",
+				"src/main/agents/limitResetEstimator.ts",
+				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-03-05", "GT1-03-11", "GT1-04-05", "GT1-04-11", "GT1-10-08"],
@@ -2190,7 +2800,8 @@
 				"REG-USAGE",
 				"S26",
 				"META-06"
-			]
+			],
+			"branchAuditRefs": ["B12", "B38", "B42", "B43"]
 		},
 		{
 			"id": "P12",
@@ -2295,7 +2906,12 @@
 				"src/__tests__/main/process-manager/recordings/turn-recordings.test.ts",
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/components/MainPanel/MainPanelContent.tsx"
+				"src/renderer/components/MainPanel/MainPanelContent.tsx",
+				"src/renderer/components/TerminalOutput/TerminalOutput.tsx",
+				"src/renderer/components/TerminalOutput/components/LogItem.tsx",
+				"src/renderer/services/codexFollowup.ts",
+				"src/main/group-chat/spawnGroupChatAgent.ts",
+				"src/main/group-chat/output-parser.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -2386,7 +3002,8 @@
 				"REG-PARSER",
 				"REG-ERRORS",
 				"S28"
-			]
+			],
+			"branchAuditRefs": ["B26", "B39", "B42"]
 		},
 		{
 			"id": "P13",
@@ -2438,7 +3055,14 @@
 				"src/main/stats/token-usage/token-usage-accessor.ts",
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/components/MainPanel/MainPanel.tsx"
+				"src/renderer/components/MainPanel/MainPanel.tsx",
+				"src/cli/commands/list-sessions.ts",
+				"src/__tests__/cli/commands/list-sessions.test.ts",
+				"src/renderer/utils/starredSessions.ts",
+				"src/renderer/hooks/agent/useSessionPagination.ts",
+				"src/renderer/services/resumableSession.ts",
+				"src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsAggregateStats.ts",
+				"src/main/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -2505,7 +3129,8 @@
 				}
 			],
 			"phase": "04",
-			"supportingRows": ["C-supportsSessionStorage", "REG-STORAGE", "REG-PROFILE"]
+			"supportingRows": ["C-supportsSessionStorage", "REG-STORAGE", "REG-PROFILE"],
+			"branchAuditRefs": ["B04", "B22", "B23", "B35", "B44"]
 		},
 		{
 			"id": "P14",
@@ -2551,7 +3176,12 @@
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/shared/maestro-lib/run/session.ts",
-				"src/renderer/components/MainPanel/MainPanelHeader.tsx"
+				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
+				"src/renderer/utils/starredSessions.ts",
+				"src/renderer/hooks/agent/useSessionPagination.ts",
+				"src/renderer/services/resumableSession.ts",
+				"src/main/storage/index.ts",
+				"src/main/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-04-07", "GT1-04-08A", "GT1-04-08C", "GT1-04-09"],
@@ -2611,7 +3241,8 @@
 				}
 			],
 			"phase": "04",
-			"supportingRows": ["C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
+			"supportingRows": ["C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"branchAuditRefs": ["B22", "B44"]
 		},
 		{
 			"id": "P15",
@@ -2730,7 +3361,8 @@
 				}
 			],
 			"phase": "04",
-			"supportingRows": ["C-supportsSessionStorage", "REG-STORAGE", "REG-PROFILE", "META-05"]
+			"supportingRows": ["C-supportsSessionStorage", "REG-STORAGE", "REG-PROFILE", "META-05"],
+			"branchAuditRefs": ["B35"]
 		},
 		{
 			"id": "P16",
@@ -2994,7 +3626,16 @@
 				"src/renderer/utils/worktreeSession.ts",
 				"src/renderer/utils/worktreeSpawn.ts",
 				"src/renderer/components/NewInstanceModal/NewInstanceModal.tsx",
-				"src/renderer/components/AgentCreationDialog.tsx"
+				"src/renderer/components/AgentCreationDialog.tsx",
+				"src/cli/index.ts",
+				"docs/cli.md",
+				"docs/cli-reference.md",
+				"docs/provider-notes.md",
+				"docs/getting-started.md",
+				"docs/features.md",
+				"docs/index.md",
+				"src/renderer/hooks/symphony/useSymphony.ts",
+				"src/main/services/symphony-runner.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-01", "GT1-05-11", "GT1-10-01"],
@@ -3042,7 +3683,8 @@
 				}
 			],
 			"phase": "05",
-			"supportingRows": ["S01", "S05", "S29", "S30", "META-01", "META-03", "META-04"]
+			"supportingRows": ["S01", "S05", "S29", "S30", "META-01", "META-03", "META-04"],
+			"branchAuditRefs": ["B13", "B46"]
 		},
 		{
 			"id": "P18",
@@ -3086,7 +3728,9 @@
 				"src/renderer/hooks/remote/useRemoteHandlers.ts",
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/App.tsx"
+				"src/renderer/App.tsx",
+				"src/renderer/hooks/wizard/useWizardHandlers.ts",
+				"src/renderer/hooks/input/useInputProcessing.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-03", "GT1-05-05", "GT1-08-01"],
@@ -3146,7 +3790,8 @@
 				}
 			],
 			"phase": "05",
-			"supportingRows": ["C-supportsSlashCommands", "S02", "S31"]
+			"supportingRows": ["C-supportsSlashCommands", "S02", "S31"],
+			"branchAuditRefs": ["B16", "B17", "B33"]
 		},
 		{
 			"id": "P19",
@@ -3186,7 +3831,10 @@
 				"src/renderer/components/MemoryViewer.tsx",
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
 				"src/shared/types.ts",
-				"src/shared/maestro-lib/providers/capabilities.ts"
+				"src/shared/maestro-lib/providers/capabilities.ts",
+				"src/main/cue/bundle/cue-bundle-exporter.ts",
+				"src/main/cue/bundle/cue-bundle-importer.ts",
+				"src/main/ipc/handlers/memory.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-07", "GT1-06-06"],
@@ -3246,7 +3894,8 @@
 				}
 			],
 			"phase": "05",
-			"supportingRows": ["C-supportsProjectMemory", "S03"]
+			"supportingRows": ["C-supportsProjectMemory", "S03"],
+			"branchAuditRefs": ["B31", "B34"]
 		},
 		{
 			"id": "P20",
@@ -3294,7 +3943,8 @@
 				"src/main/utils/context-groomer.ts",
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/hooks/batch/inlineWizard/conversationActions.ts"
+				"src/renderer/hooks/batch/inlineWizard/conversationActions.ts",
+				"src/main/process-manager/ProcessManager.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-09", "GT1-05-11", "GT1-08-14"],
@@ -3354,7 +4004,8 @@
 				}
 			],
 			"phase": "05",
-			"supportingRows": ["C-supportsWizard", "S04", "S05", "S19"]
+			"supportingRows": ["C-supportsWizard", "S04", "S05", "S19"],
+			"branchAuditRefs": ["B27", "B41"]
 		},
 		{
 			"id": "P21",
@@ -3406,7 +4057,10 @@
 				"src/renderer/components/QuickActionsModal/commands/featureCommands.ts",
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/main/ipc/handlers/context.ts"
+				"src/main/ipc/handlers/context.ts",
+				"src/renderer/services/contextGroomer.ts",
+				"src/renderer/hooks/agent/useSendToAgent.ts",
+				"src/renderer/hooks/agent/useSessionRecovery.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3480,7 +4134,8 @@
 				"C-supportsContextExport",
 				"REG-TRANSLATION",
 				"S06"
-			]
+			],
+			"branchAuditRefs": ["B21"]
 		},
 		{
 			"id": "P22",
@@ -3522,7 +4177,9 @@
 				"src/shared/maestro-lib/translation/resource-projections.ts",
 				"src/shared/maestro-lib/translation/knowledge-binding.ts",
 				"src/main/provider-translation-service.ts",
-				"src/renderer/services/providerTranslation.ts"
+				"src/renderer/services/providerTranslation.ts",
+				"src/shared/maestro-lib/translation/resources.ts",
+				"src/shared/maestro-lib/launch/launch-plan.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3589,7 +4246,8 @@
 				}
 			],
 			"phase": "06",
-			"supportingRows": ["REG-TRANSLATION", "S07"]
+			"supportingRows": ["REG-TRANSLATION", "S07"],
+			"branchAuditRefs": ["B07"]
 		},
 		{
 			"id": "P23",
@@ -3637,7 +4295,11 @@
 				"src/renderer/services/providerTranslation.ts",
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/hooks/agent/useAgentCapabilities.ts"
+				"src/renderer/hooks/agent/useAgentCapabilities.ts",
+				"src/shared/maestro-lib/translation/resources.ts",
+				"src/shared/maestro-lib/launch/launch-plan.ts",
+				"src/main/cue/bundle/cue-bundle-exporter.ts",
+				"src/main/cue/bundle/cue-bundle-importer.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3705,7 +4367,8 @@
 				}
 			],
 			"phase": "06",
-			"supportingRows": ["C-supportsProjectMemory", "REG-TRANSLATION", "S07"]
+			"supportingRows": ["C-supportsProjectMemory", "REG-TRANSLATION", "S07"],
+			"branchAuditRefs": ["B07", "B31"]
 		},
 		{
 			"id": "P24",
@@ -3747,7 +4410,9 @@
 				"src/shared/maestro-lib/translation/resource-projections.ts",
 				"src/shared/maestro-lib/translation/knowledge-binding.ts",
 				"src/main/provider-translation-service.ts",
-				"src/renderer/services/providerTranslation.ts"
+				"src/renderer/services/providerTranslation.ts",
+				"src/shared/maestro-lib/translation/resources.ts",
+				"src/shared/maestro-lib/launch/launch-plan.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3814,7 +4479,8 @@
 				}
 			],
 			"phase": "06",
-			"supportingRows": ["REG-TRANSLATION", "S07"]
+			"supportingRows": ["REG-TRANSLATION", "S07"],
+			"branchAuditRefs": ["B07"]
 		},
 		{
 			"id": "P25",
@@ -3848,7 +4514,11 @@
 			"sourcePaths": [
 				"src/shared/plugins/mcp-agent-config.ts",
 				"src/main/plugins/plugin-headless-agent-runner.ts",
-				"src/cli/services/agent-spawner.ts"
+				"src/cli/services/agent-spawner.ts",
+				"src/cli/commands/send.ts",
+				"src/main/coworking/installers/index.ts",
+				"src/main/coworking/coworking-installer.ts",
+				"src/main/cue/cue-spawn-builder.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-07-05", "GT1-07-06"],
@@ -3908,7 +4578,8 @@
 				}
 			],
 			"phase": "07",
-			"supportingRows": ["S08"]
+			"supportingRows": ["S08"],
+			"branchAuditRefs": ["B10", "B30", "B37"]
 		},
 		{
 			"id": "P26",
@@ -3942,7 +4613,13 @@
 			"sourcePaths": [
 				"src/shared/plugins/mcp-agent-config.ts",
 				"src/main/plugins/plugin-headless-agent-runner.ts",
-				"src/cli/services/agent-spawner.ts"
+				"src/cli/services/agent-spawner.ts",
+				"src/cli/commands/send.ts",
+				"src/main/coworking/installers/index.ts",
+				"src/main/coworking/coworking-installer.ts",
+				"src/main/cue/cue-spawn-builder.ts",
+				"src/main/storage/index.ts",
+				"src/main/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-07-05", "GT1-07-06"],
@@ -4002,7 +4679,8 @@
 				}
 			],
 			"phase": "07",
-			"supportingRows": ["S08"]
+			"supportingRows": ["S08"],
+			"branchAuditRefs": ["B10", "B30", "B37", "B44"]
 		},
 		{
 			"id": "P27",
@@ -4156,7 +4834,11 @@
 				"src/main/enterprise/dispatch.ts",
 				"src/main/enterprise/spawn-authority.ts",
 				"src/shared/maestro-lib/managed/host-adapter.ts",
-				"src/shared/maestro-lib/managed/provider-route.ts"
+				"src/shared/maestro-lib/managed/provider-route.ts",
+				"src/renderer/hooks/wizard/useWizardHandlers.ts",
+				"src/renderer/hooks/input/useInputProcessing.ts",
+				"src/main/cue/bundle/cue-bundle-exporter.ts",
+				"src/main/cue/bundle/cue-bundle-importer.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -4242,7 +4924,8 @@
 				}
 			],
 			"phase": "07",
-			"supportingRows": ["S02", "S08", "S23"]
+			"supportingRows": ["S02", "S08", "S23"],
+			"branchAuditRefs": ["B16", "B17", "B31"]
 		},
 		{
 			"id": "P29",
@@ -4343,7 +5026,8 @@
 				"src/renderer/hooks/remote/useRemoteHandlers.ts",
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/shared/maestro-lib/turns/assemble.ts"
+				"src/shared/maestro-lib/turns/assemble.ts",
+				"src/cli/services/autorun-cli-deps.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -4430,7 +5114,8 @@
 				"S31",
 				"META-06",
 				"META-07"
-			]
+			],
+			"branchAuditRefs": ["B45"]
 		},
 		{
 			"id": "P30",
@@ -4464,7 +5149,9 @@
 			"sourcePaths": [
 				"src/main/cue/cue-spawn-builder.ts",
 				"src/main/cue/cue-process-lifecycle.ts",
-				"src/cli/services/cue-standalone-engine.ts"
+				"src/cli/services/cue-standalone-engine.ts",
+				"src/main/cue/bundle/cue-bundle-exporter.ts",
+				"src/main/cue/bundle/cue-bundle-importer.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-08-08"],
@@ -4524,7 +5211,8 @@
 				}
 			],
 			"phase": "08",
-			"supportingRows": ["S13"]
+			"supportingRows": ["S13"],
+			"branchAuditRefs": ["B31", "B38"]
 		},
 		{
 			"id": "P31",
@@ -4617,7 +5305,11 @@
 				"src/shared/pianola/transcript-mining.ts",
 				"src/cli/commands/pianola-learn.ts",
 				"src/shared/types.ts",
-				"src/shared/maestro-lib/providers/capabilities.ts"
+				"src/shared/maestro-lib/providers/capabilities.ts",
+				"docs/cli-reference.md",
+				"src/renderer/components/AgentCreationDialog.tsx",
+				"src/renderer/components/NewInstanceModal/NewInstanceModal.tsx",
+				"src/cli/commands/pianola-orchestrate.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-08-10", "GT1-08-16", "GT1-01-07", "GT1-08-18"],
@@ -4677,7 +5369,8 @@
 				}
 			],
 			"phase": "08",
-			"supportingRows": ["C-supportsGroupChatModeration", "S14", "S15", "S16", "S17", "META-04"]
+			"supportingRows": ["C-supportsGroupChatModeration", "S14", "S15", "S16", "S17", "META-04"],
+			"branchAuditRefs": ["B09", "B39", "B46", "B47"]
 		},
 		{
 			"id": "P32",
@@ -4713,7 +5406,18 @@
 				"src/shared/directorNotesProvider.ts",
 				"src/main/utils/director-notes-provider.ts",
 				"src/renderer/components/Settings/tabs/EncoreTab/hooks/useDirectorNotesAgentState.ts",
-				"src/main/utils/context-groomer.ts"
+				"src/main/utils/context-groomer.ts",
+				"src/shared/feedbackAccounts.ts",
+				"docs/feedback.md",
+				"src/shared/modelTiers.ts",
+				"src/main/cross-agent/cross-agent-router.ts",
+				"src/main/cross-agent/consult-runner.ts",
+				"src/main/process-manager/ProcessManager.ts",
+				"src/renderer/hooks/batch/useDocumentProcessor.ts",
+				"src/renderer/hooks/batch/internal/useGoalRunner.ts",
+				"src/cli/services/batch-processor.ts",
+				"src/cli/services/autorun-cli-deps.ts",
+				"src/shared/maestro-lib/providers/capabilities.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-08-13", "GT1-08-14"],
@@ -4773,7 +5477,8 @@
 				}
 			],
 			"phase": "08",
-			"supportingRows": ["S18", "S19"]
+			"supportingRows": ["S18", "S19"],
+			"branchAuditRefs": ["B02", "B08", "B40", "B41", "B45"]
 		},
 		{
 			"id": "P33",
@@ -4815,7 +5520,15 @@
 				"src/shared/maestro-lib/managed/host-adapter.ts",
 				"src/main/process-manager/ProcessManager.ts",
 				"src/main/enterprise/dispatch.ts",
-				"src/main/enterprise/spawn-authority.ts"
+				"src/main/enterprise/spawn-authority.ts",
+				"src/shared/providerProfiles.ts",
+				"src/shared/maestro-lib/launch/env.ts",
+				"src/shared/envVarCatalog.ts",
+				"src/main/cross-agent/cross-agent-router.ts",
+				"src/main/cross-agent/consult-runner.ts",
+				"src/shared/pianola/pianola-agent-select.ts",
+				"src/cli/commands/pianola-orchestrate.ts",
+				"src/main/pianola/pianola-supervisor.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -4903,7 +5616,8 @@
 				}
 			],
 			"phase": "09",
-			"supportingRows": ["REG-MANAGED-ROUTES", "S23"]
+			"supportingRows": ["REG-MANAGED-ROUTES", "S23"],
+			"branchAuditRefs": ["B06", "B11", "B40", "B47"]
 		},
 		{
 			"id": "P34",
@@ -5177,7 +5891,9 @@
 				"src/main/enterprise/spawn-authority.ts",
 				"src/shared/types.ts",
 				"src/renderer/components/InputArea/InputArea.tsx",
-				"src/renderer/components/NewInstanceModal/EditAgentModal.tsx"
+				"src/renderer/components/NewInstanceModal/EditAgentModal.tsx",
+				"src/shared/feedbackAccounts.ts",
+				"docs/feedback.md"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -5279,7 +5995,8 @@
 				"S23",
 				"META-03",
 				"REG-DEFINITIONS"
-			]
+			],
+			"branchAuditRefs": ["B02", "B41"]
 		},
 		{
 			"id": "P36",
@@ -5371,7 +6088,11 @@
 				"src/shared/maestro-lib/managed/host-adapter.ts",
 				"src/main/process-manager/ProcessManager.ts",
 				"src/main/enterprise/dispatch.ts",
-				"src/main/enterprise/spawn-authority.ts"
+				"src/main/enterprise/spawn-authority.ts",
+				"src/shared/maestro-lib/launch/env.ts",
+				"src/shared/envVarCatalog.ts",
+				"src/main/cross-agent/cross-agent-router.ts",
+				"src/main/cross-agent/consult-runner.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -5470,7 +6191,8 @@
 				}
 			],
 			"phase": "09",
-			"supportingRows": ["REG-PROFILE", "REG-AUTH", "REG-MANAGED-ROUTES", "S23"]
+			"supportingRows": ["REG-PROFILE", "REG-AUTH", "REG-MANAGED-ROUTES", "S23"],
+			"branchAuditRefs": ["B06", "B40"]
 		},
 		{
 			"id": "P37",
@@ -5508,7 +6230,12 @@
 				"src/main/codex-app-server/invocation.ts",
 				"src/shared/maestro-lib/codex/server-requests.ts",
 				"src/main/web-server/handlers/messageHandlers/sessions.ts",
-				"src/main/web-server/callbacks/sessionCallbacks.ts"
+				"src/main/web-server/callbacks/sessionCallbacks.ts",
+				"src/web/hooks/useAgentManagement.ts",
+				"src/web/hooks/useMobileSessionManagement.ts",
+				"src/renderer/hooks/remote/useAppRemoteEventListeners.ts",
+				"src/main/coworking/installers/index.ts",
+				"src/main/coworking/coworking-installer.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-03-06A", "GT1-03-08A", "GT1-07-04A", "GT1-10-04A", "GT1-10-03"],
@@ -5568,7 +6295,8 @@
 				}
 			],
 			"phase": "10",
-			"supportingRows": ["S22", "S24"]
+			"supportingRows": ["S22", "S24"],
+			"branchAuditRefs": ["B28", "B30"]
 		},
 		{
 			"id": "P38",
@@ -5674,7 +6402,9 @@
 				"src/renderer/components/AgentCreationDialog.tsx",
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/shared/maestro-lib/turns/assemble.ts"
+				"src/shared/maestro-lib/turns/assemble.ts",
+				"src/cli/commands/list-sessions.ts",
+				"src/__tests__/cli/commands/list-sessions.test.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -5760,7 +6490,8 @@
 				"S25",
 				"S29",
 				"S30"
-			]
+			],
+			"branchAuditRefs": ["B04"]
 		},
 		{
 			"id": "P39",
@@ -6015,7 +6746,24 @@
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
-				"src/renderer/utils/contextUsage.ts"
+				"src/renderer/utils/contextUsage.ts",
+				"src/shared/agent-run/types.ts",
+				"src/shared/agent-run/provider.ts",
+				"src/main/agent-run/capture-service.ts",
+				"src/cli/services/agent-run-capture.ts",
+				"src/shared/contextCompaction.ts",
+				"src/renderer/services/contextCompaction.ts",
+				"src/renderer/stores/retryStore.ts",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"src/renderer/hooks/agent/useSessionPagination.ts",
+				"src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsAggregateStats.ts",
+				"src/renderer/services/codexAutoReset.ts",
+				"src/main/preload/sessions.ts",
+				"src/renderer/hooks/stats/useGlobalAgentStats.ts",
+				"src/renderer/components/AboutModal.tsx",
+				"src/renderer/components/AchievementShareButton.tsx",
+				"src/main/agents/limitResetEstimator.ts",
+				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6119,7 +6867,8 @@
 				"S28",
 				"META-06",
 				"META-07"
-			]
+			],
+			"branchAuditRefs": ["B01", "B03", "B23", "B25", "B32", "B43"]
 		},
 		{
 			"id": "P41",
@@ -6155,7 +6904,13 @@
 				"src/__tests__/main/agents/agent-completeness.test.ts",
 				"package.json",
 				"PROVIDER-SUPPORT.md",
-				"src/shared/agentMetadata.ts"
+				"src/shared/agentMetadata.ts",
+				"docs/provider-notes.md",
+				"src/__tests__/renderer/services/contextGroomer.test.ts",
+				"src/__tests__/renderer/hooks/useInputProcessing.test.ts",
+				"src/__tests__/renderer/components/NewInstanceModal/AgentPickerGrid.test.tsx",
+				"docs/multi-provider.md",
+				"CLAUDE-AGENTS.md"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-11-01"],
@@ -6203,7 +6958,8 @@
 				}
 			],
 			"phase": "11",
-			"supportingRows": []
+			"supportingRows": [],
+			"branchAuditRefs": ["B29", "B48"]
 		},
 		{
 			"id": "P42",
@@ -6503,7 +7259,19 @@
 				"src/__tests__/main/agents/agent-completeness.test.ts",
 				"package.json",
 				"PROVIDER-SUPPORT.md",
-				"src/shared/agentMetadata.ts"
+				"src/shared/agentMetadata.ts",
+				"src/cli/index.ts",
+				"docs/cli.md",
+				"docs/cli-reference.md",
+				"docs/provider-notes.md",
+				"docs/getting-started.md",
+				"docs/features.md",
+				"docs/index.md",
+				"src/__tests__/renderer/services/contextGroomer.test.ts",
+				"src/__tests__/renderer/hooks/useInputProcessing.test.ts",
+				"src/__tests__/renderer/components/NewInstanceModal/AgentPickerGrid.test.tsx",
+				"docs/multi-provider.md",
+				"CLAUDE-AGENTS.md"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-12-01", "GT1-12-02"],
@@ -6551,7 +7319,8 @@
 				}
 			],
 			"phase": "12",
-			"supportingRows": []
+			"supportingRows": [],
+			"branchAuditRefs": ["B13", "B29", "B48"]
 		},
 		{
 			"id": "P46",
@@ -6587,7 +7356,13 @@
 				"src/__tests__/main/agents/agent-completeness.test.ts",
 				"package.json",
 				"PROVIDER-SUPPORT.md",
-				"src/shared/agentMetadata.ts"
+				"src/shared/agentMetadata.ts",
+				"docs/provider-notes.md",
+				"src/__tests__/renderer/services/contextGroomer.test.ts",
+				"src/__tests__/renderer/hooks/useInputProcessing.test.ts",
+				"src/__tests__/renderer/components/NewInstanceModal/AgentPickerGrid.test.tsx",
+				"docs/multi-provider.md",
+				"CLAUDE-AGENTS.md"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-12-03"],
@@ -6635,7 +7410,8 @@
 				}
 			],
 			"phase": "12",
-			"supportingRows": []
+			"supportingRows": [],
+			"branchAuditRefs": ["B29", "B48"]
 		},
 		{
 			"id": "P47",
@@ -7617,7 +8393,8 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/App.tsx"
+				"src/renderer/App.tsx",
+				"src/main/ipc/handlers/agents.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-03", "GT1-05-05", "GT1-11-14A"],
@@ -7691,7 +8468,8 @@
 					"symbol": "App",
 					"behavior": "Only includes active provider commands when capability allows them; Claude/Codex are true while Antigravity and Grok are false."
 				}
-			]
+			],
+			"branchAuditRefs": ["B33"]
 		},
 		{
 			"id": "C-supportsSessionStorage",
@@ -9716,7 +10494,9 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/hooks/agent/useAgentCapabilities.ts"
+				"src/renderer/hooks/agent/useAgentCapabilities.ts",
+				"src/main/memory-manager.ts",
+				"src/main/ipc/handlers/memory.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-07", "GT1-06-06", "GT1-11-14A"],
@@ -9790,7 +10570,8 @@
 					"symbol": "useAgentCapabilities",
 					"behavior": "Claude true exposes native memory. Codex/Antigravity/Grok false can still expose Memory Viewer through a carried projectKnowledgeDirectory."
 				}
-			]
+			],
+			"branchAuditRefs": ["B34"]
 		},
 		{
 			"id": "C-supportsAdditionalDirectories",
@@ -10043,7 +10824,9 @@
 				"src/shared/maestro-lib/parsers/parser-factory.ts",
 				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
 				"src/main/parsers/grok-output-parser.ts",
-				"src/main/process-manager/handlers/StdoutHandler.ts"
+				"src/main/process-manager/handlers/StdoutHandler.ts",
+				"src/shared/maestro-lib/runtime/providers.ts",
+				"src/cli/services/agent-spawner.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-03-01", "GT1-03-03", "GT1-03-05", "GT1-03-09", "GT1-03-11"],
@@ -10101,7 +10884,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["REG-PARSER"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B05", "B42"]
 		},
 		{
 			"id": "REG-STORAGE",
@@ -10139,7 +10923,14 @@
 				"src/main/storage/grok-session-storage.ts",
 				"src/main/storage/base-session-storage.ts",
 				"src/main/agents/session-storage.ts",
-				"src/main/ipc/handlers/agentSessions.ts"
+				"src/main/ipc/handlers/agentSessions.ts",
+				"src/renderer/utils/starredSessions.ts",
+				"src/renderer/hooks/agent/useSessionPagination.ts",
+				"src/renderer/services/resumableSession.ts",
+				"src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsAggregateStats.ts",
+				"src/main/agents/provider-account-dirs.ts",
+				"src/main/stats/token-usage/token-usage-accessor.ts",
+				"src/main/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-04-01", "GT1-04-03", "GT1-04-05", "GT1-04-06A"],
@@ -10197,7 +10988,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["REG-STORAGE"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B22", "B23", "B35", "B44"]
 		},
 		{
 			"id": "REG-PROFILE",
@@ -10235,7 +11027,19 @@
 				"src/shared/agentAccountDir.ts",
 				"src/main/agents/provider-account-dirs.ts",
 				"src/main/stats/token-usage/token-usage-accessor.ts",
-				"src/main/ipc/handlers/agentSessions.ts"
+				"src/main/ipc/handlers/agentSessions.ts",
+				"src/shared/maestro-lib/launch/env.ts",
+				"src/shared/envVarCatalog.ts",
+				"src/shared/authPaths.ts",
+				"src/renderer/hooks/agent/useKnownAuthDirs.ts",
+				"src/renderer/components/shared/AuthPathValueInput.tsx",
+				"src/renderer/components/Settings/EnvVarsEditor.tsx",
+				"src/renderer/components/shared/AgentConfigPanel.tsx",
+				"src/main/storage/grok-session-storage.ts",
+				"src/__tests__/main/agents/agent-completeness.test.ts",
+				"docs/multi-provider.md",
+				"PROVIDER-SUPPORT.md",
+				"CLAUDE-AGENTS.md"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-02-01", "GT1-04-01", "GT1-04-11"],
@@ -10293,7 +11097,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["REG-PROFILE"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B06", "B18", "B35", "B48"]
 		},
 		{
 			"id": "REG-AUTH",
@@ -10324,7 +11129,9 @@
 				"src/shared/providerAuthIdentity.ts",
 				"src/shared/providerProfiles.ts",
 				"src/shared/agentMetadata.ts",
-				"src/renderer/utils/loginUrl.ts"
+				"src/renderer/utils/loginUrl.ts",
+				"src/shared/maestro-lib/launch/env.ts",
+				"src/shared/envVarCatalog.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-02-01", "GT1-02-03"],
@@ -10382,7 +11189,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["REG-AUTH"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B06"]
 		},
 		{
 			"id": "REG-MODEL",
@@ -10421,7 +11229,8 @@
 				"src/shared/maestro-lib/providers/definitions.ts",
 				"src/shared/agentConstants.ts",
 				"src/shared/modelTiers.ts",
-				"src/shared/effortRejection.ts"
+				"src/shared/effortRejection.ts",
+				"src/shared/directorNotesProvider.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-02-05", "GT1-02-07"],
@@ -10479,7 +11288,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["REG-MODEL"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B08", "B36"]
 		},
 		{
 			"id": "REG-USAGE",
@@ -10516,7 +11326,19 @@
 				"src/main/storage/grok-session-storage.ts",
 				"src/shared/modelPricing.ts",
 				"src/main/stats/token-usage/token-usage-accessor.ts",
-				"src/main/cue/stats/cue-token-accessor.ts"
+				"src/main/cue/stats/cue-token-accessor.ts",
+				"src/shared/maestro-lib/run/turn-capture.ts",
+				"src/main/ipc/handlers/agentSessions.ts",
+				"src/main/preload/sessions.ts",
+				"src/renderer/hooks/stats/useGlobalAgentStats.ts",
+				"src/renderer/components/AboutModal.tsx",
+				"src/renderer/components/AchievementShareButton.tsx",
+				"src/main/agents/provider-account-dirs.ts",
+				"src/main/cue/cue-spawn-builder.ts",
+				"src/main/cue/cue-process-lifecycle.ts",
+				"src/main/process-manager/handlers/StdoutHandler.ts",
+				"src/main/agents/limitResetEstimator.ts",
+				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-03-05", "GT1-03-11", "GT1-04-05", "GT1-04-11", "GT1-10-08"],
@@ -10574,7 +11396,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["REG-USAGE"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B12", "B32", "B35", "B38", "B42", "B43"]
 		},
 		{
 			"id": "REG-CHILD",
@@ -10701,7 +11524,12 @@
 				"src/main/process-manager/handlers/StdoutHandler.ts",
 				"src/main/ipc/handlers/agentSessions.ts",
 				"src/main/storage/grok-session-storage.ts",
-				"src/renderer/hooks/agent/useForkConversation.ts"
+				"src/renderer/hooks/agent/useForkConversation.ts",
+				"src/renderer/utils/starredSessions.ts",
+				"src/renderer/hooks/agent/useSessionPagination.ts",
+				"src/renderer/services/resumableSession.ts",
+				"src/main/storage/index.ts",
+				"src/main/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-04-07", "GT1-04-08A", "GT1-04-08C", "GT1-04-09"],
@@ -10759,7 +11587,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["REG-SESSION-MUTATION"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B22", "B44"]
 		},
 		{
 			"id": "REG-TRANSLATION",
@@ -10799,7 +11628,9 @@
 				"src/shared/maestro-lib/translation/resource-projections.ts",
 				"src/shared/maestro-lib/translation/knowledge-binding.ts",
 				"src/main/provider-translation-service.ts",
-				"src/renderer/services/providerTranslation.ts"
+				"src/renderer/services/providerTranslation.ts",
+				"src/shared/maestro-lib/translation/resources.ts",
+				"src/shared/maestro-lib/launch/launch-plan.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -10864,7 +11695,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["REG-TRANSLATION"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B07"]
 		},
 		{
 			"id": "REG-QUOTA",
@@ -10893,7 +11725,13 @@
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/components/UsageDashboard/UsageDashboardModal/hooks/useQuotaTabDiscovery.ts",
-				"src/renderer/components/UsageDashboard/UsageDashboardModal/views/ProviderQuotaUsageView.tsx"
+				"src/renderer/components/UsageDashboard/UsageDashboardModal/views/ProviderQuotaUsageView.tsx",
+				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
+				"src/renderer/services/codexAutoReset.ts",
+				"src/main/agents/limitResetEstimator.ts",
+				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts",
+				"src/main/stats/token-usage/token-usage-accessor.ts",
+				"src/main/cue/stats/cue-token-accessor.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-10-10"],
@@ -10951,7 +11789,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["REG-QUOTA"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B25", "B43"]
 		},
 		{
 			"id": "REG-DISCOVERY",
@@ -10991,7 +11830,10 @@
 				"src/main/agents/path-prober.ts",
 				"src/main/agents/detector.ts",
 				"src/main/agents/provider-probe.ts",
-				"src/main/agents/capability-snapshot.ts"
+				"src/main/agents/capability-snapshot.ts",
+				"src/shared/maestro-lib/runtime/providers.ts",
+				"src/shared/maestro-lib/parsers/parser-factory.ts",
+				"src/cli/services/agent-spawner.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-01-04", "GT1-02-05", "GT1-10-06"],
@@ -11049,7 +11891,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["REG-DISCOVERY"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B05", "B36"]
 		},
 		{
 			"id": "REG-ERRORS",
@@ -11185,7 +12028,10 @@
 				"src/shared/maestro-lib/run/start-turn.ts",
 				"src/shared/maestro-lib/managed/provider-route.ts",
 				"src/shared/maestro-lib/managed/host-adapter.ts",
-				"src/main/process-manager/ProcessManager.ts"
+				"src/main/process-manager/ProcessManager.ts",
+				"src/main/cross-agent/cross-agent-router.ts",
+				"src/main/cross-agent/consult-runner.ts",
+				"src/main/utils/context-groomer.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -11250,7 +12096,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["REG-MANAGED-ROUTES"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B11", "B40", "B41"]
 		},
 		{
 			"id": "S01",
@@ -11282,7 +12129,23 @@
 				"src/renderer/components/NewInstanceModal/types.ts",
 				"src/renderer/components/NewInstanceModal/AgentPickerGrid.tsx",
 				"src/renderer/components/Wizard/screens/AgentSelectionScreen/utils/agentTiles.ts",
-				"src/renderer/components/MainPanel/MainPanelHeader.tsx"
+				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
+				"src/shared/providerProfiles.ts",
+				"src/shared/maestro-lib/launch/env.ts",
+				"src/shared/envVarCatalog.ts",
+				"src/renderer/components/GroupChatModal.tsx",
+				"src/renderer/components/Wizard/screens/AgentSelectionScreen/components/AgentLogo.tsx",
+				"src/renderer/constants/agentIcons.ts",
+				"src/renderer/components/Wizard/screens/ConversationScreen/utils/providerName.ts",
+				"src/shared/authPaths.ts",
+				"src/renderer/hooks/agent/useKnownAuthDirs.ts",
+				"src/renderer/components/shared/AuthPathValueInput.tsx",
+				"src/renderer/components/Settings/EnvVarsEditor.tsx",
+				"src/renderer/components/shared/AgentConfigPanel.tsx",
+				"docs/provider-notes.md",
+				"src/__tests__/renderer/services/contextGroomer.test.ts",
+				"src/__tests__/renderer/hooks/useInputProcessing.test.ts",
+				"src/__tests__/renderer/components/NewInstanceModal/AgentPickerGrid.test.tsx"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-01"],
@@ -11328,7 +12191,8 @@
 					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
 					"affectedRows": ["S01"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B06", "B14", "B15", "B18", "B29"]
 		},
 		{
 			"id": "S02",
@@ -11355,7 +12219,12 @@
 			"routes": ["native-headless", "acp-candidate"],
 			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
-			"sourcePaths": ["src/main/ipc/handlers/agents.ts", "src/renderer/slashCommands.ts"],
+			"sourcePaths": [
+				"src/main/ipc/handlers/agents.ts",
+				"src/renderer/slashCommands.ts",
+				"src/renderer/hooks/wizard/useWizardHandlers.ts",
+				"src/renderer/hooks/input/useInputProcessing.ts"
+			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-03", "GT1-05-05"],
 				"test": ["GT1-05-04", "GT1-05-06"],
@@ -11412,7 +12281,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S02"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B16", "B17", "B33"]
 		},
 		{
 			"id": "S03",
@@ -11443,7 +12313,8 @@
 				"src/main/memory-manager.ts",
 				"src/renderer/hooks/agent/useAgentCapabilities.ts",
 				"src/renderer/components/MemoryViewer.tsx",
-				"src/renderer/components/MainPanel/MainPanelHeader.tsx"
+				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
+				"src/main/ipc/handlers/memory.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-07"],
@@ -11501,7 +12372,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S03"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B34"]
 		},
 		{
 			"id": "S04",
@@ -11531,7 +12403,8 @@
 			"sourcePaths": [
 				"src/renderer/utils/grokWizard.ts",
 				"src/renderer/services/inlineWizardConversation.ts",
-				"src/renderer/services/inlineWizardDocumentGeneration.ts"
+				"src/renderer/services/inlineWizardDocumentGeneration.ts",
+				"src/renderer/components/Wizard/services/conversationManager.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-09"],
@@ -11589,7 +12462,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S04"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B27"]
 		},
 		{
 			"id": "S05",
@@ -11619,7 +12493,11 @@
 			"sourcePaths": [
 				"src/renderer/components/Wizard/services/conversationManager.ts",
 				"src/renderer/components/Wizard/screens/AgentSelectionScreen/AgentSelectionScreen.tsx",
-				"src/renderer/components/Wizard/screens/AgentSelectionScreen/components/AgentLogo.tsx"
+				"src/renderer/components/Wizard/screens/AgentSelectionScreen/components/AgentLogo.tsx",
+				"src/renderer/constants/agentIcons.ts",
+				"src/renderer/components/Wizard/screens/ConversationScreen/utils/providerName.ts",
+				"src/renderer/services/inlineWizardConversation.ts",
+				"src/renderer/services/inlineWizardDocumentGeneration.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-11"],
@@ -11677,7 +12555,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S05"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B15", "B27"]
 		},
 		{
 			"id": "S06",
@@ -11706,7 +12585,14 @@
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/utils/sessionHelpers.ts",
-				"src/renderer/components/QuickActionsModal/commands/featureCommands.ts"
+				"src/renderer/components/QuickActionsModal/commands/featureCommands.ts",
+				"src/renderer/services/contextGroomer.ts",
+				"src/renderer/hooks/agent/useSendToAgent.ts",
+				"src/renderer/hooks/agent/useSessionRecovery.ts",
+				"docs/provider-notes.md",
+				"src/__tests__/renderer/services/contextGroomer.test.ts",
+				"src/__tests__/renderer/hooks/useInputProcessing.test.ts",
+				"src/__tests__/renderer/components/NewInstanceModal/AgentPickerGrid.test.tsx"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-06-01", "GT1-04-09"],
@@ -11764,7 +12650,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S06"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B21", "B29"]
 		},
 		{
 			"id": "S07",
@@ -11795,7 +12682,10 @@
 				"src/shared/maestro-lib/translation/support.ts",
 				"src/shared/maestro-lib/translation/adapters.ts",
 				"src/renderer/services/providerTranslation.ts",
-				"src/main/provider-translation-service.ts"
+				"src/main/provider-translation-service.ts",
+				"src/shared/maestro-lib/translation/resources.ts",
+				"src/shared/maestro-lib/translation/resource-projections.ts",
+				"src/shared/maestro-lib/launch/launch-plan.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -11860,7 +12750,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S07"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B07"]
 		},
 		{
 			"id": "S08",
@@ -11890,7 +12781,13 @@
 			"sourcePaths": [
 				"src/shared/plugins/mcp-agent-config.ts",
 				"src/main/plugins/plugin-headless-agent-runner.ts",
-				"src/cli/services/agent-spawner.ts"
+				"src/cli/services/agent-spawner.ts",
+				"src/cli/commands/send.ts",
+				"src/main/coworking/installers/index.ts",
+				"src/main/coworking/coworking-installer.ts",
+				"src/main/cue/cue-spawn-builder.ts",
+				"src/main/storage/index.ts",
+				"src/main/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-07-05", "GT1-07-06"],
@@ -11948,7 +12845,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S08"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B10", "B30", "B37", "B44"]
 		},
 		{
 			"id": "S09",
@@ -11982,7 +12880,9 @@
 				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
 				"src/renderer/components/TerminalOutput/utils/groupSubagentToolLogs.ts",
 				"src/renderer/components/TerminalOutput/components/LogItem.tsx",
-				"src/renderer/components/TerminalOutput/components/ToolBadge.tsx"
+				"src/renderer/components/TerminalOutput/components/ToolBadge.tsx",
+				"src/renderer/components/TerminalOutput/TerminalOutput.tsx",
+				"src/renderer/services/codexFollowup.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-07-08", "GT1-07-09"],
@@ -12040,7 +12940,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S09"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B26"]
 		},
 		{
 			"id": "S10",
@@ -12069,7 +12970,10 @@
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/hooks/batch/useDocumentProcessor.ts",
-				"src/renderer/hooks/batch/useBatchProcessor.ts"
+				"src/renderer/hooks/batch/useBatchProcessor.ts",
+				"src/renderer/hooks/batch/internal/useGoalRunner.ts",
+				"src/cli/services/batch-processor.ts",
+				"src/cli/services/autorun-cli-deps.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-08-01"],
@@ -12127,7 +13031,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S10"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B45"]
 		},
 		{
 			"id": "S11",
@@ -12154,7 +13059,12 @@
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
 			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
-			"sourcePaths": ["src/renderer/hooks/batch/internal/useGoalRunner.ts"],
+			"sourcePaths": [
+				"src/renderer/hooks/batch/internal/useGoalRunner.ts",
+				"src/renderer/hooks/batch/useDocumentProcessor.ts",
+				"src/cli/services/batch-processor.ts",
+				"src/cli/services/autorun-cli-deps.ts"
+			],
 			"ownerTasks": {
 				"implementation": ["GT1-08-03"],
 				"test": ["GT1-08-04"],
@@ -12211,7 +13121,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S11"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B45"]
 		},
 		{
 			"id": "S12",
@@ -12238,7 +13149,13 @@
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
 			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
-			"sourcePaths": ["src/cli/services/batch-processor.ts", "src/cli/services/agent-spawner.ts"],
+			"sourcePaths": [
+				"src/cli/services/batch-processor.ts",
+				"src/cli/services/agent-spawner.ts",
+				"src/renderer/hooks/batch/useDocumentProcessor.ts",
+				"src/renderer/hooks/batch/internal/useGoalRunner.ts",
+				"src/cli/services/autorun-cli-deps.ts"
+			],
 			"ownerTasks": {
 				"implementation": ["GT1-08-05"],
 				"test": ["GT1-08-06"],
@@ -12295,7 +13212,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S12"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B45"]
 		},
 		{
 			"id": "S13",
@@ -12325,7 +13243,8 @@
 			"sourcePaths": [
 				"src/main/cue/cue-spawn-builder.ts",
 				"src/main/cue/cue-process-lifecycle.ts",
-				"src/cli/services/cue-standalone-engine.ts"
+				"src/cli/services/cue-standalone-engine.ts",
+				"src/main/plugins/plugin-headless-agent-runner.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-08-08"],
@@ -12383,7 +13302,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S13"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B37", "B38"]
 		},
 		{
 			"id": "S14",
@@ -12414,7 +13334,10 @@
 				"src/shared/maestro-lib/groupchat/storage.ts",
 				"src/main/group-chat/output-parser.ts",
 				"src/main/group-chat/spawnGroupChatAgent.ts",
-				"src/renderer/components/GroupChatModal.tsx"
+				"src/renderer/components/GroupChatModal.tsx",
+				"src/renderer/components/NewInstanceModal/types.ts",
+				"src/renderer/components/NewInstanceModal/AgentPickerGrid.tsx",
+				"src/renderer/components/Wizard/screens/AgentSelectionScreen/utils/agentTiles.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-08-10"],
@@ -12472,7 +13395,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S14"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B14", "B39"]
 		},
 		{
 			"id": "S15",
@@ -12501,7 +13425,9 @@
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/services/symphony-runner.ts",
-				"src/renderer/hooks/symphony/useSymphony.ts"
+				"src/renderer/hooks/symphony/useSymphony.ts",
+				"src/renderer/components/AgentCreationDialog.tsx",
+				"src/renderer/components/NewInstanceModal/NewInstanceModal.tsx"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-08-16"],
@@ -12559,7 +13485,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S15"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B46"]
 		},
 		{
 			"id": "S16",
@@ -12589,7 +13516,8 @@
 			"sourcePaths": [
 				"src/shared/pianola/pianola-agent-select.ts",
 				"src/shared/pianola/pianola-orchestrator.ts",
-				"src/main/pianola/pianola-supervisor.ts"
+				"src/main/pianola/pianola-supervisor.ts",
+				"src/cli/commands/pianola-orchestrate.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-01-07"],
@@ -12658,7 +13586,8 @@
 				"ownerTask": "GT1-01-07",
 				"status": "pending",
 				"reason": "Existing mechanism or proposed integration owner identified; phase01 task reconciliation must make any missing implementation/test packet explicit before dependent execution."
-			}
+			},
+			"branchAuditRefs": ["B47"]
 		},
 		{
 			"id": "S17",
@@ -12687,7 +13616,8 @@
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/pianola/transcript-mining.ts",
-				"src/cli/commands/pianola-learn.ts"
+				"src/cli/commands/pianola-learn.ts",
+				"docs/cli-reference.md"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-08-18"],
@@ -12745,7 +13675,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S17"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B09"]
 		},
 		{
 			"id": "S18",
@@ -12775,7 +13706,8 @@
 			"sourcePaths": [
 				"src/shared/directorNotesProvider.ts",
 				"src/main/utils/director-notes-provider.ts",
-				"src/renderer/components/Settings/tabs/EncoreTab/hooks/useDirectorNotesAgentState.ts"
+				"src/renderer/components/Settings/tabs/EncoreTab/hooks/useDirectorNotesAgentState.ts",
+				"src/shared/modelTiers.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-08-13"],
@@ -12833,7 +13765,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S18"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B08"]
 		},
 		{
 			"id": "S19",
@@ -12860,7 +13793,15 @@
 			"routes": ["native-headless", "acp-candidate"],
 			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
-			"sourcePaths": ["src/main/utils/context-groomer.ts"],
+			"sourcePaths": [
+				"src/main/utils/context-groomer.ts",
+				"src/shared/modelTiers.ts",
+				"src/shared/directorNotesProvider.ts",
+				"src/main/cross-agent/cross-agent-router.ts",
+				"src/main/cross-agent/consult-runner.ts",
+				"src/main/process-manager/ProcessManager.ts",
+				"src/shared/maestro-lib/providers/capabilities.ts"
+			],
 			"ownerTasks": {
 				"implementation": ["GT1-08-14"],
 				"test": ["GT1-08-15"],
@@ -12917,7 +13858,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S19"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B08", "B40", "B41"]
 		},
 		{
 			"id": "S20",
@@ -12949,7 +13891,10 @@
 				"src/shared/maestro-lib/run/start-turn.ts",
 				"src/shared/maestro-lib/turns/run-agent-turn.ts",
 				"src/shared/maestro-lib/runtime/turns.ts",
-				"src/cli/services/agent-spawner.ts"
+				"src/cli/services/agent-spawner.ts",
+				"src/shared/maestro-lib/runtime/providers.ts",
+				"src/shared/maestro-lib/parsers/parser-factory.ts",
+				"src/shared/maestro-lib/providers/capabilities.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-07-01", "GT1-07-02", "GT1-07-03"],
@@ -13007,7 +13952,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S20"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B05", "B11"]
 		},
 		{
 			"id": "S21",
@@ -13036,7 +13982,9 @@
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/process-manager/ProcessManager.ts",
-				"src/main/codex-app-server/steering.ts"
+				"src/main/codex-app-server/steering.ts",
+				"src/renderer/utils/sendMenu.ts",
+				"src/renderer/utils/executionQueue.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-07-02"],
@@ -13105,7 +14053,8 @@
 				"ownerTask": "GT1-01-07",
 				"status": "pending",
 				"reason": "Existing mechanism or proposed integration owner identified; phase01 task reconciliation must make any missing implementation/test packet explicit before dependent execution."
-			}
+			},
+			"branchAuditRefs": ["B24"]
 		},
 		{
 			"id": "S22",
@@ -13224,7 +14173,13 @@
 				"src/main/enterprise/dispatch.ts",
 				"src/main/enterprise/spawn-authority.ts",
 				"src/shared/maestro-lib/managed/host-adapter.ts",
-				"src/shared/maestro-lib/managed/provider-route.ts"
+				"src/shared/maestro-lib/managed/provider-route.ts",
+				"src/shared/providerProfiles.ts",
+				"src/shared/maestro-lib/launch/env.ts",
+				"src/shared/envVarCatalog.ts",
+				"src/shared/maestro-lib/providers/capabilities.ts",
+				"src/main/cross-agent/cross-agent-router.ts",
+				"src/main/cross-agent/consult-runner.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-09-02", "GT1-09-04", "GT1-09-07", "GT1-09-09"],
@@ -13282,7 +14237,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S23"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B06", "B11", "B40"]
 		},
 		{
 			"id": "S24",
@@ -13311,7 +14267,10 @@
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/web-server/handlers/messageHandlers/sessions.ts",
-				"src/main/web-server/callbacks/sessionCallbacks.ts"
+				"src/main/web-server/callbacks/sessionCallbacks.ts",
+				"src/web/hooks/useAgentManagement.ts",
+				"src/web/hooks/useMobileSessionManagement.ts",
+				"src/renderer/hooks/remote/useAppRemoteEventListeners.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-10-03", "GT1-10-04A"],
@@ -13369,7 +14328,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S24"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B28"]
 		},
 		{
 			"id": "S25",
@@ -13399,7 +14359,17 @@
 			"sourcePaths": [
 				"src/cli/index.ts",
 				"src/cli/services/agent-spawner.ts",
-				"src/shared/maestro-lib/runtime/turns.ts"
+				"src/shared/maestro-lib/runtime/turns.ts",
+				"src/cli/commands/list-sessions.ts",
+				"src/__tests__/cli/commands/list-sessions.test.ts",
+				"src/shared/maestro-lib/runtime/providers.ts",
+				"src/shared/maestro-lib/parsers/parser-factory.ts",
+				"docs/cli.md",
+				"docs/cli-reference.md",
+				"docs/provider-notes.md",
+				"docs/getting-started.md",
+				"docs/features.md",
+				"docs/index.md"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-10-01", "GT1-07-03"],
@@ -13457,7 +14427,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S25"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B04", "B05", "B13"]
 		},
 		{
 			"id": "S26",
@@ -13486,7 +14457,16 @@
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/stats/token-usage/token-usage-accessor.ts",
-				"src/main/cue/stats/cue-token-accessor.ts"
+				"src/main/cue/stats/cue-token-accessor.ts",
+				"src/renderer/hooks/agent/useSessionPagination.ts",
+				"src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsAggregateStats.ts",
+				"src/main/ipc/handlers/agentSessions.ts",
+				"src/main/preload/sessions.ts",
+				"src/renderer/hooks/stats/useGlobalAgentStats.ts",
+				"src/renderer/components/AboutModal.tsx",
+				"src/renderer/components/AchievementShareButton.tsx",
+				"src/main/agents/limitResetEstimator.ts",
+				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-10-08"],
@@ -13544,7 +14524,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S26"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B23", "B32", "B43"]
 		},
 		{
 			"id": "S27",
@@ -13573,7 +14554,13 @@
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/components/UsageDashboard/UsageDashboardModal/hooks/useQuotaTabDiscovery.ts",
-				"src/renderer/components/UsageDashboard/UsageDashboardModal/views/ProviderQuotaUsageView.tsx"
+				"src/renderer/components/UsageDashboard/UsageDashboardModal/views/ProviderQuotaUsageView.tsx",
+				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
+				"src/renderer/services/codexAutoReset.ts",
+				"src/main/agents/limitResetEstimator.ts",
+				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts",
+				"src/main/stats/token-usage/token-usage-accessor.ts",
+				"src/main/cue/stats/cue-token-accessor.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-10-10"],
@@ -13631,7 +14618,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S27"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B25", "B43"]
 		},
 		{
 			"id": "S28",
@@ -13661,7 +14649,10 @@
 			"sourcePaths": [
 				"src/shared/maestro-lib/run/start-turn.ts",
 				"src/__tests__/performance/ThinkingStreamPerformance.test.tsx",
-				"src/__tests__/main/process-manager/recordings/turn-recordings.test.ts"
+				"src/__tests__/main/process-manager/recordings/turn-recordings.test.ts",
+				"src/shared/maestro-lib/run/turn-capture.ts",
+				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
+				"src/main/process-manager/handlers/StdoutHandler.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-03-09"],
@@ -13719,7 +14710,8 @@
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S28"]
 				}
-			]
+			],
+			"branchAuditRefs": ["B12", "B42"]
 		},
 		{
 			"id": "S29",
@@ -13749,7 +14741,8 @@
 			"sourcePaths": [
 				"src/renderer/hooks/worktree/useWorktreeHandlers.ts",
 				"src/renderer/utils/worktreeSession.ts",
-				"src/renderer/utils/worktreeSpawn.ts"
+				"src/renderer/utils/worktreeSpawn.ts",
+				"src/renderer/types/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-01", "GT1-10-01"],
@@ -13818,7 +14811,8 @@
 				"ownerTask": "GT1-01-07",
 				"status": "pending",
 				"reason": "Existing mechanism or proposed integration owner identified; phase01 task reconciliation must make any missing implementation/test packet explicit before dependent execution."
-			}
+			},
+			"branchAuditRefs": ["B19"]
 		},
 		{
 			"id": "S30",
@@ -13847,7 +14841,9 @@
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/components/NewInstanceModal/NewInstanceModal.tsx",
-				"src/renderer/components/AgentCreationDialog.tsx"
+				"src/renderer/components/AgentCreationDialog.tsx",
+				"src/renderer/hooks/symphony/useSymphony.ts",
+				"src/main/services/symphony-runner.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-01", "GT1-10-01"],
@@ -13916,7 +14912,8 @@
 				"ownerTask": "GT1-01-07",
 				"status": "pending",
 				"reason": "Existing mechanism or proposed integration owner identified; phase01 task reconciliation must make any missing implementation/test packet explicit before dependent execution."
-			}
+			},
+			"branchAuditRefs": ["B46"]
 		},
 		{
 			"id": "S31",
@@ -13946,7 +14943,9 @@
 			"sourcePaths": [
 				"src/renderer/stores/agentStore.ts",
 				"src/shared/templateVariables.ts",
-				"src/renderer/hooks/remote/useRemoteHandlers.ts"
+				"src/renderer/hooks/remote/useRemoteHandlers.ts",
+				"src/renderer/hooks/input/useInputProcessing.ts",
+				"src/renderer/hooks/remote/useRemoteIntegration.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-05", "GT1-08-01"],
@@ -14015,7 +15014,8 @@
 				"ownerTask": "GT1-01-07",
 				"status": "pending",
 				"reason": "Existing mechanism or proposed integration owner identified; phase01 task reconciliation must make any missing implementation/test packet explicit before dependent execution."
-			}
+			},
+			"branchAuditRefs": ["B20"]
 		},
 		{
 			"id": "META-01",
@@ -14051,7 +15051,11 @@
 				"src/shared/agentMetadata.ts",
 				"src/renderer/components/NewInstanceModal/types.ts",
 				"src/renderer/components/Wizard/screens/AgentSelectionScreen/utils/agentTiles.ts",
-				"src/renderer/components/GroupChatModal.tsx"
+				"src/renderer/components/GroupChatModal.tsx",
+				"src/renderer/components/NewInstanceModal/AgentPickerGrid.tsx",
+				"src/renderer/components/Wizard/screens/AgentSelectionScreen/components/AgentLogo.tsx",
+				"src/renderer/constants/agentIcons.ts",
+				"src/renderer/components/Wizard/screens/ConversationScreen/utils/providerName.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -14113,7 +15117,8 @@
 					"affectedRows": ["META-01"]
 				}
 			],
-			"symbols": ["AGENT_DISPLAY_NAMES", "AGENT_PICKER_META", "PICKABLE_AGENT_IDS"]
+			"symbols": ["AGENT_DISPLAY_NAMES", "AGENT_PICKER_META", "PICKABLE_AGENT_IDS"],
+			"branchAuditRefs": ["B14", "B15"]
 		},
 		{
 			"id": "META-03",
@@ -16024,6 +17029,2622 @@
 					}
 				}
 			]
+		},
+		{
+			"id": "S32",
+			"outcome": "Preserve Grok provider identity in Agent Runs metadata, capture labels and dashboard filters",
+			"required": true,
+			"kind": "qualification",
+			"category": "application-surface",
+			"referenceIds": ["P17", "P38", "P40"],
+			"comparators": {
+				"claude-code": {
+					"behavior": "Claude identity resolves to claude-code in capture metadata.",
+					"evidenceRefs": ["F144", "F145", "F146", "F147"]
+				},
+				"codex": {
+					"behavior": "Codex identity resolves to codex in capture metadata.",
+					"evidenceRefs": ["F144", "F145", "F146", "F147"]
+				},
+				"antigravity": {
+					"behavior": "Antigravity is absent from KNOWN_AGENT_RUN_PROVIDERS and resolves to unknown.",
+					"evidenceRefs": ["F144", "F145", "F146", "F147"]
+				}
+			},
+			"surfaces": ["Agent Runs provider attribution"],
+			"routes": ["offline-audit"],
+			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"mechanism": "Extend the existing shared consumer and its native adapter where required; preserve provider-specific syntax and refusal boundaries. GT1-01-07 must allocate bounded implementation/test packets for this newly discovered surface before dependent execution.",
+			"sourcePaths": [
+				"src/shared/agent-run/types.ts",
+				"src/shared/agent-run/provider.ts",
+				"src/main/agent-run/capture-service.ts",
+				"src/cli/services/agent-run-capture.ts"
+			],
+			"ownerTasks": {
+				"implementation": ["GT1-01-07", "GT1-10-08"],
+				"test": ["GT1-10-09"],
+				"verification": ["GT1-01-07", "GT1-10-12", "GT1-11-03"],
+				"live": [],
+				"finalAcceptance": ["GT1-12-06"]
+			},
+			"versions": {
+				"profile": "official-grok-candidate",
+				"supportedRange": null
+			},
+			"limitations": [
+				"KNOWN_AGENT_RUN_PROVIDERS includes Claude/Codex but omits Grok and Antigravity; resolveAgentRunProvider returns unknown for both, losing actual provider identity in desktop and CLI capture. The fixed-point test derives its cases from the incomplete list and cannot discover missing AGENT_IDS.",
+				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim."
+			],
+			"implementation": "pending",
+			"static": "not-run",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"currentEvidence": {
+				"provenance": "source-supported",
+				"sourceRevisionRef": "branchAudit.sourceCommit",
+				"evidenceRef": "phase01-branches"
+			},
+			"evidenceApplicability": {
+				"static": {
+					"applicable": true,
+					"reason": "Inspect listed registry/builders/consumers against the required outcome."
+				},
+				"deterministic": {
+					"applicable": true,
+					"reason": "Exercise listed consumers or validate audit/docs with offline fixtures."
+				},
+				"live": {
+					"applicable": false,
+					"reason": "This row covers pure provider-label normalization and stored metadata presentation. Native capture, process streaming and transcript correctness remain separately live-applicable in S20/S25/S28."
+				}
+			},
+			"blockers": [
+				{
+					"id": "gap:S32",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "KNOWN_AGENT_RUN_PROVIDERS includes Claude/Codex but omits Grok and Antigravity; resolveAgentRunProvider returns unknown for both, losing actual provider identity in desktop and CLI capture. The fixed-point test derives its cases from the incomplete list and cannot discover missing AGENT_IDS.",
+					"affectedRows": ["S32"]
+				},
+				{
+					"id": "owner-scope:S32",
+					"code": "owner-task-scope-pending",
+					"missingPrerequisite": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage.",
+					"affectedRows": ["S32"]
+				}
+			],
+			"ownerScopeReview": {
+				"ownerTask": "GT1-01-07",
+				"status": "pending",
+				"reason": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage."
+			},
+			"branchAuditRefs": ["B01"]
+		},
+		{
+			"id": "S33",
+			"outcome": "Select a Grok account and run the shared feedback interview with qualified read-only semantics",
+			"required": true,
+			"kind": "qualification",
+			"category": "application-surface",
+			"referenceIds": ["P04", "P20", "P32", "P35"],
+			"comparators": {
+				"claude-code": {
+					"behavior": "Claude participates in account-aware interview candidates and provider defaults.",
+					"evidenceRefs": ["F148", "F149"]
+				},
+				"codex": {
+					"behavior": "Codex participates in account-aware interview candidates and provider defaults.",
+					"evidenceRefs": ["F148", "F149"]
+				},
+				"antigravity": {
+					"behavior": "Antigravity is excluded from FEEDBACK_PROVIDERS, like Grok.",
+					"evidenceRefs": ["F148", "F149"]
+				}
+			},
+			"surfaces": ["Feedback interview accounts"],
+			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
+			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"mechanism": "Extend the existing shared consumer and its native adapter where required; preserve provider-specific syntax and refusal boundaries. GT1-01-07 must allocate bounded implementation/test packets for this newly discovered surface before dependent execution.",
+			"sourcePaths": ["src/shared/feedbackAccounts.ts", "docs/feedback.md"],
+			"ownerTasks": {
+				"implementation": ["GT1-01-07", "GT1-08-14"],
+				"test": ["GT1-08-15"],
+				"verification": ["GT1-01-07", "GT1-08-21", "GT1-11-03"],
+				"live": ["GT1-11-12"],
+				"finalAcceptance": ["GT1-12-06"]
+			},
+			"versions": {
+				"profile": "official-grok-candidate",
+				"supportedRange": null
+			},
+			"limitations": [
+				"FEEDBACK_PROVIDERS is restricted to Claude/Codex/OpenCode; candidate builder skips Grok and Antigravity agents and only enumerates allowlisted provider defaults. This is a real shared utility surface missing from the current ledger. Extend only with qualified account identity and read-only interview semantics; picker registration alone does not enable it.",
+				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim."
+			],
+			"implementation": "pending",
+			"static": "not-run",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"currentEvidence": {
+				"provenance": "source-supported",
+				"sourceRevisionRef": "branchAudit.sourceCommit",
+				"evidenceRef": "phase01-branches"
+			},
+			"evidenceApplicability": {
+				"static": {
+					"applicable": true,
+					"reason": "Inspect listed registry/builders/consumers against the required outcome."
+				},
+				"deterministic": {
+					"applicable": true,
+					"reason": "Exercise listed consumers or validate audit/docs with offline fixtures."
+				},
+				"live": {
+					"applicable": true,
+					"reason": "Real selected-binary evidence is required for the native behavior, continuation or effect claim on each declared route/platform. Fixtures and missing authorization do not waive it."
+				}
+			},
+			"blockers": [
+				{
+					"id": "gap:S33",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "FEEDBACK_PROVIDERS is restricted to Claude/Codex/OpenCode; candidate builder skips Grok and Antigravity agents and only enumerates allowlisted provider defaults. This is a real shared utility surface missing from the current ledger. Extend only with qualified account identity and read-only interview semantics; picker registration alone does not enable it.",
+					"affectedRows": ["S33"]
+				},
+				{
+					"id": "owner-scope:S33",
+					"code": "owner-task-scope-pending",
+					"missingPrerequisite": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage.",
+					"affectedRows": ["S33"]
+				},
+				{
+					"id": "qualified-binary-and-platforms-missing",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Exact binary/version and declared route/platform receipts.",
+					"affectedRows": ["S33"]
+				},
+				{
+					"id": "live-authorization-absent",
+					"code": "live-disabled",
+					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["S33"]
+				}
+			],
+			"ownerScopeReview": {
+				"ownerTask": "GT1-01-07",
+				"status": "pending",
+				"reason": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage."
+			},
+			"branchAuditRefs": ["B02"]
+		},
+		{
+			"id": "S34",
+			"outcome": "Recover a Grok chat context-limit refusal by qualified native compaction and retry without losing session identity",
+			"required": true,
+			"kind": "qualification",
+			"category": "application-surface",
+			"referenceIds": ["P10", "P14", "P40"],
+			"comparators": {
+				"claude-code": {
+					"behavior": "Claude is the only registered headless compaction command; source comments describe empty successful result and preserved native ID.",
+					"evidenceRefs": ["F150", "F151", "F152", "F153"]
+				},
+				"codex": {
+					"behavior": "Codex has no registered headless compaction recovery command.",
+					"evidenceRefs": ["F150", "F151", "F152", "F153"]
+				},
+				"antigravity": {
+					"behavior": "Antigravity has no registered headless compaction recovery command.",
+					"evidenceRefs": ["F150", "F151", "F152", "F153"]
+				}
+			},
+			"surfaces": ["Context-limit recovery"],
+			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
+			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"mechanism": "Extend the existing shared consumer and its native adapter where required; preserve provider-specific syntax and refusal boundaries. GT1-01-07 must allocate bounded implementation/test packets for this newly discovered surface before dependent execution.",
+			"sourcePaths": [
+				"src/shared/contextCompaction.ts",
+				"src/renderer/services/contextCompaction.ts",
+				"src/renderer/stores/retryStore.ts",
+				"docs/agent-guides/CANONICAL-UTILITIES.md"
+			],
+			"ownerTasks": {
+				"implementation": ["GT1-01-07", "GT1-03-11"],
+				"test": ["GT1-03-12"],
+				"verification": ["GT1-01-07", "GT1-03-13", "GT1-11-03"],
+				"live": ["GT1-11-11"],
+				"finalAcceptance": ["GT1-12-06"]
+			},
+			"versions": {
+				"profile": "official-grok-candidate",
+				"supportedRange": null
+			},
+			"limitations": [
+				"Only Claude has a verified headless compaction command. Grok, Codex and Antigravity receive no automatic compact-and-resend recovery; this is a deliberate safe omission, not permission to send literal /compact as a prompt. Equivalent Grok recovery or explicit limitation needs a separate ledger row, including same native ID, original prompt retention, cancellation and failed compaction behavior. Auto Run is explicitly outside this existing recovery route.",
+				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim."
+			],
+			"implementation": "pending",
+			"static": "not-run",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"currentEvidence": {
+				"provenance": "source-supported",
+				"sourceRevisionRef": "branchAudit.sourceCommit",
+				"evidenceRef": "phase01-branches"
+			},
+			"evidenceApplicability": {
+				"static": {
+					"applicable": true,
+					"reason": "Inspect listed registry/builders/consumers against the required outcome."
+				},
+				"deterministic": {
+					"applicable": true,
+					"reason": "Exercise listed consumers or validate audit/docs with offline fixtures."
+				},
+				"live": {
+					"applicable": true,
+					"reason": "Real selected-binary evidence is required for the native behavior, continuation or effect claim on each declared route/platform. Fixtures and missing authorization do not waive it."
+				}
+			},
+			"blockers": [
+				{
+					"id": "gap:S34",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "Only Claude has a verified headless compaction command. Grok, Codex and Antigravity receive no automatic compact-and-resend recovery; this is a deliberate safe omission, not permission to send literal /compact as a prompt. Equivalent Grok recovery or explicit limitation needs a separate ledger row, including same native ID, original prompt retention, cancellation and failed compaction behavior. Auto Run is explicitly outside this existing recovery route.",
+					"affectedRows": ["S34"]
+				},
+				{
+					"id": "owner-scope:S34",
+					"code": "owner-task-scope-pending",
+					"missingPrerequisite": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage.",
+					"affectedRows": ["S34"]
+				},
+				{
+					"id": "qualified-binary-and-platforms-missing",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Exact binary/version and declared route/platform receipts.",
+					"affectedRows": ["S34"]
+				},
+				{
+					"id": "live-authorization-absent",
+					"code": "live-disabled",
+					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["S34"]
+				}
+			],
+			"ownerScopeReview": {
+				"ownerTask": "GT1-01-07",
+				"status": "pending",
+				"reason": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage."
+			},
+			"branchAuditRefs": ["B03"]
+		},
+		{
+			"id": "S35",
+			"outcome": "Install, inspect and use Grok coworking MCP through the existing managed installer and Settings surface",
+			"required": true,
+			"kind": "qualification",
+			"category": "application-surface",
+			"referenceIds": ["P25", "P26", "P28", "P37"],
+			"comparators": {
+				"claude-code": {
+					"behavior": "Claude has a registered native coworking installer and participates in install status/all operations.",
+					"evidenceRefs": ["F154", "F155"]
+				},
+				"codex": {
+					"behavior": "Codex has a registered native coworking installer and participates in install status/all operations.",
+					"evidenceRefs": ["F154", "F155"]
+				},
+				"antigravity": {
+					"behavior": "Antigravity has no registered coworking installer, like Grok.",
+					"evidenceRefs": ["F154", "F155"]
+				}
+			},
+			"surfaces": ["Coworking MCP installation"],
+			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
+			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"mechanism": "Extend the existing shared consumer and its native adapter where required; preserve provider-specific syntax and refusal boundaries. GT1-01-07 must allocate bounded implementation/test packets for this newly discovered surface before dependent execution.",
+			"sourcePaths": [
+				"src/main/coworking/installers/index.ts",
+				"src/main/coworking/coworking-installer.ts"
+			],
+			"ownerTasks": {
+				"implementation": ["GT1-01-07", "GT1-07-05"],
+				"test": ["GT1-07-07"],
+				"verification": ["GT1-01-07", "GT1-07-11", "GT1-11-03"],
+				"live": ["GT1-11-12"],
+				"finalAcceptance": ["GT1-12-06"]
+			},
+			"versions": {
+				"profile": "official-grok-candidate",
+				"supportedRange": null
+			},
+			"limitations": [
+				"INSTALLERS registers Claude, Codex, OpenCode and Factory Droid only. The Settings status list and install-for-all derive from it; getInstaller(grok) is null and installFor(grok) throws unsupported. This is an unimplemented Grok outcome, not evidence that Grok lacks MCP. Preserve managed install admission when adding an adapter. Antigravity is also absent, which does not lower the union bar.",
+				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim."
+			],
+			"implementation": "pending",
+			"static": "not-run",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"currentEvidence": {
+				"provenance": "source-supported",
+				"sourceRevisionRef": "branchAudit.sourceCommit",
+				"evidenceRef": "phase01-branches"
+			},
+			"evidenceApplicability": {
+				"static": {
+					"applicable": true,
+					"reason": "Inspect listed registry/builders/consumers against the required outcome."
+				},
+				"deterministic": {
+					"applicable": true,
+					"reason": "Exercise listed consumers or validate audit/docs with offline fixtures."
+				},
+				"live": {
+					"applicable": true,
+					"reason": "Real selected-binary evidence is required for the native behavior, continuation or effect claim on each declared route/platform. Fixtures and missing authorization do not waive it."
+				}
+			},
+			"blockers": [
+				{
+					"id": "gap:S35",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "INSTALLERS registers Claude, Codex, OpenCode and Factory Droid only. The Settings status list and install-for-all derive from it; getInstaller(grok) is null and installFor(grok) throws unsupported. This is an unimplemented Grok outcome, not evidence that Grok lacks MCP. Preserve managed install admission when adding an adapter. Antigravity is also absent, which does not lower the union bar.",
+					"affectedRows": ["S35"]
+				},
+				{
+					"id": "owner-scope:S35",
+					"code": "owner-task-scope-pending",
+					"missingPrerequisite": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage.",
+					"affectedRows": ["S35"]
+				},
+				{
+					"id": "qualified-binary-and-platforms-missing",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Exact binary/version and declared route/platform receipts.",
+					"affectedRows": ["S35"]
+				},
+				{
+					"id": "live-authorization-absent",
+					"code": "live-disabled",
+					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["S35"]
+				}
+			],
+			"ownerScopeReview": {
+				"ownerTask": "GT1-01-07",
+				"status": "pending",
+				"reason": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage."
+			},
+			"branchAuditRefs": ["B30"]
+		},
+		{
+			"id": "S36",
+			"outcome": "Carry selected Grok native resources and MCP secret-name requirements through Cue or agent bundles with honest portability limits",
+			"required": true,
+			"kind": "qualification",
+			"category": "application-surface",
+			"referenceIds": ["P19", "P23", "P28", "P30"],
+			"comparators": {
+				"claude-code": {
+					"behavior": "Claude agents collect native assets and .mcp.json secret-name requirements in addition to generic settings/playbooks.",
+					"evidenceRefs": ["F156", "F157"]
+				},
+				"codex": {
+					"behavior": "Codex retains generic settings/playbooks but has no equivalent native-asset collection branch here.",
+					"evidenceRefs": ["F156", "F157"]
+				},
+				"antigravity": {
+					"behavior": "Antigravity retains generic settings/playbooks but has no equivalent native-asset collection branch here.",
+					"evidenceRefs": ["F156", "F157"]
+				}
+			},
+			"surfaces": ["Cue and agent bundle native resource portability"],
+			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
+			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"mechanism": "Extend the existing shared consumer and its native adapter where required; preserve provider-specific syntax and refusal boundaries. GT1-01-07 must allocate bounded implementation/test packets for this newly discovered surface before dependent execution.",
+			"sourcePaths": [
+				"src/main/cue/bundle/cue-bundle-exporter.ts",
+				"src/main/cue/bundle/cue-bundle-importer.ts"
+			],
+			"ownerTasks": {
+				"implementation": ["GT1-01-07", "GT1-06-10", "GT1-08-08"],
+				"test": ["GT1-06-11", "GT1-08-09"],
+				"verification": ["GT1-01-07", "GT1-06-12", "GT1-08-12", "GT1-11-03"],
+				"live": ["GT1-11-12"],
+				"finalAcceptance": ["GT1-12-06"]
+			},
+			"versions": {
+				"profile": "official-grok-candidate",
+				"supportedRange": null
+			},
+			"limitations": [
+				"Generic agent/settings/playbook export retains toolType, but native assets are collected only for Claude agents and MCP secret names from .mcp.json are attached only to Claude on export/import. These guards correctly protect Claude-specific formats; Grok needs a separately qualified native-resource projection/explicit limitation so bundling does not silently promise full portability.",
+				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim."
+			],
+			"implementation": "pending",
+			"static": "not-run",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"currentEvidence": {
+				"provenance": "source-supported",
+				"sourceRevisionRef": "branchAudit.sourceCommit",
+				"evidenceRef": "phase01-branches"
+			},
+			"evidenceApplicability": {
+				"static": {
+					"applicable": true,
+					"reason": "Inspect listed registry/builders/consumers against the required outcome."
+				},
+				"deterministic": {
+					"applicable": true,
+					"reason": "Exercise listed consumers or validate audit/docs with offline fixtures."
+				},
+				"live": {
+					"applicable": true,
+					"reason": "Real selected-binary evidence is required for the native behavior, continuation or effect claim on each declared route/platform. Fixtures and missing authorization do not waive it."
+				}
+			},
+			"blockers": [
+				{
+					"id": "gap:S36",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "Generic agent/settings/playbook export retains toolType, but native assets are collected only for Claude agents and MCP secret names from .mcp.json are attached only to Claude on export/import. These guards correctly protect Claude-specific formats; Grok needs a separately qualified native-resource projection/explicit limitation so bundling does not silently promise full portability.",
+					"affectedRows": ["S36"]
+				},
+				{
+					"id": "owner-scope:S36",
+					"code": "owner-task-scope-pending",
+					"missingPrerequisite": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage.",
+					"affectedRows": ["S36"]
+				},
+				{
+					"id": "qualified-binary-and-platforms-missing",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Exact binary/version and declared route/platform receipts.",
+					"affectedRows": ["S36"]
+				},
+				{
+					"id": "live-authorization-absent",
+					"code": "live-disabled",
+					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["S36"]
+				}
+			],
+			"ownerScopeReview": {
+				"ownerTask": "GT1-01-07",
+				"status": "pending",
+				"reason": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage."
+			},
+			"branchAuditRefs": ["B31"]
+		},
+		{
+			"id": "S37",
+			"outcome": "Include Grok stored-history aggregates in lifetime global statistics, About and achievement sharing with truthful completeness",
+			"required": true,
+			"kind": "qualification",
+			"category": "application-surface",
+			"referenceIds": ["P13", "P40"],
+			"comparators": {
+				"claude-code": {
+					"behavior": "Global stats discovers and aggregates Claude stored sessions and includes cached/archive totals.",
+					"evidenceRefs": ["F011", "F158", "F159", "F160", "F161"]
+				},
+				"codex": {
+					"behavior": "Global stats discovers and aggregates Codex stored sessions; this branch explicitly has no authoritative cost data.",
+					"evidenceRefs": ["F011", "F158", "F159", "F160", "F161"]
+				},
+				"antigravity": {
+					"behavior": "Antigravity is absent from global discovery/aggregation, like Grok.",
+					"evidenceRefs": ["F011", "F158", "F159", "F160", "F161"]
+				}
+			},
+			"surfaces": ["Lifetime global stats and achievement sharing"],
+			"routes": ["offline-audit"],
+			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"mechanism": "Extend the existing shared consumer and its native adapter where required; preserve provider-specific syntax and refusal boundaries. GT1-01-07 must allocate bounded implementation/test packets for this newly discovered surface before dependent execution.",
+			"sourcePaths": [
+				"src/main/ipc/handlers/agentSessions.ts",
+				"src/main/preload/sessions.ts",
+				"src/renderer/hooks/stats/useGlobalAgentStats.ts",
+				"src/renderer/components/AboutModal.tsx",
+				"src/renderer/components/AchievementShareButton.tsx"
+			],
+			"ownerTasks": {
+				"implementation": ["GT1-01-07", "GT1-10-08"],
+				"test": ["GT1-10-09"],
+				"verification": ["GT1-01-07", "GT1-10-12", "GT1-11-03"],
+				"live": [],
+				"finalAcceptance": ["GT1-12-06"]
+			},
+			"versions": {
+				"profile": "official-grok-candidate",
+				"supportedRange": null
+			},
+			"limitations": [
+				"agentSessions:getGlobalStats is labeled All Providers but discovers and aggregates only Claude/Codex stores. Grok history registration and the Cost & Tokens collector do not enter this distinct pipeline. Consequently About, usage-header/share and achievement totals omit Grok; Antigravity is omitted too. This warrants a separate outcome or explicit S26 expansion.",
+				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim."
+			],
+			"implementation": "pending",
+			"static": "not-run",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"currentEvidence": {
+				"provenance": "source-supported",
+				"sourceRevisionRef": "branchAudit.sourceCommit",
+				"evidenceRef": "phase01-branches"
+			},
+			"evidenceApplicability": {
+				"static": {
+					"applicable": true,
+					"reason": "Inspect listed registry/builders/consumers against the required outcome."
+				},
+				"deterministic": {
+					"applicable": true,
+					"reason": "Exercise listed consumers or validate audit/docs with offline fixtures."
+				},
+				"live": {
+					"applicable": false,
+					"reason": "This row covers aggregation and presentation of selected-profile stored-history fixtures. Native decoding, account isolation and authoritative cost remain live-applicable in P11/P13/REG-STORAGE/REG-USAGE; this row cannot certify those inputs."
+				}
+			},
+			"blockers": [
+				{
+					"id": "gap:S37",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "agentSessions:getGlobalStats is labeled All Providers but discovers and aggregates only Claude/Codex stores. Grok history registration and the Cost & Tokens collector do not enter this distinct pipeline. Consequently About, usage-header/share and achievement totals omit Grok; Antigravity is omitted too. This warrants a separate outcome or explicit S26 expansion.",
+					"affectedRows": ["S37"]
+				},
+				{
+					"id": "owner-scope:S37",
+					"code": "owner-task-scope-pending",
+					"missingPrerequisite": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage.",
+					"affectedRows": ["S37"]
+				}
+			],
+			"ownerScopeReview": {
+				"ownerTask": "GT1-01-07",
+				"status": "pending",
+				"reason": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage."
+			},
+			"branchAuditRefs": ["B32"]
 		}
-	]
+	],
+	"branchAudit": {
+		"taskId": "GT1-01-03",
+		"sourceCommit": "81080100b939c0497874b3998dd77546b670cc0d",
+		"recordedAt": "2026-10-30T08:02:44.318746+00:00",
+		"baseObservation": {
+			"ref": "refs/heads/feature/mega-maestro-v1.1.0-rc",
+			"commit": "7c8e0368827249c6c4e56d8f541eecf7045bcd0a",
+			"aheadBehind": [3, 4]
+		},
+		"evidenceRef": "phase01-branches",
+		"searches": [
+			{
+				"query": "providers",
+				"command": [
+					"rg",
+					"--no-heading",
+					"--color",
+					"never",
+					"--sort",
+					"path",
+					"-n",
+					"-i",
+					"-e",
+					"claude|codex|antigravity|grok",
+					"src/main",
+					"src/shared",
+					"src/renderer",
+					"src/web",
+					"src/cli",
+					"src/__tests__",
+					"docs",
+					"CLAUDE.md",
+					"CLAUDE-AGENTS.md",
+					"PROVIDER-SUPPORT.md",
+					"CONTRIBUTING.md",
+					"README.md"
+				],
+				"exitCode": 0,
+				"outputPath": "tmp/grok-tier1-audit/branches/providers.txt",
+				"sha256": "4f73e570a7fe7bd9439f1a255c8c10427117991a9cea3a43fa1605b9df305767",
+				"matchingLines": 23696,
+				"files": 1676,
+				"byRoot": {
+					"src/main": {
+						"matchingLines": 2864,
+						"files": 201
+					},
+					"src/shared": {
+						"matchingLines": 2487,
+						"files": 206
+					},
+					"src/renderer": {
+						"matchingLines": 1713,
+						"files": 268
+					},
+					"src/web": {
+						"matchingLines": 1,
+						"files": 1
+					},
+					"src/cli": {
+						"matchingLines": 269,
+						"files": 23
+					},
+					"src/__tests__": {
+						"matchingLines": 15506,
+						"files": 908
+					},
+					"docs": {
+						"matchingLines": 682,
+						"files": 64
+					},
+					"CLAUDE.md": {
+						"matchingLines": 45,
+						"files": 1
+					},
+					"CLAUDE-AGENTS.md": {
+						"matchingLines": 24,
+						"files": 1
+					},
+					"PROVIDER-SUPPORT.md": {
+						"matchingLines": 95,
+						"files": 1
+					},
+					"CONTRIBUTING.md": {
+						"matchingLines": 5,
+						"files": 1
+					},
+					"README.md": {
+						"matchingLines": 5,
+						"files": 1
+					}
+				}
+			},
+			{
+				"query": "registries",
+				"command": [
+					"rg",
+					"--no-heading",
+					"--color",
+					"never",
+					"--sort",
+					"path",
+					"-n",
+					"-i",
+					"-e",
+					"AGENT_IDS|PICKABLE_AGENT_IDS|AGENT_PICKER_META|SUPPORTED_AGENTS|AGENT_AUTOSELECT_ORDER|PROVIDER_PROFILE_DEFINITIONS|hasCapability|supports[A-Z]|getAgentCapabilities|createTranslationRegistry",
+					"src/main",
+					"src/shared",
+					"src/renderer",
+					"src/web",
+					"src/cli",
+					"src/__tests__",
+					"docs",
+					"CLAUDE.md",
+					"CLAUDE-AGENTS.md",
+					"PROVIDER-SUPPORT.md",
+					"CONTRIBUTING.md",
+					"README.md"
+				],
+				"exitCode": 0,
+				"outputPath": "tmp/grok-tier1-audit/branches/registries.txt",
+				"sha256": "ff647250d025b5739d320fa19133f497059b50fbb042b30935c02fe81e367711",
+				"matchingLines": 2198,
+				"files": 203,
+				"byRoot": {
+					"src/main": {
+						"matchingLines": 65,
+						"files": 24
+					},
+					"src/shared": {
+						"matchingLines": 482,
+						"files": 38
+					},
+					"src/renderer": {
+						"matchingLines": 157,
+						"files": 42
+					},
+					"src/web": {
+						"matchingLines": 0,
+						"files": 0
+					},
+					"src/cli": {
+						"matchingLines": 15,
+						"files": 4
+					},
+					"src/__tests__": {
+						"matchingLines": 1256,
+						"files": 84
+					},
+					"docs": {
+						"matchingLines": 54,
+						"files": 7
+					},
+					"CLAUDE.md": {
+						"matchingLines": 3,
+						"files": 1
+					},
+					"CLAUDE-AGENTS.md": {
+						"matchingLines": 35,
+						"files": 1
+					},
+					"PROVIDER-SUPPORT.md": {
+						"matchingLines": 112,
+						"files": 1
+					},
+					"CONTRIBUTING.md": {
+						"matchingLines": 19,
+						"files": 1
+					},
+					"README.md": {
+						"matchingLines": 0,
+						"files": 0
+					}
+				}
+			},
+			{
+				"query": "branches",
+				"command": [
+					"rg",
+					"--no-heading",
+					"--color",
+					"never",
+					"--sort",
+					"path",
+					"-n",
+					"-i",
+					"-e",
+					"(===|!==|case |includes\\(|new Set|Record<|PROVIDERS|AGENTS|TYPES|ALLOWLIST|allowlist|whitelist|providerId|toolType).*(claude|codex|antigravity|grok)|(claude|codex|antigravity|grok).*(===|!==|includes\\(|:)",
+					"src/main",
+					"src/shared",
+					"src/renderer",
+					"src/web",
+					"src/cli",
+					"src/__tests__",
+					"docs",
+					"CLAUDE.md",
+					"CLAUDE-AGENTS.md",
+					"PROVIDER-SUPPORT.md",
+					"CONTRIBUTING.md",
+					"README.md"
+				],
+				"exitCode": 0,
+				"outputPath": "tmp/grok-tier1-audit/branches/branches.txt",
+				"sha256": "05f562203c9c38d207eb5ab42c18114fcea4915092209b2a8dafd1d5cb192736",
+				"matchingLines": 7035,
+				"files": 1112,
+				"byRoot": {
+					"src/main": {
+						"matchingLines": 651,
+						"files": 114
+					},
+					"src/shared": {
+						"matchingLines": 651,
+						"files": 135
+					},
+					"src/renderer": {
+						"matchingLines": 504,
+						"files": 147
+					},
+					"src/web": {
+						"matchingLines": 0,
+						"files": 0
+					},
+					"src/cli": {
+						"matchingLines": 69,
+						"files": 10
+					},
+					"src/__tests__": {
+						"matchingLines": 4888,
+						"files": 659
+					},
+					"docs": {
+						"matchingLines": 234,
+						"files": 43
+					},
+					"CLAUDE.md": {
+						"matchingLines": 14,
+						"files": 1
+					},
+					"CLAUDE-AGENTS.md": {
+						"matchingLines": 0,
+						"files": 0
+					},
+					"PROVIDER-SUPPORT.md": {
+						"matchingLines": 20,
+						"files": 1
+					},
+					"CONTRIBUTING.md": {
+						"matchingLines": 1,
+						"files": 1
+					},
+					"README.md": {
+						"matchingLines": 3,
+						"files": 1
+					}
+				}
+			}
+		],
+		"interpretation": "Search counts are matching lines/files, not proof every occurrence is a defect or every branch was exhaustively classified. Findings inspect consumer contexts across every requested area. accidental-exclusion describes omission from a generic outcome, not developer intent. Preserve intentional native formats/refusals until equivalent behavior is qualified.",
+		"findings": [
+			{
+				"id": "B01",
+				"area": "Agent Runs provider attribution",
+				"classification": "accidental-exclusion",
+				"rows": ["S32", "P40"],
+				"anchors": [
+					{
+						"sourceRef": "F144",
+						"line": 16,
+						"symbol": "KNOWN_AGENT_RUN_PROVIDERS",
+						"lineSha256": "e232aaec46ad37348271990d5d02946f83f2ed6ef2eed9e7c223e0ac40b08166"
+					},
+					{
+						"sourceRef": "F145",
+						"line": 28,
+						"symbol": "resolveAgentRunProvider",
+						"lineSha256": "5223c472b24e6613f84614f02526ccf95e423c6784a94548a558610a8ce0339b"
+					},
+					{
+						"sourceRef": "F146",
+						"line": 263,
+						"symbol": "capture provider",
+						"lineSha256": "aa419498787c2233a7939a3fdc455775af546516746f7fe571e5ca9722740f0e"
+					},
+					{
+						"sourceRef": "F147",
+						"line": 117,
+						"symbol": "capture provider",
+						"lineSha256": "d37d47af736b953426e17908f1ab2e85109d33ad9d0ffa6f46e88e893302c8cb"
+					}
+				],
+				"testSourceRefs": ["F162", "F163"]
+			},
+			{
+				"id": "B02",
+				"area": "Feedback interview accounts",
+				"classification": "intentional-capability-gap",
+				"rows": ["S33", "P32", "P04", "P35"],
+				"anchors": [
+					{
+						"sourceRef": "F148",
+						"line": 26,
+						"symbol": "FEEDBACK_PROVIDERS",
+						"lineSha256": "07236b880eed98d137e47a5e1b8d60eb0652e68ef7e5138cf21601dcbb2e281a"
+					},
+					{
+						"sourceRef": "F148",
+						"line": 115,
+						"symbol": "buildFeedbackAccountCandidates agent filter",
+						"lineSha256": "1b1160af06380b69e9168a783af0e0bbe302e68a628529be74ed124be4a5910d"
+					},
+					{
+						"sourceRef": "F148",
+						"line": 143,
+						"symbol": "provider-default loop",
+						"lineSha256": "6fa162fcc7e450750e88cf2659789b8dfcebfa199247aa69eaaac4311a8b5479"
+					},
+					{
+						"sourceRef": "F149",
+						"line": 30,
+						"symbol": "account choice documentation",
+						"lineSha256": "6dd545d6c22fdb8a94338601116738437e72d0cad83a55c1687f440bd8e8dbff"
+					},
+					{
+						"sourceRef": "F149",
+						"line": 62,
+						"symbol": "read-only interview claim",
+						"lineSha256": "32f1d78beb597123452d1af0b5162fdfe24dd1192372d15d2acfd670e163355f"
+					}
+				],
+				"testSourceRefs": ["F164"]
+			},
+			{
+				"id": "B03",
+				"area": "Context-limit recovery",
+				"classification": "intentional-capability-gap",
+				"rows": ["S34", "P10", "P40"],
+				"anchors": [
+					{
+						"sourceRef": "F150",
+						"line": 25,
+						"symbol": "CONTEXT_COMPACT_COMMANDS",
+						"lineSha256": "fc6601d9d2fcce33634e95209f1d8d8d16a5100143dcb56b9596b0c6081626fb"
+					},
+					{
+						"sourceRef": "F151",
+						"line": 93,
+						"symbol": "compact eligibility",
+						"lineSha256": "2bfd1e497f336d04f435ad7dfc4fec076af509c9475cd8f93fcba55534cc88a8"
+					},
+					{
+						"sourceRef": "F151",
+						"line": 111,
+						"symbol": "compactTabContext command",
+						"lineSha256": "fe7bd7d72ca4f421b6403357c159fc1f403e4dda4c991182d86e0c38c70ed41d"
+					},
+					{
+						"sourceRef": "F152",
+						"line": 1053,
+						"symbol": "retry compaction guard",
+						"lineSha256": "66326a12144f84c9999be415efac00fb7ab569b93c38c0cbaf23d90be1ff268d"
+					},
+					{
+						"sourceRef": "F153",
+						"line": 274,
+						"symbol": "Recovering a turn refused on the context limit",
+						"lineSha256": "8d706d4af88b3788b165dfd73f3ee891e0336504f2ecedc25751351f9d09beac"
+					}
+				],
+				"testSourceRefs": ["F165"]
+			},
+			{
+				"id": "B04",
+				"area": "CLI native session listing",
+				"classification": "intentional-capability-gap",
+				"rows": ["S25", "P13", "P38"],
+				"anchors": [
+					{
+						"sourceRef": "F166",
+						"line": 34,
+						"symbol": "DISK_SESSION_TYPES",
+						"lineSha256": "5ea52e292d8e53673f004a07ccde8399b0dd9df817dbcab385b4078ac36f6737"
+					},
+					{
+						"sourceRef": "F166",
+						"line": 244,
+						"symbol": "listSessions disk dispatch",
+						"lineSha256": "8fa0190baa83608753b6e10d566278cabe68d38cfd9175357f370dad90ba009d"
+					},
+					{
+						"sourceRef": "F166",
+						"line": 141,
+						"symbol": "listTabSessions",
+						"lineSha256": "f1e5c9a07083633a736ba5bde9755d25e78f69f4d9240e523bad9fe0ade72656"
+					},
+					{
+						"sourceRef": "F167",
+						"line": 27,
+						"symbol": "native reader mock",
+						"lineSha256": "e8b74596d9b87f36f4128046ad5c5c577a5b66acd9773dbf3beb3fcc5cd804b0"
+					}
+				],
+				"testSourceRefs": ["F167"]
+			},
+			{
+				"id": "B05",
+				"area": "Portable discovery and headless dispatch",
+				"classification": "registry-derived",
+				"rows": ["S20", "S25", "REG-PARSER", "REG-DISCOVERY"],
+				"anchors": [
+					{
+						"sourceRef": "F168",
+						"line": 48,
+						"symbol": "createProviderLister definitions",
+						"lineSha256": "b19b6ea36028bb158d87c09aaa959bd6fba1857d92d5bc60bef4f1e8a106c68b"
+					},
+					{
+						"sourceRef": "F034",
+						"line": 35,
+						"symbol": "Grok parser registration",
+						"lineSha256": "4fc8145c725d2323f7cc358bf5be96dbd4d404fddb037d60af0e24a932062a73"
+					},
+					{
+						"sourceRef": "F043",
+						"line": 1999,
+						"symbol": "spawnAgentOnce Claude branch",
+						"lineSha256": "fa81781a460c595de39975496068eb24375cd332a137e596a06b472f2ca31284"
+					},
+					{
+						"sourceRef": "F043",
+						"line": 2011,
+						"symbol": "usesJsonLineOutput generic route",
+						"lineSha256": "06ae06c1aee2ac2f9263d66c569d92866ad0fb696c0e1803ceebb665c01bd5f9"
+					},
+					{
+						"sourceRef": "F043",
+						"line": 1480,
+						"symbol": "Codex workingDirArgs",
+						"lineSha256": "db06eb94a5e7572cf99cb8349be5ee6ec0e48e631c77239cf4a794405114895e"
+					},
+					{
+						"sourceRef": "F043",
+						"line": 1627,
+						"symbol": "Antigravity step hook",
+						"lineSha256": "1fb36bed1c422bcfb57b624095f740ab40b1321883f06356788ca743be5042ad"
+					}
+				],
+				"testSourceRefs": ["F169", "F170"]
+			},
+			{
+				"id": "B06",
+				"area": "Account and managed environment registries",
+				"classification": "accidental-exclusion",
+				"rows": ["REG-PROFILE", "REG-AUTH", "S23", "P04", "P33", "P36", "S01"],
+				"anchors": [
+					{
+						"sourceRef": "F007",
+						"line": 59,
+						"symbol": "PROVIDER_PROFILE_CONFIGS",
+						"lineSha256": "93ca77ea639250b26332426d1d8e0324b39da1528d1b3f0a58fc27dcbf38d62d"
+					},
+					{
+						"sourceRef": "F171",
+						"line": 652,
+						"symbol": "PROVIDER_ROUTE_ENV_NAMES",
+						"lineSha256": "1c588acc210fc4813a2d95c88ea98c311a0b76b81a263216d71d65ee2c38fd0a"
+					},
+					{
+						"sourceRef": "F171",
+						"line": 691,
+						"symbol": "ALL_ROUTE_ENV_NAMES",
+						"lineSha256": "c0f4b38807916892c82dcdf53bcdf0d6bb03403612f3026c5d202f695d3573e5"
+					},
+					{
+						"sourceRef": "F171",
+						"line": 830,
+						"symbol": "applyManagedEnvCeiling",
+						"lineSha256": "8280103180f77312b9ff9d39826a195360a51501a99b4c72f1e1b4bc201e1d66"
+					},
+					{
+						"sourceRef": "F172",
+						"line": 68,
+						"symbol": "PROVIDER_ENV_VAR_SUGGESTIONS",
+						"lineSha256": "2cd7a727e29ec5b99a4287f9fe5a0c6a11851d2fe2e5458d97fa4f557c3d4761"
+					}
+				],
+				"testSourceRefs": ["F173", "F174"]
+			},
+			{
+				"id": "B07",
+				"area": "Translation and carried resources",
+				"classification": "intentional-capability-gap",
+				"rows": ["REG-TRANSLATION", "S07", "P22", "P23", "P24"],
+				"anchors": [
+					{
+						"sourceRef": "F089",
+						"line": 4,
+						"symbol": "TRANSLATION_PROVIDER_VERSIONS",
+						"lineSha256": "9d164ac80bac6efe6972d2e239b7e2c817cdc964a506640f62caa01596b66768"
+					},
+					{
+						"sourceRef": "F090",
+						"line": 350,
+						"symbol": "createTranslationRegistry",
+						"lineSha256": "c082be4247e2dbe4fcb8256ff31a768a13e66d894b869fc0953836f771a247c6"
+					},
+					{
+						"sourceRef": "F175",
+						"line": 49,
+						"symbol": "native resource roots",
+						"lineSha256": "97f23124e1bc9d1d18bcf6377843fbb14574a2a6def73b9d6f5ce32ed7ee2b30"
+					},
+					{
+						"sourceRef": "F175",
+						"line": 283,
+						"symbol": "opposite-provider projection",
+						"lineSha256": "7e942930ff2be0954449d23d2fd8893b454271753f7797daf665dde15cafbfc4"
+					},
+					{
+						"sourceRef": "F092",
+						"line": 99,
+						"symbol": "instruction target projection",
+						"lineSha256": "0fa9b7bdef25586ad3721387bfe690ee2611e3cacd5c63dc7d829902722a6ac2"
+					},
+					{
+						"sourceRef": "F092",
+						"line": 124,
+						"symbol": "skill target projection",
+						"lineSha256": "43f8f808ac9ca534e5b068cc8dc4d36ad67b9d8d649e8b46599ff0b903d8d92c"
+					},
+					{
+						"sourceRef": "F176",
+						"line": 469,
+						"symbol": "Claude autoMemoryDirectory binding",
+						"lineSha256": "de67824d688415876ffa6790e8e35fb07abec42e8fb43c8af1d5660937dd70d6"
+					}
+				],
+				"testSourceRefs": ["F177", "F178"]
+			},
+			{
+				"id": "B08",
+				"area": "Effort tiers and Notes preference",
+				"classification": "intentional-capability-gap",
+				"rows": ["REG-MODEL", "S18", "S19", "P06", "P32"],
+				"anchors": [
+					{
+						"sourceRef": "F022",
+						"line": 72,
+						"symbol": "EFFORT_LADDERS",
+						"lineSha256": "5c5ccd316ba38ec8951ccbf69923ef36bc3cb654b4009178276e8966cd5b311d"
+					},
+					{
+						"sourceRef": "F022",
+						"line": 109,
+						"symbol": "TIER_MODELS",
+						"lineSha256": "7f0b2442c365bd102b9a1907ae8e207fbcfbb01423d14bf248862f28588fc389"
+					},
+					{
+						"sourceRef": "F022",
+						"line": 173,
+						"symbol": "supportsEffortSelection",
+						"lineSha256": "2b36d186f5fb68ac92c24489be2dfdacf9bf6b85c1704f4fe0f327705c972a3c"
+					},
+					{
+						"sourceRef": "F022",
+						"line": 193,
+						"symbol": "cheapTurnSettings",
+						"lineSha256": "1be9a31ecfa760f823a5fa49c3a07053faeb100a2865bd0d626ad1a86562a4d1"
+					},
+					{
+						"sourceRef": "F121",
+						"line": 36,
+						"symbol": "SYNOPSIS_PROVIDER_PREFERENCE",
+						"lineSha256": "cecfb6b0e9fdf09d68d7582275eb6eb4c101d61ecb78173e2251c102b94aed59"
+					}
+				],
+				"testSourceRefs": ["F179"]
+			},
+			{
+				"id": "B09",
+				"area": "Pianola transcript learning",
+				"classification": "intentional-capability-gap",
+				"rows": ["S17", "P31"],
+				"anchors": [
+					{
+						"sourceRef": "F119",
+						"line": 21,
+						"symbol": "TranscriptAgent",
+						"lineSha256": "fda0ac01a9ca0bc2f8cc65e731f3390ef24059002ef0996a71c1d5d02f0a620e"
+					},
+					{
+						"sourceRef": "F120",
+						"line": 93,
+						"symbol": "parser selection",
+						"lineSha256": "e01561205f4ae03ab3c5abc4dd3bda3a33a4d8f435638932c295e2d72d62211e"
+					},
+					{
+						"sourceRef": "F120",
+						"line": 113,
+						"symbol": "default providers",
+						"lineSha256": "5847e675b2a9b010f711b20e241e88dc8458cc04096afcee2edbaffbd1d8d97e"
+					},
+					{
+						"sourceRef": "F120",
+						"line": 119,
+						"symbol": "requested provider filter",
+						"lineSha256": "fa8cc229f12beae5fa7d9e6c32fbade035c1e879cefeaa774e4c8de73bd77192"
+					},
+					{
+						"sourceRef": "F180",
+						"line": 2225,
+						"symbol": "pianola learn provider option",
+						"lineSha256": "f960fd416f87e54fb01dcadbef826153b9b3a31e5ba6e2396691cea11a10e1f4"
+					}
+				],
+				"testSourceRefs": ["F181", "F182"]
+			},
+			{
+				"id": "B10",
+				"area": "Plugin MCP verified-strategy gate",
+				"classification": "intentional-capability-gap",
+				"rows": ["S08", "P25", "P26"],
+				"anchors": [
+					{
+						"sourceRef": "F099",
+						"line": 184,
+						"symbol": "MCP_CONFIG_BY_AGENT",
+						"lineSha256": "ee6ef30d223d3af88e4019e4e01ea7334ce0c65b5ddc0248be0e8d234185347e"
+					},
+					{
+						"sourceRef": "F183",
+						"line": 310,
+						"symbol": "plugin-scope capability check",
+						"lineSha256": "9d784a03bb9980c50421ac8efc0435de77d0dc003650a13c7bfcac3de2c22e7a"
+					},
+					{
+						"sourceRef": "F043",
+						"line": 281,
+						"symbol": "localPluginMcp capability",
+						"lineSha256": "ec83e197672a12d532d878ca85b62d6aeff783ffd96e47eb0ed071e3b9de16a2"
+					},
+					{
+						"sourceRef": "F043",
+						"line": 1544,
+						"symbol": "generic MCP injection",
+						"lineSha256": "5f1a6c92ca2a03789c45c69385c9e66f13b078ff56034d461ef0151e94edf773"
+					}
+				],
+				"testSourceRefs": ["F184"]
+			},
+			{
+				"id": "B11",
+				"area": "Managed route taxonomy",
+				"classification": "intentional-provider-specific",
+				"rows": ["REG-MANAGED-ROUTES", "S20", "S23", "P09", "P33"],
+				"anchors": [
+					{
+						"sourceRef": "F025",
+						"line": 594,
+						"symbol": "providerRouteSupport",
+						"lineSha256": "cbb2f7202cdcd3c026f24ad24ba487aff37b2194f73aca00229292bdfafc4ade"
+					},
+					{
+						"sourceRef": "F025",
+						"line": 602,
+						"symbol": "codex-app-server restriction",
+						"lineSha256": "774641fb266cb82b54528c0b77ef70e175be694b73e5b7419c2022f121cadd13"
+					},
+					{
+						"sourceRef": "F025",
+						"line": 606,
+						"symbol": "opencode-server restriction",
+						"lineSha256": "be14d315a21979ae2891c05fb644f955dd760e82d6e7dd781d834c50ecb7fdd3"
+					},
+					{
+						"sourceRef": "F025",
+						"line": 622,
+						"symbol": "managed child launch status",
+						"lineSha256": "6c20e1b022d49aedef53e1a2c9ce9635ef43ef1ad0fbdefbd5d223fb794ec7bf"
+					}
+				],
+				"testSourceRefs": ["F185"]
+			},
+			{
+				"id": "B12",
+				"area": "Usage event aggregation",
+				"classification": "intentional-provider-specific",
+				"rows": ["REG-USAGE", "P11", "S28"],
+				"anchors": [
+					{
+						"sourceRef": "F186",
+						"line": 24,
+						"symbol": "usageReportingFor",
+						"lineSha256": "f22e6f429366891523c0e5f9f9e9b6811c5c149359750f6f7b306d32375c2ab7"
+					},
+					{
+						"sourceRef": "F186",
+						"line": 75,
+						"symbol": "TurnCapture usage mode",
+						"lineSha256": "aa5e6a3d299a3863519a73117aee77348a84b8e0547a051b1f89b27dfc9bced9"
+					},
+					{
+						"sourceRef": "F017",
+						"line": 374,
+						"symbol": "turnUsage",
+						"lineSha256": "b608bba2c94381b338a885ff314384ae4a38c0230d73515145fb07c1b1b4534d"
+					}
+				],
+				"testSourceRefs": ["F187"]
+			},
+			{
+				"id": "B13",
+				"area": "CLI and user-document provider lists",
+				"classification": "accidental-exclusion",
+				"rows": ["S25", "P17", "P45"],
+				"anchors": [
+					{
+						"sourceRef": "F126",
+						"line": 1755,
+						"symbol": "create-agent --type help",
+						"lineSha256": "1056adeae11aad366db886c03b3f76af3e58c3134e2f3cc2273de16398337f6a"
+					},
+					{
+						"sourceRef": "F188",
+						"line": 177,
+						"symbol": "supported agent types",
+						"lineSha256": "2a2b58421d1d79f54e48e9c019a31a7b1f1b97d8a692d9c166d0498eef45b6e6"
+					},
+					{
+						"sourceRef": "F188",
+						"line": 617,
+						"symbol": "create-agent --type docs",
+						"lineSha256": "93eb7994f990ca18ad66483502ab72bc7a73f4ced11de221182edec44f9c46b4"
+					},
+					{
+						"sourceRef": "F180",
+						"line": 1432,
+						"symbol": "create-agent --type reference",
+						"lineSha256": "f3224b986967b4b3a1f7f7c689d237dc89b2180e7bec45e02d860b8142830825"
+					},
+					{
+						"sourceRef": "F189",
+						"line": 3,
+						"symbol": "provider description",
+						"lineSha256": "704eac1e58cd1de2e99600c3896c54369fa6360a63e59c51783e29fc9d0b6818"
+					},
+					{
+						"sourceRef": "F190",
+						"line": 52,
+						"symbol": "supported provider setup",
+						"lineSha256": "23772044fa7e3b8cae72e76e49179894f2f4a5fec9f9874149c966a956d98b57"
+					},
+					{
+						"sourceRef": "F191",
+						"line": 59,
+						"symbol": "provider support note",
+						"lineSha256": "0ed3224b795d020b7925c3593478aaa0ea6a5787a63337f8f1eb012445e3fdf7"
+					},
+					{
+						"sourceRef": "F192",
+						"line": 13,
+						"symbol": "provider overview",
+						"lineSha256": "f3f0219c93519cf640b6f2585f70f889b9c9d71b1a84356e58a93e9966c0cdec"
+					}
+				],
+				"testSourceRefs": []
+			},
+			{
+				"id": "B14",
+				"area": "Provider selectors",
+				"classification": "registry-derived",
+				"rows": ["S01", "S14", "META-01"],
+				"anchors": [
+					{
+						"sourceRef": "F067",
+						"line": 17,
+						"symbol": "SUPPORTED_AGENTS",
+						"lineSha256": "a870cd64878c99795c11375786dd69bd82a82e8487d2e193b2997e047a236a49"
+					},
+					{
+						"sourceRef": "F068",
+						"line": 115,
+						"symbol": "isSupported",
+						"lineSha256": "7dd12cbdeff68348c6cc63e5fe203f52f2ca5d92cb2b022a1ae83844e30ccb3e"
+					},
+					{
+						"sourceRef": "F069",
+						"line": 17,
+						"symbol": "AGENT_TILES",
+						"lineSha256": "c02770c4c631fe602da9e18463bb10597f0363e9d3172e8bd1c42df7a4680080"
+					},
+					{
+						"sourceRef": "F113",
+						"line": 284,
+						"symbol": "availableTiles",
+						"lineSha256": "b5071c440d6cf556f3997304c06b6bf22bcb0e0f0fb89e9298b6c03fd2dcb329"
+					}
+				],
+				"testSourceRefs": ["F193"]
+			},
+			{
+				"id": "B15",
+				"area": "Provider label and visual resources",
+				"classification": "accidental-exclusion",
+				"rows": ["S01", "S05", "META-01"],
+				"anchors": [
+					{
+						"sourceRef": "F072",
+						"line": 271,
+						"symbol": "case 'grok'",
+						"lineSha256": "cd200b32bc9edf660020f85c997738e22daaba022fdad2751f85aa7c735ca6a4"
+					},
+					{
+						"sourceRef": "F194",
+						"line": 55,
+						"symbol": "grok",
+						"lineSha256": "b94100b6ea1f6172956bd4ea0b77691279c1449f42756060a0ac2a50d46f11c4"
+					},
+					{
+						"sourceRef": "F195",
+						"line": 3,
+						"symbol": "getConversationProviderName",
+						"lineSha256": "c44a4c801388b5f5f003f6aaeab91dca173f26a974f99d52b86b6bd89174ed97"
+					}
+				],
+				"testSourceRefs": ["F196"]
+			},
+			{
+				"id": "B16",
+				"area": "Slash discovery and profile refresh",
+				"classification": "accidental-exclusion",
+				"rows": ["S02", "P18", "P28"],
+				"anchors": [
+					{
+						"sourceRef": "F197",
+						"line": 240,
+						"symbol": "slash command discovery effect",
+						"lineSha256": "82f178fbfb0be5f27de32228c3719d43952b76f20a6edc1ca0adf79b78b40ed3"
+					},
+					{
+						"sourceRef": "F197",
+						"line": 244,
+						"symbol": "provider allowlist",
+						"lineSha256": "54df758f0c3f2eef12ec073e25fb3acfd1146b4a68a25e057c108d8e94477509"
+					},
+					{
+						"sourceRef": "F197",
+						"line": 203,
+						"symbol": "activeCodexEnv",
+						"lineSha256": "e1ac08c8217f75e9f34ba8b67e4d4cabdc11b8406a1c3e16940ad61ee2be5539"
+					},
+					{
+						"sourceRef": "F197",
+						"line": 308,
+						"symbol": "discoverSlashCommands customEnvVars",
+						"lineSha256": "919801ad32a32a73b8b3d13bd4e1b6949579c6975221c546381ea6ac060ccf40"
+					},
+					{
+						"sourceRef": "F197",
+						"line": 331,
+						"symbol": "agentCommands replacement",
+						"lineSha256": "a6d701ca0b536dc59ff5ee9f30c7f2fd504b299f8f03711d4b5c7fc2d94e53d2"
+					}
+				],
+				"testSourceRefs": ["F198"]
+			},
+			{
+				"id": "B17",
+				"area": "Native skills list",
+				"classification": "intentional-capability-gap",
+				"rows": ["S02", "P18", "P28"],
+				"anchors": [
+					{
+						"sourceRef": "F079",
+						"line": 31,
+						"symbol": "agentTypes",
+						"lineSha256": "92b84dc3eca63ebed2fc77fd886cf924f51744654411e9856c3610401b0d381f"
+					},
+					{
+						"sourceRef": "F199",
+						"line": 489,
+						"symbol": "/skills local command",
+						"lineSha256": "39c8282664da2a141d7ace71798cd0630e8ff39259b306531e6e031c80c14ed1"
+					},
+					{
+						"sourceRef": "F197",
+						"line": 760,
+						"symbol": "handleSkillsCommand provider guard",
+						"lineSha256": "5897b71cbc5d94717b1d811cefec4b497312c4c4199610e8755cb7f9a99d559f"
+					},
+					{
+						"sourceRef": "F197",
+						"line": 782,
+						"symbol": "claude.getSkills",
+						"lineSha256": "867663731ee019609457ffb52c5b27639e2f8880cb77523be7431fe8ec82daaa"
+					}
+				],
+				"testSourceRefs": ["F198", "F200"]
+			},
+			{
+				"id": "B18",
+				"area": "Account path suggestions and validation",
+				"classification": "accidental-exclusion",
+				"rows": ["REG-PROFILE", "P04", "S01"],
+				"anchors": [
+					{
+						"sourceRef": "F201",
+						"line": 1,
+						"symbol": "KnownAuthDirs",
+						"lineSha256": "56955b9b515d15475490ea63d8e194aaf3c4c5117cdcaaf03493f21e930e3a06"
+					},
+					{
+						"sourceRef": "F202",
+						"line": 6,
+						"symbol": "isKnownAuthDirs",
+						"lineSha256": "76a948533d26a5bc9e6419769431aa92719e4e8d9e248f96a9ab711d2badbd2d"
+					},
+					{
+						"sourceRef": "F203",
+						"line": 29,
+						"symbol": "knownPaths",
+						"lineSha256": "52fcd31a5dbf966a17be7f71d683d706eaf3feed823608af5157a319d17c1b03"
+					},
+					{
+						"sourceRef": "F204",
+						"line": 36,
+						"symbol": "ABSOLUTE_PATH_KEYS",
+						"lineSha256": "9bc32d6cf2bb04cf993dbecf50e82f204c4a6171c35996f84c5a7802c63fd64c"
+					},
+					{
+						"sourceRef": "F204",
+						"line": 154,
+						"symbol": "absolute path validation",
+						"lineSha256": "eca56413a030b83a2f39fb143f0f93178be0543e4e8a4a979899ddffd9c9a776"
+					},
+					{
+						"sourceRef": "F205",
+						"line": 1020,
+						"symbol": "AuthPathValueInput",
+						"lineSha256": "7dfbda8367d0dd82dfe3c559c15cc2d8885e45474621681a0b4d0d01a73e7cc9"
+					}
+				],
+				"testSourceRefs": ["F206", "F207", "F208"]
+			},
+			{
+				"id": "B19",
+				"area": "Worktree configuration inheritance",
+				"classification": "shared-inheritance-gap",
+				"rows": ["S29"],
+				"anchors": [
+					{
+						"sourceRef": "F074",
+						"line": 59,
+						"symbol": "parent toolType",
+						"lineSha256": "a3dac0027e5798c0914fa457c5be26929f7376ddfcd4549b8489ad9aced656f0"
+					},
+					{
+						"sourceRef": "F074",
+						"line": 121,
+						"symbol": "copied custom config fields",
+						"lineSha256": "9c34affbcea51486dfb7511f0a926976010379e44c2c4dba1cdd6a69e29ab43a"
+					},
+					{
+						"sourceRef": "F209",
+						"line": 1569,
+						"symbol": "Session.customEffort",
+						"lineSha256": "1e440a6d59362a1685705c3ca11df7d651fb255b18d2c24da81c4ee07c352f5d"
+					},
+					{
+						"sourceRef": "F075",
+						"line": 242,
+						"symbol": "buildWorktreeSession",
+						"lineSha256": "b8f62d87d824d767c2f0f4c965fa6c01ba39e0f8a73a36b6dddc634ffe49931d"
+					},
+					{
+						"sourceRef": "F073",
+						"line": 914,
+						"symbol": "buildWorktreeSession",
+						"lineSha256": "b9247733958b1f6be5e5b177d5edf0ebcc2faf9fdca7cbb0cafbe8a520944275"
+					}
+				],
+				"testSourceRefs": ["F210", "F211"]
+			},
+			{
+				"id": "B20",
+				"area": "Custom command and template dispatch",
+				"classification": "registry-derived",
+				"rows": ["S31"],
+				"anchors": [
+					{
+						"sourceRef": "F199",
+						"line": 509,
+						"symbol": "custom AI command expansion",
+						"lineSha256": "cccf08d2f55468736ca27f5e63aef4a42c12e0be3dffadd18c143456ad38a954"
+					},
+					{
+						"sourceRef": "F212",
+						"line": 818,
+						"symbol": "commandName",
+						"lineSha256": "0db977d9816f944d55b1e82da8a75dad20add70fb08b9ed05631478a8f0eeee9"
+					},
+					{
+						"sourceRef": "F212",
+						"line": 829,
+						"symbol": "command queue selection",
+						"lineSha256": "a3f9670a89c88bdd3fca2ec0b7dc7dcd24cf9a553dc91998933c8395f99af090"
+					},
+					{
+						"sourceRef": "F212",
+						"line": 870,
+						"symbol": "literalPrompt",
+						"lineSha256": "ed78aeadaa0562f7f7f1452b5d6e3eb27e77f6d722f7c91a6e2321c043332885"
+					}
+				],
+				"testSourceRefs": ["F200"]
+			},
+			{
+				"id": "B21",
+				"area": "Context transfer artifact metadata",
+				"classification": "accidental-exclusion",
+				"rows": ["S06", "P21"],
+				"anchors": [
+					{
+						"sourceRef": "F213",
+						"line": 68,
+						"symbol": "AGENT_ARTIFACTS",
+						"lineSha256": "07bd10460521c891bc5d8ddf58b4c30eb400155cd0105af461c2b4383b92f780"
+					},
+					{
+						"sourceRef": "F213",
+						"line": 149,
+						"symbol": "AGENT_TARGET_NOTES",
+						"lineSha256": "08f6822457a1c2afdfd12f19a9be7ee8a3d717cefa3763fd08d3dc17d1a7adcd"
+					},
+					{
+						"sourceRef": "F213",
+						"line": 193,
+						"symbol": "buildContextTransferPrompt",
+						"lineSha256": "79df6919a69cafc825ee98540d165405f9643ebbafe70eac588a250aeb52d5cb"
+					},
+					{
+						"sourceRef": "F214",
+						"line": 312,
+						"symbol": "transfer prompt consumer",
+						"lineSha256": "2d32565e666fb499b412da13122439ddbc6a04dbc51bcca92a256f3df62868ea"
+					},
+					{
+						"sourceRef": "F215",
+						"line": 94,
+						"symbol": "same-provider recovery consumer",
+						"lineSha256": "6febf521226491b4cc1c0d277b1128cba91b2e75b8e7af2cf11bf9238e214251"
+					}
+				],
+				"testSourceRefs": ["F216", "F217"]
+			},
+			{
+				"id": "B22",
+				"area": "History metadata compatibility branches",
+				"classification": "intentional-provider-specific",
+				"rows": ["REG-STORAGE", "REG-SESSION-MUTATION", "P13", "P14"],
+				"anchors": [
+					{
+						"sourceRef": "F218",
+						"line": 45,
+						"symbol": "persistTabStarred",
+						"lineSha256": "cac0228c378e6174e8dae7c51e6aae71569f60b236d5a8db79578e8c8743edce"
+					},
+					{
+						"sourceRef": "F219",
+						"line": 125,
+						"symbol": "origins dispatch",
+						"lineSha256": "e900edd5dd5cfb078200f7e4c519c3e11f2a02e5c5552b41511661c9e27d8dbf"
+					},
+					{
+						"sourceRef": "F219",
+						"line": 156,
+						"symbol": "listPaginated",
+						"lineSha256": "6e417787702323a72f223f90fe7bdab4a354cb33e63581398052863d219312bd"
+					},
+					{
+						"sourceRef": "F220",
+						"line": 71,
+						"symbol": "agentSessions.read",
+						"lineSha256": "f4645432fa77074991fedc5253bb675a05e0a7010eddd359b79040dbf10a59b5"
+					},
+					{
+						"sourceRef": "F220",
+						"line": 105,
+						"symbol": "legacy/generic origins",
+						"lineSha256": "b17881ad5e88413029ee1b15c214429a0d2817c63bcdc01b8592f9e9dbc6bb77"
+					}
+				],
+				"testSourceRefs": ["F221", "F222"]
+			},
+			{
+				"id": "B23",
+				"area": "History full-project aggregate stats",
+				"classification": "intentional-capability-gap",
+				"rows": ["REG-STORAGE", "S26", "P13", "P40"],
+				"anchors": [
+					{
+						"sourceRef": "F219",
+						"line": 180,
+						"symbol": "getProjectStats",
+						"lineSha256": "19c892f993cb8e3ec108728854af478ef8071db96a489bdffe61e630099f391b"
+					},
+					{
+						"sourceRef": "F223",
+						"line": 58,
+						"symbol": "Claude progressive subscription",
+						"lineSha256": "1c85cba85e7a7961bf69008f7ad550d5110719bd242cb2aae568a13d65d105f2"
+					},
+					{
+						"sourceRef": "F223",
+						"line": 79,
+						"symbol": "non-Claude loaded-page totals",
+						"lineSha256": "ce5083bc99e5ee6d7f443c4ecedbf19d27104825e1beadb364bfb0f8f8e9bdfa"
+					},
+					{
+						"sourceRef": "F223",
+						"line": 122,
+						"symbol": "isComplete",
+						"lineSha256": "7d199b75c7605bd6b590306d6b4afd403b76017fcc2450b3a21e7accdb240533"
+					}
+				],
+				"testSourceRefs": ["F224"]
+			},
+			{
+				"id": "B24",
+				"area": "Mid-turn steering UI",
+				"classification": "intentional-capability-gap",
+				"rows": ["S21"],
+				"anchors": [
+					{
+						"sourceRef": "F225",
+						"line": 61,
+						"symbol": "getSteerSupport Codex",
+						"lineSha256": "1777d849e8bd539cfafb95f6b2abaf401d7b3c957423640a5a3fa782ba536d36"
+					},
+					{
+						"sourceRef": "F225",
+						"line": 92,
+						"symbol": "unsupported provider result",
+						"lineSha256": "975d15d24313d616878d51b2c206d7fe69a5a2efa26e25958ac2f5ba760b7a9a"
+					},
+					{
+						"sourceRef": "F226",
+						"line": 816,
+						"symbol": "Codex transport guard",
+						"lineSha256": "1777d849e8bd539cfafb95f6b2abaf401d7b3c957423640a5a3fa782ba536d36"
+					},
+					{
+						"sourceRef": "F226",
+						"line": 830,
+						"symbol": "not-claude guard",
+						"lineSha256": "17eb1091b2873abe58a50f1e2ef7b41208f9f39c69ea7f6d8a4bf7b59af7c76d"
+					}
+				],
+				"testSourceRefs": ["F227", "F228"]
+			},
+			{
+				"id": "B25",
+				"area": "Plan quota and reset-credit UIs",
+				"classification": "intentional-provider-specific",
+				"rows": ["REG-QUOTA", "S27", "P40"],
+				"anchors": [
+					{
+						"sourceRef": "F128",
+						"line": 29,
+						"symbol": "PROVIDER_CONFIG",
+						"lineSha256": "fb2dfe79b9178299ac89dc31109e6ed638f892e52ca187d155458b9f031da7f2"
+					},
+					{
+						"sourceRef": "F053",
+						"line": 162,
+						"symbol": "showBatchUsage",
+						"lineSha256": "24663c30f92015408396b926310b55f1ce3ee14ce37c61f655802e2b3048dbe0"
+					},
+					{
+						"sourceRef": "F053",
+						"line": 562,
+						"symbol": "positive reported cost/capability",
+						"lineSha256": "942e5e02510b1c1f852a72550247540406d543438f661d89cad60b2b8c339c35"
+					},
+					{
+						"sourceRef": "F053",
+						"line": 574,
+						"symbol": "supportsUsageStats",
+						"lineSha256": "3a1acf7b361ad866f064d9ee7d623e3191a3fa0d65a9b9ce5fcfc01b8c653930"
+					},
+					{
+						"sourceRef": "F229",
+						"line": 89,
+						"symbol": "not-codex",
+						"lineSha256": "aa0ee2a96e4502fcc0ed3874ab46def9ebb096223aa9eb086951f28a3683807b"
+					}
+				],
+				"testSourceRefs": ["F230"]
+			},
+			{
+				"id": "B26",
+				"area": "Codex directive rendering",
+				"classification": "intentional-provider-specific",
+				"rows": ["P12", "S09"],
+				"anchors": [
+					{
+						"sourceRef": "F231",
+						"line": 760,
+						"symbol": "codexDirectives",
+						"lineSha256": "d6b54be01a51cd9001fbbf4ecdb4c0fa7962d1fe4bce4d2ad40385b0edc42efd"
+					},
+					{
+						"sourceRef": "F065",
+						"line": 269,
+						"symbol": "codexDirectivesForBody",
+						"lineSha256": "dfc2848ffd76903b9b6c103fabc9418f5e34bf232242bf11b4bf3501164b36a3"
+					},
+					{
+						"sourceRef": "F232",
+						"line": 136,
+						"symbol": "codexDirectivesLiveForSource",
+						"lineSha256": "cbca944b473e3e052ba557457a4e83f9e5c90c6c1b972cb58e6ca6648e1290b6"
+					}
+				],
+				"testSourceRefs": []
+			},
+			{
+				"id": "B27",
+				"area": "Grok wizard protocol cases",
+				"classification": "intentional-provider-specific",
+				"rows": ["S04", "S05", "P20"],
+				"anchors": [
+					{
+						"sourceRef": "F070",
+						"line": 747,
+						"symbol": "case 'grok'",
+						"lineSha256": "12778e053293d93146944de1e7691355b9edd0731be956356a237d5847508396"
+					},
+					{
+						"sourceRef": "F070",
+						"line": 865,
+						"symbol": "extractGrokTextFromJsonl",
+						"lineSha256": "fa7be5c5a798073434262f8c9ea8f332724675f80ca6116792759de5f7470c42"
+					},
+					{
+						"sourceRef": "F085",
+						"line": 605,
+						"symbol": "case 'grok'",
+						"lineSha256": "705c2ae7b48bec7feb83140eb459b96fcaefef4203988d0a697438d6140a1d46"
+					},
+					{
+						"sourceRef": "F086",
+						"line": 127,
+						"symbol": "Grok stream extraction",
+						"lineSha256": "9a3abda9efc1c21f56ba35b1bd448ed8592d658c913834326373ea7a45d18976"
+					},
+					{
+						"sourceRef": "F086",
+						"line": 821,
+						"symbol": "default base args",
+						"lineSha256": "0f72711c52f4477bcc7448133b36b0f7eb5ee3ba24254e93a785ddc25781f130"
+					}
+				],
+				"testSourceRefs": []
+			},
+			{
+				"id": "B28",
+				"area": "Web client and remote renderer paths",
+				"classification": "registry-derived",
+				"rows": ["S24", "P37"],
+				"anchors": [
+					{
+						"sourceRef": "F233",
+						"line": 116,
+						"symbol": "createAgent",
+						"lineSha256": "6ab4d0edee523ceca948c59d5eced92fd0c7262ed33135ed0a0ec6cf6c924d2e"
+					},
+					{
+						"sourceRef": "F233",
+						"line": 127,
+						"symbol": "create_session request",
+						"lineSha256": "bd4ba919322326c8370107828bc6c02d4f20ea2803a4b00704166fc44cf7cc3c"
+					},
+					{
+						"sourceRef": "F234",
+						"line": 734,
+						"symbol": "onUserInput",
+						"lineSha256": "9da8702de1249c3612644bc17ec30947b06e199ed22dcd597a154a3679cfbc43"
+					},
+					{
+						"sourceRef": "F235",
+						"line": 1502,
+						"symbol": "agents.get(toolType)",
+						"lineSha256": "7929b81c98c18d99cd0c8c138ee9f3eff0b85dd104cc2f1f7c5a2eec87105661"
+					},
+					{
+						"sourceRef": "F235",
+						"line": 1548,
+						"symbol": "session toolType",
+						"lineSha256": "69db24360784a05b39a80da1ad880e11a30f576b6932a5a9cc41487277ede2aa"
+					}
+				],
+				"testSourceRefs": []
+			},
+			{
+				"id": "B29",
+				"area": "Documentation and test coverage drift",
+				"classification": "accidental-exclusion",
+				"rows": ["P41", "P45", "P46", "S01", "S06"],
+				"anchors": [
+					{
+						"sourceRef": "F189",
+						"line": 3,
+						"symbol": "description provider list",
+						"lineSha256": "704eac1e58cd1de2e99600c3896c54369fa6360a63e59c51783e29fc9d0b6818"
+					},
+					{
+						"sourceRef": "F216",
+						"line": 320,
+						"symbol": "agent matrix",
+						"lineSha256": "61eb3317a29efb387d358cc96a8680b60fe2543c2535ae4e990ada5f99922283"
+					},
+					{
+						"sourceRef": "F200",
+						"line": 12,
+						"symbol": "isBatchModeAgent mock",
+						"lineSha256": "aa59a0bb88add3b28bd36849f291806655da151b84ad75ffcbcc8d9c8a930873"
+					},
+					{
+						"sourceRef": "F193",
+						"line": 361,
+						"symbol": "Grok selectable test",
+						"lineSha256": "8a0ab392b9458f8c95574359810bd5fdb6f3af1e93f60664c6bf72932ec21fd0"
+					}
+				],
+				"testSourceRefs": ["F216", "F200", "F193"]
+			},
+			{
+				"id": "B30",
+				"area": "Coworking MCP installation",
+				"classification": "accidental-exclusion",
+				"rows": ["S35", "P25", "P26", "P37", "S08"],
+				"anchors": [
+					{
+						"sourceRef": "F154",
+						"line": 11,
+						"symbol": "INSTALLERS",
+						"lineSha256": "f87d8b0f89b8dbda716c8df7fa5288e5be8185fa1191af40086eadbe0f501884"
+					},
+					{
+						"sourceRef": "F155",
+						"line": 30,
+						"symbol": "getInstallStatus",
+						"lineSha256": "f5b16870140d6b9798433acc68254955d8a3b5377d3bea1bbaea39b165a87a70"
+					},
+					{
+						"sourceRef": "F155",
+						"line": 54,
+						"symbol": "installFor",
+						"lineSha256": "d19c8c12cb14f13609d295896e0f24bce6ad39c6743e73f58c316cd14544f3bc"
+					}
+				],
+				"testSourceRefs": ["F236", "F237", "F238", "F239"]
+			},
+			{
+				"id": "B31",
+				"area": "Cue and agent bundle native resource portability",
+				"classification": "intentional-capability-gap",
+				"rows": ["S36", "P19", "P23", "P28", "P30"],
+				"anchors": [
+					{
+						"sourceRef": "F156",
+						"line": 1059,
+						"symbol": "claudeAgents / collectClaudeAssets",
+						"lineSha256": "f7e7d36ce6e365f295b121e0eadd8936d5fb64e0e736032daac50c875d8f499f"
+					},
+					{
+						"sourceRef": "F156",
+						"line": 1160,
+						"symbol": "buildAgentSettings MCP secret names",
+						"lineSha256": "21f11964ffcb46c85a598c7d219821d1c117ed6d18c8bd7c619ace2fedd8ddf8"
+					},
+					{
+						"sourceRef": "F156",
+						"line": 1166,
+						"symbol": "CueBundleAgent",
+						"lineSha256": "39b8f27655553d3c56a912bff7d5235529921c5d5d419ca04ed9bc541278a33e"
+					},
+					{
+						"sourceRef": "F157",
+						"line": 1054,
+						"symbol": "requiredSecrets",
+						"lineSha256": "33bf691deb6b2a3fd17f0c073e0cc55a35e0782bd2fdffa53e432e92880d6d08"
+					}
+				],
+				"testSourceRefs": ["F240", "F241", "F242"]
+			},
+			{
+				"id": "B32",
+				"area": "Lifetime global stats and achievement sharing",
+				"classification": "accidental-exclusion",
+				"rows": ["S37", "P40", "REG-USAGE", "S26"],
+				"anchors": [
+					{
+						"sourceRef": "F011",
+						"line": 932,
+						"symbol": "agentSessions:getGlobalStats",
+						"lineSha256": "f9ffb1662c17ef36e3f5a79102eaae442a563b619f651ea03bc6b7822803b76f"
+					},
+					{
+						"sourceRef": "F011",
+						"line": 954,
+						"symbol": "buildResultFromCache Claude aggregate",
+						"lineSha256": "5877cb33f419992eba13f84cec38cbc43eeaa6e89d02533ff73dc96a7061413f"
+					},
+					{
+						"sourceRef": "F011",
+						"line": 977,
+						"symbol": "buildResultFromCache Codex aggregate",
+						"lineSha256": "65c702b21041aae3f8a2c2557daea98886c923ba23b5ab46384df69d389d7faf"
+					},
+					{
+						"sourceRef": "F011",
+						"line": 1028,
+						"symbol": "discoverClaudeSessionFiles / discoverCodexSessionFiles",
+						"lineSha256": "8d0224a6db6cddd436495affdcf839d9467cd2f7b7b846e0deb8fc550452a918"
+					},
+					{
+						"sourceRef": "F158",
+						"line": 301,
+						"symbol": "getGlobalStats",
+						"lineSha256": "40984c83d21a3164b63126f260b7e1de0793526ca697ebb28aca81b65e9b0dac"
+					},
+					{
+						"sourceRef": "F159",
+						"line": 50,
+						"symbol": "getGlobalStats consumer",
+						"lineSha256": "a746224270a8d8c52f77383a2ec6dd6e29cccbc634b0b8581be2be6d7ee2fd4d"
+					},
+					{
+						"sourceRef": "F160",
+						"line": 49,
+						"symbol": "useGlobalAgentStats",
+						"lineSha256": "fdac2dea88ca9cd0adac6b386e1c457671afe56727b19479a4f61cf4e25524d3"
+					},
+					{
+						"sourceRef": "F161",
+						"line": 405,
+						"symbol": "totalTokens / sessionsValue",
+						"lineSha256": "3d79836061777b10ebd09c32711b1da9b07e170c008c0e60a679cdae95526c9e"
+					}
+				],
+				"testSourceRefs": ["F243"]
+			},
+			{
+				"id": "B33",
+				"area": "Slash command and skills discovery",
+				"classification": "intentional-capability-gap",
+				"rows": ["P18", "S02", "C-supportsSlashCommands"],
+				"anchors": [
+					{
+						"sourceRef": "F078",
+						"line": 1919,
+						"symbol": "agents:discoverSlashCommands",
+						"lineSha256": "32b6a53f0d2fc9381609bc10b763f8d6dbc4b522ed36688f3810ba23fbc75313"
+					},
+					{
+						"sourceRef": "F078",
+						"line": 1947,
+						"symbol": "Codex discovery",
+						"lineSha256": "e2b755e5880792ffbe506990e2b8e44adb24a25754ed2cf8cc93b9aaff7e07ff"
+					},
+					{
+						"sourceRef": "F078",
+						"line": 1994,
+						"symbol": "non-Claude null guard",
+						"lineSha256": "80d111f99611fd7b67f43c5f84672cbb821494cbe89d4e0d285bdd92f0ba944e"
+					}
+				],
+				"testSourceRefs": ["F208", "F244"]
+			},
+			{
+				"id": "B34",
+				"area": "Native project memory",
+				"classification": "intentional-capability-gap",
+				"rows": ["P19", "S03", "C-supportsProjectMemory"],
+				"anchors": [
+					{
+						"sourceRef": "F081",
+						"line": 74,
+						"symbol": "getMemoryDirectoryPath",
+						"lineSha256": "7978a85bfa6dfdd9baf48da9529686ccd3cd33f29206dcaa7ca8fa475475fec2"
+					},
+					{
+						"sourceRef": "F245",
+						"line": 51,
+						"symbol": "directoryFor managed knowledge",
+						"lineSha256": "fbb433274a47b0a8bc8185e99fd5058b167766b7f7955b68ae070b2813645ef5"
+					},
+					{
+						"sourceRef": "F245",
+						"line": 56,
+						"symbol": "directoryFor native provider guard",
+						"lineSha256": "0d1e1541ff2f3d4acd2c13b90fb6e60753698bdfb0debae913c892049885525c"
+					}
+				],
+				"testSourceRefs": ["F246"]
+			},
+			{
+				"id": "B35",
+				"area": "Account-scoped history and attribution",
+				"classification": "registry-derived",
+				"rows": ["P02", "P13", "P15", "REG-PROFILE", "REG-STORAGE", "REG-USAGE"],
+				"anchors": [
+					{
+						"sourceRef": "F009",
+						"line": 186,
+						"symbol": "getProviderAccountDirs",
+						"lineSha256": "41e5ac459f8441322c6eb447072db7c243cc841f7ac3e65523903b95582c81ad"
+					},
+					{
+						"sourceRef": "F010",
+						"line": 242,
+						"symbol": "accountDirs fan-out",
+						"lineSha256": "6fb8df116e2c90505312963008f54facdd792c1ad6fd60adc27c5216502032ea"
+					},
+					{
+						"sourceRef": "F050",
+						"line": 54,
+						"symbol": "getLocalGrokHome",
+						"lineSha256": "be29249635e6d7577770eca8ddb4a72eb4d18dbc74651ae41b15355bb563ecb3"
+					},
+					{
+						"sourceRef": "F050",
+						"line": 408,
+						"symbol": "getSessionsDir",
+						"lineSha256": "acfc789a98db3102efd6b9af13b594090c49e810c90c8d6e2443df24504c4dd6"
+					}
+				],
+				"testSourceRefs": ["F247", "F248", "F249"]
+			},
+			{
+				"id": "B36",
+				"area": "Grok model discovery scope",
+				"classification": "intentional-capability-gap",
+				"rows": ["P03", "REG-MODEL", "REG-DISCOVERY"],
+				"anchors": [
+					{
+						"sourceRef": "F004",
+						"line": 921,
+						"symbol": "discoverModels Grok case",
+						"lineSha256": "a3a954e01dab4a55e83f77f4f469d27dcee18f98aedcb7a60914ec13c2cd903c"
+					},
+					{
+						"sourceRef": "F004",
+						"line": 927,
+						"symbol": "GROK_HOME cache root",
+						"lineSha256": "a3bd9ab9dc112c8278119a3ff5d5b5c22ada42c66f01f27534e446df28753558"
+					},
+					{
+						"sourceRef": "F004",
+						"line": 1151,
+						"symbol": "discoverConfigOptions Grok case",
+						"lineSha256": "a3a954e01dab4a55e83f77f4f469d27dcee18f98aedcb7a60914ec13c2cd903c"
+					}
+				],
+				"testSourceRefs": ["F250", "F251"]
+			},
+			{
+				"id": "B37",
+				"area": "Plugin tools in headless and Cue runs",
+				"classification": "registry-derived",
+				"rows": ["P25", "P26", "S08", "S13"],
+				"anchors": [
+					{
+						"sourceRef": "F100",
+						"line": 189,
+						"symbol": "requirePluginTools / receiptToolId guard",
+						"lineSha256": "8ac2d31af915c28bc7f4b85d63a68f527c199f0dbbfd4124bb84b31c95a063d8"
+					},
+					{
+						"sourceRef": "F107",
+						"line": 357,
+						"symbol": "MCP_CONFIG_BY_AGENT verified gate",
+						"lineSha256": "249e3204346fb8d801faf83ba6eda68861616c21d473baa2b5f465c88fd8a176"
+					}
+				],
+				"testSourceRefs": ["F252", "F253"]
+			},
+			{
+				"id": "B38",
+				"area": "Cue workflow launch and usage",
+				"classification": "registry-derived",
+				"rows": ["P10", "P11", "P30", "S13", "REG-USAGE"],
+				"anchors": [
+					{
+						"sourceRef": "F107",
+						"line": 120,
+						"symbol": "getAgentDefinition",
+						"lineSha256": "3e7583a364dd5b53244ded6d155d56da97298771f7cb4835ad1ac650d54d5154"
+					},
+					{
+						"sourceRef": "F107",
+						"line": 130,
+						"symbol": "getAgentCapabilities",
+						"lineSha256": "c205effc973efea52589b9854fdb23c90f673c10b9cadd388aa8e98bb1ffcdd2"
+					},
+					{
+						"sourceRef": "F108",
+						"line": 257,
+						"symbol": "CueRunStreamCapture constructor",
+						"lineSha256": "1a1249950cdc7d3ec0cd19ea17924f471b50f736f58c3c6f6b0d3fe44747fc25"
+					},
+					{
+						"sourceRef": "F108",
+						"line": 275,
+						"symbol": "usageAccumulator / usageLastWriteWins",
+						"lineSha256": "c9d5d32ce309e9e0a042fe4d52273cc9ea0ffaac3cdb1c5d145c32360a49da51"
+					}
+				],
+				"testSourceRefs": ["F253", "F254", "F255"]
+			},
+			{
+				"id": "B39",
+				"area": "Group chat shared launch and parsing",
+				"classification": "registry-derived",
+				"rows": ["P12", "P31", "S14"],
+				"anchors": [
+					{
+						"sourceRef": "F112",
+						"line": 198,
+						"symbol": "prepareGroupChatSpawn",
+						"lineSha256": "1f8f014a77ff1a62109e9ee529c72c340a5da8c5a022907e7a0d1e4440f8726d"
+					},
+					{
+						"sourceRef": "F112",
+						"line": 250,
+						"symbol": "spawnAdmitted",
+						"lineSha256": "1d018dc866f356a360e3167f995a70d66cdab602428a27add22a26f08e573347"
+					},
+					{
+						"sourceRef": "F111",
+						"line": 64,
+						"symbol": "extractTextFromAgentOutput",
+						"lineSha256": "0712524e742c29f0b4eb41ef4a092dc327a3121247b7585eaed5599bb5717a71"
+					},
+					{
+						"sourceRef": "F111",
+						"line": 107,
+						"symbol": "textParts accumulation",
+						"lineSha256": "7200ee1799cb85b6b846d780b8fc8b7a812479c95318c90f9bbff010b908f312"
+					}
+				],
+				"testSourceRefs": ["F256", "F257"]
+			},
+			{
+				"id": "B40",
+				"area": "Managed cross-agent consult reachability",
+				"classification": "registry-derived",
+				"rows": ["P32", "P33", "P36", "S19", "S23", "REG-MANAGED-ROUTES"],
+				"anchors": [
+					{
+						"sourceRef": "F258",
+						"line": 248,
+						"symbol": "consultRefusal",
+						"lineSha256": "40ef9212ee17662f792cb8577236a59cc8b35b3256a5ec376153425b39c5a2a8"
+					},
+					{
+						"sourceRef": "F258",
+						"line": 267,
+						"symbol": "SSH consult refusal",
+						"lineSha256": "2ef60ee71cc9571757abbc2b31b493f26a295b062130812748851fb8a1e74a10"
+					},
+					{
+						"sourceRef": "F258",
+						"line": 274,
+						"symbol": "providerRouteSupport",
+						"lineSha256": "cb656a62e23cfebb7423c1d37b97d23e0b637d6135f0dfaeb3eab76039b90345"
+					},
+					{
+						"sourceRef": "F259",
+						"line": 78,
+						"symbol": "extractTextFromStreamJson",
+						"lineSha256": "d16229ec0f1f8aff3b81dffb8310eeacb81b7675177a4a5d1f244acd9e1e931e"
+					},
+					{
+						"sourceRef": "F025",
+						"line": 622,
+						"symbol": "managedLaunch / managed route classification",
+						"lineSha256": "6c20e1b022d49aedef53e1a2c9ce9635ef43ef1ad0fbdefbd5d223fb794ec7bf"
+					}
+				],
+				"testSourceRefs": ["F260", "F261"]
+			},
+			{
+				"id": "B41",
+				"area": "Utility no-tools and Claude TUI distinction",
+				"classification": "intentional-capability-gap",
+				"rows": ["P20", "P32", "P35", "S19", "REG-MANAGED-ROUTES"],
+				"anchors": [
+					{
+						"sourceRef": "F087",
+						"line": 352,
+						"symbol": "getAgent",
+						"lineSha256": "99503194fc45561d0c1224ac5caeebd828d8cb8b8992652d33cef7d1662b777a"
+					},
+					{
+						"sourceRef": "F087",
+						"line": 379,
+						"symbol": "disableTools / noToolsArgs",
+						"lineSha256": "f7d208103214fa5d9940e0ac9df5e4d180202d55585ae64bf62bbd5987a2a5bb"
+					},
+					{
+						"sourceRef": "F087",
+						"line": 397,
+						"symbol": "boundUtilityRoute",
+						"lineSha256": "70c219e1ffc7748604d2b1fa9976ef8d7a5b9ff9dab6f028a0765c5255d600c5"
+					},
+					{
+						"sourceRef": "F087",
+						"line": 459,
+						"symbol": "Claude TUI decision",
+						"lineSha256": "3eedd2f3e6f769046609dc282f8932cb66138e0c1c7d3fd56a88795337fb552e"
+					},
+					{
+						"sourceRef": "F040",
+						"line": 187,
+						"symbol": "localTuiLaunchOf",
+						"lineSha256": "30b0cf24c5b175351e18651b017bc5f786984e3b60ac5fb92f1411860ac34262"
+					}
+				],
+				"testSourceRefs": ["F262", "F263", "F264"]
+			},
+			{
+				"id": "B42",
+				"area": "Usage and thinking stream special cases",
+				"classification": "intentional-provider-specific",
+				"rows": ["P10", "P11", "P12", "REG-PARSER", "REG-USAGE", "S28"],
+				"anchors": [
+					{
+						"sourceRef": "F036",
+						"line": 675,
+						"symbol": "normalizeUsageToDelta",
+						"lineSha256": "45c497bf6568afa52c3191250391f1e929c225999e45a8312589347892840504"
+					},
+					{
+						"sourceRef": "F036",
+						"line": 751,
+						"symbol": "requiresReasoningTag",
+						"lineSha256": "1e2091002920d073f0dda1f21ef01591031242b5fab2b7952f430a56386eaef7"
+					},
+					{
+						"sourceRef": "F036",
+						"line": 765,
+						"symbol": "Grok emitDataBuffered",
+						"lineSha256": "ac2d893b4066bf1b0610c1babd1e19c471c48b9e271138cf93639192ed8fe08f"
+					},
+					{
+						"sourceRef": "F036",
+						"line": 899,
+						"symbol": "result duplicate guard",
+						"lineSha256": "8f358fcab1d414e054566be5ee632a9ea3508a539cb356f6abb10afa15fb38bf"
+					}
+				],
+				"testSourceRefs": ["F265", "F266"]
+			},
+			{
+				"id": "B43",
+				"area": "Quota unknown and usage completeness",
+				"classification": "intentional-provider-specific",
+				"rows": ["P10", "P11", "P40", "REG-QUOTA", "REG-USAGE", "S26", "S27"],
+				"anchors": [
+					{
+						"sourceRef": "F267",
+						"line": 30,
+						"symbol": "getLimitResetAt",
+						"lineSha256": "396d3dba2677a262d9025a8761281d5b4339ca69bad84b97de73ec73b37f9a96"
+					},
+					{
+						"sourceRef": "F268",
+						"line": 411,
+						"symbol": "getLimitResetAt consumer",
+						"lineSha256": "0eafa11167d0f54f0793385d6d71e3df8eafc51f7bed4d85e48acfc03aa78cb3"
+					},
+					{
+						"sourceRef": "F010",
+						"line": 57,
+						"symbol": "COVERAGE_BY_AGENT",
+						"lineSha256": "757fb19589f07356f7b4214b51fc3b7698eafd24e0c865716d44662424a3333d"
+					},
+					{
+						"sourceRef": "F052",
+						"line": 84,
+						"symbol": "COVERAGE_BY_AGENT",
+						"lineSha256": "f6846bd663d553a07f20019cbb7622ed479cf95ebfb42863a69bf8e562db3112"
+					}
+				],
+				"testSourceRefs": ["F269", "F270", "F249"]
+			},
+			{
+				"id": "B44",
+				"area": "History registration and relay provenance",
+				"classification": "registry-derived",
+				"rows": ["P13", "P14", "P26", "REG-STORAGE", "REG-SESSION-MUTATION", "S08"],
+				"anchors": [
+					{
+						"sourceRef": "F057",
+						"line": 42,
+						"symbol": "initializeSessionStorages",
+						"lineSha256": "dce09c880d9febd22dff3cb47192ba57b83d3c8a625bc3af9d1afbbf6b3a3402"
+					},
+					{
+						"sourceRef": "F057",
+						"line": 49,
+						"symbol": "GrokSessionStorage registration",
+						"lineSha256": "58c769654810c74a4cd84b1a3da9bd2e2aa5a0e4e4dd58b567de3a79ac07f4e6"
+					},
+					{
+						"sourceRef": "F271",
+						"line": 2077,
+						"symbol": "markRelaySession",
+						"lineSha256": "cf595d304a08ba94c39e88395efa9fba2c2a882f2905a4b3c9477f686d6f274e"
+					},
+					{
+						"sourceRef": "F271",
+						"line": 2091,
+						"symbol": "agentSessionOriginsStore generic fallback",
+						"lineSha256": "f34a618b15868cc35c5e324bc1466d5dcf2051fb12ba4d85a9ddff0103f82012"
+					}
+				],
+				"testSourceRefs": ["F248", "F243"]
+			},
+			{
+				"id": "B45",
+				"area": "Auto Run desktop and headless workflow consumers",
+				"classification": "registry-derived",
+				"rows": ["S10", "S11", "S12", "P29", "P32"],
+				"anchors": [
+					{
+						"sourceRef": "F103",
+						"line": 453,
+						"symbol": "resolveTurnSettings",
+						"lineSha256": "6e168f65e2faa75df345ffa1c51515cd785868094f13fe6412aa9965774d26fd"
+					},
+					{
+						"sourceRef": "F103",
+						"line": 540,
+						"symbol": "onSpawnAgent",
+						"lineSha256": "467ebfc1894f0a04617fb2a2d033123e07e3f050feb8a28d1d08860ced7e17aa"
+					},
+					{
+						"sourceRef": "F105",
+						"line": 553,
+						"symbol": "goal onSpawnAgent",
+						"lineSha256": "ab9436c12689c7b4d730a3f7570776e266f1abcb9525cdfb28a6540f0a98de23"
+					},
+					{
+						"sourceRef": "F105",
+						"line": 787,
+						"symbol": "supportsResume handoff gate",
+						"lineSha256": "a3d9891b1a6c30c3e1f88900d6ab2f4d32e246ff40b00e2a7a4735688b0a3dde"
+					},
+					{
+						"sourceRef": "F106",
+						"line": 32,
+						"symbol": "shared runPlaybook adapter",
+						"lineSha256": "74f8b97a375621d5a352ba101048fccde21742a867b3cb3a7b7362671fc86b63"
+					},
+					{
+						"sourceRef": "F272",
+						"line": 82,
+						"symbol": "CLI turn port spawnAgent",
+						"lineSha256": "f907679eba90bab0560c898793bbc36552e4bbe03eb89b8f21ed9ae52caf8516"
+					},
+					{
+						"sourceRef": "F272",
+						"line": 54,
+						"symbol": "goalTurnOptions",
+						"lineSha256": "cd61e67df429e1c33e767b65e53bc8861cc01c0ff49a4c39ec051eaf6b323c83"
+					}
+				],
+				"testSourceRefs": ["F273", "F274", "F275"]
+			},
+			{
+				"id": "B46",
+				"area": "Symphony and duplicate/custom agent creation",
+				"classification": "registry-derived",
+				"rows": ["S15", "S30", "P17", "P31"],
+				"anchors": [
+					{
+						"sourceRef": "F077",
+						"line": 95,
+						"symbol": "symphonyAgentFilter",
+						"lineSha256": "d9957dd07185ec1c105922325eb2e8f89680c4d3c115cef9e56ec70836fd11f8"
+					},
+					{
+						"sourceRef": "F077",
+						"line": 286,
+						"symbol": "onCreateAgent selected provider config",
+						"lineSha256": "bb9752223ee7150106fcaf7f8dbdd025c9b684096201ac8180ff4b7eabc5e52e"
+					},
+					{
+						"sourceRef": "F115",
+						"line": 375,
+						"symbol": "startContribution selected sessionId",
+						"lineSha256": "6f54ccef4e61008b1c9e487a5852e797b8506f0fea6e56fe5e72bc16cbdeb928"
+					},
+					{
+						"sourceRef": "F114",
+						"line": 61,
+						"symbol": "repositoryHold",
+						"lineSha256": "8b976ab8db5fb0d927b2d6b2a2469be25d68343d0543ea848fb884a9d91cb5fc"
+					},
+					{
+						"sourceRef": "F076",
+						"line": 273,
+						"symbol": "duplicate getEffortConfigKey",
+						"lineSha256": "576295fb71d81ef97b3d7dd3099b149fa2cbcd6eb38f4e74d9af6f04cb19bbae"
+					},
+					{
+						"sourceRef": "F076",
+						"line": 287,
+						"symbol": "duplicate selected toolType",
+						"lineSha256": "d2f1a70a12c18349d7fd45fcc35f1a9d077f6c3a4e06e1d08fbf8a8b507ae527"
+					},
+					{
+						"sourceRef": "F076",
+						"line": 625,
+						"symbol": "onCreate provider configuration",
+						"lineSha256": "82680c6013faf4dddc32c4ba9fd4cc1850041b00fadc1f67ce7526709e7b6b88"
+					}
+				],
+				"testSourceRefs": ["F276", "F277"]
+			},
+			{
+				"id": "B47",
+				"area": "Pianola selection and cold-start fallback",
+				"classification": "intentional-provider-specific",
+				"rows": ["S16", "P31", "P04", "P33"],
+				"anchors": [
+					{
+						"sourceRef": "F116",
+						"line": 59,
+						"symbol": "selectAgentForTask",
+						"lineSha256": "9023fde8d74539bfb22bb10b41ea4d7faced9701c476e8c500dac6c967e9d489"
+					},
+					{
+						"sourceRef": "F278",
+						"line": 600,
+						"symbol": "ensureAgent task.agentType",
+						"lineSha256": "5fac2a493665783dbc25fa9453211bcc129f1f5f95b4e7412b88aa581551a636"
+					},
+					{
+						"sourceRef": "F278",
+						"line": 618,
+						"symbol": "DEFAULT_CAPABILITIES candidate assignment",
+						"lineSha256": "f36be6399c0e25defb35752bd6c7978c614e1dabd8e06d9c4e95a75f1a4ac17e"
+					},
+					{
+						"sourceRef": "F278",
+						"line": 623,
+						"symbol": "selectAgentForTask without required flags",
+						"lineSha256": "c6f94ad20bbf6f450c5909ba27c36701a0cf619c25f1965a81316f0a8dba4171"
+					},
+					{
+						"sourceRef": "F278",
+						"line": 634,
+						"symbol": "cold-start Claude fallback",
+						"lineSha256": "515c33b26468f9d8e6b7c0bac6797036723302a21b661dbce5799528fa72b345"
+					},
+					{
+						"sourceRef": "F278",
+						"line": 639,
+						"symbol": "create_session configuration",
+						"lineSha256": "0635ae18cc55c0f9e4aee4cb1e5e2dda67890e5663ae3894f0e25c6d4f15878f"
+					},
+					{
+						"sourceRef": "F118",
+						"line": 561,
+						"symbol": "admitSupervisorChild",
+						"lineSha256": "d48c92a9ea5aa1b826831abd00a42dbec5132ec4d571a2fce435edd93c8b4b78"
+					}
+				],
+				"testSourceRefs": ["F279", "F280", "F281"]
+			},
+			{
+				"id": "B48",
+				"area": "Registry completeness and historical documentation",
+				"classification": "intentional-provider-specific",
+				"rows": ["P41", "P45", "P46", "REG-PROFILE"],
+				"anchors": [
+					{
+						"sourceRef": "F129",
+						"line": 68,
+						"symbol": "per-agent completeness",
+						"lineSha256": "6c967e634f3b1869e9ec6224a2c20269b0b71a618ca24edc9c9b11f9ec74ea05"
+					},
+					{
+						"sourceRef": "F129",
+						"line": 81,
+						"symbol": "requiredBooleanFields",
+						"lineSha256": "ae0060444b7535a2975616f15b66b41efb6089cc5a180dc3f27151117ddce5b0"
+					},
+					{
+						"sourceRef": "F282",
+						"line": 313,
+						"symbol": "Other Providers account limitation",
+						"lineSha256": "03b980ec7db432435ff948fa3ae6cd0cb38b33bb0873f5f4ac6ccb312d6c8ad8"
+					},
+					{
+						"sourceRef": "F131",
+						"line": 1211,
+						"symbol": "Grok support heading",
+						"lineSha256": "0872d8704a606a924b8b06190ba074302f2545d906936898d187d40c54b1a977"
+					},
+					{
+						"sourceRef": "F283",
+						"line": 14,
+						"symbol": "Grok beta row",
+						"lineSha256": "57674b9f332ecf8f334f5fe61ab3d7d8124db0e345b5c8ad550b962362731b46"
+					}
+				],
+				"testSourceRefs": ["F129"]
+			}
+		],
+		"addedRows": ["S32", "S33", "S34", "S35", "S36", "S37"],
+		"ownerScopeReviewTask": "GT1-01-07",
+		"evidenceApplicabilityReview": {
+			"status": "pass",
+			"reviewer": "Independent UI and main-process auditors",
+			"scope": "New S32-S37 scope only; no existing applicability is weakened. S32 is pure metadata attribution; S37 is pure stored-data aggregation. Runtime capture, native schema, account isolation and cost authority retain their existing live requirements."
+		},
+		"productAcceptance": "not-run",
+		"liveCalls": 0,
+		"imagesAnalyzed": 0
+	}
 }
