@@ -441,6 +441,7 @@ export class ProcessManager extends EventEmitter {
 		const existing = this.processes.get(config.sessionId);
 		if (
 			config.reuseTerminal &&
+			!config.promptArtifact &&
 			config.toolType === 'terminal' &&
 			existing &&
 			this.terminalAttachable(config.sessionId)
@@ -477,6 +478,27 @@ export class ProcessManager extends EventEmitter {
 			};
 		}
 		const lease = admitted.lease;
+		// Only the child-process sink owns prompt files. Refuse before attaching,
+		// replacing an existing process or selecting a transport that drops them.
+		if (
+			config.promptArtifact &&
+			(config.toolType === 'terminal' ||
+				this.shouldUsePty(config) ||
+				this.shouldUseOpencodeServer(config) ||
+				this.shouldUseCodexAppServer(config))
+		) {
+			const message = 'Prompt-file delivery is unavailable on this transport. Nothing was started.';
+			lease?.release({ outcome: 'spawn-failed', message });
+			this.emit('agent-error', config.sessionId, {
+				type: 'unknown',
+				message,
+				recoverable: false,
+				agentId: config.toolType,
+				sessionId: config.sessionId,
+				timestamp: Date.now(),
+			} satisfies AgentError);
+			return { pid: -1, success: false, error: message };
+		}
 		// Expand a leading `~` in the working directory before spawning. node-pty
 		// and child_process hand `cwd` straight to the OS, which - unlike a shell -
 		// does not expand `~`. A session whose cwd is persisted as `~/project` (or
@@ -583,9 +605,11 @@ export class ProcessManager extends EventEmitter {
 						requestedToolType: config.toolType,
 					}
 				);
-				// Drop the dead entry and let the spawn below take the session id. No
-				// kill() here: there is no process left to signal, and kill() would
-				// emit a spurious exit for a turn that ended long ago.
+				// The local PID is gone, but a remote prompt reader can outlive its
+				// SSH client. Hand cleanup to that owner before replacing the entry.
+				if (existing.sshRemotePromptArtifactPath !== undefined) {
+					this.signalRemote(config.sessionId, existing, 'terminate');
+				}
 				this.processes.delete(config.sessionId);
 				this.releaseLease(config.sessionId, {
 					outcome: 'unknown',
@@ -1140,8 +1164,29 @@ export class ProcessManager extends EventEmitter {
 	private emitSpawn(config: ProcessConfig): void {
 		try {
 			if (config.promptArtifact) {
-				// Capture listeners receive metadata, never the private file handoff.
-				const { promptArtifact: _promptArtifact, ...captureConfig } = config;
+				// Project lifecycle metadata only. Args, stdin scripts, images and
+				// prompt callbacks can carry private file content or destinations.
+				// Keep the admitted/spawned request intact; this copy is observational.
+				const captureConfig: ProcessConfig = {
+					sessionId: config.sessionId,
+					toolType: config.toolType,
+					cwd: config.cwd,
+					command: config.command,
+					args: [],
+					querySource: config.querySource,
+					tabId: config.tabId,
+					projectPath: config.projectPath,
+					agentSessionId: config.agentSessionId,
+					sshRemoteId: config.sshRemoteId,
+					sshRemoteHost: config.sshRemoteHost,
+					purpose: config.purpose,
+					origin: config.origin,
+					utilityOf: config.utilityOf,
+					admission: config.admission,
+					autoRun: config.autoRun,
+					delegation: config.delegation,
+					dispatchedAs: config.dispatchedAs,
+				};
 				this.emit('spawn', captureConfig);
 			} else {
 				this.emit('spawn', config);
@@ -1509,12 +1554,24 @@ export class ProcessManager extends EventEmitter {
 	 */
 	private signalRemote(sessionId: string, proc: ManagedProcess, mode: RemoteSignalMode): void {
 		if (!proc.sshRemotePidFile || !proc.command || !proc.args) return;
+		// Prompt-owner records require their artifact witness. Never send one
+		// through the legacy signal script, which cannot preserve file ownership.
+		if (
+			proc.sshRemotePromptArtifactPath === undefined &&
+			!proc.sshRemotePidFile.startsWith('/tmp/maestro-agent-')
+		) {
+			logger.warn('Remote signal ownership is unavailable', 'ProcessManager', { sessionId, mode });
+			return;
+		}
 		signalRemoteAgent(
 			{
 				sshCommand: proc.command,
 				sshArgs: proc.args,
 				pidFile: proc.sshRemotePidFile,
 				sessionId,
+				...(proc.sshRemotePromptArtifactPath !== undefined
+					? { promptArtifactPath: proc.sshRemotePromptArtifactPath }
+					: {}),
 			},
 			mode
 		);
@@ -1523,8 +1580,9 @@ export class ProcessManager extends EventEmitter {
 	/**
 	 * The stop ladder escalates only the local ssh client. When an interrupted
 	 * SSH agent has not exited after the grace period, ask its host for SIGTERM
-	 * too. Test for an observed exit, never `.killed`, which is set as soon as a
-	 * signal is delivered.
+	 * too. Local SSH exit does not prove a remote prompt reader has stopped;
+	 * its owner must recheck remote PID and descriptor identity after the grace.
+	 * Ordinary turns still stop escalating on observed exit, never `.killed`.
 	 */
 	private scheduleRemoteTerminate(
 		sessionId: string,
@@ -1533,11 +1591,18 @@ export class ProcessManager extends EventEmitter {
 	): void {
 		if (!proc.sshRemotePidFile) return;
 		const timer = setTimeout(() => {
-			if (child.exitCode === null && child.signalCode === null) {
+			if (
+				proc.sshRemotePromptArtifactPath !== undefined ||
+				(child.exitCode === null && child.signalCode === null)
+			) {
 				this.signalRemote(sessionId, proc, 'terminate');
 			}
 		}, INTERACTIVE_STOP_GRACE_MS);
-		child.once('exit', () => clearTimeout(timer));
+		if (proc.sshRemotePromptArtifactPath === undefined) {
+			child.once('exit', () => clearTimeout(timer));
+		} else {
+			timer.unref?.();
+		}
 	}
 
 	/**

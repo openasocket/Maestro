@@ -680,6 +680,9 @@ export interface ManagedProcess {
 	 *  can signal the agent on its host rather than only the local ssh client.
 	 *  See utils/ssh-remote-signal.ts. Set only for stdin-script SSH spawns. */
 	sshRemotePidFile?: string;
+	/** Private remote prompt cleanup metadata, bound to sshRemotePidFile ownership.
+	 *  Never expose in Process Details, capture events or persisted diagnostics. */
+	sshRemotePromptArtifactPath?: string;
 	dataBuffer?: string;
 	dataBufferTimeout?: NodeJS.Timeout;
 	/** Env vars Maestro explicitly set on this process (global, then the session's own set or else the agent-level set),

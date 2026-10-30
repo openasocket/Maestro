@@ -710,8 +710,9 @@ export class ChildProcessSpawner {
 				projectPath: config.projectPath,
 				sshRemoteId: config.sshRemoteId,
 				sshRemoteHost: config.sshRemoteHost,
-				sshRemoteCommand: config.sshRemoteCommand,
+				sshRemoteCommand: promptArtifact ? undefined : config.sshRemoteCommand,
 				sshRemotePidFile,
+				sshRemotePromptArtifactPath: remoteArtifactPath,
 				// Seed from config on resume. Copilot emits `session.resume`
 				// (no sessionId) instead of `session.start` when --resume=<id>
 				// is set, so StdoutHandler can't populate this from the stream
