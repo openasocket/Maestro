@@ -6,12 +6,13 @@
  */
 
 import { useState, useCallback } from 'react';
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { AgentConfigPanel } from '../../../../renderer/components/shared/AgentConfigPanel';
 import type { AgentConfig, AgentCapabilities } from '../../../../renderer/types';
 
 import { createMockTheme } from '../../../helpers/mockTheme';
+import { getAgentDefinition } from '../../../../shared/maestro-lib/providers/definitions';
 
 // Mock lucide-react icons
 vi.mock('lucide-react', () => ({
@@ -403,6 +404,91 @@ describe('AgentConfigPanel', () => {
 				expect(onConfigBlur).toHaveBeenCalledWith('model', '');
 			});
 		});
+	});
+
+	describe('Grok manual model and effort controls', () => {
+		const agent = createMockAgent({
+			...getAgentDefinition('grok'),
+			capabilities: { supportsModelSelection: true } as AgentCapabilities,
+		});
+		beforeEach(() => vi.useFakeTimers());
+		afterEach(() => vi.useRealTimers());
+
+		it.each([{ availableModels: [] }, { availableModels: ['catalog-only'] }])(
+			'keeps stored selections while options change to %j and refresh is requested',
+			({ availableModels }) => {
+				const props = createDefaultProps({
+					agent,
+					agentConfig: { model: 'stored-model', reasoningEffort: 'stored-effort' },
+					onRefreshModels: vi.fn(),
+				});
+				const { rerender } = render(<AgentConfigPanel {...props} loadingModels />);
+				rerender(
+					<AgentConfigPanel
+						{...props}
+						availableModels={availableModels}
+						dynamicOptions={{ reasoningEffort: [] }}
+						configOptionNotes={{ model: 'Model discovery unavailable.' }}
+					/>
+				);
+				expect(screen.getByDisplayValue('stored-model')).toHaveValue('stored-model');
+				expect(screen.getByDisplayValue('stored-effort')).toHaveValue('stored-effort');
+				expect(screen.getByTestId('config-option-note-model')).toHaveTextContent(
+					'Model discovery unavailable.'
+				);
+				fireEvent.click(screen.getByTitle('Refresh available models'));
+				expect(props.onRefreshModels).toHaveBeenCalledOnce();
+				expect(props.onConfigChange).not.toHaveBeenCalled();
+				expect(props.onConfigBlur).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each([{ availableModels: [] }, { availableModels: ['catalog-only'] }])(
+			'commits manual values and inheritance with catalog %j',
+			async ({ availableModels }) => {
+				const onConfigBlur = vi.fn();
+				function StatefulWrapper() {
+					const [agentConfig, setAgentConfig] = useState({
+						model: 'stored-model',
+						reasoningEffort: 'stored-effort',
+					});
+					return (
+						<AgentConfigPanel
+							{...createDefaultProps({
+								agent,
+								agentConfig,
+								availableModels,
+								onConfigBlur,
+								onConfigChange: (key, value) =>
+									setAgentConfig((previous) => ({ ...previous, [key]: value })),
+							})}
+						/>
+					);
+				}
+				render(<StatefulWrapper />);
+				for (const [key, stored, manual] of [
+					['model', 'stored-model', 'manual-model'],
+					['reasoningEffort', 'stored-effort', 'manual-effort'],
+				]) {
+					const input = screen.getByDisplayValue(stored);
+					fireEvent.focus(input);
+					fireEvent.change(input, { target: { value: manual } });
+					fireEvent.blur(input);
+					await act(async () => vi.advanceTimersByTimeAsync(150));
+					expect(onConfigBlur).toHaveBeenCalledWith(key, manual);
+					expect(input).toHaveValue(manual);
+				}
+				fireEvent.click(screen.getByTitle('Reset to default model'));
+				expect(onConfigBlur).toHaveBeenCalledWith('model', '');
+				expect(screen.queryByDisplayValue('manual-model')).not.toBeInTheDocument();
+				const effort = screen.getByDisplayValue('manual-effort');
+				fireEvent.change(effort, { target: { value: '' } });
+				fireEvent.blur(effort);
+				await act(async () => vi.advanceTimersByTimeAsync(150));
+				expect(onConfigBlur).toHaveBeenCalledWith('reasoningEffort', '');
+				expect(effort).toHaveValue('');
+			}
+		);
 	});
 
 	describe('Agent configuration sections', () => {

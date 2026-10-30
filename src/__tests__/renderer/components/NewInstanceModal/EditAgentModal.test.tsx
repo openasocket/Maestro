@@ -13,6 +13,9 @@ import { act, render, screen, fireEvent, waitFor, within } from '@testing-librar
 import { EditAgentModal } from '../../../../renderer/components/NewInstanceModal/EditAgentModal';
 import { useSessionStore } from '../../../../renderer/stores/sessionStore';
 import type { Theme, Session, AgentConfig } from '../../../../renderer/types';
+import { getAgentDefinition } from '../../../../shared/maestro-lib/providers/definitions';
+import { getAgentCapabilities } from '../../../../shared/maestro-lib/providers/capabilities';
+import type { AgentDiscoveryResult } from '../../../../shared/types';
 
 // lucide-react icons are mocked globally in src/__tests__/setup.ts using a Proxy
 
@@ -681,6 +684,190 @@ describe('EditAgentModal', () => {
 		expect(screen.getByText('Save Changes').closest('button')).toBeDisabled();
 		fireEvent.click(screen.getByLabelText('Accept the listed conversion limitations'));
 		expect(screen.getByText('Save Changes').closest('button')).not.toBeDisabled();
+	});
+
+	describe('Grok draft discovery', () => {
+		const originalModels = window.maestro.agents.getModels;
+		const originalOptions = window.maestro.agents.getConfigOptions;
+		beforeEach(() => {
+			vi.useFakeTimers();
+			vi.mocked(window.maestro.agents.detect).mockResolvedValue([
+				{
+					...getAgentDefinition('grok')!,
+					capabilities: getAgentCapabilities('grok'),
+					available: true,
+					path: '/bin/grok',
+				} as AgentConfig,
+			]);
+			const unavailable = { status: 'unavailable', options: [] };
+			window.maestro.agents.getModels = vi.fn().mockResolvedValue(unavailable);
+			window.maestro.agents.getConfigOptions = vi.fn().mockResolvedValue(unavailable);
+		});
+		afterEach(() => {
+			vi.useRealTimers();
+			window.maestro.agents.getModels = originalModels;
+			window.maestro.agents.getConfigOptions = originalOptions;
+		});
+
+		const modal = (session: Session) => (
+			<EditAgentModal
+				isOpen={true}
+				onClose={onClose}
+				onSave={onSave}
+				theme={theme}
+				session={session}
+				existingSessions={[]}
+			/>
+		);
+
+		it.each([undefined, {}, { GROK_HOME: ' ' }])(
+			'keeps stored selections and environment %j through unavailable discovery and save',
+			async (customEnvVars) => {
+				const session = createSession({
+					toolType: 'grok',
+					customPath: '/custom/grok',
+					customModel: 'stored-model',
+					customEffort: 'stored-effort',
+					customEnvVars,
+				});
+				render(modal(session));
+				await act(async () => {});
+				await act(() => vi.advanceTimersByTimeAsync(300));
+				const request = {
+					providerId: 'grok',
+					context: expect.objectContaining({
+						kind: 'draft',
+						cwd: session.projectRoot,
+						customPath: '/custom/grok',
+						customEnvVars,
+						model: 'stored-model',
+						effort: 'stored-effort',
+					}),
+				};
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith(request);
+				expect(window.maestro.agents.getConfigOptions).toHaveBeenCalledWith(
+					request,
+					'reasoningEffort'
+				);
+				expect(screen.getByDisplayValue('stored-model')).toBeInTheDocument();
+				expect(screen.getByDisplayValue('stored-effort')).toBeInTheDocument();
+				expect(screen.getByTestId('config-option-note-model')).toHaveTextContent('unavailable');
+				fireEvent.change(screen.getByDisplayValue('stored-model'), {
+					target: { value: 'manual-model' },
+				});
+				fireEvent.change(screen.getByDisplayValue('stored-effort'), {
+					target: { value: 'manual-effort' },
+				});
+				await act(() => vi.advanceTimersByTimeAsync(300));
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+					providerId: 'grok',
+					context: expect.objectContaining({
+						model: 'manual-model',
+						effort: 'manual-effort',
+						customEnvVars,
+					}),
+				});
+				fireEvent.click(screen.getByText('Save Changes'));
+				expect(onSave.mock.calls[0].slice(5, 10)).toEqual([
+					'/custom/grok',
+					'--verbose',
+					customEnvVars,
+					'manual-model',
+					'manual-effort',
+				]);
+			}
+		);
+
+		it.each(['local', 'ssh'])(
+			'rejects late account options and forced refresh after switching to a %s draft',
+			async (target) => {
+				let finishOld!: (value: AgentDiscoveryResult) => void;
+				const pending = new Promise<AgentDiscoveryResult>((resolve) => {
+					finishOld = resolve;
+				});
+				window.maestro.agents.getModels = vi
+					.fn()
+					.mockReturnValueOnce(pending)
+					.mockReturnValueOnce(pending)
+					.mockResolvedValue({ status: 'discovered', options: ['new-catalog'] });
+				window.maestro.agents.getConfigOptions = vi
+					.fn()
+					.mockReturnValueOnce(pending)
+					.mockReturnValueOnce(pending)
+					.mockResolvedValue({ status: 'unavailable', options: [] });
+				const first = createSession({
+					toolType: 'grok',
+					customEnvVars: { GROK_HOME: '/accounts/a' },
+					customModel: 'model-a',
+					customEffort: 'effort-a',
+				});
+				const view = render(modal(first));
+				await act(async () => {});
+				await act(() => vi.advanceTimersByTimeAsync(300));
+				fireEvent.click(screen.getByTitle('Refresh available models'));
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith(
+					expect.objectContaining({ forceRefresh: true })
+				);
+				const next = createSession({
+					id: 'session-b',
+					toolType: 'grok',
+					projectRoot: '/draft/b',
+					customPath: '/bin/grok-b',
+					customEnvVars: { GROK_HOME: '/accounts/b' },
+					customModel: 'model-b',
+					customEffort: 'effort-b',
+					sshRemoteId: target === 'ssh' ? 'old-host' : undefined,
+					sessionSshRemoteConfig:
+						target === 'ssh' ? { enabled: true, remoteId: 'new-host' } : undefined,
+				});
+				view.rerender(modal(next));
+				await act(async () => {});
+				await act(() => vi.advanceTimersByTimeAsync(300));
+				const request = {
+					providerId: 'grok',
+					context: expect.objectContaining({
+						customEnvVars: { GROK_HOME: '/accounts/b' },
+						sshRemoteId: next.sshRemoteId,
+						sessionSshRemoteConfig: expect.objectContaining({
+							enabled: target === 'ssh',
+							remoteId: target === 'ssh' ? 'new-host' : null,
+						}),
+					}),
+				};
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith(request);
+				expect(window.maestro.agents.getConfigOptions).toHaveBeenLastCalledWith(
+					request,
+					'reasoningEffort'
+				);
+				const calls = vi.mocked(window.maestro.agents.getModels).mock.calls.length;
+				await act(async () => {
+					finishOld({ status: 'discovered', options: ['old-catalog'] });
+				});
+				await act(() => vi.advanceTimersByTimeAsync(300));
+				expect(window.maestro.agents.getModels).toHaveBeenCalledTimes(calls);
+				expect(screen.getByTestId('config-option-note-reasoningEffort')).toHaveTextContent(
+					'Effort discovery unavailable'
+				);
+				fireEvent.change(screen.getByDisplayValue('model-b'), { target: { value: 'catalog' } });
+				expect(screen.getByText('new-catalog')).toBeInTheDocument();
+				expect(screen.queryByText('old-catalog')).not.toBeInTheDocument();
+				expect(screen.getByDisplayValue('effort-b')).toBeInTheDocument();
+			}
+		);
+
+		it('keeps a persisted incomplete SSH target unresolved for discovery', async () => {
+			const sessionSshRemoteConfig = { enabled: true, remoteId: null };
+			render(modal(createSession({ toolType: 'grok', sessionSshRemoteConfig })));
+			await act(async () => {});
+			await act(() => vi.advanceTimersByTimeAsync(300));
+			// GT1-02-05I1 repairs initialization that currently drops this target.
+			expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+				providerId: 'grok',
+				context: expect.objectContaining({
+					sessionSshRemoteConfig: expect.objectContaining(sessionSshRemoteConfig),
+				}),
+			});
+		});
 	});
 
 	// Effort is per-session (like model), but the panel used to render it straight
