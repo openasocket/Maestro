@@ -3,8 +3,8 @@
  * from a CueExecutionConfig.
  *
  * Single responsibility: given session/agent/prompt/SSH config, produce a
- * SpawnSpec (command, args, cwd, env, stdin data). No side effects beyond
- * the async SSH resolution.
+ * SpawnSpec (command, args, cwd, env, stdin data). Owns plugin run proofs
+ * during preparation; a successful spec transfers them to the executor.
  */
 
 import type { CueExecutionConfig } from './cue-executor';
@@ -391,46 +391,54 @@ export async function buildSpawnSpec(
 		isPluginsFeatureEnabled() &&
 		(getActivePluginManager()?.getContributions().tools.length ?? 0) > 0
 	) {
-		pluginRunToken = pluginToolRunIdentity.issue(session.id, config.timeoutMs + 60_000);
+		// Retain ownership until all injection preparation succeeds. Failed or
+		// unused injections must release both the identity and its private file.
+		let pluginProofReady = false;
 		try {
+			pluginRunToken = pluginToolRunIdentity.issue(session.id, config.timeoutMs + 60_000);
 			pluginRunProofFile = createPluginRunProofFile(pluginRunToken, config.timeoutMs + 60_000);
-		} catch (error) {
-			pluginToolRunIdentity.revoke(pluginRunToken);
-			throw error;
-		}
-		const injection = buildMcpInjection(
-			mcpCap,
-			{
-				command: process.execPath,
-				args: [resolveMaestroCliScriptPath(), 'mcp', 'serve'],
-				env: {
-					ELECTRON_RUN_AS_NODE: '1',
-					MAESTRO_PLUGIN_RUN_TOKEN_FILE: pluginRunProofFile,
-					...(process.env.MAESTRO_USER_DATA
-						? { MAESTRO_USER_DATA: process.env.MAESTRO_USER_DATA }
-						: {}),
-					...(process.env.XDG_CONFIG_HOME ? { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME } : {}),
+			const injection = buildMcpInjection(
+				mcpCap,
+				{
+					command: process.execPath,
+					args: [resolveMaestroCliScriptPath(), 'mcp', 'serve'],
+					env: {
+						ELECTRON_RUN_AS_NODE: '1',
+						MAESTRO_PLUGIN_RUN_TOKEN_FILE: pluginRunProofFile,
+						...(process.env.MAESTRO_USER_DATA
+							? { MAESTRO_USER_DATA: process.env.MAESTRO_USER_DATA }
+							: {}),
+						...(process.env.XDG_CONFIG_HOME
+							? { XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME }
+							: {}),
+					},
 				},
-			},
-			{ tmpDir: os.tmpdir(), join: path.join }
-		);
-		if (injection.files.length === 0) {
-			spawnArgs = mergeMcpInjectionArgs(mcpCap, spawnArgs, injection.globalArgs);
-			spawnEnv = {
-				...spawnEnv,
-				...injection.env,
-			};
-		} else {
-			pluginToolRunIdentity.revoke(pluginRunToken);
-			try {
-				removePluginRunProofFile(pluginRunProofFile);
-			} catch (error) {
-				logger.warn('Could not remove plugin run proof file', '[PluginRunIdentity]', {
-					error: String(error),
-				});
+				{ tmpDir: os.tmpdir(), join: path.join }
+			);
+			if (injection.files.length === 0) {
+				spawnArgs = mergeMcpInjectionArgs(mcpCap, spawnArgs, injection.globalArgs);
+				spawnEnv = {
+					...spawnEnv,
+					...injection.env,
+				};
+				pluginProofReady = true;
 			}
-			pluginRunToken = undefined;
-			pluginRunProofFile = undefined;
+		} catch {
+			// Injection errors can contain prompt-bearing argv or private paths.
+			return { ok: false, message: 'Plugin tool preparation unavailable.' };
+		} finally {
+			if (!pluginProofReady) {
+				if (pluginRunToken) pluginToolRunIdentity.revoke(pluginRunToken);
+				if (pluginRunProofFile) {
+					try {
+						removePluginRunProofFile(pluginRunProofFile);
+					} catch {
+						logger.warn('Could not remove plugin run proof file', '[PluginRunIdentity]');
+					}
+				}
+				pluginRunToken = undefined;
+				pluginRunProofFile = undefined;
+			}
 		}
 	}
 
