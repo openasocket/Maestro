@@ -9,7 +9,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 
 // Stop's remote half is observed here, never sent: a real one runs ssh.
 const remoteSignals = vi.hoisted(() => [] as Array<{ pidFile: string; mode: string }>);
@@ -29,6 +29,10 @@ import {
 } from '../../../../shared/claudeCostTracker';
 import { getEffortRejection, resetEffortRejections } from '../../../../shared/effortRejection';
 import { SSH_STDIN_REMOTE_SHELL } from '../../../../shared/maestro-lib/control/ssh-remote-signal';
+import * as launchPlanner from '../../../../shared/maestro-lib/launch/launch-plan';
+import * as runToCompletion from '../../../../shared/maestro-lib/run/run-to-completion';
+import * as pipeSpawn from '../../../../shared/maestro-lib/run/pipe-spawn';
+import * as turnArgs from '../../../../shared/maestro-lib/turns/args';
 
 import {
 	assembleTurn,
@@ -466,6 +470,192 @@ describe('runAgentTurn: refusals', () => {
 		);
 
 		expect(started).toMatchObject({ ok: false, reason: 'no-parser' });
+	});
+});
+
+describe('runAgentTurn: Grok launch refusals', () => {
+	const remote: SshRemoteConfig = {
+		id: 'remote-1',
+		name: 'Build box',
+		host: 'build.example.com',
+		port: 22,
+		username: 'dev',
+		privateKeyPath: '~/.ssh/id_ed25519',
+		enabled: true,
+	};
+	let turn: AssembledTurn;
+
+	beforeEach(() => {
+		resetEffortRejections();
+		vi.spyOn(runToCompletion, 'runTurn').mockImplementation(() => {
+			throw new Error('A refused launch must never start a process');
+		});
+		vi.spyOn(launchPlanner, 'buildAgentLaunchPlan');
+		const assembled = assembleTurn(
+			makeAgent({ toolType: 'grok', cwd: scratch.dir }),
+			makeTab(),
+			{ text: 'Keep the selected model and effort.' },
+			makeContext('grok')
+		);
+		if (!assembled.ok) throw new Error(assembled.message);
+		turn = assembled.turn;
+	});
+
+	afterEach(() => {
+		try {
+			expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+		} finally {
+			vi.restoreAllMocks();
+			resetEffortRejections();
+		}
+	});
+
+	describe.each(['local', 'resolved SSH'] as const)('%s', (target) => {
+		it.each([
+			{
+				selection: 'unverified none',
+				args: ['-m', 'fixture-model', '--reasoning-effort', 'none'],
+				message: 'Grok effort "none" requires verified support for the selected model.',
+			},
+			{
+				selection: 'conflicting models',
+				args: ['-m', 'fixture-model', '--model=another-model', '--reasoning-effort', 'high'],
+				message:
+					'Conflicting Grok model selections. Configure one value across settings and custom arguments.',
+			},
+			{
+				selection: 'conflicting efforts',
+				args: ['-m', 'fixture-model', '--reasoning-effort', 'high', '--effort=low'],
+				message:
+					'Conflicting Grok effort selections. Configure one value across settings and custom arguments.',
+			},
+		])(
+			'preserves $selection as a model/effort refusal without retrying',
+			async ({ args, message }) => {
+				const getSshRemotes = vi.fn(() => [remote]);
+				const wrapSpawnWithSsh = vi.fn<NonNullable<RunAgentTurnDeps['wrapSpawnWithSsh']>>();
+				// Exercise the final launch boundary: normal assembly rejects these selections earlier.
+				const launch = {
+					...turn.launch,
+					args: [...args],
+					sshRemoteConfig:
+						target === 'resolved SSH' ? { enabled: true, remoteId: remote.id } : undefined,
+				};
+				const started = await runAgentTurn(
+					{ ...turn, launch },
+					optionsFor({ sshStore: { getSshRemotes }, deps: { wrapSpawnWithSsh, env: {} } })
+				);
+
+				expect(started).toEqual({ ok: false, reason: 'grok-model-effort-refused', message });
+				expect(launchPlanner.buildAgentLaunchPlan).toHaveBeenCalledOnce();
+				expect(launchPlanner.buildAgentLaunchPlan).toHaveBeenCalledWith(
+					expect.objectContaining({ args, sshRemoteConfig: launch.sshRemoteConfig })
+				);
+				expect(launch.args).toEqual(args);
+				expect(getSshRemotes).toHaveBeenCalledTimes(target === 'resolved SSH' ? 1 : 0);
+				expect(wrapSpawnWithSsh).not.toHaveBeenCalled();
+			}
+		);
+	});
+
+	it.each(['missing', 'disabled'] as const)(
+		'keeps a genuinely %s SSH remote classified as SSH, before effort validation',
+		async (state) => {
+			const wrapSpawnWithSsh = vi.fn<NonNullable<RunAgentTurnDeps['wrapSpawnWithSsh']>>();
+			const started = await runAgentTurn(
+				{
+					...turn,
+					launch: {
+						...turn.launch,
+						args: ['--reasoning-effort', 'none'],
+						sshRemoteConfig: { enabled: true, remoteId: remote.id },
+					},
+				},
+				optionsFor({
+					sshStore: {
+						getSshRemotes: () => (state === 'missing' ? [] : [{ ...remote, enabled: false }]),
+					},
+					deps: { wrapSpawnWithSsh, env: {} },
+				})
+			);
+
+			expect(started).toMatchObject({ ok: false, reason: 'ssh-unresolved' });
+			if (started.ok) throw new Error('Expected an SSH refusal');
+			expect(started.message).toContain(state === 'disabled' ? 'disabled' : remote.id);
+			expect(started.message).toContain('nothing ran on this machine');
+			expect(launchPlanner.buildAgentLaunchPlan).toHaveBeenCalledOnce();
+			expect(wrapSpawnWithSsh).not.toHaveBeenCalled();
+		}
+	);
+
+	it('preserves the original managed route diagnostic ahead of an invalid Grok effort', async () => {
+		const started = await runAgentTurn(
+			{
+				...turn,
+				launch: {
+					...turn.launch,
+					args: ['--reasoning-effort', 'none'],
+					managed: {
+						route: {
+							providerId: 'codex',
+							model: null,
+							baseUrl: null,
+							accountDir: null,
+							login: 'provider-login',
+							permissionMode: null,
+						},
+					},
+				},
+			},
+			optionsFor()
+		);
+
+		expect(started).toEqual({
+			ok: false,
+			reason: 'managed-denied',
+			message: 'The policy routes this launch to codex, not grok.',
+		});
+		expect(launchPlanner.buildAgentLaunchPlan).toHaveBeenCalledOnce();
+	});
+
+	it('retains the enrolled-host gate before planning an unmanaged Grok turn', async () => {
+		const started = await runAgentTurn(turn, optionsFor({ standing: 'enrolled' }));
+
+		expect(started).toMatchObject({ ok: false, reason: 'managed-unavailable' });
+		expect(launchPlanner.buildAgentLaunchPlan).not.toHaveBeenCalled();
+	});
+
+	it('cleans an already owned prompt artifact when the Grok launch plan refuses', async () => {
+		const file = outFile('owned-system-prompt');
+		fs.writeFileSync(file, 'Synthetic system prompt');
+		// Inject ownership at the existing materializer seam, without claiming native Grok file support.
+		const write = vi.spyOn(turnArgs, 'writeSystemPromptFile').mockImplementation(async (input) => ({
+			args: [...input.args, '--append-system-prompt-file', file],
+			prompt: input.prompt,
+			tempFile: file,
+			delivery: 'file',
+		}));
+		const cleanup = vi.spyOn(pipeSpawn, 'removeTempFiles');
+		const started = await runAgentTurn(
+			{
+				...turn,
+				systemPrompt: 'Synthetic system prompt',
+				systemPromptDelivery: { via: 'file' },
+				launch: { ...turn.launch, args: ['--reasoning-effort', 'none'] },
+			},
+			optionsFor({ deps: { tempDir: scratch.dir } })
+		);
+
+		expect(started).toEqual({
+			ok: false,
+			reason: 'grok-model-effort-refused',
+			message: 'Grok effort "none" requires verified support for the selected model.',
+		});
+		expect(write).toHaveBeenCalledOnce();
+		expect(cleanup).toHaveBeenCalledExactlyOnceWith([file]);
+		expect(launchPlanner.buildAgentLaunchPlan).toHaveBeenCalledOnce();
+		await waitUntil(() => !fs.existsSync(file));
+		expect(fs.existsSync(file)).toBe(false);
 	});
 });
 

@@ -18,7 +18,7 @@
  * - a standalone host and a bare manager are unchanged.
  */
 import * as os from 'os';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('electron', () => ({
 	app: { getPath: (): string => os.tmpdir() },
@@ -37,6 +37,10 @@ vi.mock('../../../../../main/coworking/coworking-socket-path', () => ({
 	getBridgeSocketPath: () => '/tmp/maestro-test-coworking.sock',
 }));
 
+import * as agentArgs from '../../../../../main/utils/agent-args';
+import * as launchPlan from '../../../../../shared/maestro-lib/launch/launch-plan';
+import { resolveSshLaunchTarget } from '../../../../../shared/maestro-lib/launch/ssh-remote-resolver';
+import { logger } from '../../../../../main/utils/logger';
 import { getAgentCapabilities } from '../../../../../main/agents';
 import type { AgentDetector } from '../../../../../main/agents';
 import { getAgentDefinition } from '../../../../../main/agents/definitions';
@@ -102,18 +106,22 @@ interface Harness {
  * authority), its `spawn` replaced at the very end so no process starts and
  * the config the sink was handed can be read back.
  */
-function harness(port: FakeSpawnPort | null, options: { spySpawn?: boolean } = {}): Harness {
-	const definition = getAgentDefinition('codex');
-	if (!definition) throw new Error('no codex definition');
+function harness(
+	port: FakeSpawnPort | null,
+	options: { spySpawn?: boolean; provider?: 'codex' | 'grok' } = {}
+): Harness {
+	const provider = options.provider ?? 'codex';
+	const definition = getAgentDefinition(provider);
+	if (!definition) throw new Error(`no ${provider} definition`);
 	const agent = {
 		...definition,
 		available: true,
-		path: '/usr/local/bin/codex',
-		capabilities: getAgentCapabilities('codex'),
+		path: `/usr/local/bin/${provider}`,
+		capabilities: getAgentCapabilities(provider),
 	};
 	const sessions = {
 		sessions: [
-			{ id: AGENT, name: 'Backend', toolType: 'codex', cwd: os.tmpdir(), aiTabs: [{ id: TAB }] },
+			{ id: AGENT, name: 'Backend', toolType: provider, cwd: os.tmpdir(), aiTabs: [{ id: TAB }] },
 		],
 	};
 	const processManager = port
@@ -141,7 +149,7 @@ function harness(port: FakeSpawnPort | null, options: { spySpawn?: boolean } = {
 		getProcessManager: () => processManager,
 		getAgentDetector: () =>
 			({
-				getAgent: async (id: string) => (id === 'codex' ? agent : null),
+				getAgent: async (id: string) => (id === provider ? agent : null),
 			}) as unknown as AgentDetector,
 		agentConfigsStore: fakeStore({
 			configs: {},
@@ -529,5 +537,167 @@ describe('process:spawn on a standalone host: unchanged', () => {
 		const admitted = spawned(h);
 		expect(admitted).toMatchObject({ purpose: 'conversation', origin: 'desktop' });
 		expect(admitted.admission).toBeUndefined();
+	});
+});
+
+describe('process:spawn launch refusal classification', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it.each([
+		{ target: 'local', selection: 'effort' },
+		{ target: 'remote', selection: 'effort' },
+		{ target: 'local', selection: 'model' },
+		{ target: 'remote', selection: 'model' },
+	])(
+		'reports $target Grok $selection refusal without an SSH label or retry',
+		async ({ target, selection }) => {
+			const port = fakeSpawnPort();
+			const h = harness(port, { provider: 'grok' });
+			const definition = getAgentDefinition('grok')!;
+			const remote = {
+				id: 'remote-grok',
+				name: 'Grok host',
+				host: 'grok.example.test',
+				enabled: true,
+				port: 22,
+				username: 'synthetic',
+				privateKeyPath: '',
+			};
+			h.deps.settingsStore.set('sshRemotes', [remote]);
+			const sshRemoteConfig =
+				target === 'remote' ? { enabled: true, remoteId: remote.id } : undefined;
+			const args = [
+				...definition.args,
+				'-m',
+				'grok-selected',
+				'--reasoning-effort',
+				selection === 'effort' ? 'none' : 'high',
+				...(selection === 'model' ? ['--model', 'grok-other'] : []),
+			];
+			const diagnostic =
+				selection === 'effort'
+					? 'Grok effort "none" requires verified support for the selected model.'
+					: 'Conflicting Grok model selections. Configure one value across settings and custom arguments.';
+			// Ordinary config composition rejects these values even earlier. Inject
+			// final argv at that boundary to exercise the REAL planner's refusal and
+			// this consumer's reporting, without manufacturing a planner result.
+			const compose = vi.spyOn(agentArgs, 'applyAgentConfigOverrides').mockReturnValue({
+				args,
+				effectiveCustomEnvVars: undefined,
+				modelSource: 'session',
+				customArgsSource: 'session',
+				customEnvSource: 'none',
+			});
+			const plan = vi.spyOn(launchPlan, 'buildAgentLaunchPlan');
+			const result = await handleProcessSpawn(
+				payload({
+					toolType: 'grok',
+					command: definition.command,
+					args: [...definition.args],
+					sessionCustomModel: 'grok-selected',
+					sessionCustomEffort: selection === 'effort' ? 'none' : 'high',
+					sessionSshRemoteConfig: sshRemoteConfig,
+				}),
+				h.deps
+			);
+
+			expect(result).toEqual({ success: false, pid: 0 });
+			expect(compose).toHaveBeenCalledOnce();
+			expect(plan).toHaveBeenCalledOnce();
+			const input = plan.mock.calls[0][0];
+			expect(input.args).toEqual(args);
+			expect(resolveSshLaunchTarget(input.sshStore, input.sshRemoteConfig)).toEqual(
+				target === 'remote' ? { kind: 'remote', remote } : { kind: 'local' }
+			);
+			expect(plan.mock.results[0].value).toEqual({
+				ok: false,
+				reason: 'grok-model-effort-refused',
+				error: diagnostic,
+			});
+			expect(h.sent).toEqual([['process:data', PROCESS, `\r\n[Maestro] ${diagnostic}\r\n`]]);
+			expect(h.errors).toEqual([]);
+			expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+				'Grok model/effort selection refused; not spawning',
+				'[ProcessManager]',
+				{ sessionId: PROCESS, toolType: 'grok', reason: 'grok-model-effort-refused' }
+			);
+			expect(h.spawn).not.toHaveBeenCalled();
+			expect(port.asked).toHaveLength(0);
+			expect(port.authority.live()).toHaveLength(0);
+		}
+	);
+
+	it('retains the genuine unresolved-SSH diagnostic and log classification', async () => {
+		const port = fakeSpawnPort();
+		const h = harness(port, { provider: 'grok' });
+		const definition = getAgentDefinition('grok')!;
+		const plan = vi.spyOn(launchPlan, 'buildAgentLaunchPlan');
+		const result = await handleProcessSpawn(
+			payload({
+				toolType: 'grok',
+				command: definition.command,
+				args: [...definition.args],
+				sessionSshRemoteConfig: { enabled: true, remoteId: 'removed-remote' },
+			}),
+			h.deps
+		);
+		expect(result).toEqual({ success: false, pid: 0 });
+		expect(plan).toHaveBeenCalledOnce();
+		const refusal = plan.mock.results[0].value;
+		if (refusal.ok) throw new Error('Expected unresolved SSH refusal');
+		expect(refusal).toMatchObject({ ok: false, reason: 'remote-not-found' });
+		expect(refusalSentToTab(h)).toBe(`\r\n[Maestro] ${refusal.error}\r\n`);
+		expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+			'SSH remote could not be resolved; not spawning',
+			'[ProcessManager]',
+			{ sessionId: PROCESS, remoteId: 'removed-remote', reason: 'remote-not-found' }
+		);
+		expect(h.spawn).not.toHaveBeenCalled();
+		expect(port.asked).toHaveLength(0);
+		expect(port.authority.live()).toHaveLength(0);
+	});
+
+	it('retains managed launch refusal classification before a Grok selection is dispatched', async () => {
+		const port = fakeSpawnPort();
+		port.routeCeiling = () => ({
+			providerId: 'codex',
+			model: null,
+			baseUrl: null,
+			accountDir: null,
+			login: 'provider-login',
+			permissionMode: null,
+		});
+		const h = harness(port, { provider: 'grok' });
+		const definition = getAgentDefinition('grok')!;
+		const plan = vi.spyOn(launchPlan, 'buildAgentLaunchPlan');
+		const result = await handleProcessSpawn(
+			payload({
+				toolType: 'grok',
+				command: definition.command,
+				args: [...definition.args],
+				sessionCustomModel: 'grok-selected',
+				sessionCustomEffort: 'high',
+			}),
+			h.deps
+		);
+		expect(result).toEqual({ success: false, pid: 0 });
+		expect(plan).toHaveBeenCalledOnce();
+		expect(refusalSentToTab(h)).toBe(
+			'\r\n[Maestro] The policy routes this launch to codex, not grok.\r\n'
+		);
+		expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+			'Managed launch plan refused the spawn; not spawning',
+			'[ProcessManager]',
+			{ sessionId: PROCESS, toolType: 'grok', reason: 'managed-route-refused' }
+		);
+		expect(h.spawn).not.toHaveBeenCalled();
+		expect(port.asked).toHaveLength(0);
+		expect(port.authority.live()).toHaveLength(0);
 	});
 });
