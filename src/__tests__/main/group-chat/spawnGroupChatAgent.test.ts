@@ -630,12 +630,12 @@ describe('spawnGroupChatAgent', () => {
 								expect(mockWrapSpawnWithSsh).toHaveBeenCalledOnce();
 								expect(mockWrapSpawnWithSsh.mock.calls[0][0].args).toEqual(args);
 								const prepared = await mockWrapSpawnWithSsh.mock.results[0].value;
-								expect(config).toMatchObject({
-									command: 'ssh',
-									args: prepared.args,
-									sshStdinScript: prepared.sshStdinScript,
-								});
-								expect(config.sshStdinScript).toContain(`'${readOnly[0]}' '${readOnly[1]}'`);
+								expect(config.command).toBe('ssh');
+								expect(config.args).toEqual(prepared.args);
+								expect(config.sshRemoteCommand).toBe(prepared.sshRemoteCommand);
+								// Short prompts use the packed SSH command rather than a stdin script.
+								expect(config.sshStdinScript).toBeUndefined();
+								expect(config.sshRemoteCommand).toContain(`'${readOnly[0]}' '${readOnly[1]}'`);
 							} else {
 								expect(mockWrapSpawnWithSsh).not.toHaveBeenCalled();
 								expect(config.args).toEqual(args);
@@ -646,6 +646,8 @@ describe('spawnGroupChatAgent', () => {
 								'--dangerously-bypass-approvals-and-sandbox',
 							]) {
 								expect(config.args).not.toContain(bypass);
+								expect(config.args.join(' ')).not.toContain(bypass);
+								expect(config.sshRemoteCommand ?? '').not.toContain(bypass);
 								expect(config.sshStdinScript ?? '').not.toContain(bypass);
 							}
 							if (denied) {
