@@ -4,17 +4,20 @@
  * Covers buildAgentArgs, applyAgentConfigOverrides, and getContextWindowValue.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import {
 	buildAgentArgs,
 	applyAgentConfigOverrides,
 	getContextWindowValue,
 	placeResumeSelectorLast,
+	GrokModelEffortError,
+	type GrokEffortMenu,
 } from '../../../main/utils/agent-args';
 import { AGENT_DEFINITIONS, getAgentDefinition } from '../../../main/agents/definitions';
 import type { AgentConfig } from '../../../main/agents';
 import { logger as mockLogger } from '../../../main/utils/logger';
 import { setMaestroLibLogger } from '../../../shared/maestro-lib/host';
+import { noteEffortRejection, resetEffortRejections } from '../../../shared/effortRejection';
 
 vi.mock('../../../main/utils/logger', () => ({
 	logger: {
@@ -923,6 +926,261 @@ describe('buildAgentArgs', () => {
 // applyAgentConfigOverrides
 // ---------------------------------------------------------------------------
 describe('applyAgentConfigOverrides', () => {
+	describe('Grok final model and effort composition', () => {
+		const grok = getAgentDefinition('grok')!;
+		beforeEach(resetEffortRejections);
+		afterEach(resetEffortRejections);
+
+		it.each(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const)(
+			'keeps the advertised explicit %s effort without substitution',
+			(reasoningEffort) => {
+				const { args } = applyAgentConfigOverrides(grok, [], {
+					agentConfigValues: { model: 'synthetic-model', reasoningEffort },
+					grokEffortMenu: {
+						status: 'discovered',
+						model: 'synthetic-model',
+						wireValues: [reasoningEffort],
+					},
+				});
+				expect(args).toEqual(['-m', 'synthetic-model', '--reasoning-effort', reasoningEffort]);
+			}
+		);
+
+		it.each<{ label: string; menu?: GrokEffortMenu }>([
+			{ label: 'absent' },
+			{
+				label: 'unavailable',
+				menu: { status: 'unavailable', model: 'synthetic-model', wireValues: ['none'] },
+			},
+			{
+				label: 'fallback',
+				menu: { status: 'configured-fallback', model: 'synthetic-model', wireValues: ['none'] },
+			},
+			{
+				label: 'stale model',
+				menu: { status: 'discovered', model: 'old-model', wireValues: ['none'] },
+			},
+			{
+				label: 'different model case',
+				menu: { status: 'discovered', model: 'SYNTHETIC-MODEL', wireValues: ['none'] },
+			},
+		])('refuses none but preserves explicit non-none with a $label menu', ({ menu }) => {
+			const overrides = { sessionCustomModel: 'synthetic-model', grokEffortMenu: menu };
+			expect(() =>
+				applyAgentConfigOverrides(grok, [], { ...overrides, sessionCustomEffort: ' NONE ' })
+			).toThrow('Grok effort "none" requires verified support for the selected model.');
+			expect(
+				applyAgentConfigOverrides(grok, [], { ...overrides, sessionCustomEffort: ' xhigh ' }).args
+			).toEqual(['-m', 'synthetic-model', '--reasoning-effort', 'xhigh']);
+		});
+
+		it.each(['none', 'minimal', 'native-menu-id', 'ｍａｘ'])(
+			'refuses unadvertised wire value %s without choosing a menu entry',
+			(sessionCustomEffort) => {
+				expect(() =>
+					applyAgentConfigOverrides(grok, [], {
+						sessionCustomModel: 'synthetic-model',
+						sessionCustomEffort,
+						grokEffortMenu: {
+							status: 'discovered',
+							model: 'synthetic-model',
+							wireValues: ['low', 'max'],
+						},
+					})
+				).toThrow('Grok effort is not advertised as a wire value for the selected model.');
+			}
+		);
+
+		it('does not treat an implicit CLI model as matching menu evidence', () => {
+			expect(() =>
+				applyAgentConfigOverrides(grok, [], {
+					sessionCustomEffort: 'none',
+					grokEffortMenu: { status: 'discovered', model: 'synthetic-model', wireValues: ['none'] },
+				})
+			).toThrow('Grok effort "none" requires verified support for the selected model.');
+		});
+
+		it.each([
+			[undefined, 'high'],
+			['', 'high'],
+			[' max ', 'max'],
+		])(
+			'resolves session effort %s over provider settings once',
+			(sessionCustomEffort, expected) => {
+				const result = applyAgentConfigOverrides(grok, [], {
+					agentConfigValues: { model: 'provider-model', reasoningEffort: 'high' },
+					sessionCustomModel: 'session-model',
+					sessionCustomEffort,
+					grokEffortMenu: {
+						status: 'discovered',
+						model: 'session-model',
+						wireValues: ['high', 'max'],
+					},
+				});
+				expect(result.args).toEqual(['-m', 'session-model', '--reasoning-effort', expected]);
+				expect(result.modelSource).toBe('session');
+			}
+		);
+
+		it('validates inherited provider effort against the final session model', () => {
+			const overrides = {
+				agentConfigValues: { model: 'provider-model', reasoningEffort: 'none' },
+				sessionCustomModel: 'session-model',
+				sessionCustomEffort: '',
+			};
+			expect(() =>
+				applyAgentConfigOverrides(grok, [], {
+					...overrides,
+					grokEffortMenu: { status: 'discovered', model: 'provider-model', wireValues: ['none'] },
+				})
+			).toThrow('Grok effort "none" requires verified support');
+			expect(
+				applyAgentConfigOverrides(grok, [], {
+					...overrides,
+					grokEffortMenu: { status: 'discovered', model: 'session-model', wireValues: ['none'] },
+				}).args
+			).toEqual(['-m', 'session-model', '--reasoning-effort', 'none']);
+		});
+
+		it.each([
+			'--effort HIGH --reasoning-effort=high --model=synthetic-model',
+			'--reasoning-effort=" high " --effort=HIGH -m=" synthetic-model "',
+			"--effort ' high ' --model ' synthetic-model '",
+			'\t--effort\tHIGH\n--model=synthetic-model  ',
+		])('consolidates equivalent settings and custom aliases: %s', (sessionCustomArgs) => {
+			const result = applyAgentConfigOverrides(grok, [], {
+				agentConfigValues: {
+					model: 'synthetic-model',
+					reasoningEffort: 'high',
+					customArgs: '--effort low',
+				},
+				sessionCustomArgs,
+			});
+			expect(result.args).toEqual(['-m', 'synthetic-model', '--reasoning-effort', 'high']);
+			expect(result.customArgsSource).toBe('session');
+		});
+
+		it('validates none supplied only through provider custom aliases', () => {
+			const result = applyAgentConfigOverrides(grok, [], {
+				agentConfigValues: {
+					customArgs: '--model=" synthetic-model " --effort=" NONE " --reasoning-effort=none',
+				},
+				grokEffortMenu: { status: 'discovered', model: 'synthetic-model', wireValues: ['none'] },
+			});
+			expect(result.args).toEqual(['-m', 'synthetic-model', '--reasoning-effort', 'NONE']);
+			expect(result.customArgsSource).toBe('agent');
+		});
+
+		it.each([
+			['--effort low', 'effort'],
+			['--reasoning-effort=low', 'effort'],
+			['--effort=" low "', 'effort'],
+			['--model=other-model', 'model'],
+			['-m other-model', 'model'],
+			['--model=SYNTHETIC-MODEL', 'model'],
+		])('refuses a conflicting custom selection: %s', (customArgs, selection) => {
+			expect(() =>
+				applyAgentConfigOverrides(grok, [], {
+					agentConfigValues: { model: 'synthetic-model', reasoningEffort: 'high', customArgs },
+				})
+			).toThrow(`Conflicting Grok ${selection} selections.`);
+		});
+
+		it.each(['--reasoning-effort', '--effort', '-m', '--model'])(
+			'preserves repeated %s pairs until conflicts can be refused',
+			(flag) => {
+				const input = [flag, 'high', flag, 'low'];
+				const built = buildAgentArgs(grok, { baseArgs: input });
+				expect(built).toEqual(input);
+				expect(() => applyAgentConfigOverrides(grok, built, {})).toThrow(GrokModelEffortError);
+				expect(input).toEqual([flag, 'high', flag, 'low']);
+				const repeated = buildAgentArgs(grok, { baseArgs: [flag, 'high', flag, 'high'] });
+				expect(applyAgentConfigOverrides(grok, repeated, {}).args).toEqual([
+					flag.includes('effort') ? '--reasoning-effort' : '-m',
+					'high',
+				]);
+			}
+		);
+
+		it.each([
+			'--effort',
+			'--reasoning-effort=',
+			'--effort=" \t "',
+			'--effort --model=synthetic-model',
+			'-m',
+			'--model=',
+			'--model " "',
+		])('refuses an empty or missing custom selection: %s', (sessionCustomArgs) => {
+			expect(() => applyAgentConfigOverrides(grok, [], { sessionCustomArgs })).toThrow(
+				/Grok (effort|model) selection requires a nonempty value/
+			);
+		});
+
+		it.each(['--effort="high', "--model 'synthetic-model"])(
+			'refuses unmatched custom quotes: %s',
+			(sessionCustomArgs) => {
+				expect(() => applyAgentConfigOverrides(grok, [], { sessionCustomArgs })).toThrow(
+					'Grok custom arguments contain an unmatched quote.'
+				);
+			}
+		);
+
+		it.each(['--', '-msynthetic-model'])(
+			'refuses custom syntax that could hide a later selection: %s',
+			(sessionCustomArgs) => {
+				expect(() => applyAgentConfigOverrides(grok, [], { sessionCustomArgs })).toThrow(
+					GrokModelEffortError
+				);
+			}
+		);
+
+		it.each(['none', 'high'] as const)(
+			'remembers native refusal of %s across model changes and mixed case',
+			(effort) => {
+				noteEffortRejection('grok', {
+					value: effort.toUpperCase(),
+					model: 'old-model',
+					supported: ['low'],
+				});
+				expect(() =>
+					applyAgentConfigOverrides(grok, [], {
+						agentConfigValues: { model: 'new-model', reasoningEffort: effort },
+						grokEffortMenu: {
+							status: 'discovered',
+							model: 'new-model',
+							wireValues: [effort, 'low'],
+						},
+					})
+				).toThrow(
+					`Grok CLI rejected effort "${effort.toUpperCase()}" for old-model. It accepts low.`
+				);
+			}
+		);
+
+		it('leaves ordinary provider effort and tokenizer behavior unchanged', () => {
+			noteEffortRejection('grok', { value: 'high', supported: ['low'] });
+			expect(
+				applyAgentConfigOverrides(getAgentDefinition('codex'), ['exec', '--json'], {
+					agentConfigValues: { reasoningEffort: 'high' },
+				}).args
+			).toEqual(['exec', '--json', '-c', 'model_reasoning_effort="high"']);
+			expect(
+				applyAgentConfigOverrides(getAgentDefinition('antigravity'), [], {
+					agentConfigValues: { model: 'ordinary-model', effort: 'high' },
+					sessionCustomArgs: '--effort="none"',
+				}).args
+			).toEqual([
+				'--model',
+				'ordinary-model',
+				'--effort',
+				'high',
+				'--print-timeout',
+				'30m',
+				'--effort="none"',
+			]);
+		});
+	});
+
 	describe('Codex reasoning config (#1744)', () => {
 		const baseArgs = ['exec', '--json'];
 		const codex = () => getAgentDefinition('codex');

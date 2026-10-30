@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
 	buildAgentLaunchPlan,
 	isManagedLaunchRefusal,
@@ -13,6 +13,7 @@ import {
 import { getAgentDefinition } from '../../../../shared/maestro-lib/providers/definitions';
 import { getAgentCapabilities } from '../../../../shared/maestro-lib/providers/capabilities';
 import type { SshRemoteConfig } from '../../../../shared/types';
+import { noteEffortRejection, resetEffortRejections } from '../../../../shared/effortRejection';
 import type { ManagedRouteCeiling } from '../../../../shared/maestro-lib/launch/env';
 import { bindApprovedCredentials } from '../../../../shared/maestro-lib/managed/credentials';
 import { MANAGED_CONTRACT_VERSION } from '../../../../shared/maestro-lib/managed/types';
@@ -237,6 +238,230 @@ describe('buildAgentLaunchPlan', () => {
 		expect(batch.plan.envVars).toEqual({ A: 'default', B: 'batch' });
 		expect(readOnly.plan.envVars).toEqual({ A: 'read-only' });
 		expect(plain.plan.envVars).toEqual({ A: 'default' });
+	});
+});
+
+describe('Grok final launch model and effort validation', () => {
+	const agent = { ...getAgentDefinition('grok'), capabilities: getAgentCapabilities('grok') };
+	const menu: NonNullable<AgentLaunchInput['grokEffortMenu']> = {
+		status: 'discovered',
+		model: 'selected-model',
+		wireValues: ['none', 'high'],
+	};
+
+	beforeEach(resetEffortRejections);
+	afterEach(resetEffortRejections);
+
+	it.each(['desktop', 'cli', 'cue'] as const)(
+		'%s validates one normalized effort before local or SSH prompt placement',
+		(surface) => {
+			for (const sshRemoteConfig of [undefined, { enabled: true, remoteId: 'remote-1' }]) {
+				const args = [
+					'--model= selected-model ',
+					'-m',
+					'selected-model',
+					'--effort= HiGh ',
+					'--reasoning-effort',
+					'high',
+				];
+				const original = [...args];
+				const result = buildAgentLaunchPlan(
+					input({
+						agent,
+						surface,
+						command: '/opt/grok',
+						args,
+						grokEffortMenu: menu,
+						sshRemoteConfig,
+						sshStore: storeWith(remote()),
+						sessionCustomEnvVars: { GROK_HOME: '/account/selected' },
+						prompt: '--effort=none is prompt text',
+					})
+				);
+				if (!result.ok) throw new Error(result.error);
+				expect(result.plan.args).toEqual([
+					'-m',
+					'selected-model',
+					'--reasoning-effort',
+					'HiGh',
+					...(sshRemoteConfig ? [] : ['-p', '--effort=none is prompt text']),
+				]);
+				expect(result.plan.command).toBe(sshRemoteConfig ? 'grok' : '/opt/grok');
+				expect(result.plan.target.kind).toBe(sshRemoteConfig ? 'remote' : 'local');
+				expect(result.plan.envVars).toEqual({ GROK_HOME: '/account/selected' });
+				expect(args).toEqual(original);
+			}
+		}
+	);
+
+	it.each([
+		['missing', undefined],
+		['unavailable', { ...menu, status: 'unavailable' as const }],
+		['configured fallback', { ...menu, status: 'configured-fallback' as const }],
+		['stale model', { ...menu, model: 'previous-model' }],
+		['different model casing', { ...menu, model: 'SELECTED-MODEL' }],
+	] as const)(
+		'preserves explicit high but refuses none with a %s menu',
+		(_label, grokEffortMenu) => {
+			for (const effort of ['high', 'none']) {
+				const result = buildAgentLaunchPlan(
+					input({ agent, grokEffortMenu, args: ['-m', 'selected-model', '--effort', effort] })
+				);
+				if (effort === 'high') {
+					if (!result.ok) throw new Error(result.error);
+					expect(result.plan.args).toEqual([
+						'-m',
+						'selected-model',
+						'--reasoning-effort',
+						'high',
+						'-p',
+						'fix the bug',
+					]);
+				} else {
+					expect(result).toMatchObject({
+						ok: false,
+						reason: 'grok-model-effort-refused',
+						error: expect.stringContaining('requires verified support'),
+					});
+					expect(result).not.toHaveProperty('plan');
+				}
+			}
+		}
+	);
+
+	it.each(['none', 'high'])('accepts advertised %s without adding a fallback effort', (effort) => {
+		const result = buildAgentLaunchPlan(
+			input({ agent, grokEffortMenu: menu, args: ['--model=selected-model', `--effort=${effort}`] })
+		);
+		if (!result.ok) throw new Error(result.error);
+		expect(result.plan.args).toEqual([
+			'-m',
+			'selected-model',
+			'--reasoning-effort',
+			effort,
+			'-p',
+			'fix the bug',
+		]);
+	});
+
+	it.each([
+		[['--effort=none'], menu, 'requires verified support'],
+		[['-m', 'selected-model', '--effort=medium'], menu, 'not advertised'],
+		[
+			['-m', 'selected-model', '--effort=none'],
+			{ ...menu, wireValues: ['high'] as const },
+			'not advertised',
+		],
+		[['-m', 'selected-model', '--effort=high'], { ...menu, wireValues: [] }, 'not advertised'],
+		[
+			['-m', 'selected-model', '--model=other-model', '--effort=high'],
+			menu,
+			'Conflicting Grok model',
+		],
+		[['--effort=high', '--reasoning-effort=low'], undefined, 'Conflicting Grok effort'],
+		[['--effort', '  '], undefined, 'nonempty value'],
+		[['--model='], undefined, 'nonempty value'],
+		[['--reasoning-effort'], undefined, 'nonempty value'],
+		[['-mselected-model'], undefined, 'Use -m <model>'],
+		[['--', '--effort=none'], undefined, 'cannot end options'],
+	] as const)(
+		'refuses unsafe composed selectors %j before creating a plan',
+		(args, grokEffortMenu, message) => {
+			const result = buildAgentLaunchPlan(input({ agent, args: [...args], grokEffortMenu }));
+			expect(result).toMatchObject({
+				ok: false,
+				reason: 'grok-model-effort-refused',
+				error: expect.stringContaining(message),
+			});
+			expect(result).not.toHaveProperty('plan');
+		}
+	);
+
+	it('retains native defaults when no effort was selected', () => {
+		const result = buildAgentLaunchPlan(
+			input({ agent, args: ['--model=selected-model'], grokEffortMenu: menu })
+		);
+		if (!result.ok) throw new Error(result.error);
+		expect(result.plan.args).toEqual(['-m', 'selected-model', '-p', 'fix the bug']);
+	});
+
+	it('refuses a remembered uppercase rejection even when the selected model advertises it', () => {
+		noteEffortRejection('grok', { value: 'HIGH', model: 'previous-model', supported: ['low'] });
+		const result = buildAgentLaunchPlan(
+			input({ agent, grokEffortMenu: menu, args: ['-m', 'selected-model', '--effort=high'] })
+		);
+		expect(result).toMatchObject({
+			ok: false,
+			reason: 'grok-model-effort-refused',
+			error: 'Grok CLI rejected effort "HIGH" for previous-model. It accepts low.',
+		});
+		expect(result).not.toHaveProperty('plan');
+	});
+
+	it('validates effort against the final managed model pin before environment delivery', () => {
+		const result = buildAgentLaunchPlan(
+			input({
+				agent,
+				args: ['--effort=none'],
+				grokEffortMenu: { ...menu, wireValues: ['high'] },
+				managed: {
+					route: {
+						providerId: 'grok',
+						model: 'selected-model',
+						baseUrl: null,
+						accountDir: null,
+						login: 'provider-login',
+						permissionMode: null,
+					},
+				},
+			})
+		);
+		expect(result).toMatchObject({
+			ok: false,
+			reason: 'grok-model-effort-refused',
+			error: expect.stringContaining('not advertised'),
+		});
+		expect(result).not.toHaveProperty('plan');
+	});
+
+	it.each(['--model=selected-model', '-m=selected-model'])(
+		'does not add a second managed model pin beside %s',
+		(modelArg) => {
+			const modelArgs = vi.fn(agent.modelArgs);
+			const result = buildAgentLaunchPlan(
+				input({
+					agent: { ...agent, modelArgs },
+					args: [modelArg, '--effort=none'],
+					grokEffortMenu: menu,
+					managed: {
+						route: {
+							providerId: 'grok',
+							model: 'selected-model',
+							baseUrl: null,
+							accountDir: null,
+							login: 'provider-login',
+							permissionMode: null,
+						},
+					},
+				})
+			);
+			expect(modelArgs).not.toHaveBeenCalled();
+			// Model/effort validation succeeds; Grok's managed env route is still unsupported.
+			expect(result).toMatchObject({
+				ok: false,
+				reason: 'managed-route-refused',
+				error: expect.stringContaining('no variable for it'),
+			});
+			expect(result).not.toHaveProperty('plan');
+		}
+	);
+
+	it('keeps another provider argv unchanged despite Grok menus and rejection memory', () => {
+		noteEffortRejection('grok', { value: 'none', supported: ['high'] });
+		const args = ['exec', '--model=codex-model', '--effort=none'];
+		const result = buildAgentLaunchPlan(input({ args, grokEffortMenu: menu }));
+		if (!result.ok) throw new Error(result.error);
+		expect(result.plan.args).toEqual([...args, '--', 'fix the bug']);
 	});
 });
 
