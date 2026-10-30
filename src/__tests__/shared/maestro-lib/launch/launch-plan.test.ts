@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as path from 'node:path';
 import {
 	buildAgentLaunchPlan,
 	isManagedLaunchRefusal,
@@ -11,7 +12,10 @@ import {
 	type SshRemoteExpectation,
 } from '../../../../shared/maestro-lib/launch/ssh-remote-resolver';
 import { getAgentDefinition } from '../../../../shared/maestro-lib/providers/definitions';
-import { getAgentCapabilities } from '../../../../shared/maestro-lib/providers/capabilities';
+import {
+	getAgentCapabilities,
+	GROK_DIRECTORY_GRANT_SUPPORT,
+} from '../../../../shared/maestro-lib/providers/capabilities';
 import type { SshRemoteConfig } from '../../../../shared/types';
 import { noteEffortRejection, resetEffortRejections } from '../../../../shared/effortRejection';
 import type { ManagedRouteCeiling } from '../../../../shared/maestro-lib/launch/env';
@@ -238,6 +242,277 @@ describe('buildAgentLaunchPlan', () => {
 		expect(batch.plan.envVars).toEqual({ A: 'default', B: 'batch' });
 		expect(readOnly.plan.envVars).toEqual({ A: 'read-only' });
 		expect(plain.plan.envVars).toEqual({ A: 'default' });
+	});
+});
+
+describe('Grok directory-grant planning (native filesystem qualification remains phase 11)', () => {
+	const agent = { ...getAgentDefinition('grok'), capabilities: getAgentCapabilities('grok') };
+	const unsupported =
+		'Grok CLI additional-directory read and write grants have no qualified native mechanism. Remove the grants to run with the selected working directory.';
+	const readonly = "Grok CLI writable directory grants exceed this launch's read-only mode.";
+
+	describe.each([
+		{ host: 'local', resumed: false },
+		{ host: 'local', resumed: true },
+		{ host: 'remote', resumed: false },
+		{ host: 'remote', resumed: true },
+	])('$host, resumed=$resumed', ({ host, resumed }) => {
+		const isRemote = host === 'remote';
+		const cwd = isRemote ? '/selected/work tree/工作' : path.resolve('fixture work tree', '工作');
+		const root = isRemote ? '~/other root/资料' : path.resolve('fixture other root', '资料');
+		const account = isRemote ? '/accounts/selected' : path.resolve('fixture selected account');
+		const destination = isRemote ? '/remote/tmp/prompt.json' : path.resolve('fixture prompt.json');
+		const args = [...agent.workingDirArgs!(cwd), ...(resumed ? agent.resumeArgs!('turn-id') : [])];
+		const selection: Partial<AgentLaunchInput> = {
+			agent,
+			args,
+			cwd,
+			command: path.resolve('fixture grok'),
+			remoteCommand: '/remote/bin/custom grok',
+			isResuming: resumed,
+			prompt: `private prompt mentioning ${root} does not grant access`,
+			sessionCustomEnvVars: { GROK_HOME: account },
+			sshRemoteConfig: isRemote ? { enabled: true, remoteId: 'remote-1' } : undefined,
+			sshStore: storeWith(remote()),
+			promptFileDestination: {
+				path: destination,
+				owner: isRemote ? 'remote' : 'local',
+				...(isRemote ? { sshRemoteId: 'remote-1' } : {}),
+			},
+		};
+
+		it.each([
+			['absent', undefined],
+			['empty', []],
+			['blank', [{ path: ' \t ', read: true, write: true }]],
+			['inert', [{ path: root, read: false, write: false }]],
+			[
+				'last duplicate disabled',
+				[
+					{ path: root, read: true, write: true },
+					{ path: ` ${root} `, read: false, write: false },
+				],
+			],
+		] satisfies [string, AgentLaunchInput['additionalDirectories']][])(
+			'preserves selected host/cwd/account/resume without a grant for %s rows',
+			(_label, additionalDirectories) => {
+				const original = structuredClone(additionalDirectories);
+				const result = buildAgentLaunchPlan(input({ ...selection, additionalDirectories }));
+				if (!result.ok) throw new Error(result.error);
+				expect(result.plan.args).toEqual([...args, '--prompt-file', destination]);
+				expect(result.plan.cwd).toBe(cwd);
+				expect(result.plan.command).toBe(isRemote ? selection.remoteCommand : selection.command);
+				expect(result.plan.target).toEqual(
+					isRemote ? { kind: 'remote', remote: remote() } : { kind: 'local' }
+				);
+				expect(result.plan.envVars).toEqual({ GROK_HOME: account });
+				if (isRemote) expect(result.plan.env).toBeUndefined();
+				else expect(result.plan.env?.GROK_HOME).toBe(account);
+				expect(result.plan.permission).toEqual({ requested: 'standard', ceiling: null });
+				expect(result.plan.prompt).toMatchObject({
+					via: 'file',
+					artifact: selection.promptFileDestination,
+				});
+				expect(result.plan.stdin).toBeUndefined();
+				expect(additionalDirectories).toEqual(original);
+			}
+		);
+
+		it.each([
+			['read only', [{ path: root, read: true, write: false }]],
+			['write only', [{ path: root, read: false, write: true }]],
+			['read and write', [{ path: root, read: true, write: true }]],
+			['cwd is not a grant exception', [{ path: cwd, read: true, write: false }]],
+			[
+				'independent read/write roots',
+				[
+					{ path: root, read: true, write: false },
+					{
+						path: isRemote ? path.posix.join(root, 'output') : path.join(root, 'output'),
+						read: false,
+						write: true,
+					},
+				],
+			],
+			[
+				'last duplicate enabled',
+				[
+					{ path: root, read: false, write: false },
+					{ path: ` ${root} `, read: true, write: false },
+				],
+			],
+		] satisfies [string, AgentLaunchInput['additionalDirectories']][])(
+			'refuses %s before prompt delivery without exposing selected paths or content',
+			(_label, additionalDirectories) => {
+				const original = structuredClone(additionalDirectories);
+				const result = buildAgentLaunchPlan(
+					input({ ...selection, additionalDirectories, promptFileDestination: undefined })
+				);
+				expect(result).toEqual({
+					ok: false,
+					reason: 'grok-directory-grants-refused',
+					error: unsupported,
+				});
+				expect(additionalDirectories).toEqual(original);
+				for (const privateText of [root, cwd, account, selection.prompt!]) {
+					expect(JSON.stringify(result)).not.toContain(privateText);
+				}
+			}
+		);
+
+		it.each(['readOnlyMode', 'permissionMode', 'managed'] as const)(
+			'intersects writes with the %s readonly ceiling without treating reads as writes',
+			(source) => {
+				const mode: Partial<AgentLaunchInput> =
+					source === 'readOnlyMode' ? { readOnlyMode: true } : { permissionMode: 'readonly' };
+				if (source === 'managed') {
+					mode.managed = {
+						route: {
+							providerId: 'grok',
+							model: null,
+							baseUrl: null,
+							accountDir: null,
+							login: 'provider-login',
+							permissionMode: 'readonly',
+						},
+					};
+				}
+				for (const write of [false, true]) {
+					const result = buildAgentLaunchPlan(
+						input({
+							...selection,
+							...mode,
+							args: [...args, ...agent.readOnlyArgs!],
+							additionalDirectories: [{ path: root, read: !write, write }],
+						})
+					);
+					expect(result).toEqual({
+						ok: false,
+						reason: 'grok-directory-grants-refused',
+						error: write ? readonly : unsupported,
+					});
+				}
+				// Last-row semantics must remove an earlier write rather than falsely
+				// classify the remaining read as a writable-ceiling violation.
+				const downgraded = buildAgentLaunchPlan(
+					input({
+						...selection,
+						...mode,
+						args: [...args, ...agent.readOnlyArgs!],
+						additionalDirectories: [
+							{ path: root, read: false, write: true },
+							{ path: ` ${root} `, read: true, write: false },
+						],
+					})
+				);
+				expect(downgraded).toEqual({
+					ok: false,
+					reason: 'grok-directory-grants-refused',
+					error: unsupported,
+				});
+				const upgraded = buildAgentLaunchPlan(
+					input({
+						...selection,
+						...mode,
+						args: [...args, ...agent.readOnlyArgs!],
+						additionalDirectories: [
+							{ path: root, read: true, write: false },
+							{ path: ` ${root} `, read: false, write: true },
+						],
+					})
+				);
+				expect(upgraded).toEqual({
+					ok: false,
+					reason: 'grok-directory-grants-refused',
+					error: readonly,
+				});
+			}
+		);
+
+		it('preserves the managed readonly refusal before conflicting custom root grants', () => {
+			const result = buildAgentLaunchPlan(
+				input({
+					...selection,
+					permissionMode: 'full',
+					args: [...args, '--add-dir', root],
+					additionalDirectories: [{ path: root, read: true, write: true }],
+					managed: {
+						route: {
+							providerId: 'grok',
+							model: null,
+							baseUrl: null,
+							accountDir: null,
+							login: 'provider-login',
+							permissionMode: 'readonly',
+						},
+					},
+				})
+			);
+			expect(result).toEqual({
+				ok: false,
+				reason: 'managed-route-refused',
+				error:
+					'The launch asks for more than the policy allows - permission mode "full" asks for more than the policy\'s ceiling, which allows at most "readonly" for grok',
+			});
+		});
+
+		it.each([['--add-dir', root], [`--add-dir=${root}`]])(
+			'refuses the unqualified custom grant spelling %j even without typed rows',
+			(...customArgs) => {
+				const result = buildAgentLaunchPlan(
+					input({ ...selection, args: [...args, ...customArgs] })
+				);
+				expect(result).toEqual({
+					ok: false,
+					reason: 'grok-directory-grants-refused',
+					error: 'Grok CLI has no qualified --add-dir argument for additional-directory grants.',
+				});
+			}
+		);
+	});
+
+	it.each([undefined, '0.2.93', '1.0.5', '1.0.70', '999.0.0-unqualified'])(
+		'a reported version %s cannot promote unqualified directory support',
+		(version) => {
+			const discoveredAgent = {
+				...agent,
+				snapshot: { status: 'ok' as const, version, lastProbedAt: 0 },
+			};
+			expect(GROK_DIRECTORY_GRANT_SUPPORT.supportedVersionRange).toBeNull();
+			expect(discoveredAgent.capabilities.supportsAdditionalDirectories).toBe(false);
+			expect(discoveredAgent.additionalDirArgs).toBeUndefined();
+			const result = buildAgentLaunchPlan(
+				input({
+					agent: discoveredAgent,
+					args: [],
+					additionalDirectories: [{ path: path.resolve('version grant'), read: true, write: true }],
+				})
+			);
+			expect(result).toEqual({
+				ok: false,
+				reason: 'grok-directory-grants-refused',
+				error: unsupported,
+			});
+		}
+	);
+
+	it.each([
+		['--allow', 'Read(*)'],
+		['--deny', 'Write(*)'],
+		['--sandbox', 'workspace-write'],
+	])('does not mistake the %s tool/sandbox rule for an extra-root mechanism', (...args) => {
+		const result = buildAgentLaunchPlan(
+			input({
+				agent,
+				args,
+				additionalDirectories: [{ path: path.resolve('rule grant'), read: true, write: false }],
+			})
+		);
+		expect(result).toEqual({
+			ok: false,
+			reason: 'grok-directory-grants-refused',
+			error: unsupported,
+		});
 	});
 });
 

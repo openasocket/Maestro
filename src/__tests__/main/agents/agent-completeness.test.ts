@@ -27,6 +27,7 @@ import { initializeOutputParsers, getOutputParser, getErrorPatterns } from '../.
 import { getSessionStorage, clearStorageRegistry } from '../../../main/agents/session-storage';
 import { initializeSessionStorages } from '../../../main/storage';
 import { AGENT_IDS } from '../../../shared/agentIds';
+import { GROK_DIRECTORY_GRANT_SUPPORT } from '../../../shared/maestro-lib/providers/capabilities';
 import {
 	AGENT_AUTOSELECT_ORDER,
 	AGENT_PICKER_META,
@@ -169,6 +170,21 @@ describe('Agent Completeness', () => {
 				});
 			});
 		}
+	});
+
+	it('keeps unqualified Grok directory-grant evidence separate from public availability', () => {
+		// Pinned-source ACP resume rejects roots; CLI read/write roots have no
+		// qualified version. Neither investigation result authorizes native grants.
+		expect(GROK_DIRECTORY_GRANT_SUPPORT).toEqual({
+			cliReadRoots: 'unverified',
+			cliWritableRoots: 'unverified',
+			acpResumeRoots: 'unsupported',
+			supportedVersionRange: null,
+		});
+		const grok = AGENT_DEFINITIONS.find((def) => def.id === 'grok');
+		expect(grok).toBeDefined();
+		expect(grok?.additionalDirArgs).toBeUndefined();
+		expect(getAgentCapabilities('grok').supportsAdditionalDirectories).toBe(false);
 	});
 
 	describe('provider picker registration', () => {

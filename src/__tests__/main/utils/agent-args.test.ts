@@ -5,8 +5,10 @@
  */
 
 import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import path from 'node:path';
 import {
 	buildAgentArgs,
+	buildAdditionalDirArgs,
 	applyAgentConfigOverrides,
 	getContextWindowValue,
 	placeResumeSelectorLast,
@@ -1987,6 +1989,74 @@ describe('buildAgentArgs: additionalDirectories', () => {
 			'--resume',
 			'sess-1',
 		]);
+	});
+
+	describe('Grok: unqualified native grants (real definition)', () => {
+		const grok = makeAgent(getAgentDefinition('grok'));
+		const cwd = path.join('selected workspace', '作業');
+		const grantPath = path.join('separate root', '資料');
+
+		it.each([undefined, 'grok-resume-session'])(
+			'preserves cwd and resume %s without emitting absent or empty grants',
+			(agentSessionId) => {
+				const options = { baseArgs: [], prompt: 'inspect', cwd, agentSessionId };
+				const expected = [
+					'--cwd',
+					cwd,
+					'--always-approve',
+					'--output-format',
+					'streaming-json',
+					...(agentSessionId ? ['--resume', agentSessionId] : []),
+				];
+				expect(buildAgentArgs(grok, options)).toEqual(expected);
+				expect(buildAgentArgs(grok, { ...options, additionalDirectories: [] })).toEqual(expected);
+				expect(buildAdditionalDirArgs(grok, undefined)).toEqual([]);
+				expect(buildAdditionalDirArgs(grok, [])).toEqual([]);
+			}
+		);
+
+		it.each([
+			{ label: 'read', dirs: [{ path: grantPath, read: true, write: false }] },
+			{ label: 'write', dirs: [{ path: grantPath, read: false, write: true }] },
+			{ label: 'read/write', dirs: [{ path: grantPath, read: true, write: true }] },
+			{ label: 'separate read/write roots', dirs: [RO, WO] },
+			{ label: 'duplicate roots', dirs: [RW, RW] },
+			{ label: 'inert', dirs: [INERT] },
+			{ label: 'last duplicate disabled', dirs: [RW, { ...RW, read: false, write: false }] },
+		])('does not invent native flags for $label requests', ({ dirs }) => {
+			// This builder cannot authorize Grok grants: the launch planner owns
+			// their refusal. Matching argv is not proof of filesystem enforcement.
+			for (const readOnlyMode of [false, true]) {
+				const options = {
+					baseArgs: [],
+					prompt: 'inspect',
+					cwd,
+					agentSessionId: 'grok-resume-session',
+					readOnlyMode,
+				};
+				const args = buildAgentArgs(grok, { ...options, additionalDirectories: dirs });
+				expect(buildAdditionalDirArgs(grok, dirs)).toEqual([]);
+				expect(args).toEqual(buildAgentArgs(grok, options));
+				expect(args.slice(0, 2)).toEqual(['--cwd', cwd]);
+				expect(args.slice(-2)).toEqual(['--resume', 'grok-resume-session']);
+				expect(args).not.toContain('--add-dir');
+				for (const directory of dirs) expect(args).not.toContain(directory.path);
+				if (readOnlyMode) {
+					expect(args).toEqual([
+						'--cwd',
+						cwd,
+						'--output-format',
+						'streaming-json',
+						'--permission-mode',
+						'plan',
+						'--deny',
+						'Bash(*)',
+						'--resume',
+						'grok-resume-session',
+					]);
+				}
+			}
+		});
 	});
 
 	it('Codex: --add-dir lands on `exec`, not on the `resume` subcommand', () => {
