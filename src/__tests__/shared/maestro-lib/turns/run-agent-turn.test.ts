@@ -565,10 +565,123 @@ describe('runAgentTurn: Grok launch refusals', () => {
 					expect.objectContaining({ args, sshRemoteConfig: launch.sshRemoteConfig })
 				);
 				expect(launch.args).toEqual(args);
-				expect(getSshRemotes).toHaveBeenCalledTimes(target === 'resolved SSH' ? 1 : 0);
+				// A remote prompt destination and the final plan each resolve the selected host.
+				expect(getSshRemotes).toHaveBeenCalledTimes(target === 'resolved SSH' ? 2 : 0);
 				expect(wrapSpawnWithSsh).not.toHaveBeenCalled();
 			}
 		);
+	});
+
+	describe.each(['local', 'SSH'] as const)('%s grants', (host) => {
+		describe.each([null, 'selected-native-session'])('resume %s', (resume) => {
+			it.each([
+				{ access: 'read', readOnly: false },
+				{ access: 'write', readOnly: false },
+				{ access: 'mixed', readOnly: false },
+				{ access: 'read', readOnly: true },
+				{ access: 'write', readOnly: true },
+				{ access: 'duplicate read', readOnly: true },
+				{ access: 'duplicate write', readOnly: true },
+			])(
+				'refuses $access with readonly=$readOnly before any artifact or retry',
+				async ({ access, readOnly }) => {
+					const root = '/PRIVATE grants/雪';
+					const privateText = 'PRIVATE turn bytes 雪';
+					const account =
+						host === 'SSH'
+							? '/remote/selected-account'
+							: path.join(scratch.dir, 'selected-account');
+					const cwd = host === 'SSH' ? '/remote/selected-project' : scratch.dir;
+					const additionalDirectories = [
+						{ path: root, read: access !== 'write', write: access !== 'read' },
+						...(access === 'mixed'
+							? [{ path: root + '/independent-read', read: true, write: false }]
+							: []),
+						...(access.startsWith('duplicate')
+							? [
+									{
+										path: root,
+										read: access === 'duplicate read',
+										write: access === 'duplicate write',
+									},
+								]
+							: []),
+					];
+					const captured = additionalDirectories.map((row) => ({ ...row }));
+					const sshRemoteConfig =
+						host === 'SSH' ? { enabled: true, remoteId: remote.id } : undefined;
+					const assembled = assembleTurn(
+						makeAgent({
+							toolType: 'grok',
+							cwd,
+							additionalDirectories,
+							customPath: '/selected/bin/grok',
+							customEnvVars: { GROK_HOME: account },
+							sessionSshRemoteConfig: sshRemoteConfig,
+						}),
+						makeTab({ agentSessionId: resume, readOnlyMode: readOnly }),
+						{ text: privateText },
+						makeContext('grok', { command: '/selected/bin/grok' })
+					);
+					if (!assembled.ok) throw new Error(assembled.message);
+					const turn = assembled.turn;
+					// An edit after assembly cannot drop the already selected grant refusal.
+					additionalDirectories.forEach((row) => {
+						row.read = false;
+						row.write = false;
+					});
+					additionalDirectories.length = 0;
+					// Synthetic file placement exercises ordering, not a Grok system-file capability.
+					turn.systemPrompt = privateText;
+					turn.systemPromptDelivery = { via: 'file' };
+					const write = vi.spyOn(turnArgs, 'writeSystemPromptFile');
+					const cleanup = vi.spyOn(pipeSpawn, 'removeTempFiles');
+					const getSshRemotes = vi.fn(() => [remote]);
+					const wrap = vi.fn<NonNullable<RunAgentTurnDeps['wrapSpawnWithSsh']>>();
+					const logs = (['debug', 'info', 'warn', 'error'] as const).map((level) =>
+						vi.spyOn(logger, level).mockImplementation(() => {})
+					);
+					const started = await runAgentTurn(
+						turn,
+						optionsFor({
+							sshStore: { getSshRemotes },
+							deps: { wrapSpawnWithSsh: wrap, env: {}, tempDir: scratch.dir },
+						})
+					);
+					const message =
+						readOnly && (access === 'write' || access === 'duplicate write')
+							? "Grok CLI writable directory grants exceed this launch's read-only mode."
+							: 'Grok CLI additional-directory read and write grants have no qualified native mechanism. Remove the grants to run with the selected working directory.';
+					expect(started).toEqual({ ok: false, reason: 'grok-directory-grants-refused', message });
+					expect(launchPlanner.buildAgentLaunchPlan).toHaveBeenCalledOnce();
+					expect(launchPlanner.buildAgentLaunchPlan).toHaveBeenCalledWith(
+						expect.objectContaining({
+							agent: turn.provider,
+							additionalDirectories: captured,
+							cwd,
+							command: '/selected/bin/grok',
+							remoteCommand: '/selected/bin/grok',
+							sessionCustomEnvVars: { GROK_HOME: account },
+							sshRemoteConfig,
+							isResuming: !!resume,
+							readOnlyMode: readOnly,
+						})
+					);
+					if (resume) expect(turn.launch.args).toContain(resume);
+					expect(getSshRemotes).toHaveBeenCalledTimes(host === 'SSH' ? 2 : 0);
+					expect(write).not.toHaveBeenCalled();
+					expect(cleanup).not.toHaveBeenCalled();
+					expect(wrap).not.toHaveBeenCalled();
+					expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+					expect(remoteSignals).toEqual([]);
+					const disclosure = JSON.stringify({ started, logs: logs.map((log) => log.mock.calls) });
+					for (const secret of [root, privateText, turn.launch.prompt!, account]) {
+						expect(disclosure).not.toContain(secret);
+						expect(disclosure).not.toContain(JSON.stringify(secret).slice(1, -1));
+					}
+				}
+			);
+		});
 	});
 
 	it.each(['missing', 'disabled'] as const)(
@@ -581,6 +694,7 @@ describe('runAgentTurn: Grok launch refusals', () => {
 					launch: {
 						...turn.launch,
 						args: ['--reasoning-effort', 'none'],
+						additionalDirectories: [{ path: '/private/grant', read: true, write: true }],
 						sshRemoteConfig: { enabled: true, remoteId: remote.id },
 					},
 				},
@@ -608,6 +722,7 @@ describe('runAgentTurn: Grok launch refusals', () => {
 				launch: {
 					...turn.launch,
 					args: ['--reasoning-effort', 'none'],
+					additionalDirectories: [{ path: '/private/grant', read: true, write: true }],
 					managed: {
 						route: {
 							providerId: 'codex',
@@ -632,16 +747,17 @@ describe('runAgentTurn: Grok launch refusals', () => {
 	});
 
 	it('retains the enrolled-host gate before planning an unmanaged Grok turn', async () => {
+		turn.launch.additionalDirectories = [{ path: '/private/grant', read: true, write: true }];
 		const started = await runAgentTurn(turn, optionsFor({ standing: 'enrolled' }));
 
 		expect(started).toMatchObject({ ok: false, reason: 'managed-unavailable' });
 		expect(launchPlanner.buildAgentLaunchPlan).not.toHaveBeenCalled();
 	});
 
-	it('cleans an already owned prompt artifact when the Grok launch plan refuses', async () => {
+	it('leaves an unowned file untouched when Grok preflight refuses before materialization', async () => {
 		const file = outFile('owned-system-prompt');
 		fs.writeFileSync(file, 'Synthetic system prompt');
-		// Inject ownership at the existing materializer seam, without claiming native Grok file support.
+		// Ownership would transfer only if the materializer ran; preflight must skip it.
 		const write = vi.spyOn(turnArgs, 'writeSystemPromptFile').mockImplementation(async (input) => ({
 			args: [...input.args, '--append-system-prompt-file', file],
 			prompt: input.prompt,
@@ -664,11 +780,10 @@ describe('runAgentTurn: Grok launch refusals', () => {
 			reason: 'grok-model-effort-refused',
 			message: 'Grok effort "none" requires verified support for the selected model.',
 		});
-		expect(write).toHaveBeenCalledOnce();
-		expect(cleanup).toHaveBeenCalledExactlyOnceWith([file]);
+		expect(write).not.toHaveBeenCalled();
+		expect(cleanup).not.toHaveBeenCalled();
 		expect(launchPlanner.buildAgentLaunchPlan).toHaveBeenCalledOnce();
-		await waitUntil(() => !fs.existsSync(file));
-		expect(fs.existsSync(file)).toBe(false);
+		expect(fs.readFileSync(file, 'utf8')).toBe('Synthetic system prompt');
 	});
 });
 
@@ -696,12 +811,22 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 
 	describe.each(['local', 'SSH'] as const)('%s owner', (host) => {
 		it.each([
-			{ name: 'short fresh', text: 'Unicode 雪', resume: null },
-			{ name: 'long resumed', text: 'large 雪\n'.repeat(12_000), resume: 'grok-native-session' },
-			{ name: 'empty resumed', text: '', resume: 'grok-native-session' },
+			{ name: 'short fresh', text: 'Unicode 雪', resume: null, grants: 'empty' },
+			{
+				name: 'long resumed',
+				text: 'large 雪\n'.repeat(12_000),
+				resume: 'grok-native-session',
+				grants: 'off',
+			},
+			{
+				name: 'empty resumed',
+				text: '',
+				resume: 'grok-native-session',
+				grants: 'duplicate disabled',
+			},
 		])(
 			'delivers $name content once and retains the correct cleanup owner',
-			async ({ text, resume }) => {
+			async ({ text, resume, grants }) => {
 				const argvOut = outFile('file-argv');
 				const stdinOut = outFile('file-stdin');
 				const env = {
@@ -719,11 +844,22 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 					text: text || 'assembled placeholder',
 					env,
 					tab: { agentSessionId: resume },
-					agent: { customPath: '/opt/remote grok/bin/grok' },
+					agent: {
+						customPath: '/opt/remote grok/bin/grok',
+						additionalDirectories:
+							grants === 'empty'
+								? []
+								: [
+										...(grants === 'duplicate disabled'
+											? [{ path: '/private/root 雪', read: true, write: true }]
+											: []),
+										{ path: '/private/root 雪', read: false, write: false },
+										{ path: '  ', read: true, write: true },
+									],
+					},
 				});
 				// Exercise an explicitly empty final launch without changing assembleTurn's empty-message gate.
 				if (!text) turn.launch.prompt = '';
-				turn.launch.agent = fileAgent;
 				if (host === 'SSH') turn.launch.sshRemoteConfig = { enabled: true, remoteId: remote.id };
 				const destination =
 					host === 'SSH'
@@ -738,8 +874,10 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 					sshStdinScript: 'synthetic remote transfer',
 					sshRemoteUsed: remote,
 				}));
+				const plan = vi.spyOn(launchPlanner, 'buildAgentLaunchPlan');
+				const getSshRemotes = vi.fn(() => [remote]);
 				const run = await start(turn, {
-					sshStore: { getSshRemotes: () => [remote] },
+					sshStore: { getSshRemotes },
 					deps: { wrapSpawnWithSsh: wrap, env: { ...process.env, ...env } },
 				});
 				try {
@@ -751,6 +889,12 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 						content: [{ type: 'text', text: turn.launch.prompt }],
 					});
 					expect(runToCompletion.runTurn).toHaveBeenCalledOnce();
+					expect(plan).toHaveBeenCalledOnce();
+					expect(getSshRemotes).toHaveBeenCalledTimes(host === 'SSH' ? 1 : 0);
+					expect(plan.mock.calls[0][0].additionalDirectories).toEqual(
+						turn.launch.additionalDirectories
+					);
+					expect(turn.launch.args.join(' ')).not.toContain('/private/root');
 					if (host === 'local') {
 						expect(wrap).not.toHaveBeenCalled();
 						expect(spec).toMatchObject({
@@ -758,11 +902,7 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 							cwd: scratch.dir,
 							env: { GROK_HOME: env.GROK_HOME },
 						});
-						expect(argv).toEqual([
-							...turn.launch.args.slice(1),
-							'--prompt-json-file',
-							destination.path,
-						]);
+						expect(argv).toEqual([...turn.launch.args.slice(1), '--prompt-file', destination.path]);
 						expect(fs.readFileSync(stdinOut, 'utf8')).toBe('');
 						expect(fs.readFileSync(destination.path, 'utf8')).toBe(content);
 					} else {
@@ -773,7 +913,7 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 							prompt: undefined,
 							customEnvVars: { GROK_HOME: env.GROK_HOME },
 							promptArtifact: { ...destination, content },
-							args: [...turn.launch.args, '--prompt-json-file', destination.path],
+							args: [...turn.launch.args, '--prompt-file', destination.path],
 						});
 						expect(wrap.mock.calls[0][1]).toEqual(turn.launch.sshRemoteConfig);
 						expect(spec.promptArtifact).toBeUndefined();
@@ -804,6 +944,7 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 			'conflicting source',
 			'wrong owner',
 			'managed',
+			'realized conflict',
 			...(host === 'resolved SSH' ? ['remote preparation'] : []),
 		])('preserves %s diagnostics and cleans only owned preparation', async (failure) => {
 			const privateText = 'PRIVATE prompt "雪"\nnever disclose';
@@ -851,7 +992,17 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 				.spyOn(turnArgs, 'writeSystemPromptFile')
 				.mockImplementation(async (input) => {
 					fs.writeFileSync(owned, input.systemPrompt);
-					return { args: input.args, prompt: input.prompt, tempFile: owned, delivery: 'file' };
+					return {
+						args: [
+							...input.args,
+							...(failure === 'realized conflict'
+								? ['-p', privateText]
+								: ['--append-system-prompt-file', owned]),
+						],
+						prompt: input.prompt,
+						tempFile: owned,
+						delivery: 'file',
+					};
 				});
 			const cleanup = vi.spyOn(pipeSpawn, 'removeTempFiles');
 			const plan = vi.spyOn(launchPlanner, 'buildAgentLaunchPlan');
@@ -885,10 +1036,22 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 				reason: failure === 'managed' ? 'managed-denied' : 'prompt-delivery-refused',
 				message,
 			});
-			expect(plan).toHaveBeenCalledOnce();
-			expect(getSshRemotes).toHaveBeenCalledTimes(host === 'resolved SSH' ? 1 : 0);
+			const materialized = failure === 'remote preparation' || failure === 'realized conflict';
+			expect(plan).toHaveBeenCalledTimes(materialized ? 2 : 1);
+			expect(getSshRemotes).toHaveBeenCalledTimes(
+				host === 'resolved SSH' ? (materialized ? 2 : 1) : 0
+			);
+			if (materialized) {
+				expect(plan.mock.results[0].value.ok).toBe(true);
+				expect(plan.mock.calls[1][0].args).toEqual([
+					...turn.launch.args,
+					...(failure === 'realized conflict'
+						? ['-p', privateText]
+						: ['--append-system-prompt-file', owned]),
+				]);
+			}
 			if (failure !== 'remote preparation') {
-				expect(plan.mock.results[0].value).toEqual({
+				expect(plan.mock.results.at(-1)!.value).toEqual({
 					ok: false,
 					reason: failure === 'managed' ? 'managed-route-refused' : 'prompt-delivery-refused',
 					error: message,
@@ -905,9 +1068,14 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 			}
 			expect(wrap).toHaveBeenCalledTimes(failure === 'remote preparation' ? 1 : 0);
 			expect(runToCompletion.runTurn).not.toHaveBeenCalled();
-			expect(write).toHaveBeenCalledOnce();
-			expect(cleanup).toHaveBeenCalledExactlyOnceWith([owned]);
-			await waitUntil(() => !fs.existsSync(owned));
+			if (materialized) {
+				expect(write).toHaveBeenCalledOnce();
+				expect(cleanup).toHaveBeenCalledExactlyOnceWith([owned]);
+				await waitUntil(() => !fs.existsSync(owned));
+			} else {
+				expect(write).not.toHaveBeenCalled();
+				expect(cleanup).not.toHaveBeenCalled();
+			}
 			expect(fs.existsSync(owned)).toBe(false);
 			expect(fs.readFileSync(untouched, 'utf8')).toBe('keep unowned bytes');
 			if (host === 'local') expect(fs.existsSync(destination.path)).toBe(false);
