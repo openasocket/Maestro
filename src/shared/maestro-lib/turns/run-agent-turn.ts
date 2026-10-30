@@ -12,8 +12,8 @@
  *
  * - An SSH remote that cannot be resolved (decision D1c). The turn never runs on this machine
  *   in its place.
- * - Images (PA12). Placing them writes temp files per provider, which waits for CH-8; a silent
- *   drop would send a prompt about a picture the agent never sees.
+ * - Images without an explicit file route and admitted, resolved content blocks (PA12).
+ *   Missing bytes or support refuse in the planner, never falling back to tool-read files.
  * - Standard permission mode on a Claude Code API turn (PA11). The permission relay lives in
  *   the desktop; without it Claude aborts on the first tool call.
  *
@@ -50,7 +50,8 @@ import {
 	isManagedLaunchRefusal,
 	type ManagedLaunchInput,
 } from '../launch/launch-plan';
-import type { SshRemoteSettingsStore } from '../launch/ssh-remote-resolver';
+import { resolveSshLaunchTarget, type SshRemoteSettingsStore } from '../launch/ssh-remote-resolver';
+import { newRemotePromptFileDestination } from '../launch/ssh-command-builder';
 import {
 	sshUnresolvedRemoteMessage,
 	wrapSpawnWithSsh,
@@ -90,7 +91,7 @@ export type RunAgentTurnRefusal =
 	| 'grok-model-effort-refused'
 	/** The prompt cannot be delivered as requested. Nothing was started. */
 	| 'prompt-delivery-refused'
-	/** The turn carries images (CH-8). */
+	/** The turn carries images without an explicit file route (CH-8). */
 	| 'images-unsupported'
 	/** Claude Code in Standard permission mode, with no relay to answer its prompts (PA11). */
 	| 'standard-mode-unsupported'
@@ -352,7 +353,8 @@ export async function runAgentTurn(
 			'This installation is enrolled and the turn carries no managed dispatch, so it was not started.'
 		);
 	}
-	if (launch.hasImages) {
+	const hasImages = launch.hasImages || !!turn.entry.images?.length;
+	if (hasImages && !launch.agent?.promptFile) {
 		return refuse(
 			'images-unsupported',
 			'Images cannot be sent from here yet. Send the message without them, or use the desktop.'
@@ -429,9 +431,23 @@ export async function runAgentTurn(
 		return refuse(reason, message);
 	};
 
+	// Name remote preparation on the selected host. The planner retains precise
+	// SSH refusals when resolution fails and validates any supplied destination.
+	let promptFileDestination = launch.promptFileDestination;
+	if (launch.agent?.promptFile && sshEnabled && !promptFileDestination) {
+		const target = resolveSshLaunchTarget(options.sshStore, sshConfig);
+		if (target.kind === 'remote') {
+			promptFileDestination = newRemotePromptFileDestination(
+				target.remote.id,
+				launch.agent.promptFile.format
+			);
+		}
+	}
 	const planned = buildAgentLaunchPlan({
 		...launch,
 		args,
+		hasImages,
+		promptFileDestination,
 		sshStore: options.sshStore,
 		...(options.managed?.launch ? { managed: options.managed.launch } : {}),
 	});
@@ -462,42 +478,51 @@ export async function runAgentTurn(
 				})
 			: null;
 		const wrap = deps.wrapSpawnWithSsh ?? wrapSpawnWithSsh;
-		const wrapped = await wrap(
-			{
-				command: remoteInteractive ? remoteInteractive.command : plan.command,
-				args: remoteInteractive ? [...remoteInteractive.prependArgs, ...plan.args] : plan.args,
-				cwd: launch.cwd,
-				prompt: launch.prompt,
-				customEnvVars: remoteInteractive
-					? { ...plan.envVars, ...remoteInteractive.env }
-					: plan.envVars,
-				agentBinaryName: remoteInteractive ? remoteInteractive.command : provider.binaryName,
-				promptArgs: provider.promptArgs,
-				noPromptSeparator: provider.noPromptSeparator,
-				querySource: launch.querySource,
-			},
-			sshConfig,
-			options.sshStore ?? { getSshRemotes: () => [] }
-		);
-		// The wrapper degrades to a local spawn when it cannot resolve the remote. Taking that
-		// would run the agent here against the remote's path.
-		if (!wrapped.sshRemoteUsed)
-			return abandon('ssh-unresolved', sshUnresolvedRemoteMessage(sshConfig));
-		// The script records the remote agent's pid, so Stop reaches it and not only the ssh client.
-		const recorded = recordRemoteAgent({
-			command: wrapped.command,
-			args: wrapped.args,
-			sshStdinScript: wrapped.sshStdinScript,
-			sessionId: options.sessionId,
-		});
-		remote = recorded.remote;
-		spec = {
-			command: wrapped.command,
-			args: wrapped.args,
-			cwd: wrapped.cwd,
-			env: { ...(deps.env ?? process.env) },
-			stdin: recorded.sshStdinScript,
-		};
+		const artifact = plan.prompt.via === 'file' ? plan.prompt.artifact : undefined;
+		try {
+			const wrapped = await wrap(
+				{
+					command: remoteInteractive ? remoteInteractive.command : plan.command,
+					args: remoteInteractive ? [...remoteInteractive.prependArgs, ...plan.args] : plan.args,
+					cwd: launch.cwd,
+					prompt: artifact ? undefined : launch.prompt,
+					...(artifact ? { promptArtifact: artifact } : {}),
+					customEnvVars: remoteInteractive
+						? { ...plan.envVars, ...remoteInteractive.env }
+						: plan.envVars,
+					agentBinaryName: remoteInteractive ? remoteInteractive.command : plan.command,
+					promptArgs: provider.promptArgs,
+					noPromptSeparator: provider.noPromptSeparator,
+					querySource: launch.querySource,
+				},
+				sshConfig,
+				options.sshStore ?? { getSshRemotes: () => [] }
+			);
+			// The wrapper degrades to a local spawn when it cannot resolve the remote. Taking that
+			// would run the agent here against the remote's path.
+			if (!wrapped.sshRemoteUsed)
+				return abandon('ssh-unresolved', sshUnresolvedRemoteMessage(sshConfig));
+			// The script records the remote agent's pid, so Stop reaches it and not only the ssh client.
+			const recorded = recordRemoteAgent({
+				command: wrapped.command,
+				args: wrapped.args,
+				sshStdinScript: wrapped.sshStdinScript,
+				sessionId: options.sessionId,
+				...(artifact ? { promptArtifactPath: artifact.path } : {}),
+			});
+			remote = recorded.remote;
+			spec = {
+				command: wrapped.command,
+				args: wrapped.args,
+				cwd: wrapped.cwd,
+				env: { ...(deps.env ?? process.env) },
+				stdin: recorded.sshStdinScript,
+			};
+		} catch (error) {
+			if (artifact)
+				return abandon('prompt-delivery-refused', 'Remote prompt preparation unavailable.');
+			throw error;
+		}
 	} else if (plan.env === undefined) {
 		return abandon('launch', 'The launch plan has no local environment');
 	} else {

@@ -19,6 +19,13 @@ import { STEERING_SOCKET_ENV_VAR } from '../../chatSteering';
 import type { ClaudeTokenMode } from '../../claudeTokenMode';
 import { logger } from '../host';
 import { getContextWindowValue } from '../launch/agent-args';
+import type { AgentLaunchInput } from '../launch/launch-plan';
+import {
+	resolvePromptDelivery,
+	selectPromptFileDestination,
+	type PromptDelivery,
+} from '../launch/prompt-delivery';
+import { newRemotePromptFileDestination } from '../launch/ssh-command-builder';
 import {
 	applyClaudeSpawnDecision,
 	buildRemoteInteractiveSpawn,
@@ -159,6 +166,10 @@ export interface PreparedGroupChatSpawn {
 	command: string;
 	args: string[];
 	prompt?: string;
+	/** Private final file plan; remote artifacts must never reach the local materializer. */
+	promptDelivery?: Extract<PromptDelivery, { via: 'file' }>;
+	/** Remote cleanup ownership, passed to the existing PID/signal owner. */
+	promptArtifactPath?: string;
 	customEnvVars?: Record<string, string>;
 	/** A read-only turn (moderator, synthesis, a read-only delegation). */
 	readOnlyMode: boolean;
@@ -180,7 +191,15 @@ export interface PreparedGroupChatSpawn {
  * run against the remote's directory.
  */
 export async function prepareGroupChatSpawn(
-	spawn: GroupChatSpawn,
+	spawn: GroupChatSpawn &
+		Pick<
+			AgentLaunchInput,
+			| 'remoteCommand'
+			| 'promptBlocks'
+			| 'embeddedImageSupport'
+			| 'hasImages'
+			| 'promptFileDestination'
+		>,
 	deps: GroupChatSpawnDeps
 ): Promise<PreparedGroupChatSpawn> {
 	const {
@@ -207,6 +226,47 @@ export async function prepareGroupChatSpawn(
 	let spawnEnvVars = customEnvVars;
 	let spawnSshStdinScript: string | undefined;
 	let spawnSshRemoteCommand: string | undefined;
+	let promptArtifactPath: string | undefined;
+	let fileDelivery: Extract<PromptDelivery, { via: 'file' }> | undefined;
+
+	// Ordered blocks must already include composed text and replace prompt.
+	// Resolve the exact composed input before asynchronous preparation. This only
+	// chooses private bytes and a fresh name; the admitted sink owns every write.
+	if (agent.promptFile || spawn.promptBlocks !== undefined) {
+		const remote = sshRemoteConfig?.enabled
+			? sshStore && getSshRemoteConfig(sshStore, { sessionSshConfig: sshRemoteConfig }).config
+			: undefined;
+		if (sshRemoteConfig?.enabled && !remote) {
+			throw new Error(sshUnresolvedRemoteMessage(sshRemoteConfig));
+		}
+		const destination =
+			spawn.promptFileDestination ??
+			(remote && agent.promptFile
+				? newRemotePromptFileDestination(remote.id, agent.promptFile.format)
+				: selectPromptFileDestination(agent, undefined));
+		const delivery = resolvePromptDelivery({
+			agent,
+			prompt,
+			args,
+			promptBlocks: spawn.promptBlocks,
+			embeddedImageSupport: spawn.embeddedImageSupport,
+			hasImages: spawn.hasImages,
+			promptFileDestination: destination,
+			sshRemote: !!remote,
+			sshRemoteId: remote?.id,
+			// Explicit files take precedence on every platform; Windows legacy
+			// delivery still comes from the host collaborator below.
+			isWindowsHost: false,
+		});
+		if (delivery.via === 'refused') throw new Error(delivery.error);
+		if (delivery.via === 'file') {
+			fileDelivery = delivery;
+			spawnArgs = [...args, ...delivery.args];
+			spawnPrompt = undefined;
+		}
+	}
+
+	const fileArgs = fileDelivery ? spawnArgs : undefined;
 
 	// Over SSH, warm the remote maestro-p probe BEFORE resolving so a remote TUI
 	// selection falls back to API instead of exiting 127 when maestro-p isn't
@@ -244,7 +304,7 @@ export async function prepareGroupChatSpawn(
 			decision: claudeDecision,
 			interactiveModeArgs: agent.interactiveModeArgs,
 			command: baseCommand,
-			args,
+			args: spawnArgs,
 			customEnvVars,
 			maxWaitSeconds: spawn.maxWaitSeconds,
 		});
@@ -291,22 +351,29 @@ export async function prepareGroupChatSpawn(
 				LOG_CONTEXT
 			);
 		}
+		const remoteArgs = fileArgs ?? args;
 		const sshWrapped = await wrapSpawnWithSsh(
 			{
 				command: baseCommand,
-				args: remoteInteractive ? [...remoteInteractive.prependArgs, ...args] : args,
+				args: remoteInteractive ? [...remoteInteractive.prependArgs, ...remoteArgs] : remoteArgs,
 				cwd,
-				prompt,
+				prompt: spawnPrompt,
+				...(fileDelivery ? { promptArtifact: fileDelivery.artifact } : {}),
 				customEnvVars: remoteInteractive
 					? { ...(customEnvVars ?? {}), ...remoteInteractive.env }
 					: customEnvVars,
 				promptArgs: agent.promptArgs,
 				noPromptSeparator: agent.noPromptSeparator,
-				agentBinaryName: remoteInteractive ? remoteInteractive.command : agent.binaryName,
+				agentBinaryName: remoteInteractive
+					? remoteInteractive.command
+					: (spawn.remoteCommand ?? agent.binaryName),
 			},
 			sshRemoteConfig,
 			sshStore
-		);
+		).catch((error: unknown) => {
+			if (fileDelivery) throw new Error('Remote prompt preparation unavailable.');
+			throw error;
+		});
 		// wrapSpawnWithSsh quietly hands back the unmodified local config when the
 		// remote cannot be resolved. Taking it would run this agent on the user's
 		// own machine against the REMOTE's cwd - the participant would either fail
@@ -322,6 +389,7 @@ export async function prepareGroupChatSpawn(
 		spawnEnvVars = sshWrapped.customEnvVars;
 		spawnSshStdinScript = sshWrapped.sshStdinScript;
 		spawnSshRemoteCommand = sshWrapped.sshRemoteCommand;
+		promptArtifactPath = sshWrapped.promptArtifactPath;
 		if (debugLabel) {
 			logger.debug(
 				`[GroupChat:Debug] SSH remote used for ${debugLabel}: ${sshWrapped.sshRemoteUsed.name}`,
@@ -351,6 +419,8 @@ export async function prepareGroupChatSpawn(
 		command: spawnCommand,
 		args: spawnArgs,
 		prompt: spawnPrompt,
+		...(fileDelivery ? { promptDelivery: fileDelivery } : {}),
+		...(promptArtifactPath !== undefined ? { promptArtifactPath } : {}),
 		customEnvVars: spawnEnvVars,
 		readOnlyMode,
 		contextWindow: getContextWindowValue(agent, agentConfigValues ?? {}),
@@ -358,8 +428,8 @@ export async function prepareGroupChatSpawn(
 		noPromptSeparator: agent.noPromptSeparator,
 		shell: winConfig.shell,
 		runInShell: winConfig.runInShell,
-		sendPromptViaStdin: winConfig.sendPromptViaStdin,
-		sendPromptViaStdinRaw: winConfig.sendPromptViaStdinRaw,
+		sendPromptViaStdin: fileDelivery ? false : winConfig.sendPromptViaStdin,
+		sendPromptViaStdinRaw: fileDelivery ? false : winConfig.sendPromptViaStdinRaw,
 		sshStdinScript: spawnSshStdinScript,
 		sshRemoteCommand: spawnSshRemoteCommand,
 	};

@@ -24,7 +24,7 @@ import {
 	type SshRemoteSettingsStore,
 } from './ssh-remote-resolver';
 import { buildSshCommand, buildSshCommandWithStdin } from './ssh-command-builder';
-import { buildPromptArgv } from './prompt-delivery';
+import { buildPromptArgv, type PromptDelivery } from './prompt-delivery';
 import { logger } from '../host';
 import { DEFAULT_QUERY_SOURCE, QUERY_SOURCE_ENV_VAR, type QuerySource } from '../../querySource';
 import { stripBlankEnvVars } from '../../agentEnvironment';
@@ -80,6 +80,8 @@ export interface SshSpawnWrapConfig {
 	cwd: string;
 	/** The prompt to send (if any) */
 	prompt?: string;
+	/** Final private file source; args already contain its canonical file arguments. */
+	promptArtifact?: Extract<PromptDelivery, { via: 'file' }>['artifact'];
 	/** Custom environment variables */
 	customEnvVars?: Record<string, string>;
 	/** Agent's promptArgs function (for building prompt flags) */
@@ -120,6 +122,10 @@ export interface SshSpawnWrapResult {
 	customEnvVars?: Record<string, string>;
 	/** The prompt to pass to ProcessManager (undefined for SSH prompts sent via stdinScript) */
 	prompt?: string;
+	/** Private local artifact, unchanged when SSH is not used. */
+	promptArtifact?: Extract<PromptDelivery, { via: 'file' }>['artifact'];
+	/** Private remote cleanup metadata; bind through recordRemoteAgent before spawning. */
+	promptArtifactPath?: string;
 	/** Script to send via stdin for SSH execution (includes PATH setup + prompt passthrough) */
 	sshStdinScript?: string;
 	/** Human-readable remote agent invocation (shown in Process Details above the SSH command) */
@@ -157,6 +163,14 @@ export async function wrapSpawnWithSsh(
 	sshConfig: AgentSshRemoteConfig | undefined,
 	sshStore: SshRemoteSettingsStore
 ): Promise<SshSpawnWrapResult> {
+	if (config.promptArtifact) {
+		config = {
+			...config,
+			args: [...config.args],
+			customEnvVars: config.customEnvVars ? { ...config.customEnvVars } : undefined,
+			promptArtifact: { ...config.promptArtifact },
+		};
+	}
 	// Check if SSH is enabled for this session
 	if (!sshConfig?.enabled) {
 		// Local execution - return config unchanged
@@ -165,7 +179,8 @@ export async function wrapSpawnWithSsh(
 			args: config.args,
 			cwd: config.cwd,
 			customEnvVars: config.customEnvVars,
-			prompt: config.prompt,
+			prompt: config.promptArtifact ? undefined : config.prompt,
+			...(config.promptArtifact ? { promptArtifact: config.promptArtifact } : {}),
 			sshRemoteUsed: null,
 		};
 	}
@@ -186,7 +201,8 @@ export async function wrapSpawnWithSsh(
 			args: config.args,
 			cwd: config.cwd,
 			customEnvVars: config.customEnvVars,
-			prompt: config.prompt,
+			prompt: config.promptArtifact ? undefined : config.prompt,
+			...(config.promptArtifact ? { promptArtifact: config.promptArtifact } : {}),
 			sshRemoteUsed: null,
 		};
 	}
@@ -209,7 +225,7 @@ export async function wrapSpawnWithSsh(
 	// This matches the approach used by the process:spawn IPC handler.
 	const isLargePrompt = config.prompt && config.prompt.length > 4000;
 
-	if (config.prompt && isLargePrompt) {
+	if (!config.promptArtifact && config.prompt && isLargePrompt) {
 		// Large prompt - use stdin passthrough via buildSshCommandWithStdin
 		// The prompt is appended after the exec line in the stdin script, so the
 		// exec'd agent reads it directly from stdin as raw text.
@@ -239,16 +255,20 @@ export async function wrapSpawnWithSsh(
 	}
 
 	// Small or no prompt - embed in command line via buildSshCommand
-	const sshArgs = config.prompt
-		? [...config.args, ...buildPromptArgv(config, config.prompt)]
-		: [...config.args];
+	const sshArgs =
+		!config.promptArtifact && config.prompt
+			? [...config.args, ...buildPromptArgv(config, config.prompt)]
+			: [...config.args];
 
-	if (config.launchViaStdinScript) {
+	// File delivery is final, including empty content. Never append the original
+	// prompt or send it as raw stdin; the remote owner consumes only the artifact.
+	if (config.promptArtifact || config.launchViaStdinScript) {
 		const sshCommand = await buildSshCommandWithStdin(sshResult.config, {
 			command: remoteCommand,
 			args: sshArgs,
 			cwd: config.cwd,
 			env: withQuerySource(config.customEnvVars, config.querySource),
+			...(config.promptArtifact ? { promptArtifact: config.promptArtifact } : {}),
 		});
 
 		return {
@@ -260,6 +280,7 @@ export async function wrapSpawnWithSsh(
 			sshStdinScript: sshCommand.stdinScript,
 			sshRemoteCommand: sshCommand.remoteCommandLine,
 			sshRemoteUsed: sshResult.config,
+			...(config.promptArtifact ? { promptArtifactPath: config.promptArtifact.path } : {}),
 		};
 	}
 
