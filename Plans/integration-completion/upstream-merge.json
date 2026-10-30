@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge in progress; MCOMP-01-03A, 03B, 03C, 03D, 03E, 03F, 03G, 03H and 03I staged (25 files), 19 files unmerged in the worktree; MCOMP-01-03J..P resolve them (positional order mentionRouting, delegation, dispatchTicket on the dispatch callbacks, see progress.MCOMP-01-03I.positionalOrder), Q commits, R tests, S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T02:47:35.030Z",
-		"updatedBy": "MCOMP-01-03I"
+		"state": "merge in progress; MCOMP-01-03A, 03B, 03C, 03D, 03E, 03F, 03G, 03H, 03I and 03J staged (28 files), 16 files unmerged in the worktree; MCOMP-01-03K..P resolve them (positional order mentionRouting, delegation, dispatchTicket on the dispatch callbacks and their relays, see progress.MCOMP-01-03I.positionalOrder and progress.MCOMP-01-03J.positionalOrder), Q commits, R tests, S lands, T re-pins and closes",
+		"updatedAt": "2026-10-30T02:57:51.560Z",
+		"updatedBy": "MCOMP-01-03J"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -527,6 +527,62 @@
 			],
 			"unmergedAfter": 19,
 			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03i.mjs (not in git)"
+		},
+		"MCOMP-01-03J": {
+			"resolvedAt": "2026-10-29",
+			"resolvedBy": "Maestro-Claude",
+			"files": [
+				"src/main/web-server/callbacks/commandCallbacks.ts",
+				"src/main/web-server/callbacks/browserTabCallbacks.ts",
+				"src/main/web-server/callbacks/queueCallbacks.ts"
+			],
+			"positionalOrder": "the 03I order held on every relay: ..., background | hidden | held, mentionRouting (upstream c8913d2d8), delegation, dispatchTicket (integration MRC-07-04C 497efd2a7, MRC-08-01B eafe4d781, MRC-08-02 48839c506); on the wire to the renderer: remote:executeCommand carries [sessionId, command, inputMode, tabId, force, images, background, mentionRouting, delegation, dispatchTicket, responseChannel] (requestFromRenderer appends the receipt channel last); remote:newAITabWithPrompt carries [sessionId, prompt, responseChannel, background, hidden, mentionRouting, delegation, dispatchTicket]; remote:enqueueCommand carries [sessionId, command, responseChannel, inputMode, tabId, images, background, held, mentionRouting, delegation, dispatchTicket]; the preload remotes of MCOMP-01-03N (commandRemote onRemoteCommand, browserTabRemote onRemoteNewAITabWithPrompt, queueRemote onRemoteEnqueueCommand) must read these slots in this order",
+			"hunks": {
+				"src/main/web-server/callbacks/commandCallbacks.ts": [
+					"8-19 (the imports after ConsultAgentResult): the integration side (MRC-07-04C) imported the ManagedDelegationContext type; upstream imported the MentionRouting type (c8913d2d8) and the agent-busy snapshotAiTurnProcesses / waitForAiTurnsToExit pair plus the turnInterrupt constants and helpers its interruptTurn relay in this file uses (50a8084bf; the relay body at 254-282 had auto-merged); resolved as upstream three imports first, then the integration type import",
+					"112-117 (the executeCommand callback parameters after background): both sides appended their parameters; resolved as mentionRouting?: MentionRouting then delegation?: ManagedDelegationContext, dispatchTicket?: string",
+					"161-178 (the args the relay hands requestFromRenderer): the integration side had a three-line comment and a multi-line array ending background, delegation, dispatchTicket; upstream a one-line array ending background, mentionRouting; resolved as the multi-line array with mentionRouting inserted before delegation and the comment now naming the routing as well; the receipt channel requestFromRenderer appends stays the last argument"
+				],
+				"src/main/web-server/callbacks/browserTabCallbacks.ts": [
+					"347-352 (the newAITabWithPrompt callback parameters after hidden): resolved as mentionRouting then delegation, dispatchTicket",
+					"404-409 (the arguments of the remote:newAITabWithPrompt send after responseChannel, background, hidden): resolved as mentionRouting then delegation, dispatchTicket; both type imports (7, 9), the integration readManagedRefusal() reader and the dispatchTicket on the terminal open and relayed write (MRC-08-02A) had auto-merged"
+				],
+				"src/main/web-server/callbacks/queueCallbacks.ts": [
+					"63-68 (the enqueueCommand callback parameters after held): resolved as mentionRouting then delegation, dispatchTicket",
+					"118-123 (the arguments of the remote:enqueueCommand send after responseChannel, inputMode, tabId, images, background, held): resolved as mentionRouting then delegation, dispatchTicket; both type imports (7, 18) and the steer relay had auto-merged"
+				]
+			},
+			"checks": {
+				"staging": "merge-tool stage over the three files: prettier left all three unchanged, git add done, 16 files left unmerged, no marker left in any, nothing unstaged, nothing untracked in the worktree",
+				"seams": "the delegation and dispatch-ticket seams of the three relays are whole on upstream shape: the dispatching operation context and the host-minted ticket still travel from the callback parameters to the renderer send on every relay (executeCommand before the receipt channel, newAITabWithPrompt and enqueueCommand last), one slot later behind upstream mentionRouting; upstream interruptTurn relay (50a8084bf) and its imports are kept; the integration managed-refusal reader and the terminal-tab tickets in browserTabCallbacks auto-merged untouched",
+				"suites": "Working/mcomp-01-03/suites-03j.mjs over src/__tests__/main/web-server/callbacks and auth/transport-actor.test.ts: 8 files / 70 tests passed, 0 failed, 0 skipped (transport-actor 30, autoRunControlCallbacks 4, cadenzaMovementCallbacks 1, sessionCallbacks.relay 1, sessionCallbacks 4, tabCallbacks 14, terminalCallbacks 12, plus the 4 throwaway cases below); no committed suite imports the three files directly: their only importers are web-server-factory.ts (whose suite web-server-factory.test.ts is itself unmerged, MCOMP-01-03M) and computer-history/digest-consult.ts (parseConsultAgentResult, no suite of its own)",
+				"throwaway": "src/__tests__/main/web-server/callbacks/zz-03j.throwaway.test.ts (4 tests, deleted after the run) registered the three callbacks against a fake server and window and asserted the exact webContents.send argument lists: executeCommand [channel, sessionId, command, inputMode, tabId, force, images, background, mentionRouting, delegation, dispatchTicket, responseChannel] (12 arguments, the receipt answered through the ipcMain.on handler resolves true); newAITabWithPrompt [channel, sessionId, prompt, responseChannel, background, hidden, mentionRouting, delegation, dispatchTicket] (9); enqueueCommand [channel, sessionId, command, responseChannel, inputMode, tabId, images, background, held, mentionRouting, delegation, dispatchTicket] (12); omitted trailing arguments arrive as undefined in their own slots, never shifted",
+				"typeCheck": "a throwaway tsconfig extending the worktree tsconfig.main.json over the three files alone (Working/mcomp-01-03/tsconfig-03j.json, not in git; log tsc-03j.log): 0 errors in the three files; the only output is 27 TS1185 (merge conflict marker encountered) in the still-unmerged messageHandlers/commands.ts (3), queue.ts (6), tabs.ts (6) and types.ts (12) the files reach through ../WebServer (MCOMP-01-03K and 03L); MCOMP-01-03Q checks the real configs once they are resolved",
+				"numstatVsHead": {
+					"src/main/web-server/callbacks/commandCallbacks.ts": "50+/19- (upstream interruptTurn relay and dispatch --routing)",
+					"src/main/web-server/callbacks/browserTabCallbacks.ts": "3+/0- (upstream mentionRouting import, parameter and argument)",
+					"src/main/web-server/callbacks/queueCallbacks.ts": "3+/0- (the same)"
+				},
+				"numstatVsMergeHead": {
+					"src/main/web-server/callbacks/commandCallbacks.ts": "20+/2- (the integration delegation and ticket on the executeCommand relay)",
+					"src/main/web-server/callbacks/browserTabCallbacks.ts": "34+/7- (the integration managed-refusal reader, terminal tickets, delegation and ticket on newAITabWithPrompt)",
+					"src/main/web-server/callbacks/queueCallbacks.ts": "7+/2- (the integration delegation and ticket on enqueueCommand)"
+				}
+			},
+			"semanticConflictsForQ": [],
+			"followUpsForR": [
+				"make the four throwaway cases of zz-03j.throwaway.test.ts permanent as src/__tests__/main/web-server/callbacks/dispatchRelays.test.ts (or inside messageHandlers.test.ts once 03L resolves it): the exact positional argument list of the three remote:* sends, including the undefined-slot case",
+				"rerun web-server-factory.test.ts once MCOMP-01-03M resolves it; it is the only committed suite that reaches the three callback modules"
+			],
+			"blockedSuites": [
+				"src/__tests__/main/web-server/web-server-factory.test.ts (itself unmerged, 03M)"
+			],
+			"observations": [
+				"the preload remotes of MCOMP-01-03N already carry both sides positionally (commandRemote.ts 51-54 / 70-73 / 103-106, browserTabRemote.ts 266-270 / 282-299, queueRemote.ts 29-33 / 48-51 / 65-68 in their conflicted state) and their hunks have the same two-vs-one shape, so paramHunk / argHunk resolve them to the same order; upstream browserTabRemote collapsed the forwarding call to one line (299) the way CallbackRegistry.newAITabWithPrompt did, so the multi-line integration body is the one to keep there too",
+				"the executeCommand comment on the integration side described only the delegation and the ticket; it now names the @mention routing as well, since all three ride in the slots before the receipt channel"
+			],
+			"unmergedAfter": 16,
+			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03j.mjs (not in git)"
 		}
 	}
 }
