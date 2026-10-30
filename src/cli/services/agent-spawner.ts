@@ -1935,6 +1935,8 @@ export interface SpawnAgentOptions {
  * failing every task of a playbook on a value nobody typed is the wrong
  * outcome. The refusal is noted, so later `resolveTurnSettings` calls in this
  * run stop asking for the value and report why (see shared/effortRejection.ts).
+ * Grok preserves the failure: these options carry neither automatic-hint
+ * provenance nor a distinct fallback validated for the selected model/account/host.
  */
 export async function spawnAgent(
 	toolType: ToolType,
@@ -1944,12 +1946,18 @@ export async function spawnAgent(
 	options?: SpawnAgentOptions
 ): Promise<AgentResult> {
 	const result = await spawnAgentOnce(toolType, cwd, prompt, agentSessionId, options);
-	if (result.success || !options?.customEffort) return result;
+	if (result.success || (!options?.customEffort && toolType !== 'grok')) return result;
 
 	const rejection = parseEffortRejection(`${result.error ?? ''}\n${result.response ?? ''}`);
 	if (!rejection) return result;
 
 	noteEffortRejection(toolType, rejection);
+	// Dropping Grok's override could resend the same configured value or change
+	// an explicit choice. Diagnostic supported values are not fallback authority.
+	if (toolType === 'grok') {
+		console.error(`[maestro] ${describeEffortRejection(toolType, rejection)}`);
+		return result;
+	}
 	console.error(
 		`[maestro] ${describeEffortRejection(toolType, rejection)} Retrying at the agent's configured effort.`
 	);

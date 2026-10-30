@@ -281,6 +281,11 @@ export async function groomContext(
 	try {
 		return await groomContextOnce(options, processManager, agentDetector);
 	} catch (error) {
+		// Grok callers provide no automatic-hint provenance or validated distinct
+		// fallback. Clearing this value can inherit the same refusal or silently
+		// change an explicit selection. The process error listener still records it.
+		if (options.agentType === 'grok') throw error;
+
 		// The provider refused the effort level this turn asked for (see
 		// `shared/effortRejection.ts`). Callers pass an effort Maestro picked off
 		// a static ladder for a throwaway turn, and a provider can retire a rung
