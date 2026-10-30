@@ -435,11 +435,17 @@ async function groomContextOnce(
 		throw new Error('Prompt-file grooming cannot enforce read-only mode.');
 	}
 
+	// Keep provider cwd flags and the SSH shell on the same captured directory.
+	// Remote paths belong to the remote host; preserve them without local resolution.
+	const effectiveCwd = sessionSshRemoteConfig?.enabled
+		? sessionSshRemoteConfig.workingDirOverride || projectRoot
+		: projectRoot;
+
 	// Build args using the unified buildAgentArgs utility
 	const baseArgs = buildAgentArgs(agent, {
 		baseArgs: agent.args || [],
 		prompt: prompt,
-		cwd: projectRoot,
+		cwd: effectiveCwd,
 		readOnlyMode,
 		modelId,
 		yoloMode: false,
@@ -524,7 +530,7 @@ async function groomContextOnce(
 	// on the local machine even though the user explicitly opted into SSH.
 	let spawnCommand = resolvedCommand;
 	let spawnArgs = resolvedArgs;
-	let spawnCwd = projectRoot;
+	let spawnCwd = effectiveCwd;
 	let spawnPrompt: string | undefined = prompt;
 	let spawnEnvVars = resolvedEnvVars;
 	let sshStdinScript: string | undefined;
@@ -624,11 +630,6 @@ async function groomContextOnce(
 			);
 		}
 
-		// `projectRoot` is the LOCAL path for an SSH agent, and the remote shell
-		// does `cd <cwd> || exit 1`. Prefer the configured remote working dir so
-		// grooming lands in the same directory the agent's own turns run in.
-		const remoteCwd = sessionSshRemoteConfig.workingDirOverride || projectRoot;
-
 		// Remote TUI: maestro-p on the remote host drives the remote claude.
 		// Null for the API path, which leaves the plain claude spawn untouched.
 		const remoteInteractive = claudeDecision
@@ -646,7 +647,7 @@ async function groomContextOnce(
 				args: remoteInteractive
 					? [...remoteInteractive.prependArgs, ...deliveryArgs]
 					: deliveryArgs,
-				cwd: remoteCwd,
+				cwd: effectiveCwd,
 				prompt: spawnPrompt,
 				...(fileDelivery ? { promptArtifact: fileDelivery.artifact } : {}),
 				customEnvVars: remoteInteractive
