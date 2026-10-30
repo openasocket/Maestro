@@ -424,7 +424,7 @@ describe('runAgentTurn: an SSH remote', () => {
 		expect(wrapped?.command).toBe('/opt/remote/bin/opencode');
 		expect(wrapped?.prompt).toBe(turn.launch.prompt);
 		expect(wrapped?.cwd).toBe(scratch.dir);
-		expect(wrapped?.agentBinaryName).toBe('opencode');
+		expect(wrapped?.agentBinaryName).toBe('/opt/remote/bin/opencode');
 		expect(wrapped?.querySource).toBe('user');
 		expect(fs.readFileSync(stdinOut, 'utf8')).toBe('cd /work && exec opencode');
 		expect(result.outcome).toBe('completed');

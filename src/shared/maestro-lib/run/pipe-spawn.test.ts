@@ -565,7 +565,7 @@ describe('planPipeSpawn', () => {
 					const write = vi.spyOn(fs, 'writeFileSync');
 					const open = vi.spyOn(fs, 'openSync');
 					const file = prepared.plan.prompt.artifact.path;
-					current = startTurn(plan.spec, {}, {});
+					current = startTurn(plan.spec, {}, { stopGraceMs: 200 });
 					expect(open).toHaveBeenCalledExactlyOnceWith(file, 'wx', 0o600);
 					expect(write).toHaveBeenCalledTimes(1);
 					expect(fs.readFileSync(file, 'utf8')).toBe(
@@ -679,7 +679,7 @@ describe('planPipeSpawn', () => {
 								promptDelivery: kind === 'local-plan' ? delivery : undefined,
 							})
 						);
-						current = startTurn(plan.spec, {}, {});
+						current = startTurn(plan.spec, {}, { stopGraceMs: 200 });
 					};
 					expect(launch).toThrow(
 						new Error(

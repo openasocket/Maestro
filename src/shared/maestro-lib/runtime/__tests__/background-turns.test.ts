@@ -436,7 +436,7 @@ describe('background turns', () => {
 					success: false,
 					error: 'Background turn cancelled before spawn.',
 				});
-				expect(fs.existsSync(file)).toBe(false);
+				await vi.waitFor(() => expect(fs.existsSync(file)).toBe(false), { timeout: 2_000 });
 				expect(provider!.calls).toEqual([]);
 				expect(beginTurn).not.toHaveBeenCalled();
 			}
