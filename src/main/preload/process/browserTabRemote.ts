@@ -1,4 +1,5 @@
 import { ipcRenderer } from 'electron';
+import type { MentionRouting } from '../../../shared/crossAgentContext';
 import type { ManagedDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 
 export function createBrowserTabRemoteApi() {
@@ -257,6 +258,7 @@ export function createBrowserTabRemoteApi() {
 				responseChannel: string,
 				background?: boolean,
 				hidden?: boolean,
+				mentionRouting?: MentionRouting,
 				/** The dispatching operation's context; the renderer puts it on the new tab's first spawn. */
 				delegation?: ManagedDelegationContext,
 				/** The host-minted dispatch ticket; echoed unread on the spawn or the queued item. */
@@ -270,6 +272,7 @@ export function createBrowserTabRemoteApi() {
 				responseChannel: string,
 				background?: boolean,
 				hidden?: boolean,
+				mentionRouting?: MentionRouting,
 				delegation?: ManagedDelegationContext,
 				dispatchTicket?: string
 			) => {
@@ -280,6 +283,7 @@ export function createBrowserTabRemoteApi() {
 						responseChannel,
 						background,
 						hidden,
+						mentionRouting,
 						delegation,
 						dispatchTicket
 					);

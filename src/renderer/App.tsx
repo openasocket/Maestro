@@ -143,6 +143,7 @@ import { useChatFileDropZone } from './hooks/ui/useChatFileDropZone';
 import { useMainPanelProps, useSessionListProps, useRightPanelProps } from './hooks/props';
 import { useAgentListeners } from './hooks/agent/useAgentListeners';
 import { installFeedbackLiveStateHook } from './services/feedbackLiveState';
+import { installAutoRunSnapshotResponder } from './services/debugPackage';
 import { useSessionRecovery } from './hooks/agent/useSessionRecovery';
 import { useAutoResumeCoordinator } from './hooks/agent/useAutoResumeCoordinator';
 import { useCapabilitiesPriming } from './hooks/agent/useCapabilitiesPriming';
@@ -158,7 +159,11 @@ import { notifyCenterFlash } from './stores/centerFlashStore';
 import { useComposerInputStore } from './stores/composerInputStore';
 import { getModalActions, useModalActions, useModalStore } from './stores/modalStore';
 import { GitStatusProvider } from './contexts/GitStatusContext';
-import { WindowProvider, useWindowContextOptional } from './contexts/WindowContext';
+import {
+	WindowProvider,
+	useIsLifecycleOwner,
+	useWindowContextOptional,
+} from './contexts/WindowContext';
 import { GitShortcutActionsBridge } from './components/GitShortcutActionsBridge';
 import { InputProvider, useInputContext } from './contexts/InputContext';
 import {
@@ -168,12 +173,18 @@ import {
 } from './stores/groupChatStore';
 import { useBatchStore } from './stores/batchStore';
 import { registerBatchResumer } from './services/batchResumer';
+import { registerSessionPersistenceFlush } from './services/sessionPersistenceFlush';
 import { mergeQueuedItemIntoAbove, toggleQueuedItemPaused } from './services/queuedPrompt';
 import {
 	CODEX_FOLLOWUP_EVENT,
 	resolveCodexFollowup,
 	type CodexFollowupRequest,
 } from './services/codexFollowup';
+import {
+	CODE_FENCE_COMMAND_EVENT,
+	type CodeFenceCommandRequest,
+} from './services/codeFenceCommand';
+import { dispatchShellCommand } from './services/shellCommand';
 // All session state is read directly from useSessionStore in MaestroConsoleInner.
 import {
 	useSessionStore,
@@ -837,6 +848,7 @@ function MaestroConsoleInner() {
 	// the single-window app / web / isolation tests fall back to "show here".
 	const windowCtx = useWindowContextOptional();
 	const currentWindowId = windowCtx?.windowId ?? null;
+	const isLifecycleOwner = useIsLifecycleOwner();
 
 	// Stable actions from groupChatStore (non-reactive)
 	const {
@@ -1023,6 +1035,10 @@ function MaestroConsoleInner() {
 	// Let the Feedback chat read this window's live state (read-only).
 	useEffect(() => installFeedbackLiveStateHook(), []);
 
+	// Hand this window's Auto Run state to a package main builds on its own
+	// (`maestro-cli support-package`, Feedback's support package).
+	useEffect(() => installAutoRunSnapshotResponder(), []);
+
 	// Expose notifyToast to window for debugging/testing
 	useEffect(() => {
 		(window as any).__maestroDebug = {
@@ -1091,6 +1107,7 @@ function MaestroConsoleInner() {
 		handleCloseOtherTabs,
 		handleCloseTabsLeft,
 		handleCloseTabsRight,
+		handleCloseTabGroup,
 		handleCloseCurrentTab,
 		handleRequestTabRename,
 		handleUpdateTabByClaudeSessionId,
@@ -1402,7 +1419,7 @@ function MaestroConsoleInner() {
 		handlePRCreated,
 	} = useWorktreeHandlers({
 		rightPanelRef,
-		isLifecycleOwner: !isWebDesktop() && (windowCtx?.isMainWindow ?? true),
+		isLifecycleOwner,
 	});
 
 	// --- APP HANDLERS (drag, file, folder operations) ---
@@ -1559,6 +1576,8 @@ function MaestroConsoleInner() {
 		handleSendToAgent,
 		handleMergeWith,
 		handleOpenSendToAgentModal,
+		mergeTabContext,
+		transferTabContext,
 	} = useMergeTransferHandlers({
 		sessionsRef,
 		activeSessionIdRef,
@@ -1578,6 +1597,7 @@ function MaestroConsoleInner() {
 		cancelTab,
 		canSummarize,
 		handleSummarizeAndContinue,
+		summarizeTab,
 	} = useSummarizeAndContinue();
 
 	// Fresh store snapshot - chrome equality ignores contextUsage / logs.
@@ -2043,6 +2063,9 @@ function MaestroConsoleInner() {
 	}, []);
 
 	// This is used by context transfer to automatically send the transferred context to the agent
+	const activeAiTabAutoSend = activeSession
+		? getActiveTab(activeSession)?.autoSendOnActivate === true
+		: false;
 	useEffect(() => {
 		if (!activeSession) return;
 
@@ -2071,7 +2094,9 @@ function MaestroConsoleInner() {
 		}, 100);
 
 		return () => clearTimeout(timeoutId);
-	}, [activeSession?.id, activeSession?.activeTabId]);
+		// The flag itself is a dependency too: a merge into the tab already on
+		// screen sets it without changing the selection, and must still send.
+	}, [activeSession?.id, activeSession?.activeTabId, activeAiTabAutoSend]);
 
 	// Initialize activity tracker for per-session time tracking
 	useActivityTracker(activeSessionId, setSessions);
@@ -2090,7 +2115,7 @@ function MaestroConsoleInner() {
 	useHandsOnTimeTracker(addTotalActiveTimeMs);
 
 	// Auto Run achievement tracking (progress intervals, peak usage stats)
-	useAutoRunAchievements({ activeBatchSessionIds });
+	useAutoRunAchievements({ activeBatchSessionIds, isLifecycleOwner });
 
 	// "Quit when idle" watcher - quits the app once all operations finish once armed
 	useQuitWhenIdle();
@@ -2200,6 +2225,10 @@ function MaestroConsoleInner() {
 	// Persist sessions to electron-store using debounced persistence (reduces disk writes from 100+/sec to <1/sec during streaming)
 	// The hook handles: debouncing, flush-on-unmount, flush-on-visibility-change, flush-on-beforeunload
 	const { flushNow: flushSessionPersistence } = useDebouncedPersistence(initialLoadComplete);
+	useEffect(() => {
+		registerSessionPersistenceFlush(flushSessionPersistence);
+		return () => registerSessionPersistenceFlush(null);
+	}, [flushSessionPersistence]);
 
 	// Session lifecycle operations (rename, delete, star, unread, groups persistence, nav tracking)
 	// - provided by useSessionLifecycle hook (Phase 2H)
@@ -2282,6 +2311,8 @@ function MaestroConsoleInner() {
 		setBookmarksCollapsed,
 		inputRef,
 		terminalOutputRef,
+		groupChatInputRef,
+		groupChatMessagesRef,
 		starredSectionCollapsed: starredSessionsCollapsed,
 		setStarredSectionCollapsed: setStarredSessionsCollapsed,
 		groupChats,
@@ -2408,7 +2439,6 @@ function MaestroConsoleInner() {
 
 	// handleInterrupt - provided by useInterruptHandler hook
 	const { handleInterrupt } = useInterruptHandler({
-		sessionsRef,
 		cancelPendingSynopsis,
 		processQueuedItem,
 	});
@@ -2461,6 +2491,7 @@ function MaestroConsoleInner() {
 		resumeAfterError: resumeAutoRunAfterError,
 		skipCurrentDocument: skipCurrentAutoRunDocument,
 		abortBatchOnError: abortAutoRunBatchOnError,
+		tabContextOps: { summarizeTab, mergeTabContext, transferTabContext },
 	});
 
 	/*
@@ -2511,6 +2542,53 @@ function MaestroConsoleInner() {
 			notifyCenterFlash({
 				message: 'Conversation moved',
 				detail: 'The follow-up is in the composer, not sent.',
+				color: 'yellow',
+			});
+		}
+	});
+
+	/*
+	 * --- CODE FENCE RUN BUTTONS ---
+	 *
+	 * A shell fence's Run button in an agent's reply. Same targeting rule as the
+	 * follow-up chips above, through the same resolver: the command is
+	 * agent-authored, so it runs only in the conversation it was drawn in, and a
+	 * click that arrives after the user moved away degrades to a command-mode
+	 * prefill in the composer on screen. A run goes through
+	 * `dispatchShellCommand`, the exact path a typed `!command` takes, so it
+	 * lands as the same card and in the same recall history.
+	 */
+	useEventListener(CODE_FENCE_COMMAND_EVENT, (event) => {
+		const request = (event as CustomEvent<CodeFenceCommandRequest>).detail;
+		const session = sessionsRef.current.find((s) => s.id === activeSessionIdRef.current);
+		const resolution = resolveCodexFollowup(
+			request && {
+				prompt: request.command,
+				sessionId: request.sessionId,
+				tabId: request.tabId,
+				mode: request.mode === 'run' ? 'send' : 'prefill',
+			},
+			{
+				activeSessionId: session?.id ?? null,
+				activeTabId: session ? (getActiveTab(session)?.id ?? null) : null,
+			}
+		);
+
+		if (resolution.action === 'ignore') return;
+
+		if (resolution.action === 'send' && session) {
+			void dispatchShellCommand({ session, tabId: resolution.tabId, command: resolution.prompt });
+			return;
+		}
+
+		if (resolution.action !== 'prefill') return;
+		useComposerInputStore.getState().loadAiDraft(resolution.tabId, resolution.prompt, 'shell');
+		inputRef.current?.focus();
+
+		if (resolution.movedAway) {
+			notifyCenterFlash({
+				message: 'Conversation moved',
+				detail: 'The command is in the composer, not run.',
 				color: 'yellow',
 			});
 		}
@@ -2793,6 +2871,7 @@ function MaestroConsoleInner() {
 		// Group chat context
 		activeGroupChatId,
 		groupChatInputRef,
+		groupChatMessagesRef,
 		flushGroupChatDraft,
 		groupChatStagedImages,
 		setGroupChatRightTab,
@@ -3031,6 +3110,7 @@ function MaestroConsoleInner() {
 		handleCloseOtherTabs,
 		handleCloseTabsLeft,
 		handleCloseTabsRight,
+		handleCloseTabGroup,
 
 		// Unified tab system handlers (Phase 4) - paint self-sourced in MainPanel
 		handleFileTabSelect: handleSelectFileTab,
@@ -3570,6 +3650,7 @@ function MaestroConsoleInner() {
 						onCloseOtherTabs={handleCloseOtherTabs}
 						onCloseTabsLeft={handleCloseTabsLeft}
 						onCloseTabsRight={handleCloseTabsRight}
+						onCloseTabGroup={handleCloseTabGroup}
 						setPlaygroundOpen={setPlaygroundOpen}
 						onQuickActionsRefreshGitFileState={handleQuickActionsRefreshGitFileState}
 						onQuickActionsDebugReleaseQueuedItem={handleQuickActionsDebugReleaseQueuedItem}

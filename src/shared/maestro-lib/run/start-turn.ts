@@ -324,6 +324,17 @@ function appendBoundedTail(current: string, chunk: string, limit: number | undef
 	return combined.slice(combined.length - limit);
 }
 
+/** Only the native spawn call can establish this synchronous nonstart proof.
+ * Exceptions after spawn remain uncertain even if no handle reaches the caller. */
+export class TurnNotStartedError extends Error {
+	readonly cause: unknown;
+	constructor(error: unknown) {
+		super(error instanceof Error ? error.message : String(error));
+		this.name = 'TurnNotStartedError';
+		this.cause = error;
+	}
+}
+
 /**
  * Start one agent turn and stream it.
  *
@@ -354,12 +365,29 @@ export function startTurn(
 		if (!verdict.ok) throw new DispatchRefusedError(verdict.state, verdict.code, verdict.message);
 	}
 
-	const child = spawn(spec.command, spec.args, {
-		cwd: spec.cwd,
-		env: spec.env,
-		shell: spec.shell ?? false,
-		stdio: [stdinMode, 'pipe', 'pipe'],
-	});
+	let child: ChildProcess;
+	try {
+		child = spawn(spec.command, spec.args, {
+			cwd: spec.cwd,
+			env: spec.env,
+			shell: spec.shell ?? false,
+			stdio: [stdinMode, 'pipe', 'pipe'],
+		});
+	} catch (error) {
+		// A synchronous nonstart after an admission: the `done` promise that
+		// would release the lease is never built, so it ends here as a spawn
+		// failure instead of staying live until the authority expires it.
+		gate?.released?.({
+			exitCode: null,
+			signal: null,
+			interrupted: false,
+			stderrText: '',
+			stdoutText: '',
+			droppedOutputBytes: 0,
+			spawnError: error instanceof Error ? error : new Error(String(error)),
+		});
+		throw new TurnNotStartedError(error);
+	}
 
 	const parser = options.parser ?? (options.agentId ? createOutputParser(options.agentId) : null);
 	const tailLimit = options.stdoutTailLimit ?? DEFAULT_STDOUT_TAIL_LIMIT;

@@ -52,6 +52,7 @@ None of these load automatically. Read the one that matches the task before you 
 | Vulnerability report, advisory, CVE, or credit     | [SECURITY-RUNBOOK.md](docs/agent-guides/SECURITY-RUNBOOK.md)     |
 | Plugin media isolation or a bounded native tool    | [PLUGIN-MEDIA-TOOLS.md](docs/agent-guides/PLUGIN-MEDIA-TOOLS.md) |
 | Docs or site screenshot                            | [SCREENSHOT-CAPTURE.md](docs/agent-guides/SCREENSHOT-CAPTURE.md) |
+| Dataview query, vault index, or DataviewJS sandbox | [DATAVIEW.md](docs/agent-guides/DATAVIEW.md)                     |
 
 ### Commonly-reimplemented functions (do NOT add new copies)
 
@@ -88,12 +89,15 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 
 - **Path utilities:** `truncatePath()`, `getParentDir()`, `truncateCommand()`, `isAbsolutePath()`, `getBasename()`, `joinPath()` in `src/shared/formatters.ts`
 - **Worktree path comparisons:** `normalizeWorktreePath()`, `isPathAtOrUnderRoot()` in `src/shared/worktreePaths.ts`
+- **An untrusted relative path that must stay inside a root:** `normalizeRootRelativePath()`, `isPathInsideRoot()` in `src/shared/pathContainment.ts`
+- **Whether a path stays inside a root once symlinks resolve (main):** `resolvePathInRealRoot()`, `isPathWithin()`, `foldPathCase()`, `realpathThroughAncestor()` in `src/main/utils/real-path-containment.ts`
 - **Remote worktree aliases:** `resolveWorktreeAliasesRemote()` in `src/main/utils/remote-git.ts`
 - **A path the user typed on the CLI:** `resolveCliPath(input)` in `src/cli/utils/parse.ts`
 - **An image file the user named on the CLI:** `readCliImageFile(input, maxBytes)` in `src/cli/utils/imageFiles.ts`
 - **Classifying a file by extension:** `getFileCategory()`, `isPreviewableFile()`, `matchesFileCategory()`, `getFileExtension()` in `src/shared/fileCategories.ts`
 - **Reading a zip from disk:** `readZipArchive()`, `extractZipTo()`, `isUnsafeZipEntryName()` in `src/main/utils/zip-archive.ts` (never `adm-zip`)
 - **Guarding a serialized JSON payload before it overwrites a file:** `assertSerializedJsonIsSafe(serialized, target)` in `src/shared/jsonUtils.ts`
+- **UTF-8 size of a JSON payload (a message size cap):** `serializedJsonByteLength(value)` in `src/shared/jsonUtils.ts`
 - **Deterministic JSON (same value, same text):** `canonicalJson(value)` in `src/shared/canonicalJson.ts` (never hash or compare `JSON.stringify` output)
 - **Redacting secrets from text you persist or show:** `redactSecrets(text, opts?)`, `passesLuhn()` in `src/shared/redactSecrets.ts`; `redactPackageContents()` in `src/main/debug-package/index.ts`; `SENSITIVE_KEYS`, `MANAGED_SENSITIVE_KEYS` in `src/shared/settingsMetadata.ts`
 - **Strip ANSI / collapse progress overwrites:** `stripAnsiCodes()`, `processCarriageReturns()` in `src/shared/stringUtils.ts`
@@ -105,6 +109,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 
 #### Main process: stores, persistence, platform
 
+- **Hosting untrusted content in an isolated `<webview>` guest:** `hardenIsolatedGuestSession()`, `hardenIsolatedGuestWebPreferences()`, `attachIsolatedGuestSecurity()`, `isolatedGuestDocument()` in `src/main/utils/isolated-guest.ts`; `isDetachedWebviewError()` in `src/renderer/utils/webviewErrors.ts`
 - **One log entry as one JSON line (`--log-format json`):** `formatJsonLogLine()`, `buildJsonLogLine()`, `JSON_LOG_ID_FIELDS` in `src/shared/jsonLogLine.ts`
 - **A CLI verb that needs the desktop app, when the app is absent:** `exitIfMaestroNotRunning(error, options)` / `failFromError()` in `src/cli/services/session-command.ts`, over `MaestroNotRunningError`
 - **An explicit data directory on a CLI verb (`--data-dir`):** `applyDataDirOption()`, `requireDataDirOrExit()` in `src/cli/services/data-dir-option.ts` (sets `MAESTRO_USER_DATA` so every reader agrees; never creates the folder)
@@ -113,20 +118,26 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Maestro's data directory, without Electron:** `resolveUserDataDir(options?)`, `assertUserDataDirExists(dir)` in `src/shared/userDataDir.ts`
 - **Where the synced stores live (custom Storage Location):** `resolveSyncDir(userDataDir)`, `isValidSyncPath()`, `BOOTSTRAP_STORE_FILE` in `src/shared/syncPath.ts`; the CLI's `getSyncDir()` in `src/cli/services/storage.ts`
 - **Deferred main-process store persistence:** `deferStoreWrites()` in `src/main/stores/deferred-writes.ts`, `flushPendingSessionWrites()` in `src/main/stores/instances.ts`
-- **Rewriting a large `{ key: [...] }` JSON store file:** `serializeWithMemoizedArray(data, memoKey)` in `src/shared/memoizedJsonSerialize.ts`
+- **Rewriting a large `{ key: [...] }` JSON store file:** `serializeWithMemoizedArray(data, memoKey)`, `encodeWithMemoizedArray(data, memoKey)` in `src/shared/memoizedJsonSerialize.ts`
 - **Recovering from a store file that is not JSON:** `createStoreDeserializer()`, `corruptStorePath()` in `src/main/stores/corrupt-store-recovery.ts` (never `clearInvalidConfig`)
+- **Parsing a session transcript in the main process:** `runTranscriptParse(task)` in `src/main/transcript-parse/transcript-parse-pool.ts`, task bodies in `transcript-parse-tasks.ts`
+- **A cache derivation upgrade that survives being killed:** `isDerivationStale()`, `accumulateUpgradeBaseline()`, `finishDerivationUpgrade()` in `src/main/utils/statsCache.ts`; `createCacheCheckpointer()` in `src/main/utils/cache-checkpointer.ts`
+- **Showing the progress of a long scan:** `withStatsIndexing()` in `src/main/stats/stats-indexing.ts`, `summarizeStatsIndexing()` in `src/shared/statsIndexing.ts`, drawn by `<StatsIndexingHost>`
 - **Sealing a file with the key the OS holds for the app:** `safeStorageSeal(safeStorage)`, `obscuringSeal()`, `sealProtectionProblem()`, `SealProvider`, `SafeStorageLike` in `src/main/utils/safe-storage-seal.ts`
 - **Proving a sealed file is the newest one (rollback and deletion):** `createKeyringAnchor(service, account)`, `AnchorStore`, `keyringAnchor()`, `noAnchor()` in `src/main/utils/keyring-anchor.ts`
 - **Writing a Claude session's origin record:** `setClaudeSessionOrigin()`, `mergeClaudeSessionOrigin()` in `src/main/storage/claude-session-origins.ts`
 - **Serializing async work on one entity:** `createKeyedWriteQueue()` in `src/shared/keyedWriteQueue.ts` (main imports it via `src/main/utils/atomic-json-store.ts`)
 - **Capping stored tool output:** `compactToolOutput()`, `compactSessionToolOutputs()` in `src/shared/toolOutput.ts`
 - **Merging browser-deferred conversations:** `projectWebSession()`, `readDeferredContent()`, `mergeDeferredSessionContent()` in `src/main/stores/deferred-session-content.ts`, over `mergeDeferredItems()` in `src/shared/deferredSessionContent.ts`
+- **Turning Live mode (the web interface) or Remote Control (its tunnel) on or off:** `getLiveModeController()`, `createLiveModeController()` in `src/main/web-server/live-mode.ts`; wire types in `src/shared/liveMode.ts`
+- **Asking a renderer window a question from main (request, reply, timeout):** `requestFromRenderer(win, channel, { fallback, parse, timeoutMs, args })` in `src/main/web-server/callbacks/remoteRequest.ts`
 - **HTTP request from the main process:** `fetchWithTimeout()`, `isFetchTimeoutError()` in `src/main/utils/fetchWithTimeout.ts` (never a bare `fetch()`)
 - **The egress ceiling a managed desktop holds outbound HTTP to (the fetch chokepoint):** `createEgressPolicySource()`, `EGRESS_CLASSES` in `src/main/enterprise/egress-policy.ts`; `setEgressAuthority()`, `EgressDeniedError`, `isEgressDeniedError()`, `heldEgress()` in `src/main/utils/fetchWithTimeout.ts`
 - **The update ceiling a managed desktop holds its own roll-forward to:** `createUpdatePolicySource()`, `updateVerdict()` in `src/main/enterprise/update-policy.ts`; `setUpdateAuthority()`, `updateHoldFor()`, `heldUpdate()` in `src/main/update-checker.ts`; `holdEgress()` in `src/main/utils/fetchWithTimeout.ts`
 - **The listener ceiling a managed desktop holds its inbound surfaces to (web server, tunnel):** `createListenerPolicySource()`, `listenerVerdict()`, `LISTENER_KINDS` in `src/main/enterprise/listener-policy.ts`; `setListenerAuthority()`, `holdListener()`, `heldListeners()` in `src/main/enterprise/listener-gate.ts`
 - **A git query the UI polls in the background:** `execGitReadOnly()`, `isGitTimeout()`, `READ_ONLY_GIT_TIMEOUT_MS` in `src/main/utils/remote-git.ts`
 - **SSH remote lookup:** `getSshRemoteById()` in `src/main/stores/getters.ts`
+- **Yielding to the event loop during long main-process work:** `yieldToEventLoop()` in `src/main/utils/concurrency.ts`
 - **Platform detection:** `isWindows()`, `isMacOS()`, `isLinux()` in `src/shared/platformDetection.ts`; renderer-only `isWindowsPlatform()` and siblings in `src/renderer/utils/platformUtils.ts` (never `process.platform` in the renderer)
 - **Encore Feature flags and their defaults:** `ENCORE_FEATURE_DEFAULTS`, `resolveEncoreFeatures(raw, pins?)`, `isEncoreFeatureEnabled()`, `requireEncoreFeature()` in `src/shared/encoreFeatureDefaults.ts`; background services follow the flag via `createEncoreFeatureLifecycle()` in `src/main/encore-feature-lifecycle.ts`
 - **Which settings a managed policy holds (lock and pin):** `isSettingLocked()`, `applyManagedPins()`, `lockedSettingKeys()`, `parseManagedSettingsPolicy()`, `managedSettingLockReason()`, `encoreFlagPins()` in `src/shared/managedSettingsLock.ts`; a key is lockable only through `lockable` in `SETTINGS_METADATA`
@@ -141,6 +152,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Whether a stored agent is live (a switched-off Pianola is dormant):** `filterLiveAgents()`, `isAgentDormant()` in `src/shared/agentVisibility.ts`; per process `getLiveSessions()` (main getters), `readLiveSessions()` (CLI storage), `useLiveSessions()` in `src/renderer/hooks/session/useLiveSessions.ts`
 - **A maestro-cli verb that belongs to an Encore Feature:** `encoreCommand()`, `requireEncore()`, `requireEncoreForOptions()` in `src/cli/utils/encore-gate.ts`
 - **Filing GitHub feedback (check gh, search, +1, submit):** `submitFeedbackConversation()`, `searchFeedbackIssues()` in `src/main/feedback/index.ts`
+- **Writing lifetime counters that must never go down:** `mergeUsagePeaks()` in `src/shared/usagePeaks.ts`, `mergeAutoRunStats()` in `src/shared/autoRunStatsMerge.ts`, enforced by `settings:set` in `src/main/ipc/handlers/persistence.ts`
 
 #### Spawning and stopping agents (process, SSH, env, prompts)
 
@@ -162,6 +174,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **A path handed to a REMOTE shell (`cd`, `ls`, `stat` over SSH):** `shellEscapeRemotePath()` in `src/main/utils/shell-escape.ts` (`shellEscape()` stops `~` from expanding)
 - **SSH connection options (`ssh -o`):** `resolveSshOptions()`, `buildSshOptionArgs()`, `validateSshOption()` in `src/shared/sshOptions.ts`
 - **Building or delivering the Maestro system prompt:** `assembleMaestroSystemPrompt()` in `src/shared/maestroSystemPrompt.ts`; `applySystemPromptDelivery()` in `src/main/utils/system-prompt-delivery.ts`; `buildMaestroSystemPromptForSession()` in `src/main/utils/maestro-system-prompt.ts`
+- **Expanding `{{INCLUDE:name}}` in a prompt:** `resolvePromptIncludes()`, `findPromptIncludeNames()` in `src/shared/promptIncludes.ts`
 - **The system-prompt envelope for a provider with no `--append-system-prompt`:** `embedSystemPromptInPrompt()`, `stripEmbeddedSystemPrompt()`, `hasEmbeddedSystemPrompt()` in `src/shared/embeddedSystemPrompt.ts` (a wire format; never template it inline)
 - **Who asked for this turn (interactive vs automation):** `QUERY_SOURCE_ENV_VAR`, `QuerySource`, `DEFAULT_QUERY_SOURCE` in `src/shared/querySource.ts` (`MAESTRO_QUERY_SOURCE`)
 - **Prefixing an agent's New Session Message:** `prependNewSessionMessageOnFirstTurn()`, `prependNewSessionMessage()` in `src/shared/newSessionMessage.ts`
@@ -258,12 +271,14 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 #### Agents (renderer state and navigation)
 
 - **The record a new agent starts as:** `buildNewAgentRecord(input)`, `newAgentClaudeInteractive(toolType)` in `src/shared/newAgentRecord.ts`
+- **What a duplicated agent inherits:** `buildDuplicateAgentInput(source, overrides?)`, `defaultDuplicateAgentName()`, `duplicateAgentBlocker()` in `src/shared/newAgentRecord.ts`
 - **Session lookup:** `selectActiveSession()`, `selectSessionById()` in `src/renderer/stores/sessionStore.ts`; `useActiveSession()` hook in `src/renderer/hooks/session/useActiveSession.ts`
 - **Session mutation:** `updateSessionWith()`, `updateAiTab()`, `updateFileTab()`, `updateBrowserTab()` in `src/renderer/stores/sessionStore.ts` (never `setSessions(prev => prev.map(...))` for one agent or tab)
 - **Which agent this client is looking at:** `persistActiveSessionId()`, `readPersistedActiveSessionId()` in `src/renderer/utils/activeSessionPersistence.ts` (never `sessions.getActiveSessionId()` directly)
 - **Which client this page is, across a reload:** `getClientInstanceId()` / `isReloadedClientInstance()` in `src/renderer/utils/clientInstance.ts`
 - **Telling the other clients an agent appeared or went away:** `sessions:lifecycleSync`, emitted in `src/main/ipc/handlers/persistence.ts`, applied by `useSessionLifecycleSync` in `src/renderer/hooks/session/useSessionLifecycleSync.ts`
 - **Moving an agent to another directory:** `withWorkingDirectory()`, `workingDirectoryChangeBlocker()`, `isSameDirectory()` in `src/renderer/utils/agentWorkingDirectory.ts`
+- **Moving an agent to another group:** `withAgentInGroup(agents, agentId, groupId)` in `src/shared/maestro-lib/agents/rules.ts`
 - **Per-agent git actions:** `useGitAgentActions(session)` in `src/renderer/hooks/git/useGitAgentActions.ts`
 - **Whether a PR is being opened right now:** `usePRCreationActive()`, `startPRCreation()` in `src/renderer/stores/prCreationStore.ts`
 - **Taking the user to an agent:** `jumpToAgent()`, `revealAgentInSidebar()`, `openAgentSettings()` in `src/renderer/services/agentNavigation.ts`
@@ -276,6 +291,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Recording wizard usage:** `beginWizardRun()`, `recordWizardDocuments()` in `src/renderer/services/wizardStats.ts`
 - **Leaving inline wizard mode:** `flattenWizardIntoTab(tab, { summary? })` in `src/renderer/utils/tabHelpers/index.ts`
 - **What the Thinking pill lists:** `buildThinkingItems()` in `src/renderer/utils/thinkingItems.ts` (read through `useThinkingItems()`); `useBackgroundAutoRuns()` in `src/renderer/hooks/batch/useBackgroundAutoRuns.ts`
+- **Whether this renderer owns an app-wide side effect:** `useIsLifecycleOwner()` in `src/renderer/contexts/WindowContext.tsx`
 
 #### Tabs
 
@@ -286,14 +302,20 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **What an unnamed tab is called:** `getTabDisplayName(tab)`, `isSessionIdLabel()` in `src/renderer/utils/tabHelpers`, over `formatSessionId(agentSessionId)`
 - **Where a closed tab's name still exists:** `HistoryEntry.sessionName` only; pass it as the third argument of `handleResumeSession`
 - **Reading a past conversation back into a tab:** `loadResumableSession()` in `src/renderer/services/resumableSession.ts`
+- **Storing the closed-tab stack (Cmd+Shift+T):** `projectClosedTabHistory()`, `normalizeStoredClosedTabs()`, `MAX_CLOSED_TAB_HISTORY` in `src/shared/closedTabHistory.ts`; `loadReopenedTabContent()` in `src/renderer/services/reopenedTabContent.ts`
+- **Reading or reopening the closed-tab stack from a script (`maestro-cli tab closed` / `tab reopen`):** `runRemoteClosedTabCommand()`, `listClosedTabs()`, `getClosedTabLabel()` in `src/renderer/services/closedTabCommands.ts`, wire in `src/shared/closedTabCommands.ts`
+- **Compact, Merge Into, or Send to Agent from a script (`maestro-cli tab compact` / `merge` / `transfer`):** `runRemoteTabContextOp()` in `src/renderer/services/tabContextOps.ts`, wire in `src/shared/tabContextOps.ts`
+- **Forcing a tracked sessions flush from outside App's hook tree:** `flushSessionPersistenceNow()`, `registerSessionPersistenceFlush()` in `src/renderer/services/sessionPersistenceFlush.ts`
 - **Which tab a Quick Chat message goes to:** `decideRoute()`, `parseRouteAnswer()` in `src/shared/quickChatRouting.ts`; `routeQuickChatMessage()`, `reopenClosedConversation()` in `src/renderer/services/quickChatRouter.ts`
 - **Naming a tab from the user's message:** `requestTabAutoName()`, `collectNamingPrompt()`, `requestWizardTabAutoName()` in `src/renderer/services/tabAutoNaming.ts`
 - **Closing a tab while the unread filter is on:** `closeTab()`'s third argument is an OVERRIDE; omit it and `src/renderer/utils/tabHelpers/index.ts` reads `uiStore.showUnreadOnly`
 - **Ending a turn with no process exit:** `settleTabThinkingState(session, tabId)` in `src/renderer/utils/tabHelpers/index.ts`
+- **Never leaving an agent with an empty tab strip:** `ensureAgentHasVisibleTab()`, `agentHasVisibleTab()`, `createBlankAiTab()` in `src/renderer/utils/unifiedTabOrderUtils.ts`
 - **Handing the agent back when a shell command or a CLI playbook ends:** `settleAgentStateFromTabs(session)` in `src/renderer/utils/tabHelpers` (never gate on `aiPid`, which per-tab agents leave at 0 or -1)
 - **Agent state from tab states another client reported:** `syncAgentStateToTabs(session)` in `src/renderer/utils/tabHelpers` (the web-desktop inventory sync)
 - **A tab's own process produced output:** `markTabBusyFromOutput(session, tabId)` in `src/renderer/utils/tabHelpers`, via `noteLiveTabOutput()` in `src/renderer/hooks/agent/internal/helpers/liveTabOutput.ts` (check the tab first; write only when it is not already busy)
-- **Stop and a pending auto-retry:** `stopRetriesForAgent(sessionId)` in `src/renderer/stores/retryStore.ts` (not `cancelRetry`, which raises the blocking error state)
+- **Stopping a running turn (Stop pill, REST, `maestro-cli interrupt`):** `interruptTurn(sessionId, { tabId? })` in `src/renderer/services/turnInterrupt.ts`, wire types in `src/shared/turnInterrupt.ts`
+- **Stop and a pending auto-retry:** `stopRetriesForAgent(sessionId, tabId?)` in `src/renderer/stores/retryStore.ts` (not `cancelRetry`, which raises the blocking error state)
 - **Killing every AI process an agent owns:** `killAgentAiProcesses(agentId)` in `src/renderer/services/process.ts` (never kill the bare `{id}-ai`, which no per-tab turn uses)
 - **Toggling the unread filters:** `toggleTabUnreadFilter()`, `toggleAllUnreadFilters()`, and `areUnreadFiltersActive()` in `src/renderer/services/unreadFilters.ts`
 - **Creating a tab straight into a tile:** `tileNewTab()` / `canTileNewTab()` in `src/renderer/hooks/tabs/tileNewTab.ts`
@@ -306,6 +328,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 
 - **Command mode (`!`) is STATE, not a text prefix, and it is a LADDER:** the mode is STATE, never a leading `!`: `composerInputStore.aiCommandMode` (`'off' | 'shell' | 'ai'`), read through `isShellCommandMode()`, `isAiCommandMode()`, `normalizeComposerCommandMode()` in `src/renderer/utils/shellCommandInput.ts`
 - **Run a shell command from the chat:** `dispatchShellCommand()`, `runShellCommand()`, `cancelShellCommand()`, `resolveCommandCwd()` in `src/renderer/services/shellCommand.ts`
+- **Running a shell code fence from an agent's reply:** `requestCodeFenceCommand()` / `CODE_FENCE_COMMAND_EVENT` in `src/renderer/services/codeFenceCommand.ts`, `isRunnableShellLanguage()` / `commandFromShellFence()` in `src/renderer/utils/shellCommandInput.ts`, drawn by `<CodeRunButton>`
 - **Ask the model for a shell command (AI command mode):** `requestAiCommand()`, `acceptAiCommand()`, `dismissAiCommand()` in `src/renderer/services/aiCommand.ts`; prompt in `src/prompts/ai-command.md`
 - **Shell tab completion:** `useTabCompletion()` in `src/renderer/hooks/input/useTabCompletion.ts` (terminal composer and command mode)
 - **Revealing output the user asked for, past a paused auto-scroll:** `requestTranscriptScrollToBottom(sessionId, tabId)` in `src/renderer/services/transcriptScroll.ts`
@@ -328,7 +351,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 
 - **Consulting another agent from a message (`@mention`):** `planCrossAgentMentions()`, `dispatchCrossAgentMentions()`, `dispatchCrossAgentMentionsForMessage()`, `queuedMentionFields()` in `src/renderer/services/crossAgentMentions.ts` (plan at submit, fire when the item is the agent's turn)
 - **Holding a mentioning turn open until its consult replies:** `holdTurnForConsults()`, `settleConsultHold()`, `withConsultPendingNote()` in `src/renderer/services/crossAgentConsultHold.ts`
-- **When a mention runs (parallel / consult first / hand-off):** `inferMentionTiming()` in `src/shared/crossAgentContext.ts`; `armMentionHandoff()`, `releaseMentionHandoff()`, `dropMentionHandoffs()` in `src/renderer/services/crossAgentHandoff.ts`
+- **When a mention runs (parallel / consult first / hand-off):** `inferMentionTiming()`, `parseMentionRoutingField()`, `isMentionRouting()` in `src/shared/crossAgentContext.ts`; `armMentionHandoff()`, `releaseMentionHandoff()`, `dropMentionHandoffs()` in `src/renderer/services/crossAgentHandoff.ts`
 - **An agent asking another agent (`maestro-cli ask`):** `runCrossAgentAsk()` in `src/renderer/services/crossAgentAsk.ts` (a question is `ask`, never `dispatch`)
 - **Marking an agent's own hand-off in its transcript (`dispatch` / `ask` from its shell):** `readCallerIdentity()`, `callerMessageFields()`, `isSelfDispatch()` in `src/shared/agentDelegation.ts`; `recordAgentDelegation()`, `settleAgentDelegation()` in `src/renderer/services/agentDelegation.ts`
 - **Running a consult (prompt, budgets, completion, Stop):** `createConsultService()` in `src/shared/maestro-lib/agents/consult.ts`; lineage and admission: `createRuntimeConsults()` in `src/shared/maestro-lib/runtime/consults.ts` (headless), `consultRefusal()` in `src/main/cross-agent/cross-agent-router.ts` (desktop)
@@ -363,6 +386,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Whether two subscriptions are the same visual trigger:** `triggerGroupKey(sub)` in `src/shared/cue/trigger-group-key.ts`
 - **How big a pipeline is on the canvas:** `pipelineCardBounds()`, `nodeFootprintWidth()`, `estimateNodeWidth()` in `src/renderer/components/CuePipelineEditor/utils/nodeFootprint.ts`
 - **Which pipelines belong to an agent:** `pipelinesForSession()`, `pipelineInvolvesSession()`, `pipelineNamesDeclaredBySession()` in `src/renderer/components/CuePipelineEditor/utils/pipelineMembership.ts`
+- **Where a pipeline is drawn (its one home agent):** `resolvePipelineHomes()` in `src/renderer/components/CuePipelineEditor/utils/pipelineMembership.ts`; cluster box geometry `agentClusterBounds()` in `nodeFootprint.ts`
 - **What a group chat does with a message it cannot send yet:** pure rules in `src/shared/groupChatQueueModel.ts`, driven by `src/main/group-chat/group-chat-queue.ts` (the queue is owned by MAIN; the renderer holds a mirror)
 - **How much work happened in a group chat:** `computeGroupChatActivity(entries)` in `src/shared/groupChatActivity.ts` (never the first-to-last message span)
 - **Bucketing Director's Notes bullets:** `bucketNarrativeItems()`, `shouldRenderBuckets()`, `buildNarrativeGroupLookup()` in `src/shared/directorNotesGrouping.ts`
@@ -386,6 +410,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Whether a surface is the topmost layer:** `useIsTopLayer(priority)` in `src/renderer/hooks/ui/useIsTopLayer.ts`
 - **Modal / find-bar ESC pill:** `<EscCloseButton>` in `src/renderer/components/ui/EscCloseButton.tsx`
 - **A modal default sized to the screen:** `viewportModalSize({ width, height })` in `src/renderer/utils/modalSizing.ts`
+- **A widget that floats over the whole desktop:** `createFloatingWidgetWindow()` in `src/main/floating-widgets/floating-widget-window.ts`, `publishStoreState()` / `mirrorStoreState()` in `src/renderer/utils/windowStoreMirror.ts`, `floatingWidgetsAvailable()` in `src/renderer/utils/floatingWidgetMode.ts`
 - **Audio/video playback:** media NEVER becomes a tab: `handleOpenFileTab()` in `src/renderer/hooks/tabs/internal/useFilePreviewTabHandlers.ts` diverts it to `useMediaPlaybackStore` and the one `FloatingMediaPlayer`; `file://` links go through `openFileUrl()` in `src/renderer/utils/openFileUrl.ts`
 - **Opening a clicked link:** `openUrl(url, { ctrlKey })` in `src/renderer/utils/openUrl.ts`, over `parseUrlRoutingHint()` / `isWebUrl()` / `stripUrlRoutingHint()` in `src/shared/urlRoutingHint.ts`
 - **Right-click menu on an image:** already app-wide via `<ImageContextMenuHost>` in `src/renderer/components/ImageContextMenuHost.tsx`; opt a surface out with `data-no-image-menu`
@@ -441,7 +466,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 
 #### Markdown, text, and fonts
 
-- **Render markdown:** `<Markdown preset="chat | document | wizard-bubble | release-notes">` from `src/renderer/components/Markdown/`; document map `createMarkdownComponents()` in `src/renderer/utils/markdownConfig.ts`
+- **Render markdown:** `<Markdown preset="chat | document | release-notes">` from `src/renderer/components/Markdown/`; document map `createMarkdownComponents()` in `src/renderer/utils/markdownConfig.ts`
 - **Markdown to plain text (list rows, previews):** `stripMarkdown()`, `flattenMarkdownTables()` in `src/shared/markdown.ts`
 - **Clickable task checkboxes in rendered markdown:** `toggleTaskCheckboxAtLine()` in `src/renderer/utils/markdownTasks.ts`, `rehypeSourceLine` in `src/renderer/components/Markdown/rehypeSourceLine.ts`, `onTaskToggle` on `createMarkdownComponents()`
 - **A pane that reads and edits a markdown document:** the File Preview stack, never a bare `<textarea>`: `<Markdown preset="document">` to read, `<MarkdownEditor>` from `src/renderer/components/FilePreview/markdownEditor` to write (`MemoryViewer` is the reference)
@@ -458,6 +483,15 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Saving the user's own font setup:** `captureTypographySnapshot()`, `typographySnapshotPatch()`, `typographySnapshotMatches()` in `src/shared/typographySnapshot.ts`; keys from `TYPOGRAPHY_SURFACE_LIST` in `src/shared/typography.ts`
 - **Font zoom on a reading pane:** `useFontScale(storageKey)` in `src/renderer/hooks/ui/useFontScale.ts`, `<FontScaleControl>` in `src/renderer/components/ui/FontScaleControl.tsx`, range math in `src/shared/scaleRange.ts`
 
+#### Dataview (Obsidian queries and DataviewJS)
+
+- **Parsing or running a Dataview query, and finding a note's Dataview blocks:** `parseQuery()`, `executeDql()`, `executeInlineDql()`, `extractDataviewBlocks()` in `src/shared/dataview/index.ts` (never import `src/shared/dataview/vendor/`)
+- **One markdown file to one Dataview page:** `parsePage()`, `parseRawPage()`, `finishPage()` in `src/shared/dataview/page.ts`
+- **The Dataview vault index (query, status, rebuild, change events):** `DataviewService`, `getDataviewService()` in `src/main/dataview/dataview-service.ts`
+- **Whether a DataviewJS block may run:** `dataviewJsRunPolicy()`, `isTrustedDataviewRoot()` in `src/shared/dataview/trust.ts`; `useDataviewJsRunPolicy()` in `src/renderer/hooks/file/useDataviewJsRunPolicy.ts`
+- **A message from the DataviewJS sandbox:** `parseSandboxMessage(raw, from)` in `src/shared/dataview/sandboxProtocol.ts`
+- **What counts as a wiki link, embed, or file path in markdown text:** `WIKI_LINK_PATTERN`, `IMAGE_EMBED_PATTERN`, `PATH_PATTERN` in `src/shared/fileLinkPatterns.ts`
+
 #### Layout, scroll, sizing, and hook utilities
 
 - **Following streaming output in a capped box:** `useStickToBottom(contentKey)` in `src/renderer/hooks/ui/useStickToBottom.ts`
@@ -466,6 +500,7 @@ Keep rationale OUT of this list. `npm run docs:verify` fails when an index line 
 - **Sizing a virtualized row the user's font decides:** `virtualizer.measureElement` + `data-index` and NO inline `height` (see `HistoryPanel`, `FileSearchModal`)
 - **Element width for JS-computed layout:** `useElementWidth(ref, enabled?)`, `useElementHeight(ref, enabled?)` in `src/renderer/hooks/ui/useElementWidth.ts`
 - **Keeping a floating menu on screen:** `useContextMenuPosition(menuRef, x, y)` in `src/renderer/hooks/ui/useContextMenuPosition.ts` (apply BOTH `maxHeight` and `overflowY: 'auto'`)
+- **How a floating surface looks (popover, menu, hover card, tooltip):** `elevatedSurfaceStyle(theme)`, `getElevatedSurfaceColors(colors)` in `src/renderer/utils/elevatedSurface.ts`
 - **Dropdown/tooltip anchored to a header element:** `useAnchoredMenuPosition(menuRef, anchorRef)` in `src/renderer/hooks/ui/useAnchoredMenuPosition.ts`, rendered via `createPortal(..., document.body)`
 - **A pane width the user sets by dragging:** `useResizablePanel()` in `src/renderer/hooks/ui/useResizablePanel.ts`; a pane inside another surface pairs it with `usePersistedPanelWidth()` and omits `settingsKey`
 - **A dropdown the user resizes by its bottom edge (never off screen):** `useResizableDropdownHeight()`, `fitDropdownHeight` in `src/renderer/hooks/ui/useResizableDropdownHeight.ts`

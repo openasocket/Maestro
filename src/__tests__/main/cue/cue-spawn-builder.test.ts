@@ -704,6 +704,67 @@ describe('cue-spawn-builder', () => {
 					expect(result.spec.command).not.toBe(process.execPath);
 				}
 			});
+
+			// #1872: a Cue run in the agent's own project root accepts claude's
+			// folder-trust prompt; any other folder must still fail loudly.
+			it('opts maestro-p into workspace trust when the run is in the agent project root', async () => {
+				mockGetAgentDefinition.mockReturnValue(claudeInteractiveAgentDef);
+
+				const result = await buildSpawnSpec(
+					createConfig({ enableMaestroP: true, maestroPMode: 'interactive' }),
+					'Hello world'
+				);
+
+				expect(result.ok).toBe(true);
+				if (result.ok) {
+					expect(result.spec.env.MAESTRO_P_ACCEPT_WORKSPACE_TRUST).toBe('1');
+				}
+			});
+
+			it('does not opt into workspace trust for a folder that is not the agent own', async () => {
+				mockGetAgentDefinition.mockReturnValue(claudeInteractiveAgentDef);
+
+				const result = await buildSpawnSpec(
+					createConfig({
+						enableMaestroP: true,
+						maestroPMode: 'interactive',
+						projectRoot: '/somewhere/else',
+					}),
+					'Hello world'
+				);
+
+				expect(result.ok).toBe(true);
+				if (result.ok) {
+					expect(result.spec.env.MAESTRO_P_ACCEPT_WORKSPACE_TRUST).toBeUndefined();
+				}
+			});
+
+			it('passes the workspace-trust opt-in to the remote maestro-p over SSH', async () => {
+				mockGetAgentDefinition.mockReturnValue(claudeInteractiveAgentDef);
+				mockWrapSpawnWithSsh.mockResolvedValue({
+					command: 'ssh',
+					args: ['user@host', 'maestro-p'],
+					cwd: '/projects/test',
+					customEnvVars: undefined,
+					prompt: undefined,
+					sshRemoteUsed: { id: 'r1', name: 'S', host: 'h' },
+				});
+
+				await buildSpawnSpec(
+					createConfig({
+						enableMaestroP: true,
+						maestroPMode: 'interactive',
+						sshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+						sshStore: sshStoreWithRemotes(),
+					}),
+					'Hello world'
+				);
+
+				const wrapConfig = mockWrapSpawnWithSsh.mock.calls[0][0] as {
+					customEnvVars?: Record<string, string>;
+				};
+				expect(wrapConfig.customEnvVars?.MAESTRO_P_ACCEPT_WORKSPACE_TRUST).toBe('1');
+			});
 		});
 	});
 

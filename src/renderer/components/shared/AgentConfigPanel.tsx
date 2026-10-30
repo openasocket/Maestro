@@ -33,6 +33,7 @@ import { AuthPathValueInput } from './AuthPathValueInput';
 import { EnvVarKeyInput } from './EnvVarKeyInput';
 import { BLANK_ENV_VAR_KEY } from '../../../shared/envVarCatalog';
 import { useKnownEnvVarKeys } from '../../hooks/agent/useKnownEnvVarKeys';
+import { elevatedSurfaceStyle } from '../../utils/elevatedSurface';
 
 const MAESTRO_P_INSTALL_URL = 'https://runmaestro.ai/maestro-p/';
 
@@ -228,10 +229,9 @@ function ModelTextInput({
 					{/* Custom dropdown */}
 					{isModelField && showDropdown && filteredModels.length > 0 && (
 						<div
-							className="absolute z-50 left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto rounded border shadow-lg"
+							className="absolute z-50 left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto rounded"
 							style={{
-								backgroundColor: theme.colors.bgMain,
-								borderColor: theme.colors.border,
+								...elevatedSurfaceStyle(theme),
 							}}
 						>
 							{filteredModels.map((model) => (
@@ -801,7 +801,7 @@ export function AgentConfigPanel({
 								type="text"
 								value={maestroPPath}
 								onChange={(e) => onMaestroPPathChange?.(e.target.value)}
-								onBlur={onMaestroPPathBlur}
+								onBlur={() => onMaestroPPathBlur?.()}
 								onClick={(e) => e.stopPropagation()}
 								placeholder={detectedMaestroPPath ?? '/path/to/maestro-p'}
 								className="w-full p-2 rounded border bg-transparent outline-none text-xs font-mono"
@@ -869,7 +869,7 @@ export function AgentConfigPanel({
 						type="text"
 						value={readOpenCodeAgentArg(customArgs)}
 						onChange={(e) => onCustomArgsChange(writeOpenCodeAgentArg(customArgs, e.target.value))}
-						onBlur={onCustomArgsBlur}
+						onBlur={() => onCustomArgsBlur()}
 						onClick={(e) => e.stopPropagation()}
 						placeholder="build"
 						className="w-full p-2 rounded border bg-transparent outline-none text-xs font-mono"
@@ -899,7 +899,10 @@ export function AgentConfigPanel({
 						type="text"
 						value={customArgs}
 						onChange={(e) => onCustomArgsChange(e.target.value)}
-						onBlur={onCustomArgsBlur}
+						// Called with no arguments, never handed the FocusEvent: a parent that
+						// shares one persist function across these blur props (Director's Notes)
+						// would store the event and fail the settings IPC write (MAESTRO-11C).
+						onBlur={() => onCustomArgsBlur()}
 						onClick={(e) => e.stopPropagation()}
 						placeholder="--flag value --another-flag"
 						className="flex-1 p-2 rounded border bg-transparent outline-none text-xs font-mono"
@@ -949,10 +952,9 @@ export function AgentConfigPanel({
 										{/* Tooltip */}
 										{showingTooltip === envVar.key && (
 											<div
-												className="absolute left-1/2 bottom-full mb-1 z-50 p-3 rounded shadow-lg text-xs whitespace-normal leading-relaxed"
+												className="absolute left-1/2 bottom-full mb-1 z-50 p-3 rounded text-xs whitespace-normal leading-relaxed"
 												style={{
-													backgroundColor: theme.colors.bgMain,
-													border: `1px solid ${theme.colors.border}`,
+													...elevatedSurfaceStyle(theme),
 													color: theme.colors.textMain,
 													width: '320px',
 													transform: 'translateX(-50%)',
@@ -1022,7 +1024,7 @@ export function AgentConfigPanel({
 									value={value}
 									knownAuthDirs={knownAuthDirs}
 									onChange={(updatedValue) => onEnvVarValueChange(key, updatedValue, enabled)}
-									onBlur={onEnvVarsBlur}
+									onBlur={() => onEnvVarsBlur()}
 									className="flex-[2] p-2 rounded border bg-transparent outline-none text-xs font-mono"
 									containerClassName="flex-[2] min-w-0"
 									style={{

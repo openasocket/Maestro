@@ -2,7 +2,7 @@
  * Commands domain WebSocket message handlers.
  *
  * Extracted from WebSocketMessageHandler.ts. Handles: send_command, switch_mode,
- * select_session.
+ * interrupt_turn, select_session, cross_agent_ask.
  */
 
 import { logger } from '../../../utils/logger';
@@ -17,6 +17,8 @@ import {
 	withdrawDispatchTicket,
 } from '../../auth/transport-actor';
 import { LOG_CONTEXT } from './shared';
+import { interruptTurnFailure } from '../../../../shared/turnInterrupt';
+import { parseMentionRoutingField } from '../../../../shared/crossAgentContext';
 import type { WebClient, WebClientMessage, MessageHandlerContext } from './types';
 
 /**
@@ -88,6 +90,16 @@ export function handleSendCommand(
 		return;
 	}
 	const effectiveCommand = command ?? '';
+
+	// `dispatch --routing`: a routing the caller named but that is not one is
+	// refused, never dropped, so the prompt cannot run on the wording's routing
+	// behind a caller who asked for another.
+	const routingField = parseMentionRoutingField(message.mentionRouting);
+	if (!routingField.ok) {
+		ctx.sendError(client, routingField.error, { sessionId });
+		return;
+	}
+	const mentionRouting = routingField.routing;
 
 	// Get session details to check state and determine how to handle
 	const sessionDetail = ctx.callbacks.getSessionDetail?.(sessionId);
@@ -207,6 +219,7 @@ export function handleSendCommand(
 				force,
 				images,
 				background,
+				mentionRouting,
 				delegation,
 				dispatchTicket
 			)
@@ -357,6 +370,61 @@ export function handleSwitchMode(
 		})
 		.catch((error) => {
 			ctx.sendError(client, `Failed to switch mode: ${error.message}`);
+		});
+}
+
+/**
+ * Handle interrupt_turn message - stop a running turn (`maestro-cli interrupt`).
+ *
+ * No `tabId` is the agent-level Stop the desktop pill runs (every busy tab);
+ * a `tabId` narrows it to that tab. The reply is the renderer's
+ * `InterruptTurnResult` plus main's `exited` read of the process table, so the
+ * caller knows whether anything ran and whether it has stopped. A call with
+ * nothing to stop succeeds with `wasBusy: false`.
+ */
+export function handleInterruptTurn(
+	ctx: MessageHandlerContext,
+	client: WebClient,
+	message: WebClientMessage
+): void {
+	const sessionId = typeof message.sessionId === 'string' ? message.sessionId : '';
+	const tabId = typeof message.tabId === 'string' && message.tabId ? message.tabId : undefined;
+
+	const reply = (payload: Record<string, unknown>) => {
+		ctx.send(client, { type: 'interrupt_turn_result', ...payload, requestId: message.requestId });
+	};
+
+	if (!sessionId) {
+		reply({ success: false, error: 'Missing sessionId' });
+		return;
+	}
+	if (!ctx.callbacks.interruptSession) {
+		reply({
+			...interruptTurnFailure(
+				sessionId,
+				tabId ?? null,
+				'RENDERER_UNAVAILABLE',
+				'Interrupting a turn is not configured'
+			),
+		});
+		return;
+	}
+
+	logger.info(
+		`[Web] Received interrupt_turn: session=${sessionId}, tab=${tabId ?? 'all'}`,
+		LOG_CONTEXT
+	);
+	ctx.callbacks
+		.interruptSession(sessionId, tabId)
+		.then((result) => reply({ ...result }))
+		.catch((error) => {
+			ctx.reportHandlerError(
+				client,
+				error,
+				'interrupt_turn',
+				{ sessionId, tabId, requestId: message.requestId },
+				'Failed to interrupt turn'
+			);
 		});
 }
 

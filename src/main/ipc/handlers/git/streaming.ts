@@ -7,6 +7,7 @@ import { getSshRemoteById } from '../../../stores';
 import { withIpcErrorLogging } from '../../../utils/ipcHandler';
 import { getShellPath } from '../../../runtime/getShellPath';
 import { captureMessage } from '../../../utils/sentry';
+import { sendToInvoker, type InvokerEvent } from '../../../utils/safe-send';
 import { processCarriageReturns, stripAnsiCodes } from '../../../../shared/stringUtils';
 import {
 	GIT_STREAMING_OPERATIONS,
@@ -84,7 +85,7 @@ function plainGitErrorText(stderr: string): string {
  * arrives and resolving once the process exits.
  */
 async function runStreamingGitCommand(
-	event: Electron.IpcMainInvokeEvent,
+	event: InvokerEvent,
 	options: {
 		runId: string;
 		operation: GitStreamingOperation;
@@ -192,7 +193,7 @@ async function runStreamingGitCommand(
 }
 
 async function spawnStreamingGitCommand(
-	event: Electron.IpcMainInvokeEvent,
+	event: InvokerEvent,
 	options: {
 		runId: string;
 		operation: GitStreamingOperation;
@@ -246,8 +247,7 @@ async function spawnStreamingGitCommand(
 	}
 
 	const send = (chunk: string, stream: 'stdout' | 'stderr') => {
-		if (event.sender.isDestroyed()) return;
-		event.sender.send('git:commandOutput', { runId, stream, chunk });
+		sendToInvoker(event, 'git:commandOutput', { runId, stream, chunk });
 	};
 
 	const handle = execFileStreaming(command, args, {

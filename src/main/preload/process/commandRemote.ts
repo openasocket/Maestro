@@ -1,5 +1,7 @@
 import { ipcRenderer } from 'electron';
 import type { AgentDelegationNotice } from '../../../shared/agentDelegation';
+import type { InterruptTurnResult } from '../../../shared/turnInterrupt';
+import type { MentionRouting } from '../../../shared/crossAgentContext';
 import type { ManagedDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 
 /**
@@ -30,8 +32,11 @@ export function createCommandRemoteApi() {
 		 *
 		 * `dispatchTicket` is the host-minted ticket the spawn handler claims to
 		 * bind the transport that sent the dispatch; the renderer echoes it on the
-		 * spawn config unread. Both sit BEFORE the receipt channel because main
-		 * appends that channel last.
+		 * spawn config unread.
+		 *
+		 * `mentionRouting` is the `@mention` routing `maestro-cli dispatch --routing`
+		 * set; it rides in the slot ahead of them. All three sit BEFORE the receipt
+		 * channel because main appends that channel last.
 		 */
 		onRemoteCommand: (
 			callback: (
@@ -42,6 +47,7 @@ export function createCommandRemoteApi() {
 				force?: boolean,
 				images?: string[],
 				background?: boolean,
+				mentionRouting?: MentionRouting,
 				delegation?: ManagedDelegationContext,
 				dispatchTicket?: string,
 				receiptChannel?: string
@@ -57,6 +63,7 @@ export function createCommandRemoteApi() {
 				force?: boolean,
 				images?: string[],
 				background?: boolean,
+				mentionRouting?: MentionRouting,
 				delegation?: ManagedDelegationContext,
 				dispatchTicket?: string,
 				receiptChannel?: string
@@ -69,6 +76,7 @@ export function createCommandRemoteApi() {
 					force,
 					imageCount: images?.length ?? 0,
 					background,
+					mentionRouting,
 					delegated: delegation !== undefined,
 					ticketed: dispatchTicket !== undefined,
 					receiptChannel,
@@ -82,6 +90,7 @@ export function createCommandRemoteApi() {
 						force,
 						images,
 						background,
+						mentionRouting,
 						delegation,
 						dispatchTicket,
 						receiptChannel
@@ -237,13 +246,33 @@ export function createCommandRemoteApi() {
 		},
 
 		/**
-		 * Subscribe to remote interrupt from web interface
-		 * Forwards to desktop's handleInterrupt logic
+		 * Subscribe to remote stops (REST interrupt route, `maestro-cli interrupt`).
+		 * Forwards to `interruptTurn()`, the function the desktop Stop runs.
+		 * `tabId` narrows the stop to one tab; absent, the whole agent stops.
+		 * `responseChannel` is the reply channel main mints per request; answer it
+		 * with `sendRemoteInterruptResponse`.
 		 */
-		onRemoteInterrupt: (callback: (sessionId: string) => void): (() => void) => {
-			const handler = (_: unknown, sessionId: string) => callback(sessionId);
+		onRemoteInterrupt: (
+			callback: (sessionId: string, tabId?: string, responseChannel?: string) => void
+		): (() => void) => {
+			const handler = (_: unknown, sessionId: string, tabId?: unknown, responseChannel?: unknown) =>
+				callback(
+					sessionId,
+					typeof tabId === 'string' ? tabId : undefined,
+					typeof responseChannel === 'string' ? responseChannel : undefined
+				);
 			ipcRenderer.on('remote:interrupt', handler);
 			return () => ipcRenderer.removeListener('remote:interrupt', handler);
+		},
+
+		/** Answer a `remote:interrupt` channel with what the stop did. */
+		sendRemoteInterruptResponse: (responseChannel: string, result: InterruptTurnResult): void => {
+			log('Sending remote interrupt response', {
+				responseChannel,
+				success: result?.success,
+				wasBusy: result?.wasBusy,
+			});
+			ipcRenderer.send(responseChannel, result);
 		},
 
 		/**

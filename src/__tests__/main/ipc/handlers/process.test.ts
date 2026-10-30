@@ -755,6 +755,30 @@ describe('process IPC handlers', () => {
 			);
 		});
 
+		it('derives the tab identity from the process id when the spawn sends no tabId', async () => {
+			// Desktop turns spawn as `{agentId}-ai-{tabId}` and never send `tabId`.
+			mockAgentDetector.getAgent.mockResolvedValue({ id: 'opencode', requiresPty: false });
+			mockProcessManager.spawn.mockReturnValue({ pid: 2002, success: true });
+
+			const handler = handlers.get('process:spawn');
+			await handler!({} as any, {
+				sessionId: 'agent-identity-ai-tab-8-fp-1700000000000',
+				toolType: 'opencode',
+				cwd: '/test',
+				command: 'opencode',
+				args: [],
+			});
+
+			expect(mockProcessManager.spawn).toHaveBeenCalledWith(
+				expect.objectContaining({
+					customEnvVars: expect.objectContaining({
+						MAESTRO_CALLER_AGENT_ID: 'agent-identity',
+						MAESTRO_CALLER_TAB_ID: 'tab-8',
+					}),
+				})
+			);
+		});
+
 		/**
 		 * A dispatched turn (MRC-07-04C): the record of the operation that
 		 * dispatched it arrives on the spawn config, the handler stamps the CHILD
@@ -1429,6 +1453,45 @@ describe('process IPC handlers', () => {
 					})
 				);
 				expect(spawnCall.customEnvVars?.NODE_PATH).toBeUndefined();
+			});
+
+			// An agent that only ran `claude --print` never saw claude's trust prompt,
+			// so after a switch to TUI every turn failed with exit 7 (#1872).
+			it.each([
+				['accepts', '/projects/app', '1'],
+				['does not accept', '/Users/me', undefined],
+			])("%s claude's folder trust when the TUI spawn cwd is %s", async (_label, cwd, expected) => {
+				const maestroPPath = path.join(process.cwd(), 'src', 'maestro-p', 'index.ts');
+				mockAgentDetector.getAgent.mockResolvedValue(claudeCodeAgent);
+				mockProcessManager.spawn.mockReturnValue({ pid: 4246, success: true });
+				mockSessionsStore.get.mockImplementation((key: string, defaultValue: unknown) => {
+					if (key === 'sessions') {
+						return [
+							{
+								id: 'session-tui',
+								cwd: '/projects/app',
+								enableMaestroP: true,
+								maestroPMode: 'interactive',
+								maestroPPath,
+							},
+						];
+					}
+					return defaultValue;
+				});
+
+				const handler = handlers.get('process:spawn');
+				await handler!({} as any, {
+					sessionId: 'session-tui-ai-tab-1',
+					toolType: 'claude-code',
+					cwd,
+					command: '/usr/local/bin/claude',
+					args: claudeCodeAgent.args,
+					prompt: 'hi',
+				});
+
+				const spawnCall = mockProcessManager.spawn.mock.calls[0][0];
+				expect(spawnCall.args[0]).toBe(maestroPPath);
+				expect(spawnCall.customEnvVars?.MAESTRO_P_ACCEPT_WORKSPACE_TRUST).toBe(expected);
 			});
 
 			// Auto Run (and goal iterations) spawn as `{agentId}-batch-{ts}` and send no

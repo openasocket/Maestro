@@ -37,10 +37,16 @@ import {
 	CUE_BUNDLE_AGENT_FIELDS,
 	CUE_BUNDLE_CLAUDE_MEMORY_DIR,
 	CUE_BUNDLE_LAYOUT_PATH,
+	CUE_BUNDLE_LOCAL_AGENT_FIELDS,
+	CUE_BUNDLE_LOCAL_PATH,
 	CUE_BUNDLE_MANIFEST_PATH,
 	CUE_BUNDLE_README_PATH,
+	type CueBundleAgentChange,
 	type CueBundleAgentSettings,
 	type CueBundleKind,
+	type CueBundleLocalAgent,
+	type CueBundleLocalAgentField,
+	type CueBundleLocalData,
 	type CueBundleManifest,
 } from '../../../shared/cue-bundle-types';
 import { CUE_CONFIG_PATH, PLAYBOOKS_DIR } from '../../../shared/maestro-paths';
@@ -80,12 +86,18 @@ import { resolveCueConfigPath } from '../config/cue-config-repository';
 import { loadPipelineLayout, savePipelineLayout } from '../pipeline-layout-store';
 import { upsertPipeline, validatePipelineEntry } from '../pipeline-layout-mutations';
 import {
+	parseCueBundleLocalData,
 	readCueBundleArchive,
 	validateCueBundleArchive,
 	type CueBundleArchive,
 	type CueBundleValidationIssue,
 } from './cue-bundle-validator';
-import { isForbiddenBundleEntry, isWithin, sortedUnique } from './cue-bundle-exporter';
+import {
+	isForbiddenBundleEntry,
+	isWithin,
+	sortedUnique,
+	withoutManagedAuthorityEnv,
+} from './cue-bundle-exporter';
 import {
 	MCP_CONFIG_FILE,
 	isClaudeMemoryFileName,
@@ -194,8 +206,20 @@ export interface CueBundleImportOptions {
 	bundlePath: string;
 	/** Target Maestro data directory. Created when missing (and logged). */
 	dataDir: string;
-	/** Bundle workspace key -> absolute local folder. Every key needs one. */
+	/**
+	 * Bundle workspace key -> absolute local folder. Every key needs one,
+	 * except that an applied exact copy fills in a missing key with the folder
+	 * it came from, when that folder exists here.
+	 */
 	workspaces: Record<string, string>;
+	/**
+	 * Apply an exact copy's `local.json` (secret values, binary paths, SSH and
+	 * other providers' settings). Defaults to on; ignored for a bundle
+	 * without one.
+	 */
+	useLocal?: boolean;
+	/** Put the agents the import creates in this Left Bar group. */
+	groupId?: string;
 	/** Version of the program importing (the CLI passes its own). */
 	runningVersion: string;
 	/** Plan and report only; write nothing. */
@@ -248,7 +272,7 @@ export interface CueBundleImportHost {
 	 * Add `created` and replace `updated` (matched by id). Called last, after
 	 * every file is written; a throw rolls the files back.
 	 */
-	applyAgents(change: { created: SessionInfo[]; updated: SessionInfo[] }): Promise<void>;
+	applyAgents(change: CueBundleAgentChange): Promise<void>;
 }
 
 export type CueBundleImportConflictKind =
@@ -327,8 +351,8 @@ export interface CueBundleImportSecret {
 	 * up exactly as the engine and the CLI will at launch.
 	 */
 	set: boolean;
-	/** Where the value was found, when it was. */
-	source?: SecretSource;
+	/** Where the value was found, when it was: `bundle` when an exact copy carries it. */
+	source?: SecretSource | 'bundle';
 	/** Why a secret file that exists cannot be used (names the path, never the value). */
 	problem?: string;
 	/** Who reads it: `agent:<name>` or `webhook:<subscription>`. */
@@ -342,6 +366,25 @@ export interface CueBundleImportSecret {
 	 * secrets are read by the engine itself, so the allowlist does not apply.
 	 */
 	passesServerAllowlist?: boolean;
+}
+
+/** What an exact copy sets on one agent, so the user sees it before the write. */
+export interface CueBundleImportLocalAgent {
+	agentId: string;
+	agentName: string;
+	/** Agent fields `local.json` sets (each one replaced, absent ones cleared). */
+	fields: string[];
+	/** Binaries the agent will run from this copy: `customPath`, `customProviderPath`, `maestroPPath`. */
+	binaries: string[];
+}
+
+/** An exact copy's `local.json`, as the import uses it. */
+export interface CueBundleImportLocal {
+	/** False when the bundle has one and the caller declined it (`useLocal: false`). */
+	applied: boolean;
+	/** Workspace key -> folder filled in from the copy, for keys the caller left unmapped. */
+	workspaces: Record<string, string>;
+	agents: CueBundleImportLocalAgent[];
 }
 
 export interface CueBundleImportAgentPath {
@@ -369,6 +412,8 @@ export interface CueBundleImportPlan {
 	managed: CueBundleImportManagedReport[];
 	conflicts: CueBundleImportConflict[];
 	warnings: string[];
+	/** Present when the bundle is an exact copy. */
+	local?: CueBundleImportLocal;
 }
 
 export interface CueBundleImportResult {
@@ -422,6 +467,86 @@ function asStringList(value: unknown): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function existingAbsoluteDir(folder: unknown): folder is string {
+	if (typeof folder !== 'string' || !path.isAbsolute(folder)) return false;
+	return fs.statSync(folder, { throwIfNoEntry: false })?.isDirectory() === true;
+}
+
+/** Binary paths an exact copy can set, listed in the plan before anything is written. */
+const LOCAL_BINARY_FIELDS = ['customPath', 'customProviderPath', 'maestroPPath'] as const;
+
+const isNonEmptyString = (value: unknown) => typeof value === 'string' && value.length > 0;
+const isStringRecord = (value: unknown) =>
+	isRecord(value) && Object.values(value).every((v) => typeof v === 'string');
+
+/** The shape each exact-copy field must have before it is written to an agent. */
+const LOCAL_FIELD_SHAPES: Record<CueBundleLocalAgentField, (value: unknown) => boolean> = {
+	customEnvVars: isStringRecord,
+	customEnvVarsDisabled: isStringRecord,
+	customPath: isNonEmptyString,
+	customProviderPath: isNonEmptyString,
+	maestroPPath: isNonEmptyString,
+	sessionSshRemoteConfig: (v) => isRecord(v) && typeof v.enabled === 'boolean',
+	additionalDirectories: (v) =>
+		Array.isArray(v) && v.every((d) => isRecord(d) && typeof d.path === 'string'),
+	worktreeConfig: (v) => isRecord(v) && typeof v.basePath === 'string',
+	providerOverrides: isRecord,
+	bookmarked: (v) => typeof v === 'boolean',
+};
+
+/** The one line an exact copy's authority-shaped env is reported on; the names were left out. */
+function authorityDroppedWarning(agentName: string, names: readonly string[]): string {
+	return `Agent "${agentName}": the exact copy sets ${names.join(', ')}, which look like managed grants or enrollment; left out.`;
+}
+
+/**
+ * Every field an exact copy sets on one agent: all of
+ * {@link CUE_BUNDLE_LOCAL_AGENT_FIELDS}, an absent one as `undefined` so it
+ * clears the field. A value of the wrong shape is left out with a warning;
+ * env vars go through the same sanitizer as a bundle's portable ones.
+ */
+function localAgentFields(
+	local: CueBundleLocalAgent,
+	agentName: string,
+	warnings: string[]
+): Record<CueBundleLocalAgentField, unknown> {
+	const out = {} as Record<CueBundleLocalAgentField, unknown>;
+	for (const field of CUE_BUNDLE_LOCAL_AGENT_FIELDS) {
+		const value = local[field];
+		if (value === undefined) {
+			out[field] = undefined;
+		} else if (!LOCAL_FIELD_SHAPES[field](value)) {
+			out[field] = undefined;
+			warnings.push(`Agent "${agentName}": the exact copy's ${field} is not valid; left out.`);
+		} else if (field === 'customEnvVars' || field === 'customEnvVarsDisabled') {
+			// A grant, a lease or an enrollment token never comes in from an
+			// archive, not even an exact copy's: the rule the exporter holds.
+			const authority = withoutManagedAuthorityEnv(field, value);
+			if (authority.dropped.length > 0) {
+				warnings.push(authorityDroppedWarning(agentName, authority.dropped));
+			}
+			const { sanitized, droppedNames } = sanitizeCustomEnvVars(
+				authority.value as Record<string, string>
+			);
+			if (droppedNames.length > 0) {
+				warnings.push(
+					`Agent "${agentName}": dropped environment variable${droppedNames.length === 1 ? '' : 's'} ${droppedNames.join(', ')} (invalid name or blocked).`
+				);
+			}
+			out[field] = Object.keys(sanitized).length > 0 ? sanitized : undefined;
+		} else if (field === 'providerOverrides') {
+			const authority = withoutManagedAuthorityEnv(field, value);
+			if (authority.dropped.length > 0) {
+				warnings.push(authorityDroppedWarning(agentName, authority.dropped));
+			}
+			out[field] = authority.value;
+		} else {
+			out[field] = value;
+		}
+	}
+	return out;
 }
 
 function readIfExists(filePath: string): Buffer | null {
@@ -662,6 +787,12 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 			{ entries: forbidden }
 		);
 	}
+	// An exact copy's machine data, unless the caller declined it. The validator
+	// has already proved it parses.
+	const localData: CueBundleLocalData | undefined =
+		manifest.local && options.useLocal !== false
+			? parseCueBundleLocalData(entries.get(manifest.local)!)
+			: undefined;
 	warnings.push(...(manifest.warnings ?? []), ...validation.warnings.map((w) => w.message));
 
 	let layoutEntry: CuePipeline | undefined;
@@ -723,7 +854,16 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 		: readIfExists(path.join(dataDir, 'maestro-sessions.json'));
 
 	// ─── Workspaces ──────────────────────────────────────────────────────────
-	const unmapped = manifest.workspaces.filter((ws) => !options.workspaces[ws.key]);
+	/** Keys the caller left unmapped that an exact copy maps to the folder it came from. */
+	const localWorkspaces: Record<string, string> = {};
+	for (const ws of manifest.workspaces) {
+		const folder = localData?.workspaces[ws.key];
+		if (!options.workspaces[ws.key] && folder && existingAbsoluteDir(folder)) {
+			localWorkspaces[ws.key] = path.resolve(folder);
+		}
+	}
+	const workspaceFolders = { ...localWorkspaces, ...options.workspaces };
+	const unmapped = manifest.workspaces.filter((ws) => !workspaceFolders[ws.key]);
 	if (unmapped.length > 0) {
 		throw new CueBundleImportError(
 			'WORKSPACE_UNMAPPED',
@@ -734,7 +874,7 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 	const roots = new Map<string, string>();
 	const missing: Array<{ key: string; path: string; gitRemote?: string; gitRef?: string }> = [];
 	for (const ws of manifest.workspaces) {
-		const mapped = options.workspaces[ws.key];
+		const mapped = workspaceFolders[ws.key];
 		if (!path.isAbsolute(mapped)) {
 			throw new CueBundleImportError(
 				'INVALID_OPTIONS',
@@ -913,6 +1053,11 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 	const nextSessions = [...existingSessions] as Array<SessionInfo & Record<string, unknown>>;
 	const bundleAgentIds = new Set(manifest.agents.map((a) => a.id));
 	const autoRunFolders = new Map<string, string>();
+	/** Agent id -> the out-of-workspace Auto Run folder an exact copy restores, for its documents. */
+	const localAutoRunFolders = new Map<string, string>();
+	const localReports: CueBundleImportLocalAgent[] = [];
+	/** Env var names an applied exact copy gives some agent a value for. */
+	const localEnvNames = new Set<string>();
 	/**
 	 * Workspace key -> secrets its bundled `.mcp.json` references. Read from the
 	 * file itself, not only from the agents' `env.required`, so a bundle
@@ -940,9 +1085,18 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 			continue;
 		}
 		const root = roots.get(settings.workspace)!;
-		const cwd = settings.cwd
-			? containedTarget(root, settings.cwd, `Agent "${settings.name}" working directory`)
-			: realpathOrResolve(root);
+		const localAgent: CueBundleLocalAgent | undefined = localData?.agents[agent.id];
+		// An exact copy restores a working directory outside the project root,
+		// which the portable settings cannot name, when it exists here.
+		const localCwd =
+			localAgent?.cwd && existingAbsoluteDir(localAgent.cwd)
+				? path.resolve(localAgent.cwd)
+				: undefined;
+		const cwd =
+			localCwd ??
+			(settings.cwd
+				? containedTarget(root, settings.cwd, `Agent "${settings.name}" working directory`)
+				: realpathOrResolve(root));
 		if (!fs.existsSync(cwd)) {
 			warnings.push(`Agent "${settings.name}" works in ${cwd}, which does not exist yet.`);
 		}
@@ -958,11 +1112,16 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 					)
 				: realpathOrResolve(autoRoot);
 		} else if (settings.autoRun && 'bundlePath' in settings.autoRun) {
-			autoRunFolderPath = containedTarget(
-				dataDir,
-				`autorun/${agent.id}`,
-				`Agent "${settings.name}" Auto Run folder`
-			);
+			if (localAgent?.autoRunFolderPath && path.isAbsolute(localAgent.autoRunFolderPath)) {
+				autoRunFolderPath = path.resolve(localAgent.autoRunFolderPath);
+				localAutoRunFolders.set(agent.id, autoRunFolderPath);
+			} else {
+				autoRunFolderPath = containedTarget(
+					dataDir,
+					`autorun/${agent.id}`,
+					`Agent "${settings.name}" Auto Run folder`
+				);
+			}
 		}
 		if (autoRunFolderPath) autoRunFolders.set(agent.id, autoRunFolderPath);
 
@@ -981,6 +1140,22 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 		}
 		const customEnvVars =
 			Object.keys(sanitized.sanitized).length > 0 ? sanitized.sanitized : undefined;
+
+		const localFields = localAgent
+			? localAgentFields(localAgent, settings.name, warnings)
+			: undefined;
+		const localEnv = localFields?.customEnvVars as Record<string, string> | undefined;
+		if (localFields) {
+			for (const name of Object.keys(localEnv ?? {})) localEnvNames.add(name);
+			localReports.push({
+				agentId: agent.id,
+				agentName: settings.name,
+				fields: CUE_BUNDLE_LOCAL_AGENT_FIELDS.filter((f) => localFields[f] !== undefined),
+				binaries: LOCAL_BINARY_FIELDS.flatMap((f) =>
+					typeof localFields[f] === 'string' ? [localFields[f] as string] : []
+				),
+			});
+		}
 
 		// The workspace root is the agent's project root even when it works in a
 		// subfolder, the way the desktop records an agent created in a project.
@@ -1048,20 +1223,32 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 			nudgeMessage: settings.nudgeMessage,
 			enableMaestroP: settings.enableMaestroP,
 			maestroPMode: settings.maestroPMode,
+			contextWindowSource: settings.contextWindowSource,
+			retryOnAvailabilityErrors: settings.retryOnAvailabilityErrors,
+			retryOnTokenExhaustion: settings.retryOnTokenExhaustion,
+			codexAutoResetOnExhaustion: settings.codexAutoResetOnExhaustion,
+			codexTransport: settings.codexTransport,
+			fileTreeAutoRefreshInterval: settings.fileTreeAutoRefreshInterval,
+			documentGraphLayout: settings.documentGraphLayout,
 			customEnvVars,
 			// Names only. The CLI and Cue resolve them at launch from systemd
 			// credentials, /run/secrets or the environment, for this agent alone.
 			// A Claude agent also needs what its workspace's `.mcp.json` expands;
-			// no other provider reads that file.
-			requiredSecrets: requiredSecretNames([
-				...asStringList(settings.env?.required),
-				...(settings.toolType === 'claude-code'
-					? (mcpSecretsByWorkspace.get(settings.workspace) ?? [])
-					: []),
-			]),
+			// no other provider reads that file. A name an exact copy gives a value
+			// is in the agent's own env instead.
+			requiredSecrets: requiredSecretNames(
+				[
+					...asStringList(settings.env?.required),
+					...(settings.toolType === 'claude-code'
+						? (mcpSecretsByWorkspace.get(settings.workspace) ?? [])
+						: []),
+				].filter((name) => !localEnv || !(name in localEnv))
+			),
 			// Ids only, and only the ones the host policy approved above.
 			managedCredentialRefs: approvedRefs,
 		} satisfies Record<(typeof CUE_BUNDLE_AGENT_FIELDS)[number], unknown>;
+		// The exact copy's own env wins over the portable values.
+		const fields = localFields ? { ...bundleFields, ...localFields } : bundleFields;
 		const sameName = existingSessions.find(
 			(s) => s.id !== agent.id && s.name.toLowerCase() === settings.name.toLowerCase()
 		);
@@ -1077,7 +1264,10 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 				target: agent.id,
 				message: `Agent ${agent.id} ("${nextSessions[existingIndex].name}") already exists`,
 			});
-			nextSessions[existingIndex] = { ...nextSessions[existingIndex], ...bundleFields };
+			nextSessions[existingIndex] = {
+				...nextSessions[existingIndex],
+				...fields,
+			} as SessionInfo & Record<string, unknown>;
 		} else {
 			nextSessions.push({
 				...buildNewAgentRecord(
@@ -1087,12 +1277,13 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 						toolType: settings.toolType,
 						cwd,
 						autoRunFolderPath: bundleFields.autoRunFolderPath,
+						groupId: options.groupId,
 						saveToHistory,
 						showThinking,
 					},
 					{ generateId: generateUUID }
 				),
-				...bundleFields,
+				...fields,
 				claudeInteractive: newAgentClaudeInteractive(settings.toolType),
 			} as SessionInfo & Record<string, unknown>);
 		}
@@ -1104,7 +1295,8 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 			cwd,
 			action: existingIndex >= 0 ? 'update' : 'create',
 		});
-		for (const name of settings.env?.machineSpecific ?? []) {
+		// An exact copy carries these values.
+		for (const name of localFields ? [] : (settings.env?.machineSpecific ?? [])) {
 			warnings.push(
 				`Agent "${settings.name}" needs ${name} set to a local path; set it after import.`
 			);
@@ -1139,6 +1331,7 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 		if (
 			source === CUE_BUNDLE_README_PATH ||
 			source === CUE_BUNDLE_MANIFEST_PATH ||
+			source === CUE_BUNDLE_LOCAL_PATH ||
 			source === CUE_BUNDLE_LAYOUT_PATH ||
 			settingsPaths.has(source) ||
 			cueConfigPaths.has(source)
@@ -1193,10 +1386,14 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 		}
 		const auto = /^autorun\/([^/]+)\/(.+)$/.exec(source);
 		if (auto && bundleAgentIds.has(auto[1])) {
+			// An exact copy puts the documents back in the folder they came from.
+			const localFolder = localAutoRunFolders.get(auto[1]);
 			planFile(
 				'autorun',
 				source,
-				containedTarget(dataDir, `autorun/${auto[1]}/${auto[2]}`, source),
+				localFolder
+					? containedTarget(localFolder, auto[2], source)
+					: containedTarget(dataDir, `autorun/${auto[1]}/${auto[2]}`, source),
 				bytes
 			);
 			continue;
@@ -1458,12 +1655,20 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 		// The same lookup the engine and the CLI make at launch, so a secret
 		// supplied only as a file is not reported missing. The value is dropped.
 		const lookup = lookupSecret(name, { env, runSecretsDir: options.runSecretsDir });
+		const usedBy = [...secretUsers.get(name)!].sort();
+		// An agent's own env carries the value an exact copy restored. A webhook
+		// secret is read by the engine, never from an agent's env.
+		const fromCopy =
+			lookup.status !== 'found' &&
+			localEnvNames.has(name) &&
+			!usedBy.some((user) => user.startsWith('webhook:'));
 		const secret: CueBundleImportSecret = {
 			name,
-			set: lookup.status === 'found',
-			usedBy: [...secretUsers.get(name)!].sort(),
+			set: lookup.status === 'found' || fromCopy,
+			usedBy,
 		};
 		if (lookup.status === 'found') secret.source = lookup.source;
+		else if (fromCopy) secret.source = 'bundle';
 		if (lookup.status === 'unusable') {
 			secret.problem = describeSecretProblem({ name, ...lookup });
 		}
@@ -1493,6 +1698,15 @@ async function buildPlan(options: CueBundleImportOptions): Promise<InternalPlan>
 		managed: managedReports,
 		conflicts,
 		warnings: [...new Set(warnings)],
+		...(manifest.local
+			? {
+					local: {
+						applied: !!localData,
+						workspaces: localWorkspaces,
+						agents: localReports,
+					},
+				}
+			: {}),
 	};
 	return {
 		plan,
@@ -1601,7 +1815,11 @@ export async function importCueBundle(
 			const byId = new Map((internal.sessionsData.sessions ?? []).map((s) => [s.id, s]));
 			const pick = (action: CueBundleImportAgent['action']) =>
 				plan.agents.filter((a) => a.action === action).map((a) => byId.get(a.id)!);
-			await options.host.applyAgents({ created: pick('create'), updated: pick('update') });
+			await options.host.applyAgents({
+				created: pick('create'),
+				updated: pick('update'),
+				exact: !!plan.local?.applied,
+			});
 		} else {
 			done.push(sessionsWrite);
 			await writeSessionsStoreFile(plan.dataDir, internal.sessionsData);

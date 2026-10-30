@@ -74,6 +74,7 @@ import {
 	scopeSessionsToOwningWindow,
 } from '../../utils/windowTargets';
 import { GroupContextMenu } from './GroupContextMenu';
+import { canExportAgent } from '../../utils/agentBundles';
 import { WizardIndicator } from './WizardIndicator';
 import { PluginUiItemsSlot } from '../plugins/PluginUiItemsSlot';
 import { BusyWand } from './BusyWand';
@@ -101,6 +102,7 @@ import { Wordmark } from '../ui/Wordmark';
 import { usePluginContributions } from '../../hooks/usePluginContributions';
 import { usePluginGroupings } from '../../hooks/usePluginGroupings';
 import { buildVirtualGrouping } from '../../utils/pluginGroupings';
+import { withAgentInGroup } from '../../../shared/maestro-lib/agents/rules';
 
 /**
  * Sidebar widths at which the header's two pills can afford their text labels.
@@ -883,15 +885,7 @@ function SessionListInner(props: SessionListProps) {
 
 	const handleMoveToGroup = useCallback(
 		(sessionId: string, groupId: string) => {
-			const normalizedGroupId = groupId || undefined;
-			setSessions((prev) =>
-				prev.map((s) => {
-					if (s.id === sessionId) return { ...s, groupId: normalizedGroupId };
-					// Also update worktree children to keep groupId in sync
-					if (s.parentSessionId === sessionId) return { ...s, groupId: normalizedGroupId };
-					return s;
-				})
-			);
+			setSessions((prev) => withAgentInGroup(prev, sessionId, groupId));
 		},
 		[setSessions]
 	);
@@ -2482,6 +2476,14 @@ function SessionListInner(props: SessionListProps) {
 							.openModal('newInstance', { duplicatingSessionId: contextMenuSession.id });
 						setContextMenu(null);
 					}}
+					onExport={
+						canExportAgent(contextMenuSession)
+							? () =>
+									useModalStore
+										.getState()
+										.openModal('agentExport', { sessionId: contextMenuSession.id })
+							: undefined
+					}
 					onToggleBookmark={() => toggleBookmark(contextMenuSession.id)}
 					showGroupActions={!activeVirtualGrouping}
 					onMoveToGroup={(groupId) => handleMoveToGroup(contextMenuSession.id, groupId)}
@@ -2592,6 +2594,15 @@ function SessionListInner(props: SessionListProps) {
 						useModalStore.getState().openModal('newInstance', {
 							duplicatingSessionId: null,
 							presetGroupId: groupContextMenuGroup.id,
+						});
+					}}
+					onImportAgent={() => {
+						// Expand the group so the imported agents are visible when they land.
+						if (groupContextMenuGroup.collapsed) {
+							toggleGroup(groupContextMenuGroup.id);
+						}
+						useModalStore.getState().openModal('agentImport', {
+							groupId: groupContextMenuGroup.id,
 						});
 					}}
 					onDelete={

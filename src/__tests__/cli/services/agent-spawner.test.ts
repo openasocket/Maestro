@@ -4005,6 +4005,171 @@ Some text with [x] in it that's not a checkbox
 			expect(JSON.stringify(onProgress.mock.calls)).not.toMatch(/SECRET_/);
 		});
 
+		it.each(['codex', 'claude-code'] as const)(
+			'streams safe detailed %s actions through the provider boundary',
+			async (provider) => {
+				const cases: Array<[string, unknown, string]> = [
+					[
+						'Read',
+						{ file_path: '/PRIVATE_HOME/.codex/skills/research/SKILL.md' },
+						'Reading skill research',
+					],
+					['Skill', { skill: 'research', args: 'PRIVATE_ARGS' }, 'Reading skill research'],
+					['Skill', { skill: 'bad;PRIVATE' }, 'Reading skill'],
+					['Read', { path: '/PRIVATE_HOME/src/main.ts' }, 'Reading file main.ts'],
+					['Read', { path: 'PRIVATE\nfile.ts' }, 'Reading file'],
+					['Skill', { skill: 'research\n' }, 'Reading skill'],
+					['Glob', { pattern: '*.ts\n' }, 'Searching files'],
+					['Bash', { command: 'cat README.md\n' }, 'Running shell command'],
+					['Read', { path: '/PRIVATE_HOME/ghp_' + 'A'.repeat(36) }, 'Reading file'],
+					['Read', {}, 'Reading file'],
+					['Glob', { pattern: 'src/**/*.test.ts' }, 'Searching files for *.test.ts'],
+					['Grep', { glob: '*.ts', pattern: 'PRIVATE_SEARCH' }, 'Searching files for *.ts'],
+					['Grep', { pattern: 'PRIVATE_SEARCH' }, 'Searching files'],
+					['Glob', { pattern: 'PRIVATE?token=abc&other=1' }, 'Searching files'],
+					[
+						'Bash',
+						{ command: 'cat /PRIVATE_HOME/.codex/skills/research/SKILL.md' },
+						'Reading skill research',
+					],
+					[
+						'functions.exec_command',
+						{ cmd: "sed -n '1,80p' /PRIVATE_HOME/src/main.ts" },
+						'Reading file main.ts',
+					],
+					['functions.exec_command', { cmd: "rg --files -g '*.ts'" }, 'Searching files for *.ts'],
+					[
+						'functions.exec_command',
+						{ cmd: "rg --files -g '*ghp_" + 'A'.repeat(36) + "'" },
+						'Searching files',
+					],
+					['Bash', { command: 'cat --help' }, 'Running shell command'],
+					['Bash', { command: 'head -n' }, 'Running shell command'],
+					['Bash', { command: 'tail --version' }, 'Running shell command'],
+					['Bash', { command: 'cat -- -notes.md' }, 'Reading file -notes.md'],
+					['Bash', { command: "sed -n '1,80p' --help" }, 'Running shell command'],
+					[
+						'Bash',
+						{ command: 'git status --short' },
+						'Running shell command to inspect repository status',
+					],
+					[
+						'Bash',
+						{ command: 'npm run build:main' },
+						'Running shell command to build the main process',
+					],
+					// A workspace's lint script may run ESLint, types, or another linter.
+					['Bash', { command: 'npm run lint' }, 'Running shell command to run lint checks'],
+					[
+						'functions.exec',
+						'await tools.exec_command({"cmd":"npm run lint"});',
+						'Running shell command to run lint checks',
+					],
+					['Bash', { command: 'cat README.md; echo PRIVATE_DATA' }, 'Running shell command'],
+					['Bash', { command: 'cat README.md | head' }, 'Running shell command'],
+					['Bash', { command: 'cat $(PRIVATE_SUBSTITUTION)' }, 'Running shell command'],
+					['Bash', { command: 'TOKEN=PRIVATE npm test' }, 'Running shell command'],
+					[
+						'Bash',
+						{ command: 'curl https://private.invalid?token=PRIVATE' },
+						'Running shell command',
+					],
+					['Bash', { command: 'cat README.md\necho PRIVATE_DATA' }, 'Running shell command'],
+					[
+						'functions.exec',
+						'await tools.exec_command({"cmd":"cat /PRIVATE_HOME/.codex/skills/research/SKILL.md"});',
+						'Reading skill research',
+					],
+					[
+						'functions.exec',
+						'await tools.exec_command({"cmd":"npm test"});',
+						'Running shell command to run tests',
+					],
+					[
+						'functions.exec',
+						'await tools.exec_command({"cmd":"cat README.md"}); PRIVATE_CODE();',
+						'Running shell command',
+					],
+					[
+						'functions.exec',
+						'await tools.exec_command({cmd: "PRIVATE_CODE"});',
+						'Running shell command',
+					],
+					[
+						'functions.exec',
+						'await tools.exec_command({"cmd":"git status"}); await tools.exec_command({"cmd":"PRIVATE"});',
+						'Running shell commands',
+					],
+					['Read', { path: '/PRIVATE_HOME/' + 'x'.repeat(81) + '.md' }, 'Reading file'],
+				];
+				const onProgress = vi.fn();
+				const pending = spawnAgent(provider, '/p', 'hi', undefined, { onProgress });
+				const lines =
+					provider === 'codex'
+						? [
+								...cases.flatMap(([name, input], index) => [
+									{
+										type: 'response_item',
+										payload: {
+											type: 'function_call',
+											name,
+											call_id: `c${index}`,
+											arguments: JSON.stringify(input),
+										},
+									},
+									{
+										type: 'response_item',
+										payload: {
+											type: 'function_call_output',
+											call_id: `c${index}`,
+											output: 'PRIVATE_OUTPUT',
+										},
+									},
+								]),
+								{ type: 'item.completed', item: { type: 'agent_message', text: 'done' } },
+							]
+						: [
+								{
+									type: 'assistant',
+									message: {
+										content: cases.map(([name, input], index) => ({
+											type: 'tool_use',
+											id: `c${index}`,
+											name,
+											input,
+										})),
+									},
+								},
+								{
+									type: 'user',
+									message: {
+										content: cases.map((_, index) => ({
+											type: 'tool_result',
+											tool_use_id: `c${index}`,
+											content: 'PRIVATE_OUTPUT',
+										})),
+									},
+								},
+								{ type: 'result', result: 'done' },
+							];
+				await driveSpawnToCompletion(
+					pending,
+					0,
+					lines.map((line) => JSON.stringify(line)).join('\n') + '\n'
+				);
+				const events = onProgress.mock.calls
+					.map(([event]) => event)
+					.filter((event) => event.type === 'tool');
+				for (const status of ['started', 'completed']) {
+					expect(
+						events.filter((event) => event.status === status).map((event) => event.summary)
+					).toEqual(cases.map((entry) => entry[2]));
+				}
+				expect(JSON.stringify(events)).not.toMatch(/PRIVATE/);
+				for (const event of events) expect(event.summary.length).toBeLessThanOrEqual(120);
+			}
+		);
+
 		it('Claude spawn without any options still includes base stream-json flags', async () => {
 			const p = spawnAgent('claude-code', '/p', 'hi');
 			await driveSpawnToCompletion(p, 0, CLAUDE_OK());

@@ -1,5 +1,6 @@
 import { ipcRenderer } from 'electron';
 import type { QueueSteerResult } from '../../../shared/chatSteering';
+import type { MentionRouting } from '../../../shared/crossAgentContext';
 import type { ManagedDelegationContext } from '../../../shared/maestro-lib/managed/delegation';
 
 export function createQueueRemoteApi() {
@@ -20,6 +21,7 @@ export function createQueueRemoteApi() {
 				images?: string[],
 				background?: boolean,
 				held?: boolean,
+				mentionRouting?: MentionRouting,
 				/** The dispatching operation's context; the renderer stores it on the queued item. */
 				delegation?: ManagedDelegationContext,
 				/** The host-minted dispatch ticket; echoed unread on the spawn or the queued item. */
@@ -36,6 +38,7 @@ export function createQueueRemoteApi() {
 				images?: string[],
 				background?: boolean,
 				held?: boolean,
+				mentionRouting?: MentionRouting,
 				delegation?: ManagedDelegationContext,
 				dispatchTicket?: string
 			) => {
@@ -49,6 +52,7 @@ export function createQueueRemoteApi() {
 						images,
 						background,
 						held,
+						mentionRouting,
 						delegation,
 						dispatchTicket
 					);

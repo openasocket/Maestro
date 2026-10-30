@@ -15,6 +15,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react';
 import { GroupChatInput } from '../../../renderer/components/GroupChatInput';
 import { useImageAnnotatorStore } from '../../../renderer/components/ImageAnnotator/imageAnnotatorStore';
 import { useSessionStore } from '../../../renderer/stores/sessionStore';
+import { useUIStore } from '../../../renderer/stores/uiStore';
 import type { Session, Group, GroupChatParticipant } from '../../../renderer/types';
 import { createMockSession as baseCreateMockSession } from '../../helpers/mockSession';
 import { resetStores } from '../../helpers/resetStores';
@@ -221,6 +222,39 @@ describe('GroupChatInput', () => {
 		});
 	});
 
+	describe('@mention pills', () => {
+		const overlayOf = (container: HTMLElement) =>
+			container.querySelector('.maestro-input-text-overlay') as HTMLDivElement | null;
+
+		it('draws a pill behind a known agent mention, as the AI composer does', () => {
+			const sessions = [createMockSession('session-1', 'Maestro', 'claude-code')];
+			const { container } = render(<GroupChatInput {...createDefaultProps({ sessions })} />);
+
+			const textarea = screen.getByPlaceholderText(/Type a message/i) as HTMLTextAreaElement;
+			typeInTextarea(textarea, 'ask @Maestro about it');
+
+			const overlay = overlayOf(container);
+			expect(overlay).not.toBeNull();
+			const chip = Array.from(overlay!.querySelectorAll('span')).find(
+				(span) => span.textContent === '@Maestro'
+			);
+			expect(chip).toBeDefined();
+			expect(chip!.style.borderRadius).toBe('6px');
+		});
+
+		it('draws no pill for an unknown @word or a draft without mentions', () => {
+			const sessions = [createMockSession('session-1', 'Maestro', 'claude-code')];
+			const { container } = render(<GroupChatInput {...createDefaultProps({ sessions })} />);
+
+			const textarea = screen.getByPlaceholderText(/Type a message/i) as HTMLTextAreaElement;
+			typeInTextarea(textarea, 'ping @nobody here');
+			expect(overlayOf(container)).toBeNull();
+
+			typeInTextarea(textarea, 'plain text');
+			expect(overlayOf(container)).toBeNull();
+		});
+	});
+
 	describe('@mention autocomplete', () => {
 		it('shows mention dropdown when typing @', () => {
 			const sessions = [
@@ -340,6 +374,47 @@ describe('GroupChatInput', () => {
 
 			// Dropdown should be hidden
 			expect(screen.queryByText('Maestro')).not.toBeInTheDocument();
+		});
+
+		it('keeps an Escape that closes the dropdown away from the window handler', () => {
+			// The window-level Escape handler blurs the composer and focuses the
+			// transcript. While the picker is open, Escape must only close it.
+			const sessions = [createMockSession('session-1', 'Maestro', 'claude-code')];
+			const windowEscape = vi.fn();
+			window.addEventListener('keydown', windowEscape);
+
+			render(<GroupChatInput {...createDefaultProps({ sessions })} />);
+
+			const textarea = screen.getByPlaceholderText(/Type a message/i) as HTMLTextAreaElement;
+			typeInTextarea(textarea, '@');
+			fireEvent.keyDown(textarea, { key: 'Escape' });
+
+			expect(screen.queryByText('Maestro')).not.toBeInTheDocument();
+			expect(windowEscape).not.toHaveBeenCalled();
+			window.removeEventListener('keydown', windowEscape);
+		});
+
+		it('lets Escape reach the window handler when the dropdown is closed', () => {
+			const windowEscape = vi.fn();
+			window.addEventListener('keydown', windowEscape);
+
+			render(<GroupChatInput {...createDefaultProps()} />);
+
+			const textarea = screen.getByPlaceholderText(/Type a message/i) as HTMLTextAreaElement;
+			fireEvent.keyDown(textarea, { key: 'Escape' });
+
+			expect(windowEscape).toHaveBeenCalledTimes(1);
+			window.removeEventListener('keydown', windowEscape);
+		});
+
+		it('claims main-area focus when the composer is focused', () => {
+			useUIStore.getState().setActiveFocus('sidebar');
+
+			render(<GroupChatInput {...createDefaultProps()} />);
+
+			fireEvent.focus(screen.getByPlaceholderText(/Type a message/i));
+
+			expect(useUIStore.getState().activeFocus).toBe('main');
 		});
 
 		it('closes the popover on Escape even when the filter matches no agents', () => {
@@ -755,6 +830,37 @@ describe('GroupChatInput', () => {
 			fireEvent.click(screen.getByRole('button', { name: 'Staged image 1' }));
 
 			expect(onOpenLightbox).toHaveBeenCalledWith(stagedImages[0], stagedImages, 'staged');
+		});
+
+		it('leaves the read-only and carousel chords to the window handler', () => {
+			// The window handler reads the live bindings and acts on the room, so
+			// the composer must neither consume these chords nor act on them itself.
+			const onOpenLightbox = vi.fn();
+			const setReadOnlyMode = vi.fn();
+			const stagedImages = ['data:image/png;base64,a'];
+			const windowKeys = vi.fn();
+			window.addEventListener('keydown', windowKeys);
+
+			render(
+				<GroupChatInput
+					{...createDefaultProps({
+						stagedImages,
+						setStagedImages: vi.fn(),
+						onOpenLightbox,
+						readOnlyMode: false,
+						setReadOnlyMode,
+					})}
+				/>
+			);
+
+			const textarea = screen.getByPlaceholderText(/Type a message/i);
+			fireEvent.keyDown(textarea, { key: 'r', metaKey: true });
+			fireEvent.keyDown(textarea, { key: 'y', metaKey: true });
+
+			expect(windowKeys).toHaveBeenCalledTimes(2);
+			expect(setReadOnlyMode).not.toHaveBeenCalled();
+			expect(onOpenLightbox).not.toHaveBeenCalled();
+			window.removeEventListener('keydown', windowKeys);
 		});
 
 		it('removes a staged image by content when its remove button is clicked', () => {

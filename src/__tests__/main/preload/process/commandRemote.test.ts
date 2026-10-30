@@ -30,7 +30,7 @@ describe('Process CommandRemote Preload API', () => {
 	});
 
 	describe('onRemoteCommand', () => {
-		it('should register listener and invoke callback with all parameters including tabId, force, images, and background', () => {
+		it('should register listener and invoke callback with all parameters including tabId, force, images, background, and mentionRouting', () => {
 			const callback = vi.fn();
 			let registeredHandler: (
 				event: unknown,
@@ -41,6 +41,9 @@ describe('Process CommandRemote Preload API', () => {
 				force?: boolean,
 				images?: string[],
 				background?: boolean,
+				mentionRouting?: string,
+				delegation?: unknown,
+				dispatchTicket?: string,
 				receiptChannel?: string
 			) => void;
 
@@ -61,6 +64,7 @@ describe('Process CommandRemote Preload API', () => {
 				true,
 				images,
 				true,
+				'handoff',
 				undefined,
 				undefined,
 				'receipt-channel'
@@ -74,13 +78,14 @@ describe('Process CommandRemote Preload API', () => {
 				true,
 				images,
 				true,
+				'handoff',
 				undefined,
 				undefined,
 				'receipt-channel'
 			);
 		});
 
-		it('forwards the delegation context in the slot before the receipt channel (MRC-07-04C)', () => {
+		it('forwards the delegation context in the slot after the routing and before the ticket and the receipt channel (MRC-07-04C)', () => {
 			// The dispatching operation's record rides beside the prompt; main
 			// appends the receipt channel after it, so the two must not swap.
 			const callback = vi.fn();
@@ -99,6 +104,7 @@ describe('Process CommandRemote Preload API', () => {
 				false,
 				undefined,
 				true,
+				undefined,
 				delegation,
 				undefined,
 				'receipt-channel'
@@ -111,10 +117,63 @@ describe('Process CommandRemote Preload API', () => {
 				false,
 				undefined,
 				true,
+				undefined,
 				delegation,
 				undefined,
 				'receipt-channel'
 			);
+		});
+
+		it('forwards the routing, the delegation record and the dispatch ticket in that order, logging the record and the ticket by presence only', () => {
+			// The wire main sends is `..., background, mentionRouting, delegation,
+			// dispatchTicket, receiptChannel`; the preload hands every slot over as
+			// is, and its debug log names the routing (a closed vocabulary) but
+			// never the record or the ticket by value.
+			const callback = vi.fn();
+			let registeredHandler: (...args: unknown[]) => void;
+			mockOn.mockImplementation((channel: string, handler: typeof registeredHandler) => {
+				if (channel === 'remote:executeCommand') registeredHandler = handler;
+			});
+			api.onRemoteCommand(callback);
+			const delegation = { contractVersion: '1.0', traceId: 'trace-1' };
+			registeredHandler!(
+				{},
+				'session-123',
+				'go',
+				'ai',
+				'tab-7',
+				false,
+				undefined,
+				false,
+				'only',
+				delegation,
+				'tkt-1',
+				'receipt-channel'
+			);
+			expect(callback).toHaveBeenCalledWith(
+				'session-123',
+				'go',
+				'ai',
+				'tab-7',
+				false,
+				undefined,
+				false,
+				'only',
+				delegation,
+				'tkt-1',
+				'receipt-channel'
+			);
+			const received = mockInvoke.mock.calls.find(
+				(call) => call[2] === 'Received remote:executeCommand IPC'
+			);
+			expect(received).toBeDefined();
+			expect(received![4]).toMatchObject({
+				mentionRouting: 'only',
+				delegated: true,
+				ticketed: true,
+			});
+			expect(JSON.stringify(received![4])).not.toContain('tkt-1');
+			expect(JSON.stringify(received![4])).not.toContain('trace-1');
 		});
 
 		it('forwards undefined tabId/force/images/background when the IPC sender omits them (legacy callers)', () => {
@@ -128,6 +187,9 @@ describe('Process CommandRemote Preload API', () => {
 				force?: boolean,
 				images?: string[],
 				background?: boolean,
+				mentionRouting?: string,
+				delegation?: unknown,
+				dispatchTicket?: string,
 				receiptChannel?: string
 			) => void;
 
@@ -144,6 +206,7 @@ describe('Process CommandRemote Preload API', () => {
 				'session-123',
 				'test command',
 				'ai',
+				undefined,
 				undefined,
 				undefined,
 				undefined,
@@ -168,6 +231,9 @@ describe('Process CommandRemote Preload API', () => {
 				force?: boolean,
 				images?: string[],
 				background?: boolean,
+				mentionRouting?: string,
+				delegation?: unknown,
+				dispatchTicket?: string,
 				receiptChannel?: string
 			) => void;
 
@@ -197,6 +263,7 @@ describe('Process CommandRemote Preload API', () => {
 				undefined,
 				undefined,
 				false,
+				undefined,
 				undefined,
 				undefined,
 				undefined

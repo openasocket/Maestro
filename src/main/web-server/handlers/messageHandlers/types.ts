@@ -53,10 +53,13 @@ import type {
 	ConsultAgentResult,
 	RenameTabResult,
 	SnoozeCommandCallback,
+	ClosedTabCommandCallback,
+	TabContextOpCallback,
 	AutoRunSteeringCommandCallback,
 	WindowCommandCallback,
 	ThroughputGaugeCommandCallback,
 	OpenFileTabOptions,
+	InterruptSessionCallback,
 } from '../../types';
 import type { DebugPackageDependencies } from '../../../debug-package';
 import type { ManagedOperations } from '../../../enterprise/service';
@@ -68,6 +71,7 @@ import type {
 } from '../../../cue-bundle-service';
 import type { MediaOpenMode } from '../../../../shared/mediaTypes';
 import type { AgentDelegationNotice } from '../../../../shared/agentDelegation';
+import type { MentionRouting } from '../../../../shared/crossAgentContext';
 import type { ManagedDelegationContext } from '../../../../shared/maestro-lib/managed/delegation';
 import type { GroupAppearance, GroupUpdateRequest } from '../../../../shared/groupAppearance';
 import type { CadenzaPayload } from '../../../../shared/cadenza-types';
@@ -170,6 +174,7 @@ export interface MessageHandlerCallbacks {
 		force?: boolean,
 		images?: string[],
 		background?: boolean,
+		mentionRouting?: MentionRouting,
 		/** The context of the operation that dispatched the prompt (see `readDispatchDelegation`). */
 		delegation?: ManagedDelegationContext,
 		/** The host-minted ticket the spawn sink claims the transport with (see `issueDispatchTicket`). */
@@ -192,6 +197,8 @@ export interface MessageHandlerCallbacks {
 	starTab: (sessionId: string, tabId: string, starred: boolean) => Promise<boolean>;
 	/** `maestro-cli snooze` - park, list, wake, dismiss, reschedule, history. */
 	snoozeCommand: SnoozeCommandCallback;
+	/** `maestro-cli tab closed` / `tab reopen` - read and reopen the closed-tab stack. */
+	closedTabCommand: ClosedTabCommandCallback;
 	/** `maestro-cli steer-auto-run` - send a note, list notes and replies, cancel. */
 	autoRunSteeringCommand: AutoRunSteeringCommandCallback;
 	/** `maestro-cli window` - list windows, move an agent or a group between them. */
@@ -254,10 +261,13 @@ export interface MessageHandlerCallbacks {
 		prompt: string,
 		background?: boolean,
 		hidden?: boolean,
+		mentionRouting?: MentionRouting,
 		delegation?: ManagedDelegationContext,
 		/** The host-minted ticket the spawn sink claims the transport with (see `issueDispatchTicket`). */
 		dispatchTicket?: string
 	) => Promise<{ success: boolean; tabId?: string; queued?: boolean; error?: string }>;
+	/** Stop a running turn, the agent's or one tab's (`maestro-cli interrupt`). */
+	interruptSession: InterruptSessionCallback;
 	/** Consult another agent and return its answer (`maestro-cli ask`). */
 	consultAgent: (params: ConsultAgentParams) => Promise<ConsultAgentResult>;
 	/** Mark a delivered CLI dispatch in the calling agent's transcript. Fire-and-forget. */
@@ -270,6 +280,7 @@ export interface MessageHandlerCallbacks {
 		images?: string[],
 		background?: boolean,
 		held?: boolean,
+		mentionRouting?: MentionRouting,
 		delegation?: ManagedDelegationContext,
 		/** The host-minted ticket the spawn sink claims the transport with (see `issueDispatchTicket`). */
 		dispatchTicket?: string
@@ -444,14 +455,13 @@ export interface MessageHandlerCallbacks {
 	) => Promise<StartGroupChatResult | null>;
 	getGroupChatState: (chatId: string) => Promise<GroupChatState | null>;
 	stopGroupChat: (chatId: string) => Promise<boolean>;
+	archiveGroupChat: (chatId: string, archived: boolean) => Promise<boolean>;
 	sendGroupChatMessage: (chatId: string, message: string) => Promise<boolean>;
 	steerGroupChat?: (
 		chatId: string,
 		request: SteerGroupChatRequest
 	) => Promise<GroupChatSteerResult>;
-	mergeContext: (sourceSessionId: string, targetSessionId: string) => Promise<boolean>;
-	transferContext: (sourceSessionId: string, targetSessionId: string) => Promise<boolean>;
-	summarizeContext: (sessionId: string) => Promise<boolean>;
+	tabContextOp: TabContextOpCallback;
 	createGist: (
 		sessionId: string,
 		description: string,
@@ -541,7 +551,8 @@ export interface MessageHandlerCallbacks {
  */
 export interface MessageHandlerContext {
 	callbacks: Partial<MessageHandlerCallbacks>;
-	send: (client: WebClient, data: Record<string, unknown>) => void;
+	/** `onSent` runs once the frame is on the socket (see `live_command`). */
+	send: (client: WebClient, data: Record<string, unknown>, onSent?: () => void) => void;
 	sendError: (client: WebClient, message: string, extra?: Record<string, unknown>) => void;
 	reportHandlerError: (
 		client: WebClient,

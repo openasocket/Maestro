@@ -883,12 +883,18 @@ function activateRestoredPane(session: Session, groupId: string, ref: UnifiedTab
  * rather than restoring one, so pulling it into a rebuilt group would yank a live
  * tab out of wherever the user currently has it.
  *
+ * `index` reopens a deeper entry of the stack (`maestro-cli tab reopen`); the
+ * default 0 is the Cmd+Shift+T head.
+ *
  * Lives here rather than beside `reopenUnifiedClosedTab` because tabHelpers
  * must not import this module (it would close an import cycle).
  */
-export function reopenClosedTabWithTiling(session: Session): ReopenUnifiedClosedTabResult | null {
-	const placement = session.unifiedClosedTabHistory?.[0]?.tilePlacement;
-	const result = reopenUnifiedClosedTab(session);
+export function reopenClosedTabWithTiling(
+	session: Session,
+	index = 0
+): ReopenUnifiedClosedTabResult | null {
+	const placement = session.unifiedClosedTabHistory?.[index]?.tilePlacement;
+	const result = reopenUnifiedClosedTab(session, index);
 	if (!result || !placement || result.wasDuplicate) return result;
 
 	const tiled = restoreTilePlacement(result.session, placement, {
@@ -1403,7 +1409,7 @@ function pruneLayoutToLiveTabs(
  * pointer. Does NOT touch activeGroupId (callers clear it as part of the dissolve).
  * A `group` ref (never a leaf) yields an empty patch.
  */
-function standaloneFocusPatch(ref: UnifiedTabRef): Partial<Session> {
+export function standaloneFocusPatch(ref: UnifiedTabRef): Partial<Session> {
 	switch (ref.type) {
 		case 'ai':
 			return {

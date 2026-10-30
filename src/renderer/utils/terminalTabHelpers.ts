@@ -5,16 +5,15 @@
 import { Session, TerminalTab, ClosedTabEntry, UnifiedTabRef } from '../types';
 import { generateId } from './ids';
 import {
+	ensureAgentHasVisibleTab,
 	getNavigableUnifiedTabOrder,
 	insertAfterActiveInUnifiedTabOrder,
 } from './unifiedTabOrderUtils';
 import { terminalTabFocusFields } from './tabFocusFields';
+import { MAX_CLOSED_TAB_HISTORY } from '../../shared/closedTabHistory';
 
 /** Maximum number of closed terminal tab entries to expose via the public API (e.g., for UI limits). */
 export const MAX_CLOSED_TERMINAL_TABS = 10;
-
-/** Maximum entries in unifiedClosedTabHistory - matches tabHelpers MAX_CLOSED_TAB_HISTORY. */
-const MAX_CLOSED_UNIFIED_HISTORY = 25;
 
 // ─── Factory ────────────────────────────────────────────────────────────────
 
@@ -215,6 +214,8 @@ export function addTerminalTab(
 /**
  * Close a terminal tab and add it to the unified closed tab history (for Cmd+Shift+T undo).
  * When closing the last terminal tab, switches inputMode back to 'ai'.
+ * Closing the agent's last visible tab lands on a fresh AI chat
+ * (see ensureAgentHasVisibleTab).
  * When closing the active terminal tab, selects the adjacent tab to the left (or right if at index 0).
  *
  * @param session - The Maestro session containing the terminal tab
@@ -270,10 +271,10 @@ export function closeTerminalTab(session: Session, tabId: string): Session {
 		}
 	}
 
-	// Prepend to unified closed history, capped at MAX_CLOSED_UNIFIED_HISTORY
+	// Prepend to unified closed history, capped at MAX_CLOSED_TAB_HISTORY
 	const updatedUnifiedHistory = [closedTabEntry, ...(session.unifiedClosedTabHistory || [])].slice(
 		0,
-		MAX_CLOSED_UNIFIED_HISTORY
+		MAX_CLOSED_TAB_HISTORY
 	);
 
 	const baseSession = {
@@ -318,13 +319,15 @@ export function closeTerminalTab(session: Session, tabId: string): Session {
 			inputMode: 'ai',
 		};
 	} else {
-		// No fallback ref (unifiedTabOrder out of sync or no tabs left)
+		// No fallback ref (unifiedTabOrder out of sync or no tabs left). Every
+		// branch above names a surviving tab, so only this one can leave the
+		// strip empty.
 		const newInputMode = updatedTerminalTabs.length === 0 ? 'ai' : session.inputMode;
-		return {
+		return ensureAgentHasVisibleTab({
 			...baseSession,
 			activeTerminalTabId: newActiveTerminalTabId,
 			inputMode: newInputMode,
-		};
+		});
 	}
 }
 

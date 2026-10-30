@@ -256,7 +256,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 	);
 	const resizableModal = useResizableModal({
 		resizeKey: 'settings',
-		defaultSize: { width: 980, height: 900 },
+		defaultSize: { width: 1200, height: 900 },
 		minSize: { width: 720, height: 480 },
 		enabled: isOpen,
 	});
@@ -542,7 +542,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 
 				{/* Body: Sidebar + Content (two-column on sm+, stacked on xs) */}
 				<div
-					className={`flex ${isXs ? 'flex-col' : ''} flex-1 overflow-hidden ${searchActive ? 'hidden' : ''}`}
+					className={`flex ${isXs ? 'flex-col' : ''} flex-1 min-h-0 overflow-hidden ${searchActive ? 'hidden' : ''}`}
 				>
 					{isXs ? (
 						/* Horizontal tab strip above content (xs phones) */
@@ -586,7 +586,7 @@ export const SettingsModal = memo(function SettingsModal(props: SettingsModalPro
 					<div
 						ref={contentRef}
 						onScroll={handleContentScroll}
-						className="flex-1 p-6 overflow-y-auto scrollbar-thin"
+						className={`flex-1 min-w-0 min-h-0 ${activeTab.startsWith('plugin-settings:') ? 'flex flex-col overflow-hidden p-3 sm:p-4' : 'p-6 overflow-y-auto scrollbar-thin'}`}
 					>
 						{activeTab === 'general' && <GeneralTab theme={theme} isOpen={isOpen} />}
 

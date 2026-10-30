@@ -1175,8 +1175,10 @@ export type ClosedTabEntry =
  * shape mirrors {@link ClosedTabEntry} because waking reuses the same
  * restore-at-original-position logic as reopening a closed tab.
  *
- * Unlike `unifiedClosedTabHistory` (a runtime-only undo stack), this list IS
- * persisted: a snooze has to survive quitting the app.
+ * Both lists persist, but differently: `unifiedClosedTabHistory` stores each
+ * closed tab as a pointer (no transcript when the provider can give it back, no
+ * file content; see src/shared/closedTabHistory.ts), while a snooze keeps its
+ * tab's newest logs, because a snoozed tab comes back verbatim.
  */
 /**
  * How a snooze ended. All three mean "no longer snoozed", but the distinction
@@ -1456,7 +1458,8 @@ export interface Session {
 	aiTabs: AITab[];
 	// Currently active tab ID
 	activeTabId: string;
-	// Stack of recently closed tabs for undo (max 25, runtime-only, not persisted)
+	// Legacy AI-only stack of recently closed tabs (max 25, runtime-only, never
+	// persisted). The unified stack below is the one Cmd+Shift+T pops and stores.
 	closedTabHistory: ClosedTab[];
 	// Tabs that were closed while still thinking - kept here so the thinking pill
 	// can surface them until the underlying agent process finishes. Runtime-only,
@@ -1487,8 +1490,11 @@ export interface Session {
 
 	// Unified tab ordering - determines visual order of all tabs (AI, file, browser, and terminal)
 	unifiedTabOrder: UnifiedTabRef[];
-	// Stack of recently closed tabs (AI, file, browser, and terminal) for undo (max 25, runtime-only, not persisted)
-	// Used by Cmd+Shift+T to restore any recently closed tab
+	// Stack of recently closed tabs (AI, file, browser, and terminal) for undo, newest first
+	// (max MAX_CLOSED_TAB_HISTORY). Used by Cmd+Shift+T to restore any recently closed tab.
+	// Persisted as pointers via projectClosedTabHistory() in src/shared/closedTabHistory.ts:
+	// a restored AI entry may have no logs and a file entry no content until
+	// services/reopenedTabContent.ts reads them back. Absent on disk when empty.
 	unifiedClosedTabHistory: ClosedTabEntry[];
 
 	// Tab tiling (split panes) - each TabGroup renders several existing tabs side
@@ -1874,6 +1880,10 @@ export interface EncoreFeatureFlags {
 	// agents. Off by default. Optional so older fixtures and persisted settings
 	// remain valid.
 	throughputGauge?: boolean;
+	// Dataview - render Obsidian Dataview queries in File Preview and the Auto
+	// Run preview. Off by default. Optional so older fixtures and persisted
+	// settings remain valid.
+	dataview?: boolean;
 }
 
 // Director's Notes settings for synopsis generation

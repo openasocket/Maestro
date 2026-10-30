@@ -15,6 +15,7 @@ import type {
 	EnqueueCommandResult,
 	EnqueueCommandFailureReason,
 } from '../types';
+import type { MentionRouting } from '../../../shared/crossAgentContext';
 
 /** Known machine-readable enqueue failure causes, in the order the renderer's
  *  `remote:enqueueCommand` handler can produce them. */
@@ -59,6 +60,7 @@ export function registerQueueCallbacks(
 			images?: string[],
 			background?: boolean,
 			held?: boolean,
+			mentionRouting?: MentionRouting,
 			delegation?: ManagedDelegationContext,
 			dispatchTicket?: string
 		) => {
@@ -110,6 +112,7 @@ export function registerQueueCallbacks(
 					images,
 					background,
 					held,
+					mentionRouting,
 					delegation,
 					dispatchTicket
 				);

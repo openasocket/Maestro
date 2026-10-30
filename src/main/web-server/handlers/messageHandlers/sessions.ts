@@ -102,6 +102,28 @@ export function handleCreateSession(
 	}
 	// autoRunFolderPath can be set outside of the agent's cwd (no confinement needed)
 	if (message.autoRunFolderPath) config.autoRunFolderPath = message.autoRunFolderPath as string;
+	// The rest of the New Agent modal's fields, so `duplicate-agent` creates the
+	// same agent the modal does. Booleans are copied when present: an explicit
+	// `false` is a choice (Adaptive Mode off over SSH, resilience opted out).
+	if (Array.isArray(message.additionalDirectories) && message.additionalDirectories.length > 0) {
+		config.additionalDirectories =
+			message.additionalDirectories as CreateSessionConfig['additionalDirectories'];
+	}
+	if (typeof message.enableMaestroP === 'boolean') config.enableMaestroP = message.enableMaestroP;
+	if (message.maestroPMode === 'interactive' || message.maestroPMode === 'dynamic') {
+		config.maestroPMode = message.maestroPMode;
+	}
+	if (message.maestroPPath) config.maestroPPath = message.maestroPPath as string;
+	if (typeof message.retryOnAvailabilityErrors === 'boolean') {
+		config.retryOnAvailabilityErrors = message.retryOnAvailabilityErrors;
+	}
+	if (typeof message.retryOnTokenExhaustion === 'boolean') {
+		config.retryOnTokenExhaustion = message.retryOnTokenExhaustion;
+	}
+	if (message.codexAutoResetOnExhaustion === true) config.codexAutoResetOnExhaustion = true;
+	if (message.codexTransport === 'app-server' || message.codexTransport === 'exec') {
+		config.codexTransport = message.codexTransport;
+	}
 	const hasConfig = Object.keys(config).length > 0;
 
 	ctx.callbacks
@@ -461,9 +483,14 @@ export function handleProviderTranslation(
 	}
 	if (
 		typeof patch.migrationAction !== 'string' ||
-		!['plan', 'apply', 'status', 'recover', 'rollback'].includes(patch.migrationAction)
+		!['plan', 'apply', 'status', 'recover', 'rollback', 'switch'].includes(patch.migrationAction)
 	) {
 		ctx.sendError(client, 'Invalid provider translation action');
+		return;
+	}
+	// `switch` changes the provider WITHOUT converting, so it needs a destination.
+	if (patch.migrationAction === 'switch' && patch.toolType === undefined) {
+		ctx.sendError(client, 'Switching provider requires a destination provider');
 		return;
 	}
 	if (
