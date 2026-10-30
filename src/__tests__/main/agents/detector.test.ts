@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import {
 	AgentDetector,
 	AgentConfig,
@@ -101,6 +101,10 @@ import { setMaestroLibLogger } from '../../../shared/maestro-lib/host';
 import type { EgressRequest } from '../../../main/enterprise/egress-policy';
 import { setEgressAuthority } from '../../../main/utils/fetchWithTimeout';
 import { denyingEgressAuthority } from '../../helpers/egressAuthority';
+import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
+import type { ModelDiscoveryContext } from '../../../main/agents/detector';
+import * as providerProbe from '../../../main/agents/provider-probe';
+import * as pathProber from '../../../main/agents/path-prober';
 
 // The library logs and reports through its host (shared/maestro-lib/host.ts),
 // which the real desktop modules register into on load. They are mocked here,
@@ -1152,6 +1156,264 @@ describe('agent-detector', () => {
 		});
 	});
 
+	describe('Grok selected-context discovery', () => {
+		const root = path.resolve('synthetic-grok-discovery');
+		let context: ModelDiscoveryContext;
+		let probe: MockInstance<typeof providerProbe.runProviderProbe>;
+
+		beforeEach(() => {
+			context = {
+				target: { kind: 'local' },
+				cwd: path.join(root, 'project'),
+				customPath: path.join(root, 'custom bin', 'grok'),
+				configGeneration: 'revision-1',
+				model: 'private/deployment',
+				effort: 'max',
+				environment: {
+					surface: 'desktop',
+					globalShellEnvVars: {
+						GROK_HOME: path.join(root, 'global'),
+						GROK_AUTH_PATH: path.join(root, 'auth-a.json'),
+					},
+					agentCustomEnvVars: { GROK_HOME: path.join(root, 'provider') },
+					sessionCustomEnvVars: { GROK_HOME: path.join(root, 'account-a') },
+				},
+			};
+			vi.spyOn(pathProber, 'checkCustomPath').mockImplementation(async (binary) => ({
+				exists: true,
+				path: binary,
+			}));
+			_readFileSync.mockReset().mockImplementation(() => {
+				throw new Error('ENOENT');
+			});
+			// Synthetic adapter responses only: the real runner refuses Grok until containment is qualified.
+			probe = vi.spyOn(providerProbe, 'runProviderProbe').mockImplementation(async ({ kind }) => ({
+				stdout:
+					kind === 'version' ? 'grok 1.0.70' : 'Available models:\n * visible-alias (default)\n',
+				stderr: '',
+				exitCode: 0,
+			}));
+		});
+
+		afterEach(() => {
+			expect(_readFileSync).not.toHaveBeenCalled();
+			expect(_fsAccess).not.toHaveBeenCalled();
+			expect(mockExecFileNoThrow).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			['malformed', '{'],
+			['empty', '{"models":{}}'],
+			['hidden', '{"models":{"internal":{"info":{"id":"internal","hidden":true}}}}'],
+			[
+				'stale',
+				'{"version":"0.2.93","timestamp":0,"models":{"old":{"info":{"id":"old","context_window":500000}}}}',
+			],
+		])(
+			'ignores %s native cache bytes and uses the selected probe catalog',
+			async (_label, cache) => {
+				_readFileSync.mockReturnValue(cache);
+				probe
+					.mockResolvedValueOnce({ stdout: 'grok 1.0.70', stderr: '', exitCode: 0 })
+					.mockResolvedValueOnce({
+						stdout:
+							'Default model: internal\nAvailable models:\n * visible-alias (default)\n - visible-alias\n',
+						stderr: '',
+						exitCode: 0,
+					});
+				expect(await detector.discoverModels('grok', false, context)).toEqual([
+					'visible-alias',
+					context.model,
+				]);
+				expect(pathProber.checkCustomPath).toHaveBeenCalledWith(context.customPath);
+				expect(probe).toHaveBeenNthCalledWith(
+					1,
+					expect.objectContaining({
+						providerId: 'grok',
+						command: context.customPath,
+						args: ['--version'],
+						cwd: context.cwd,
+						env: expect.objectContaining({ GROK_HOME: path.join(root, 'account-a') }),
+						limits: { timeoutMs: 5000, maxOutputBytes: 16 * 1024 },
+					}),
+					undefined
+				);
+				expect(probe).toHaveBeenNthCalledWith(
+					2,
+					expect.objectContaining({
+						args: ['models'],
+						command: context.customPath,
+						cwd: context.cwd,
+						env: expect.objectContaining({ GROK_HOME: path.join(root, 'account-a') }),
+						limits: { timeoutMs: 15000, maxOutputBytes: 1024 * 1024 },
+					}),
+					undefined
+				);
+			}
+		);
+
+		it('withholds unscoped models and static config options without probing', async () => {
+			expect(await detector.discoverModels('grok')).toEqual([]);
+			expect(await detector.discoverConfigOptions('grok', 'model')).toEqual(['']);
+			expect(await detector.discoverConfigOptions('grok', 'reasoningEffort')).toEqual(['']);
+			expect(probe).not.toHaveBeenCalled();
+			expect(pathProber.checkCustomPath).not.toHaveBeenCalled();
+		});
+
+		it.each(['remote', 'unresolved', 'relative-cwd'] as const)(
+			'never reuses a local catalog for %s context',
+			async (kind) => {
+				await detector.discoverModels('grok', false, context);
+				probe.mockClear();
+				vi.mocked(pathProber.checkCustomPath).mockClear();
+				if (kind === 'remote')
+					context.target = {
+						kind,
+						remote: {
+							id: 'remote-a',
+							name: 'Synthetic',
+							host: 'example.invalid',
+							port: 22,
+							username: 'fixture',
+							privateKeyPath: '',
+							enabled: true,
+						},
+					};
+				else if (kind === 'unresolved')
+					context.target = {
+						kind,
+						reason: 'remote-not-found',
+						message: 'Synthetic missing host',
+					};
+				else context.cwd = 'relative-project';
+				expect(await detector.discoverModels('grok', false, context)).toEqual([context.model]);
+				context.model = '';
+				expect(await detector.discoverModels('grok', false, context)).toEqual([]);
+				expect(probe).not.toHaveBeenCalled();
+				expect(pathProber.checkCustomPath).not.toHaveBeenCalled();
+			}
+		);
+
+		it('refuses managed-host discovery without a supplied route ceiling', async () => {
+			const port = fakeSpawnPort();
+			detector = new AgentDetector(undefined, {
+				managedProbe: () => ({ port, actor: { peer: 'host-secret' } }),
+			});
+			expect(await detector.discoverModels('grok', false, context)).toEqual([context.model]);
+			expect(probe).not.toHaveBeenCalled();
+			expect(pathProber.checkCustomPath).not.toHaveBeenCalled();
+			expect(port.asked).toEqual([]);
+		});
+
+		it.each([
+			['empty catalog', 'Available models:\n', 0],
+			['help output', 'Usage: grok [OPTIONS]\n --model <MODEL>\n', 0],
+			['malformed row', 'Available models:\n * valid-first\n unexpected metadata\n', 0],
+			['refused catalog', 'Available models:\n * partial\n', 126],
+		])(
+			'preserves configured selections after %s without inventing defaults',
+			async (_label, stdout, exitCode) => {
+				probe
+					.mockResolvedValueOnce({ stdout: 'grok 1.0.70', stderr: '', exitCode: 0 })
+					.mockResolvedValueOnce({ stdout, stderr: '', exitCode });
+				expect(await detector.discoverConfigOptions('grok', 'model', false, context)).toEqual([
+					'',
+					context.model,
+				]);
+				expect(
+					await detector.discoverConfigOptions('grok', 'reasoningEffort', false, context)
+				).toEqual(['', 'max']);
+				expect(probe).toHaveBeenCalledTimes(2);
+			}
+		);
+
+		it('keeps configured models when the actual runner refuses containment', async () => {
+			probe.mockRestore();
+			expect(await detector.discoverModels('grok', false, context)).toEqual([context.model]);
+			expect(logger.warn).toHaveBeenCalledWith(
+				expect.stringContaining('Probe of grok'),
+				'AgentDetector',
+				expect.objectContaining({ code: 'runtime-unavailable' })
+			);
+		});
+
+		it.each(['binary', 'cwd', 'account', 'environment', 'version', 'generation'] as const)(
+			'separates cached catalogs by %s',
+			async (scope) => {
+				expect(await detector.discoverModels('grok', false, context)).toEqual([
+					'visible-alias',
+					context.model,
+				]);
+				const changed = { ...context, environment: { ...context.environment } };
+				if (scope === 'binary') changed.customPath = path.join(root, 'other bin', 'grok');
+				if (scope === 'cwd') changed.cwd = path.join(root, 'other project');
+				if (scope === 'account')
+					changed.environment.sessionCustomEnvVars = { GROK_HOME: path.join(root, 'account-b') };
+				if (scope === 'environment')
+					changed.environment.globalShellEnvVars = {
+						...context.environment.globalShellEnvVars,
+						GROK_AUTH_PATH: path.join(root, 'auth-b.json'),
+					};
+				if (scope === 'generation') changed.configGeneration = 'revision-2';
+				probe
+					.mockResolvedValueOnce({
+						stdout: scope === 'version' ? 'grok 1.0.71' : 'grok 1.0.70',
+						stderr: '',
+						exitCode: 0,
+					})
+					.mockResolvedValueOnce({
+						stdout: 'Available models:\n - next-alias\n',
+						stderr: '',
+						exitCode: 0,
+					});
+				expect(await detector.discoverModels('grok', false, changed)).toEqual([
+					'next-alias',
+					context.model,
+				]);
+				expect(probe).toHaveBeenCalledTimes(4);
+				expect(probe.mock.calls.at(-1)?.[0]).toMatchObject({
+					command: changed.customPath,
+					cwd: changed.cwd,
+					env: { GROK_HOME: changed.environment.sessionCustomEnvVars?.GROK_HOME },
+				});
+			}
+		);
+
+		it('rechecks version on cache hits without caching a configured model', async () => {
+			await detector.discoverModels('grok', false, context);
+			context.model = 'other-model';
+			expect(await detector.discoverModels('grok', false, context)).toEqual([
+				'visible-alias',
+				'other-model',
+			]);
+			context.model = 'visible-alias';
+			expect(await detector.discoverModels('grok', false, context)).toEqual(['visible-alias']);
+			expect(probe.mock.calls.map(([request]) => request.kind)).toEqual([
+				'version',
+				'models',
+				'version',
+				'version',
+			]);
+		});
+
+		it.each(['no-generation', 'refresh', 'expired'] as const)(
+			'probes again for %s',
+			async (reason) => {
+				if (reason === 'no-generation') delete context.configGeneration;
+				const now = vi.spyOn(Date, 'now').mockReturnValue(1000);
+				await detector.discoverModels('grok', false, context);
+				if (reason === 'expired') now.mockReturnValue(301001);
+				await detector.discoverModels('grok', reason === 'refresh', context);
+				expect(probe.mock.calls.map(([request]) => request.kind)).toEqual([
+					'version',
+					'models',
+					'version',
+					'models',
+				]);
+			}
+		);
+	});
+
 	describe('discoverModels', () => {
 		beforeEach(async () => {
 			// Setup: opencode is available
@@ -1689,110 +1951,6 @@ describe('agent-detector', () => {
 			await detector.detectAgents();
 
 			const models = await detector.discoverModels('codex');
-			expect(models).toEqual([]);
-		});
-
-		it('should discover models for Grok from models_cache.json', async () => {
-			mockExecFileNoThrow.mockImplementation(async (cmd, args) => {
-				const binaryName = args[0];
-				if (binaryName === 'grok') {
-					return { stdout: '/usr/bin/grok\n', stderr: '', exitCode: 0 };
-				}
-				if (binaryName === 'bash') {
-					return { stdout: '/bin/bash\n', stderr: '', exitCode: 0 };
-				}
-				return { stdout: '', stderr: 'not found', exitCode: 1 };
-			});
-
-			// Grok's cache shape differs from Codex: models is an object map keyed by
-			// model ID, each entry wrapping an `info` object with a `hidden` flag.
-			const cacheData = JSON.stringify({
-				models: {
-					'grok-4.5': { info: { id: 'grok-4.5', hidden: false, context_window: 500000 } },
-					'grok-composer-2.5-fast': {
-						info: { id: 'grok-composer-2.5-fast', hidden: false, context_window: 200000 },
-					},
-					'grok-internal-preview': { info: { id: 'grok-internal-preview', hidden: true } },
-				},
-			});
-			_readFileSync.mockImplementation((filePath: fs.PathOrFileDescriptor) => {
-				if (typeof filePath === 'string' && filePath.includes('models_cache.json')) {
-					return cacheData;
-				}
-				throw new Error('ENOENT');
-			});
-
-			detector.clearCache();
-			await detector.detectAgents();
-
-			const models = await detector.discoverModels('grok');
-			expect(models).toEqual(['grok-4.5', 'grok-composer-2.5-fast']);
-			expect(models).not.toContain('grok-internal-preview'); // hidden
-			expect(logger.info).toHaveBeenCalledWith(
-				expect.stringContaining('Discovered 2 models'),
-				'AgentDetector',
-				expect.any(Object)
-			);
-		});
-
-		it('should fall back to parsing `grok models` output when models_cache.json is missing', async () => {
-			mockExecFileNoThrow.mockImplementation(async (cmd, args) => {
-				const binaryName = args[0];
-				if (binaryName === 'grok') {
-					return { stdout: '/usr/bin/grok\n', stderr: '', exitCode: 0 };
-				}
-				if (binaryName === 'bash') {
-					return { stdout: '/bin/bash\n', stderr: '', exitCode: 0 };
-				}
-				if (cmd === '/usr/bin/grok' && args[0] === 'models') {
-					// Captured from `grok models` v0.2.93
-					return {
-						stdout:
-							'You are logged in with grok.com.\n' +
-							'\n' +
-							'Default model: grok-4.5\n' +
-							'\n' +
-							'Available models:\n' +
-							'  * grok-4.5 (default)\n' +
-							'  - grok-composer-2.5-fast\n',
-						stderr: '',
-						exitCode: 0,
-					};
-				}
-				return { stdout: '', stderr: 'not found', exitCode: 1 };
-			});
-
-			_readFileSync.mockImplementation(() => {
-				throw new Error('ENOENT');
-			});
-
-			detector.clearCache();
-			await detector.detectAgents();
-
-			const models = await detector.discoverModels('grok');
-			expect(models).toEqual(['grok-4.5', 'grok-composer-2.5-fast']);
-		});
-
-		it('should return empty array when Grok cache and CLI discovery both fail', async () => {
-			mockExecFileNoThrow.mockImplementation(async (cmd, args) => {
-				const binaryName = args[0];
-				if (binaryName === 'grok') {
-					return { stdout: '/usr/bin/grok\n', stderr: '', exitCode: 0 };
-				}
-				if (binaryName === 'bash') {
-					return { stdout: '/bin/bash\n', stderr: '', exitCode: 0 };
-				}
-				return { stdout: '', stderr: 'not found', exitCode: 1 };
-			});
-
-			_readFileSync.mockImplementation(() => {
-				throw new Error('ENOENT');
-			});
-
-			detector.clearCache();
-			await detector.detectAgents();
-
-			const models = await detector.discoverModels('grok');
 			expect(models).toEqual([]);
 		});
 
@@ -2493,64 +2651,6 @@ describe('agent-detector', () => {
 				'Could not read Codex models_cache.json for config option discovery',
 				'AgentDetector'
 			);
-		});
-
-		it('should discover Grok model options from models_cache.json with empty default first', async () => {
-			mockExecFileNoThrow.mockImplementation(async (cmd, args) => {
-				const binaryName = args[0];
-				if (binaryName === 'grok') {
-					return { stdout: '/usr/bin/grok\n', stderr: '', exitCode: 0 };
-				}
-				if (binaryName === 'bash') {
-					return { stdout: '/bin/bash\n', stderr: '', exitCode: 0 };
-				}
-				return { stdout: '', stderr: 'not found', exitCode: 1 };
-			});
-
-			// Include a model beyond the static fallback list to prove the values
-			// come from the cache, not the definition.
-			const cacheData = JSON.stringify({
-				models: {
-					'grok-4.5': { info: { id: 'grok-4.5', hidden: false } },
-					'grok-composer-2.5-fast': { info: { id: 'grok-composer-2.5-fast', hidden: false } },
-					'grok-5-preview': { info: { id: 'grok-5-preview', hidden: false } },
-				},
-			});
-			_readFileSync.mockImplementation((filePath: fs.PathOrFileDescriptor) => {
-				if (typeof filePath === 'string' && filePath.includes('models_cache.json')) {
-					return cacheData;
-				}
-				throw new Error('ENOENT');
-			});
-
-			detector.clearCache();
-			await detector.detectAgents();
-
-			const options = await detector.discoverConfigOptions('grok', 'model');
-			expect(options).toEqual(['', 'grok-4.5', 'grok-composer-2.5-fast', 'grok-5-preview']);
-		});
-
-		it('falls back to static Grok model options when cache and CLI discovery both fail', async () => {
-			mockExecFileNoThrow.mockImplementation(async (cmd, args) => {
-				const binaryName = args[0];
-				if (binaryName === 'grok') {
-					return { stdout: '/usr/bin/grok\n', stderr: '', exitCode: 0 };
-				}
-				if (binaryName === 'bash') {
-					return { stdout: '/bin/bash\n', stderr: '', exitCode: 0 };
-				}
-				return { stdout: '', stderr: 'not found', exitCode: 1 };
-			});
-
-			_readFileSync.mockImplementation(() => {
-				throw new Error('ENOENT');
-			});
-
-			detector.clearCache();
-			await detector.detectAgents();
-
-			const options = await detector.discoverConfigOptions('grok', 'model');
-			expect(options).toEqual(['', 'grok-4.5', 'grok-composer-2.5-fast']);
 		});
 
 		it('should fall back to static options for select config options without dynamic discovery', async () => {
