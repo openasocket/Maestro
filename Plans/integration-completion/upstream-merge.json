@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge in progress; MCOMP-01-03A, 03B and 03C staged (9 files), 35 files unmerged in the worktree; MCOMP-01-03D..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T01:46:16.072Z",
-		"updatedBy": "MCOMP-01-03C"
+		"state": "merge in progress; MCOMP-01-03A, 03B, 03C and 03D staged (12 files), 32 files unmerged in the worktree; MCOMP-01-03E..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
+		"updatedAt": "2026-10-30T01:54:28.898Z",
+		"updatedBy": "MCOMP-01-03D"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -265,6 +265,45 @@
 			],
 			"unmergedAfter": 35,
 			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03c.mjs (not in git)"
+		},
+		"MCOMP-01-03D": {
+			"resolvedAt": "2026-10-29",
+			"resolvedBy": "Maestro-Claude",
+			"files": [
+				"src/main/ipc/handlers/process/handle-spawn.ts",
+				"src/main/group-chat/spawnGroupChatAgent.ts",
+				"src/__tests__/main/cross-agent-router.test.ts"
+			],
+			"hunks": {
+				"src/main/ipc/handlers/process/handle-spawn.ts": [
+					"507-515 (the one hunk, the caller-identity comment ahead of the non-terminal block): the base comment ended at \"drives, not an agent turn, so it is never stamped.\"; upstream extended it by three lines on the tab half of the compound {agentId}-ai-{tabId} process id (its code change, callerTabId = config.tabId ?? config.sessionId.match(REGEX_AI_TAB_ID)?.[1], auto-merged at 517 with the REGEX_AI_TAB_ID import); the integration side added let dispatchedAs: DispatchedSpawnIds | undefined right after the comment (the ids minted for a dispatched child at 544, handed to the sink at 1201); upstream four comment lines kept, then the declaration"
+				],
+				"src/main/group-chat/spawnGroupChatAgent.ts": [
+					"114-134 (the one hunk, SpawnGroupChatAgentConfig after isResume): both sides appended options; the integration actor?: ProcessSpawnActor (the sink binds it at the spawnAdmitted call, 263) and dispatchedBy?: GroupChatSpawnLineage (a consult asking operation, read at 185-187) kept first, then upstream acceptWorkspaceTrust?: boolean (forwarded to prepareGroupChatSpawn at 224, which auto-merged)"
+				],
+				"src/__tests__/main/cross-agent-router.test.ts": [
+					"74-78 (the harness overrides type): both fields kept, the integration actor?: ProcessSpawnActor (the host-secret actor case at 141) then upstream target?: Partial<CrossAgentTargetSession> (the codex target case at 325); both imports already present on both sides",
+					"101-106 (the startCrossAgentRequest options in harness()): upstream getTargetSession: () => ({ ...targetSession(), ...overrides.target }) in place of the base getTargetSession: targetSession, then the integration ...(overrides.actor ? { actor: overrides.actor } : {})"
+				]
+			},
+			"checks": {
+				"staging": "merge-tool stage over the three files: prettier left all three unchanged, git add done, 32 files left unmerged, no marker left in any of the three",
+				"seams": "the admission seams stay whole: handle-spawn.ts still mints dispatchedAs for a delegated spawn and hands it to admitSpawn at the sink; spawnGroupChatAgent.ts still derives the room or consult lineage, stamps it before the SSH wrap and spawns through spawnAdmitted for the actor named; upstream folder-trust opt-in (acceptWorkspaceTrust) rides beside them and the consult suite keeps both the actor case and the codex target case",
+				"suites": "node node_modules/vitest/vitest.mjs run in the worktree over cross-agent-router.test.ts, group-chat/spawnGroupChatAgent and ipc/handlers/process: 1 file passed (findOwningSessionRecord.test.ts, 6 tests); cross-agent-router.test.ts, spawnGroupChatAgent.test.ts and handle-spawn.managed.test.ts cannot transform because they reach src/shared/maestro-lib/run/start-turn.ts (still unmerged, MCOMP-01-03F), process.test.ts and currentSpawnActor.test.ts because they reach src/main/cue/cue-process-lifecycle.ts (also 03F); the three resolved files themselves parsed (prettier read them unchanged), so these are not defects of this group",
+				"numstatVsHead": {
+					"src/main/ipc/handlers/process/handle-spawn.ts": "7+/3-",
+					"src/main/group-chat/spawnGroupChatAgent.ts": "7+/0-",
+					"src/__tests__/main/cross-agent-router.test.ts": "31+/1- (upstream folder-trust and codex consult cases)"
+				},
+				"numstatVsMergeHead": {
+					"src/main/ipc/handlers/process/handle-spawn.ts": "344+/58- (the sink admission)",
+					"src/main/group-chat/spawnGroupChatAgent.ts": "100+/4- (the room and consult lineage)",
+					"src/__tests__/main/cross-agent-router.test.ts": "17+/0- (the actor case)"
+				}
+			},
+			"semanticConflictsForQ": [],
+			"unmergedAfter": 32,
+			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03d.mjs (not in git)"
 		}
 	}
 }
