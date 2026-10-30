@@ -8,12 +8,12 @@
 		"archiveFormatVersion": 2,
 		"archive": {
 			"file": "runtime.tgz",
-			"sha256": "48458098c8138ddaa73dc429aeeaf069e311deff52fddacb300a535e6fc946ea",
-			"sha512": "8f4c0041934b6700357941bad457095ef1b002de6388a091e5c73ec32cba4208c383fc3217943c5e2a96fd3469bbec90b6b50f4b85fe7defdfaffa917c71abfe",
-			"bytes": 2444723
+			"sha256": "fcd47fed0336f38712b14901f9eaab29d6204078f02a5d9ae38e478d921893ea",
+			"sha512": "3436e023ba104cb8e409288bfe58e9146062842c24ffa328835f40ec490db0d51fbf6e0cafcfbe9eee3f16b483589e49070701ec44aa5198a88702267d63fcbe",
+			"bytes": 2444741
 		},
-		"manifestSha256": "1a081531b7ef1424acfbc5d4c97e3ff2a3793bfd3d575304a079acd14bd0708d",
-		"payloadDigest": "3ab9f5cfd81c7113499b60010df6995912c415c3859ae72497107b2f4e132df8",
+		"manifestSha256": "cfd5942d9a7a5febb43510c36f51a1b18fe5ac1a47fd3445fbde84eebf1a4a30",
+		"payloadDigest": "6d2c186673ab2fa95d39ee7b878578b8b1402de5a85d1158ff5e1bc90405e4d9",
 		"payloadFiles": 298,
 		"versions": {
 			"app": "1.1.0-RC",
@@ -23,8 +23,8 @@
 		},
 		"implementation": {
 			"rules": "maestro-implementation-tree/1",
-			"digest": "1d5da40b2d20d0ae6a5aaa5c9d89c31ac57bc152a568e3b814a4d038dc05ebd4",
-			"commit": "54e329e63e81de0b4b0bff06bd8ace557305d273",
+			"digest": "3af2584a4076ba3c3435c832e93beb9c841eae10bf6261ffd468034e64b1f5e0",
+			"commit": "b8678e4a087492e7941b569dcc8848e13e5d0cb5",
 			"fileCount": 6587
 		},
 		"library": {
@@ -34,7 +34,7 @@
 			"entrySha256": "b21f1f7d39675d39e8cc2b7468caa7d5a4cfd04b31aa09d64351900f73164f0d"
 		},
 		"location": {
-			"directory": "dist/mega-maestro-runtime/0.32.0/48458098c8138ddaa73dc429aeeaf069e311deff52fddacb300a535e6fc946ea",
+			"directory": "dist/mega-maestro-runtime/0.32.0/fcd47fed0336f38712b14901f9eaab29d6204078f02a5d9ae38e478d921893ea",
 			"rule": "obtain the archive by archive.sha256 and verify the sidecar and sha512; the directory is where the packager lands it"
 		},
 		"receipts": {
