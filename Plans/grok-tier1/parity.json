@@ -1921,7 +1921,8 @@
 				"src/shared/maestro-lib/parsers/antigravity-output-parser.ts",
 				"src/main/process-manager/handlers/StdoutHandler.ts",
 				"src/renderer/hooks/agent/useAgentErrorRecovery.tsx",
-				"src/renderer/components/Wizard/services/wizardErrorDetection.ts"
+				"src/renderer/components/Wizard/services/wizardErrorDetection.ts",
+				"src/shared/maestro-lib/settings/snapshot.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -2005,7 +2006,7 @@
 				{
 					"id": "grok-environment-disclosure-unverified",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H must propagate the masking key through settings snapshots. GT1-02-03D/03I/13 own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03b-opaque-environment-disclosure. Whole-row qualification remains pending.",
+					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots and documents opaque Grok bundle/gateway handling. GT1-02-03D/03I/13 still own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03h-opaque-settings-snapshots. Whole-row qualification remains pending.",
 					"affectedRows": ["P05"]
 				},
 				{
@@ -11999,7 +12000,8 @@
 				"src/shared/envVarCatalog.ts",
 				"src/main/process-manager/handlers/StdoutHandler.ts",
 				"src/renderer/hooks/agent/useAgentErrorRecovery.tsx",
-				"src/renderer/components/Wizard/services/wizardErrorDetection.ts"
+				"src/renderer/components/Wizard/services/wizardErrorDetection.ts",
+				"src/shared/maestro-lib/settings/snapshot.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-02-01", "GT1-02-03", "GT1-02-03B", "GT1-02-03H", "GT1-02-03C"],
@@ -12060,7 +12062,7 @@
 				{
 					"id": "grok-environment-disclosure-unverified",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H must propagate the masking key through settings snapshots. GT1-02-03D/03I/13 own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03b-opaque-environment-disclosure. Whole-row qualification remains pending.",
+					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots and documents opaque Grok bundle/gateway handling. GT1-02-03D/03I/13 still own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03h-opaque-settings-snapshots. Whole-row qualification remains pending.",
 					"affectedRows": ["REG-AUTH"]
 				},
 				{
@@ -16614,7 +16616,8 @@
 				"src/renderer/components/ReauthModal.tsx",
 				"src/renderer/hooks/agent/useAgentErrorRecovery.tsx",
 				"src/main/process-manager/handlers/StdoutHandler.ts",
-				"src/renderer/components/Wizard/services/wizardErrorDetection.ts"
+				"src/renderer/components/Wizard/services/wizardErrorDetection.ts",
+				"src/shared/maestro-lib/settings/snapshot.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -16719,7 +16722,7 @@
 				{
 					"id": "grok-environment-disclosure-unverified",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H must propagate the masking key through settings snapshots. GT1-02-03D/03I/13 own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03b-opaque-environment-disclosure. Whole-row qualification remains pending.",
+					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots and documents opaque Grok bundle/gateway handling. GT1-02-03D/03I/13 still own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03h-opaque-settings-snapshots. Whole-row qualification remains pending.",
 					"affectedRows": ["META-05"]
 				},
 				{

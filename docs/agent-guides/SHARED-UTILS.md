@@ -78,8 +78,16 @@ Precedence (later wins), mirroring `process:spawnTerminalTab`:
 | ------------------------- | ------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `resolveAgentEnvironment` | `(layers: AgentEnvironmentLayers) => ResolvedEnvVar[]` | Merge the three layers, key-sorted. Each entry carries the winning `source` plus `shadowedBy`, the layers it overrode. Empty-string values are kept: `FOO=` is a real override, not an absent one. |
 | `isSecretEnvKey`          | `(key: string) => boolean`                             | Whether a value should be masked until revealed. Matched loosely on purpose - a false positive costs one click, a false negative puts a live key on screen during a screen share.                  |
-| `maskEnvValue`            | `(value: string) => string`                            | Mask a secret, keeping the last four characters so one credential is still tellable from another. Values of 8 characters or fewer are masked whole.                                                |
+| `maskEnvValue`            | `(value: string, key?: string) => string`              | Pass the environment key to mask Grok credential bundles and gateway values wholly. Other secrets retain their last four characters; values of 8 characters or fewer are masked whole.             |
 | `envSourceLabel`          | `(source: EnvVarSource) => string`                     | Human label for a layer: `Global`, `Provider`, `This agent`.                                                                                                                                       |
+
+`isSecretEnvKey` treats `GROK_AUTH`, `GROK_MODELS_BASE_URL`,
+`GROK_CLI_CHAT_PROXY_BASE_URL` and `GROK_XAI_API_BASE_URL` as secrets,
+case-insensitively. Pass the key to `maskEnvValue(value, key)` to replace their
+whole value with eight bullets, including malformed JSON or URLs. Gateway
+credentials can appear in userinfo, queries or arbitrary paths, so masking is
+conservative even for apparently credential-free URLs; never parse a bundle or
+URL to guess which suffix is safe. Omitting the key keeps legacy suffix masking.
 
 **Do NOT re-derive this merge inline.** The precedence has to match the spawner's
 or the UI describes a process nobody is running. Render the result with
