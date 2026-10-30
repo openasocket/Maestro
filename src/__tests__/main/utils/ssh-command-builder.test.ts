@@ -12,6 +12,9 @@ import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { logger } from '../../../shared/maestro-lib/host';
 import { resolveSshPath } from '../../../shared/maestro-lib/launch/ssh-path';
+import { resolvePromptDelivery } from '../../../shared/maestro-lib/launch/prompt-delivery';
+import { getAgentDefinition } from '../../../shared/maestro-lib/providers/definitions';
+import { getAgentCapabilities } from '../../../shared/maestro-lib/providers/capabilities';
 import { newRemotePidFilePath, withRemotePidRecord } from '../../../main/utils/ssh-remote-signal';
 import { createScratchDir } from '../../shared/maestro-lib/run/fakeAgent';
 
@@ -53,17 +56,20 @@ describe('ssh-command-builder', () => {
 	describe('private remote prompt files', () => {
 		function options(content = 'synthetic private prompt\n雪 🐱\n') {
 			const destination = newRemotePromptFileDestination(baseConfig.id);
+			const delivery = resolvePromptDelivery({
+				agent: { ...getAgentDefinition('grok'), capabilities: getAgentCapabilities('grok') },
+				prompt: content,
+				isWindowsHost: false,
+				sshRemote: true,
+				sshRemoteId: baseConfig.id,
+				promptFileDestination: destination,
+			});
+			expect(delivery.via).toBe('file');
+			if (delivery.via !== 'file') throw new Error('Grok must select owned prompt-file delivery');
 			return {
 				command: '~/bin/grok custom',
-				args: ['--prompt-file', destination.path],
-				promptArtifact: {
-					...destination,
-					content,
-					encoding: 'utf8' as const,
-					mode: 0o600 as const,
-					flag: 'wx' as const,
-					cleanup: 'turn' as const,
-				},
+				args: delivery.args,
+				promptArtifact: delivery.artifact,
 			};
 		}
 
@@ -73,7 +79,19 @@ describe('ssh-command-builder', () => {
 			'%s transfers exactly one encoded body without exposing private data in argv or logs',
 			async (build) => {
 				const localTemp = vi.spyOn(os, 'tmpdir').mockReturnValue('/local-only-temp');
-				const request = options();
+				const prompt = 'synthetic private prompt 雪 🐱\r\n$(exit 42) `whoami` " & | > '.repeat(
+					2000
+				);
+				const request = options(prompt);
+				expect(request.args).toEqual(['--prompt-file', request.promptArtifact.path]);
+				expect(request.promptArtifact.owner).toBe('remote');
+				expect(request.promptArtifact.sshRemoteId).toBe(baseConfig.id);
+				expect(request.promptArtifact.path).toMatch(/\.json$/);
+				expect(JSON.parse(request.promptArtifact.content)).toEqual({
+					type: 'acp',
+					content: [{ type: 'text', text: prompt }],
+				});
+				expect(Buffer.byteLength(prompt, 'utf8')).toBeGreaterThan(32767);
 				const info = vi.spyOn(logger, 'info');
 				const debug = vi.spyOn(logger, 'debug');
 				const result = await build(baseConfig, request);
@@ -245,6 +263,18 @@ describe('ssh-command-builder', () => {
 					if (failure === 'owner-collision')
 						expect(fs.readFileSync(pidFile, 'utf8')).toBe('untouched');
 					else expect(fs.existsSync(pidFile)).toBe(false);
+				});
+
+				it('refuses a cancelled Grok transfer before creating files or starting its reader', async () => {
+					fs.writeFileSync(`${pidFile}.cancel`, '', { flag: 'wx', mode: 0o600 });
+					const result = run(await script());
+					expect(result.error).toBeUndefined();
+					expect(result.status).toBe(1);
+					expect(result.stdout.length).toBe(0);
+					expect(result.stderr.toString()).toBe('Remote prompt preparation unavailable.\n');
+					expect(fs.existsSync(request.promptArtifact.path)).toBe(false);
+					expect(fs.existsSync(pidFile)).toBe(false);
+					expect(fs.readFileSync(`${pidFile}.cancel`, 'utf8')).toBe('');
 				});
 
 				it.each([23, 127])(

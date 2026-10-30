@@ -10,6 +10,12 @@ import {
 import type { AcpPromptBlock } from '../../../../shared/maestro-lib/launch/image-refs';
 import { getAgentDefinition } from '../../../../shared/maestro-lib/providers/definitions';
 import { getAgentCapabilities } from '../../../../shared/maestro-lib/providers/capabilities';
+import { applySystemPromptDelivery } from '../../../../shared/maestro-lib/turns/args';
+import {
+	embedSystemPromptInPrompt,
+	EMBEDDED_SYSTEM_PROMPT_SEPARATOR,
+	stripEmbeddedSystemPrompt,
+} from '../../../../shared/embeddedSystemPrompt';
 
 /** A real provider, as the spawners see it: definition plus capabilities. */
 function provider(id: string): PromptDeliveryAgent {
@@ -103,17 +109,14 @@ describe('resolvePromptDelivery', () => {
 });
 
 describe('resolvePromptDelivery ACP JSON artifacts', () => {
-	// Candidate declaration only; GT1-02-11 owns activation of the real registry.
-	const promptArgs = vi.fn((prompt: string) => ['-p', prompt]);
-	const promptFileArgs = vi.fn((file: string) => ['--prompt-file', file]);
+	// Observe the registered builders without replacing their behavior or route declaration.
+	const registered = provider('grok');
+	const promptArgs = vi.fn(registered.promptArgs);
+	const promptFileArgs = vi.fn(registered.promptFileArgs);
 	const grok: PromptDeliveryAgent = {
-		...provider('grok'),
+		...registered,
 		promptArgs,
 		promptFileArgs,
-		promptFile: {
-			format: 'acp-json',
-			exclusivePromptFlags: ['-p', '--single', '--prompt-json', '--prompt-file'],
-		},
 	};
 	const base: ResolvePromptDeliveryInput = {
 		agent: grok,
@@ -129,23 +132,98 @@ describe('resolvePromptDelivery ACP JSON artifacts', () => {
 		maxBytesPerImage: 3,
 		maxTotalBytes: 3,
 	};
-	const privateText = '  private prompt "雪"\nsecond line\t';
+	const privateText =
+		'  private prompt "雪"\nsecond line\t$(touch sentinel) `id` & | ; < > %PATH% \' ';
 
 	beforeEach(() => vi.clearAllMocks());
 
-	it.each(['', ' \t\r\n ', privateText])(
-		'preserves exact text %j in the native envelope',
-		(prompt) => {
-			for (const isWindowsHost of [false, true]) {
-				const result = resolvePromptDelivery({ ...base, prompt, isWindowsHost });
-				expect(result.via).toBe('file');
-				if (result.via !== 'file') throw new Error('Expected prompt artifact');
-				expect(JSON.parse(result.artifact.content)).toEqual({
-					type: 'acp',
-					content: [{ type: 'text', text: prompt }],
-				});
-				expect(result.args).toEqual(['--prompt-file', base.promptFileDestination!.path]);
-				expect(promptArgs).not.toHaveBeenCalled();
+	it.each([
+		{ name: 'empty', prompt: '' },
+		{ name: 'whitespace', prompt: ' \t\r\n ' },
+		{ name: 'Unicode and shell metacharacters', prompt: privateText },
+		{ name: 'above Windows argv limits', prompt: privateText.repeat(2048) },
+	])('preserves exact $name bytes in the native envelope', ({ prompt }) => {
+		for (const isWindowsHost of [false, true]) {
+			const result = resolvePromptDelivery({ ...base, prompt, isWindowsHost });
+			expect(result.via).toBe('file');
+			if (result.via !== 'file') throw new Error('Expected prompt artifact');
+			expect(JSON.parse(result.artifact.content)).toEqual({
+				type: 'acp',
+				content: [{ type: 'text', text: prompt }],
+			});
+			expect(Buffer.from(result.artifact.content, 'utf8')).toEqual(
+				Buffer.from(
+					JSON.stringify({ type: 'acp', content: [{ type: 'text', text: prompt }] }),
+					'utf8'
+				)
+			);
+			expect(result.args).toEqual(['--prompt-file', base.promptFileDestination!.path]);
+			expect(promptArgs).not.toHaveBeenCalled();
+			if (prompt.length > 32768) {
+				expect(result.args.join(' ').length).toBeLessThan(8192);
+			}
+		}
+	});
+
+	it('distinguishes an absent prompt from an explicitly empty file turn', () => {
+		expect(resolvePromptDelivery(base)).toEqual({ via: 'none' });
+		expect(promptFileArgs).not.toHaveBeenCalled();
+		expect(resolvePromptDelivery({ ...base, prompt: '' }).via).toBe('file');
+		expect(promptArgs).not.toHaveBeenCalled();
+	});
+
+	it.each([false, true])(
+		'composes one system envelope and skips it on resume (Windows=%s)',
+		(isWindowsHost) => {
+			for (const sshRemote of [false, true]) {
+				for (const isResume of [false, true]) {
+					const definition = getAgentDefinition('grok')!;
+					const systemPrompt = 'Private Maestro system context\n  preserve spacing 雪';
+					const args = isResume ? definition.resumeArgs!('synthetic-session') : [];
+					const originalArgs = [...args];
+					const placed = applySystemPromptDelivery({
+						args,
+						prompt: privateText,
+						systemPrompt,
+						supportsAppendSystemPrompt: getAgentCapabilities('grok').supportsAppendSystemPrompt,
+						isResume,
+						isWindowsHost,
+						sshRemote,
+					});
+					expect(placed.delivery).toEqual({ via: isResume ? 'skip-on-resume' : 'embed' });
+					expect(placed.args).toEqual(originalArgs);
+					expect(args).toEqual(originalArgs);
+					const expected = isResume
+						? privateText
+						: embedSystemPromptInPrompt(systemPrompt, privateText);
+					expect(placed.prompt).toBe(expected);
+					expect(placed.prompt!.split(EMBEDDED_SYSTEM_PROMPT_SEPARATOR)).toHaveLength(
+						isResume ? 1 : 2
+					);
+					expect(stripEmbeddedSystemPrompt(placed.prompt!)).toBe(privateText);
+					const destination = sshRemote
+						? {
+								owner: 'remote' as const,
+								path: '/remote/scratch/system.json',
+								sshRemoteId: 'selected-host',
+							}
+						: base.promptFileDestination!;
+					const delivered = resolvePromptDelivery({
+						...base,
+						prompt: placed.prompt,
+						args: placed.args,
+						isWindowsHost,
+						sshRemote,
+						sshRemoteId: sshRemote ? 'selected-host' : undefined,
+						promptFileDestination: destination,
+					});
+					if (delivered.via !== 'file') throw new Error('Expected registered Grok file route');
+					expect(delivered.args).toEqual(['--prompt-file', destination.path]);
+					expect(delivered.artifact.content).toBe(
+						JSON.stringify({ type: 'acp', content: [{ type: 'text', text: expected }] })
+					);
+					expect(promptArgs).not.toHaveBeenCalled();
+				}
 			}
 		}
 	);

@@ -516,8 +516,156 @@ describe('Grok directory-grant planning (native filesystem qualification remains
 	});
 });
 
+describe('registered Grok prompt-file launch planning', () => {
+	const agent = { ...getAgentDefinition('grok'), capabilities: getAgentCapabilities('grok') };
+
+	it.each(['desktop', 'cli', 'cue'] as const)(
+		'%s keeps large prompts in one host-owned JSON artifact on fresh and resumed turns',
+		(surface) => {
+			const prompt = '  private-unicode-🧪界\n"quotes" $(echo nope) & | %PATH% `nope`\r\n'.repeat(
+				1_000
+			);
+			expect(prompt.length).toBeGreaterThan(32_767);
+			for (const isRemote of [false, true]) {
+				for (const isResuming of [false, true]) {
+					const destination = {
+						owner: isRemote ? ('remote' as const) : ('local' as const),
+						path: isRemote ? '/remote/owned/prompt.json' : path.resolve('owned prompt.json'),
+						...(isRemote ? { sshRemoteId: 'remote-1' } : {}),
+					};
+					const args = [
+						...agent.jsonOutputArgs!,
+						...(isResuming ? agent.resumeArgs!('turn-id') : []),
+					];
+					const result = buildAgentLaunchPlan(
+						input({
+							agent,
+							surface,
+							args,
+							prompt,
+							isResuming,
+							isWindowsHost: true,
+							cmdShellLaunch: true,
+							sshRemoteConfig: isRemote ? { enabled: true, remoteId: 'remote-1' } : undefined,
+							sshStore: storeWith(remote()),
+							promptFileDestination: destination,
+						})
+					);
+					if (!result.ok) throw new Error(result.error);
+					expect(result.plan.target.kind).toBe(isRemote ? 'remote' : 'local');
+					expect(result.plan.args).toEqual([...args, '--prompt-file', destination.path]);
+					expect(result.plan.stdin).toBeUndefined();
+					expect(result.plan.prompt).toMatchObject({
+						via: 'file',
+						artifact: {
+							...destination,
+							content: JSON.stringify({ type: 'acp', content: [{ type: 'text', text: prompt }] }),
+							encoding: 'utf8',
+							mode: 0o600,
+							flag: 'wx',
+							cleanup: 'turn',
+						},
+					});
+					expect(JSON.stringify(result.plan.args)).not.toContain('private-unicode');
+					expect(args).toEqual([
+						...agent.jsonOutputArgs!,
+						...(isResuming ? agent.resumeArgs!('turn-id') : []),
+					]);
+				}
+			}
+		}
+	);
+
+	it('allocates distinct local JSON names without falling back to ignored stdin', () => {
+		const first = buildAgentLaunchPlan(input({ agent, args: [], prompt: '', isWindowsHost: true }));
+		const second = buildAgentLaunchPlan(
+			input({ agent, args: [], prompt: '', isWindowsHost: true })
+		);
+		if (!first.ok || !second.ok) throw new Error('expected local file plans');
+		if (first.plan.prompt.via !== 'file' || second.plan.prompt.via !== 'file')
+			throw new Error('expected artifacts');
+		expect(path.isAbsolute(first.plan.prompt.artifact.path)).toBe(true);
+		expect(path.extname(first.plan.prompt.artifact.path)).toBe('.json');
+		expect(first.plan.prompt.artifact.path).not.toBe(second.plan.prompt.artifact.path);
+		expect(first.plan.prompt.artifact.content).toBe(
+			'{"type":"acp","content":[{"type":"text","text":""}]}'
+		);
+		expect(first.plan.args).toEqual(['--prompt-file', first.plan.prompt.artifact.path]);
+		expect(first.plan.stdin).toBeUndefined();
+	});
+
+	it.each([
+		undefined,
+		{ owner: 'local', path: path.resolve('local private.json') },
+		{ owner: 'remote', path: '/remote/private.json', sshRemoteId: 'different-remote' },
+	] satisfies AgentLaunchInput['promptFileDestination'][])(
+		'refuses an absent or foreign SSH destination without exposing prompt text: %j',
+		(promptFileDestination) => {
+			const prompt = 'private-prompt-must-not-be-diagnostic';
+			const result = buildAgentLaunchPlan(
+				input({
+					agent,
+					args: [],
+					prompt,
+					promptFileDestination,
+					sshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+					sshStore: storeWith(remote()),
+				})
+			);
+			expect(result).toMatchObject({ ok: false, reason: 'prompt-delivery-refused' });
+			expect(result).not.toHaveProperty('plan');
+			expect(JSON.stringify(result)).not.toContain(prompt);
+			expect(JSON.stringify(result)).not.toContain('private.json');
+		}
+	);
+
+	it.each([false, true])(
+		'requires embedded image bytes rather than a path on resume=%s',
+		(isResuming) => {
+			const prompt = `inspect privately\n${agent.imagePromptBuilder!([path.resolve('private image.png')])}`;
+			const selection = input({
+				agent,
+				args: isResuming ? agent.resumeArgs!('turn-id') : [],
+				prompt,
+				hasImages: true,
+				isResuming,
+			});
+			const refused = buildAgentLaunchPlan(selection);
+			expect(refused).toEqual({
+				ok: false,
+				reason: 'prompt-delivery-refused',
+				error: 'Image content is missing from the ACP prompt file.',
+			});
+			expect(JSON.stringify(refused)).not.toContain(prompt);
+			const blocks = [
+				{ type: 'text' as const, text: 'inspect privately' },
+				{ type: 'image' as const, mimeType: 'image/png', data: 'AQID' },
+			];
+			const delivered = buildAgentLaunchPlan({
+				...selection,
+				prompt: undefined,
+				promptBlocks: blocks,
+				embeddedImageSupport: {
+					mimeTypes: ['image/png'],
+					maxCount: 1,
+					maxBytesPerImage: 3,
+					maxTotalBytes: 3,
+				},
+			});
+			if (!delivered.ok) throw new Error(delivered.error);
+			if (delivered.plan.prompt.via !== 'file') throw new Error('expected image artifact');
+			expect(JSON.parse(delivered.plan.prompt.artifact.content)).toEqual({
+				type: 'acp',
+				content: blocks,
+			});
+			expect(delivered.plan.stdin).toBeUndefined();
+		}
+	);
+});
+
 describe('Grok final launch model and effort validation', () => {
 	const agent = { ...getAgentDefinition('grok'), capabilities: getAgentCapabilities('grok') };
+	const localDestination = { owner: 'local' as const, path: path.resolve('effort prompt.json') };
 	const menu: NonNullable<AgentLaunchInput['grokEffortMenu']> = {
 		status: 'discovered',
 		model: 'selected-model',
@@ -551,6 +699,9 @@ describe('Grok final launch model and effort validation', () => {
 						sshStore: storeWith(remote()),
 						sessionCustomEnvVars: { GROK_HOME: '/account/selected' },
 						prompt: '--effort=none is prompt text',
+						promptFileDestination: sshRemoteConfig
+							? { owner: 'remote', path: '/remote/owned/effort.json', sshRemoteId: 'remote-1' }
+							: localDestination,
 					})
 				);
 				if (!result.ok) throw new Error(result.error);
@@ -559,7 +710,8 @@ describe('Grok final launch model and effort validation', () => {
 					'selected-model',
 					'--reasoning-effort',
 					'HiGh',
-					...(sshRemoteConfig ? [] : ['-p', '--effort=none is prompt text']),
+					'--prompt-file',
+					sshRemoteConfig ? '/remote/owned/effort.json' : localDestination.path,
 				]);
 				expect(result.plan.command).toBe(sshRemoteConfig ? 'grok' : '/opt/grok');
 				expect(result.plan.target.kind).toBe(sshRemoteConfig ? 'remote' : 'local');
@@ -580,7 +732,12 @@ describe('Grok final launch model and effort validation', () => {
 		(_label, grokEffortMenu) => {
 			for (const effort of ['high', 'none']) {
 				const result = buildAgentLaunchPlan(
-					input({ agent, grokEffortMenu, args: ['-m', 'selected-model', '--effort', effort] })
+					input({
+						agent,
+						grokEffortMenu,
+						args: ['-m', 'selected-model', '--effort', effort],
+						promptFileDestination: localDestination,
+					})
 				);
 				if (effort === 'high') {
 					if (!result.ok) throw new Error(result.error);
@@ -589,8 +746,8 @@ describe('Grok final launch model and effort validation', () => {
 						'selected-model',
 						'--reasoning-effort',
 						'high',
-						'-p',
-						'fix the bug',
+						'--prompt-file',
+						localDestination.path,
 					]);
 				} else {
 					expect(result).toMatchObject({
@@ -606,7 +763,12 @@ describe('Grok final launch model and effort validation', () => {
 
 	it.each(['none', 'high'])('accepts advertised %s without adding a fallback effort', (effort) => {
 		const result = buildAgentLaunchPlan(
-			input({ agent, grokEffortMenu: menu, args: ['--model=selected-model', `--effort=${effort}`] })
+			input({
+				agent,
+				grokEffortMenu: menu,
+				args: ['--model=selected-model', `--effort=${effort}`],
+				promptFileDestination: localDestination,
+			})
 		);
 		if (!result.ok) throw new Error(result.error);
 		expect(result.plan.args).toEqual([
@@ -614,8 +776,8 @@ describe('Grok final launch model and effort validation', () => {
 			'selected-model',
 			'--reasoning-effort',
 			effort,
-			'-p',
-			'fix the bug',
+			'--prompt-file',
+			localDestination.path,
 		]);
 	});
 
@@ -654,10 +816,20 @@ describe('Grok final launch model and effort validation', () => {
 
 	it('retains native defaults when no effort was selected', () => {
 		const result = buildAgentLaunchPlan(
-			input({ agent, args: ['--model=selected-model'], grokEffortMenu: menu })
+			input({
+				agent,
+				args: ['--model=selected-model'],
+				grokEffortMenu: menu,
+				promptFileDestination: localDestination,
+			})
 		);
 		if (!result.ok) throw new Error(result.error);
-		expect(result.plan.args).toEqual(['-m', 'selected-model', '-p', 'fix the bug']);
+		expect(result.plan.args).toEqual([
+			'-m',
+			'selected-model',
+			'--prompt-file',
+			localDestination.path,
+		]);
 	});
 
 	it('refuses a remembered uppercase rejection even when the selected model advertises it', () => {
