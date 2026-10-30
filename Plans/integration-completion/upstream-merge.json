@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge in progress; MCOMP-01-03A, 03B, 03C, 03D, 03E and 03F staged (18 files), 26 files unmerged in the worktree; MCOMP-01-03G..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T02:24:59.085Z",
-		"updatedBy": "MCOMP-01-03F"
+		"state": "merge in progress; MCOMP-01-03A, 03B, 03C, 03D, 03E, 03F and 03G staged (20 files), 24 files unmerged in the worktree; MCOMP-01-03H..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
+		"updatedAt": "2026-10-30T02:33:22.101Z",
+		"updatedBy": "MCOMP-01-03G"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -394,6 +394,43 @@
 			],
 			"unmergedAfter": 26,
 			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03f.mjs (not in git)"
+		},
+		"MCOMP-01-03G": {
+			"resolvedAt": "2026-10-29",
+			"resolvedBy": "Maestro-Claude",
+			"files": ["src/cli/commands/dispatch.ts", "src/__tests__/cli/commands/dispatch.test.ts"],
+			"hunks": {
+				"src/cli/commands/dispatch.ts": [
+					"16-30 (the imports): the integration side (4048746b2) imports MANAGED_DELEGATION_ENV_VAR and readDelegationContextEnv from managed/delegation beside the caller helpers; upstream (c8913d2d8, 6013016a3) imports the CallerIdentity type beside them, parseMentionRoutingField and MentionRouting from crossAgentContext and resolveMentionedTargetSessionIds from the mention roster; resolved as every name of both sides, upstream agentDelegation import (the superset) first, then crossAgentContext, the integration managed/delegation import, the roster",
+					"420-444 (the caller read in runDispatch): the integration side reads the delegation context beside the caller identity, refuses a record that is not a context (DELEGATION_INVALID, nothing sent) and builds caller as the caller fields plus the record; upstream reads the identity once into callerIdentity and feeds it to buildCallbackFields(options, agentId, callerIdentity), the call it moved here from above the routing check so --notify-on-complete can default to the dispatching tab (the base call auto-merged away); resolved as upstream shape with the delegation read folded into the caller construction: the integration comment, const callerIdentity = readCallerIdentity(process.env), readDelegationContextEnv(process.env), the DELEGATION_INVALID refusal, caller = callerMessageFields(callerIdentity) plus the delegation record when carried, then the callback build and its refusal; the three send paths (send_command, new_ai_tab_with_prompt, enqueue_command) spread callback.fields, routingFields and caller, auto-merged; one ordering note: on the integration side the callback option refusal (INVALID_OPTIONS) preceded the delegation refusal, now the delegation refusal comes first because upstream placed the callback build behind the caller read; both refuse before anything is sent, and no case of either suite depends on which wins when both are wrong"
+				],
+				"src/__tests__/cli/commands/dispatch.test.ts": [
+					"872-899 and 910-1050 (one both-sides append at the end of the outer describe, interleaved by git around the stubClient helper and the beforeEach opener both sides copied from caller attribution): the integration side describe(delegation context (MRC-07-04B)) whole (the jsdoc, RECORD, the resolveAgentId beforeEach, three cases: the record forwarded beside the caller on the send, new-tab and queue paths; a record that is not a context refused DELEGATION_INVALID with nothing sent; nothing added for an absent or blank record), then upstream describe(--routing) whole (the roster beforeEach over readLiveSessions and readGroups, six cases: each of the four modes sent as mentionRouting, an unknown mode refused INVALID_OPTIONS, --routing refused without a mention of another agent, the routing carried on the --queue and --new-tab paths, no mentionRouting and no roster read without the flag)",
+					"816-825 (beyond the hunks, caller attribution): the stubClient helper the base kept local there and both sides copied into their new blocks is hoisted once to the outer describe ahead of caller attribution, so the three blocks share one definition; no case changes"
+				]
+			},
+			"checks": {
+				"staging": "merge-tool stage over the two files: prettier left both unchanged, git add done, 24 files left unmerged, no marker left in either, nothing unstaged",
+				"seams": "the delegated-dispatch seam stays whole on upstream shape: maestro-cli dispatch still reads the delegation context off the shell, refuses an invalid record before anything is sent and forwards the record as delegation beside fromSessionId on every path; upstream --routing (mentionRouting, refused without a mention of another agent) and the dispatching-tab callback default travel beside it; the DispatchOptions, DispatchResponse and runQueueDispatch shapes auto-merged with routingFields and callerFields on every path",
+				"suites": "node node_modules/vitest/vitest.mjs run in the worktree over dispatch.test.ts: 54 tests passed (14 describe blocks, the three delegation cases and the nine routing cases among them); the other importers of the verb, app-not-running 188, dispatch-notify-on-complete 18, pianola-learn 6, pianola-orchestrate 9, pianola 13: 234 passed, 0 failed, 0 skipped",
+				"typeCheck": "a throwaway tsconfig extending the worktree tsconfig.cli.json over the two files alone (Working/mcomp-01-03/tsconfig-03g.json, not in git): no error in dispatch.ts; two TS1117 duplicate-key errors in dispatch.test.ts at 389 and 527 (background: false then background: true in one expected literal) that exist identically on the base (373/375, 511/513), the integration side and upstream, outside the hunks; no tsconfig includes src/__tests__/cli, so MCOMP-01-03Q will not meet them; left as found",
+				"cliWiring": "src/cli/index.ts auto-merged with upstream --routing <mode> option (line 601) beside --notify-on-complete and --callback-tab (609, 614), the options the resolved verb reads",
+				"numstatVsHead": {
+					"src/cli/commands/dispatch.ts": "82+/11- (upstream --routing and the dispatching-tab callback default)",
+					"src/__tests__/cli/commands/dispatch.test.ts": "104+/18- (upstream --routing cases plus the hoisted helper)"
+				},
+				"numstatVsMergeHead": {
+					"src/cli/commands/dispatch.ts": "21+/1- (the delegation context read, refusal and forwarding)",
+					"src/__tests__/cli/commands/dispatch.test.ts": "104+/21- (the delegation cases plus the hoisted helper)"
+				}
+			},
+			"semanticConflictsForQ": [],
+			"followUpsForR": [],
+			"observations": [
+				"dispatch.test.ts carries two duplicate background keys in expected literals (lines 389 and 527 after the merge) on every side since before the shared base; a cleanup for a later task, not this merge"
+			],
+			"unmergedAfter": 24,
+			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03g.mjs (not in git)"
 		}
 	}
 }
