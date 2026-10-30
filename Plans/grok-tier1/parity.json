@@ -1676,7 +1676,8 @@
 					"GT1-02-05C1",
 					"GT1-02-05C2",
 					"GT1-02-05C3",
-					"GT1-02-05D1"
+					"GT1-02-05D1",
+					"GT1-02-05F1"
 				],
 				"test": [
 					"GT1-02-06",
@@ -1689,7 +1690,9 @@
 					"GT1-02-05A2",
 					"GT1-02-05C1T",
 					"GT1-02-05C2T",
-					"GT1-02-05D1T"
+					"GT1-02-05D1T",
+					"GT1-02-05F2",
+					"GT1-02-05J1"
 				],
 				"verification": ["GT1-02-13", "GT1-10-12", "GT1-11-10", "GT1-07-11", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
@@ -1747,7 +1750,7 @@
 				{
 					"id": "grok-scoped-discovery-consumers-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults. GT1-02-05A adds Grok process deadlines, combined output caps, cancellation and sanitized failures through the shared runner; deterministic execution remains not-run. GT1-02-05A1/05A2/13 must close and verify inherited-pipe descendant cleanup after parent exit and the async Windows taskkill deadline before strict total completion is claimed. GT1-02-05B adds host-owned selected-agent/draft/provider-settings IPC context and explicit discovery/fallback status; tests remain not-run. GT1-02-05B1 aligns renderer discovery overloads with the shared request/result types and preserves legacy string-array signatures; compiler verification remains not-run. GT1-02-05C wires scoped debounced discovery and statuses into the configuration/options hooks and Auto Run, preserving explicit Grok values and withholding unresolved worktree catalogs; deterministic execution remains not-run. GT1-02-05C1/C2 own remaining model-picker, queued-turn, Group Chat and Director Notes consumers, including absent-versus-empty environment serialization; C3 owns guide updates and C1T/C2T/13 their regression execution. GT1-02-05D wires New/Edit/Symphony creation drafts through the shared options hook, rejects stale results and unresolved SSH discovery, preserves explicit values and legacy remote duplication; behavioral execution remains not-run. GT1-02-05D1/D1T/13 retain the discovered Symphony selected-model/effort handoff, secret-free contribution logging and renderer regression coverage. GT1-02-05E wires the wizard configuration to the shared scoped discovery hook with actual cwd, executable, environment, provider model/effort drafts and SSH selection; unavailable catalogs preserve manual values, and late open/refresh responses are guarded. GT1-02-05H/13 own wizard fixture updates and behavioral verification, including raw absent/empty/blank environments and cleared provider selections. GT1-02-05F retains context-window fallbacks; G-J/06/13 own regressions. GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Legacy calls receive no discovered Grok models; managed discovery remains unavailable pending phase09 qualification.",
+					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults. GT1-02-05A adds Grok process deadlines, combined output caps, cancellation and sanitized failures through the shared runner; deterministic execution remains not-run. GT1-02-05A1/05A2/13 must close and verify inherited-pipe descendant cleanup after parent exit and the async Windows taskkill deadline before strict total completion is claimed. GT1-02-05B adds host-owned selected-agent/draft/provider-settings IPC context and explicit discovery/fallback status; tests remain not-run. GT1-02-05B1 aligns renderer discovery overloads with the shared request/result types and preserves legacy string-array signatures; compiler verification remains not-run. GT1-02-05C wires scoped debounced discovery and statuses into the configuration/options hooks and Auto Run, preserving explicit Grok values and withholding unresolved worktree catalogs; deterministic execution remains not-run. GT1-02-05C1/C2 own remaining model-picker, queued-turn, Group Chat and Director Notes consumers, including absent-versus-empty environment serialization; C3 owns guide updates and C1T/C2T/13 their regression execution. GT1-02-05D wires New/Edit/Symphony creation drafts through the shared options hook, rejects stale results and unresolved SSH discovery, preserves explicit values and legacy remote duplication; behavioral execution remains not-run. GT1-02-05D1/D1T/13 retain the discovered Symphony selected-model/effort handoff, secret-free contribution logging and renderer regression coverage. GT1-02-05E wires the wizard configuration to the shared scoped discovery hook with actual cwd, executable, environment, provider model/effort drafts and SSH selection; unavailable catalogs preserve manual values, and late open/refresh responses are guarded. GT1-02-05H/13 own wizard fixture updates and behavioral verification, including raw absent/empty/blank environments and cleared provider selections. GT1-02-05F sets the shared Grok context default to unknown and rejects provider/host-only context snapshots in the shared helper and listener wiring; positive user-override paths are preserved and execution remains not-run. GT1-02-05J/J1/13 own constants, real wiring and configured-override checks; GT1-02-05F1/F2/13 own the remaining shared group-chat 200K fallback. Phase07 GT1-07-02/04/11 retain unknown-window and positive-override propagation through StdoutHandler/buildUsageStats. G-I/06/13 retain the other discovery regressions. GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Legacy calls receive no discovered Grok models; managed discovery remains unavailable pending phase09 qualification.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
@@ -2130,7 +2133,8 @@
 					"GT1-02-05C1",
 					"GT1-02-05C2",
 					"GT1-02-05C3",
-					"GT1-02-05D1"
+					"GT1-02-05D1",
+					"GT1-02-05F1"
 				],
 				"test": [
 					"GT1-02-06",
@@ -2144,7 +2148,9 @@
 					"GT1-02-05A2",
 					"GT1-02-05C1T",
 					"GT1-02-05C2T",
-					"GT1-02-05D1T"
+					"GT1-02-05D1T",
+					"GT1-02-05F2",
+					"GT1-02-05J1"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -2209,7 +2215,7 @@
 				{
 					"id": "grok-scoped-discovery-consumers-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults. GT1-02-05A adds Grok process deadlines, combined output caps, cancellation and sanitized failures through the shared runner; deterministic execution remains not-run. GT1-02-05A1/05A2/13 must close and verify inherited-pipe descendant cleanup after parent exit and the async Windows taskkill deadline before strict total completion is claimed. GT1-02-05B adds host-owned selected-agent/draft/provider-settings IPC context and explicit discovery/fallback status; tests remain not-run. GT1-02-05B1 aligns renderer discovery overloads with the shared request/result types and preserves legacy string-array signatures; compiler verification remains not-run. GT1-02-05C wires scoped debounced discovery and statuses into the configuration/options hooks and Auto Run, preserving explicit Grok values and withholding unresolved worktree catalogs; deterministic execution remains not-run. GT1-02-05C1/C2 own remaining model-picker, queued-turn, Group Chat and Director Notes consumers, including absent-versus-empty environment serialization; C3 owns guide updates and C1T/C2T/13 their regression execution. GT1-02-05D wires New/Edit/Symphony creation drafts through the shared options hook, rejects stale results and unresolved SSH discovery, preserves explicit values and legacy remote duplication; behavioral execution remains not-run. GT1-02-05D1/D1T/13 retain the discovered Symphony selected-model/effort handoff, secret-free contribution logging and renderer regression coverage. GT1-02-05E wires the wizard configuration to the shared scoped discovery hook with actual cwd, executable, environment, provider model/effort drafts and SSH selection; unavailable catalogs preserve manual values, and late open/refresh responses are guarded. GT1-02-05H/13 own wizard fixture updates and behavioral verification, including raw absent/empty/blank environments and cleared provider selections. GT1-02-05F retains context-window fallbacks; G-J/06/13 own regressions. GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Legacy calls receive no discovered Grok models; managed discovery remains unavailable pending phase09 qualification.",
+					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults. GT1-02-05A adds Grok process deadlines, combined output caps, cancellation and sanitized failures through the shared runner; deterministic execution remains not-run. GT1-02-05A1/05A2/13 must close and verify inherited-pipe descendant cleanup after parent exit and the async Windows taskkill deadline before strict total completion is claimed. GT1-02-05B adds host-owned selected-agent/draft/provider-settings IPC context and explicit discovery/fallback status; tests remain not-run. GT1-02-05B1 aligns renderer discovery overloads with the shared request/result types and preserves legacy string-array signatures; compiler verification remains not-run. GT1-02-05C wires scoped debounced discovery and statuses into the configuration/options hooks and Auto Run, preserving explicit Grok values and withholding unresolved worktree catalogs; deterministic execution remains not-run. GT1-02-05C1/C2 own remaining model-picker, queued-turn, Group Chat and Director Notes consumers, including absent-versus-empty environment serialization; C3 owns guide updates and C1T/C2T/13 their regression execution. GT1-02-05D wires New/Edit/Symphony creation drafts through the shared options hook, rejects stale results and unresolved SSH discovery, preserves explicit values and legacy remote duplication; behavioral execution remains not-run. GT1-02-05D1/D1T/13 retain the discovered Symphony selected-model/effort handoff, secret-free contribution logging and renderer regression coverage. GT1-02-05E wires the wizard configuration to the shared scoped discovery hook with actual cwd, executable, environment, provider model/effort drafts and SSH selection; unavailable catalogs preserve manual values, and late open/refresh responses are guarded. GT1-02-05H/13 own wizard fixture updates and behavioral verification, including raw absent/empty/blank environments and cleared provider selections. GT1-02-05F sets the shared Grok context default to unknown and rejects provider/host-only context snapshots in the shared helper and listener wiring; positive user-override paths are preserved and execution remains not-run. GT1-02-05J/J1/13 own constants, real wiring and configured-override checks; GT1-02-05F1/F2/13 own the remaining shared group-chat 200K fallback. Phase07 GT1-07-02/04/11 retain unknown-window and positive-override propagation through StdoutHandler/buildUsageStats. G-I/06/13 retain the other discovery regressions. GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Legacy calls receive no discovered Grok models; managed discovery remains unavailable pending phase09 qualification.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
@@ -5806,9 +5812,18 @@
 					"GT1-08-18",
 					"GT1-08-19A",
 					"GT1-08-19B",
-					"GT1-02-05D1"
+					"GT1-02-05D1",
+					"GT1-02-05F1"
 				],
-				"test": ["GT1-08-11", "GT1-08-17", "GT1-08-20", "GT1-08-19", "GT1-08-20A", "GT1-02-05D1T"],
+				"test": [
+					"GT1-08-11",
+					"GT1-08-17",
+					"GT1-08-20",
+					"GT1-08-19",
+					"GT1-08-20A",
+					"GT1-02-05D1T",
+					"GT1-02-05F2"
+				],
 				"verification": ["GT1-08-12", "GT1-08-21", "GT1-11-11E", "GT1-02-13"],
 				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -5867,6 +5882,12 @@
 					"code": "implementation-and-verification-pending",
 					"missingPrerequisite": "GT1-02-05D scopes dialog discovery only. SymphonyModal drops agentConfig before onStartContribution and useSymphonyContribution lacks selected model/effort while logging the full environment-bearing data payload. GT1-02-05D1/D1T/13 must preserve selected model/effort into the created Session and omit secret-bearing logs, with renderer coverage. Phase08/11 still own orchestration and native qualification.",
 					"affectedRows": ["P03", "P06", "P31", "S15", "REG-MODEL", "REG-DISCOVERY"]
+				},
+				{
+					"id": "grok-groupchat-unknown-context",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-02-05F1/F2/13 must preserve unknown Grok context in shared groupchat/router.ts usageReported instead of substituting 200K, while retaining positive selected windows and token/cost totals. Phase07 GT1-07-02/04/11 own upstream StdoutHandler propagation.",
+					"affectedRows": ["P31"]
 				}
 			],
 			"phase": "08",
@@ -12228,7 +12249,8 @@
 					"GT1-02-05C1",
 					"GT1-02-05C2",
 					"GT1-02-05C3",
-					"GT1-02-05D1"
+					"GT1-02-05D1",
+					"GT1-02-05F1"
 				],
 				"test": [
 					"GT1-02-06",
@@ -12241,7 +12263,9 @@
 					"GT1-02-05A2",
 					"GT1-02-05C1T",
 					"GT1-02-05C2T",
-					"GT1-02-05D1T"
+					"GT1-02-05D1T",
+					"GT1-02-05F2",
+					"GT1-02-05J1"
 				],
 				"verification": ["GT1-02-13", "GT1-02-14", "GT1-03-13", "GT1-03-14", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
@@ -12299,7 +12323,7 @@
 				{
 					"id": "grok-scoped-discovery-consumers-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults. GT1-02-05A adds Grok process deadlines, combined output caps, cancellation and sanitized failures through the shared runner; deterministic execution remains not-run. GT1-02-05A1/05A2/13 must close and verify inherited-pipe descendant cleanup after parent exit and the async Windows taskkill deadline before strict total completion is claimed. GT1-02-05B adds host-owned selected-agent/draft/provider-settings IPC context and explicit discovery/fallback status; tests remain not-run. GT1-02-05B1 aligns renderer discovery overloads with the shared request/result types and preserves legacy string-array signatures; compiler verification remains not-run. GT1-02-05C wires scoped debounced discovery and statuses into the configuration/options hooks and Auto Run, preserving explicit Grok values and withholding unresolved worktree catalogs; deterministic execution remains not-run. GT1-02-05C1/C2 own remaining model-picker, queued-turn, Group Chat and Director Notes consumers, including absent-versus-empty environment serialization; C3 owns guide updates and C1T/C2T/13 their regression execution. GT1-02-05D wires New/Edit/Symphony creation drafts through the shared options hook, rejects stale results and unresolved SSH discovery, preserves explicit values and legacy remote duplication; behavioral execution remains not-run. GT1-02-05D1/D1T/13 retain the discovered Symphony selected-model/effort handoff, secret-free contribution logging and renderer regression coverage. GT1-02-05E wires the wizard configuration to the shared scoped discovery hook with actual cwd, executable, environment, provider model/effort drafts and SSH selection; unavailable catalogs preserve manual values, and late open/refresh responses are guarded. GT1-02-05H/13 own wizard fixture updates and behavioral verification, including raw absent/empty/blank environments and cleared provider selections. GT1-02-05F retains context-window fallbacks; G-J/06/13 own regressions. GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Legacy calls receive no discovered Grok models; managed discovery remains unavailable pending phase09 qualification.",
+					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults. GT1-02-05A adds Grok process deadlines, combined output caps, cancellation and sanitized failures through the shared runner; deterministic execution remains not-run. GT1-02-05A1/05A2/13 must close and verify inherited-pipe descendant cleanup after parent exit and the async Windows taskkill deadline before strict total completion is claimed. GT1-02-05B adds host-owned selected-agent/draft/provider-settings IPC context and explicit discovery/fallback status; tests remain not-run. GT1-02-05B1 aligns renderer discovery overloads with the shared request/result types and preserves legacy string-array signatures; compiler verification remains not-run. GT1-02-05C wires scoped debounced discovery and statuses into the configuration/options hooks and Auto Run, preserving explicit Grok values and withholding unresolved worktree catalogs; deterministic execution remains not-run. GT1-02-05C1/C2 own remaining model-picker, queued-turn, Group Chat and Director Notes consumers, including absent-versus-empty environment serialization; C3 owns guide updates and C1T/C2T/13 their regression execution. GT1-02-05D wires New/Edit/Symphony creation drafts through the shared options hook, rejects stale results and unresolved SSH discovery, preserves explicit values and legacy remote duplication; behavioral execution remains not-run. GT1-02-05D1/D1T/13 retain the discovered Symphony selected-model/effort handoff, secret-free contribution logging and renderer regression coverage. GT1-02-05E wires the wizard configuration to the shared scoped discovery hook with actual cwd, executable, environment, provider model/effort drafts and SSH selection; unavailable catalogs preserve manual values, and late open/refresh responses are guarded. GT1-02-05H/13 own wizard fixture updates and behavioral verification, including raw absent/empty/blank environments and cleared provider selections. GT1-02-05F sets the shared Grok context default to unknown and rejects provider/host-only context snapshots in the shared helper and listener wiring; positive user-override paths are preserved and execution remains not-run. GT1-02-05J/J1/13 own constants, real wiring and configured-override checks; GT1-02-05F1/F2/13 own the remaining shared group-chat 200K fallback. Phase07 GT1-07-02/04/11 retain unknown-window and positive-override propagation through StdoutHandler/buildUsageStats. G-I/06/13 retain the other discovery regressions. GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Legacy calls receive no discovered Grok models; managed discovery remains unavailable pending phase09 qualification.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
@@ -12934,7 +12958,8 @@
 					"GT1-02-05C1",
 					"GT1-02-05C2",
 					"GT1-02-05C3",
-					"GT1-02-05D1"
+					"GT1-02-05D1",
+					"GT1-02-05F1"
 				],
 				"test": [
 					"GT1-02-06",
@@ -12947,7 +12972,9 @@
 					"GT1-02-05A2",
 					"GT1-02-05C1T",
 					"GT1-02-05C2T",
-					"GT1-02-05D1T"
+					"GT1-02-05D1T",
+					"GT1-02-05F2",
+					"GT1-02-05J1"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -13012,7 +13039,7 @@
 				{
 					"id": "grok-scoped-discovery-consumers-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults. GT1-02-05A adds Grok process deadlines, combined output caps, cancellation and sanitized failures through the shared runner; deterministic execution remains not-run. GT1-02-05A1/05A2/13 must close and verify inherited-pipe descendant cleanup after parent exit and the async Windows taskkill deadline before strict total completion is claimed. GT1-02-05B adds host-owned selected-agent/draft/provider-settings IPC context and explicit discovery/fallback status; tests remain not-run. GT1-02-05B1 aligns renderer discovery overloads with the shared request/result types and preserves legacy string-array signatures; compiler verification remains not-run. GT1-02-05C wires scoped debounced discovery and statuses into the configuration/options hooks and Auto Run, preserving explicit Grok values and withholding unresolved worktree catalogs; deterministic execution remains not-run. GT1-02-05C1/C2 own remaining model-picker, queued-turn, Group Chat and Director Notes consumers, including absent-versus-empty environment serialization; C3 owns guide updates and C1T/C2T/13 their regression execution. GT1-02-05D wires New/Edit/Symphony creation drafts through the shared options hook, rejects stale results and unresolved SSH discovery, preserves explicit values and legacy remote duplication; behavioral execution remains not-run. GT1-02-05D1/D1T/13 retain the discovered Symphony selected-model/effort handoff, secret-free contribution logging and renderer regression coverage. GT1-02-05E wires the wizard configuration to the shared scoped discovery hook with actual cwd, executable, environment, provider model/effort drafts and SSH selection; unavailable catalogs preserve manual values, and late open/refresh responses are guarded. GT1-02-05H/13 own wizard fixture updates and behavioral verification, including raw absent/empty/blank environments and cleared provider selections. GT1-02-05F retains context-window fallbacks; G-J/06/13 own regressions. GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Legacy calls receive no discovered Grok models; managed discovery remains unavailable pending phase09 qualification.",
+					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults. GT1-02-05A adds Grok process deadlines, combined output caps, cancellation and sanitized failures through the shared runner; deterministic execution remains not-run. GT1-02-05A1/05A2/13 must close and verify inherited-pipe descendant cleanup after parent exit and the async Windows taskkill deadline before strict total completion is claimed. GT1-02-05B adds host-owned selected-agent/draft/provider-settings IPC context and explicit discovery/fallback status; tests remain not-run. GT1-02-05B1 aligns renderer discovery overloads with the shared request/result types and preserves legacy string-array signatures; compiler verification remains not-run. GT1-02-05C wires scoped debounced discovery and statuses into the configuration/options hooks and Auto Run, preserving explicit Grok values and withholding unresolved worktree catalogs; deterministic execution remains not-run. GT1-02-05C1/C2 own remaining model-picker, queued-turn, Group Chat and Director Notes consumers, including absent-versus-empty environment serialization; C3 owns guide updates and C1T/C2T/13 their regression execution. GT1-02-05D wires New/Edit/Symphony creation drafts through the shared options hook, rejects stale results and unresolved SSH discovery, preserves explicit values and legacy remote duplication; behavioral execution remains not-run. GT1-02-05D1/D1T/13 retain the discovered Symphony selected-model/effort handoff, secret-free contribution logging and renderer regression coverage. GT1-02-05E wires the wizard configuration to the shared scoped discovery hook with actual cwd, executable, environment, provider model/effort drafts and SSH selection; unavailable catalogs preserve manual values, and late open/refresh responses are guarded. GT1-02-05H/13 own wizard fixture updates and behavioral verification, including raw absent/empty/blank environments and cleared provider selections. GT1-02-05F sets the shared Grok context default to unknown and rejects provider/host-only context snapshots in the shared helper and listener wiring; positive user-override paths are preserved and execution remains not-run. GT1-02-05J/J1/13 own constants, real wiring and configured-override checks; GT1-02-05F1/F2/13 own the remaining shared group-chat 200K fallback. Phase07 GT1-07-02/04/11 retain unknown-window and positive-override propagation through StdoutHandler/buildUsageStats. G-I/06/13 retain the other discovery regressions. GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Legacy calls receive no discovered Grok models; managed discovery remains unavailable pending phase09 qualification.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
