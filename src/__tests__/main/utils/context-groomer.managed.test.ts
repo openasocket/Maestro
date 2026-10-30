@@ -18,7 +18,7 @@
  * - a standalone host and a manager double with only `spawn` are unchanged.
  */
 import * as os from 'os';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('electron', () => ({
 	app: { getPath: (): string => os.tmpdir() },
@@ -42,7 +42,12 @@ import type { AgentDetector } from '../../../main/agents';
 import { getAgentDefinition } from '../../../main/agents/definitions';
 import { ProcessManager } from '../../../main/process-manager';
 import { utilityLineageOf, type ProcessConfig } from '../../../main/process-manager/types';
-import { groomContext, type GroomingProcessManager } from '../../../main/utils/context-groomer';
+import {
+	cancelAllGroomingSessions,
+	getActiveGroomingSessionCount,
+	groomContext,
+	type GroomingProcessManager,
+} from '../../../main/utils/context-groomer';
 import type { ManagedRouteCeiling } from '../../../shared/maestro-lib/launch/env';
 import { fakeSpawnPort, type FakeSpawnPort } from '../../helpers/managedSpawnPort';
 
@@ -324,6 +329,155 @@ describe('groomContext on a standalone host: unchanged', () => {
 		});
 		expect(last).not.toHaveProperty('admission');
 	});
+});
+
+describe('groomContext cancellation across desktop admission', () => {
+	beforeEach(() => vi.clearAllMocks());
+	afterEach(() => {
+		cancelAllGroomingSessions();
+		vi.restoreAllMocks();
+	});
+
+	it('cancels before detector completion without asking admission or starting a reader', async () => {
+		const port = fakeSpawnPort();
+		const h = harness(port);
+		const admitted = vi.spyOn(h.processManager, 'spawnAdmitted');
+		const kill = vi.spyOn(h.processManager, 'kill').mockReturnValue(true);
+		let resolveAgent!: (agent: ReturnType<typeof agentFor>) => void;
+		const pendingAgent = new Promise<ReturnType<typeof agentFor>>((resolve) => {
+			resolveAgent = resolve;
+		});
+		const selectedDetector = detector();
+		vi.spyOn(selectedDetector, 'getAgent').mockReturnValue(pendingAgent);
+		const pending = groomContext(baseOptions, h.processManager, selectedDetector);
+		const rejected = expect(pending).rejects.toThrow('Grooming cancelled by user');
+		expect(getActiveGroomingSessionCount()).toBe(1);
+		cancelAllGroomingSessions();
+		resolveAgent(agentFor('claude-code'));
+		await rejected;
+		expect(admitted).not.toHaveBeenCalled();
+		expect(port.asked).toHaveLength(0);
+		expect(h.spawn).not.toHaveBeenCalled();
+		expect(kill).not.toHaveBeenCalled();
+		expect(getActiveGroomingSessionCount()).toBe(0);
+	});
+
+	it.each(['allow', 'deny', 'reject'] as const)(
+		'cancels while a %s policy decision is pending and never starts its late reader',
+		async (decision) => {
+			let finishDecision!: () => void;
+			const decisionGate = new Promise<void>((resolve) => {
+				finishDecision = resolve;
+			});
+			let markAsked!: () => void;
+			const asked = new Promise<void>((resolve) => {
+				markAsked = resolve;
+			});
+			const privatePrompt = 'PRIVATE pending grooming content /synthetic/private.json';
+			const port = fakeSpawnPort({
+				decide: async () => {
+					markAsked();
+					await decisionGate;
+					if (decision === 'reject') throw new Error(privatePrompt);
+					return decision === 'allow'
+						? { decision: 'allow', policyRevision: 1 }
+						: { decision: 'deny', policyRevision: 1, code: 'policy-denied', reason: privatePrompt };
+				},
+			});
+			const h = harness(port);
+			const admitted = vi.spyOn(h.processManager, 'spawnAdmitted');
+			const kill = vi.spyOn(h.processManager, 'kill').mockReturnValue(true);
+			const pending = groomContext(
+				{
+					...baseOptions,
+					prompt: privatePrompt,
+					lineage: { sessionId: AGENT, tabId: TAB },
+					actor: { peer: 'host-secret' },
+				},
+				h.processManager,
+				detector()
+			);
+			const rejected = expect(pending).rejects.toThrow('Grooming cancelled by user');
+			await asked;
+			const [request, actor, controls] = admitted.mock.calls[0];
+			expect(controls?.signal?.aborted).toBe(false);
+			expect(request).not.toHaveProperty('signal');
+			expect(actor).toEqual({ peer: 'host-secret' });
+			expect(request.utilityOf).toEqual({ sessionId: AGENT, tabId: TAB });
+			cancelAllGroomingSessions();
+			cancelAllGroomingSessions();
+			await rejected;
+			expect(controls?.signal?.aborted).toBe(true);
+			finishDecision();
+			const outcome = await admitted.mock.results[0].value;
+			expect(outcome).toEqual({
+				pid: -1,
+				success: false,
+				error: 'Spawn cancelled before starting.',
+			});
+			expect(admitted).toHaveBeenCalledOnce();
+			expect(h.spawn).not.toHaveBeenCalled();
+			expect(kill).toHaveBeenCalledExactlyOnceWith(request.sessionId);
+			expect(port.authority.live()).toHaveLength(0);
+			expect(getActiveGroomingSessionCount()).toBe(0);
+			expect(h.processManager.listenerCount('data')).toBe(0);
+			expect(h.processManager.listenerCount('exit')).toBe(1);
+			expect(h.processManager.listenerCount('agent-error')).toBe(1);
+			const serialized = JSON.stringify({ requests: port.asked, outcome });
+			expect(serialized).not.toContain(privatePrompt);
+			expect(serialized).not.toContain('"signal"');
+		}
+	);
+
+	it('keeps Stop on the existing active reader after admission succeeds', async () => {
+		const h = harness(fakeSpawnPort());
+		const admitted = vi.spyOn(h.processManager, 'spawnAdmitted');
+		const kill = vi.spyOn(h.processManager, 'kill').mockReturnValue(true);
+		let markStarted!: () => void;
+		const started = new Promise<void>((resolve) => {
+			markStarted = resolve;
+		});
+		h.spawn.mockImplementationOnce(() => {
+			markStarted();
+			return { pid: 4242, success: true };
+		});
+		const pending = groomContext(baseOptions, h.processManager, detector());
+		const rejected = expect(pending).rejects.toThrow('Grooming cancelled by user');
+		await started;
+		await admitted.mock.results[0].value;
+		const request = spawned(h);
+		const signal = admitted.mock.calls[0][2]?.signal;
+		expect(signal?.aborted).toBe(false);
+		cancelAllGroomingSessions();
+		await rejected;
+		cancelAllGroomingSessions();
+		expect(signal?.aborted).toBe(true);
+		expect(kill).toHaveBeenCalledExactlyOnceWith(request.sessionId);
+		h.processManager.emit('data', request.sessionId, 'late reader data');
+		h.processManager.emit('exit', request.sessionId, 0);
+		expect(getActiveGroomingSessionCount()).toBe(0);
+		expect(h.processManager.listenerCount('data')).toBe(0);
+		expect(h.processManager.listenerCount('exit')).toBe(1);
+	});
+
+	it.each(['managed', 'standalone'] as const)(
+		'finishes an uncanceled %s turn with the signal outside the launch configuration',
+		async (standing) => {
+			const h = harness(fakeSpawnPort({ standing }));
+			const admitted = vi.spyOn(h.processManager, 'spawnAdmitted');
+			const kill = vi.spyOn(h.processManager, 'kill').mockReturnValue(true);
+			const result = await groomContext(baseOptions, h.processManager, detector());
+			expect(result.response).toBe(ANSWER);
+			const signal = admitted.mock.calls[0][2]?.signal;
+			expect(signal?.aborted).toBe(false);
+			expect(spawned(h)).not.toHaveProperty('signal');
+			expect(JSON.stringify(spawned(h))).not.toContain('"signal"');
+			cancelAllGroomingSessions();
+			expect(signal?.aborted).toBe(false);
+			expect(kill).not.toHaveBeenCalled();
+			expect(getActiveGroomingSessionCount()).toBe(0);
+		}
+	);
 });
 
 describe('utilityLineageOf: the lineage reader at the IPC boundary', () => {

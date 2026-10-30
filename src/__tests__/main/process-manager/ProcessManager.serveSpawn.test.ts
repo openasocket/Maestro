@@ -346,6 +346,231 @@ describe('ProcessManager managed admission at the sink', () => {
 			expect(fs.writeFileSync).not.toHaveBeenCalled();
 		});
 
+		describe.each(['local', 'remote'] as const)(
+			'%s pending-admission cancellation (GT1-02-10G1T)',
+			(owner) => {
+				let request: ProcessConfig;
+				let controller: AbortController;
+				beforeEach(() => {
+					controller = new AbortController();
+					request = config({
+						toolType: 'grok',
+						command: owner === 'remote' ? 'ssh' : 'grok',
+						prompt: undefined,
+						promptArtifact: {
+							...artifact,
+							owner,
+							...(owner === 'remote'
+								? { path: '/var/tmp/private-prompt.json', sshRemoteId: 'remote-selected' }
+								: {}),
+						},
+						sshRemoteId: owner === 'remote' ? 'remote-selected' : undefined,
+						sshStdinScript: owner === 'remote' ? 'PRIVATE SSH script' : undefined,
+					});
+				});
+
+				it.each(['standalone', 'managed'] as const)(
+					'pre-abort never asks admission or starts a reader on a %s host',
+					async (standing) => {
+						const { manager, port, cli, serve, errors } = managedManager(
+							fakeSpawnPort({ standing })
+						);
+						const admit = vi.spyOn(manager, 'admitSpawn');
+						const capture = vi.fn();
+						manager.on('spawn', capture);
+						controller.abort(new Error(`PRIVATE abort ${request.promptArtifact!.path}`));
+						expect(
+							await manager.spawnAdmitted(
+								request,
+								{ peer: 'in-process' },
+								{ signal: controller.signal }
+							)
+						).toEqual({ pid: -1, success: false, error: 'Spawn cancelled before starting.' });
+						for (const sink of [admit, cli, serve, capture]) expect(sink).not.toHaveBeenCalled();
+						expect(port.asked).toHaveLength(0);
+						expect(port.authority.live()).toHaveLength(0);
+						expect(errors).toEqual([]);
+						for (const log of Object.values(logger)) expect(log).not.toHaveBeenCalled();
+					}
+				);
+
+				it.each(['standalone', 'admitted', 'denied', 'unavailable', 'rejected'] as const)(
+					'cancellation wins over a pending %s decision without reaching artifact I/O or SSH',
+					async (decision) => {
+						const port = fakeSpawnPort({
+							standing: decision === 'standalone' ? 'standalone' : 'managed',
+							decide: () =>
+								decision === 'denied'
+									? {
+											decision: 'deny',
+											reason: `PRIVATE denial ${request.promptArtifact!.path}`,
+											policyRevision: 1,
+										}
+									: { decision: 'allow', policyRevision: 1 },
+						});
+						const { manager, cli, serve, errors } = managedManager(port);
+						const capture = vi.fn();
+						const kill = vi.spyOn(manager, 'kill').mockReturnValue(true);
+						manager.on('spawn', capture);
+						let settle!: () => void;
+						const pending = new Promise<void>((resolve) => {
+							settle = resolve;
+						});
+						let lease: ReturnType<typeof port.authority.live>[number] | undefined;
+						const realAdmit = manager.admitSpawn.bind(manager);
+						const admit = vi
+							.spyOn(manager, 'admitSpawn')
+							.mockImplementation(async (config, actor) => {
+								await pending;
+								if (decision === 'rejected')
+									throw new Error(`PRIVATE rejection ${artifact.content}`);
+								if (decision === 'unavailable')
+									return {
+										state: 'unavailable',
+										code: 'runtime-unavailable',
+										message: `PRIVATE refusal ${artifact.path}`,
+									};
+								const outcome = await realAdmit(config, actor);
+								if (outcome.state === 'admitted') {
+									[lease] = port.authority.live();
+									vi.spyOn(lease, 'release');
+								}
+								return outcome;
+							});
+						const result = manager.spawnAdmitted(
+							request,
+							{ peer: 'in-process' },
+							{ signal: controller.signal }
+						);
+						expect(admit).toHaveBeenCalledExactlyOnceWith(request, { peer: 'in-process' });
+						expect(port.asked).toHaveLength(0);
+						controller.abort(new Error(`PRIVATE abort ${artifact.content}`));
+						settle();
+						expect(await result).toEqual({
+							pid: -1,
+							success: false,
+							error: 'Spawn cancelled before starting.',
+						});
+						for (const sink of [cli, serve, capture, kill]) expect(sink).not.toHaveBeenCalled();
+						expect(errors).toEqual([]);
+						expect(port.asked).toHaveLength(
+							decision === 'admitted' || decision === 'denied' ? 1 : 0
+						);
+						expect(port.authority.live()).toHaveLength(0);
+						expect(manager.admissionOf(request.sessionId)).toBeNull();
+						// Later cancellation and an unrelated exit cannot release the unused lease again.
+						controller.abort();
+						manager.emit('exit', request.sessionId, 0);
+						if (decision === 'admitted') {
+							expect(lease).toBeDefined();
+							expect(lease!.release).toHaveBeenCalledExactlyOnceWith({
+								outcome: 'spawn-failed',
+								message: 'Spawn cancelled before starting.',
+							});
+							expect(lease!.ended()).toMatchObject({ state: 'released' });
+						}
+						const disclosed = JSON.stringify([
+							await result,
+							errors,
+							capture.mock.calls,
+							port.asked,
+							...Object.values(logger).map((log) => vi.mocked(log).mock.calls),
+						]);
+						for (const privateValue of [
+							request.promptArtifact!.path,
+							'PRIVATE',
+							'signal',
+							'reason',
+						])
+							expect(disclosed).not.toContain(privateValue);
+					}
+				);
+
+				it.each(['standalone', 'managed'] as const)(
+					'keeps a successful %s spawn private and leaves a bound reader with its existing owner',
+					async (standing) => {
+						const { manager, port, cli, serve } = managedManager(fakeSpawnPort({ standing }));
+						const kill = vi.spyOn(manager, 'kill').mockReturnValue(true);
+						const capture = vi.fn();
+						manager.on('spawn', capture);
+						const before = buildSpawnRequestSnapshot(request);
+						expect(
+							await manager.spawnAdmitted(
+								request,
+								{ peer: 'in-process' },
+								{ signal: controller.signal }
+							)
+						).toEqual({ pid: 4242, success: true });
+						expect(cli).toHaveBeenCalledTimes(1);
+						expect(serve).not.toHaveBeenCalled();
+						expect(cli.mock.calls[0][0].promptArtifact).toBe(request.promptArtifact);
+						expect(cli.mock.calls[0][0]).not.toHaveProperty('signal');
+						expect(capture).toHaveBeenCalledTimes(1);
+						const [lease] = port.authority.live();
+						if (standing === 'managed') {
+							expect(lease.state()).toBe('bound');
+							vi.spyOn(lease, 'release');
+							expect(port.asked[0].snapshot).toEqual(before);
+							expect(manager.admissionOf(request.sessionId)?.requestDigest).toBe(
+								dispatchSnapshotDigest(before)
+							);
+						} else expect(port.asked).toEqual([]);
+						controller.abort(new Error(`PRIVATE abort ${artifact.content}`));
+						expect(kill).not.toHaveBeenCalled();
+						if (lease) expect(lease.release).not.toHaveBeenCalled();
+						expect(buildSpawnRequestSnapshot(request)).toEqual(before);
+						for (const value of [request, before, capture.mock.calls[0][0]])
+							expect(value).not.toHaveProperty('signal');
+						for (const key of ['promptArtifact', 'prompt', 'sshStdinScript'])
+							expect(capture.mock.calls[0][0]).not.toHaveProperty(key);
+						const disclosed = JSON.stringify([
+							capture.mock.calls,
+							port.asked,
+							...Object.values(logger).map((log) => vi.mocked(log).mock.calls),
+						]);
+						for (const privateValue of [request.promptArtifact!.path, 'PRIVATE', 'signal'])
+							expect(disclosed).not.toContain(privateValue);
+						manager.emit('exit', request.sessionId, 0);
+						manager.emit('exit', request.sessionId, 0);
+						if (lease)
+							expect(lease.release).toHaveBeenCalledExactlyOnceWith({
+								outcome: 'exited',
+								exitCode: 0,
+								signal: null,
+							});
+						expect(port.authority.live()).toHaveLength(0);
+					}
+				);
+			}
+		);
+
+		it.each(['standalone', 'managed'] as const)(
+			'preserves ordinary %s serve spawns with internal cancellation controls (GT1-02-10G1T)',
+			async (standing) => {
+				const { manager, port, serve, cli } = managedManager(fakeSpawnPort({ standing }));
+				const request = config();
+				const capture = vi.fn();
+				manager.on('spawn', capture);
+				const controller = new AbortController();
+				expect(
+					await manager.spawnAdmitted(
+						request,
+						{ peer: 'in-process' },
+						{ signal: controller.signal }
+					)
+				).toBe(SERVE_RESULT);
+				expect(serve).toHaveBeenCalledTimes(1);
+				expect(cli).not.toHaveBeenCalled();
+				expect(capture).toHaveBeenCalledTimes(1);
+				expect(serve).toHaveBeenCalledExactlyOnceWith(capture.mock.calls[0][0]);
+				expect(capture.mock.calls[0][0]).not.toHaveProperty('signal');
+				expect(JSON.stringify(capture.mock.calls)).not.toContain('signal');
+				expect(port.asked).toHaveLength(standing === 'managed' ? 1 : 0);
+				manager.emit('exit', request.sessionId, 0);
+				expect(port.authority.live()).toHaveLength(0);
+			}
+		);
+
 		it.each<[string, Partial<ProcessConfig>]>([
 			['terminal attach', { toolType: 'terminal', reuseTerminal: true, prompt: undefined }],
 			['PTY', { toolType: 'grok', requiresPty: true, prompt: undefined }],
