@@ -1857,7 +1857,7 @@
 				{
 					"id": "grok-withheld-profile-readiness-unverified",
 					"code": "deterministic-evidence-pending",
-					"missingPrerequisite": "GT1-02-03A withholds unproven Grok credential attribution; GT1-02-03F separates settled withheld profiles from pending root/env inputs so removed dashboard filters can clear. GT1-02-03D authored resolver coverage for withheld credentials, state-root and local/SSH separation; execution remains not-run. GT1-02-03G/13 must prove withheld-mode transitions, pending env/home protection, unfiltered visibility and execute the resolver cases. Selected model/file/managed auth and whole-row qualification remain unproven. See Plans/grok-tier1/evidence/02.md#gt1-02-03f-settled-withheld-profile-readiness.",
+					"missingPrerequisite": "GT1-02-03A withholds unproven Grok credential attribution; GT1-02-03F separates settled withheld profiles from pending root/env inputs so removed dashboard filters can clear. GT1-02-03D authored resolver coverage for withheld credentials, state-root and local/SSH separation. GT1-02-03G authored 18 dashboard cases for withheld-mode transitions, pending env/home protection, empty and mixed fleets, env replacement, unfiltered visibility and local/SSH isolation without placeholder accounts. GT1-02-13 must execute both suites; deterministic evidence remains not-run. Selected model/file/managed auth and whole-row qualification remain unproven. See Plans/grok-tier1/evidence/02.md#gt1-02-03g-dashboard-profile-test-authoring.",
 					"affectedRows": ["P04"]
 				}
 			],
@@ -11953,7 +11953,7 @@
 				{
 					"id": "grok-withheld-profile-readiness-unverified",
 					"code": "deterministic-evidence-pending",
-					"missingPrerequisite": "GT1-02-03A withholds unproven Grok credential attribution; GT1-02-03F separates settled withheld profiles from pending root/env inputs so removed dashboard filters can clear. GT1-02-03D authored resolver coverage for withheld credentials, state-root and local/SSH separation; execution remains not-run. GT1-02-03G/13 must prove withheld-mode transitions, pending env/home protection, unfiltered visibility and execute the resolver cases. Selected model/file/managed auth and whole-row qualification remain unproven. See Plans/grok-tier1/evidence/02.md#gt1-02-03f-settled-withheld-profile-readiness.",
+					"missingPrerequisite": "GT1-02-03A withholds unproven Grok credential attribution; GT1-02-03F separates settled withheld profiles from pending root/env inputs so removed dashboard filters can clear. GT1-02-03D authored resolver coverage for withheld credentials, state-root and local/SSH separation. GT1-02-03G authored 18 dashboard cases for withheld-mode transitions, pending env/home protection, empty and mixed fleets, env replacement, unfiltered visibility and local/SSH isolation without placeholder accounts. GT1-02-13 must execute both suites; deterministic evidence remains not-run. Selected model/file/managed auth and whole-row qualification remain unproven. See Plans/grok-tier1/evidence/02.md#gt1-02-03g-dashboard-profile-test-authoring.",
 					"affectedRows": ["REG-PROFILE"]
 				}
 			],
