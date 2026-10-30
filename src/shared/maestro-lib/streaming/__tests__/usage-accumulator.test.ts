@@ -1,4 +1,21 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+
+// Hoisted before parser imports: config/cache reads never reach operator storage.
+const codexStorage = vi.hoisted(() => ({
+	existsSync: vi.fn(() => true),
+	readFileSync: vi.fn((file: unknown) => {
+		if (String(file).endsWith('config.toml')) return 'model = "synthetic-codex"';
+		if (String(file).endsWith('models_cache.json')) {
+			return JSON.stringify({
+				models: [{ slug: 'synthetic-codex', context_window: 262144 }],
+			});
+		}
+		throw new Error('Unexpected synthetic storage read');
+	}),
+}));
+vi.mock('fs', () => codexStorage);
+
+beforeEach(() => vi.clearAllMocks());
 import {
 	describeUsageProvenance,
 	USAGE_PROVENANCE_FIELDS,
@@ -10,6 +27,7 @@ import {
 } from '../usage-accumulator';
 import { CodexOutputParser } from '../../parsers/codex-output-parser';
 import type { UsageStats } from '../../../types';
+import { parsedUsageToStats } from '../usage-totals';
 
 function usage(overrides: Partial<UsageStats> = {}): UsageStats {
 	return {
@@ -233,6 +251,58 @@ describe('UsageAccumulator over a resumed Codex process', () => {
 // was read from, how the provider reported, what was replayed, the cache
 // convention, and an honest `unavailable` for a stream that carried nothing.
 describe('usage provenance', () => {
+	it.each([undefined, 98_304])(
+		'preserves native window provenance (%s) across deferred config, completion and normalization',
+		(nativeWindow) => {
+			const parser = new CodexOutputParser();
+			const acc = new UsageAccumulator({ attachesAbsoluteUsage: true });
+			const tracker = new UsageProvenanceTracker({ accumulator: acc });
+			expect(codexStorage.existsSync).not.toHaveBeenCalled();
+			expect(codexStorage.readFileSync).not.toHaveBeenCalled();
+			const first = parser.parseJsonObject({
+				type: 'event_msg',
+				payload: {
+					type: 'token_count',
+					info: {
+						model_context_window: nativeWindow,
+						total_token_usage: { input_tokens: 100, output_tokens: 10 },
+					},
+				},
+			})!.usage!;
+			expect(codexStorage.existsSync).toHaveBeenCalledOnce();
+			expect(codexStorage.readFileSync).toHaveBeenCalledTimes(2);
+			const completed = parser.parseJsonLine(
+				JSON.stringify({
+					type: 'turn.completed',
+					usage: { input_tokens: 180, output_tokens: 25 },
+				})
+			)!.usage!;
+			const expectedWindow = nativeWindow ?? 262144;
+			for (const report of [first, completed]) {
+				expect(report).toMatchObject({
+					contextWindow: expectedWindow,
+					contextWindowReported: nativeWindow !== undefined,
+				});
+				tracker.observe(report);
+				const normalized = acc.normalize(parsedUsageToStats(report));
+				expect(normalized.contextWindow).toBe(expectedWindow);
+				expect(normalized.contextWindowResolved).toBe(nativeWindow ? true : undefined);
+				if (report === completed) {
+					expect(normalized).toMatchObject({ inputTokens: 80, outputTokens: 15 });
+					expect(normalized.absoluteUsage).toMatchObject({
+						inputTokens: 180,
+						outputTokens: 25,
+					});
+					expect(describeUsageProvenance(tracker.summary(), normalized, null).contextWindow).toBe(
+						nativeWindow ?? null
+					);
+				}
+			}
+			expect(codexStorage.existsSync).toHaveBeenCalledOnce();
+			expect(codexStorage.readFileSync).toHaveBeenCalledTimes(2);
+		}
+	);
+
 	it('maps every source onto the contract word, and a runtime only ever says estimated or unavailable', () => {
 		expect(usageProvenanceOf('gateway')).toBe('gateway_metered');
 		expect(usageProvenanceOf('provider-billing')).toBe('provider_reported');
