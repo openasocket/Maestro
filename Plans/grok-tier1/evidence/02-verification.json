@@ -1,0 +1,2061 @@
+{
+	"schemaVersion": 1,
+	"taskId": "GT1-02-13",
+	"recordedAt": "2026-10-30T21:41:34.188440+00:00",
+	"sourceCommit": "ccde87a072105969c18dfdf6a6f524d3b87022ec",
+	"phase02BaseCommit": "63b1d4661",
+	"executionRoot": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+	"branch": "auto-run-feature/grok-cli-integration",
+	"baseObservation": {
+		"ref": "feature/mega-maestro-v1.1.0-rc",
+		"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
+		"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+		"aheadBehind": [113, 10]
+	},
+	"environment": {
+		"platform": "darwin",
+		"architecture": "arm64",
+		"node": "v26.13.0",
+		"npm": "11.20.0",
+		"vitest": "4.1.11",
+		"typescript": "6.0.3",
+		"mode": "isolated local deterministic fixtures and harmless process doubles",
+		"credentials": "Inherited provider credentials removed without disclosure; HOME and CODEX_HOME unchanged. No live Grok invocation.",
+		"live": "not-run"
+	},
+	"inputsSha256": {
+		"package.json": "c6c1e45b7ba259420616990f408c70d9c07cd4226b9a8283197dd5944ba8b93b",
+		"package-lock.json": "0b6b52f5ae6660b8cf2ca74cf9c7992e9630b08ce685c8413040caa305ecb747",
+		"vitest.config.mts": "c72dbc05459559b23dce670db0f17c064dfdf026d46d3c0d2ea4777af654ac77",
+		"tsconfig.lint.json": "ea576d76e80ddf428e64e16d6495bcb2b5cd6bd1b1eb578116bd78decb22c083",
+		"tsconfig.main.json": "1a4b54a2a4613cb1c27771632697cd0f5ef130a5ea24659b461492e978f5d745",
+		"tsconfig.cli.json": "31213859259324304c3449b67dc48519c21fa94e0c3dcfd4e53ca593b587ed95"
+	},
+	"suiteScope": [
+		{
+			"file": "src/__tests__/cli/services/agent-spawner.test.ts",
+			"sha256": "fce9d8e52f340b75e9cef81be265bf6f6efa8498a9c4d4fff88f78827d7a7596",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/agents/agent-completeness.test.ts",
+			"sha256": "fbd48c85c48b094c9f2f1ba0129ef8b39849d349da9aa5ea9032815ac36c16e8",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/agents/capability-snapshot.test.ts",
+			"sha256": "894ab1a7708dbf5520a2653acc473bb3de093a2f689e2434ebf1f98bb72a80a1",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/agents/definitions.test.ts",
+			"sha256": "7d8229524aee84e8a8a0fef1ad4dfa544f876fb58cb814b64e5370485719e46f",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/agents/detector.test.ts",
+			"sha256": "0ed1776b2ee8cff34a6b5d93f46880c598425b945fb482c47d264aa6b8bea9ad",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/agents/provider-account-dirs.test.ts",
+			"sha256": "bc539ba5c81ad3d22762bf732c58ef824ea358e60e1bc6bf80028721d55a8f35",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/cue/bundle/cue-bundle-exporter.test.ts",
+			"sha256": "d03296cfc1f714b5a7b63e5b146d6bb937d7b7102b33055d1f9aacd85c1fcfd5",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/cue/cue-executor.test.ts",
+			"sha256": "1a84a9415d4d46196e859afb2130094ed69b2042af8bc7e49d95b91266baac4b",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/cue/cue-spawn-builder.test.ts",
+			"sha256": "49816d7757a277a49eba0794b485df3adee383a85095ba870718e52b617ce883",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts",
+			"sha256": "6d7951622ff47a0ffadca556ef6c8a1c3bb7690cac07dbe81c72bc40d2296b14",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/ipc/handlers/agents.test.ts",
+			"sha256": "3f79df63f9a26964400cf9b95f5cd79eaffa12e3740a34a055d37d2e2679ca2c",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts",
+			"sha256": "05a39fbb9ffeceb6555c1ddd0ea2007c8d67fe40308373d20353aa73cfdc237f",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/ipc/handlers/tabNaming.managed.test.ts",
+			"sha256": "a06264957e6531a41a47720fe28d498623ede23c7ba5fdf4792cbb285692430c",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/ipc/handlers/tabNaming.test.ts",
+			"sha256": "5975fecadf33cc30717fedf110947f90d903074841fbde4c24ed9103eadbbd3e",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/preload/agents.test.ts",
+			"sha256": "c9d0fa69fec64e93c97fb0fc812d6098b7923ebc1af6a7afec3924e8391a5086",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/process-listeners-wiring.test.ts",
+			"sha256": "e8518fa8e68275d619973e229669718f22122045f5b06d3d45d4d7a2f641a60a",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/process-manager/ProcessManager.serveSpawn.test.ts",
+			"sha256": "dd74fd7466feb2924916cd5bdf20541f35d8a387c7d27cbda10ac6fc3bed4325",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/process-manager/ProcessManager.stop.process.test.ts",
+			"sha256": "97c435e1b1aa953837757588150e61cb9e54d2167acbeb839b51fb573a0c1c15",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/process-manager/handlers/StdoutHandler.test.ts",
+			"sha256": "01ca70aa740b41a591668d10d93340681c3ff76cc47f82f10715f99c8d780302",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/process-manager/spawners/ChildProcessSpawner.test.ts",
+			"sha256": "4b730a0cc23a0cea3696fbc141efbbbae77070d44ad5f0aa0bb3d3a83eab75ec",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/process-manager/utils/imageUtils.test.ts",
+			"sha256": "d897036fcc5291797faa054bb8cca95b9a5c84801247409264ab3cde5c17e23a",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/utils/agent-args.test.ts",
+			"sha256": "ca405b29dddb5f51c921f217ed692cc28e81f7ca217daeb91728949268b1ca01",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/utils/context-groomer.managed.test.ts",
+			"sha256": "3ff37a9a3b5a9feaef2d5942f17b23661c834244878bd47f5e1fb75d6001eee5",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/utils/context-groomer.test.ts",
+			"sha256": "937e5cfa9ffb4c88449bb127a14945b57abfbd4fed070fb89ef55b2e4e939436",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/utils/ssh-command-builder.test.ts",
+			"sha256": "7e9403e91659782cf2671f72f13625e520516cb02ba84cb006f8f5a978e6bb46",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/utils/ssh-remote-signal.test.ts",
+			"sha256": "c8caa2d04d8125247980c29dc2bc3dd2a841a4df599e144947ea0b96cf80b7c2",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/main/utils/ssh-spawn-wrapper.test.ts",
+			"sha256": "91a293ca138ac18cda4d6fa97e1bc88444522b6f15d014e9c94e42942617cfe8",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/renderer/components/AgentCreationDialog.test.tsx",
+			"sha256": "9635d17475cdfbb1e68a90bf08a9aa6525825e7c58347faea7f1e47ab6bed516",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/BatchRunnerModal.test.tsx",
+			"sha256": "3d02230d5c540b983c722d04298fc4dc25ace55b2d823b26fec75bb5ac85ddde",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/EnvVarList.test.tsx",
+			"sha256": "d9758a9479401b806eee196c97998f8714bda99e9e42a84ce2147b38f73fff5c",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/GroupChatModals.test.tsx",
+			"sha256": "8a4da00cab8e29eca3c27f2397d5ccfae19f26dd3b95a69ee8470d9304e2d1ef",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/MainPanel.test.tsx",
+			"sha256": "a6f1e78a2c85de726c3cf2bd0c2aadd70e71fb0377248d661bd78b926bf22db0",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/ModelEffortModal.test.tsx",
+			"sha256": "cc43f8ac7d5bdf2519fb3ea4292f54f8a36821ac2a09d27bcb6d9009397e298e",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/NewInstanceModal.test.tsx",
+			"sha256": "be5d9e816328ae91385c76b001574b189fd8cb8112c714b78a1e96f9a0fd6c48",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/NewInstanceModal/EditAgentModal.test.tsx",
+			"sha256": "7cfd1f24c944596e2050d4a262e087b8dd83d01e16433b29da5284e6eccdbedc",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/ParticipantCard.test.tsx",
+			"sha256": "984edd8e6143ea20bc6a8bb041a047d95cc5647ff98b5d5b048c964319845a05",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/QueuedItemEditModal.test.tsx",
+			"sha256": "64b6bba9facc8f8f11d34ea7ea730fa21b0ecc85afadc89f4e6a2d1b1fcd158e",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/ReauthModal.test.tsx",
+			"sha256": "4a424b7cb746f97c6d61fbb4fa7b1dc6b2094cbcb932f267b11dac1b877233df",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/Settings/tabs/EncoreTab.test.tsx",
+			"sha256": "a33e305ce6108dd98d159833824c5daf5b5d9d07386d4028c723029c49582673",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/SymphonyModal.test.tsx",
+			"sha256": "93d72646b88afd96dd2f67ac7dddda40728ead4291c24d26afb6835039c29f42",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/UsageDashboard/AgentOverviewCards.test.tsx",
+			"sha256": "2c9b75c613f88c0a271131192ac30091b5eb6d8d30180286f9199a8dae3ba98b",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/Wizard/screens/AgentSelectionScreen/hooks.test.tsx",
+			"sha256": "ec7424ada63664feef3cc54a732c2ebf1987e6086a924b502c6fdb6f84065b9b",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/Wizard/services/wizardErrorDetection.test.ts",
+			"sha256": "09d5593bd2932410c04759213e47ef07b8cce3885016d2e4f28d00fbf93856a8",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx",
+			"sha256": "5bc10cb3c8d81a3222daab724c378ca1901ab763105ded1a26798efbf5517504",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/hooks/useAgentConfiguration.test.ts",
+			"sha256": "1e3857bedf825066bf23710c088d7bc03920c7c5d14f6a83b4c17a11137a8624",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/hooks/useAgentErrorRecovery.test.ts",
+			"sha256": "bf3dc32ab6f72f0c4b22764b868959d4ec163854842915eae001ea4bc2ebdf89",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/hooks/useAgentExecution.test.ts",
+			"sha256": "674e1f6349a8c0a0259bcb426fddf46f278a89fa44e3f2e976aa8a41d0ff07c8",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/hooks/useGroupChatHandlers.test.ts",
+			"sha256": "760170643b425151c7c46559f20550b5779d8b7a6dbdec8364bc7f8b5102278c",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/hooks/useSymphonyContribution.test.ts",
+			"sha256": "d8f2a6479a081a116f518b41538259f95272a473bc7cef9b3aa2d45ea40da583",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/utils/contextWindowResolver.test.ts",
+			"sha256": "d2bac54d04bdfe037c0196d1bd10640c36e2ab170a446d47eca38a81f3cc0345",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/renderer/utils/loginUrl.test.ts",
+			"sha256": "ee1fa0591a6d4f07d80b05c05b4beffef66e18761ec5f19af04c3910afff17ed",
+			"project": "jsdom"
+		},
+		{
+			"file": "src/__tests__/shared/agentConstants.test.ts",
+			"sha256": "e50aaf6de719181bee9a3ea4039f2a36ee3aef98a153040a8ebe565612d29b88",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/agentEnvironment.test.ts",
+			"sha256": "2da023413fb5e0b93ce545e87fa2616b226d2344c3529ce67a3080b29edb04dc",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/agentMetadata.test.ts",
+			"sha256": "e74fd633837b700ad4a3eadf7c495cb15179ec483a8e90e5f662ad3d72e79cca",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/autorunModelHints.test.ts",
+			"sha256": "2b707aa936dd87486b8d262e675c98798e8452ff6a87c54afbdd441c7e5e19c6",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/effortRejection.test.ts",
+			"sha256": "16af737c481ff59c3864c2ceecd4ff2f5faadbe48078e9e25fb59dc94d917b81",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/envVarCatalog.test.ts",
+			"sha256": "9581ece77168ed045945def25f9145bea9b4154235e5c34ae6bbd91c78c974f5",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/maestro-lib/control/process-tree.test.ts",
+			"sha256": "1314f01c1d4c55bc821add998f669fee3fcff2715633e48f3a3dad58fe25d78d",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/maestro-lib/control/termination.process.test.ts",
+			"sha256": "c7bcbba8c78b78755dc68148943799164751bd177388168f62259c5761b72fec",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/maestro-lib/control/termination.test.ts",
+			"sha256": "4b25517c7f2dfe7058f30e802faddf9dad3ceda4a66b741ddb66fdbeb4dde5f3",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/maestro-lib/control/turn-guard.test.ts",
+			"sha256": "1c5d7599d6bfb32595d443a18595ba91d59769e25bd3a19828892c2f10357663",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/maestro-lib/launch/agent-args.managed.test.ts",
+			"sha256": "0621c2d67aa40768950ead0011231d0c624e712cc4ae0ff9d5f1fed98a6ec9b1",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/maestro-lib/launch/launch-plan.test.ts",
+			"sha256": "bf91b359d08b3efba45675a0ec85571ace28b5f5b8f9792f61a427b41a09b37f",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/maestro-lib/launch/prompt-delivery.test.ts",
+			"sha256": "0d5f9cb0b46e9fc2ae3ea601e665cf0e326e501527e6a1e805ec2800d1174a7d",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/maestro-lib/managed/authority.test.ts",
+			"sha256": "eb10bc80f80498c4ae3b1638a22aeaee4fbdac90a99277d27665fb7d4e3b8306",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/maestro-lib/run/session.test.ts",
+			"sha256": "573535de6469a8e10dfe2c5d9711a3101ab7cdb42ab95324b4bbcf6db0410719",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/maestro-lib/run/start-turn.test.ts",
+			"sha256": "f533fc1c2ac33415e65820421835795c43b3f3a631f6fcd906c496ef5739b3d5",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/maestro-lib/turns/assemble.test.ts",
+			"sha256": "fdd49ec4af9d2d7bf27143036785fbc366578de6648f3e0bc0964d91be0c2180",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts",
+			"sha256": "3f8a77b34e0790e016cb70c0e1a155373dd98419b2db8ffc4a33bb2b6d3c9d2a",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/modelTiers.test.ts",
+			"sha256": "b605d1e247d57eaa9e432e3baaf5312e58bfaa6769fd0d81d2d4a4e6455b0f01",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/providerAuthIdentity.test.ts",
+			"sha256": "3b90cd9235a9276422f20c176ef173ffcfcbb40a1d1f5762e9a3ec9fc96dc421",
+			"project": "node"
+		},
+		{
+			"file": "src/__tests__/shared/providerProfiles.test.ts",
+			"sha256": "4c15c3894dc17bed241f4b3a496d9aa3eed344a6ab066bcfd8984158e422c20c",
+			"project": "node"
+		},
+		{
+			"file": "src/shared/maestro-lib/groupchat/__tests__/observations.test.ts",
+			"sha256": "51e768e3335b4ac95d39c2256ed685b79f91092713da22237628ad9af7f8493c",
+			"project": "node"
+		},
+		{
+			"file": "src/shared/maestro-lib/groupchat/__tests__/router.test.ts",
+			"sha256": "3a988d9962870180610fb441735d34c2aacc262cb82534ee486e4cbc2452eb19",
+			"project": "node"
+		},
+		{
+			"file": "src/shared/maestro-lib/groupchat/__tests__/spawn.test.ts",
+			"sha256": "ce6a04ec04a092dd8c67263295dbde97451e6160e61af1dfd0a571cb63e36b36",
+			"project": "node"
+		},
+		{
+			"file": "src/shared/maestro-lib/run/pipe-spawn.test.ts",
+			"sha256": "80123dab56dfb21ab1b8e6a372ce45ba4f403b027eb2b91ac7d96242777cc1be",
+			"project": "node"
+		},
+		{
+			"file": "src/shared/maestro-lib/runtime/__tests__/background-turns.test.ts",
+			"sha256": "02c560a3695360b5a5617d5cd96f1a98dbde23c5e1fdd7fc819621b482ed3346",
+			"project": "node"
+		},
+		{
+			"file": "src/shared/maestro-lib/runtime/__tests__/group-chats.test.ts",
+			"sha256": "c119c2b64c26f1e05815f9430daf7b87595f06844667ae61322a112557175d67",
+			"project": "node"
+		},
+		{
+			"file": "src/shared/maestro-lib/settings/__tests__/snapshot.test.ts",
+			"sha256": "c89bedff0f4e57606281b29c075fb6b2f3d5139c2fc363d16d5814bcc9511f0d",
+			"project": "node"
+		}
+	],
+	"checks": [
+		{
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/main/agents/agent-completeness.test.ts",
+				"-t",
+				"Agent completeness storage isolation",
+				"--reporter=json",
+				"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/sentinel-results.json"
+			],
+			"exitCode": 1,
+			"durationSeconds": 1.835,
+			"startedAt": "2026-10-30T21:37:21.117896+00:00",
+			"log": "tmp/grok-tier1-phase02-verify/sentinel.log",
+			"id": "isolation",
+			"sourceCommit": "ccde87a072105969c18dfdf6a6f524d3b87022ec",
+			"status": "fail",
+			"resultsPath": "tmp/grok-tier1-phase02-verify/sentinel-results.json",
+			"resultsSha256": "05f16441634b71513395e135dedaa0fce463926ca27724aff7e973c3e6776327",
+			"logSha256": "1caaf3a6d139558ec92d350d58a63bcf5a2ed5c9e9bbdeadbe20227a5d763e20",
+			"counts": {
+				"files": 1,
+				"passedFiles": 0,
+				"failedFiles": 1,
+				"passed": 0,
+				"failed": 0,
+				"skipped": 0,
+				"todo": 0
+			},
+			"suites": [
+				{
+					"file": "src/__tests__/main/agents/agent-completeness.test.ts",
+					"status": "fail",
+					"assertionCounts": {},
+					"failures": [],
+					"skipped": [],
+					"collectionError": "Agent completeness attempted filesystem access outside its in-memory fixture"
+				}
+			]
+		},
+		{
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/cli/services/agent-spawner.test.ts",
+				"src/__tests__/main/agents/capability-snapshot.test.ts",
+				"src/__tests__/main/agents/definitions.test.ts",
+				"src/__tests__/main/agents/detector.test.ts",
+				"src/__tests__/main/agents/provider-account-dirs.test.ts",
+				"src/__tests__/main/cue/bundle/cue-bundle-exporter.test.ts",
+				"src/__tests__/main/cue/cue-executor.test.ts",
+				"src/__tests__/main/cue/cue-spawn-builder.test.ts",
+				"src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts",
+				"src/__tests__/main/ipc/handlers/agents.test.ts",
+				"src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts",
+				"src/__tests__/main/ipc/handlers/tabNaming.managed.test.ts",
+				"src/__tests__/main/ipc/handlers/tabNaming.test.ts",
+				"src/__tests__/main/preload/agents.test.ts",
+				"src/__tests__/main/process-listeners-wiring.test.ts",
+				"src/__tests__/main/process-manager/ProcessManager.serveSpawn.test.ts",
+				"src/__tests__/main/process-manager/ProcessManager.stop.process.test.ts",
+				"src/__tests__/main/process-manager/handlers/StdoutHandler.test.ts",
+				"src/__tests__/main/process-manager/spawners/ChildProcessSpawner.test.ts",
+				"src/__tests__/main/process-manager/utils/imageUtils.test.ts",
+				"src/__tests__/main/utils/agent-args.test.ts",
+				"src/__tests__/main/utils/context-groomer.managed.test.ts",
+				"src/__tests__/main/utils/context-groomer.test.ts",
+				"src/__tests__/main/utils/ssh-command-builder.test.ts",
+				"src/__tests__/main/utils/ssh-remote-signal.test.ts",
+				"src/__tests__/main/utils/ssh-spawn-wrapper.test.ts",
+				"src/__tests__/shared/agentConstants.test.ts",
+				"src/__tests__/shared/agentEnvironment.test.ts",
+				"src/__tests__/shared/agentMetadata.test.ts",
+				"src/__tests__/shared/autorunModelHints.test.ts",
+				"src/__tests__/shared/effortRejection.test.ts",
+				"src/__tests__/shared/envVarCatalog.test.ts",
+				"src/__tests__/shared/maestro-lib/control/process-tree.test.ts",
+				"src/__tests__/shared/maestro-lib/control/termination.process.test.ts",
+				"src/__tests__/shared/maestro-lib/control/termination.test.ts",
+				"src/__tests__/shared/maestro-lib/control/turn-guard.test.ts",
+				"src/__tests__/shared/maestro-lib/launch/agent-args.managed.test.ts",
+				"src/__tests__/shared/maestro-lib/launch/launch-plan.test.ts",
+				"src/__tests__/shared/maestro-lib/launch/prompt-delivery.test.ts",
+				"src/__tests__/shared/maestro-lib/managed/authority.test.ts",
+				"src/__tests__/shared/maestro-lib/run/session.test.ts",
+				"src/__tests__/shared/maestro-lib/run/start-turn.test.ts",
+				"src/__tests__/shared/maestro-lib/turns/assemble.test.ts",
+				"src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts",
+				"src/__tests__/shared/modelTiers.test.ts",
+				"src/__tests__/shared/providerAuthIdentity.test.ts",
+				"src/__tests__/shared/providerProfiles.test.ts",
+				"src/shared/maestro-lib/groupchat/__tests__/observations.test.ts",
+				"src/shared/maestro-lib/groupchat/__tests__/router.test.ts",
+				"src/shared/maestro-lib/groupchat/__tests__/spawn.test.ts",
+				"src/shared/maestro-lib/run/pipe-spawn.test.ts",
+				"src/shared/maestro-lib/runtime/__tests__/background-turns.test.ts",
+				"src/shared/maestro-lib/runtime/__tests__/group-chats.test.ts",
+				"src/shared/maestro-lib/settings/__tests__/snapshot.test.ts",
+				"--maxWorkers=2",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/node/results.json"
+			],
+			"exitCode": 1,
+			"durationSeconds": 21.595,
+			"startedAt": "2026-10-30T21:38:27.365826+00:00",
+			"log": "tmp/grok-tier1-phase02-verify/node/run.log",
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/node/temp",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/node/temp",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/node/temp",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/node/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/node/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/node/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/node/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1"
+			},
+			"id": "node",
+			"sourceCommit": "ccde87a072105969c18dfdf6a6f524d3b87022ec",
+			"status": "fail",
+			"resultsPath": "tmp/grok-tier1-phase02-verify/node/results.json",
+			"resultsSha256": "8d7aa4e8760d9615f69ea19e8994762a4046068800f6631c98bef86411ce827b",
+			"logSha256": "c038544a362f3b8e837b33b6f771d818a668673f246ce3fdd402656ce5a30857",
+			"counts": {
+				"files": 54,
+				"passedFiles": 48,
+				"failedFiles": 6,
+				"passed": 3405,
+				"failed": 40,
+				"skipped": 19,
+				"todo": 0
+			},
+			"suites": [
+				{
+					"file": "src/__tests__/main/process-listeners-wiring.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 19
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/agentConstants.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 44
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/agentEnvironment.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 61
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/agentMetadata.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 62
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/autorunModelHints.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 78
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/effortRejection.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 39
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/envVarCatalog.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 19
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/modelTiers.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 56
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/providerAuthIdentity.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 74
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/providerProfiles.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 53
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/cli/services/agent-spawner.test.ts",
+					"status": "fail",
+					"assertionCounts": {
+						"passed": 256,
+						"failed": 25
+					},
+					"failures": [
+						{
+							"fullName": "agent-spawner spawnAgent should spawn grok headless with -p, --always-approve, streaming-json and accumulate text deltas",
+							"messages": ["AssertionError: expected [ '--always-approve', …(4) ] to include '-p'"],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:2128:17"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: effort refused by the provider Grok refusal (SSH=true) preserves automatic hint, equal inherited value without an unqualified fallback",
+							"messages": [
+								"AssertionError: expected \"vi.fn()\" to be called 1 times, but got 0 times"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:3295:24"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: effort refused by the provider Grok refusal (SSH=true) preserves automatic hint, different inherited value without an unqualified fallback",
+							"messages": [
+								"AssertionError: expected \"vi.fn()\" to be called 1 times, but got 0 times"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:3295:24"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: effort refused by the provider Grok refusal (SSH=true) preserves explicit ladder value, equal inherited value without an unqualified fallback",
+							"messages": [
+								"AssertionError: expected \"vi.fn()\" to be called 1 times, but got 0 times"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:3295:24"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: effort refused by the provider Grok refusal (SSH=true) preserves explicit ladder value, different inherited value without an unqualified fallback",
+							"messages": [
+								"AssertionError: expected \"vi.fn()\" to be called 1 times, but got 0 times"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:3295:24"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: effort refused by the provider Grok refusal (SSH=true) preserves provider-only effort without an unqualified fallback",
+							"messages": [
+								"AssertionError: expected \"vi.fn()\" to be called 1 times, but got 0 times"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:3295:24"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: effort refused by the provider Grok refusal (SSH=true) preserves unknown provenance and default without an unqualified fallback",
+							"messages": [
+								"AssertionError: expected \"vi.fn()\" to be called 1 times, but got 0 times"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:3295:24"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=false resume=undefined runs empty/inert grant case 0 with selected identity",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(4) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4606:21"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=false resume=undefined runs empty/inert grant case 1 with selected identity",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(4) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4606:21"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=false resume=selected-resume runs empty/inert grant case 0 with selected identity",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(6) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4606:21"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=false resume=selected-resume runs empty/inert grant case 1 with selected identity",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(6) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4606:21"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=true resume=undefined runs empty/inert grant case 0 with selected identity",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(4) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4606:21"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=true resume=undefined runs empty/inert grant case 1 with selected identity",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(4) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4606:21"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=true resume=selected-resume runs empty/inert grant case 0 with selected identity",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(6) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4606:21"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=true resume=selected-resume runs empty/inert grant case 1 with selected identity",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(6) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4606:21"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches Grok directory-grant launch composition retains the claude-code native grant builder",
+							"messages": [
+								"AssertionError: expected [ '--print', '--verbose', …(7) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4677:19"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches Grok directory-grant launch composition retains the codex native grant builder",
+							"messages": ["AssertionError: expected false to be true // Object.is equality"],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4675:29"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=false) preserves prompt bytes and exit outcome for case 0",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(6) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4750:20"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=false) preserves prompt bytes and exit outcome for case 1",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(6) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4750:20"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=false) preserves prompt bytes and exit outcome for case 2",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(6) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4750:20"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=false) preserves prompt bytes and exit outcome for case 3",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(8) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4750:20"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=true) preserves prompt bytes and exit outcome for case 0",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(6) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4750:20"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=true) preserves prompt bytes and exit outcome for case 1",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(6) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4750:20"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=true) preserves prompt bytes and exit outcome for case 2",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(6) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4750:20"]
+						},
+						{
+							"fullName": "agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=true) preserves prompt bytes and exit outcome for case 3",
+							"messages": [
+								"AssertionError: expected [ '--always-approve', …(8) ] to deeply equal ArrayContaining{…}"
+							],
+							"locations": ["src/__tests__/cli/services/agent-spawner.test.ts:4750:20"]
+						}
+					],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/agents/capability-snapshot.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 16
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/agents/definitions.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 64
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/agents/detector.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 124
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/agents/provider-account-dirs.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 32
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/cue/cue-executor.test.ts",
+					"status": "fail",
+					"assertionCounts": {
+						"passed": 71,
+						"failed": 10
+					},
+					"failures": [
+						{
+							"fullName": "cue-executor managed admission plugin proof ownership after build resolution canonical prompt artifact handoff retains local bytes and identity through admission and exit 0",
+							"messages": ["TypeError: Cannot read properties of undefined (reading '0')"],
+							"locations": ["src/__tests__/main/cue/cue-executor.test.ts:1885:56"]
+						},
+						{
+							"fullName": "cue-executor managed admission plugin proof ownership after build resolution canonical prompt artifact handoff retains local bytes and identity through admission and exit 7",
+							"messages": ["TypeError: Cannot read properties of undefined (reading '0')"],
+							"locations": ["src/__tests__/main/cue/cue-executor.test.ts:1885:56"]
+						},
+						{
+							"fullName": "cue-executor managed admission plugin proof ownership after build resolution canonical prompt artifact handoff refuses partial write and never retries text",
+							"messages": [
+								"Error: [vitest] No \"GrokModelEffortError\" export is defined on the \"../../../shared/maestro-lib/launch/agent-args\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:\n"
+							],
+							"locations": [
+								"src/shared/maestro-lib/launch/launch-plan.ts:510:27",
+								"src/main/cue/cue-spawn-builder.ts:204:21",
+								"src/__tests__/main/cue/cue-executor.test.ts:75:19",
+								"src/main/cue/cue-executor.ts:262:22",
+								"src/__tests__/main/cue/cue-executor.test.ts:1944:22"
+							]
+						},
+						{
+							"fullName": "cue-executor managed admission plugin proof ownership after build resolution canonical prompt artifact handoff refuses competing stdin and never retries text",
+							"messages": [
+								"Error: [vitest] No \"GrokModelEffortError\" export is defined on the \"../../../shared/maestro-lib/launch/agent-args\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:\n"
+							],
+							"locations": [
+								"src/shared/maestro-lib/launch/launch-plan.ts:510:27",
+								"src/main/cue/cue-spawn-builder.ts:204:21",
+								"src/__tests__/main/cue/cue-executor.test.ts:75:19",
+								"src/main/cue/cue-executor.ts:262:22",
+								"src/__tests__/main/cue/cue-executor.test.ts:1944:22"
+							]
+						},
+						{
+							"fullName": "cue-executor managed admission plugin proof ownership after build resolution canonical prompt artifact handoff refuses transport mismatch and never retries text",
+							"messages": [
+								"Error: [vitest] No \"GrokModelEffortError\" export is defined on the \"../../../shared/maestro-lib/launch/agent-args\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:\n"
+							],
+							"locations": [
+								"src/shared/maestro-lib/launch/launch-plan.ts:510:27",
+								"src/main/cue/cue-spawn-builder.ts:204:21",
+								"src/__tests__/main/cue/cue-executor.test.ts:75:19",
+								"src/main/cue/cue-executor.ts:262:22",
+								"src/__tests__/main/cue/cue-executor.test.ts:1944:22"
+							]
+						},
+						{
+							"fullName": "cue-executor managed admission plugin proof ownership after build resolution canonical prompt artifact handoff starts no file or process after managed deny",
+							"messages": [
+								"Error: [vitest] No \"GrokModelEffortError\" export is defined on the \"../../../shared/maestro-lib/launch/agent-args\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:\n"
+							],
+							"locations": [
+								"src/shared/maestro-lib/launch/launch-plan.ts:510:27",
+								"src/main/cue/cue-spawn-builder.ts:204:21",
+								"src/__tests__/main/cue/cue-executor.test.ts:75:19",
+								"src/main/cue/cue-executor.ts:262:22",
+								"src/__tests__/main/cue/cue-executor.test.ts:1984:22"
+							]
+						},
+						{
+							"fullName": "cue-executor managed admission plugin proof ownership after build resolution canonical prompt artifact handoff starts no file or process after managed cancel",
+							"messages": [
+								"Error: [vitest] No \"GrokModelEffortError\" export is defined on the \"../../../shared/maestro-lib/launch/agent-args\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:\n"
+							],
+							"locations": [
+								"src/shared/maestro-lib/launch/launch-plan.ts:510:27",
+								"src/main/cue/cue-spawn-builder.ts:204:21",
+								"src/__tests__/main/cue/cue-executor.test.ts:75:19",
+								"src/main/cue/cue-executor.ts:262:22",
+								"src/__tests__/main/cue/cue-executor.test.ts:1984:22"
+							]
+						},
+						{
+							"fullName": "cue-executor managed admission plugin proof ownership after build resolution canonical prompt artifact handoff keeps SSH ownership on cancel without local writes",
+							"messages": ["TypeError: Cannot read properties of undefined (reading '0')"],
+							"locations": ["src/__tests__/main/cue/cue-executor.test.ts:2017:50"]
+						},
+						{
+							"fullName": "cue-executor managed admission plugin proof ownership after build resolution canonical prompt artifact handoff keeps SSH ownership on timeout without local writes",
+							"messages": ["TypeError: Cannot read properties of undefined (reading '0')"],
+							"locations": ["src/__tests__/main/cue/cue-executor.test.ts:2017:50"]
+						},
+						{
+							"fullName": "cue-executor managed admission plugin proof ownership after build resolution canonical prompt artifact handoff keeps SSH ownership on transport failure without local writes",
+							"messages": ["TypeError: Cannot read properties of undefined (reading '0')"],
+							"locations": ["src/__tests__/main/cue/cue-executor.test.ts:2017:50"]
+						}
+					],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/cue/cue-spawn-builder.test.ts",
+					"status": "fail",
+					"assertionCounts": {
+						"passed": 59,
+						"failed": 1
+					},
+					"failures": [
+						{
+							"fullName": "cue-spawn-builder buildSpawnSpec opt-in prompt-file plans preserves composed and empty bytes with SSH=true",
+							"messages": [
+								"AssertionError: expected { command: 'grok', …(10) } to match object { command: '/fixture/grok', …(5) }\n(5 matching properties omitted from actual)"
+							],
+							"locations": ["src/__tests__/main/cue/cue-spawn-builder.test.ts:304:21"]
+						}
+					],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts",
+					"status": "fail",
+					"assertionCounts": {
+						"passed": 39,
+						"failed": 1
+					},
+					"failures": [
+						{
+							"fullName": "spawnGroupChatAgent child lineage at the sink (MRC-07-08) is refused unavailable on an enrolled desktop, unasked at the endpoint, with nothing spawned (CP-03)",
+							"messages": [
+								"Error: Endpoint socket refused: The socket path is longer than 103 bytes."
+							],
+							"locations": [
+								"src/main/enterprise/endpoint-client.ts:115:21",
+								"src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts:1052:35"
+							]
+						}
+					],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/preload/agents.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 46
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/process-manager/ProcessManager.serveSpawn.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 86
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/process-manager/ProcessManager.stop.process.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 16
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/utils/agent-args.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 200
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/utils/context-groomer.managed.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 30
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/utils/context-groomer.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 59
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/utils/ssh-command-builder.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 98,
+						"skipped": 14
+					},
+					"failures": [],
+					"skipped": [
+						"ssh-command-builder private remote prompt files owned script lifetime preserves exact bytes, private mode and closed stdin for payload 0",
+						"ssh-command-builder private remote prompt files owned script lifetime preserves exact bytes, private mode and closed stdin for payload 1",
+						"ssh-command-builder private remote prompt files owned script lifetime preserves exact bytes, private mode and closed stdin for payload 2",
+						"ssh-command-builder private remote prompt files owned script lifetime refuses truncated without launching or deleting another owner",
+						"ssh-command-builder private remote prompt files owned script lifetime refuses checksum without launching or deleting another owner",
+						"ssh-command-builder private remote prompt files owned script lifetime refuses decode without launching or deleting another owner",
+						"ssh-command-builder private remote prompt files owned script lifetime refuses collision without launching or deleting another owner",
+						"ssh-command-builder private remote prompt files owned script lifetime refuses symlink without launching or deleting another owner",
+						"ssh-command-builder private remote prompt files owned script lifetime refuses owner-collision without launching or deleting another owner",
+						"ssh-command-builder private remote prompt files owned script lifetime refuses unbound without launching or deleting another owner",
+						"ssh-command-builder private remote prompt files owned script lifetime refuses a cancelled Grok transfer before creating files or starting its reader",
+						"ssh-command-builder private remote prompt files owned script lifetime preserves provider exit 23 while removing owned files",
+						"ssh-command-builder private remote prompt files owned script lifetime preserves provider exit 127 while removing owned files",
+						"ssh-command-builder private remote prompt files owned script lifetime preserves a destination replaced while the provider runs"
+					]
+				},
+				{
+					"file": "src/__tests__/main/utils/ssh-remote-signal.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 14,
+						"skipped": 4
+					},
+					"failures": [],
+					"skipped": [
+						"remote scripts under a real bash keeps a pre-record cancellation tombstone against delayed launch",
+						"remote scripts under a real bash checks descriptor ownership before hard-stop cleanup: owned",
+						"remote scripts under a real bash checks descriptor ownership before hard-stop cleanup: recycled",
+						"remote scripts under a real bash checks descriptor ownership before hard-stop cleanup: replaced"
+					]
+				},
+				{
+					"file": "src/__tests__/main/utils/ssh-spawn-wrapper.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 26
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/shared/maestro-lib/run/pipe-spawn.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 44
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/cue/bundle/cue-bundle-exporter.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 41
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/ipc/handlers/agents.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 132
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/ipc/handlers/tabNaming.managed.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 22
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/ipc/handlers/tabNaming.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 137
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/process-manager/handlers/StdoutHandler.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 139
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/process-manager/spawners/ChildProcessSpawner.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 82
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/process-manager/utils/imageUtils.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 38
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/control/process-tree.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 74
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/control/termination.process.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 10
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/control/termination.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 52
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/control/turn-guard.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 19
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/launch/agent-args.managed.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 44
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/launch/launch-plan.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 134
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/launch/prompt-delivery.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 63
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/managed/authority.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 33
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/run/session.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 32
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/run/start-turn.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 74,
+						"skipped": 1
+					},
+					"failures": [],
+					"skipped": [
+						"applyWindowsShellRules starts a .cmd shim under a path with spaces and delivers the prompt intact"
+					]
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/turns/assemble.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 68
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts",
+					"status": "fail",
+					"assertionCounts": {
+						"passed": 81,
+						"failed": 1
+					},
+					"failures": [
+						{
+							"fullName": "runAgentTurn: an SSH remote runs what the SSH wrapper built, with the remote command, not this machine`s path",
+							"messages": [
+								"AssertionError: expected '/opt/remote/bin/opencode' to be 'opencode' // Object.is equality"
+							],
+							"locations": ["src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts:427:36"]
+						}
+					],
+					"skipped": []
+				},
+				{
+					"file": "src/shared/maestro-lib/groupchat/__tests__/observations.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 51
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/shared/maestro-lib/groupchat/__tests__/router.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 76
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/shared/maestro-lib/groupchat/__tests__/spawn.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 48
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/shared/maestro-lib/runtime/__tests__/background-turns.test.ts",
+					"status": "fail",
+					"assertionCounts": {
+						"passed": 35,
+						"failed": 2
+					},
+					"failures": [
+						{
+							"fullName": "background turns candidate Grok file delivery cleans abandoned system preparation when a group is stopped",
+							"messages": ["AssertionError: expected true to be false // Object.is equality"],
+							"locations": [
+								"src/shared/maestro-lib/runtime/__tests__/background-turns.test.ts:373:33"
+							]
+						},
+						{
+							"fullName": "background turns candidate Grok file delivery cleans abandoned system preparation when a consult is stopped",
+							"messages": ["AssertionError: expected true to be false // Object.is equality"],
+							"locations": [
+								"src/shared/maestro-lib/runtime/__tests__/background-turns.test.ts:373:33"
+							]
+						}
+					],
+					"skipped": []
+				},
+				{
+					"file": "src/shared/maestro-lib/runtime/__tests__/group-chats.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 23
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/shared/maestro-lib/settings/__tests__/snapshot.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 30
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 82
+					},
+					"failures": [],
+					"skipped": []
+				}
+			],
+			"unhandledErrors": {
+				"count": 5,
+				"kind": "Unhandled Rejection",
+				"message": "No \"GrokModelEffortError\" export is defined on the \"../../../shared/maestro-lib/launch/agent-args\" mock.",
+				"file": "src/__tests__/main/cue/cue-executor.test.ts",
+				"latestTests": [
+					"retains local bytes and identity through admission and exit 0",
+					"retains local bytes and identity through admission and exit 7",
+					"keeps SSH ownership on cancel without local writes",
+					"keeps SSH ownership on timeout without local writes",
+					"keeps SSH ownership on transport failure without local writes"
+				]
+			}
+		},
+		{
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/renderer/components/AgentCreationDialog.test.tsx",
+				"src/__tests__/renderer/components/BatchRunnerModal.test.tsx",
+				"src/__tests__/renderer/components/EnvVarList.test.tsx",
+				"src/__tests__/renderer/components/GroupChatModals.test.tsx",
+				"src/__tests__/renderer/components/MainPanel.test.tsx",
+				"src/__tests__/renderer/components/ModelEffortModal.test.tsx",
+				"src/__tests__/renderer/components/NewInstanceModal.test.tsx",
+				"src/__tests__/renderer/components/NewInstanceModal/EditAgentModal.test.tsx",
+				"src/__tests__/renderer/components/ParticipantCard.test.tsx",
+				"src/__tests__/renderer/components/QueuedItemEditModal.test.tsx",
+				"src/__tests__/renderer/components/ReauthModal.test.tsx",
+				"src/__tests__/renderer/components/Settings/tabs/EncoreTab.test.tsx",
+				"src/__tests__/renderer/components/SymphonyModal.test.tsx",
+				"src/__tests__/renderer/components/UsageDashboard/AgentOverviewCards.test.tsx",
+				"src/__tests__/renderer/components/Wizard/screens/AgentSelectionScreen/hooks.test.tsx",
+				"src/__tests__/renderer/components/Wizard/services/wizardErrorDetection.test.ts",
+				"src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx",
+				"src/__tests__/renderer/hooks/useAgentConfiguration.test.ts",
+				"src/__tests__/renderer/hooks/useAgentErrorRecovery.test.ts",
+				"src/__tests__/renderer/hooks/useAgentExecution.test.ts",
+				"src/__tests__/renderer/hooks/useGroupChatHandlers.test.ts",
+				"src/__tests__/renderer/hooks/useSymphonyContribution.test.ts",
+				"src/__tests__/renderer/utils/contextWindowResolver.test.ts",
+				"src/__tests__/renderer/utils/loginUrl.test.ts",
+				"--maxWorkers=2",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/renderer/results.json"
+			],
+			"exitCode": 1,
+			"durationSeconds": 22.131,
+			"startedAt": "2026-10-30T21:38:17.337611+00:00",
+			"finishedAt": "2026-10-30T21:38:39.468768+00:00",
+			"sourceCommit": "ccde87a072105969c18dfdf6a6f524d3b87022ec",
+			"log": "tmp/grok-tier1-phase02-verify/renderer/run.log",
+			"results": "tmp/grok-tier1-phase02-verify/renderer/results.json",
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/renderer/temp",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/renderer/temp",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/renderer/temp",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/renderer/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/renderer/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/renderer/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/renderer/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1"
+			},
+			"id": "renderer",
+			"status": "fail",
+			"resultsPath": "tmp/grok-tier1-phase02-verify/renderer/results.json",
+			"resultsSha256": "a523268755494c117a66eb557f1a5d6400419e18fe76c681422eeed89cf6f71b",
+			"logSha256": "d32ed8b67ff0a969f91f2873eef7f4330cffa5bc166a4a1b2f3de2defcbc15a4",
+			"counts": {
+				"files": 24,
+				"passedFiles": 22,
+				"failedFiles": 2,
+				"passed": 1295,
+				"failed": 2,
+				"skipped": 8,
+				"todo": 0
+			},
+			"suites": [
+				{
+					"file": "src/__tests__/renderer/components/AgentCreationDialog.test.tsx",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 16
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/BatchRunnerModal.test.tsx",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 171,
+						"skipped": 8
+					},
+					"failures": [],
+					"skipped": [
+						"Playbook with Worktree Settings loads playbook with worktree settings",
+						"Playbook with Worktree Settings clears worktree settings when loading playbook without them",
+						"Click Outside Dropdown Handlers closes branch dropdown when clicking outside",
+						"Worktree Browse Button opens folder dialog and sets worktree path",
+						"Worktree Browse Button handles cancelled folder selection",
+						"Worktree Validation Edge Cases shows uncommitted changes warning when branch mismatch exists",
+						"Worktree Validation Edge Cases handles validation exception gracefully",
+						"GitHub CLI Link renders GitHub CLI link and prevents propagation on click"
+					]
+				},
+				{
+					"file": "src/__tests__/renderer/components/EnvVarList.test.tsx",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 8
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/GroupChatModals.test.tsx",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 27
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/MainPanel.test.tsx",
+					"status": "fail",
+					"assertionCounts": {
+						"passed": 161,
+						"failed": 1
+					},
+					"failures": [
+						{
+							"fullName": "MainPanel Grok selected-context discovery debounces account changes and never reprobes the prior account on a rapid provider round trip",
+							"messages": [
+								"Error: expect(element).toHaveAttribute(\"data-available-models\", \"[\"sonnet\"]\") // element.getAttribute(\"data-available-models\") === \"[\"sonnet\"]\"\n\nExpected the element to have attribute:\n  data-available-models=\"[\"sonnet\"]\"\nReceived:\n  data-available-models=\"[]\""
+							],
+							"locations": ["src/__tests__/renderer/components/MainPanel.test.tsx:4126:45"]
+						}
+					],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/ModelEffortModal.test.tsx",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 32
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/NewInstanceModal.test.tsx",
+					"status": "fail",
+					"assertionCounts": {
+						"passed": 108,
+						"failed": 1
+					},
+					"failures": [
+						{
+							"fullName": "NewInstanceModal Grok draft discovery keeps unsaved fields and configured-fallback selections through SSH redetection",
+							"messages": [
+								"TestingLibraryElementError: Unable to find an element with the display value:  /synthetic/bin/grok .\n\nIgnored nodes: comments, script, style\n\u001b[36m<body>\u001b[39m\n  \u001b[36m<div>\u001b[39m\n    \u001b[36m<div\u001b[39m\n      \u001b[33maria-label\u001b[39m=\u001b[32m\"Create New Agent\"\u001b[39m\n      \u001b[33maria-modal\u001b[39m=\u001b[32m\"true\"\u001b[39m\n      \u001b[33mclass\u001b[39m=\u001b[32m\"fixed inset-0 modal-overlay flex items-center justify-center animate-in fade-in duration-200 outline-none\"\u001b[39m\n      \u001b[33mrole\u001b[39m=\u001b[32m\"dialog\"\u001b[39m\n      \u001b[33mstyle\u001b[39m=\u001b[32m\"z-index: 9999;\"\u001b[39m\n      \u001b[33mtabindex\u001b[39m=\u001b[32m\"-1\"\u001b[39m\n    \u001b[36m>\u001b[39m\n      \u001b[36m<div\u001b[39m\n        \u001b[33mclass\u001b[39m=\u001b[32m\"relative border rounded-lg shadow-2xl flex flex-col overflow-hidden \"\u001b[39m\n        \u001b[33mstyle\u001b[39m=\u001b[32m\"width: min(calc(600px * var(--font-scale, 1)), 95vw); max-height: 90vh; background-color: rgb(22, 33, 62); border-color: rgb(51, 51, 85);\"\u001b[39m\n      \u001b[36m>\u001b[39m\n        \u001b[36m<div\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"p-4 border-b flex items-center justify-between shrink-0 \"\u001b[39m\n          \u001b[33mstyle\u001b[39m=\u001b[32m\"border-color: rgb(51, 51, 85);\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<div\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"flex items-center gap-2 min-w-0\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<h2\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"text-sm font-bold shrink-0\"\u001b[39m\n              \u001b[33mstyle\u001b[39m=\u001b[32m\"color: rgb(232, 232, 232);\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[0mCreate New Agent\u001b[0m\n            \u001b[36m</h2>\u001b[39m\n          \u001b[36m</div>\u001b[39m\n          \u001b[36m<div\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"flex items-center gap-2\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<button\u001b[39m\n              \u001b[33maria-label\u001b[39m=\u001b[32m\"Close modal\"\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"inline-flex items-center justify-center p-1 rounded hover:bg-white/10 transition-colors disabled:opacity-50 disabled:cursor-not-allowed\"\u001b[39m\n              \u001b[33mstyle\u001b[39m=\u001b[32m\"color: rgb(136, 136, 136);\"\u001b[39m\n              \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<svg\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"w-4 h-4\"\u001b[39m\n                \u001b[33mdata-testid\u001b[39m=\u001b[32m\"x-icon\"\u001b[39m\n              \u001b[36m/>\u001b[39m\n            \u001b[36m</button>\u001b[39m\n          \u001b[36m</div>\u001b[39m\n        \u001b[36m</div>\u001b[39m\n        \u001b[36m<div\u001b[39m\n          \u001b[33mclass\u001b[39m=\u001b[32m\"p-6 overflow-y-auto flex-1 min-h-0\"\u001b[39m\n        \u001b[36m>\u001b[39m\n          \u001b[36m<div\u001b[39m\n            \u001b[33mclass\u001b[39m=\u001b[32m\"space-y-5\"\u001b[39m\n          \u001b[36m>\u001b[39m\n            \u001b[36m<div\u001b[39m\n              \u001b[33mclass\u001b[39m=\u001b[32m\"w-full\"\u001b[39m\n            \u001b[36m>\u001b[39m\n              \u001b[36m<label\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"block text-xs font-bold opacity-70 uppercase mb-2\"\u001b[39m\n                \u001b[33mfor\u001b[39m=\u001b[32m\"agent-name-input\"\u001b[39m\n                \u001b[33mstyle\u001b[39m=\u001b[32m\"color: rgb(232, 232, 232);\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[0mAgent Name\u001b[0m\n              \u001b[36m</label>\u001b[39m\n              \u001b[36m<div\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[36m<input\u001b[39m\n                  \u001b[33mclass\u001b[39m=\u001b[32m\"w-full p-3 rounded border bg-transparent outline-none p-2\"\u001b[39m\n                  \u001b[33mid\u001b[39m=\u001b[32m\"agent-name-input\"\u001b[39m\n                  \u001b[33mplaceholder\u001b[39m=\u001b[32m\"\"\u001b[39m\n                  \u001b[33mstyle\u001b[39m=\u001b[32m\"border-color: rgb(51, 51, 85); color: rgb(232, 232, 232);\"\u001b[39m\n                  \u001b[33mtype\u001b[39m=\u001b[32m\"text\"\u001b[39m\n                  \u001b[33mvalue\u001b[39m=\u001b[32m\"Grok A (Copy)\"\u001b[39m\n                \u001b[36m/>\u001b[39m\n              \u001b[36m</div>\u001b[39m\n            \u001b[36m</div>\u001b[39m\n            \u001b[36m<div>\u001b[39m\n              \u001b[36m<div\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"flex items-center justify-between gap-3 mb-2\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[36m<div\u001b[39m\n                  \u001b[33mclass\u001b[39m=\u001b[32m\"block text-xs font-bold opacity-70 uppercase\"\u001b[39m\n                  \u001b[33mstyle\u001b[39m=\u001b[32m\"color: rgb(232, 232, 232);\"\u001b[39m\n                \u001b[36m>\u001b[39m\n                  \u001b[0mAgent Provider\u001b[0m\n                \u001b[36m</div>\u001b[39m\n                \u001b[36m<div\u001b[39m\n                  \u001b[33mclass\u001b[39m=\u001b[32m\"flex items-center text-xs gap-2\"\u001b[39m\n                  \u001b[33mstyle\u001b[39m=\u001b[32m\"color: rgb(136, 136, 136);\"\u001b[39m\n                \u001b[36m>\u001b[39m\n                  \u001b[36m<span>\u001b[39m\n                    \u001b[0m1 of 1 locally\u001b[0m\n                  \u001b[36m</span>\u001b[39m\n                  \u001b[36m<label\u001b[39m\n                    \u001b[33mclass\u001b[39m=\u001b[32m\"flex items-center gap-2 select-none cursor-pointer\"\u001b[39m\n                    \u001b[33mdata-provider-bar-nav-exempt\u001b[39m=\u001b[32m\"true\"\u001b[39m\n                  \u001b[36m>\u001b[39m\n                    \u001b[36m<button\u001b[39m\n                      \u001b[33maria-checked\u001b[39m=\u001b[32m\"false\"\u001b[39m\n                      \u001b[33maria-label\u001b[39m=\u001b[32m\"Show all supported providers\"\u001b[39m\n                      \u001b[33mclass\u001b[39m=\u001b[32m\"focus-ring rounded-full flex-shrink-0 cursor-pointer\"\u001b[39m\n                      \u001b[33mrole\u001b[39m=\u001b[32m\"switch\"\u001b[39m\n                      \u001b[33mtype\u001b[39m=\u001b[32m\"button\"\u001b[39m\n                    \u001b[36m>\u001b[39m\n                      \u001b[36m<span\u001b[39m\n                        \u001b[33mclass\u001b[39m=\u001b[32m\"relative block w-10 h-5 rounded-full transition-colors\"\u001b[39m\n                        \u001b[33mstyle\u001b[39m=\u001b[32m\"background-color: rgb(15, 52, 96);\"\u001b[39m\n                      \u001b[36m>\u001b[39m\n                        \u001b[36m<span\u001b[39m\n                          \u001b[33mclass\u001b[39m=\u001b[32m\"absolute left-0 top-0.5 w-4 h-4 rounded-full bg-white transition-transform translate-x-0.5 \"\u001b[39m\n                        \u001b[36m/>\u001b[39m\n                      \u001b[36m</span>\u001b[39m\n                    \u001b[36m</button>\u001b[39m\n                    \u001b[0mShow All\u001b[0m\n                  \u001b[36m</label>\u001b[39m\n                \u001b[36m</div>\u001b[39m\n              \u001b[36m</div>\u001b[39m\n              \u001b[36m<div\u001b[39m\n                \u001b[33maria-label\u001b[39m=\u001b[32m\"Agent provider selection\"\u001b[39m\n                \u001b[33mclass\u001b[39m=\u001b[32m\"space-y-1\"\u001b[39m\n                \u001b[33mrole\u001b[39m=\u001b[32m\"listbox\"\u001b[39m\n              \u001b[36m>\u001b[39m\n                \u001b[36m<div\u001b[39m\n                  \u001b[33mclass\u001b[39m=\u001b[32m\"rounded border transition-all overflow-hidden ring-2\"\u001b[39m\n                  \u001b[33mstyle\u001b[39m=\u001b[32m\"border-color: rgb(51, 51, 85); background-color: rgb(90, 31, 143); --tw-ring-color: #7b2cbf;\"\u001b[39m\n                \u001b[36m>\u001b[39m\n                  \u001b[36m<div\u001b[39m\n                    \u001b[33maria-expanded\u001b[39m=\u001b[32m\"true\"\u001b[39m\n                    \u001b[33maria-selected\u001b[39m=\u001b[32m\"true\"\u001b[39m\n                    \u001b[33mclass\u001b[39m=\u001b[32m\"w-full text-left px-3 py-2 flex items-center justify-between hover:bg-white/5 cursor-pointer\"\u001b[39m\n                    \u001b[33mrole\u001b[39m=\u001b[32m\"option\"\u001b[39m\n                    \u001b[33mstyle\u001b[39m=\u001b[32m\"color: rgb(232, 232, 232);\"\u001b[39m\n                    \u001b[33mtabindex\u001b[39m=\u001b[32m\"0\"\u001b[39m\n                  \u001b[36m>\u001b[39m\n                    \u001b[36m<div\u001b[39m\n                      \u001b[33mclass\u001b[39m=\u001b[32m\"flex items-center gap-2\"\u001b[39m\n                    \u001b[36m>\u001b[39m\n                      \u001b[36m<svg\u001b[39m\n                        \u001b[33mclass\u001b[39m=\u001b[32m\"w-4 h-4 transition-transform rotate-90\"\u001b[39m\n                        \u001b[33mdata-testid\u001b[39m=\u001b[32m\"chevronright-icon\"\u001b[..."
+							],
+							"locations": ["src/__tests__/renderer/components/NewInstanceModal.test.tsx:2401:26"]
+						}
+					],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/ParticipantCard.test.tsx",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 24
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/QueuedItemEditModal.test.tsx",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 18
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/ReauthModal.test.tsx",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 79
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/SymphonyModal.test.tsx",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 13
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useAgentConfiguration.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 41
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useAgentErrorRecovery.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 18
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useAgentExecution.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 38
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useGroupChatHandlers.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 97
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useSymphonyContribution.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 56
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/utils/contextWindowResolver.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 27
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/utils/loginUrl.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 37
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/NewInstanceModal/EditAgentModal.test.tsx",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 81
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/UsageDashboard/AgentOverviewCards.test.tsx",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 89
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 57
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/Settings/tabs/EncoreTab.test.tsx",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 23
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/Wizard/services/wizardErrorDetection.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 20
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/components/Wizard/screens/AgentSelectionScreen/hooks.test.tsx",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 54
+					},
+					"failures": [],
+					"skipped": []
+				}
+			]
+		},
+		{
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts",
+				"--maxWorkers=2",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/node/short-socket-results.json"
+			],
+			"exitCode": 1,
+			"durationSeconds": 2.068,
+			"startedAt": "2026-10-30T21:39:21.724406+00:00",
+			"log": "tmp/grok-tier1-phase02-verify/node/short-socket.log",
+			"environmentCorrection": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/v13",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/v13",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/v13"
+			},
+			"reason": "Original deeply nested scratch root exceeded 103-byte endpoint socket path limit; only affected suite rerun with shorter confined scratch root.",
+			"id": "socket-short",
+			"sourceCommit": "ccde87a072105969c18dfdf6a6f524d3b87022ec",
+			"status": "fail",
+			"resultsPath": "tmp/grok-tier1-phase02-verify/node/short-socket-results.json",
+			"resultsSha256": "b6a934cb437ad0781d2b04cdd14c3a02add40af8a04c9f459dbf4f3d6b7577d6",
+			"logSha256": "4725f4ac47e0d66dfdfb0cba73fe6b6701189d0df4e769400b03e86a1149210e",
+			"counts": {
+				"files": 1,
+				"passedFiles": 0,
+				"failedFiles": 1,
+				"passed": 39,
+				"failed": 1,
+				"skipped": 0,
+				"todo": 0
+			},
+			"suites": [
+				{
+					"file": "src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts",
+					"status": "fail",
+					"assertionCounts": {
+						"passed": 39,
+						"failed": 1
+					},
+					"failures": [
+						{
+							"fullName": "spawnGroupChatAgent child lineage at the sink (MRC-07-08) is refused unavailable on an enrolled desktop, unasked at the endpoint, with nothing spawned (CP-03)",
+							"messages": [
+								"Error: Endpoint socket refused: The socket path is longer than 103 bytes."
+							],
+							"locations": [
+								"src/main/enterprise/endpoint-client.ts:115:21",
+								"src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts:1052:35"
+							]
+						}
+					],
+					"skipped": []
+				}
+			]
+		},
+		{
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts",
+				"-t",
+				"CP-03",
+				"--maxWorkers=2",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/node/bounded-socket-results.json"
+			],
+			"exitCode": 0,
+			"durationSeconds": 1.746,
+			"startedAt": "2026-10-30T21:39:47.252219+00:00",
+			"log": "tmp/grok-tier1-phase02-verify/node/bounded-socket.log",
+			"environmentCorrection": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration"
+			},
+			"reason": "First shortened scratch root still gave 109 bytes. Prevalidated checkout-root scratch gives 101 bytes; rerun only the affected CP-03 test, preserving original failures.",
+			"id": "socket-bounded",
+			"sourceCommit": "ccde87a072105969c18dfdf6a6f524d3b87022ec",
+			"status": "pass",
+			"resultsPath": "tmp/grok-tier1-phase02-verify/node/bounded-socket-results.json",
+			"resultsSha256": "5bd99280bef1a13a912ec57af941f1cbd2a454570b433978f128ee11a32b7700",
+			"logSha256": "48fe840ff3b8e1fa91e1b1cbd7d8dff3f6c07a4736d381cac53ac9cf08d8f3e9",
+			"counts": {
+				"files": 1,
+				"passedFiles": 1,
+				"failedFiles": 0,
+				"passed": 1,
+				"failed": 0,
+				"skipped": 39,
+				"todo": 0
+			},
+			"suites": [
+				{
+					"file": "src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"skipped": 39,
+						"passed": 1
+					},
+					"failures": [],
+					"skipped": [
+						"spawnGroupChatAgent forwards maxWaitSeconds as --max-wait on the interactive maestro-p spawn",
+						"spawnGroupChatAgent omits --max-wait when maxWaitSeconds is not provided",
+						"spawnGroupChatAgent does not inject --max-wait on the API path (no maestro-p)",
+						"spawnGroupChatAgent SSH remote resolution fails loudly instead of silently spawning locally when the remote cannot be resolved",
+						"spawnGroupChatAgent SSH remote resolution spawns normally when the remote resolves",
+						"spawnGroupChatAgent appendSystemPrompt passes the native flag for agents that support it",
+						"spawnGroupChatAgent appendSystemPrompt re-sends the native flag on resume",
+						"spawnGroupChatAgent appendSystemPrompt embeds into the prompt for agents without the flag, and not on resume",
+						"spawnGroupChatAgent appendSystemPrompt hands the embedded prompt to the SSH wrapper",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) SSH=false hands off composed bytes once through admission",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) SSH=false hands off empty bytes once through admission",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) SSH=false hands off sole system bytes once through admission",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) SSH=false hands off resumed bytes once through admission",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) SSH=false hands off empty resumed bytes once through admission",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) SSH=true hands off composed bytes once through admission",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) SSH=true hands off empty bytes once through admission",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) SSH=true hands off sole system bytes once through admission",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) SSH=true hands off resumed bytes once through admission",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) SSH=true hands off empty resumed bytes once through admission",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) preserves ordered image content and the system envelope across caller mutation",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) preserves image-only image content and the system envelope across caller mutation",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) preserves unadmitted image content and the system envelope across caller mutation",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) refuses duplicate sources without admission, retry or private diagnostics",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) refuses resume contradiction without admission, retry or private diagnostics",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) refuses missing resume ID without admission, retry or private diagnostics",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) refuses conflicting argv without admission, retry or private diagnostics",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) refuses wrong owner without admission, retry or private diagnostics",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) sanitizes an SSH preparation failure and never falls back to a local process",
+						"spawnGroupChatAgent private prompt-file handoff (GT1-02-10D1T) returns a managed refusal without retrying through the legacy spawn",
+						"spawnGroupChatAgent the room lineage and the admitted spawn (MRC-07-05) spawns a room turn through the admitted path as the room’s child: the room record, the process id as its ids, the keyboard as the actor",
+						"spawnGroupChatAgent the room lineage and the admitted spawn (MRC-07-05) reports a refusal at the sink as the result, with nothing spawned",
+						"spawnGroupChatAgent the room lineage and the admitted spawn (MRC-07-05) hands a consult (no room) to the sink with no lineage and no stamp, and a named actor as given",
+						"spawnGroupChatAgent the room lineage and the admitted spawn (MRC-07-05) spawns as before through a process manager with no admitted path, still stamping the room record",
+						"spawnGroupChatAgent the room lineage and the admitted spawn (MRC-07-05) stamps the record before the SSH wrap, so it reaches the remote agent",
+						"spawnGroupChatAgent child lineage at the sink (MRC-07-08) binds a room turn as the room child under the host generation, runs it under the lease, and stamps the bound record on the process",
+						"spawnGroupChatAgent child lineage at the sink (MRC-07-08) parents every role of one room under the one room run, each its own request, each under its own lease",
+						"spawnGroupChatAgent child lineage at the sink (MRC-07-08) a dispatch from the participant shell is bound as the participant child: the chain one link deeper, parented under the turn, the room still the root",
+						"spawnGroupChatAgent child lineage at the sink (MRC-07-08) binds a consult (no room, no record) as a chat turn of its own, stamping nothing",
+						"spawnGroupChatAgent child lineage at the sink (MRC-07-08) a record planted in the agent variables neither widens the binding nor reaches the process: the room child does"
+					]
+				}
+			]
+		},
+		{
+			"name": "lint",
+			"command": ["npm", "run", "lint"],
+			"sourceCommit": "ccde87a072105969c18dfdf6a6f524d3b87022ec",
+			"startedAt": "2026-10-30T21:37:21.710921+00:00",
+			"durationSeconds": 21.237,
+			"exitCode": 2,
+			"logPath": "tmp/grok-tier1-phase02-verify/types/lint.log",
+			"logSha256": "c74c60a8051339f7c3a0514ae5f883e23816d352ffb0aaa2d75c2e53004c1fe0",
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/types/temp",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/types/temp",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/types/temp",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/types/npm-cache",
+				"npm_config_update_notifier": "false"
+			},
+			"status": "fail",
+			"diagnosticLines": [
+				"",
+				"> maestro@1.1.0-RC lint",
+				"> tsc -p tsconfig.lint.json && tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.cli.json --noEmit",
+				"",
+				"src/main/plugins/plugin-host-handlers.ts(1196,76): error TS2339: Property 'dispatcher' does not exist on type 'RequestInit'.",
+				"src/shared/maestro-lib/run/pipe-spawn.test.ts(568,41): error TS2345: Argument of type '{}' is not assignable to parameter of type 'StartTurnOptions'.",
+				"  Property 'stopGraceMs' is missing in type '{}' but required in type 'StartTurnOptions'.",
+				"src/shared/maestro-lib/run/pipe-spawn.test.ts(682,42): error TS2345: Argument of type '{}' is not assignable to parameter of type 'StartTurnOptions'.",
+				"  Property 'stopGraceMs' is missing in type '{}' but required in type 'StartTurnOptions'.",
+				"src/shared/maestro-lib/runtime/background-turns.ts(373,5): error TS2322: Type '{ supportsResume: boolean; supportsReadOnlyMode: boolean; supportsStandardPermissionMode?: boolean | undefined; supportsJsonOutput: boolean; supportsSessionId: boolean; supportsImageInput: boolean; ... 22 more ...; imageResumeMode?: \"prompt-embed\" | undefined; } | undefined' is not assignable to type 'AgentCapabilities'.",
+				"  Type 'undefined' is not assignable to type 'AgentCapabilities'."
+			]
+		},
+		{
+			"name": "main",
+			"command": [
+				"node",
+				"node_modules/typescript/bin/tsc",
+				"-p",
+				"tsconfig.main.json",
+				"--noEmit"
+			],
+			"sourceCommit": "ccde87a072105969c18dfdf6a6f524d3b87022ec",
+			"startedAt": "2026-10-30T21:37:42.948921+00:00",
+			"durationSeconds": 6.712,
+			"exitCode": 2,
+			"logPath": "tmp/grok-tier1-phase02-verify/types/main.log",
+			"logSha256": "0c4abc8948820278880cb5d87063703a291843880aa76aae13c2cb4428a4b448",
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/types/temp",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/types/temp",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/types/temp",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/types/npm-cache",
+				"npm_config_update_notifier": "false"
+			},
+			"status": "fail",
+			"diagnosticLines": [
+				"src/cli/services/agent-spawner.ts(1704,30): error TS2345: Argument of type '{ env: ProcessEnv; command: string; args: string[]; cwd: string; prompt: { via: \"none\"; } | { via: \"argv\"; args: string[]; } | { via: \"stdin\"; format: \"stream-json\" | \"raw\"; args: string[]; } | { ...; } | { ...; }; ... 5 more ...; target: { ...; }; } | { ...; }' is not assignable to parameter of type 'LaunchPlanCommon & { target: { kind: \"local\"; }; env: ProcessEnv; }'.",
+				"  Type '{ env: NodeJS.ProcessEnv; command: string; args: string[]; cwd: string; prompt: Exclude<PromptDelivery, { via: \"refused\"; }>; stdin: string | undefined; ... 4 more ...; target: { kind: \"remote\"; remote: SshRemoteConfig; }; }' is not assignable to type 'LaunchPlanCommon & { target: { kind: \"local\"; }; env: ProcessEnv; }'.",
+				"    Type '{ env: NodeJS.ProcessEnv; command: string; args: string[]; cwd: string; prompt: Exclude<PromptDelivery, { via: \"refused\"; }>; stdin: string | undefined; ... 4 more ...; target: { kind: \"remote\"; remote: SshRemoteConfig; }; }' is not assignable to type '{ target: { kind: \"local\"; }; env: ProcessEnv; }'.",
+				"      The types of 'target.kind' are incompatible between these types.",
+				"        Type '\"remote\"' is not assignable to type '\"local\"'.",
+				"src/main/group-chat/spawnGroupChatAgent.ts(184,4): error TS2322: Type '{ supportsResume: boolean; supportsReadOnlyMode: boolean; supportsStandardPermissionMode?: boolean | undefined; supportsJsonOutput: boolean; supportsSessionId: boolean; supportsImageInput: boolean; ... 22 more ...; imageResumeMode?: \"prompt-embed\" | undefined; } | undefined' is not assignable to type 'AgentCapabilities'.",
+				"  Type 'undefined' is not assignable to type 'AgentCapabilities'.",
+				"src/main/group-chat/spawnGroupChatAgent.ts(341,3): error TS2353: Object literal may only specify known properties, and 'readOnlyMode' does not exist in type 'ProcessConfig'.",
+				"src/shared/maestro-lib/run/pipe-spawn.test.ts(568,41): error TS2345: Argument of type '{}' is not assignable to parameter of type 'StartTurnOptions'.",
+				"  Property 'stopGraceMs' is missing in type '{}' but required in type 'StartTurnOptions'.",
+				"src/shared/maestro-lib/run/pipe-spawn.test.ts(682,42): error TS2345: Argument of type '{}' is not assignable to parameter of type 'StartTurnOptions'.",
+				"  Property 'stopGraceMs' is missing in type '{}' but required in type 'StartTurnOptions'.",
+				"src/shared/maestro-lib/runtime/background-turns.ts(373,5): error TS2322: Type '{ supportsResume: boolean; supportsReadOnlyMode: boolean; supportsStandardPermissionMode?: boolean | undefined; supportsJsonOutput: boolean; supportsSessionId: boolean; supportsImageInput: boolean; ... 22 more ...; imageResumeMode?: \"prompt-embed\" | undefined; } | undefined' is not assignable to type 'AgentCapabilities'.",
+				"  Type 'undefined' is not assignable to type 'AgentCapabilities'."
+			]
+		},
+		{
+			"name": "cli",
+			"command": ["node", "node_modules/typescript/bin/tsc", "-p", "tsconfig.cli.json", "--noEmit"],
+			"sourceCommit": "ccde87a072105969c18dfdf6a6f524d3b87022ec",
+			"startedAt": "2026-10-30T21:37:49.661608+00:00",
+			"durationSeconds": 5.513,
+			"exitCode": 2,
+			"logPath": "tmp/grok-tier1-phase02-verify/types/cli.log",
+			"logSha256": "9f886ea9bb93ddcec6b4bd081b70d9381ad87ee755cb3875a68420c4e960f3bc",
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/types/temp",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/types/temp",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/types/temp",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-verify/types/npm-cache",
+				"npm_config_update_notifier": "false"
+			},
+			"status": "fail",
+			"diagnosticLines": [
+				"src/cli/services/agent-spawner.ts(1704,30): error TS2345: Argument of type '{ env: ProcessEnv; command: string; args: string[]; cwd: string; prompt: { via: \"none\"; } | { via: \"argv\"; args: string[]; } | { via: \"stdin\"; format: \"stream-json\" | \"raw\"; args: string[]; } | { ...; } | { ...; }; ... 5 more ...; target: { ...; }; } | { ...; }' is not assignable to parameter of type 'LaunchPlanCommon & { target: { kind: \"local\"; }; env: ProcessEnv; }'.",
+				"  Type '{ env: NodeJS.ProcessEnv; command: string; args: string[]; cwd: string; prompt: Exclude<PromptDelivery, { via: \"refused\"; }>; stdin: string | undefined; ... 4 more ...; target: { kind: \"remote\"; remote: SshRemoteConfig; }; }' is not assignable to type 'LaunchPlanCommon & { target: { kind: \"local\"; }; env: ProcessEnv; }'.",
+				"    Type '{ env: NodeJS.ProcessEnv; command: string; args: string[]; cwd: string; prompt: Exclude<PromptDelivery, { via: \"refused\"; }>; stdin: string | undefined; ... 4 more ...; target: { kind: \"remote\"; remote: SshRemoteConfig; }; }' is not assignable to type '{ target: { kind: \"local\"; }; env: ProcessEnv; }'.",
+				"      The types of 'target.kind' are incompatible between these types.",
+				"        Type '\"remote\"' is not assignable to type '\"local\"'.",
+				"src/shared/maestro-lib/run/pipe-spawn.test.ts(568,41): error TS2345: Argument of type '{}' is not assignable to parameter of type 'StartTurnOptions'.",
+				"  Property 'stopGraceMs' is missing in type '{}' but required in type 'StartTurnOptions'.",
+				"src/shared/maestro-lib/run/pipe-spawn.test.ts(682,42): error TS2345: Argument of type '{}' is not assignable to parameter of type 'StartTurnOptions'.",
+				"  Property 'stopGraceMs' is missing in type '{}' but required in type 'StartTurnOptions'.",
+				"src/shared/maestro-lib/runtime/background-turns.ts(373,5): error TS2322: Type '{ supportsResume: boolean; supportsReadOnlyMode: boolean; supportsStandardPermissionMode?: boolean | undefined; supportsJsonOutput: boolean; supportsSessionId: boolean; supportsImageInput: boolean; ... 22 more ...; imageResumeMode?: \"prompt-embed\" | undefined; } | undefined' is not assignable to type 'AgentCapabilities'.",
+				"  Type 'undefined' is not assignable to type 'AgentCapabilities'."
+			]
+		}
+	],
+	"typeDiagnostics": [
+		{
+			"path": "src/main/plugins/plugin-host-handlers.ts",
+			"line": 1196,
+			"column": 76,
+			"code": "TS2339",
+			"message": "Property 'dispatcher' does not exist on type 'RequestInit'.",
+			"checks": ["lint"],
+			"sourceFileSha256": "81ff275887037b6ec7596ebc68821661db52f739d1ba91f06eae9b774a026986"
+		},
+		{
+			"path": "src/shared/maestro-lib/run/pipe-spawn.test.ts",
+			"line": 568,
+			"column": 41,
+			"code": "TS2345",
+			"message": "Argument of type '{}' is not assignable to parameter of type 'StartTurnOptions'.",
+			"checks": ["lint", "main", "cli"],
+			"sourceFileSha256": "80123dab56dfb21ab1b8e6a372ce45ba4f403b027eb2b91ac7d96242777cc1be"
+		},
+		{
+			"path": "src/shared/maestro-lib/run/pipe-spawn.test.ts",
+			"line": 682,
+			"column": 42,
+			"code": "TS2345",
+			"message": "Argument of type '{}' is not assignable to parameter of type 'StartTurnOptions'.",
+			"checks": ["lint", "main", "cli"],
+			"sourceFileSha256": "80123dab56dfb21ab1b8e6a372ce45ba4f403b027eb2b91ac7d96242777cc1be"
+		},
+		{
+			"path": "src/shared/maestro-lib/runtime/background-turns.ts",
+			"line": 373,
+			"column": 5,
+			"code": "TS2322",
+			"message": "Type '{ supportsResume: boolean; supportsReadOnlyMode: boolean; supportsStandardPermissionMode?: boolean | undefined; supportsJsonOutput: boolean; supportsSessionId: boolean; supportsImageInput: boolean; ... 22 more ...; imageResumeMode?: \"prompt-embed\" | undefined; } | undefined' is not assignable to type 'AgentCapabilities'.",
+			"checks": ["lint", "main", "cli"],
+			"sourceFileSha256": "9635d2d681b3e54287b38783e9ec6d072e2cf9ea91e88c3e1547bd82e544db5d"
+		},
+		{
+			"path": "src/cli/services/agent-spawner.ts",
+			"line": 1704,
+			"column": 30,
+			"code": "TS2345",
+			"message": "Argument of type '{ env: ProcessEnv; command: string; args: string[]; cwd: string; prompt: { via: \"none\"; } | { via: \"argv\"; args: string[]; } | { via: \"stdin\"; format: \"stream-json\" | \"raw\"; args: string[]; } | { ...; } | { ...; }; ... 5 more ...; target: { ...; }; } | { ...; }' is not assignable to parameter of type 'LaunchPlanCommon & { target: { kind: \"local\"; }; env: ProcessEnv; }'.",
+			"checks": ["main", "cli"],
+			"sourceFileSha256": "7ceb492ac30e4c4558ac7f937c74ff6ee0ede9c2824aafeb88398de3710c45fd"
+		},
+		{
+			"path": "src/main/group-chat/spawnGroupChatAgent.ts",
+			"line": 184,
+			"column": 4,
+			"code": "TS2322",
+			"message": "Type '{ supportsResume: boolean; supportsReadOnlyMode: boolean; supportsStandardPermissionMode?: boolean | undefined; supportsJsonOutput: boolean; supportsSessionId: boolean; supportsImageInput: boolean; ... 22 more ...; imageResumeMode?: \"prompt-embed\" | undefined; } | undefined' is not assignable to type 'AgentCapabilities'.",
+			"checks": ["main"],
+			"sourceFileSha256": "2f838f8a6387366aa2888d648a61fa299eb78393471565c125efabce2a979166"
+		},
+		{
+			"path": "src/main/group-chat/spawnGroupChatAgent.ts",
+			"line": 341,
+			"column": 3,
+			"code": "TS2353",
+			"message": "Object literal may only specify known properties, and 'readOnlyMode' does not exist in type 'ProcessConfig'.",
+			"checks": ["main"],
+			"sourceFileSha256": "2f838f8a6387366aa2888d648a61fa299eb78393471565c125efabce2a979166"
+		}
+	],
+	"summary": {
+		"status": "fail",
+		"initialFullSuiteFiles": 78,
+		"initialPassedFiles": 70,
+		"initialFailedFiles": 8,
+		"initialPassedAssertions": 4700,
+		"initialFailedAssertions": 42,
+		"initialSkippedAssertions": 27,
+		"resolvedHarnessFailures": 1,
+		"remainingFailedAssertions": 41,
+		"remainingFailedFiles": 7,
+		"isolationImportFailure": true,
+		"fullCompleteness": "not-run",
+		"uniqueTypeDiagnostics": 7,
+		"phaseOwnedTypeDiagnostics": 6,
+		"nativeQualification": "not-run"
+	},
+	"limits": [
+		"The isolation guard refused during import before collecting any tests; exact blocked operation is unobserved. No evidence of operator-data contents access. Full completeness withheld.",
+		"Original node batch has five unhandled Cue mock rejections; passing tests do not qualify the failed batch as clean.",
+		"A 109-byte scratch socket still failed; a prevalidated 101-byte path passed the affected case only. Original and corrective receipts remain separate.",
+		"Skipped tests and native/SSH/Windows/Linux behavior are not passing evidence.",
+		"No production or test code changed during verification; repairs are separate executable tasks."
+	]
+}

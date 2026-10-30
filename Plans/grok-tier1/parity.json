@@ -282,6 +282,15 @@
 			"sourceRevisionScope": "pre-task HEAD plus the local GT1-02-05 implementation diff identified by source hashes in the evidence",
 			"provenance": "source-and-static-review",
 			"acceptanceRun": false
+		},
+		"phase02-focused-verification": {
+			"path": "Plans/grok-tier1/evidence/02.md#gt1-02-13-focused-verification",
+			"receiptPath": "Plans/grok-tier1/evidence/02-verification.json",
+			"sourceCommit": "ccde87a072105969c18dfdf6a6f524d3b87022ec",
+			"provenance": "deterministic-tests-and-typechecks",
+			"acceptanceRun": false,
+			"status": "fail",
+			"affectedRows": ["P46"]
 		}
 	},
 	"sourceCatalog": {
@@ -8302,9 +8311,17 @@
 				"CLAUDE-AGENTS.md"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-12-03"],
-				"test": ["GT1-12-04", "GT1-02-12A"],
-				"verification": ["GT1-12-05", "GT1-12-06", "GT1-11-03", "GT1-02-13"],
+				"implementation": ["GT1-12-03", "GT1-02-13B", "GT1-02-13C", "GT1-02-13E", "GT1-02-13G"],
+				"test": [
+					"GT1-12-04",
+					"GT1-02-12A",
+					"GT1-02-13A",
+					"GT1-02-13D",
+					"GT1-02-13F",
+					"GT1-02-13H",
+					"GT1-02-13I"
+				],
+				"verification": ["GT1-12-05", "GT1-12-06", "GT1-11-03", "GT1-02-13", "GT1-02-13J"],
 				"live": [],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -8317,7 +8334,7 @@
 			],
 			"implementation": "pending",
 			"static": "not-run",
-			"deterministic": "not-run",
+			"deterministic": "fail",
 			"live": "not-run",
 			"currentEvidence": {
 				"provenance": "source-supported",
@@ -8342,8 +8359,9 @@
 				{
 					"id": "gap:P46",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks. GT1-02-12A authors completeness import/registration isolation and seven sentinel cases, including the actual Node preferences fallback despite MAESTRO_USER_DATA. GT1-02-13 must execute these before the baseline isolation blocker can be closed; no behavioral pass is claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-12a-completeness-storage-isolation.",
-					"affectedRows": ["P46"]
+					"missingPrerequisite": "GT1-02-13 executed focused tests and all three TypeScript configurations at ccde87a072105969c18dfdf6a6f524d3b87022ec. Remaining: 41 assertion failures, completeness import isolation failure (full suite not-run), six phase-owned type diagnostics and the existing dispatcher baseline. GT1-02-13A through GT1-02-13I own bounded repairs; GT1-02-13J re-verifies before GT1-02-14 reconciliation. No native/platform acceptance is inferred. See Plans/grok-tier1/evidence/02.md#gt1-02-13-focused-verification.",
+					"affectedRows": ["P46"],
+					"evidenceRef": "phase02-focused-verification"
 				},
 				{
 					"id": "baseline-typescript-dispatcher",
