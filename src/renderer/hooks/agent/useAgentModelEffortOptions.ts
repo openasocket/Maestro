@@ -10,14 +10,16 @@
  * lives here so there is a single request shape, a single stale-guard, and a
  * single fallback story.
  *
- * Effort options are agent-scoped, not model-scoped: agents expose the list
+ * Effort options use the selected discovery context when supplied: agents expose the list
  * under either `effort` (Claude Code) or `reasoningEffort` (Codex, Copilot-CLI,
  * Factory Droid, Grok), so both keys are probed and whichever the agent defines
  * wins. That keeps this correct as agents are added without touching callers.
  */
 
 import { useEffect, useState } from 'react';
+import type { AgentDiscoveryRequest, AgentDiscoveryResult } from '../../../shared/types';
 import { readEffortFromConfig } from '../../utils/agentEffort';
+import { useDebouncedValue } from '../utils/useThrottle';
 
 export interface AgentModelEffortOptions {
 	/** Model ids the agent offers. Empty when the agent has no model selection. */
@@ -35,6 +37,8 @@ export interface AgentModelEffortOptions {
 	 * nothing to show.
 	 */
 	loaded: boolean;
+	modelStatus: AgentDiscoveryResult['status'];
+	effortStatus: AgentDiscoveryResult['status'];
 }
 
 /**
@@ -46,36 +50,82 @@ export interface AgentModelEffortOptions {
  *
  * @param agentId - The agent's tool type, or undefined when no agent is active.
  */
-export function useAgentModelEffortOptions(agentId?: string): AgentModelEffortOptions {
+export function useAgentModelEffortOptions(
+	agentId?: string,
+	/** Memoized selected context. Grok never discovers from a provider ID alone. */
+	context?: AgentDiscoveryRequest['context']
+): AgentModelEffortOptions {
+	const scopedContext = agentId === 'grok' ? context : undefined;
+	const discoveryContext = useDebouncedValue(scopedContext, 300);
 	const [models, setModels] = useState<string[]>([]);
 	const [efforts, setEfforts] = useState<string[]>([]);
 	const [defaultModel, setDefaultModel] = useState('');
 	const [defaultEffort, setDefaultEffort] = useState('');
 	const [loaded, setLoaded] = useState(false);
+	const [modelStatus, setModelStatus] = useState<AgentDiscoveryResult['status']>('unavailable');
+	const [effortStatus, setEffortStatus] = useState<AgentDiscoveryResult['status']>('unavailable');
+	const [resolvedFor, setResolvedFor] = useState<{
+		agentId: string;
+		context: typeof context;
+	}>();
 
 	useEffect(() => {
-		if (!agentId) return;
 		let stale = false;
 		setLoaded(false);
+		setResolvedFor(undefined);
+		setModels([]);
+		setEfforts([]);
+		setDefaultModel('');
+		setDefaultEffort('');
+		setModelStatus('unavailable');
+		setEffortStatus('unavailable');
+		if (!agentId || (agentId === 'grok' && discoveryContext !== scopedContext)) return;
 
-		const modelsDone = window.maestro.agents
-			.getModels(agentId)
+		const modelsDone = (
+			agentId === 'grok'
+				? discoveryContext
+					? window.maestro.agents.getModels({ providerId: agentId, context: discoveryContext })
+					: Promise.resolve<AgentDiscoveryResult>({ status: 'unavailable', options: [] })
+				: window.maestro.agents.getModels(agentId).then((options) => ({
+						status: options.length ? ('discovered' as const) : ('unavailable' as const),
+						options,
+					}))
+		)
 			.then((fetched) => {
-				if (!stale) setModels(fetched);
+				if (stale) return;
+				setModels(fetched.options);
+				setModelStatus(fetched.status);
 			})
 			.catch(() => {
 				if (!stale) setModels([]);
 			});
 
-		const effortsDone = Promise.all([
-			window.maestro.agents.getConfigOptions(agentId, 'effort').catch(() => [] as string[]),
-			window.maestro.agents
-				.getConfigOptions(agentId, 'reasoningEffort')
-				.catch(() => [] as string[]),
-		])
+		const effortsDone = Promise.all(
+			['effort', 'reasoningEffort'].map((key) =>
+				(agentId === 'grok'
+					? discoveryContext
+						? window.maestro.agents.getConfigOptions(
+								{ providerId: agentId, context: discoveryContext },
+								key
+							)
+						: Promise.resolve<AgentDiscoveryResult>({ status: 'unavailable', options: [] })
+					: window.maestro.agents.getConfigOptions(agentId, key).then((options) => ({
+							status: options.length ? ('discovered' as const) : ('unavailable' as const),
+							options,
+						}))
+				).catch((): AgentDiscoveryResult => ({ status: 'unavailable', options: [] }))
+			)
+		)
 			.then(([effortOpts, reasoningOpts]) => {
 				if (stale) return;
-				setEfforts(effortOpts.length > 0 ? effortOpts : reasoningOpts);
+				const selected =
+					effortOpts.status === 'discovered' && effortOpts.options.length > 0
+						? effortOpts
+						: reasoningOpts.status === 'discovered' || effortOpts.options.length === 0
+							? reasoningOpts
+							: effortOpts;
+				setEfforts(selected.options);
+				setEffortStatus(selected.status);
 			})
 			.catch(() => {
 				if (!stale) setEfforts([]);
@@ -95,15 +145,28 @@ export function useAgentModelEffortOptions(agentId?: string): AgentModelEffortOp
 			});
 
 		Promise.all([modelsDone, effortsDone, defaultsDone]).then(() => {
-			if (!stale) setLoaded(true);
+			if (stale) return;
+			setResolvedFor({ agentId, context: discoveryContext });
+			setLoaded(true);
 		});
 
 		return () => {
 			stale = true;
 		};
-	}, [agentId]);
+	}, [agentId, discoveryContext, scopedContext]);
 
-	return { models, efforts, defaultModel, defaultEffort, loaded };
+	// Hide the previous account's lists on the render that changes context,
+	// before the effect has a chance to clear them or a consumer validates a pick.
+	const current = resolvedFor?.agentId === agentId && resolvedFor?.context === scopedContext;
+	return {
+		models: current ? models : [],
+		efforts: current ? efforts : [],
+		defaultModel: current ? defaultModel : '',
+		defaultEffort: current ? defaultEffort : '',
+		loaded: current && loaded,
+		modelStatus: current ? modelStatus : 'unavailable',
+		effortStatus: current ? effortStatus : 'unavailable',
+	};
 }
 
 /**
