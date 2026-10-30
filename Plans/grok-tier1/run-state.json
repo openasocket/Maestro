@@ -72,7 +72,8 @@
 			"cairoVersion": "1.18.6",
 			"pangoVersion": "1.58.2",
 			"pythonDistutilsAvailable": true,
-			"nativeBuildVerified": false
+			"nativeBuildVerified": false,
+			"nodeNativeLoadVerified": true
 		},
 		"packageName": "maestro",
 		"packageVersion": "1.1.0-RC",
@@ -81,11 +82,11 @@
 		"packageManagerPin": null,
 		"lockfileVersion": 3,
 		"setupCommand": "npm ci",
-		"setupStatus": "not-run",
+		"setupStatus": "pass",
 		"setupOwnerTask": "GT1-01-01A",
-		"nodeModulesPresent": false,
-		"localTestRunnerAvailable": false,
-		"missingLocalTools": ["vitest", "typescript", "prettier", "eslint", "lint-staged"],
+		"nodeModulesPresent": true,
+		"localTestRunnerAvailable": true,
+		"missingLocalTools": ["lint-staged"],
 		"pinnedDependencies": {
 			"typescript": "6.0.3",
 			"vitest": "4.1.11",
@@ -125,6 +126,23 @@
 			"version": null,
 			"packageIdentity": null,
 			"invoked": false
+		},
+		"installedDependencies": {
+			"typescript": "6.0.3",
+			"vitest": "4.1.11",
+			"vite": "8.2.2",
+			"prettier": "3.8.3",
+			"eslint": "9.39.4",
+			"electron": "41.10.7",
+			"electron-rebuild": "3.2.9",
+			"@electron/rebuild": "4.2.0",
+			"node-pty": "1.2.0-beta.12",
+			"better-sqlite3": "12.11.1",
+			"canvas": "3.2.3",
+			"husky": "9.1.7",
+			"patch-package": "8.0.1",
+			"@playwright/test": "1.59.1",
+			"jsdom": "27.4.0"
 		}
 	},
 	"selectedOfficialPackage": {
@@ -164,7 +182,8 @@
 		{
 			"id": "dependencies-not-installed",
 			"ownerTask": "GT1-01-01A",
-			"detail": "No node_modules in execution checkout; installation and native ABI checks remain pending."
+			"detail": "GT1-01-01A installed 1,445 lock-matching packages with npm ci in supported Node/server mode. Local test/build tools and Node native smoke checks pass; see setup. Desktop Electron ABI is separately not-run.",
+			"status": "resolved"
 		},
 		{
 			"id": "unavailable-commit-hook-tool",
@@ -200,6 +219,11 @@
 			"id": "platform-coverage-unqualified",
 			"ownerTask": "GT1-01-05",
 			"detail": "Only local macOS arm64 tools inspected; no Linux, Windows, SSH or real-provider qualification."
+		},
+		{
+			"id": "desktop-native-abi-unverified",
+			"ownerTask": "GT1-01-01A",
+			"detail": "Node/server install is ready for Node tooling. Electron native rebuild was intentionally omitted because electron-rebuild 3.2.9 hardcodes ~/.electron-gyp; future desktop checks need a confined build setup and their own evidence."
 		}
 	],
 	"reviewedInputsSha256": {
@@ -219,5 +243,145 @@
 		"repositorySuiteOwnerTask": "GT1-01-06",
 		"imagesAnalyzed": 0,
 		"independentReview": "pass"
+	},
+	"lastCompletedTaskId": "GT1-01-01A",
+	"lastUpdatedAt": "2026-10-30T07:16:19.140351+00:00",
+	"setup": {
+		"taskId": "GT1-01-01A",
+		"status": "pass",
+		"sourceCommit": "531edf5f3076d16799422170d94b655f9ed0dd4f",
+		"baseCommit": "dab0dbb9ccad90b5f3d5c0784cd0d0151b24e796",
+		"sourceAheadOfBase": 1,
+		"sourceBehindBase": 2,
+		"startedAt": "2026-10-30T07:12:10.106330+00:00",
+		"finishedAt": "2026-10-30T07:12:33.743057+00:00",
+		"mode": "node-server",
+		"command": ["npm", "ci", "--no-audit", "--no-fund", "--foreground-scripts"],
+		"environment": {
+			"MAESTRO_SERVER_INSTALL": "1",
+			"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-setup/npm-cache",
+			"npm_config_devdir": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-setup/node-gyp",
+			"npm_package_config_node_gyp_devdir": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-setup/node-gyp",
+			"electron_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-setup/electron-cache",
+			"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-setup/xdg-cache",
+			"CLANG_MODULE_CACHE_PATH": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-setup/clang-cache",
+			"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-setup/temp",
+			"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-setup/temp",
+			"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-setup/temp",
+			"PYTHONDONTWRITEBYTECODE": "1",
+			"npm_config_update_notifier": "false",
+			"GIT_CONFIG_COUNT": "1",
+			"GIT_CONFIG_KEY_0": "core.hooksPath",
+			"GIT_CONFIG_VALUE_0": ".husky"
+		},
+		"exitCode": 0,
+		"installedPackageCount": 1445,
+		"installedVersionsMatchLock": true,
+		"lockfileSha256": "0b6b52f5ae6660b8cf2ca74cf9c7992e9630b08ce685c8413040caa305ecb747",
+		"localLogPath": "tmp/grok-tier1-setup/npm-ci.log",
+		"localLogSha256": "0b9f518061a22c9fa0f5275aa79484edb596ea071d202fc18e470bf0efdcfe1c",
+		"protectedFileHashes": {
+			"/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/package.json": "c6c1e45b7ba259420616990f408c70d9c07cd4226b9a8283197dd5944ba8b93b",
+			"/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/package-lock.json": "0b6b52f5ae6660b8cf2ca74cf9c7992e9630b08ce685c8413040caa305ecb747",
+			"/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/scripts/check-python.mjs": "c51598093e91f5f64500a9dfca83996a7467bd92b082076e4f10ac4ac31bbea7",
+			"/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/scripts/setup-git-hooks.mjs": "5e996dea737859a586dc2a1ea4280d06ca3b9f838a73f87d91acab83f997e3d5",
+			"/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/scripts/postinstall.mjs": "9302a064fa44a645298e6efc0a9eb7d48924bb7bcf46965818302def4dd66be3",
+			"/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/scripts/ensure-electron.mjs": "bf51cf488cb612251610a69d1a14c0757d947a885f70a087b5a014ee54864242",
+			"/Users/dr3/dev-shit/Maestro/.git/config": "97f4b6dbd75596ea6c98a47afd196c49c96bac7f49671d516a8ad7750d090481",
+			"/Users/dr3/dev-shit/Maestro/package.json": "c6c1e45b7ba259420616990f408c70d9c07cd4226b9a8283197dd5944ba8b93b",
+			"/Users/dr3/dev-shit/Maestro/package-lock.json": "0b6b52f5ae6660b8cf2ca74cf9c7992e9630b08ce685c8413040caa305ecb747",
+			"/Users/dr3/dev-shit/Maestro/node_modules/.package-lock.json": "937fcabde8784aa8096b3f4ab8630514b44de1900b4d379ff97a530c2d85c37a",
+			"/Users/dr3/dev-shit/Maestro/node_modules/better-sqlite3/build/Release/better_sqlite3.node": "f3313c80714cbbac79debf22a575642528b082b68f362c21049dd263e8644869",
+			"/Users/dr3/dev-shit/Maestro/node_modules/node-pty/prebuilds/darwin-arm64/pty.node": "30ac36647725b2402585781c8e81be39d76962bf79d03620a9763539d0fdbec8",
+			"/Users/dr3/dev-shit/Maestro/node_modules/canvas/build/Release/canvas.node": "34d2e33ac5228866827aa9d49cd373ef3fe691000614e7fc3fa606d4e36fef2c"
+		},
+		"protectedFilesUnchanged": true,
+		"checks": [
+			{
+				"command": ["node", "--version"],
+				"exitCode": 0,
+				"stdout": "v26.13.0",
+				"stderr": ""
+			},
+			{
+				"command": ["npm", "--version"],
+				"exitCode": 0,
+				"stdout": "11.20.0",
+				"stderr": ""
+			},
+			{
+				"command": ["./node_modules/.bin/vitest", "--version"],
+				"exitCode": 0,
+				"stdout": "vitest/4.1.11 darwin-arm64 node-v26.13.0",
+				"stderr": ""
+			},
+			{
+				"command": ["./node_modules/.bin/tsc", "--version"],
+				"exitCode": 0,
+				"stdout": "Version 6.0.3",
+				"stderr": ""
+			},
+			{
+				"command": ["./node_modules/.bin/prettier", "--version"],
+				"exitCode": 0,
+				"stdout": "3.8.3",
+				"stderr": ""
+			},
+			{
+				"command": ["./node_modules/.bin/eslint", "--version"],
+				"exitCode": 0,
+				"stdout": "v9.39.4",
+				"stderr": ""
+			},
+			{
+				"command": ["./node_modules/.bin/vite", "--version"],
+				"exitCode": 0,
+				"stdout": "vite/8.2.2 darwin-arm64 node-v26.13.0",
+				"stderr": ""
+			},
+			{
+				"command": ["./node_modules/.bin/esbuild", "--version"],
+				"exitCode": 0,
+				"stdout": "0.28.1",
+				"stderr": ""
+			},
+			{
+				"command": ["./node_modules/.bin/playwright", "--version"],
+				"exitCode": 0,
+				"stdout": "Version 1.59.1",
+				"stderr": ""
+			},
+			{
+				"command": ["npm", "ls", "--depth=0", "--json"],
+				"exitCode": 0,
+				"problems": [],
+				"directDependencies": 147
+			},
+			{
+				"command": [
+					"node",
+					"-e",
+					"const assert = require('node:assert/strict'); const db = new (require('better-sqlite3'))(':memory:'); assert.equal(db.prepare('select 42 as value').get().value, 42); db.close(); const canvas = require('canvas').createCanvas(1, 1); const ctx = canvas.getContext('2d'); ctx.fillStyle = '#ff0000'; ctx.fillRect(0, 0, 1, 1); assert.deepEqual([...ctx.getImageData(0, 0, 1, 1).data], [255, 0, 0, 255]); const pty = require('node-pty'); assert.equal(typeof pty.spawn, 'function'); const fs = require('node:fs'); const electron = require('electron'); assert(fs.existsSync(electron)); console.log(JSON.stringify({sqlite: 'query passed', canvas: 'pixel passed', nodePty: 'native binding loaded', electron: 'binary exists (not launched)', nodeAbi: process.versions.modules}));"
+				],
+				"exitCode": 0,
+				"stdout": "{\"sqlite\":\"query passed\",\"canvas\":\"pixel passed\",\"nodePty\":\"native binding loaded\",\"electron\":\"binary exists (not launched)\",\"nodeAbi\":\"147\"}",
+				"stderr": ""
+			}
+		],
+		"nodeAbi": "147",
+		"desktopNativeAbi": {
+			"status": "not-run",
+			"reason": "Supported MAESTRO_SERVER_INSTALL=1 keeps the Node ABI; pinned electron-rebuild 3.2.9 hardcodes a cache outside the checkout. Electron binary exists but was not launched; desktop/native build qualification remains pending."
+		},
+		"warnings": [
+			"npm 11 warns npm_config_devdir is unknown; retained for pinned node-gyp 9 compatibility alongside npm_package_config_node_gyp_devdir.",
+			"Pinned transitive dependencies report deprecations; no versions or lock entries changed.",
+			"npm reports uncovered allowScripts entries for electron-winstaller@5.4.0, fsevents@2.3.3 and fsevents@2.3.2; no approval/config mutation performed.",
+			"lint-staged remains absent from the manifest and lockfile; do not let the commit hook implicitly download it."
+		],
+		"repositorySuites": "not-run",
+		"repositorySuiteOwnerTask": "GT1-01-06",
+		"independentReview": "pass",
+		"imagesAnalyzed": 0
 	}
 }

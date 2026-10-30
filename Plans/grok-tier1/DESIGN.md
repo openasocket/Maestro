@@ -75,13 +75,20 @@ capability, parser, storage, permission, pricing or beta behavior changes in thi
 
 The host is macOS 27.2 arm64 with Node 26.13.0 and npm 11.20.0. The manifest requires
 Node >=22.0.0, `.npmrc` enforces engines, and package-lock version 3 pins dependencies.
-There is no exact package-manager/runtime pin and no execution-checkout `node_modules`.
-GT1-01-01A owns pinned setup with `npm ci`, scoped caches and native-module readiness.
+There is no exact package-manager/runtime pin. GT1-01-01 initially found no
+execution-checkout `node_modules`; GT1-01-01A subsequently installed 1,445 lock-matching
+packages with `npm ci` and caches/temp files under `tmp/grok-tier1-setup/`.
+The supported `MAESTRO_SERVER_INSTALL=1` mode preserves Node ABI 147: local test/build
+tool versions, the dependency tree and SQLite/canvas/PTY binding smoke checks passed.
+Electron native rebuild remains `not-run` because the pinned rebuild tool hardcodes
+`~/.electron-gyp`, outside this task's write boundary. Electron's binary is present,
+but neither desktop ABI readiness nor application tests are implied by setup success.
 The lifecycle scripts and available native prerequisites are recorded in [[Plans/grok-tier1/evidence/01]].
 
-This task may read the primary checkout's existing Prettier 3.8.3 executable, matching
-the lockfile, to format only the new baseline files. This does not install or link
-dependencies. The remaining repository suites are explicitly `not-run` until GT1-01-06.
+GT1-01-01 borrowed the primary checkout's lock-matching Prettier read-only. After
+GT1-01-01A, use the worktree's installed Prettier 3.8.3. The remaining repository suites
+are explicitly `not-run` until GT1-01-06. Run-state retains the original baseline
+provenance; its `setup` receipt records GT1-01-01A's source revision and commands.
 
 The local commit hook calls unpinned, unavailable `npx lint-staged`. Use a command-local
 `core.hooksPath=/dev/null` for this documentation-only commit after explicit formatting
