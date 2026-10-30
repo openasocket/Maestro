@@ -65,6 +65,8 @@ export interface PipeSpawnConfig {
 	prompt?: string;
 	/** Final local file plan. Its args are already in `args`; its artifact is private sink input. */
 	promptDelivery?: Extract<PromptDelivery, { via: 'file' }>;
+	/** Private remote cleanup metadata from SSH preparation; never a local materialization input. */
+	promptArtifactPath?: string;
 	/** Image data URLs. Needs `saveImageToTempFile` unless the provider takes them over stdin. */
 	images?: string[];
 	imageArgs?: (imagePath: string) => string[];
@@ -157,6 +159,11 @@ export function planPipeSpawn(
 	const hasImages = images && images.length > 0;
 	const capabilities = getAgentCapabilities(toolType);
 	const fileDelivery = config.promptDelivery;
+	const hasRemoteArtifact = config.promptArtifactPath !== undefined;
+	const hasFileDelivery = !!fileDelivery || hasRemoteArtifact;
+	if (hasRemoteArtifact && (fileDelivery || !config.sshStdinScript)) {
+		throw new Error('Prompt-file delivery does not match its host plan.');
+	}
 	if (fileDelivery) {
 		if (fileDelivery.artifact.owner !== 'local' || config.sshStdinScript) {
 			throw new Error('Remote prompt files must be prepared by the selected SSH transport.');
@@ -172,7 +179,11 @@ export function planPipeSpawn(
 		) {
 			throw new Error('Prompt-file arguments must match the final launch plan.');
 		}
-	} else if (getAgentDefinition(toolType)?.promptFile && (prompt !== undefined || hasImages)) {
+	} else if (
+		!hasRemoteArtifact &&
+		getAgentDefinition(toolType)?.promptFile &&
+		(prompt !== undefined || hasImages)
+	) {
 		throw new Error('Explicit prompt-file delivery must be planned before pipe spawning.');
 	}
 
@@ -197,14 +208,14 @@ export function planPipeSpawn(
 	let finalArgs: string[];
 	let tempFiles: string[] = [];
 	// effectivePrompt may be modified (e.g., image path prefix prepended for resume mode)
-	let effectivePrompt = fileDelivery ? undefined : prompt;
+	let effectivePrompt = hasFileDelivery ? undefined : prompt;
 	// If the caller pre-embedded the prompt in args (e.g., SSH tab naming wraps it
 	// inside bash -c), skip the appending paths below and treat it as already-added.
-	let promptAddedToArgs = !!fileDelivery || !!config.promptAlreadyInArgs;
+	let promptAddedToArgs = hasFileDelivery || !!config.promptAlreadyInArgs;
 
-	if (fileDelivery) {
+	if (hasFileDelivery) {
 		// No legacy image writer, prompt builder or stdin assembly may run for
-		// this turn. startTurn owns exclusive creation and cleanup after admission.
+		// this turn. startTurn owns local files; the SSH script owns remote files.
 		finalArgs = [...args];
 	} else if (hasImages && prompt && capabilities.supportsStreamJsonInput) {
 		// For agents that support stream-json input (like Claude Code)
@@ -289,7 +300,7 @@ export function planPipeSpawn(
 	// Some CLIs need an explicit query source to avoid opening their interactive UI.
 	// SSH scripts own their remote arguments and must not receive local stdin flags.
 	if (
-		!fileDelivery &&
+		!hasFileDelivery &&
 		sendPromptViaStdinRaw &&
 		effectivePrompt &&
 		!config.sshStdinScript &&
@@ -320,7 +331,7 @@ export function planPipeSpawn(
 	// out of the Windows command line without assuming stdin support.
 	const promptFileArgs = getAgentDefinition(toolType)?.promptFileArgs;
 	if (
-		!fileDelivery &&
+		!hasFileDelivery &&
 		isWindows() &&
 		effectivePrompt &&
 		promptAddedToArgs &&
@@ -449,7 +460,7 @@ export function planPipeSpawn(
 		promptArgLength: prompt ? spawnArgs[spawnArgs.length - 1]?.length : undefined,
 	});
 
-	const isBatchMode = !!fileDelivery || !!prompt;
+	const isBatchMode = hasFileDelivery || !!prompt;
 	// Detect JSON streaming mode from args or config flag
 	// IMPORTANT: SSH stdin script mode (sshStdinScript) MUST enable stream-json parsing
 	// because the SSH command wraps the actual agent command. Without this, the output
@@ -497,6 +508,7 @@ export function planPipeSpawn(
 		args: finalArgs,
 		sshStdinScript: config.sshStdinScript,
 		sessionId,
+		...(hasRemoteArtifact ? { promptArtifactPath: config.promptArtifactPath } : {}),
 	});
 
 	let stdinText: string | undefined;
