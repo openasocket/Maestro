@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge in progress; MCOMP-01-03A, 03B, 03C, 03D, 03E, 03F, 03G, 03H, 03I, 03J and 03K staged (31 files), 13 files unmerged in the worktree; MCOMP-01-03L..P resolve them (positional order mentionRouting, delegation, dispatchTicket on the dispatch callbacks, their relays and the handler calls, see progress.MCOMP-01-03I, 03J and 03K positionalOrder), Q commits, R tests (install the merged dependencies first: luxon), S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T03:05:03.241Z",
-		"updatedBy": "MCOMP-01-03K"
+		"state": "merge in progress; MCOMP-01-03A..03L staged (34 files), 10 files unmerged in the worktree; MCOMP-01-03M..P resolve them (positional order mentionRouting, delegation, dispatchTicket on the dispatch callbacks, their relays, the handler calls and the preload remotes, see progress.MCOMP-01-03I, 03J, 03K and 03L positionalOrder), Q commits and type-checks (remote-fs.ts execRemoteCommand access slot, see progress.MCOMP-01-03L.semanticConflictsForQ), R tests (install the merged dependencies first: luxon, papaparse, parsimmon and their @types), S lands, T re-pins and closes",
+		"updatedAt": "2026-10-30T03:14:38.573Z",
+		"updatedBy": "MCOMP-01-03L"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -640,6 +640,66 @@
 			],
 			"unmergedAfter": 13,
 			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03k.mjs (not in git)"
+		},
+		"MCOMP-01-03L": {
+			"resolvedAt": "2026-10-29",
+			"resolvedBy": "Maestro-Claude",
+			"files": [
+				"src/main/web-server/handlers/messageHandlers/queue.ts",
+				"src/main/web-server/handlers/messageHandlers/tabs.ts",
+				"src/__tests__/main/web-server/handlers/messageHandlers.test.ts"
+			],
+			"positionalOrder": "the 03K handler order holds on the two remaining handler calls and on every positional assertion of the suite: enqueueCommand(sessionId, command, inputMode, tabId, images, background, held, mentionRouting, delegation, dispatchTicket) in handleEnqueueCommand; newAITabWithPrompt(sessionId, prompt, background, hidden, mentionRouting, delegation, dispatchTicket) in handleNewAITabWithPrompt; the suite asserts the ten (executeCommand, enqueueCommand) and seven (newAITabWithPrompt) argument lists and reads the ticket at index 9 (executeCommand, enqueueCommand) and 6 (newAITabWithPrompt); the read order inside each handler is upstream routing refusal then the integration delegation refusal, as commands.ts has it",
+			"hunks": {
+				"src/main/web-server/handlers/messageHandlers/queue.ts": [
+					"78-97 (the two reads after the enqueueCommand-configured guard; a both-sides insertion at one spot): both kept, upstream parseMentionRoutingField(message.mentionRouting) with its refusal (c8913d2d8) then the integration readDispatchDelegation(message) with its refusal (MRC-07-04C), both before anything is armed, ticketed or queued",
+					"144-149 (the arguments handleEnqueueCommand hands ctx.callbacks.enqueueCommand after held): resolved as routingField.routing then delegation, dispatchTicket; the issueDispatchTicket / withdrawDispatchTicket pair (MRC-08-02) and both imports had auto-merged"
+				],
+				"src/main/web-server/handlers/messageHandlers/tabs.ts": [
+					"755-773 (the two reads after the newAITabWithPrompt-configured guard): both kept, upstream routing read and refusal (c8913d2d8) then the integration delegation read and refusal (MRC-07-04C), both ahead of the callback precheck and before the tab exists",
+					"798-802 (the newAITabWithPrompt call after hidden; upstream had it on one line): resolved as routingField.routing then delegation, dispatchTicket on a multi-line call (as CallbackRegistry in 03I); the ticket issue/withdraw (MRC-08-02), the terminal-tab ticket (MRC-08-02A) and both imports had auto-merged"
+				],
+				"src/__tests__/main/web-server/handlers/messageHandlers.test.ts": [
+					"683, 883, 920, 965, 995, 1027, 1057 (seven send_command executeCommand assertions), 3821, 3853, 3878, 3903 (four new_ai_tab_with_prompt assertions), 4220, 4461 (two enqueue_command assertions): ours appended `undefined, expect.any(String)` (delegation, ticket) and upstream `undefined` (routing) at the same slot; resolved as `undefined, undefined, expect.any(String)`",
+					"812-815 (the terminal-mode send_command assertion; ours `undefined,` before a shared `undefined`, upstream nothing): resolved as three undefineds, a terminal write carrying none of the three (commands.ts issues no ticket for a terminal write)",
+					"auto-merged cases brought to the 03K shape, outside the hunks: upstream routing cases at 715 (consult-first), 3786 (only) and 4258 (handoff) gain `undefined, expect.any(String)` after the routing word; the integration record cases at 1170, 1223, 1265 gain `undefined` (the routing slot) ahead of `delegation`, and 1307 (the absent record) ahead of its undefined; the four index reads of the ticket move one slot right (1325 sent()[9] MRC-08-01B, 1459 newAITabWithPrompt [6] and 1461 enqueueCommand [9] MRC-08-02, 1864 call[9] MRC-08-06); the two record-case titles now say \"after held and the routing\" / \"after hidden and the routing\""
+				]
+			},
+			"checks": {
+				"staging": "merge-tool stage over the three files: prettier left all three unchanged, git add done, 10 files left unmerged, no marker left in any, nothing unstaged, nothing untracked in the worktree",
+				"seams": "the delegation and dispatch-ticket seams are whole on upstream shape: both handlers refuse a routing that is not one and a record that is not a context before anything is armed, ticketed, queued or created (the enqueue path answers enqueue_command_result success:false, the new-tab path new_ai_tab_with_prompt_result success:false, nothing forwarded), issue the ticket inside the client context and withdraw it on a refused result, and hand the renderer mentionRouting one slot ahead of delegation and dispatchTicket, matching MessageHandlerCallbacks (03K), the registry (03I) and the relays (03J)",
+				"suites": "Working/mcomp-01-03/suites-03l.mjs --throwaway: the whole resolved messageHandlers.test.ts copied beside itself as zz-03l.throwaway.test.ts with one vi.mock of messageHandlers/dataview prepended (the only path to luxon; no case of the suite exercises it), 68 describe blocks / 417 tests passed, 0 failed, 0 skipped, the copy deleted after the run (log suites-03l.log); dataviewHandler.test.ts, blocked on the unmerged tabs.ts in 03K, now transforms and passes (8)",
+				"throwaway": "no hand-written throwaway spec was needed: the committed suite itself ran as the throwaway copy, so every case of both sides (upstream routing on send, new-tab and queue; the integration delegation, ticket, terminal-tab and identity cases) passed against the resolved handlers; the dataview mock exists only in the copy, the committed suite is unchanged beyond the merge",
+				"typeCheck": "a throwaway tsconfig extending the worktree tsconfig.main.json over queue.ts, tabs.ts and WebSocketMessageHandler.ts (Working/mcomp-01-03/tsconfig-03l.json, not in git; log tsc-03l.log): 0 errors in any file under src/main/web-server; with the dispatcher closure now free of markers, tsc reaches semantic checking (03K saw only TS1185, which suppresses it) and reports 262 errors elsewhere in the closure: 256 in src/shared/dataview/vendor/ and src/main/lite/discovery/ that are the throwaway config (luxon, papaparse, parsimmon and their @types are in the merged package.json but absent from the symlinked node_modules; src/types/dns-packet.d.ts is outside a files-only config) and 3 real ones in src/main/utils/remote-fs.ts recorded under semanticConflictsForQ; value.ts(145) TS2322, context.ts(132) TS2345 and the implicit-any cascade in the vendor all sit behind the missing types and are for 03Q to re-check once 03R installs",
+				"numstatVsHead": {
+					"src/main/web-server/handlers/messageHandlers/queue.ts": "10+/0- (upstream dispatch --queue --routing read and argument)",
+					"src/main/web-server/handlers/messageHandlers/tabs.ts": "18+/1- (upstream dispatch --new-tab --routing read and argument, the call opened out)",
+					"src/__tests__/main/web-server/handlers/messageHandlers.test.ts": "412+/43- (upstream routing, interrupt, context-ops, collapse and live cases plus the routing slot on every positional assertion)"
+				},
+				"numstatVsMergeHead": {
+					"src/main/web-server/handlers/messageHandlers/queue.ts": "36+/3- (the integration delegation read and the ticket)",
+					"src/main/web-server/handlers/messageHandlers/tabs.ts": "64+/3- (the integration delegation read, the ticket and the terminal-tab ticket)",
+					"src/__tests__/main/web-server/handlers/messageHandlers.test.ts": "1179+/25- (the integration delegation, ticket, terminal-tab and identity cases plus the delegation and ticket slots on every positional assertion)"
+				}
+			},
+			"semanticConflictsForQ": [
+				"src/main/utils/remote-fs.ts (auto-merged, both sides changed it): the integration side (MRC2-05-07) inserted `access: RemoteFsAccess` as the third parameter of execRemoteCommand(config, remoteCommand, access, deps, input) and rewrote every call with a read()/write()/remove() value; upstream added readFileInRootRemote (80d1c8aa0 / 2a32b6942), findAncestorWithDirRemote (30be4834f) and listFilesWithStatsRemote (50953bc94) whose calls at merged lines 699, 1117 and 1832 still have the base three-argument shape `execRemoteCommand(sshRemote, remoteCommand, deps)`, so deps lands in the access slot: TS2345 x3 under tsconfig.main.json; 03Q gives each an access value (read(\"readFileInRoot\", path), read(\"findAncestorWithDir\", path), read(\"listFilesWithStats\", path)) so the managed remote hold covers the three new reads, and 03R extends remote-fs.managed.test.ts for them"
+			],
+			"followUpsForR": [
+				"the merged package.json adds luxon ^3.7.2, papaparse ^5.7.0, parsimmon ^1.18.1 and @types/luxon, @types/papaparse, @types/parsimmon (the Dataview vendor), none of which exist in the symlinked node_modules; the 13 handler suites of the 03K finding, the dataview suites and tsconfig.main.json over src/shared/dataview/vendor all need the merged lockfile installed first, and the npm install --dry-run read-back should name all six",
+				"the 03K follow-up (permanent cases for the five zz-03k throwaway assertions) is closed by the resolved suite: the ten-argument executeCommand list with the routing word, the omitted-slot undefineds and the terminal write are asserted at 707, 1162, 1299 and 804 of the resolved messageHandlers.test.ts, and both refusals at 720 and 1177",
+				"once luxon is installed, run the committed messageHandlers.test.ts itself (417 cases) and dataviewHandler.test.ts without the mock to confirm the throwaway copy was faithful"
+			],
+			"blockedSuites": [
+				"src/__tests__/main/web-server/handlers/messageHandlers.test.ts (loads only with luxon installed; proven through the throwaway copy with the dataview mock)",
+				"the 13 handler suites named under progress.MCOMP-01-03K.followUpsForR (luxon absent from the symlinked node_modules; not a merge defect)"
+			],
+			"observations": [
+				"the TS1185 marker errors 03K and earlier tasks saw in a throwaway tsconfig are syntactic, and tsc reports no semantic diagnostics while any file of the program has one; a 0-error claim from a throwaway config over an unmerged closure is only a parse check, which is why the remote-fs.ts conflict surfaced here and not in 03C..03K",
+				"the preload remotes of 03N must read the renderer slots 03J fixed: remote:newAITabWithPrompt [sessionId, prompt, responseChannel, background, hidden, mentionRouting, delegation, dispatchTicket] and remote:enqueueCommand [..., background, held, mentionRouting, delegation, dispatchTicket]; the renderer hook of 03P and its suite assert the same order"
+			],
+			"unmergedAfter": 10,
+			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03l.mjs (not in git)"
 		}
 	}
 }
