@@ -3,9 +3,29 @@
  *
  * The run layer is the part that owns a process, so its tests start one: the
  * fake agent in `src/__tests__/fixtures/fake-agent.mjs`, replaying a turn.
- * Nothing about the process is mocked.
+ * The ownership-race cases below isolate process operations with scoped spies.
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { EventEmitter } from 'events';
+import { PassThrough } from 'stream';
+import * as childProcess from 'child_process';
+import * as processTree from '../../../../shared/maestro-lib/control/process-tree';
+import * as platform from '../../../../shared/platformDetection';
+import {
+	trackProcessTree,
+	TREE_REFRESH_MS,
+} from '../../../../shared/maestro-lib/control/termination';
+
+// Mutable facades allow scoped spies without changing the real-process cases.
+vi.mock('child_process', async (original) => ({
+	...(await original<typeof import('child_process')>()),
+}));
+vi.mock('../../../../shared/maestro-lib/control/process-tree', async (original) => ({
+	...(await original<typeof import('../../../../shared/maestro-lib/control/process-tree')>()),
+}));
+vi.mock('../../../../shared/platformDetection', async (original) => ({
+	...(await original<typeof import('../../../../shared/platformDetection')>()),
+}));
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -19,6 +39,7 @@ import {
 	type LocalLaunchPlan,
 	type StartTurnOptions,
 	type TurnHandlers,
+	type TurnHandle,
 } from '../../../../shared/maestro-lib/run/start-turn';
 import {
 	buildDispatchSnapshot,
@@ -770,6 +791,215 @@ describe('managed admission at the spawn', () => {
 		};
 		return { lease, gate, seen };
 	}
+
+	describe('observed descendant ownership', () => {
+		const root = { pid: 4242, startedAt: 'original-root' };
+		const tool = { pid: 5000, startedAt: 'original-tool' };
+		let child: childProcess.ChildProcess;
+		let tree: processTree.ProcessTreeSnapshot;
+		let current: TurnHandle | undefined;
+		let resolveRead: ((value: processTree.ProcessTreeSnapshot) => void) | undefined;
+
+		beforeEach(() => {
+			vi.useFakeTimers();
+			current = undefined;
+			resolveRead = undefined;
+			tree = { owned: true, root, descendants: [tool] };
+			child = Object.assign(new EventEmitter(), {
+				pid: root.pid,
+				exitCode: null,
+				signalCode: null,
+				kill: vi.fn(() => true),
+				stdin: new PassThrough(),
+				stdout: new PassThrough(),
+				stderr: new PassThrough(),
+			}) as unknown as childProcess.ChildProcess;
+			vi.spyOn(childProcess, 'spawn').mockReturnValue(child);
+			vi.spyOn(platform, 'isWindows').mockReturnValue(false);
+			vi.spyOn(processTree, 'snapshotProcessTree').mockImplementation(() => tree);
+			vi.spyOn(processTree, 'refreshProcessTree').mockImplementation(async (_pid, prior) => prior);
+			vi.spyOn(processTree, 'killSurvivors').mockReturnValue(0);
+			vi.spyOn(processTree, 'killProcessTreeNow').mockImplementation(() => {});
+			// Defense in depth: no synthetic PID may reach the operating system.
+			vi.spyOn(process, 'kill').mockReturnValue(true);
+		});
+
+		afterEach(async () => {
+			resolveRead?.(tree);
+			child.emit('close', 0, null);
+			await current?.done;
+			child.stdin?.destroy();
+			child.stdout?.destroy();
+			child.stderr?.destroy();
+			vi.clearAllTimers();
+			vi.useRealTimers();
+			vi.restoreAllMocks();
+		});
+
+		async function observed(options: Partial<StartTurnOptions> = {}, handlers: TurnHandlers = {}) {
+			const spec = { command: process.execPath, args: [], cwd: scratch.dir, env: {} };
+			const { lease, gate, seen } = await gateFor(authority().auth, spec);
+			const release = vi.spyOn(lease, 'release');
+			const unsubscribe = vi.fn();
+			const onRevoked = gate.onRevoked!;
+			gate.onRevoked = (listener) => {
+				const off = onRevoked(listener);
+				return () => {
+					unsubscribe();
+					off();
+				};
+			};
+			current = startTurn(spec, handlers, {
+				...OPTIONS,
+				trackDescendants: true,
+				...options,
+				admission: { gate, attribution: ATTRIBUTION },
+			});
+			return { turn: current, lease, release, seen, unsubscribe };
+		}
+
+		it.each(['timeout', 'cancellation'] as const)(
+			'joins a late observation after parent exit and %s before releasing the lease',
+			async (reason) => {
+				const controller = new AbortController();
+				const removeAbort = vi.spyOn(controller.signal, 'removeEventListener');
+				const { turn, lease, release, unsubscribe } = await observed({ signal: controller.signal });
+				const finish = trackProcessTree(child);
+				expect(trackProcessTree(child)).toBe(finish);
+				expect(vi.getTimerCount()).toBe(1);
+				vi.mocked(processTree.refreshProcessTree).mockImplementationOnce(
+					() =>
+						new Promise((resolve) => {
+							resolveRead = resolve;
+						})
+				);
+				await vi.advanceTimersByTimeAsync(TREE_REFRESH_MS * 3);
+				expect(processTree.refreshProcessTree).toHaveBeenCalledTimes(1);
+				const synchronousTool = { pid: 5001, startedAt: 'sync-tool' };
+				const lateTool = { pid: 5002, startedAt: 'late-tool' };
+				tree = { ...tree, descendants: [tool, synchronousTool] };
+				Object.assign(child, { exitCode: 0 });
+				child.emit('exit', 0, null);
+				expect(release).not.toHaveBeenCalled();
+				if (reason === 'timeout') {
+					setTimeout(() => turn.terminate(), 100);
+					await vi.advanceTimersByTimeAsync(100);
+				} else controller.abort();
+				expect(processTree.killSurvivors).toHaveBeenLastCalledWith(
+					[tool, synchronousTool],
+					expect.any(Object)
+				);
+				expect(child.kill).not.toHaveBeenCalled();
+				child.emit('close', 0, null);
+				expect(vi.getTimerCount()).toBe(0);
+				expect(lease.state()).toBe('bound');
+				expect(release).not.toHaveBeenCalled();
+				resolveRead!({ owned: true, root, descendants: [tool, lateTool] });
+				const exit = await turn.done;
+				expect(processTree.killSurvivors).toHaveBeenLastCalledWith(
+					[tool, synchronousTool, lateTool],
+					expect.any(Object)
+				);
+				expect(exit).toMatchObject({ exitCode: 0, interrupted: true, stoppedBy: 'caller' });
+				expect(lease.state()).toBe('released');
+				expect(release).toHaveBeenCalledTimes(1);
+				expect(unsubscribe).toHaveBeenCalledTimes(1);
+				expect(removeAbort).toHaveBeenCalledWith('abort', expect.any(Function));
+				expect(child.listenerCount('exit')).toBe(0);
+				const sweeps = vi.mocked(processTree.killSurvivors).mock.calls.length;
+				turn.terminateNow();
+				controller.abort();
+				child.emit('close', 0, null);
+				expect(processTree.killSurvivors).toHaveBeenCalledTimes(sweeps);
+				expect(release).toHaveBeenCalledTimes(1);
+				expect(process.kill).not.toHaveBeenCalled();
+			}
+		);
+
+		it('drains trailing stdout and stderr after exit, then joins a normal pending read without stopping', async () => {
+			const { lines, handlers } = recorder();
+			const { turn, release } = await observed({}, handlers);
+			vi.mocked(processTree.refreshProcessTree).mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						resolveRead = resolve;
+					})
+			);
+			await vi.advanceTimersByTimeAsync(TREE_REFRESH_MS);
+			child.stdout!.emit('data', 'first\nlast');
+			Object.assign(child, { exitCode: 0 });
+			child.emit('exit', 0, null);
+			child.stdout!.emit('data', ' line');
+			child.stderr!.emit('data', 'trailing warning');
+			expect(release).not.toHaveBeenCalled();
+			child.emit('close', 0, null);
+			expect(lines).toEqual(['first', 'last line']);
+			expect(release).not.toHaveBeenCalled();
+			resolveRead!(tree);
+			expect(await turn.done).toMatchObject({
+				stdoutText: 'first\nlast line',
+				stderrText: 'trailing warning',
+				interrupted: false,
+			});
+			expect(release).toHaveBeenCalledTimes(1);
+			expect(processTree.killSurvivors).not.toHaveBeenCalled();
+			expect(vi.getTimerCount()).toBe(0);
+		});
+
+		it('retains ownership after a post-spawn signal error and cleans up a failed table read', async () => {
+			const { turn, lease, release } = await observed();
+			vi.mocked(processTree.refreshProcessTree).mockRejectedValueOnce(
+				new Error('table unavailable')
+			);
+			await vi.advanceTimersByTimeAsync(TREE_REFRESH_MS);
+			child.emit('error', Object.assign(new Error('signal denied'), { code: 'EPERM' }));
+			expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+			expect(lease.state()).toBe('bound');
+			expect(release).not.toHaveBeenCalled();
+			expect(child.listenerCount('exit')).toBe(1);
+			expect(vi.getTimerCount()).toBe(2); // one tracker and one escalation
+			Object.assign(child, { signalCode: 'SIGTERM' });
+			child.emit('exit', null, 'SIGTERM');
+			child.emit('close', null, 'SIGTERM');
+			expect(await turn.done).toMatchObject({ signal: 'SIGTERM', interrupted: true });
+			expect((await turn.done).spawnError).toBeUndefined();
+			expect(release).toHaveBeenCalledTimes(1);
+			expect(child.listenerCount('exit')).toBe(0);
+			expect(vi.getTimerCount()).toBe(0);
+		});
+
+		it('releases a failed spawn once without starting observation', async () => {
+			Object.assign(child, { pid: undefined });
+			const { turn, release } = await observed();
+			const error = Object.assign(new Error('missing executable'), { code: 'ENOENT' });
+			child.emit('error', error);
+			child.emit('close', -2, null);
+			expect((await turn.done).spawnError).toBe(error);
+			expect(release).toHaveBeenCalledTimes(1);
+			expect(processTree.snapshotProcessTree).not.toHaveBeenCalled();
+			expect(vi.getTimerCount()).toBe(0);
+		});
+
+		it.each([undefined, false])(
+			'preserves untracked spawn and stop behavior with trackDescendants=%s',
+			async (trackDescendants) => {
+				const { turn } = await observed({ trackDescendants });
+				expect(childProcess.spawn).toHaveBeenCalledWith(process.execPath, [], {
+					cwd: scratch.dir,
+					env: {},
+					shell: false,
+					stdio: ['pipe', 'pipe', 'pipe'],
+				});
+				expect(processTree.snapshotProcessTree).not.toHaveBeenCalled();
+				expect(vi.getTimerCount()).toBe(0);
+				turn.terminateNow();
+				expect(processTree.killProcessTreeNow).toHaveBeenCalledWith(root.pid, expect.any(Object));
+				child.emit('close', null, 'SIGKILL');
+				await turn.done;
+				expect(vi.getTimerCount()).toBe(0);
+			}
+		);
+	});
 
 	it('admits a harmless launch: the lease is checked at the spawn, bound to the pid, released on exit', async () => {
 		const { auth } = authority();
