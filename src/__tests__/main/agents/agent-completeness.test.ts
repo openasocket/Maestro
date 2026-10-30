@@ -50,6 +50,26 @@ const isolation = await vi.hoisted(async () => {
 	const message = 'Agent completeness attempted filesystem access outside its in-memory fixture';
 	const restores: Array<() => void> = [];
 
+	// Collection can fail before any test runs. Put safe details in the error
+	// itself so JSON reporters retain the refused operation without home paths,
+	// preferences names, file contents or raw call arguments. This does no I/O.
+	function describeBlockedAccess({ operation, path: file }: (typeof blocked)[number]): string {
+		let target = '<non-path>';
+		if (file) {
+			const normalized = normalizeWorktreePath(file);
+			if (isPathAtOrUnderRoot(normalized, preferences)) {
+				target = '<preferences>';
+			} else if (isPathAtOrUnderRoot(normalized, normalizeWorktreePath(userData))) {
+				target = '<fixture-user-data>';
+			} else if (isPathAtOrUnderRoot(normalized, normalizeWorktreePath(root))) {
+				target = path.relative(root, file) || '.';
+			} else {
+				target = '<outside-checkout>';
+			}
+		}
+		return JSON.stringify({ operation, target });
+	}
+
 	// Only module-loading reads may reach disk. Registration has no reason to
 	// read transcripts, preferences, caches or even the synthetic user-data root.
 	function guard(target: object, operations: readonly string[], moduleReads = false): void {
@@ -91,7 +111,7 @@ const isolation = await vi.hoisted(async () => {
 				}
 				blocked.push({ operation, path: file });
 				// Not ENOENT: conf treats that as permission to write defaults.
-				throw new Error(message);
+				throw new Error(`${message}: ${describeBlockedAccess({ operation, path: file })}`);
 			});
 			restores.push(() => spy.mockRestore());
 		}
@@ -164,7 +184,9 @@ const isolation = await vi.hoisted(async () => {
 		Store,
 		stores,
 		blocked,
+		diagnostics: () => blocked.map(describeBlockedAccess),
 		message,
+		root: path.resolve(root),
 		userData,
 		fs,
 		require,
@@ -213,7 +235,7 @@ beforeAll(() => {
 	clearStorageRegistry();
 	initializeSessionStorages();
 	// A swallowed access error must fail too, including one during module import.
-	expect(isolation.blocked.map(({ operation }) => operation)).toEqual([]);
+	expect(isolation.diagnostics()).toEqual([]);
 	expect(isolation.Store).toHaveBeenCalledExactlyOnceWith({
 		name: 'claude-session-origins',
 		defaults: { origins: {} },
@@ -227,7 +249,7 @@ afterAll(() => {
 
 afterEach(() => {
 	// Negative controls drain only their own expected refusals in finally blocks.
-	expect(isolation.blocked.map(({ operation }) => operation)).toEqual([]);
+	expect(isolation.diagnostics()).toEqual([]);
 });
 
 describe('Agent completeness storage isolation', () => {
@@ -280,7 +302,11 @@ describe('Agent completeness storage isolation', () => {
 						name: 'claude-session-origins',
 						defaults: { origins: {} },
 					})
-			).toThrow(isolation.message);
+			).toThrow(
+				new Error(
+					`${isolation.message}: ${JSON.stringify({ operation: 'readFileSync', target: '<preferences>' })}`
+				)
+			);
 			expect(isolation.blocked).toEqual([{ operation: 'readFileSync', path: fallback }]);
 		} finally {
 			isolation.blocked.length = 0;
@@ -293,14 +319,80 @@ describe('Agent completeness storage isolation', () => {
 			const file = path.join(isolation.userData, 'claude-session-origins.json');
 			const input =
 				kind === 'buffer' ? Buffer.from(file) : kind === 'url' ? pathToFileURL(file) : file;
+			const diagnostic = JSON.stringify({
+				operation: 'readFileSync',
+				target: '<fixture-user-data>',
+			});
 			try {
-				expect(() => readFileSync(input)).toThrow(isolation.message);
+				expect(() => readFileSync(input)).toThrow(new Error(`${isolation.message}: ${diagnostic}`));
+				expect(isolation.diagnostics()).toEqual([diagnostic]);
 				expect(isolation.blocked).toEqual([{ operation: 'readFileSync', path: file }]);
 			} finally {
 				isolation.blocked.length = 0;
 			}
 		}
 	);
+
+	it('reports refused checkout-root metadata without allowing a guessed loader exception', () => {
+		const diagnostic = JSON.stringify({ operation: 'statSync', target: '.' });
+		try {
+			expect(() => isolation.fs.statSync(isolation.root)).toThrow(
+				new Error(`${isolation.message}: ${diagnostic}`)
+			);
+			expect(isolation.diagnostics()).toEqual([diagnostic]);
+			expect(isolation.blocked).toEqual([{ operation: 'statSync', path: isolation.root }]);
+		} finally {
+			isolation.blocked.length = 0;
+		}
+	});
+
+	it('reports checkout-relative module paths while still refusing writes', () => {
+		const relative = path.join('src', 'synthetic-module.ts');
+		const file = path.join(isolation.root, relative);
+		const diagnostic = JSON.stringify({ operation: 'writeFileSync', target: relative });
+		try {
+			expect(() => isolation.fs.writeFileSync(file, 'synthetic-private-content')).toThrow(
+				new Error(`${isolation.message}: ${diagnostic}`)
+			);
+			expect(isolation.diagnostics()).toEqual([diagnostic]);
+			expect(isolation.blocked).toEqual([{ operation: 'writeFileSync', path: file }]);
+		} finally {
+			isolation.blocked.length = 0;
+		}
+	});
+
+	it.each(['string', 'buffer', 'url'] as const)(
+		'redacts outside-checkout %s targets before refusing the read',
+		(kind) => {
+			// A sibling sharing the checkout's prefix must not be reported as local.
+			// This is a synthetic path; the guard refuses it before touching disk.
+			const file = path.join(`${isolation.root}-private`, 'synthetic-private-account.json');
+			const input =
+				kind === 'buffer' ? Buffer.from(file) : kind === 'url' ? pathToFileURL(file) : file;
+			const diagnostic = JSON.stringify({
+				operation: 'readFileSync',
+				target: '<outside-checkout>',
+			});
+			try {
+				expect(() => readFileSync(input)).toThrow(new Error(`${isolation.message}: ${diagnostic}`));
+				expect(isolation.diagnostics()).toEqual([diagnostic]);
+				expect(isolation.blocked).toEqual([{ operation: 'readFileSync', path: file }]);
+			} finally {
+				isolation.blocked.length = 0;
+			}
+		}
+	);
+
+	it('omits file descriptors from refusal diagnostics', () => {
+		const diagnostic = JSON.stringify({ operation: 'readFileSync', target: '<non-path>' });
+		try {
+			expect(() => readFileSync(0)).toThrow(new Error(`${isolation.message}: ${diagnostic}`));
+			expect(isolation.diagnostics()).toEqual([diagnostic]);
+			expect(isolation.blocked).toEqual([{ operation: 'readFileSync', path: undefined }]);
+		} finally {
+			isolation.blocked.length = 0;
+		}
+	});
 
 	it('refuses synchronous and promise reads/writes and directory creation', async () => {
 		const file = path.join(isolation.userData, 'maestro-settings.json');
