@@ -3,6 +3,7 @@
  * the Claude token source, the SSH wrap, the Windows shell, and the turn clock, over the real
  * realizers and fake host collaborators.
  */
+import * as path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { STEERING_SOCKET_ENV_VAR } from '../../../chatSteering';
@@ -22,6 +23,9 @@ import {
 	type GroupChatSpawnDeps,
 } from '../spawn';
 import type { GroupChatSpawn } from '../types';
+
+// Keep the real SSH wrapper/builder without running local binary discovery.
+vi.mock('../../launch/ssh-path', () => ({ resolveSshPath: async () => 'ssh' }));
 
 const claude = (): AgentConfig =>
 	({
@@ -388,6 +392,256 @@ describe('prepareGroupChatSpawn', () => {
 			await expect(
 				prepareGroupChatSpawn(spawnOf({ sshRemoteConfig: ssh }), deps)
 			).rejects.toThrow();
+			expect(deps.beginTurn).not.toHaveBeenCalled();
+		});
+	});
+
+	describe('private prompt ownership across an awaited SSH probe', () => {
+		// Synthetic declaration only; the production Grok registry remains inactive.
+		const grok: AgentConfig = {
+			...getAgentDefinition('grok')!,
+			available: true,
+			path: path.resolve('local-grok'),
+			capabilities: getAgentCapabilities('grok'),
+			promptFile: {
+				format: 'acp-json',
+				exclusivePromptFlags: ['-p', '--single', '--prompt-json', '--prompt-file'],
+			},
+			promptFileArgs: (file) => ['--prompt-file', file],
+		};
+		const remoteCommand = path.posix.join('/opt', 'team tools', 'grok');
+		const destination = {
+			owner: 'remote' as const,
+			sshRemoteId: remote.id,
+			path: path.posix.join('/tmp', 'maestro-prompt-11111111-2222-4333-8444-555555555555.json'),
+		};
+
+		describe.each([false, true])('resume=%s', (isResume) => {
+			it.each(['store replacement', 'store mutation', 'probe mutation', 'caller mutation'])(
+				'keeps the original host, private bytes and cleanup ownership after %s',
+				async (mutation) => {
+					const selected = {
+						...remote,
+						privateKeyPath: '',
+						sshOptions: { ProxyJump: 'original-bastion', ConnectTimeout: '17' },
+						remoteEnv: { REMOTE_ACCOUNT: 'original-account' },
+					};
+					const remotes = [selected];
+					const gate = Promise.withResolvers<void>();
+					const probeRemoteMaestroP = vi.fn<NonNullable<GroupChatSpawnDeps['probeRemoteMaestroP']>>(
+						() => gate.promise
+					);
+					const resolveClaudeSpawnMode = vi.fn().mockReturnValue({ ...apiDecision });
+					const deps = depsOf({
+						sshStore: storeOf(remotes),
+						probeRemoteMaestroP,
+						resolveClaudeSpawnMode,
+					});
+					const sessionId = '019aa4fe-0000-7000-8000-000000000001';
+					const args = ['--model', 'original-model', ...(isResume ? ['--resume', sessionId] : [])];
+					const request: Parameters<typeof prepareGroupChatSpawn>[0] = {
+						...spawnOf({
+							providerId: 'grok',
+							agent: grok,
+							args,
+							prompt: undefined,
+							isResume,
+							cwd: path.posix.join('/remote', 'original work'),
+							sshRemoteConfig: { enabled: true, remoteId: remote.id },
+							customEnvVars: { GROK_HOME: '/remote/selected-account' },
+						}),
+						remoteCommand,
+						promptBlocks: [
+							{ type: 'text', text: '  before 雪\n' },
+							{ type: 'image', mimeType: 'image/png', data: 'AQID' },
+							{ type: 'text', text: '\t after 🧪  ' },
+						],
+						hasImages: true,
+						embeddedImageSupport: {
+							mimeTypes: ['image/png'],
+							maxCount: 1,
+							maxBytesPerImage: 3,
+							maxTotalBytes: 3,
+						},
+						promptFileDestination: destination,
+					};
+					const pending = prepareGroupChatSpawn(request, deps);
+					// This observable boundary proves the mutation occurs during the probe await.
+					expect(probeRemoteMaestroP).toHaveBeenCalledExactlyOnceWith(selected);
+					expect(resolveClaudeSpawnMode).not.toHaveBeenCalled();
+					expect(deps.beginTurn).not.toHaveBeenCalled();
+
+					if (mutation === 'store replacement') {
+						remotes[0] = {
+							...selected,
+							host: 'replacement.invalid',
+							username: 'replacement-user',
+							port: 2200,
+							sshOptions: { ProxyJump: 'replacement-bastion', ConnectTimeout: '99' },
+							remoteEnv: { REMOTE_ACCOUNT: 'replacement-account' },
+						};
+					} else if (mutation === 'caller mutation') {
+						request.sshRemoteConfig!.enabled = false;
+						request.sshRemoteConfig!.remoteId = 'replacement-id';
+						request.customEnvVars!.GROK_HOME = '/replacement/account';
+						request.args.splice(0, request.args.length, '--model', 'replacement-model');
+						request.remoteCommand = '/replacement/grok';
+						request.cwd = '/replacement/work';
+					} else {
+						const target =
+							mutation === 'probe mutation' ? probeRemoteMaestroP.mock.calls[0][0] : selected;
+						target.host = 'replacement.invalid';
+						target.username = 'replacement-user';
+						target.port = 2200;
+						target.sshOptions!.ProxyJump = 'replacement-bastion';
+						target.sshOptions!.ConnectTimeout = '99';
+						target.remoteEnv!.REMOTE_ACCOUNT = 'replacement-account';
+					}
+					gate.resolve();
+					const prepared = await pending;
+					expect(prepared.command).toBe('ssh');
+					expect(prepared.args).toEqual(
+						expect.arrayContaining([
+							'me@box.local',
+							'-p',
+							'22',
+							'ProxyJump=original-bastion',
+							'ConnectTimeout=17',
+						])
+					);
+					expect(prepared.args.slice(-4)).toEqual(['/bin/bash', '--norc', '--noprofile', '-s']);
+					expect(prepared.promptDelivery?.artifact).toMatchObject({
+						...destination,
+						mode: 0o600,
+						flag: 'wx',
+						cleanup: 'turn',
+					});
+					const artifact = prepared.promptDelivery!.artifact;
+					expect(JSON.parse(artifact.content)).toEqual({
+						type: 'acp',
+						content: request.promptBlocks,
+					});
+					const script = prepared.sshStdinScript!;
+					const payload = script.match(
+						/<<'MAESTRO_PROMPT_EOF'[^\n]*\n([A-Za-z0-9+/=]+)\nMAESTRO_PROMPT_EOF/
+					);
+					expect(payload).not.toBeNull();
+					expect(Buffer.from(payload![1], 'base64')).toEqual(Buffer.from(artifact.content, 'utf8'));
+					expect(script).toContain("export REMOTE_ACCOUNT='original-account'");
+					expect(script).toContain("export GROK_HOME='/remote/selected-account'");
+					expect(script).toContain("cd '/remote/original work' || exit 1");
+					expect(script).toContain(`'${remoteCommand}' '--model' 'original-model'`);
+					expect(script.includes(`'--resume' '${sessionId}'`)).toBe(isResume);
+					expect(script).toContain(`'--prompt-file' '${artifact.path}' </dev/null 8>&- 9>&-`);
+					// These are the inputs handed to the existing PID/stop owner, not a native cleanup run.
+					expect(prepared.promptArtifactPath).toBe(artifact.path);
+					expect(script).toContain(
+						`[ "\${_maestro_prompt_path-}" = '${prepared.promptArtifactPath}' ]`
+					);
+					expect(script).toContain('[ "$_maestro_prompt_path" -ef /proc/$$/fd/9 ]');
+					expect(script).toContain('trap _maestro_prompt_cleanup EXIT');
+					expect(prepared).toMatchObject({
+						prompt: undefined,
+						customEnvVars: undefined,
+						sendPromptViaStdin: false,
+						sendPromptViaStdinRaw: false,
+						sshRemoteCommand: `'${remoteCommand}' [private prompt file]`,
+					});
+					expect(prepared.args.join(' ')).not.toContain(artifact.path);
+					expect(prepared.sshRemoteCommand).not.toContain(artifact.content);
+					expect([...prepared.args, script].join('\n')).not.toContain('replacement');
+					expect(script).not.toContain(grok.path);
+					expect(deps.beginTurn).toHaveBeenCalledExactlyOnceWith(request.processId);
+				}
+			);
+		});
+
+		it.each(['probe', 'wrapper'])(
+			'uses fixed private diagnostics when the %s refuses',
+			async (stage) => {
+				const gate = Promise.withResolvers<void>();
+				const privateFailure = new Error(`private-body ${destination.path}`);
+				const probeRemoteMaestroP = vi.fn(() => gate.promise);
+				const resolveClaudeSpawnMode = vi.fn().mockReturnValue({ ...apiDecision });
+				const windowsSpawnConfig = vi.fn().mockReturnValue({});
+				const deps = depsOf({
+					sshStore: storeOf([{ ...remote, privateKeyPath: '' }]),
+					probeRemoteMaestroP,
+					resolveClaudeSpawnMode,
+					windowsSpawnConfig,
+				});
+				const pending = prepareGroupChatSpawn(
+					{
+						...spawnOf({
+							providerId: 'grok',
+							agent: grok,
+							args: [],
+							prompt: 'private-body',
+							sshRemoteConfig: { enabled: true, remoteId: remote.id },
+							customEnvVars: stage === 'wrapper' ? { _maestro_reserved: 'private-body' } : {},
+						}),
+						promptFileDestination: destination,
+					},
+					deps
+				).catch((error: unknown) => error);
+				expect(probeRemoteMaestroP).toHaveBeenCalledTimes(1);
+				if (stage === 'probe') gate.reject(privateFailure);
+				else gate.resolve();
+				const error = await pending;
+				expect(error).toBeInstanceOf(Error);
+				expect(error).toHaveProperty('message', 'Remote prompt preparation unavailable.');
+				expect(error).not.toHaveProperty('cause');
+				expect(error).not.toBe(privateFailure);
+				expect(resolveClaudeSpawnMode).toHaveBeenCalledTimes(stage === 'probe' ? 0 : 1);
+				expect(windowsSpawnConfig).not.toHaveBeenCalled();
+				expect(deps.beginTurn).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each(['missing store', 'missing remote', 'disabled remote'])(
+			'refuses an initially unresolved file target (%s) before probing or starting a turn',
+			async (state) => {
+				const probeRemoteMaestroP = vi.fn().mockResolvedValue(undefined);
+				const deps = depsOf({
+					sshStore:
+						state === 'missing store'
+							? null
+							: storeOf(state === 'missing remote' ? [] : [{ ...remote, enabled: false }]),
+					probeRemoteMaestroP,
+				});
+				await expect(
+					prepareGroupChatSpawn(
+						{
+							...spawnOf({
+								providerId: 'grok',
+								agent: grok,
+								args: [],
+								prompt: 'private-body',
+								sshRemoteConfig: { enabled: true, remoteId: remote.id },
+							}),
+							promptFileDestination: destination,
+						},
+						deps
+					)
+				).rejects.toThrow('could not be resolved');
+				expect(probeRemoteMaestroP).not.toHaveBeenCalled();
+				expect(deps.beginTurn).not.toHaveBeenCalled();
+			}
+		);
+
+		it('preserves the original probe error for ordinary Claude turns', async () => {
+			const gate = Promise.withResolvers<void>();
+			const failure = new Error('legacy probe failure');
+			const probeRemoteMaestroP = vi.fn(() => gate.promise);
+			const deps = depsOf({ sshStore: storeOf([remote]), probeRemoteMaestroP });
+			const pending = prepareGroupChatSpawn(
+				spawnOf({ sshRemoteConfig: { enabled: true, remoteId: remote.id } }),
+				deps
+			);
+			const rejected = expect(pending).rejects.toBe(failure);
+			expect(probeRemoteMaestroP).toHaveBeenCalledTimes(1);
+			gate.reject(failure);
+			await rejected;
 			expect(deps.beginTurn).not.toHaveBeenCalled();
 		});
 	});
