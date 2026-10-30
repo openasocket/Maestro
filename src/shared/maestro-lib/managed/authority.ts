@@ -38,6 +38,7 @@
 import { createHash } from 'node:crypto';
 
 import { canonicalJson } from '../../canonicalJson';
+import type { PromptDelivery } from '../launch/prompt-delivery';
 import {
 	MANAGED_CONTRACT_VERSION,
 	type ManagedAuthenticatedContext,
@@ -180,6 +181,8 @@ export interface DispatchSnapshot {
 	envDigest: string;
 	/** Digest of what is written to stdin (a prompt, an SSH script), or null for nothing. */
 	stdinDigest: string | null;
+	/** Binds the planned file and its bytes without storing private content. Absent for legacy specs. */
+	promptArtifactDigest?: string;
 	provider: string;
 	model: string | null;
 	/** An opaque account reference (a profile or account key), never a credential. */
@@ -210,6 +213,7 @@ export interface DispatchSpecLike {
 	cwd: string;
 	env: Readonly<Record<string, string | undefined>>;
 	stdin?: string;
+	promptArtifact?: Extract<PromptDelivery, { via: 'file' }>['artifact'];
 	shell?: boolean | string;
 }
 
@@ -241,6 +245,9 @@ export function buildDispatchSnapshot(
 		envKeys: Object.keys(env),
 		envDigest: sha256Hex(canonicalJson(env)),
 		stdinDigest: spec.stdin ? sha256Hex(spec.stdin) : null,
+		...(spec.promptArtifact
+			? { promptArtifactDigest: sha256Hex(canonicalJson(spec.promptArtifact)) }
+			: {}),
 		provider: attribution.provider,
 		model: attribution.model ?? null,
 		account: attribution.account ?? null,

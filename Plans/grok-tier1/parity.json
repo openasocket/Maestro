@@ -2329,7 +2329,9 @@
 				"src/renderer/hooks/remote/useRemoteHandlers.ts",
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/shared/maestro-lib/launch/prompt-delivery.ts"
+				"src/shared/maestro-lib/launch/prompt-delivery.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/managed/authority.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -2340,9 +2342,31 @@
 					"GT1-02-11",
 					"GT1-02-09A",
 					"GT1-05-06A",
-					"GT1-02-10A"
+					"GT1-02-10A",
+					"GT1-02-10B",
+					"GT1-02-10C",
+					"GT1-02-10D",
+					"GT1-02-10E0",
+					"GT1-02-10E",
+					"GT1-02-10F",
+					"GT1-02-10G"
 				],
-				"test": ["GT1-05-06", "GT1-08-02", "GT1-02-12", "GT1-02-09B", "GT1-05-06B", "GT1-02-10AT"],
+				"test": [
+					"GT1-05-06",
+					"GT1-08-02",
+					"GT1-02-12",
+					"GT1-02-09B",
+					"GT1-05-06B",
+					"GT1-02-10AT",
+					"GT1-02-10T",
+					"GT1-02-10BT",
+					"GT1-02-10CT",
+					"GT1-02-10DT",
+					"GT1-02-10E0T",
+					"GT1-02-10ET",
+					"GT1-02-10FT",
+					"GT1-02-10GT"
+				],
 				"verification": [
 					"GT1-01-07",
 					"GT1-05-13",
@@ -2389,7 +2413,7 @@
 				{
 					"id": "gap:P07",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-09/09A add inactive pure prompt-file planning with executing-host ownership, exclusive creation/cleanup obligations and lowercase ACP JSON preserving ordered text/image bytes. Embedded images require explicit per-turn MIME/count/byte admission; malformed, missing and unsupported content refuses without stdin/text-only/tool-read fallback. Existing provider routing is unchanged. GT1-02-10 must propagate promptBlocks/embeddedImageSupport through launch-plan and consumers, allocate/materialize/clean on the executing host and suppress legacy prompt/image assembly; GT1-02-10A owns refusal classification before GT1-02-11 activation and stdin-claim correction. GT1-02-09B authored 75 planner/encoder regression cases across two existing suites; execution remains not-run under GT1-02-13. GT1-02-10AT/12 retain consumer refusal and artifact lifecycle coverage. No deterministic or native prompt-file delivery is certified. Other definition and surface requirements remain with their existing owners. See Plans/grok-tier1/evidence/02.md.",
+					"missingPrerequisite": "GT1-02-09/09A add inactive pure prompt-file planning with executing-host ownership, exclusive creation/cleanup obligations and lowercase ACP JSON preserving ordered text/image bytes. Embedded images require explicit per-turn MIME/count/byte admission; malformed, missing and unsupported content refuses without stdin/text-only/tool-read fallback. Existing provider routing is unchanged. GT1-02-10 must propagate promptBlocks/embeddedImageSupport through launch-plan and consumers, allocate/materialize/clean on the executing host and suppress legacy prompt/image assembly; GT1-02-10A owns refusal classification before GT1-02-11 activation and stdin-claim correction. GT1-02-09B authored 75 planner/encoder regression cases across two existing suites; execution remains not-run under GT1-02-13. GT1-02-10AT/12 retain consumer refusal and artifact lifecycle coverage. No deterministic or native prompt-file delivery is certified. Other definition and surface requirements remain with their existing owners. See Plans/grok-tier1/evidence/02.md. GT1-02-10 adds the inactive shared local artifact sink: exclusive 0600 creation, descriptor-owned cleanup and managed artifact digest binding with preflight/final checks. Bounded GT1-02-10B-10G (including 10E0 request binding) retain destination/ordered-content propagation, SSH creation and hard-stop cleanup, desktop/shared/CLI/Cue/utility consumers before GT1-02-11 activation. GT1-02-10T/10BT/10CT/10DT/10E0T/10ET/10FT/10GT own lifecycle/consumer tests; GT1-02-13 owns execution. Local/remote/platform behavior remains not-run; no capability or managed route is promoted.",
 					"affectedRows": ["P07"]
 				},
 				{
@@ -2456,7 +2480,9 @@
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/shared/maestro-lib/run/pipe-spawn.ts",
 				"src/renderer/components/InputArea/InputArea.tsx",
-				"src/renderer/components/NewInstanceModal/EditAgentModal.tsx"
+				"src/renderer/components/NewInstanceModal/EditAgentModal.tsx",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/managed/authority.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -2467,9 +2493,31 @@
 					"GT1-09-07",
 					"GT1-07-01",
 					"GT1-02-09A",
-					"GT1-07-03D"
+					"GT1-07-03D",
+					"GT1-02-10B",
+					"GT1-02-10C",
+					"GT1-02-10D",
+					"GT1-02-10E0",
+					"GT1-02-10E",
+					"GT1-02-10F",
+					"GT1-02-10G"
 				],
-				"test": ["GT1-02-12", "GT1-02-11B", "GT1-09-08", "GT1-07-04", "GT1-02-09B", "GT1-07-03E"],
+				"test": [
+					"GT1-02-12",
+					"GT1-02-11B",
+					"GT1-09-08",
+					"GT1-07-04",
+					"GT1-02-09B",
+					"GT1-07-03E",
+					"GT1-02-10T",
+					"GT1-02-10BT",
+					"GT1-02-10CT",
+					"GT1-02-10DT",
+					"GT1-02-10E0T",
+					"GT1-02-10ET",
+					"GT1-02-10FT",
+					"GT1-02-10GT"
+				],
 				"verification": ["GT1-02-13", "GT1-02-14", "GT1-09-11", "GT1-07-11"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -2508,7 +2556,7 @@
 				{
 					"id": "gap:P08",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-09A adds inactive ordered ACP JSON image encoding with strict MIME/base64/count/individual-and-total-byte validation. Limits are explicit executing-host admission policy, not claimed native limits; omitted support refuses. Planning does not read image refs/paths, grant tools/filesystem access, alter permissions or retry as text. GT1-02-10/11 still own host materialization, full launch/consumer propagation and activation; GT1-07-03D/03E own portable image acceptance; GT1-02-11A owns additional-directory grants. Fresh/resumed route/model support, cleanup, remote locality and real image acceptance remain unqualified. GT1-02-09B authored planner/encoder regressions for ordered native JSON, image admission and fixed refusals without fallback. GT1-02-12 retains artifact lifecycle coverage; GT1-02-13 owns execution, still not-run. All other listed consumer/policy requirements remain with existing owners. See Plans/grok-tier1/evidence/02.md.",
+					"missingPrerequisite": "GT1-02-09A adds inactive ordered ACP JSON image encoding with strict MIME/base64/count/individual-and-total-byte validation. Limits are explicit executing-host admission policy, not claimed native limits; omitted support refuses. Planning does not read image refs/paths, grant tools/filesystem access, alter permissions or retry as text. GT1-02-10/11 still own host materialization, full launch/consumer propagation and activation; GT1-07-03D/03E own portable image acceptance; GT1-02-11A owns additional-directory grants. Fresh/resumed route/model support, cleanup, remote locality and real image acceptance remain unqualified. GT1-02-09B authored planner/encoder regressions for ordered native JSON, image admission and fixed refusals without fallback. GT1-02-12 retains artifact lifecycle coverage; GT1-02-13 owns execution, still not-run. All other listed consumer/policy requirements remain with existing owners. See Plans/grok-tier1/evidence/02.md. GT1-02-10 adds the inactive shared local artifact sink: exclusive 0600 creation, descriptor-owned cleanup and managed artifact digest binding with preflight/final checks. Bounded GT1-02-10B-10G (including 10E0 request binding) retain destination/ordered-content propagation, SSH creation and hard-stop cleanup, desktop/shared/CLI/Cue/utility consumers before GT1-02-11 activation. GT1-02-10T/10BT/10CT/10DT/10E0T/10ET/10FT/10GT own lifecycle/consumer tests; GT1-02-13 owns execution. Local/remote/platform behavior remains not-run; no capability or managed route is promoted.",
 					"affectedRows": ["P08"]
 				},
 				{
@@ -7250,7 +7298,9 @@
 				"src/main/agents/capability-snapshot.ts",
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/shared/maestro-lib/launch/prompt-delivery.ts"
+				"src/shared/maestro-lib/launch/prompt-delivery.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/managed/authority.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -7260,9 +7310,29 @@
 					"GT1-02-09",
 					"GT1-02-10",
 					"GT1-02-11",
-					"GT1-02-10A"
+					"GT1-02-10A",
+					"GT1-02-10B",
+					"GT1-02-10C",
+					"GT1-02-10D",
+					"GT1-02-10E0",
+					"GT1-02-10E",
+					"GT1-02-10F",
+					"GT1-02-10G"
 				],
-				"test": ["GT1-02-06", "GT1-10-07", "GT1-02-12", "GT1-02-10AT"],
+				"test": [
+					"GT1-02-06",
+					"GT1-10-07",
+					"GT1-02-12",
+					"GT1-02-10AT",
+					"GT1-02-10T",
+					"GT1-02-10BT",
+					"GT1-02-10CT",
+					"GT1-02-10DT",
+					"GT1-02-10E0T",
+					"GT1-02-10ET",
+					"GT1-02-10FT",
+					"GT1-02-10GT"
+				],
 				"verification": ["GT1-02-13", "GT1-10-12", "GT1-11-10", "GT1-02-14", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -7301,7 +7371,7 @@
 				{
 					"id": "gap:P39",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-09/09A add inactive pure prompt-file planning with executing-host ownership, exclusive creation/cleanup obligations and lowercase ACP JSON preserving ordered text/image bytes. Embedded images require explicit per-turn MIME/count/byte admission; malformed, missing and unsupported content refuses without stdin/text-only/tool-read fallback. Existing provider routing is unchanged. GT1-02-10 must propagate promptBlocks/embeddedImageSupport through launch-plan and consumers, allocate/materialize/clean on the executing host and suppress legacy prompt/image assembly; GT1-02-10A owns refusal classification before GT1-02-11 activation and stdin-claim correction. GT1-02-09B authored 75 planner/encoder regression cases across two existing suites; execution remains not-run under GT1-02-13. GT1-02-10AT/12 retain consumer refusal and artifact lifecycle coverage. No deterministic or native prompt-file delivery is certified. Other definition and surface requirements remain with their existing owners. See Plans/grok-tier1/evidence/02.md.",
+					"missingPrerequisite": "GT1-02-09/09A add inactive pure prompt-file planning with executing-host ownership, exclusive creation/cleanup obligations and lowercase ACP JSON preserving ordered text/image bytes. Embedded images require explicit per-turn MIME/count/byte admission; malformed, missing and unsupported content refuses without stdin/text-only/tool-read fallback. Existing provider routing is unchanged. GT1-02-10 must propagate promptBlocks/embeddedImageSupport through launch-plan and consumers, allocate/materialize/clean on the executing host and suppress legacy prompt/image assembly; GT1-02-10A owns refusal classification before GT1-02-11 activation and stdin-claim correction. GT1-02-09B authored 75 planner/encoder regression cases across two existing suites; execution remains not-run under GT1-02-13. GT1-02-10AT/12 retain consumer refusal and artifact lifecycle coverage. No deterministic or native prompt-file delivery is certified. Other definition and surface requirements remain with their existing owners. See Plans/grok-tier1/evidence/02.md. GT1-02-10 adds the inactive shared local artifact sink: exclusive 0600 creation, descriptor-owned cleanup and managed artifact digest binding with preflight/final checks. Bounded GT1-02-10B-10G (including 10E0 request binding) retain destination/ordered-content propagation, SSH creation and hard-stop cleanup, desktop/shared/CLI/Cue/utility consumers before GT1-02-11 activation. GT1-02-10T/10BT/10CT/10DT/10E0T/10ET/10FT/10GT own lifecycle/consumer tests; GT1-02-13 owns execution. Local/remote/platform behavior remains not-run; no capability or managed route is promoted.",
 					"affectedRows": ["P39"]
 				},
 				{
@@ -8985,7 +9055,9 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/shared/maestro-lib/run/pipe-spawn.ts"
+				"src/shared/maestro-lib/run/pipe-spawn.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/managed/authority.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -8994,9 +9066,29 @@
 					"GT1-02-11",
 					"GT1-11-14A",
 					"GT1-02-09A",
-					"GT1-07-03D"
+					"GT1-07-03D",
+					"GT1-02-10B",
+					"GT1-02-10C",
+					"GT1-02-10D",
+					"GT1-02-10E0",
+					"GT1-02-10E",
+					"GT1-02-10F",
+					"GT1-02-10G"
 				],
-				"test": ["GT1-02-12", "GT1-11-14B", "GT1-02-09B", "GT1-07-03E"],
+				"test": [
+					"GT1-02-12",
+					"GT1-11-14B",
+					"GT1-02-09B",
+					"GT1-07-03E",
+					"GT1-02-10T",
+					"GT1-02-10BT",
+					"GT1-02-10CT",
+					"GT1-02-10DT",
+					"GT1-02-10E0T",
+					"GT1-02-10ET",
+					"GT1-02-10FT",
+					"GT1-02-10GT"
+				],
 				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-14C", "GT1-07-11"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -9035,7 +9127,7 @@
 				{
 					"id": "gap:C-supportsImageInput",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-09A adds inactive ordered ACP JSON image encoding with strict MIME/base64/count/individual-and-total-byte validation. Limits are explicit executing-host admission policy, not claimed native limits; omitted support refuses. Planning does not read image refs/paths, grant tools/filesystem access, alter permissions or retry as text. GT1-02-10/11 still own host materialization, full launch/consumer propagation and activation; GT1-07-03D/03E own portable image acceptance; GT1-02-11A owns additional-directory grants. Fresh/resumed route/model support, cleanup, remote locality and real image acceptance remain unqualified. GT1-02-09B authored planner/encoder regressions for ordered native JSON, image admission and fixed refusals without fallback. GT1-02-12 retains artifact lifecycle coverage; GT1-02-13 owns execution, still not-run. All other listed consumer/policy requirements remain with existing owners. See Plans/grok-tier1/evidence/02.md.",
+					"missingPrerequisite": "GT1-02-09A adds inactive ordered ACP JSON image encoding with strict MIME/base64/count/individual-and-total-byte validation. Limits are explicit executing-host admission policy, not claimed native limits; omitted support refuses. Planning does not read image refs/paths, grant tools/filesystem access, alter permissions or retry as text. GT1-02-10/11 still own host materialization, full launch/consumer propagation and activation; GT1-07-03D/03E own portable image acceptance; GT1-02-11A owns additional-directory grants. Fresh/resumed route/model support, cleanup, remote locality and real image acceptance remain unqualified. GT1-02-09B authored planner/encoder regressions for ordered native JSON, image admission and fixed refusals without fallback. GT1-02-12 retains artifact lifecycle coverage; GT1-02-13 owns execution, still not-run. All other listed consumer/policy requirements remain with existing owners. See Plans/grok-tier1/evidence/02.md. GT1-02-10 adds the inactive shared local artifact sink: exclusive 0600 creation, descriptor-owned cleanup and managed artifact digest binding with preflight/final checks. Bounded GT1-02-10B-10G (including 10E0 request binding) retain destination/ordered-content propagation, SSH creation and hard-stop cleanup, desktop/shared/CLI/Cue/utility consumers before GT1-02-11 activation. GT1-02-10T/10BT/10CT/10DT/10E0T/10ET/10FT/10GT own lifecycle/consumer tests; GT1-02-13 owns execution. Local/remote/platform behavior remains not-run; no capability or managed route is promoted.",
 					"affectedRows": ["C-supportsImageInput"]
 				},
 				{
@@ -9110,7 +9202,9 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/components/InputArea/InputArea.tsx"
+				"src/renderer/components/InputArea/InputArea.tsx",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/managed/authority.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -9119,9 +9213,29 @@
 					"GT1-02-11",
 					"GT1-11-14A",
 					"GT1-02-09A",
-					"GT1-07-03D"
+					"GT1-07-03D",
+					"GT1-02-10B",
+					"GT1-02-10C",
+					"GT1-02-10D",
+					"GT1-02-10E0",
+					"GT1-02-10E",
+					"GT1-02-10F",
+					"GT1-02-10G"
 				],
-				"test": ["GT1-02-12", "GT1-11-14B", "GT1-02-09B", "GT1-07-03E"],
+				"test": [
+					"GT1-02-12",
+					"GT1-11-14B",
+					"GT1-02-09B",
+					"GT1-07-03E",
+					"GT1-02-10T",
+					"GT1-02-10BT",
+					"GT1-02-10CT",
+					"GT1-02-10DT",
+					"GT1-02-10E0T",
+					"GT1-02-10ET",
+					"GT1-02-10FT",
+					"GT1-02-10GT"
+				],
 				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-14C", "GT1-07-11"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -9160,7 +9274,7 @@
 				{
 					"id": "gap:C-supportsImageInputOnResume",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-09A adds inactive ordered ACP JSON image encoding with strict MIME/base64/count/individual-and-total-byte validation. Limits are explicit executing-host admission policy, not claimed native limits; omitted support refuses. Planning does not read image refs/paths, grant tools/filesystem access, alter permissions or retry as text. GT1-02-10/11 still own host materialization, full launch/consumer propagation and activation; GT1-07-03D/03E own portable image acceptance; GT1-02-11A owns additional-directory grants. Fresh/resumed route/model support, cleanup, remote locality and real image acceptance remain unqualified. GT1-02-09B authored planner/encoder regressions for ordered native JSON, image admission and fixed refusals without fallback. GT1-02-12 retains artifact lifecycle coverage; GT1-02-13 owns execution, still not-run. All other listed consumer/policy requirements remain with existing owners. See Plans/grok-tier1/evidence/02.md.",
+					"missingPrerequisite": "GT1-02-09A adds inactive ordered ACP JSON image encoding with strict MIME/base64/count/individual-and-total-byte validation. Limits are explicit executing-host admission policy, not claimed native limits; omitted support refuses. Planning does not read image refs/paths, grant tools/filesystem access, alter permissions or retry as text. GT1-02-10/11 still own host materialization, full launch/consumer propagation and activation; GT1-07-03D/03E own portable image acceptance; GT1-02-11A owns additional-directory grants. Fresh/resumed route/model support, cleanup, remote locality and real image acceptance remain unqualified. GT1-02-09B authored planner/encoder regressions for ordered native JSON, image admission and fixed refusals without fallback. GT1-02-12 retains artifact lifecycle coverage; GT1-02-13 owns execution, still not-run. All other listed consumer/policy requirements remain with existing owners. See Plans/grok-tier1/evidence/02.md. GT1-02-10 adds the inactive shared local artifact sink: exclusive 0600 creation, descriptor-owned cleanup and managed artifact digest binding with preflight/final checks. Bounded GT1-02-10B-10G (including 10E0 request binding) retain destination/ordered-content propagation, SSH creation and hard-stop cleanup, desktop/shared/CLI/Cue/utility consumers before GT1-02-11 activation. GT1-02-10T/10BT/10CT/10DT/10E0T/10ET/10FT/10GT own lifecycle/consumer tests; GT1-02-13 owns execution. Local/remote/platform behavior remains not-run; no capability or managed route is promoted.",
 					"affectedRows": ["C-supportsImageInputOnResume"]
 				},
 				{
@@ -10464,7 +10578,9 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/shared/maestro-lib/launch/prompt-delivery.ts"
+				"src/shared/maestro-lib/launch/prompt-delivery.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/managed/authority.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -10473,9 +10589,29 @@
 					"GT1-02-11",
 					"GT1-11-14A",
 					"GT1-02-09A",
-					"GT1-02-10A"
+					"GT1-02-10A",
+					"GT1-02-10B",
+					"GT1-02-10C",
+					"GT1-02-10D",
+					"GT1-02-10E0",
+					"GT1-02-10E",
+					"GT1-02-10F",
+					"GT1-02-10G"
 				],
-				"test": ["GT1-02-12", "GT1-11-14B", "GT1-02-09B", "GT1-02-10AT"],
+				"test": [
+					"GT1-02-12",
+					"GT1-11-14B",
+					"GT1-02-09B",
+					"GT1-02-10AT",
+					"GT1-02-10T",
+					"GT1-02-10BT",
+					"GT1-02-10CT",
+					"GT1-02-10DT",
+					"GT1-02-10E0T",
+					"GT1-02-10ET",
+					"GT1-02-10FT",
+					"GT1-02-10GT"
+				],
 				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -10514,7 +10650,7 @@
 				{
 					"id": "gap:C-supportsPromptViaStdin",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-09/09A add inactive pure prompt-file planning with executing-host ownership, exclusive creation/cleanup obligations and lowercase ACP JSON preserving ordered text/image bytes. Embedded images require explicit per-turn MIME/count/byte admission; malformed, missing and unsupported content refuses without stdin/text-only/tool-read fallback. Existing provider routing is unchanged. GT1-02-10 must propagate promptBlocks/embeddedImageSupport through launch-plan and consumers, allocate/materialize/clean on the executing host and suppress legacy prompt/image assembly; GT1-02-10A owns refusal classification before GT1-02-11 activation and stdin-claim correction. GT1-02-09B authored 75 planner/encoder regression cases across two existing suites; execution remains not-run under GT1-02-13. GT1-02-10AT/12 retain consumer refusal and artifact lifecycle coverage. No deterministic or native prompt-file delivery is certified. Other definition and surface requirements remain with their existing owners. See Plans/grok-tier1/evidence/02.md.",
+					"missingPrerequisite": "GT1-02-09/09A add inactive pure prompt-file planning with executing-host ownership, exclusive creation/cleanup obligations and lowercase ACP JSON preserving ordered text/image bytes. Embedded images require explicit per-turn MIME/count/byte admission; malformed, missing and unsupported content refuses without stdin/text-only/tool-read fallback. Existing provider routing is unchanged. GT1-02-10 must propagate promptBlocks/embeddedImageSupport through launch-plan and consumers, allocate/materialize/clean on the executing host and suppress legacy prompt/image assembly; GT1-02-10A owns refusal classification before GT1-02-11 activation and stdin-claim correction. GT1-02-09B authored 75 planner/encoder regression cases across two existing suites; execution remains not-run under GT1-02-13. GT1-02-10AT/12 retain consumer refusal and artifact lifecycle coverage. No deterministic or native prompt-file delivery is certified. Other definition and surface requirements remain with their existing owners. See Plans/grok-tier1/evidence/02.md. GT1-02-10 adds the inactive shared local artifact sink: exclusive 0600 creation, descriptor-owned cleanup and managed artifact digest binding with preflight/final checks. Bounded GT1-02-10B-10G (including 10E0 request binding) retain destination/ordered-content propagation, SSH creation and hard-stop cleanup, desktop/shared/CLI/Cue/utility consumers before GT1-02-11 activation. GT1-02-10T/10BT/10CT/10DT/10E0T/10ET/10FT/10GT own lifecycle/consumer tests; GT1-02-13 owns execution. Local/remote/platform behavior remains not-run; no capability or managed route is promoted.",
 					"affectedRows": ["C-supportsPromptViaStdin"]
 				},
 				{
@@ -17525,7 +17661,9 @@
 				"src/shared/maestro-lib/launch/prompt-delivery.ts",
 				"src/shared/maestro-lib/turns/assemble.ts",
 				"src/shared/maestro-lib/run/pipe-spawn.ts",
-				"src/main/agents/definitions.ts"
+				"src/main/agents/definitions.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/managed/authority.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -17564,7 +17702,14 @@
 					"GT1-02-07C",
 					"GT1-02-07A1",
 					"GT1-08-14E",
-					"GT1-02-10A"
+					"GT1-02-10A",
+					"GT1-02-10B",
+					"GT1-02-10C",
+					"GT1-02-10D",
+					"GT1-02-10E0",
+					"GT1-02-10E",
+					"GT1-02-10F",
+					"GT1-02-10G"
 				],
 				"test": [
 					"GT1-11-02",
@@ -17597,7 +17742,15 @@
 					"GT1-02-07CT",
 					"GT1-02-07A1T",
 					"GT1-08-14F",
-					"GT1-02-10AT"
+					"GT1-02-10AT",
+					"GT1-02-10T",
+					"GT1-02-10BT",
+					"GT1-02-10CT",
+					"GT1-02-10DT",
+					"GT1-02-10E0T",
+					"GT1-02-10ET",
+					"GT1-02-10FT",
+					"GT1-02-10GT"
 				],
 				"verification": [
 					"GT1-01-07",
@@ -17658,7 +17811,7 @@
 				{
 					"id": "gap:REG-DEFINITIONS",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-09/09A add inactive pure prompt-file planning with executing-host ownership, exclusive creation/cleanup obligations and lowercase ACP JSON preserving ordered text/image bytes. Embedded images require explicit per-turn MIME/count/byte admission; malformed, missing and unsupported content refuses without stdin/text-only/tool-read fallback. Existing provider routing is unchanged. GT1-02-10 must propagate promptBlocks/embeddedImageSupport through launch-plan and consumers, allocate/materialize/clean on the executing host and suppress legacy prompt/image assembly; GT1-02-10A owns refusal classification before GT1-02-11 activation and stdin-claim correction. GT1-02-09B authored 75 planner/encoder regression cases across two existing suites; execution remains not-run under GT1-02-13. GT1-02-10AT/12 retain consumer refusal and artifact lifecycle coverage. No deterministic or native prompt-file delivery is certified. Other definition and surface requirements remain with their existing owners. See Plans/grok-tier1/evidence/02.md.",
+					"missingPrerequisite": "GT1-02-09/09A add inactive pure prompt-file planning with executing-host ownership, exclusive creation/cleanup obligations and lowercase ACP JSON preserving ordered text/image bytes. Embedded images require explicit per-turn MIME/count/byte admission; malformed, missing and unsupported content refuses without stdin/text-only/tool-read fallback. Existing provider routing is unchanged. GT1-02-10 must propagate promptBlocks/embeddedImageSupport through launch-plan and consumers, allocate/materialize/clean on the executing host and suppress legacy prompt/image assembly; GT1-02-10A owns refusal classification before GT1-02-11 activation and stdin-claim correction. GT1-02-09B authored 75 planner/encoder regression cases across two existing suites; execution remains not-run under GT1-02-13. GT1-02-10AT/12 retain consumer refusal and artifact lifecycle coverage. No deterministic or native prompt-file delivery is certified. Other definition and surface requirements remain with their existing owners. See Plans/grok-tier1/evidence/02.md. GT1-02-10 adds the inactive shared local artifact sink: exclusive 0600 creation, descriptor-owned cleanup and managed artifact digest binding with preflight/final checks. Bounded GT1-02-10B-10G (including 10E0 request binding) retain destination/ordered-content propagation, SSH creation and hard-stop cleanup, desktop/shared/CLI/Cue/utility consumers before GT1-02-11 activation. GT1-02-10T/10BT/10CT/10DT/10E0T/10ET/10FT/10GT own lifecycle/consumer tests; GT1-02-13 owns execution. Local/remote/platform behavior remains not-run; no capability or managed route is promoted.",
 					"affectedRows": ["REG-DEFINITIONS"]
 				},
 				{

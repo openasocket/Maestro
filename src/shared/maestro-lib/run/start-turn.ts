@@ -1,6 +1,8 @@
 // src/shared/maestro-lib/run/start-turn.ts
 
 import { spawn, type ChildProcess } from 'child_process';
+import * as fs from 'fs';
+import * as path from 'path';
 
 import type { AgentOutputParser, ParsedEvent } from '../parsers/agent-output-parser';
 import { createOutputParser } from '../parsers/parser-factory';
@@ -12,6 +14,8 @@ import {
 	type StopStage,
 } from '../control/termination';
 import type { AgentLaunchPlan } from '../launch/launch-plan';
+import type { PromptDelivery } from '../launch/prompt-delivery';
+import { logger } from '../host';
 import { quoteCommandForCmdShell, windowsShellReason } from '../launch/windows-command';
 import { escapeCmdArgs } from '../launch/windows-shell-escape';
 import { isWindows } from '../../platformDetection';
@@ -51,6 +55,8 @@ export interface TurnProcessSpec {
 	 * plan chose to deliver over stdin, or the script an SSH remote runs.
 	 */
 	stdin?: string;
+	/** Private local artifact, created exclusively at the sink and removed after the reader closes. */
+	promptArtifact?: Extract<PromptDelivery, { via: 'file' }>['artifact'];
 	/**
 	 * Run the command through a shell: `true` for the platform default, or the
 	 * shell's path. Needed on Windows for a bare `.exe` name (PATH resolution),
@@ -115,6 +121,7 @@ export function turnProcessSpecFromPlan(
 			cwd: plan.cwd,
 			env: plan.env,
 			stdin: plan.stdin,
+			...(plan.prompt.via === 'file' ? { promptArtifact: { ...plan.prompt.artifact } } : {}),
 		},
 		options
 	);
@@ -151,8 +158,10 @@ export interface TurnHandlers {
 /**
  * The managed admission at the sink. `admit` is synchronous and runs with the
  * snapshot of the FINAL spec, the instant before `spawn`: there is nothing
- * between the two for a replacement to slip through. A refusal throws
- * `DispatchRefusedError` out of `startTurn` before any effect; an admission
+ * between the two for a replacement to slip through. For a prompt artifact,
+ * it also checks before any file is created; `admit` must support rechecking
+ * an unbound lease. A refusal throws
+ * `DispatchRefusedError` out of `startTurn` before spawn and cleans any prepared artifact; an admission
  * is followed by `bound` (the pid), and by `released` once the process is
  * gone. A revocation heard through `onRevoked` while bound terminates the
  * process, and the exit says the authority stopped it, not the caller.
@@ -206,7 +215,7 @@ export function leaseAdmission(
 	};
 }
 
-/** Thrown by `startTurn` when the admission refuses. Nothing was spawned and nothing was written. */
+/** Thrown by `startTurn` when admission refuses. Nothing spawned; owned preparation is cleaned. */
 export class DispatchRefusedError extends Error {
 	constructor(
 		readonly state: DispatchAdmissionState,
@@ -353,27 +362,106 @@ export function startTurn(
 	handlers: TurnHandlers,
 	options: StartTurnOptions
 ): TurnHandle {
+	// The gate may call host code. Keep its callbacks from replacing the bytes,
+	// destination or launch inputs between preparation and the final admission.
+	if (spec.promptArtifact) {
+		spec = {
+			...spec,
+			args: [...spec.args],
+			env: { ...spec.env },
+			promptArtifact: { ...spec.promptArtifact },
+		};
+	}
+	const artifact = spec.promptArtifact;
+	let artifactFd: number | undefined;
+	const removeArtifact = (): void => {
+		if (!artifact || artifactFd === undefined) return;
+		try {
+			const ownedArtifact = fs.fstatSync(artifactFd);
+			const current = fs.lstatSync(artifact.path);
+			if (current.dev !== ownedArtifact.dev || current.ino !== ownedArtifact.ino) {
+				logger.warn('Prompt artifact changed ownership; cleanup skipped.', 'startTurn');
+				return;
+			}
+			fs.unlinkSync(artifact.path);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+				// OS errors include the private path. Never forward them to logs.
+				logger.warn('Could not remove an owned prompt artifact.', 'startTurn');
+			}
+		} finally {
+			try {
+				fs.closeSync(artifactFd);
+			} catch {
+				logger.warn('Could not close an owned prompt artifact.', 'startTurn');
+			}
+			artifactFd = undefined;
+		}
+	};
 	const hasStdin = spec.stdin !== undefined && spec.stdin !== '';
 	const stdinMode = hasStdin ? 'pipe' : (options.emptyStdin ?? 'pipe');
 
 	// The admission sees exactly what spawn sees: the snapshot is built from
 	// this spec, here, and nothing runs between the verdict and the spawn.
 	const gate = options.admission?.gate;
-	if (options.admission) {
-		const { attribution } = options.admission;
-		const verdict = options.admission.gate.admit(buildDispatchSnapshot(spec, attribution));
-		if (!verdict.ok) throw new DispatchRefusedError(verdict.state, verdict.code, verdict.message);
-	}
+	const admit = (): void => {
+		if (options.admission) {
+			const { attribution } = options.admission;
+			const verdict = options.admission.gate.admit(buildDispatchSnapshot(spec, attribution));
+			if (!verdict.ok) throw new DispatchRefusedError(verdict.state, verdict.code, verdict.message);
+		}
+	};
 
-	const child = spawn(spec.command, spec.args, {
-		cwd: spec.cwd,
-		env: spec.env,
-		shell: spec.shell ?? false,
-		stdio: [stdinMode, 'pipe', 'pipe'],
-	});
+	// Construct the parser before owning a file or child, so a constructor
+	// failure cannot leave either without a settlement handler.
+	const parser = options.parser ?? (options.agentId ? createOutputParser(options.agentId) : null);
+	let child: ChildProcess;
+	try {
+		if (artifact) {
+			if (
+				artifact.owner !== 'local' ||
+				!path.isAbsolute(artifact.path) ||
+				artifact.path.includes('\0') ||
+				artifact.encoding !== 'utf8' ||
+				artifact.mode !== 0o600 ||
+				artifact.flag !== 'wx' ||
+				artifact.cleanup !== 'turn' ||
+				typeof artifact.content !== 'string' ||
+				spec.stdin !== undefined
+			) {
+				throw new Error('Prompt-file delivery requires an exclusive local artifact without stdin.');
+			}
+			if (options.signal?.aborted)
+				throw new Error('Prompt-file launch was cancelled before spawn.');
+			admit();
+			if (options.signal?.aborted)
+				throw new Error('Prompt-file launch was cancelled before spawn.');
+			try {
+				// Register ownership immediately after exclusive creation. Retain
+				// the descriptor until cleanup can compare its inode with the path;
+				// a failed write, collision or replacement must not delete another file.
+				artifactFd = fs.openSync(artifact.path, artifact.flag, artifact.mode);
+				fs.writeFileSync(artifactFd, artifact.content, artifact.encoding);
+			} catch {
+				throw new Error('Could not prepare the private prompt artifact.');
+			}
+		}
+		admit();
+		if (artifact && options.signal?.aborted) {
+			throw new Error('Prompt-file launch was cancelled before spawn.');
+		}
+		child = spawn(spec.command, spec.args, {
+			cwd: spec.cwd,
+			env: spec.env,
+			shell: spec.shell ?? false,
+			stdio: [stdinMode, 'pipe', 'pipe'],
+		});
+	} catch (error) {
+		removeArtifact();
+		throw error;
+	}
 	const finishTracking = options.trackDescendants ? trackProcessTree(child) : undefined;
 
-	const parser = options.parser ?? (options.agentId ? createOutputParser(options.agentId) : null);
 	const tailLimit = options.stdoutTailLimit ?? DEFAULT_STDOUT_TAIL_LIMIT;
 
 	let droppedOutputBytes = 0;
@@ -449,6 +537,7 @@ export function startTurn(
 				...(stdinError ? { stdinError } : {}),
 			};
 			const release = (): void => {
+				removeArtifact();
 				gate?.released?.(turnExit);
 				resolve(turnExit);
 			};
@@ -488,7 +577,7 @@ export function startTurn(
 		child.on('error', (error) => {
 			// A failed signal can emit `error` on a process that did start. Keep
 			// ownership and drain its pipes; only a spawn failure releases here.
-			if (options.trackDescendants && child.pid !== undefined) {
+			if ((options.trackDescendants || artifact) && child.pid !== undefined) {
 				stop('terminate');
 				return;
 			}
