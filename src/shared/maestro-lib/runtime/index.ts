@@ -78,6 +78,7 @@ import {
 	type WorkflowOwnerStanding,
 } from '../managed/workflows';
 import { getVisibleAgentDefinitions } from '../providers/definitions';
+import { installTurnSinkStanding } from '../run/start-turn';
 import type { AgentRecord } from '../store/records';
 import { createBackgroundTurns, type BackgroundTurnDeps } from './background-turns';
 import { createRuntimeConsults, type RuntimeConsultsManagedOptions } from './consults';
@@ -518,8 +519,8 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 	 * What a consult and a group chat turn are admitted with: the headless spawn authority over the
 	 * binding and that same host, with the enrollment's registered actor as the principal, rebuilt
 	 * on every turn so an enrollment that appeared or lapsed applies to the next one (the Auto Run
-	 * port's recipe). The consult stage, the background runner and the turn service's standing
-	 * admission (MRC3-01-01) read the one port.
+	 * port's recipe). The consult stage, the background runner, the turn service's standing
+	 * admission (MRC3-01-01) and the spawn sink's standing below read the one port.
 	 */
 	const backgroundSpawnPort = (): HeadlessSpawnAuthority =>
 		createHeadlessSpawnAuthority({
@@ -530,6 +531,23 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			actor: managedActorPrincipal(autoRunHost?.identity?.read() ?? null, installation),
 			...(deps.now ? { now: deps.now } : {}),
 		});
+
+	// The host's standing at the spawn sink (MCOMP-09-02A): every `startTurn` and `runAgentTurn`
+	// in this process, whatever its caller passed or left out, is held to the installation standing
+	// the turn service holds, read from the same port on every call so there is no second rule: a
+	// managed standing unless the binding reads standalone, and the id of the authority answering
+	// now, or null while none does (a bare CLI with no attached host, a binding for another
+	// authority, an unreadable file). Released at shutdown; the release clears only this install,
+	// so one runtime after another in a process does not clear its successor's standing.
+	const releaseSinkStanding = installTurnSinkStanding({
+		standing: () => backgroundSpawnPort().standing(),
+		authorityId: () => {
+			const port = backgroundSpawnPort();
+			return port.standing() === 'managed' && port.unavailableReason === null
+				? port.authority.authorityId
+				: null;
+		},
+	});
 
 	// The run releases what it held back (queued chat messages) when it ends, and the turn service
 	// asks whether a run holds an agent: each needs the other, so the run reaches `turns`, declared
@@ -687,6 +705,9 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 				if (eventsLoaded.ok) await eventJournal.flush();
 			} finally {
 				process.off('exit', onExit);
+				// The sink's standing goes with the lock: a later runtime in this process installs its
+				// own, and nothing in between is held to a host that is gone.
+				releaseSinkStanding();
 				lock.release();
 			}
 		})();
