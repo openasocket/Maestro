@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge in progress; MCOMP-01-03A, 03B, 03C, 03D, 03E, 03F and 03G staged (20 files), 24 files unmerged in the worktree; MCOMP-01-03H..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T02:33:22.101Z",
-		"updatedBy": "MCOMP-01-03G"
+		"state": "merge in progress; MCOMP-01-03A, 03B, 03C, 03D, 03E, 03F, 03G and 03H staged (22 files), 22 files unmerged in the worktree; MCOMP-01-03I..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
+		"updatedAt": "2026-10-30T02:37:42.158Z",
+		"updatedBy": "MCOMP-01-03H"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -431,6 +431,43 @@
 			],
 			"unmergedAfter": 24,
 			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03g.mjs (not in git)"
+		},
+		"MCOMP-01-03H": {
+			"resolvedAt": "2026-10-29",
+			"resolvedBy": "Maestro-Claude",
+			"files": [
+				"src/shared/maestro-lib/runtime/turns.ts",
+				"src/shared/maestro-lib/runtime/__tests__/turns.test.ts"
+			],
+			"hunks": {
+				"src/shared/maestro-lib/runtime/turns.ts": [
+					"373-394 (the runAgentTurn() options in startItem, a both-sides insertion after maestroPBinPath): the integration side (MRC3-01-02 a1be9b7b1 over MRC-08-05 1ec3d0ce6 and MRC-10-01A 358809892) passes the host standing (standing: enrolled ? enrolled : standalone, the provider layer holding the same rule on its own) and the managed envelope (authority, context, policy, resourceIds, the onLease capture of the lease id and its lifecycle admission into admitted); upstream (34c00474e, the maestro-p folder-trust opt-in, #1872) passes acceptWorkspaceTrust: isAgentOwnWorkingDirectory(turn.launch.cwd, agent) so a TUI turn in the agent own cwd may accept the folder-trust prompt; resolved as both halves, the integration block first then upstream line with its comment; the isAgentOwnWorkingDirectory import (line 64) auto-merged, agent is the loaded record already in scope, and RunAgentTurnOptions in turns/run-agent-turn.ts (auto-merged) declares standing (154), managed and acceptWorkspaceTrust (174) side by side"
+				],
+				"src/shared/maestro-lib/runtime/__tests__/turns.test.ts": [
+					"42-47 (the imports after readHistory): the integration side added import { RUNTIME_LOCK_FILE_NAME } from ../data-dir-lock after the runAgentTurn import (the fence case takes the runtime lock away, line 1042 after the merge); upstream widened the runAgentTurn import to import { runAgentTurn, type RunAgentTurnOptions } (the type of the turnOptions capture at line 73 the folder-trust assertion at 261 reads); resolved as upstream import line then the integration lock-file import; every case of both sides (the integration standing, dequeue-admission and fence cases, upstream folder-trust case) had auto-merged"
+				]
+			},
+			"checks": {
+				"staging": "merge-tool stage over the two files: prettier left both unchanged, git add done, 22 files left unmerged, no marker left in either, nothing unstaged",
+				"seams": "the standing and managed-envelope seams of the runtime turn service are whole on upstream shape: startItem still passes standing and the managed authority, context, policy, resource ids and onLease capture to runAgentTurn(), the lease-or-stop rule after the start and the journal writes on refusal are untouched (auto-merged), and upstream acceptWorkspaceTrust travels beside them on the same call; the provider-layer gate (RunAgentTurnOptions.standing) and the folder-trust env (MAESTRO_P_ACCEPT_WORKSPACE_TRUST in launch/interactive-mode.ts) both auto-merged",
+				"suites": "node node_modules/vitest/vitest.mjs run src/shared/maestro-lib/runtime/__tests__ in the worktree: 20 files / 332 tests passed, 0 failed, 0 skipped; turns.test.ts 27 passed (the upstream folder-trust case and the integration enrolled-refusal, dequeue-admission and fence cases among them); the other runtime suites that compose createRuntimeTurns (runtime 33, autorun 21, autorun-turns 9, background-turns 26, consults 22, group-chats 19, group-chats-autorun 5, server 23, server-requests 34, server-group-chat 7, server-frames 17, data-dir-lock 23, lock 24, processes 9, providers 7, git 4, local-documents 6, settings-watch 11, system-prompts 5) all passed; no suite of this group reaches a still-unmerged file",
+				"typeCheck": "a throwaway tsconfig extending the worktree tsconfig.cli.json over the two files alone (Working/mcomp-01-03/tsconfig-03h.json, not in git; types: [node]): no error in turns.ts or turns.test.ts; one TS2339 in launch/interactive-mode.ts:553 (process.resourcesPath, an Electron-typed property) that is the throwaway config missing the Electron types, present identically on the base (515), the integration side and upstream, outside this task; MCOMP-01-03Q checks the real configs",
+				"numstatVsHead": {
+					"src/shared/maestro-lib/runtime/turns.ts": "4+/0- (upstream folder-trust opt-in)",
+					"src/shared/maestro-lib/runtime/__tests__/turns.test.ts": "15+/1- (upstream turnOptions capture and its case)"
+				},
+				"numstatVsMergeHead": {
+					"src/shared/maestro-lib/runtime/turns.ts": "500+/40- (the integration standing, dequeue admission and managed envelope)",
+					"src/shared/maestro-lib/runtime/__tests__/turns.test.ts": "700+/12- (the integration managed and standing cases)"
+				}
+			},
+			"semanticConflictsForQ": [],
+			"followUpsForR": [],
+			"observations": [
+				"the throwaway per-task tsconfig pattern (types: [node]) reports process.resourcesPath in launch/interactive-mode.ts as TS2339 whenever a file reaches it; the real configs carry the Electron types, so it is a harness artifact, not a defect"
+			],
+			"unmergedAfter": 22,
+			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03h.mjs (not in git)"
 		}
 	}
 }
