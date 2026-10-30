@@ -595,8 +595,10 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		fence,
 		rules: deps.rules,
 		autoRunHolds: (agentId) => autoRun.holds(agentId),
-		// Every plain send is admitted on the binding's standing: an enrolled runtime queues
-		// nothing without a dispatch, a standalone one queues as before.
+		// Every send and every dequeue is admitted on the host's standing (MRC3-01-01, MCOMP-09-01):
+		// an enrolled runtime queues nothing without a dispatch and starts a queued item only once
+		// the live port has re-authorized it; a standalone one queues as before. The port is rebuilt
+		// on every read, so an enrollment that landed while an item waited counts at its start.
 		standing: {
 			port: backgroundSpawnPort,
 			journal: () => (journalLoaded.ok ? journal : null),

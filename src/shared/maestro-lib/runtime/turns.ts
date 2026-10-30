@@ -38,6 +38,18 @@
  *   started, and the provider layer refuses the same on its own (`standing: 'enrolled'`). A
  *   managed item whose attempt went terminal at its start is dropped too, with the attempt
  *   journaled, so no held copy can be resumed into a second dispatch of one attempt.
+ * - **The standing is the host's, never the caller's** (MCOMP-09-01). `standing` is required: the
+ *   turn service reads the host's live port at every submit and every dequeue, and nothing an item
+ *   carries or an API the caller picked (`send`, the facade's `sendManaged`) lowers what it says.
+ *   On an enrolled binding a managed item is re-authorized at the dequeue before anything is read
+ *   for the turn: the port must answer, the authority answering now must be the one that minted
+ *   the dispatch, and the agent must still run the provider the submission named; the spawn is then
+ *   admitted with the live authority on the policy of this moment, under the dispatch's own identity
+ *   (run, attempt, actor), so a collision retry keeps the one logical run and the journal names what
+ *   ran. An item that fails that check is dropped with its attempt journaled as failed. A queue edit
+ *   that withdraws a managed item (`queue.remove`, a closed tab, a removed agent, a peer's cancel)
+ *   journals the attempt cancelled, so no attempt is left submitted with nothing to run it. Reads
+ *   (`queue.list`, `subscribe`, `interrupt`) need no admission: they cause no effect.
  *
  * The queue is in memory. A host that exits drops what was waiting; a turn that was running is
  * stopped and recorded as interrupted (`stopAll`), which is what the person asked for by quitting.
@@ -142,11 +154,11 @@ export interface RuntimeTurnDeps {
 }
 
 /**
- * The standing every plain submission is admitted on (MRC3-01-01). The port is the headless spawn
- * authority over the binding and the attached host, the one the background turns admit with,
- * built on every call so an enrollment that appeared, lapsed or changed hands applies to the next
- * send. Absent (a host composed with no binding, a test over the queue alone): every send is
- * standalone, which is what no binding means.
+ * The standing every submission and every dequeue is admitted on (MRC3-01-01, MCOMP-09-01). The port
+ * is the headless spawn authority over the binding and the attached host, the one the background
+ * turns admit with, built on every call so an enrollment that appeared, lapsed or changed hands
+ * applies to the next send and the next start. A host with no binding reads `standalone` from the
+ * binding's own port; the turn service never assumes it.
  */
 export interface RuntimeTurnStanding {
 	port(): Pick<
@@ -168,8 +180,8 @@ export interface RuntimeTurnsOptions {
 	rules?: Partial<RuleContext>;
 	/** Does an Auto Run hold this agent's working tree? A write message then waits for the run (AE17). */
 	autoRunHolds?(agentId: string): boolean;
-	/** The binding's standing a plain send is admitted on. Absent: standalone. */
-	standing?: RuntimeTurnStanding;
+	/** The host's standing every send and every dequeue is admitted on. Required (MCOMP-09-01). */
+	standing: RuntimeTurnStanding;
 	options?: RuntimeTurnOptions;
 	deps?: Partial<RuntimeTurnDeps>;
 }
@@ -198,6 +210,14 @@ interface TurnItem extends QueueItem {
 	/** Set on a managed item: the authority admits it at the spawn, the journal records it. */
 	managed?: ManagedDispatch;
 }
+
+type ManagedRefusalReason = Extract<
+	RunAgentTurnRefusal,
+	'managed-denied' | 'managed-unavailable' | 'managed-unknown'
+>;
+
+/** The live port, as the turn service reads it. */
+type StandingPort = ReturnType<RuntimeTurnStanding['port']>;
 
 type Verdict =
 	| { ok: true }
@@ -287,8 +307,64 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 	// Starting one turn (the queue's `start`)
 	// -----------------------------------------------------------------------
 
-	/** Is the binding enrolled right now? Read at every dequeue, so an enrollment that landed while an item waited counts. */
-	const enrolledStanding = (): boolean => options.standing?.port().standing() === 'managed';
+	/**
+	 * The dispatch a dequeued item runs under, decided on the host's live standing (MRC3-01-02,
+	 * MCOMP-09-01), never on the item alone. Standalone with no dispatch: none. Enrolled with no
+	 * dispatch: refused and nothing journaled, since no attempt exists to record. Enrolled with a
+	 * dispatch: the port must answer, the authority answering now must be the one that minted the
+	 * dispatch, and the agent must still run the provider the submission named; the dispatch then
+	 * carries the live authority and the policy of this moment under the identity the journal knows
+	 * (run, attempt, actor, trace), so the one logical run is admitted on what holds now. A dispatch
+	 * refused here is journaled as a failed attempt, and the item is dropped. Standalone with a
+	 * dispatch (a managed submission on a host whose injected authority stands in for an enrollment)
+	 * runs as it was minted.
+	 */
+	async function admitDequeue(
+		port: StandingPort,
+		enrolled: boolean,
+		item: TurnItem,
+		providerNow: string
+	): Promise<ManagedDispatch | undefined> {
+		const managed = item.managed;
+		if (!managed) {
+			if (!enrolled) return undefined;
+			throw new TurnStartRefusal(
+				'managed-unavailable',
+				'This installation is enrolled and the queued message carries no managed dispatch (it was queued before the enrollment, or by an older process), so it was dropped rather than started; send it again.'
+			);
+		}
+		if (!enrolled) return managed;
+		const refuse = async (
+			message: string,
+			reason: ManagedRefusalReason = 'managed-unavailable'
+		): Promise<never> => {
+			await managed.journal
+				.markTerminal(managed.runId, managed.attemptId, {
+					outcome: 'failed',
+					detail: `${reason}: ${message}`,
+				})
+				.catch((error) =>
+					logger.warn(`The run journal was not written: ${errorText(error)}`, LOG_CONTEXT)
+				);
+			throw new TurnStartRefusal(reason, message);
+		};
+		if (port.unavailableReason !== null) {
+			return refuse(
+				`This installation is enrolled and no authority answers for it now, so the queued message was dropped rather than started: ${port.unavailableReason}`
+			);
+		}
+		if (port.authority.authorityId !== managed.authority.authorityId) {
+			return refuse(
+				`The queued message was admitted by authority ${managed.authority.authorityId}, and ${port.authority.authorityId} answers for this installation now, so it was dropped rather than started; send it again.`
+			);
+		}
+		if (item.settingsProvider !== providerNow) {
+			return refuse(
+				`The queued message was admitted for provider ${item.settingsProvider}, and the agent runs ${providerNow} now, so it was dropped rather than started; send it again.`
+			);
+		}
+		return { ...managed, authority: port.authority, policy: port.policy() };
+	}
 
 	async function startItem(agentId: string, item: TurnItem): Promise<QueuedTurnHandle> {
 		const record = repository.getAgent(agentId);
@@ -298,17 +374,12 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		// The tab's previous process has not gone yet: a timing collision, not a verdict on the item.
 		if (registry.isBusy(agentId, item.tabId)) throw new TurnCollisionError();
 
-		// The dequeue admission (MRC3-01-02), before anything is read for the turn: on an enrolled
-		// binding an item with no dispatch is refused and dropped, never started, and nothing is
-		// journaled, since no attempt exists to record. A standalone binding reads nothing here.
-		const enrolled = enrolledStanding();
-		const managed = item.managed;
-		if (enrolled && !managed) {
-			throw new TurnStartRefusal(
-				'managed-unavailable',
-				'This installation is enrolled and the queued message carries no managed dispatch (it was queued before the enrollment, or by an older process), so it was dropped rather than started; send it again.'
-			);
-		}
+		// The dequeue admission (MRC3-01-02, MCOMP-09-01), before anything is read for the turn: the
+		// host's live standing decides what this item runs under, never the item alone. A standalone
+		// binding with a plain item reads nothing here.
+		const port = options.standing.port();
+		const enrolled = port.standing() === 'managed';
+		const managed = await admitDequeue(port, enrolled, item, record.toolType);
 
 		const agent = toTurnAgent(record);
 		if (!agent) throw new Error('The agent has no working directory to run in.');
@@ -657,6 +728,27 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		}
 	}
 
+	/**
+	 * Take a waiting item out, and write down why when it was a managed attempt (MCOMP-09-01): the
+	 * journal must not keep an attempt submitted with nothing left to run it. False when the item is
+	 * not waiting (it may already be running).
+	 */
+	async function withdrawWaiting(
+		queue: ExecutionQueue<TurnItem>,
+		item: TurnItem,
+		detail: string
+	): Promise<boolean> {
+		if (!queue.remove(item.id)) return false;
+		if (item.managed) {
+			await item.managed.journal
+				.markTerminal(item.managed.runId, item.managed.attemptId, { outcome: 'cancelled', detail })
+				.catch((error) =>
+					logger.warn(`The run journal was not written: ${errorText(error)}`, LOG_CONTEXT)
+				);
+		}
+		return true;
+	}
+
 	function queueFor(agentId: string): ExecutionQueue<TurnItem> {
 		let queue = queues.get(agentId);
 		if (!queue) {
@@ -677,12 +769,17 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		(event) => {
 			if (event.type === 'agent.removed') {
 				const queue = queues.get(event.agentId);
+				for (const item of queue?.items() ?? []) {
+					void withdrawWaiting(queue!, item, 'The agent was removed before it was dispatched.');
+				}
 				queue?.dispose();
 				queues.delete(event.agentId);
 			} else if (event.type === 'tab.removed') {
 				const queue = queues.get(event.agentId);
 				for (const item of queue?.items() ?? []) {
-					if (item.tabId === event.tabId) queue?.remove(item.id);
+					if (item.tabId === event.tabId) {
+						void withdrawWaiting(queue!, item, 'The tab was closed before it was dispatched.');
+					}
 				}
 			}
 		},
@@ -692,11 +789,6 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 	// -----------------------------------------------------------------------
 	// The API
 	// -----------------------------------------------------------------------
-
-	type ManagedRefusalReason = Extract<
-		RunAgentTurnRefusal,
-		'managed-denied' | 'managed-unavailable' | 'managed-unknown'
-	>;
 
 	type Submission =
 		| { status: 'queued'; receipt: Extract<TurnSendReceipt, { status: 'queued' }> }
@@ -950,11 +1042,14 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		async cancelRun(runId, kind) {
 			for (const queue of queues.values()) {
 				const waiting = queue.items().find((item) => item.managed?.runId === runId);
-				if (waiting?.managed && queue.remove(waiting.id)) {
-					await waiting.managed.journal.markTerminal(runId, waiting.managed.attemptId, {
-						outcome: 'cancelled',
-						detail: 'Removed from the queue before it was dispatched.',
-					});
+				if (
+					waiting &&
+					(await withdrawWaiting(
+						queue,
+						waiting,
+						'Removed from the queue before it was dispatched.'
+					))
+				) {
 					return 'dequeued';
 				}
 			}
@@ -997,7 +1092,17 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 				if (!repository.getAgent(agentId)) {
 					return fail('turns.queue.remove', 'not-found', `No agent ${agentId}.`);
 				}
-				return ok({ removed: queues.get(agentId)?.remove(itemId) ?? false });
+				const queue = queues.get(agentId);
+				const waiting = queue?.items().find((item) => item.id === itemId);
+				const removed =
+					queue && waiting
+						? await withdrawWaiting(
+								queue,
+								waiting,
+								'Removed from the queue by a client before it was dispatched.'
+							)
+						: false;
+				return ok({ removed });
 			},
 		},
 
