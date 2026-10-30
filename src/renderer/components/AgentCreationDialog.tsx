@@ -116,6 +116,7 @@ export function AgentCreationDialog({
 	const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
 	const [sessionName, setSessionName] = useState('');
 	const [workingDirectory, setWorkingDirectory] = useState('');
+	const workingDirectoryRevisionRef = useRef(0);
 	const [isCreating, setIsCreating] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	const [refreshingAgent, setRefreshingAgent] = useState<string | null>(null);
@@ -187,6 +188,7 @@ export function AgentCreationDialog({
 	// Reset all state when dialog opens
 	useEffect(() => {
 		let stale = false;
+		const directoryRevision = ++workingDirectoryRevisionRef.current;
 		if (isOpen) {
 			setWorkingDirectory('');
 			// Reset error state
@@ -203,11 +205,11 @@ export function AgentCreationDialog({
 				window.maestro.fs
 					.homeDir()
 					.then((homeDir) => {
-						if (stale) return;
+						if (stale || workingDirectoryRevisionRef.current !== directoryRevision) return;
 						setWorkingDirectory(`${homeDir}/Maestro-Symphony/${dirName}`);
 					})
 					.catch(() => {
-						if (stale) return;
+						if (stale || workingDirectoryRevisionRef.current !== directoryRevision) return;
 						// Fallback to tilde (will be expanded in process-manager)
 						setWorkingDirectory(`~/Maestro-Symphony/${dirName}`);
 					});
@@ -215,6 +217,7 @@ export function AgentCreationDialog({
 		}
 		return () => {
 			stale = true;
+			workingDirectoryRevisionRef.current++;
 		};
 	}, [isOpen, repo, issue]);
 
@@ -313,8 +316,10 @@ export function AgentCreationDialog({
 
 	// Handle folder selection
 	const handleSelectFolder = useCallback(async () => {
+		const directoryRevision = workingDirectoryRevisionRef.current;
 		const folder = await window.maestro.dialog.selectFolder();
-		if (folder) {
+		if (folder && workingDirectoryRevisionRef.current === directoryRevision) {
+			workingDirectoryRevisionRef.current++;
 			setWorkingDirectory(folder);
 		}
 	}, []);
@@ -730,7 +735,11 @@ export function AgentCreationDialog({
 							<input
 								type="text"
 								value={workingDirectory}
-								onChange={(e) => setWorkingDirectory(e.target.value)}
+								onChange={(e) => {
+									// Even a cleared draft belongs to the user, not the pending home lookup.
+									workingDirectoryRevisionRef.current++;
+									setWorkingDirectory(e.target.value);
+								}}
 								className="flex-1 px-3 py-2 rounded border bg-transparent outline-none text-sm focus:ring-1"
 								style={{ borderColor: theme.colors.border, color: theme.colors.textMain }}
 								placeholder="~/Maestro-Symphony/owner-repo"
