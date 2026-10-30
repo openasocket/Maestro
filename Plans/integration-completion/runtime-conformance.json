@@ -8,33 +8,33 @@
 		"archiveFormatVersion": 2,
 		"archive": {
 			"file": "runtime.tgz",
-			"sha256": "759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e",
-			"sha512": "106b2be395da76e69a7674891e725caf8d0289ff7e9681f118b62f4bd31c39a93a172b5f8d9e26b106144edf9963f185375929d8d92c7ac9b3adbc4d50b05ad2",
-			"bytes": 2444724
+			"sha256": "dfbe9cfc136dc27e54a62ee506c096964ca73f63678c3c3b4bb3dec8060f98b6",
+			"sha512": "24219ee2dbdc3aef2749d1f27d6bc072f9ffe4cd9f31bacf6fdfbafe9120908f5e56e7a429d132ecc58b67ea4acabd0b67d75e5253f869bde1f796c66953052f",
+			"bytes": 2455994
 		},
-		"manifestSha256": "a6d2fbae560a32f718b50c73248e8623835e89ead7c72a030301677e6562f464",
-		"payloadDigest": "92182876f557f645a01b9748ff6da5057e1cec75f14d88cec6786d95cce276c9",
+		"manifestSha256": "92840b908b5245016e0e722bdbd460dc05d97e951ca94f349aa576556826ca5c",
+		"payloadDigest": "cbc7c552dd26c64be4505bc1490e839f6ee324c6aef4bd62072eebc8843c7fd9",
 		"payloadFiles": 298,
 		"versions": {
 			"app": "1.1.0-RC",
-			"library": "0.32.0",
+			"library": "0.33.0",
 			"managedContract": "maestro-managed/1",
 			"endpointProtocol": 1
 		},
 		"implementation": {
 			"rules": "maestro-implementation-tree/1",
-			"digest": "75805d4299b1e56fb7ceaf424d54fb4eed8fefeb68b470d3ed5cada882335844",
-			"commit": "35266afc2ab2ea0b3ff278de1998d150f4ba9d13",
+			"digest": "e154c712ec77d104b729fb49e3e8d8e4aae06411b41168fe7a91916912ef4e0d",
+			"commit": "7c8e0368827249c6c4e56d8f541eecf7045bcd0a",
 			"fileCount": 6587
 		},
 		"library": {
-			"sourceRevision": "955fd7b4d4fd34ad35df4c00ba60c40c8100bb19",
-			"inputSha256": "fd606bdab76b61c5ff7ccf6ea7d26da89d46c5fe49de93a3ae1b6044a2cebde1",
+			"sourceRevision": "7c8e0368827249c6c4e56d8f541eecf7045bcd0a",
+			"inputSha256": "cfc1e76289766ecf85f1522030e9e739a5db311959105d6a025067e4f4a746eb",
 			"inputFiles": 323,
-			"entrySha256": "b21f1f7d39675d39e8cc2b7468caa7d5a4cfd04b31aa09d64351900f73164f0d"
+			"entrySha256": "7885d7f0f58c12f460ec1e76964c3aef03c5494354f4b9ce4a26032efd4d20c1"
 		},
 		"location": {
-			"directory": "dist/mega-maestro-runtime/0.32.0/759b947aaf546631e573642e5a9c8450adafa74a239e42741766cc1acef05a3e",
+			"directory": "dist/mega-maestro-runtime/0.33.0/dfbe9cfc136dc27e54a62ee506c096964ca73f63678c3c3b4bb3dec8060f98b6",
 			"rule": "obtain the archive by archive.sha256 and verify the sidecar and sha512; the directory is where the packager lands it"
 		},
 		"receipts": {
