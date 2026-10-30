@@ -98,6 +98,54 @@ Key responsibilities:
 - Handles stdin writing: SSH script, raw prompt, stream-json message, or close for batch
 - Windows-specific: auto-enables shell for `.exe` basenames and shell scripts, escapes args for cmd.exe or PowerShell
 
+### Shared turn cleanup and provider probes
+
+Use `startTurn()` in `src/shared/maestro-lib/run/start-turn.ts` for agent turns
+and `runProviderProbe()` in `src/main/agents/provider-probe.ts` for exec-style
+provider discovery. `startTurn` and managed/controlled probe turns use the
+canonical `stopProcess()` ladder. A probe that owns a separate transport uses
+`admitProviderProbe()` and hands the returned spec and admission unchanged to
+`startTurn()`.
+
+`startTurn` supports opt-in `trackDescendants: true`. The canonical
+`trackProcessTree(child)` observes owned POSIX descendants from spawn through
+pipe close, preserving recorded children after their parent exits. It verifies
+the root PID/start time before following new children and each recorded
+survivor before signaling. A reused PID must not become a new root; a legacy
+snapshot without root identity can follow only recorded descendants. Missing
+ownership and Windows provide no tracker. The tracker merges pending reads with
+the stop snapshot, avoids duplicate timers and joins the last observation/sweep
+before admission release. Normal trailing output still drains on `close`, and
+release occurs once. A post-spawn signal error requests stopping while retaining
+ownership; it is not treated as a failed spawn.
+
+Eligible probes with `limits` or `signal` opt into that tracking alongside the
+existing abort signal. Admission precedes the process budget. Output limits
+count combined UTF-8 stdout/stderr, and controlled failures discard partial
+output and use fixed diagnostics. Cancellation before admission starts nothing;
+cancellation while admission is pending releases any resulting lease without
+spawning. A synchronous sink/spawn failure releases through the probe owner;
+a started turn releases through `startTurn`. Unrelated calls without controls
+retain their legacy standalone `execFileNoThrow` or managed admission path and
+do not opt into continuous tracking.
+
+Observation does **not** prove finite lifetime containment. A rapid fork/exit
+can occur between snapshots, tools can leave process groups, and Windows
+`taskkill /t` cannot recover an exited parent's orphan. The 5,000 ms taskkill
+and 2,000 ms asynchronous process-table helper timeouts bound those helpers,
+not every descendant's lifetime. Do not race completion against a timeout,
+destroy inherited pipes, claim group ownership, or add another runner.
+
+Grok exec discovery requires a guaranteed deadline. No proven host containment
+mechanism is available on this route, so `runProviderProbe` returns explicit
+unavailability by throwing a fixed `DispatchRefusedError` with state
+`unavailable` and code `runtime-unavailable`, before admission or spawn. This
+also applies when a caller omits limits; invalid limits are rejected first and
+pre-aborted requests still return cancellation. No lease is acquired and no
+unmanaged/unbounded retry runs. The detector maps the refusal to `EREFUSED` and
+preserves the selected configured model. Native containment and end-to-end
+deadline qualification remain blocked; the observation option is no substitute.
+
 ### Handler Classes
 
 **DataBufferManager** (`handlers/DataBufferManager.ts`):

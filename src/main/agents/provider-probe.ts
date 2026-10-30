@@ -14,8 +14,11 @@
  * skill probe speaks JSON-RPC to `codex app-server`, MRC2-02-04 / MRC2-03-04A).
  * A standalone host (no `managed`, or a port whose standing is `standalone`)
  * runs `execFileNoThrow` exactly as before unless the caller requests limits or
- * cancellation; those probes use the same `startTurn` lifecycle as admitted
- * probes. A managed host admits the probe before any process:
+ * cancellation; eligible probes use the same `startTurn` lifecycle as admitted
+ * probes, with opt-in observed-descendant cleanup. Grok exec discovery requires
+ * proven finite lifetime containment, which this host route does not provide;
+ * it refuses before admission or spawn, even if a caller omits limits. A managed
+ * host admits an eligible probe before any process:
  *
  *   1. a refusal remembered for this authority, policy revision, provider,
  *      actor, probe and directory is answered without asking again;
@@ -32,10 +35,11 @@
  *      spawn (`admitProbeTurn`, `purpose: probe`), re-checked at the sink,
  *      bound to the pid and released with the exit.
  *
- * Every refusal is remembered (`createProbeRefusalCache`) so a surface that
- * probes on every agent start does not ask the authority again for the same
- * answer, and thrown as a `DispatchRefusedError` with the authority's state
- * and code. Nothing falls back to an unmanaged spawn.
+ * Managed admission refusals are remembered (`createProbeRefusalCache`) so a
+ * surface that probes on every agent start does not ask the authority again for
+ * the same answer, and thrown as a `DispatchRefusedError` with its state and code.
+ * The fixed containment refusal needs no authority lookup or cache. Nothing
+ * falls back to an unmanaged spawn.
  */
 
 import { execFileNoThrow, type ExecResult } from '../utils/execFile';
@@ -116,7 +120,11 @@ export interface ProviderProbeRequest {
 	cwd?: string;
 	/** The full environment for the probe; the process's own when absent. */
 	env?: NodeJS.ProcessEnv;
-	/** Opt-in process limits; admission must settle before the process budget starts. */
+	/**
+	 * Opt-in process limits; admission must settle before the process budget starts.
+	 * These trigger stopping, not a guaranteed completion deadline: observed-tree
+	 * cleanup cannot contain unobserved forks or Windows orphans.
+	 */
 	limits?: {
 		/** Absolute run budget in milliseconds, never extended by output. */
 		timeoutMs: number;
@@ -366,7 +374,7 @@ async function startedProbe(
 				},
 				{
 					admission,
-					...(controlled ? { signal: controller.signal } : {}),
+					...(controlled ? { signal: controller.signal, trackDescendants: true } : {}),
 					stopGraceMs: 250,
 					stdoutTailLimit: 0,
 					stderrTailLimit: 0,
@@ -390,8 +398,9 @@ async function startedProbe(
 			}
 			throw error;
 		}
-		// Never settle by racing a timer: the shared ladder owns termination and
-		// descendant cleanup, and startTurn releases the lease when the turn ends.
+		// Never settle by racing a timer: startTurn drains the pipes and joins
+		// observed-descendant cleanup before releasing the lease. Observation is
+		// not containment, so this is not a strict total-completion guarantee.
 		const exit = await turn.done;
 		if (failure) return failure;
 		if (controlled) {
@@ -423,7 +432,11 @@ async function startedProbe(
  * refusal is thrown as a `DispatchRefusedError` naming the authority's state
  * and code, nothing was started, and the caller decides what to answer in
  * its place. It never spawns unmanaged. Opt-in limits/cancellation use that same
- * lifecycle on standalone hosts, with sanitized failures and no partial output.
+ * lifecycle on standalone hosts, with observed-descendant cleanup, sanitized
+ * failures and no partial output. Grok exec probes are unavailable before any
+ * admission or spawn until this route has proven host lifetime containment;
+ * omitting limits does not allow an unbounded retry. Its callers retain their
+ * configured fallback instead of treating this refusal as an empty catalog.
  */
 export async function runProviderProbe(
 	request: ProviderProbeRequest,
@@ -444,6 +457,17 @@ export async function runProviderProbe(
 	}
 	if (request.signal?.aborted) {
 		return { stdout: '', stderr: 'Provider probe canceled.', exitCode: 'ECANCELED' };
+	}
+	// Polling can miss a rapid fork/exit; taskkill cannot recover the children
+	// of an exited Windows parent. No proven host containment is available on
+	// this route, so a Grok discovery deadline cannot be honored after spawning.
+	// Refuse before acquiring a lease, with no request data in the diagnostic.
+	if (request.providerId === 'grok') {
+		throw new DispatchRefusedError(
+			'unavailable',
+			'runtime-unavailable',
+			'Grok discovery unavailable: this host cannot guarantee finite probe lifetime. Nothing was started.'
+		);
 	}
 	if (request.limits || request.signal || (managed && managed.port.standing() !== 'standalone')) {
 		return startedProbe(request, managed);
