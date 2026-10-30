@@ -21,11 +21,182 @@
  * - that would break the exhaustiveness this test protects.
  */
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
+
+// Install before importing storage: a beforeAll mock is too late for transitive
+// module initialization. MAESTRO_USER_DATA does not relocate electron-store's
+// plain-Node preferences fallback. No fixture files or operator stores are needed.
+const isolation = await vi.hoisted(async () => {
+	const { createRequire, syncBuiltinESMExports } = await import('node:module');
+	const { fileURLToPath } = await import('node:url');
+	const path = await import('node:path');
+	const { isPathAtOrUnderRoot, normalizeWorktreePath } =
+		await import('../../../shared/worktreePaths');
+	const require = createRequire(import.meta.url);
+	// Guard the actual CommonJS objects too. vi.mock('fs') alone cannot intercept
+	// electron-store -> conf -> require('fs'). Never import the real store unguarded.
+	const fs: typeof import('node:fs') = require('node:fs');
+	const root = fileURLToPath(new URL('../../../../', import.meta.url));
+	const userData = path.join(root, 'tmp', 'agent-completeness-unused-user-data');
+	// Compute only the path, never stat/read it. Even a shell redirecting XDG or
+	// APPDATA into the checkout must not make preferences a permitted module read.
+	// In plain Node, conf infers the project from its caller (electron-store).
+	const storeProject = require('electron-store/package.json').name;
+	const preferences = normalizeWorktreePath(
+		path.resolve(require('env-paths')(storeProject).config)
+	);
+	vi.stubEnv('MAESTRO_USER_DATA', userData);
+	const blocked: Array<{ operation: string; path: string | undefined }> = [];
+	const message = 'Agent completeness attempted filesystem access outside its in-memory fixture';
+	const restores: Array<() => void> = [];
+
+	// Only module-loading reads may reach disk. Registration has no reason to
+	// read transcripts, preferences, caches or even the synthetic user-data root.
+	function guard(target: object, operations: readonly string[], moduleReads = false): void {
+		for (const operation of operations) {
+			const original = Reflect.get(target, operation);
+			if (typeof original !== 'function') continue;
+			const spy = vi.spyOn(target as Record<string, (...args: unknown[]) => unknown>, operation);
+			spy.mockImplementation((...args: unknown[]) => {
+				const input = args[0];
+				const file =
+					input instanceof URL
+						? fileURLToPath(input)
+						: typeof input === 'string' || Buffer.isBuffer(input)
+							? path.resolve(input.toString())
+							: undefined;
+				const options = args[1];
+				const flags = operation.startsWith('open')
+					? options
+					: options && typeof options === 'object'
+						? Reflect.get(options, operation === 'createReadStream' ? 'flags' : 'flag')
+						: undefined;
+				if (
+					moduleReads &&
+					(flags === undefined ||
+						flags === 'r' ||
+						flags === 'rs' ||
+						flags === fs.constants.O_RDONLY) &&
+					file &&
+					!isPathAtOrUnderRoot(normalizeWorktreePath(file), preferences) &&
+					(file === path.join(root, 'package.json') ||
+						['src', 'node_modules'].some((dir) =>
+							isPathAtOrUnderRoot(
+								normalizeWorktreePath(file),
+								normalizeWorktreePath(path.join(root, dir))
+							)
+						))
+				) {
+					return Reflect.apply(original, target, args);
+				}
+				blocked.push({ operation, path: file });
+				// Not ENOENT: conf treats that as permission to write defaults.
+				throw new Error(message);
+			});
+			restores.push(() => spy.mockRestore());
+		}
+	}
+	guard(
+		fs,
+		[
+			'readFileSync',
+			'readFile',
+			'readdirSync',
+			'readdir',
+			'accessSync',
+			'access',
+			'existsSync',
+			'statSync',
+			'stat',
+			'lstatSync',
+			'lstat',
+			'createReadStream',
+			'open',
+			'openSync',
+		],
+		true
+	);
+	guard(fs.promises, ['readFile', 'readdir', 'access', 'stat', 'lstat', 'open'], true);
+	const mutations = [
+		'writeFile',
+		'appendFile',
+		'mkdir',
+		'mkdtemp',
+		'rm',
+		'rmdir',
+		'unlink',
+		'rename',
+		'copyFile',
+		'cp',
+		'symlink',
+		'link',
+		'truncate',
+		'chmod',
+		'chown',
+		'utimes',
+	];
+	guard(fs, [...mutations, ...mutations.map((name) => `${name}Sync`), 'createWriteStream']);
+	guard(fs.promises, mutations);
+	syncBuiltinESMExports();
+
+	// Reuse the in-memory get/set/store pattern from claude-session-storage.test.
+	// Each constructor owns its defaults, so accidental extra stores are observable.
+	const stores: Array<{
+		options: { name: string; defaults: Record<string, unknown> };
+		store: Record<string, unknown>;
+		get: ReturnType<typeof vi.fn>;
+		set: ReturnType<typeof vi.fn>;
+	}> = [];
+	const Store = vi.fn(function (options: { name: string; defaults: Record<string, unknown> }) {
+		const store = structuredClone(options.defaults);
+		const instance = {
+			options,
+			store,
+			get: vi.fn((key: string, fallback?: unknown) => store[key] ?? fallback),
+			set: vi.fn((key: string, value: unknown) => {
+				store[key] = value;
+			}),
+		};
+		stores.push(instance);
+		return instance;
+	});
+	return {
+		Store,
+		stores,
+		blocked,
+		message,
+		userData,
+		fs,
+		require,
+		restore: () => {
+			for (const restore of restores.reverse()) restore();
+			syncBuiltinESMExports();
+			vi.unstubAllEnvs();
+		},
+	};
+});
+
+vi.mock('electron-store', () => ({ default: isolation.Store }));
+
+import path from 'node:path';
+import { readFileSync } from 'node:fs';
+import fsPromises from 'node:fs/promises';
+import { pathToFileURL } from 'node:url';
 import { AGENT_DEFINITIONS, AGENT_CAPABILITIES, getAgentCapabilities } from '../../../main/agents';
 import { initializeOutputParsers, getOutputParser, getErrorPatterns } from '../../../main/parsers';
 import { getSessionStorage, clearStorageRegistry } from '../../../main/agents/session-storage';
-import { initializeSessionStorages } from '../../../main/storage';
+import {
+	initializeSessionStorages,
+	ClaudeSessionStorage,
+	CodexSessionStorage,
+	OpenCodeSessionStorage,
+	FactoryDroidSessionStorage,
+	CopilotSessionStorage,
+	OmpSessionStorage,
+	GrokSessionStorage,
+	AntigravitySessionStorage,
+} from '../../../main/storage';
+import { resolveUserDataDir } from '../../../shared/userDataDir';
 import { AGENT_IDS } from '../../../shared/agentIds';
 import { GROK_DIRECTORY_GRANT_SUPPORT } from '../../../shared/maestro-lib/providers/capabilities';
 import {
@@ -41,6 +212,123 @@ beforeAll(() => {
 	initializeOutputParsers();
 	clearStorageRegistry();
 	initializeSessionStorages();
+	// A swallowed access error must fail too, including one during module import.
+	expect(isolation.blocked.map(({ operation }) => operation)).toEqual([]);
+	expect(isolation.Store).toHaveBeenCalledExactlyOnceWith({
+		name: 'claude-session-origins',
+		defaults: { origins: {} },
+	});
+});
+
+afterAll(() => {
+	clearStorageRegistry();
+	isolation.restore();
+});
+
+afterEach(() => {
+	// Negative controls drain only their own expected refusals in finally blocks.
+	expect(isolation.blocked.map(({ operation }) => operation)).toEqual([]);
+});
+
+describe('Agent completeness storage isolation', () => {
+	it('registers every real adapter behind the in-memory store boundary', () => {
+		for (const [id, Adapter] of [
+			['claude-code', ClaudeSessionStorage],
+			['codex', CodexSessionStorage],
+			['opencode', OpenCodeSessionStorage],
+			['factory-droid', FactoryDroidSessionStorage],
+			['copilot-cli', CopilotSessionStorage],
+			['omp', OmpSessionStorage],
+			['grok', GrokSessionStorage],
+			['antigravity', AntigravitySessionStorage],
+		] as const) {
+			expect(getSessionStorage(id)).toBeInstanceOf(Adapter);
+		}
+	});
+
+	it('round-trips origin changes through the real adapter without a disk store', () => {
+		const storage = getSessionStorage('claude-code') as ClaudeSessionStorage;
+		const project = path.join(isolation.userData, 'synthetic-project');
+		storage.registerSessionOrigin(project, 'synthetic-session', 'user');
+		storage.updateSessionName(project, 'synthetic-session', 'Fixture name');
+		expect(storage.getSessionOrigins(project)).toEqual({
+			'synthetic-session': { origin: 'user', sessionName: 'Fixture name' },
+		});
+		expect(isolation.stores).toHaveLength(1);
+		expect(isolation.stores[0].get).toHaveBeenCalled();
+		expect(isolation.stores[0].set).toHaveBeenCalledWith('origins', {
+			[project]: { 'synthetic-session': { origin: 'user', sessionName: 'Fixture name' } },
+		});
+	});
+
+	it('blocks the real Node preferences fallback even with MAESTRO_USER_DATA set', () => {
+		// Bypass only the Store mock, never the underlying filesystem guard. The
+		// real dependency chooses its path; no preferences contents are inspected.
+		const NativeStore = isolation.require('electron-store');
+		const envPaths = isolation.require('env-paths');
+		expect(isolation.require('electron').app).toBeUndefined();
+		expect(resolveUserDataDir()).toBe(isolation.userData);
+		const fallback = path.resolve(
+			envPaths(isolation.require('electron-store/package.json').name).config,
+			'claude-session-origins.json'
+		);
+		expect(fallback).not.toBe(path.join(isolation.userData, 'claude-session-origins.json'));
+		try {
+			expect(
+				() =>
+					new NativeStore({
+						name: 'claude-session-origins',
+						defaults: { origins: {} },
+					})
+			).toThrow(isolation.message);
+			expect(isolation.blocked).toEqual([{ operation: 'readFileSync', path: fallback }]);
+		} finally {
+			isolation.blocked.length = 0;
+		}
+	});
+
+	it.each(['string', 'buffer', 'url'] as const)(
+		'refuses %s paths before reading preferences',
+		(kind) => {
+			const file = path.join(isolation.userData, 'claude-session-origins.json');
+			const input =
+				kind === 'buffer' ? Buffer.from(file) : kind === 'url' ? pathToFileURL(file) : file;
+			try {
+				expect(() => readFileSync(input)).toThrow(isolation.message);
+				expect(isolation.blocked).toEqual([{ operation: 'readFileSync', path: file }]);
+			} finally {
+				isolation.blocked.length = 0;
+			}
+		}
+	);
+
+	it('refuses synchronous and promise reads/writes and directory creation', async () => {
+		const file = path.join(isolation.userData, 'maestro-settings.json');
+		try {
+			expect(() => isolation.fs.writeFileSync(file, '{}')).toThrow(isolation.message);
+			expect(() => isolation.fs.mkdirSync(isolation.userData, { recursive: true })).toThrow(
+				isolation.message
+			);
+			await expect(Promise.resolve().then(() => fsPromises.readFile(file))).rejects.toThrow(
+				isolation.message
+			);
+			await expect(Promise.resolve().then(() => fsPromises.writeFile(file, '{}'))).rejects.toThrow(
+				isolation.message
+			);
+			await expect(
+				Promise.resolve().then(() => fsPromises.mkdir(isolation.userData))
+			).rejects.toThrow(isolation.message);
+			expect(isolation.blocked.map(({ operation }) => operation)).toEqual([
+				'writeFileSync',
+				'mkdirSync',
+				'readFile',
+				'writeFile',
+				'mkdir',
+			]);
+		} finally {
+			isolation.blocked.length = 0;
+		}
+	});
 });
 
 describe('Agent Completeness', () => {
