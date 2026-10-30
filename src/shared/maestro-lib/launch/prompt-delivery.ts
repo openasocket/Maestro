@@ -9,6 +9,9 @@
  * call sites. Every surface now asks here.
  */
 
+import { randomUUID } from 'node:crypto';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { isAbsolutePath } from '../../formatters';
 import type { AgentCapabilities } from '../../types';
 import type { AgentConfig } from '../providers/definitions';
@@ -55,6 +58,26 @@ export function buildPromptArgv(
 export interface PromptFileDestination {
 	path: string;
 	owner: 'local' | 'remote';
+	/** Selected SSH configuration that owns a remote destination. */
+	sshRemoteId?: string;
+}
+
+/**
+ * Choose a name only, without creating anything. Call once per local launch
+ * attempt; an SSH owner must supply its own destination from that host.
+ * Kept separate from the deterministic resolver and content encoder below.
+ */
+export function selectPromptFileDestination(
+	agent: PromptDeliveryAgent | null | undefined,
+	sshRemoteId: string | undefined,
+	destination?: PromptFileDestination
+): PromptFileDestination | undefined {
+	if (!agent?.promptFile || destination || sshRemoteId !== undefined) return destination;
+	const extension = agent.promptFile.format === 'acp-json' ? '.json' : '.txt';
+	return {
+		owner: 'local',
+		path: path.join(os.tmpdir(), `maestro-prompt-${randomUUID()}${extension}`),
+	};
 }
 
 /** Where the user prompt goes. */
@@ -104,6 +127,8 @@ export interface ResolvePromptDeliveryInput {
 	isWindowsHost: boolean;
 	/** The agent runs on an SSH remote. */
 	sshRemote: boolean;
+	/** When resolved, require a destination belonging to this exact SSH target. */
+	sshRemoteId?: string;
 	/** The turn carries images. A file route must receive their embedded bytes. */
 	hasImages?: boolean;
 	/** Ordered, resolved ACP blocks instead of `prompt`, never in addition to it. */
@@ -153,6 +178,8 @@ export function resolvePromptDelivery(input: ResolvePromptDeliveryInput): Prompt
 			!agent.promptFileArgs ||
 			!destination ||
 			destination.owner !== (input.sshRemote ? 'remote' : 'local') ||
+			(input.sshRemoteId !== undefined && destination.sshRemoteId !== input.sshRemoteId) ||
+			(input.sshRemote && !path.posix.isAbsolute(destination.path)) ||
 			!isAbsolutePath(destination.path) ||
 			destination.path.includes('\0') ||
 			!destination.path.endsWith(extension)

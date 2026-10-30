@@ -62,10 +62,12 @@ import {
 } from './env';
 import {
 	resolvePromptDelivery,
+	selectPromptFileDestination,
 	type PromptDelivery,
 	type PromptDeliveryAgent,
 	type PromptFileDestination,
 } from './prompt-delivery';
+import type { AcpPromptBlock, EmbeddedImageSupport } from './image-refs';
 import {
 	resolveSshLaunchTarget,
 	type SshLaunchTarget,
@@ -107,6 +109,10 @@ export interface AgentLaunchInput {
 	/** The user prompt, already final (system prompt embedded if that applies). */
 	prompt?: string;
 	hasImages?: boolean;
+	/** Ordered, resolved content, including composed instructions, instead of prompt text. */
+	promptBlocks?: readonly AcpPromptBlock[];
+	/** Executing host's admission for embedded images on this route/model/turn. */
+	embeddedImageSupport?: EmbeddedImageSupport;
 	/** Fresh executing-host path; the launch owner materializes and cleans the planned artifact. */
 	promptFileDestination?: PromptFileDestination;
 
@@ -509,6 +515,29 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 		target.kind === 'local'
 			? bindTranslationKnowledge(input.prompt, envVars?.[TRANSLATION_KNOWLEDGE_ENV_VAR])
 			: input.prompt;
+	let promptBlocks = input.promptBlocks;
+	if (target.kind === 'local' && knowledgeDirectory && Array.isArray(promptBlocks)) {
+		// Keep ordered content intact, binding staged instructions once to the
+		// first nonempty text block just as the text-only path does. Empty text
+		// retains the canonical binder's no-op behavior; never flatten images.
+		const textIndex = promptBlocks.findIndex(
+			(block) => block?.type === 'text' && typeof block.text === 'string' && block.text.length > 0
+		);
+		if (textIndex < 0 && promptBlocks.some((block) => block?.type === 'image')) {
+			return {
+				ok: false,
+				reason: 'prompt-delivery-refused',
+				error:
+					'Image-only content requires a composed text block for staged translation knowledge.',
+			};
+		}
+		promptBlocks = promptBlocks.map((block, index) =>
+			index === textIndex && block.type === 'text'
+				? { ...block, text: bindTranslationKnowledge(block.text, knowledgeDirectory)! }
+				: block
+		);
+	}
+	const sshRemoteId = target.kind === 'remote' ? target.remote.id : undefined;
 	const prompt = resolvePromptDelivery({
 		agent,
 		prompt: effectivePrompt,
@@ -519,9 +548,15 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 			(input.surface === 'desktop' && (input.isWindowsHost ?? isWindows())) ||
 			input.cmdShellLaunch === true,
 		sshRemote: target.kind === 'remote',
+		sshRemoteId,
 		hasImages: input.hasImages,
+		promptBlocks,
+		embeddedImageSupport: input.embeddedImageSupport,
 		args: launchArgs,
-		promptFileDestination: input.promptFileDestination,
+		promptFileDestination:
+			input.prompt !== undefined || promptBlocks !== undefined || input.hasImages
+				? selectPromptFileDestination(agent, sshRemoteId, input.promptFileDestination)
+				: input.promptFileDestination,
 	});
 	if (prompt.via === 'refused') {
 		return { ok: false, reason: 'prompt-delivery-refused', error: prompt.error };
