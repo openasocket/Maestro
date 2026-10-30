@@ -275,6 +275,13 @@
 			"sourceCommit": "e6b805be85a87f1b0fc567ae5344c0b74b013b78",
 			"provenance": "source-and-task-scope-review",
 			"acceptanceRun": false
+		},
+		"phase02-scoped-discovery": {
+			"path": "Plans/grok-tier1/evidence/02.md#gt1-02-05-scoped-discovery-foundation",
+			"sourceCommit": "db2797d91776c768601e93853fd0209bd88b805d",
+			"sourceRevisionScope": "pre-task HEAD plus the local GT1-02-05 implementation diff identified by source hashes in the evidence",
+			"provenance": "source-and-static-review",
+			"acceptanceRun": false
 		}
 	},
 	"sourceCatalog": {
@@ -1653,8 +1660,28 @@
 				"src/main/agents/capability-snapshot.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-01-04", "GT1-02-05", "GT1-10-06", "GT1-07-01"],
-				"test": ["GT1-02-06", "GT1-10-07", "GT1-07-04"],
+				"implementation": [
+					"GT1-01-04",
+					"GT1-02-05",
+					"GT1-10-06",
+					"GT1-07-01",
+					"GT1-02-05A",
+					"GT1-02-05B",
+					"GT1-02-05B1",
+					"GT1-02-05C",
+					"GT1-02-05D",
+					"GT1-02-05E",
+					"GT1-02-05F"
+				],
+				"test": [
+					"GT1-02-06",
+					"GT1-10-07",
+					"GT1-07-04",
+					"GT1-02-05G",
+					"GT1-02-05H",
+					"GT1-02-05I",
+					"GT1-02-05J"
+				],
 				"verification": ["GT1-02-13", "GT1-10-12", "GT1-11-10", "GT1-07-11", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -1707,6 +1734,12 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["P03"]
+				},
+				{
+					"id": "grok-scoped-discovery-consumers-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults in the detector/definition/snapshot only. GT1-02-05A-F must bound the existing probe runner, wire selected context through IPC and all picker/workflow callers, preserve unavailable selections, and remove the remaining static context-window fallback. GT1-02-05G-J/06/13 own regressions; GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Current legacy calls intentionally receive no discovered Grok models. Managed discovery remains unavailable pending phase09 qualification.",
+					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
 			"phase": "02",
@@ -2072,8 +2105,29 @@
 				"src/shared/directorNotesProvider.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-05", "GT1-02-07", "GT1-07-01", "GT1-03-10A"],
-				"test": ["GT1-02-06", "GT1-02-08", "GT1-07-04", "GT1-03-10B"],
+				"implementation": [
+					"GT1-02-05",
+					"GT1-02-07",
+					"GT1-07-01",
+					"GT1-03-10A",
+					"GT1-02-05A",
+					"GT1-02-05B",
+					"GT1-02-05B1",
+					"GT1-02-05C",
+					"GT1-02-05D",
+					"GT1-02-05E",
+					"GT1-02-05F"
+				],
+				"test": [
+					"GT1-02-06",
+					"GT1-02-08",
+					"GT1-07-04",
+					"GT1-03-10B",
+					"GT1-02-05G",
+					"GT1-02-05H",
+					"GT1-02-05I",
+					"GT1-02-05J"
+				],
 				"verification": [
 					"GT1-02-13",
 					"GT1-02-14",
@@ -2090,7 +2144,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok discovery reads process GROK_HOME models_cache.json, filters info.hidden, then probes grok models text. Cache is keyed only by agentId; effective account/endpoint/version scoping and ACP model/config discovery are absent. Config option discovery only specializes model; effort uses static options. Grok absent from EFFORT_LADDERS/TIER_MODELS. Antigravity omissions do not relax required outcome. Grok per-account/endpoint allowed models and model-specific effort/context metadata need authoritative negotiated discovery."
+				"GT1-02-05 now requires explicit local discovery context, uses the admitted CLI rather than unverified disk catalogs, retains configured IDs and withholds unscoped snapshot metadata. Model/effort fields permit manual entry without guessed options; context default is unknown in the definition only. Host/renderer wiring, finite probe lifetime, global context fallbacks and acknowledged ACP model-specific effort/context remain pending through named continuation tasks. Existing Grok effort-tier and native capability claims still require the phase02/03/11 owners; no current binary or model ID is certified."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -2133,6 +2187,12 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["P06"]
+				},
+				{
+					"id": "grok-scoped-discovery-consumers-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults in the detector/definition/snapshot only. GT1-02-05A-F must bound the existing probe runner, wire selected context through IPC and all picker/workflow callers, preserve unavailable selections, and remove the remaining static context-window fallback. GT1-02-05G-J/06/13 own regressions; GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Current legacy calls intentionally receive no discovered Grok models. Managed discovery remains unavailable pending phase09 qualification.",
+					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
 			"phase": "02",
@@ -12122,8 +12182,27 @@
 				"src/shared/directorNotesProvider.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-05", "GT1-02-07", "GT1-03-10A"],
-				"test": ["GT1-02-06", "GT1-02-08", "GT1-03-10B"],
+				"implementation": [
+					"GT1-02-05",
+					"GT1-02-07",
+					"GT1-03-10A",
+					"GT1-02-05A",
+					"GT1-02-05B",
+					"GT1-02-05B1",
+					"GT1-02-05C",
+					"GT1-02-05D",
+					"GT1-02-05E",
+					"GT1-02-05F"
+				],
+				"test": [
+					"GT1-02-06",
+					"GT1-02-08",
+					"GT1-03-10B",
+					"GT1-02-05G",
+					"GT1-02-05H",
+					"GT1-02-05I",
+					"GT1-02-05J"
+				],
 				"verification": ["GT1-02-13", "GT1-02-14", "GT1-03-13", "GT1-03-14", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -12133,7 +12212,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok discovery reads process GROK_HOME models_cache.json, filters info.hidden, then probes grok models text. Cache is keyed only by agentId; effective account/endpoint/version scoping and ACP model/config discovery are absent. Config option discovery only specializes model; effort uses static options. Grok absent from EFFORT_LADDERS/TIER_MODELS. Antigravity omissions do not relax required outcome."
+				"GT1-02-05 now requires explicit local discovery context, uses the admitted CLI rather than unverified disk catalogs, retains configured IDs and withholds unscoped snapshot metadata. Model/effort fields permit manual entry without guessed options; context default is unknown in the definition only. Host/renderer wiring, finite probe lifetime, global context fallbacks and acknowledged ACP model-specific effort/context remain pending through named continuation tasks. Existing Grok effort-tier and native capability claims still require the phase02/03/11 owners; no current binary or model ID is certified."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12176,6 +12255,12 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["REG-MODEL"]
+				},
+				{
+					"id": "grok-scoped-discovery-consumers-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults in the detector/definition/snapshot only. GT1-02-05A-F must bound the existing probe runner, wire selected context through IPC and all picker/workflow callers, preserve unavailable selections, and remove the remaining static context-window fallback. GT1-02-05G-J/06/13 own regressions; GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Current legacy calls intentionally receive no discovered Grok models. Managed discovery remains unavailable pending phase09 qualification.",
+					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
 			"branchAuditRefs": ["B08", "B36"]
@@ -12793,8 +12878,28 @@
 				"src/cli/services/agent-spawner.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-01-04", "GT1-02-05", "GT1-10-06", "GT1-03-10A"],
-				"test": ["GT1-02-06", "GT1-10-07", "GT1-03-10B"],
+				"implementation": [
+					"GT1-01-04",
+					"GT1-02-05",
+					"GT1-10-06",
+					"GT1-03-10A",
+					"GT1-02-05A",
+					"GT1-02-05B",
+					"GT1-02-05B1",
+					"GT1-02-05C",
+					"GT1-02-05D",
+					"GT1-02-05E",
+					"GT1-02-05F"
+				],
+				"test": [
+					"GT1-02-06",
+					"GT1-10-07",
+					"GT1-03-10B",
+					"GT1-02-05G",
+					"GT1-02-05H",
+					"GT1-02-05I",
+					"GT1-02-05J"
+				],
 				"verification": [
 					"GT1-02-13",
 					"GT1-10-12",
@@ -12854,6 +12959,12 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["REG-DISCOVERY"]
+				},
+				{
+					"id": "grok-scoped-discovery-consumers-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults in the detector/definition/snapshot only. GT1-02-05A-F must bound the existing probe runner, wire selected context through IPC and all picker/workflow callers, preserve unavailable selections, and remove the remaining static context-window fallback. GT1-02-05G-J/06/13 own regressions; GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Current legacy calls intentionally receive no discovered Grok models. Managed discovery remains unavailable pending phase09 qualification.",
+					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
 			"branchAuditRefs": ["B05", "B36"]

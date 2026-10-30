@@ -924,15 +924,13 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		configOptions: [
 			{
 				key: 'model',
-				type: 'select',
+				type: 'text',
 				label: 'Model',
 				description:
-					'Model to use (see `grok models`). Leave empty for the default model (grok-4.5).',
-				dynamic: true, // Discovered from ~/.grok/models_cache.json (or `grok models`) at runtime
-				// Static fallback used when ~/.grok/models_cache.json hasn't been
-				// written yet and the CLI is unreachable, so the dropdown still renders.
-				options: ['', 'grok-4.5', 'grok-composer-2.5-fast'],
-				default: '', // Empty = use grok's default model (grok-4.5)
+					'Model from the selected account catalog. Leave empty to inherit the CLI default; unavailable discovery keeps an explicit selection.',
+				// The existing text/autocomplete control preserves configured IDs even
+				// when a selected-account catalog is unavailable.
+				default: '',
 				argBuilder: (value: string) => {
 					if (value && value.trim()) {
 						return ['-m', value.trim()];
@@ -942,17 +940,11 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 			},
 			{
 				key: 'reasoningEffort',
-				type: 'select',
+				type: 'text',
 				label: 'Reasoning Effort',
 				description:
-					"How much the model should reason before responding. Leave empty for the model default (high). Note: 'none' is model-dependent - the default model (grok-4.5) rejects it; grok-composer-2.5-fast accepts it.",
-				// Accepted values discovered empirically from grok v0.2.93: a bogus value
-				// errors with "Use none, minimal, low, medium, high, xhigh, max, or a
-				// model menu option id". Live runs confirmed all seven work on
-				// grok-composer-2.5-fast; grok-4.5 rejects 'none' server-side
-				// (HTTP 400 "This model does not support reasoning_effort value none")
-				// but accepts the other six.
-				options: ['', 'none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+					'Leave empty to inherit the selected model default. Available effort levels depend on the model and CLI version.',
+				// Preserve explicit values until a scoped per-model menu is available.
 				default: '',
 				argBuilder: (value: string) =>
 					value && value.trim() ? ['--reasoning-effort', value.trim()] : [],
@@ -961,9 +953,8 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 				key: 'contextWindow',
 				type: 'number',
 				label: 'Context Window Size',
-				description:
-					'Maximum context window size in tokens. 500000 for grok-4.5, 200000 for grok-composer-2.5-fast.',
-				default: 500000, // Matches DEFAULT_CONTEXT_WINDOWS grok entry (grok-4.5)
+				description: 'Context window override for the selected model. Leave at 0 when unknown.',
+				default: 0,
 			},
 		],
 	},
