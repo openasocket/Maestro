@@ -11,7 +11,7 @@
  * - Uses shared AgentSelector and AgentConfigPanel components
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Music, X, Bot, Settings, FolderOpen, ChevronRight, RefreshCw } from 'lucide-react';
 import { GhostIconButton } from './ui/GhostIconButton';
@@ -23,6 +23,9 @@ import { useResizableModal } from '../hooks/ui/useResizableModal';
 import { MODAL_PRIORITIES } from '../constants/modalPriorities';
 import { AgentConfigPanel } from './shared/AgentConfigPanel';
 import { useAgentConfiguration } from '../hooks/agent/useAgentConfiguration';
+import { useAgentModelEffortOptions } from '../hooks/agent/useAgentModelEffortOptions';
+import { readEffortFromConfig } from '../utils/agentEffort';
+import type { AgentDiscoveryRequest } from '../../shared/types';
 import { isBetaAgent } from '../../shared/agentMetadata';
 import { isAdaptiveModeDefaultOn } from '../../shared/agentConstants';
 import { logger } from '../utils/logger';
@@ -138,6 +141,40 @@ export function AgentCreationDialog({
 	);
 	const [loadingDynamicOptions, setLoadingDynamicOptions] = useState<Record<string, boolean>>({});
 
+	const [grokRefresh, setGrokRefresh] = useState(0);
+	const grokContext = useMemo<AgentDiscoveryRequest['context'] | undefined>(() => {
+		// A refresh changes context identity so the shared hook reloads the catalog.
+		void grokRefresh;
+		return isOpen && selectedAgent === 'grok' && expandedAgent === 'grok'
+			? {
+					kind: 'draft',
+					cwd: workingDirectory,
+					customPath: customAgentPaths.grok || undefined,
+					customEnvVars: customAgentEnvVars.grok,
+					model: agentConfigs.grok?.model,
+					effort: readEffortFromConfig(agentConfigs.grok),
+				}
+			: undefined;
+	}, [
+		isOpen,
+		selectedAgent,
+		expandedAgent,
+		workingDirectory,
+		customAgentPaths.grok,
+		customAgentEnvVars.grok,
+		agentConfigs.grok,
+		grokRefresh,
+	]);
+	const grokOptions = useAgentModelEffortOptions(grokContext ? 'grok' : undefined, grokContext);
+	const currentGrokContext = useRef(grokContext);
+	currentGrokContext.current = grokContext;
+	useEffect(() => {
+		currentGrokContext.current = grokContext;
+		return () => {
+			currentGrokContext.current = undefined;
+		};
+	}, [grokContext]);
+
 	// Resolve the bundled maestro-p path once so the Batch Mode toggle can show
 	// it as helper text in the path-override input.
 	useEffect(() => {
@@ -149,7 +186,9 @@ export function AgentCreationDialog({
 
 	// Reset all state when dialog opens
 	useEffect(() => {
+		let stale = false;
 		if (isOpen) {
+			setWorkingDirectory('');
 			// Reset error state
 			setError(null);
 			setIsCreating(false);
@@ -164,14 +203,19 @@ export function AgentCreationDialog({
 				window.maestro.fs
 					.homeDir()
 					.then((homeDir) => {
+						if (stale) return;
 						setWorkingDirectory(`${homeDir}/Maestro-Symphony/${dirName}`);
 					})
 					.catch(() => {
+						if (stale) return;
 						// Fallback to tilde (will be expanded in process-manager)
 						setWorkingDirectory(`~/Maestro-Symphony/${dirName}`);
 					});
 			}
 		}
+		return () => {
+			stale = true;
+		};
 	}, [isOpen, repo, issue]);
 
 	// Auto-select first compatible agent when detection completes,
@@ -190,6 +234,22 @@ export function AgentCreationDialog({
 	// Load models for an agent
 	const loadModelsForAgent = useCallback(
 		async (agentId: string, force = false) => {
+			if (agentId === 'grok') {
+				const context = currentGrokContext.current;
+				if (!force || !context) return; // Automatic discovery belongs to the shared hook.
+				try {
+					await window.maestro.agents.getModels({
+						providerId: agentId,
+						context,
+						forceRefresh: true,
+					});
+				} catch {
+					// The shared hook reports unavailable and preserves manual selections.
+				} finally {
+					if (currentGrokContext.current === context) setGrokRefresh((value) => value + 1);
+				}
+				return;
+			}
 			if (!force && availableModels[agentId]) return;
 
 			setLoadingModels((prev) => ({ ...prev, [agentId]: true }));
@@ -208,6 +268,7 @@ export function AgentCreationDialog({
 	// Load dynamic config options for an agent
 	const loadDynamicOptionsForAgent = useCallback(
 		async (agentId: string) => {
+			if (agentId === 'grok') return;
 			if (dynamicOptions[agentId]) return;
 			const agent = ac.detectedAgents.find((a) => a.id === agentId);
 			const dynamicSelects = agent?.configOptions?.filter(
@@ -572,11 +633,41 @@ export function AgentCreationDialog({
 															}));
 														}}
 														onConfigBlur={(_key, _value) => {}}
-														availableModels={availableModels[agent.id] || []}
-														loadingModels={loadingModels[agent.id] || false}
+														availableModels={
+															agent.id === 'grok'
+																? grokOptions.models
+																: availableModels[agent.id] || []
+														}
+														loadingModels={
+															agent.id === 'grok'
+																? !grokOptions.loaded
+																: loadingModels[agent.id] || false
+														}
 														onRefreshModels={() => loadModelsForAgent(agent.id, true)}
-														dynamicOptions={dynamicOptions[agent.id] || {}}
-														loadingDynamicOptions={loadingDynamicOptions[agent.id] || false}
+														dynamicOptions={
+															agent.id === 'grok'
+																? { reasoningEffort: grokOptions.efforts }
+																: dynamicOptions[agent.id] || {}
+														}
+														loadingDynamicOptions={
+															agent.id === 'grok'
+																? !grokOptions.loaded
+																: loadingDynamicOptions[agent.id] || false
+														}
+														configOptionNotes={
+															agent.id === 'grok'
+																? {
+																		model:
+																			grokOptions.modelStatus !== 'discovered'
+																				? 'Model discovery unavailable for this draft. You can keep or enter a model manually.'
+																				: undefined,
+																		reasoningEffort:
+																			grokOptions.effortStatus !== 'discovered'
+																				? 'Effort discovery unavailable for this draft. You can keep or enter effort manually.'
+																				: undefined,
+																	}
+																: undefined
+														}
 														onRefreshAgent={() => handleRefreshAgent(agent.id)}
 														refreshingAgent={refreshingAgent === agent.id}
 														compact
