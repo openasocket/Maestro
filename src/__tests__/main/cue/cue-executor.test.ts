@@ -127,6 +127,7 @@ vi.mock('../../../main/agents', () => ({
 // Mock buildAgentArgs and applyAgentConfigOverrides.
 // buildAgentArgs returns flags only - it does NOT append the prompt as a positional arg.
 // The executor is responsible for appending the prompt after applyAgentConfigOverrides.
+// Keep Grok model/effort validation and its error class real for the launch planner.
 const mockBuildAgentArgs = vi.fn((_agent: unknown, _opts: unknown) => [
 	'--print',
 	'--verbose',
@@ -141,7 +142,8 @@ const mockApplyOverrides = vi.fn((_agent: unknown, args: string[], _overrides: u
 	customEnvSource: 'none' as const,
 	modelSource: 'default' as const,
 }));
-vi.mock('../../../shared/maestro-lib/launch/agent-args', () => ({
+vi.mock('../../../shared/maestro-lib/launch/agent-args', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../../shared/maestro-lib/launch/agent-args')>()),
 	buildAgentArgs: (...args: unknown[]) => mockBuildAgentArgs(...args),
 	applyAgentConfigOverrides: (...args: unknown[]) => mockApplyOverrides(...args),
 }));
@@ -1870,18 +1872,32 @@ describe('cue-executor', () => {
 							decision: 'allow',
 							policyRevision: 1,
 						}));
-						const pending = executeCuePrompt(
-							createExecutionConfig({
-								toolType: 'grok',
-								admission,
-								promptPath: privateContent,
-								appendSystemPrompt: 'SYSTEM',
-								customPath: '/fixture/grok',
-								customEnvVars: { GROK_HOME: '/fixture/account' },
-								session: createMockSession({ newSessionMessage: 'FIRST' }),
-							})
-						);
-						await vi.advanceTimersByTimeAsync(0);
+						const [result, runningProcesses] = await Promise.all([
+							executeCuePrompt(
+								createExecutionConfig({
+									toolType: 'grok',
+									admission,
+									promptPath: privateContent,
+									appendSystemPrompt: 'SYSTEM',
+									customPath: '/fixture/grok',
+									customEnvVars: { GROK_HOME: '/fixture/account' },
+									session: createMockSession({ newSessionMessage: 'FIRST' }),
+								})
+							),
+							(async () => {
+								await vi.advanceTimersByTimeAsync(0);
+								expect(mockSpawn).toHaveBeenCalledTimes(1);
+								expect(fs.unlinkSync).not.toHaveBeenCalled();
+								const runningProcesses = getCueProcessList();
+								expect(runningProcesses).toHaveLength(1);
+								mockChild.emit('close', exitCode);
+								return JSON.stringify(runningProcesses);
+							})(),
+						]);
+						expect(result).toMatchObject({
+							exitCode,
+							status: exitCode ? 'failed' : 'completed',
+						});
 						const file = vi.mocked(fs.openSync).mock.calls[0][0];
 						expect(fs.openSync).toHaveBeenCalledExactlyOnceWith(file, 'wx', 0o600);
 						expect(fs.writeFileSync).toHaveBeenCalledExactlyOnceWith(
@@ -1911,13 +1927,7 @@ describe('cue-executor', () => {
 						expect(asked).toHaveLength(1);
 						expect(asked[0].snapshot.args).toEqual(mockSpawn.mock.calls[0][1]);
 						expect(mockChild.stdin.write).not.toHaveBeenCalled();
-						expect(fs.unlinkSync).not.toHaveBeenCalled();
-						expect(JSON.stringify(getCueProcessList())).not.toContain(String(file));
-						mockChild.emit('close', exitCode);
-						expect(await pending).toMatchObject({
-							exitCode,
-							status: exitCode ? 'failed' : 'completed',
-						});
+						expect(runningProcesses).not.toContain(String(file));
 						expect(fs.unlinkSync).toHaveBeenCalledExactlyOnceWith(file);
 						expect(fs.closeSync).toHaveBeenCalledExactlyOnceWith(91);
 						expectProofReleased();
@@ -2004,27 +2014,33 @@ describe('cue-executor', () => {
 							sshRemoteUsed: { id: 'r1', name: 'Remote', host: 'r1.example.com' },
 						}));
 						const controller = new AbortController();
-						const pending = executeCuePrompt(
-							createExecutionConfig({
-								toolType: 'grok',
-								signal: controller.signal,
-								timeoutMs: 100,
-								sshRemoteConfig: { enabled: true, remoteId: 'r1' },
-								sshStore: sshStoreWithRemotes(),
-							})
+						const [result] = await Promise.all([
+							executeCuePrompt(
+								createExecutionConfig({
+									toolType: 'grok',
+									signal: controller.signal,
+									timeoutMs: 100,
+									sshRemoteConfig: { enabled: true, remoteId: 'r1' },
+									sshStore: sshStoreWithRemotes(),
+								})
+							),
+							(async () => {
+								await vi.advanceTimersByTimeAsync(0);
+								expect(mockSpawn).toHaveBeenCalledTimes(1);
+								if (ending === 'cancel') controller.abort();
+								if (ending === 'timeout') await vi.advanceTimersByTimeAsync(100);
+								mockChild.emit('close', ending === 'transport failure' ? 255 : null);
+							})(),
+						]);
+						expect(result.status).toBe(
+							ending === 'cancel' ? 'stopped' : ending === 'timeout' ? 'timeout' : 'failed'
 						);
-						await vi.advanceTimersByTimeAsync(0);
+						expect(mockWrapSpawnWithSsh).toHaveBeenCalledTimes(1);
 						const artifact = mockWrapSpawnWithSsh.mock.lastCall![0].promptArtifact;
 						expect(mockChild.stdin.write).toHaveBeenCalledOnce();
 						const script = mockChild.stdin.write.mock.calls[0][0] as string;
 						expect(script).toContain(artifact.path);
 						expect(script.match(/readonly _maestro_prompt_pid_file=/g)).toHaveLength(1);
-						if (ending === 'cancel') controller.abort();
-						if (ending === 'timeout') await vi.advanceTimersByTimeAsync(100);
-						mockChild.emit('close', ending === 'transport failure' ? 255 : null);
-						expect((await pending).status).toBe(
-							ending === 'cancel' ? 'stopped' : ending === 'timeout' ? 'timeout' : 'failed'
-						);
 						expect(signalRemoteAgent).toHaveBeenCalledWith(
 							expect.objectContaining({
 								promptArtifactPath: artifact.path,
