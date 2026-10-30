@@ -9,6 +9,9 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import * as childProcess from 'child_process';
+import * as artifactFs from 'fs';
+import * as parserFactory from '../../../../shared/maestro-lib/parsers/parser-factory';
+import { logger } from '../../../../shared/maestro-lib/host';
 import * as processTree from '../../../../shared/maestro-lib/control/process-tree';
 import * as platform from '../../../../shared/platformDetection';
 import {
@@ -19,6 +22,10 @@ import {
 // Mutable facades allow scoped spies without changing the real-process cases.
 vi.mock('child_process', async (original) => ({
 	...(await original<typeof import('child_process')>()),
+}));
+vi.mock('fs', async (original) => ({ ...(await original<typeof import('fs')>()) }));
+vi.mock('../../../../shared/maestro-lib/parsers/parser-factory', async (original) => ({
+	...(await original<typeof import('../../../../shared/maestro-lib/parsers/parser-factory')>()),
 }));
 vi.mock('../../../../shared/maestro-lib/control/process-tree', async (original) => ({
 	...(await original<typeof import('../../../../shared/maestro-lib/control/process-tree')>()),
@@ -105,6 +112,324 @@ function recorder() {
 	};
 	return { heard, lines, events, handlers };
 }
+
+describe('startTurn private prompt artifacts', () => {
+	let files: ReturnType<typeof createScratchDir>;
+	let child: childProcess.ChildProcess;
+	let current: TurnHandle | undefined;
+	let spec: TurnProcessSpec;
+	let artifact: NonNullable<TurnProcessSpec['promptArtifact']>;
+	let descriptor: number | undefined;
+	let descriptorOpen: boolean;
+	const attribution = { provider: 'grok' } as const;
+
+	beforeEach(() => {
+		vi.useFakeTimers();
+		files = createScratchDir('maestro-prompt-artifact');
+		current = undefined;
+		descriptor = undefined;
+		descriptorOpen = false;
+		artifact = {
+			owner: 'local',
+			path: path.join(files.dir, 'private-prompt.json'),
+			content: JSON.stringify({ prompt: 'synthetic-private-content 🦊\nnext line' }),
+			encoding: 'utf8',
+			mode: 0o600,
+			flag: 'wx',
+			cleanup: 'turn',
+		};
+		spec = {
+			command: process.execPath,
+			args: ['--prompt-file', artifact.path],
+			cwd: files.dir,
+			env: {},
+			promptArtifact: artifact,
+		};
+		child = Object.assign(new EventEmitter(), {
+			pid: 4242,
+			exitCode: null,
+			signalCode: null,
+			kill: vi.fn(() => true),
+			stdin: new PassThrough(),
+			stdout: new PassThrough(),
+			stderr: new PassThrough(),
+		}) as unknown as childProcess.ChildProcess;
+		vi.spyOn(childProcess, 'spawn').mockReturnValue(child);
+		vi.spyOn(platform, 'isWindows').mockReturnValue(false);
+		vi.spyOn(processTree, 'snapshotProcessTree').mockReturnValue({ owned: false, descendants: [] });
+		vi.spyOn(processTree, 'killProcessTreeNow').mockImplementation(() => {});
+		vi.spyOn(process, 'kill').mockReturnValue(true);
+		vi.spyOn(artifactFs, 'openSync').mockImplementation((...args) => {
+			descriptor = fs.openSync(...args);
+			descriptorOpen = true;
+			return descriptor;
+		});
+		vi.spyOn(artifactFs, 'closeSync').mockImplementation((fd) => {
+			fs.closeSync(fd);
+			if (fd === descriptor) descriptorOpen = false;
+		});
+		vi.spyOn(logger, 'warn').mockImplementation(() => {});
+	});
+
+	afterEach(async () => {
+		try {
+			child.emit('close', 0, null);
+			await current?.done;
+		} finally {
+			child.stdin?.destroy();
+			child.stdout?.destroy();
+			child.stderr?.destroy();
+			vi.clearAllTimers();
+			vi.useRealTimers();
+			vi.restoreAllMocks();
+			// Also release a leaked descriptor when an assertion exposes a regression.
+			if (descriptorOpen && descriptor !== undefined) {
+				try {
+					fs.closeSync(descriptor);
+				} catch (error) {
+					if ((error as NodeJS.ErrnoException).code !== 'EBADF') throw error;
+				}
+			}
+			files.cleanup();
+		}
+	});
+
+	function expectClosed() {
+		expect(descriptor).toBeTypeOf('number');
+		expect(artifactFs.closeSync).toHaveBeenCalledExactlyOnceWith(descriptor);
+		expect(() => fs.fstatSync(descriptor!)).toThrow(expect.objectContaining({ code: 'EBADF' }));
+	}
+
+	it.each([
+		['empty bytes', '', 0],
+		['empty JSON prompt', '{"prompt":""}', 0],
+		['Unicode JSON', JSON.stringify({ prompt: '雪 🦊\n"quoted"\r\n\t' }), 0],
+		['large JSON', JSON.stringify({ prompt: '🦊\n'.repeat(100_000) }), 7],
+	] as const)('preserves %s until reader close', async (_label, content, code) => {
+		artifact.content = content;
+		current = startTurn(spec, {}, OPTIONS);
+		expect(artifactFs.openSync).toHaveBeenCalledExactlyOnceWith(artifact.path, 'wx', 0o600);
+		expect(fs.readFileSync(artifact.path)).toEqual(Buffer.from(content, 'utf8'));
+		if (process.platform !== 'win32') expect(fs.statSync(artifact.path).mode & 0o777).toBe(0o600);
+		expect((child.stdin as PassThrough).read()).toBeNull();
+		Object.assign(child, { exitCode: code });
+		child.emit('exit', code, null);
+		expect(fs.existsSync(artifact.path)).toBe(true);
+		expect(artifactFs.closeSync).not.toHaveBeenCalled();
+		child.emit('close', code, null);
+		expect(await current.done).toMatchObject({ exitCode: code, interrupted: false });
+		expect(fs.existsSync(artifact.path)).toBe(false);
+		expectClosed();
+	});
+
+	it('preserves an exclusive-create collision without acquiring a descriptor', () => {
+		fs.writeFileSync(artifact.path, 'other owner');
+		expect(() => startTurn(spec, {}, OPTIONS)).toThrow(
+			/^Could not prepare the private prompt artifact\.$/
+		);
+		expect(fs.readFileSync(artifact.path, 'utf8')).toBe('other owner');
+		expect(descriptor).toBeUndefined();
+		expect(artifactFs.closeSync).not.toHaveBeenCalled();
+		expect(childProcess.spawn).not.toHaveBeenCalled();
+	});
+
+	it.each(['replacement', 'missing'] as const)(
+		'closes its descriptor after a %s path',
+		async (kind) => {
+			current = startTurn(spec, {}, OPTIONS);
+			if (kind === 'replacement')
+				fs.renameSync(artifact.path, path.join(files.dir, 'original.json'));
+			else fs.unlinkSync(artifact.path);
+			if (kind === 'replacement') fs.writeFileSync(artifact.path, 'other owner');
+			child.emit('close', 0, null);
+			await current.done;
+			if (kind === 'replacement') {
+				expect(fs.readFileSync(artifact.path, 'utf8')).toBe('other owner');
+				expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
+					'Prompt artifact changed ownership; cleanup skipped.',
+					'startTurn'
+				);
+			} else expect(logger.warn).not.toHaveBeenCalled();
+			expectClosed();
+		}
+	);
+
+	it('removes partial writes and reports a fixed preparation error', () => {
+		vi.spyOn(artifactFs, 'writeFileSync').mockImplementationOnce((fd) => {
+			fs.writeSync(fd as number, 'partial');
+			throw new Error(`write failed: ${artifact.path} ${artifact.content}`);
+		});
+		expect(() => startTurn(spec, {}, OPTIONS)).toThrow(
+			/^Could not prepare the private prompt artifact\.$/
+		);
+		expect(fs.existsSync(artifact.path)).toBe(false);
+		expect(childProcess.spawn).not.toHaveBeenCalled();
+		expect(logger.warn).not.toHaveBeenCalled();
+		expectClosed();
+	});
+
+	it.each(['synchronous', 'asynchronous'] as const)(
+		'cleans up a %s spawn failure',
+		async (kind) => {
+			const error = Object.assign(new Error('synthetic spawn failure'), { code: 'ENOENT' });
+			if (kind === 'synchronous') {
+				vi.mocked(childProcess.spawn).mockImplementationOnce(() => {
+					throw error;
+				});
+				expect(() => startTurn(spec, {}, OPTIONS)).toThrow(error);
+			} else {
+				Object.assign(child, { pid: undefined });
+				current = startTurn(spec, {}, OPTIONS);
+				child.emit('error', error);
+				expect((await current.done).spawnError).toBe(error);
+				child.emit('close', -2, null);
+			}
+			expect(fs.existsSync(artifact.path)).toBe(false);
+			expectClosed();
+		}
+	);
+
+	it('constructs the parser before acquiring a file or child', () => {
+		vi.spyOn(parserFactory, 'createOutputParser').mockImplementationOnce(() => {
+			throw new Error('synthetic parser failure');
+		});
+		expect(() => startTurn(spec, {}, { ...OPTIONS, agentId: 'grok' })).toThrow(
+			'synthetic parser failure'
+		);
+		expect(artifactFs.openSync).not.toHaveBeenCalled();
+		expect(artifactFs.closeSync).not.toHaveBeenCalled();
+		expect(childProcess.spawn).not.toHaveBeenCalled();
+	});
+
+	it.each(['before', 'preflight', 'final'] as const)(
+		'cleans cancellation %s admission without spawning',
+		(when) => {
+			const controller = new AbortController();
+			if (when === 'before') controller.abort();
+			const admit = vi.fn<DispatchAdmission['admit']>(() => {
+				if (when === 'preflight' || admit.mock.calls.length === 2) controller.abort();
+				return { ok: true };
+			});
+			expect(() =>
+				startTurn(
+					spec,
+					{},
+					{ ...OPTIONS, signal: controller.signal, admission: { gate: { admit }, attribution } }
+				)
+			).toThrow(/^Prompt-file launch was cancelled before spawn\.$/);
+			expect(fs.existsSync(artifact.path)).toBe(false);
+			expect(childProcess.spawn).not.toHaveBeenCalled();
+			if (when === 'final') expectClosed();
+			else expect(artifactFs.openSync).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['cancellation', 'signal error'] as const)(
+		'retains ownership after %s until reader close',
+		async (reason) => {
+			const controller = new AbortController();
+			const released = vi.fn();
+			current = startTurn(
+				spec,
+				{},
+				{
+					...OPTIONS,
+					signal: controller.signal,
+					admission: { gate: { admit: () => ({ ok: true }), released }, attribution },
+				}
+			);
+			if (reason === 'cancellation') controller.abort();
+			else child.emit('error', Object.assign(new Error('signal denied'), { code: 'EPERM' }));
+			expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+			Object.assign(child, { signalCode: 'SIGTERM' });
+			child.emit('exit', null, 'SIGTERM');
+			expect(fs.readFileSync(artifact.path, 'utf8')).toBe(artifact.content);
+			expect(artifactFs.closeSync).not.toHaveBeenCalled();
+			expect(released).not.toHaveBeenCalled();
+			child.emit('close', null, 'SIGTERM');
+			expect(await current.done).toMatchObject({ signal: 'SIGTERM', interrupted: true });
+			expect((await current.done).spawnError).toBeUndefined();
+			expect(released).toHaveBeenCalledTimes(1);
+			expect(fs.existsSync(artifact.path)).toBe(false);
+			expectClosed();
+		}
+	);
+
+	it.each(['preflight', 'final'] as const)(
+		'refuses %s admission and removes only owned preparation',
+		(when) => {
+			const admit = vi.fn<DispatchAdmission['admit']>(() => {
+				expect(fs.existsSync(artifact.path)).toBe(admit.mock.calls.length === 2);
+				return when === 'preflight' || admit.mock.calls.length === 2
+					? { ok: false, state: 'denied', code: 'policy-denied', message: 'synthetic denial' }
+					: { ok: true };
+			});
+			const bound = vi.fn();
+			expect(() =>
+				startTurn(spec, {}, { ...OPTIONS, admission: { gate: { admit, bound }, attribution } })
+			).toThrow(DispatchRefusedError);
+			expect(bound).not.toHaveBeenCalled();
+			expect(childProcess.spawn).not.toHaveBeenCalled();
+			expect(fs.existsSync(artifact.path)).toBe(false);
+			if (when === 'final') expectClosed();
+			else expect(artifactFs.openSync).not.toHaveBeenCalled();
+		}
+	);
+
+	it('keeps admitted bytes and launch inputs when callbacks mutate the originals', async () => {
+		const original = { ...artifact };
+		const snapshot = buildDispatchSnapshot(spec, attribution);
+		const admit = vi.fn<DispatchAdmission['admit']>((seen) => {
+			expect(seen).toEqual(snapshot);
+			artifact.content = 'replaced';
+			artifact.path = path.join(files.dir, 'redirected.json');
+			spec.args[1] = artifact.path;
+			spec.env.REPLACED = 'yes';
+			spec.command = 'replaced';
+			return { ok: true };
+		});
+		current = startTurn(spec, {}, { ...OPTIONS, admission: { gate: { admit }, attribution } });
+		expect(admit).toHaveBeenCalledTimes(2);
+		expect(fs.readFileSync(original.path, 'utf8')).toBe(original.content);
+		expect(fs.existsSync(artifact.path)).toBe(false);
+		expect(childProcess.spawn).toHaveBeenCalledWith(
+			process.execPath,
+			['--prompt-file', original.path],
+			{ cwd: files.dir, env: {}, shell: false, stdio: ['pipe', 'pipe', 'pipe'] }
+		);
+		child.emit('close', 0, null);
+		await current.done;
+		expect(fs.existsSync(original.path)).toBe(false);
+		expectClosed();
+	});
+
+	it.each(['fstatSync', 'lstatSync', 'unlinkSync', 'closeSync'] as const)(
+		'reports %s cleanup failure without private data',
+		async (operation) => {
+			current = startTurn(spec, {}, OPTIONS);
+			vi.spyOn(artifactFs, operation).mockImplementationOnce(() => {
+				// Simulate an error after closing so the fixture never intentionally leaks.
+				if (operation === 'closeSync') {
+					fs.closeSync(descriptor!);
+					descriptorOpen = false;
+				}
+				throw Object.assign(new Error(`${artifact.path}: ${artifact.content}`), { code: 'EIO' });
+			});
+			child.emit('close', 0, null);
+			await current.done;
+			expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
+				operation === 'closeSync'
+					? 'Could not close an owned prompt artifact.'
+					: 'Could not remove an owned prompt artifact.',
+				'startTurn'
+			);
+			expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain(artifact.path);
+			expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain(artifact.content);
+			expect(fs.existsSync(artifact.path)).toBe(operation !== 'closeSync');
+			expectClosed();
+		}
+	);
+});
 
 describe('startTurn', () => {
 	it('streams every line and parsed event, then reports a clean exit', async () => {

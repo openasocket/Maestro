@@ -21,6 +21,7 @@ import {
 	unavailableAuthority,
 	type AdmissionRequest,
 	type DispatchLease,
+	type DispatchSpecLike,
 	type PolicyDecision,
 } from '../../../../shared/maestro-lib/managed/authority';
 import {
@@ -175,6 +176,99 @@ describe('dispatch snapshot', () => {
 			expect(dispatchSnapshotDigest(buildDispatchSnapshot(changed, { provider: 'p' }))).not.toBe(a);
 		}
 		expect(dispatchSnapshotDigest(buildDispatchSnapshot(SPEC, { provider: 'q' }))).not.toBe(a);
+	});
+
+	describe('prompt artifact binding', () => {
+		const artifact = {
+			path: path.join(os.tmpdir(), 'private-prompt.json'),
+			owner: 'local',
+			content: '[{"type":"text","text":"private café"}]',
+			encoding: 'utf8',
+			mode: 0o600,
+			flag: 'wx',
+			cleanup: 'turn',
+		} satisfies NonNullable<DispatchSpecLike['promptArtifact']>;
+
+		it.each([
+			['empty bytes', { content: '' }],
+			['JSON whitespace', { content: ` ${artifact.content}` }],
+			['Unicode bytes', { content: artifact.content.normalize('NFD') }],
+			['destination', { path: path.join(os.tmpdir(), 'other-private-prompt.json') }],
+			['owner', { owner: 'remote' }],
+			['SSH target', { sshRemoteId: 'other-remote' }],
+			['encoding', { encoding: 'utf16le' }],
+			['mode', { mode: 0o644 }],
+			['creation flag', { flag: 'w' }],
+			['cleanup', { cleanup: 'never' }],
+		] as const)('invalidates an admitted lease when artifact %s changes', async (_name, change) => {
+			const { auth } = authority(() => ALLOW);
+			const snapshot = buildDispatchSnapshot(
+				{ ...SPEC, promptArtifact: artifact },
+				{ provider: 'grok' }
+			);
+			const lease = await admitted(auth, {
+				context: verified(),
+				snapshot,
+				policy: { sources: [], policyRevision: 3 },
+			});
+			// Invalid metadata models an untrusted replacement, before sink validation.
+			const changed = buildDispatchSnapshot(
+				{ ...SPEC, promptArtifact: { ...artifact, ...change } as typeof artifact },
+				{ provider: 'grok' }
+			);
+			expect(snapshot.promptArtifactDigest).toMatch(/^[a-f0-9]{64}$/);
+			expect(changed.promptArtifactDigest).not.toBe(snapshot.promptArtifactDigest);
+			expect(dispatchSnapshotDigest(changed)).not.toBe(dispatchSnapshotDigest(snapshot));
+			expect(auth.check(lease, dispatchSnapshotDigest(snapshot))).toEqual({ ok: true });
+			expect(auth.check(lease, dispatchSnapshotDigest(changed))).toEqual({
+				ok: false,
+				reason: 'snapshot-mismatch',
+			});
+			for (const value of [artifact.path, artifact.content, 'private café']) {
+				expect(JSON.stringify(snapshot)).not.toContain(JSON.stringify(value).slice(1, -1));
+			}
+		});
+
+		it('retains the original snapshot after caller input mutations', () => {
+			const spec = {
+				...SPEC,
+				args: [...SPEC.args],
+				env: { ...SPEC.env },
+				promptArtifact: { ...artifact },
+			};
+			const snapshot = buildDispatchSnapshot(spec, { provider: 'grok' });
+			const original = structuredClone(snapshot);
+			const digest = dispatchSnapshotDigest(snapshot);
+			spec.promptArtifact.content = 'replacement private content';
+			spec.promptArtifact.path = path.join(os.tmpdir(), 'replacement.json');
+			spec.args.push('--replacement');
+			spec.env.A = 'replacement environment';
+			expect(snapshot).toEqual(original);
+			expect(dispatchSnapshotDigest(snapshot)).toBe(digest);
+			expect(dispatchSnapshotDigest(buildDispatchSnapshot(spec, { provider: 'grok' }))).not.toBe(
+				digest
+			);
+		});
+
+		it('preserves the pre-artifact snapshot shape and digest when the artifact is absent', () => {
+			const snapshot = buildDispatchSnapshot(SPEC, { provider: 'p' });
+			expect(snapshot).not.toHaveProperty('promptArtifactDigest');
+			expect(
+				buildDispatchSnapshot({ ...SPEC, promptArtifact: undefined }, { provider: 'p' })
+			).toEqual(snapshot);
+			// Fixed legacy fixture: adding even an empty optional digest changes this value.
+			expect(dispatchSnapshotDigest(snapshot)).toBe(
+				'3c6314663b52d7390254532f144c814f43155320a7445e0fda37101e907acc9a'
+			);
+			expect(
+				dispatchSnapshotDigest(
+					buildDispatchSnapshot(
+						{ ...SPEC, promptArtifact: { ...artifact, content: '' } },
+						{ provider: 'p' }
+					)
+				)
+			).not.toBe(dispatchSnapshotDigest(snapshot));
+		});
 	});
 });
 
