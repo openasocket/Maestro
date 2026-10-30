@@ -17,7 +17,14 @@
  * - a standalone host spawns as before, with no admission bound.
  */
 import * as os from 'os';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+import * as artifactFs from 'fs';
+import * as childProcess from 'child_process';
+import { EventEmitter } from 'events';
+import { PassThrough } from 'stream';
+import * as platform from '../../../../shared/platformDetection';
 
 vi.mock('electron', () => ({
 	ipcMain: { handle: vi.fn() },
@@ -25,6 +32,32 @@ vi.mock('electron', () => ({
 	safeStorage: { isEncryptionAvailable: (): boolean => false },
 }));
 vi.mock('node-pty', () => ({ spawn: vi.fn() }));
+vi.mock('../../../../shared/platformDetection', async (original) => ({
+	...(await original<typeof import('../../../../shared/platformDetection')>()),
+}));
+// Mutable facades reuse the start-turn artifact fixture; native process entry points stay closed.
+vi.mock('fs', async (original) => ({ ...(await original<typeof import('fs')>()) }));
+vi.mock('os', async (original) => ({ ...(await original<typeof import('os')>()) }));
+vi.mock('child_process', async (original) => {
+	const actual = await original<typeof import('child_process')>();
+	return {
+		...actual,
+		...Object.fromEntries(
+			['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork'].map((name) => [
+				name,
+				vi.fn(() => {
+					throw new Error('Native process access forbidden in naming tests');
+				}),
+			])
+		),
+	};
+});
+vi.mock('../../../../shared/maestro-lib/control/process-tree', () => ({
+	snapshotProcessTree: vi.fn(() => ({ owned: false, descendants: [] })),
+	refreshProcessTree: vi.fn(),
+	killProcessTreeNow: vi.fn(),
+	killSurvivors: vi.fn(),
+}));
 vi.mock('../../../../shared/maestro-lib/run/start-turn', async (importOriginal) => ({
 	...(await importOriginal<typeof import('../../../../shared/maestro-lib/run/start-turn')>()),
 	startTurn: vi.fn(() => {
@@ -56,7 +89,10 @@ import {
 import { ProcessManager } from '../../../../main/process-manager';
 import type { ProcessConfig } from '../../../../main/process-manager/types';
 import { logger } from '../../../../main/utils/logger';
+import { captureException } from '../../../../main/utils/sentry';
 import { startTurn } from '../../../../shared/maestro-lib/run/start-turn';
+import { createScratchDir } from '../../../shared/maestro-lib/run/fakeAgent';
+import type { TurnHandle } from '../../../../shared/maestro-lib/run/start-turn';
 import type { PolicyDecision } from '../../../../shared/maestro-lib/managed/authority';
 import type { ManagedDelegationContext } from '../../../../shared/maestro-lib/managed/delegation';
 import { MANAGED_CONTRACT_VERSION } from '../../../../shared/maestro-lib/managed/types';
@@ -435,6 +471,7 @@ describe('Grok naming prompt files at the managed sink (GT1-02-11D)', () => {
 		expect(
 			JSON.stringify([
 				h.errors,
+				vi.mocked(captureException).mock.calls.map(([error]) => String(error)),
 				port.asked,
 				...Object.values(logger).map((log) => vi.mocked(log).mock.calls),
 			])
@@ -509,4 +546,202 @@ describe('Grok naming prompt files at the managed sink (GT1-02-11D)', () => {
 			JSON.stringify(Object.values(logger).map((log) => vi.mocked(log).mock.calls))
 		).not.toContain('PRIVATE_ORPHAN_PROMPT');
 	});
+});
+
+describe('Grok naming owns real artifact cleanup (GT1-02-11D1)', () => {
+	let files: ReturnType<typeof createScratchDir>;
+	let child: childProcess.ChildProcess;
+	let turn: TurnHandle | undefined;
+	let descriptor: number | undefined;
+	let h: Harness;
+	let controller: AbortController;
+	const privateMessage = 'PRIVATE_NAMING_雪\n"quoted"';
+
+	beforeEach(async () => {
+		vi.clearAllMocks();
+		files = createScratchDir('maestro-naming-artifact');
+		vi.spyOn(os, 'tmpdir').mockReturnValue(files.dir);
+		turn = undefined;
+		descriptor = undefined;
+		controller = new AbortController();
+		// Same synthetic streams and descriptor guard as start-turn.test.ts.
+		child = Object.assign(new EventEmitter(), {
+			pid: 4242,
+			exitCode: null,
+			signalCode: null,
+			kill: vi.fn(() => true),
+			stdin: new PassThrough(),
+			stdout: new PassThrough(),
+			stderr: new PassThrough(),
+		}) as unknown as childProcess.ChildProcess;
+		vi.spyOn(childProcess, 'spawn').mockReturnValue(child);
+		vi.spyOn(process, 'kill').mockReturnValue(true);
+		vi.spyOn(platform, 'isWindows').mockReturnValue(false);
+		vi.spyOn(artifactFs, 'openSync').mockImplementation((file, flags, mode) => {
+			expect(path.dirname(String(file))).toBe(files.dir);
+			descriptor = fs.openSync(file, flags, mode);
+			return descriptor;
+		});
+		vi.spyOn(artifactFs, 'closeSync');
+		const actual = await vi.importActual<
+			typeof import('../../../../shared/maestro-lib/run/start-turn')
+		>('../../../../shared/maestro-lib/run/start-turn');
+		vi.mocked(startTurn).mockImplementation((...args) => {
+			turn = actual.startTurn(...args);
+			return turn;
+		});
+		h = harness(null, { provider: 'grok', spySpawn: false });
+	});
+
+	afterEach(async () => {
+		controller.abort();
+		Object.assign(child, { exitCode: 0 });
+		child.emit('exit', 0, null);
+		child.emit('close', 0, null);
+		await turn?.done;
+		child.stdin?.destroy();
+		child.stdout?.destroy();
+		child.stderr?.destroy();
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+		vi.mocked(startTurn).mockImplementation(() => {
+			throw new Error('Native naming forbidden');
+		});
+		if (descriptor !== undefined) {
+			try {
+				fs.closeSync(descriptor);
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code !== 'EBADF') throw error;
+			}
+		}
+		files.cleanup();
+	});
+
+	it.each(['normal', 'nonzero', 'stop', 'early extraction', 'late admission'] as const)(
+		'retains the naming file through %s until the reader closes',
+		async (outcome) => {
+			if (outcome === 'early extraction') vi.useFakeTimers();
+			let admit!: () => void;
+			if (outcome === 'late admission') {
+				const gate = new Promise<void>((resolve) => {
+					admit = resolve;
+				});
+				// An uncooperative async adapter exercises naming's defensive late-reader stop;
+				// the real managed sink's cancellation guard remains covered above.
+				vi.spyOn(h.processManager, 'spawnAdmitted').mockImplementation(async (config) => {
+					await gate;
+					return h.processManager.spawn(config);
+				});
+			}
+			const pending = generateTabName(
+				h.deps,
+				{
+					...dispatchedConfig(UNMANAGED_INITIATOR),
+					agentType: 'grok',
+					userMessage: privateMessage,
+				},
+				controller.signal
+			);
+			if (outcome === 'late admission') {
+				await vi.waitFor(() => expect(h.processManager.spawnAdmitted).toHaveBeenCalledOnce());
+				controller.abort();
+				await expect(pending).resolves.toBeNull();
+				expect(artifactFs.openSync).not.toHaveBeenCalled();
+				admit();
+			}
+			await vi.waitFor(() => expect(h.spawn).toHaveBeenCalledOnce());
+			const config = h.spawn.mock.calls[0][0] as ProcessConfig;
+			const artifact = config.promptArtifact!;
+			expect(turn).toBeDefined();
+			expect(fs.readFileSync(artifact.path, 'utf8')).toBe(artifact.content);
+			expect(childProcess.spawn).toHaveBeenCalledOnce();
+			expect((child.stdin as PassThrough).read()).toBeNull();
+			if (outcome === 'early extraction') {
+				h.processManager.emit('data', config.sessionId, 'Owned Title');
+				await vi.advanceTimersByTimeAsync(2000);
+				await expect(pending).resolves.toBe('Owned Title');
+			} else if (outcome === 'stop') controller.abort();
+			if (['stop', 'early extraction', 'late admission'].includes(outcome)) {
+				await vi.waitFor(() => expect(child.kill).toHaveBeenCalledWith('SIGTERM'));
+				if (outcome !== 'early extraction') await expect(pending).resolves.toBeNull();
+			}
+			if (outcome === 'normal') h.processManager.emit('data', config.sessionId, 'Owned Title');
+			const code = outcome === 'nonzero' ? 7 : 0;
+			Object.assign(child, { exitCode: code });
+			child.emit('exit', code, null);
+			expect(fs.existsSync(artifact.path)).toBe(true);
+			expect(artifactFs.closeSync).not.toHaveBeenCalled();
+			child.emit('close', code, null);
+			await turn!.done;
+			if (outcome === 'normal') await expect(pending).resolves.toBe('Owned Title');
+			if (outcome === 'nonzero') await expect(pending).resolves.toBeNull();
+			expect(fs.existsSync(artifact.path)).toBe(false);
+			expect(artifactFs.closeSync).toHaveBeenCalledExactlyOnceWith(descriptor);
+			expect(() => fs.fstatSync(descriptor!)).toThrow(expect.objectContaining({ code: 'EBADF' }));
+			expect(h.processManager.listenerCount('data')).toBe(0);
+			expect(h.processManager.listenerCount('raw-stdout')).toBe(0);
+			const diagnostics = JSON.stringify([
+				h.errors,
+				vi.mocked(captureException).mock.calls.map(([error]) => String(error)),
+				...Object.values(logger).map((log) => vi.mocked(log).mock.calls),
+			]);
+			for (const privateBytes of [
+				privateMessage,
+				JSON.stringify(privateMessage).slice(1, -1),
+				Buffer.from(artifact.content).toString('base64'),
+			]) {
+				expect(diagnostics).not.toContain(privateBytes);
+			}
+		}
+	);
+
+	it.each(['synchronous', 'asynchronous', 'collision', 'replacement'] as const)(
+		'cleans only its owned naming artifact after %s failure',
+		async (failure) => {
+			if (failure === 'synchronous')
+				vi.mocked(childProcess.spawn).mockImplementationOnce(() => {
+					throw new Error(privateMessage);
+				});
+			if (failure === 'asynchronous') Object.assign(child, { pid: undefined });
+			if (failure === 'collision') {
+				h.spawn.mockImplementation((config: ProcessConfig) => {
+					fs.writeFileSync(config.promptArtifact!.path, 'other owner');
+					return ProcessManager.prototype.spawn.call(h.processManager, config);
+				});
+			}
+			const pending = generateTabName(
+				h.deps,
+				{ ...baseConfig(), agentType: 'grok', userMessage: privateMessage },
+				controller.signal
+			);
+			await vi.waitFor(() => expect(h.spawn).toHaveBeenCalledOnce());
+			const artifact = (h.spawn.mock.calls[0][0] as ProcessConfig).promptArtifact!;
+			if (failure === 'replacement') {
+				fs.renameSync(artifact.path, path.join(files.dir, 'original.json'));
+				fs.writeFileSync(artifact.path, 'other owner');
+			}
+			if (failure === 'asynchronous') child.emit('error', new Error(privateMessage));
+			child.emit('close', failure === 'replacement' ? 0 : -1, null);
+			await turn?.done;
+			await expect(pending).resolves.toBeNull();
+			if (failure === 'collision' || failure === 'replacement')
+				expect(fs.readFileSync(artifact.path, 'utf8')).toBe('other owner');
+			else expect(fs.existsSync(artifact.path)).toBe(false);
+			if (failure === 'collision') {
+				expect(childProcess.spawn).not.toHaveBeenCalled();
+				expect(artifactFs.closeSync).not.toHaveBeenCalled();
+			} else expect(artifactFs.closeSync).toHaveBeenCalledExactlyOnceWith(descriptor);
+			const diagnostics = JSON.stringify([
+				h.errors,
+				vi.mocked(captureException).mock.calls.map(([error]) => String(error)),
+				...Object.values(logger).map((log) => vi.mocked(log).mock.calls),
+			]);
+			for (const privateBytes of [
+				privateMessage,
+				JSON.stringify(privateMessage).slice(1, -1),
+				Buffer.from(artifact.content).toString('base64'),
+			])
+				expect(diagnostics).not.toContain(privateBytes);
+		}
+	);
 });

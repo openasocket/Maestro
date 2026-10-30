@@ -2406,6 +2406,189 @@ describe('Tab Naming IPC Handlers', () => {
 			}
 		);
 
+		it.each(
+			['detector-local', 'detector-ssh', 'ssh-preparation'].flatMap((stage) =>
+				['session', 'empty', 'blank', 'provider', 'global', 'utility'].map((account) => ({
+					stage,
+					account,
+				}))
+			)
+		)(
+			'captures naming identity before $stage with $account account precedence (GT1-02-11D1)',
+			async ({ stage, account }) => {
+				const ssh = stage !== 'detector-local';
+				const utility = account === 'utility';
+				const executable = ssh ? '/opt/selected tools/grok' : path.resolve('selected-bin/grok');
+				const customPaths = { grok: executable };
+				const provider = {
+					model: 'selected-model',
+					customEnvVars: account === 'global' ? {} : { GROK_HOME: '/selected-provider' },
+				};
+				const configs = { grok: provider };
+				const settings = {
+					utilityAgentId: utility ? 'grok' : null,
+					utilityModelId: utility ? 'selected-utility-model' : null,
+					shellEnvVars: { GROK_HOME: '/selected-global', SNAPSHOT_GLOBAL: 'selected' },
+				};
+				mockAgentConfigsStore.get.mockReturnValue(configs);
+				mockSettingsStore.get.mockImplementation((key: keyof typeof settings, fallback) =>
+					key in settings ? settings[key] : fallback
+				);
+				deps.getAgentDetector = () =>
+					({ ...mockAgentDetector, getCustomPaths: () => customPaths }) as unknown as AgentDetector;
+				const selectedRemote = { ...remote, remoteEnv: { SNAPSHOT_REMOTE: 'selected' } };
+				const { getSshRemoteConfig } = await import('../../../../main/utils/ssh-remote-resolver');
+				vi.mocked(getSshRemoteConfig).mockReturnValue({
+					config: selectedRemote,
+					source: 'session',
+				});
+				const { buildSshCommand } = await import('../../../../main/utils/ssh-command-builder');
+				if (stage === 'ssh-preparation') {
+					const actual = await vi.importActual<
+						typeof import('../../../../main/utils/ssh-command-builder')
+					>('../../../../main/utils/ssh-command-builder');
+					vi.mocked(buildSshCommand).mockImplementationOnce(async (...args) => {
+						await new Promise<void>((resolve) => {
+							releasePreparation = resolve;
+						});
+						return actual.buildSshCommand(...args);
+					});
+				} else {
+					mockAgentDetector.getAgent.mockImplementationOnce(
+						() =>
+							new Promise((resolve) => {
+								releasePreparation = () => resolve(grok);
+							})
+					);
+				}
+				const request: Parameters<typeof generateTabName>[1] = {
+					userMessage: privateMessage,
+					agentType: utility ? 'claude-code' : 'grok',
+					cwd,
+					sessionCustomEnvVars:
+						account === 'empty'
+							? {}
+							: account === 'blank'
+								? { GROK_HOME: '  ' }
+								: account === 'session' || utility
+									? { GROK_HOME: '/selected-session' }
+									: undefined,
+					sessionSshRemoteConfig: ssh
+						? { enabled: true, remoteId: remote.id, workingDirOverride: '/srv/selected project' }
+						: undefined,
+				};
+				pending = generateTabName(deps, request, controller.signal);
+				await vi.waitFor(() => expect(releasePreparation).toBeDefined());
+				expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+
+				// Edit the existing owner and then replace it with another same-provider session.
+				if (request.sessionCustomEnvVars)
+					request.sessionCustomEnvVars.GROK_HOME = '/edited-session';
+				if (request.sessionSshRemoteConfig) {
+					request.sessionSshRemoteConfig.remoteId = 'edited-host';
+					request.sessionSshRemoteConfig.workingDirOverride = '/srv/edited';
+				}
+				Object.assign(request, {
+					userMessage: 'replacement message',
+					cwd: path.resolve('replacement-project'),
+					agentType: utility ? 'codex' : 'grok',
+					sessionCustomEnvVars: { GROK_HOME: '/replacement-account' },
+					sessionSshRemoteConfig: { enabled: false, remoteId: null },
+				});
+				provider.model = 'edited-model';
+				provider.customEnvVars.GROK_HOME = '/edited-provider';
+				configs.grok = {
+					model: 'replacement-model',
+					customEnvVars: { GROK_HOME: '/replacement-provider' },
+				};
+				settings.utilityAgentId = 'codex';
+				settings.utilityModelId = 'replacement-utility-model';
+				settings.shellEnvVars.GROK_HOME = '/edited-global';
+				settings.shellEnvVars.SNAPSHOT_GLOBAL = 'edited';
+				customPaths.grok = '/replacement/grok';
+				selectedRemote.id = 'replacement-host';
+				selectedRemote.host = 'replacement.invalid';
+				selectedRemote.remoteEnv.SNAPSHOT_REMOTE = 'edited';
+				releasePreparation!();
+				await vi.waitFor(() => expect(mockProcessManager.spawn).toHaveBeenCalledOnce());
+
+				const spawn = mockProcessManager.spawn.mock.calls[0][0] as ProcessConfig;
+				const wrapped = vi.mocked(buildSshCommand).mock.calls[0];
+				const args = ssh ? wrapped[1].args! : spawn.args;
+				expect(mockAgentDetector.getAgent).toHaveBeenCalledExactlyOnceWith('grok');
+				expect(spawn.toolType).toBe('grok');
+				expect(args).toEqual(
+					expect.arrayContaining([
+						'-m',
+						utility ? 'selected-utility-model' : 'selected-model',
+						'--cwd',
+						ssh ? '/srv/selected project' : cwd,
+					])
+				);
+				const selectedAccount =
+					account === 'session'
+						? '/selected-session'
+						: account === 'empty' || account === 'global'
+							? undefined
+							: account === 'blank'
+								? '  '
+								: '/selected-provider';
+				expect(spawn.customEnvVars?.GROK_HOME).toBe(selectedAccount);
+				expect(spawn.shellEnvVars).toEqual({
+					GROK_HOME: '/selected-global',
+					SNAPSHOT_GLOBAL: 'selected',
+				});
+				expect(spawn.promptArtifact?.content).toContain(privateMessage);
+				expect(spawn.promptArtifact?.content).not.toContain('replacement message');
+				expect(spawn.prompt).toBeUndefined();
+				if (ssh) {
+					expect(getSshRemoteConfig).toHaveBeenCalledOnce();
+					expect(buildSshCommand).toHaveBeenCalledOnce();
+					expect(wrapped[0]).toMatchObject({
+						id: remote.id,
+						host: remote.host,
+						remoteEnv: { SNAPSHOT_REMOTE: 'selected' },
+					});
+					expect(spawn.sshStdinScript).toContain("export SNAPSHOT_REMOTE='selected'");
+					expect(wrapped[1]).toMatchObject({
+						command: executable,
+						cwd: '/srv/selected project',
+						env: { GROK_HOME: selectedAccount ?? '/selected-global', SNAPSHOT_GLOBAL: 'selected' },
+					});
+					expect(spawn).toMatchObject({
+						sshRemoteId: remote.id,
+						sshRemoteHost: remote.host,
+						promptArtifact: { owner: 'remote', sshRemoteId: remote.id },
+					});
+					expect(spawn.args.join(' ')).toContain(remote.host);
+					expect(spawn.args.join(' ')).not.toContain('replacement.invalid');
+				} else {
+					expect(buildSshCommand).not.toHaveBeenCalled();
+					expect(spawn).toMatchObject({
+						command: executable,
+						cwd,
+						promptArtifact: { owner: 'local' },
+					});
+				}
+				controller.abort();
+				await expect(pending).resolves.toBeNull();
+				const diagnostics = JSON.stringify([
+					...Object.values(logger).map((log) => vi.mocked(log).mock.calls),
+					vi.mocked(captureException).mock.calls.map(([error]) => String(error)),
+					spawn.args,
+					spawn.sshRemoteCommand,
+				]);
+				const prompt = JSON.parse(spawn.promptArtifact!.content).content[0].text as string;
+				for (const privateBytes of [
+					privateMessage,
+					JSON.stringify(prompt).slice(1, -1),
+					encodeURIComponent(prompt),
+					Buffer.from(spawn.promptArtifact!.content).toString('base64'),
+				])
+					expect(diagnostics).not.toContain(privateBytes);
+			}
+		);
+
 		it.each(['cancel', 'missing-script', 'reject'])(
 			'starts no reader when remote preparation ends in %s',
 			async (outcome) => {
@@ -2431,8 +2614,11 @@ describe('Tab Naming IPC Handlers', () => {
 					controller.signal
 				);
 				await vi.waitFor(() => expect(buildSshCommand).toHaveBeenCalledOnce());
+				const encodedPrompt = Buffer.from(
+					vi.mocked(buildSshCommand).mock.calls[0][1].promptArtifact!.content
+				).toString('base64');
 				if (outcome === 'cancel') controller.abort();
-				if (outcome === 'reject') reject(new Error(privateMessage));
+				if (outcome === 'reject') reject(new Error(`${privateMessage} ${encodedPrompt}`));
 				else
 					prepared({
 						command: 'synthetic-ssh',
@@ -2445,8 +2631,13 @@ describe('Tab Naming IPC Handlers', () => {
 				expect(
 					JSON.stringify([vi.mocked(logger.error).mock.calls, vi.mocked(logger.warn).mock.calls])
 				).not.toContain(privateMessage);
-				for (const [error] of vi.mocked(captureException).mock.calls)
+				expect(
+					JSON.stringify(Object.values(logger).map((log) => vi.mocked(log).mock.calls))
+				).not.toContain(encodedPrompt);
+				for (const [error] of vi.mocked(captureException).mock.calls) {
 					expect(String(error)).not.toContain(privateMessage);
+					expect(String(error)).not.toContain(encodedPrompt);
+				}
 			}
 		);
 
