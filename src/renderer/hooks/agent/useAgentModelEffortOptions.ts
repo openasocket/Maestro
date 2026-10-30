@@ -56,7 +56,9 @@ export function useAgentModelEffortOptions(
 	context?: AgentDiscoveryRequest['context']
 ): AgentModelEffortOptions {
 	const scopedContext = agentId === 'grok' ? context : undefined;
-	const discoveryContext = useDebouncedValue(scopedContext, 300);
+	const debouncedContext = useDebouncedValue(scopedContext, 300);
+	// Legacy requests have no context, even while a prior Grok context is debouncing.
+	const discoveryContext = agentId === 'grok' ? debouncedContext : undefined;
 	const [models, setModels] = useState<string[]>([]);
 	const [efforts, setEfforts] = useState<string[]>([]);
 	const [defaultModel, setDefaultModel] = useState('');
