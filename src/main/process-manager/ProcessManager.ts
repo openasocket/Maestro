@@ -13,6 +13,7 @@ import type {
 	ProcessSpawnActor,
 	ProcessSpawnAdmission,
 	ProcessSpawnAdmissionOutcome,
+	ProcessSpawnOptions,
 	ProcessSpawnAuthorityPort,
 	ProcessSpawnContextInput,
 	ManagedCommandContext,
@@ -974,9 +975,40 @@ export class ProcessManager extends EventEmitter {
 	 * its admission, and a refusal is returned as a failed `SpawnResult` with
 	 * the authority's state and code (and reported to the tab as an
 	 * `agent-error`, since no process exists to report it).
+	 * Internal cancellation returns a fixed failed result without reporting a
+	 * policy denial; an unused admission is released before returning.
 	 */
-	async spawnAdmitted(config: ProcessConfig, actor: ProcessSpawnActor): Promise<SpawnResult> {
-		const admitted = await this.admitSpawn(config, actor);
+	async spawnAdmitted(
+		config: ProcessConfig,
+		actor: ProcessSpawnActor,
+		options: ProcessSpawnOptions = {}
+	): Promise<SpawnResult> {
+		const { signal } = options;
+		const cancelled = {
+			pid: -1,
+			success: false,
+			error: 'Spawn cancelled before starting.',
+		} satisfies SpawnResult;
+		if (signal?.aborted) return cancelled;
+		let admitted: ProcessSpawnAdmissionOutcome;
+		try {
+			admitted = await this.admitSpawn(config, actor);
+		} catch (error) {
+			if (signal?.aborted) return cancelled;
+			throw error;
+		}
+		// Admission can yield even on a standalone host. Cancellation takes
+		// precedence over every decision, before any artifact or child exists.
+		if (signal?.aborted) {
+			if (admitted.state === 'admitted') {
+				// This lease has not reached withLease/boundLeases. Its admission
+				// owner releases it once, without touching an already-running reader.
+				const lease = this.admissionLeases.get(admitted.admission);
+				this.admissionLeases.delete(admitted.admission);
+				lease?.release({ outcome: 'spawn-failed', message: cancelled.error });
+			}
+			return cancelled;
+		}
 		if (admitted.state === 'standalone') return this.spawn(config);
 		if (admitted.state === 'admitted') {
 			return this.spawn({ ...config, admission: admitted.admission });

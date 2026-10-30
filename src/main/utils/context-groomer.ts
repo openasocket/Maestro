@@ -35,6 +35,7 @@ import {
 	spawnOriginOf,
 	type ProcessSpawnActor,
 	type ProcessSpawnAuthorityPort,
+	type ProcessSpawnOptions,
 	type UtilityTurnLineage,
 	type ProcessConfig,
 } from '../process-manager/types';
@@ -106,7 +107,8 @@ export interface GroomingProcessManager {
 	spawn(config: GroomingSpawnConfig): { pid: number; success?: boolean } | null;
 	spawnAdmitted?(
 		config: GroomingSpawnConfig,
-		actor: ProcessSpawnActor
+		actor: ProcessSpawnActor,
+		options?: ProcessSpawnOptions
 	): Promise<GroomingSpawnOutcome>;
 	managedPort?(): Pick<ProcessSpawnAuthorityPort, 'standing' | 'routeCeiling'> | null;
 	on(event: string, handler: (...args: unknown[]) => void): void;
@@ -715,6 +717,7 @@ async function groomContextOnce(
 		let cancelled = false;
 
 		const cleanup = () => {
+			signal.removeEventListener('abort', cancelOperation);
 			if (overallTimeout) clearTimeout(overallTimeout);
 			if (idleCheckInterval) {
 				clearInterval(idleCheckInterval);
@@ -744,12 +747,10 @@ async function groomContextOnce(
 			reject(new Error('Grooming cancelled by user'));
 		};
 
-		// Track this grooming session with cancel function
-		activeGroomingSessions.set(groomerSessionId, {
-			groomerSessionId,
-			startTime,
-			cancel: cancelOperation,
-		});
+		// Keep the controller-backed callback registered by groomContext: Stop
+		// must abort pending admission as well as stop an already-started reader.
+		const activeSession = activeGroomingSessions.get(groomerSessionId);
+		if (activeSession) activeSession.startTime = startTime;
 
 		const finishWithResponse = (reason: string) => {
 			if (resolved || cancelled) return;
@@ -848,6 +849,11 @@ async function groomContextOnce(
 		processManager.on('data', onData);
 		processManager.on('exit', onExit);
 		processManager.on('agent-error', onError);
+		signal.addEventListener('abort', cancelOperation, { once: true });
+		if (signal.aborted) {
+			cancelOperation();
+			return;
+		}
 
 		// On Windows, grooming prompts often exceed cmd.exe's ~8KB command-line
 		// limit (ENAMETOOLONG on spawn). Route the prompt via stdin instead.
@@ -963,18 +969,20 @@ async function groomContextOnce(
 		// rejection the caller reports); a standalone desktop, and a manager
 		// double with no admission path, spawn as before.
 		if (processManager.spawnAdmitted) {
-			processManager.spawnAdmitted(spawnConfig, actor).then(armAfterSpawn, (error: unknown) => {
-				if (resolved) return;
-				cleanup();
-				resolved = true;
-				reject(
-					fileDelivery
-						? new Error('Prompt-file grooming spawn unavailable.')
-						: error instanceof Error
-							? error
-							: new Error(String(error))
-				);
-			});
+			processManager
+				.spawnAdmitted(spawnConfig, actor, { signal })
+				.then(armAfterSpawn, (error: unknown) => {
+					if (resolved) return;
+					cleanup();
+					resolved = true;
+					reject(
+						fileDelivery
+							? new Error('Prompt-file grooming spawn unavailable.')
+							: error instanceof Error
+								? error
+								: new Error(String(error))
+					);
+				});
 		} else {
 			try {
 				armAfterSpawn(processManager.spawn(spawnConfig));

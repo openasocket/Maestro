@@ -439,6 +439,16 @@ export type ProcessSpawnAdmissionOutcome =
 	| { state: 'admitted'; admission: ProcessSpawnAdmission }
 	| { state: 'denied' | 'unavailable' | 'unknown'; code: ManagedDenialCode; message: string };
 
+/** Internal controls for `spawnAdmitted`, separate from the captured launch request. */
+export interface ProcessSpawnOptions {
+	/**
+	 * Cancel before spawn, including while admission is pending. Never serialized
+	 * or included in managed content digests. Once started, the caller retains
+	 * its existing process stop ownership.
+	 */
+	signal?: AbortSignal;
+}
+
 /**
  * Kill/interrupt handle for server-backed processes, whose stop starts with a
  * protocol call rather than a signal: the OpenCode SDK path (no OS child) and
