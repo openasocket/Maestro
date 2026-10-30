@@ -928,6 +928,11 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		// Do not add noToolsArgs unless grok ships a verified all-off flag.
 		yoloModeArgs: ['--always-approve'],
 		workingDirArgs: (dir: string) => ['--cwd', dir], // Set working directory
+		// Intentionally no additionalDirArgs: --cwd selects the workspace and
+		// --allow/--deny control tool approval, neither grants additional roots.
+		// GROK_DIRECTORY_GRANT_SUPPORT records the unqualified CLI mechanism and
+		// unsupported ACP resume roots separately from the false public capability.
+		// The launch planner refuses explicit grants; never substitute prompt paths.
 		// Legacy path-mention builder. Explicit file plans require admitted ACP
 		// image blocks and refuse without them; they never fall back to tool reads.
 		imagePromptBuilder: plainPathImagePrompt,

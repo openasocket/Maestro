@@ -22,6 +22,18 @@ export type { AgentCapabilities };
 export { DEFAULT_CAPABILITIES };
 
 /**
+ * Investigation evidence, not public availability or a launch authorization.
+ * The pinned source documents tool approval rules, not CLI root grants, and
+ * rejects additionalDirectories on ACP resume. No binary/version is qualified.
+ */
+export const GROK_DIRECTORY_GRANT_SUPPORT = {
+	cliReadRoots: 'unverified',
+	cliWritableRoots: 'unverified',
+	acpResumeRoots: 'unsupported',
+	supportedVersionRange: null,
+} as const;
+
+/**
  * Capability definitions for each supported agent.
  *
  * NOTE: These are the current known capabilities. As agents evolve,
@@ -515,7 +527,7 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 		usesCombinedContextWindow: false, // Conservative default: on-disk signals.json reports a single contextTokensUsed but gauge math is unverified
 		supportsAppendSystemPrompt: false, // Native rules/append aliases remain unqualified; embed once and skip on resume
 		supportsProjectMemory: false, // Conservative default: no project memory mechanism observed
-		supportsAdditionalDirectories: false, // Unverified - no directory-grant flag confirmed for this CLI
+		supportsAdditionalDirectories: false, // See GROK_DIRECTORY_GRANT_SUPPORT; no qualified native root-grant builder
 	},
 };
 

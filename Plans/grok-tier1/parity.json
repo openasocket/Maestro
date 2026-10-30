@@ -2522,7 +2522,9 @@
 				"src/main/cue/cue-executor.ts",
 				"src/shared/maestro-lib/groupchat/spawn.ts",
 				"src/main/utils/context-groomer.ts",
-				"src/shared/maestro-lib/runtime/background-turns.ts"
+				"src/shared/maestro-lib/runtime/background-turns.ts",
+				"src/shared/maestro-lib/providers/definitions.ts",
+				"src/shared/maestro-lib/launch/launch-plan.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -2546,7 +2548,9 @@
 					"GT1-02-10F1",
 					"GT1-02-10D2",
 					"GT1-02-10G1",
-					"GT1-02-10G2"
+					"GT1-02-10G2",
+					"GT1-02-11A1",
+					"GT1-02-11A2"
 				],
 				"test": [
 					"GT1-02-12",
@@ -2567,7 +2571,9 @@
 					"GT1-02-10E1T",
 					"GT1-02-10F1T",
 					"GT1-02-10D2T",
-					"GT1-02-10G1T"
+					"GT1-02-10G1T",
+					"GT1-02-11A1T",
+					"GT1-02-11A2T"
 				],
 				"verification": ["GT1-02-13", "GT1-02-14", "GT1-09-11", "GT1-07-11"],
 				"live": ["GT1-11-11"],
@@ -2621,6 +2627,12 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["P08"]
+				},
+				{
+					"id": "grok-directory-grants-unqualified",
+					"code": "native-grants-and-consumer-propagation-pending",
+					"missingPrerequisite": "GT1-02-11A adds structured planner refusal for explicit active Grok directory grants and incompatible --add-dir arguments; read-only writes cannot widen the ceiling. Public additional-directory capability remains false and its builder absent. Investigation metadata records unverified CLI read/write roots, unsupported additionalDirectories on pinned-source ACP resume, and no qualified version range. No actual root-grant implementation or containment is certified: cwd, prompt paths, --allow/--deny tool rules and --sandbox profile labels are not grants. Existing callers drop typed grants before planning; bounded GT1-02-11A1/11A2 own desktop/CLI/Cue/shared-turn forwarding and refusal classification, with 11A1T/11A2T/11B authoring and GT1-02-13 execution. Native allowed/denied roots, symlink containment, supported binary versions and platforms remain blocked with existing phase09/11 owners. See Plans/grok-tier1/evidence/02.md#gt1-02-11a-grok-directory-grant-refusal.",
+					"affectedRows": ["P08", "P35", "C-supportsAdditionalDirectories", "REG-DEFINITIONS"]
 				}
 			],
 			"phase": "02",
@@ -6667,7 +6679,9 @@
 				"src/renderer/components/InputArea/InputArea.tsx",
 				"src/renderer/components/NewInstanceModal/EditAgentModal.tsx",
 				"src/shared/feedbackAccounts.ts",
-				"docs/feedback.md"
+				"docs/feedback.md",
+				"src/shared/maestro-lib/providers/definitions.ts",
+				"src/shared/maestro-lib/launch/launch-plan.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6683,7 +6697,9 @@
 					"GT1-09-09",
 					"GT1-02-11A",
 					"GT1-08-14A",
-					"GT1-08-14B"
+					"GT1-08-14B",
+					"GT1-02-11A1",
+					"GT1-02-11A2"
 				],
 				"test": [
 					"GT1-03-02",
@@ -6699,7 +6715,9 @@
 					"GT1-02-11B",
 					"GT1-07-04",
 					"GT1-08-14C",
-					"GT1-08-14D"
+					"GT1-08-14D",
+					"GT1-02-11A1T",
+					"GT1-02-11A2T"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -6764,6 +6782,12 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["P35"]
+				},
+				{
+					"id": "grok-directory-grants-unqualified",
+					"code": "native-grants-and-consumer-propagation-pending",
+					"missingPrerequisite": "GT1-02-11A adds structured planner refusal for explicit active Grok directory grants and incompatible --add-dir arguments; read-only writes cannot widen the ceiling. Public additional-directory capability remains false and its builder absent. Investigation metadata records unverified CLI read/write roots, unsupported additionalDirectories on pinned-source ACP resume, and no qualified version range. No actual root-grant implementation or containment is certified: cwd, prompt paths, --allow/--deny tool rules and --sandbox profile labels are not grants. Existing callers drop typed grants before planning; bounded GT1-02-11A1/11A2 own desktop/CLI/Cue/shared-turn forwarding and refusal classification, with 11A1T/11A2T/11B authoring and GT1-02-13 execution. Native allowed/denied roots, symlink containment, supported binary versions and platforms remain blocked with existing phase09/11 owners. See Plans/grok-tier1/evidence/02.md#gt1-02-11a-grok-directory-grant-refusal.",
+					"affectedRows": ["P08", "P35", "C-supportsAdditionalDirectories", "REG-DEFINITIONS"]
 				}
 			],
 			"phase": "09",
@@ -11942,11 +11966,13 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/components/NewInstanceModal/EditAgentModal.tsx"
+				"src/renderer/components/NewInstanceModal/EditAgentModal.tsx",
+				"src/shared/maestro-lib/providers/definitions.ts",
+				"src/shared/maestro-lib/launch/launch-plan.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-11A", "GT1-09-07", "GT1-11-14A"],
-				"test": ["GT1-02-11B", "GT1-09-08", "GT1-11-14B"],
+				"implementation": ["GT1-02-11A", "GT1-09-07", "GT1-11-14A", "GT1-02-11A1", "GT1-02-11A2"],
+				"test": ["GT1-02-11B", "GT1-09-08", "GT1-11-14B", "GT1-02-11A1T", "GT1-02-11A2T"],
 				"verification": ["GT1-02-13", "GT1-09-11", "GT1-11-14C"],
 				"live": ["GT1-11-12", "GT1-11-14C"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -11999,6 +12025,12 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["C-supportsAdditionalDirectories"]
+				},
+				{
+					"id": "grok-directory-grants-unqualified",
+					"code": "native-grants-and-consumer-propagation-pending",
+					"missingPrerequisite": "GT1-02-11A adds structured planner refusal for explicit active Grok directory grants and incompatible --add-dir arguments; read-only writes cannot widen the ceiling. Public additional-directory capability remains false and its builder absent. Investigation metadata records unverified CLI read/write roots, unsupported additionalDirectories on pinned-source ACP resume, and no qualified version range. No actual root-grant implementation or containment is certified: cwd, prompt paths, --allow/--deny tool rules and --sandbox profile labels are not grants. Existing callers drop typed grants before planning; bounded GT1-02-11A1/11A2 own desktop/CLI/Cue/shared-turn forwarding and refusal classification, with 11A1T/11A2T/11B authoring and GT1-02-13 execution. Native allowed/denied roots, symlink containment, supported binary versions and platforms remain blocked with existing phase09/11 owners. See Plans/grok-tier1/evidence/02.md#gt1-02-11a-grok-directory-grant-refusal.",
+					"affectedRows": ["P08", "P35", "C-supportsAdditionalDirectories", "REG-DEFINITIONS"]
 				}
 			],
 			"field": "supportsAdditionalDirectories",
@@ -17830,7 +17862,9 @@
 				"src/main/cue/cue-executor.ts",
 				"src/shared/maestro-lib/groupchat/spawn.ts",
 				"src/main/utils/context-groomer.ts",
-				"src/shared/maestro-lib/runtime/background-turns.ts"
+				"src/shared/maestro-lib/runtime/background-turns.ts",
+				"src/shared/maestro-lib/providers/capabilities.ts",
+				"src/shared/maestro-lib/launch/launch-plan.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -17883,7 +17917,9 @@
 					"GT1-02-10D2",
 					"GT1-02-10G1",
 					"GT1-02-10G2",
-					"GT1-02-11C"
+					"GT1-02-11C",
+					"GT1-02-11A1",
+					"GT1-02-11A2"
 				],
 				"test": [
 					"GT1-11-02",
@@ -17930,7 +17966,9 @@
 					"GT1-02-10F1T",
 					"GT1-02-10D2T",
 					"GT1-02-10G1T",
-					"GT1-02-11D"
+					"GT1-02-11D",
+					"GT1-02-11A1T",
+					"GT1-02-11A2T"
 				],
 				"verification": [
 					"GT1-01-07",
@@ -18011,6 +18049,12 @@
 					"code": "implementation-and-verification-pending",
 					"missingPrerequisite": "GT1-02-07 adds evidence-gated minimal/medium/max candidates and native refusal memory. GT1-02-07A moves none/remembered-refusal guards from the scalar builder to canonical final argv composition and the shared launch planner, validates matching selected-model canonical wire menus, consolidates equivalent aliases and refuses conflicts/malformed selections. Current consumers supply no acknowledged menu, so none stays unavailable and explicit non-none values retain native validation; no native acceptance is claimed. GT1-02-07AT authors 77 final-argument and launch-plan regression cases across the two existing suites, covering selected/stale/unavailable menus, validated none, provider/session inheritance, aliases/quotes/whitespace/conflicts, remembered refusals, local/SSH surfaces, managed model-pin ordering and ordinary providers. GT1-02-13 owns execution; tests and type checks remain not-run. See Plans/grok-tier1/evidence/02.md#gt1-02-07at-final-argument-and-launch-validation-regression-tests. GT1-02-07A1 preserves grok-model-effort-refused and its original diagnostic through run-agent-turn.ts and corrects the process/handle-spawn.ts log classification, retaining existing refusal cleanup and callbacks. GT1-02-07A1T authored 17 consumer regression cases for local/resolved-SSH Grok refusals, exact diagnostic/reporting and log identity, no spawn/retry, owned-artifact cleanup and genuine SSH/managed classifications. GT1-02-13 owns execution; behavior remains not-run. See Plans/grok-tier1/evidence/02.md#gt1-02-07a1t-launch-refusal-regression-coverage. See Plans/grok-tier1/evidence/02.md#gt1-02-07a1-launch-refusal-classification. GT1-02-07B threads optional selected-model advertised wire values through shared hint resolution, inspection/replay and cheap/resumed settings, preserving exact minimal/medium/max membership and refusal memory with distinct missing-menu/missing-rung warnings. Current consumers still supply no evidence and inherit. GT1-02-07BT authored 42 regression cases across the existing hint/model-tier suites for real parsing, inspection and segment replay, exact rung/menu gating, warning precedence, default/inline scopes, refusal memory, configured values and cheap/resumed settings, with ordinary-provider regressions. Scoped formatting, dash lint and independent static review passed; tests/type checks remain not-run under GT1-02-13. See Plans/grok-tier1/evidence/02.md#gt1-02-07bt-shared-hint-regression-coverage. See Plans/grok-tier1/evidence/02.md#gt1-02-07b-shared-hint-evidence-propagation. GT1-02-07C guards CLI, renderer batch/synopsis and context-groomer retries: Grok failures are preserved because the current APIs have no proven automatic-hint provenance and validated distinct fallback; provider-wide refusal reporting remains active. GT1-02-07CT authored 25 Grok regression cases and expanded Codex retry success/refusal coverage (26 net new cases) across the existing CLI, renderer execution and context-groomer suites. Synthetic fixtures cover automatic hints, explicit/unknown origins, same/different inherited efforts, case-insensitive refusal memory, original errors, no unqualified second process, selected model/account/SSH forwarding and cleanup. GT1-02-13 owns execution; deterministic/live status remains not-run. See Plans/grok-tier1/evidence/02.md#gt1-02-07ct-effort-refusal-regression-tests. See Plans/grok-tier1/evidence/02.md#gt1-02-07c-preserved-effort-refusals. Audited tabNaming.ts and shared runtime/autorun-turns.ts retain GT1-08-14 utility ownership through bounded GT1-08-14E/14F continuations and GT1-08-21 verification. GT1-02-08 authored 54 additional core regression cases and corrected two stale static-menu expectations across modelTiers, effortRejection and definitions. Coverage includes all canonical explicit tokens, exact hint candidates, legacy/arbitrary menus, raw/JSON diagnostics, ambiguous escaped menus, provider-wide ASCII-case refusal memory, inherited blanks and single-pair scalar emission. Existing GT1-02-07BT and GT1-02-07AT suites retain deterministic playbook replay and final model/effort refusal/deduplication coverage. GT1-02-13 owns execution; tests/type checks remain not-run. See Plans/grok-tier1/evidence/02.md#gt1-02-08-core-effort-and-definition-regression-tests; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata and menu-ID mappings. No universal effort menu or model tiers are claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-07a-final-model-and-effort-validation.",
 					"affectedRows": ["P06", "REG-MODEL", "REG-DEFINITIONS", "P29", "P32", "S10", "S19"]
+				},
+				{
+					"id": "grok-directory-grants-unqualified",
+					"code": "native-grants-and-consumer-propagation-pending",
+					"missingPrerequisite": "GT1-02-11A adds structured planner refusal for explicit active Grok directory grants and incompatible --add-dir arguments; read-only writes cannot widen the ceiling. Public additional-directory capability remains false and its builder absent. Investigation metadata records unverified CLI read/write roots, unsupported additionalDirectories on pinned-source ACP resume, and no qualified version range. No actual root-grant implementation or containment is certified: cwd, prompt paths, --allow/--deny tool rules and --sandbox profile labels are not grants. Existing callers drop typed grants before planning; bounded GT1-02-11A1/11A2 own desktop/CLI/Cue/shared-turn forwarding and refusal classification, with 11A1T/11A2T/11B authoring and GT1-02-13 execution. Native allowed/denied roots, symlink containment, supported binary versions and platforms remain blocked with existing phase09/11 owners. See Plans/grok-tier1/evidence/02.md#gt1-02-11a-grok-directory-grant-refusal.",
+					"affectedRows": ["P08", "P35", "C-supportsAdditionalDirectories", "REG-DEFINITIONS"]
 				}
 			],
 			"definitionInventory": [

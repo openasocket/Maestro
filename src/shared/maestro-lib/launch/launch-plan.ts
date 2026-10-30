@@ -29,12 +29,17 @@ import {
 
 import { isWindows } from '../../platformDetection';
 import {
+	dirsWithAnyAccess,
+	dirsWithWriteAccess,
+	normalizeAdditionalDirectories,
+} from '../../additionalDirectories';
+import {
 	GrokModelEffortError,
 	resolveGrokModelEffortArgs,
 	type GrokEffortMenu,
 } from './agent-args';
 import type { QuerySource } from '../../querySource';
-import type { AgentSshRemoteConfig, SshRemoteConfig } from '../../types';
+import type { AdditionalDirectory, AgentSshRemoteConfig, SshRemoteConfig } from '../../types';
 import {
 	describeSecretProblem,
 	describeStrictSecretProblems,
@@ -106,6 +111,12 @@ export interface AgentLaunchInput {
 	/** Host-scoped native wire menu; picker options are not validation evidence. */
 	grokEffortMenu?: GrokEffortMenu;
 	cwd: string;
+	/**
+	 * Explicit grants on the selected host, separate from cwd and prompt paths.
+	 * Other providers retain their existing argument builders. Grok refuses active
+	 * grants until a native mechanism is qualified; never expand remote roots here.
+	 */
+	additionalDirectories?: AdditionalDirectory[];
 	/** The user prompt, already final (system prompt embedded if that applies). */
 	prompt?: string;
 	hasImages?: boolean;
@@ -311,6 +322,7 @@ export type AgentLaunchPlanResult =
 				| Extract<SshLaunchTarget, { kind: 'unresolved' }>['reason']
 				| ManagedLaunchRefusal
 				| 'grok-model-effort-refused'
+				| 'grok-directory-grants-refused'
 				| 'prompt-delivery-refused';
 			error: string;
 	  };
@@ -439,6 +451,41 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 				ok: false,
 				reason: 'managed-route-refused',
 				error: `The launch arguments route around the policy - ${argProblems.join('; ')}`,
+			};
+		}
+	}
+	if (agent?.id === 'grok') {
+		// --add-dir belongs to other providers. Refuse both spellings even when
+		// no typed grant was supplied, rather than forward a fabricated Grok flag.
+		if (input.args.some((arg) => arg === '--add-dir' || arg.startsWith('--add-dir='))) {
+			return {
+				ok: false,
+				reason: 'grok-directory-grants-refused',
+				error: 'Grok CLI has no qualified --add-dir argument for additional-directory grants.',
+			};
+		}
+		// Reuse saved-row semantics (blank/inert rows, last duplicate wins).
+		// No local home, filesystem lookup or cwd substitution: these roots belong
+		// to the selected host, including on a resumed turn.
+		const grants = dirsWithAnyAccess(normalizeAdditionalDirectories(input.additionalDirectories));
+		if (grants.length > 0) {
+			const readOnly =
+				input.readOnlyMode || requestedMode === 'readonly' || route?.permissionMode === 'readonly';
+			if (readOnly && dirsWithWriteAccess(grants).length > 0) {
+				return {
+					ok: false,
+					reason: 'grok-directory-grants-refused',
+					error: "Grok CLI writable directory grants exceed this launch's read-only mode.",
+				};
+			}
+			// Read grants are not writable roots. Neither has qualified native
+			// support, so refusing the request is the only safe intersection today.
+			// Plan mode, approval rules and paths in a prompt are not root grants.
+			return {
+				ok: false,
+				reason: 'grok-directory-grants-refused',
+				error:
+					'Grok CLI additional-directory read and write grants have no qualified native mechanism. Remove the grants to run with the selected working directory.',
 			};
 		}
 	}
