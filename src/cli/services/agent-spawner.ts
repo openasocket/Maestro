@@ -7,6 +7,7 @@ import * as path from 'path';
 import type {
 	AdditionalDirectory,
 	AgentSshRemoteConfig,
+	SshRemoteConfig,
 	ToolType,
 	UsageStats,
 } from '../../shared/types';
@@ -28,6 +29,7 @@ import {
 } from '../../shared/maestro-lib/launch/launch-plan';
 import {
 	resolveSystemPromptDelivery,
+	type PromptFileDestination,
 	type SystemPromptDelivery,
 } from '../../shared/maestro-lib/launch/prompt-delivery';
 import {
@@ -41,6 +43,7 @@ import {
 	DispatchRefusedError,
 	leaseAdmission,
 	startTurn,
+	turnProcessSpecFromPlan,
 	DEFAULT_STDERR_TAIL_LIMIT,
 	type StartTurnOptions,
 	type TurnProcessSpec,
@@ -167,10 +170,14 @@ const cliSpawnCoreDeps: ClaudeSpawnCoreDeps = createStandaloneClaudeSpawnCoreDep
 
 async function maybeWrapSpawnWithSsh(
 	config: SshSpawnWrapConfig,
-	sshConfig: AgentSshRemoteConfig
+	sshConfig: AgentSshRemoteConfig,
+	selectedRemote?: SshRemoteConfig
 ): Promise<SshSpawnWrapResult> {
+	selectedRemote = selectedRemote ? structuredClone(selectedRemote) : undefined;
 	const { wrapSpawnWithSsh } = await import('../../main/utils/ssh-spawn-wrapper');
-	return wrapSpawnWithSsh(config, sshConfig, { getSshRemotes: () => readSshRemotes() });
+	return wrapSpawnWithSsh(config, sshConfig, {
+		getSshRemotes: () => (selectedRemote ? [selectedRemote] : readSshRemotes()),
+	});
 }
 
 type SpawnOverrides = Pick<
@@ -352,7 +359,7 @@ function resolveAgentOverrides(
  * Plan a CLI agent launch with the shared `buildAgentLaunchPlan`, as the `cli`
  * surface: provider defaults fill only what the shell has not set, so a value
  * exported in the shell that runs the command survives; the user's own vars
- * override it; and the prompt goes on the command line on every host. The
+ * override it; explicit file delivery takes priority over legacy argv. The
  * CLI's own inputs: SSH remotes read from disk, and batch-mode vars always on
  * (every CLI spawn is a batch spawn). A desktop-backed local turn with live
  * global settings uses the canonical desktop environment rules, including
@@ -366,6 +373,7 @@ function planCliLaunch(
 		args: string[];
 		cwd: string;
 		prompt: string;
+		promptFileDestination?: PromptFileDestination;
 		readOnlyMode?: boolean;
 		/** The mode the launch asks for (`cliRequestedPermissionMode`); the plan measures it against the ceiling. */
 		permissionMode: LaunchPermissionMode;
@@ -387,6 +395,7 @@ function planCliLaunch(
 		args: input.args,
 		cwd: input.cwd,
 		prompt: input.prompt,
+		promptFileDestination: input.promptFileDestination,
 		agentCustomEnvVars: input.agentCustomEnvVars,
 		sessionCustomEnvVars: input.sessionCustomEnvVars,
 		readOnlyMode: input.readOnlyMode,
@@ -723,8 +732,8 @@ const NO_EXIT_CLASSIFICATION = { detectErrorFromExit: () => null };
  * `interrupted`; timeout and startup failures settle as `crashed`.
  *
  * Over SSH this stops the LOCAL ssh client; without a forced TTY the remote
- * process is not guaranteed to receive the hangup, so a remote agent may
- * outlive an interrupted CLI run. Documented in Plans/maestro-lib-cli-migration.md.
+ * process is not guaranteed to receive the hangup on legacy routes. Explicit
+ * file routes additionally bind the shared remote owner and turn guard below.
  */
 function cliTurnOptions(
 	signal: AbortSignal | undefined,
@@ -1465,6 +1474,7 @@ async function spawnJsonLineAgent(
 	overrides: SpawnOverrides = {}
 ): Promise<AgentResult> {
 	const def = getAgentDefinition(toolType);
+	sshRemoteConfig = sshRemoteConfig ? { ...sshRemoteConfig } : undefined;
 
 	// Build args from agent definition (without the prompt or model/customArgs -
 	// those come from applyAgentConfigOverrides via configOptions).
@@ -1552,16 +1562,24 @@ async function spawnJsonLineAgent(
 		? getAgentCommand(toolType)
 		: (overrides.agentCommand ?? (await resolveLocalAgentCommand(toolType)));
 
-	// Target, environment and prompt delivery come from the shared launch plan,
-	// by the CLI's own rules (see planCliLaunch): the provider's own prompt flag
-	// (Copilot's `-p`), a bare positional or `-- <prompt>`, on the command line
-	// on every host. An SSH remote that cannot be resolved fails here, before
-	// anything is spawned.
+	// Select only a name on the executing host; the shared sink owns all I/O.
+	let promptFileDestination: PromptFileDestination | undefined;
+	if (def?.promptFile && sshRemoteConfig?.enabled && sshRemoteConfig.remoteId) {
+		const { newRemotePromptFileDestination } =
+			await import('../../shared/maestro-lib/launch/ssh-command-builder');
+		promptFileDestination = newRemotePromptFileDestination(
+			sshRemoteConfig.remoteId,
+			def.promptFile.format
+		);
+	}
+	// The canonical planner chooses local file destinations and refuses invalid
+	// targets or competing prompt sources before any process can start.
 	const planResult = planCliLaunch(toolType, def, {
 		command: agentCommand,
 		args: baseArgs,
 		cwd,
 		prompt: effectivePrompt,
+		promptFileDestination,
 		readOnlyMode,
 		permissionMode: cliRequestedPermissionMode(toolType, readOnlyMode, baseArgs),
 		managed: cliManagedRoute(overrides.managed, toolType),
@@ -1577,6 +1595,7 @@ async function spawnJsonLineAgent(
 		return planRefusalResult(planResult);
 	}
 	const plan = planResult.plan;
+	const artifact = plan.prompt.via === 'file' ? plan.prompt.artifact : undefined;
 
 	// See the note in spawnClaudeAgent: CLI runs are invisible to the desktop
 	// WakaTime listener, so they beat from their own output stream.
@@ -1592,29 +1611,45 @@ async function spawnJsonLineAgent(
 	let spawnEnv: NodeJS.ProcessEnv = plan.env ?? { ...process.env };
 	let sshStdinScript: string | undefined;
 
+	let remote: import('../../shared/maestro-lib/control/turn-guard').RemoteAgentTarget | undefined;
+	let remoteControl: typeof import('../../shared/maestro-lib/control/turn-guard') | undefined;
 	if (plan.target.kind === 'remote' && sshRemoteConfig) {
-		// Pass `effectivePrompt` (not the raw `prompt`) so the embed-in-turn-1
-		// fallback for agents without native --append-system-prompt support
-		// also reaches the SSH remote. baseArgs already carries the native
-		// flag for agents that support it.
-		const wrapped = await maybeWrapSpawnWithSsh(
-			{
-				command: agentCommand,
-				args: plan.args,
-				cwd,
-				prompt: effectivePrompt,
-				customEnvVars: plan.envVars,
-				agentBinaryName: def?.binaryName,
-				noPromptSeparator,
-				promptArgs: def?.promptArgs,
-				querySource: overrides.querySource,
-			},
-			sshRemoteConfig
-		);
-		if (!wrapped.sshRemoteUsed) {
-			return sshUnresolvedFailure(sshRemoteConfig);
+		try {
+			const wrapped = await maybeWrapSpawnWithSsh(
+				{
+					command: artifact ? plan.command : agentCommand,
+					args: plan.args,
+					cwd,
+					prompt: artifact ? undefined : effectivePrompt,
+					...(artifact ? { promptArtifact: artifact } : {}),
+					customEnvVars: plan.envVars,
+					agentBinaryName: artifact ? plan.command : def?.binaryName,
+					noPromptSeparator,
+					promptArgs: def?.promptArgs,
+					querySource: overrides.querySource,
+				},
+				sshRemoteConfig,
+				artifact ? plan.target.remote : undefined
+			);
+			if (!wrapped.sshRemoteUsed) return sshUnresolvedFailure(sshRemoteConfig);
+			({ spawnCommand, spawnArgs, spawnCwd, spawnEnv, sshStdinScript } =
+				applySshWrapResult(wrapped));
+			if (artifact) {
+				remoteControl = await import('../../shared/maestro-lib/control/turn-guard');
+				const recorded = remoteControl.recordRemoteAgent({
+					command: spawnCommand,
+					args: spawnArgs,
+					sshStdinScript,
+					sessionId: agentSessionId ?? 'cli-turn',
+					promptArtifactPath: artifact.path,
+				});
+				sshStdinScript = recorded.sshStdinScript;
+				remote = recorded.remote;
+			}
+		} catch (error) {
+			if (artifact) return spawnFailureResult('Remote prompt preparation unavailable.');
+			throw error;
 		}
-		({ spawnCommand, spawnArgs, spawnCwd, spawnEnv, sshStdinScript } = applySshWrapResult(wrapped));
 	}
 
 	// Resolve the output parser before spawning so a misconfigured agent type
@@ -1659,19 +1694,35 @@ async function spawnJsonLineAgent(
 
 	// Everything about the launch is final here; a managed host admits exactly
 	// this spec and the lease is re-checked against it inside `startTurn`.
-	const spec: TurnProcessSpec = {
-		command: spawnCommand,
-		args: spawnArgs,
-		cwd: spawnCwd,
-		env: spawnEnv,
-		stdin: sshStdinScript || plan.stdin,
-	};
+	const spec: TurnProcessSpec =
+		artifact?.owner === 'local'
+			? turnProcessSpecFromPlan({ ...plan, env: spawnEnv })
+			: {
+					command: spawnCommand,
+					args: spawnArgs,
+					cwd: spawnCwd,
+					env: spawnEnv,
+					stdin: sshStdinScript ?? plan.stdin,
+				};
+	if (artifact && overrides.signal?.aborted) return interruptedResult();
 	const admitted = await admitCliLaunch(
 		overrides.managed,
 		spec,
 		cliAttribution(toolType, { resuming: isResume, sshRemoteConfig, model: overrides.customModel })
 	);
 	if (!admitted.ok) return admitted.result;
+	if (artifact && overrides.signal?.aborted) {
+		admitted.admission?.gate.released?.({
+			exitCode: null,
+			signal: null,
+			interrupted: true,
+			stoppedBy: 'caller',
+			stdoutText: '',
+			stderrText: '',
+			droppedOutputBytes: 0,
+		});
+		return interruptedResult();
+	}
 	let turn: ReturnType<typeof startTurn>;
 	try {
 		turn = startTurn(
@@ -1759,13 +1810,33 @@ async function spawnJsonLineAgent(
 				},
 				onOversizedLine: warnOversizedLineBuffer,
 			},
-			{ ...cliTurnOptions(undefined, admitted.admission), parser }
+			{ ...cliTurnOptions(artifact ? overrides.signal : undefined, admitted.admission), parser }
 		);
 	} catch (error) {
+		if (artifact) {
+			admitted.admission?.gate.released?.({
+				exitCode: null,
+				signal: null,
+				interrupted: false,
+				spawnError: new Error('Could not start the private prompt-file turn.'),
+				stdoutText: '',
+				stderrText: '',
+				droppedOutputBytes: 0,
+			});
+		}
 		const refused = refusedResult(error);
 		if (refused) return refused;
+		if (artifact)
+			return overrides.signal?.aborted
+				? interruptedResult()
+				: spawnFailureResult('Could not start the private prompt-file turn.');
 		throw error;
 	}
+	const guarded = remoteControl?.guardTurn(turn, {
+		sessionId: agentSessionId ?? 'cli-turn',
+		graceMs: BACKGROUND_STOP_GRACE_MS,
+		remote,
+	});
 	let forcedStop!: () => void;
 	const forced = new Promise<undefined>((resolve) => {
 		forcedStop = () => resolve(undefined);
@@ -1777,6 +1848,7 @@ async function spawnJsonLineAgent(
 		onStop: (reason) => {
 			stopped = true;
 			stopReason = reason;
+			guarded?.terminateNow();
 		},
 		onForcedStop: forcedStop,
 	});
@@ -1793,7 +1865,11 @@ async function spawnJsonLineAgent(
 	if (!exit) return interruptedResult();
 	if (exit.spawnError) {
 		const agentName = def?.name || toolType;
-		return spawnFailureResult(`Failed to spawn ${agentName}: ${exit.spawnError.message}`);
+		return spawnFailureResult(
+			artifact
+				? 'Could not start the private prompt-file turn.'
+				: `Failed to spawn ${agentName}: ${exit.spawnError.message}`
+		);
 	}
 
 	// Soft success: agents like Grok may exit non-zero after a full

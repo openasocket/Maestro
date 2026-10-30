@@ -37,6 +37,7 @@ import {
 	startTurn,
 	type StartTurnOptions,
 	type TurnHandle,
+	type TurnProcessSpec,
 } from '../../shared/maestro-lib/run/start-turn';
 import {
 	buildDispatchSnapshot,
@@ -50,12 +51,8 @@ import type {
 	ManagedDenialCode,
 } from '../../shared/maestro-lib/managed/types';
 import { isLaunchCancelled } from './cue-launch-cancel';
-import {
-	newRemotePidFilePath,
-	signalRemoteAgent,
-	sshConnectionArgs,
-	withRemotePidRecord,
-} from '../utils/ssh-remote-signal';
+import { signalRemoteAgent } from '../utils/ssh-remote-signal';
+import { guardTurn, recordRemoteAgent } from '../../shared/maestro-lib/control/turn-guard';
 
 // ─── Types ──────���────────────────────────────────────────────────────────────
 
@@ -72,6 +69,8 @@ export interface CueActiveProcess {
 	/** For stdin-script SSH spawns: where the remote agent's pid is recorded, so
 	 *  a stop or timeout reaches the agent and not only the local ssh client. */
 	sshRemotePidFile?: string;
+	/** Private remote file witness for the existing stop owner. Never serialized. */
+	sshRemotePromptArtifactPath?: string;
 	/** Live ref to the accumulating stdout buffer - filled by the runProcess
 	 *  closure as chunks arrive. Exposed via `getActiveProcessOutput` so the
 	 *  renderer can poll for in-flight logs without a separate subscription
@@ -451,6 +450,9 @@ function terminateRemoteCueAgent(runId: string, entry: CueActiveProcess): void {
 			sshCommand: entry.command,
 			sshArgs: entry.args,
 			pidFile: entry.sshRemotePidFile,
+			...(entry.sshRemotePromptArtifactPath !== undefined
+				? { promptArtifactPath: entry.sshRemotePromptArtifactPath }
+				: {}),
 			sessionId: runId,
 		},
 		'terminate'
@@ -513,6 +515,17 @@ export async function runProcess(
 	// again after the managed admission below, which is the one await before
 	// the spawn.
 	if (isLaunchCancelled(options.signal)) return stoppedResult();
+	if (spec.promptArtifact) {
+		// Admission may await host code. Keep the selected bytes and transport
+		// independent of mutations to the caller's original spec while it waits.
+		spec = {
+			...spec,
+			args: [...spec.args],
+			env: { ...spec.env },
+			promptArtifact: { ...spec.promptArtifact },
+		};
+	}
+	const promptArtifact = spec.promptArtifact;
 
 	let stdout = '';
 	let stderr = '';
@@ -523,22 +536,51 @@ export async function runProcess(
 	// local run on a Windows host; see resolvePromptDelivery).
 	// A stdin-script SSH run records the remote agent's pid so Stop and the
 	// timeout can reach it: killing only the local ssh client leaves it running.
-	const sshRemotePidFile =
-		sshStdinScript && sshRemoteEnabled && sshConnectionArgs(spec.args)
-			? newRemotePidFilePath()
-			: undefined;
-	const stdin =
-		sshStdinScript && sshRemoteEnabled
-			? sshRemotePidFile
-				? withRemotePidRecord(sshStdinScript, sshRemotePidFile)
-				: sshStdinScript
-			: stdinPrompt;
-	const processSpec = {
+	let recorded: ReturnType<typeof recordRemoteAgent>;
+	try {
+		if (
+			promptArtifact &&
+			(stdinPrompt !== undefined ||
+				spec.stdinPrompt !== undefined ||
+				(promptArtifact.owner === 'remote'
+					? !sshRemoteEnabled ||
+						!spec.sshRemoteUsed ||
+						spec.sshRemoteUsed.id !== promptArtifact.sshRemoteId ||
+						sshStdinScript !== spec.sshStdinScript
+					: sshRemoteEnabled || !!spec.sshRemoteUsed || !!sshStdinScript || !!spec.sshStdinScript))
+		) {
+			throw new Error(
+				'Prompt-file delivery requires its selected transport without another source.'
+			);
+		}
+		recorded = recordRemoteAgent({
+			command: spec.command,
+			args: spec.args,
+			sshStdinScript: sshRemoteEnabled ? sshStdinScript : undefined,
+			sessionId: runId,
+			...(promptArtifact?.owner === 'remote' ? { promptArtifactPath: promptArtifact.path } : {}),
+		});
+	} catch (error) {
+		if (!promptArtifact) throw error;
+		return {
+			...stoppedResult(),
+			status: 'failed',
+			stderr: 'Prompt-file preparation unavailable.',
+		};
+	}
+	const sshRemotePidFile = recorded.remote?.pidFile;
+	const processSpec: TurnProcessSpec = {
 		command: spec.command,
 		args: spec.args,
 		cwd: spec.cwd,
 		env: spec.env,
-		stdin,
+		stdin:
+			sshStdinScript && sshRemoteEnabled
+				? recorded.sshStdinScript
+				: promptArtifact
+					? undefined
+					: stdinPrompt,
+		...(promptArtifact?.owner === 'local' ? { promptArtifact } : {}),
 	};
 
 	// Managed admission: everything about the spec is final here, stdin included.
@@ -564,6 +606,7 @@ export async function runProcess(
 		};
 	};
 	let admission: StartTurnOptions['admission'];
+	let lease: DispatchLease | undefined;
 	if (options.managed) {
 		const managed = options.managed;
 		const admitted = await managed.authority.admit({
@@ -579,7 +622,7 @@ export async function runProcess(
 			admitted.lease.release({ outcome: 'stopped', by: 'caller' });
 			return stoppedResult();
 		}
-		managed.onLease?.(admitted.lease);
+		lease = admitted.lease;
 		admission = {
 			gate: leaseAdmission(managed.authority, admitted.lease),
 			attribution: managed.attribution,
@@ -588,6 +631,11 @@ export async function runProcess(
 
 	let turn: TurnHandle;
 	try {
+		if (lease) options.managed?.onLease?.(lease);
+		if (isLaunchCancelled(options.signal)) {
+			lease?.release({ outcome: 'stopped', by: 'caller' });
+			return stoppedResult();
+		}
 		// maestro-p (interactive token mode) self-allocates its own PTY via
 		// node-pty internally, so plain pipe stdio here is sufficient; no
 		// caller-side TTY is needed.
@@ -620,23 +668,45 @@ export async function runProcess(
 				stderrTailLimit: 0,
 				sessionId: runId,
 				label: 'cue',
+				...(options.signal ? { signal: options.signal } : {}),
 				...(admission ? { admission } : {}),
 			}
 		);
 	} catch (err) {
+		const failure = promptArtifact
+			? new Error('Prompt-file launch failed.')
+			: err instanceof Error
+				? err
+				: new Error(String(err));
+		lease?.release(
+			isLaunchCancelled(options.signal)
+				? { outcome: 'stopped', by: 'caller' }
+				: { outcome: 'spawn-failed', message: failure.message }
+		);
 		// The gate refused the final spec: a decision, not a crash.
 		if (err instanceof DispatchRefusedError) {
 			return managedRefusal(err.state, err.code, err.message);
 		}
-		captureException(err, { operation: 'cue:spawn', runId, command: spec.command });
+		if (isLaunchCancelled(options.signal)) return stoppedResult();
+		captureException(failure, { operation: 'cue:spawn', runId, command: spec.command });
 		return {
 			stdout: '',
-			stderr: `Spawn error: ${err instanceof Error ? err.message : String(err)}`,
+			stderr: `Spawn error: ${failure.message}`,
 			exitCode: null,
 			status: 'failed',
 			providerSessionId: null,
 			usage: null,
 		};
+	}
+	if (promptArtifact?.owner === 'remote') {
+		// Failed transport and managed revocation also reach the remote owner,
+		// even when local SSH close happens before remote cleanup completes.
+		guardTurn(turn, {
+			sessionId: runId,
+			graceMs: BACKGROUND_STOP_GRACE_MS,
+			remote: recorded.remote,
+			signal: options.signal,
+		});
 	}
 
 	// Set by `stopProcess` / `stopAllProcesses` before the kill, so the exit
@@ -650,12 +720,15 @@ export async function runProcess(
 	const entry: CueActiveProcess = {
 		child: turn.child,
 		command: spec.command,
-		args: spec.args,
+		args: promptArtifact?.owner === 'local' ? [] : spec.args,
 		cwd: spec.cwd,
 		toolType,
 		startTime: Date.now(),
-		sshRemoteCommand: spec.sshRemoteCommand,
+		sshRemoteCommand: promptArtifact ? undefined : spec.sshRemoteCommand,
 		sshRemotePidFile,
+		...(promptArtifact?.owner === 'remote'
+			? { sshRemotePromptArtifactPath: promptArtifact.path }
+			: {}),
 		getStdout: () => stdout,
 		getStderr: () => stderr,
 		requestStop: () => {
@@ -702,12 +775,13 @@ export async function runProcess(
 	// Spawn errors that arrive after spawn returned (e.g. ENOENT).
 	if (exit.spawnError) {
 		if (timedOut) return finish('timeout', null);
-		captureException(exit.spawnError, {
+		const failure = promptArtifact ? new Error('Prompt-file launch failed.') : exit.spawnError;
+		captureException(failure, {
 			operation: 'cue:childProcess:error',
 			runId,
 			command: spec.command,
 		});
-		stderr += `\nSpawn error: ${exit.spawnError.message}`;
+		stderr += `\nSpawn error: ${failure.message}`;
 		return finish('failed', null);
 	}
 
@@ -723,7 +797,7 @@ export async function runProcess(
 		{
 			exitCode: exit.exitCode,
 			signal: exit.signal,
-			interrupted: stopRequested,
+			interrupted: stopRequested || exit.interrupted,
 			stderrText: stderr,
 			stdoutText: stdout,
 			explicitError: capture.inBandError,

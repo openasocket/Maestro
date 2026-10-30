@@ -48,6 +48,9 @@ import {
 } from '../plugins/plugin-tool-run-identity';
 import { resolveMaestroCliScriptPath } from './cue-cli-executor';
 import { applySystemPromptDelivery } from '../utils/system-prompt-delivery';
+import { resolveSshLaunchTarget } from '../../shared/maestro-lib/launch/ssh-remote-resolver';
+import { newRemotePromptFileDestination } from '../../shared/maestro-lib/launch/ssh-command-builder';
+import type { TurnProcessSpec } from '../../shared/maestro-lib/run/start-turn';
 
 // ─── Types ──────���────────────────────────────────────────────────────────────
 
@@ -63,8 +66,10 @@ export interface SpawnSpec {
 	sshRemoteCommand?: string;
 	/** For SSH small-prompt mode: raw prompt to send via stdin */
 	stdinPrompt?: string;
+	/** Private file source. Only a local artifact may reach the local turn sink. */
+	promptArtifact?: TurnProcessSpec['promptArtifact'];
 	/** Whether SSH remote execution was actually used */
-	sshRemoteUsed?: { name?: string; host: string };
+	sshRemoteUsed?: { id?: string; name?: string; host: string };
 	/** Main-process proof to revoke after this Cue run. Never logged. */
 	pluginRunToken?: string;
 	pluginRunProofFile?: string;
@@ -190,9 +195,12 @@ export async function buildSpawnSpec(
 	// 4. The launch plan decides where the run happens, what it execs, its
 	// environment and how the prompt reaches it, as the `cue` surface: the
 	// inherited environment, then the provider defaults, then the agent's own
-	// vars, with the prompt on the command line. An SSH remote that cannot be
+	// vars. Explicit file delivery takes priority over legacy argv. An SSH remote that cannot be
 	// resolved fails the run here: it never falls back to running the agent on
 	// this machine.
+	const fileTarget = agentDef.promptFile
+		? resolveSshLaunchTarget(sshStore, sshRemoteConfig)
+		: undefined;
 	const planResult = buildAgentLaunchPlan({
 		surface: 'cue',
 		agent: { ...agentDef, capabilities: agentConfig.capabilities },
@@ -200,6 +208,14 @@ export async function buildSpawnSpec(
 		args: finalArgs,
 		cwd: projectRoot,
 		prompt: promptToSend,
+		...(agentDef.promptFile && fileTarget?.kind === 'remote'
+			? {
+					promptFileDestination: newRemotePromptFileDestination(
+						fileTarget.remote.id,
+						agentDef.promptFile.format
+					),
+				}
+			: {}),
 		agentCustomEnvVars: sanitizeLayer(
 			(agentConfigValues as Record<string, unknown> | undefined)?.customEnvVars as
 				| Record<string, string>
@@ -223,6 +239,7 @@ export async function buildSpawnSpec(
 		return { ok: false, message: planResult.error };
 	}
 	const plan = planResult.plan;
+	const promptArtifact = plan.prompt.via === 'file' ? { ...plan.prompt.artifact } : undefined;
 	// Names only: the run still starts, and the agent reports its own auth error.
 	const undeliveredSecrets = describeUndeliveredSecrets(session?.name ?? toolType, plan.secrets);
 	if (undeliveredSecrets) config.onLog('warn', `[CUE] ${undeliveredSecrets}`);
@@ -244,7 +261,8 @@ export async function buildSpawnSpec(
 	// so a headless Cue spawn falls a remote TUI selection back to API instead of
 	// exiting 127 when maestro-p isn't installed on the remote (no UI/readiness
 	// probe runs first).
-	const remoteTarget = plan.target.kind === 'remote' ? plan.target.remote : undefined;
+	const remoteTarget =
+		plan.target.kind === 'remote' ? structuredClone(plan.target.remote) : undefined;
 	const remoteMaestroPAvailable = remoteTarget
 		? await ensureRemoteMaestroPProbed(remoteTarget)
 		: undefined;
@@ -293,7 +311,8 @@ export async function buildSpawnSpec(
 			command: plan.command,
 			args: remoteInteractive ? [...remoteInteractive.prependArgs, ...plan.args] : plan.args,
 			cwd: plan.cwd,
-			prompt: promptToSend,
+			prompt: promptArtifact ? undefined : promptToSend,
+			...(promptArtifact ? { promptArtifact } : {}),
 			customEnvVars: remoteInteractive
 				? { ...(plan.envVars ?? {}), ...remoteInteractive.env }
 				: plan.envVars,
@@ -306,7 +325,17 @@ export async function buildSpawnSpec(
 			launchViaStdinScript: true,
 		};
 
-		const sshResult = await wrapSpawnWithSsh(sshWrapConfig, sshRemoteConfig, sshStore);
+		let sshResult;
+		try {
+			sshResult = await wrapSpawnWithSsh(
+				sshWrapConfig,
+				sshRemoteConfig,
+				promptArtifact ? { getSshRemotes: () => [remoteTarget] } : sshStore
+			);
+		} catch (error) {
+			if (promptArtifact) return { ok: false, message: 'Remote prompt preparation unavailable.' };
+			throw error;
+		}
 		if (!sshResult.sshRemoteUsed) {
 			// The plan resolved this remote a moment ago; losing it now is still a
 			// failure, not a reason to run locally.
@@ -415,6 +444,7 @@ export async function buildSpawnSpec(
 			sshStdinScript,
 			sshRemoteCommand,
 			stdinPrompt,
+			...(promptArtifact ? { promptArtifact } : {}),
 			sshRemoteUsed,
 			pluginRunToken,
 			pluginRunProofFile,
