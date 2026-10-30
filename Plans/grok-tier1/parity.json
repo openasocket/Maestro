@@ -1857,7 +1857,7 @@
 				{
 					"id": "grok-withheld-profile-readiness-unverified",
 					"code": "deterministic-evidence-pending",
-					"missingPrerequisite": "GT1-02-03A withholds unproven Grok credential attribution; GT1-02-03F separates settled withheld profiles from pending root/env inputs so removed dashboard filters can clear. GT1-02-03D/03G/13 must prove resolver behavior, withheld-mode transitions, pending env/home protection, unfiltered visibility and local/SSH separation. Selected model/file/managed auth and whole-row qualification remain unproven. See Plans/grok-tier1/evidence/02.md#gt1-02-03f-settled-withheld-profile-readiness.",
+					"missingPrerequisite": "GT1-02-03A withholds unproven Grok credential attribution; GT1-02-03F separates settled withheld profiles from pending root/env inputs so removed dashboard filters can clear. GT1-02-03D authored resolver coverage for withheld credentials, state-root and local/SSH separation; execution remains not-run. GT1-02-03G/13 must prove withheld-mode transitions, pending env/home protection, unfiltered visibility and execute the resolver cases. Selected model/file/managed auth and whole-row qualification remain unproven. See Plans/grok-tier1/evidence/02.md#gt1-02-03f-settled-withheld-profile-readiness.",
 					"affectedRows": ["P04"]
 				}
 			],
@@ -2006,7 +2006,7 @@
 				{
 					"id": "grok-environment-disclosure-unverified",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots. GT1-02-03I authored 20 snapshot and 4 Cue-export regression cases, not executed. GT1-02-03D still owns helper/UI coverage and GT1-02-13 owns deterministic execution. See Plans/grok-tier1/evidence/02.md#gt1-02-03i-settings-snapshot-and-cue-export-test-authoring. Whole-row qualification remains pending.",
+					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots. GT1-02-03I authored 20 snapshot and 4 Cue-export regression cases, not executed. GT1-02-03D authored helper and ReauthModal coverage for full masking, explicit reveal/hide and non-login terminal suppression using synthetic environments; these cases remain not-run. GT1-02-13 owns deterministic execution. See Plans/grok-tier1/evidence/02.md#gt1-02-03d-account-disclosure-and-login-test-authoring. Whole-row qualification remains pending.",
 					"affectedRows": ["P05"]
 				},
 				{
@@ -11953,7 +11953,7 @@
 				{
 					"id": "grok-withheld-profile-readiness-unverified",
 					"code": "deterministic-evidence-pending",
-					"missingPrerequisite": "GT1-02-03A withholds unproven Grok credential attribution; GT1-02-03F separates settled withheld profiles from pending root/env inputs so removed dashboard filters can clear. GT1-02-03D/03G/13 must prove resolver behavior, withheld-mode transitions, pending env/home protection, unfiltered visibility and local/SSH separation. Selected model/file/managed auth and whole-row qualification remain unproven. See Plans/grok-tier1/evidence/02.md#gt1-02-03f-settled-withheld-profile-readiness.",
+					"missingPrerequisite": "GT1-02-03A withholds unproven Grok credential attribution; GT1-02-03F separates settled withheld profiles from pending root/env inputs so removed dashboard filters can clear. GT1-02-03D authored resolver coverage for withheld credentials, state-root and local/SSH separation; execution remains not-run. GT1-02-03G/13 must prove withheld-mode transitions, pending env/home protection, unfiltered visibility and execute the resolver cases. Selected model/file/managed auth and whole-row qualification remain unproven. See Plans/grok-tier1/evidence/02.md#gt1-02-03f-settled-withheld-profile-readiness.",
 					"affectedRows": ["REG-PROFILE"]
 				}
 			],
@@ -12062,7 +12062,7 @@
 				{
 					"id": "grok-environment-disclosure-unverified",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots. GT1-02-03I authored 20 snapshot and 4 Cue-export regression cases, not executed. GT1-02-03D still owns helper/UI coverage and GT1-02-13 owns deterministic execution. See Plans/grok-tier1/evidence/02.md#gt1-02-03i-settings-snapshot-and-cue-export-test-authoring. Whole-row qualification remains pending.",
+					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots. GT1-02-03I authored 20 snapshot and 4 Cue-export regression cases, not executed. GT1-02-03D authored helper and ReauthModal coverage for full masking, explicit reveal/hide and non-login terminal suppression using synthetic environments; these cases remain not-run. GT1-02-13 owns deterministic execution. See Plans/grok-tier1/evidence/02.md#gt1-02-03d-account-disclosure-and-login-test-authoring. Whole-row qualification remains pending.",
 					"affectedRows": ["REG-AUTH"]
 				},
 				{
@@ -16722,7 +16722,7 @@
 				{
 					"id": "grok-environment-disclosure-unverified",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots. GT1-02-03I authored 20 snapshot and 4 Cue-export regression cases, not executed. GT1-02-03D still owns helper/UI coverage and GT1-02-13 owns deterministic execution. See Plans/grok-tier1/evidence/02.md#gt1-02-03i-settings-snapshot-and-cue-export-test-authoring. Whole-row qualification remains pending.",
+					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots. GT1-02-03I authored 20 snapshot and 4 Cue-export regression cases, not executed. GT1-02-03D authored helper and ReauthModal coverage for full masking, explicit reveal/hide and non-login terminal suppression using synthetic environments; these cases remain not-run. GT1-02-13 owns deterministic execution. See Plans/grok-tier1/evidence/02.md#gt1-02-03d-account-disclosure-and-login-test-authoring. Whole-row qualification remains pending.",
 					"affectedRows": ["META-05"]
 				},
 				{
