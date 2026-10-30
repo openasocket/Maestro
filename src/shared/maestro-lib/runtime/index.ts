@@ -46,7 +46,11 @@ import {
 	type HostAuthority,
 	type PolicySourceSet,
 } from '../managed/authority';
-import { createManagedBinding, type ManagedBinding } from '../managed/binding';
+import {
+	createManagedBinding,
+	type InstallationStandingSource,
+	type ManagedBinding,
+} from '../managed/binding';
 import {
 	createEventJournal,
 	managedEventJournalPath,
@@ -147,6 +151,15 @@ export interface MaestroRuntimeOptions {
 		 * into the binding file under the lock. Takes precedence over `authority`.
 		 */
 		host?(installation: ManagedInstallationIdentity): ManagedHostAdapter;
+		/**
+		 * What the protected custody (the sealed identity record and its anchor)
+		 * says of this installation, read on every call (MCOMP-09-04A). With it
+		 * the binding file is a mirror held to the custody: an enrollment the
+		 * custody holds is enrolled with no file, a file the custody does not
+		 * hold supplies no authority, and the lock holder reconciles the mirror
+		 * from the custody. Without it the binding reads the files alone.
+		 */
+		standing?: InstallationStandingSource;
 		/** The approved handle for a resource id a managed submission names. Default: none. */
 		resolveResource?(id: string, context: ManagedAuthenticatedContext): ApprovedResource | null;
 		/** Which agents a verified actor may see. Default: all of them. */
@@ -324,10 +337,12 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 	});
 	const managedHost = options.managed?.host?.(installation) ?? null;
 	const managedAuthority = managedHost?.authority ?? options.managed?.authority;
+	const custodyStanding = options.managed?.standing;
 	const binding = createManagedBinding({
 		paths,
 		fence: () => fenceVerdict(),
 		...(managedAuthority ? { authority: managedAuthority } : {}),
+		...(custodyStanding ? { standing: custodyStanding } : {}),
 		now: deps.now ?? (() => Date.now()),
 	});
 	let phase: RuntimePhase = 'open';
@@ -409,9 +424,36 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 	// holder, so the runtime's own enrollment and the protected custody agree.
 	// A binding for another authority, or a record for another installation,
 	// is left as it is: the binding then reads enrolled-unavailable and says why.
+	// With a custody standing attached (MCOMP-09-04A) the custody decides what
+	// the mirror holds: its enrollment is written when no file carries it yet
+	// (a mirror already there is not a warning), and a stale mirror the custody
+	// holds nothing for is removed by name. The standalone check alone decides
+	// nothing then: the binding already reads enrolled with no file.
+	if (custodyStanding) {
+		const custody = custodyStanding.read();
+		const state = binding.state();
+		if (custody.standing === 'managed' && custody.enrollment) {
+			const enrolled = await binding.enroll(custody.enrollment);
+			if (!enrolled.ok && enrolled.reason !== 'already-enrolled') {
+				logger.warn(
+					`The managed binding could not mirror the custody's enrollment (${enrolled.reason}): ${enrolled.message}`,
+					LOG_CONTEXT
+				);
+			}
+		} else if (custody.standing === 'standalone' && state.state === 'enrolled-unavailable') {
+			const removed = await binding.unenroll({ installationId: state.record.installationId });
+			if (!removed.ok) {
+				logger.warn(
+					`The stale managed binding ${state.file} could not be removed (${removed.reason}): ${removed.message}`,
+					LOG_CONTEXT
+				);
+			}
+		}
+	}
 	if (managedHost) {
 		const identity = managedHost.identity.read();
 		if (
+			!custodyStanding &&
 			identity.status === 'ok' &&
 			identity.record &&
 			identity.record.installationId === installation.installationId &&

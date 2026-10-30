@@ -151,8 +151,14 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * record held but not readable here, an anchor whose record is gone and a revoked or suspended record are managed
  * and unavailable, and a retired record is the one release. `enroll` refuses `custody-mismatch`, `unenroll` refuses
  * `management-required`, and `managedBindingFiles` always reads the production directory the data directory maps to.
+ * 0.35.0: the protected standing at the runtime (`./runtime`, MCOMP-09-04A): `createMaestroRuntime({ managed: { standing } })`
+ * hands an `InstallationStandingSource` to its binding, so a runtime's enrollment is what the custody holds (enrolled
+ * with no file; a file the custody does not hold supplies no authority), and the lock holder reconciles the mirror
+ * from the custody: the custody's enrollment is written when no file carries it (a mirror already there is not a
+ * warning) and a stale mirror under a standalone custody is removed by name. A runtime with no source reads the
+ * files alone, as before.
  */
-export const MAESTRO_LIB_VERSION = '0.34.0';
+export const MAESTRO_LIB_VERSION = '0.35.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';
