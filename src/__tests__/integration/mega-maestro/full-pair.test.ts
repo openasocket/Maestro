@@ -59,6 +59,7 @@ import {
 	type ManagedLifecycleEvent,
 } from '../../../shared/maestro-lib/managed/events';
 import type { ManagedOrigin } from '../../../shared/maestro-lib/managed/types';
+import { readRuntimePin } from '../../../../scripts/package-mega-maestro-runtime.mjs';
 import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
 import { startFakeEndpoint, type FakeEndpoint } from '../../main/enterprise/fakeEndpoint';
 import {
@@ -71,6 +72,7 @@ import {
 	pairIdentityRecord,
 	readSyntheticEffects,
 	runPairCheck,
+	RUNTIME_CONFORMANCE_FILE,
 	SYNTHETIC_EFFECTS_FILE,
 	SYNTHETIC_PROVIDER_ID,
 	verifiedContext,
@@ -477,33 +479,22 @@ describe('full pair: the real endpoint through the harness script', () => {
 	it.skipIf(!report.assessment.ready)(
 		`runs the full pair against the packaged runtime: every journey passed, both source digests recorded${blocked}`,
 		() => {
-			// The packaged runtime of this HEAD: `npm run package:mega-maestro-runtime` lands it under dist/.
-			const runtimeRoot = path.resolve(process.cwd(), 'dist/mega-maestro-runtime');
-			const runtimeDir = fs.existsSync(runtimeRoot)
-				? fs
-						.readdirSync(runtimeRoot)
-						.flatMap((version) =>
-							fs
-								.readdirSync(path.join(runtimeRoot, version))
-								.map((digest) => path.join(runtimeRoot, version, digest))
-						)
-						.find((dir) => {
-							const artifact = path.join(dir, 'artifact.json');
-							if (!fs.existsSync(artifact)) return false;
-							const manifest = JSON.parse(fs.readFileSync(artifact, 'utf8')) as {
-								source?: { head?: string };
-							};
-							return manifest.source?.head === report.host.maestroHead;
-						})
-				: undefined;
+			// The pinned runtime of this tree: the committed `runtime` section names the archive a
+			// pair loads (`verifyRuntimeInput()` holds it to the tree; `run` refuses any other).
+			const pin = readRuntimePin(RUNTIME_CONFORMANCE_FILE) as {
+				status: string;
+				record: { archive: { sha256: string }; location: { directory: string } } | null;
+			};
+			expect(pin.status, 'no committed runtime pin names an archive').toBe('pinned');
+			const runtimeDir = path.resolve(process.cwd(), pin.record!.location.directory);
 			expect(
-				runtimeDir,
-				'no packaged runtime of this HEAD: npm run package:mega-maestro-runtime'
-			).toBeDefined();
+				fs.existsSync(runtimeDir),
+				'the pinned runtime is not packaged here: npm run package:mega-maestro-runtime'
+			).toBe(true);
 			const out = path.join(os.tmpdir(), `full-pair-${process.pid}.json`);
 			const result = spawnSync(
 				process.execPath,
-				[PAIR_HARNESS_SCRIPT, 'run', '--runtime', runtimeDir!, '--out', out],
+				[PAIR_HARNESS_SCRIPT, 'run', '--runtime', runtimeDir, '--out', out],
 				{ encoding: 'utf8', timeout: 300_000 }
 			);
 			expect(result.status, result.stderr).toBe(0);
@@ -512,7 +503,11 @@ describe('full pair: the real endpoint through the harness script', () => {
 					certifiable: boolean;
 					verdicts: Record<string, number>;
 					journeys: Array<{ id: string; verdict: string; blockedBy: string[] }>;
-					runtime: { archiveSha256: string | null; sourceHead?: string };
+					runtime: {
+						archiveSha256: string | null;
+						sourceHead?: string;
+						coordinationOnly?: boolean;
+					};
 					source: { digest: string | null };
 				};
 			};
@@ -526,8 +521,13 @@ describe('full pair: the real endpoint through the harness script', () => {
 			expect(record.run.journeys.map((j) => j.id).sort()).toEqual(
 				PAIR_JOURNEYS.map((j) => j.id).sort()
 			);
-			expect(record.run.runtime.archiveSha256).toBe(path.basename(runtimeDir!));
-			expect(record.run.runtime.sourceHead).toBe(report.host.maestroHead);
+			expect(record.run.runtime.archiveSha256).toBe(pin.record!.archive.sha256);
+			expect(path.basename(runtimeDir)).toBe(pin.record!.archive.sha256);
+			// The archive observed the HEAD it was packaged at; a later coordination-only commit
+			// (a pin, a receipt, a checklist) leaves it current and says so.
+			if (!record.run.runtime.coordinationOnly) {
+				expect(record.run.runtime.sourceHead).toBe(report.host.maestroHead);
+			}
 			expect(record.run.source.digest).toMatch(/^[a-f0-9]{64}$/);
 		},
 		400_000
