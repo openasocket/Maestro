@@ -7,9 +7,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { GroupChatModal } from '../../../renderer/components/GroupChatModal';
-import type { GroupChat, AgentConfig } from '../../../renderer/types';
+import type { GroupChat, AgentConfig, ModeratorConfig } from '../../../renderer/types';
 
 import { createMockTheme } from '../../helpers/mockTheme';
 
@@ -442,6 +442,291 @@ describe('GroupChatModal', () => {
 				expect(screen.getByText(/changing the moderator agent/i)).toBeInTheDocument();
 			});
 		});
+	});
+
+	describe('Grok moderator discovery and serialization', () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+			const agents = [
+				createMockAgent({
+					id: 'grok',
+					name: 'Grok CLI',
+					binaryName: 'grok',
+					capabilities: { supportsModelSelection: true } as AgentConfig['capabilities'],
+					configOptions: [
+						{ key: 'model', type: 'text', description: '', label: 'Model', default: 'model-id' },
+						{
+							key: 'reasoningEffort',
+							type: 'text',
+							description: '',
+							label: 'Effort',
+							default: 'effort-id',
+						},
+					],
+				}),
+				createMockAgent({ id: 'codex', name: 'Codex' }),
+			];
+			setupDefaultMocks(agents);
+			vi.mocked(window.maestro.agents.detect).mockImplementation(async () => [...agents]);
+			vi.mocked(window.maestro.agents.getModels).mockResolvedValue({
+				status: 'unavailable',
+				options: [],
+			} as never);
+			vi.mocked(window.maestro.agents.getConfigOptions).mockResolvedValue({
+				status: 'unavailable',
+				options: [],
+			} as never);
+		});
+
+		afterEach(() => {
+			vi.clearAllTimers();
+			vi.useRealTimers();
+			vi.mocked(window.maestro.agents.getConfigOptions).mockReset();
+			vi.restoreAllMocks();
+		});
+
+		async function openGrokEditor(config: ModeratorConfig = {}, expand = true) {
+			const onSave = vi.fn();
+			const groupChat = createMockGroupChat({
+				moderatorAgentId: 'grok',
+				moderatorConfig: { customModel: 'saved-model', ...config },
+			});
+			const ui = (chat = groupChat, isOpen = true) => (
+				<GroupChatModal
+					mode="edit"
+					theme={createMockTheme()}
+					isOpen={isOpen}
+					groupChat={chat}
+					onClose={vi.fn()}
+					onSave={onSave}
+				/>
+			);
+			const view = render(ui());
+			await act(async () => {});
+			if (expand) {
+				fireEvent.click(screen.getByRole('button', { name: /customize/i }));
+				await act(async () => {});
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(300);
+				});
+			}
+			return { onSave, groupChat, ui, ...view };
+		}
+
+		it.each([undefined, {}, { GROK_HOME: '   ' }])(
+			'preserves raw environment %j and the saved model across rename-only save and reopen',
+			async (customEnvVars) => {
+				vi.mocked(window.maestro.agents.getConfig).mockResolvedValue({
+					customEnvVars: { GROK_HOME: '/provider/account' },
+				});
+				const { onSave, groupChat, ui, rerender } = await openGrokEditor({ customEnvVars }, false);
+				fireEvent.change(screen.getByPlaceholderText(/Auth Feature Implementation/i), {
+					target: { value: 'Renamed chat' },
+				});
+				fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+				const saved = onSave.mock.calls[0][3];
+				expect(saved).toMatchObject({ customModel: 'saved-model' });
+				expect(saved.customEnvVars).toEqual(customEnvVars);
+				rerender(ui(groupChat, false));
+				rerender(ui({ ...groupChat, moderatorConfig: saved }));
+				await act(async () => {});
+				fireEvent.click(screen.getByRole('button', { name: /customize/i }));
+				await act(async () => {});
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(300);
+				});
+				expect(
+					screen.getByText(/unavailable until the moderator workspace is known/i)
+				).toBeInTheDocument();
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith(
+					expect.objectContaining({
+						providerId: 'grok',
+						context: expect.objectContaining({ cwd: undefined }),
+					})
+				);
+				fireEvent.change(screen.getByPlaceholderText('--flag value --another-flag'), {
+					target: { value: '--synthetic' },
+				});
+				fireEvent.blur(screen.getByPlaceholderText('--flag value --another-flag'));
+				fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+				expect(onSave.mock.calls[1][3]).toMatchObject({
+					customModel: 'saved-model',
+					customArgs: '--synthetic',
+				});
+				expect(onSave.mock.calls[1][3].customEnvVars).toEqual(customEnvVars);
+			}
+		);
+
+		it.each(['remove', 'rename', 'blank', 'disable'] as const)(
+			'keeps %s account edits identical in SSH discovery and the saved launch configuration',
+			async (edit) => {
+				const sshRemoteConfig = {
+					enabled: true,
+					remoteId: 'remote-a',
+					workingDirOverride: '/remote/project',
+				};
+				const { onSave } = await openGrokEditor({
+					customPath: '/remote/bin/grok',
+					customEnvVars: { GROK_HOME: '/accounts/a' },
+					sshRemoteConfig,
+				});
+				if (edit === 'remove') fireEvent.click(screen.getByTitle('Remove variable'));
+				if (edit === 'rename') {
+					const key = screen.getByDisplayValue('GROK_HOME');
+					fireEvent.change(key, { target: { value: 'GROK_AUTH_PATH' } });
+					fireEvent.blur(key);
+				}
+				if (edit === 'blank')
+					fireEvent.change(screen.getByDisplayValue('/accounts/a'), { target: { value: '   ' } });
+				if (edit === 'disable') fireEvent.click(screen.getByTitle(/^Disable GROK_HOME/));
+				fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+				const expected =
+					edit === 'rename'
+						? { GROK_AUTH_PATH: '/accounts/a' }
+						: edit === 'blank'
+							? { GROK_HOME: '   ' }
+							: {};
+				const saved = onSave.mock.calls[0][3];
+				expect(saved.customEnvVars).toEqual(expected);
+				expect(saved.customEnvVarsDisabled).toEqual(
+					edit === 'disable' ? { GROK_HOME: '/accounts/a' } : undefined
+				);
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(300);
+				});
+				const request = expect.objectContaining({
+					providerId: 'grok',
+					context: expect.objectContaining({
+						kind: 'draft',
+						cwd: '/remote/project',
+						customPath: saved.customPath,
+						customEnvVars: expected,
+						sessionSshRemoteConfig: sshRemoteConfig,
+					}),
+				});
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith(request);
+				expect(window.maestro.agents.getConfigOptions).toHaveBeenLastCalledWith(
+					request,
+					'reasoningEffort'
+				);
+			}
+		);
+
+		it('keeps typed model and effort through deferred provider settings and redetection', async () => {
+			let finishConfig!: (value: Record<string, unknown>) => void;
+			vi.mocked(window.maestro.agents.getConfig).mockReturnValue(
+				new Promise((resolve) => {
+					finishConfig = resolve;
+				})
+			);
+			const { onSave } = await openGrokEditor();
+			const model = screen.getByPlaceholderText('model-id');
+			const effort = screen.getByPlaceholderText('effort-id');
+			fireEvent.change(model, { target: { value: 'manual-model' } });
+			fireEvent.change(effort, { target: { value: 'manual-effort' } });
+			await act(async () => {
+				finishConfig({ model: 'provider-model', reasoningEffort: 'provider-effort' });
+			});
+			vi.mocked(window.maestro.agents.getConfig).mockClear();
+			fireEvent.click(screen.getByTitle('Re-detect agent path'));
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(300);
+			});
+			expect(window.maestro.agents.getConfig).toHaveBeenCalledWith('grok');
+			expect(model).toHaveValue('manual-model');
+			expect(effort).toHaveValue('manual-effort');
+			fireEvent.blur(effort);
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(150);
+			});
+			expect(window.maestro.agents.setConfig).toHaveBeenLastCalledWith(
+				'grok',
+				expect.objectContaining({
+					model: 'manual-model',
+					reasoningEffort: 'manual-effort',
+				})
+			);
+			fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+			expect(onSave.mock.calls[0][3].customModel).toBe('manual-model');
+		});
+
+		it.each(['path', 'account', 'ssh', 'unresolved-ssh', 'provider', 'reopen'] as const)(
+			'discards late catalog results after a %s change',
+			async (change) => {
+				let finishModels!: (value: { status: 'discovered'; options: string[] }) => void;
+				vi.mocked(window.maestro.agents.getModels).mockReturnValue(
+					new Promise<{ status: 'discovered'; options: string[] }>((resolve) => {
+						finishModels = resolve;
+					}) as never
+				);
+				const { groupChat, ui, rerender } = await openGrokEditor({
+					customEnvVars: { GROK_HOME: '/accounts/a' },
+					sshRemoteConfig: {
+						enabled: true,
+						remoteId: 'remote-a',
+						workingDirOverride: '/remote/project',
+					},
+				});
+				expect(window.maestro.agents.getModels).toHaveBeenCalled();
+				vi.mocked(window.maestro.agents.getModels).mockResolvedValue({
+					status: 'unavailable',
+					options: [],
+				} as never);
+				if (change === 'path')
+					fireEvent.change(screen.getByPlaceholderText('grok'), {
+						target: { value: '/remote/bin/other-grok' },
+					});
+				if (change === 'account')
+					fireEvent.change(screen.getByDisplayValue('/accounts/a'), {
+						target: { value: '/accounts/b' },
+					});
+				if (change === 'ssh' || change === 'unresolved-ssh')
+					rerender(
+						ui({
+							...groupChat,
+							moderatorConfig: {
+								...groupChat.moderatorConfig,
+								sshRemoteConfig: {
+									enabled: true,
+									remoteId: change === 'ssh' ? 'remote-b' : '',
+									workingDirOverride: '/other/project',
+								},
+							},
+						})
+					);
+				if (change === 'provider')
+					fireEvent.change(screen.getByRole('combobox', { name: /select moderator/i }), {
+						target: { value: 'codex' },
+					});
+				if (change === 'reopen') {
+					rerender(ui(groupChat, false));
+					rerender(ui());
+					await act(async () => {});
+					fireEvent.click(screen.getByRole('button', { name: /customize/i }));
+				}
+				await act(async () => {});
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(300);
+				});
+				await act(async () => {
+					finishModels({ status: 'discovered', options: ['stale-account-model'] });
+				});
+				expect(screen.queryByText(/1 model available/i)).not.toBeInTheDocument();
+				if (change !== 'provider')
+					expect(screen.getByPlaceholderText('model-id')).toHaveValue('saved-model');
+				if (change === 'ssh' || change === 'unresolved-ssh')
+					expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith(
+						expect.objectContaining({
+							context: expect.objectContaining({
+								cwd: '/other/project',
+								sessionSshRemoteConfig: expect.objectContaining({
+									remoteId: change === 'ssh' ? 'remote-b' : '',
+								}),
+							}),
+						})
+					);
+			}
+		);
 	});
 
 	describe('agent availability', () => {
