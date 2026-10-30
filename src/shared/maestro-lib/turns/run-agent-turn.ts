@@ -88,6 +88,8 @@ export type RunAgentTurnRefusal =
 	| 'ssh-unresolved'
 	/** Grok's model/effort selection was refused before dispatch. Nothing was started. */
 	| 'grok-model-effort-refused'
+	/** The prompt cannot be delivered as requested. Nothing was started. */
+	| 'prompt-delivery-refused'
 	/** The turn carries images (CH-8). */
 	| 'images-unsupported'
 	/** Claude Code in Standard permission mode, with no relay to answer its prompts (PA11). */
@@ -434,7 +436,10 @@ export async function runAgentTurn(
 		...(options.managed?.launch ? { managed: options.managed.launch } : {}),
 	});
 	if (!planned.ok) {
-		if (planned.reason === 'grok-model-effort-refused') {
+		if (
+			planned.reason === 'grok-model-effort-refused' ||
+			planned.reason === 'prompt-delivery-refused'
+		) {
 			return abandon(planned.reason, planned.error);
 		}
 		return abandon(

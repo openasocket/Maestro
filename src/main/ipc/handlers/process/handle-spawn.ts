@@ -437,6 +437,12 @@ async function handleProcessSpawnImpl(
 					toolType: config.toolType,
 					reason: planResult.reason,
 				});
+			} else if (planResult.reason === 'prompt-delivery-refused') {
+				logger.error('Prompt delivery refused; not spawning', LOG_CONTEXT, {
+					sessionId: config.sessionId,
+					toolType: config.toolType,
+					reason: planResult.reason,
+				});
 			} else {
 				logger.error('SSH remote could not be resolved; not spawning', LOG_CONTEXT, {
 					sessionId: config.sessionId,
