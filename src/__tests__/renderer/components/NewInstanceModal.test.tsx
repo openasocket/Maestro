@@ -2398,7 +2398,7 @@ describe('NewInstanceModal', () => {
 				['stored-model', 'manual-model'],
 				['stored-effort', 'manual-effort'],
 			]) {
-				const input = screen.getByDisplayValue(previous);
+				const input = screen.getByDisplayValue(previous, { normalizer: (value) => value });
 				fireEvent.change(input, { target: { value } });
 				fireEvent.blur(input);
 			}
