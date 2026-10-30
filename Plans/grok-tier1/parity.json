@@ -300,6 +300,15 @@
 			"acceptanceRun": false,
 			"status": "fail",
 			"affectedRows": ["P46"]
+		},
+		"phase02-isolation-reverification": {
+			"path": "Plans/grok-tier1/evidence/02.md#gt1-02-13n-isolation-and-ssh-repair-verification",
+			"receiptPath": "Plans/grok-tier1/evidence/02-isolation-reverification.json",
+			"sourceCommit": "459ba9a14b757f9e662c3e9eb928a08ed062d35e",
+			"provenance": "deterministic-tests-and-typechecks",
+			"acceptanceRun": false,
+			"status": "fail",
+			"affectedRows": ["P46"]
 		}
 	},
 	"sourceCatalog": {
@@ -8327,7 +8336,8 @@
 					"GT1-02-13E",
 					"GT1-02-13G",
 					"GT1-02-13E1",
-					"GT1-02-13K"
+					"GT1-02-13K",
+					"GT1-02-13O"
 				],
 				"test": [
 					"GT1-12-04",
@@ -8340,7 +8350,8 @@
 					"GT1-02-13B1",
 					"GT1-02-13E2",
 					"GT1-02-13L",
-					"GT1-02-13M"
+					"GT1-02-13M",
+					"GT1-02-13P"
 				],
 				"verification": [
 					"GT1-12-05",
@@ -8348,7 +8359,8 @@
 					"GT1-11-03",
 					"GT1-02-13",
 					"GT1-02-13J",
-					"GT1-02-13N"
+					"GT1-02-13N",
+					"GT1-02-13Q"
 				],
 				"live": [],
 				"finalAcceptance": ["GT1-12-06"]
@@ -8387,9 +8399,9 @@
 				{
 					"id": "gap:P46",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-13J reverified 17 full affected suites and the completeness sentinel at c7208fb923a68983f254c6d8bb4cee62d2904b9a. All seven previously unresolved failing suites pass; 1,329 assertions passed, four new group-chat SSH read-only fixture cases failed, eight were skipped, and zero unhandled errors were reported. The sentinel refused import-time OpenCode existsSync outside the checkout before collection; full completeness remains not-run. Main/CLI TypeScript checks pass and all six phase-owned diagnostics are absent; npm run lint still reports the unchanged dispatcher baseline owned by GT1-12-03. GT1-02-13K removed the eager OpenCode storage constants and deferred the six uses to existing local-operation resolvers; scoped formatting/ESLint and independent static review passed. GT1-02-13L authored four regression cases for import/construction isolation, after-import SQLite/JSON selection with real fixtures and remote-path isolation; scoped formatting/test-file ESLint and independent static review passed. GT1-02-13M repaired the four short-prompt SSH read-only controls to preserve exact prepared argv/remote command, assert absent stdin script and check bypass absence inside the packed command; scoped formatting/test-file ESLint and independent static review passed. Behavioral verification remains not-run for these repairs: GT1-02-13N owns sentinel-first execution and the full OpenCode storage and desktop group-chat suites before GT1-02-14 reconciliation. Preserve the isolation guard and policy assertions. No native/platform qualification or acceptance promotion is inferred. Historical repair receipts remain in 02.md and 02-verification.json; current exact commands, hashes, exits, durations, failures and skips are in Plans/grok-tier1/evidence/02-reverification.json.",
+					"missingPrerequisite": "GT1-02-13N verified source 459ba9a14b757f9e662c3e9eb928a08ed062d35e: full OpenCode storage (15) and desktop group-chat (49) suites pass all 64 assertions, including all eight new/repaired cases, with no skips or unhandled errors. The unchanged completeness sentinel now fails in beforeAll after collection: two refused outside-checkout operations, existsSync then readFileSync, and 115 skipped assertions (13 selected setup-blocked, 102 filtered). Full completeness remains not-run. Static tracing matches eager Codex parser constructor config/cache reads; GT1-02-13O repairs the canonical parser, GT1-02-13P covers synthetic parsing/registration/usage boundaries, and GT1-02-13Q verifies before GT1-02-14 reconciliation. Main/CLI compiler checks pass; lint retains only unchanged dispatcher TS2339 owned by GT1-12-03. No guard waiver, unchanged retry or acceptance promotion. Historical 13J results remain in 02-reverification.json; current exact commands, hashes, exits, durations and diagnostics are in 02-isolation-reverification.json.",
 					"affectedRows": ["P46"],
-					"evidenceRef": "phase02-repaired-verification"
+					"evidenceRef": "phase02-isolation-reverification"
 				},
 				{
 					"id": "baseline-typescript-dispatcher",
