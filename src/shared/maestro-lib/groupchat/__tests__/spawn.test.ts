@@ -416,6 +416,132 @@ describe('prepareGroupChatSpawn', () => {
 			path: path.posix.join('/tmp', 'maestro-prompt-11111111-2222-4333-8444-555555555555.json'),
 		};
 
+		describe.each([false, true])('file preparation over SSH=%s', (ssh) => {
+			describe.each([false, true])('resume=%s', (isResume) => {
+				it.each([
+					['short', '  private 雪\n'],
+					['long', 'private 🧪\n'.repeat(1_000)],
+					['empty', ''],
+				])('delivers %s text only through its owned artifact', async (_label, prompt) => {
+					const command = path.resolve('team tools', 'grok');
+					const cwd = ssh ? path.posix.join('/remote', 'team work') : path.resolve('team work');
+					const customEnvVars = { GROK_HOME: ssh ? '/remote/account' : path.resolve('account') };
+					const sessionId = '019aa4fe-0000-7000-8000-000000000002';
+					const args = ['--model', 'selected-model', ...(isResume ? ['--resume', sessionId] : [])];
+					const promptArgs = vi.fn((text: string) => ['-p', text]);
+					const deps = depsOf({
+						sshStore: storeOf([{ ...remote, privateKeyPath: '' }]),
+						windowsSpawnConfig: () => ({
+							shell: undefined,
+							runInShell: false,
+							sendPromptViaStdin: true,
+							sendPromptViaStdinRaw: true,
+						}),
+					});
+					const prepared = await prepareGroupChatSpawn(
+						{
+							...spawnOf({
+								providerId: 'grok',
+								agent: { ...grok, promptArgs },
+								command,
+								args,
+								cwd,
+								customEnvVars,
+								prompt,
+								isResume,
+								sshRemoteConfig: ssh ? { enabled: true, remoteId: remote.id } : undefined,
+							}),
+							promptFileDestination: ssh ? destination : undefined,
+						},
+						deps
+					);
+					const artifact = prepared.promptDelivery!.artifact;
+					expect(artifact.content).toBe(
+						JSON.stringify({ type: 'acp', content: [{ type: 'text', text: prompt }] })
+					);
+					expect(artifact).toMatchObject({
+						owner: ssh ? 'remote' : 'local',
+						encoding: 'utf8',
+						mode: 0o600,
+						flag: 'wx',
+						cleanup: 'turn',
+					});
+					expect(prepared).toMatchObject({
+						prompt: undefined,
+						sendPromptViaStdin: false,
+						sendPromptViaStdinRaw: false,
+					});
+					expect(promptArgs).not.toHaveBeenCalled();
+					expect(deps.beginTurn).toHaveBeenCalledExactlyOnceWith('group-chat-p1');
+					if (ssh) {
+						expect(artifact).toMatchObject(destination);
+						expect(prepared.command).toBe('ssh');
+						expect(prepared.args).toContain('me@box.local');
+						expect(prepared.promptArtifactPath).toBe(destination.path);
+						const script = prepared.sshStdinScript!;
+						expect(script).toContain(Buffer.from(artifact.content, 'utf8').toString('base64'));
+						expect(script).toContain("cd '/remote/team work' || exit 1");
+						expect(script).toContain("export GROK_HOME='/remote/account'");
+						expect(script).toContain("'grok' '--model' 'selected-model'");
+						expect(script.includes(`'--resume' '${sessionId}'`)).toBe(isResume);
+						expect(script).toContain(`'--prompt-file' '${artifact.path}' </dev/null 8>&- 9>&-`);
+						expect(script).not.toContain(command);
+						expect(prepared.args.join(' ')).not.toContain(artifact.path);
+					} else {
+						expect(path.isAbsolute(artifact.path)).toBe(true);
+						expect(artifact.path).toMatch(/maestro-prompt-[\da-f-]+\.json$/);
+						expect(artifact.sshRemoteId).toBeUndefined();
+						expect(prepared).toMatchObject({
+							command,
+							cwd,
+							customEnvVars,
+							args: [...args, '--prompt-file', artifact.path],
+						});
+						expect(prepared.sshStdinScript).toBeUndefined();
+						expect(prepared.promptArtifactPath).toBeUndefined();
+					}
+				});
+			});
+		});
+
+		it.each([false, true])(
+			'forwards ordered local images only with admission=%s',
+			async (admitted) => {
+				const deps = depsOf();
+				const promptBlocks = [
+					{ type: 'text' as const, text: 'system\n before 雪' },
+					{ type: 'image' as const, mimeType: 'image/png', data: 'AQID' },
+					{ type: 'text' as const, text: '\tafter 🧪 ' },
+				];
+				const pending = prepareGroupChatSpawn(
+					{
+						...spawnOf({ providerId: 'grok', agent: grok, args: [], prompt: undefined }),
+						promptBlocks,
+						hasImages: true,
+						embeddedImageSupport: admitted
+							? { mimeTypes: ['image/png'], maxCount: 1, maxBytesPerImage: 3, maxTotalBytes: 3 }
+							: undefined,
+					},
+					deps
+				);
+				if (!admitted) {
+					await expect(pending).rejects.toThrow(
+						'Embedded images require explicit support and bounded image limits.'
+					);
+					expect(deps.beginTurn).not.toHaveBeenCalled();
+					return;
+				}
+				const prepared = await pending;
+				expect(JSON.parse(prepared.promptDelivery!.artifact.content)).toEqual({
+					type: 'acp',
+					content: promptBlocks,
+				});
+				expect(prepared.prompt).toBeUndefined();
+				expect(prepared.args).toEqual(['--prompt-file', prepared.promptDelivery!.artifact.path]);
+				expect(deps.beginTurn).toHaveBeenCalledTimes(1);
+			}
+		);
+
 		describe.each([false, true])('resume=%s', (isResume) => {
 			it.each(['store replacement', 'store mutation', 'probe mutation', 'caller mutation'])(
 				'keeps the original host, private bytes and cleanup ownership after %s',

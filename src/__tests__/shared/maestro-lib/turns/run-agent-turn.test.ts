@@ -12,13 +12,24 @@ import path from 'node:path';
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
 
 // Stop's remote half is observed here, never sent: a real one runs ssh.
-const remoteSignals = vi.hoisted(() => [] as Array<{ pidFile: string; mode: string }>);
+const remoteSignals = vi.hoisted(
+	() =>
+		[] as Array<{
+			pidFile: string;
+			mode: string;
+			promptArtifactPath?: string;
+		}>
+);
 vi.mock('../../../../shared/maestro-lib/control/ssh-remote-signal', async (importOriginal) => ({
 	...(await importOriginal<
 		typeof import('../../../../shared/maestro-lib/control/ssh-remote-signal')
 	>()),
-	signalRemoteAgent: (target: { pidFile: string }, mode: string) => {
-		remoteSignals.push({ pidFile: target.pidFile, mode });
+	signalRemoteAgent: (target: { pidFile: string; promptArtifactPath?: string }, mode: string) => {
+		remoteSignals.push({
+			pidFile: target.pidFile,
+			mode,
+			...(target.promptArtifactPath ? { promptArtifactPath: target.promptArtifactPath } : {}),
+		});
 		return true;
 	},
 }));
@@ -29,6 +40,7 @@ import {
 } from '../../../../shared/claudeCostTracker';
 import { getEffortRejection, resetEffortRejections } from '../../../../shared/effortRejection';
 import { SSH_STDIN_REMOTE_SHELL } from '../../../../shared/maestro-lib/control/ssh-remote-signal';
+import { newRemotePromptFileDestination } from '../../../../shared/maestro-lib/launch/ssh-command-builder';
 import * as launchPlanner from '../../../../shared/maestro-lib/launch/launch-plan';
 import * as runToCompletion from '../../../../shared/maestro-lib/run/run-to-completion';
 import * as pipeSpawn from '../../../../shared/maestro-lib/run/pipe-spawn';
@@ -657,6 +669,184 @@ describe('runAgentTurn: Grok launch refusals', () => {
 		await waitUntil(() => !fs.existsSync(file));
 		expect(fs.existsSync(file)).toBe(false);
 	});
+});
+
+describe('runAgentTurn: private prompt-file handoff', () => {
+	const remote: SshRemoteConfig = {
+		id: 'remote-file',
+		name: 'File host',
+		host: 'files.example.test',
+		port: 2222,
+		username: 'dev',
+		privateKeyPath: '~/.ssh/id_ed25519',
+		enabled: true,
+	};
+	const fileAgent = {
+		...makeContext('grok').provider,
+		promptFile: { format: 'acp-json' as const, exclusivePromptFlags: ['-p', '--prompt-json-file'] },
+		promptFileArgs: (file: string) => ['--prompt-json-file', file],
+	};
+	beforeEach(() => {
+		vi.spyOn(runToCompletion, 'runTurn');
+	});
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	describe.each(['local', 'SSH'] as const)('%s owner', (host) => {
+		it.each([
+			{ name: 'short fresh', text: 'Unicode 雪', resume: null },
+			{ name: 'long resumed', text: 'large 雪\n'.repeat(12_000), resume: 'grok-native-session' },
+			{ name: 'empty resumed', text: '', resume: 'grok-native-session' },
+		])(
+			'delivers $name content once and retains the correct cleanup owner',
+			async ({ text, resume }) => {
+				const argvOut = outFile('file-argv');
+				const stdinOut = outFile('file-stdin');
+				const env = {
+					FAKE_AGENT_RECORDING: writeFakeTurn(scratch.dir, {
+						chunks: [],
+						close: { code: 0, signal: null },
+					}),
+					FAKE_AGENT_HOLD: '1',
+					FAKE_AGENT_ARGV_OUT: argvOut,
+					FAKE_AGENT_STDIN_OUT: stdinOut,
+					GROK_HOME: path.join(scratch.dir, 'selected-account'),
+				};
+				const turn = assembleWithFakeAgent('grok', {
+					recording: 'captured-opencode-normal',
+					text: text || 'assembled placeholder',
+					env,
+					tab: { agentSessionId: resume },
+					agent: { customPath: '/opt/remote grok/bin/grok' },
+				});
+				// Exercise an explicitly empty final launch without changing assembleTurn's empty-message gate.
+				if (!text) turn.launch.prompt = '';
+				turn.launch.agent = fileAgent;
+				if (host === 'SSH') turn.launch.sshRemoteConfig = { enabled: true, remoteId: remote.id };
+				const destination =
+					host === 'SSH'
+						? newRemotePromptFileDestination(remote.id, 'acp-json')
+						: { owner: 'local' as const, path: outFile('private-prompt') + '.json' };
+				turn.launch.promptFileDestination = destination;
+				const sshArgs = ['-p', '2222', 'dev@files.example.test', ...SSH_STDIN_REMOTE_SHELL];
+				const wrap = vi.fn<NonNullable<RunAgentTurnDeps['wrapSpawnWithSsh']>>(async () => ({
+					command: process.execPath,
+					args: [FAKE_AGENT_PATH, ...sshArgs],
+					cwd: scratch.dir,
+					sshStdinScript: 'synthetic remote transfer',
+					sshRemoteUsed: remote,
+				}));
+				const run = await start(turn, {
+					sshStore: { getSshRemotes: () => [remote] },
+					deps: { wrapSpawnWithSsh: wrap, env: { ...process.env, ...env } },
+				});
+				try {
+					await waitUntil(() => fs.existsSync(stdinOut));
+					const argv = JSON.parse(fs.readFileSync(argvOut, 'utf8')) as string[];
+					const spec = vi.mocked(runToCompletion.runTurn).mock.calls[0][0];
+					const content = JSON.stringify({
+						type: 'acp',
+						content: [{ type: 'text', text: turn.launch.prompt }],
+					});
+					expect(runToCompletion.runTurn).toHaveBeenCalledOnce();
+					if (host === 'local') {
+						expect(wrap).not.toHaveBeenCalled();
+						expect(spec).toMatchObject({
+							command: process.execPath,
+							cwd: scratch.dir,
+							env: { GROK_HOME: env.GROK_HOME },
+						});
+						expect(argv).toEqual([
+							...turn.launch.args.slice(1),
+							'--prompt-json-file',
+							destination.path,
+						]);
+						expect(fs.readFileSync(stdinOut, 'utf8')).toBe('');
+						expect(fs.readFileSync(destination.path, 'utf8')).toBe(content);
+					} else {
+						expect(wrap).toHaveBeenCalledOnce();
+						expect(wrap.mock.calls[0][0]).toMatchObject({
+							command: '/opt/remote grok/bin/grok',
+							cwd: scratch.dir,
+							prompt: undefined,
+							customEnvVars: { GROK_HOME: env.GROK_HOME },
+							promptArtifact: { ...destination, content },
+							args: [...turn.launch.args, '--prompt-json-file', destination.path],
+						});
+						expect(wrap.mock.calls[0][1]).toEqual(turn.launch.sshRemoteConfig);
+						expect(spec.promptArtifact).toBeUndefined();
+						expect(argv).toEqual(sshArgs);
+						expect(fs.readFileSync(stdinOut, 'utf8')).toContain('synthetic remote transfer');
+					}
+					if (resume) expect(turn.launch.args).toContain(resume);
+				} finally {
+					run.terminate();
+					await run.result;
+				}
+				if (host === 'local') {
+					expect(fs.existsSync(destination.path)).toBe(false);
+					expect(remoteSignals).toEqual([]);
+				} else {
+					expect(remoteSignals[0]).toMatchObject({
+						mode: 'terminate',
+						promptArtifactPath: destination.path,
+						pidFile: expect.stringMatching(/^\/tmp\/maestro-prompt-owner-[0-9a-f-]+\.pid$/),
+					});
+				}
+			}
+		);
+	});
+
+	it.each(['delivery', 'remote preparation', 'managed'] as const)(
+		'refuses %s without starting or retrying and cleans owned system preparation',
+		async (failure) => {
+			const owned = outFile('owned-system');
+			fs.writeFileSync(owned, 'synthetic system');
+			vi.spyOn(turnArgs, 'writeSystemPromptFile').mockImplementation(async (input) => ({
+				args: input.args,
+				prompt: input.prompt,
+				tempFile: owned,
+				delivery: 'file',
+			}));
+			const wrap = vi
+				.fn<NonNullable<RunAgentTurnDeps['wrapSpawnWithSsh']>>()
+				.mockRejectedValue(new Error('private bytes and path'));
+			const turn = assembleWithFakeAgent('grok', { recording: 'captured-opencode-normal' });
+			turn.systemPromptDelivery = { via: 'file' };
+			turn.launch.agent = fileAgent;
+			if (failure === 'delivery') turn.launch.args.push('-p', 'competing text');
+			if (failure === 'remote preparation')
+				turn.launch.sshRemoteConfig = { enabled: true, remoteId: remote.id };
+			if (failure === 'managed')
+				turn.launch.managed = {
+					route: {
+						providerId: 'codex',
+						model: null,
+						baseUrl: null,
+						accountDir: null,
+						login: 'provider-login',
+						permissionMode: null,
+					},
+				};
+			const started = await runAgentTurn(
+				turn,
+				optionsFor({
+					sshStore: { getSshRemotes: () => [remote] },
+					deps: { wrapSpawnWithSsh: wrap },
+				})
+			);
+			expect(started).toMatchObject({
+				ok: false,
+				reason: failure === 'managed' ? 'managed-denied' : 'prompt-delivery-refused',
+			});
+			expect(JSON.stringify(started)).not.toContain('private bytes and path');
+			expect(wrap).toHaveBeenCalledTimes(failure === 'remote preparation' ? 1 : 0);
+			expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+			await waitUntil(() => !fs.existsSync(owned));
+			expect(fs.existsSync(owned)).toBe(false);
+		}
+	);
 });
 
 describe('runAgentTurn: the Claude token source', () => {
