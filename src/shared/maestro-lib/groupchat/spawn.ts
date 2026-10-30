@@ -202,6 +202,14 @@ export async function prepareGroupChatSpawn(
 		>,
 	deps: GroupChatSpawnDeps
 ): Promise<PreparedGroupChatSpawn> {
+	// Hold the caller's selected account, executable and SSH selection across
+	// probe/wrapper awaits. The remote's own mutable records are captured below.
+	spawn = {
+		...spawn,
+		args: [...spawn.args],
+		customEnvVars: spawn.customEnvVars ? { ...spawn.customEnvVars } : undefined,
+		sshRemoteConfig: spawn.sshRemoteConfig ? { ...spawn.sshRemoteConfig } : spawn.sshRemoteConfig,
+	};
 	const {
 		processId,
 		providerId,
@@ -215,9 +223,20 @@ export async function prepareGroupChatSpawn(
 		readOnlyMode = false,
 		debugLabel,
 	} = spawn;
-	const { sshStore } = deps;
+	const selectedRemote =
+		sshRemoteConfig?.enabled && deps.sshStore
+			? getSshRemoteConfig(deps.sshStore, { sessionSshConfig: sshRemoteConfig }).config
+			: null;
+	// One target owns the probe, private destination and final SSH command, even
+	// if settings replace the same ID or mutate its options/environment in place.
+	// Give collaborators copies so they cannot change the captured target either.
+	const remote = selectedRemote ? structuredClone(selectedRemote) : null;
+	const sshStore: SshRemoteSettingsStore | null = deps.sshStore
+		? { getSshRemotes: () => (remote ? [structuredClone(remote)] : []) }
+		: null;
 
 	const baseCommand = spawn.command ?? agent.path ?? agent.command;
+	const remoteCommand = spawn.remoteCommand ?? agent.binaryName;
 
 	let spawnCommand = baseCommand;
 	let spawnArgs = args;
@@ -233,9 +252,6 @@ export async function prepareGroupChatSpawn(
 	// Resolve the exact composed input before asynchronous preparation. This only
 	// chooses private bytes and a fresh name; the admitted sink owns every write.
 	if (agent.promptFile || spawn.promptBlocks !== undefined) {
-		const remote = sshRemoteConfig?.enabled
-			? sshStore && getSshRemoteConfig(sshStore, { sessionSshConfig: sshRemoteConfig }).config
-			: undefined;
 		if (sshRemoteConfig?.enabled && !remote) {
 			throw new Error(sshUnresolvedRemoteMessage(sshRemoteConfig));
 		}
@@ -271,12 +287,12 @@ export async function prepareGroupChatSpawn(
 	// Over SSH, warm the remote maestro-p probe BEFORE resolving so a remote TUI
 	// selection falls back to API instead of exiting 127 when maestro-p isn't
 	// installed on the remote (the resolver reads this from the cache).
-	if (sshRemoteConfig?.enabled && sshStore && deps.probeRemoteMaestroP) {
-		const sshRemote = getSshRemoteConfig(sshStore, {
-			sessionSshConfig: sshRemoteConfig,
-		}).config;
-		if (sshRemote) {
-			await deps.probeRemoteMaestroP(sshRemote);
+	if (remote && deps.probeRemoteMaestroP) {
+		try {
+			await deps.probeRemoteMaestroP(structuredClone(remote));
+		} catch (error) {
+			if (fileDelivery) throw new Error('Remote prompt preparation unavailable.');
+			throw error;
 		}
 	}
 
@@ -364,9 +380,7 @@ export async function prepareGroupChatSpawn(
 					: customEnvVars,
 				promptArgs: agent.promptArgs,
 				noPromptSeparator: agent.noPromptSeparator,
-				agentBinaryName: remoteInteractive
-					? remoteInteractive.command
-					: (spawn.remoteCommand ?? agent.binaryName),
+				agentBinaryName: remoteInteractive ? remoteInteractive.command : remoteCommand,
 			},
 			sshRemoteConfig,
 			sshStore
