@@ -363,6 +363,8 @@ export function assembleTurn(
 				remoteCommand: agent.customPath || provider.binaryName,
 				args: placement.args,
 				cwd: agent.cwd,
+				// Keep the selected grants with this turn even if the session is edited later.
+				additionalDirectories: agent.additionalDirectories?.map((directory) => ({ ...directory })),
 				prompt: finalPrompt,
 				hasImages,
 				globalShellEnvVars: context.globalEnvVars ? { ...context.globalEnvVars } : undefined,

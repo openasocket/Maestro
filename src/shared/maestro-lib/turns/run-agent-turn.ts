@@ -89,6 +89,8 @@ export type RunAgentTurnRefusal =
 	| 'ssh-unresolved'
 	/** Grok's model/effort selection was refused before dispatch. Nothing was started. */
 	| 'grok-model-effort-refused'
+	/** Grok cannot honor the configured directory grants. Nothing was started. */
+	| 'grok-directory-grants-refused'
 	/** The prompt cannot be delivered as requested. Nothing was started. */
 	| 'prompt-delivery-refused'
 	/** The turn carries images without an explicit file route (CH-8). */
@@ -407,30 +409,7 @@ export async function runAgentTurn(
 		);
 	}
 
-	// Windows hands a large system prompt to the agent in a file, through the realization every
-	// spawn shares: owner-only, removed after its lifetime, and the inline flag when the write
-	// fails. The flag goes into the arguments before the plan places the prompt after them.
 	let args = launch.args;
-	let systemPromptFile: string | undefined;
-	if (turn.systemPromptDelivery.via === 'file' && turn.systemPrompt) {
-		const delivered = await writeSystemPromptFile({
-			args,
-			prompt: launch.prompt,
-			systemPrompt: turn.systemPrompt,
-			sessionId: options.sessionId,
-			agentId: providerId,
-			logContext: LOG_CONTEXT,
-			tempDir: deps.tempDir,
-		});
-		args = delivered.args;
-		systemPromptFile = delivered.tempFile;
-	}
-	// A turn refused from here on leaves no file behind for its lifetime.
-	const abandon = (reason: RunAgentTurnRefusal, message: string): RunAgentTurnStart => {
-		if (systemPromptFile) removeTempFiles([systemPromptFile]);
-		return refuse(reason, message);
-	};
-
 	// Name remote preparation on the selected host. The planner retains precise
 	// SSH refusals when resolution fails and validates any supplied destination.
 	let promptFileDestination = launch.promptFileDestination;
@@ -443,17 +422,48 @@ export async function runAgentTurn(
 			);
 		}
 	}
-	const planned = buildAgentLaunchPlan({
-		...launch,
-		args,
-		hasImages,
-		promptFileDestination,
-		sshStore: options.sshStore,
-		...(options.managed?.launch ? { managed: options.managed.launch } : {}),
-	});
+	const planLaunch = () =>
+		buildAgentLaunchPlan({
+			...launch,
+			args,
+			hasImages,
+			promptFileDestination,
+			sshStore: options.sshStore,
+			...(options.managed?.launch ? { managed: options.managed.launch } : {}),
+		});
+	// Grok's configuration refusals must precede every prompt artifact, including
+	// a system-prompt file. Grant validation stays solely in the shared planner.
+	let planned = providerId === 'grok' ? planLaunch() : undefined;
+
+	// Windows hands a large system prompt to the agent in a file, through the realization every
+	// spawn shares: owner-only, removed after its lifetime, and the inline flag when the write
+	// fails. The flag goes into the arguments before the final plan places the prompt after them.
+	let systemPromptFile: string | undefined;
+	if ((!planned || planned.ok) && turn.systemPromptDelivery.via === 'file' && turn.systemPrompt) {
+		const delivered = await writeSystemPromptFile({
+			args,
+			prompt: launch.prompt,
+			systemPrompt: turn.systemPrompt,
+			sessionId: options.sessionId,
+			agentId: providerId,
+			logContext: LOG_CONTEXT,
+			tempDir: deps.tempDir,
+		});
+		args = delivered.args;
+		systemPromptFile = delivered.tempFile;
+		planned = undefined; // Plan again with the realized system-prompt arguments.
+	}
+	// A turn refused from here on leaves no file behind for its lifetime.
+	const abandon = (reason: RunAgentTurnRefusal, message: string): RunAgentTurnStart => {
+		if (systemPromptFile) removeTempFiles([systemPromptFile]);
+		return refuse(reason, message);
+	};
+
+	planned ??= planLaunch();
 	if (!planned.ok) {
 		if (
 			planned.reason === 'grok-model-effort-refused' ||
+			planned.reason === 'grok-directory-grants-refused' ||
 			planned.reason === 'prompt-delivery-refused'
 		) {
 			return abandon(planned.reason, planned.error);
