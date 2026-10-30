@@ -244,8 +244,8 @@
 		"imagesAnalyzed": 0,
 		"independentReview": "pass"
 	},
-	"lastCompletedTaskId": "GT1-01-03",
-	"lastUpdatedAt": "2026-10-30T08:10:25.207082+00:00",
+	"lastCompletedTaskId": "GT1-01-04",
+	"lastUpdatedAt": "2026-10-30T08:25:16.651172+00:00",
 	"setup": {
 		"taskId": "GT1-01-01A",
 		"status": "pass",
@@ -494,5 +494,71 @@
 		"publication": "Local commit only under CONTRACT; no push.",
 		"sha256": "aadd111b0381fe6c8ef14572ba11d267919c84c3c03b6f49a5b38fdaa7144f50",
 		"evidenceSha256": "7d6a95c2850fc615d80cdeff9ac909e244ea30e60a0e63c5694c219c85e76107"
+	},
+	"protocolDesign": {
+		"taskId": "GT1-01-04",
+		"contract": "grok-route-contract/v1",
+		"path": "Plans/grok-tier1/DESIGN.md",
+		"sourceCommit": "4ee75e4fe6c6282176d3ea30000cd1b7a1347c3f",
+		"baseObservation": {
+			"ref": "refs/heads/feature/mega-maestro-v1.1.0-rc",
+			"commit": "43d1bb32e68aa78bc29e7d60a46b9976a1de2116",
+			"aheadBehind": [4, 6]
+		},
+		"evidencePath": "Plans/grok-tier1/evidence/01.md#gt1-01-04-protocol-and-route-design",
+		"sourceEvidence": {
+			"publicCommit": "2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8",
+			"monorepoCommit": "559751fdcec02d413e4c57c8832ab275e4f44980",
+			"fileCount": 22,
+			"manifestSha256": "71cfd9e0d43227f47e9b7adf5aec4ed973466ec6a1d3b7d407bd465555936252",
+			"metadataSha256": "2593e3586516fbb766b8eee31abf042b7e7b9981fa6e3e1d777d2b9eb15f4c8d",
+			"commitMetadataSha256": "ba8458628d06ef54776c58ae704e902c9daeaa6e56afa66496cd3cc908fe76c9",
+			"retrievalCommand": ["python3", "tmp/grok-tier1-protocol/fetch-evidence.py"],
+			"retrievalExitCode": 0,
+			"retrievalScriptSha256": "165b9beaefec72c5e6b18a8663ee03493669dfac50ee066de01c477f45d49964"
+		},
+		"wireProtocolVersion": 1,
+		"inspectedAcpCrateVersion": "0.10.4",
+		"inspectedAcpSchemaVersion": "0.11.4",
+		"candidatePackageVersion": "1.0.70",
+		"binarySourceRelationship": "unknown",
+		"qualifiedVersionRange": null,
+		"capabilityChains": 29,
+		"proposedRoutes": ["native-headless", "acp-stdio"],
+		"ownerScopeReconciliation": {
+			"task": "GT1-01-07",
+			"items": [
+				"Shared RPC extraction with Codex compatibility regression tests",
+				"Pure negotiated route selector and consumer packets",
+				"Shared structured terminal and precise usage fact extensions",
+				"Portable runAgentTurn image acceptance"
+			]
+		},
+		"artifactValidation": {
+			"status": "pass",
+			"command": ["node", "tmp/grok-tier1-protocol/check-design.cjs"],
+			"exitCode": 0,
+			"scriptSha256": "3779f0be7fcb74bef50a3e8e4ae4fde8ad3ff8301bed42f75a7eaff1bf07600e",
+			"environment": "darwin-arm64, Node v26.13.0; offline AST/JSON/document/source checks",
+			"fixture": "22 SHA-pinned official source files, 2 metadata documents and current canonical AgentCapabilities AST",
+			"formatCommand": [
+				"node",
+				"node_modules/prettier/bin/prettier.cjs",
+				"--check",
+				"Plans/grok-tier1/DESIGN.md",
+				"Plans/grok-tier1/run-state.json",
+				"Plans/grok-tier1/evidence/01.md"
+			],
+			"formatExitCode": 0,
+			"diffCheckExitCode": 0
+		},
+		"independentReview": "pass",
+		"productAcceptance": "not-run",
+		"repositorySuites": "not-run",
+		"repositorySuiteOwnerTask": "GT1-01-06",
+		"liveCalls": 0,
+		"imagesAnalyzed": 0,
+		"nextTask": "GT1-01-05",
+		"publication": "Local commit only under CONTRACT; no push."
 	}
 }
