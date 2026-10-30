@@ -286,6 +286,315 @@
           "id": "MCOMP-01-02B"
         },
         {
+          "label": "Resolve the upstream/rc merge conflicts in the agent guides and CLAUDE.md (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "docs/agent-guides/CLI-UI-PARITY.md",
+            "docs/agent-guides/CANONICAL-UTILITIES.md",
+            "CLAUDE.md"
+          ],
+          "outcome": "Resolve the 3 unmerged files of this group (docs/agent-guides/CLI-UI-PARITY.md, docs/agent-guides/CANONICAL-UTILITIES.md, CLAUDE.md) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. documentation only: both sides added parity rows, canonical entries and index lines; keep every row and entry of both sides once, keep each CLAUDE.md index line on one line and its CANONICAL-UTILITIES.md entry present so npm run docs:verify passes. Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03A"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in the repository ignore list and the plugin ceiling (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            ".prettierignore",
+            "src/main/plugins/permission-broker.ts",
+            "src/main/plugins/plugin-manager.ts"
+          ],
+          "outcome": "Resolve the 3 unmerged files of this group (.prettierignore, src/main/plugins/permission-broker.ts, src/main/plugins/plugin-manager.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. the integration side added the managed plugin ceiling to permission-broker.ts (holds(), ceilingVerdict(), managedPluginStanding(), 350 added lines) while upstream reshaped plugin-manager.ts (368 added, 68 removed); the ceiling must still hold every plugin call after the reshape. Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03B"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in the main entry and the system and web handlers (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/main/index.ts",
+            "src/main/ipc/handlers/system.ts",
+            "src/main/ipc/handlers/web.ts"
+          ],
+          "outcome": "Resolve the 3 unmerged files of this group (src/main/index.ts, src/main/ipc/handlers/system.ts, src/main/ipc/handlers/web.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. index.ts carries the enterprise service wiring on the integration side (503 added lines) and 505 added lines upstream; web.ts lost 126 lines upstream, so keep restoreManagedRemoteAccess() and the listener gate reachable from wherever upstream moved the remote-access handlers. Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03C"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in spawn admission, group chat and the consult suite (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/main/ipc/handlers/process/handle-spawn.ts",
+            "src/main/group-chat/spawnGroupChatAgent.ts",
+            "src/__tests__/main/cross-agent-router.test.ts"
+          ],
+          "outcome": "Resolve the 3 unmerged files of this group (src/main/ipc/handlers/process/handle-spawn.ts, src/main/group-chat/spawnGroupChatAgent.ts, src/__tests__/main/cross-agent-router.test.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. the integration side admits every desktop spawn at the process sink (344 added lines in handle-spawn.ts) and stamps group chat lineage (100 added lines); upstream changed a handful of lines in each, so re-apply upstream on the integration shape. Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03D"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in the keyring anchor and the Cue bundle exporter and importer (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/main/utils/keyring-anchor.ts",
+            "src/main/cue/bundle/cue-bundle-importer.ts",
+            "src/main/cue/bundle/cue-bundle-exporter.ts"
+          ],
+          "outcome": "Resolve the 3 unmerged files of this group (src/main/utils/keyring-anchor.ts, src/main/cue/bundle/cue-bundle-importer.ts, src/main/cue/bundle/cue-bundle-exporter.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. upstream rewrote 22 lines of keyring-anchor.ts that the integration side extended (anchorAccountForDirectory); the bundle files hold isForbiddenBundleEntry() and CueBundleManagedPolicy on the integration side under 222 and 112 added upstream lines. Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03E"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in the Cue process lifecycle, the turn start and the CLI spawner (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/main/cue/cue-process-lifecycle.ts",
+            "src/shared/maestro-lib/run/start-turn.ts",
+            "src/cli/services/agent-spawner.ts"
+          ],
+          "outcome": "Resolve the 3 unmerged files of this group (src/main/cue/cue-process-lifecycle.ts, src/shared/maestro-lib/run/start-turn.ts, src/cli/services/agent-spawner.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. three spawn-admission seams of the integration side (ProcessRunOptions.managed, leaseAdmission() inside startTurn(), cliSpawnAuthority()); upstream changed the launch and stop paths around them by 9, 22 and 105 lines. Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03F"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in the CLI dispatch verb and its suite (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/cli/commands/dispatch.ts",
+            "src/__tests__/cli/commands/dispatch.test.ts"
+          ],
+          "outcome": "Resolve the 2 unmerged files of this group (src/cli/commands/dispatch.ts, src/__tests__/cli/commands/dispatch.test.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. both sides added options and cases to dispatch (upstream 82 added lines, the integration side 21, the suite 104 and 103); keep every option and every case of both sides. Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03G"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in the runtime turns and their suite (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/shared/maestro-lib/runtime/turns.ts",
+            "src/shared/maestro-lib/runtime/__tests__/turns.test.ts"
+          ],
+          "outcome": "Resolve the 2 unmerged files of this group (src/shared/maestro-lib/runtime/turns.ts, src/shared/maestro-lib/runtime/__tests__/turns.test.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. the integration side rewrote turns.ts (500 added lines: dequeue admission in startItem, runAgentTurn standing) and its suite (700 added); upstream added 4 and 15 lines, so re-apply upstream on the integration shape. Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03H"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in the web server core (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/main/web-server/WebServer.ts",
+            "src/main/web-server/types.ts",
+            "src/main/web-server/managers/CallbackRegistry.ts"
+          ],
+          "outcome": "Resolve the 3 unmerged files of this group (src/main/web-server/WebServer.ts, src/main/web-server/types.ts, src/main/web-server/managers/CallbackRegistry.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. upstream reworked the callback registry (64 added, 40 removed) and the server; the integration side registers the managed and enterprise callbacks and types; keep every registration and type of both sides. Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03I"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in the web server callbacks (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/main/web-server/callbacks/commandCallbacks.ts",
+            "src/main/web-server/callbacks/browserTabCallbacks.ts",
+            "src/main/web-server/callbacks/queueCallbacks.ts"
+          ],
+          "outcome": "Resolve the 3 unmerged files of this group (src/main/web-server/callbacks/commandCallbacks.ts, src/main/web-server/callbacks/browserTabCallbacks.ts, src/main/web-server/callbacks/queueCallbacks.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. small hunks on both sides of each callback module; the shapes settled here bind MCOMP-01-03N (the preload remotes must match). Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03J"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in the socket message handlers, commands and their types (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts",
+            "src/main/web-server/handlers/messageHandlers/commands.ts",
+            "src/main/web-server/handlers/messageHandlers/types.ts"
+          ],
+          "outcome": "Resolve the 3 unmerged files of this group (src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts, src/main/web-server/handlers/messageHandlers/commands.ts, src/main/web-server/handlers/messageHandlers/types.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. both sides registered new bridge verbs (the integration side the managed and enterprise ones, 92 and 64 added lines); keep every handler registration and message type of both sides. Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03K"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in the queue and tab message handlers and their suite (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/main/web-server/handlers/messageHandlers/queue.ts",
+            "src/main/web-server/handlers/messageHandlers/tabs.ts",
+            "src/__tests__/main/web-server/handlers/messageHandlers.test.ts"
+          ],
+          "outcome": "Resolve the 3 unmerged files of this group (src/main/web-server/handlers/messageHandlers/queue.ts, src/main/web-server/handlers/messageHandlers/tabs.ts, src/__tests__/main/web-server/handlers/messageHandlers.test.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. the suite has 14 hunks over 7556 lines and the integration side added 1167 lines of cases to it; keep every case of both sides and make the suite agree with what MCOMP-01-03K settled. Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03L"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in the web server factory and callback registry suites (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/__tests__/main/web-server/web-server-factory.test.ts",
+            "src/__tests__/main/web-server/managers/CallbackRegistry.test.ts"
+          ],
+          "outcome": "Resolve the 2 unmerged files of this group (src/__tests__/main/web-server/web-server-factory.test.ts, src/__tests__/main/web-server/managers/CallbackRegistry.test.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. must agree with what MCOMP-01-03I settled in WebServer.ts and CallbackRegistry.ts; keep every case of both sides. Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03M"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in the preload remotes (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/main/preload/process/browserTabRemote.ts",
+            "src/main/preload/process/commandRemote.ts",
+            "src/main/preload/process/queueRemote.ts"
+          ],
+          "outcome": "Resolve the 3 unmerged files of this group (src/main/preload/process/browserTabRemote.ts, src/main/preload/process/commandRemote.ts, src/main/preload/process/queueRemote.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. every bridge verb settled in MCOMP-01-03J needs the same shape on the preload side; keep every remote of both sides. Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03N"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in the preload command suite, the renderer globals and queued prompts (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/__tests__/main/preload/process/commandRemote.test.ts",
+            "src/renderer/global.d.ts",
+            "src/renderer/services/queuedPrompt.ts"
+          ],
+          "outcome": "Resolve the 3 unmerged files of this group (src/__tests__/main/preload/process/commandRemote.test.ts, src/renderer/global.d.ts, src/renderer/services/queuedPrompt.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. global.d.ts declares the window.maestro.* surface both sides extended (87 and 80 added lines); keep every declaration of both sides, the preload suite in step with MCOMP-01-03N, and both sides of queuedPrompt.ts (the integration side holds the managed enqueue path). Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03O"
+        },
+        {
+          "label": "Resolve the upstream/rc merge conflicts in the remote integration hook and its suite (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/renderer/hooks/remote/useRemoteIntegration.ts",
+            "src/__tests__/renderer/hooks/useRemoteIntegration.test.ts"
+          ],
+          "outcome": "Resolve the 2 unmerged files of this group (src/renderer/hooks/remote/useRemoteIntegration.ts, src/__tests__/renderer/hooks/useRemoteIntegration.test.ts) inside the integration worktree /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691 on integrate/upstream-rc-3c85691, where MCOMP-01-03 started the no-commit merge of upstream/rc 3c8569162: keep the upstream change and the integration branch's managed seams together, never drop a guard or a test case, never take one whole side, stage with .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (markers refused, prettier, git add) and do not commit the merge here. 10 and 7 hunks: both sides registered new remote handlers (upstream 111 and 387 added lines, the integration side 50 and 341); keep every handler and case of both sides, in step with MCOMP-01-03N and MCOMP-01-03O. Name any semantic conflict the files cannot settle alone for MCOMP-01-03Q.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03P"
+        },
+        {
+          "label": "Commit the upstream/rc merge in the integration worktree and type-check the merged tree (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "Plans/integration-completion/upstream-merge.json"
+          ],
+          "outcome": "Precondition: MCOMP-01-03A through MCOMP-01-03P are checked and `node .maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs status` reads unmergedCount 0 with MERGE_HEAD 3c8569162; if any file is still unmerged, stop and name it, do not resolve it here. Commit the merge inside the worktree only (`/usr/bin/git -c commit.gpgsign=false commit --no-verify -F <message file>` from a node script, cwd the worktree; the message starts with `MAESTRO: MCOMP-01-03 merge upstream/rc 3c8569162 into feature/mega-maestro-v1.1.0-rc` and names the 223 upstream commits, the 1020 auto-merged files and the 44 resolved files). Then type-check the merged tree in the worktree, where node_modules is a symlink to the main checkout: `npm run lint` chains three tsc runs with `&&`, so run `node node_modules/typescript/bin/tsc -p tsconfig.lint.json`, `... -p tsconfig.main.json --noEmit` and `... -p tsconfig.cli.json --noEmit` one by one and read each. The two pre-existing errors (`src/main/plugins/plugin-host-handlers.ts:1196` dispatcher on RequestInit, `src/shared/maestro-lib/__tests__/built-entry.test.ts:37` .mjs import) are known; every other error is a semantic conflict of the merge (an export renamed on one side and imported under the old name on the other, a handler signature both sides changed). Repair those in a second commit on the integration branch when they fit 3 files and 500 lines; otherwise insert bounded IMPLEMENT continuations ahead of MCOMP-01-03R, one per group of at most three files, and leave this task unchecked until they land. Record the merge commit, the three tsc results and the counts of `git diff --stat HEAD~1..HEAD` in the note under this task and in Plans/integration-completion/upstream-merge.json in the main checkout (status committed; a coordination-only commit under Plans/, no re-pin yet).",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03Q"
+        },
+        {
+          "label": "Run the suites the upstream/rc merge touched in the integration worktree (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "TEST",
+          "targets": [
+            "Plans/integration-completion/upstream-merge.json"
+          ],
+          "outcome": "Precondition: MCOMP-01-03Q is checked (the merge is committed on `integrate/upstream-rc-3c85691` and the tree type-checks). In the worktree, with Node 26 from /opt/homebrew/bin and node_modules symlinked from the main checkout: (1) `npm run lint:eslint` and `npm run docs:verify`; (2) the vitest suites under the 44 resolved files and every `src/__tests__` and `__tests__` file the merge changed (`git diff --name-only HEAD~1..HEAD` filtered to test files; run them with `node node_modules/vitest/vitest.mjs run <files>` because `npx vitest` is rewritten by the shell shim to report 0 tests); (3) the full default suite once (`node node_modules/vitest/vitest.mjs run`), reading the known flakes named in `.maestro/playbooks/Working/mcomp-01-03/README-flakes.md` as flakes only when they pass alone; (4) `npm install --ignore-scripts --no-audit --no-fund --dry-run`, which must list nothing to add or remove, because package.json and package-lock.json auto-merged and a generated-file change must be recorded, not assumed. Every failure is either a case that must be brought to the merged behavior or a merge defect: repair test files within 3 files and 500 lines here, and insert bounded IMPLEMENT continuations ahead of MCOMP-01-03S for product defects; delete or skip no case, and never loosen an assertion to pass. Record the commands, the pass and fail counts and the lockfile reading in the note and in Plans/integration-completion/upstream-merge.json (status tested; coordination-only commit under Plans/).",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03R"
+        },
+        {
+          "label": "Land the integration branch on the feature branch and rescan the effect and credential paths (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "Plans/integration-completion/upstream-merge.json"
+          ],
+          "outcome": "Precondition: MCOMP-01-03Q and MCOMP-01-03R are checked. In the MAIN checkout (`/Users/dr3/dev-shit/Maestro`, branch `feature/mega-maestro-v1.1.0-rc`): confirm `git status --porcelain` shows only the untracked .sloptimize/ and rustygraphify-out/, then `git merge --no-ff integrate/upstream-rc-3c85691` (never a reset, never a force push, never a merge toward upstream main); the feature branch may have moved by coordination commits under Plans/ since the worktree was cut, so any conflict there is settled by keeping both sides, and a conflict anywhere else is named and left to a bounded continuation inserted ahead of MCOMP-01-03T. Then rescan the effect and credential paths on the merged tree, as the completion specification requires after conflict resolution: run `src/__tests__/leak-guard*` and the redaction canary suites (`redaction-canaries.test.ts`, `redactSecrets.managed.test.ts`), the spawn-admission and sink suites named in `Plans/mega-maestro-rc/evidence/p2-sink-inventory.json` as far as they exist, `findCanaries` and `findAbsolutePaths` through `scripts/write-mega-maestro-handoff.mjs` (both must read empty), and `node scripts/mega-maestro-pair.mjs check`; every new sink upstream added (a spawn, a shell, an HTTP fetch, a credential read) that bypasses the managed seams is named in the note and becomes a bounded IMPLEMENT continuation ahead of MCOMP-01-03T. Remove the worktree when the landing commit exists: delete the node_modules symlink first, then `git worktree remove /Users/dr3/dev-shit/worktrees/integrate/upstream-rc-3c85691` and the worktree agent entry the Left Bar shows (`maestro-cli list agents` names it; remove it through maestro-cli, never by editing the sessions store). Record the landing commit, the rescan results and the removal in Plans/integration-completion/upstream-merge.json (status landed) and push the feature branch with `node .maestro/playbooks/Working/git.mjs push --no-verify origin feature/mega-maestro-v1.1.0-rc`.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03S"
+        },
+        {
+          "label": "Re-pin MAESTRO-M0-RUNTIME after the upstream/rc merge and close MCOMP-01-03 (continuation of MCOMP-01-03, inserted ahead of it)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "Plans/integration-completion/runtime-conformance.json",
+            "Plans/integration-completion/upstream-merge.json"
+          ],
+          "outcome": "Precondition: MCOMP-01-03S is checked (the merge landed on the feature branch). The merge moved src/, package-lock.json and the library inputs under src/shared/maestro-lib, so the pinned archive reads drift: rebuild the library first (`npm run build:maestro-lib`, bumping `src/shared/maestro-lib/version.ts` and the version line of `docs/maestro-lib.md` together when the public surface changed), then `node scripts/package-mega-maestro-runtime.mjs --json`, `--runtime <dir> --write-pin --json`, the conformance section re-added by `.maestro/playbooks/Working/mcomp-03-03/add-conformance-v2.mjs`, prettier on the pin, and `--runtime <dir> --json` reading status ready with drift 0 (the recipe of MCOMP-01-02C's `commit-and-repin.mjs`). Run the pin-reading suites (`src/__tests__/scripts/package-mega-maestro-runtime.test.ts`, `mega-maestro-handoff`, `managed/contracts`, `standalone`) and commit the pin and any library build output the repository tracks as one commit. Then mark Plans/integration-completion/upstream-merge.json status pinned, naming the archive sha256, bytes and implementation digest, check MCOMP-01-03 off with a note naming the landing commit and this task, and push. If the archive cannot read ready, name the drift and leave both this task and MCOMP-01-03 unchecked.",
+          "backlog": [
+            "BASE-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-01-03T"
+        },
+        {
           "label": "Integrate reviewed upstream changes in bounded groups",
           "kind": "IMPLEMENT",
           "targets": [
@@ -338,7 +647,7 @@
       ],
       "id": "MCOMP-01",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-01.md",
-      "taskCount": 8,
+      "taskCount": 28,
       "stage": "S02"
     },
     {
@@ -6838,7 +7147,7 @@
       ],
       "requires": [],
       "nativeInputs": false,
-      "taskCount": 17
+      "taskCount": 37
     },
     {
       "id": "S03",
@@ -7239,10 +7548,10 @@
       "taskCount": 1
     }
   ],
-  "taskCount": 279,
+  "taskCount": 299,
   "taskCounts": {
-    "IMPLEMENT": 178,
-    "TEST": 37,
+    "IMPLEMENT": 197,
+    "TEST": 38,
     "VERIFY": 64
   },
   "artifacts": {
@@ -8024,6 +8333,26 @@
       "MCOMP-31-06"
     ],
     "BASE-02": [
+      "MCOMP-01-03A",
+      "MCOMP-01-03B",
+      "MCOMP-01-03C",
+      "MCOMP-01-03D",
+      "MCOMP-01-03E",
+      "MCOMP-01-03F",
+      "MCOMP-01-03G",
+      "MCOMP-01-03H",
+      "MCOMP-01-03I",
+      "MCOMP-01-03J",
+      "MCOMP-01-03K",
+      "MCOMP-01-03L",
+      "MCOMP-01-03M",
+      "MCOMP-01-03N",
+      "MCOMP-01-03O",
+      "MCOMP-01-03P",
+      "MCOMP-01-03Q",
+      "MCOMP-01-03R",
+      "MCOMP-01-03S",
+      "MCOMP-01-03T",
       "MCOMP-01-03",
       "MCOMP-01-04",
       "MCOMP-01-05",
