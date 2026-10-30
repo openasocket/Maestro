@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentConfig } from '../../../../../types';
-import type { AgentSshRemoteConfig } from '../../../../../../shared/types';
+import type { AgentDiscoveryRequest, AgentSshRemoteConfig } from '../../../../../../shared/types';
+import { useAgentModelEffortOptions } from '../../../../../hooks/agent/useAgentModelEffortOptions';
+import { readEffortFromConfig } from '../../../../../utils/agentEffort';
 import { logger } from '../../../../../utils/logger';
 import { captureException } from '../../../../../utils/sentry';
+import { useWizard } from '../../../WizardContext';
 import type { AgentTile } from '../types';
 import { AGENT_TILES } from '../utils/agentTiles';
 import {
@@ -54,11 +57,78 @@ export function useAgentConfigurationPanel({
 	showGridView,
 	announce,
 }: UseAgentConfigurationPanelArgs) {
+	const { state: wizardState } = useWizard();
 	const [agentConfig, setAgentConfig] = useState<Record<string, any>>({});
 	const agentConfigRef = useRef<Record<string, any>>({});
+	const [loadedConfigFor, setLoadedConfigFor] = useState<string>();
+	const configRequestRef = useRef(0);
 	const [availableModels, setAvailableModels] = useState<string[]>([]);
 	const [loadingModels, setLoadingModels] = useState(false);
 	const [refreshingAgent, setRefreshingAgent] = useState(false);
+	const [grokRefresh, setGrokRefresh] = useState(0);
+	const [customPathEditedFor, setCustomPathEditedFor] = useState<string | null>(null);
+	// Read the actual wizard environment, not the caller's display-only `{}`
+	// placeholder: absent inherits provider settings; explicit empty replaces them.
+	const draft = useMemo(
+		() => ({
+			cwd: wizardState.directoryPath,
+			customPath:
+				customPathEditedFor === 'grok' ? customPath : normalizeOptionalWizardString(customPath),
+			customEnvVars: wizardState.customEnvVars,
+			sessionSshRemoteConfig: sshRemoteConfig,
+			isOpen: wizardState.isOpen,
+			step: wizardState.currentStep,
+			selectedAgent: wizardState.selectedAgent,
+		}),
+		[
+			wizardState.directoryPath,
+			customPath,
+			customPathEditedFor,
+			wizardState.customEnvVars,
+			sshRemoteConfig,
+			wizardState.isOpen,
+			wizardState.currentStep,
+			wizardState.selectedAgent,
+		]
+	);
+	const currentDraft = useRef<typeof draft | undefined>(draft);
+	currentDraft.current = draft;
+	useEffect(() => {
+		currentDraft.current = draft;
+		return () => {
+			currentDraft.current = undefined;
+		};
+	}, [draft]);
+
+	const grokContext = useMemo<AgentDiscoveryRequest['context'] | undefined>(() => {
+		void grokRefresh;
+		return draft.isOpen &&
+			draft.step === 'agent-selection' &&
+			configuringAgentId === 'grok' &&
+			loadedConfigFor === 'grok'
+			? {
+					// These controls write provider model/effort settings on blur.
+					// Empty drafts must not inherit the old, not-yet-saved value.
+					kind: 'provider-settings',
+					cwd: draft.cwd,
+					customPath: draft.customPath,
+					customEnvVars: draft.customEnvVars,
+					model: agentConfig.model,
+					effort: readEffortFromConfig(agentConfig) ?? '',
+					// Preserve enabled SSH with no remote ID as unresolved.
+					sessionSshRemoteConfig: draft.sessionSshRemoteConfig,
+				}
+			: undefined;
+	}, [draft, configuringAgentId, loadedConfigFor, agentConfig, grokRefresh]);
+	const grokOptions = useAgentModelEffortOptions(grokContext ? 'grok' : undefined, grokContext);
+	const currentGrokContext = useRef(grokContext);
+	currentGrokContext.current = grokContext;
+	useEffect(() => {
+		currentGrokContext.current = grokContext;
+		return () => {
+			currentGrokContext.current = undefined;
+		};
+	}, [grokContext]);
 	// Auto-detected maestro-p path, shown as helper text under the Claude Token
 	// Source path override (mirrors EditAgentModal). Local-only; the override is
 	// hidden over SSH where maestro-p is resolved on the remote PATH.
@@ -72,8 +142,11 @@ export function useAgentConfigurationPanel({
 	}, []);
 
 	const setCustomPath = useCallback(
-		(value: string) => setWizardCustomPath(normalizeOptionalWizardString(value)),
-		[setWizardCustomPath]
+		(value: string) => {
+			setCustomPathEditedFor(configuringAgentId);
+			setWizardCustomPath(normalizeOptionalWizardString(value));
+		},
+		[configuringAgentId, setWizardCustomPath]
 	);
 
 	const setCustomArgs = useCallback(
@@ -88,17 +161,24 @@ export function useAgentConfigurationPanel({
 
 	const handleOpenConfig = useCallback(
 		async (agentId: string) => {
+			const requestId = ++configRequestRef.current;
+			setLoadedConfigFor(undefined);
+			setAvailableModels([]);
+			setLoadingModels(false);
 			const config = await window.maestro.agents.getConfig(agentId);
+			if (configRequestRef.current !== requestId || currentDraft.current !== draft) return;
 			agentConfigRef.current = config || {};
 			setAgentConfig(config || {});
+			setLoadedConfigFor(agentId);
 			setConfiguringAgentId(agentId);
 
 			const agent = detectedAgents.find((candidate) => candidate.id === agentId);
-			if (agent?.capabilities?.supportsModelSelection) {
+			if (agentId !== 'grok' && agent?.capabilities?.supportsModelSelection) {
 				setLoadingModels(true);
 				const sshRemoteId = getSshRemoteIdForDetection(sshRemoteConfig);
 				try {
 					const models = await window.maestro.agents.getModels(agentId, false, sshRemoteId);
+					if (configRequestRef.current !== requestId || currentDraft.current !== draft) return;
 					setAvailableModels(models);
 				} catch (error) {
 					logger.error('Failed to load models:', undefined, error);
@@ -110,10 +190,13 @@ export function useAgentConfigurationPanel({
 						},
 					});
 				} finally {
-					setLoadingModels(false);
+					if (configRequestRef.current === requestId) {
+						setLoadingModels(false);
+					}
 				}
 			}
 
+			if (configRequestRef.current !== requestId || currentDraft.current !== draft) return;
 			setSelectedAgent(agentId);
 			showConfigView();
 
@@ -123,6 +206,7 @@ export function useAgentConfigurationPanel({
 		[
 			announce,
 			detectedAgents,
+			draft,
 			setConfiguringAgentId,
 			setSelectedAgent,
 			showConfigView,
@@ -131,6 +215,11 @@ export function useAgentConfigurationPanel({
 	);
 
 	const handleCloseConfig = useCallback(() => {
+		configRequestRef.current++;
+		currentGrokContext.current = undefined;
+		setLoadedConfigFor(undefined);
+		setAvailableModels([]);
+		setLoadingModels(false);
 		setWizardSessionSshRemoteConfig(toWizardSshRemoteConfig(sshRemoteConfig));
 		showGridView(configuringAgentId);
 		announce('Returned to agent selection');
@@ -154,10 +243,36 @@ export function useAgentConfigurationPanel({
 
 	const handleRefreshModels = useCallback(async () => {
 		if (!configuringAgentId) return;
+		if (configuringAgentId === 'grok') {
+			if (!grokContext) return;
+			// The forced request refreshes the host cache. Only the shared hook
+			// publishes options, and only if this draft is still current.
+			try {
+				await window.maestro.agents.getModels({
+					providerId: 'grok',
+					context: grokContext,
+					forceRefresh: true,
+				});
+			} catch (error) {
+				logger.error('Failed to refresh models:', undefined, error);
+				captureException(error, {
+					extra: {
+						operation: 'agentSelection:refreshModels',
+						agentId: configuringAgentId,
+						remoteMode: Boolean(sshRemoteConfig?.enabled),
+					},
+				});
+			} finally {
+				if (currentGrokContext.current === grokContext) setGrokRefresh((value) => value + 1);
+			}
+			return;
+		}
+		const requestId = ++configRequestRef.current;
 		setLoadingModels(true);
 		const sshRemoteId = getSshRemoteIdForDetection(sshRemoteConfig);
 		try {
 			const models = await window.maestro.agents.getModels(configuringAgentId, true, sshRemoteId);
+			if (configRequestRef.current !== requestId || currentDraft.current !== draft) return;
 			setAvailableModels(models);
 		} catch (error) {
 			logger.error('Failed to refresh models:', undefined, error);
@@ -169,9 +284,11 @@ export function useAgentConfigurationPanel({
 				},
 			});
 		} finally {
-			setLoadingModels(false);
+			if (configRequestRef.current === requestId) {
+				setLoadingModels(false);
+			}
 		}
-	}, [configuringAgentId, sshRemoteConfig]);
+	}, [configuringAgentId, draft, grokContext, sshRemoteConfig]);
 
 	// Optional `value` covers the chooser: it calls this in the same handler as
 	// the state update that sets customPath, so reading customPath back out of
@@ -179,8 +296,19 @@ export function useAgentConfigurationPanel({
 	const handleCustomPathBlur = useCallback(
 		async (value?: string) => {
 			if (configuringAgentId) {
+				const requestId = configRequestRef.current;
+				setCustomPathEditedFor(configuringAgentId);
 				const pathToSet = (value ?? customPath).trim() || null;
 				await window.maestro.agents.setCustomPath(configuringAgentId, pathToSet);
+				if (
+					configuringAgentId === 'grok' &&
+					configRequestRef.current === requestId &&
+					currentDraft.current?.isOpen
+				) {
+					// Saving a clear changes the inherited executable without changing
+					// the empty text field. Recheck the host-owned selection afterward.
+					setGrokRefresh((value) => value + 1);
+				}
 			}
 			await refreshAgentDetection();
 		},
@@ -232,12 +360,45 @@ export function useAgentConfigurationPanel({
 	const configuringTile: AgentTile | undefined = AGENT_TILES.find(
 		(tile) => tile.id === configuringAgentId
 	);
-	const detectedConfigAgent = detectedAgents.find((agent) => agent.id === configuringAgentId);
+	const detectedAgent = detectedAgents.find((agent) => agent.id === configuringAgentId);
+	// The existing panel renders option descriptions alongside its text controls.
+	// Keep manual values intact and distinguish unavailable metadata from invalidity.
+	const detectedConfigAgent =
+		detectedAgent?.id === 'grok'
+			? {
+					...detectedAgent,
+					configOptions: detectedAgent.configOptions?.map((option) => {
+						if (!['model', 'effort', 'reasoningEffort'].includes(option.key)) return option;
+						const status =
+							option.key === 'model' ? grokOptions.modelStatus : grokOptions.effortStatus;
+						return status === 'discovered'
+							? option
+							: {
+									...option,
+									description: `${option.description} ${
+										!draft.cwd
+											? 'Discovery is unavailable until a project directory is selected. Manual values are preserved.'
+											: status === 'configured-fallback'
+												? 'Discovery is unavailable for this selection. The configured value is preserved; manual entry remains available.'
+												: 'Discovery is unavailable for this selection. Manual values are preserved.'
+									}`,
+								};
+					}),
+				}
+			: detectedAgent;
 
 	return {
 		agentConfig,
-		availableModels,
-		loadingModels,
+		availableModels:
+			configuringAgentId === 'grok'
+				? grokOptions.modelStatus === 'discovered'
+					? grokOptions.models
+					: []
+				: availableModels,
+		loadingModels:
+			configuringAgentId === 'grok' ? Boolean(grokContext) && !grokOptions.loaded : loadingModels,
+		modelDiscoveryStatus: grokOptions.modelStatus,
+		effortDiscoveryStatus: grokOptions.effortStatus,
 		refreshingAgent,
 		detectedMaestroPPath,
 		configuringTile,
