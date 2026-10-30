@@ -846,5 +846,436 @@ describe('AgentSelectionScreen hooks', () => {
 				});
 			}
 		);
+
+		it('keeps executable clear ownership with the provider that was edited', async () => {
+			args = {
+				...args,
+				customPath: '',
+				detectedAgents: [
+					...args.detectedAgents,
+					agent({ id: 'codex', capabilities: { supportsModelSelection: true } as any }),
+				],
+			};
+			const { result, rerender } = renderHook(() => useAgentConfigurationPanel(args));
+			await act(async () => result.current.handleOpenConfig('grok'));
+			await act(async () => vi.advanceTimersByTimeAsync(300));
+			expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+				providerId: 'grok',
+				context: expect.objectContaining({ customPath: undefined }),
+			});
+			act(() => result.current.setCustomPath(''));
+			expect(args.setWizardCustomPath).toHaveBeenLastCalledWith(undefined);
+			expect(result.current.availableModels).toEqual([]);
+			await act(async () => vi.advanceTimersByTimeAsync(300));
+			expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+				providerId: 'grok',
+				context: expect.objectContaining({ customPath: '' }),
+			});
+
+			wizardState = { ...wizardState, selectedAgent: 'codex' };
+			args = { ...args, configuringAgentId: 'codex' };
+			rerender();
+			vi.mocked(window.maestro.agents.getModels).mockResolvedValueOnce(['codex-model']);
+			await act(async () => result.current.handleOpenConfig('codex'));
+			act(() => result.current.setCustomPath(''));
+			expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith('codex', false, undefined);
+			expect(result.current.availableModels).toEqual(['codex-model']);
+
+			wizardState = { ...wizardState, selectedAgent: 'grok' };
+			args = { ...args, configuringAgentId: 'grok' };
+			rerender();
+			await act(async () => result.current.handleOpenConfig('grok'));
+			await act(async () => vi.advanceTimersByTimeAsync(300));
+			expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+				providerId: 'grok',
+				context: expect.objectContaining({ customPath: undefined }),
+			});
+		});
+
+		it.each(['/selected/grok', ''])(
+			'invalidates the catalog after saving executable %j even when the text is unchanged',
+			async (customPath) => {
+				const { result, rerender } = renderHook(() => useAgentConfigurationPanel(args));
+				await act(async () => result.current.handleOpenConfig('grok'));
+				act(() => result.current.setCustomPath(customPath));
+				args = { ...args, customPath };
+				rerender();
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				expect(result.current.availableModels).toEqual(['catalog-model']);
+				let finishSave!: () => void;
+				vi.mocked(window.maestro.agents.setCustomPath).mockReturnValueOnce(
+					new Promise<void>((resolve) => {
+						finishSave = resolve;
+					})
+				);
+				let saving!: Promise<void>;
+				act(() => {
+					saving = result.current.handleCustomPathBlur();
+				});
+				expect(window.maestro.agents.setCustomPath).toHaveBeenLastCalledWith(
+					'grok',
+					customPath || null
+				);
+				expect(args.refreshAgentDetection).not.toHaveBeenCalled();
+				await act(async () => {
+					finishSave();
+					await saving;
+				});
+				expect(args.refreshAgentDetection).toHaveBeenCalledTimes(1);
+				expect(result.current.availableModels).toEqual([]);
+				vi.mocked(window.maestro.agents.getModels).mockResolvedValue({
+					status: 'discovered',
+					options: ['saved-executable-model'],
+				} as never);
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+					providerId: 'grok',
+					context: expect.objectContaining({ customPath }),
+				});
+				expect(result.current.availableModels).toEqual(['saved-executable-model']);
+				expect(result.current.agentConfig).toEqual({
+					model: 'manual-model',
+					reasoningEffort: 'manual-effort',
+				});
+			}
+		);
+
+		it.each([
+			'account',
+			'account reopen',
+			'provider',
+			'close',
+			'reopen',
+			'wizard reopen',
+			'unmount',
+		] as const)(
+			'discards a pending config load after %s without selecting or overwriting a new owner',
+			async (change) => {
+				let finishConfig!: (value: Record<string, string>) => void;
+				vi.mocked(window.maestro.agents.getConfig).mockReturnValueOnce(
+					new Promise((resolve) => {
+						finishConfig = resolve;
+					})
+				);
+				const { result, rerender, unmount } = renderHook(() => useAgentConfigurationPanel(args));
+				let opening!: Promise<void>;
+				act(() => {
+					opening = result.current.handleOpenConfig('grok');
+				});
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				expect(window.maestro.agents.getModels).not.toHaveBeenCalled();
+				expect(window.maestro.agents.getConfigOptions).not.toHaveBeenCalled();
+				if (change === 'account' || change === 'account reopen') {
+					wizardState = { ...wizardState, customEnvVars: { GROK_HOME: '/accounts/next' } };
+					rerender();
+				} else if (change === 'provider') {
+					wizardState = { ...wizardState, selectedAgent: 'codex' };
+					args = { ...args, configuringAgentId: 'codex' };
+					rerender();
+				} else if (change === 'wizard reopen') {
+					wizardState = { ...wizardState, isOpen: false };
+					rerender();
+					wizardState = { ...wizardState, isOpen: true };
+					rerender();
+				} else if (change === 'unmount') unmount();
+				else act(() => result.current.handleCloseConfig());
+				if (change === 'provider' || change === 'reopen' || change === 'account reopen') {
+					await act(async () => result.current.handleOpenConfig(args.configuringAgentId!));
+					act(() => {
+						result.current.handleConfigChange('model', 'new-owner-model');
+						result.current.handleConfigChange('reasoningEffort', 'new-owner-effort');
+					});
+					await act(async () => vi.advanceTimersByTimeAsync(300));
+				}
+				const expected =
+					change === 'provider' || change === 'reopen' || change === 'account reopen'
+						? { model: 'new-owner-model', reasoningEffort: 'new-owner-effort' }
+						: {};
+				expect(result.current.agentConfig).toEqual(expected);
+				vi.mocked(args.setSelectedAgent).mockClear();
+				vi.mocked(args.setConfiguringAgentId).mockClear();
+				vi.mocked(args.showConfigView).mockClear();
+				vi.mocked(args.announce).mockClear();
+				const modelCalls = vi.mocked(window.maestro.agents.getModels).mock.calls.length;
+				await act(async () => {
+					finishConfig({ model: 'stale-model', reasoningEffort: 'stale-effort' });
+					await opening;
+				});
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				expect(result.current.agentConfig).toEqual(expected);
+				expect(args.setSelectedAgent).not.toHaveBeenCalled();
+				expect(args.setConfiguringAgentId).not.toHaveBeenCalled();
+				expect(args.showConfigView).not.toHaveBeenCalled();
+				expect(args.announce).not.toHaveBeenCalled();
+				expect(window.maestro.agents.getModels).toHaveBeenCalledTimes(modelCalls);
+			}
+		);
+
+		it.each(['account', 'provider', 'close', 'reopen', 'unmount'] as const)(
+			'ignores pending model and both effort catalogs after %s',
+			async (change) => {
+				let finishModels!: (value: AgentDiscoveryResult) => void;
+				let finishEfforts!: (value: AgentDiscoveryResult) => void;
+				vi.mocked(window.maestro.agents.getModels).mockReturnValueOnce(
+					new Promise<AgentDiscoveryResult>((resolve) => {
+						finishModels = resolve;
+					}) as never
+				);
+				const pendingEfforts = new Promise<AgentDiscoveryResult>((resolve) => {
+					finishEfforts = resolve;
+				});
+				vi.mocked(window.maestro.agents.getConfigOptions)
+					.mockReturnValueOnce(pendingEfforts as never)
+					.mockReturnValueOnce(pendingEfforts as never)
+					.mockResolvedValue({ status: 'unavailable', options: [] } as never);
+				const { result, rerender, unmount } = renderHook(() => useAgentConfigurationPanel(args));
+				await act(async () => result.current.handleOpenConfig('grok'));
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				expect(window.maestro.agents.getModels).toHaveBeenCalledTimes(1);
+				expect(window.maestro.agents.getConfigOptions).toHaveBeenCalledTimes(2);
+				if (change === 'account') {
+					wizardState = { ...wizardState, customEnvVars: { GROK_HOME: '/accounts/next' } };
+					rerender();
+				} else if (change === 'provider') {
+					wizardState = { ...wizardState, selectedAgent: 'codex' };
+					args = { ...args, configuringAgentId: 'codex' };
+					rerender();
+					await act(async () => result.current.handleOpenConfig('codex'));
+				} else if (change === 'unmount') unmount();
+				else {
+					act(() => result.current.handleCloseConfig());
+					if (change === 'reopen') await act(async () => result.current.handleOpenConfig('grok'));
+				}
+				if (change !== 'unmount') {
+					expect(result.current.availableModels).toEqual([]);
+					act(() => {
+						result.current.handleConfigChange('model', 'typed-model');
+						result.current.handleConfigChange('reasoningEffort', 'typed-effort');
+					});
+				}
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				const activeGrok = change === 'account' || change === 'reopen';
+				expect(result.current.availableModels).toEqual(activeGrok ? ['catalog-model'] : []);
+				expect(result.current.effortDiscoveryStatus).toBe('unavailable');
+				const config = result.current.agentConfig;
+				await act(async () => {
+					finishModels({ status: 'discovered', options: ['stale-model'] });
+					finishEfforts({ status: 'discovered', options: ['stale-effort'] });
+				});
+				expect(result.current.availableModels).toEqual(activeGrok ? ['catalog-model'] : []);
+				expect(result.current.effortDiscoveryStatus).toBe('unavailable');
+				expect(result.current.agentConfig).toEqual(config);
+				if (activeGrok)
+					expect(result.current.agentConfig).toEqual({
+						model: 'typed-model',
+						reasoningEffort: 'typed-effort',
+					});
+			}
+		);
+
+		it.each([
+			'account',
+			'provider',
+			'close',
+			'reopen',
+			'wizard reopen',
+			'unmount',
+			'manual edit',
+		] as const)(
+			'prevents an old forced refresh from publishing or reloading after %s',
+			async (change) => {
+				const { result, rerender, unmount } = renderHook(() => useAgentConfigurationPanel(args));
+				await act(async () => result.current.handleOpenConfig('grok'));
+				act(() => {
+					result.current.handleConfigChange('model', 'typed-model');
+					result.current.handleConfigChange('reasoningEffort', 'typed-effort');
+				});
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				expect(result.current.availableModels).toEqual(['catalog-model']);
+				let finishRefresh!: (value: AgentDiscoveryResult) => void;
+				vi.mocked(window.maestro.agents.getModels).mockReturnValueOnce(
+					new Promise<AgentDiscoveryResult>((resolve) => {
+						finishRefresh = resolve;
+					}) as never
+				);
+				let refreshing!: Promise<void>;
+				act(() => {
+					refreshing = result.current.handleRefreshModels();
+				});
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+					providerId: 'grok',
+					forceRefresh: true,
+					context: expect.objectContaining({ model: 'typed-model', effort: 'typed-effort' }),
+				});
+				if (change === 'account') {
+					wizardState = { ...wizardState, customEnvVars: { GROK_HOME: '/accounts/next' } };
+					rerender();
+				} else if (change === 'provider') {
+					wizardState = { ...wizardState, selectedAgent: 'codex' };
+					args = { ...args, configuringAgentId: 'codex' };
+					rerender();
+					await act(async () => result.current.handleOpenConfig('codex'));
+				} else if (change === 'wizard reopen') {
+					wizardState = { ...wizardState, isOpen: false };
+					rerender();
+					expect(result.current.availableModels).toEqual([]);
+					wizardState = { ...wizardState, isOpen: true };
+					rerender();
+				} else if (change === 'unmount') unmount();
+				else if (change === 'close' || change === 'reopen') {
+					act(() => result.current.handleCloseConfig());
+					if (change === 'reopen') await act(async () => result.current.handleOpenConfig('grok'));
+				}
+				if (change === 'provider' || change === 'reopen' || change === 'manual edit')
+					act(() => {
+						result.current.handleConfigChange(
+							'model',
+							change === 'manual edit' ? 'latest-model' : 'typed-model'
+						);
+						result.current.handleConfigChange(
+							'reasoningEffort',
+							change === 'manual edit' ? 'latest-effort' : 'typed-effort'
+						);
+					});
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				const modelCalls = vi.mocked(window.maestro.agents.getModels).mock.calls.length;
+				const effortCalls = vi.mocked(window.maestro.agents.getConfigOptions).mock.calls.length;
+				const models = result.current.availableModels;
+				const config = result.current.agentConfig;
+				expect(models).toEqual(
+					change === 'provider' || change === 'close' ? [] : ['catalog-model']
+				);
+				expect(config).toEqual({
+					model: change === 'manual edit' ? 'latest-model' : 'typed-model',
+					reasoningEffort: change === 'manual edit' ? 'latest-effort' : 'typed-effort',
+				});
+				await act(async () => {
+					finishRefresh({ status: 'discovered', options: ['stale-forced-model'] });
+					await refreshing;
+				});
+				expect(result.current.availableModels).toEqual(models);
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				expect(window.maestro.agents.getModels).toHaveBeenCalledTimes(modelCalls);
+				expect(window.maestro.agents.getConfigOptions).toHaveBeenCalledTimes(effortCalls);
+				expect(result.current.availableModels).toEqual(models);
+				expect(result.current.agentConfig).toEqual(config);
+			}
+		);
+
+		it.each([false, true])(
+			'reports forced refresh errors with remoteMode=%s and retains manual text',
+			async (remoteMode) => {
+				if (remoteMode)
+					args = { ...args, sshRemoteConfig: { enabled: true, remoteId: 'remote-1' } };
+				const { result } = renderHook(() => useAgentConfigurationPanel(args));
+				await act(async () => result.current.handleOpenConfig('grok'));
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				const error = new Error('synthetic discovery failure');
+				vi.mocked(window.maestro.agents.getModels).mockRejectedValueOnce(error);
+				await act(async () => result.current.handleRefreshModels());
+				expect(captureException).toHaveBeenCalledWith(error, {
+					extra: { operation: 'agentSelection:refreshModels', agentId: 'grok', remoteMode },
+				});
+				expect(result.current.availableModels).toEqual([]);
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				expect(result.current.availableModels).toEqual(['catalog-model']);
+				expect(result.current.agentConfig).toEqual({
+					model: 'manual-model',
+					reasoningEffort: 'manual-effort',
+				});
+			}
+		);
+
+		it('reloads the current catalog after a successful forced refresh without adopting its payload', async () => {
+			const { result } = renderHook(() => useAgentConfigurationPanel(args));
+			await act(async () => result.current.handleOpenConfig('grok'));
+			await act(async () => vi.advanceTimersByTimeAsync(300));
+			vi.mocked(window.maestro.agents.getModels)
+				.mockResolvedValueOnce({ status: 'discovered', options: ['force-payload'] } as never)
+				.mockResolvedValue({ status: 'discovered', options: ['fresh-catalog'] } as never);
+			await act(async () => result.current.handleRefreshModels());
+			expect(result.current.availableModels).toEqual([]);
+			expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+				providerId: 'grok',
+				forceRefresh: true,
+				context: expect.objectContaining({ customPath: '/bin/grok' }),
+			});
+			await act(async () => vi.advanceTimersByTimeAsync(300));
+			expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+				providerId: 'grok',
+				context: expect.objectContaining({ customPath: '/bin/grok' }),
+			});
+			expect(result.current.availableModels).toEqual(['fresh-catalog']);
+			expect(result.current.agentConfig).toEqual({
+				model: 'manual-model',
+				reasoningEffort: 'manual-effort',
+			});
+		});
+
+		it.each(['open', 'refresh'] as const)(
+			'keeps the Codex %s signature and rejects its late catalog after switching to Grok',
+			async (operation) => {
+				wizardState = { ...wizardState, selectedAgent: 'codex' };
+				args = {
+					...args,
+					configuringAgentId: 'codex',
+					sshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+					detectedAgents: [
+						...args.detectedAgents,
+						agent({
+							id: 'codex',
+							capabilities: { supportsModelSelection: true } as any,
+						}),
+					],
+				};
+				const { result, rerender } = renderHook(() => useAgentConfigurationPanel(args));
+				if (operation === 'refresh') {
+					vi.mocked(window.maestro.agents.getModels).mockResolvedValueOnce(['codex-model']);
+					await act(async () => result.current.handleOpenConfig('codex'));
+				}
+				let finishModels!: (value: string[]) => void;
+				vi.mocked(window.maestro.agents.getModels).mockReturnValueOnce(
+					new Promise<string[]>((resolve) => {
+						finishModels = resolve;
+					})
+				);
+				let pending!: Promise<void>;
+				await act(async () => {
+					pending =
+						operation === 'open'
+							? result.current.handleOpenConfig('codex')
+							: result.current.handleRefreshModels();
+				});
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith(
+					'codex',
+					operation === 'refresh',
+					'remote-1'
+				);
+				wizardState = { ...wizardState, selectedAgent: 'grok' };
+				args = { ...args, configuringAgentId: 'grok' };
+				rerender();
+				await act(async () => result.current.handleOpenConfig('grok'));
+				act(() => {
+					result.current.handleConfigChange('model', 'typed-model');
+					result.current.handleConfigChange('reasoningEffort', 'typed-effort');
+				});
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				vi.mocked(args.showConfigView).mockClear();
+				vi.mocked(args.setSelectedAgent).mockClear();
+				vi.mocked(args.announce).mockClear();
+				await act(async () => {
+					finishModels(['stale-codex-model']);
+					await pending;
+				});
+				expect(result.current.availableModels).toEqual(['catalog-model']);
+				expect(result.current.agentConfig).toEqual({
+					model: 'typed-model',
+					reasoningEffort: 'typed-effort',
+				});
+				expect(args.showConfigView).not.toHaveBeenCalled();
+				expect(args.setSelectedAgent).not.toHaveBeenCalled();
+				expect(args.announce).not.toHaveBeenCalled();
+			}
+		);
 	});
 });
