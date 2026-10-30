@@ -210,14 +210,21 @@ export function supportsEffortSelection(toolType: ToolType): boolean {
  * downgrade therefore cannot follow the conversation forward into the next real
  * turn. If a future caller ever DOES adopt that id, this pin has to be revisited
  * first, or the tab silently continues on the cheap model.
+ *
+ * Grok's floor still requires the selected model's advertised wire values (see
+ * resolveEffortLevel). Missing evidence or a missing floor leaves effort unset
+ * for the caller to inherit; another advertised rung is never substituted.
  */
-export function cheapTurnSettings(toolType: ToolType): {
+export function cheapTurnSettings(
+	toolType: ToolType,
+	supportedEfforts?: readonly string[]
+): {
 	model: string | undefined;
 	effort: string | undefined;
 } {
 	return {
 		model: resolveTierModel(toolType, 'low'),
-		effort: resolveEffortLevel(toolType, 'low'),
+		effort: resolveEffortLevel(toolType, 'low', supportedEfforts),
 	};
 }
 
@@ -236,15 +243,18 @@ export function cheapTurnSettings(toolType: ToolType): {
  * `current` is what the summarized turn ran at. It is also what the turn
  * inherits on a provider with no tier mapping (codex, opencode), where there
  * is nothing to downgrade TO.
+ * Grok keeps that model; any supplied effort evidence must belong to it and
+ * its current account/host/version, never another session's menu.
  */
 export function cheapResumeTurnSettings(
 	toolType: ToolType,
-	current: { model?: string; effort?: string } = {}
+	current: { model?: string; effort?: string } = {},
+	supportedEfforts?: readonly string[]
 ): {
 	model: string | undefined;
 	effort: string | undefined;
 } {
-	const cheap = cheapTurnSettings(toolType);
+	const cheap = cheapTurnSettings(toolType, supportedEfforts);
 	const shrinksWindow =
 		(getModelContextWindowOverride(current.model) ?? FALLBACK_CONTEXT_WINDOW) >
 		(getModelContextWindowOverride(cheap.model) ?? FALLBACK_CONTEXT_WINDOW);
