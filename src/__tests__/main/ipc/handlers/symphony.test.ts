@@ -26,16 +26,21 @@ vi.mock('electron', () => ({
 	BrowserWindow: vi.fn(),
 }));
 
-// Mock fs/promises
-vi.mock('fs/promises', () => ({
-	default: {
+// Mock fs/promises. The handlers import the default export; the atomic writer
+// the store writers go through (`atomicWriteJson`) imports the namespace, so the
+// same mock functions are exposed both ways and `vi.mocked(fs.writeFile)` sees
+// the writer's temp-file write and `fs.rename` the publish.
+vi.mock('fs/promises', () => {
+	const mocked = {
 		readFile: vi.fn(),
 		writeFile: vi.fn(),
+		rename: vi.fn(),
 		mkdir: vi.fn(),
 		rm: vi.fn(),
 		access: vi.fn(),
-	},
-}));
+	};
+	return { ...mocked, default: mocked };
+});
 
 // Mock execFileNoThrow
 vi.mock('../../../../main/utils/execFile', () => ({
@@ -65,6 +70,26 @@ vi.mock('../../../../main/utils/logger', () => ({
 // Mock global fetch
 const mockFetch = vi.fn();
 global.fetch = mockFetch;
+
+/**
+ * Every Symphony store write lands on `<path>.tmp` and is renamed over the store
+ * (MCOMP-01-02C), so a write to `symphony-state.json` or `symphony-cache.json`
+ * is read off its temp path on `fs.writeFile`, in call order, and the publish
+ * off `fs.rename`. The store path itself never appears on `fs.writeFile`.
+ */
+const storeWrites = (file: string): any[] =>
+	vi
+		.mocked(fs.writeFile)
+		.mock.calls.filter((call) => String(call[0]).endsWith(`${file}.tmp`))
+		.map((call) => JSON.parse(call[1] as string));
+
+/** The renames that published `file`: each from the fixed temp path over the store. */
+const storePublishes = (file: string) =>
+	vi
+		.mocked(fs.rename)
+		.mock.calls.filter(
+			([from, to]) => String(to).endsWith(file) && String(from) === `${String(to)}.tmp`
+		);
 
 // Import mocked functions
 import { execFileNoThrow } from '../../../../main/utils/execFile';
@@ -130,6 +155,7 @@ describe('Symphony IPC handlers', () => {
 		// Default mock for fs operations
 		vi.mocked(fs.mkdir).mockResolvedValue(undefined);
 		vi.mocked(fs.writeFile).mockResolvedValue(undefined);
+		vi.mocked(fs.rename).mockResolvedValue(undefined);
 
 		// Default: no fork needed (user has push access)
 		vi.mocked(ensureForkSetup).mockResolvedValue({ isFork: false });
@@ -155,6 +181,7 @@ describe('Symphony IPC handlers', () => {
 		it('should have proper mocks for fs/promises', () => {
 			expect(fs.readFile).toBeDefined();
 			expect(fs.writeFile).toBeDefined();
+			expect(fs.rename).toBeDefined();
 			expect(fs.mkdir).toBeDefined();
 		});
 
@@ -1160,8 +1187,8 @@ describe('Symphony IPC handlers', () => {
 			await handler!({} as any, false);
 
 			expect(fs.writeFile).toHaveBeenCalled();
-			const writeCall = vi.mocked(fs.writeFile).mock.calls[0];
-			const writtenData = JSON.parse(writeCall[1] as string);
+			expect(storePublishes('symphony-cache.json')).toHaveLength(1);
+			const writtenData = storeWrites('symphony-cache.json')[0];
 			expect(writtenData.registry.data).toEqual(
 				expect.objectContaining({ repositories: freshRegistry.repositories })
 			);
@@ -1310,8 +1337,8 @@ describe('Symphony IPC handlers', () => {
 			await handler!({} as any, 'owner/repo', false);
 
 			expect(fs.writeFile).toHaveBeenCalled();
-			const writeCall = vi.mocked(fs.writeFile).mock.calls[0];
-			const writtenData = JSON.parse(writeCall[1] as string);
+			expect(storePublishes('symphony-cache.json')).toHaveLength(1);
+			const writtenData = storeWrites('symphony-cache.json')[0];
 			expect(writtenData.issues['owner/repo']).toBeDefined();
 		});
 
@@ -1339,8 +1366,8 @@ describe('Symphony IPC handlers', () => {
 
 			expect(result.cleared).toBe(true);
 			expect(fs.writeFile).toHaveBeenCalled();
-			const writeCall = vi.mocked(fs.writeFile).mock.calls[0];
-			const writtenData = JSON.parse(writeCall[1] as string);
+			expect(storePublishes('symphony-cache.json')).toHaveLength(1);
+			const writtenData = storeWrites('symphony-cache.json')[0];
 			expect(writtenData.issues).toEqual({});
 			expect(writtenData.registry).toBeUndefined();
 		});
@@ -2367,15 +2394,17 @@ describe('Symphony IPC handlers', () => {
 				const handler = getStartHandler();
 				await handler!({} as any, validStartParams);
 
-				// Verify the state was written with fork info
-				const writeStateCall = vi
-					.mocked(fs.writeFile)
-					.mock.calls.find(
-						(call) => typeof call[0] === 'string' && call[0].includes('symphony-state.json')
-					);
-				expect(writeStateCall).toBeDefined();
-				const savedState = JSON.parse(writeStateCall![1] as string);
-				const savedContrib = savedState.active[0];
+				// Verify the state was written with fork info: on the temp path, then
+				// renamed over symphony-state.json, which never appears on writeFile.
+				const stateWrites = storeWrites('symphony-state.json');
+				expect(stateWrites.length).toBeGreaterThan(0);
+				expect(storePublishes('symphony-state.json')).toHaveLength(stateWrites.length);
+				expect(
+					vi
+						.mocked(fs.writeFile)
+						.mock.calls.some((call) => String(call[0]).endsWith('symphony-state.json'))
+				).toBe(false);
+				const savedContrib = stateWrites[0].active[0];
 				expect(savedContrib.isFork).toBe(true);
 				expect(savedContrib.forkSlug).toBe('chris/repo');
 				expect(savedContrib.upstreamSlug).toBe('owner/repo');
@@ -6234,8 +6263,8 @@ This is a Symphony task document.
 
 				// Verify state was written
 				expect(fs.writeFile).toHaveBeenCalled();
-				const writeCall = vi.mocked(fs.writeFile).mock.calls[0];
-				const writtenState = JSON.parse(writeCall[1] as string);
+				expect(storePublishes('symphony-state.json')).toHaveLength(1);
+				const writtenState = storeWrites('symphony-state.json')[0];
 
 				expect(writtenState.history).toHaveLength(1);
 				expect(writtenState.history[0].repoSlug).toBe('owner/repo');
@@ -6258,8 +6287,8 @@ This is a Symphony task document.
 
 				expect(result.success).toBe(true);
 
-				const writeCall = vi.mocked(fs.writeFile).mock.calls[0];
-				const writtenState = JSON.parse(writeCall[1] as string);
+				expect(storePublishes('symphony-state.json')).toHaveLength(1);
+				const writtenState = storeWrites('symphony-state.json')[0];
 
 				expect(writtenState.history[0].wasMerged).toBe(true);
 				expect(writtenState.history[0].mergedAt).toBe('2026-02-02T23:31:31Z');
@@ -6278,8 +6307,8 @@ This is a Symphony task document.
 					prUrl: 'https://github.com/new-owner/new-repo/pull/1',
 				});
 
-				const writeCall = vi.mocked(fs.writeFile).mock.calls[0];
-				const writtenState = JSON.parse(writeCall[1] as string);
+				expect(storePublishes('symphony-state.json')).toHaveLength(1);
+				const writtenState = storeWrites('symphony-state.json')[0];
 
 				expect(writtenState.stats.repositoriesContributed).toContain('new-owner/new-repo');
 			});
@@ -6300,8 +6329,8 @@ This is a Symphony task document.
 					},
 				});
 
-				const writeCall = vi.mocked(fs.writeFile).mock.calls[0];
-				const writtenState = JSON.parse(writeCall[1] as string);
+				expect(storePublishes('symphony-state.json')).toHaveLength(1);
+				const writtenState = storeWrites('symphony-state.json')[0];
 
 				expect(writtenState.history[0].tokenUsage.inputTokens).toBe(50000);
 				expect(writtenState.history[0].tokenUsage.outputTokens).toBe(25000);
@@ -6321,8 +6350,8 @@ This is a Symphony task document.
 					prUrl: 'https://github.com/owner/repo/pull/456',
 				});
 
-				const writeCall = vi.mocked(fs.writeFile).mock.calls[0];
-				const writtenState = JSON.parse(writeCall[1] as string);
+				expect(storePublishes('symphony-state.json')).toHaveLength(1);
+				const writtenState = storeWrites('symphony-state.json')[0];
 
 				expect(writtenState.stats.firstContributionAt).toBeDefined();
 				expect(writtenState.stats.lastContributionAt).toBeDefined();

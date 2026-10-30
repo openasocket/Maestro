@@ -7,6 +7,7 @@ import { SafeSendFn } from '../../../utils/safe-send';
 import type { SessionsData, MaestroSettings } from '../../../stores/types';
 import { CreateHandlerOptions } from '../../../utils/ipcHandler';
 import { execFileNoThrow } from '../../../utils/execFile';
+import { atomicWriteJson, createKeyedWriteQueue } from '../../../utils/atomic-json-store';
 import { getExpandedEnv } from '../../../agents/path-prober';
 import { resolveGhPath } from '../../../utils/cliDetection';
 import { getActingTransport, transportSpawnActor } from '../../../web-server/auth/transport-actor';
@@ -318,11 +319,33 @@ export async function isContributionClone(localPath: string, repoSlug?: string):
 }
 
 /**
+ * One write chain per Symphony store file (MCOMP-01-02C).
+ *
+ * Both stores used to be a plain `fs.writeFile`, which truncates and then
+ * streams, so two handler calls that overlap (the 5-second
+ * `symphony:updateStatus` poll beside a `symphony:registerActive`) left a
+ * reader on a document with the tail of the longer write after the JSON.
+ * `atomicWriteJson` lands the bytes on `<path>.tmp` and renames it over the
+ * store, so a reader sees the old file or the new one; and because that temp
+ * name is fixed, two overlapping atomic writes would tear the temp file or lose
+ * the second rename to ENOENT, so the queue runs the writes to one path one at
+ * a time. Only the write is serialized: a handler's read-modify-write is not,
+ * and two overlapping updates can still lose one to the other as before.
+ */
+const storeWrites = createKeyedWriteQueue();
+
+async function writeStoreFile(app: App, filePath: string, value: unknown): Promise<void> {
+	await storeWrites.enqueue(filePath, async () => {
+		await ensureSymphonyDir(app);
+		await atomicWriteJson(filePath, value);
+	});
+}
+
+/**
  * Write cache to disk.
  */
 export async function writeCache(app: App, cache: SymphonyCache): Promise<void> {
-	await ensureSymphonyDir(app);
-	await fs.writeFile(getCachePath(app), JSON.stringify(cache, null, 2), 'utf-8');
+	await writeStoreFile(app, getCachePath(app), cache);
 }
 
 /**
@@ -346,8 +369,7 @@ export async function readState(app: App): Promise<SymphonyState> {
  * Write symphony state to disk.
  */
 export async function writeState(app: App, state: SymphonyState): Promise<void> {
-	await ensureSymphonyDir(app);
-	await fs.writeFile(getStatePath(app), JSON.stringify(state, null, 2), 'utf-8');
+	await writeStoreFile(app, getStatePath(app), state);
 }
 
 /**
