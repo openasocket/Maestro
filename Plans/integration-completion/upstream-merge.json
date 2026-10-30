@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge in progress; MCOMP-01-03A..03O staged (42 files), 2 files unmerged in the worktree (useRemoteIntegration.ts and its suite); MCOMP-01-03P resolves them (positional order mentionRouting, delegation, dispatchTicket on the dispatch callbacks, their relays, the handler calls, the preload remotes, the renderer declarations and the renderer hook, see progress.MCOMP-01-03I, 03J, 03K, 03L, 03M, 03N and 03O positionalOrder), Q commits and type-checks (remote-fs.ts execRemoteCommand access slot, see progress.MCOMP-01-03L.semanticConflictsForQ), R tests (install the merged dependencies first: luxon, papaparse, parsimmon, remove-markdown and their @types; add the remote:newAITabWithPrompt relay case and the browserTabRemote / queueRemote positional cases), S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T03:46:01.206Z",
-		"updatedBy": "MCOMP-01-03O"
+		"state": "merge in progress; MCOMP-01-03A..03P staged (all 44 files resolved), 0 files unmerged in the worktree; MCOMP-01-03Q commits the merge and type-checks the merged tree (remote-fs.ts execRemoteCommand access slot, see progress.MCOMP-01-03L.semanticConflictsForQ; the positional order is recorded under progress.MCOMP-01-03I, 03J, 03K, 03L, 03M, 03N, 03O and 03P positionalOrder), R tests (install the merged dependencies first: luxon, papaparse, parsimmon, remove-markdown and their @types; add the remote:newAITabWithPrompt relay case and the browserTabRemote / queueRemote positional cases; the onRemoteCrossAgentAsk request type drift, see progress.MCOMP-01-03P.followUpsForR), S lands, T re-pins and closes",
+		"updatedAt": "2026-10-30T04:00:34.333Z",
+		"updatedBy": "MCOMP-01-03P"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -861,6 +861,58 @@
 			],
 			"unmergedAfter": 2,
 			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03o.mjs (not in git)"
+		},
+		"MCOMP-01-03P": {
+			"resolvedAt": "2026-10-29",
+			"resolvedBy": "Maestro-Claude",
+			"files": [
+				"src/renderer/hooks/remote/useRemoteIntegration.ts",
+				"src/__tests__/renderer/hooks/useRemoteIntegration.test.ts"
+			],
+			"positionalOrder": "the renderer hook reads the three onRemote* callbacks in the 03N/03O order: onRemoteCommand (sessionId, command, inputMode, tabId, force, images, background, mentionRouting, delegation, dispatchTicket, receiptChannel); onRemoteNewAITabWithPrompt (sessionId, prompt, responseChannel, background, hidden, mentionRouting, delegation, dispatchTicket); onRemoteEnqueueCommand (sessionId, command, responseChannel, inputMode, tabId, images, background, held, mentionRouting, delegation, dispatchTicket); it hands mentionRouting, delegation, dispatchTicket in that order to the maestro:remoteCommand event detail (onRemoteCommand; the idle branches of onRemoteNewAITabWithPrompt and onRemoteEnqueueCommand, where useRemoteHandlers.ts reads them) and to enqueuePromptForTab / buildQueuedMessageItem (the busy branches, 03O); the last positional link of the chain 03I fixed, so 03Q type-checks the whole wire and 03R runs its suites",
+			"hunks": {
+				"src/renderer/hooks/remote/useRemoteIntegration.ts": [
+					"10-14 (the import pair): upstream's `import type { MentionRouting }` first, then the integration `import type { ManagedDelegationContext }`",
+					"364-369 (the onRemoteCommand parameters after background, before receiptChannel), 772-777 (onRemoteNewAITabWithPrompt after hidden) and 1259-1264 (onRemoteEnqueueCommand after held), each the two-vs-one trailing optional parameter: upstream's `mentionRouting?: MentionRouting` first, then the integration `delegation?: ManagedDelegationContext` and `dispatchTicket?: string`",
+					"489-494 (the maestro:remoteCommand detail of onRemoteCommand), 900-907 (the detail of onRemoteNewAITabWithPrompt on an idle agent, the integration two-line comment over the ticket kept) and 1318-1323 (the detail in the idle branch of onRemoteEnqueueCommand): `mentionRouting, delegation, dispatchTicket` in the detail",
+					"866-871 (enqueuePromptForTab in the busy branch of onRemoteNewAITabWithPrompt) and 1347-1352 (buildQueuedMessageItem in the busy branch of onRemoteEnqueueCommand): the three handed to the builder in that order",
+					"476-481 (the integration comment over the onRemoteCommand detail, upstream nothing): kept, the routing named ahead of the record and the ticket",
+					"auto-merged outside the hunks: every other handler both sides registered (upstream 111 added lines: the interrupt relay, the closed-tab, context-overlay and live handlers; the integration 50: the cross-agent ask ticket and the delegation notice), the `item.mentionRouting` carriage of the queue mirror and useRemoteHandlers.ts, the consumer of the detail, which reads the three and puts the record and the ticket on the spawn config"
+				],
+				"src/__tests__/renderer/hooks/useRemoteIntegration.test.ts": [
+					"879-882, 910-913 and 942-945 (the three receipt cases: ours added one `undefined,` for the record and the ticket sharing the trailing slot, upstream nothing since its routing took it): two `undefined,` ahead of the receipt channel (eleven arguments)",
+					"2462-2574 (the one two-describe interleave inside 'remote enqueue command (dispatch --queue)': ours appended the MRC-07-04D delegation case, upstream its two routing cases, git sharing the mock session, the handler call's head and the closing `});`): rebuilt as three whole cases, integration first; the delegation case hands `undefined,` (the routing) ahead of the record after held, its title naming the slot; upstream's routing-stamped and routing-to-idle-path cases kept whole (nine arguments ending on the routing slot)",
+					"beyond the hunks, every auto-merged positional call of either side brought to the merged wire: upstream's onRemoteCommand routing case (693) gains two `undefined,` between `'consult-first'` and the receipt channel (its nine arguments had put the receipt channel in the record's slot); the integration onRemoteCommand delegation (MRC-07-04C, 972) and ticket (MRC-08-01B, 1010) cases, the onRemoteNewAITabWithPrompt ticket (MRC-08-02, 1730 and 1759) and delegation (MRC-07-04D, 2154) cases and the onRemoteEnqueueCommand ticket cases (MRC-08-02, 2274 and 2309) gain the routing `undefined,` ahead of the record's slot, the two slot comments naming the routing",
+					"the explicit type of the captured onRemoteEnqueueCommand handler (166-177), which named neither side's slots (both sides fired past it; the suite is in no tsconfig, so neither saw the TS2554), becomes the `Parameters<typeof window.maestro.process.onRemoteEnqueueCommand>[0]` form its two siblings use",
+					"every other case both sides added (upstream 387 and the integration 341 added lines) had auto-merged and asserts named detail or item fields; the merged suite declares 134 it() cases = base 116 + the integration 10 + upstream 8, no case dropped"
+				]
+			},
+			"checks": {
+				"staging": "merge-tool stage over the two files: prettier left both unchanged; git add done, 0 files unmerged (the merge-tool status reads unmergedCount 0 for 03Q), no marker left in either, nothing unstaged, nothing untracked in the worktree",
+				"seams": "the hook hands the record and the ticket on every path a program's dispatch reaches the renderer through (the onRemoteCommand event detail, the idle and busy branches of onRemoteNewAITabWithPrompt and onRemoteEnqueueCommand) beside upstream's picked routing, and useRemoteHandlers.ts (auto-merged, 89 cases) reads them off the detail onto the spawn config for the sink to bind; no guard, handler or case of either side dropped",
+				"suites": "Working/mcomp-01-03/suites-03p.mjs --throwaway useRemoteIntegration.test.ts useRemoteHandlers.test queuedPrompt.test (log suites-03p.log): 3 files / 263 tests passed, 0 failed, 0 skipped: the resolved suite ran as a throwaway copy zz-03p.throwaway.test.ts (deleted after the run) with one vi.mock of src/shared/dataview prepended (a Proxy answering every export), 145 passed (both sides' cases: the three receipt cases, the routing carried into the event and stamped on the queued item, the record and the ticket on the event and the queued item of each path, the ask ticket, the delegation notice, upstream's interrupt, closed-tab, context-overlay and live cases); useRemoteHandlers.test.ts (auto-merged, the consumer of the event detail) 89; queuedPrompt.test.ts 29. As committed the suite fails at load, `Failed to resolve import \"luxon\" from src/shared/dataview/vendor/data-model/value.ts`: the renderer closure now reaches the vendored Dataview core through upstream's own import chain useRemoteIntegration.ts -> services/tabContextOps.ts (783318bed) -> MergeSessionModal.tsx -> hooks/index.ts -> hooks/batch/useAutoRunMarkdown.ts -> Markdown/components/dataviewSurface.ts -> DataviewBlock.tsx -> shared/dataview/index.ts -> vendor/data-model/value.ts -> luxon, which the symlinked node_modules lacks until 03R installs the merged dependencies; an environment gap, not a merge defect",
+				"typeCheck": "throwaway tsconfig-03p.json (extends the worktree tsconfig.json, files = the hook + the suite; log tsc-03p.log): exit 2, 353 errors, 0 in the hook, 6 in the suite, every one of the six pre-existing and none on a merged line (Working/mcomp-01-03/tsc-sides-03p.mjs, log tsc-sides-03p.log, type-checked throwaway copies of the HEAD, MERGE_HEAD and base versions of the suite beside it under the same config and deleted them: the three TS6133 unused captured handlers at 125, 128 and 147, the TS2352 AgentConfig cast at 1895 and the TS2345 createDeps shape at 1978 are on all three sides; the TS2353 at 1612, `dispatchTicket` not in the request type of window.maestro.process.onRemoteCrossAgentAsk (global.d.ts 973) that the MRC-08-01C ask-ticket case sends it on, is on the HEAD side alone, an integration-side drift between the suite and the declaration, the hook's own handler parameter naming the field; src/__tests__ is in no tsconfig, so npm run lint never sees any of the six). The other 347 are outside the two files: 254 in src/shared/dataview/vendor behind the missing luxon, papaparse, parsimmon and remove-markdown (03R), 3 remote-fs.ts TS2345 (03Q, progress.MCOMP-01-03L.semanticConflictsForQ), the 1 pre-existing plugin-host-handlers.ts dispatcher error, and 89 artifacts of a files-only config over the hook's much wider closure, all declared under src/types or src/renderer/vite-env.d.ts, which `include: []` drops: 66 svg module imports in fileExplorerIcons/richTheme.tsx (TS2307), 3 css side-effect imports (TS2882), 8 `window.__updateSplash` / `__hideSplash` reads (TS2339), 7 Promise.withResolvers under the ES2020 lib (TS2550) and 5 dns-packet module reads in the Lite discovery and the browser relay with the implicit-any parameters the missing declaration leaves (TS7006); none of those files changed on a merged line",
+				"numstatVsHead": {
+					"src/renderer/hooks/remote/useRemoteIntegration.ts": "98+/30- (upstream's handlers and the routing slot on the three callbacks, the detail and the builder calls)",
+					"src/__tests__/renderer/hooks/useRemoteIntegration.test.ts": "405+/32- (upstream's cases, the routing slot on the integration cases, the two slot comments, the enqueue handler type)"
+				},
+				"numstatVsMergeHead": {
+					"src/renderer/hooks/remote/useRemoteIntegration.ts": "36+/3- (the delegation import, the record and ticket slots on the three callbacks, the detail and the builder calls, the comments)",
+					"src/__tests__/renderer/hooks/useRemoteIntegration.test.ts": "354+/10- (the integration cases, the record and ticket slots on upstream's routing case and the receipt cases, the enqueue handler type)"
+				}
+			},
+			"semanticConflictsForQ": [],
+			"followUpsForR": [
+				"the merged suite needs luxon (and papaparse, parsimmon, remove-markdown with their @types) installed before it runs as committed: the hook's closure reaches the vendored Dataview core through upstream's tabContextOps chain (see checks.suites); until then suites-03p.mjs --throwaway runs it with the Proxy mock of src/shared/dataview",
+				"pre-existing on the integration side, not merge-introduced: the request type of window.maestro.process.onRemoteCrossAgentAsk in global.d.ts (973) lacks `dispatchTicket?: string`, which the hook's handler reads and the suite's MRC-08-01C case sends (TS2353 at suite 1612 under a config that includes the suite); 03R may add the field to the declaration when it type-checks the suites it runs, or leave it with the suite outside every tsconfig"
+			],
+			"blockedSuites": [],
+			"observations": [
+				"the chain 03I fixed ends here: every positional carrier of the dispatch wire (the callback types 03I, the relays 03J, the handler calls 03K/03L, the suites 03M, the preload remotes 03N, the renderer declarations and queuedPrompt 03O, the renderer hook and its suite 03P) reads mentionRouting, delegation, dispatchTicket in that order; 03Q type-checks the whole merged tree once",
+				"the three receipt cases, the delegation and ticket cases and upstream's routing cases on onRemoteCommand all pass against the merged global.d.ts (03O) under Parameters<typeof window.maestro.process.onRemoteCommand>[0], so the suite's captured handler types are the wire, not a local copy of it"
+			],
+			"unmergedAfter": 0,
+			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03p.mjs (not in git)"
 		}
 	}
 }
