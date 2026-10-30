@@ -16,6 +16,12 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as proofIdentity from '../../../main/plugins/plugin-tool-run-identity';
+import * as wakaTime from '../../../main/wakatime-instance';
+import { logger } from '../../../main/utils/logger';
+import type { SpawnBuildResult } from '../../../main/cue/cue-spawn-builder';
 import type { ChildProcess } from 'child_process';
 import type { CueEvent, CueSubscription } from '../../../main/cue/cue-types';
 import type { SessionInfo } from '../../../shared/types';
@@ -46,7 +52,10 @@ function sshStoreWithRemotes() {
 // transitively imports `cue-github-poller`, which calls `getExpandedEnv()` at
 // module-load time and needs `fs.existsSync` for nvm/path detection.
 const mockReadFileSync = vi.fn();
-const { injectInvalidProof } = vi.hoisted(() => ({ injectInvalidProof: { current: false } }));
+const { injectInvalidProof, buildBoundary } = vi.hoisted(() => ({
+	injectInvalidProof: { current: false },
+	buildBoundary: { afterBuild: undefined as ((result: SpawnBuildResult) => void) | undefined },
+}));
 vi.mock('fs', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('fs')>();
 	return {
@@ -65,6 +74,7 @@ vi.mock('../../../main/cue/cue-spawn-builder', async (importOriginal) => {
 				// Cleanup rejects this path after the provider has already completed.
 				result.spec.pluginRunProofFile = '/invalid/not-a-proof';
 			}
+			buildBoundary.afterBuild?.(result);
 			return result;
 		},
 	};
@@ -325,6 +335,7 @@ describe('cue-executor', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		injectInvalidProof.current = false;
+		buildBoundary.afterBuild = undefined;
 		vi.useFakeTimers();
 		getActiveProcesses().clear();
 
@@ -1780,6 +1791,213 @@ describe('cue-executor', () => {
 			};
 			return { admission, asked };
 		}
+
+		describe('plugin proof ownership after build resolution', () => {
+			const proofFile = path.resolve('maestro-plugin-run-private-fixture', 'proof');
+			const privateContent = 'SYNTHETIC_PRIVATE_CUE_PROMPT';
+			let token: string | undefined;
+			const ownedFiles = new Set<string>();
+			let removeProof: ReturnType<typeof vi.spyOn>;
+			let revoke: ReturnType<typeof vi.spyOn>;
+			let warn: ReturnType<typeof vi.spyOn>;
+
+			beforeEach(() => {
+				token = undefined;
+				ownedFiles.clear();
+				mockGetOutputParser.mockReturnValue(null);
+				removeProof = vi
+					.spyOn(proofIdentity, 'removePluginRunProofFile')
+					.mockImplementation((file) => {
+						expect(ownedFiles.delete(file)).toBe(true);
+					});
+				revoke = vi.spyOn(proofIdentity.pluginToolRunIdentity, 'revoke');
+				warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+				buildBoundary.afterBuild = (result) => {
+					if (!result.ok) return;
+					token = proofIdentity.pluginToolRunIdentity.issue('session-1');
+					ownedFiles.add(proofFile);
+					result.spec.pluginRunToken = token;
+					result.spec.pluginRunProofFile = proofFile;
+				};
+			});
+
+			afterEach(() => {
+				vi.restoreAllMocks();
+				if (token) proofIdentity.pluginToolRunIdentity.revoke(token);
+				buildBoundary.afterBuild = undefined;
+			});
+
+			function expectProofReleased() {
+				expect(token).toBeDefined();
+				expect(revoke).toHaveBeenCalledExactlyOnceWith(token);
+				expect(proofIdentity.pluginToolRunIdentity.resolve(token).callerAgentId).toBeNull();
+				expect(removeProof).toHaveBeenCalledExactlyOnceWith(proofFile);
+				expect(ownedFiles.size).toBe(0);
+			}
+
+			it('releases a successful build cancelled in the microtask before executor continuation', async () => {
+				const controller = new AbortController();
+				const attachProof = buildBoundary.afterBuild!;
+				buildBoundary.afterBuild = (result) => {
+					expect(result.ok).toBe(true);
+					attachProof(result);
+					void Promise.resolve().then(() => controller.abort());
+				};
+				const onRunTranscript = vi.fn();
+				const result = await executeCuePrompt(
+					createExecutionConfig({ signal: controller.signal, onRunTranscript })
+				);
+				expect(result.status).toBe('stopped');
+				expectProofReleased();
+				expect(mockSpawn).not.toHaveBeenCalled();
+				expect(mockBuildAgentArgs).toHaveBeenCalledTimes(1);
+				expect(onRunTranscript).not.toHaveBeenCalled();
+			});
+
+			it('keeps cancellation ahead of a failed build without acquiring proof ownership', async () => {
+				const controller = new AbortController();
+				mockGetAgentDefinition.mockReturnValue(null);
+				buildBoundary.afterBuild = (result) => {
+					expect(result.ok).toBe(false);
+					void Promise.resolve().then(() => controller.abort());
+				};
+				const result = await executeCuePrompt(createExecutionConfig({ signal: controller.signal }));
+				expect(result).toMatchObject({ status: 'stopped', stderr: '' });
+				expect(mockSpawn).not.toHaveBeenCalled();
+				expect(revoke).not.toHaveBeenCalled();
+				expect(removeProof).not.toHaveBeenCalled();
+			});
+
+			it.each(['logging', 'heartbeat'] as const)(
+				'releases proofs when %s setup throws before execution',
+				async (stage) => {
+					const failure = new Error(privateContent);
+					const config = createExecutionConfig();
+					if (stage === 'logging')
+						config.onLog = vi.fn(() => {
+							throw failure;
+						});
+					else
+						vi.spyOn(wakaTime, 'getWakaTimeManager').mockImplementation(() => {
+							throw failure;
+						});
+					await expect(executeCuePrompt(config)).rejects.toBe(failure);
+					expectProofReleased();
+					expect(mockSpawn).not.toHaveBeenCalled();
+				}
+			);
+
+			it('releases proofs after a managed refusal without a process or retry', async () => {
+				const { admission, asked } = admissionWith(() => ({
+					decision: 'deny',
+					reason: 'Fixture denial',
+					policyRevision: 1,
+				}));
+				const onRunTranscript = vi.fn();
+				const result = await executeCuePrompt(
+					createExecutionConfig({ admission, onRunTranscript })
+				);
+				expect(result.managed).toEqual({ state: 'denied', code: 'policy-denied' });
+				expect(asked).toHaveLength(1);
+				expectProofReleased();
+				expect(mockSpawn).not.toHaveBeenCalled();
+				expect(mockBuildAgentArgs).toHaveBeenCalledTimes(1);
+				expect(onRunTranscript).not.toHaveBeenCalled();
+			});
+
+			it('releases proofs when exclusive local prompt preparation fails without retry or private diagnostics', async () => {
+				const promptFile = path.resolve('private-cue-prompt.json');
+				const attachProof = buildBoundary.afterBuild!;
+				buildBoundary.afterBuild = (result) => {
+					attachProof(result);
+					if (!result.ok) return;
+					result.spec.args = ['--prompt-file', promptFile];
+					result.spec.promptArtifact = {
+						owner: 'local',
+						path: promptFile,
+						content: privateContent,
+						encoding: 'utf8',
+						mode: 0o600,
+						flag: 'wx',
+						cleanup: 'turn',
+					};
+				};
+				const open = vi.spyOn(fs, 'openSync').mockImplementation(() => {
+					throw new Error(`${promptFile}: ${privateContent}`);
+				});
+				const config = createExecutionConfig();
+				const result = await executeCuePrompt(config);
+				expect(open).toHaveBeenCalledExactlyOnceWith(promptFile, 'wx', 0o600);
+				expect(result).toMatchObject({
+					status: 'failed',
+					stderr: 'Spawn error: Prompt-file launch failed.',
+				});
+				expectProofReleased();
+				expect(mockSpawn).not.toHaveBeenCalled();
+				expect(mockBuildAgentArgs).toHaveBeenCalledTimes(1);
+				const diagnostics = JSON.stringify([
+					result,
+					vi.mocked(config.onLog).mock.calls,
+					warn.mock.calls,
+				]);
+				for (const privateValue of [promptFile, privateContent, proofFile, token!])
+					expect(diagnostics).not.toContain(privateValue);
+			});
+
+			it.each([0, 7])('releases proofs before the transcript after exit %i', async (exitCode) => {
+				const onRunTranscript = vi.fn();
+				const pending = executeCuePrompt(createExecutionConfig({ onRunTranscript }));
+				await vi.advanceTimersByTimeAsync(0);
+				expect(proofIdentity.pluginToolRunIdentity.resolve(token).callerAgentId).toBe('session-1');
+				expect(ownedFiles.has(proofFile)).toBe(true);
+				mockChild.emit('close', exitCode);
+				const result = await pending;
+				expect(result).toMatchObject({ exitCode, status: exitCode === 0 ? 'completed' : 'failed' });
+				expectProofReleased();
+				expect(mockSpawn).toHaveBeenCalledTimes(1);
+				expect(onRunTranscript).toHaveBeenCalledTimes(1);
+				expect(removeProof.mock.invocationCallOrder[0]).toBeLessThan(
+					onRunTranscript.mock.invocationCallOrder[0]
+				);
+			});
+
+			it('reports cleanup failure without private proof paths, tokens or prompt content', async () => {
+				removeProof.mockImplementation(() => {
+					throw new Error(`${proofFile}: ${token} ${privateContent}`);
+				});
+				const config = createExecutionConfig({ promptPath: privateContent });
+				const pending = executeCuePrompt(config);
+				await vi.advanceTimersByTimeAsync(0);
+				mockChild.emit('close', 0);
+				const result = await pending;
+				expect(result.status).toBe('completed');
+				expect(revoke).toHaveBeenCalledExactlyOnceWith(token);
+				expect(proofIdentity.pluginToolRunIdentity.resolve(token).callerAgentId).toBeNull();
+				expect(removeProof).toHaveBeenCalledExactlyOnceWith(proofFile);
+				expect(warn).toHaveBeenCalledExactlyOnceWith(
+					'Could not remove plugin run proof file',
+					'[PluginRunIdentity]'
+				);
+				const diagnostics = JSON.stringify([
+					result,
+					vi.mocked(config.onLog).mock.calls,
+					warn.mock.calls,
+				]);
+				for (const privateValue of [proofFile, token!, privateContent])
+					expect(diagnostics).not.toContain(privateValue);
+			});
+
+			it('finishes an ordinary no-proof run without attempting proof cleanup', async () => {
+				buildBoundary.afterBuild = undefined;
+				const pending = executeCuePrompt(createExecutionConfig());
+				await vi.advanceTimersByTimeAsync(0);
+				mockChild.emit('close', 0);
+				expect((await pending).status).toBe('completed');
+				expect(mockSpawn).toHaveBeenCalledTimes(1);
+				expect(revoke).not.toHaveBeenCalled();
+				expect(removeProof).not.toHaveBeenCalled();
+			});
+		});
 
 		it('is asked on the final spawn with the executor attribution, then the run proceeds', async () => {
 			const { admission, asked } = admissionWith(() => ({ decision: 'allow', policyRevision: 1 }));

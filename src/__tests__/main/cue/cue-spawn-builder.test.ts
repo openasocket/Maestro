@@ -73,6 +73,34 @@ vi.mock('../../../main/plugins/plugin-manager-singleton', () => ({
 	getActivePluginManager: () => mockActivePluginManager(),
 }));
 
+// Keep real in-memory identities and pure argument builders, but never write a
+// proof to the host's temp directory or resolve its installed CLI.
+vi.mock('../../../main/plugins/plugin-tool-run-identity', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('../../../main/plugins/plugin-tool-run-identity')>();
+	const { join } = await import('node:path');
+	return {
+		...actual,
+		pluginToolRunIdentity: new actual.PluginToolRunIdentity(),
+		createPluginRunProofFile: vi.fn(() => join('fixtures', 'maestro-plugin-run-fixture', 'proof')),
+		removePluginRunProofFile: vi.fn(),
+	};
+});
+vi.mock('../../../shared/plugins/mcp-agent-config', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../../shared/plugins/mcp-agent-config')>();
+	return {
+		...actual,
+		buildMcpInjection: vi.fn(actual.buildMcpInjection),
+		mergeMcpInjectionArgs: vi.fn(actual.mergeMcpInjectionArgs),
+	};
+});
+vi.mock('../../../main/cue/cue-cli-executor', () => ({
+	resolveMaestroCliScriptPath: vi.fn(() => 'fixture-maestro-cli.js'),
+}));
+vi.mock('../../../main/utils/logger', () => ({
+	logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+
 // Mock the Claude token-source resolver's leaf dependencies so the maestro-p
 // binary reads as present and config-dir resolution is deterministic. The
 // resolver itself (resolveClaudeSpawnMode / applyClaudeSpawnDecision) and
@@ -108,8 +136,12 @@ vi.mock('../../../shared/platformDetection', async (importOriginal) => {
 import { buildSpawnSpec } from '../../../main/cue/cue-spawn-builder';
 import {
 	pluginToolRunIdentity,
+	createPluginRunProofFile,
 	removePluginRunProofFile,
 } from '../../../main/plugins/plugin-tool-run-identity';
+import { buildMcpInjection, mergeMcpInjectionArgs } from '../../../shared/plugins/mcp-agent-config';
+import { resolveMaestroCliScriptPath } from '../../../main/cue/cue-cli-executor';
+import { logger } from '../../../main/utils/logger';
 import { embedSystemPromptInPrompt } from '../../../shared/embeddedSystemPrompt';
 import * as platformDetection from '../../../shared/platformDetection';
 
@@ -178,6 +210,11 @@ function createConfig(overrides: Partial<CueExecutionConfig> = {}): CueExecution
 describe('cue-spawn-builder', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		vi.mocked(createPluginRunProofFile).mockReset();
+		vi.mocked(removePluginRunProofFile).mockReset();
+		vi.mocked(buildMcpInjection).mockReset();
+		vi.mocked(mergeMcpInjectionArgs).mockReset();
+		vi.mocked(resolveMaestroCliScriptPath).mockReset();
 		mockPluginsEnabled.mockReturnValue(false);
 		mockActivePluginManager.mockReturnValue(null);
 		mockGetAgentDefinition.mockReturnValue(defaultAgentDef);
@@ -193,6 +230,165 @@ describe('cue-spawn-builder', () => {
 	});
 
 	describe('buildSpawnSpec', () => {
+		describe('plugin proof preparation ownership', () => {
+			const privatePrompt = 'PRIVATE Cue prompt with credentials';
+			const privateError = new Error(`PRIVATE filesystem details: ${privatePrompt}`);
+
+			beforeEach(() => {
+				mockPluginsEnabled.mockReturnValue(true);
+				mockActivePluginManager.mockReturnValue({ getContributions: () => ({ tools: [{}] }) });
+				vi.spyOn(pluginToolRunIdentity, 'issue');
+				vi.spyOn(pluginToolRunIdentity, 'revoke');
+			});
+
+			afterEach(() => {
+				// Also release identities if an assertion fails before executor handoff.
+				for (const issued of vi.mocked(pluginToolRunIdentity.issue).mock.results) {
+					if (issued.type === 'return') pluginToolRunIdentity.revoke(issued.value);
+				}
+				vi.restoreAllMocks();
+			});
+
+			it.each(['proof file', 'CLI path', 'injection', 'argument merge', 'environment merge'])(
+				'revokes its identity and removes any owned proof when %s preparation fails',
+				async (stage) => {
+					const fail = () => {
+						throw privateError;
+					};
+					if (stage === 'proof file')
+						vi.mocked(createPluginRunProofFile).mockImplementationOnce(fail);
+					if (stage === 'CLI path')
+						vi.mocked(resolveMaestroCliScriptPath).mockImplementationOnce(fail);
+					if (stage === 'injection') vi.mocked(buildMcpInjection).mockImplementationOnce(fail);
+					if (stage === 'argument merge')
+						vi.mocked(mergeMcpInjectionArgs).mockImplementationOnce(fail);
+					if (stage === 'environment merge') {
+						vi.mocked(buildMcpInjection).mockReturnValueOnce({
+							globalArgs: [],
+							files: [],
+							get env() {
+								throw privateError;
+							},
+						});
+					}
+					const config = createConfig({ enableMaestroP: false });
+					const result = await buildSpawnSpec(config, privatePrompt);
+					const token = vi.mocked(pluginToolRunIdentity.issue).mock.results[0].value;
+					expect(pluginToolRunIdentity.issue).toHaveBeenCalledExactlyOnceWith('session-1', 90000);
+					expect(createPluginRunProofFile).toHaveBeenCalledExactlyOnceWith(token, 90000);
+					expect(pluginToolRunIdentity.revoke).toHaveBeenCalledExactlyOnceWith(token);
+					expect(pluginToolRunIdentity.resolve(token).callerAgentId).toBeNull();
+					if (stage === 'proof file') {
+						expect(removePluginRunProofFile).not.toHaveBeenCalled();
+					} else {
+						expect(removePluginRunProofFile).toHaveBeenCalledExactlyOnceWith(
+							vi.mocked(createPluginRunProofFile).mock.results[0].value
+						);
+					}
+					expect(result).toEqual({ ok: false, message: 'Plugin tool preparation unavailable.' });
+					expect(config.onLog).not.toHaveBeenCalled();
+					expect(logger.warn).not.toHaveBeenCalled();
+					expect(mockWrapSpawnWithSsh).not.toHaveBeenCalled();
+				}
+			);
+
+			it.each([false, true])(
+				'releases an unused file injection (cleanup failure: %s)',
+				async (cleanupFails) => {
+					vi.mocked(buildMcpInjection).mockReturnValueOnce({
+						globalArgs: ['--unused-injection'],
+						env: { UNUSED_PLUGIN_ENV: 'unused' },
+						files: [{ path: 'unused-config.json', content: privatePrompt }],
+					});
+					if (cleanupFails) {
+						vi.mocked(removePluginRunProofFile).mockImplementationOnce(() => {
+							throw privateError;
+						});
+					}
+					const result = await buildSpawnSpec(
+						createConfig({ enableMaestroP: false }),
+						'public prompt'
+					);
+					const token = vi.mocked(pluginToolRunIdentity.issue).mock.results[0].value;
+					expect(result.ok).toBe(true);
+					if (!result.ok) throw new Error('Expected a usable spec without plugin injection');
+					expect(result.spec.pluginRunToken).toBeUndefined();
+					expect(result.spec.pluginRunProofFile).toBeUndefined();
+					expect(result.spec.args).toEqual(['--print', '--verbose', '--', 'public prompt']);
+					expect(result.spec.env.UNUSED_PLUGIN_ENV).toBeUndefined();
+					expect(mergeMcpInjectionArgs).not.toHaveBeenCalled();
+					expect(pluginToolRunIdentity.revoke).toHaveBeenCalledExactlyOnceWith(token);
+					expect(pluginToolRunIdentity.resolve(token).callerAgentId).toBeNull();
+					expect(removePluginRunProofFile).toHaveBeenCalledExactlyOnceWith(
+						vi.mocked(createPluginRunProofFile).mock.results[0].value
+					);
+					if (cleanupFails) {
+						expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
+							'Could not remove plugin run proof file',
+							'[PluginRunIdentity]'
+						);
+					} else expect(logger.warn).not.toHaveBeenCalled();
+					expect(
+						JSON.stringify([result.spec.args, vi.mocked(logger.warn).mock.calls])
+					).not.toContain(privatePrompt);
+				}
+			);
+
+			it('keeps the fixed refusal when removing a failed injection proof also throws', async () => {
+				vi.mocked(buildMcpInjection).mockImplementationOnce(() => {
+					throw privateError;
+				});
+				vi.mocked(removePluginRunProofFile).mockImplementationOnce(() => {
+					throw privateError;
+				});
+				const result = await buildSpawnSpec(createConfig({ enableMaestroP: false }), privatePrompt);
+				const token = vi.mocked(pluginToolRunIdentity.issue).mock.results[0].value;
+				expect(result).toEqual({ ok: false, message: 'Plugin tool preparation unavailable.' });
+				expect(pluginToolRunIdentity.revoke).toHaveBeenCalledExactlyOnceWith(token);
+				expect(pluginToolRunIdentity.resolve(token).callerAgentId).toBeNull();
+				expect(removePluginRunProofFile).toHaveBeenCalledExactlyOnceWith(
+					vi.mocked(createPluginRunProofFile).mock.results[0].value
+				);
+				expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
+					'Could not remove plugin run proof file',
+					'[PluginRunIdentity]'
+				);
+			});
+
+			it('transfers a successful proof to its caller without revoking or removing it', async () => {
+				const result = await buildSpawnSpec(
+					createConfig({ enableMaestroP: false }),
+					'public prompt'
+				);
+				expect(result.ok).toBe(true);
+				if (!result.ok) throw new Error('Expected proof ownership transfer');
+				expect(pluginToolRunIdentity.resolve(result.spec.pluginRunToken).callerAgentId).toBe(
+					'session-1'
+				);
+				expect(result.spec.pluginRunProofFile).toBe(
+					vi.mocked(createPluginRunProofFile).mock.results[0].value
+				);
+				expect(pluginToolRunIdentity.revoke).not.toHaveBeenCalled();
+				expect(removePluginRunProofFile).not.toHaveBeenCalled();
+			});
+
+			it('never issues or removes a proof when plugin injection is disabled', async () => {
+				mockPluginsEnabled.mockReturnValue(false);
+				const result = await buildSpawnSpec(
+					createConfig({ enableMaestroP: false }),
+					'public prompt'
+				);
+				expect(result.ok).toBe(true);
+				if (!result.ok) throw new Error('Expected ordinary launch spec');
+				expect(result.spec.pluginRunToken).toBeUndefined();
+				expect(result.spec.pluginRunProofFile).toBeUndefined();
+				expect(pluginToolRunIdentity.issue).not.toHaveBeenCalled();
+				expect(pluginToolRunIdentity.revoke).not.toHaveBeenCalled();
+				expect(createPluginRunProofFile).not.toHaveBeenCalled();
+				expect(removePluginRunProofFile).not.toHaveBeenCalled();
+			});
+		});
+
 		it('injects a run-bound local MCP bridge for a Cue agent', async () => {
 			mockPluginsEnabled.mockReturnValue(true);
 			mockActivePluginManager.mockReturnValue({ getContributions: () => ({ tools: [{}] }) });
