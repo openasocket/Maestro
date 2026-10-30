@@ -276,7 +276,7 @@ const AGENT_LOGIN_COMMANDS: Record<AgentId, AgentLoginCommand | null> = {
 	// Antigravity has no login subcommand: headless runs reuse the credentials
 	// cached by one interactive sign-in, so the bare TUI is the whole flow.
 	antigravity: { binary: 'agy', args: '' },
-	grok: { binary: 'grok', args: 'login' },
+	grok: { binary: 'grok', args: 'login', remoteArgs: 'login --device-auth' },
 	hermes: null,
 	pi: null,
 	omp: null,
