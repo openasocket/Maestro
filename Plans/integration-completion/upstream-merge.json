@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge in progress; MCOMP-01-03A, 03B, 03C, 03D and 03E staged (15 files), 29 files unmerged in the worktree; MCOMP-01-03F..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T02:15:25.384Z",
-		"updatedBy": "MCOMP-01-03E"
+		"state": "merge in progress; MCOMP-01-03A, 03B, 03C, 03D, 03E and 03F staged (18 files), 26 files unmerged in the worktree; MCOMP-01-03G..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
+		"updatedAt": "2026-10-30T02:24:59.085Z",
+		"updatedBy": "MCOMP-01-03F"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -349,6 +349,51 @@
 			],
 			"unmergedAfter": 29,
 			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03e.mjs (not in git)"
+		},
+		"MCOMP-01-03F": {
+			"resolvedAt": "2026-10-29",
+			"resolvedBy": "Maestro-Claude",
+			"files": [
+				"src/main/cue/cue-process-lifecycle.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/cli/services/agent-spawner.ts"
+			],
+			"hunks": {
+				"src/main/cue/cue-process-lifecycle.ts": [
+					"35-58 (the start-turn import): the integration side (85fa6b014) imports DispatchRefusedError, leaseAdmission and StartTurnOptions beside startTurn and TurnHandle, plus the authority (buildDispatchSnapshot, DispatchAttribution, DispatchLease, HostAuthority, PolicySourceSet) and managed-types imports; upstream (8b2053823, 83c826179) adds TurnNotStartedError; resolved as one import carrying every name",
+					"512-539 (after the options destructure in runProcess): the integration side named the stopped result stoppedResult() because it is returned twice, before and after the awaited managed admission; upstream inlined it with executionStarted: false and a comment that nothing below awaits, which the admission makes untrue; resolved as the integration helper and comment with upstream executionStarted: false added to the helper; the catch at the spawn (DispatchRefusedError first, then upstream !(err instanceof TurnNotStartedError)) and the finish() claim (typeof turn.child.pid === number || !exit.spawnError) auto-merged",
+					"beyond the hunks: managedRefusal(), the result of a refused admission or a lease the gate would not verify (no process started), carries executionStarted: false, the host-proven nonstart upstream execution claim asks for; the run manager (executorMayHaveStarted) and the receipt ledger read that field"
+				],
+				"src/shared/maestro-lib/run/start-turn.ts": [
+					"359-387 (the one hunk, the spawn inside startTurn): the integration side (4f69e1471, e08432dec) asks the admission gate with buildDispatchSnapshot of the final spec the instant before spawn and throws DispatchRefusedError before any effect; upstream (8b2053823) wraps spawn in try/catch and throws TurnNotStartedError, the one synchronous nonstart proof; resolved as the gate first, then upstream let child: ChildProcess; try { spawn } catch, with the lease released as a spawn failure inside the catch (gate?.released?.({ exitCode: null, signal: null, interrupted: false, stderrText, stdoutText, droppedOutputBytes: 0, spawnError }), which the leaseAdmission gate maps to outcome spawn-failed) before TurnNotStartedError leaves, since the done promise that would release it is never built; the revocation subscription, released-on-settle and bound-on-pid auto-merged"
+				],
+				"src/cli/services/agent-spawner.ts": [
+					"197-201 (the SpawnOverrides pick): both sides appended a name; the integration side (e08432dec) managed, upstream (34c00474e, the maestro-p folder-trust opt-in) acceptWorkspaceTrust; both kept, integration first",
+					"2094-2100 (the overrides literal in spawnAgentOnce): the integration managed: options?.managed ?? cliSpawnAuthority() with its comment (a fresh admission on every spawn, the effort retry included), then upstream acceptWorkspaceTrust: options?.acceptWorkspaceTrust (forwarded to the maestro-p launches at 1197 and 1231, auto-merged)"
+				]
+			},
+			"checks": {
+				"staging": "merge-tool stage over the three files: prettier left all three unchanged, git add done, 26 files left unmerged, no marker left in any of the three, nothing unstaged",
+				"seams": "the spawn-admission seams stay whole on upstream shape: a Cue run still asks the authority with the final snapshot before the spawn and spawns only on a lease (ProcessRunOptions.managed), startTurn still asks the gate with the final spec before spawn and refuses with DispatchRefusedError before any effect, the CLI spawner still resolves cliSpawnAuthority() on every spawn; upstream execution claim rides on them: a refusal, an unavailable authority and a stop during the decision are host-proven nonstarts (executionStarted false), a synchronous spawn throw after an admission releases the lease as spawn-failed and reaches the caller as TurnNotStartedError (executionStarted false), anything after spawn returned stays uncertain (true), and acceptWorkspaceTrust travels beside managed in the CLI overrides",
+				"suites": "node node_modules/vitest/vitest.mjs run in the worktree over cue-process-lifecycle (3 suites), start-turn.test, agent-spawner, cue-executor, cue-run-router (2), cue-receipt-ledger, cross-agent-router, spawnGroupChatAgent, ipc/handlers/process (4 suites), ipc/handlers/system (2), cue-bundle-roundtrip, cue-standalone-import-restart, plugin-manager-verify, codex-skills (2), agent-args.managed, pianola-supervisor.managed: 24 files / 942 tests, 940 passed, 1 skipped (the Windows-only .cmd shim case of start-turn.test), 1 failed: system.managed.test.ts \"standalone moves the folder and starts the tunnel as before\", the case MCOMP-01-03C recorded for Q/R (the suite passes tunnelManager and getWebServer the deps no longer declare and expects tunnel.start to answer where upstream tunnel:start goes through the live-mode controller), not a defect of these files; the suites 03C, 03D and 03E reported blocked on start-turn.ts and cue-process-lifecycle.ts (cross-agent-router 26, spawnGroupChatAgent 22, handle-spawn.managed 20, process 156, currentSpawnActor 12, system 123, cue-bundle-roundtrip 5, cue-standalone-import-restart 2, plugin-manager-verify 11) now transform and pass; per file: cross-agent-router 26, agent-spawner 216, cue-standalone-import-restart 2, codex-skills.managed 20, codex-skills 4, cue-executor 61, cue-process-lifecycle.managed 6, cue-process-lifecycle.process 11, cue-process-lifecycle 66, cue-receipt-ledger 42, cue-run-router.managed 19, cue-run-router 24, spawnGroupChatAgent 22, pianola-supervisor.managed 10, plugin-manager-verify 11, cue-bundle-roundtrip 5, process 156, system.managed 10 (1 failed), system 123, agent-args.managed 25, start-turn 45 (1 skipped), currentSpawnActor 12, findOwningSessionRecord 6, handle-spawn.managed 20",
+				"throwaway": "a throwaway spec (src/__tests__/main/cue/zz-03f.throwaway.test.ts, the managed lifecycle harness over the real createLocalHostAuthority, run then deleted) proved the seams on upstream shape: a denied policy and an unavailable authority answer executionStarted false with their managed refusal; a stop while the authority decides answers stopped with executionStarted false and no live lease; a synchronous spawn throw after the admission answers failed with executionStarted false, Spawn error in stderr, the lease released as { outcome: spawn-failed, message }, no live lease and a TurnNotStartedError reported to Sentry under cue:spawn; startTurn itself with a leaseAdmission gate and a throwing spawn throws TurnNotStartedError with the lease released spawn-failed; 5 tests passed",
+				"numstatVsHead": {
+					"src/main/cue/cue-process-lifecycle.ts": "6+/0- (upstream execution claim on the managed sink)",
+					"src/shared/maestro-lib/run/start-turn.ts": "34+/6- (upstream nonstart proof plus the lease release in its catch)",
+					"src/cli/services/agent-spawner.ts": "105+/5- (upstream folder-trust opt-in and public tool progress)"
+				},
+				"numstatVsMergeHead": {
+					"src/main/cue/cue-process-lifecycle.ts": "122+/14- (Cue prompt admission)",
+					"src/shared/maestro-lib/run/start-turn.ts": "124+/4- (the lease gate plus its release on a nonstart)",
+					"src/cli/services/agent-spawner.ts": "419+/107- (the CLI spawn authority and the ceiling on Codex and CLI flags)"
+				}
+			},
+			"semanticConflictsForQ": [],
+			"followUpsForR": [
+				"permanent test cases for the execution claim on the managed seams belong in cue-process-lifecycle.managed.test.ts (a refusal, an unavailable authority and a stop during the decision answer executionStarted false; a synchronous spawn throw after the admission releases the lease spawn-failed with executionStarted false) and in the managed admission block of start-turn.test.ts (a throwing spawn after an admitted gate throws TurnNotStartedError with the lease released spawn-failed); proved here only with the deleted throwaway spec to keep this task at three authored files"
+			],
+			"unmergedAfter": 26,
+			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03f.mjs (not in git)"
 		}
 	}
 }
