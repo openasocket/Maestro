@@ -17,6 +17,7 @@
  * and is safe to import from main.
  */
 
+import { isBlankEnvValue } from './agentEnvironment';
 import { getAgentDisplayName } from './agentMetadata';
 import { classifyCredentialKind, type CredentialKind } from './providerAuthIdentity';
 
@@ -68,6 +69,9 @@ export const PROVIDER_PROFILE_CONFIGS: Readonly<Record<string, ProviderProfileCo
 		defaultSubdir: '.copilot',
 		sessionsSubdir: 'session-state',
 	},
+	// Grok's state/transcript root. GROK_AUTH_PATH and GROK_AUTH can select
+	// credentials independently; this directory alone is not a billing identity.
+	grok: { envVar: 'GROK_HOME', defaultSubdir: '.grok', sessionsSubdir: 'sessions' },
 };
 
 /**
@@ -154,9 +158,9 @@ export function getAccountKeyHelpers(toolType: string): QuotaAccountKeyHelpers |
 /**
  * Resolve which account directory an agent runs against.
  *
- * `env` must already be the effective environment for the agent, lowest layer
- * first (agent-level `customEnvVars` merged under the session's own), matching
- * what the spawner assembles.
+ * `env` must already be the effective environment for the agent, matching the
+ * spawner: the session's own vars replace the provider set, with global/host
+ * layers underneath. A blank value cancels the lower layers, as at spawn.
  *
  * Returns `null` when the provider has no account concept, or when the env var
  * is unset and `homeDir` has not resolved yet - in that second case there is no
@@ -172,7 +176,7 @@ export function resolveAgentAccountKey(
 	if (!config) return null;
 	const helpers = getAccountKeyHelpers(toolType)!;
 	const configured = env?.[config.envVar];
-	if (typeof configured === 'string' && configured.length > 0) {
+	if (typeof configured === 'string' && !isBlankEnvValue(configured)) {
 		return helpers.normalizeKey(configured);
 	}
 	return homeDir ? helpers.normalizeKey(`${homeDir}/${config.defaultSubdir}`) : null;

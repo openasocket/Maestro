@@ -47,6 +47,8 @@ export interface AgentAccountDirLayers {
  * Same precedence as `buildChildProcessEnv`: the agent's own env vars (or the
  * provider-level set it inherits, which REPLACES rather than layers), then
  * Settings -> Environment, then the host env, then the provider default.
+ * A blank at the winning layer unsets the variable, selecting the provider
+ * default rather than falling through to another account in a lower layer.
  *
  * An SSH agent carries only its custom vars to the remote host, so only that
  * layer counts; the value is a remote path and is returned as is (no `~`
@@ -72,12 +74,11 @@ export function resolveAgentAccountDir(
 
 	if (agent.sshRemote) return usable(custom) ? custom.trim() : undefined;
 
-	const chosen = [
-		custom,
-		layers.globalShellEnvVars?.[config.envVar],
-		layers.env?.[config.envVar],
-	].find(usable);
-	if (!chosen) return path.join(layers.homeDir, config.defaultSubdir);
+	// Select before checking for blanks, matching the launch environment's
+	// merge-then-unset rule. A blank override must not revive another account.
+	const chosen =
+		custom ?? layers.globalShellEnvVars?.[config.envVar] ?? layers.env?.[config.envVar];
+	if (!usable(chosen)) return path.join(layers.homeDir, config.defaultSubdir);
 	return path.resolve(expandTilde(chosen.trim(), layers.homeDir));
 }
 
