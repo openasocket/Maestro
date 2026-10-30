@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge in progress; MCOMP-01-03A, 03B, 03C, 03D, 03E, 03F, 03G, 03H, 03I and 03J staged (28 files), 16 files unmerged in the worktree; MCOMP-01-03K..P resolve them (positional order mentionRouting, delegation, dispatchTicket on the dispatch callbacks and their relays, see progress.MCOMP-01-03I.positionalOrder and progress.MCOMP-01-03J.positionalOrder), Q commits, R tests, S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T02:57:51.560Z",
-		"updatedBy": "MCOMP-01-03J"
+		"state": "merge in progress; MCOMP-01-03A, 03B, 03C, 03D, 03E, 03F, 03G, 03H, 03I, 03J and 03K staged (31 files), 13 files unmerged in the worktree; MCOMP-01-03L..P resolve them (positional order mentionRouting, delegation, dispatchTicket on the dispatch callbacks, their relays and the handler calls, see progress.MCOMP-01-03I, 03J and 03K positionalOrder), Q commits, R tests (install the merged dependencies first: luxon), S lands, T re-pins and closes",
+		"updatedAt": "2026-10-30T03:05:03.241Z",
+		"updatedBy": "MCOMP-01-03K"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -583,6 +583,63 @@
 			],
 			"unmergedAfter": 16,
 			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03j.mjs (not in git)"
+		},
+		"MCOMP-01-03K": {
+			"resolvedAt": "2026-10-29",
+			"resolvedBy": "Maestro-Claude",
+			"files": [
+				"src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts",
+				"src/main/web-server/handlers/messageHandlers/commands.ts",
+				"src/main/web-server/handlers/messageHandlers/types.ts"
+			],
+			"positionalOrder": "the 03I order holds on MessageHandlerCallbacks and on the one call handleSendCommand makes: executeCommand(sessionId, command, inputMode, tabId, force, images, background, mentionRouting, delegation, dispatchTicket); newAITabWithPrompt(sessionId, prompt, background, hidden, mentionRouting, delegation, dispatchTicket); enqueueCommand(sessionId, command, inputMode, tabId, images, background, held, mentionRouting, delegation, dispatchTicket); the queue.ts and tabs.ts callers of MCOMP-01-03L and the messageHandlers.test.ts positional assertions must follow these slots (the ten HEAD-side executeCommand assertions gain mentionRouting as the eighth argument before delegation and the ticket)",
+			"hunks": {
+				"src/main/web-server/handlers/messageHandlers/types.ts": [
+					"74-78 (the type imports after AgentDelegationNotice): both kept, upstream MentionRouting (c8913d2d8) then the integration ManagedDelegationContext (MRC-07-04C), as web-server/types.ts in 03I",
+					"180-187 (executeCommand parameters after background): resolved as mentionRouting?: MentionRouting then the integration delegation?: ManagedDelegationContext and dispatchTicket?: string with their doc comments",
+					"270-276 (newAITabWithPrompt parameters after hidden): resolved as mentionRouting then delegation, dispatchTicket",
+					"292-298 (enqueueCommand parameters after held): resolved as mentionRouting then delegation, dispatchTicket; every other callback of both sides had auto-merged (upstream interruptSession, closedTabCommand, liveCommand, dataviewCommand, the context ops; the integration getManaged, writeAgentConfigValue, the dispatchTicket on openTerminalTab and writeTerminalTab payloads)"
+				],
+				"src/main/web-server/handlers/messageHandlers/commands.ts": [
+					"222-227 (the arguments handleSendCommand hands ctx.callbacks.executeCommand after background): resolved as mentionRouting then delegation, dispatchTicket; the reads feeding them had auto-merged: upstream parseMentionRoutingField(message.mentionRouting) with its refusal (97-102), the integration readDispatchDelegation refusal (151-166) and the issueDispatchTicket / withdrawTicket pair (202-207, then/catch); upstream handleInterruptTurn (14451968f) auto-merged whole"
+				],
+				"src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts": [
+					"31-37 (the doc comment list of message types after throughput_gauge_command): both sides appended bullets; resolved as upstream live_command (0ef20751c) then the integration managed_* reads and CLI-only writes (MRC2-07-03); the registrations of both sides had auto-merged (upstream interrupt_turn, closed_tab_command, live_command, dataview_command cases and imports; the integration runAsClient wrap, the handleManagedMessage import and the ten managed_* cases)"
+				]
+			},
+			"checks": {
+				"staging": "merge-tool stage over the three files: prettier left all three unchanged, git add done, 13 files left unmerged, no marker left in any, nothing unstaged, nothing untracked in the worktree",
+				"seams": "the delegation and dispatch-ticket seams are whole on upstream shape: the MessageHandlerCallbacks types declare the three dispatch callbacks with mentionRouting one slot ahead of delegation and dispatchTicket, matching the ExecuteCommandCallback / NewAITabWithPromptCallback / EnqueueCommandCallback of 03I and the relays of 03J; handleSendCommand still refuses a malformed delegation before anything is armed, issues the ticket inside the client context for an AI dispatch only and withdraws it on refusal or throw; the runAsClient wrap and the managed dispatcher (MRC2-07-03) are intact beside upstream interrupt, closed-tab, live and dataview handlers",
+				"suites": "Working/mcomp-01-03/suites-03k.mjs: transport-actor 30, bridgeHandlers 40, bridgePathGuard 10, createSessionBackground 4, createSessionProvenance 6, providerTranslation 10 and the 5 throwaway cases below: 105 passed, 0 failed, 0 skipped (log suites-03k.log)",
+				"throwaway": "src/__tests__/main/web-server/handlers/zz-03k.throwaway.test.ts (5 tests, deleted after the run) drove handleSendCommand from commands.ts against a fake context and asserted the exact executeCommand argument list: [sessionId, command, inputMode, tabId, force, images, background, mentionRouting, delegation, dispatchTicket] (10 arguments; a valid record and routing \"only\" arrive in their slots, omitted routing and delegation arrive as undefined in their own slots before the string ticket, a terminal write carries undefined for all three), a routing that is not one is refused through sendError with no executeCommand call, and a delegation record that is not a context is refused as a success:false command_result with no executeCommand call",
+				"typeCheck": "a throwaway tsconfig extending the worktree tsconfig.main.json over the three files alone (Working/mcomp-01-03/tsconfig-03k.json, not in git; log tsc-03k.log): 0 errors in the three files; the only output is 12 TS1185 (merge conflict marker encountered) in the still-unmerged messageHandlers/queue.ts (6) and tabs.ts (6) the dispatcher imports (MCOMP-01-03L); MCOMP-01-03Q checks the real configs once they are resolved",
+				"numstatVsHead": {
+					"src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts": "48+/3- (upstream interrupt_turn, closed_tab_command, live_command, dataview_command and context ops)",
+					"src/main/web-server/handlers/messageHandlers/commands.ts": "69+/1- (upstream dispatch --routing read and handleInterruptTurn)",
+					"src/main/web-server/handlers/messageHandlers/types.ts": "15+/4- (upstream MentionRouting import and parameters, interruptSession, closedTabCommand, liveCommand, dataviewCommand callbacks)"
+				},
+				"numstatVsMergeHead": {
+					"src/main/web-server/handlers/messageHandlers/WebSocketMessageHandler.ts": "52+/1- (the integration runAsClient wrap, managed dispatcher and doc bullets)",
+					"src/main/web-server/handlers/messageHandlers/commands.ts": "92+/11- (the integration transport admission, delegation read, dispatch ticket and consult ticket)",
+					"src/main/web-server/handlers/messageHandlers/types.ts": "64+/9- (the integration delegation and ticket parameters, getManaged, writeAgentConfigValue, terminal ticket payloads)"
+				}
+			},
+			"semanticConflictsForQ": [],
+			"followUpsForR": [
+				"the worktree node_modules is a symlink to the main checkout, which lacks upstream's new dependency luxon ^3.7.2 (src/shared/dataview/vendor/data-model/value.ts, pulled in by messageHandlers/dataview.ts through the dispatcher): 13 handler suites (appInfoHandler, autoRunSteeringHandler, closedTabHandler, computerHistoryHandler, contextOpsHandler, liveCommandHandler, maestroRunHandler, messageHandlers.managed, quickChatHandler, snoozeHandler, statsIndexingHandler, throughputGaugeHandler, tokenUsageHandler) fail at load with \"Cannot find package luxon\" until the merged lockfile is installed; 03R must install the merged dependencies (in the worktree after 03Q, or in the main checkout after 03S) before the touched suites and the full suite run, and the npm install --dry-run read-back should name luxon among the additions",
+				"make the five throwaway cases of zz-03k.throwaway.test.ts permanent inside messageHandlers.test.ts once MCOMP-01-03L resolves it (its ten HEAD-side executeCommand assertions gain the mentionRouting slot); the dispatchTicket cases there already assert the ticket as the last argument"
+			],
+			"blockedSuites": [
+				"src/__tests__/main/web-server/handlers/messageHandlers.test.ts (itself unmerged, 03L)",
+				"src/__tests__/main/web-server/handlers/dataviewHandler.test.ts (transform fails on the unmerged tabs.ts, 03L)",
+				"the 13 handler suites named under followUpsForR (luxon absent from the symlinked node_modules; not a merge defect)"
+			],
+			"observations": [
+				"queue.ts and tabs.ts (03L) carry the same two-vs-one hunks on their enqueueCommand and newAITabWithPrompt calls (queue.ts 6 marker lines, tabs.ts 6) and must land mentionRouting before delegation, dispatchTicket to match the types resolved here",
+				"the doc comment bullets are the only hunk in WebSocketMessageHandler.ts; both sides appended their new message types after throughput_gauge_command and the switch cases auto-merged, so no handler registration was in conflict"
+			],
+			"unmergedAfter": 13,
+			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03k.mjs (not in git)"
 		}
 	}
 }
