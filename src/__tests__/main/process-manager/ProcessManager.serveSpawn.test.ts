@@ -9,7 +9,34 @@
  */
 
 import * as os from 'os';
-import { describe, it, expect, vi } from 'vitest';
+import * as path from 'path';
+import * as fs from 'fs';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
+vi.mock('os', async (importOriginal) => ({
+	...(await importOriginal<typeof import('os')>()),
+}));
+
+vi.mock('fs', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('fs')>();
+	const writes = {
+		openSync: vi.fn(() => {
+			throw new Error('Admission tests must not open prompt files.');
+		}),
+		writeFileSync: vi.fn(() => {
+			throw new Error('Admission tests must not write prompt files.');
+		}),
+	};
+	return { ...actual, ...writes, default: { ...actual, ...writes } };
+});
+
+// Admission tests stop at the fake spawners, before any artifact I/O or child.
+vi.mock('../../../shared/maestro-lib/run/start-turn', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../../shared/maestro-lib/run/start-turn')>()),
+	startTurn: vi.fn(() => {
+		throw new Error('Admission tests must not reach artifact materialization or process launch.');
+	}),
+}));
 
 vi.mock('node-pty', () => ({
 	spawn: vi.fn(),
@@ -28,7 +55,13 @@ import {
 	buildSpawnRequestSnapshot,
 	dispatchedChildContext,
 } from '../../../main/process-manager/ProcessManager';
-import { dispatchSnapshotDigest } from '../../../shared/maestro-lib/managed/authority';
+import {
+	buildDispatchSnapshot,
+	dispatchSnapshotDigest,
+} from '../../../shared/maestro-lib/managed/authority';
+import { startTurn } from '../../../shared/maestro-lib/run/start-turn';
+import { logger } from '../../../main/utils/logger';
+import { COWORKING_RUN_ADMISSION_ENV_VAR } from '../../../main/coworking/coworking-types';
 import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
 import type { SshRemoteEndpointIdentity } from '../../../shared/maestro-lib/launch/ssh-remote-resolver';
 import type { ProcessConfig } from '../../../main/process-manager/types';
@@ -153,7 +186,7 @@ describe('ProcessManager managed admission at the sink', () => {
 	function managedManager(port = fakeSpawnPort()) {
 		const manager = new ProcessManager(() => true, { spawnAuthority: () => port });
 		const serve = vi.fn(() => SERVE_RESULT);
-		const cli = vi.fn(() => ({ pid: 4242, success: true }));
+		const cli = vi.fn((_config: ProcessConfig) => ({ pid: 4242, success: true }));
 		const internals = manager as unknown as {
 			opencodeServerSpawner: { spawn: typeof serve };
 			childProcessSpawner: { spawn: typeof cli };
@@ -288,6 +321,369 @@ describe('ProcessManager managed admission at the sink', () => {
 		expect(manager.spawn(config())).toBe(SERVE_RESULT);
 		expect(serve).toHaveBeenCalledTimes(1);
 		expect(port.asked).toHaveLength(0);
+	});
+
+	describe('private prompt artifact admission (GT1-02-10E0T)', () => {
+		const artifact: NonNullable<ProcessConfig['promptArtifact']> = {
+			owner: 'local',
+			path: path.join(os.tmpdir(), 'maestro-prompt-00000000-0000-4000-8000-000000000001.json'),
+			content: JSON.stringify([{ type: 'text', text: 'PRIVATE prompt: 雪\nsecond line' }]),
+			encoding: 'utf8',
+			mode: 0o600,
+			flag: 'wx',
+			cleanup: 'turn',
+		};
+
+		beforeEach(() => {
+			vi.clearAllMocks();
+			// Exercise the real tilde-copy path without reading the operator's home.
+			vi.spyOn(os, 'homedir').mockReturnValue(os.tmpdir());
+		});
+		afterEach(() => {
+			vi.restoreAllMocks();
+			expect(startTurn).not.toHaveBeenCalled();
+			expect(fs.openSync).not.toHaveBeenCalled();
+			expect(fs.writeFileSync).not.toHaveBeenCalled();
+		});
+
+		it.each(['local', 'remote'] as const)(
+			'binds a %s artifact by digest without publishing its private fields',
+			(owner) => {
+				const selected = {
+					...artifact,
+					owner,
+					...(owner === 'remote'
+						? { path: '/var/tmp/private-prompt.json', sshRemoteId: 'remote-selected' }
+						: {}),
+				};
+				const request = config({
+					toolType: 'grok',
+					command: owner === 'remote' ? 'ssh' : 'grok',
+					prompt: undefined,
+					promptArtifact: selected,
+					sshRemoteId: selected.sshRemoteId,
+					sshStdinScript: owner === 'remote' ? 'PRIVATE SSH script' : undefined,
+				});
+				const snapshot = buildSpawnRequestSnapshot(request);
+				const legacy = buildSpawnRequestSnapshot({ ...request, promptArtifact: undefined });
+				expect(snapshot.promptArtifactDigest).toMatch(/^[a-f0-9]{64}$/);
+				expect(snapshot).toEqual({ ...legacy, promptArtifactDigest: expect.any(String) });
+				expect(snapshot.target).toEqual(
+					owner === 'remote' ? { kind: 'ssh', remoteId: 'remote-selected' } : { kind: 'local' }
+				);
+				expect(snapshot.stdinDigest).toBe(legacy.stdinDigest);
+				expect(snapshot).not.toHaveProperty('promptArtifact');
+				// No path is in argv here: isolate the private field from public argv.
+				const serialized = JSON.stringify(snapshot);
+				for (const privateValue of [
+					selected.path,
+					path.basename(selected.path),
+					selected.content,
+					'PRIVATE prompt',
+					'PRIVATE SSH',
+				]) {
+					expect(serialized).not.toContain(privateValue);
+				}
+				expect(dispatchSnapshotDigest(snapshot)).not.toBe(dispatchSnapshotDigest(legacy));
+				expect(buildSpawnRequestSnapshot({ ...request, promptArtifact: { ...selected } })).toEqual(
+					snapshot
+				);
+			}
+		);
+
+		it.each([
+			['content', { content: 'REPLACEMENT private prompt' }],
+			['empty content', { content: '' }],
+			['destination', { path: path.join(os.tmpdir(), 'private-replacement.json') }],
+			['owner', { owner: 'remote' }],
+			['remote identity', { sshRemoteId: 'remote-other' }],
+			['encoding', { encoding: 'utf16le' }],
+			['mode', { mode: 0o644 }],
+			['creation flag', { flag: 'w' }],
+			['cleanup lifetime', { cleanup: 'never' }],
+			['omission', null],
+		] as const)(
+			'rejects changed artifact %s before spawn, without consuming the original lease',
+			async (_label, change) => {
+				const { manager, port, cli, serve, errors } = managedManager();
+				const capture = vi.fn();
+				manager.on('spawn', capture);
+				const request = config({ toolType: 'grok', command: 'grok', promptArtifact: artifact });
+				const snapshot = buildSpawnRequestSnapshot(request);
+				const admitted = await manager.admitSpawn(request, { peer: 'in-process' });
+				if (admitted.state !== 'admitted') throw new Error(admitted.state);
+				const [lease] = port.authority.live();
+				// Malformed metadata is deliberate. Even an unchecked runtime caller
+				// cannot reuse a lease with different file ownership or creation rules.
+				const changed = {
+					...request,
+					promptArtifact: change ? { ...artifact, ...change } : undefined,
+					admission: admitted.admission,
+				} as ProcessConfig;
+				const changedSnapshot = buildSpawnRequestSnapshot(changed);
+				expect(changedSnapshot.promptArtifactDigest).not.toBe(snapshot.promptArtifactDigest);
+				expect(dispatchSnapshotDigest(changedSnapshot)).not.toBe(admitted.admission.requestDigest);
+				expect(changedSnapshot.stdinDigest).toBe(snapshot.stdinDigest);
+				expect(changed.args).toBe(request.args);
+				const result = manager.spawn(changed);
+				expect(result).toMatchObject({
+					success: false,
+					pid: -1,
+					managed: { state: 'denied', code: 'lease-invalid' },
+				});
+				expect(cli).not.toHaveBeenCalled();
+				expect(serve).not.toHaveBeenCalled();
+				expect(capture).not.toHaveBeenCalled();
+				expect(lease.state()).toBe('issued');
+				expect(port.asked).toHaveLength(1);
+				expect(port.asked[0].snapshot).toEqual(snapshot);
+				expect(errors).toHaveLength(1);
+				const disclosed = JSON.stringify([
+					result,
+					errors,
+					...Object.values(logger).map((log) => vi.mocked(log).mock.calls),
+				]);
+				for (const privateValue of [
+					artifact.path,
+					path.basename(artifact.path),
+					'PRIVATE prompt',
+					'REPLACEMENT private',
+					'private-replacement',
+				]) {
+					expect(disclosed).not.toContain(privateValue);
+				}
+
+				expect(manager.spawn({ ...request, admission: admitted.admission })).toEqual({
+					pid: 4242,
+					success: true,
+				});
+				expect(cli).toHaveBeenCalledTimes(1);
+				expect(lease.state()).toBe('bound');
+				expect(manager.admissionOf(request.sessionId)).toBe(admitted.admission);
+				manager.emit('exit', request.sessionId, 0);
+				expect(lease.ended()).toMatchObject({ state: 'released', release: { outcome: 'exited' } });
+				expect(port.authority.live()).toHaveLength(0);
+			}
+		);
+
+		it('detects mutation of the original artifact after admission', async () => {
+			const { manager, port, cli, serve } = managedManager();
+			const request = config({
+				toolType: 'grok',
+				command: 'grok',
+				promptArtifact: { ...artifact },
+			});
+			const admitted = await manager.admitSpawn(request, { peer: 'in-process' });
+			if (admitted.state !== 'admitted') throw new Error(admitted.state);
+			const snapshot = structuredClone(port.asked[0].snapshot);
+			request.promptArtifact!.content = 'MUTATED private prompt';
+			expect(manager.spawn({ ...request, admission: admitted.admission })).toMatchObject({
+				success: false,
+				managed: { state: 'denied', code: 'lease-invalid' },
+			});
+			expect(port.asked[0].snapshot).toEqual(snapshot);
+			expect(cli).not.toHaveBeenCalled();
+			expect(serve).not.toHaveBeenCalled();
+			port.authority.live()[0].release({ outcome: 'stopped', by: 'caller' });
+		});
+
+		it.each(['fresh', 'empty', 'resumed'] as const)(
+			'preserves the %s artifact through admitted, cwd and environment copies',
+			async (turn) => {
+				const { manager, port, cli, serve } = managedManager();
+				const selected = { ...artifact, content: turn === 'empty' ? '' : artifact.content };
+				const request = config({
+					toolType: 'grok',
+					command: 'grok',
+					cwd: '~',
+					prompt: undefined,
+					args: ['--prompt-file', selected.path],
+					promptArtifact: selected,
+					customEnvVars: { GROK_HOME: path.join(os.tmpdir(), 'synthetic-grok-account') },
+					agentSessionId: turn === 'resumed' ? 'native-resume-id' : undefined,
+				});
+				const original = structuredClone(request);
+				const snapshot = buildSpawnRequestSnapshot(request);
+				expect(await manager.spawnAdmitted(request, { peer: 'in-process' })).toEqual({
+					pid: 4242,
+					success: true,
+				});
+				expect(cli).toHaveBeenCalledTimes(1);
+				expect(serve).not.toHaveBeenCalled();
+				const spawned = cli.mock.calls[0][0] as ProcessConfig;
+				expect(spawned).not.toBe(request);
+				expect(spawned.promptArtifact).toBe(selected);
+				expect(spawned).toMatchObject({
+					cwd: os.tmpdir(),
+					args: request.args,
+					agentSessionId: request.agentSessionId,
+				});
+				expect(spawned.customEnvVars).toMatchObject({
+					...request.customEnvVars,
+					MAESTRO_COWORKING_SESSION_ID: 'agent-1',
+					MAESTRO_COWORKING_SOCKET_OVERRIDE: '/tmp/maestro-test-coworking.sock',
+					[COWORKING_RUN_ADMISSION_ENV_VAR]: expect.any(String),
+				});
+				expect(spawned.admission?.requestDigest).toBe(dispatchSnapshotDigest(snapshot));
+				expect(port.asked[0].snapshot).toEqual(snapshot);
+				expect(snapshot.operation).toBe(turn === 'resumed' ? 'resume' : 'start');
+				expect(snapshot.stdinDigest).toBeNull();
+				expect(snapshot.promptArtifactDigest).toMatch(/^[a-f0-9]{64}$/);
+				expect(request).toEqual(original);
+				manager.emit('exit', request.sessionId, 0);
+				expect(port.authority.live()).toHaveLength(0);
+			}
+		);
+
+		it('projects capture metadata without exposing or stripping the private spawner input', async () => {
+			const { manager, port, cli } = managedManager();
+			const heard: ProcessConfig[] = [];
+			manager.on('spawn', (captured) => heard.push(captured));
+			// Poison every legacy carrier to catch capture leaks, not to qualify
+			// a mixed delivery plan at the child spawner (which is fake here).
+			const request = config({
+				toolType: 'grok',
+				command: 'grok',
+				promptArtifact: artifact,
+				args: ['--prompt-file', artifact.path],
+				prompt: artifact.content,
+				sshStdinScript: artifact.content,
+				sshRemoteCommand: artifact.path,
+				images: [artifact.content],
+				customEnvVars: { PRIVATE_FIXTURE: artifact.content },
+				promptArgs: () => [artifact.content],
+				imagePromptBuilder: () => artifact.path,
+				querySource: 'auto',
+				tabId: 'tab-1',
+				projectPath: os.tmpdir(),
+				purpose: 'utility',
+				utilityOf: { sessionId: 'agent-1', tabId: 'tab-1' },
+			});
+			expect((await manager.spawnAdmitted(request, { peer: 'in-process' })).success).toBe(true);
+			expect(heard).toHaveLength(1);
+			expect(heard[0]).toMatchObject({
+				sessionId: request.sessionId,
+				toolType: 'grok',
+				cwd: request.cwd,
+				command: 'grok',
+				args: [],
+				querySource: 'auto',
+				tabId: 'tab-1',
+				projectPath: os.tmpdir(),
+				purpose: 'utility',
+				utilityOf: request.utilityOf,
+				admission: manager.admissionOf(request.sessionId),
+			});
+			for (const key of [
+				'promptArtifact',
+				'prompt',
+				'sshStdinScript',
+				'sshRemoteCommand',
+				'images',
+				'customEnvVars',
+				'promptArgs',
+				'imagePromptBuilder',
+			]) {
+				expect(heard[0]).not.toHaveProperty(key);
+			}
+			const disclosed = JSON.stringify([
+				heard,
+				...Object.values(logger).map((log) => vi.mocked(log).mock.calls),
+			]);
+			expect(disclosed).not.toContain(artifact.path);
+			expect(disclosed).not.toContain(path.basename(artifact.path));
+			expect(disclosed).not.toContain('PRIVATE prompt');
+			const spawned = cli.mock.calls[0][0] as ProcessConfig;
+			expect(spawned.promptArtifact).toBe(artifact);
+			expect(spawned.args).toEqual(request.args);
+			expect(spawned.promptArgs).toBe(request.promptArgs);
+			expect(spawned.sshStdinScript).toBe(artifact.content);
+			manager.emit('exit', request.sessionId, 0);
+			expect(port.authority.live()).toHaveLength(0);
+		});
+
+		it.each(['missing admission', 'policy denial'] as const)(
+			'refuses %s before artifact preparation or spawn',
+			async (reason) => {
+				const port = fakeSpawnPort({
+					decide: () => ({
+						decision: 'deny',
+						reason: 'Fixture policy refuses this launch.',
+						policyRevision: 1,
+					}),
+				});
+				const { manager, cli, serve, errors } = managedManager(port);
+				const capture = vi.fn();
+				manager.on('spawn', capture);
+				const request = config({ toolType: 'grok', command: 'grok', promptArtifact: artifact });
+				const result =
+					reason === 'missing admission'
+						? manager.spawn(request)
+						: await manager.spawnAdmitted(request, { peer: 'in-process' });
+				expect(result).toMatchObject({
+					pid: -1,
+					success: false,
+					managed: {
+						state: 'denied',
+						code: reason === 'missing admission' ? 'lease-invalid' : 'policy-denied',
+					},
+				});
+				expect(cli).not.toHaveBeenCalled();
+				expect(serve).not.toHaveBeenCalled();
+				expect(capture).not.toHaveBeenCalled();
+				expect(errors).toHaveLength(1);
+				expect(port.asked).toHaveLength(reason === 'missing admission' ? 0 : 1);
+				expect(port.authority.live()).toHaveLength(0);
+				const disclosed = JSON.stringify([
+					result,
+					errors,
+					port.asked,
+					...Object.values(logger).map((log) => vi.mocked(log).mock.calls),
+				]);
+				expect(disclosed).not.toContain(artifact.path);
+				expect(disclosed).not.toContain(path.basename(artifact.path));
+				expect(disclosed).not.toContain('PRIVATE prompt');
+			}
+		);
+
+		it.each(['omitted', 'undefined'] as const)(
+			'preserves the legacy digest and capture identity with an %s artifact',
+			async (field) => {
+				const { manager, port, serve } = managedManager();
+				const request = config(field === 'undefined' ? { promptArtifact: undefined } : {});
+				const legacy = buildDispatchSnapshot(
+					{
+						command: request.command,
+						args: request.args,
+						cwd: request.cwd,
+						env: {},
+						stdin: request.prompt,
+						shell: false,
+					},
+					{
+						provider: 'opencode',
+						operation: 'start',
+						target: { kind: 'local' },
+						purpose: 'conversation',
+						origin: 'desktop',
+					}
+				);
+				expect(buildSpawnRequestSnapshot(request)).toEqual(legacy);
+				expect(legacy).not.toHaveProperty('promptArtifactDigest');
+				const admitted = await manager.admitSpawn(request, { peer: 'in-process' });
+				if (admitted.state !== 'admitted') throw new Error(admitted.state);
+				expect(admitted.admission.requestDigest).toBe(dispatchSnapshotDigest(legacy));
+				const carried = { ...request, admission: admitted.admission };
+				const heard: ProcessConfig[] = [];
+				manager.on('spawn', (captured) => heard.push(captured));
+				expect(manager.spawn(carried)).toBe(SERVE_RESULT);
+				expect(serve).toHaveBeenCalledWith(carried);
+				expect(heard).toHaveLength(1);
+				expect(heard[0]).toBe(carried);
+				manager.emit('exit', request.sessionId, 0);
+				expect(port.authority.live()).toHaveLength(0);
+			}
+		);
 	});
 });
 
