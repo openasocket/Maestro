@@ -16,6 +16,10 @@
  *   drop would send a prompt about a picture the agent never sees.
  * - Standard permission mode on a Claude Code API turn (PA11). The permission relay lives in
  *   the desktop; without it Claude aborts on the first tool call.
+ * - An enrolled host with no managed authority, or with one that is not the authority answering
+ *   for the installation now (MRC3-01-02, MCOMP-09-02). The host's standing is read from what the
+ *   caller passed AND from what the host installed at the sink; an omitted or standalone word from
+ *   the caller lowers nothing, and the sink reads the standing again the instant before `spawn`.
  *
  * Completion is the caller's policy (decision D2): the exit facts go through
  * `resolveTurnOutcome`, and the session id is the first one the provider announced (D4).
@@ -73,7 +77,13 @@ import {
 	type CompletedTurn,
 	type RunningTurn,
 } from '../run/run-to-completion';
-import { DispatchRefusedError, leaseAdmission, type DispatchAdmission } from '../run/start-turn';
+import {
+	DispatchRefusedError,
+	freezeTurnProcessSpec,
+	leaseAdmission,
+	turnSinkStanding,
+	type DispatchAdmission,
+} from '../run/start-turn';
 import { turnProcessSpecFromPlan, type TurnProcessSpec } from '../run/start-turn';
 import type { ResolveTurnOutcomeOptions } from '../streaming/turn-outcome';
 import { writeSystemPromptFile } from './args';
@@ -147,9 +157,12 @@ export interface RunAgentTurnOptions {
 	/** The managed authority this turn runs under. Absent: an unmanaged turn. */
 	managed?: ManagedTurnAuthority;
 	/**
-	 * The host's standing (MRC3-01-02). `enrolled`: the turn runs under `managed` or not at all, and
-	 * one that arrives with none is refused as `managed-unavailable` before anything is planned,
-	 * written or started. `standalone` or absent: an unmanaged turn is what it always was.
+	 * The host's standing as the caller reads it (MRC3-01-02). `enrolled`: the turn runs under
+	 * `managed` or not at all, and one that arrives with none is refused as `managed-unavailable`
+	 * before anything is planned, written or started. `standalone` or absent is not a claim the
+	 * caller can make on its own (MCOMP-09-02): the standing a host installed at the sink
+	 * (`installTurnSinkStanding`) is read here too, and a managed one holds whatever this says. An
+	 * unmanaged turn is what it always was only where no host installed a managed standing.
 	 */
 	standing?: 'standalone' | 'enrolled';
 	/**
@@ -340,13 +353,33 @@ export async function runAgentTurn(
 	const sshEnabled = sshConfig?.enabled === true;
 	const deps = options.deps ?? {};
 
-	// The standing gate comes first (MRC3-01-02): on an enrolled host a turn with no managed
-	// authority is never a plain turn, whatever else it carries.
-	if (options.standing === 'enrolled' && !options.managed) {
+	// The standing gate comes first (MRC3-01-02, MCOMP-09-02): the host's installed standing is read
+	// beside the caller's word, so a caller that passed none, or said standalone, on an enrolled host
+	// is held to the host's; the sink reads it again at the spawn. On an enrolled host a turn with no
+	// managed authority is never a plain turn, whatever else it carries, and one whose authority is
+	// not the one answering for the installation now is not asked to admit anything.
+	const sink = turnSinkStanding();
+	const sinkManaged = sink?.standing() === 'managed';
+	if ((options.standing === 'enrolled' || sinkManaged) && !options.managed) {
 		return refuse(
 			'managed-unavailable',
 			'This installation is enrolled and the turn carries no managed dispatch, so it was not started.'
 		);
+	}
+	if (sink && sinkManaged && options.managed) {
+		const live = sink.authorityId();
+		if (live === null) {
+			return refuse(
+				'managed-unavailable',
+				'This installation is enrolled and no authority answers for it now, so the turn was not started.'
+			);
+		}
+		if (live !== options.managed.authority.authorityId) {
+			return refuse(
+				'managed-unavailable',
+				`The turn's managed authority ${options.managed.authority.authorityId} is not the one answering for this installation (${live}), so it was not started.`
+			);
+		}
 	}
 	if (launch.hasImages) {
 		return refuse(
@@ -511,17 +544,23 @@ export async function runAgentTurn(
 		}
 	}
 
+	// Everything about the spec is final here, and it is frozen as its own copy before anything reads
+	// it (MCOMP-09-02): the snapshot the authority admits is the spec `runTurn` spawns, and the plan,
+	// the wrapper and the maestro-p decision hold no reference that can change it while the
+	// admission is awaited.
+	const final = freezeTurnProcessSpec(spec);
+
 	const claudeResume = readClaudeResumeBaseline({
 		providerId,
 		resumeSessionId: turn.resumeSessionId,
 		cwd: launch.cwd,
-		env: spec.env,
+		env: final.env,
 		remote: plan.target.kind === 'remote',
 	});
 
-	// Managed admission: everything about the spec is final here. The authority sees the snapshot
-	// of what will be spawned, and the lease it grants is checked again inside `startTurn` against
-	// the spec that reaches `spawn`, so a replaced spec fails there rather than running.
+	// Managed admission: the authority sees the snapshot of what will be spawned, and the lease it
+	// grants is checked again inside `startTurn` against the spec that reaches `spawn`, so a
+	// replaced spec fails there rather than running.
 	const attribution = {
 		provider: providerId,
 		model: turn.settings.model ?? null,
@@ -535,16 +574,17 @@ export async function runAgentTurn(
 		resourceIds: options.managed?.resourceIds ?? [],
 	};
 	let admission: { gate: DispatchAdmission; attribution: typeof attribution } | undefined;
+	let lease: DispatchLease | undefined;
 	if (options.managed) {
 		const managed = options.managed;
 		const admitted = await managed.authority.admit({
 			context: managed.context,
-			snapshot: buildDispatchSnapshot(spec, attribution),
+			snapshot: buildDispatchSnapshot(final, attribution),
 			policy: managed.policy,
 		});
 		if (admitted.state !== 'admitted')
 			return abandon(`managed-${admitted.state}`, admitted.message);
-		const lease = admitted.lease;
+		lease = admitted.lease;
 		managed.onLease?.(lease);
 		admission = { gate: leaseAdmission(managed.authority, lease), attribution };
 	}
@@ -554,7 +594,7 @@ export async function runAgentTurn(
 	let running: RunningTurn;
 	try {
 		running = runTurn(
-			spec,
+			final,
 			{
 				agentId: providerId,
 				sessionId: options.sessionId,
@@ -567,6 +607,9 @@ export async function runAgentTurn(
 		);
 	} catch (error) {
 		if (error instanceof DispatchRefusedError) {
+			// A lease issued for a launch the sink refused is released with the sink's word, so the
+			// authority does not hold it live until it expires; nothing was spawned.
+			lease?.release({ outcome: 'spawn-failed', message: error.message });
 			return abandon(`managed-${error.state}`, error.message);
 		}
 		if (error instanceof UnknownProviderError) return abandon('no-parser', error.message);

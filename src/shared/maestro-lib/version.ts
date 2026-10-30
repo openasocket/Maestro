@@ -138,8 +138,14 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * MRC2-04-01A): `SshRemoteExpectation.providerId` may be null, and `sshRemoteEndpointProblems` then skips the
  * route-row check while still requiring the same enterprise, a registered authority and a policy revision not
  * behind the host's. What a managed git write over SSH (the shared git executor's gate) qualifies its remote on.
+ * 0.33.0: the host's standing at the spawn sink (`./run/start-turn`, MCOMP-09-02): `installTurnSinkStanding`
+ * installs what a host holds (binding and the authority answering now) and `turnSinkStanding` reads it; under a
+ * managed standing `startTurn` refuses a launch with no admission, with a gate not minted by `leaseAdmission`
+ * (`leaseAdmissionAuthority`) or minted over another authority, before any effect, and never spawns it plain;
+ * `runAgentTurn` reads the same standing beside its caller's word. `freezeTurnProcessSpec` is the own frozen
+ * copy both admit and spawn. Also covers MCOMP-09-01, which made `createRuntimeTurns({ standing })` required.
  */
-export const MAESTRO_LIB_VERSION = '0.32.0';
+export const MAESTRO_LIB_VERSION = '0.33.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';

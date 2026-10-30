@@ -2306,6 +2306,20 @@
           "id": "MCOMP-09-02"
         },
         {
+          "label": "Install the sink standing from the runtime (continuation of MCOMP-09-02)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/shared/maestro-lib/runtime/index.ts"
+          ],
+          "outcome": "createMaestroRuntime installs the host standing at the spawn sink (installTurnSinkStanding over the binding state and the authority the background spawn port answers with, read per call) and releases it at shutdown, so every startTurn and runAgentTurn in a runtime process is held to the installation standing the turn service already holds, with no second rule. One authored file, under 100 changed lines; a standalone runtime installs a standalone standing and runs as before. No additional counterpart input is required for this task.",
+          "backlog": [
+            "M-01"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-09-02A"
+        },
+        {
           "label": "Implement protected detached-host custody",
           "kind": "IMPLEMENT",
           "targets": [
@@ -2403,7 +2417,7 @@
       ],
       "id": "MCOMP-09",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-09.md",
-      "taskCount": 7,
+      "taskCount": 8,
       "stage": "S04"
     },
     {
@@ -7202,7 +7216,7 @@
         "MEGA-CONTRACTS-FOUNDATION-BUILD"
       ],
       "nativeInputs": false,
-      "taskCount": 22
+      "taskCount": 23
     },
     {
       "id": "S05",
@@ -7563,9 +7577,9 @@
       "taskCount": 1
     }
   ],
-  "taskCount": 300,
+  "taskCount": 301,
   "taskCounts": {
-    "IMPLEMENT": 197,
+    "IMPLEMENT": 198,
     "TEST": 39,
     "VERIFY": 64
   },
@@ -7979,6 +7993,7 @@
     "M-01": [
       "MCOMP-09-01",
       "MCOMP-09-02",
+      "MCOMP-09-02A",
       "MCOMP-09-05",
       "MCOMP-09-06",
       "MCOMP-09-07",
