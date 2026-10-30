@@ -1,0 +1,223 @@
+{
+	"schemaVersion": 1,
+	"taskId": "GT1-01-01",
+	"recordedAt": "2026-10-30T07:04:59.192940+00:00",
+	"executionRoot": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+	"branch": "auto-run-feature/grok-cli-integration",
+	"sourceCommit": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+	"baseRef": "refs/heads/feature/mega-maestro-v1.1.0-rc",
+	"baseCommit": "dab0dbb9ccad90b5f3d5c0784cd0d0151b24e796",
+	"canonicalPlaybookPath": "/Users/dr3/dev-shit/Maestro/.maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-01.md",
+	"canonicalPlaybookFolder": "/Users/dr3/dev-shit/Maestro/.maestro/playbooks/2026-10-30-Grok-Tier1",
+	"contractPath": "/Users/dr3/dev-shit/Maestro/.maestro/playbooks/2026-10-30-Grok-Tier1/CONTRACT.md",
+	"referencePath": "/Users/dr3/dev-shit/Maestro/.maestro/playbooks/2026-10-30-Grok-Tier1/REFERENCE.md",
+	"evidencePath": "Plans/grok-tier1/evidence/01.md",
+	"agent": {
+		"id": "404dfe62-cb4a-4e29-b2e3-a2cbb6ee3bb9",
+		"name": "auto-run-feature/grok-cli-integration",
+		"provider": "codex",
+		"registeredCwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+		"registeredAutoRunFolder": "/Users/dr3/dev-shit/Maestro/.maestro/playbooks",
+		"registeredWorktreeBasePath": null,
+		"verification": "pass"
+	},
+	"git": {
+		"commonDirectory": "/Users/dr3/dev-shit/Maestro/.git",
+		"baseResolution": "Existing local branch; origin tracking ref matched. No fetch or remote freshness claim.",
+		"originBaseCommit": "dab0dbb9ccad90b5f3d5c0784cd0d0151b24e796",
+		"upstreamBaseRefPresent": false,
+		"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+		"sourceIsAncestorOfBase": true,
+		"baseIsAncestorOfSource": false,
+		"sourceAheadOfBase": 0,
+		"sourceBehindBase": 2,
+		"baseOnlyChangedFiles": [
+			"Plans/integration-completion/evidence/completion-runtime-bootstrap.json",
+			"Plans/integration-completion/evidence/m0-build.json"
+		],
+		"initialTrackedChanges": [],
+		"initialUntrackedFiles": [".sloptimize/output_cache/st_7201b532_1793343493.json"],
+		"preserveAndExcludeFromCommit": [".sloptimize/"],
+		"remotes": {
+			"origin": "https://github.com/openasocket/Maestro.git",
+			"upstream": "https://github.com/RunMaestro/Maestro.git"
+		},
+		"sharedHooksPath": ".husky",
+		"primaryCheckoutChanged": false,
+		"pushAllowed": false,
+		"publicationPolicy": "CONTRACT.md prohibits pushes, PRs, merges and publication. Use a task-local commit only."
+	},
+	"tooling": {
+		"platform": "darwin",
+		"architecture": "arm64",
+		"osVersion": "27.2",
+		"osBuild": "26B123",
+		"node": {
+			"version": "v26.13.0",
+			"path": "/opt/homebrew/bin/node"
+		},
+		"npm": {
+			"version": "11.20.0",
+			"path": "/opt/homebrew/bin/npm"
+		},
+		"bunVersion": "1.4.4",
+		"pythonVersion": "3.9.6",
+		"gitVersion": "2.54.0 (Apple Git-157)",
+		"ripgrepVersion": "15.2.0",
+		"ghVersion": "2.103.3",
+		"nativePrerequisites": {
+			"xcodeDirectory": "/Applications/Xcode.app/Contents/Developer",
+			"clangVersion": "21.0.0",
+			"makeVersion": "3.81",
+			"cairoVersion": "1.18.6",
+			"pangoVersion": "1.58.2",
+			"pythonDistutilsAvailable": true,
+			"nativeBuildVerified": false
+		},
+		"packageName": "maestro",
+		"packageVersion": "1.1.0-RC",
+		"requiredNode": ">=22.0.0",
+		"engineStrict": true,
+		"packageManagerPin": null,
+		"lockfileVersion": 3,
+		"setupCommand": "npm ci",
+		"setupStatus": "not-run",
+		"setupOwnerTask": "GT1-01-01A",
+		"nodeModulesPresent": false,
+		"localTestRunnerAvailable": false,
+		"missingLocalTools": ["vitest", "typescript", "prettier", "eslint", "lint-staged"],
+		"pinnedDependencies": {
+			"typescript": "6.0.3",
+			"vitest": "4.1.11",
+			"vite": "8.2.2",
+			"prettier": "3.8.3",
+			"eslint": "9.39.4",
+			"electron": "41.10.7",
+			"electron-rebuild": "3.2.9",
+			"@electron/rebuild": "4.2.0",
+			"node-pty": "1.2.0-beta.12",
+			"better-sqlite3": "12.11.1",
+			"canvas": "3.2.3",
+			"husky": "9.1.7",
+			"patch-package": "8.0.1",
+			"@playwright/test": "1.59.1",
+			"jsdom": "27.4.0"
+		},
+		"lifecycleScripts": {
+			"preinstall": "node scripts/check-python.mjs",
+			"prepare": "node scripts/setup-git-hooks.mjs",
+			"postinstall": "node scripts/postinstall.mjs"
+		},
+		"validationScripts": {
+			"lint": "tsc -p tsconfig.lint.json && tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.cli.json --noEmit",
+			"lint:eslint": "eslint src/ && eslint -c eslint.dashes.config.mjs src/__tests__ scripts",
+			"docs:verify": "node scripts/verify-docs-paths.mjs",
+			"test": "cross-env NODE_OPTIONS=--max-old-space-size=8192 vitest run",
+			"format:check:all": "prettier --check ."
+		},
+		"baselineFormatter": {
+			"version": "3.8.3",
+			"entry": "/Users/dr3/dev-shit/Maestro/node_modules/prettier/bin/prettier.cjs",
+			"scope": "Read-only use of the existing lock-matching formatter; writes restricted to these baseline artifacts. No dependency links or installs."
+		},
+		"installedGrok": {
+			"path": "/Users/dr3/.grok/bin/grok",
+			"version": null,
+			"packageIdentity": null,
+			"invoked": false
+		}
+	},
+	"selectedOfficialPackage": {
+		"providerId": "grok",
+		"displayName": "Grok CLI",
+		"name": "@xai-official/grok",
+		"executable": "grok",
+		"candidateVersion": "1.0.70",
+		"launcherNodeRequirement": ">=20",
+		"metadataUrl": "https://registry.npmjs.org/@xai-official%2fgrok/1.0.70",
+		"artifactUrl": "https://registry.npmjs.org/@xai-official/grok/-/grok-1.0.70.tgz",
+		"referenceIntegrity": "sha512-Q2Ncoez//mk1Z9CNhgvp9eAYfZJZmshDAPxs0XAhhGnilH3abGAyTwqOSvqVnsFCUjjzT9TCYZIgAH2A2XL6CQ==",
+		"repositoryUrl": "https://github.com/xai-org/grok-build",
+		"referencePublicSourceCommit": "2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8",
+		"referenceMonorepoCommit": "559751fdcec02d413e4c57c8832ab275e4f44980",
+		"provenance": "Copied from canonical REFERENCE.md, not independently revalidated in this baseline.",
+		"artifactDownloaded": false,
+		"artifactIntegrityVerified": false,
+		"installedBinaryMatchesCandidate": null,
+		"binarySourceRelationship": "unknown",
+		"supportedVersionRange": null,
+		"qualificationStatus": "not-run"
+	},
+	"live": {
+		"enabled": false,
+		"credentialsReference": null,
+		"authorizationReference": null,
+		"budgetUsd": 0,
+		"maxCalls": 0,
+		"maxTurns": 0,
+		"maxWallClockSeconds": 0,
+		"allowedEndpoints": [],
+		"allowedSshTargets": [],
+		"status": "not-run"
+	},
+	"constraints": [
+		{
+			"id": "dependencies-not-installed",
+			"ownerTask": "GT1-01-01A",
+			"detail": "No node_modules in execution checkout; installation and native ABI checks remain pending."
+		},
+		{
+			"id": "unavailable-commit-hook-tool",
+			"ownerTask": "GT1-01-01A",
+			"detail": "Executable .husky/pre-commit runs npx lint-staged, absent from both manifest and lock. Avoid an implicit unpinned download; baseline commit disables hooks for that command only after explicit artifact checks."
+		},
+		{
+			"id": "stale-setup-documentation",
+			"ownerTask": "GT1-01-01A",
+			"detail": "CONTRIBUTING says Node 20+, npm install and Jest in places. Actual engine is >=22, pinned setup is npm ci, runner is Vitest."
+		},
+		{
+			"id": "base-has-advanced",
+			"ownerTask": "GT1-01-01",
+			"detail": "Execution HEAD is two documentation/evidence commits behind resolved base. Record as observed; no rebase, merge, reset or primary checkout mutation."
+		},
+		{
+			"id": "command-output-rewriting",
+			"ownerTask": "GT1-01-01",
+			"detail": "Shell tooling rewrites cat, ls, rg and git invocations through st; some raw flags fail. Python pathlib/subprocess supplied exact read-only bytes and command output."
+		},
+		{
+			"id": "candidate-unqualified",
+			"ownerTask": "GT1-01-04",
+			"detail": "Reference package/source identities are independent. Existing PATH binary was located only; no Grok command or network discovery was run."
+		},
+		{
+			"id": "live-authorization-absent",
+			"ownerTask": "GT1-01-05",
+			"detail": "No disposable test credentials, finite positive budget, isolated live configuration or permitted endpoints supplied. Live execution stays disabled."
+		},
+		{
+			"id": "platform-coverage-unqualified",
+			"ownerTask": "GT1-01-05",
+			"detail": "Only local macOS arm64 tools inspected; no Linux, Windows, SSH or real-provider qualification."
+		}
+	],
+	"reviewedInputsSha256": {
+		"CLAUDE.md": "32c3c5e9400f3875e9a57379d90440514e60cf694d06f725e16e510957aad40d",
+		"CLAUDE-AGENTS.md": "6cce94af6856f748d70011b16b8dfed09c5dba8d4d3b8675fac3b0c1cb73c2a5",
+		"PROVIDER-SUPPORT.md": "ac323e5eb53b79f6cc72dbeb2ce6c5b307ccc26af53097b6bb19c768c3dc4431",
+		"CONTRIBUTING.md": "8a2e69ad343b87aea7d7d64aa8806bd19e22c6023858ac15b3c249d99d4d51aa",
+		"docs/agent-guides/AGENT-INFRA.md": "990e05f28941ec5b6a6508388646e24c319c3d44ccacaa71aa1eee4c38af2cd8",
+		"package.json": "c6c1e45b7ba259420616990f408c70d9c07cd4226b9a8283197dd5944ba8b93b",
+		"package-lock.json": "0b6b52f5ae6660b8cf2ca74cf9c7992e9630b08ce685c8413040caa305ecb747",
+		"/Users/dr3/dev-shit/Maestro/.maestro/playbooks/2026-10-30-Grok-Tier1/CONTRACT.md": "602e7b5a26ec95f058604c85109a49d1c6a6189b56650ca0104dcdb037c57150",
+		"/Users/dr3/dev-shit/Maestro/.maestro/playbooks/2026-10-30-Grok-Tier1/REFERENCE.md": "55d43fa2e56382ae085884f7f56e945bed0d97ce2c0696bc62943fba5738663c"
+	},
+	"verification": {
+		"artifactChecks": "pass",
+		"repositorySuites": "not-run",
+		"repositorySuiteOwnerTask": "GT1-01-06",
+		"imagesAnalyzed": 0,
+		"independentReview": "pass"
+	}
+}
