@@ -138,8 +138,50 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge started; 44 files unmerged in the worktree; MCOMP-01-03A..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T00:15:10.131Z",
-		"updatedBy": "MCOMP-01-03"
+		"state": "merge in progress; MCOMP-01-03A staged (3 files), 41 files unmerged in the worktree; MCOMP-01-03B..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
+		"updatedAt": "2026-10-30T00:24:54.759Z",
+		"updatedBy": "MCOMP-01-03A"
+	},
+	"progress": {
+		"MCOMP-01-03A": {
+			"resolvedAt": "2026-10-29",
+			"resolvedBy": "Maestro-Claude",
+			"files": [
+				"CLAUDE.md",
+				"docs/agent-guides/CANONICAL-UTILITIES.md",
+				"docs/agent-guides/CLI-UI-PARITY.md"
+			],
+			"hunks": {
+				"CLAUDE.md": [
+					"123-130: upstream three new index lines (transcript parse pool, cache derivation upgrade, stats indexing) kept, the seal index line kept as the integration side spells it (with sealProtectionProblem(), which upstream copy lacks)"
+				],
+				"docs/agent-guides/CANONICAL-UTILITIES.md": [
+					"81-90: upstream Live mode controller and requestFromRenderer entries kept; the fetchWithTimeout entry kept as the integration side extended it (upstream copy equals the base and is a prefix of it); the egress, update and listener ceiling entries kept unchanged",
+					"95-108: the Encore entry merged into one: upstream symbol list (isEncoreFeatureEnabled, requireEncoreFeature, encoreDisabledMessage) with the integration managed-pins tail (resolveEncoreFeatures(raw, pins?), EncoreFlagPins, the lifecycle setPins and the renderer overlay); the nine managed settings and custody entries kept unchanged",
+					"196-231: the providerSwap entry taken from upstream (switchProviderWithoutConversion, mapAgentAiTabs; the integration copy equalled the base); the 31 integration entries from the Mega-Maestro contracts artifact to the Cue bundle rule kept unchanged"
+				],
+				"docs/agent-guides/CLI-UI-PARITY.md": [
+					"275-492 (Covered table): upstream 110 rows kept, including its longer cells on the shared rows (Quick Chat steer, group emoji, code-fence Run, open-file media, support-package Auto Run state, throughput-gauge window); the 11 integration rows inserted at their places (Settings > Agents and Settings: a managed key after Edit Agent modal fields; the nine Mega-Maestro pane and managed inbox rows after Open a modal or dashboard); the integration row Check a data dir is ready to run Cue unattended (CLI first; no UI surface yet) names the same action as upstream row Cue modal, Readiness tab, which now has the UI surface, so the upstream row stands alone",
+					"579-694 (Open gaps): item 0 Recover standing and Complete registration kept; upstream three open items (provider quota snapshots, Merge Into a new agent, Pipeline Graph view selection) as 1-3; Pause and resume a managed run kept as item 4 (was 17); the integration items 1-5, 8-10, 15 and 16 are Covered rows upstream and 6, 7 and 11-14 sit under Not mirrored by design upstream, so none is repeated"
+				]
+			},
+			"checks": {
+				"docsVerify": "node scripts/verify-docs-paths.mjs in the worktree: 1287 asserted paths, 423 index entries against 423 full entries, 0 findings",
+				"prettier": "run by merge-tool stage; CLAUDE.md and CANONICAL-UTILITIES.md unchanged, CLI-UI-PARITY.md table re-padded",
+				"numstatVsHead": {
+					"CLAUDE.md": "39+/4-",
+					"docs/agent-guides/CANONICAL-UTILITIES.md": "44+/8-",
+					"docs/agent-guides/CLI-UI-PARITY.md": "269+/227- (table padding)"
+				},
+				"numstatVsMergeHead": {
+					"CLAUDE.md": "81+/7-",
+					"docs/agent-guides/CANONICAL-UTILITIES.md": "85+/10-",
+					"docs/agent-guides/CLI-UI-PARITY.md": "38+/0-"
+				}
+			},
+			"semanticConflictsForQ": [],
+			"unmergedAfter": 41,
+			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03a.mjs (not in git)"
+		}
 	}
 }
