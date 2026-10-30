@@ -5,6 +5,9 @@
  * these rules. These pin the plan itself, with real provider definitions and no process.
  */
 import * as fs from 'fs';
+import * as childProcess from 'child_process';
+import { EventEmitter } from 'events';
+import { PassThrough } from 'stream';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +17,10 @@ import { buildAgentLaunchPlan, type AgentLaunchInput } from '../launch/launch-pl
 import type { AcpPromptBlock } from '../launch/image-refs';
 import * as definitions from '../providers/definitions';
 import { SSH_STDIN_REMOTE_SHELL } from '../control/ssh-remote-signal';
+import * as remoteSignal from '../control/ssh-remote-signal';
+import { guardTurn } from '../control/turn-guard';
+import { logger } from '../host';
+import { startTurn, type TurnHandle, type TurnExit } from './start-turn';
 import { getAgentDefinition } from '../providers/definitions';
 import {
 	argsResumeSession,
@@ -23,6 +30,12 @@ import {
 	type PipeSpawnConfig,
 } from './pipe-spawn';
 
+vi.mock('child_process', async (original) => ({
+	...(await original<typeof childProcess>()),
+}));
+vi.mock('../control/ssh-remote-signal', async (original) => ({
+	...(await original<typeof remoteSignal>()),
+}));
 vi.mock('fs', async (importOriginal) => ({ ...(await importOriginal<typeof fs>()) }));
 vi.mock('../providers/definitions', async (importOriginal) => ({
 	...(await importOriginal<typeof definitions>()),
@@ -504,6 +517,191 @@ describe('planPipeSpawn', () => {
 				expect(fs.writeFileSync).not.toHaveBeenCalled();
 			}
 		);
+
+		describe('sink and remote stop ownership', () => {
+			let child: childProcess.ChildProcess;
+			let current: TurnHandle | undefined;
+			beforeEach(() => {
+				current = undefined;
+				child = Object.assign(new EventEmitter(), {
+					pid: 4242,
+					exitCode: null,
+					signalCode: null,
+					kill: vi.fn(() => true),
+					stdin: new PassThrough(),
+					stdout: new PassThrough(),
+					stderr: new PassThrough(),
+				}) as unknown as childProcess.ChildProcess;
+				vi.spyOn(childProcess, 'spawn').mockReturnValue(child);
+				vi.spyOn(remoteSignal, 'signalRemoteAgent').mockReturnValue(true);
+				for (const level of ['debug', 'info', 'warn'] as const)
+					vi.spyOn(logger, level).mockImplementation(() => {});
+			});
+			afterEach(async () => {
+				child.emit('close', 0, null);
+				await current?.done;
+				child.stdin?.destroy();
+				child.stdout?.destroy();
+				child.stderr?.destroy();
+			});
+
+			it.each(['', 'Private Unicode 雪\n"quoted" & $HOME\r\n'.repeat(1000)])(
+				'materializes the local pipe artifact once at the shared sink (%#)',
+				async (prompt) => {
+					const prepared = buildAgentLaunchPlan({ ...input, prompt });
+					if (!prepared.ok || prepared.plan.prompt.via !== 'file')
+						throw new Error('Expected file plan');
+					const plan = planPipeSpawn(
+						base({
+							toolType: 'grok',
+							command: input.command,
+							cwd: scratch.dir,
+							args: prepared.plan.args,
+							promptDelivery: prepared.plan.prompt,
+						})
+					);
+					expect(fs.writeFileSync).not.toHaveBeenCalled();
+					vi.mocked(fs.writeFileSync).mockRestore();
+					const write = vi.spyOn(fs, 'writeFileSync');
+					const open = vi.spyOn(fs, 'openSync');
+					const file = prepared.plan.prompt.artifact.path;
+					current = startTurn(plan.spec, {}, {});
+					expect(open).toHaveBeenCalledExactlyOnceWith(file, 'wx', 0o600);
+					expect(write).toHaveBeenCalledTimes(1);
+					expect(fs.readFileSync(file, 'utf8')).toBe(
+						JSON.stringify({ type: 'acp', content: [{ type: 'text', text: prompt }] })
+					);
+					expect(childProcess.spawn).toHaveBeenCalledTimes(1);
+					expect((child.stdin as PassThrough).read()).toBeNull();
+					child.emit('exit', 0, null);
+					expect(fs.existsSync(file)).toBe(true);
+					child.emit('close', 0, null);
+					await current.done;
+					expect(fs.existsSync(file)).toBe(false);
+					expect(plan.tempFiles).toEqual([]);
+					expect(remoteSignal.signalRemoteAgent).not.toHaveBeenCalled();
+					const diagnostics = JSON.stringify([
+						vi.mocked(logger.debug).mock.calls,
+						vi.mocked(logger.info).mock.calls,
+						vi.mocked(logger.warn).mock.calls,
+					]);
+					expect(diagnostics).not.toContain(file);
+					expect(diagnostics).not.toContain('Private Unicode');
+				}
+			);
+
+			it.each(['', 'private-remote-content 雪'])(
+				'binds remote cleanup to one PID and the existing stop guard (%#)',
+				(prompt) => {
+					const artifactPath = '/tmp/private-remote-prompt.json';
+					const sshArgs = ['-o', 'BatchMode=yes', 'dev@build', ...SSH_STDIN_REMOTE_SHELL];
+					const script = 'exec /remote/custom-grok --prompt-file ' + artifactPath;
+					const plan = planPipeSpawn(
+						base({
+							toolType: 'grok',
+							command: 'ssh',
+							args: sshArgs,
+							sshStdinScript: script,
+							promptArtifactPath: artifactPath,
+							prompt,
+							images: ['data:image/png;base64,AQID'],
+							imageArgs,
+							imagePromptBuilder,
+							promptArgs,
+							sendPromptViaStdin: true,
+							sendPromptViaStdinRaw: true,
+						}),
+						{ saveImageToTempFile }
+					);
+					expect(plan.remoteAgent).toEqual({
+						sshCommand: 'ssh',
+						sshArgs,
+						sessionId: 's1',
+						promptArtifactPath: artifactPath,
+						pidFile: expect.stringMatching(/^\/tmp\/maestro-prompt-owner-[0-9a-f-]{36}\.pid$/),
+					});
+					expect(plan.spec.stdin?.match(/readonly _maestro_prompt_pid_file=/g)).toHaveLength(1);
+					expect(plan.spec.stdin).not.toContain('maestro-agent-');
+					expect(plan.spec.stdin).toContain(script);
+					expect(plan.spec.stdin).not.toContain('private-remote-content');
+					expect(plan.spec.promptArtifact).toBeUndefined();
+					expect(plan.args).toEqual(sshArgs);
+					expect(plan.isBatchMode).toBe(true);
+					expect(plan.keepStdinOpen).toBe(false);
+					expect(plan.tempFiles).toEqual([]);
+					const terminate = vi.fn();
+					const stops = guardTurn(
+						{
+							child,
+							done: new Promise<TurnExit>(() => {}),
+							interrupt: vi.fn(),
+							terminate,
+							terminateNow: vi.fn(),
+						},
+						{ sessionId: 's1', graceMs: 200, remote: plan.remoteAgent }
+					);
+					stops.terminate();
+					expect(remoteSignal.signalRemoteAgent).toHaveBeenCalledExactlyOnceWith(
+						plan.remoteAgent,
+						'terminate'
+					);
+					expect(terminate).toHaveBeenCalledTimes(1);
+					expect(fs.writeFileSync).not.toHaveBeenCalled();
+					expect(saveImageToTempFile).not.toHaveBeenCalled();
+					expect(imageArgs).not.toHaveBeenCalled();
+					expect(imagePromptBuilder).not.toHaveBeenCalled();
+					expect(promptArgs).not.toHaveBeenCalled();
+					expect(childProcess.spawn).not.toHaveBeenCalled();
+					const diagnostics = JSON.stringify([
+						vi.mocked(logger.debug).mock.calls,
+						vi.mocked(logger.info).mock.calls,
+						vi.mocked(logger.warn).mock.calls,
+					]);
+					expect(diagnostics).not.toContain(artifactPath);
+					expect(diagnostics).not.toContain('private-remote-content');
+				}
+			);
+
+			it.each(['missing-script', 'local-plan', 'wrong-shell'] as const)(
+				'refuses %s remote preparation before the sink without private diagnostics',
+				(kind) => {
+					const launch = () => {
+						const plan = planPipeSpawn(
+							base({
+								toolType: 'grok',
+								command: 'ssh',
+								args:
+									kind === 'wrong-shell'
+										? ['dev@build', 'bash']
+										: ['dev@build', ...SSH_STDIN_REMOTE_SHELL],
+								sshStdinScript: kind === 'missing-script' ? undefined : 'private-script-content',
+								promptArtifactPath: '/tmp/private-refused-prompt.json',
+								promptDelivery: kind === 'local-plan' ? delivery : undefined,
+							})
+						);
+						current = startTurn(plan.spec, {}, {});
+					};
+					expect(launch).toThrow(
+						new Error(
+							kind === 'wrong-shell'
+								? 'Remote prompt preparation unavailable.'
+								: 'Prompt-file delivery does not match its host plan.'
+						)
+					);
+					expect(childProcess.spawn).not.toHaveBeenCalled();
+					expect(fs.writeFileSync).not.toHaveBeenCalled();
+					expect(remoteSignal.signalRemoteAgent).not.toHaveBeenCalled();
+					expect(fs.readdirSync(scratch.dir)).toEqual([]);
+					const diagnostics = JSON.stringify([
+						vi.mocked(logger.debug).mock.calls,
+						vi.mocked(logger.info).mock.calls,
+						vi.mocked(logger.warn).mock.calls,
+					]);
+					expect(diagnostics).not.toContain('private-script-content');
+					expect(diagnostics).not.toContain('/tmp/private-refused-prompt.json');
+				}
+			);
+		});
 
 		it.each(['remote-owner', 'ssh-script'] as const)(
 			'refuses local materialization for %s',

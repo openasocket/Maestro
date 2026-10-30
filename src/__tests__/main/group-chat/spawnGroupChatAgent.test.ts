@@ -7,7 +7,7 @@
  * router would wait the full supervising timeout. Regression guard for that.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Keep applyClaudeSpawnDecision + buildRemoteInteractiveSpawn REAL (they own the
 // actual `--max-wait` arg injection, which is what we want to assert lands in
@@ -58,7 +58,17 @@ vi.mock('../../../main/utils/logger', () => ({
 	logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock('../../../shared/maestro-lib/launch/ssh-path', () => ({
+	resolveSshPath: async () => 'ssh',
+}));
+
 import * as os from 'os';
+import * as path from 'node:path';
+import { getAgentDefinition } from '../../../shared/maestro-lib/providers/definitions';
+import { getAgentCapabilities } from '../../../shared/maestro-lib/providers/capabilities';
+import { getSshRemoteConfig } from '../../../shared/maestro-lib/launch/ssh-remote-resolver';
+import { logger } from '../../../shared/maestro-lib/host';
+import type { SpawnGroupChatAgentConfig } from '../../../main/group-chat/spawnGroupChatAgent';
 import { spawnGroupChatAgent } from '../../../main/group-chat/spawnGroupChatAgent';
 import { embedSystemPromptInPrompt } from '../../../shared/embeddedSystemPrompt';
 import type { AgentConfig } from '../../../main/agents/definitions';
@@ -342,6 +352,294 @@ describe('spawnGroupChatAgent', () => {
 			});
 			const wrapConfig = mockWrapSpawnWithSsh.mock.calls[0][0] as { prompt: string };
 			expect(wrapConfig.prompt).toBe(embedSystemPromptInPrompt('SYS', 'hello'));
+		});
+	});
+
+	describe('private prompt-file handoff (GT1-02-10D1T)', () => {
+		const roomId = '11111111-2222-4333-8444-555555555555';
+		const providerSession = '019aa4fe-0000-7000-8000-000000000002';
+		const remote = {
+			id: 'r1',
+			name: 'Box',
+			host: 'box.invalid',
+			port: 22,
+			username: 'me',
+			privateKeyPath: '',
+			enabled: true,
+			useSshConfig: false,
+		};
+		const remotePath = path.posix.join(
+			'/tmp',
+			'maestro-prompt-11111111-2222-4333-8444-555555555555.json'
+		);
+		let base: SpawnGroupChatAgentConfig;
+		let spawnAdmitted: ReturnType<typeof vi.fn>;
+		beforeEach(async () => {
+			for (const level of ['debug', 'info', 'warn', 'error'] as const)
+				vi.spyOn(logger, level).mockImplementation(() => {});
+			mockResolve.mockReturnValue({ mode: 'api', reason: 'auto' });
+			vi.mocked(getSshRemoteConfig).mockReturnValue({ config: remote, source: 'session' });
+			const actual = await vi.importActual<
+				typeof import('../../../shared/maestro-lib/launch/ssh-spawn-wrapper')
+			>('../../../shared/maestro-lib/launch/ssh-spawn-wrapper');
+			mockWrapSpawnWithSsh.mockImplementation(actual.wrapSpawnWithSsh);
+			spawnAdmitted = vi.fn().mockResolvedValue({ pid: 4343, success: true });
+			base = {
+				sessionId: `group-chat-${roomId}-participant-Alpha-1700000000000`,
+				agentId: 'grok',
+				agent: {
+					...getAgentDefinition('grok')!,
+					available: true,
+					capabilities: getAgentCapabilities('grok'),
+					// Candidate declaration only; this does not activate the provider.
+					promptFile: {
+						format: 'acp-json',
+						exclusivePromptFlags: ['-p', '--single', '--prompt-file'],
+					},
+					promptFileArgs: (file) => ['--prompt-file', file],
+				},
+				command: path.resolve('local tools', 'grok'),
+				remoteCommand: path.posix.join('/opt', 'remote tools', 'grok'),
+				args: ['--model', 'selected-model'],
+				cwd: path.resolve('work'),
+				prompt: 'private 雪\n$(keep) `literal`',
+				appendSystemPrompt: 'private system',
+				customEnvVars: { GROK_HOME: path.resolve('account') },
+				readOnlyMode: true,
+				actor: { peer: 'web-login', username: 'pat' },
+				processManager: { ...processManager, spawnAdmitted },
+			};
+		});
+		afterEach(() => {
+			vi.mocked(getSshRemoteConfig).mockReturnValue({ config: null, source: 'session' });
+			mockWrapSpawnWithSsh.mockReset();
+			vi.restoreAllMocks();
+		});
+		describe.each([false, true])('SSH=%s', (ssh) => {
+			it.each([
+				['composed', 'private 雪\n$(keep) `literal`', false],
+				['empty', '', false],
+				['sole system', '', false],
+				['resumed', 'private 🧪\n'.repeat(4_000), true],
+				['empty resumed', '', true],
+			] as const)('hands off %s bytes once through admission', async (label, prompt, resumed) => {
+				const config = { ...base, prompt, isResume: false };
+				if (label === 'empty' || label === 'empty resumed') config.appendSystemPrompt = undefined;
+				if (resumed) {
+					config.sessionId = 'cross-agent-request';
+					config.args = [...base.args, '--resume', providerSession];
+				}
+				if (ssh) {
+					config.cwd = path.posix.join('/remote', 'team work');
+					config.customEnvVars = { GROK_HOME: '/remote/account' };
+					config.sshRemoteConfig = { enabled: true, remoteId: remote.id };
+					config.sshStore = { getSshRemotes: () => [remote] };
+					config.promptFileDestination = {
+						owner: 'remote',
+						path: remotePath,
+						sshRemoteId: remote.id,
+					};
+				}
+				expect(await spawnGroupChatAgent(config)).toEqual({ pid: 4343, success: true });
+				expect(spawnAdmitted).toHaveBeenCalledTimes(1);
+				expect(spawnSpy).not.toHaveBeenCalled();
+				const [spawned, actor] = spawnAdmitted.mock.calls[0] as [ProcessConfig, unknown];
+				const artifact = spawned.promptArtifact!;
+				const text =
+					resumed || !config.appendSystemPrompt
+						? prompt
+						: prompt
+							? embedSystemPromptInPrompt(config.appendSystemPrompt, prompt)
+							: config.appendSystemPrompt;
+				expect(artifact.content).toBe(
+					JSON.stringify({ type: 'acp', content: [{ type: 'text', text }] })
+				);
+				expect(artifact).toMatchObject({
+					owner: ssh ? 'remote' : 'local',
+					mode: 0o600,
+					flag: 'wx',
+					encoding: 'utf8',
+					cleanup: 'turn',
+				});
+				expect(spawned).toMatchObject({
+					toolType: 'grok',
+					readOnlyMode: true,
+					prompt: undefined,
+					sendPromptViaStdin: false,
+					sendPromptViaStdinRaw: false,
+				});
+				expect(actor).toEqual(base.actor);
+				expect(spawned.agentSessionId).toBe(resumed ? providerSession : undefined);
+				expect(spawned.delegation).toEqual(resumed ? undefined : groupChatRoomContext(roomId));
+				if (ssh) {
+					const wrapped = mockWrapSpawnWithSsh.mock.calls[0][0];
+					expect(mockWrapSpawnWithSsh).toHaveBeenCalledTimes(1);
+					expect(wrapped).toMatchObject({
+						cwd: config.cwd,
+						agentBinaryName: config.remoteCommand,
+						prompt: undefined,
+						promptArtifact: artifact,
+						customEnvVars: config.customEnvVars,
+					});
+					expect(spawned).toMatchObject({
+						command: 'ssh',
+						sshRemoteId: remote.id,
+						cwd: os.homedir(),
+					});
+					expect(artifact.path).toBe(remotePath);
+					expect(spawned.sshStdinScript).toContain(
+						Buffer.from(artifact.content).toString('base64')
+					);
+					expect(spawned.sshStdinScript).toContain(
+						"'/opt/remote tools/grok' '--model' 'selected-model'"
+					);
+					expect(spawned.sshStdinScript).toContain("cd '/remote/team work' || exit 1");
+					expect(spawned.sshStdinScript).toContain("export GROK_HOME='/remote/account'");
+					expect(spawned.sshStdinScript!.includes(`'--resume' '${providerSession}'`)).toBe(resumed);
+					expect(spawned.sshStdinScript).not.toContain(config.command);
+					expect(spawned.args.join(' ')).not.toContain(artifact.path);
+				} else {
+					expect(mockWrapSpawnWithSsh).not.toHaveBeenCalled();
+					expect(path.isAbsolute(artifact.path)).toBe(true);
+					expect(spawned).toMatchObject({
+						command: config.command,
+						cwd: config.cwd,
+						customEnvVars: config.customEnvVars,
+						args: [...config.args, '--prompt-file', artifact.path],
+					});
+				}
+				const diagnostics = JSON.stringify([
+					spawned.sshRemoteCommand,
+					vi.mocked(logger.debug).mock.calls,
+					vi.mocked(logger.info).mock.calls,
+					vi.mocked(logger.warn).mock.calls,
+				]);
+				for (const value of ['private system', 'private 雪', 'private 🧪', artifact.path])
+					expect(diagnostics).not.toContain(value);
+			});
+		});
+		it.each(['ordered', 'image-only', 'unadmitted'])(
+			'preserves %s image content and the system envelope across caller mutation',
+			async (kind) => {
+				const image = { type: 'image' as const, mimeType: 'image/png', data: 'AQID' };
+				const blocks =
+					kind === 'image-only'
+						? [image]
+						: [
+								{ type: 'text' as const, text: 'before 雪' },
+								image,
+								{ type: 'text' as const, text: '\tafter 🧪 ' },
+							];
+				const support = {
+					mimeTypes: ['image/png'],
+					maxCount: 1,
+					maxBytesPerImage: 3,
+					maxTotalBytes: 3,
+				};
+				const pending = spawnGroupChatAgent({
+					...base,
+					prompt: undefined,
+					promptBlocks: blocks,
+					hasImages: true,
+					embeddedImageSupport: kind === 'unadmitted' ? undefined : support,
+				});
+				image.data = 'BAUG';
+				support.mimeTypes.length = 0;
+				base.customEnvVars!.GROK_HOME = 'mutated';
+				base.agent.promptFile!.format = 'text';
+				if (kind === 'unadmitted') {
+					await expect(pending).rejects.toThrow('Prompt-file group chat preparation unavailable.');
+					expect(spawnAdmitted).not.toHaveBeenCalled();
+					return;
+				}
+				await pending;
+				const spawned = spawnAdmitted.mock.calls[0][0] as ProcessConfig;
+				const originalImage = { ...image, data: 'AQID' };
+				expect(JSON.parse(spawned.promptArtifact!.content)).toEqual({
+					type: 'acp',
+					content:
+						kind === 'image-only'
+							? [{ type: 'text', text: 'private system' }, originalImage]
+							: [
+									{ type: 'text', text: embedSystemPromptInPrompt('private system', 'before 雪') },
+									originalImage,
+									{ type: 'text', text: '\tafter 🧪 ' },
+								],
+				});
+				expect(spawned.customEnvVars!.GROK_HOME).toBe(path.resolve('account'));
+				expect(spawnAdmitted).toHaveBeenCalledTimes(1);
+				expect(spawnSpy).not.toHaveBeenCalled();
+			}
+		);
+		it.each([
+			[
+				'duplicate sources',
+				{ promptBlocks: [{ type: 'text', text: 'private block' }] },
+				'Supply either prompt text or ordered content blocks, not both.',
+			],
+			[
+				'resume contradiction',
+				{ args: ['--resume', providerSession], agentSessionId: 'other' },
+				'Prompt-file resume identity does not match its launch arguments.',
+			],
+			[
+				'missing resume ID',
+				{ args: ['--resume'] },
+				'Prompt-file resume requires an explicit provider session identity.',
+			],
+			[
+				'conflicting argv',
+				{ args: ['--single=private-argv'] },
+				'Prompt-file group chat preparation unavailable.',
+			],
+			[
+				'wrong owner',
+				{ promptFileDestination: { owner: 'remote', path: remotePath, sshRemoteId: 'r1' } },
+				'Prompt-file group chat preparation unavailable.',
+			],
+		] satisfies [string, Partial<SpawnGroupChatAgentConfig>, string][])(
+			'refuses %s without admission, retry or private diagnostics',
+			async (_label, overrides, message) => {
+				await expect(spawnGroupChatAgent({ ...base, ...overrides })).rejects.toThrow(
+					new Error(message)
+				);
+				expect(spawnAdmitted).not.toHaveBeenCalled();
+				expect(spawnSpy).not.toHaveBeenCalled();
+				expect(mockWrapSpawnWithSsh).not.toHaveBeenCalled();
+				const logs = JSON.stringify([
+					vi.mocked(logger.debug).mock.calls,
+					vi.mocked(logger.warn).mock.calls,
+					vi.mocked(logger.error).mock.calls,
+				]);
+				for (const value of ['private', remotePath, 'other']) expect(logs).not.toContain(value);
+			}
+		);
+
+		it('sanitizes an SSH preparation failure and never falls back to a local process', async () => {
+			mockWrapSpawnWithSsh.mockRejectedValueOnce(new Error(`private content at ${remotePath}`));
+			await expect(
+				spawnGroupChatAgent({
+					...base,
+					sshRemoteConfig: { enabled: true, remoteId: remote.id },
+					sshStore: { getSshRemotes: () => [remote] },
+				})
+			).rejects.toThrow(/^Prompt-file group chat preparation unavailable\.$/);
+			expect(spawnAdmitted).not.toHaveBeenCalled();
+			expect(spawnSpy).not.toHaveBeenCalled();
+			expect(mockWrapSpawnWithSsh).toHaveBeenCalledTimes(1);
+		});
+
+		it('returns a managed refusal without retrying through the legacy spawn', async () => {
+			const refusal = {
+				pid: -1,
+				success: false,
+				error: 'The spawn was not admitted.',
+				managed: { state: 'unavailable', code: 'runtime-unavailable' },
+			};
+			spawnAdmitted.mockResolvedValueOnce(refusal);
+			expect(await spawnGroupChatAgent(base)).toEqual(refusal);
+			expect(spawnAdmitted).toHaveBeenCalledTimes(1);
+			expect(spawnSpy).not.toHaveBeenCalled();
 		});
 	});
 
