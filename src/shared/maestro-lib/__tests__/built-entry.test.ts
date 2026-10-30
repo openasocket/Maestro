@@ -34,10 +34,22 @@ import {
 	CAPTURED_CLAUDE_CODE_SESSION_ID,
 } from '../../../__tests__/main/process-manager/recordings/captured';
 import type { TurnRecording } from '../../../__tests__/main/process-manager/recordings/fixtures';
-import { packageRuntime } from '../../../../scripts/package-mega-maestro-runtime.mjs';
 
 const REPO_ROOT = path.resolve(__dirname, '../../../..');
 const BUILD_SCRIPT = path.join(REPO_ROOT, 'scripts/build-maestro-lib.mjs');
+/**
+ * The packager, scripts/package-mega-maestro-runtime.mjs, loaded by path the way the built
+ * files are: a script the lint legs cannot type is never imported statically from src/.
+ */
+const PACKAGER = pathToFileURL(
+	path.join(REPO_ROOT, 'scripts/package-mega-maestro-runtime.mjs')
+).href;
+type PackageRuntime = (options: {
+	library: string;
+	out: string;
+	allowDirty?: boolean;
+	allowStale?: boolean;
+}) => { dir: string };
 const FAKE_AGENT = path.resolve(__dirname, '../../../__tests__/fixtures/fake-agent.mjs');
 const posixOnly = describe.skipIf(process.platform === 'win32');
 
@@ -405,15 +417,16 @@ describe('the packaged runtime archive, as a consumer loads it', () => {
 	let payload: string;
 	let manifest: RuntimeManifest;
 
-	beforeAll(() => {
+	beforeAll(async () => {
 		// The scratch build, packaged as the bootstrap archive (the flags only record a
 		// dirty or stale state; the archive is the same payload either way).
+		const { packageRuntime } = (await import(PACKAGER)) as { packageRuntime: PackageRuntime };
 		const report = packageRuntime({
 			library: libDir,
 			out: path.join(scratch, 'runtime'),
 			allowDirty: true,
 			allowStale: true,
-		}) as { dir: string };
+		});
 		const extracted = path.join(scratch, 'consumer');
 		fs.mkdirSync(extracted);
 		const tar = spawnSync('tar', ['-xzf', path.join(report.dir, 'runtime.tgz'), '-C', extracted], {
