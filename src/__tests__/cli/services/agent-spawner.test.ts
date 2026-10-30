@@ -2114,20 +2114,36 @@ Some text with [x] in it that's not a checkbox
 			expect(result.agentSessionId).toBe('cop-resume-1');
 		});
 
-		it('should spawn grok headless with -p, --always-approve, streaming-json and accumulate text deltas', async () => {
+		it('should spawn grok headless with a private ACP prompt file and accumulate text deltas', async () => {
+			vi.spyOn(fs, 'openSync').mockReturnValue(73);
+			vi.spyOn(fs, 'fstatSync').mockReturnValue({ dev: 1, ino: 73 } as fs.Stats);
+			vi.spyOn(fs, 'lstatSync').mockReturnValue({ dev: 1, ino: 73 } as fs.Stats);
+			vi.spyOn(fs, 'unlinkSync').mockImplementation(() => {});
+			vi.spyOn(fs, 'closeSync').mockImplementation(() => {});
+			vi.mocked(fs.writeFileSync).mockImplementation(() => {});
 			const resultPromise = spawnAgent('grok', '/project', 'Hello grok');
-			await new Promise((resolve) => setTimeout(resolve, 0));
+			await waitForSpawnCall();
 
-			const [cmd, args] = mockSpawn.mock.calls[0];
-			expect(cmd).toBeTruthy();
+			const { command, args, options } = spawnCall();
+			expect(command).toBe('/usr/local/bin/grok');
+			expect(options).toMatchObject({ cwd: '/project', shell: false });
 
-			// Grok batch mode: grok --always-approve --output-format streaming-json -p "prompt"
+			// The canonical file transport keeps ACP content out of argv and stdin.
 			expect(args).toContain('--always-approve');
-			expect(args).toContain('--output-format');
-			expect(args).toContain('streaming-json');
-			expect(args).toContain('-p');
-			expect(args).toContain('Hello grok');
-			// promptArgs path replaces the '--' separator
+			expect(args[args.indexOf('--output-format') + 1]).toBe('streaming-json');
+			expect(args.filter((arg) => arg === '--prompt-file')).toHaveLength(1);
+			const file = args[args.indexOf('--prompt-file') + 1];
+			expect(fs.openSync).toHaveBeenCalledExactlyOnceWith(file, 'wx', 0o600);
+			expect(fs.writeFileSync).toHaveBeenCalledExactlyOnceWith(
+				73,
+				JSON.stringify({ type: 'acp', content: [{ type: 'text', text: 'Hello grok' }] }),
+				'utf8'
+			);
+			expect(fs.unlinkSync).not.toHaveBeenCalled();
+			expect(fs.closeSync).not.toHaveBeenCalled();
+			expect(args).not.toContain('-p');
+			expect(args.join(' ')).not.toContain('Hello grok');
+			expect(mockStdin.write).not.toHaveBeenCalled();
 			expect(args).not.toContain('--');
 			// --permission-mode belongs to read-only mode only; grok's clap errors
 			// with "cannot be used multiple times" if the flag ever repeats.
@@ -2161,6 +2177,8 @@ Some text with [x] in it that's not a checkbox
 			expect(result.success).toBe(true);
 			expect(result.response).toBe('READY');
 			expect(result.agentSessionId).toBe('grok-sess-1');
+			expect(fs.unlinkSync).toHaveBeenCalledExactlyOnceWith(file);
+			expect(fs.closeSync).toHaveBeenCalledExactlyOnceWith(73);
 		});
 
 		it('should run grok read-only with a single --permission-mode plan and no approve flag', async () => {
@@ -3279,8 +3297,9 @@ Some text with [x] in it that's not a checkbox
 					if (remote) {
 						mockWrapSpawnWithSsh.mockResolvedValue({
 							command: 'ssh',
-							args: ['remotehost', 'synthetic-grok-command'],
-							cwd: '/p',
+							args: ['remotehost', ...remoteSignal.SSH_STDIN_REMOTE_SHELL],
+							cwd: '/local',
+							sshStdinScript: 'exec grok --prompt-file /synthetic-owned-file',
 							sshRemoteUsed: { id: 'r1', name: 'r1', host: 'remotehost' },
 						});
 					}
@@ -3311,12 +3330,21 @@ Some text with [x] in it that's not a checkbox
 							expect.objectContaining({
 								cwd: '/p',
 								agentBinaryName: 'grok',
+								prompt: undefined,
+								promptArtifact: expect.objectContaining({
+									owner: 'remote',
+									sshRemoteId: 'r1',
+									content: JSON.stringify({ type: 'acp', content: [{ type: 'text', text: 'hi' }] }),
+								}),
 								customEnvVars: expect.objectContaining(accountEnv),
 							}),
 							sshRemoteConfig,
 							expect.anything()
 						);
 						expect(spawnCall().command).toBe('ssh');
+						expect(spawnCall().options).toMatchObject({ cwd: '/local' });
+						expect(mockStdin.write).toHaveBeenCalledTimes(1);
+						expect(mockStdin.write.mock.calls[0][0]).toContain('exec grok --prompt-file');
 					} else {
 						expect(mockWrapSpawnWithSsh).not.toHaveBeenCalled();
 						expect(spawnCall().options.env).toMatchObject(accountEnv);
@@ -4603,9 +4631,8 @@ Some text with [x] in it that's not a checkbox
 							expect(result.success).toBe(true);
 							const wrapped = mockWrapSpawnWithSsh.mock.calls[0]?.[0];
 							const args = remote ? wrapped.args : spawnCall().args;
-							expect(args).toEqual(
-								expect.arrayContaining(['--cwd', '/selected/project', '--prompt-file'])
-							);
+							expect(args).toContain('--prompt-file');
+							expect(args).not.toContain('--cwd');
 							expect(args).not.toContain('--add-dir');
 							expect(args.join(' ')).not.toContain('/private/');
 							if (session) expect(args).toEqual(expect.arrayContaining(['--resume', session]));
@@ -4670,7 +4697,12 @@ Some text with [x] in it that's not a checkbox
 							additionalDirectories: [read, write],
 						}),
 						0,
-						provider === 'claude-code' ? CLAUDE_OK() : CODEX_INIT()
+						provider === 'claude-code'
+							? CLAUDE_OK()
+							: JSON.stringify({
+									type: 'item.completed',
+									item: { type: 'agent_message', text: 'hi' },
+								}) + '\n'
 					);
 					expect(result.success).toBe(true);
 					const { args } = spawnCall();
@@ -4747,15 +4779,16 @@ Some text with [x] in it that's not a checkbox
 						});
 						const wrapped = mockWrapSpawnWithSsh.mock.calls[0]?.[0];
 						const args = remote ? wrapped.args : spawnCall().args;
-						expect(args).toEqual(
-							expect.arrayContaining(['-m', 'fixture-model', '--cwd', '/project', '--prompt-file'])
-						);
+						expect(args).toEqual(expect.arrayContaining(['-m', 'fixture-model', '--prompt-file']));
+						expect(args).not.toContain('--cwd');
 						expect(args).not.toContain('-p');
+						expect(args).not.toContain(composed);
 						if (session) expect(args).toEqual(expect.arrayContaining(['--resume', session]));
 						if (remote) {
 							expect(wrapped).toMatchObject({
 								command: 'grok',
 								agentBinaryName: 'grok',
+								cwd: '/project',
 								prompt: undefined,
 								customEnvVars: { GROK_HOME: '/account/selected' },
 								promptArtifact: {
@@ -4780,6 +4813,7 @@ Some text with [x] in it that's not a checkbox
 							expect(fs.writeFileSync).toHaveBeenCalledExactlyOnceWith(73, content, 'utf8');
 							expect(fs.unlinkSync).toHaveBeenCalledExactlyOnceWith(file);
 							expect(fs.closeSync).toHaveBeenCalledExactlyOnceWith(73);
+							expect(spawnCall().options).toMatchObject({ cwd: '/project' });
 							expect(spawnCall().options.env.GROK_HOME).toBe('/account/selected');
 							expect(mockStdin.write).not.toHaveBeenCalled();
 						}
