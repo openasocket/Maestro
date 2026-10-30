@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge in progress; MCOMP-01-03A, 03B, 03C, 03D, 03E, 03F, 03G and 03H staged (22 files), 22 files unmerged in the worktree; MCOMP-01-03I..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T02:37:42.158Z",
-		"updatedBy": "MCOMP-01-03H"
+		"state": "merge in progress; MCOMP-01-03A, 03B, 03C, 03D, 03E, 03F, 03G, 03H and 03I staged (25 files), 19 files unmerged in the worktree; MCOMP-01-03J..P resolve them (positional order mentionRouting, delegation, dispatchTicket on the dispatch callbacks, see progress.MCOMP-01-03I.positionalOrder), Q commits, R tests, S lands, T re-pins and closes",
+		"updatedAt": "2026-10-30T02:47:35.030Z",
+		"updatedBy": "MCOMP-01-03I"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -468,6 +468,65 @@
 			],
 			"unmergedAfter": 22,
 			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03h.mjs (not in git)"
+		},
+		"MCOMP-01-03I": {
+			"resolvedAt": "2026-10-29",
+			"resolvedBy": "Maestro-Claude",
+			"files": [
+				"src/main/web-server/WebServer.ts",
+				"src/main/web-server/types.ts",
+				"src/main/web-server/managers/CallbackRegistry.ts"
+			],
+			"positionalOrder": "positional order of the trailing optional parameters on ExecuteCommandCallback, NewAITabWithPromptCallback and EnqueueCommandCallback, and on every pass-through of them: ..., background | hidden | held, mentionRouting (upstream c8913d2d8), delegation, dispatchTicket (integration MRC-08-01B, MRC-08-02); upstream shape first, the integration additions re-applied after it; groups J (callbacks), K (WebSocketMessageHandler, commands, messageHandlers types), L (queue, tabs, messageHandlers.test), M (web-server-factory.test, CallbackRegistry.test), N (preload remotes), O (global.d.ts, queuedPrompt) and P (useRemoteIntegration and its suite) must keep this order wherever a both-sides hunk passes them positionally",
+			"hunks": {
+				"src/main/web-server/types.ts": [
+					"43-47 (the type imports after AgentDelegationNotice): the integration side imported ManagedDelegationContext from shared/maestro-lib/managed/delegation, upstream imported MentionRouting from shared/crossAgentContext; resolved as both lines, upstream first",
+					"372-390 (ExecuteCommandCallback trailing parameters): the integration side (MRC-08-01B eafe4d781, MRC-08-02 48839c506) appended the documented delegation?: ManagedDelegationContext and dispatchTicket?: string after background; upstream (c8913d2d8, dispatch --routing) appended the documented mentionRouting?: MentionRouting at the same spot; resolved as upstream parameter with its doc comment first, then the two integration parameters with their doc comments",
+					"619-627 (NewAITabWithPromptCallback trailing parameters): the same both-sides append after hidden; resolved as mentionRouting then delegation, dispatchTicket, each with its doc comment",
+					"666-674 (EnqueueCommandCallback trailing parameters): the same both-sides append after held; resolved as mentionRouting then delegation, dispatchTicket, each with its doc comment; upstream mentionRouting on the send_command message (317) and on QueuedItemSnapshot (679) and the integration dispatchTicket on the terminal write payload (577), the terminal open request (786) and the relayed write (801) had auto-merged"
+				],
+				"src/main/web-server/managers/CallbackRegistry.ts": [
+					"478-483 and 494-499 (executeCommand() parameters and the arguments it forwards to callbacks.executeCommand): both sides appended their parameter after background; resolved as mentionRouting then delegation, dispatchTicket on both the signature and the forwarding call",
+					"703-721 (newAITabWithPrompt() parameters and body): upstream collapsed the forwarding call to one line with mentionRouting as the fifth argument, the integration side kept it multi-line with delegation and dispatchTicket as the fifth and sixth; resolved as the multi-line signature and body with mentionRouting inserted before delegation on both",
+					"744-749 and 760-765 (enqueueCommand() parameters and the arguments it forwards): both sides appended after held; resolved as mentionRouting then delegation, dispatchTicket on both; both type imports (lines 2 and 18), upstream interruptSession callback slot and method (217, 336, 503-512, 1346) and the integration openTerminalTab dispatchTicket pass-through (661-664 after the merge) had auto-merged"
+				],
+				"src/main/web-server/WebServer.ts": [
+					"1342-1347 and 1357-1362 (setupMessageHandlerCallbacks executeCommand pass-through, parameters and arguments): both sides appended after background; resolved as mentionRouting then delegation, dispatchTicket on both",
+					"1418-1423 and 1430-1439 (newAITabWithPrompt pass-through, parameters and arguments): both sides appended after hidden; upstream side of the second hunk also carries its new interruptSession: (sessionId, tabId) => this.callbackRegistry.interruptSession(sessionId, tabId) entry for the WebSocket message handler (14451968f, interrupt_turn); resolved as mentionRouting then delegation, dispatchTicket, and upstream interruptSession entry kept whole right after the newAITabWithPrompt entry",
+					"1452-1457 and 1467-1472 (enqueueCommand pass-through, parameters and arguments): both sides appended after held; resolved as mentionRouting then delegation, dispatchTicket on both; the other interruptSession wiring (1233), both type imports (39, 85) and the integration openTerminalTab dispatchTicket pass-through (1395-1400 after the merge) had auto-merged"
+				]
+			},
+			"checks": {
+				"staging": "merge-tool stage over the three files: prettier left all three unchanged, git add done, 19 files left unmerged, no marker left in any, nothing unstaged",
+				"seams": "the dispatch-ticket and delegation seams of the web server are whole on upstream shape: every one of the three dispatch callbacks (execute, new tab with prompt, enqueue) still carries the dispatching operation context and the host-minted ticket from the WS handler through the registry and the message-handler pass-through to the renderer, now one slot later behind upstream mentionRouting; the terminal-tab ticket (openTerminalTab, the relayed terminal write) and the managed and enterprise callbacks registered by the integration side (getManaged, the settings authority, the listener hold in listen) auto-merged untouched; upstream interrupt_turn pass-through is registered beside them",
+				"suites": "Working/mcomp-01-03/suites-03i.mjs over the eight suites that import one of the three files: cot-export 67, live-mode 26, createSessionProvenance 6, sessionCallbacks.relay 1, pianola-message-contract 1 passed (101 tests, 0 failed, 0 skipped); WebServer.test.ts, WebServer.listenerPolicy.test.ts and liteHost.test.ts cannot transform because WebServer.ts imports ./handlers, whose messageHandlers/commands.ts (222) still carries markers (MCOMP-01-03K), not a defect of these files; CallbackRegistry.test.ts and web-server-factory.test.ts are themselves unmerged (MCOMP-01-03M)",
+				"typeCheck": "a throwaway tsconfig extending the worktree tsconfig.main.json over the three files alone (Working/mcomp-01-03/tsconfig-03i.json, not in git): 0 errors in WebServer.ts, types.ts or CallbackRegistry.ts; the only output is 27 TS1185 (merge conflict marker encountered) in the still-unmerged messageHandlers/types.ts, queue.ts, tabs.ts and commands.ts that WebServer.ts reaches (MCOMP-01-03K and 03L); MCOMP-01-03Q checks the real configs once they are resolved",
+				"numstatVsHead": {
+					"src/main/web-server/WebServer.ts": "32+/20- (upstream interrupt_turn, closed_tab_command, context ops, release supervision, live controller and dispatch --routing)",
+					"src/main/web-server/types.ts": "59+/13- (upstream message and callback types for the same verbs)",
+					"src/main/web-server/managers/CallbackRegistry.ts": "59+/34- (upstream registry rework)"
+				},
+				"numstatVsMergeHead": {
+					"src/main/web-server/WebServer.ts": "61+/14- (the integration managed and enterprise callbacks, the listener hold, the dispatch tickets)",
+					"src/main/web-server/types.ts": "69+/4- (the integration delegation, ticket, managed and settings-authority types)",
+					"src/main/web-server/managers/CallbackRegistry.ts": "53+/8- (the integration getManaged, settings and ticket registrations)"
+				}
+			},
+			"semanticConflictsForQ": [],
+			"followUpsForR": [
+				"rerun WebServer.test.ts, WebServer.listenerPolicy.test.ts and liteHost.test.ts once MCOMP-01-03K resolves messageHandlers/commands.ts; they transform-fail on its markers today"
+			],
+			"blockedSuites": [
+				"src/__tests__/main/web-server/WebServer.test.ts (messageHandlers/commands.ts markers, 03K)",
+				"src/__tests__/main/web-server/WebServer.listenerPolicy.test.ts (same)",
+				"src/__tests__/main/web-server/liteHost.test.ts (same)"
+			],
+			"observations": [
+				"positional order of the trailing optional parameters on ExecuteCommandCallback, NewAITabWithPromptCallback and EnqueueCommandCallback, and on every pass-through of them: ..., background | hidden | held, mentionRouting (upstream c8913d2d8), delegation, dispatchTicket (integration MRC-08-01B, MRC-08-02); upstream shape first, the integration additions re-applied after it; groups J (callbacks), K (WebSocketMessageHandler, commands, messageHandlers types), L (queue, tabs, messageHandlers.test), M (web-server-factory.test, CallbackRegistry.test), N (preload remotes), O (global.d.ts, queuedPrompt) and P (useRemoteIntegration and its suite) must keep this order wherever a both-sides hunk passes them positionally",
+				"upstream c8913d2d8 collapsed the newAITabWithPrompt forwarding call in CallbackRegistry to one line; with three trailing parameters the multi-line form is what prettier produces, so the integration multi-line body was kept"
+			],
+			"unmergedAfter": 19,
+			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03i.mjs (not in git)"
 		}
 	}
 }
