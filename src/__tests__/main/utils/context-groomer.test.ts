@@ -8,7 +8,12 @@
 
 import * as path from 'path';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { groomContext, type GroomingProcessManager } from '../../../main/utils/context-groomer';
+import {
+	groomContext,
+	getActiveGroomingSessionCount,
+	type GroomingProcessManager,
+} from '../../../main/utils/context-groomer';
+import { cheapTurnSettings } from '../../../shared/modelTiers';
 import type { AgentDetector } from '../../../main/agents';
 import type { AgentConfig } from '../../../main/agents';
 import type { SshRemoteSettingsStore } from '../../../main/utils/ssh-remote-resolver';
@@ -909,7 +914,7 @@ describe('groomContext', () => {
 		};
 
 		/** First spawn is refused; every later one answers normally. */
-		function refuseFirstSpawn(pm: ReturnType<typeof createMockProcessManager>) {
+		function refuseFirstSpawn(pm: ReturnType<typeof createMockProcessManager>, refusal = REFUSAL) {
 			const answer = pm.spawn.bind(pm);
 			let spawns = 0;
 			pm.spawn = (config: Record<string, unknown>) => {
@@ -917,7 +922,7 @@ describe('groomContext', () => {
 				if (spawns > 1) return answer(config);
 				const sessionId = config.sessionId as string;
 				setTimeout(() => {
-					pm._emitError(sessionId, REFUSAL);
+					pm._emitError(sessionId, refusal);
 					pm._emitExit(sessionId, 1);
 				}, 10);
 				return { pid: 12345, success: true };
@@ -948,6 +953,95 @@ describe('groomContext', () => {
 			// Only the effort is dropped; the model the caller asked for stays.
 			expect(calls[1][2]).toMatchObject({ sessionCustomModel: 'haiku' });
 		});
+
+		it.each([
+			['automatic hint', 'automatic', 'high', false],
+			['explicit user value', 'max', 'high', false],
+			['equal session and provider effort', 'medium', 'medium', true],
+			['different inherited provider effort', 'medium', 'high', true],
+			['provider effort without a turn override', undefined, 'medium', true],
+			['menu ID with unknown provenance', 'reasoning-menu', 'high', true],
+		] as const)(
+			'preserves a Grok refusal for %s without an unqualified fallback',
+			async (_label, requestedEffort, providerEffort, remote) => {
+				// Even a hint produced from an advertised menu loses its provenance
+				// at this API; a different configured effort is not a validated fallback.
+				const effort =
+					requestedEffort === 'automatic'
+						? cheapTurnSettings('grok', ['minimal', 'high']).effort
+						: requestedEffort;
+				if (requestedEffort === 'automatic') expect(effort).toBe('minimal');
+				const refusal = {
+					...REFUSAL,
+					agentId: 'grok',
+					message: `--effort/--reasoning-effort: unknown effort level '${effort ?? providerEffort}'; use one of: high`,
+				};
+				const spawnCount = refuseFirstSpawn(mockPM, refusal);
+				const spawn = vi.spyOn(mockPM, 'spawn');
+				const grok = makeAgent({ id: 'grok', binaryName: 'grok', command: 'grok' });
+				const account = { GROK_HOME: '/accounts/selected' };
+				const providerConfig = { model: 'grok-selected', reasoningEffort: providerEffort };
+				vi.mocked(applyAgentConfigOverrides).mockReturnValueOnce({
+					args: ['--model', 'grok-selected', '--reasoning-effort', effort ?? providerEffort],
+					effectiveCustomEnvVars: account,
+					customArgsSource: 'none',
+					customEnvSource: 'session',
+					modelSource: 'session',
+				});
+
+				await expect(
+					groomContext(
+						{
+							projectRoot: '/project',
+							agentType: 'grok',
+							prompt: 'summarize',
+							agentSessionId: 'grok-session',
+							sessionCustomPath: '/selected/grok',
+							sessionCustomModel: 'grok-selected',
+							sessionCustomEffort: effort,
+							sessionCustomEnvVars: account,
+							agentConfigValues: providerConfig,
+							sessionSshRemoteConfig: { enabled: remote, remoteId: SSH_REMOTE.id },
+							sshStore: createSshStore(),
+						},
+						mockPM,
+						createMockAgentDetector(grok)
+					)
+				).rejects.toThrow(`Grooming error: ${refusal.message}`);
+
+				expect(spawnCount()).toBe(1);
+				expect(applyAgentConfigOverrides).toHaveBeenCalledExactlyOnceWith(
+					grok,
+					expect.any(Array),
+					expect.objectContaining({
+						sessionCustomEffort: effort,
+						sessionCustomModel: 'grok-selected',
+						sessionCustomEnvVars: account,
+						agentConfigValues: providerConfig,
+					})
+				);
+				expect(buildAgentArgs).toHaveBeenCalledWith(
+					grok,
+					expect.objectContaining({ agentSessionId: 'grok-session' })
+				);
+				const config = spawn.mock.calls[0][0];
+				expect(config.toolType).toBe('grok');
+				expect(config.command).toBe(remote ? 'ssh' : '/selected/grok');
+				if (remote) {
+					expect(config.sshRemoteId).toBe(SSH_REMOTE.id);
+					expect(config.sshRemoteHost).toBe(SSH_REMOTE.host);
+					const command = (config.args as string[]).join(' ');
+					expect(command).toContain('/selected/grok');
+					expect(command).toContain('/accounts/selected');
+					expect(command).toContain('grok-selected');
+				} else {
+					expect(config.customEnvVars).toEqual(account);
+					expect(config.args).toContain('grok-selected');
+				}
+				for (const handlers of mockPM._handlers.values()) expect(handlers).toHaveLength(0);
+				expect(getActiveGroomingSessionCount()).toBe(0);
+			}
+		);
 
 		it('does not retry when no effort was sent', async () => {
 			// The agent's own configured effort was refused. Nothing Maestro chose

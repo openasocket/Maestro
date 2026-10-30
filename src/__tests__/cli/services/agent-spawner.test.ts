@@ -184,7 +184,7 @@ import { getAgentDefinition } from '../../../main/agents/definitions';
 import { isolateAgentEnv } from '../../helpers/agentEnvIsolation';
 // Static, so they share one module instance with the statically imported
 // `spawnAgent` above; other suites here call `vi.resetModules()`.
-import { resetEffortRejections } from '../../../shared/effortRejection';
+import { getEffortRejection, resetEffortRejections } from '../../../shared/effortRejection';
 import { resolveEffortLevel } from '../../../shared/modelTiers';
 import {
 	createHeadlessSpawnAuthority,
@@ -3163,37 +3163,58 @@ Some text with [x] in it that's not a checkbox
 		const effortArg = (args: string[]) =>
 			args.find((arg) => arg.startsWith('model_reasoning_effort='));
 
-		it('runs the turn once more with the effort left to the agent', async () => {
-			const p = spawnAgent('codex', '/p', 'hi', undefined, { customEffort: 'low' });
+		it.each([true, false])(
+			'retries Codex once at a distinct configured effort (success=%s)',
+			async (succeeds) => {
+				mockReadAgentConfig.mockReturnValue({ reasoningEffort: 'medium' });
+				const p = spawnAgent('codex', '/p', 'hi', 'codex-resume', {
+					customEffort: 'low',
+					customModel: 'gpt-6-astra',
+				});
 
-			await waitForSpawnCall(1);
-			expect(effortArg(argsOfSpawn(0))).toBe('model_reasoning_effort="low"');
-			mockStdout.emit('data', Buffer.from(REFUSAL_LINE));
-			await yieldTick();
-			(mockChild as EventEmitter).emit('close', 1);
+				await waitForSpawnCall(1);
+				expect(effortArg(argsOfSpawn(0))).toBe('model_reasoning_effort="low"');
+				mockStdout.emit('data', Buffer.from(REFUSAL_LINE));
+				await yieldTick();
+				(mockChild as EventEmitter).emit('close', 1);
 
-			await waitForSpawnCall(2);
-			expect(mockSpawn).toHaveBeenCalledTimes(2);
-			expect(effortArg(argsOfSpawn(1))).toBeUndefined();
-			await yieldTick();
-			// A turn that closes with no final text reads as crashed, so the
-			// retry answers before it exits.
-			mockStdout.emit(
-				'data',
-				Buffer.from(
-					JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'hi' } }) +
-						'\n'
-				)
-			);
-			await yieldTick();
-			(mockChild as EventEmitter).emit('close', 0);
+				await waitForSpawnCall(2);
+				expect(mockSpawn).toHaveBeenCalledTimes(2);
+				expect(effortArg(argsOfSpawn(1))).toBe('model_reasoning_effort="medium"');
+				for (const index of [0, 1]) {
+					expect(argsOfSpawn(index)).toEqual(
+						expect.arrayContaining(['-m', 'gpt-6-astra', 'resume', 'codex-resume'])
+					);
+				}
+				await yieldTick();
+				// A turn that closes with no final text reads as crashed, so the
+				// retry answers before it exits.
+				mockStdout.emit(
+					'data',
+					Buffer.from(
+						succeeds
+							? JSON.stringify({
+									type: 'item.completed',
+									item: { type: 'agent_message', text: 'hi' },
+								}) + '\n'
+							: REFUSAL_LINE.replaceAll("'low'", "'medium'").replace(
+									"Supported values are: 'medium', 'high'.",
+									"Supported values are: 'high'."
+								)
+					)
+				);
+				await yieldTick();
+				(mockChild as EventEmitter).emit('close', succeeds ? 0 : 1);
 
-			const result = await p;
-			expect(result.success).toBe(true);
-			expect(errorSpy).toHaveBeenCalledWith(
-				expect.stringContaining('codex rejected effort "low" for gpt-6-astra')
-			);
-		});
+				const result = await p;
+				expect(result.success).toBe(succeeds);
+				expect(mockSpawn).toHaveBeenCalledTimes(2);
+				if (!succeeds) expect(result.error).toContain("Unsupported value: 'medium'");
+				expect(errorSpy).toHaveBeenCalledWith(
+					expect.stringContaining('codex rejected effort "low" for gpt-6-astra')
+				);
+			}
+		);
 
 		it('takes the refused value out of the ladder for the rest of the run', async () => {
 			expect(resolveEffortLevel('codex', 'low')).toBe('low');
@@ -3223,6 +3244,107 @@ Some text with [x] in it that's not a checkbox
 			const result = await p;
 			expect(result.success).toBe(false);
 			expect(mockSpawn).toHaveBeenCalledTimes(1);
+		});
+
+		describe.each([false, true])('Grok refusal (SSH=%s)', (remote) => {
+			it.each([
+				['automatic hint, equal inherited value', 'automatic', 'minimal'],
+				['automatic hint, different inherited value', 'automatic', 'high'],
+				['explicit ladder value, equal inherited value', 'minimal', 'minimal'],
+				['explicit ladder value, different inherited value', 'minimal', 'high'],
+				['provider-only effort', undefined, 'minimal'],
+				['unknown provenance and default', undefined, undefined],
+			] as const)(
+				'preserves %s without an unqualified fallback',
+				async (_label, chosen, inherited) => {
+					// The caller can produce a real hint, but SpawnAgentOptions cannot
+					// prove its provenance or authorize the diagnostic's offered fallback.
+					const customEffort =
+						chosen === 'automatic'
+							? resolveEffortLevel('grok', 'low', ['minimal', 'high'])
+							: chosen;
+					expect(customEffort).toBe(chosen === 'automatic' ? 'minimal' : chosen);
+					mockReadAgentConfig.mockReturnValue({ reasoningEffort: inherited });
+					const accountEnv = { GROK_HOME: '/synthetic/account-a' };
+					const sshRemoteConfig = remote ? { enabled: true, remoteId: 'r1' } : undefined;
+					if (remote) {
+						mockWrapSpawnWithSsh.mockResolvedValue({
+							command: 'ssh',
+							args: ['remotehost', 'synthetic-grok-command'],
+							cwd: '/p',
+							sshRemoteUsed: { id: 'r1', name: 'r1', host: 'remotehost' },
+						});
+					}
+					const options = {
+						customEffort,
+						customModel: 'grok-selected',
+						customEnvVars: accountEnv,
+						sshRemoteConfig,
+					};
+					const p = spawnAgent('grok', '/p', 'hi', 'grok-resume', options);
+					await waitForSpawnCall();
+					expect(mockSpawn).toHaveBeenCalledTimes(1);
+					const args = remote
+						? (mockWrapSpawnWithSsh.mock.calls[0][0].args as string[])
+						: argsOfSpawn(0);
+					expect(args).toEqual(
+						expect.arrayContaining(['-m', 'grok-selected', '--resume', 'grok-resume'])
+					);
+					const effort = customEffort ?? inherited;
+					if (effort) {
+						expect(args.filter((arg) => arg === '--reasoning-effort')).toHaveLength(1);
+						expect(args[args.indexOf('--reasoning-effort') + 1]).toBe(effort);
+					} else {
+						expect(args).not.toContain('--reasoning-effort');
+					}
+					if (remote) {
+						expect(mockWrapSpawnWithSsh).toHaveBeenCalledWith(
+							expect.objectContaining({
+								cwd: '/p',
+								agentBinaryName: 'grok',
+								customEnvVars: expect.objectContaining(accountEnv),
+							}),
+							sshRemoteConfig,
+							expect.anything()
+						);
+						expect(spawnCall().command).toBe('ssh');
+					} else {
+						expect(mockWrapSpawnWithSsh).not.toHaveBeenCalled();
+						expect(spawnCall().options.env).toMatchObject(accountEnv);
+					}
+					const refusal =
+						"--effort/--reasoning-effort: unknown effort level 'MINIMAL'; use one of: high";
+					if (remote) mockStderr.emit('data', Buffer.from(refusal));
+					else
+						mockStdout.emit(
+							'data',
+							Buffer.from(JSON.stringify({ type: 'error', message: refusal }) + '\n')
+						);
+					await yieldTick();
+					mockChild.emit('close', 1);
+					const result = await p;
+					expect(result).toMatchObject({ success: false, error: refusal });
+					expect(mockSpawn).toHaveBeenCalledTimes(1);
+					expect(mockWrapSpawnWithSsh).toHaveBeenCalledTimes(remote ? 1 : 0);
+					expect(options).toEqual({
+						customEffort,
+						customModel: 'grok-selected',
+						customEnvVars: accountEnv,
+						sshRemoteConfig,
+					});
+					expect(getEffortRejection('grok', 'minimal')).toMatchObject({
+						value: 'MINIMAL',
+						supported: ['high'],
+					});
+					expect(getEffortRejection('grok', 'MiNiMaL')).toBe(getEffortRejection('grok', 'minimal'));
+					expect(resolveEffortLevel('grok', 'low', ['minimal', 'high'])).toBeUndefined();
+					expect(resolveEffortLevel('codex', 'low')).toBe('low');
+					expect(errorSpy).toHaveBeenCalledWith(
+						expect.stringContaining('grok rejected effort "MINIMAL"')
+					);
+					expect(errorSpy).not.toHaveBeenCalledWith(expect.stringContaining('Retrying'));
+				}
+			);
 		});
 
 		it('does not retry an ordinary failure', async () => {
