@@ -124,6 +124,7 @@ import { isWindows } from '../../../../shared/platformDetection';
 import { getAgentDefinition } from '../../../../main/agents/definitions';
 import { getAgentCapabilities as getRealAgentCapabilities } from '../../../../main/agents/capabilities';
 import { logger } from '../../../../main/utils/logger';
+import * as turnRunner from '../../../../shared/maestro-lib/run/start-turn';
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /**
@@ -421,6 +422,135 @@ describe('ChildProcessSpawner', () => {
 
 			expect(processes.get('test-session')?.sshRemotePidFile).toBeUndefined();
 			expect(mockChildProcess.stdin.write.mock.calls[0][0]).toBe('exec claude');
+		});
+
+		describe('remote prompt-file owner handoff (GT1-02-10E1T)', () => {
+			const artifact: NonNullable<ProcessConfig['promptArtifact']> = {
+				owner: 'remote',
+				sshRemoteId: 'synthetic-grok-remote',
+				path: '/tmp/maestro-prompt-private-10e1.json',
+				content: 'private-body-10e1: 雪\nsecond line',
+				encoding: 'utf8',
+				mode: 0o600,
+				flag: 'wx',
+				cleanup: 'turn',
+			};
+			const config = createBaseConfig({
+				toolType: 'grok',
+				command: '/usr/bin/ssh',
+				args: ['-o', 'BatchMode=yes', 'user@host', '/bin/bash', '--norc', '--noprofile', '-s'],
+				sshRemoteId: artifact.sshRemoteId,
+				sshStdinScript: 'private-script-10e1\nexec /remote/bin/grok\n',
+				// Direct callers may bypass the SSH builder's display redaction.
+				sshRemoteCommand: `grok --prompt-file ${artifact.path} ${artifact.content}`,
+				promptArtifact: artifact,
+			});
+
+			it.each(['', artifact.content])(
+				'binds one remote owner without local materialization (%j)',
+				(content) => {
+					const { processes, spawner } = createTestContext();
+					const start = vi.spyOn(turnRunner, 'startTurn');
+					try {
+						const result = spawner.spawn({ ...config, promptArtifact: { ...artifact, content } });
+						expect(result.success).toBe(true);
+						expect(mockSpawn).toHaveBeenCalledTimes(1);
+						expect(start).toHaveBeenCalledTimes(1);
+						const spec = start.mock.calls[0][0];
+						expect(spec).not.toHaveProperty('promptArtifact');
+						expect(spec.args).toEqual(config.args);
+						const proc = processes.get(config.sessionId)!;
+						expect(processes.size).toBe(1);
+						expect(proc.sshRemotePromptArtifactPath).toBe(artifact.path);
+						expect(proc.sshRemotePidFile).toMatch(
+							/^\/tmp\/maestro-prompt-owner-[0-9a-f-]{36}\.pid$/
+						);
+						const script = mockChildProcess.stdin.write.mock.calls[0][0] as string;
+						expect(script).toBe(spec.stdin);
+						expect(script).toContain(`readonly _maestro_prompt_path='${artifact.path}'`);
+						expect(script).toContain(
+							`readonly _maestro_prompt_pid_file='${proc.sshRemotePidFile}'`
+						);
+						expect(script.match(/readonly _maestro_prompt_pid_file=/g)).toHaveLength(1);
+						expect(script).not.toContain('maestro-agent-');
+						expect(script).toContain(config.sshStdinScript);
+						expect(mockChildProcess.stdin.end).toHaveBeenCalledTimes(1);
+						expect(proc.args).toEqual(config.args);
+						expect(proc.sshRemoteCommand).toBeUndefined();
+						expect(proc).not.toHaveProperty('promptArtifact');
+						expect(proc).not.toHaveProperty('sshStdinScript');
+						expect(proc.tempFiles).toBeUndefined();
+						expect(saveImageToTempFile).not.toHaveBeenCalled();
+						mockChildProcess.stderr.emit(
+							'error',
+							new Error(`${artifact.path} ${artifact.content}`)
+						);
+						expect(logger.error).toHaveBeenCalledWith(
+							'[ProcessManager] stderr error',
+							'ProcessManager',
+							{ sessionId: config.sessionId, error: 'Prompt-file process stderr failed.' }
+						);
+						const diagnostic = JSON.stringify([
+							result,
+							proc.command,
+							proc.args,
+							proc.maestroEnvVars,
+							proc.sshRemoteCommand,
+							vi.mocked(logger.debug).mock.calls,
+							vi.mocked(logger.info).mock.calls,
+							vi.mocked(logger.warn).mock.calls,
+							vi.mocked(logger.error).mock.calls,
+						]);
+						for (const privateText of [artifact.path, 'private-body-10e1', 'private-script-10e1']) {
+							expect(diagnostic).not.toContain(privateText);
+						}
+					} finally {
+						start.mockRestore();
+					}
+				}
+			);
+
+			it('uses the same private owner when SSH closes nonzero', async () => {
+				const { processes, spawner } = createTestContext();
+				spawner.spawn(config);
+				const proc = processes.get(config.sessionId)!;
+				childHandlers(mockChildProcess).get('close')?.(255, null);
+				await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(2));
+				const cleanup = mockChildProcess.stdin.end.mock.calls[0][0] as string;
+				expect(cleanup).toContain(`f='${proc.sshRemotePidFile}'; a='${artifact.path}'`);
+				expect(cleanup).toContain('kill -TERM');
+				expect(cleanup).not.toContain('private-body-10e1');
+				expect(cleanup).not.toContain('private-script-10e1');
+				expect(mockSpawn.mock.calls[1][1]).toContain('user@host');
+				childHandlers(mockChildProcess).get('exit')?.(0);
+			});
+
+			it('refuses a remote artifact bound to another host without spawning or exposing it', () => {
+				const { processes, spawner } = createTestContext();
+				expect(spawner.spawn({ ...config, sshRemoteId: 'different-remote' })).toEqual({
+					pid: -1,
+					success: false,
+					error: 'Prompt-file delivery does not match its host plan.',
+				});
+				expect(mockSpawn).not.toHaveBeenCalled();
+				expect(processes.size).toBe(0);
+			});
+
+			it('preserves ordinary SSH command display and the legacy PID namespace', () => {
+				const { processes, spawner } = createTestContext();
+				spawner.spawn({
+					...config,
+					toolType: 'codex',
+					promptArtifact: undefined,
+					sshStdinScript: 'exec codex exec --json\n',
+					sshRemoteCommand: 'codex exec --json',
+				});
+				const proc = processes.get(config.sessionId)!;
+				expect(proc.sshRemoteCommand).toBe('codex exec --json');
+				expect(proc.sshRemotePromptArtifactPath).toBeUndefined();
+				expect(proc.sshRemotePidFile).toMatch(/^\/tmp\/maestro-agent-[0-9a-f-]{36}\.pid$/);
+				expect(mockChildProcess.stdin.write.mock.calls[0][0]).not.toContain('_maestro_prompt_path');
+			});
 		});
 
 		// 2026-10-15: the local ssh of a Codex turn exited non-zero while Codex
