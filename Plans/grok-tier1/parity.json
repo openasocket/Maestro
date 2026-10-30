@@ -58,6 +58,11 @@
 			"requiredCandidate": true,
 			"qualification": "not-run",
 			"reason": "Distribution candidate from REFERENCE; no native Grok evidence in this audit."
+		},
+		"win32-arm64": {
+			"requiredCandidate": true,
+			"qualification": "not-run",
+			"reason": "Advertised npm 1.0.70 optional dependency established in GT1-01-05; native support is unqualified."
 		}
 	},
 	"routeProfiles": {
@@ -263,6 +268,13 @@
 			"acceptanceRun": false,
 			"status": "fail",
 			"affectedRows": ["P46"]
+		},
+		"phase01-task-coverage": {
+			"path": "Plans/grok-tier1/evidence/01.md#gt1-01-07-task-coverage-review",
+			"receiptPath": "Plans/grok-tier1/evidence/01-task-coverage.json",
+			"sourceCommit": "e6b805be85a87f1b0fc567ae5344c0b74b013b78",
+			"provenance": "source-and-task-scope-review",
+			"acceptanceRun": false
 		}
 	},
 	"sourceCatalog": {
@@ -1442,8 +1454,8 @@
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-01-02", "GT1-01-03", "GT1-11-14A"],
-				"test": ["GT1-11-02", "GT1-11-14B"],
-				"verification": ["GT1-01-07", "GT1-11-03", "GT1-11-14C"],
+				"test": ["GT1-11-02", "GT1-11-14B", "GT1-02-12A"],
+				"verification": ["GT1-01-07", "GT1-11-03", "GT1-11-14C", "GT1-02-13"],
 				"live": [],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -1518,7 +1530,14 @@
 				"src/main/agents/capability-snapshot.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/agentIds.ts",
@@ -1532,9 +1551,9 @@
 				"src/main/storage/grok-session-storage.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-01-04", "GT1-02-05", "GT1-10-06"],
-				"test": ["GT1-02-06", "GT1-10-07"],
-				"verification": ["GT1-02-13", "GT1-10-12", "GT1-11-10"],
+				"implementation": ["GT1-01-04", "GT1-02-05", "GT1-10-06", "GT1-07-01"],
+				"test": ["GT1-02-06", "GT1-10-07", "GT1-07-04"],
+				"verification": ["GT1-02-13", "GT1-10-12", "GT1-11-10", "GT1-07-11"],
 				"live": ["GT1-11-10"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -1616,7 +1635,14 @@
 				"src/main/agents/capability-snapshot.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/agentIds.ts",
@@ -1627,10 +1653,10 @@
 				"src/main/agents/capability-snapshot.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-01-04", "GT1-02-05", "GT1-10-06"],
-				"test": ["GT1-02-06", "GT1-10-07"],
-				"verification": ["GT1-02-13", "GT1-10-12", "GT1-11-10"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-01-04", "GT1-02-05", "GT1-10-06", "GT1-07-01"],
+				"test": ["GT1-02-06", "GT1-10-07", "GT1-07-04"],
+				"verification": ["GT1-02-13", "GT1-10-12", "GT1-11-10", "GT1-07-11", "GT1-11-11A"],
+				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -1716,7 +1742,14 @@
 				"src/main/ipc/handlers/agentSessions.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/providerProfiles.ts",
@@ -1738,10 +1771,25 @@
 				"src/main/pianola/pianola-supervisor.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-01", "GT1-04-01", "GT1-04-11"],
-				"test": ["GT1-02-02", "GT1-04-02", "GT1-04-12"],
-				"verification": ["GT1-02-13", "GT1-02-14", "GT1-04-13"],
-				"live": ["GT1-11-11"],
+				"implementation": [
+					"GT1-02-01",
+					"GT1-04-01",
+					"GT1-04-11",
+					"GT1-05-02A",
+					"GT1-05-02C",
+					"GT1-08-14A"
+				],
+				"test": ["GT1-02-02", "GT1-04-02", "GT1-04-12", "GT1-05-02B", "GT1-05-02D", "GT1-08-14C"],
+				"verification": [
+					"GT1-02-13",
+					"GT1-02-14",
+					"GT1-04-13",
+					"GT1-05-13",
+					"GT1-05-14",
+					"GT1-08-21",
+					"GT1-11-11A"
+				],
+				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -1832,7 +1880,14 @@
 				"src/shared/maestro-lib/parsers/antigravity-output-parser.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/providerAuthIdentity.ts",
@@ -1847,10 +1902,17 @@
 				"src/shared/maestro-lib/parsers/antigravity-output-parser.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-01", "GT1-02-03", "GT1-03-11"],
-				"test": ["GT1-02-02", "GT1-02-04", "GT1-03-12"],
-				"verification": ["GT1-02-13", "GT1-02-14", "GT1-03-13", "GT1-11-11"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-02-01", "GT1-02-03", "GT1-03-11", "GT1-03-11A"],
+				"test": ["GT1-02-02", "GT1-02-04", "GT1-03-12", "GT1-03-11B"],
+				"verification": [
+					"GT1-02-13",
+					"GT1-02-14",
+					"GT1-03-13",
+					"GT1-11-11",
+					"GT1-03-14",
+					"GT1-11-11A"
+				],
+				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -1938,7 +2000,14 @@
 				"src/shared/maestro-lib/providers/capabilities.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/agents/detector.ts",
@@ -1952,10 +2021,17 @@
 				"src/shared/directorNotesProvider.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-05", "GT1-02-07"],
-				"test": ["GT1-02-06", "GT1-02-08"],
-				"verification": ["GT1-02-13", "GT1-02-14"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-02-05", "GT1-02-07", "GT1-07-01", "GT1-03-10A"],
+				"test": ["GT1-02-06", "GT1-02-08", "GT1-07-04", "GT1-03-10B"],
+				"verification": [
+					"GT1-02-13",
+					"GT1-02-14",
+					"GT1-03-13",
+					"GT1-03-14",
+					"GT1-07-11",
+					"GT1-11-11A"
+				],
+				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -2042,7 +2118,14 @@
 				"src/shared/maestro-lib/launch/prompt-delivery.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/stores/agentStore.ts",
@@ -2053,10 +2136,26 @@
 				"src/shared/maestro-lib/launch/prompt-delivery.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-05", "GT1-08-01", "GT1-02-09", "GT1-02-10", "GT1-02-11"],
-				"test": ["GT1-05-06", "GT1-08-02", "GT1-02-12"],
-				"verification": ["GT1-01-07", "GT1-05-13", "GT1-08-07", "GT1-02-13", "GT1-02-14"],
-				"live": ["GT1-11-11"],
+				"implementation": [
+					"GT1-05-05",
+					"GT1-08-01",
+					"GT1-02-09",
+					"GT1-02-10",
+					"GT1-02-11",
+					"GT1-02-09A",
+					"GT1-05-06A"
+				],
+				"test": ["GT1-05-06", "GT1-08-02", "GT1-02-12", "GT1-02-09B", "GT1-05-06B"],
+				"verification": [
+					"GT1-01-07",
+					"GT1-05-13",
+					"GT1-08-07",
+					"GT1-02-13",
+					"GT1-02-14",
+					"GT1-05-14",
+					"GT1-11-11C"
+				],
+				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -2146,7 +2245,14 @@
 				"src/renderer/components/NewInstanceModal/EditAgentModal.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -2156,9 +2262,18 @@
 				"src/renderer/components/NewInstanceModal/EditAgentModal.tsx"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-09", "GT1-02-10", "GT1-02-11", "GT1-02-11A", "GT1-09-07"],
-				"test": ["GT1-02-12", "GT1-02-11B", "GT1-09-08"],
-				"verification": ["GT1-02-13", "GT1-02-14", "GT1-09-11"],
+				"implementation": [
+					"GT1-02-09",
+					"GT1-02-10",
+					"GT1-02-11",
+					"GT1-02-11A",
+					"GT1-09-07",
+					"GT1-07-01",
+					"GT1-02-09A",
+					"GT1-07-03D"
+				],
+				"test": ["GT1-02-12", "GT1-02-11B", "GT1-09-08", "GT1-07-04", "GT1-02-09B", "GT1-07-03E"],
+				"verification": ["GT1-02-13", "GT1-02-14", "GT1-09-11", "GT1-07-11"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -2318,7 +2433,14 @@
 				"src/renderer/components/MainPanel/MainPanelContent.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/parsers/index.ts",
@@ -2355,7 +2477,10 @@
 					"GT1-03-06A",
 					"GT1-03-08A",
 					"GT1-07-04A",
-					"GT1-10-04A"
+					"GT1-10-04A",
+					"GT1-03-01A",
+					"GT1-03-05A",
+					"GT1-07-03A"
 				],
 				"test": [
 					"GT1-03-02",
@@ -2369,7 +2494,10 @@
 					"GT1-03-06B",
 					"GT1-03-08B",
 					"GT1-07-04B",
-					"GT1-10-04B"
+					"GT1-10-04B",
+					"GT1-03-01B",
+					"GT1-03-05B",
+					"GT1-07-03C"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -2549,7 +2677,14 @@
 				"src/shared/maestro-lib/turns/assemble.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/parsers/index.ts",
@@ -2598,7 +2733,12 @@
 					"GT1-07-02",
 					"GT1-07-03",
 					"GT1-08-05",
-					"GT1-10-01"
+					"GT1-10-01",
+					"GT1-03-01A",
+					"GT1-03-05A",
+					"GT1-03-11A",
+					"GT1-07-03A",
+					"GT1-07-04C"
 				],
 				"test": [
 					"GT1-03-02",
@@ -2611,7 +2751,12 @@
 					"GT1-09-03",
 					"GT1-07-04",
 					"GT1-08-06",
-					"GT1-10-02"
+					"GT1-10-02",
+					"GT1-03-01B",
+					"GT1-03-05B",
+					"GT1-03-11B",
+					"GT1-07-03C",
+					"GT1-07-04D"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -2623,9 +2768,10 @@
 					"GT1-11-12",
 					"GT1-01-07",
 					"GT1-08-07",
-					"GT1-10-05"
+					"GT1-10-05",
+					"GT1-11-11C"
 				],
-				"live": ["GT1-11-11"],
+				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -2725,7 +2871,14 @@
 				"src/renderer/utils/contextUsage.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
@@ -2745,10 +2898,37 @@
 				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-03-05", "GT1-03-11", "GT1-04-05", "GT1-04-11", "GT1-10-08"],
-				"test": ["GT1-03-06", "GT1-03-12", "GT1-04-06", "GT1-04-12", "GT1-10-09"],
-				"verification": ["GT1-03-13", "GT1-04-13", "GT1-10-12", "GT1-10-16"],
-				"live": ["GT1-11-11"],
+				"implementation": [
+					"GT1-03-05",
+					"GT1-03-11",
+					"GT1-04-05",
+					"GT1-04-11",
+					"GT1-10-08",
+					"GT1-07-02",
+					"GT1-07-03",
+					"GT1-03-05A",
+					"GT1-03-05C"
+				],
+				"test": [
+					"GT1-03-06",
+					"GT1-03-12",
+					"GT1-04-06",
+					"GT1-04-12",
+					"GT1-10-09",
+					"GT1-07-04",
+					"GT1-03-05B",
+					"GT1-03-05D"
+				],
+				"verification": [
+					"GT1-03-13",
+					"GT1-04-13",
+					"GT1-10-12",
+					"GT1-10-16",
+					"GT1-03-14",
+					"GT1-07-11",
+					"GT1-11-11F"
+				],
+				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -2897,7 +3077,14 @@
 				"src/renderer/components/MainPanel/MainPanelContent.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/parsers/index.ts",
@@ -2929,7 +3116,9 @@
 					"GT1-03-05",
 					"GT1-03-09",
 					"GT1-03-11",
-					"GT1-02-03"
+					"GT1-02-03",
+					"GT1-03-05A",
+					"GT1-03-11A"
 				],
 				"test": [
 					"GT1-03-02",
@@ -2938,7 +3127,9 @@
 					"GT1-03-10",
 					"GT1-03-12",
 					"GT1-02-04",
-					"GT1-10-13"
+					"GT1-10-13",
+					"GT1-03-05B",
+					"GT1-03-11B"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -2947,9 +3138,10 @@
 					"GT1-02-13",
 					"GT1-11-11",
 					"GT1-10-14",
-					"GT1-10-16"
+					"GT1-10-16",
+					"GT1-11-11F"
 				],
-				"live": ["GT1-11-11"],
+				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -3050,7 +3242,14 @@
 				"src/renderer/components/MainPanel/MainPanel.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/storage/index.ts",
@@ -3174,7 +3373,14 @@
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
@@ -3195,8 +3401,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-04-07", "GT1-04-08A", "GT1-04-08C", "GT1-04-09"],
 				"test": ["GT1-04-08", "GT1-04-08B", "GT1-04-08D", "GT1-04-10"],
-				"verification": ["GT1-04-13", "GT1-04-14"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
+				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -3289,7 +3495,14 @@
 				"src/renderer/components/MainPanel/MainPanel.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/storage/index.ts",
@@ -3315,8 +3528,8 @@
 					"GT1-04-11"
 				],
 				"test": ["GT1-04-02", "GT1-04-04", "GT1-04-06", "GT1-04-06B", "GT1-02-02", "GT1-04-12"],
-				"verification": ["GT1-04-13", "GT1-04-14", "GT1-02-13", "GT1-02-14"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-04-13", "GT1-04-14", "GT1-02-13", "GT1-02-14", "GT1-11-11A"],
+				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -3447,7 +3660,14 @@
 				"src/renderer/components/TerminalOutput/components/ToolBadge.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
@@ -3473,7 +3693,8 @@
 					"GT1-10-08",
 					"GT1-04-06A",
 					"GT1-07-08",
-					"GT1-07-09"
+					"GT1-07-09",
+					"GT1-03-05C"
 				],
 				"test": [
 					"GT1-03-06",
@@ -3482,10 +3703,19 @@
 					"GT1-04-12",
 					"GT1-10-09",
 					"GT1-04-06B",
-					"GT1-07-10"
+					"GT1-07-10",
+					"GT1-03-05D"
 				],
-				"verification": ["GT1-03-13", "GT1-04-13", "GT1-10-12", "GT1-07-11", "GT1-10-16"],
-				"live": ["GT1-11-11"],
+				"verification": [
+					"GT1-03-13",
+					"GT1-04-13",
+					"GT1-10-12",
+					"GT1-07-11",
+					"GT1-10-16",
+					"GT1-03-14",
+					"GT1-11-11F"
+				],
+				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -3620,7 +3850,14 @@
 				"src/renderer/components/AgentCreationDialog.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/agentMetadata.ts",
@@ -3647,10 +3884,10 @@
 				"src/main/services/symphony-runner.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-01", "GT1-05-11", "GT1-10-01"],
-				"test": ["GT1-05-02", "GT1-05-12", "GT1-10-02"],
+				"implementation": ["GT1-05-01", "GT1-05-11", "GT1-10-01", "GT1-05-02A", "GT1-05-02C"],
+				"test": ["GT1-05-02", "GT1-05-12", "GT1-10-02", "GT1-05-02B", "GT1-05-02D"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-01-07", "GT1-10-05"],
-				"live": [],
+				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -3727,7 +3964,14 @@
 				"src/renderer/App.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/ipc/handlers/agents.ts",
@@ -3744,8 +3988,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-05-03", "GT1-05-05", "GT1-08-01"],
 				"test": ["GT1-05-04", "GT1-05-06", "GT1-08-02"],
-				"verification": ["GT1-05-13", "GT1-05-14", "GT1-01-07", "GT1-08-07"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-05-13", "GT1-05-14", "GT1-01-07", "GT1-08-07", "GT1-11-11B"],
+				"live": ["GT1-11-11", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -3832,7 +4076,14 @@
 				"src/shared/maestro-lib/providers/capabilities.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/memory-manager.ts",
@@ -3848,8 +4099,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-05-07", "GT1-06-06"],
 				"test": ["GT1-05-08", "GT1-06-08"],
-				"verification": ["GT1-05-13", "GT1-05-14", "GT1-06-12"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-05-13", "GT1-05-14", "GT1-06-12", "GT1-11-11B"],
+				"live": ["GT1-11-11", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -3940,7 +4191,14 @@
 				"src/renderer/hooks/batch/inlineWizard/conversationActions.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/utils/grokWizard.ts",
@@ -3958,8 +4216,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-05-09", "GT1-05-11", "GT1-08-14"],
 				"test": ["GT1-05-10", "GT1-05-12", "GT1-08-15"],
-				"verification": ["GT1-05-13", "GT1-05-14", "GT1-08-21"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-05-13", "GT1-05-14", "GT1-08-21", "GT1-11-11D"],
+				"live": ["GT1-11-11", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -4052,7 +4310,14 @@
 				"src/main/ipc/handlers/context.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/translation/support.ts",
@@ -4083,8 +4348,8 @@
 					"GT1-04-09"
 				],
 				"test": ["GT1-06-08", "GT1-06-09", "GT1-06-11", "GT1-06-02", "GT1-04-10"],
-				"verification": ["GT1-06-12"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-06-12", "GT1-11-11C"],
+				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -4177,7 +4442,14 @@
 				"src/renderer/services/providerTranslation.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/translation/support.ts",
@@ -4292,7 +4564,14 @@
 				"src/renderer/hooks/agent/useAgentCapabilities.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/translation/support.ts",
@@ -4410,7 +4689,14 @@
 				"src/renderer/services/providerTranslation.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/translation/support.ts",
@@ -4518,7 +4804,14 @@
 				"src/cli/services/agent-spawner.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/plugins/mcp-agent-config.ts",
@@ -4530,10 +4823,10 @@
 				"src/main/cue/cue-spawn-builder.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-07-05", "GT1-07-06"],
-				"test": ["GT1-07-07"],
-				"verification": ["GT1-07-11"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-07-05", "GT1-07-06", "GT1-07-07A", "GT1-07-07C"],
+				"test": ["GT1-07-07", "GT1-07-07B", "GT1-07-07D"],
+				"verification": ["GT1-07-11", "GT1-11-11B"],
+				"live": ["GT1-11-11", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -4617,7 +4910,14 @@
 				"src/cli/services/agent-spawner.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/plugins/mcp-agent-config.ts",
@@ -4631,10 +4931,10 @@
 				"src/main/index.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-07-05", "GT1-07-06"],
-				"test": ["GT1-07-07"],
-				"verification": ["GT1-07-11"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-07-05", "GT1-07-06", "GT1-07-07A"],
+				"test": ["GT1-07-07", "GT1-07-07B"],
+				"verification": ["GT1-07-11", "GT1-11-11B"],
+				"live": ["GT1-11-11", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -4725,7 +5025,14 @@
 				"src/renderer/components/TerminalOutput/components/ToolBadge.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
@@ -4832,7 +5139,14 @@
 				"src/shared/maestro-lib/managed/provider-route.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/ipc/handlers/agents.ts",
@@ -4858,7 +5172,10 @@
 					"GT1-09-02",
 					"GT1-09-04",
 					"GT1-09-07",
-					"GT1-09-09"
+					"GT1-09-09",
+					"GT1-07-07C",
+					"GT1-08-09A",
+					"GT1-08-09B"
 				],
 				"test": [
 					"GT1-05-04",
@@ -4868,7 +5185,9 @@
 					"GT1-09-05",
 					"GT1-09-08",
 					"GT1-09-10",
-					"GT1-09-12"
+					"GT1-09-12",
+					"GT1-07-07D",
+					"GT1-08-09C"
 				],
 				"verification": [
 					"GT1-05-13",
@@ -4877,9 +5196,11 @@
 					"GT1-09-01",
 					"GT1-09-06",
 					"GT1-09-11",
-					"GT1-09-13"
+					"GT1-09-13",
+					"GT1-08-12",
+					"GT1-11-11B"
 				],
-				"live": ["GT1-11-11", "GT1-11-12"],
+				"live": ["GT1-11-11", "GT1-11-12", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -5019,7 +5340,14 @@
 				"src/shared/maestro-lib/turns/assemble.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/hooks/batch/useDocumentProcessor.ts",
@@ -5057,8 +5385,16 @@
 					"GT1-05-06",
 					"GT1-03-10"
 				],
-				"verification": ["GT1-08-07", "GT1-01-07", "GT1-05-13", "GT1-10-05", "GT1-03-13"],
-				"live": ["GT1-11-11"],
+				"verification": [
+					"GT1-08-07",
+					"GT1-01-07",
+					"GT1-05-13",
+					"GT1-10-05",
+					"GT1-03-13",
+					"GT1-11-11C",
+					"GT1-11-11E"
+				],
+				"live": ["GT1-11-11", "GT1-11-11C", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -5153,7 +5489,14 @@
 				"src/cli/services/cue-standalone-engine.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/cue/cue-spawn-builder.ts",
@@ -5163,10 +5506,10 @@
 				"src/main/cue/bundle/cue-bundle-importer.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-08-08"],
-				"test": ["GT1-08-09"],
-				"verification": ["GT1-08-12"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-08-08", "GT1-08-09A", "GT1-08-09B", "GT1-08-09D", "GT1-08-09E"],
+				"test": ["GT1-08-09", "GT1-08-09C", "GT1-08-09F"],
+				"verification": ["GT1-08-12", "GT1-11-11E"],
+				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -5299,7 +5642,14 @@
 				"src/shared/maestro-lib/providers/capabilities.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/groupchat/storage.ts",
@@ -5321,10 +5671,10 @@
 				"src/cli/commands/pianola-orchestrate.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-08-10", "GT1-08-16", "GT1-01-07", "GT1-08-18"],
-				"test": ["GT1-08-11", "GT1-08-17", "GT1-08-20", "GT1-08-19"],
-				"verification": ["GT1-08-12", "GT1-08-21"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-08-10", "GT1-08-16", "GT1-08-18", "GT1-08-19A", "GT1-08-19B"],
+				"test": ["GT1-08-11", "GT1-08-17", "GT1-08-20", "GT1-08-19", "GT1-08-20A"],
+				"verification": ["GT1-08-12", "GT1-08-21", "GT1-11-11E"],
+				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -5409,7 +5759,14 @@
 				"src/main/utils/context-groomer.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/directorNotesProvider.ts",
@@ -5429,10 +5786,10 @@
 				"src/shared/maestro-lib/providers/capabilities.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-08-13", "GT1-08-14"],
-				"test": ["GT1-08-15"],
-				"verification": ["GT1-08-21"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-08-13", "GT1-08-14", "GT1-08-14A", "GT1-08-14B"],
+				"test": ["GT1-08-15", "GT1-08-14C", "GT1-08-14D"],
+				"verification": ["GT1-08-21", "GT1-11-11D"],
+				"live": ["GT1-11-11", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -5520,7 +5877,14 @@
 				"src/main/enterprise/spawn-authority.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/providers/capabilities.ts",
@@ -5560,7 +5924,8 @@
 					"GT1-09-05",
 					"GT1-09-08",
 					"GT1-09-10",
-					"GT1-09-12"
+					"GT1-09-12",
+					"GT1-07-04"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -5703,7 +6068,14 @@
 				"src/renderer/components/InputArea/InputArea.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/providers/capabilities.ts",
@@ -5887,7 +6259,14 @@
 				"src/renderer/components/NewInstanceModal/EditAgentModal.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/providers/capabilities.ts",
@@ -5916,7 +6295,9 @@
 					"GT1-09-04",
 					"GT1-09-07",
 					"GT1-09-09",
-					"GT1-02-11A"
+					"GT1-02-11A",
+					"GT1-08-14A",
+					"GT1-08-14B"
 				],
 				"test": [
 					"GT1-03-02",
@@ -5929,7 +6310,10 @@
 					"GT1-09-08",
 					"GT1-09-10",
 					"GT1-09-12",
-					"GT1-02-11B"
+					"GT1-02-11B",
+					"GT1-07-04",
+					"GT1-08-14C",
+					"GT1-08-14D"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -5940,9 +6324,10 @@
 					"GT1-09-01",
 					"GT1-09-06",
 					"GT1-09-13",
-					"GT1-02-13"
+					"GT1-02-13",
+					"GT1-11-11D"
 				],
-				"live": ["GT1-11-12"],
+				"live": ["GT1-11-12", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -6080,7 +6465,14 @@
 				"src/main/enterprise/spawn-authority.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/providerProfiles.ts",
@@ -6132,7 +6524,8 @@
 					"GT1-09-05",
 					"GT1-09-08",
 					"GT1-09-10",
-					"GT1-09-12"
+					"GT1-09-12",
+					"GT1-09-12A"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -6232,7 +6625,14 @@
 				"src/main/web-server/callbacks/sessionCallbacks.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/permission-relay/PermissionRelayServer.ts",
@@ -6394,7 +6794,14 @@
 				"src/shared/maestro-lib/turns/assemble.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/cli/services/batch-processor.ts",
@@ -6423,9 +6830,10 @@
 					"GT1-07-03",
 					"GT1-10-01",
 					"GT1-05-01",
-					"GT1-03-09"
+					"GT1-03-09",
+					"GT1-07-03D"
 				],
-				"test": ["GT1-08-06", "GT1-07-04", "GT1-10-02", "GT1-05-02", "GT1-03-10"],
+				"test": ["GT1-08-06", "GT1-07-04", "GT1-10-02", "GT1-05-02", "GT1-03-10", "GT1-07-03E"],
 				"verification": [
 					"GT1-08-07",
 					"GT1-07-11",
@@ -6434,9 +6842,11 @@
 					"GT1-10-16",
 					"GT1-01-07",
 					"GT1-05-13",
-					"GT1-03-13"
+					"GT1-03-13",
+					"GT1-11-11C",
+					"GT1-11-11E"
 				],
-				"live": ["GT1-11-11"],
+				"live": ["GT1-11-11", "GT1-11-11C", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -6535,7 +6945,14 @@
 				"src/shared/maestro-lib/launch/prompt-delivery.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/agentIds.ts",
@@ -6558,8 +6975,8 @@
 					"GT1-02-11"
 				],
 				"test": ["GT1-02-06", "GT1-10-07", "GT1-02-12"],
-				"verification": ["GT1-02-13", "GT1-10-12", "GT1-11-10", "GT1-02-14"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-02-13", "GT1-10-12", "GT1-11-10", "GT1-02-14", "GT1-11-11A"],
+				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -6730,7 +7147,14 @@
 				"src/renderer/utils/contextUsage.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/providerProfiles.ts",
@@ -6785,7 +7209,12 @@
 					"GT1-10-08",
 					"GT1-10-10",
 					"GT1-02-03",
-					"GT1-03-09"
+					"GT1-03-09",
+					"GT1-07-04C",
+					"GT1-10-09A",
+					"GT1-10-09C",
+					"GT1-10-09D",
+					"GT1-10-09E"
 				],
 				"test": [
 					"GT1-02-02",
@@ -6797,7 +7226,12 @@
 					"GT1-10-09",
 					"GT1-10-11",
 					"GT1-02-04",
-					"GT1-10-13"
+					"GT1-10-13",
+					"GT1-07-04D",
+					"GT1-10-09B",
+					"GT1-10-09F",
+					"GT1-10-09G",
+					"GT1-10-11A"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -6807,9 +7241,12 @@
 					"GT1-10-12",
 					"GT1-10-16",
 					"GT1-11-11",
-					"GT1-10-14"
+					"GT1-10-14",
+					"GT1-07-11",
+					"GT1-11-11C",
+					"GT1-11-11F"
 				],
-				"live": ["GT1-11-11"],
+				"live": ["GT1-11-11", "GT1-11-11C", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -6923,8 +7360,8 @@
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-11-01"],
-				"test": ["GT1-11-02"],
-				"verification": ["GT1-11-03"],
+				"test": ["GT1-11-02", "GT1-02-12A"],
+				"verification": ["GT1-11-03", "GT1-02-13"],
 				"live": [],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -7082,7 +7519,14 @@
 				"src/shared/agentMetadata.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/__tests__/main/agents/agent-completeness.test.ts",
@@ -7091,10 +7535,34 @@
 				"src/shared/agentMetadata.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-11-08", "GT1-11-08A"],
-				"test": ["GT1-11-09"],
-				"verification": ["GT1-11-10", "GT1-11-11", "GT1-11-12", "GT1-11-13", "GT1-11-14C"],
-				"live": ["GT1-11-10", "GT1-11-11", "GT1-11-12", "GT1-11-13", "GT1-11-14C"],
+				"implementation": ["GT1-11-08", "GT1-11-08A", "GT1-11-08B", "GT1-11-08C"],
+				"test": ["GT1-11-09", "GT1-11-09A"],
+				"verification": [
+					"GT1-11-10",
+					"GT1-11-11",
+					"GT1-11-12",
+					"GT1-11-13",
+					"GT1-11-14C",
+					"GT1-11-11A",
+					"GT1-11-11B",
+					"GT1-11-11C",
+					"GT1-11-11D",
+					"GT1-11-11E",
+					"GT1-11-11F"
+				],
+				"live": [
+					"GT1-11-10",
+					"GT1-11-11",
+					"GT1-11-12",
+					"GT1-11-13",
+					"GT1-11-14C",
+					"GT1-11-11A",
+					"GT1-11-11B",
+					"GT1-11-11C",
+					"GT1-11-11D",
+					"GT1-11-11E",
+					"GT1-11-11F"
+				],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -7375,8 +7843,8 @@
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-12-03"],
-				"test": ["GT1-12-04"],
-				"verification": ["GT1-12-05", "GT1-12-06"],
+				"test": ["GT1-12-04", "GT1-02-12A"],
+				"verification": ["GT1-12-05", "GT1-12-06", "GT1-11-03", "GT1-02-13"],
 				"live": [],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -7628,7 +8096,14 @@
 				"src/shared/maestro-lib/run/session.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -7638,8 +8113,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-04-07", "GT1-11-14A"],
 				"test": ["GT1-04-08", "GT1-11-14B"],
-				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C", "GT1-11-11C"],
+				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -7739,7 +8214,14 @@
 				"src/renderer/components/InputArea/InputArea.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -7850,7 +8332,14 @@
 				"src/renderer/components/InputArea/InputArea.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -7861,7 +8350,7 @@
 				"implementation": ["GT1-03-07", "GT1-09-07", "GT1-11-14A"],
 				"test": ["GT1-03-08", "GT1-09-08", "GT1-11-14B"],
 				"verification": ["GT1-03-13", "GT1-09-11", "GT1-11-14C"],
-				"live": ["GT1-11-12"],
+				"live": ["GT1-11-12", "GT1-11-14C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -7960,7 +8449,14 @@
 				"src/shared/maestro-lib/parsers/index.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -8071,7 +8567,14 @@
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -8182,7 +8685,14 @@
 				"src/shared/maestro-lib/run/pipe-spawn.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -8190,9 +8700,16 @@
 				"src/shared/maestro-lib/run/pipe-spawn.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-09", "GT1-02-10", "GT1-02-11", "GT1-11-14A"],
-				"test": ["GT1-02-12", "GT1-11-14B"],
-				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-14C"],
+				"implementation": [
+					"GT1-02-09",
+					"GT1-02-10",
+					"GT1-02-11",
+					"GT1-11-14A",
+					"GT1-02-09A",
+					"GT1-07-03D"
+				],
+				"test": ["GT1-02-12", "GT1-11-14B", "GT1-02-09B", "GT1-07-03E"],
+				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-14C", "GT1-07-11"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -8293,7 +8810,14 @@
 				"src/renderer/components/InputArea/InputArea.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -8301,9 +8825,16 @@
 				"src/renderer/components/InputArea/InputArea.tsx"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-09", "GT1-02-10", "GT1-02-11", "GT1-11-14A"],
-				"test": ["GT1-02-12", "GT1-11-14B"],
-				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-14C"],
+				"implementation": [
+					"GT1-02-09",
+					"GT1-02-10",
+					"GT1-02-11",
+					"GT1-11-14A",
+					"GT1-02-09A",
+					"GT1-07-03D"
+				],
+				"test": ["GT1-02-12", "GT1-11-14B", "GT1-02-09B", "GT1-07-03E"],
+				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-14C", "GT1-07-11"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -8404,7 +8935,14 @@
 				"src/renderer/App.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -8415,8 +8953,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-05-03", "GT1-05-05", "GT1-11-14A"],
 				"test": ["GT1-05-04", "GT1-05-06", "GT1-11-14B"],
-				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-14C"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-14C", "GT1-11-11B"],
+				"live": ["GT1-11-11", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -8517,7 +9055,14 @@
 				"src/renderer/components/MainPanel/MainPanel.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -8628,7 +9173,14 @@
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -8636,10 +9188,34 @@
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-03-05", "GT1-03-11", "GT1-10-08", "GT1-11-14A"],
-				"test": ["GT1-03-06", "GT1-03-12", "GT1-10-09", "GT1-11-14B"],
-				"verification": ["GT1-03-13", "GT1-10-12", "GT1-11-14C"],
-				"live": ["GT1-11-11"],
+				"implementation": [
+					"GT1-03-05",
+					"GT1-03-11",
+					"GT1-10-08",
+					"GT1-11-14A",
+					"GT1-07-02",
+					"GT1-07-03",
+					"GT1-03-05A",
+					"GT1-03-05C"
+				],
+				"test": [
+					"GT1-03-06",
+					"GT1-03-12",
+					"GT1-10-09",
+					"GT1-11-14B",
+					"GT1-07-04",
+					"GT1-03-05B",
+					"GT1-03-05D"
+				],
+				"verification": [
+					"GT1-03-13",
+					"GT1-10-12",
+					"GT1-11-14C",
+					"GT1-03-14",
+					"GT1-07-11",
+					"GT1-11-11F"
+				],
+				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -8739,7 +9315,14 @@
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -8747,10 +9330,34 @@
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-03-05", "GT1-03-11", "GT1-10-08", "GT1-11-14A"],
-				"test": ["GT1-03-06", "GT1-03-12", "GT1-10-09", "GT1-11-14B"],
-				"verification": ["GT1-03-13", "GT1-10-12", "GT1-11-14C"],
-				"live": ["GT1-11-11"],
+				"implementation": [
+					"GT1-03-05",
+					"GT1-03-11",
+					"GT1-10-08",
+					"GT1-11-14A",
+					"GT1-07-02",
+					"GT1-07-03",
+					"GT1-03-05A",
+					"GT1-03-05C"
+				],
+				"test": [
+					"GT1-03-06",
+					"GT1-03-12",
+					"GT1-10-09",
+					"GT1-11-14B",
+					"GT1-07-04",
+					"GT1-03-05B",
+					"GT1-03-05D"
+				],
+				"verification": [
+					"GT1-03-13",
+					"GT1-10-12",
+					"GT1-11-14C",
+					"GT1-03-14",
+					"GT1-07-11",
+					"GT1-11-11F"
+				],
+				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -8850,7 +9457,14 @@
 				"src/shared/maestro-lib/turns/assemble.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -8860,8 +9474,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-03-09", "GT1-08-05", "GT1-10-01", "GT1-11-14A"],
 				"test": ["GT1-03-10", "GT1-08-06", "GT1-10-02", "GT1-11-14B"],
-				"verification": ["GT1-03-13", "GT1-08-07", "GT1-10-05", "GT1-11-14C"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-03-13", "GT1-08-07", "GT1-10-05", "GT1-11-14C", "GT1-11-11E"],
+				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -8957,7 +9571,14 @@
 			},
 			"surfaces": ["src/shared/types.ts", "src/shared/maestro-lib/providers/capabilities.ts"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": ["src/shared/types.ts", "src/shared/maestro-lib/providers/capabilities.ts"],
 			"ownerTasks": {
@@ -9064,7 +9685,14 @@
 				"src/main/process-manager/handlers/StdoutHandler.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -9175,7 +9803,14 @@
 				"src/main/process-manager/handlers/StdoutHandler.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -9183,8 +9818,8 @@
 				"src/main/process-manager/handlers/StdoutHandler.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-03-05", "GT1-03-11", "GT1-11-14A"],
-				"test": ["GT1-03-06", "GT1-03-12", "GT1-11-14B"],
+				"implementation": ["GT1-03-05", "GT1-03-11", "GT1-11-14A", "GT1-03-05A"],
+				"test": ["GT1-03-06", "GT1-03-12", "GT1-11-14B", "GT1-03-05B"],
 				"verification": ["GT1-03-13", "GT1-03-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -9286,7 +9921,14 @@
 				"src/main/agents/detector.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -9294,10 +9936,17 @@
 				"src/main/agents/detector.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-05", "GT1-02-07", "GT1-11-14A"],
-				"test": ["GT1-02-06", "GT1-02-08", "GT1-11-14B"],
-				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-14C"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-02-05", "GT1-02-07", "GT1-11-14A", "GT1-03-10A"],
+				"test": ["GT1-02-06", "GT1-02-08", "GT1-11-14B", "GT1-03-10B"],
+				"verification": [
+					"GT1-02-13",
+					"GT1-02-14",
+					"GT1-11-14C",
+					"GT1-03-13",
+					"GT1-03-14",
+					"GT1-11-11A"
+				],
+				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -9397,7 +10046,14 @@
 				"src/shared/maestro-lib/run/pipe-spawn.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -9508,7 +10164,14 @@
 				"src/shared/maestro-lib/launch/prompt-delivery.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -9516,8 +10179,8 @@
 				"src/shared/maestro-lib/launch/prompt-delivery.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-09", "GT1-02-10", "GT1-02-11", "GT1-11-14A"],
-				"test": ["GT1-02-12", "GT1-11-14B"],
+				"implementation": ["GT1-02-09", "GT1-02-10", "GT1-02-11", "GT1-11-14A", "GT1-02-09A"],
+				"test": ["GT1-02-12", "GT1-11-14B", "GT1-02-09B"],
 				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -9619,7 +10282,14 @@
 				"src/renderer/components/MainPanel/MainPanelContent.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -9730,7 +10400,14 @@
 				"src/renderer/utils/sessionHelpers.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -9740,8 +10417,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-06-01", "GT1-11-14A"],
 				"test": ["GT1-06-02", "GT1-11-14B"],
-				"verification": ["GT1-06-12", "GT1-11-14C"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-06-12", "GT1-11-14C", "GT1-11-11C"],
+				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -9841,7 +10518,14 @@
 				"src/main/ipc/handlers/context.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -9851,8 +10535,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-06-01", "GT1-11-14A"],
 				"test": ["GT1-06-02", "GT1-11-14B"],
-				"verification": ["GT1-06-12", "GT1-11-14C"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-06-12", "GT1-11-14C", "GT1-11-11C"],
+				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -9952,7 +10636,14 @@
 				"src/renderer/hooks/batch/inlineWizard/conversationActions.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -9962,8 +10653,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-05-09", "GT1-05-11", "GT1-11-14A"],
 				"test": ["GT1-05-10", "GT1-05-12", "GT1-11-14B"],
-				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-14C"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-14C", "GT1-11-11D"],
+				"live": ["GT1-11-11", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -10063,7 +10754,14 @@
 				"src/shared/maestro-lib/groupchat/storage.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -10073,8 +10771,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-08-10", "GT1-11-14A"],
 				"test": ["GT1-08-11", "GT1-11-14B"],
-				"verification": ["GT1-08-12", "GT1-11-14C"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-08-12", "GT1-11-14C", "GT1-11-11E"],
+				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -10174,7 +10872,14 @@
 				"src/cli/services/agent-spawner.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -10283,7 +10988,14 @@
 				"src/renderer/utils/contextUsage.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -10291,10 +11003,10 @@
 				"src/renderer/utils/contextUsage.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-03-05", "GT1-03-11", "GT1-10-08", "GT1-11-14A"],
-				"test": ["GT1-03-06", "GT1-03-12", "GT1-10-09", "GT1-11-14B"],
-				"verification": ["GT1-03-13", "GT1-10-12", "GT1-11-14C"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-03-05", "GT1-03-11", "GT1-10-08", "GT1-11-14A", "GT1-03-05C"],
+				"test": ["GT1-03-06", "GT1-03-12", "GT1-10-09", "GT1-11-14B", "GT1-03-05D"],
+				"verification": ["GT1-03-13", "GT1-10-12", "GT1-11-14C", "GT1-03-14", "GT1-11-11F"],
+				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -10394,7 +11106,14 @@
 				"src/shared/maestro-lib/launch/prompt-delivery.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -10505,7 +11224,14 @@
 				"src/renderer/hooks/agent/useAgentCapabilities.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -10517,8 +11243,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-05-07", "GT1-06-06", "GT1-11-14A"],
 				"test": ["GT1-05-08", "GT1-06-08", "GT1-11-14B"],
-				"verification": ["GT1-05-13", "GT1-06-12", "GT1-11-14C"],
-				"live": ["GT1-11-13"],
+				"verification": ["GT1-05-13", "GT1-06-12", "GT1-11-14C", "GT1-11-11B"],
+				"live": ["GT1-11-13", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -10619,7 +11345,14 @@
 				"src/renderer/components/NewInstanceModal/EditAgentModal.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -10630,7 +11363,7 @@
 				"implementation": ["GT1-02-11A", "GT1-09-07", "GT1-11-14A"],
 				"test": ["GT1-02-11B", "GT1-09-08", "GT1-11-14B"],
 				"verification": ["GT1-02-13", "GT1-09-11", "GT1-11-14C"],
-				"live": ["GT1-11-12"],
+				"live": ["GT1-11-12", "GT1-11-14C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -10730,7 +11463,14 @@
 				"src/shared/maestro-lib/run/pipe-spawn.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -10738,9 +11478,16 @@
 				"src/shared/maestro-lib/run/pipe-spawn.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-09", "GT1-02-10", "GT1-02-11", "GT1-11-14A"],
-				"test": ["GT1-02-12", "GT1-11-14B"],
-				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-14C"],
+				"implementation": [
+					"GT1-02-09",
+					"GT1-02-10",
+					"GT1-02-11",
+					"GT1-11-14A",
+					"GT1-02-09A",
+					"GT1-07-03D"
+				],
+				"test": ["GT1-02-12", "GT1-11-14B", "GT1-02-09B", "GT1-07-03E"],
+				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-14C", "GT1-07-11"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -10833,7 +11580,14 @@
 			},
 			"surfaces": ["desktop transcript", "portable runtime", "CLI output"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/parsers/index.ts",
@@ -10845,8 +11599,24 @@
 				"src/cli/services/agent-spawner.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-03-01", "GT1-03-03", "GT1-03-05", "GT1-03-09", "GT1-03-11"],
-				"test": ["GT1-03-02", "GT1-03-04", "GT1-03-06", "GT1-03-10", "GT1-03-12"],
+				"implementation": [
+					"GT1-03-01",
+					"GT1-03-03",
+					"GT1-03-05",
+					"GT1-03-09",
+					"GT1-03-11",
+					"GT1-03-01A",
+					"GT1-03-05A"
+				],
+				"test": [
+					"GT1-03-02",
+					"GT1-03-04",
+					"GT1-03-06",
+					"GT1-03-10",
+					"GT1-03-12",
+					"GT1-03-01B",
+					"GT1-03-05B"
+				],
 				"verification": ["GT1-03-13", "GT1-03-14", "GT1-07-11"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -10932,7 +11702,14 @@
 				"CLI history"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/storage/index.ts",
@@ -11036,7 +11813,14 @@
 				"SSH attribution"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/providerProfiles.ts",
@@ -11060,8 +11844,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-02-01", "GT1-04-01", "GT1-04-11"],
 				"test": ["GT1-02-02", "GT1-04-02", "GT1-04-12"],
-				"verification": ["GT1-02-13", "GT1-02-14", "GT1-04-13"],
-				"live": ["GT1-11-12"],
+				"verification": ["GT1-02-13", "GT1-02-14", "GT1-04-13", "GT1-11-11A"],
+				"live": ["GT1-11-12", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -11139,7 +11923,14 @@
 			},
 			"surfaces": ["login action", "API-key/gateway guidance", "account attribution"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/providerAuthIdentity.ts",
@@ -11152,8 +11943,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-02-01", "GT1-02-03"],
 				"test": ["GT1-02-02", "GT1-02-04"],
-				"verification": ["GT1-02-13", "GT1-02-14"],
-				"live": ["GT1-11-12"],
+				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-11A"],
+				"live": ["GT1-11-12", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -11237,7 +12028,14 @@
 				"Auto Run model hints"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/agents/detector.ts",
@@ -11249,10 +12047,10 @@
 				"src/shared/directorNotesProvider.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-05", "GT1-02-07"],
-				"test": ["GT1-02-06", "GT1-02-08"],
-				"verification": ["GT1-02-13", "GT1-02-14"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-02-05", "GT1-02-07", "GT1-03-10A"],
+				"test": ["GT1-02-06", "GT1-02-08", "GT1-03-10B"],
+				"verification": ["GT1-02-13", "GT1-02-14", "GT1-03-13", "GT1-03-14", "GT1-11-11A"],
+				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -11335,7 +12133,14 @@
 				"per-model attribution"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
@@ -11357,10 +12162,36 @@
 				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-03-05", "GT1-03-11", "GT1-04-05", "GT1-04-11", "GT1-10-08"],
-				"test": ["GT1-03-06", "GT1-03-12", "GT1-04-06", "GT1-04-12", "GT1-10-09"],
-				"verification": ["GT1-03-13", "GT1-04-13", "GT1-10-12"],
-				"live": ["GT1-11-11"],
+				"implementation": [
+					"GT1-03-05",
+					"GT1-03-11",
+					"GT1-04-05",
+					"GT1-04-11",
+					"GT1-10-08",
+					"GT1-07-02",
+					"GT1-07-03",
+					"GT1-03-05A",
+					"GT1-03-05C"
+				],
+				"test": [
+					"GT1-03-06",
+					"GT1-03-12",
+					"GT1-04-06",
+					"GT1-04-12",
+					"GT1-10-09",
+					"GT1-07-04",
+					"GT1-03-05B",
+					"GT1-03-05D"
+				],
+				"verification": [
+					"GT1-03-13",
+					"GT1-04-13",
+					"GT1-10-12",
+					"GT1-03-14",
+					"GT1-07-11",
+					"GT1-11-11F"
+				],
+				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -11438,7 +12269,14 @@
 			},
 			"surfaces": ["child activity", "tool nesting", "parent totals", "transcript reload"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
@@ -11533,7 +12371,14 @@
 				"tab persistence"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
@@ -11550,8 +12395,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-04-07", "GT1-04-08A", "GT1-04-08C", "GT1-04-09"],
 				"test": ["GT1-04-08", "GT1-04-08B", "GT1-04-08D", "GT1-04-10"],
-				"verification": ["GT1-04-13", "GT1-04-14"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
+				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -11635,7 +12480,14 @@
 				"native continuation"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/translation/support.ts",
@@ -11737,7 +12589,14 @@
 			},
 			"surfaces": ["Usage Dashboard quota panels", "account quota attribution"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/components/UsageDashboard/UsageDashboardModal/hooks/useQuotaTabDiscovery.ts",
@@ -11752,8 +12611,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-10-10"],
 				"test": ["GT1-10-11"],
-				"verification": ["GT1-10-12", "GT1-10-16"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-10-12", "GT1-10-16", "GT1-11-11F"],
+				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -11838,7 +12697,14 @@
 				"src/main/agents/capability-snapshot.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/agentIds.ts",
@@ -11852,10 +12718,17 @@
 				"src/cli/services/agent-spawner.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-01-04", "GT1-02-05", "GT1-10-06"],
-				"test": ["GT1-02-06", "GT1-10-07"],
-				"verification": ["GT1-02-13", "GT1-10-12", "GT1-11-10"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-01-04", "GT1-02-05", "GT1-10-06", "GT1-03-10A"],
+				"test": ["GT1-02-06", "GT1-10-07", "GT1-03-10B"],
+				"verification": [
+					"GT1-02-13",
+					"GT1-10-12",
+					"GT1-11-10",
+					"GT1-03-13",
+					"GT1-03-14",
+					"GT1-11-11A"
+				],
+				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -11940,7 +12813,14 @@
 				"src/shared/maestro-lib/parsers/antigravity-output-parser.ts"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/agentErrorPatterns.ts",
@@ -11951,10 +12831,10 @@
 				"src/shared/maestro-lib/parsers/antigravity-output-parser.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-03", "GT1-03-11"],
-				"test": ["GT1-02-04", "GT1-03-12"],
-				"verification": ["GT1-02-13", "GT1-03-13", "GT1-11-11"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-02-03", "GT1-03-11", "GT1-03-11A"],
+				"test": ["GT1-02-04", "GT1-03-12", "GT1-03-11B"],
+				"verification": ["GT1-02-13", "GT1-03-13", "GT1-11-11", "GT1-03-14", "GT1-11-11A"],
+				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -12037,7 +12917,14 @@
 				"src/main/process-manager/ProcessManager.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/providers/capabilities.ts",
@@ -12056,11 +12943,20 @@
 					"GT1-03-07",
 					"GT1-03-09",
 					"GT1-07-01",
-					"GT1-09-02"
+					"GT1-09-02",
+					"GT1-03-01A"
 				],
-				"test": ["GT1-03-02", "GT1-03-04", "GT1-03-08", "GT1-03-10", "GT1-09-03"],
+				"test": [
+					"GT1-03-02",
+					"GT1-03-04",
+					"GT1-03-08",
+					"GT1-03-10",
+					"GT1-09-03",
+					"GT1-07-04",
+					"GT1-03-01B"
+				],
 				"verification": ["GT1-03-13", "GT1-07-11", "GT1-09-11", "GT1-11-12"],
-				"live": ["GT1-11-12"],
+				"live": ["GT1-11-12", "GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -12138,7 +13034,14 @@
 			},
 			"surfaces": ["Provider pickers and configuration"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/agentMetadata.ts",
@@ -12233,7 +13136,14 @@
 			},
 			"surfaces": ["Slash autocomplete and native skills"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/ipc/handlers/agents.ts",
@@ -12244,8 +13154,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-05-03", "GT1-05-05"],
 				"test": ["GT1-05-04", "GT1-05-06"],
-				"verification": ["GT1-05-13", "GT1-05-14"],
-				"live": ["GT1-11-11", "GT1-11-12"],
+				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-11B"],
+				"live": ["GT1-11-11", "GT1-11-12", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -12323,7 +13233,14 @@
 			},
 			"surfaces": ["Project memory viewer and rules"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/memory-manager.ts",
@@ -12335,8 +13252,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-05-07"],
 				"test": ["GT1-05-08"],
-				"verification": ["GT1-05-13", "GT1-05-14"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-11B"],
+				"live": ["GT1-11-11", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -12414,7 +13331,14 @@
 			},
 			"surfaces": ["Inline discovery and document wizard"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/utils/grokWizard.ts",
@@ -12425,8 +13349,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-05-09"],
 				"test": ["GT1-05-10"],
-				"verification": ["GT1-05-13", "GT1-05-14"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-11D"],
+				"live": ["GT1-11-11", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -12504,7 +13428,14 @@
 			},
 			"surfaces": ["Onboarding provider discovery wizard"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/components/Wizard/services/conversationManager.ts",
@@ -12518,8 +13449,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-05-11"],
 				"test": ["GT1-05-12"],
-				"verification": ["GT1-05-13", "GT1-05-14"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-11D"],
+				"live": ["GT1-11-11", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -12597,7 +13528,14 @@
 			},
 			"surfaces": ["Context merge and export controls"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/utils/sessionHelpers.ts",
@@ -12613,8 +13551,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-06-01", "GT1-04-09"],
 				"test": ["GT1-06-02", "GT1-04-10"],
-				"verification": ["GT1-06-12"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-06-12", "GT1-11-11C"],
+				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -12692,7 +13630,14 @@
 			},
 			"surfaces": ["Transactional provider translation"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/translation/support.ts",
@@ -12792,7 +13737,14 @@
 			},
 			"surfaces": ["MCP configuration and plugin tool receipts"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/plugins/mcp-agent-config.ts",
@@ -12806,10 +13758,10 @@
 				"src/main/index.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-07-05", "GT1-07-06"],
-				"test": ["GT1-07-07"],
-				"verification": ["GT1-07-11"],
-				"live": ["GT1-11-11", "GT1-11-12"],
+				"implementation": ["GT1-07-05", "GT1-07-06", "GT1-07-07C"],
+				"test": ["GT1-07-07", "GT1-07-07D"],
+				"verification": ["GT1-07-11", "GT1-11-11B"],
+				"live": ["GT1-11-11", "GT1-11-12", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -12887,7 +13839,14 @@
 			},
 			"surfaces": ["Native subagent activity and transcript lineage"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/parsers/claude-output-parser.ts",
@@ -12982,7 +13941,14 @@
 			},
 			"surfaces": ["Task and document Auto Run"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/hooks/batch/useDocumentProcessor.ts",
@@ -12994,8 +13960,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-08-01"],
 				"test": ["GT1-08-02"],
-				"verification": ["GT1-08-07"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-08-07", "GT1-11-11E"],
+				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -13073,7 +14039,14 @@
 			},
 			"surfaces": ["Goal-driven Auto Run"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/hooks/batch/internal/useGoalRunner.ts",
@@ -13084,8 +14057,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-08-03"],
 				"test": ["GT1-08-04"],
-				"verification": ["GT1-08-07"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-08-07", "GT1-11-11E"],
+				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -13163,7 +14136,14 @@
 			},
 			"surfaces": ["Headless playbook execution"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/cli/services/batch-processor.ts",
@@ -13175,8 +14155,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-08-05"],
 				"test": ["GT1-08-06"],
-				"verification": ["GT1-08-07"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-08-07", "GT1-11-11E"],
+				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -13254,7 +14234,14 @@
 			},
 			"surfaces": ["Cue prompt and standalone execution"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/cue/cue-spawn-builder.ts",
@@ -13263,10 +14250,10 @@
 				"src/main/plugins/plugin-headless-agent-runner.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-08-08"],
-				"test": ["GT1-08-09"],
-				"verification": ["GT1-08-12"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-08-08", "GT1-08-09D", "GT1-08-09E"],
+				"test": ["GT1-08-09", "GT1-08-09F"],
+				"verification": ["GT1-08-12", "GT1-11-11E"],
+				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -13344,7 +14331,14 @@
 			},
 			"surfaces": ["Group chat moderation and participation"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/groupchat/storage.ts",
@@ -13358,8 +14352,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-08-10"],
 				"test": ["GT1-08-11"],
-				"verification": ["GT1-08-12"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-08-12", "GT1-11-11E"],
+				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -13437,7 +14431,14 @@
 			},
 			"surfaces": ["Symphony contribution workflow"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/services/symphony-runner.ts",
@@ -13448,8 +14449,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-08-16"],
 				"test": ["GT1-08-17"],
-				"verification": ["GT1-08-21"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-08-21", "GT1-11-11E"],
+				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -13527,7 +14528,14 @@
 			},
 			"surfaces": ["Pianola task dispatch and supervised children"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/pianola/pianola-agent-select.ts",
@@ -13536,10 +14544,10 @@
 				"src/cli/commands/pianola-orchestrate.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-01-07"],
-				"test": ["GT1-08-20"],
-				"verification": ["GT1-08-21"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-08-19A", "GT1-08-19B"],
+				"test": ["GT1-08-20", "GT1-08-20A"],
+				"verification": ["GT1-08-21", "GT1-11-11E"],
+				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -13590,18 +14598,14 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S16"]
-				},
-				{
-					"id": "owner-scope:S16",
-					"code": "owner-task-scope-pending",
-					"missingPrerequisite": "GT1-01-07 must make any needed implementation and test packet explicit before dependent execution; current owners identify the integration area.",
-					"affectedRows": ["S16"]
 				}
 			],
 			"ownerScopeReview": {
 				"ownerTask": "GT1-01-07",
-				"status": "pending",
-				"reason": "Existing mechanism or proposed integration owner identified; phase01 task reconciliation must make any missing implementation/test packet explicit before dependent execution."
+				"status": "pass",
+				"scope": "Implementation/test/verification ownership only; no product acceptance.",
+				"reason": "Concrete bounded packets inserted before dependent checks; ownerTasks names the resulting paths.",
+				"evidenceRef": "phase01-task-coverage"
 			},
 			"branchAuditRefs": ["B47"]
 		},
@@ -13628,7 +14632,14 @@
 			},
 			"surfaces": ["Pianola transcript learning"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/pianola/transcript-mining.ts",
@@ -13638,8 +14649,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-08-18"],
 				"test": ["GT1-08-19"],
-				"verification": ["GT1-08-21"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-08-21", "GT1-11-11E"],
+				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -13717,7 +14728,14 @@
 			},
 			"surfaces": ["Director Notes provider selection"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/directorNotesProvider.ts",
@@ -13728,8 +14746,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-08-13"],
 				"test": ["GT1-08-15"],
-				"verification": ["GT1-08-21"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-08-21", "GT1-11-11D"],
+				"live": ["GT1-11-11", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -13807,7 +14825,14 @@
 			},
 			"surfaces": ["Cheap turns, tab names, synopsis and grooming"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/utils/context-groomer.ts",
@@ -13821,8 +14846,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-08-14"],
 				"test": ["GT1-08-15"],
-				"verification": ["GT1-08-21"],
-				"live": ["GT1-11-12"],
+				"verification": ["GT1-08-21", "GT1-11-11D"],
+				"live": ["GT1-11-12", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -13900,7 +14925,14 @@
 			},
 			"surfaces": ["Desktop, library and CLI transport reachability"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/process-manager/ProcessManager.ts",
@@ -13913,8 +14945,8 @@
 				"src/shared/maestro-lib/providers/capabilities.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-07-01", "GT1-07-02", "GT1-07-03"],
-				"test": ["GT1-07-04"],
+				"implementation": ["GT1-07-01", "GT1-07-02", "GT1-07-03", "GT1-07-03D"],
+				"test": ["GT1-07-04", "GT1-07-03E"],
 				"verification": ["GT1-07-11"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -13994,7 +15026,14 @@
 			},
 			"surfaces": ["Mid-turn steering"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/process-manager/ProcessManager.ts",
@@ -14003,10 +15042,10 @@
 				"src/renderer/utils/executionQueue.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-07-02"],
-				"test": ["GT1-07-04"],
-				"verification": ["GT1-01-07", "GT1-07-11"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-07-02", "GT1-07-03A", "GT1-07-03B"],
+				"test": ["GT1-07-04", "GT1-07-03C"],
+				"verification": ["GT1-01-07", "GT1-07-11", "GT1-11-11C"],
+				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -14057,18 +15096,14 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S21"]
-				},
-				{
-					"id": "owner-scope:S21",
-					"code": "owner-task-scope-pending",
-					"missingPrerequisite": "GT1-01-07 must make any needed implementation and test packet explicit before dependent execution; current owners identify the integration area.",
-					"affectedRows": ["S21"]
 				}
 			],
 			"ownerScopeReview": {
 				"ownerTask": "GT1-01-07",
-				"status": "pending",
-				"reason": "Existing mechanism or proposed integration owner identified; phase01 task reconciliation must make any missing implementation/test packet explicit before dependent execution."
+				"status": "pass",
+				"scope": "Implementation/test/verification ownership only; no product acceptance.",
+				"reason": "Concrete bounded packets inserted before dependent checks; ownerTasks names the resulting paths.",
+				"evidenceRef": "phase01-task-coverage"
 			},
 			"branchAuditRefs": ["B24"]
 		},
@@ -14095,7 +15130,14 @@
 			},
 			"surfaces": ["Approval, plan and user-question interaction"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/permission-relay/PermissionRelayServer.ts",
@@ -14105,8 +15147,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-03-06A", "GT1-03-08A", "GT1-07-04A", "GT1-10-04A"],
 				"test": ["GT1-03-06B", "GT1-03-08B", "GT1-07-04B", "GT1-10-04B"],
-				"verification": ["GT1-07-11", "GT1-10-05"],
-				"live": ["GT1-11-12"],
+				"verification": ["GT1-07-11", "GT1-10-05", "GT1-11-14C"],
+				"live": ["GT1-11-12", "GT1-11-14C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -14183,7 +15225,14 @@
 			},
 			"surfaces": ["Managed admission and preventive effect authority"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/enterprise/dispatch.ts",
@@ -14199,7 +15248,7 @@
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-09-02", "GT1-09-04", "GT1-09-07", "GT1-09-09"],
-				"test": ["GT1-09-03", "GT1-09-05", "GT1-09-08", "GT1-09-10", "GT1-09-12"],
+				"test": ["GT1-09-03", "GT1-09-05", "GT1-09-08", "GT1-09-10", "GT1-09-12", "GT1-09-12A"],
 				"verification": ["GT1-09-01", "GT1-09-06", "GT1-09-11", "GT1-09-13"],
 				"live": ["GT1-11-12"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -14279,7 +15328,14 @@
 			},
 			"surfaces": ["Browser desktop, mobile and Lite sessions"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/web-server/handlers/messageHandlers/sessions.ts",
@@ -14370,7 +15426,14 @@
 			},
 			"surfaces": ["CLI creation, configuration, send and library host"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/cli/index.ts",
@@ -14388,9 +15451,9 @@
 				"docs/index.md"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-10-01", "GT1-07-03"],
-				"test": ["GT1-10-02", "GT1-07-04"],
-				"verification": ["GT1-10-05", "GT1-10-15", "GT1-10-16"],
+				"implementation": ["GT1-10-01", "GT1-07-03", "GT1-07-03D"],
+				"test": ["GT1-10-02", "GT1-07-04", "GT1-07-03E"],
+				"verification": ["GT1-10-05", "GT1-10-15", "GT1-10-16", "GT1-07-11"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -14469,7 +15532,14 @@
 			},
 			"surfaces": ["Usage dashboard and Cue cost attribution"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/main/stats/token-usage/token-usage-accessor.ts",
@@ -14485,10 +15555,10 @@
 				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-10-08"],
-				"test": ["GT1-10-09"],
-				"verification": ["GT1-10-12", "GT1-10-16"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-10-08", "GT1-10-09C", "GT1-10-09D", "GT1-10-09E"],
+				"test": ["GT1-10-09", "GT1-10-09F", "GT1-10-09G"],
+				"verification": ["GT1-10-12", "GT1-10-16", "GT1-11-11F"],
+				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -14566,7 +15636,14 @@
 			},
 			"surfaces": ["Quota discovery and unavailable quota presentation"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/components/UsageDashboard/UsageDashboardModal/hooks/useQuotaTabDiscovery.ts",
@@ -14580,9 +15657,9 @@
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-10-10"],
-				"test": ["GT1-10-11"],
-				"verification": ["GT1-10-12", "GT1-10-16"],
-				"live": ["GT1-11-11"],
+				"test": ["GT1-10-11", "GT1-10-11A"],
+				"verification": ["GT1-10-12", "GT1-10-16", "GT1-11-11F"],
+				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -14660,7 +15737,14 @@
 			},
 			"surfaces": ["Streaming bounds and turn recordings"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/maestro-lib/run/start-turn.ts",
@@ -14673,8 +15757,8 @@
 			"ownerTasks": {
 				"implementation": ["GT1-03-09"],
 				"test": ["GT1-10-13"],
-				"verification": ["GT1-10-14", "GT1-10-16"],
-				"live": ["GT1-11-11"],
+				"verification": ["GT1-10-14", "GT1-10-16", "GT1-11-11F"],
+				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -14752,7 +15836,14 @@
 			},
 			"surfaces": ["General agent worktree creation and inherited configuration"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/hooks/worktree/useWorktreeHandlers.ts",
@@ -14761,10 +15852,10 @@
 				"src/renderer/types/index.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-01", "GT1-10-01"],
-				"test": ["GT1-05-02", "GT1-10-02"],
-				"verification": ["GT1-01-07", "GT1-05-13", "GT1-10-05"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-05-01", "GT1-10-01", "GT1-05-02A"],
+				"test": ["GT1-05-02", "GT1-10-02", "GT1-05-02B"],
+				"verification": ["GT1-01-07", "GT1-05-13", "GT1-10-05", "GT1-05-14", "GT1-11-11C"],
+				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -14815,18 +15906,14 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S29"]
-				},
-				{
-					"id": "owner-scope:S29",
-					"code": "owner-task-scope-pending",
-					"missingPrerequisite": "GT1-01-07 must make any needed implementation and test packet explicit before dependent execution; current owners identify the integration area.",
-					"affectedRows": ["S29"]
 				}
 			],
 			"ownerScopeReview": {
 				"ownerTask": "GT1-01-07",
-				"status": "pending",
-				"reason": "Existing mechanism or proposed integration owner identified; phase01 task reconciliation must make any missing implementation/test packet explicit before dependent execution."
+				"status": "pass",
+				"scope": "Implementation/test/verification ownership only; no product acceptance.",
+				"reason": "Concrete bounded packets inserted before dependent checks; ownerTasks names the resulting paths.",
+				"evidenceRef": "phase01-task-coverage"
 			},
 			"branchAuditRefs": ["B19"]
 		},
@@ -14853,7 +15940,14 @@
 			},
 			"surfaces": ["Custom and duplicate agent creation"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/components/NewInstanceModal/NewInstanceModal.tsx",
@@ -14862,10 +15956,10 @@
 				"src/main/services/symphony-runner.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-01", "GT1-10-01"],
-				"test": ["GT1-05-02", "GT1-10-02"],
-				"verification": ["GT1-01-07", "GT1-05-13", "GT1-10-05"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-05-01", "GT1-10-01", "GT1-05-02C"],
+				"test": ["GT1-05-02", "GT1-10-02", "GT1-05-02D"],
+				"verification": ["GT1-01-07", "GT1-05-13", "GT1-10-05", "GT1-05-14", "GT1-11-11C"],
+				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -14916,18 +16010,14 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S30"]
-				},
-				{
-					"id": "owner-scope:S30",
-					"code": "owner-task-scope-pending",
-					"missingPrerequisite": "GT1-01-07 must make any needed implementation and test packet explicit before dependent execution; current owners identify the integration area.",
-					"affectedRows": ["S30"]
 				}
 			],
 			"ownerScopeReview": {
 				"ownerTask": "GT1-01-07",
-				"status": "pending",
-				"reason": "Existing mechanism or proposed integration owner identified; phase01 task reconciliation must make any missing implementation/test packet explicit before dependent execution."
+				"status": "pass",
+				"scope": "Implementation/test/verification ownership only; no product acceptance.",
+				"reason": "Concrete bounded packets inserted before dependent checks; ownerTasks names the resulting paths.",
+				"evidenceRef": "phase01-task-coverage"
 			},
 			"branchAuditRefs": ["B46"]
 		},
@@ -14954,7 +16044,14 @@
 			},
 			"surfaces": ["Custom AI command and prompt-template dispatch"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/renderer/stores/agentStore.ts",
@@ -14964,10 +16061,10 @@
 				"src/renderer/hooks/remote/useRemoteIntegration.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-05", "GT1-08-01"],
-				"test": ["GT1-05-06", "GT1-08-02"],
-				"verification": ["GT1-01-07", "GT1-05-13", "GT1-08-07"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-05-05", "GT1-08-01", "GT1-05-06A"],
+				"test": ["GT1-05-06", "GT1-08-02", "GT1-05-06B"],
+				"verification": ["GT1-01-07", "GT1-05-13", "GT1-08-07", "GT1-05-14", "GT1-11-11C"],
+				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -15018,18 +16115,14 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S31"]
-				},
-				{
-					"id": "owner-scope:S31",
-					"code": "owner-task-scope-pending",
-					"missingPrerequisite": "GT1-01-07 must make any needed implementation and test packet explicit before dependent execution; current owners identify the integration area.",
-					"affectedRows": ["S31"]
 				}
 			],
 			"ownerScopeReview": {
 				"ownerTask": "GT1-01-07",
-				"status": "pending",
-				"reason": "Existing mechanism or proposed integration owner identified; phase01 task reconciliation must make any missing implementation/test packet explicit before dependent execution."
+				"status": "pass",
+				"scope": "Implementation/test/verification ownership only; no product acceptance.",
+				"reason": "Concrete bounded packets inserted before dependent checks; ownerTasks names the resulting paths.",
+				"evidenceRef": "phase01-task-coverage"
 			},
 			"branchAuditRefs": ["B20"]
 		},
@@ -15061,7 +16154,14 @@
 				"src/renderer/components/GroupChatModal.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/agentMetadata.ts",
@@ -15080,9 +16180,10 @@
 					"GT1-11-14A",
 					"GT1-05-01",
 					"GT1-05-11",
-					"GT1-10-01"
+					"GT1-10-01",
+					"GT1-05-02C"
 				],
-				"test": ["GT1-11-02", "GT1-11-14B", "GT1-05-02", "GT1-05-12", "GT1-10-02"],
+				"test": ["GT1-11-02", "GT1-11-14B", "GT1-05-02", "GT1-05-12", "GT1-10-02", "GT1-05-02D"],
 				"verification": [
 					"GT1-01-07",
 					"GT1-11-03",
@@ -15091,7 +16192,7 @@
 					"GT1-05-14",
 					"GT1-10-05"
 				],
-				"live": [],
+				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -15163,7 +16264,14 @@
 				"src/renderer/components/InputArea/InputArea.tsx"
 			],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/agentMetadata.ts",
@@ -15297,7 +16405,14 @@
 			},
 			"surfaces": ["src/shared/agentMetadata.ts", "src/renderer/components/GroupChatModal.tsx"],
 			"routes": ["native-headless", "acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": ["src/shared/agentMetadata.ts", "src/renderer/components/GroupChatModal.tsx"],
 			"ownerTasks": {
@@ -15307,8 +16422,8 @@
 					"GT1-10-01",
 					"GT1-08-10",
 					"GT1-08-16",
-					"GT1-01-07",
-					"GT1-08-18"
+					"GT1-08-18",
+					"GT1-08-19A"
 				],
 				"test": [
 					"GT1-05-02",
@@ -15325,9 +16440,10 @@
 					"GT1-01-07",
 					"GT1-10-05",
 					"GT1-08-12",
-					"GT1-08-21"
+					"GT1-08-21",
+					"GT1-11-11E"
 				],
-				"live": ["GT1-11-11"],
+				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -15411,7 +16527,14 @@
 				"src/main/process-manager/handlers/StdoutHandler.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/agentMetadata.ts",
@@ -15457,9 +16580,10 @@
 					"GT1-04-13",
 					"GT1-04-14",
 					"GT1-10-12",
-					"GT1-11-10"
+					"GT1-11-10",
+					"GT1-11-11A"
 				],
-				"live": ["GT1-11-11"],
+				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -15544,7 +16668,14 @@
 				"src/main/provider-translation-service.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/agentConstants.ts",
@@ -15572,7 +16703,8 @@
 					"GT1-02-01",
 					"GT1-04-01",
 					"GT1-10-10",
-					"GT1-02-03"
+					"GT1-02-03",
+					"GT1-03-10A"
 				],
 				"test": [
 					"GT1-02-06",
@@ -15593,7 +16725,8 @@
 					"GT1-04-02",
 					"GT1-10-11",
 					"GT1-02-04",
-					"GT1-10-13"
+					"GT1-10-13",
+					"GT1-03-10B"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -15607,9 +16740,11 @@
 					"GT1-05-13",
 					"GT1-10-05",
 					"GT1-11-11",
-					"GT1-10-14"
+					"GT1-10-14",
+					"GT1-03-14",
+					"GT1-11-11F"
 				],
-				"live": ["GT1-11-11"],
+				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -15692,7 +16827,14 @@
 				"src/shared/maestro-lib/runtime/turns.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/agentConstants.ts",
@@ -15735,7 +16877,8 @@
 					"GT1-10-09",
 					"GT1-10-11",
 					"GT1-02-04",
-					"GT1-10-13"
+					"GT1-10-13",
+					"GT1-10-11A"
 				],
 				"verification": [
 					"GT1-08-07",
@@ -15749,9 +16892,11 @@
 					"GT1-10-12",
 					"GT1-10-16",
 					"GT1-11-11",
-					"GT1-10-14"
+					"GT1-10-14",
+					"GT1-11-11E",
+					"GT1-11-11F"
 				],
-				"live": ["GT1-11-11"],
+				"live": ["GT1-11-11", "GT1-11-11E", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -15843,7 +16988,14 @@
 				"src/main/agents/definitions.ts"
 			],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing canonical producer and consumers; qualify equivalent outcomes through the listed owners. Capability/syntax equality alone is not required.",
 			"sourcePaths": [
 				"src/shared/types.ts",
@@ -17069,7 +18221,14 @@
 			},
 			"surfaces": ["Agent Runs provider attribution"],
 			"routes": ["offline-audit"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing shared consumer and its native adapter where required; preserve provider-specific syntax and refusal boundaries. GT1-01-07 must allocate bounded implementation/test packets for this newly discovered surface before dependent execution.",
 			"sourcePaths": [
 				"src/shared/agent-run/types.ts",
@@ -17078,8 +18237,8 @@
 				"src/cli/services/agent-run-capture.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-01-07", "GT1-10-08"],
-				"test": ["GT1-10-09"],
+				"implementation": ["GT1-10-08", "GT1-10-09A"],
+				"test": ["GT1-10-09", "GT1-10-09B"],
 				"verification": ["GT1-01-07", "GT1-10-12", "GT1-11-03"],
 				"live": [],
 				"finalAcceptance": ["GT1-12-06"]
@@ -17121,18 +18280,14 @@
 					"code": "implementation-or-evidence-pending",
 					"missingPrerequisite": "KNOWN_AGENT_RUN_PROVIDERS includes Claude/Codex but omits Grok and Antigravity; resolveAgentRunProvider returns unknown for both, losing actual provider identity in desktop and CLI capture. The fixed-point test derives its cases from the incomplete list and cannot discover missing AGENT_IDS.",
 					"affectedRows": ["S32"]
-				},
-				{
-					"id": "owner-scope:S32",
-					"code": "owner-task-scope-pending",
-					"missingPrerequisite": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage.",
-					"affectedRows": ["S32"]
 				}
 			],
 			"ownerScopeReview": {
 				"ownerTask": "GT1-01-07",
-				"status": "pending",
-				"reason": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage."
+				"status": "pass",
+				"scope": "Implementation/test/verification ownership only; no product acceptance.",
+				"reason": "Concrete bounded packets inserted before dependent checks; ownerTasks names the resulting paths.",
+				"evidenceRef": "phase01-task-coverage"
 			},
 			"branchAuditRefs": ["B01"]
 		},
@@ -17159,14 +18314,21 @@
 			},
 			"surfaces": ["Feedback interview accounts"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing shared consumer and its native adapter where required; preserve provider-specific syntax and refusal boundaries. GT1-01-07 must allocate bounded implementation/test packets for this newly discovered surface before dependent execution.",
 			"sourcePaths": ["src/shared/feedbackAccounts.ts", "docs/feedback.md"],
 			"ownerTasks": {
-				"implementation": ["GT1-01-07", "GT1-08-14"],
-				"test": ["GT1-08-15"],
-				"verification": ["GT1-01-07", "GT1-08-21", "GT1-11-03"],
-				"live": ["GT1-11-12"],
+				"implementation": ["GT1-08-14", "GT1-08-14A", "GT1-08-14B"],
+				"test": ["GT1-08-15", "GT1-08-14C", "GT1-08-14D"],
+				"verification": ["GT1-01-07", "GT1-08-21", "GT1-11-03", "GT1-11-11D"],
+				"live": ["GT1-11-12", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -17208,12 +18370,6 @@
 					"affectedRows": ["S33"]
 				},
 				{
-					"id": "owner-scope:S33",
-					"code": "owner-task-scope-pending",
-					"missingPrerequisite": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage.",
-					"affectedRows": ["S33"]
-				},
-				{
 					"id": "qualified-binary-and-platforms-missing",
 					"code": "qualification-not-run",
 					"missingPrerequisite": "Exact binary/version and declared route/platform receipts.",
@@ -17228,8 +18384,10 @@
 			],
 			"ownerScopeReview": {
 				"ownerTask": "GT1-01-07",
-				"status": "pending",
-				"reason": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage."
+				"status": "pass",
+				"scope": "Implementation/test/verification ownership only; no product acceptance.",
+				"reason": "Concrete bounded packets inserted before dependent checks; ownerTasks names the resulting paths.",
+				"evidenceRef": "phase01-task-coverage"
 			},
 			"branchAuditRefs": ["B02"]
 		},
@@ -17256,7 +18414,14 @@
 			},
 			"surfaces": ["Context-limit recovery"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing shared consumer and its native adapter where required; preserve provider-specific syntax and refusal boundaries. GT1-01-07 must allocate bounded implementation/test packets for this newly discovered surface before dependent execution.",
 			"sourcePaths": [
 				"src/shared/contextCompaction.ts",
@@ -17265,10 +18430,10 @@
 				"docs/agent-guides/CANONICAL-UTILITIES.md"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-01-07", "GT1-03-11"],
-				"test": ["GT1-03-12"],
-				"verification": ["GT1-01-07", "GT1-03-13", "GT1-11-03"],
-				"live": ["GT1-11-11"],
+				"implementation": ["GT1-03-11", "GT1-07-04C"],
+				"test": ["GT1-03-12", "GT1-07-04D"],
+				"verification": ["GT1-01-07", "GT1-03-13", "GT1-11-03", "GT1-07-11", "GT1-11-11C"],
+				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -17310,12 +18475,6 @@
 					"affectedRows": ["S34"]
 				},
 				{
-					"id": "owner-scope:S34",
-					"code": "owner-task-scope-pending",
-					"missingPrerequisite": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage.",
-					"affectedRows": ["S34"]
-				},
-				{
 					"id": "qualified-binary-and-platforms-missing",
 					"code": "qualification-not-run",
 					"missingPrerequisite": "Exact binary/version and declared route/platform receipts.",
@@ -17330,8 +18489,10 @@
 			],
 			"ownerScopeReview": {
 				"ownerTask": "GT1-01-07",
-				"status": "pending",
-				"reason": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage."
+				"status": "pass",
+				"scope": "Implementation/test/verification ownership only; no product acceptance.",
+				"reason": "Concrete bounded packets inserted before dependent checks; ownerTasks names the resulting paths.",
+				"evidenceRef": "phase01-task-coverage"
 			},
 			"branchAuditRefs": ["B03"]
 		},
@@ -17358,17 +18519,24 @@
 			},
 			"surfaces": ["Coworking MCP installation"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing shared consumer and its native adapter where required; preserve provider-specific syntax and refusal boundaries. GT1-01-07 must allocate bounded implementation/test packets for this newly discovered surface before dependent execution.",
 			"sourcePaths": [
 				"src/main/coworking/installers/index.ts",
 				"src/main/coworking/coworking-installer.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-01-07", "GT1-07-05"],
-				"test": ["GT1-07-07"],
-				"verification": ["GT1-01-07", "GT1-07-11", "GT1-11-03"],
-				"live": ["GT1-11-12"],
+				"implementation": ["GT1-07-05", "GT1-07-07A"],
+				"test": ["GT1-07-07", "GT1-07-07B"],
+				"verification": ["GT1-01-07", "GT1-07-11", "GT1-11-03", "GT1-11-11B"],
+				"live": ["GT1-11-12", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -17410,12 +18578,6 @@
 					"affectedRows": ["S35"]
 				},
 				{
-					"id": "owner-scope:S35",
-					"code": "owner-task-scope-pending",
-					"missingPrerequisite": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage.",
-					"affectedRows": ["S35"]
-				},
-				{
 					"id": "qualified-binary-and-platforms-missing",
 					"code": "qualification-not-run",
 					"missingPrerequisite": "Exact binary/version and declared route/platform receipts.",
@@ -17430,8 +18592,10 @@
 			],
 			"ownerScopeReview": {
 				"ownerTask": "GT1-01-07",
-				"status": "pending",
-				"reason": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage."
+				"status": "pass",
+				"scope": "Implementation/test/verification ownership only; no product acceptance.",
+				"reason": "Concrete bounded packets inserted before dependent checks; ownerTasks names the resulting paths.",
+				"evidenceRef": "phase01-task-coverage"
 			},
 			"branchAuditRefs": ["B30"]
 		},
@@ -17458,17 +18622,31 @@
 			},
 			"surfaces": ["Cue and agent bundle native resource portability"],
 			"routes": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing shared consumer and its native adapter where required; preserve provider-specific syntax and refusal boundaries. GT1-01-07 must allocate bounded implementation/test packets for this newly discovered surface before dependent execution.",
 			"sourcePaths": [
 				"src/main/cue/bundle/cue-bundle-exporter.ts",
 				"src/main/cue/bundle/cue-bundle-importer.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-01-07", "GT1-06-10", "GT1-08-08"],
-				"test": ["GT1-06-11", "GT1-08-09"],
-				"verification": ["GT1-01-07", "GT1-06-12", "GT1-08-12", "GT1-11-03"],
-				"live": ["GT1-11-12"],
+				"implementation": ["GT1-06-10", "GT1-08-08", "GT1-08-09A", "GT1-08-09B"],
+				"test": ["GT1-06-11", "GT1-08-09", "GT1-08-09C"],
+				"verification": [
+					"GT1-01-07",
+					"GT1-06-12",
+					"GT1-08-12",
+					"GT1-11-03",
+					"GT1-11-13",
+					"GT1-11-11B"
+				],
+				"live": ["GT1-11-12", "GT1-11-13", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
 			"versions": {
@@ -17510,12 +18688,6 @@
 					"affectedRows": ["S36"]
 				},
 				{
-					"id": "owner-scope:S36",
-					"code": "owner-task-scope-pending",
-					"missingPrerequisite": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage.",
-					"affectedRows": ["S36"]
-				},
-				{
 					"id": "qualified-binary-and-platforms-missing",
 					"code": "qualification-not-run",
 					"missingPrerequisite": "Exact binary/version and declared route/platform receipts.",
@@ -17530,8 +18702,10 @@
 			],
 			"ownerScopeReview": {
 				"ownerTask": "GT1-01-07",
-				"status": "pending",
-				"reason": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage."
+				"status": "pass",
+				"scope": "Implementation/test/verification ownership only; no product acceptance.",
+				"reason": "Concrete bounded packets inserted before dependent checks; ownerTasks names the resulting paths.",
+				"evidenceRef": "phase01-task-coverage"
 			},
 			"branchAuditRefs": ["B31"]
 		},
@@ -17558,7 +18732,14 @@
 			},
 			"surfaces": ["Lifetime global stats and achievement sharing"],
 			"routes": ["offline-audit"],
-			"platforms": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
+			"platforms": [
+				"darwin-arm64",
+				"darwin-x64",
+				"linux-arm64",
+				"linux-x64",
+				"win32-x64",
+				"win32-arm64"
+			],
 			"mechanism": "Extend the existing shared consumer and its native adapter where required; preserve provider-specific syntax and refusal boundaries. GT1-01-07 must allocate bounded implementation/test packets for this newly discovered surface before dependent execution.",
 			"sourcePaths": [
 				"src/main/ipc/handlers/agentSessions.ts",
@@ -17568,8 +18749,8 @@
 				"src/renderer/components/AchievementShareButton.tsx"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-01-07", "GT1-10-08"],
-				"test": ["GT1-10-09"],
+				"implementation": ["GT1-10-08", "GT1-10-09C", "GT1-10-09D", "GT1-10-09E"],
+				"test": ["GT1-10-09", "GT1-10-09F", "GT1-10-09G"],
 				"verification": ["GT1-01-07", "GT1-10-12", "GT1-11-03"],
 				"live": [],
 				"finalAcceptance": ["GT1-12-06"]
@@ -17611,18 +18792,14 @@
 					"code": "implementation-or-evidence-pending",
 					"missingPrerequisite": "agentSessions:getGlobalStats is labeled All Providers but discovers and aggregates only Claude/Codex stores. Grok history registration and the Cost & Tokens collector do not enter this distinct pipeline. Consequently About, usage-header/share and achievement totals omit Grok; Antigravity is omitted too. This warrants a separate outcome or explicit S26 expansion.",
 					"affectedRows": ["S37"]
-				},
-				{
-					"id": "owner-scope:S37",
-					"code": "owner-task-scope-pending",
-					"missingPrerequisite": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage.",
-					"affectedRows": ["S37"]
 				}
 			],
 			"ownerScopeReview": {
 				"ownerTask": "GT1-01-07",
-				"status": "pending",
-				"reason": "Add explicit bounded implementation/test/verification packets for the new surface before its dependent phase; provisional owners are not complete coverage."
+				"status": "pass",
+				"scope": "Implementation/test/verification ownership only; no product acceptance.",
+				"reason": "Concrete bounded packets inserted before dependent checks; ownerTasks names the resulting paths.",
+				"evidenceRef": "phase01-task-coverage"
 			},
 			"branchAuditRefs": ["B32"]
 		}
@@ -19659,6 +20836,59 @@
 			"reviewer": "Independent UI and main-process auditors",
 			"scope": "New S32-S37 scope only; no existing applicability is weakened. S32 is pure metadata attribution; S37 is pure stored-data aggregation. Runtime capture, native schema, account isolation and cost authority retain their existing live requirements."
 		},
+		"productAcceptance": "not-run",
+		"liveCalls": 0,
+		"imagesAnalyzed": 0
+	},
+	"canonicalRouteBindings": {
+		"native-headless": {
+			"transport": "native-headless",
+			"target": "local",
+			"qualification": "not-run"
+		},
+		"acp-candidate": {
+			"transport": "acp-stdio",
+			"target": "local",
+			"qualification": "not-run"
+		},
+		"ssh-native-headless": {
+			"transport": "native-headless",
+			"target": "ssh",
+			"qualification": "not-run"
+		},
+		"ssh-acp-candidate": {
+			"transport": "acp-stdio",
+			"target": "ssh",
+			"qualification": "not-run"
+		},
+		"offline-audit": {
+			"transport": null,
+			"target": "source-portable",
+			"qualification": "not-run"
+		}
+	},
+	"taskCoverageReview": {
+		"taskId": "GT1-01-07",
+		"sourceCommit": "e6b805be85a87f1b0fc567ae5344c0b74b013b78",
+		"recordedAt": "2026-10-30T09:02:45.956534+00:00",
+		"receiptPath": "Plans/grok-tier1/evidence/01-task-coverage.json",
+		"status": "pass",
+		"resolvedOwnerScopes": [
+			"S16",
+			"S21",
+			"S29",
+			"S30",
+			"S31",
+			"S32",
+			"S33",
+			"S34",
+			"S35",
+			"S36",
+			"S37"
+		],
+		"scope": "Coverage assignment audit only; all product implementation/static/deterministic/live statuses preserved.",
+		"independentReview": "pass",
+		"validationExitCode": 0,
 		"productAcceptance": "not-run",
 		"liveCalls": 0,
 		"imagesAnalyzed": 0

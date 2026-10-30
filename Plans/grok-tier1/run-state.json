@@ -258,8 +258,8 @@
 		"independentReview": "pass",
 		"repositorySuiteEvidence": "Plans/grok-tier1/evidence/01-baseline-checks.json"
 	},
-	"lastCompletedTaskId": "GT1-01-06",
-	"lastUpdatedAt": "2026-10-30T08:45:35.375988+00:00",
+	"lastCompletedTaskId": "GT1-01-07",
+	"lastUpdatedAt": "2026-10-30T09:06:53.869200+00:00",
 	"setup": {
 		"taskId": "GT1-01-01A",
 		"status": "pass",
@@ -586,7 +586,14 @@
 			"aheadBehind": [5, 6]
 		},
 		"evidencePath": "Plans/grok-tier1/evidence/01.md#gt1-01-05-disposable-acceptance-environment",
-		"implementationOwnerTasks": ["GT1-11-08", "GT1-11-09", "GT1-11-10"],
+		"implementationOwnerTasks": [
+			"GT1-11-08",
+			"GT1-11-09",
+			"GT1-11-10",
+			"GT1-11-08B",
+			"GT1-11-08C",
+			"GT1-11-09A"
+		],
 		"runnerImplemented": false,
 		"fixture": {
 			"rootTemplate": "tmp/grok-tier1-environment/runs/<owned-run-id>",
@@ -716,7 +723,7 @@
 			{
 				"id": "E01",
 				"requirementIds": ["P03", "P13", "P15", "P36"],
-				"ownerTasks": ["GT1-02-02", "GT1-04-02", "GT1-11-09"],
+				"ownerTasks": ["GT1-02-02", "GT1-04-02", "GT1-11-09", "GT1-11-11A"],
 				"fixtureRef": "synthetic:E01",
 				"expectedInvariant": "Two synthetic accounts and hosts with colliding native IDs; no credential, config or history leakage.",
 				"blockerIds": ["host-isolation-unqualified", "live-authorization-absent"],
@@ -726,7 +733,7 @@
 			{
 				"id": "E02",
 				"requirementIds": ["P01", "P04", "P09"],
-				"ownerTasks": ["GT1-02-06", "GT1-03-02", "GT1-11-10"],
+				"ownerTasks": ["GT1-02-06", "GT1-03-02", "GT1-11-10", "GT1-11-11A"],
 				"fixtureRef": "synthetic:E02",
 				"expectedInvariant": "Unknown version/capability or discovery permission refuses before dispatch; native/ACP framing stays distinct.",
 				"blockerIds": [
@@ -740,7 +747,7 @@
 			{
 				"id": "E03",
 				"requirementIds": ["P06", "P07", "P08"],
-				"ownerTasks": ["GT1-02-12", "GT1-11-11"],
+				"ownerTasks": ["GT1-02-12", "GT1-11-11", "GT1-11-11C"],
 				"fixtureRef": "synthetic:E03",
 				"expectedInvariant": "Large Unicode, empty and multiline prompts plus fresh/resumed images preserve content and owned artifact cleanup.",
 				"blockerIds": ["binary-unpinned", "live-authorization-absent"],
@@ -750,7 +757,7 @@
 			{
 				"id": "E04",
 				"requirementIds": ["P10", "P12", "P14"],
-				"ownerTasks": ["GT1-03-10", "GT1-11-11"],
+				"ownerTasks": ["GT1-03-10", "GT1-11-11", "GT1-11-11C"],
 				"fixtureRef": "synthetic:E04",
 				"expectedInvariant": "Fresh, resume, restart, cancellation and invalid resume produce one honest terminal outcome and no orphan.",
 				"blockerIds": ["binary-unpinned", "live-limits-unset"],
@@ -760,7 +767,7 @@
 			{
 				"id": "E05",
 				"requirementIds": ["P13", "P14", "P15", "P16"],
-				"ownerTasks": ["GT1-04-02", "GT1-11-11"],
+				"ownerTasks": ["GT1-04-02", "GT1-11-11", "GT1-11-11C"],
 				"fixtureRef": "synthetic:E05",
 				"expectedInvariant": "Native reload, fork, export and child attribution preserve exact account/host/session and bounded reads.",
 				"blockerIds": ["host-isolation-unqualified", "binary-unpinned"],
@@ -770,7 +777,7 @@
 			{
 				"id": "E06",
 				"requirementIds": ["P11", "P40"],
-				"ownerTasks": ["GT1-03-06", "GT1-11-09", "GT1-11-11"],
+				"ownerTasks": ["GT1-03-06", "GT1-11-09", "GT1-11-11", "GT1-11-11F"],
 				"fixtureRef": "synthetic:E06",
 				"expectedInvariant": "Unknown/partial/exact costs, cache buckets and child usage settle once; no uncertain reservation refund.",
 				"blockerIds": ["spend-guarantee-absent", "live-limits-unset"],
@@ -780,7 +787,7 @@
 			{
 				"id": "E07",
 				"requirementIds": ["P04", "P05", "P33"],
-				"ownerTasks": ["GT1-02-06", "GT1-02-08", "GT1-11-11"],
+				"ownerTasks": ["GT1-02-06", "GT1-02-08", "GT1-11-11", "GT1-11-11A"],
 				"fixtureRef": "synthetic:E07",
 				"expectedInvariant": "Advertised model families/efforts and explicit gateways select acknowledged values; hidden/rejected choices never downgrade.",
 				"blockerIds": ["model-catalog-unqualified", "discovery-authorization-absent"],
@@ -790,7 +797,7 @@
 			{
 				"id": "E08",
 				"requirementIds": ["P18", "P19", "P25", "P26", "P27", "P28"],
-				"ownerTasks": ["GT1-11-11", "GT1-11-12"],
+				"ownerTasks": ["GT1-11-11", "GT1-11-12", "GT1-11-11B"],
 				"fixtureRef": "synthetic:E08",
 				"expectedInvariant": "Only admitted synthetic skills/rules/MCP/plugins/hooks/children execute with lineage and bounded cleanup.",
 				"blockerIds": [
@@ -804,7 +811,7 @@
 			{
 				"id": "E09",
 				"requirementIds": ["P17", "P20", "P29", "P30", "P31", "P32", "P37", "P38"],
-				"ownerTasks": ["GT1-11-07", "GT1-11-11"],
+				"ownerTasks": ["GT1-11-07", "GT1-11-11", "GT1-11-11C", "GT1-11-11D", "GT1-11-11E"],
 				"fixtureRef": "synthetic:E09",
 				"expectedInvariant": "Real desktop/library/CLI/workflow/web/Lite consumers preserve selection, session, queue, approval and cancellation.",
 				"blockerIds": ["live-authorization-absent", "managed-authority-unqualified"],
@@ -814,7 +821,7 @@
 			{
 				"id": "E10",
 				"requirementIds": ["P33", "P34", "P35", "P36"],
-				"ownerTasks": ["GT1-09-13", "GT1-11-12"],
+				"ownerTasks": ["GT1-09-13", "GT1-11-12", "GT1-11-11D"],
 				"fixtureRef": "synthetic:E10",
 				"expectedInvariant": "Denied writes/symlinks/shell/network/MCP/meta-tools/hooks/children, stale approval and revocation have zero effects.",
 				"blockerIds": [
@@ -839,7 +846,7 @@
 			{
 				"id": "E12",
 				"requirementIds": ["P15", "P39", "P43"],
-				"ownerTasks": ["GT1-10-07", "GT1-11-11", "GT1-11-12"],
+				"ownerTasks": ["GT1-10-07", "GT1-11-11", "GT1-11-12", "GT1-11-11A"],
 				"fixtureRef": "synthetic:E12",
 				"expectedInvariant": "Each native OS/arch and SSH execution host handles paths, signals, images and remote roots without local fallback.",
 				"blockerIds": ["platform-native-unqualified", "ssh-target-unapproved"],
@@ -1340,7 +1347,9 @@
 				"Add win32-arm64 advertisement to parity platform coverage without weakening requirements.",
 				"Map parity acp-candidate/ssh-acp-candidate to acp-stdio and explicit target.",
 				"Ensure GT1-11-08/09 owns isolated OS/control preflight, discovery and shared reservation admission."
-			]
+			],
+			"resolvedBy": ["GT1-11-08B", "GT1-11-08C", "GT1-11-09", "GT1-11-09A", "GT1-11-10"],
+			"status": "assigned"
 		},
 		"artifactValidation": {
 			"status": "pass",
@@ -1432,5 +1441,46 @@
 			"assertion": "Six raw receipts/log hashes, 19 source inputs, test report totals, preserved live boundary/previous artifacts and 134 parity requirements/statuses."
 		},
 		"independentReview": "pass"
+	},
+	"taskCoverageReview": {
+		"taskId": "GT1-01-07",
+		"sourceCommit": "e6b805be85a87f1b0fc567ae5344c0b74b013b78",
+		"recordedAt": "2026-10-30T09:02:45.956534+00:00",
+		"receiptPath": "Plans/grok-tier1/evidence/01-task-coverage.json",
+		"status": "pass",
+		"resolvedOwnerScopes": [
+			"S16",
+			"S21",
+			"S29",
+			"S30",
+			"S31",
+			"S32",
+			"S33",
+			"S34",
+			"S35",
+			"S36",
+			"S37"
+		],
+		"scope": "Coverage assignment audit only; all product implementation/static/deterministic/live statuses preserved.",
+		"baseObservation": {
+			"ref": "refs/heads/feature/mega-maestro-v1.1.0-rc",
+			"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
+			"aheadBehind": [7, 10]
+		},
+		"counts": {
+			"requiredRows": 134,
+			"referenceOutcomes": 48,
+			"capabilityFields": 29,
+			"sourceFiles": 283,
+			"addedTasks": 61,
+			"resolvedOwnerScopes": 11
+		},
+		"publication": "Local commit only under CONTRACT; no push.",
+		"independentReview": "pass",
+		"validationExitCode": 0,
+		"productAcceptance": "not-run",
+		"liveCalls": 0,
+		"imagesAnalyzed": 0,
+		"nextTask": "GT1-02-01"
 	}
 }
