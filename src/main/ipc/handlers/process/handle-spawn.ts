@@ -46,6 +46,7 @@ import {
 	spawnOriginOf,
 	type DispatchedSpawnIds,
 } from '../../../process-manager/types';
+import { canonicalJson } from '../../../../shared/canonicalJson';
 import { generateUUID } from '../../../../shared/uuid';
 import { QUERY_USER_ENV_VAR } from '../../../../shared/webLogin';
 import { getActingUser } from '../../../web-server/auth/acting-user';
@@ -95,8 +96,17 @@ import {
 	isManagedLaunchRefusal,
 	type LaunchPermissionDecision,
 	type ManagedLaunchInput,
+	type AgentLaunchInput,
 } from '../../../../shared/maestro-lib/launch/launch-plan';
-import { resolvePromptDelivery } from '../../../../shared/maestro-lib/launch/prompt-delivery';
+import {
+	resolvePromptDelivery,
+	type PromptDelivery,
+} from '../../../../shared/maestro-lib/launch/prompt-delivery';
+import { newRemotePromptFileDestination } from '../../../utils/ssh-command-builder';
+import {
+	applySystemPromptDelivery as placeSystemPrompt,
+	applyCopilotPreamble,
+} from '../../../../shared/maestro-lib/turns/args';
 import { preparePermissionRelayArgs } from '../../../permission-relay';
 import {
 	primeOmpModelCatalog,
@@ -134,7 +144,7 @@ export async function handleProcessSpawn(
 	config: SpawnProcessConfig,
 	deps: SpawnHandlerDependencies
 ) {
-	const proofCleanup: { release?: () => void } = {};
+	const proofCleanup: { release?: () => void; privatePrompt?: boolean } = {};
 	try {
 		return await handleProcessSpawnImpl(config, deps, proofCleanup);
 	} catch (error) {
@@ -146,6 +156,7 @@ export async function handleProcessSpawn(
 				{ context: 'plugin run proof cleanup', sessionId: config.sessionId }
 			);
 		}
+		if (proofCleanup.privatePrompt) throw new Error('Private prompt-file launch failed.');
 		throw error;
 	}
 }
@@ -153,7 +164,7 @@ export async function handleProcessSpawn(
 async function handleProcessSpawnImpl(
 	config: SpawnProcessConfig,
 	deps: SpawnHandlerDependencies,
-	proofCleanup: { release?: () => void }
+	proofCleanup: { release?: () => void; privatePrompt?: boolean }
 ) {
 	const {
 		getProcessManager,
@@ -188,6 +199,18 @@ async function handleProcessSpawnImpl(
 
 	// Get agent definition to access config options and argument builders
 	const agent = await agentDetector.getAgent(config.toolType);
+	proofCleanup.privatePrompt = !!agent?.promptFile;
+	if (
+		agent?.promptFile &&
+		(agent.requiresPty || config.toolType === 'opencode' || config.toolType === 'codex')
+	) {
+		reportSpawnRefusal(
+			deps,
+			config.sessionId,
+			'Prompt-file delivery is unavailable on this transport. Nothing was started.'
+		);
+		return { success: false, pid: 0 };
+	}
 	let invalidLocalCustomPath = false;
 	if (config.sessionCustomPath && !config.sessionSshRemoteConfig?.enabled) {
 		const requestedCustomPath = config.sessionCustomPath;
@@ -225,7 +248,7 @@ async function handleProcessSpawnImpl(
 		promptLength: config.prompt?.length,
 		// On Windows, show prompt preview to help debug truncation issues
 		promptPreview:
-			config.prompt && isWindows()
+			config.prompt && isWindows() && !agent?.promptFile
 				? {
 						first50: config.prompt.substring(0, 50),
 						last50: config.prompt.substring(Math.max(0, config.prompt.length - 50)),
@@ -300,6 +323,9 @@ async function handleProcessSpawnImpl(
 	let finalArgs = buildAgentArgs(agent, {
 		baseArgs: config.args,
 		prompt: config.prompt,
+		forceBatchMode:
+			!!agent?.promptFile &&
+			(config.prompt !== undefined || (!config.agentSessionId && !!config.appendSystemPrompt)),
 		cwd: config.cwd,
 		readOnlyMode: config.readOnlyMode,
 		modelId: config.modelId,
@@ -406,14 +432,52 @@ async function handleProcessSpawnImpl(
 	// ========================================================================
 	let effectiveCustomEnvVars: Record<string, string> | undefined;
 	let launchPermission: LaunchPermissionDecision | undefined;
+	let launchInput: AgentLaunchInput | undefined;
+	let plannedFile: Extract<PromptDelivery, { via: 'file' }> | undefined;
+	let plannedTarget: string | undefined;
+	let promptRemote: SshRemoteConfig | undefined;
+	let copilotPreamble: string | undefined;
+	if (agent?.id === 'copilot-cli') {
+		try {
+			copilotPreamble = getPrompt('copilot-preamble');
+		} catch {
+			logger.debug('copilot-preamble unavailable; skipping injection', LOG_CONTEXT);
+		}
+	}
+	// Predict the same composition without creating the legacy Windows system
+	// file. The early plan snapshots knowledge and bytes; final planning below
+	// must reproduce them at this attempt's single owned destination.
+	const placed = agent?.promptFile
+		? placeSystemPrompt({
+				args: finalArgs,
+				prompt: config.prompt,
+				systemPrompt: config.appendSystemPrompt,
+				supportsAppendSystemPrompt: !!agent.capabilities?.supportsAppendSystemPrompt,
+				isResume: !!config.agentSessionId,
+				isWindowsHost: isWindows(),
+				sshRemote: !!config.sessionSshRemoteConfig?.enabled,
+			})
+		: undefined;
 	if (config.toolType !== 'terminal') {
-		const planResult = buildAgentLaunchPlan({
+		launchInput = {
 			surface: 'desktop',
 			agent: agent ?? undefined,
 			command: config.sessionCustomPath || agent?.path || config.command,
-			args: finalArgs,
+			remoteCommand: config.sessionCustomPath,
+			args: placed?.args ?? finalArgs,
 			cwd: config.cwd,
-			prompt: config.prompt,
+			prompt: placed
+				? applyCopilotPreamble(agent?.id ?? config.toolType, placed.prompt, copilotPreamble)
+				: config.prompt,
+			promptFileDestination:
+				agent?.promptFile &&
+				config.sessionSshRemoteConfig?.enabled &&
+				config.sessionSshRemoteConfig.remoteId
+					? newRemotePromptFileDestination(
+							config.sessionSshRemoteConfig.remoteId,
+							agent.promptFile.format
+						)
+					: undefined,
 			hasImages: !!config.images?.length,
 			globalShellEnvVars,
 			agentCustomEnvVars: agentConfigValues.customEnvVars as Record<string, string> | undefined,
@@ -423,7 +487,8 @@ async function handleProcessSpawnImpl(
 			managed: desktopManagedRoute(processManager, config.toolType),
 			sshRemoteConfig: config.sessionSshRemoteConfig,
 			sshStore: createSshRemoteStoreAdapter(settingsStore),
-		});
+		};
+		const planResult = buildAgentLaunchPlan(launchInput);
 		if (!planResult.ok) {
 			if (isManagedLaunchRefusal(planResult.reason)) {
 				logger.error('Managed launch plan refused the spawn; not spawning', LOG_CONTEXT, {
@@ -455,6 +520,12 @@ async function handleProcessSpawnImpl(
 		}
 		effectiveCustomEnvVars = planResult.plan.envVars;
 		launchPermission = planResult.plan.permission;
+		if (planResult.plan.prompt.via === 'file') {
+			plannedFile = planResult.plan.prompt;
+			plannedTarget = canonicalJson(planResult.plan.target);
+			if (planResult.plan.target.kind === 'remote')
+				promptRemote = structuredClone(planResult.plan.target.remote);
+		}
 	} else {
 		effectiveCustomEnvVars = configResolution.effectiveCustomEnvVars;
 	}
@@ -777,24 +848,57 @@ async function handleProcessSpawnImpl(
 	// preamble has to ride in the user prompt to be in-context for
 	// that turn's reasoning. The text is user-editable via Maestro
 	// Prompts (`copilot-preamble`); an empty customization disables it.
-	if (agent?.id === 'copilot-cli' && effectivePrompt) {
-		try {
-			const preamble = getPrompt('copilot-preamble').trim();
-			if (preamble) {
-				effectivePrompt = `${preamble}\n\n${effectivePrompt}`;
-				logger.debug('Prepended copilot-preamble to user prompt', LOG_CONTEXT, {
-					preambleLength: preamble.length,
-				});
-			}
-		} catch (err) {
-			// Prompt not loaded yet (initializePrompts not called) - skip silently.
-			// This path is hit by tests that stub the IPC handler without bootstrapping
-			// prompts. Production code always runs initializePrompts() at app start.
-			logger.debug('copilot-preamble unavailable; skipping injection', LOG_CONTEXT, {
-				error: String(err),
-			});
+	effectivePrompt = applyCopilotPreamble(
+		agent?.id ?? config.toolType,
+		effectivePrompt,
+		copilotPreamble
+	);
+
+	let promptDelivery: PromptDelivery;
+	if (plannedFile && launchInput) {
+		const finalPlan = buildAgentLaunchPlan({
+			...launchInput,
+			args: finalArgs,
+			prompt: effectivePrompt,
+			promptFileDestination: plannedFile.artifact,
+		});
+		if (!finalPlan.ok) {
+			proofCleanup.release?.();
+			reportSpawnRefusal(deps, config.sessionId, finalPlan.error);
+			return { success: false, pid: 0 };
+		}
+		promptDelivery = finalPlan.plan.prompt;
+		if (
+			promptDelivery.via !== 'file' ||
+			canonicalJson(promptDelivery.artifact) !== canonicalJson(plannedFile.artifact) ||
+			canonicalJson(finalPlan.plan.target) !== plannedTarget
+		) {
+			proofCleanup.release?.();
+			reportSpawnRefusal(
+				deps,
+				config.sessionId,
+				'Prompt-file content or target changed during launch preparation. Nothing was started.'
+			);
+			return { success: false, pid: 0 };
+		}
+		finalArgs = finalPlan.plan.args;
+		launchPermission = finalPlan.plan.permission;
+	} else {
+		promptDelivery = resolvePromptDelivery({
+			agent,
+			prompt: effectivePrompt,
+			isWindowsHost: isWindows(),
+			sshRemote: !!config.sessionSshRemoteConfig?.enabled,
+			hasImages: !!config.images?.length,
+			args: finalArgs,
+		});
+		if (promptDelivery.via === 'refused') {
+			proofCleanup.release?.();
+			reportSpawnRefusal(deps, config.sessionId, promptDelivery.error);
+			return { success: false, pid: 0 };
 		}
 	}
+	const promptArtifact = promptDelivery.via === 'file' ? promptDelivery.artifact : undefined;
 
 	// If no shell is specified and this is a terminal session, use the default shell from settings
 	// For terminal sessions, we also load custom shell path, args, and env vars
@@ -840,7 +944,7 @@ async function handleProcessSpawnImpl(
 				: config.agentSessionId;
 
 	// Redact system prompt content from logged args (can be large and sensitive)
-	const argsToLog = redactSystemPromptArg(finalArgs);
+	const argsToLog = promptArtifact ? ['[private prompt file]'] : redactSystemPromptArg(finalArgs);
 
 	logger.info(`Spawning process: ${config.command}`, LOG_CONTEXT, {
 		sessionId: config.sessionId,
@@ -856,9 +960,11 @@ async function handleProcessSpawnImpl(
 		...(config.yoloMode && { yoloMode: true }),
 		...(config.permissionMode && { permissionMode: config.permissionMode }),
 		...(config.modelId && { modelId: config.modelId }),
-		...(config.prompt && {
-			prompt: config.prompt.length > 500 ? config.prompt.substring(0, 500) + '...' : config.prompt,
-		}),
+		...(!agent?.promptFile &&
+			config.prompt && {
+				prompt:
+					config.prompt.length > 500 ? config.prompt.substring(0, 500) + '...' : config.prompt,
+			}),
 		...(config.appendSystemPrompt && {
 			systemPromptDelivery: delivered.delivery,
 			...(systemPromptTempFile && { systemPromptFile: systemPromptTempFile }),
@@ -960,7 +1066,7 @@ async function handleProcessSpawnImpl(
 		logger.info(`Forcing shell execution for agent on Windows for PATH access`, LOG_CONTEXT, {
 			agentId: agent?.id,
 			command: commandToSpawn,
-			args: argsToSpawn,
+			args: promptArtifact ? ['[private prompt file]'] : argsToSpawn,
 			shell: shellToUse,
 			shellSource: shellConfig.source,
 		});
@@ -975,7 +1081,9 @@ async function handleProcessSpawnImpl(
 		headlessArgs: finalArgs,
 		customEnvVarsToPass,
 		effectiveCustomEnvVars,
-		effectivePrompt,
+		effectivePrompt: promptArtifact ? undefined : effectivePrompt,
+		promptArtifact,
+		resolvedRemote: promptRemote,
 		globalShellEnvVars,
 		useShell,
 		shellToUse,
@@ -1141,29 +1249,6 @@ async function handleProcessSpawnImpl(
 		cleanupPluginRunProof();
 	};
 	if (pluginRunToken && exitListener.current) processManager.on('exit', exitListener.current);
-	// ========================================================================
-	// Prompt delivery: argv vs stdin, decided HERE by the host, never by the
-	// caller, and from the FINAL prompt (system prompt and preambles folded in).
-	//
-	// Windows spawns hand the prompt to the child over stdin instead of argv to
-	// stay under the ~32K CreateProcess command-line limit. That is a property of
-	// the machine that runs the CLI and of the CLI itself, so the renderer must
-	// not decide it: a web-desktop client is a browser that can sit on a
-	// completely different OS than the host (`window.maestro.platform` there is
-	// derived from the browser's user agent), so a Windows browser driving a Linux
-	// host used to request stdin delivery. Agents that only accept a positional
-	// prompt then started with no prompt at all - omp emitted its session line and
-	// exited 0, which left the tab holding an agent session id omp never persisted,
-	// so every later turn failed to resume it too. The rule itself lives in the
-	// shared resolvePromptDelivery, which Cue and the CLI use too.
-	// ========================================================================
-	const promptDelivery = resolvePromptDelivery({
-		agent,
-		prompt: effectivePrompt,
-		isWindowsHost: isWindows(),
-		sshRemote: !!sshRemoteUsed,
-		hasImages: !!config.images?.length,
-	});
 	const sendPromptViaStdin =
 		promptDelivery.via === 'stdin' && promptDelivery.format === 'stream-json';
 	const sendPromptViaStdinRaw = promptDelivery.via === 'stdin' && promptDelivery.format === 'raw';
@@ -1189,6 +1274,7 @@ async function handleProcessSpawnImpl(
 	// host spawns as before. The ticket was spent there; strip it so the
 	// process never sees it.
 	const { dispatchTicket: _claimedTicket, ...spawnConfig } = config;
+	if (promptArtifact) delete spawnConfig.appendSystemPrompt;
 	const result = await processManager.spawnAdmitted(
 		{
 			...spawnConfig,
@@ -1216,7 +1302,9 @@ async function handleProcessSpawnImpl(
 			requiresPty: sshRemoteUsed ? false : agent?.requiresPty,
 			// For SSH, prompt is included in the stdin script, not passed separately
 			// For local execution, pass prompt (with system prompt embedded for non-append-system-prompt agents)
-			prompt: sshRemoteUsed ? undefined : effectivePrompt,
+			prompt: sshRemoteUsed || promptArtifact ? undefined : effectivePrompt,
+			promptArtifact,
+			images: promptArtifact ? undefined : config.images,
 			// Host-authoritative (see above): overrides whatever the caller sent.
 			sendPromptViaStdin,
 			sendPromptViaStdinRaw,
@@ -1228,9 +1316,9 @@ async function handleProcessSpawnImpl(
 			ompModelCatalogKey, // Identity for the omp model catalog (local omp only)
 			// When using SSH, env vars are passed in the stdin script, not locally
 			customEnvVars: customEnvVarsToPass,
-			imageArgs: agent?.imageArgs, // Function to build image CLI args (for Codex, OpenCode)
-			imagePromptBuilder: agent?.imagePromptBuilder, // Function to embed image refs into prompts (for Copilot)
-			promptArgs: agent?.promptArgs, // Function to build prompt args (e.g., ['-p', prompt] for OpenCode)
+			imageArgs: promptArtifact ? undefined : agent?.imageArgs, // Function to build image CLI args (for Codex, OpenCode)
+			imagePromptBuilder: promptArtifact ? undefined : agent?.imagePromptBuilder, // Function to embed image refs into prompts (for Copilot)
+			promptArgs: promptArtifact ? undefined : agent?.promptArgs, // Function to build prompt args (e.g., ['-p', prompt] for OpenCode)
 			noPromptSeparator: agent?.noPromptSeparator, // Some agents don't support '--' before prompt
 			// Stats tracking: use cwd as projectPath if not explicitly provided
 			projectPath: config.cwd,
