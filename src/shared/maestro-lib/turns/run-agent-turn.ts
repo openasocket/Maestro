@@ -86,6 +86,8 @@ const CLAUDE_CODE_ID = 'claude-code';
 export type RunAgentTurnRefusal =
 	/** The agent is on an SSH remote that is not usable. The turn did not run. */
 	| 'ssh-unresolved'
+	/** Grok's model/effort selection was refused before dispatch. Nothing was started. */
+	| 'grok-model-effort-refused'
 	/** The turn carries images (CH-8). */
 	| 'images-unsupported'
 	/** Claude Code in Standard permission mode, with no relay to answer its prompts (PA11). */
@@ -432,6 +434,9 @@ export async function runAgentTurn(
 		...(options.managed?.launch ? { managed: options.managed.launch } : {}),
 	});
 	if (!planned.ok) {
+		if (planned.reason === 'grok-model-effort-refused') {
+			return abandon(planned.reason, planned.error);
+		}
 		return abandon(
 			isManagedLaunchRefusal(planned.reason) ? 'managed-denied' : 'ssh-unresolved',
 			planned.error
