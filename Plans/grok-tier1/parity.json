@@ -1902,8 +1902,15 @@
 				"src/shared/maestro-lib/parsers/antigravity-output-parser.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-01", "GT1-02-03", "GT1-03-11", "GT1-03-11A"],
-				"test": ["GT1-02-02", "GT1-02-04", "GT1-03-12", "GT1-03-11B"],
+				"implementation": [
+					"GT1-02-01",
+					"GT1-02-03",
+					"GT1-03-11",
+					"GT1-03-11A",
+					"GT1-02-03B",
+					"GT1-02-03H"
+				],
+				"test": ["GT1-02-02", "GT1-02-04", "GT1-03-12", "GT1-03-11B", "GT1-02-03D", "GT1-02-03I"],
 				"verification": [
 					"GT1-02-13",
 					"GT1-02-14",
@@ -1962,6 +1969,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P05"]
+				},
+				{
+					"id": "grok-environment-disclosure-unverified",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H must propagate the masking key through settings snapshots. GT1-02-03D/03I/13 own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03b-opaque-environment-disclosure. Whole-row qualification remains pending.",
 					"affectedRows": ["P05"]
 				}
 			],
@@ -11941,8 +11954,8 @@
 				"src/shared/envVarCatalog.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-01", "GT1-02-03"],
-				"test": ["GT1-02-02", "GT1-02-04"],
+				"implementation": ["GT1-02-01", "GT1-02-03", "GT1-02-03B", "GT1-02-03H"],
+				"test": ["GT1-02-02", "GT1-02-04", "GT1-02-03D", "GT1-02-03I"],
 				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-11A"],
 				"live": ["GT1-11-12", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -11994,6 +12007,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["REG-AUTH"]
+				},
+				{
+					"id": "grok-environment-disclosure-unverified",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H must propagate the masking key through settings snapshots. GT1-02-03D/03I/13 own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03b-opaque-environment-disclosure. Whole-row qualification remains pending.",
 					"affectedRows": ["REG-AUTH"]
 				}
 			],
@@ -16557,7 +16576,9 @@
 					"GT1-10-06",
 					"GT1-02-09",
 					"GT1-02-10",
-					"GT1-02-11"
+					"GT1-02-11",
+					"GT1-02-03B",
+					"GT1-02-03H"
 				],
 				"test": [
 					"GT1-02-02",
@@ -16570,7 +16591,9 @@
 					"GT1-04-12",
 					"GT1-02-06",
 					"GT1-10-07",
-					"GT1-02-12"
+					"GT1-02-12",
+					"GT1-02-03D",
+					"GT1-02-03I"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -16634,6 +16657,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["META-05"]
+				},
+				{
+					"id": "grok-environment-disclosure-unverified",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H must propagate the masking key through settings snapshots. GT1-02-03D/03I/13 own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03b-opaque-environment-disclosure. Whole-row qualification remains pending.",
 					"affectedRows": ["META-05"]
 				}
 			],
