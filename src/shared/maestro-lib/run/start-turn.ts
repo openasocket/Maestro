@@ -5,7 +5,12 @@ import { spawn, type ChildProcess } from 'child_process';
 import type { AgentOutputParser, ParsedEvent } from '../parsers/agent-output-parser';
 import { createOutputParser } from '../parsers/parser-factory';
 import { BufferedLineReader } from '../streaming/buffered-line-reader';
-import { stopProcess, type StopHandle, type StopStage } from '../control/termination';
+import {
+	stopProcess,
+	trackProcessTree,
+	type StopHandle,
+	type StopStage,
+} from '../control/termination';
 import type { AgentLaunchPlan } from '../launch/launch-plan';
 import { quoteCommandForCmdShell, windowsShellReason } from '../launch/windows-command';
 import { escapeCmdArgs } from '../launch/windows-shell-escape';
@@ -233,6 +238,12 @@ export interface StartTurnOptions {
 	parser?: AgentOutputParser;
 	/** How long each stop stage gets before the next one runs. */
 	stopGraceMs: number;
+	/**
+	 * Observe POSIX descendants throughout the turn so cancellation after the
+	 * parent exits can still stop recorded tools holding its pipes. Not a strict
+	 * containment guarantee: unobserved descendants and Windows need host support.
+	 */
+	trackDescendants?: boolean;
 	/** Aborting this stops the turn, from `terminate`. */
 	signal?: AbortSignal;
 	/**
@@ -360,6 +371,7 @@ export function startTurn(
 		shell: spec.shell ?? false,
 		stdio: [stdinMode, 'pipe', 'pipe'],
 	});
+	const finishTracking = options.trackDescendants ? trackProcessTree(child) : undefined;
 
 	const parser = options.parser ?? (options.agentId ? createOutputParser(options.agentId) : null);
 	const tailLimit = options.stdoutTailLimit ?? DEFAULT_STDOUT_TAIL_LIMIT;
@@ -385,6 +397,7 @@ export function startTurn(
 		from: StopStage,
 		extra: { immediate?: boolean; blocking?: boolean; by?: 'caller' | 'authority' } = {}
 	): void => {
+		if (settled) return;
 		const { by = 'caller', ...rest } = extra;
 		stopLadder = stopProcess(
 			{ child },
@@ -435,8 +448,14 @@ export function startTurn(
 				droppedOutputBytes,
 				...(stdinError ? { stdinError } : {}),
 			};
-			gate?.released?.(turnExit);
-			resolve(turnExit);
+			const release = (): void => {
+				gate?.released?.(turnExit);
+				resolve(turnExit);
+			};
+			// Preserve normal stream draining, then join any pending ownership
+			// observation/sweep before releasing the lease exactly once.
+			if (finishTracking) void finishTracking().then(release);
+			else release();
 		};
 
 		// Decode on the stream, not per chunk: a multibyte character split across
@@ -467,6 +486,12 @@ export function startTurn(
 		});
 
 		child.on('error', (error) => {
+			// A failed signal can emit `error` on a process that did start. Keep
+			// ownership and drain its pipes; only a spawn failure releases here.
+			if (options.trackDescendants && child.pid !== undefined) {
+				stop('terminate');
+				return;
+			}
 			settle({ exitCode: null, signal: null, spawnError: error });
 		});
 	});
