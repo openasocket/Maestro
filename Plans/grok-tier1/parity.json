@@ -8319,7 +8319,8 @@
 					"GT1-02-13D",
 					"GT1-02-13F",
 					"GT1-02-13H",
-					"GT1-02-13I"
+					"GT1-02-13I",
+					"GT1-02-13B1"
 				],
 				"verification": ["GT1-12-05", "GT1-12-06", "GT1-11-03", "GT1-02-13", "GT1-02-13J"],
 				"live": [],
@@ -8359,7 +8360,7 @@
 				{
 					"id": "gap:P46",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-13 executed focused tests and all three TypeScript configurations at ccde87a072105969c18dfdf6a6f524d3b87022ec. Remaining: 41 assertion failures, completeness import isolation failure (full suite not-run), six phase-owned type diagnostics and the existing dispatcher baseline. GT1-02-13A through GT1-02-13I own bounded repairs; GT1-02-13J re-verifies before GT1-02-14 reconciliation. No native/platform acceptance is inferred. See Plans/grok-tier1/evidence/02.md#gt1-02-13-focused-verification. GT1-02-13A authored sanitized operation/checkout-relative diagnostics only: static tracing could not identify the denied call, so no guard exception was added and isolation remains unresolved. GT1-02-13J must capture the sentinel diagnostic and assign its bounded repair before full completeness. See Plans/grok-tier1/evidence/02.md#gt1-02-13a-sanitized-isolation-diagnostics.",
+					"missingPrerequisite": "GT1-02-13 executed focused tests and all three TypeScript configurations at ccde87a072105969c18dfdf6a6f524d3b87022ec. Remaining: 41 assertion failures, completeness import isolation failure (full suite not-run), six phase-owned type diagnostics and the existing dispatcher baseline. GT1-02-13A through GT1-02-13I own bounded repairs; GT1-02-13J re-verifies before GT1-02-14 reconciliation. No native/platform acceptance is inferred. See Plans/grok-tier1/evidence/02.md#gt1-02-13-focused-verification. GT1-02-13A authored sanitized operation/checkout-relative diagnostics only: static tracing could not identify the denied call, so no guard exception was added and isolation remains unresolved. GT1-02-13J must capture the sentinel diagnostic and assign its bounded repair before full completeness. See Plans/grok-tier1/evidence/02.md#gt1-02-13a-sanitized-isolation-diagnostics. GT1-02-13B repaired the two required capability copies and removed the ignored desktop sink readOnlyMode field while preserving prepared flags/script and spawnAdmitted; compiler and behavioral verification remain not-run. GT1-02-13B1 owns the ten obsolete artifact-field assertions, canonical read-only handoff controls and capability snapshot mutation coverage before GT1-02-13J. No permission decision or policy ceiling is fabricated, and native Grok policy qualification remains unproven. See Plans/grok-tier1/evidence/02.md#gt1-02-13b-required-capability-snapshots-and-desktop-handoff.",
 					"affectedRows": ["P46"],
 					"evidenceRef": "phase02-focused-verification"
 				},

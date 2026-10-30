@@ -370,7 +370,7 @@ export function createBackgroundTurns(options: BackgroundTurnsOptions): Backgrou
 			...spawn,
 			agent: {
 				...spawn.agent,
-				capabilities: spawn.agent.capabilities ? { ...spawn.agent.capabilities } : undefined,
+				capabilities: { ...spawn.agent.capabilities },
 				promptFile: spawn.agent.promptFile
 					? {
 							...spawn.agent.promptFile,

@@ -181,7 +181,7 @@ export async function spawnGroupChatAgent(
 		...config,
 		agent: {
 			...config.agent,
-			capabilities: config.agent.capabilities ? { ...config.agent.capabilities } : undefined,
+			capabilities: { ...config.agent.capabilities },
 			promptFile: config.agent.promptFile
 				? {
 						...config.agent.promptFile,
@@ -337,8 +337,10 @@ export async function spawnGroupChatAgent(
 		toolType: prepared.providerId,
 		cwd: prepared.cwd,
 		command: prepared.command,
+		// Read-only flags are already composed by the canonical argument builder.
+		// The sink admits these args (or the SSH script); a permission decision
+		// belongs to a validated launch plan and cannot be inferred from the boolean.
 		args: prepared.args,
-		readOnlyMode: prepared.readOnlyMode,
 		prompt: promptArtifact ? undefined : prepared.prompt,
 		...(promptArtifact ? { promptArtifact } : {}),
 		...(promptArtifact?.owner === 'remote' ? { sshRemoteId: promptArtifact.sshRemoteId } : {}),
