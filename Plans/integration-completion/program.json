@@ -2354,6 +2354,51 @@
           "id": "MCOMP-09-04"
         },
         {
+          "label": "Attach the protected installation standing to the runtime binding (continuation of MCOMP-09-04)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/shared/maestro-lib/runtime/index.ts"
+          ],
+          "outcome": "createMaestroRuntime takes the host custody standing (MaestroRuntimeOptions.managed.standing, an InstallationStandingSource) and hands it to createManagedBinding, so the runtime binding is held to the protected standing: an enrollment the custody holds is enrolled with no binding file, and a file the custody does not hold supplies no authority. The lock holder reconciles the mirror from the custody instead of the standalone check alone: enroll (already-enrolled is not a warning) when the custody holds an enrollment, unenroll by name when the custody reads standalone over a stale mirror. A runtime with no standing source reads the files alone, as before. One authored file, under 100 changed lines; a throwaway or permanent case proves an enrolled runtime whose binding file was deleted still refuses a bare startTurn. No additional counterpart input is required for this task.",
+          "backlog": [
+            "M-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-09-04A"
+        },
+        {
+          "label": "Hand the installation standing to the detached host and the Cue engine (continuation of MCOMP-09-04)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/cli/services/host-managed.ts",
+            "src/cli/commands/host.ts",
+            "src/cli/services/cue-standalone-engine.ts"
+          ],
+          "outcome": "composeHostManaged carries its InstallationStandingSource as managed.standing in BOTH branches (an uncomposed plain Node host still hands the runtime a managed options object with the standing and no adapter), maestro-cli host start passes that managed object beside managedUnavailable, and the standalone Cue engine reads its binding over createHostInstallationStanding for its data directory (resolveHostCustody with no seal), so a headless host or Cue engine whose binding file was deleted or whose record it cannot open runs managed and unavailable, never standalone. Keep the task to these three authored files and fewer than 200 changed lines. No additional counterpart input is required for this task.",
+          "backlog": [
+            "M-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-09-04B"
+        },
+        {
+          "label": "Hold the bare CLI and the desktop custody to an anchor whose record is gone (continuation of MCOMP-09-04)",
+          "kind": "IMPLEMENT",
+          "targets": [
+            "src/cli/services/agent-spawner.ts",
+            "src/main/enterprise/identity-store.ts"
+          ],
+          "outcome": "The bare CLI (cliSpawnAuthority, readCliManagedBinding) reads its binding over createHostInstallationStanding so a machine whose binding file was deleted while the sealed record or its anchor remains refuses every launch as managed-unavailable; the identity store reads a present anchor with no record as untrusted (anchor-without-record), so identityStandingOf reads managed on the desktop too and clear with the untrusted state acknowledged removes the orphan anchor. Keep the task to these two authored files and fewer than 150 changed lines, with the existing identity-store and agent-spawner suites green. No additional counterpart input is required for this task.",
+          "backlog": [
+            "M-02"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-09-04C"
+        },
+        {
           "label": "Compose actual headless identity and endpoint transport",
           "kind": "IMPLEMENT",
           "targets": [
@@ -2417,7 +2462,7 @@
       ],
       "id": "MCOMP-09",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-09.md",
-      "taskCount": 8,
+      "taskCount": 11,
       "stage": "S04"
     },
     {
@@ -7216,7 +7261,7 @@
         "MEGA-CONTRACTS-FOUNDATION-BUILD"
       ],
       "nativeInputs": false,
-      "taskCount": 23
+      "taskCount": 26
     },
     {
       "id": "S05",
@@ -7577,9 +7622,9 @@
       "taskCount": 1
     }
   ],
-  "taskCount": 301,
+  "taskCount": 304,
   "taskCounts": {
-    "IMPLEMENT": 198,
+    "IMPLEMENT": 201,
     "TEST": 39,
     "VERIFY": 64
   },
@@ -8018,6 +8063,9 @@
       "MCOMP-05-08",
       "MCOMP-09-03",
       "MCOMP-09-04",
+      "MCOMP-09-04A",
+      "MCOMP-09-04B",
+      "MCOMP-09-04C",
       "MCOMP-09-05",
       "MCOMP-09-06",
       "MCOMP-09-07",

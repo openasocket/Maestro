@@ -17,7 +17,20 @@
  *
  * The composition itself is complete and tested over injected custody (`custody`), so the day a
  * protected seal exists off Electron it is one argument, not a new module. Tests inject fakes;
- * nothing here touches the developer's keyring unless a protected seal was handed in first.
+ * nothing here touches the developer's keyring unless a protected seal was handed in first, or
+ * the installation standing is asked for and no record is present (below).
+ *
+ * The installation standing (MCOMP-09-04) is what this process can say of the installation
+ * WITHOUT composing anything: `createHostInstallationStanding` reads the data directory's sealed
+ * record (through the identity store when custody is protected; by its presence when it is not),
+ * then, when no record is present, the freshness anchor the OS credential store holds for that
+ * directory, and it reads the production directory the data directory maps to as well as the one
+ * the caller named. The answer is the `InstallationStandingSource` the library binding holds its
+ * mirror file to: a record held here in any form, or an anchor with its record gone, is managed;
+ * only no record and no anchor, or a record the endpoint retired, is standalone. So a plain Node
+ * process that cannot open the record still knows the installation is managed, an alternate data
+ * directory under an enrolled installation is that installation, and deleting the binding file (or
+ * the sealed record) by hand releases nothing.
  */
 
 import * as fs from 'fs';
@@ -43,8 +56,12 @@ import {
 import { sealProtectionProblem, type SealProvider } from '../../main/utils/safe-storage-seal';
 import {
 	MAESTRO_LIB_VERSION,
+	bindingEnrollment,
 	createManagedHostAdapter,
+	resolveProductionDataDir,
 	type EndpointPort,
+	type InstallationStanding,
+	type InstallationStandingSource,
 	type ManagedEnrollmentStatus,
 	type ManagedInstallationIdentity,
 	type MaestroRuntimeOptions,
@@ -99,12 +116,19 @@ export function resolveHostCustody(input: HostCustodyInput): HostCustodyRead {
 
 export interface HostManagedDeps {
 	userDataDir: string;
+	/**
+	 * The production data directory the caller resolved, read for the installation standing beside
+	 * the one `userDataDir` maps to. It adds a directory to read; it never removes one.
+	 */
+	productionDataDir?: string;
 	/** The build version, the `maestro` component the endpoint negotiates against. */
 	version: string;
 	/** Default: `resolveHostCustody` over the data directory with no seal, which is refused by name. */
 	custody?: HostCustodyRead;
 	/** Test seam: how a port is opened for the record's socket path. Default: the real client. */
 	openPort?(socketPath: string): EndpointPort;
+	/** Test seam for the installation standing: the anchor of a directory's record. Default: its keyring anchor. */
+	anchorFor?(dir: string): AnchorStore;
 	platform?: NodeJS.Platform;
 	now?: () => number;
 }
@@ -125,8 +149,10 @@ export type HostManagedComposition =
 			identity: EnterpriseIdentityStore;
 			/** The enrollment lifecycle's standing; null until the runtime has asked for its adapter. */
 			status(): ManagedEnrollmentStatus | null;
+			/** What this process can say of the installation, composed or not (`createHostInstallationStanding`). */
+			standing: InstallationStandingSource;
 	  }
-	| { composed: false; reason: string };
+	| { composed: false; reason: string; standing: InstallationStandingSource };
 
 function recordFileExists(file: string): boolean {
 	try {
@@ -134,6 +160,147 @@ function recordFileExists(file: string): boolean {
 	} catch {
 		return false;
 	}
+}
+
+export interface HostInstallationStandingInput {
+	userDataDir: string;
+	/** The production directory the caller named; read beside the one `userDataDir` maps to. */
+	productionDataDir?: string;
+	/**
+	 * This process's custody for the record (`resolveHostCustody`). A refused custody still reads
+	 * the standing: the record by its presence, then the anchor.
+	 */
+	custody: HostCustodyRead;
+	/** The anchor of a directory's record, consulted when no record is present. Default: its keyring anchor. */
+	anchorFor?(dir: string): AnchorStore;
+	platform?: NodeJS.Platform;
+	now?: () => number;
+}
+
+/**
+ * The protected installation standing a detached host reads (MCOMP-09-04), as
+ * `createManagedBinding({ standing })` consumes it: the sealed identity record and its freshness
+ * anchor decide, in this data directory, in the production directory it maps to, and in the one
+ * the caller named. Read on every `read()`; nothing is cached, so an enrollment that lands after
+ * the start counts on the next call.
+ *
+ * Per directory: with protected custody the identity store reads the record, and `ok` is managed
+ * with the enrollment the record implies (`bindingEnrollment`), except a `retired` record, which
+ * is the authenticated release and reads standalone; `untrusted` (rolled back, foreign,
+ * unsealable, malformed, anchor gone) is managed with no enrollment. Without protected custody a
+ * present record is managed with no enrollment: it cannot be opened here, and that is not evidence
+ * of standalone. With no record present in either case the anchor is read, and an anchor whose
+ * record is gone is managed with no enrollment: the record was removed without the release. Only
+ * no record and no anchor is standalone. The first directory that reads managed answers; when
+ * none does, the own directory's standalone detail is the answer.
+ *
+ * The anchor read is a synchronous call into the OS credential store, made only when no record
+ * is present; on a machine that never enrolled it finds no entry. Tests inject `anchorFor`.
+ */
+export function createHostInstallationStanding(
+	input: HostInstallationStandingInput
+): InstallationStandingSource {
+	const now = input.now ?? (() => Date.now());
+	const anchorFor =
+		input.anchorFor ??
+		((dir: string) =>
+			createKeyringAnchor(
+				ENTERPRISE_IDENTITY_ANCHOR_SERVICE,
+				anchorAccountForDirectory('enterprise-identity', dir)
+			));
+	const directories: string[] = [];
+	for (const dir of [
+		input.userDataDir,
+		resolveProductionDataDir(input.userDataDir),
+		...(input.productionDataDir ? [input.productionDataDir] : []),
+	]) {
+		const resolved = path.resolve(dir);
+		if (!directories.includes(resolved)) directories.push(resolved);
+	}
+
+	const heldUnreadable = (detail: string): InstallationStanding => ({
+		standing: 'managed',
+		enrollment: null,
+		management: null,
+		detail,
+	});
+
+	function anchoredOrStandalone(file: string, anchor: AnchorStore): InstallationStanding {
+		const held = anchor.available() ? anchor.read() : null;
+		if (held) {
+			return heldUnreadable(
+				`No enrollment record is present at ${file}, and the credential store holds its freshness anchor (epoch ${held.epoch}): the record was removed without the authenticated release.`
+			);
+		}
+		return {
+			standing: 'standalone',
+			detail: `No enrollment record is present at ${file}, and the credential store holds no anchor for it.`,
+		};
+	}
+
+	function readDirectory(dir: string): InstallationStanding {
+		const file = path.join(dir, ENTERPRISE_IDENTITY_FILE_NAME);
+		const custody = input.custody;
+		const own = path.resolve(input.userDataDir) === dir;
+		const anchor = custody.ok && own ? custody.anchor : anchorFor(dir);
+		if (!custody.ok) {
+			if (recordFileExists(file)) {
+				return heldUnreadable(
+					`An enrollment record is present at ${file} and cannot be opened in this process (${custody.reason}).`
+				);
+			}
+			return anchoredOrStandalone(file, anchor);
+		}
+		const read = createEnterpriseIdentityStore({
+			file,
+			seal: custody.seal,
+			anchor,
+			...(input.platform ? { platform: input.platform } : {}),
+			now,
+		}).read();
+		switch (read.status) {
+			case 'ok': {
+				const { record } = read;
+				const where = `${record.orgId} (${record.tenantId}) at ${record.endpoint.socketPath}`;
+				if (record.management === 'retired') {
+					return {
+						standing: 'standalone',
+						detail: `${file} holds a retired record for installation ${record.installationId}: released by ${where}.`,
+					};
+				}
+				return {
+					standing: 'managed',
+					enrollment: { ...bindingEnrollment(record), enrolledAt: record.enrolledAt },
+					management: record.management,
+					detail: `${file} enrolls installation ${record.installationId} with ${where}; management is ${record.management}.`,
+				};
+			}
+			case 'untrusted':
+				return heldUnreadable(
+					`An enrollment record is present at ${file} and is not trusted here (${read.reason}): ${read.message}`
+				);
+			case 'unprotected':
+				return read.fileExists
+					? heldUnreadable(
+							`An enrollment record is present at ${file} and custody is not protected here (${read.reason}): ${read.message}`
+						)
+					: anchoredOrStandalone(file, anchor);
+			case 'none':
+				return anchoredOrStandalone(file, anchor);
+		}
+	}
+
+	return {
+		read() {
+			let released: InstallationStanding | null = null;
+			for (const dir of directories) {
+				const standing = readDirectory(dir);
+				if (standing.standing === 'managed') return standing;
+				released ??= standing;
+			}
+			return released ?? { standing: 'standalone', detail: 'No data directory to read.' };
+		},
+	};
 }
 
 /**
@@ -150,11 +317,21 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 			userDataDir: deps.userDataDir,
 			...(deps.platform ? { platform: deps.platform } : {}),
 		});
+	// What this process says of the installation whether or not it composes an adapter: the
+	// binding holds its mirror to it, so an enrollment this process cannot open still counts.
+	const standing = createHostInstallationStanding({
+		userDataDir: deps.userDataDir,
+		...(deps.productionDataDir ? { productionDataDir: deps.productionDataDir } : {}),
+		custody,
+		...(deps.anchorFor ? { anchorFor: deps.anchorFor } : {}),
+		...(deps.platform ? { platform: deps.platform } : {}),
+		now,
+	});
 	if (!custody.ok) {
 		const record = recordFileExists(file)
 			? `An enrollment record is present at ${file} and cannot be opened here, so this host runs enrolled-unavailable.`
 			: `No enrollment record is present at ${file}.`;
-		return { composed: false, reason: `${custody.reason}. ${record}` };
+		return { composed: false, reason: `${custody.reason}. ${record}`, standing };
 	}
 
 	const identity = createEnterpriseIdentityStore({
@@ -201,6 +378,7 @@ export function composeHostManaged(deps: HostManagedDeps): HostManagedCompositio
 		composed: true,
 		managed: { host },
 		identity,
+		standing,
 		status: () => lifecycle?.status() ?? null,
 		lifecycle: {
 			async attach() {

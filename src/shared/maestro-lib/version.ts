@@ -144,8 +144,15 @@ import { MANAGED_CONTRACT_VERSION } from './managed/types';
  * (`leaseAdmissionAuthority`) or minted over another authority, before any effect, and never spawns it plain;
  * `runAgentTurn` reads the same standing beside its caller's word. `freezeTurnProcessSpec` is the own frozen
  * copy both admit and spawn. Also covers MCOMP-09-01, which made `createRuntimeTurns({ standing })` required.
+ * 0.34.0: the protected installation standing at the binding (`./managed/binding`, MCOMP-09-04):
+ * `InstallationStanding` and `InstallationStandingSource` are what a host's custody (the sealed identity record and
+ * its anchor) says of the installation, and `createManagedBinding({ standing })` holds the mirror file to it: an
+ * enrollment the custody holds is enrolled with no file, a file the custody does not hold supplies no authority, a
+ * record held but not readable here, an anchor whose record is gone and a revoked or suspended record are managed
+ * and unavailable, and a retired record is the one release. `enroll` refuses `custody-mismatch`, `unenroll` refuses
+ * `management-required`, and `managedBindingFiles` always reads the production directory the data directory maps to.
  */
-export const MAESTRO_LIB_VERSION = '0.33.0';
+export const MAESTRO_LIB_VERSION = '0.34.0';
 
 /** The Node range the built library runs on; `engines.node` of the built package. */
 export const MAESTRO_LIB_NODE_RANGE = '>=20';
