@@ -9,6 +9,10 @@ import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { createScratchDir } from '../../../__tests__/shared/maestro-lib/run/fakeAgent';
+import { buildAgentLaunchPlan, type AgentLaunchInput } from '../launch/launch-plan';
+import type { AcpPromptBlock } from '../launch/image-refs';
+import * as definitions from '../providers/definitions';
 import { SSH_STDIN_REMOTE_SHELL } from '../control/ssh-remote-signal';
 import { getAgentDefinition } from '../providers/definitions';
 import {
@@ -18,6 +22,11 @@ import {
 	resumeIdFromArgs,
 	type PipeSpawnConfig,
 } from './pipe-spawn';
+
+vi.mock('fs', async (importOriginal) => ({ ...(await importOriginal<typeof fs>()) }));
+vi.mock('../providers/definitions', async (importOriginal) => ({
+	...(await importOriginal<typeof definitions>()),
+}));
 
 const platform = vi.hoisted(() => ({ windows: false }));
 vi.mock('../../platformDetection', () => ({
@@ -264,6 +273,255 @@ describe('planPipeSpawn', () => {
 				)
 			).toThrow(/no image writer/);
 		});
+	});
+
+	describe('explicit prompt-file handoff', () => {
+		let scratch: ReturnType<typeof createScratchDir>;
+		let input: AgentLaunchInput;
+		let delivery: NonNullable<PipeSpawnConfig['promptDelivery']>;
+		const saveImageToTempFile = vi.fn(() => 'unexpected-image.png');
+		const imagePromptBuilder = vi.fn(() => 'unexpected image prefix');
+		const imageArgs = vi.fn(() => ['--unexpected-image']);
+		const promptArgs = vi.fn(() => ['--unexpected-prompt']);
+		const blocks: AcpPromptBlock[] = [
+			{ type: 'text', text: '' },
+			{ type: 'image', data: 'AQID', mimeType: 'image/png' },
+			{ type: 'text', text: '  Compare "these"\r\n日本語 😀\n' },
+			{ type: 'image', data: 'BAUG', mimeType: 'image/jpeg' },
+		];
+		const support = {
+			mimeTypes: ['image/png', 'image/jpeg'],
+			maxCount: 2,
+			maxBytesPerImage: 3,
+			maxTotalBytes: 6,
+		};
+
+		beforeEach(() => {
+			vi.clearAllMocks();
+			scratch = createScratchDir('maestro-pipe-artifact');
+			vi.spyOn(fs, 'writeFileSync').mockImplementation(() => {
+				throw new Error('Planning must not write prompt or image files.');
+			});
+			const lookup = definitions.getAgentDefinition;
+			// Opt in only this fixture; the real Grok declaration stays inactive.
+			const agent = {
+				...lookup('grok')!,
+				promptFile: { format: 'acp-json' as const, exclusivePromptFlags: ['-p', '--prompt-file'] },
+				promptFileArgs: (file: string) => ['--prompt-file', file],
+			};
+			vi.spyOn(definitions, 'getAgentDefinition').mockImplementation((id) =>
+				id === 'grok' ? agent : lookup(id)
+			);
+			input = {
+				surface: 'desktop',
+				agent,
+				command: process.execPath,
+				cwd: scratch.dir,
+				args: ['--output-format', 'streaming-json'],
+				promptFileDestination: { path: path.join(scratch.dir, 'prompt.json'), owner: 'local' },
+				sessionCustomEnvVars: {},
+				globalShellEnvVars: {},
+			};
+			const prepared = buildAgentLaunchPlan({ ...input, prompt: '' });
+			if (!prepared.ok || prepared.plan.prompt.via !== 'file')
+				throw new Error('Expected file plan');
+			delivery = prepared.plan.prompt;
+		});
+
+		afterEach(() => {
+			vi.restoreAllMocks();
+			scratch.cleanup();
+		});
+
+		it.each([
+			{ windows: false, resume: false },
+			{ windows: false, resume: true },
+			{ windows: true, resume: false },
+			{ windows: true, resume: true },
+		])(
+			'passes ordered admitted images to the sink (Windows=$windows, resume=$resume)',
+			({ windows, resume }) => {
+				platform.windows = windows;
+				const prepared = buildAgentLaunchPlan({
+					...input,
+					isWindowsHost: windows,
+					hasImages: true,
+					args: [...input.args, ...(resume ? ['--resume', 'saved-session'] : [])],
+					promptBlocks: blocks,
+					embeddedImageSupport: support,
+				});
+				if (!prepared.ok || prepared.plan.prompt.via !== 'file')
+					throw new Error('Expected file plan');
+				const launch = prepared.plan;
+				const plan = planPipeSpawn(
+					base({
+						toolType: 'grok',
+						command: launch.command,
+						cwd: launch.cwd,
+						args: launch.args,
+						promptDelivery: prepared.plan.prompt,
+						prompt: 'must not travel separately',
+						images: ['data:image/png;base64,AQID', 'data:image/jpeg;base64,BAUG'],
+						imageArgs,
+						imagePromptBuilder,
+						promptArgs,
+						sendPromptViaStdin: true,
+						sendPromptViaStdinRaw: true,
+					}),
+					{ saveImageToTempFile }
+				);
+
+				expect(plan.spec.promptArtifact).toEqual({
+					path: input.promptFileDestination!.path,
+					owner: 'local',
+					content: JSON.stringify({ type: 'acp', content: blocks }),
+					encoding: 'utf8',
+					mode: 0o600,
+					flag: 'wx',
+					cleanup: 'turn',
+				});
+				expect(plan.spec.promptArtifact).not.toBe(prepared.plan.prompt.artifact);
+				expect(plan.args).toEqual(launch.args);
+				expect(plan.args.filter((arg) => arg === '--prompt-file')).toHaveLength(1);
+				expect(plan.spec.args).toEqual(launch.args);
+				expect(plan.spec.args.join(' ')).not.toContain('must not travel separately');
+				expect(plan.spec.args.join(' ')).not.toContain('AQID');
+				expect(plan.spec.stdin).toBeUndefined();
+				expect(plan.tempFiles).toEqual([]);
+				expect(plan.isBatchMode).toBe(true);
+				expect(plan.keepStdinOpen).toBe(false);
+				expect(plan.isResuming).toBe(resume);
+				expect(saveImageToTempFile).not.toHaveBeenCalled();
+				expect(imagePromptBuilder).not.toHaveBeenCalled();
+				expect(imageArgs).not.toHaveBeenCalled();
+				expect(promptArgs).not.toHaveBeenCalled();
+				expect(fs.writeFileSync).not.toHaveBeenCalled();
+				expect(fs.readdirSync(scratch.dir)).toEqual([]);
+			}
+		);
+
+		it('keeps an empty file prompt in batch mode without writing or opening stdin', () => {
+			const plan = planPipeSpawn(
+				base({
+					toolType: 'grok',
+					args: [...input.args, ...delivery.args],
+					prompt: '',
+					promptDelivery: delivery,
+				})
+			);
+			expect(plan.spec.promptArtifact?.content).toBe(
+				'{"type":"acp","content":[{"type":"text","text":""}]}'
+			);
+			expect(plan.spec.stdin).toBeUndefined();
+			expect(plan.isBatchMode).toBe(true);
+			expect(plan.keepStdinOpen).toBe(false);
+			expect(plan.tempFiles).toEqual([]);
+			expect(fs.writeFileSync).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			{ label: 'missing', admitted: undefined },
+			{ label: 'invalid', admitted: { ...support, maxCount: 0 } },
+		])('refuses $label image admission before any pipe handoff', ({ admitted }) => {
+			const prepared = buildAgentLaunchPlan({
+				...input,
+				hasImages: true,
+				promptBlocks: blocks,
+				embeddedImageSupport: admitted,
+			});
+			expect(prepared).toEqual({
+				ok: false,
+				reason: 'prompt-delivery-refused',
+				error: 'Embedded images require explicit support and bounded image limits.',
+			});
+			// A caller cannot recover the refused plan by handing raw inputs to the pipe.
+			expect(() =>
+				planPipeSpawn(
+					base({
+						toolType: 'grok',
+						args: input.args,
+						prompt: 'must not fall back',
+						images: ['data:image/png;base64,AQID'],
+						imageArgs,
+						imagePromptBuilder,
+						sendPromptViaStdinRaw: true,
+					}),
+					{ saveImageToTempFile }
+				)
+			).toThrow('Explicit prompt-file delivery must be planned before pipe spawning.');
+			expect(saveImageToTempFile).not.toHaveBeenCalled();
+			expect(fs.writeFileSync).not.toHaveBeenCalled();
+			expect(fs.readdirSync(scratch.dir)).toEqual([]);
+		});
+
+		it.each([
+			{ label: 'empty', prompt: '' },
+			{ label: 'text', prompt: 'must not fall back' },
+			{ label: 'image-only', images: ['data:image/png;base64,AQID'] },
+		])(
+			'refuses an unplanned $label turn despite legacy stdin and argv options',
+			({ label: _label, ...turn }) => {
+				expect(() =>
+					planPipeSpawn(
+						base({
+							toolType: 'grok',
+							args: input.args,
+							...turn,
+							promptArgs,
+							imageArgs,
+							imagePromptBuilder,
+							sendPromptViaStdin: true,
+							sendPromptViaStdinRaw: true,
+						}),
+						{ saveImageToTempFile }
+					)
+				).toThrow('Explicit prompt-file delivery must be planned before pipe spawning.');
+				expect(saveImageToTempFile).not.toHaveBeenCalled();
+				expect(promptArgs).not.toHaveBeenCalled();
+				expect(fs.writeFileSync).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each(['missing', 'changed', 'not-at-tail', 'empty'] as const)(
+			'refuses %s file arguments without producing an alternate prompt source',
+			(kind) => {
+				const args = [...input.args, ...delivery.args];
+				if (kind === 'missing') args.pop();
+				if (kind === 'changed') args[args.length - 1] = path.join(scratch.dir, 'other.json');
+				if (kind === 'not-at-tail') args.push('--verbose');
+				if (kind === 'empty') delivery = { ...delivery, args: [] };
+				expect(() =>
+					planPipeSpawn(
+						base({
+							toolType: 'grok',
+							args,
+							promptDelivery: delivery,
+							prompt: 'must not fall back',
+							sendPromptViaStdinRaw: true,
+						})
+					)
+				).toThrow('Prompt-file arguments must match the final launch plan.');
+				expect(fs.writeFileSync).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each(['remote-owner', 'ssh-script'] as const)(
+			'refuses local materialization for %s',
+			(kind) => {
+				if (kind === 'remote-owner') delivery.artifact.owner = 'remote';
+				expect(() =>
+					planPipeSpawn(
+						base({
+							toolType: 'grok',
+							args: [...input.args, ...delivery.args],
+							promptDelivery: delivery,
+							sshStdinScript: kind === 'ssh-script' ? 'exec grok' : undefined,
+						})
+					)
+				).toThrow('Remote prompt files must be prepared by the selected SSH transport.');
+				expect(fs.writeFileSync).not.toHaveBeenCalled();
+			}
+		);
 	});
 
 	describe('a prompt file (OMP on a Windows host)', () => {
