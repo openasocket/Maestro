@@ -793,6 +793,21 @@
           "id": "MCOMP-03-04A"
         },
         {
+          "label": "Restore the lint legs over built-entry.test.ts (continuation of MCOMP-03-05)",
+          "kind": "TEST",
+          "targets": [
+            "src/shared/maestro-lib/__tests__/built-entry.test.ts"
+          ],
+          "outcome": "MCOMP-03-04 (cf93deb34) imported packageRuntime statically from scripts/package-mega-maestro-runtime.mjs in src/shared/maestro-lib/__tests__/built-entry.test.ts; the three npm run lint legs (tsconfig.lint.json, tsconfig.main.json, tsconfig.cli.json) include that folder and have no allowJs, so every leg failed with TS7016 (no declaration file for the .mjs script) at that import. Load the packager by path instead, the way the test loads the built files: a file URL of the script under REPO_ROOT, await import() in the archive section beforeAll (now async), the result typed locally as { packageRuntime: PackageRuntime } with the four options the test passes and the dir it reads; no ambient declaration, no ts-ignore, no change to the lint configs. The suite stays 7 passed; tsc -p tsconfig.main.json --noEmit and tsc -p tsconfig.cli.json --noEmit report 0 errors; tsc -p tsconfig.lint.json reports only the pre-existing plugin-host-handlers.ts dispatcher error (TS2339, present in the same form at v1.1.0-RC, outside this phase and inside the file MCOMP-01 is merging upstream into, so left for its owner and named in the BUILD receipt). src/ is in the implementation tree, so repackage and re-pin after the commit and reconcile program.json with this inserted task. Keep 1 authored file and fewer than 50 changed lines.",
+          "backlog": [
+            "BASE-01",
+            "G-04"
+          ],
+          "requires": [],
+          "produces": [],
+          "id": "MCOMP-03-05A"
+        },
+        {
           "label": "Verify and publish implementation inputs",
           "kind": "VERIFY",
           "targets": [
@@ -819,7 +834,7 @@
       ],
       "id": "MCOMP-03",
       "path": ".maestro/playbooks/2026-10-29-Maestro-Integration-Completion/MCOMP-03.md",
-      "taskCount": 7,
+      "taskCount": 8,
       "stage": "S02"
     },
     {
@@ -7147,7 +7162,7 @@
       ],
       "requires": [],
       "nativeInputs": false,
-      "taskCount": 37
+      "taskCount": 38
     },
     {
       "id": "S03",
@@ -7548,10 +7563,10 @@
       "taskCount": 1
     }
   ],
-  "taskCount": 299,
+  "taskCount": 300,
   "taskCounts": {
     "IMPLEMENT": 197,
-    "TEST": 38,
+    "TEST": 39,
     "VERIFY": 64
   },
   "artifacts": {
