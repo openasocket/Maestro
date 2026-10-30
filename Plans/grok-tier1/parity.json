@@ -1671,7 +1671,8 @@
 					"GT1-02-05C",
 					"GT1-02-05D",
 					"GT1-02-05E",
-					"GT1-02-05F"
+					"GT1-02-05F",
+					"GT1-02-05A1"
 				],
 				"test": [
 					"GT1-02-06",
@@ -1680,7 +1681,8 @@
 					"GT1-02-05G",
 					"GT1-02-05H",
 					"GT1-02-05I",
-					"GT1-02-05J"
+					"GT1-02-05J",
+					"GT1-02-05A2"
 				],
 				"verification": ["GT1-02-13", "GT1-10-12", "GT1-11-10", "GT1-07-11", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
@@ -1738,7 +1740,7 @@
 				{
 					"id": "grok-scoped-discovery-consumers-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults in the detector/definition/snapshot only. GT1-02-05A-F must bound the existing probe runner, wire selected context through IPC and all picker/workflow callers, preserve unavailable selections, and remove the remaining static context-window fallback. GT1-02-05G-J/06/13 own regressions; GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Current legacy calls intentionally receive no discovered Grok models. Managed discovery remains unavailable pending phase09 qualification.",
+					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults. GT1-02-05A adds Grok process deadlines, combined output caps, cancellation and sanitized failures through the shared runner; deterministic execution remains not-run. GT1-02-05A1/05A2/13 must close and verify inherited-pipe descendant cleanup after parent exit and the async Windows taskkill deadline before strict total completion is claimed. GT1-02-05B-F still own selected-context IPC/consumer wiring, preserved unavailable selections and remaining context-window fallbacks; G-J/06/13 own regressions. GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Legacy calls receive no discovered Grok models; managed discovery remains unavailable pending phase09 qualification.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
@@ -2116,7 +2118,8 @@
 					"GT1-02-05C",
 					"GT1-02-05D",
 					"GT1-02-05E",
-					"GT1-02-05F"
+					"GT1-02-05F",
+					"GT1-02-05A1"
 				],
 				"test": [
 					"GT1-02-06",
@@ -2126,7 +2129,8 @@
 					"GT1-02-05G",
 					"GT1-02-05H",
 					"GT1-02-05I",
-					"GT1-02-05J"
+					"GT1-02-05J",
+					"GT1-02-05A2"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -2144,7 +2148,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GT1-02-05 now requires explicit local discovery context, uses the admitted CLI rather than unverified disk catalogs, retains configured IDs and withholds unscoped snapshot metadata. Model/effort fields permit manual entry without guessed options; context default is unknown in the definition only. Host/renderer wiring, finite probe lifetime, global context fallbacks and acknowledged ACP model-specific effort/context remain pending through named continuation tasks. Existing Grok effort-tier and native capability claims still require the phase02/03/11 owners; no current binary or model ID is certified."
+				"GT1-02-05 now requires explicit local discovery context, uses the admitted CLI rather than unverified disk catalogs, retains configured IDs and withholds unscoped snapshot metadata. Model/effort fields permit manual entry without guessed options; context default is unknown in the definition only. Host/renderer wiring, strict total probe completion (shared inherited-pipe/Windows cleanup remains with GT1-02-05A1/05A2), global context fallbacks and acknowledged ACP model-specific effort/context remain pending through named continuation tasks. Existing Grok effort-tier and native capability claims still require the phase02/03/11 owners; no current binary or model ID is certified."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -2191,7 +2195,7 @@
 				{
 					"id": "grok-scoped-discovery-consumers-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults in the detector/definition/snapshot only. GT1-02-05A-F must bound the existing probe runner, wire selected context through IPC and all picker/workflow callers, preserve unavailable selections, and remove the remaining static context-window fallback. GT1-02-05G-J/06/13 own regressions; GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Current legacy calls intentionally receive no discovered Grok models. Managed discovery remains unavailable pending phase09 qualification.",
+					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults. GT1-02-05A adds Grok process deadlines, combined output caps, cancellation and sanitized failures through the shared runner; deterministic execution remains not-run. GT1-02-05A1/05A2/13 must close and verify inherited-pipe descendant cleanup after parent exit and the async Windows taskkill deadline before strict total completion is claimed. GT1-02-05B-F still own selected-context IPC/consumer wiring, preserved unavailable selections and remaining context-window fallbacks; G-J/06/13 own regressions. GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Legacy calls receive no discovered Grok models; managed discovery remains unavailable pending phase09 qualification.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
@@ -12192,7 +12196,8 @@
 					"GT1-02-05C",
 					"GT1-02-05D",
 					"GT1-02-05E",
-					"GT1-02-05F"
+					"GT1-02-05F",
+					"GT1-02-05A1"
 				],
 				"test": [
 					"GT1-02-06",
@@ -12201,7 +12206,8 @@
 					"GT1-02-05G",
 					"GT1-02-05H",
 					"GT1-02-05I",
-					"GT1-02-05J"
+					"GT1-02-05J",
+					"GT1-02-05A2"
 				],
 				"verification": ["GT1-02-13", "GT1-02-14", "GT1-03-13", "GT1-03-14", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
@@ -12212,7 +12218,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GT1-02-05 now requires explicit local discovery context, uses the admitted CLI rather than unverified disk catalogs, retains configured IDs and withholds unscoped snapshot metadata. Model/effort fields permit manual entry without guessed options; context default is unknown in the definition only. Host/renderer wiring, finite probe lifetime, global context fallbacks and acknowledged ACP model-specific effort/context remain pending through named continuation tasks. Existing Grok effort-tier and native capability claims still require the phase02/03/11 owners; no current binary or model ID is certified."
+				"GT1-02-05 now requires explicit local discovery context, uses the admitted CLI rather than unverified disk catalogs, retains configured IDs and withholds unscoped snapshot metadata. Model/effort fields permit manual entry without guessed options; context default is unknown in the definition only. Host/renderer wiring, strict total probe completion (shared inherited-pipe/Windows cleanup remains with GT1-02-05A1/05A2), global context fallbacks and acknowledged ACP model-specific effort/context remain pending through named continuation tasks. Existing Grok effort-tier and native capability claims still require the phase02/03/11 owners; no current binary or model ID is certified."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12259,7 +12265,7 @@
 				{
 					"id": "grok-scoped-discovery-consumers-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults in the detector/definition/snapshot only. GT1-02-05A-F must bound the existing probe runner, wire selected context through IPC and all picker/workflow callers, preserve unavailable selections, and remove the remaining static context-window fallback. GT1-02-05G-J/06/13 own regressions; GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Current legacy calls intentionally receive no discovered Grok models. Managed discovery remains unavailable pending phase09 qualification.",
+					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults. GT1-02-05A adds Grok process deadlines, combined output caps, cancellation and sanitized failures through the shared runner; deterministic execution remains not-run. GT1-02-05A1/05A2/13 must close and verify inherited-pipe descendant cleanup after parent exit and the async Windows taskkill deadline before strict total completion is claimed. GT1-02-05B-F still own selected-context IPC/consumer wiring, preserved unavailable selections and remaining context-window fallbacks; G-J/06/13 own regressions. GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Legacy calls receive no discovered Grok models; managed discovery remains unavailable pending phase09 qualification.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
@@ -12889,7 +12895,8 @@
 					"GT1-02-05C",
 					"GT1-02-05D",
 					"GT1-02-05E",
-					"GT1-02-05F"
+					"GT1-02-05F",
+					"GT1-02-05A1"
 				],
 				"test": [
 					"GT1-02-06",
@@ -12898,7 +12905,8 @@
 					"GT1-02-05G",
 					"GT1-02-05H",
 					"GT1-02-05I",
-					"GT1-02-05J"
+					"GT1-02-05J",
+					"GT1-02-05A2"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -12963,7 +12971,7 @@
 				{
 					"id": "grok-scoped-discovery-consumers-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults in the detector/definition/snapshot only. GT1-02-05A-F must bound the existing probe runner, wire selected context through IPC and all picker/workflow callers, preserve unavailable selections, and remove the remaining static context-window fallback. GT1-02-05G-J/06/13 own regressions; GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Current legacy calls intentionally receive no discovered Grok models. Managed discovery remains unavailable pending phase09 qualification.",
+					"missingPrerequisite": "GT1-02-05 removes unsafe direct cache reads and unqualified defaults. GT1-02-05A adds Grok process deadlines, combined output caps, cancellation and sanitized failures through the shared runner; deterministic execution remains not-run. GT1-02-05A1/05A2/13 must close and verify inherited-pipe descendant cleanup after parent exit and the async Windows taskkill deadline before strict total completion is claimed. GT1-02-05B-F still own selected-context IPC/consumer wiring, preserved unavailable selections and remaining context-window fallbacks; G-J/06/13 own regressions. GT1-03-10A/B own acknowledged per-model ACP metadata and scoped remote discovery. Legacy calls receive no discovered Grok models; managed discovery remains unavailable pending phase09 qualification.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],

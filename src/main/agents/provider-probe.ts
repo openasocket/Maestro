@@ -13,8 +13,9 @@
  * is its admission half for a probe that drives its own `startTurn` (the Codex
  * skill probe speaks JSON-RPC to `codex app-server`, MRC2-02-04 / MRC2-03-04A).
  * A standalone host (no `managed`, or a port whose standing is `standalone`)
- * runs `execFileNoThrow` exactly as before. A managed host admits the probe
- * before any process:
+ * runs `execFileNoThrow` exactly as before unless the caller requests limits or
+ * cancellation; those probes use the same `startTurn` lifecycle as admitted
+ * probes. A managed host admits the probe before any process:
  *
  *   1. a refusal remembered for this authority, policy revision, provider,
  *      actor, probe and directory is answered without asking again;
@@ -62,6 +63,7 @@ import {
 	type ProcessSpawnAuthorityPort,
 } from '../process-manager/types';
 import { currentSpawnActor } from '../web-server/auth/transport-actor';
+import { createIdleWatchdog } from '../utils/idle-watchdog';
 
 /** The route every exec-style probe takes: the provider's own executable as a child process. */
 export const PROVIDER_PROBE_ROUTE = 'child-process' as const;
@@ -114,6 +116,15 @@ export interface ProviderProbeRequest {
 	cwd?: string;
 	/** The full environment for the probe; the process's own when absent. */
 	env?: NodeJS.ProcessEnv;
+	/** Opt-in process limits; admission must settle before the process budget starts. */
+	limits?: {
+		/** Absolute run budget in milliseconds, never extended by output. */
+		timeoutMs: number;
+		/** Combined UTF-8 bytes from stdout and stderr, including unterminated lines. */
+		maxOutputBytes: number;
+	};
+	/** Cancel before launch or stop the owned process through the shared stop ladder. */
+	signal?: AbortSignal;
 }
 
 /**
@@ -288,32 +299,119 @@ export async function admitProviderProbe(
 	return { spec, admission: admitted.admission };
 }
 
-async function admittedProbe(
+async function startedProbe(
 	request: ProviderProbeRequest,
-	managed: ProviderProbeManaged
+	managed?: ProviderProbeManaged
 ): Promise<ExecResult> {
 	const { spec, admission } = await admitProviderProbe(request, managed);
+	const { limits, signal } = request;
+	const controlled = Boolean(limits || signal);
 	let stdout = '';
 	let stderr = '';
-	const turn = startTurn(
-		spec,
-		{
-			onStdout: (text) => {
-				stdout += text;
-			},
-			onStderr: (text) => {
-				stderr += text;
-			},
-		},
-		{
-			admission,
-			stopGraceMs: 250,
-			stdoutTailLimit: 0,
-			stderrTailLimit: 0,
-			label: `${request.providerId}-probe:${request.kind}`,
+	let outputBytes = 0;
+	let failure: ExecResult | undefined;
+	const controller = new AbortController();
+	const fail = (exitCode: string, message: string): void => {
+		if (failure) return;
+		failure = { stdout: '', stderr: message, exitCode };
+		stdout = '';
+		stderr = '';
+		controller.abort();
+	};
+	const onAbort = (): void => fail('ECANCELED', 'Provider probe canceled.');
+	// Admission can yield. A cancellation while it is pending must release the
+	// granted lease without starting a process, since startTurn aborts AFTER spawn.
+	if (signal?.aborted) {
+		admission?.gate.released?.({
+			exitCode: null,
+			signal: null,
+			interrupted: true,
+			stoppedBy: 'caller',
+			stdoutText: '',
+			stderrText: '',
+			droppedOutputBytes: 0,
+		});
+		return { stdout: '', stderr: 'Provider probe canceled.', exitCode: 'ECANCELED' };
+	}
+	signal?.addEventListener('abort', onAbort, { once: true });
+	const watchdog = limits
+		? createIdleWatchdog({
+				idleMs: limits.timeoutMs,
+				maxMs: limits.timeoutMs,
+				onIdle: () => fail('ETIMEDOUT', 'Provider probe exceeded its time budget.'),
+			})
+		: undefined;
+	const collect = (text: string, stream: 'stdout' | 'stderr'): void => {
+		if (failure) return;
+		if (limits) {
+			const bytes = Buffer.byteLength(text, 'utf8');
+			if (bytes > limits.maxOutputBytes - outputBytes) {
+				fail('ENOBUFS', 'Provider probe exceeded its output limit.');
+				return;
+			}
+			outputBytes += bytes;
 		}
-	);
-	return execResultOf(await turn.done, stdout, stderr);
+		watchdog?.touch();
+		if (stream === 'stdout') stdout += text;
+		else stderr += text;
+	};
+	try {
+		let turn: ReturnType<typeof startTurn>;
+		try {
+			turn = startTurn(
+				spec,
+				{
+					onStdout: (text) => collect(text, 'stdout'),
+					onStderr: (text) => collect(text, 'stderr'),
+				},
+				{
+					admission,
+					...(controlled ? { signal: controller.signal } : {}),
+					stopGraceMs: 250,
+					stdoutTailLimit: 0,
+					stderrTailLimit: 0,
+					label: `${request.providerId}-probe:${request.kind}`,
+				}
+			);
+		} catch (error) {
+			// No handle exists on sink refusal or synchronous spawn failure. Release
+			// the lease here; ordinary exits and async spawn failures belong to startTurn.
+			admission?.gate.released?.({
+				exitCode: null,
+				signal: null,
+				interrupted: false,
+				spawnError: new Error('Provider probe could not be started.'),
+				stdoutText: '',
+				stderrText: '',
+				droppedOutputBytes: 0,
+			});
+			if (controlled && !(error instanceof DispatchRefusedError)) {
+				throw new Error('Provider probe could not be started.');
+			}
+			throw error;
+		}
+		// Never settle by racing a timer: the shared ladder owns termination and
+		// descendant cleanup, and startTurn releases the lease when the turn ends.
+		const exit = await turn.done;
+		if (failure) return failure;
+		if (controlled) {
+			if (exit.interrupted) {
+				return { stdout: '', stderr: 'Provider probe stopped.', exitCode: 'ECANCELED' };
+			}
+			if (exit.spawnError || exit.stdinError || exit.exitCode !== 0) {
+				return {
+					stdout: '',
+					stderr: 'Provider probe failed.',
+					exitCode: exit.spawnError ? 'ESPAWN' : exit.stdinError ? 'EPIPE' : (exit.exitCode ?? 1),
+				};
+			}
+			return { stdout, stderr: '', exitCode: 0 };
+		}
+		return execResultOf(exit, stdout, stderr);
+	} finally {
+		watchdog?.disarm();
+		signal?.removeEventListener('abort', onAbort);
+	}
 }
 
 /**
@@ -324,14 +422,31 @@ async function admittedProbe(
  * admitted as described above and run through `startTurn` under the lease; a
  * refusal is thrown as a `DispatchRefusedError` naming the authority's state
  * and code, nothing was started, and the caller decides what to answer in
- * its place. It never spawns unmanaged.
+ * its place. It never spawns unmanaged. Opt-in limits/cancellation use that same
+ * lifecycle on standalone hosts, with sanitized failures and no partial output.
  */
 export async function runProviderProbe(
 	request: ProviderProbeRequest,
 	managed?: ProviderProbeManaged
 ): Promise<ExecResult> {
-	if (managed && managed.port.standing() !== 'standalone') {
-		return admittedProbe(request, managed);
+	if (request.limits) {
+		const { timeoutMs, maxOutputBytes } = request.limits;
+		if (
+			!Number.isInteger(timeoutMs) ||
+			timeoutMs <= 0 ||
+			timeoutMs > 2 ** 31 - 1 ||
+			!Number.isSafeInteger(maxOutputBytes) ||
+			maxOutputBytes <= 0
+		) {
+			throw new RangeError('Provider probe limits must be finite positive integers within range.');
+		}
+		request = { ...request, limits: { timeoutMs, maxOutputBytes } };
+	}
+	if (request.signal?.aborted) {
+		return { stdout: '', stderr: 'Provider probe canceled.', exitCode: 'ECANCELED' };
+	}
+	if (request.limits || request.signal || (managed && managed.port.standing() !== 'standalone')) {
+		return startedProbe(request, managed);
 	}
 	return request.env === undefined
 		? execFileNoThrow(request.command, request.args, request.cwd)

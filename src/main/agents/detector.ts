@@ -372,6 +372,8 @@ export interface ModelDiscoveryContext {
 	 * Without one, only the CLI's own scope-validated cache may be reused.
 	 */
 	configGeneration?: string;
+	/** Host-owned cancellation; never serialize an AbortSignal over IPC. */
+	signal?: AbortSignal;
 }
 
 export interface AgentDetectorDeps {
@@ -424,11 +426,29 @@ export class AgentDetector {
 		command: string,
 		args: string[],
 		env: NodeJS.ProcessEnv,
-		cwd?: string
+		cwd?: string,
+		signal?: AbortSignal
 	): Promise<ExecResult> {
 		try {
 			return await runProviderProbe(
-				{ providerId, kind, command, args, env, ...(cwd ? { cwd } : {}) },
+				{
+					providerId,
+					kind,
+					command,
+					args,
+					env,
+					...(cwd ? { cwd } : {}),
+					...(signal ? { signal } : {}),
+					// Discovery budgets are host limits, not native CLI guarantees.
+					...(providerId === 'grok'
+						? {
+								limits: {
+									timeoutMs: kind === 'version' ? 5_000 : 15_000,
+									maxOutputBytes: kind === 'version' ? 16 * 1024 : 1024 * 1024,
+								},
+							}
+						: {}),
+				},
 				this.deps.managedProbe?.()
 			);
 		} catch (error) {
@@ -758,6 +778,7 @@ export class AgentDetector {
 		}
 		const configured = context.model?.trim();
 		const fallback = configured ? [configured] : [];
+		if (context.signal?.aborted) return fallback;
 		// Grok's managed environment vocabulary is not registered yet. The
 		// environment builder reports that gap but does not itself refuse launch.
 		if (context.environment.managed || !path.isAbsolute(context.cwd)) {
@@ -803,12 +824,13 @@ export class AgentDetector {
 				command,
 				['--version'],
 				env,
-				context.cwd
+				context.cwd,
+				context.signal
 			);
 			const version = stripAnsiCodes(versionResult.stdout)
 				.trim()
 				.match(/^grok\s+(\d+\.\d+\.\d+(?:[-+][\w.-]+)?)$/i)?.[1];
-			if (versionResult.exitCode !== 0 || !version) {
+			if (context.signal?.aborted || versionResult.exitCode !== 0 || !version) {
 				logger.debug(
 					'Grok model discovery unavailable: version probe failed or unrecognized',
 					LOG_CONTEXT
@@ -838,8 +860,16 @@ export class AgentDetector {
 			// Pinned source 2bdd1d6: `grok models` validates version/auth/origin/identity
 			// in the native cache, resolves aliases and applies picker eligibility.
 			// Reading models_cache.json ourselves bypasses all of those checks.
-			const result = await this.probe('grok', 'models', command, ['models'], env, context.cwd);
-			if (result.exitCode !== 0) {
+			const result = await this.probe(
+				'grok',
+				'models',
+				command,
+				['models'],
+				env,
+				context.cwd,
+				context.signal
+			);
+			if (context.signal?.aborted || result.exitCode !== 0) {
 				logger.debug(
 					'Grok model discovery unavailable: catalog probe failed or refused',
 					LOG_CONTEXT
