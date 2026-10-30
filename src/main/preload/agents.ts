@@ -13,7 +13,12 @@ import type {
  */
 
 import { ipcRenderer } from 'electron';
-import type { AgentCapabilities, AgentConfig } from '../../shared/types';
+import type {
+	AgentCapabilities,
+	AgentConfig,
+	AgentDiscoveryRequest,
+	AgentDiscoveryResult,
+} from '../../shared/types';
 import {
 	SNAPSHOT_UPDATED_CHANNEL,
 	type AgentCapabilitiesSnapshot,
@@ -56,6 +61,39 @@ export interface AgentRefreshResult {
  * Creates the agents API object for preload exposure
  */
 export function createAgentsApi() {
+	function getModels(request: AgentDiscoveryRequest): Promise<AgentDiscoveryResult>;
+	function getModels(
+		agentId: string,
+		forceRefresh?: boolean,
+		sshRemoteId?: string
+	): Promise<string[]>;
+	function getModels(
+		request: string | AgentDiscoveryRequest,
+		forceRefresh?: boolean,
+		sshRemoteId?: string
+	): Promise<string[] | AgentDiscoveryResult> {
+		return typeof request === 'string'
+			? ipcRenderer.invoke('agents:getModels', request, forceRefresh, sshRemoteId)
+			: ipcRenderer.invoke('agents:getModels', request);
+	}
+	function getConfigOptions(
+		request: AgentDiscoveryRequest,
+		optionKey: string
+	): Promise<AgentDiscoveryResult>;
+	function getConfigOptions(
+		agentId: string,
+		optionKey: string,
+		forceRefresh?: boolean
+	): Promise<string[]>;
+	function getConfigOptions(
+		request: string | AgentDiscoveryRequest,
+		optionKey: string,
+		forceRefresh?: boolean
+	): Promise<string[] | AgentDiscoveryResult> {
+		return typeof request === 'string'
+			? ipcRenderer.invoke('agents:getConfigOptions', request, optionKey, forceRefresh)
+			: ipcRenderer.invoke('agents:getConfigOptions', request, optionKey);
+	}
 	return {
 		translateProvider: (request: TranslationRequest): Promise<TranslationReport> =>
 			ipcRenderer.invoke('agents:translateProvider', request),
@@ -191,18 +229,12 @@ export function createAgentsApi() {
 		 * Discover available models for agents that support model selection
 		 * (e.g., OpenCode with Ollama)
 		 */
-		getModels: (agentId: string, forceRefresh?: boolean, sshRemoteId?: string): Promise<string[]> =>
-			ipcRenderer.invoke('agents:getModels', agentId, forceRefresh, sshRemoteId),
+		getModels,
 
 		/**
 		 * Discover available values for a dynamic select config option
 		 */
-		getConfigOptions: (
-			agentId: string,
-			optionKey: string,
-			forceRefresh?: boolean
-		): Promise<string[]> =>
-			ipcRenderer.invoke('agents:getConfigOptions', agentId, optionKey, forceRefresh),
+		getConfigOptions,
 
 		/**
 		 * Discover available slash commands for an agent.

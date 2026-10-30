@@ -731,6 +731,52 @@ export interface AgentConfigOption {
 	dynamic?: boolean; // If true, options are fetched at runtime via agents:getConfigOptions IPC
 }
 
+/** Selected values only, never a resolved process environment or managed authority. */
+export interface AgentDiscoverySelection {
+	/** Required for discovery; absence means the UI has not selected a workspace yet. */
+	cwd?: string;
+	customPath?: string;
+	/** An explicit empty record replaces the provider environment. Blanks unset keys. */
+	customEnvVars?: Record<string, string>;
+	model?: string;
+	effort?: string;
+	sessionSshRemoteConfig?: AgentSshRemoteConfig;
+	/** Observed host identity for an existing remote agent. */
+	sshRemoteId?: string;
+}
+
+/** Serializable input to model/config discovery. The host reads all other layers. */
+export interface AgentDiscoveryRequest {
+	providerId: string;
+	forceRefresh?: boolean;
+	context:
+		| {
+				kind: 'agent';
+				sessionId: string;
+				/** Optional current tab/run selections, above the stored agent defaults. */
+				model?: string;
+				effort?: string;
+		  }
+		| (AgentDiscoverySelection & { kind: 'draft' | 'provider-settings' });
+}
+
+export interface AgentDiscoveryResult {
+	status: 'discovered' | 'unavailable' | 'configured-fallback';
+	/** Includes the configured value when present; omission is never proof of invalidity. */
+	options: string[];
+	configuredValue?: string;
+	/** Fixed diagnostics only: no environment, account paths, cache keys or native errors. */
+	reason?:
+		| 'missing-context'
+		| 'invalid-context'
+		| 'managed-unqualified'
+		| 'remote-unresolved'
+		| 'remote-unqualified'
+		| 'executable-context-unavailable'
+		| 'metadata-unavailable'
+		| 'discovery-unavailable';
+}
+
 // Agent configuration (serializable subset shared across processes)
 export interface AgentConfig {
 	id: string;
