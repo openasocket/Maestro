@@ -1230,6 +1230,129 @@ describe('applyAgentConfigOverrides', () => {
 		expect(result.customEnvSource).toBe('none');
 	});
 
+	describe.each([
+		['grok', 'GROK_HOME'],
+		['codex', 'CODEX_HOME'],
+	])('%s account environment selection', (providerId, accountKey) => {
+		it.each<{
+			name: string;
+			providerValue?: string | null;
+			sessionValue?: string | null;
+			expectedValue?: string | null;
+			source: 'none' | 'agent' | 'session';
+		}>([
+			{ name: 'absent records inherit', source: 'none' },
+			{
+				name: 'absent session inherits provider account',
+				providerValue: 'provider-account',
+				expectedValue: 'provider-account',
+				source: 'agent',
+			},
+			{
+				name: 'empty provider record remains explicit',
+				providerValue: null,
+				expectedValue: null,
+				source: 'agent',
+			},
+			{
+				name: 'empty session removes the provider account',
+				providerValue: 'provider-account',
+				sessionValue: null,
+				expectedValue: null,
+				source: 'session',
+			},
+			{
+				name: 'blank provider value remains an unset',
+				providerValue: '',
+				expectedValue: '',
+				source: 'agent',
+			},
+			{
+				name: 'blank session value removes the provider account',
+				providerValue: 'provider-account',
+				sessionValue: ' \t ',
+				expectedValue: ' \t ',
+				source: 'session',
+			},
+			{
+				name: 'selected session account replaces the provider account',
+				providerValue: 'provider-account',
+				sessionValue: 'session-account',
+				expectedValue: 'session-account',
+				source: 'session',
+			},
+		])('$name', ({ providerValue, sessionValue, expectedValue, source }) => {
+			const agent = getAgentDefinition(providerId);
+			expect(agent).toBeDefined();
+			// Null is a table sentinel for {}, never a runtime null environment.
+			const providerEnv =
+				providerValue === undefined
+					? undefined
+					: Object.freeze(providerValue === null ? {} : { [accountKey]: providerValue });
+			const sessionEnv =
+				sessionValue === undefined
+					? undefined
+					: Object.freeze(sessionValue === null ? {} : { [accountKey]: sessionValue });
+			const result = applyAgentConfigOverrides(agent, [], {
+				agentConfigValues: providerEnv === undefined ? {} : { customEnvVars: providerEnv },
+				...(sessionEnv === undefined ? {} : { sessionCustomEnvVars: sessionEnv }),
+			});
+
+			expect(result.effectiveCustomEnvVars).toEqual(
+				expectedValue === undefined
+					? undefined
+					: expectedValue === null
+						? {}
+						: { [accountKey]: expectedValue }
+			);
+			expect(result.customEnvSource).toBe(source);
+		});
+	});
+
+	it.each(['agent', 'session'] as const)(
+		'keeps definition defaults beneath an explicit empty %s environment',
+		(source) => {
+			const defaults = Object.freeze({ DEFAULT_ONLY: 'definition-value' });
+			const result = applyAgentConfigOverrides(makeAgent({ defaultEnvVars: defaults }), [], {
+				agentConfigValues: {
+					customEnvVars: source === 'agent' ? {} : { GROK_HOME: 'removed-provider-account' },
+				},
+				...(source === 'session' ? { sessionCustomEnvVars: {} } : {}),
+			});
+			expect(result.effectiveCustomEnvVars).toEqual({ DEFAULT_ONLY: 'definition-value' });
+			expect(result.customEnvSource).toBe(source);
+		}
+	);
+
+	it.each(['agent', 'session'] as const)(
+		'preserves blank %s unsets over definition defaults without merging provider-only keys',
+		(source) => {
+			const defaults = Object.freeze({ GROK_HOME: 'definition-account', DEFAULT_ONLY: 'keep' });
+			const blanks = Object.freeze({ GROK_HOME: '', GROK_AUTH_PATH: ' \t ' });
+			const result = applyAgentConfigOverrides(makeAgent({ defaultEnvVars: defaults }), [], {
+				agentConfigValues: {
+					customEnvVars:
+						source === 'agent'
+							? blanks
+							: { GROK_HOME: 'removed-provider-account', PROVIDER_ONLY: 'removed' },
+				},
+				...(source === 'session' ? { sessionCustomEnvVars: blanks } : {}),
+			});
+			expect(result.effectiveCustomEnvVars).toEqual({
+				GROK_HOME: '',
+				GROK_AUTH_PATH: ' \t ',
+				DEFAULT_ONLY: 'keep',
+			});
+			expect(result.customEnvSource).toBe(source);
+		}
+	);
+
+	it('does not turn empty definition defaults into an explicit user environment', () => {
+		const result = applyAgentConfigOverrides(makeAgent({ defaultEnvVars: {} }), [], {});
+		expect(result.effectiveCustomEnvVars).toBeUndefined();
+		expect(result.customEnvSource).toBe('none');
+	});
+
 	it('returns correct source indicators', () => {
 		const agent = makeAgent({
 			configOptions: [
