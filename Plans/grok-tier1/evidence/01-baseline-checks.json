@@ -1,0 +1,234 @@
+{
+	"schemaVersion": 1,
+	"taskId": "GT1-01-06",
+	"recordedAt": "2026-10-30T08:45:35.375988+00:00",
+	"sourceCommit": "7bf19c66923db04277844762aa0ccf7fb6d0b5c7",
+	"executionRoot": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+	"branch": "auto-run-feature/grok-cli-integration",
+	"baseObservation": {
+		"ref": "feature/mega-maestro-v1.1.0-rc",
+		"commit": "12c09e76eccace3758b792675258800e9f3e39ef",
+		"ahead": 6,
+		"behind": 8,
+		"fetched": false
+	},
+	"status": "fail",
+	"environment": {
+		"platform": "darwin-arm64",
+		"osVersion": "27.2",
+		"osBuild": "26B123",
+		"node": "v26.13.0",
+		"npm": "11.20.0",
+		"typescript": "6.0.3",
+		"vitest": "4.1.11",
+		"vite": "8.2.2",
+		"installMode": "Node/server (GT1-01-01A); Electron native ABI unqualified",
+		"overrides": {
+			"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-baseline/cache",
+			"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-baseline/temp",
+			"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-baseline/data",
+			"NO_COLOR": "1"
+		},
+		"removedChildEnvironmentPrefixes": ["GROK_", "XAI_"],
+		"homeAndCodexHomeUnchanged": true,
+		"isolationLimitation": "Completeness constructs electron-store without a mock. Conf reads the pre-existing ~/Library/Preferences/electron-store-nodejs/claude-session-origins.json fallback; MAESTRO_USER_DATA does not redirect it. Metadata-only inspection found its modification time still 2026-07-11T06:34:20.959732Z. No fallback file content copied into evidence, no observed write, and no Electron launch. This is not a fully hermetic suite."
+	},
+	"inputHashesSha256": {
+		"package.json": "c6c1e45b7ba259420616990f408c70d9c07cd4226b9a8283197dd5944ba8b93b",
+		"package-lock.json": "0b6b52f5ae6660b8cf2ca74cf9c7992e9630b08ce685c8413040caa305ecb747",
+		"vitest.config.mts": "c72dbc05459559b23dce670db0f17c064dfdf026d46d3c0d2ea4777af654ac77",
+		"tsconfig.json": "5fbb896a59400b042cee9627f1e5987fa4db5c3a94d1f278a8e54ceb894b9c00",
+		"tsconfig.lint.json": "ea576d76e80ddf428e64e16d6495bcb2b5cd6bd1b1eb578116bd78decb22c083",
+		"tsconfig.main.json": "1a4b54a2a4613cb1c27771632697cd0f5ef130a5ea24659b461492e978f5d745",
+		"tsconfig.cli.json": "31213859259324304c3449b67dc48519c21fa94e0c3dcfd4e53ca593b587ed95",
+		"scripts/verify-docs-paths.mjs": "547924c3df903aba2c7b1c3f0ea97f0cb5bb454d048b17f348d8ab772db114c9",
+		"CLAUDE.md": "32c3c5e9400f3875e9a57379d90440514e60cf694d06f725e16e510957aad40d",
+		"docs/agent-guides/CANONICAL-UTILITIES.md": "a3b35b2acc2e0392a34fa8e4d74d4d43210dde1bcd85146019f5e48ecdeb21a0",
+		"docs/agent-guides/CLI-HEADLESS.md": "07a92de2b844d32070dd22f45b7100bde26993d9707108e30881d95dd1ec2902",
+		"src/main/plugins/plugin-host-handlers.ts": "81ff275887037b6ec7596ebc68821661db52f739d1ba91f06eae9b774a026986",
+		"src/shared/maestro-lib/parsers/grok-output-parser.ts": "6139d4267313c709c3feae4ed1278afd33f0d71fce00cf00bc000cfb5229897c",
+		"src/main/storage/grok-session-storage.ts": "2b37de9eaaefe0f566d4f2b1bb115780c994a0d9d5d5778aad7c4b3386941b08",
+		"src/main/storage/index.ts": "cd4e0ab769a0a4a54e1184cc37b871c787d1291e65f22fb98be04cb772e606df",
+		"src/main/storage/claude-session-storage.ts": "98be71a3da0722372ca9129eaffe0712ca660de59312fa21154f9a35ebb8ecfe",
+		"src/__tests__/main/agents/agent-completeness.test.ts": "a26f84c67c3e86266cc78360cab5edf9413982eea736f779193641758bae4f8a",
+		"src/__tests__/main/parsers/grok-output-parser.test.ts": "ec274ec1cc4f9c0663d685daccc723aceadb11efe6a720cdb5624bc3a8c9de0e",
+		"src/__tests__/main/storage/grok-session-storage.test.ts": "f8842c38074a8f56d88820b758cd3424d65d8c001f21fb5963f8864d59e8d7e5"
+	},
+	"checks": [
+		{
+			"id": "lint",
+			"command": ["npm", "run", "lint"],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"sourceCommit": "7bf19c66923db04277844762aa0ccf7fb6d0b5c7",
+			"startedAt": "2026-10-30T08:40:55.496642+00:00",
+			"finishedAt": "2026-10-30T08:41:17.090186+00:00",
+			"durationSeconds": 21.593,
+			"exitCode": 2,
+			"log": "tmp/grok-tier1-baseline/lint.log",
+			"logSha256": "4abd073b2cfc98dc28828ff1822717cbfcebfcc9b95a12ac7a52bfe07bc134f2",
+			"status": "fail",
+			"output": "\n> maestro@1.1.0-RC lint\n> tsc -p tsconfig.lint.json && tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.cli.json --noEmit\n\nsrc/main/plugins/plugin-host-handlers.ts(1196,76): error TS2339: Property 'dispatcher' does not exist on type 'RequestInit'.\nnpm notice\nnpm notice New major version of npm available! 11.20.0 -> 12.2.1\nnpm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1\nnpm notice To update run: npm install -g npm@12.2.1\nnpm notice\n"
+		},
+		{
+			"id": "docs-verify",
+			"command": ["npm", "run", "docs:verify"],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"sourceCommit": "7bf19c66923db04277844762aa0ccf7fb6d0b5c7",
+			"startedAt": "2026-10-30T08:40:55.496643+00:00",
+			"finishedAt": "2026-10-30T08:40:56.008801+00:00",
+			"durationSeconds": 0.512,
+			"exitCode": 0,
+			"log": "tmp/grok-tier1-baseline/docs-verify.log",
+			"logSha256": "7113e2fbbe96505adb4b7cb920843314e56023a358e32b4ac651bfeedb9e4190",
+			"status": "pass",
+			"output": "\n> maestro@1.1.0-RC docs:verify\n> node scripts/verify-docs-paths.mjs\n\ndocs:verify checked 1183 asserted paths and 392 index entries against 392 full entries, 0 finding(s)\n"
+		},
+		{
+			"id": "grok-suites",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/main/parsers/grok-output-parser.test.ts",
+				"src/__tests__/main/storage/grok-session-storage.test.ts",
+				"src/__tests__/main/agents/agent-completeness.test.ts",
+				"--reporter=default",
+				"--reporter=json",
+				"--outputFile.json=tmp/grok-tier1-baseline/grok-suites.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"sourceCommit": "7bf19c66923db04277844762aa0ccf7fb6d0b5c7",
+			"startedAt": "2026-10-30T08:40:55.496642+00:00",
+			"finishedAt": "2026-10-30T08:40:57.859937+00:00",
+			"durationSeconds": 2.363,
+			"exitCode": 0,
+			"log": "tmp/grok-tier1-baseline/grok-suites.log",
+			"logSha256": "9a04e73bba6afb7be8dfa8983ede7076c4380778556e50e3f83aafb8c5c9bd37",
+			"status": "pass",
+			"output": "\n> maestro@1.1.0-RC test\n> cross-env NODE_OPTIONS=--max-old-space-size=8192 vitest run src/__tests__/main/parsers/grok-output-parser.test.ts src/__tests__/main/storage/grok-session-storage.test.ts src/__tests__/main/agents/agent-completeness.test.ts --reporter=default --reporter=json --outputFile.json=tmp/grok-tier1-baseline/grok-suites.json\n\n(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:\n  - `__dirname` (vitest.config.mts:124:22). Use `import.meta.dirname` instead\nSet `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.\n(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:\n  - `__dirname` (vitest.config.mts:124:22). Use `import.meta.dirname` instead\nSet `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.\n(!) Your Vite config uses features that are unsupported by `configLoader: 'native'`, which is planned to become the default in a future major version of Vite:\n  - `__dirname` (vitest.config.mts:124:22). Use `import.meta.dirname` instead\nSet `VITE_CONFIG_NATIVE_IGNORE_WARNING=true` to suppress this warning.\n\n RUN  v4.1.11 /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration\n\n \u2713 |node| src/__tests__/main/storage/grok-session-storage.test.ts (26 tests) 10ms\n \u2713 |node| src/__tests__/main/parsers/grok-output-parser.test.ts (46 tests) 8ms\nstdout | src/__tests__/main/agents/agent-completeness.test.ts\n[2026-10-30T08:40:57.668Z] [INFO] [[OutputParsers]] Initialized output parsers: claude-code, opencode, codex, factory-droid, copilot-cli, pi, qwen3-coder, omp, grok, antigravity \n\n \u2713 |node| src/__tests__/main/agents/agent-completeness.test.ts (101 tests) 12ms\n\n Test Files  3 passed (3)\n      Tests  173 passed (173)\n   Start at  04:40:56\n   Duration  1.07s (transform 780ms, setup 0ms, import 1.08s, tests 30ms, environment 0ms)\n\nJSON report written to /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-baseline/grok-suites.json\nnpm notice\nnpm notice New major version of npm available! 11.20.0 -> 12.2.1\nnpm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1\nnpm notice To update run: npm install -g npm@12.2.1\nnpm notice\n"
+		},
+		{
+			"id": "tsc-lint",
+			"command": ["node", "node_modules/typescript/bin/tsc", "-p", "tsconfig.lint.json"],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"sourceCommit": "7bf19c66923db04277844762aa0ccf7fb6d0b5c7",
+			"startedAt": "2026-10-30T08:41:57.698204+00:00",
+			"finishedAt": "2026-10-30T08:42:18.190433+00:00",
+			"durationSeconds": 20.492,
+			"exitCode": 2,
+			"log": "tmp/grok-tier1-baseline/tsc-lint.log",
+			"logSha256": "b2ccd45f4438f2e3c26276f3c1ccc8015b77f558fe5ac748c24d8cf104246a0f",
+			"status": "fail",
+			"output": "src/main/plugins/plugin-host-handlers.ts(1196,76): error TS2339: Property 'dispatcher' does not exist on type 'RequestInit'.\n"
+		},
+		{
+			"id": "tsc-main",
+			"command": [
+				"node",
+				"node_modules/typescript/bin/tsc",
+				"-p",
+				"tsconfig.main.json",
+				"--noEmit"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"sourceCommit": "7bf19c66923db04277844762aa0ccf7fb6d0b5c7",
+			"startedAt": "2026-10-30T08:41:57.698161+00:00",
+			"finishedAt": "2026-10-30T08:42:04.431509+00:00",
+			"durationSeconds": 6.733,
+			"exitCode": 0,
+			"log": "tmp/grok-tier1-baseline/tsc-main.log",
+			"logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			"status": "pass",
+			"output": ""
+		},
+		{
+			"id": "tsc-cli",
+			"command": ["node", "node_modules/typescript/bin/tsc", "-p", "tsconfig.cli.json", "--noEmit"],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"sourceCommit": "7bf19c66923db04277844762aa0ccf7fb6d0b5c7",
+			"startedAt": "2026-10-30T08:41:57.698172+00:00",
+			"finishedAt": "2026-10-30T08:42:03.409222+00:00",
+			"durationSeconds": 5.711,
+			"exitCode": 0,
+			"log": "tmp/grok-tier1-baseline/tsc-cli.log",
+			"logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			"status": "pass",
+			"output": ""
+		}
+	],
+	"testSummary": {
+		"files": [
+			{
+				"path": "src/__tests__/main/agents/agent-completeness.test.ts",
+				"status": "passed",
+				"tests": 101,
+				"passed": 101
+			},
+			{
+				"path": "src/__tests__/main/parsers/grok-output-parser.test.ts",
+				"status": "passed",
+				"tests": 46,
+				"passed": 46
+			},
+			{
+				"path": "src/__tests__/main/storage/grok-session-storage.test.ts",
+				"status": "passed",
+				"tests": 26,
+				"passed": 26
+			}
+		],
+		"fileCount": 3,
+		"total": 173,
+		"passed": 173,
+		"failed": 0,
+		"skipped": 0,
+		"todo": 0,
+		"reportedSuiteGroups": 31,
+		"vitestDurationSeconds": 1.07,
+		"rawReportPath": "tmp/grok-tier1-baseline/grok-suites.json",
+		"rawReportSha256": "00d586cf2da64574ebb7eba0b43c5bcf68fc9dce5347fbb004d5c9aa373b8713",
+		"note": "Vitest JSON reports 31 nested suite groups; there are 3 actual test files. Inline fixtures and mocked Grok local/remote storage, not an executable provider."
+	},
+	"diagnostics": [
+		{
+			"id": "baseline-typescript-dispatcher",
+			"status": "fail",
+			"path": "src/main/plugins/plugin-host-handlers.ts",
+			"line": 1196,
+			"column": 76,
+			"code": "TS2339",
+			"message": "Property 'dispatcher' does not exist on type 'RequestInit'.",
+			"preExisting": true,
+			"affectedChecks": ["lint", "tsc-lint"],
+			"reason": "No tracked source changes before checks. Checked source/config/lock inputs equal HEAD; production source has no delta from baseline 0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f.",
+			"affectedRequirements": ["P46"],
+			"disposition": "Record only under VERIFY scope; remains unresolved and not waived for final acceptance."
+		},
+		{
+			"id": "vite-native-config-warning",
+			"status": "warning",
+			"occurrences": 3,
+			"path": "vitest.config.mts",
+			"line": 124,
+			"column": 22,
+			"message": "__dirname is unsupported by Vite's planned future native config loader.",
+			"disposition": "Warning retained, not suppressed."
+		},
+		{
+			"id": "npm-update-notice",
+			"status": "notice",
+			"affectedChecks": ["lint", "grok-suites"],
+			"message": "npm 11.20.0 advertises 12.2.1; no update performed."
+		}
+	],
+	"environmentalFailures": [],
+	"coverageLimitations": [
+		"npm run lint short-circuited in tsconfig.lint.json; main and cli were subsequently run directly with installed TypeScript and passed.",
+		"docs:verify checks 1183 asserted paths and 392 index entries against 392 full entries; it does not validate every Markdown file.",
+		"Only the three selected unit suites ran. Full suite, ESLint, build, Electron UI, other platforms, SSH and actual Grok transports were not run.",
+		"Baseline passing tests do not satisfy complete product acceptance rows."
+	],
+	"liveCalls": 0,
+	"productAcceptance": "not-run",
+	"nextTask": "GT1-01-07"
+}

@@ -224,6 +224,19 @@
 			"id": "desktop-native-abi-unverified",
 			"ownerTask": "GT1-01-01A",
 			"detail": "Node/server install is ready for Node tooling. Electron native rebuild was intentionally omitted because electron-rebuild 3.2.9 hardcodes ~/.electron-gyp; future desktop checks need a confined build setup and their own evidence."
+		},
+		{
+			"id": "baseline-typescript-dispatcher",
+			"ownerTask": "GT1-01-06",
+			"status": "unresolved",
+			"detail": "Baseline npm run lint exits 2: plugin-host-handlers.ts(1196,76) TS2339 RequestInit.dispatcher in tsconfig.lint.json. Main/CLI direct checks pass. Unchanged production source; no unrelated repair or final-acceptance waiver.",
+			"affectedRequirementIds": ["P46"]
+		},
+		{
+			"id": "baseline-completeness-fallback-store",
+			"ownerTask": "GT1-01-06",
+			"status": "unresolved",
+			"detail": "Existing agent-completeness suite constructs electron-store and reads a pre-existing user-home fallback store despite MAESTRO_USER_DATA. Metadata shows no write during this run. Tests pass but full isolation is unproven; see baseline receipt."
 		}
 	],
 	"reviewedInputsSha256": {
@@ -239,13 +252,14 @@
 	},
 	"verification": {
 		"artifactChecks": "pass",
-		"repositorySuites": "not-run",
+		"repositorySuites": "fail",
 		"repositorySuiteOwnerTask": "GT1-01-06",
 		"imagesAnalyzed": 0,
-		"independentReview": "pass"
+		"independentReview": "pass",
+		"repositorySuiteEvidence": "Plans/grok-tier1/evidence/01-baseline-checks.json"
 	},
-	"lastCompletedTaskId": "GT1-01-05",
-	"lastUpdatedAt": "2026-10-30T08:37:32.081305+00:00",
+	"lastCompletedTaskId": "GT1-01-06",
+	"lastUpdatedAt": "2026-10-30T08:45:35.375988+00:00",
 	"setup": {
 		"taskId": "GT1-01-01A",
 		"status": "pass",
@@ -1359,5 +1373,64 @@
 		"imagesAnalyzed": 0,
 		"nextTask": "GT1-01-06",
 		"publication": "Local commit only under CONTRACT; no push."
+	},
+	"baselineVerification": {
+		"taskId": "GT1-01-06",
+		"recordedAt": "2026-10-30T08:45:35.375988+00:00",
+		"sourceCommit": "7bf19c66923db04277844762aa0ccf7fb6d0b5c7",
+		"status": "fail",
+		"taskStatus": "complete",
+		"evidencePath": "Plans/grok-tier1/evidence/01.md#gt1-01-06-baseline-verification",
+		"receiptPath": "Plans/grok-tier1/evidence/01-baseline-checks.json",
+		"lint": {
+			"status": "fail",
+			"exitCode": 2,
+			"diagnostic": "baseline-typescript-dispatcher"
+		},
+		"docsVerify": {
+			"status": "pass",
+			"exitCode": 0,
+			"checkedPaths": 1183,
+			"indexEntries": 392,
+			"fullEntries": 392,
+			"findings": 0
+		},
+		"selectedUnitTests": {
+			"status": "pass",
+			"exitCode": 0,
+			"files": 3,
+			"passed": 173,
+			"failed": 0,
+			"skipped": 0,
+			"todo": 0
+		},
+		"supplementalTypeChecks": {
+			"lint": {
+				"status": "fail",
+				"exitCode": 2
+			},
+			"main": {
+				"status": "pass",
+				"exitCode": 0
+			},
+			"cli": {
+				"status": "pass",
+				"exitCode": 0
+			}
+		},
+		"sourceChanged": false,
+		"liveCalls": 0,
+		"imagesAnalyzed": 0,
+		"productAcceptance": "not-run",
+		"nextTask": "GT1-01-07",
+		"publication": "Local commit only under CONTRACT; no push.",
+		"artifactValidation": {
+			"status": "pass",
+			"formatExitCode": 0,
+			"diffCheckExitCode": 0,
+			"receiptAndInputCheckExitCode": 0,
+			"assertion": "Six raw receipts/log hashes, 19 source inputs, test report totals, preserved live boundary/previous artifacts and 134 parity requirements/statuses."
+		},
+		"independentReview": "pass"
 	}
 }

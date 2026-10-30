@@ -254,6 +254,15 @@
 			"sourceCommit": "81080100b939c0497874b3998dd77546b670cc0d",
 			"provenance": "source-supported",
 			"acceptanceRun": false
+		},
+		"phase01-baseline-checks": {
+			"path": "Plans/grok-tier1/evidence/01.md#gt1-01-06-baseline-verification",
+			"receiptPath": "Plans/grok-tier1/evidence/01-baseline-checks.json",
+			"sourceCommit": "7bf19c66923db04277844762aa0ccf7fb6d0b5c7",
+			"provenance": "baseline-checks",
+			"acceptanceRun": false,
+			"status": "fail",
+			"affectedRows": ["P46"]
 		}
 	},
 	"sourceCatalog": {
@@ -7407,6 +7416,13 @@
 					"code": "implementation-or-evidence-pending",
 					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
 					"affectedRows": ["P46"]
+				},
+				{
+					"id": "baseline-typescript-dispatcher",
+					"code": "pre-existing-baseline-typecheck-failure",
+					"missingPrerequisite": "Resolve or explicitly reconcile TS2339 at plugin-host-handlers.ts(1196,76) before final required checks can pass; this task does not waive it.",
+					"affectedRows": ["P46"],
+					"evidenceRef": "phase01-baseline-checks"
 				}
 			],
 			"phase": "12",
