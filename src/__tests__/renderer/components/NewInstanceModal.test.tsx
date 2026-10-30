@@ -2117,6 +2117,20 @@ describe('NewInstanceModal', () => {
 
 		beforeEach(() => {
 			vi.useFakeTimers();
+			vi.mocked(window.maestro.sshRemote.getConfigs).mockResolvedValue({
+				success: true,
+				configs: [
+					{
+						id: 'remote-b',
+						name: 'Remote B',
+						host: 'b.invalid',
+						port: 22,
+						username: 'synthetic',
+						privateKeyPath: '',
+						enabled: true,
+					},
+				],
+			});
 			source = createMockSession({
 				id: 'account-a',
 				name: 'Grok A',
@@ -2292,6 +2306,251 @@ describe('NewInstanceModal', () => {
 				expect(screen.getByText('1 model available')).toBeInTheDocument();
 				expect(screen.queryByText('2 models available')).not.toBeInTheDocument();
 				expect(screen.getByDisplayValue('stored-model')).toBeInTheDocument();
+			}
+		);
+
+		it.each(['reopen', 'remote source'])(
+			'waits for the current initial config and ignores a stale seed after %s',
+			async (transition) => {
+				let resolveOld!: (config: Record<string, unknown>) => void;
+				let resolveCurrent!: (config: Record<string, unknown>) => void;
+				vi.mocked(window.maestro.agents.getConfig)
+					.mockReturnValueOnce(
+						new Promise((resolve) => {
+							resolveOld = resolve;
+						})
+					)
+					.mockReturnValueOnce(
+						new Promise((resolve) => {
+							resolveCurrent = resolve;
+						})
+					);
+				const props = { isOpen: true, onClose, onCreate, theme, existingSessions: [] };
+				const view = render(<NewInstanceModal {...props} sourceSession={source} />);
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(300);
+				});
+				expect(window.maestro.agents.getConfig).toHaveBeenCalledOnce();
+				expect(window.maestro.agents.getModels).not.toHaveBeenCalled();
+				expect(window.maestro.agents.getConfigOptions).not.toHaveBeenCalled();
+				if (transition === 'reopen') {
+					view.rerender(<NewInstanceModal {...props} isOpen={false} sourceSession={source} />);
+				}
+				const next = {
+					...source,
+					id: 'new-owner',
+					name: 'New owner',
+					cwd: '~/next',
+					sshRemoteId: transition === 'remote source' ? 'remote-b' : undefined,
+				};
+				view.rerender(<NewInstanceModal {...props} sourceSession={next} />);
+				await act(async () => {});
+				expect(window.maestro.agents.getConfig).toHaveBeenCalledTimes(2);
+				await act(async () => {
+					resolveOld({ model: 'stale-seed', reasoningEffort: 'stale-effort' });
+					await vi.advanceTimersByTimeAsync(300);
+				});
+				expect(window.maestro.agents.getModels).not.toHaveBeenCalled();
+				expect(window.maestro.agents.getConfigOptions).not.toHaveBeenCalled();
+				expect(screen.queryByDisplayValue('Grok A (Copy)')).not.toBeInTheDocument();
+				await act(async () => {
+					resolveCurrent({});
+				});
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(300);
+				});
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+					providerId: 'grok',
+					context: expect.objectContaining({
+						cwd: next.sshRemoteId ? '~/next' : '/home/testuser/next',
+						sshRemoteId: next.sshRemoteId,
+						model: 'stored-model',
+						effort: 'stored-effort',
+					}),
+				});
+				expect(screen.getByDisplayValue('New owner (Copy)')).toBeInTheDocument();
+				expect(screen.getByDisplayValue('~/next')).toBeInTheDocument();
+				expect(screen.queryByDisplayValue('stale-seed')).not.toBeInTheDocument();
+			}
+		);
+
+		it('keeps unsaved fields and configured-fallback selections through SSH redetection', async () => {
+			window.maestro.agents.getModels = vi.fn().mockResolvedValue({
+				status: 'configured-fallback',
+				options: ['fallback-model'],
+			});
+			window.maestro.agents.getConfigOptions = vi.fn().mockResolvedValue({
+				status: 'configured-fallback',
+				options: ['fallback-effort'],
+			});
+			const props = { isOpen: true, onClose, onCreate, theme, existingSessions: [] };
+			render(<NewInstanceModal {...props} sourceSession={source} />);
+			await act(async () => {});
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(300);
+			});
+			expect(screen.getByDisplayValue('stored-model')).toBeInTheDocument();
+			expect(screen.getByDisplayValue('stored-effort')).toBeInTheDocument();
+			for (const [previous, value] of [
+				['~/project', '~/unsaved-project'],
+				[' /synthetic/bin/grok ', '/synthetic/bin/edited'],
+				['/synthetic/account-a', ''],
+				['stored-model', 'manual-model'],
+				['stored-effort', 'manual-effort'],
+			]) {
+				const input = screen.getByDisplayValue(previous);
+				fireEvent.change(input, { target: { value } });
+				fireEvent.blur(input);
+			}
+			let resolveDetection!: (agents: AgentConfig[]) => void;
+			const detected = await window.maestro.agents.detect();
+			vi.mocked(window.maestro.agents.detect).mockReturnValueOnce(
+				new Promise((resolve) => {
+					resolveDetection = resolve;
+				})
+			);
+			// Commit model autocomplete blur, then settle discovery before re-detection.
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(150);
+			});
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(300);
+			});
+			const configCalls = vi.mocked(window.maestro.agents.getConfig).mock.calls.length;
+			fireEvent.change(screen.getByDisplayValue('Local Execution'), {
+				target: { value: 'remote-b' },
+			});
+			expect(window.maestro.agents.detect).toHaveBeenLastCalledWith('remote-b');
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(300);
+			});
+			expect(window.maestro.agents.getConfig).toHaveBeenCalledTimes(configCalls);
+			await act(async () => {
+				resolveDetection(detected);
+			});
+			await act(async () => {
+				await vi.advanceTimersByTimeAsync(300);
+			});
+			const context = expect.objectContaining({
+				cwd: '~/unsaved-project',
+				customPath: '/synthetic/bin/edited',
+				customEnvVars: { GROK_HOME: '' },
+				model: 'manual-model',
+				effort: 'manual-effort',
+				sshRemoteId: 'remote-b',
+				sessionSshRemoteConfig: expect.objectContaining({
+					enabled: true,
+					remoteId: 'remote-b',
+					workingDirOverride: '~/unsaved-project',
+				}),
+			});
+			expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+				providerId: 'grok',
+				context,
+			});
+			expect(window.maestro.agents.getConfigOptions).toHaveBeenCalledWith(
+				{ providerId: 'grok', context },
+				'reasoningEffort'
+			);
+			expect(
+				screen.getByText(/Model discovery unavailable for this configuration/)
+			).toBeInTheDocument();
+			expect(screen.getByText(/Effort discovery unavailable/)).toBeInTheDocument();
+		});
+
+		it.each(
+			['reopen', 'provider', 'SSH'].flatMap((transition) =>
+				['models', 'efforts', 'refresh'].map((pending) => ({ transition, pending }))
+			)
+		)(
+			'rejects late $pending after $transition changes the draft owner',
+			async ({ transition, pending }) => {
+				let resolveOld!: (result: AgentDiscoveryResult) => void;
+				const old = new Promise<AgentDiscoveryResult>((resolve) => {
+					resolveOld = resolve;
+				});
+				const detected = await window.maestro.agents.detect();
+				vi.mocked(window.maestro.agents.detect).mockResolvedValue([
+					...detected,
+					createAgentConfig({
+						...getAgentDefinition('codex'),
+						capabilities: getAgentCapabilities('codex'),
+					}),
+				]);
+				const models = vi
+					.fn()
+					.mockImplementation((request) =>
+						Promise.resolve(
+							typeof request === 'string'
+								? ['legacy-model']
+								: { status: 'discovered', options: ['current-model'] }
+						)
+					);
+				const efforts = vi
+					.fn()
+					.mockImplementation((request) =>
+						Promise.resolve(
+							typeof request === 'string' ? ['high'] : { status: 'unavailable', options: [] }
+						)
+					);
+				if (pending === 'models') models.mockReturnValueOnce(old);
+				if (pending === 'efforts') efforts.mockReturnValueOnce(old).mockReturnValueOnce(old);
+				window.maestro.agents.getModels = models;
+				window.maestro.agents.getConfigOptions = efforts;
+				const props = { isOpen: true, onClose, onCreate, theme, existingSessions: [] };
+				const view = render(<NewInstanceModal {...props} sourceSession={source} />);
+				await act(async () => {});
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(300);
+				});
+				expect(models).toHaveBeenCalledWith(expect.objectContaining({ providerId: 'grok' }));
+				expect(efforts).toHaveBeenCalledWith(
+					expect.objectContaining({ providerId: 'grok' }),
+					'reasoningEffort'
+				);
+				if (pending === 'refresh') {
+					models.mockReturnValueOnce(old);
+					fireEvent.click(screen.getByTitle('Refresh available models'));
+					expect(models).toHaveBeenLastCalledWith(expect.objectContaining({ forceRefresh: true }));
+				}
+				if (transition === 'reopen') {
+					view.rerender(<NewInstanceModal {...props} isOpen={false} sourceSession={source} />);
+					expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+					view.rerender(<NewInstanceModal {...props} sourceSession={source} />);
+				} else if (transition === 'provider') {
+					fireEvent.click(screen.getByRole('option', { name: /Codex/ }));
+					await act(async () => {});
+					expect(models).toHaveBeenCalledWith('codex', false);
+					expect(efforts).toHaveBeenCalledWith('codex', 'reasoningEffort');
+					fireEvent.click(screen.getByRole('option', { name: /Grok CLI/ }));
+				} else {
+					fireEvent.change(screen.getByDisplayValue('Local Execution'), {
+						target: { value: 'remote-b' },
+					});
+				}
+				await act(async () => {});
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(300);
+				});
+				expect(models).toHaveBeenLastCalledWith({
+					providerId: 'grok',
+					context: expect.objectContaining({
+						sshRemoteId: transition === 'SSH' ? 'remote-b' : undefined,
+					}),
+				});
+				const counts = [models.mock.calls.length, efforts.mock.calls.length];
+				await act(async () => {
+					resolveOld({ status: 'discovered', options: ['stale-one', 'stale-two'] });
+				});
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(300);
+				});
+				expect([models.mock.calls.length, efforts.mock.calls.length]).toEqual(counts);
+				expect(screen.getByText('1 model available')).toBeInTheDocument();
+				expect(screen.queryByText('2 models available')).not.toBeInTheDocument();
+				expect(screen.getByText(/Effort discovery unavailable/)).toBeInTheDocument();
+				expect(screen.getByDisplayValue('stored-model')).toBeInTheDocument();
+				expect(screen.getByDisplayValue('stored-effort')).toBeInTheDocument();
 			}
 		);
 	});
