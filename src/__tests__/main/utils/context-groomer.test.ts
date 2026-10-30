@@ -7,12 +7,14 @@
  */
 
 import * as path from 'path';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
 	groomContext,
 	getActiveGroomingSessionCount,
 	type GroomingProcessManager,
 } from '../../../main/utils/context-groomer';
+import { getAgentDefinition } from '../../../shared/maestro-lib/providers/definitions';
+import { resolveSshPath } from '../../../shared/maestro-lib/launch/ssh-path';
 import { cheapTurnSettings } from '../../../shared/modelTiers';
 import type { AgentDetector } from '../../../main/agents';
 import type { AgentConfig } from '../../../main/agents';
@@ -182,6 +184,7 @@ describe('groomContext', () => {
 			modelId: undefined,
 			yoloMode: false,
 			permissionMode: 'standard',
+			forceBatchMode: false,
 			agentSessionId: undefined,
 		});
 	});
@@ -901,6 +904,180 @@ describe('groomContext', () => {
 		for (const call of onProgress.mock.calls) {
 			expect(call[0].elapsedMs).toBeGreaterThanOrEqual(0);
 		}
+	});
+
+	describe('candidate prompt-file grooming', () => {
+		const buildMock = vi.mocked(buildAgentArgs).getMockImplementation()!;
+		const overridesMock = vi.mocked(applyAgentConfigOverrides).getMockImplementation()!;
+		beforeEach(async () => {
+			const actual = await vi.importActual<
+				typeof import('../../../shared/maestro-lib/launch/agent-args')
+			>('../../../shared/maestro-lib/launch/agent-args');
+			vi.mocked(buildAgentArgs).mockImplementation(actual.buildAgentArgs);
+			vi.mocked(applyAgentConfigOverrides).mockImplementation(actual.applyAgentConfigOverrides);
+			agent = makeAgent({
+				...getAgentDefinition('grok')!,
+				// Synthetic opt-in only; the production provider remains inactive.
+				promptFile: {
+					format: 'acp-json',
+					exclusivePromptFlags: ['-p', '--single', '--prompt-file'],
+				},
+				promptFileArgs: (file) => ['--prompt-file', file],
+			});
+		});
+		afterEach(() => {
+			vi.mocked(buildAgentArgs).mockImplementation(buildMock);
+			vi.mocked(applyAgentConfigOverrides).mockImplementation(overridesMock);
+			vi.restoreAllMocks();
+			vi.useRealTimers();
+		});
+
+		describe.each([false, true])('SSH=%s', (ssh) => {
+			it.each(['', 'composed 雪\n$(literal) `text`\n'.repeat(4_000)])(
+				'preserves exact bytes and selected host/account/model across detection (%#)',
+				async (prompt) => {
+					vi.mocked(isWindows).mockReturnValue(true);
+					const remote = { ...SSH_REMOTE };
+					const account = ssh ? '/remote/account' : path.resolve('account');
+					const executable = ssh ? '/opt/selected grok' : path.resolve('selected grok');
+					const cwd = ssh ? '/remote/team work' : path.resolve('project');
+					const options = {
+						projectRoot: path.resolve('project'),
+						agentType: 'grok',
+						readOnlyMode: true,
+						prompt,
+						agentSessionId: prompt ? 'native-session' : undefined,
+						sessionCustomPath: executable,
+						sessionCustomModel: 'grok-selected',
+						sessionCustomEnvVars: { GROK_HOME: account },
+						sessionSshRemoteConfig: { enabled: ssh, remoteId: remote.id, workingDirOverride: cwd },
+						sshStore: createSshStore([remote]),
+					};
+					const detector = createMockAgentDetector(agent);
+					vi.mocked(detector.getAgent).mockImplementationOnce(async () => {
+						options.sessionCustomModel = 'changed-model';
+						options.sessionCustomEnvVars.GROK_HOME = '/changed/account';
+						options.sessionSshRemoteConfig.workingDirOverride = '/changed/work';
+						remote.host = 'changed.invalid';
+						return agent;
+					});
+					const spawn = vi.spyOn(mockPM, 'spawn');
+					expect((await groomContext(options, mockPM, detector)).response).toBe('groomed response');
+					expect(spawn).toHaveBeenCalledTimes(1);
+					const config = spawn.mock.calls[0][0];
+					const artifact = config.promptArtifact!;
+					expect(JSON.parse(artifact.content)).toEqual({
+						type: 'acp',
+						content: [{ type: 'text', text: prompt }],
+					});
+					expect(artifact.owner).toBe(ssh ? 'remote' : 'local');
+					expect(config).toMatchObject({
+						command: ssh ? 'ssh' : executable,
+						prompt: undefined,
+						sendPromptViaStdinRaw: false,
+					});
+					expect(config.agentSessionId).toBe(prompt ? 'native-session' : undefined);
+					if (ssh) {
+						expect(artifact.sshRemoteId).toBe(SSH_REMOTE.id);
+						expect(config.sshRemoteHost).toBe(SSH_REMOTE.host);
+						expect(config.sshStdinScript).toContain(
+							Buffer.from(artifact.content).toString('base64')
+						);
+						for (const value of [artifact.path, account, executable, cwd, 'grok-selected'])
+							expect(config.sshStdinScript).toContain(value);
+						expect(config.sshStdinScript).not.toContain('/changed/');
+						expect(config.sshRemoteCommand).not.toContain(artifact.path);
+					} else {
+						expect(config.cwd).toBe(cwd);
+						expect(config.customEnvVars).toMatchObject({ GROK_HOME: account });
+						for (const value of ['streaming-json', 'grok-selected', artifact.path])
+							expect(config.args).toContain(value);
+					}
+					// Regression: GT1-02-10G2 repairs the remote override at argument construction.
+					expect(buildAgentArgs).toHaveBeenCalledWith(agent, expect.objectContaining({ cwd }));
+					const invocation = ssh ? config.sshStdinScript : config.args;
+					expect(invocation).toContain('plan');
+					expect(invocation).not.toContain('--always-approve');
+
+					expect(mockPM.kill).not.toHaveBeenCalled();
+				}
+			);
+
+			it.each(['idle', 'deadline'] as const)(
+				'stops the file reader on %s completion',
+				async (reason) => {
+					vi.useFakeTimers();
+					const spawn = vi.spyOn(mockPM, 'spawn').mockReturnValue({ pid: 12345, success: true });
+					const pending = groomContext(
+						{
+							projectRoot: path.resolve('project'),
+							agentType: 'grok',
+							prompt: 'private input',
+							timeoutMs: reason === 'idle' ? 20_000 : 100,
+							sessionSshRemoteConfig: { enabled: ssh, remoteId: SSH_REMOTE.id },
+							sshStore: createSshStore(),
+						},
+						mockPM,
+						createMockAgentDetector(agent)
+					);
+					await vi.advanceTimersByTimeAsync(0);
+					const config = spawn.mock.calls[0][0];
+					expect(config.promptArtifact?.owner).toBe(ssh ? 'remote' : 'local');
+					mockPM._emitData(config.sessionId, 'response '.repeat(20));
+					await vi.advanceTimersByTimeAsync(reason === 'idle' ? 6_000 : 100);
+					expect(await pending).toMatchObject({
+						completionReason: `${reason === 'idle' ? 'idle' : 'overall'} timeout with content`,
+					});
+					expect(mockPM.kill).toHaveBeenCalledExactlyOnceWith(config.sessionId);
+					for (const handlers of mockPM._handlers.values()) expect(handlers).toHaveLength(0);
+					expect(getActiveGroomingSessionCount()).toBe(0);
+					expect(vi.getTimerCount()).toBe(0);
+				}
+			);
+		});
+
+		it.each(['ssh', 'spawn', 'admission'] as const)(
+			'withholds private %s errors without retry',
+			async (stage) => {
+				const privateError = new Error('private /artifact.json prompt-content');
+				const spawn = vi.spyOn(mockPM, 'spawn');
+				const pm = {
+					...mockPM,
+					spawnAdmitted:
+						stage === 'admission' ? vi.fn().mockRejectedValue(privateError) : undefined,
+				};
+				if (stage === 'ssh') vi.mocked(resolveSshPath).mockRejectedValueOnce(privateError);
+				if (stage === 'spawn')
+					spawn.mockImplementationOnce(() => {
+						throw privateError;
+					});
+				await expect(
+					groomContext(
+						{
+							projectRoot: path.resolve('project'),
+							agentType: 'grok',
+							prompt: 'private input',
+							sessionCustomEffort: 'high',
+							sessionSshRemoteConfig: { enabled: stage === 'ssh', remoteId: SSH_REMOTE.id },
+							sshStore: createSshStore(),
+						},
+						pm,
+						createMockAgentDetector(agent)
+					)
+				).rejects.toEqual(
+					new Error(
+						stage === 'ssh'
+							? 'Remote prompt preparation unavailable.'
+							: 'Prompt-file grooming spawn unavailable.'
+					)
+				);
+				expect(spawn).toHaveBeenCalledTimes(stage === 'spawn' ? 1 : 0);
+				if (pm.spawnAdmitted) expect(pm.spawnAdmitted).toHaveBeenCalledTimes(1);
+				expect(applyAgentConfigOverrides).toHaveBeenCalledTimes(1);
+				for (const handlers of mockPM._handlers.values()) expect(handlers).toHaveLength(0);
+				expect(getActiveGroomingSessionCount()).toBe(0);
+			}
+		);
 	});
 
 	describe('effort refused by the provider', () => {

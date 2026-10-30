@@ -28,6 +28,8 @@ import {
 	clearRememberedClaudeSessionCosts,
 } from '../../../claudeCostTracker';
 import { embedSystemPromptInPrompt } from '../../../embeddedSystemPrompt';
+import * as systemDelivery from '../../turns/args';
+import * as remoteControl from '../../control/ssh-remote-signal';
 import { getAgentCapabilities } from '../../providers/capabilities';
 import { getAgentDefinition, type AgentConfig } from '../../providers/definitions';
 import { resolveMaestroPaths } from '../../paths/resolve';
@@ -63,6 +65,16 @@ const claude = (path = '/fake/bin/claude'): AgentConfig =>
 		path,
 		capabilities: getAgentCapabilities('claude-code'),
 	}) as AgentConfig;
+
+// Candidate file delivery is opted in only by this fixture, never by the provider registry.
+const grok: AgentConfig = {
+	...getAgentDefinition('grok')!,
+	available: true,
+	path: path.resolve('synthetic-grok'),
+	capabilities: getAgentCapabilities('grok'),
+	promptFile: { format: 'acp-json', exclusivePromptFlags: ['-p', '--prompt-file'] },
+	promptFileArgs: (file) => ['--prompt-file', file],
+};
 
 const spawnOf = (overrides: Partial<GroupChatSpawn> = {}): GroupChatSpawn => ({
 	processId: PARTICIPANT,
@@ -261,6 +273,110 @@ describe('background turns', () => {
 		});
 	});
 
+	describe('candidate Grok file delivery', () => {
+		afterEach(() => vi.restoreAllMocks());
+
+		it.each([
+			['empty', '', undefined, false],
+			['composed', 'private 雪\n'.repeat(5_000), 'SYSTEM', false],
+			['resumed', 'next turn', 'SYSTEM', true],
+		] as const)(
+			'hands %s content to the local file owner without argv or stdin fallback',
+			async (_label, prompt, system, resume) => {
+				const { background, provider } = turns(() => ({ text: '' }));
+				const spawn = spawnOf({
+					providerId: 'grok',
+					agent: grok,
+					prompt,
+					appendSystemPrompt: system,
+					args: ['--model', 'selected-model', ...(resume ? ['--resume', 'session-1'] : [])],
+					customEnvVars: { GROK_HOME: path.join(dir, 'selected-account') },
+				});
+				const started = background.groupChatRunner(handlers).start(spawn);
+				spawn.args[1] = 'changed-model';
+				spawn.customEnvVars!.GROK_HOME = path.join(dir, 'changed-account');
+				expect(await started).toMatchObject({ success: true });
+				const spec = provider!.calls[0].spec;
+				const text = system && !resume ? embedSystemPromptInPrompt(system, prompt) : prompt;
+				expect(JSON.parse(spec.promptArtifact!.content)).toEqual({
+					type: 'acp',
+					content: [{ type: 'text', text }],
+				});
+				expect(spec.promptArtifact).toMatchObject({
+					owner: 'local',
+					mode: 0o600,
+					flag: 'wx',
+					cleanup: 'turn',
+				});
+				expect(spec.args.join(' ')).toContain('selected-model');
+				expect(spec.args.join(' ')).toContain(spec.promptArtifact!.path);
+				expect(spec.env.GROK_HOME).toBe(path.join(dir, 'selected-account'));
+				expect(spec.stdin).toBeUndefined();
+				if (prompt) expect(spec.args.join(' ')).not.toContain(prompt);
+				await vi.waitFor(() => expect(background.activeCount()).toBe(0));
+			}
+		);
+
+		it.each([
+			{ args: ['-p', 'conflicting-private-input'] },
+			{ isResume: true, args: [] },
+			{ sshRemoteConfig: { enabled: true, remoteId: 'missing-private-host' } },
+		])(
+			'refuses invalid private preparation without a retry or diagnostic disclosure: %j',
+			async (override) => {
+				const { background, provider } = turns(() => ({ text: 'never' }));
+				await expect(
+					background.groupChatRunner(handlers).start(
+						spawnOf({
+							providerId: 'grok',
+							agent: grok,
+							prompt: 'private prompt',
+							...override,
+						})
+					)
+				).rejects.toEqual(new Error('Prompt-file background preparation unavailable.'));
+				expect(provider!.calls).toEqual([]);
+				expect(beginTurn).not.toHaveBeenCalled();
+				expect(reported).toEqual([]);
+			}
+		);
+
+		it.each(['group', 'consult'] as const)(
+			'cleans abandoned system preparation when a %s is stopped',
+			async (kind) => {
+				const file = path.join(dir, 'private-system.txt');
+				fs.writeFileSync(file, 'private system');
+				let finish!: (result: systemDelivery.SystemPromptDeliveryResult) => void;
+				vi.spyOn(systemDelivery, 'deliverSystemPrompt').mockReturnValueOnce(
+					new Promise((resolve) => {
+						finish = resolve;
+					})
+				);
+				const { background, provider } = turns(() => ({ text: 'never' }));
+				const group = background.groupChatRunner(handlers);
+				const consult = background.consultRunner();
+				const spawn = spawnOf({ providerId: 'grok', agent: grok });
+				const started =
+					kind === 'group'
+						? group.start(spawn)
+						: consult.start(spawn, {
+								onActivity: vi.fn(),
+								onSessionId: vi.fn(),
+								onEnd: vi.fn(),
+							});
+				(kind === 'group' ? group : consult).stop(spawn.processId);
+				finish({ args: spawn.args, prompt: spawn.prompt, tempFile: file });
+				expect(await started).toEqual({
+					success: false,
+					error: 'Background turn cancelled before spawn.',
+				});
+				expect(fs.existsSync(file)).toBe(false);
+				expect(provider!.calls).toEqual([]);
+				expect(beginTurn).not.toHaveBeenCalled();
+			}
+		);
+	});
+
 	describe('a resumed Claude session', () => {
 		it('records the turn’s own cost, not the session’s running total', async () => {
 			const configDir = path.join(dir, 'claude-config');
@@ -312,6 +428,52 @@ describe('background turns', () => {
 					],
 				})
 			);
+		});
+
+		it('pins Grok private content and account to the selected SSH host through preparation and Stop', async () => {
+			const signal = vi.spyOn(remoteControl, 'signalRemoteAgent');
+			const { background, provider } = turns(() => ({ text: '', hold: true }));
+			const runner = background.groupChatRunner(handlers);
+			const spawn = spawnOf({
+				providerId: 'grok',
+				agent: grok,
+				args: ['--model', 'selected-model'],
+				prompt: 'private remote 雪',
+				customEnvVars: { GROK_HOME: '/remote/account' },
+				sshRemoteConfig: { enabled: true, remoteId: 'r1' },
+			});
+			const started = runner.start(spawn);
+			const settings = paths().settingsFile;
+			const changed = JSON.parse(fs.readFileSync(settings, 'utf8'));
+			changed.sshRemotes[0].host = 'changed.example.com';
+			fs.writeFileSync(settings, JSON.stringify(changed));
+			spawn.sshRemoteConfig!.remoteId = 'other';
+			expect(await started).toMatchObject({ success: true });
+			const spec = provider!.calls[0].spec;
+			expect(spec.promptArtifact).toBeUndefined();
+			expect(spec.args.join(' ')).toContain('build.example.com');
+			expect(spec.args.join(' ')).not.toContain('changed.example.com');
+			expect(spec.args.join(' ')).not.toContain('private remote');
+			expect(spec.stdin).toContain('/remote/account');
+			expect(spec.stdin).toContain('selected-model');
+			expect(spec.stdin).toContain(
+				Buffer.from(
+					JSON.stringify({ type: 'acp', content: [{ type: 'text', text: 'private remote 雪' }] })
+				).toString('base64')
+			);
+			const pidFile = /\/tmp\/maestro-prompt-owner-[0-9a-f-]+\.pid/.exec(spec.stdin!)?.[0];
+			expect(pidFile).toBeDefined();
+			runner.stop(PARTICIPANT);
+			await vi.waitFor(() => expect(background.activeCount()).toBe(0));
+			expect(signal).toHaveBeenCalledWith(
+				expect.objectContaining({
+					pidFile,
+					sshArgs: spec.args,
+					promptArtifactPath: expect.stringMatching(/^\/tmp\/maestro-prompt-.*\.json$/),
+				}),
+				'terminate'
+			);
+			signal.mockRestore();
 		});
 
 		it('records the agent’s pid in its script, and Stop reaches it on its host', async () => {
@@ -531,6 +693,44 @@ describe('background turns', () => {
 			admissions = [];
 			leases = 0;
 		});
+
+		it.each(['deny', 'cancel'] as const)(
+			'does not run or retry a private Grok turn after %s admission',
+			async (decision) => {
+				const authority = authorityOf(() => {
+					if (decision === 'cancel') runner.stop(PARTICIPANT);
+					return decision === 'deny' ? 'deny' : 'allow';
+				});
+				const { background, provider } = managedTurns(
+					() => ({ text: 'never' }),
+					authority,
+					'account-selected'
+				);
+				const runner = background.groupChatRunner(handlers);
+				const spawn = spawnOf({
+					providerId: 'grok',
+					agent: grok,
+					prompt: 'private admission content',
+					args: ['--model', 'selected-model'],
+					agentConfigValues: { model: 'selected-model' },
+				});
+				const result = await runner.start(spawn);
+				expect(result.success).toBe(false);
+				if (decision === 'deny')
+					expect(result.managed).toEqual({ state: 'denied', code: 'policy-denied' });
+				else expect(result.error).toBe('Background turn cancelled before spawn.');
+				expect(asked).toHaveLength(1);
+				expect(asked[0].snapshot).toMatchObject({
+					provider: 'grok',
+					account: 'account-selected',
+					model: 'selected-model',
+					target: { kind: 'local' },
+				});
+				expect(JSON.stringify(asked)).not.toContain('private admission content');
+				expect(provider.calls).toEqual([]);
+				expect(authority.live()).toEqual([]);
+			}
+		);
 
 		it('admits a room turn as the room’s child on a lease over the final spec, stamps the record, and releases the lease when the turn ends', async () => {
 			const authority = authorityOf(() => 'allow');

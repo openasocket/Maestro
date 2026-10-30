@@ -331,6 +331,126 @@ describe('groomContext on a standalone host: unchanged', () => {
 	});
 });
 
+describe('groomContext prompt-file requirements under management (GT1-02-10GT)', () => {
+	let selectedDetector: AgentDetector;
+	beforeEach(() => {
+		vi.clearAllMocks();
+		selectedDetector = detector();
+		// Candidate only: the provider registry remains gated on native qualification.
+		vi.spyOn(selectedDetector, 'getAgent').mockResolvedValue({
+			...agentFor('grok'),
+			promptFile: {
+				format: 'acp-json',
+				exclusivePromptFlags: ['-p', '--single', '--prompt-json', '--prompt-file'],
+			},
+			promptFileArgs: (file: string) => ['--prompt-file', file],
+		});
+	});
+	afterEach(() => {
+		cancelAllGroomingSessions();
+		vi.restoreAllMocks();
+	});
+
+	it.each([
+		{
+			options: { disableTools: true },
+			overrides: { noToolsArgs: undefined },
+			mode: 'disabled tools',
+		},
+		{ options: { readOnlyMode: true }, overrides: { readOnlyArgs: [] }, mode: 'read-only mode' },
+		{
+			options: { readOnlyMode: true },
+			overrides: { readOnlyCliEnforced: false },
+			mode: 'read-only mode',
+		},
+	])(
+		'refuses an unenforceable $mode before admission or fallback',
+		async ({ options, overrides, mode }) => {
+			const candidate = await selectedDetector.getAgent('grok');
+			vi.mocked(selectedDetector.getAgent)
+				.mockClear()
+				.mockResolvedValue({ ...candidate!, ...overrides });
+			const port = fakeSpawnPort();
+			const h = harness(port);
+			await expect(
+				groomContext(
+					{ ...baseOptions, agentType: 'grok', ...options },
+					h.processManager,
+					selectedDetector
+				)
+			).rejects.toThrow(`Prompt-file grooming cannot enforce ${mode}.`);
+			expect(selectedDetector.getAgent).toHaveBeenCalledOnce();
+			expect(port.asked).toHaveLength(0);
+			expect(h.spawn).not.toHaveBeenCalled();
+			expect(getActiveGroomingSessionCount()).toBe(0);
+		}
+	);
+
+	it('keeps a managed artifact refusal terminal without retry or private snapshot disclosure', async () => {
+		const port = fakeSpawnPort({
+			decide: () => ({
+				decision: 'deny',
+				policyRevision: 1,
+				code: 'policy-denied',
+				reason: 'Synthetic artifact policy refusal',
+			}),
+		});
+		const h = harness(port);
+		await expect(
+			groomContext(
+				{ ...baseOptions, agentType: 'grok', sessionCustomEffort: 'high' },
+				h.processManager,
+				selectedDetector
+			)
+		).rejects.toThrow('Synthetic artifact policy refusal');
+		expect(selectedDetector.getAgent).toHaveBeenCalledOnce();
+		expect(port.asked).toHaveLength(1);
+		expect(port.asked[0].snapshot).toHaveProperty('promptArtifactDigest');
+		expect(JSON.stringify(port.asked)).not.toContain(baseOptions.prompt);
+		expect(port.asked[0].snapshot).not.toHaveProperty('promptArtifact');
+		expect(h.spawn).not.toHaveBeenCalled();
+		expect(port.authority.live()).toHaveLength(0);
+		expect(getActiveGroomingSessionCount()).toBe(0);
+		expect(h.processManager.listenerCount('data')).toBe(0);
+	});
+
+	it.each(['model', 'accountDir', 'ssh'] as const)(
+		'refuses an unqualified Grok %s route before artifact admission',
+		async (kind) => {
+			const port = fakeSpawnPort();
+			port.routeCeiling = () =>
+				route({
+					providerId: 'grok',
+					...(kind === 'ssh' ? {} : { [kind]: 'synthetic-pinned-value' }),
+				});
+			const h = harness(port);
+			await expect(
+				groomContext(
+					{
+						...baseOptions,
+						agentType: 'grok',
+						...(kind === 'ssh'
+							? {
+									sessionSshRemoteConfig: { enabled: true, remoteId: 'selected-host' },
+									sshStore: { getSshRemotes: () => [] },
+								}
+							: {}),
+					},
+					h.processManager,
+					selectedDetector
+				)
+			).rejects.toThrow(
+				kind === 'ssh' ? 'utility turn on an SSH remote' : 'grok has no variable for it'
+			);
+			expect(selectedDetector.getAgent).toHaveBeenCalledOnce();
+			expect(port.asked).toHaveLength(0);
+			expect(h.spawn).not.toHaveBeenCalled();
+			expect(port.authority.live()).toHaveLength(0);
+			expect(getActiveGroomingSessionCount()).toBe(0);
+		}
+	);
+});
+
 describe('groomContext cancellation across desktop admission', () => {
 	beforeEach(() => vi.clearAllMocks());
 	afterEach(() => {
