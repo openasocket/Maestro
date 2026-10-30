@@ -2,7 +2,12 @@ import type {
 	TranslationRequest,
 	TranslationReport,
 } from '../shared/maestro-lib/translation/types';
-import type { UpdateHoldView, UpdateStatus } from '../shared/types';
+import type {
+	AgentDiscoveryRequest,
+	AgentDiscoveryResult,
+	UpdateHoldView,
+	UpdateStatus,
+} from '../shared/types';
 /* eslint-disable @typescript-eslint/no-unused-vars */
 /**
  * Global type declarations for the renderer process.
@@ -2071,12 +2076,14 @@ interface MaestroAPI {
 			byProvider: Record<string, string[]>;
 			global: string[];
 		}>;
-		getModels: (agentId: string, forceRefresh?: boolean, sshRemoteId?: string) => Promise<string[]>;
-		getConfigOptions: (
-			agentId: string,
-			optionKey: string,
-			forceRefresh?: boolean
-		) => Promise<string[]>;
+		getModels: {
+			(request: AgentDiscoveryRequest): Promise<AgentDiscoveryResult>;
+			(agentId: string, forceRefresh?: boolean, sshRemoteId?: string): Promise<string[]>;
+		};
+		getConfigOptions: {
+			(request: AgentDiscoveryRequest, optionKey: string): Promise<AgentDiscoveryResult>;
+			(agentId: string, optionKey: string, forceRefresh?: boolean): Promise<string[]>;
+		};
 		discoverSlashCommands: (
 			agentId: string,
 			cwd: string,
