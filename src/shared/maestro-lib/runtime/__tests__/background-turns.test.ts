@@ -34,6 +34,7 @@ import { getAgentCapabilities } from '../../providers/capabilities';
 import { getAgentDefinition, type AgentConfig } from '../../providers/definitions';
 import { resolveMaestroPaths } from '../../paths/resolve';
 import { groupChatTurnContext } from '../../groupchat/spawn';
+import * as groupChatPreparation from '../../groupchat/spawn';
 import type { GroupChatSpawn } from '../../groupchat/types';
 import { createLocalHostAuthority, type AdmissionRequest } from '../../managed/authority';
 import type { ManagedBindingState } from '../../managed/binding';
@@ -275,6 +276,71 @@ describe('background turns', () => {
 
 	describe('candidate Grok file delivery', () => {
 		afterEach(() => vi.restoreAllMocks());
+
+		it.each(['group', 'consult'] as const)(
+			'captures %s capabilities and nested file ownership before system delivery yields',
+			async (kind) => {
+				const selectedCapabilities = { ...getAgentCapabilities('grok') };
+				const selectedPromptFile = {
+					...grok.promptFile!,
+					exclusivePromptFlags: [...grok.promptFile!.exclusivePromptFlags],
+				};
+				const callerPromptFlags = [...selectedPromptFile.exclusivePromptFlags];
+				const agent: AgentConfig = {
+					...grok,
+					capabilities: { ...selectedCapabilities },
+					promptFile: {
+						...selectedPromptFile,
+						exclusivePromptFlags: callerPromptFlags,
+					},
+				};
+				let finish!: (result: systemDelivery.SystemPromptDeliveryResult) => void;
+				const delivery = vi.spyOn(systemDelivery, 'deliverSystemPrompt').mockReturnValueOnce(
+					new Promise((resolve) => {
+						finish = resolve;
+					})
+				);
+				const prepare = vi.spyOn(groupChatPreparation, 'prepareGroupChatSpawn');
+				const { background, provider } = turns(() => ({ text: '' }));
+				const spawn = spawnOf({ providerId: 'grok', agent, prompt: 'private captured input' });
+				const started =
+					kind === 'group'
+						? background.groupChatRunner(handlers).start(spawn)
+						: background.consultRunner().start(spawn, {
+								onActivity: vi.fn(),
+								onSessionId: vi.fn(),
+								onEnd: vi.fn(),
+							});
+				expect(delivery).toHaveBeenCalledOnce();
+				expect(prepare).not.toHaveBeenCalled();
+				agent.capabilities.supportsAppendSystemPrompt =
+					!selectedCapabilities.supportsAppendSystemPrompt;
+				agent.capabilities.supportsReadOnlyMode = !selectedCapabilities.supportsReadOnlyMode;
+				callerPromptFlags.push('--print');
+				finish({ args: spawn.args, prompt: spawn.prompt });
+
+				expect(await started).toMatchObject({ success: true });
+				expect(prepare).toHaveBeenCalledOnce();
+				const captured = prepare.mock.calls[0][0].agent;
+				expect(captured.capabilities).toEqual(selectedCapabilities);
+				expect(captured.capabilities).not.toBe(agent.capabilities);
+				expect(captured.promptFile).toEqual(selectedPromptFile);
+				expect(captured.promptFile!.exclusivePromptFlags).not.toBe(
+					agent.promptFile!.exclusivePromptFlags
+				);
+				expect(getAgentCapabilities('grok')).toEqual(selectedCapabilities);
+				expect(grok.promptFile).toEqual(selectedPromptFile);
+				const spec = provider!.calls[0].spec;
+				expect(spec.promptArtifact).toMatchObject({ owner: 'local', mode: 0o600, cleanup: 'turn' });
+				expect(JSON.parse(spec.promptArtifact!.content)).toEqual({
+					type: 'acp',
+					content: [{ type: 'text', text: spawn.prompt }],
+				});
+				expect(spec.args.join(' ')).not.toContain(spawn.prompt);
+				expect(spec.stdin).toBeUndefined();
+				await vi.waitFor(() => expect(background.activeCount()).toBe(0));
+			}
+		);
 
 		it.each([
 			['empty', '', undefined, false],

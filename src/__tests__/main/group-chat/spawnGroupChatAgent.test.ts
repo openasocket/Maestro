@@ -66,6 +66,8 @@ import * as os from 'os';
 import * as path from 'node:path';
 import { getAgentDefinition } from '../../../shared/maestro-lib/providers/definitions';
 import { getAgentCapabilities } from '../../../shared/maestro-lib/providers/capabilities';
+import { buildAgentArgs } from '../../../shared/maestro-lib/launch/agent-args';
+import { ensureRemoteMaestroPProbed } from '../../../main/agents/probeRemoteMaestroP';
 import { getSshRemoteConfig } from '../../../shared/maestro-lib/launch/ssh-remote-resolver';
 import { logger } from '../../../shared/maestro-lib/host';
 import type { SpawnGroupChatAgentConfig } from '../../../main/group-chat/spawnGroupChatAgent';
@@ -119,6 +121,19 @@ describe('spawnGroupChatAgent', () => {
 			kill: vi.fn().mockReturnValue(true),
 		} as unknown as IProcessManager;
 	});
+
+	function managedManager(port: ProcessSpawnAuthorityPort = fakeSpawnPort()) {
+		const manager = new ProcessManager(() => false, {
+			spawnAuthority: () => port,
+			isCoworkingEnabled: () => false,
+		});
+		const cli = vi.fn(() => ({ pid: 4242, success: true }));
+		(manager as unknown as { childProcessSpawner: { spawn: typeof cli } }).childProcessSpawner = {
+			spawn: cli,
+		};
+		const spawned = (): ProcessConfig => cli.mock.calls[0][0] as unknown as ProcessConfig;
+		return { manager, cli, spawned };
+	}
 
 	it('forwards maxWaitSeconds as --max-wait on the interactive maestro-p spawn', async () => {
 		// Decision: local interactive, with a resolved maestro-p script path.
@@ -390,7 +405,7 @@ describe('spawnGroupChatAgent', () => {
 				agent: {
 					...getAgentDefinition('grok')!,
 					available: true,
-					capabilities: getAgentCapabilities('grok'),
+					capabilities: { ...getAgentCapabilities('grok') },
 					// Candidate declaration only; this does not activate the provider.
 					promptFile: {
 						format: 'acp-json',
@@ -405,6 +420,7 @@ describe('spawnGroupChatAgent', () => {
 				prompt: 'private 雪\n$(keep) `literal`',
 				appendSystemPrompt: 'private system',
 				customEnvVars: { GROK_HOME: path.resolve('account') },
+				// This artifact fixture has no read-only args; the boolean proves no enforcement.
 				readOnlyMode: true,
 				actor: { peer: 'web-login', username: 'pat' },
 				processManager: { ...processManager, spawnAdmitted },
@@ -463,7 +479,6 @@ describe('spawnGroupChatAgent', () => {
 				});
 				expect(spawned).toMatchObject({
 					toolType: 'grok',
-					readOnlyMode: true,
 					prompt: undefined,
 					sendPromptViaStdin: false,
 					sendPromptViaStdinRaw: false,
@@ -473,8 +488,10 @@ describe('spawnGroupChatAgent', () => {
 				expect(spawned.delegation).toEqual(resumed ? undefined : groupChatRoomContext(roomId));
 				if (ssh) {
 					const wrapped = mockWrapSpawnWithSsh.mock.calls[0][0];
+					const prepared = await mockWrapSpawnWithSsh.mock.results[0].value;
 					expect(mockWrapSpawnWithSsh).toHaveBeenCalledTimes(1);
 					expect(wrapped).toMatchObject({
+						args: [...config.args, '--prompt-file', artifact.path],
 						cwd: config.cwd,
 						agentBinaryName: config.remoteCommand,
 						prompt: undefined,
@@ -483,6 +500,8 @@ describe('spawnGroupChatAgent', () => {
 					});
 					expect(spawned).toMatchObject({
 						command: 'ssh',
+						args: prepared.args,
+						sshStdinScript: prepared.sshStdinScript,
 						sshRemoteId: remote.id,
 						cwd: os.homedir(),
 					});
@@ -518,6 +537,137 @@ describe('spawnGroupChatAgent', () => {
 					expect(diagnostics).not.toContain(value);
 			});
 		});
+		it('retains the selected capability snapshot while remote preparation is deferred', async () => {
+			const selectedCapabilities = { ...base.agent.capabilities };
+			let entered!: () => void;
+			let release!: () => void;
+			const probing = new Promise<void>((resolve) => {
+				entered = resolve;
+			});
+			const gate = new Promise<undefined>((resolve) => {
+				release = () => resolve(undefined);
+			});
+			vi.mocked(ensureRemoteMaestroPProbed).mockImplementationOnce(() => {
+				entered();
+				return gate;
+			});
+			const pending = spawnGroupChatAgent({
+				...base,
+				sshRemoteConfig: { enabled: true, remoteId: remote.id },
+				sshStore: { getSshRemotes: () => [remote] },
+			});
+			await probing;
+			base.agent.capabilities.supportsAppendSystemPrompt =
+				!selectedCapabilities.supportsAppendSystemPrompt;
+			base.agent.capabilities.supportsReadOnlyMode = !selectedCapabilities.supportsReadOnlyMode;
+			release();
+			expect(await pending).toEqual({ pid: 4343, success: true });
+			expect(mockResolve).toHaveBeenCalledOnce();
+			const captured = mockResolve.mock.calls[0][0].agent;
+			expect(captured.capabilities).toEqual(selectedCapabilities);
+			expect(captured.capabilities).not.toBe(base.agent.capabilities);
+			expect(getAgentCapabilities('grok')).toEqual(selectedCapabilities);
+			expect(spawnAdmitted).toHaveBeenCalledOnce();
+			expect(spawnSpy).not.toHaveBeenCalled();
+		});
+
+		describe.each(['claude-code', 'codex'] as const)(
+			'canonical %s read-only handoff',
+			(provider) => {
+				describe.each([false, true])('SSH=%s', (ssh) => {
+					it.each([false, true])(
+						'preserves prepared flags at admission, denied=%s',
+						async (denied) => {
+							const agent: AgentConfig = {
+								...getAgentDefinition(provider)!,
+								available: true,
+								capabilities: { ...getAgentCapabilities(provider) },
+							};
+							const args = buildAgentArgs(agent, {
+								baseArgs: agent.args,
+								prompt: 'review only',
+								readOnlyMode: true,
+							});
+							const port = fakeSpawnPort({
+								decide: () => ({
+									decision: 'deny',
+									reason: 'Read-only control denied.',
+									policyRevision: 1,
+								}),
+							});
+							const { manager, cli } = managedManager(port);
+							const legacySpawn = vi.spyOn(manager, 'spawn');
+							const admission = denied ? vi.spyOn(manager, 'spawnAdmitted') : spawnAdmitted;
+							const result = await spawnGroupChatAgent({
+								sessionId: base.sessionId,
+								agentId: provider,
+								agent,
+								args,
+								prompt: 'review only',
+								cwd: ssh ? '/remote/review' : os.tmpdir(),
+								readOnlyMode: true,
+								actor: base.actor,
+								processManager: denied ? manager : base.processManager,
+								...(ssh
+									? {
+											sshRemoteConfig: { enabled: true, remoteId: remote.id },
+											sshStore: { getSshRemotes: () => [remote] },
+										}
+									: {}),
+							});
+							expect(admission).toHaveBeenCalledOnce();
+							const [config, actor] = admission.mock.calls[0] as [ProcessConfig, unknown];
+							expect(actor).toEqual(base.actor);
+							expect(config).not.toHaveProperty('permission');
+							const readOnly =
+								provider === 'claude-code'
+									? ['--permission-mode', 'plan']
+									: ['--sandbox', 'read-only'];
+							expect(args.slice(args.indexOf(readOnly[0]), args.indexOf(readOnly[0]) + 2)).toEqual(
+								readOnly
+							);
+							if (ssh) {
+								expect(mockWrapSpawnWithSsh).toHaveBeenCalledOnce();
+								expect(mockWrapSpawnWithSsh.mock.calls[0][0].args).toEqual(args);
+								const prepared = await mockWrapSpawnWithSsh.mock.results[0].value;
+								expect(config).toMatchObject({
+									command: 'ssh',
+									args: prepared.args,
+									sshStdinScript: prepared.sshStdinScript,
+								});
+								expect(config.sshStdinScript).toContain(`'${readOnly[0]}' '${readOnly[1]}'`);
+							} else {
+								expect(mockWrapSpawnWithSsh).not.toHaveBeenCalled();
+								expect(config.args).toEqual(args);
+								expect(config.sshStdinScript).toBeUndefined();
+							}
+							for (const bypass of [
+								'--dangerously-skip-permissions',
+								'--dangerously-bypass-approvals-and-sandbox',
+							]) {
+								expect(config.args).not.toContain(bypass);
+								expect(config.sshStdinScript ?? '').not.toContain(bypass);
+							}
+							if (denied) {
+								expect(result).toMatchObject({
+									pid: -1,
+									success: false,
+									managed: { state: 'denied' },
+								});
+								expect(port.asked).toHaveLength(1);
+								expect(port.authority.live()).toHaveLength(0);
+								expect(manager.admissionOf(base.sessionId)).toBeNull();
+							} else {
+								expect(result).toEqual({ pid: 4343, success: true });
+							}
+							expect(legacySpawn).not.toHaveBeenCalled();
+							expect(cli).not.toHaveBeenCalled();
+							expect(spawnSpy).not.toHaveBeenCalled();
+						}
+					);
+				});
+			}
+		);
 		it.each(['ordered', 'image-only', 'unadmitted'])(
 			'preserves %s image content and the system envelope across caller mutation',
 			async (kind) => {
@@ -813,19 +963,6 @@ describe('spawnGroupChatAgent', () => {
 		beforeEach(() => {
 			mockResolve.mockReturnValue({ mode: 'api', reason: 'auto' });
 		});
-
-		function managedManager(port: ProcessSpawnAuthorityPort = fakeSpawnPort()) {
-			const manager = new ProcessManager(() => false, {
-				spawnAuthority: () => port,
-				isCoworkingEnabled: () => false,
-			});
-			const cli = vi.fn(() => ({ pid: 4242, success: true }));
-			(manager as unknown as { childProcessSpawner: { spawn: typeof cli } }).childProcessSpawner = {
-				spawn: cli,
-			};
-			const spawned = (): ProcessConfig => cli.mock.calls[0][0] as unknown as ProcessConfig;
-			return { manager, cli, spawned };
-		}
 
 		const turn = (
 			sessionId: string,
