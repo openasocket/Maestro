@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge in progress; MCOMP-01-03A and MCOMP-01-03B staged (6 files), 38 files unmerged in the worktree; MCOMP-01-03C..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T00:31:37.076Z",
-		"updatedBy": "MCOMP-01-03B"
+		"state": "merge in progress; MCOMP-01-03A, 03B and 03C staged (9 files), 35 files unmerged in the worktree; MCOMP-01-03D..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
+		"updatedAt": "2026-10-30T01:46:16.072Z",
+		"updatedBy": "MCOMP-01-03C"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -221,6 +221,50 @@
 			"semanticConflictsForQ": [],
 			"unmergedAfter": 38,
 			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03b.mjs (not in git)"
+		},
+		"MCOMP-01-03C": {
+			"resolvedAt": "2026-10-29",
+			"resolvedBy": "Maestro-Claude",
+			"files": [
+				"src/main/index.ts",
+				"src/main/ipc/handlers/system.ts",
+				"src/main/ipc/handlers/web.ts"
+			],
+			"hunks": {
+				"src/main/index.ts": [
+					"65-69 (imports): upstream two lines taken (createDataviewSupervisorHooks from ./dataview/dataview-service, execFile from child_process; the integration side added nothing at this spot); both are referenced below (the dataview hook in the Encore service table, execFile at the shell-less plugin host spawn)",
+					"1923-2082: the base went from pluginAuthStore = authStore straight to trustedKeysFor; the integration side inserted the enterprise service composition (createEnterpriseService over the sealed identity and its keyring anchor, the event-journal warning, the inventory inputs, a failed composition reported and left null) and moved the WakaTime auto-install behind it; upstream inserted the plugin tool identity block (toolIdentity, assertToolProofLocation, assertToolOwnerActive, the agent-active assertion, the provisioned PluginToolRunProofFiles with its closed fallback, assertToolProofStorageActive) at the same spot; both kept, the integration block first, then upstream block; the WakaTime reads exist once in the merged file (the top-level copy the integration side removed auto-merged away)"
+				],
+				"src/main/ipc/handlers/system.ts": [
+					"37-56 (imports): both groups kept, upstream isLinux (feeds openPathSettled) first, then the integration local-effects-policy, settings-policy, managedSettingsLock and syncPath imports",
+					"455-460, 478-483, 570-575 (the three shell.openPath sites: the bare-path and file: branches of shell:openExternal, shell:openPath): the integration hold holdSystemEffect(localEffects(), open-path, target, actor) kept right before the call, then upstream openPathSettled(target) in place of shell.openPath(target) (Linux fires and reports launched, Electron never settles it there)",
+					"660-693 (tunnel:start): the integration web.tunnel hold (holdManagedKey(TUNNEL_LOCK_KEY), managedRefusal on a lock, comment reworded for Remote Control) kept ahead of upstream body, which starts Remote Control through the Live mode controller (getLiveModeController(), LIVE_MODE_NOT_READY before startup registers it, liveMode.startRemoteControl()); the old body (getWebServer().getSecureUrl(), tunnelManager.start(port), the token path) is gone with upstream, which also removed getWebServer and tunnelManager from SystemHandlerDependencies (the destructuring names getMainWindow, app, settingsStore only)"
+				],
+				"src/main/ipc/handlers/web.ts": [
+					"40-48 (imports, the one hunk): both groups kept, upstream three (createLiveModeController and setLiveModeController, isWebContentsAvailable, the tunnelManager type) then the integration three (isListenerDeniedError, holdManagedKey, LIVE_SESSIONS_LOCK_KEY and TUNNEL_LOCK_KEY); the body auto-merged: restoreManagedRemoteAccess() (66-84, still called by index.ts at startup and on every policy change with tunnel: tunnelManager), the held CLI server start in ensureCliServer (isListenerDeniedError, return false on a hold) and the live:toggle hold on web.liveSessions stand beside upstream createLiveModeController() wiring, which replaced the live:startServer, live:stopServer and live:disableAll bodies (the 126 lines upstream lost) by the controller"
+				]
+			},
+			"checks": {
+				"staging": "merge-tool stage over the three files: prettier left all three unchanged, git add done, 35 files left unmerged",
+				"listenerGate": "the listener ceiling stays reachable from where upstream moved the remote-access handlers: WebServer.start() holds the web listener (holdListener, WebServer.ts:1911) under live-mode.ts startServerBody, and tunnelManager.start() carries listenerHoldFor under live-mode.ts startRemoteControlBody; restoreManagedRemoteAccess() is unchanged and still wired in index.ts (1155)",
+				"suites": "node node_modules/vitest/vitest.mjs run in the worktree over ipc/handlers/system.test.ts, ipc/handlers/system.managed.test.ts, ipc/handlers/web.test.ts, preload/system.test.ts and web-server/live-mode.test.ts: 3 files passed, 141 tests passed (web, preload system, live-mode); the two system suites could not transform because system.ts reaches src/shared/maestro-lib/run/start-turn.ts, still unmerged (MCOMP-01-03F), not a defect of these files",
+				"numstatVsHead": {
+					"src/main/index.ts": "507+/32- (upstream reshape)",
+					"src/main/ipc/handlers/system.ts": "49+/56-",
+					"src/main/ipc/handlers/web.ts": "43+/126- (upstream moved the Live switches into live-mode.ts)"
+				},
+				"numstatVsMergeHead": {
+					"src/main/index.ts": "504+/202- (the enterprise wiring)",
+					"src/main/ipc/handlers/system.ts": "207+/87- (the local-effects and settings holds)",
+					"src/main/ipc/handlers/web.ts": "52+/4-"
+				}
+			},
+			"semanticConflictsForQ": [
+				"src/__tests__/main/ipc/handlers/system.managed.test.ts (auto-merged, the integration side wrote it): its registerLocks() passes tunnelManager and getWebServer to registerSystemHandlers, which SystemHandlerDependencies no longer declares (an excess-property error under the lint tsconfig), and its standalone tunnel case expects tunnel.start to answer tunnel:start with the token path; under upstream shape the handler reaches getLiveModeController(), which that suite never registers, so it would read { success: false, error: LIVE_MODE_NOT_READY }. MCOMP-01-03Q (types) or 03R (the case) brings the suite to the merged behavior: mock ../../../../main/web-server/live-mode as system.test.ts does, expect startRemoteControl called once standalone and not called under the web.tunnel lock, keep the locked verdict assertion as it is",
+				"the web.tunnel settings lock is held on the tunnel:start IPC (its original seam); upstream new maestro-cli live tunnel on path (live_command remote-on in src/main/web-server/handlers/messageHandlers/live.ts) reaches liveMode.startRemoteControl() without that lock, with the listener ceiling inside tunnelManager.start() still holding the publish; not a conflict of these files; a follow-up may move the hold into live-mode.ts startRemoteControlBody so both surfaces meet it"
+			],
+			"unmergedAfter": 35,
+			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03c.mjs (not in git)"
 		}
 	}
 }
