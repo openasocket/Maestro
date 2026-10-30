@@ -84,6 +84,7 @@ function getOpenCodeDataDir(): string {
 
 /**
  * Get OpenCode JSON storage directory (pre-v1.2)
+ * Resolve only during local storage operations, never at import or construction.
  */
 function getOpenCodeStorageDir(): string {
 	return path.join(getOpenCodeDataDir(), 'storage');
@@ -91,6 +92,7 @@ function getOpenCodeStorageDir(): string {
 
 /**
  * Get OpenCode SQLite database path (v1.2+).
+ * Resolve only during local storage operations, never at import or construction.
  *
  * Checks each candidate data dir for an existing `opencode.db` and returns
  * the first hit. Falls back to the preferred candidate's path when none exist,
@@ -105,9 +107,6 @@ function getOpenCodeDbPath(): string {
 	}
 	return path.join(getOpenCodeDataDirCandidates()[0], 'opencode.db');
 }
-
-const OPENCODE_STORAGE_DIR = getOpenCodeStorageDir();
-const OPENCODE_DB_PATH = getOpenCodeDbPath();
 
 /**
  * OpenCode project metadata structure
@@ -260,7 +259,7 @@ interface SqlitePartData {
  * Open the OpenCode SQLite database in read-only mode.
  * Returns null if the database file doesn't exist.
  */
-function openOpenCodeDb(dbPath: string = OPENCODE_DB_PATH): Database.Database | null {
+function openOpenCodeDb(dbPath: string = getOpenCodeDbPath()): Database.Database | null {
 	if (!fsSync.existsSync(dbPath)) {
 		return null;
 	}
@@ -413,21 +412,21 @@ export class OpenCodeSessionStorage extends BaseSessionStorage {
 	 * Get the session directory for a project (local)
 	 */
 	private getSessionDir(projectId: string): string {
-		return path.join(OPENCODE_STORAGE_DIR, 'session', projectId);
+		return path.join(getOpenCodeStorageDir(), 'session', projectId);
 	}
 
 	/**
 	 * Get the message directory for a session (local)
 	 */
 	private getMessageDir(sessionId: string): string {
-		return path.join(OPENCODE_STORAGE_DIR, 'message', sessionId);
+		return path.join(getOpenCodeStorageDir(), 'message', sessionId);
 	}
 
 	/**
 	 * Get the part directory for a message (local)
 	 */
 	private getPartDir(messageId: string): string {
-		return path.join(OPENCODE_STORAGE_DIR, 'part', messageId);
+		return path.join(getOpenCodeStorageDir(), 'part', messageId);
 	}
 
 	/**
@@ -463,7 +462,7 @@ export class OpenCodeSessionStorage extends BaseSessionStorage {
 	 * Find the project ID for a given path by checking existing projects
 	 */
 	private async findProjectId(projectPath: string): Promise<string | null> {
-		const projectDir = path.join(OPENCODE_STORAGE_DIR, 'project');
+		const projectDir = path.join(getOpenCodeStorageDir(), 'project');
 
 		try {
 			await fs.access(projectDir);
@@ -1632,7 +1631,7 @@ export class OpenCodeSessionStorage extends BaseSessionStorage {
 			return this.getRemoteMessageDir(sessionId);
 		}
 		if (sessionExistsInSqlite(sessionId)) {
-			return OPENCODE_DB_PATH;
+			return getOpenCodeDbPath();
 		}
 		return this.getMessageDir(sessionId);
 	}
