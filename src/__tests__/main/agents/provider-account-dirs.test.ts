@@ -47,6 +47,10 @@ import {
 	getProviderAccountDirs,
 	resolveAgentAccountDir,
 } from '../../../main/agents/provider-account-dirs';
+import {
+	resolveAgentAccountDir as resolveAccountDirForAgent,
+	resolveAgentAccountRef,
+} from '../../../shared/agentAccountDir';
 
 let homeDir: string;
 let outsideHome: string;
@@ -82,6 +86,26 @@ afterEach(() => {
 });
 
 describe('getProviderAccountDirs', () => {
+	it('discovers two Grok transcript roots without adopting an SSH account as local', async () => {
+		const personal = makeAccountDir(homeDir, '.grok', 'sessions');
+		const work = makeAccountDir(homeDir, '.grok-work', 'sessions');
+		const remoteOnly = makeAccountDir(outsideHome, 'grok-remote', 'sessions');
+		const dirs = await getProviderAccountDirs('grok', {
+			homeDir,
+			env: {},
+			agentLevelEnvVars: {},
+			sessions: [
+				{
+					toolType: 'grok',
+					customEnvVars: { GROK_HOME: remoteOnly },
+					sessionSshRemoteConfig: { enabled: true },
+				},
+			],
+		});
+
+		expect(dirs.sort()).toEqual([personal, work].sort());
+	});
+
 	it('keeps two Codex accounts apart instead of merging them', async () => {
 		const defaultHome = makeAccountDir(homeDir, '.codex', 'sessions');
 		const workHome = makeAccountDir(homeDir, '.codex-work', 'sessions');
@@ -285,6 +309,157 @@ describe('resolveAgentAccountDir', () => {
 		agentLevelEnvVars: {},
 		globalShellEnvVars: {},
 	});
+
+	it('resolves each stored Grok agent to its own transcript root', () => {
+		const personal = makeAccountDir(homeDir, '.grok', 'sessions');
+		const work = makeAccountDir(outsideHome, 'grok-work', 'sessions');
+		const options = {
+			...base(),
+			sessions: [
+				agent({ toolType: 'grok', customEnvVars: { GROK_HOME: personal } }),
+				agent({ id: 'agent-2', toolType: 'grok', customEnvVars: { GROK_HOME: work } }),
+			],
+		};
+
+		expect(resolveAgentAccountDir('agent-1', options)).toBe(personal);
+		expect(resolveAgentAccountDir('agent-2', options)).toBe(work);
+	});
+
+	it.each([
+		['session', { GROK_HOME: 'session' }, 'provider', 'global', 'host', 'session'],
+		['provider', undefined, 'provider', 'global', 'host', 'provider'],
+		['empty session replaces provider', {}, 'provider', 'global', 'host', 'global'],
+		[
+			'unrelated session replaces provider',
+			{ OTHER: 'value' },
+			'provider',
+			'global',
+			'host',
+			'global',
+		],
+		['global', undefined, undefined, 'global', 'host', 'global'],
+		['host', undefined, undefined, undefined, 'host', 'host'],
+		['default', undefined, undefined, undefined, undefined, '.grok'],
+	] as const)(
+		'resolves Grok precedence: %s',
+		(_name, custom: Record<string, string> | undefined, provider, global, host, expected) => {
+			const customEnvVars =
+				custom &&
+				('GROK_HOME' in custom ? { GROK_HOME: path.posix.join('~', custom.GROK_HOME) } : custom);
+			const dir = resolveAgentAccountDir('agent-1', {
+				...base(),
+				sessions: [agent({ toolType: 'grok', customEnvVars })],
+				agentLevelEnvVars: provider ? { GROK_HOME: path.join(homeDir, provider) } : {},
+				globalShellEnvVars: global ? { GROK_HOME: path.join(homeDir, global) } : {},
+				env: host ? { GROK_HOME: path.join(homeDir, host) } : {},
+			});
+
+			expect(dir).toBe(path.join(homeDir, expected));
+		}
+	);
+
+	it.each(['', ' \t\n', '\u00a0'])(
+		'lets a blank Grok override %j cancel every lower account layer',
+		(blank) => {
+			const root = path.join(outsideHome, 'lower-account');
+			const layers = {
+				...base(),
+				agentLevelEnvVars: { GROK_HOME: root },
+				globalShellEnvVars: { GROK_HOME: root },
+				env: { GROK_HOME: root },
+			};
+			const session = agent({ toolType: 'grok' });
+			const cases = [
+				{ ...layers, sessions: [{ ...session, customEnvVars: { GROK_HOME: blank } }] },
+				{ ...layers, sessions: [session], agentLevelEnvVars: { GROK_HOME: blank } },
+				{
+					...layers,
+					sessions: [session],
+					agentLevelEnvVars: {},
+					globalShellEnvVars: { GROK_HOME: blank },
+				},
+				{ ...base(), sessions: [session], env: { GROK_HOME: blank } },
+			];
+
+			for (const options of cases) {
+				expect(resolveAgentAccountDir('agent-1', options)).toBe(path.join(homeDir, '.grok'));
+			}
+		}
+	);
+
+	it('keeps Grok SSH paths remote and never borrows local global or host roots', () => {
+		const root = path.posix.join('~', '.grok-work');
+		const session = agent({ toolType: 'grok', customEnvVars: { GROK_HOME: root } });
+		const options = {
+			...base(),
+			globalShellEnvVars: { GROK_HOME: path.join(outsideHome, 'global') },
+			env: { GROK_HOME: path.join(outsideHome, 'host') },
+		};
+		expect(resolveAgentAccountDir('agent-1', { ...options, sessions: [session] })).toBe(
+			path.join(homeDir, '.grok-work')
+		);
+		const remote = { ...session, sessionSshRemoteConfig: { enabled: true } };
+		expect(resolveAgentAccountDir('agent-1', { ...options, sessions: [remote] })).toBe(root);
+		expect(
+			resolveAgentAccountDir('agent-1', {
+				...options,
+				sessions: [{ ...remote, customEnvVars: undefined }],
+				agentLevelEnvVars: { GROK_HOME: root },
+			})
+		).toBe(root);
+		for (const customEnvVars of [undefined, {}, { GROK_HOME: '' }, { GROK_HOME: ' \t' }]) {
+			expect(
+				resolveAgentAccountDir('agent-1', {
+					...options,
+					sessions: [{ ...remote, customEnvVars }],
+				})
+			).toBeUndefined();
+		}
+		expect(
+			resolveAgentAccountDir('agent-1', {
+				...options,
+				agentLevelEnvVars: { GROK_HOME: root },
+				sessions: [{ ...remote, customEnvVars: { GROK_HOME: ' \t' } }],
+			})
+		).toBeUndefined();
+	});
+
+	it.each([false, true])(
+		'honors a managed Grok account above user and host roots (SSH=%s)',
+		(sshRemote) => {
+			const managedRoot = path.posix.join('~', '.grok-managed');
+			const layers = {
+				...base(),
+				agentLevelEnvVars: { GROK_HOME: path.join(outsideHome, 'provider') },
+				globalShellEnvVars: { GROK_HOME: path.join(outsideHome, 'global') },
+				env: { GROK_HOME: path.join(outsideHome, 'host') },
+			};
+			const expected = sshRemote ? managedRoot : path.join(homeDir, '.grok-managed');
+			const boundRef = resolveAgentAccountRef(
+				{
+					toolType: 'grok',
+					sshRemote,
+					customEnvVars: { GROK_HOME: expected },
+				},
+				base()
+			);
+			expect(boundRef).not.toBeNull();
+
+			for (const override of [path.join(outsideHome, 'session'), '', ' \t']) {
+				const bound = {
+					toolType: 'grok',
+					sshRemote,
+					managedAccountDir: ` ${managedRoot} `,
+					customEnvVars: { GROK_HOME: override },
+				};
+				expect(resolveAccountDirForAgent(bound, layers)).toBe(expected);
+				expect(resolveAgentAccountRef(bound, layers)).toBe(boundRef);
+				expect(resolveAgentAccountRef({ ...bound, managedAccountDir: null }, layers)).not.toBe(
+					boundRef
+				);
+			}
+		}
+	);
 
 	it("uses the agent's own CLAUDE_CONFIG_DIR, expanding ~", () => {
 		const dir = resolveAgentAccountDir('agent-1', {

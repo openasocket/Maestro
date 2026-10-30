@@ -12,6 +12,7 @@
  *     provider itself otherwise
  */
 
+import path from 'path';
 import { describe, it, expect } from 'vitest';
 import {
 	effectiveAgentCustomEnvVars,
@@ -281,5 +282,71 @@ describe('makeAccountKeyHelpers', () => {
 		expect(deriveShortName('/Users/me/.claude-gmail')).toBe('gmail');
 		expect(deriveShortName(undefined)).toBe('default');
 		expect(deriveDisplayName('/Users/me/.claude')).toBe('Default account');
+	});
+});
+
+describe('Grok account profiles', () => {
+	it('attributes two accounts separately and normalizes alternate spellings of one root', () => {
+		const personalRoot = path.posix.join(HOME, '.grok');
+		const workRoot = path.posix.join(HOME, '.grok-work');
+		const personal = resolveAgentProfile('grok', {}, HOME);
+		const work = resolveAgentProfile('grok', { GROK_HOME: workRoot }, HOME);
+
+		expect(personal).toMatchObject({
+			key: `grok::${personalRoot}`,
+			accountKey: personalRoot,
+			shortLabel: 'Grok CLI default',
+		});
+		expect(work).toMatchObject({
+			key: `grok::${workRoot}`,
+			accountKey: workRoot,
+			label: 'Grok CLI - work',
+			shortLabel: 'work',
+		});
+		expect(work?.key).not.toBe(personal?.key);
+		expect(resolveAgentProfile('grok', { GROK_HOME: `${workRoot}//` }, HOME)).toEqual(work);
+		expect(parseProviderProfileKey(work!.key)).toEqual({ toolType: 'grok', accountKey: workRoot });
+	});
+
+	it('keeps the same Grok root distinct on the local host and each SSH host', () => {
+		const env = { GROK_HOME: path.posix.join(HOME, '.grok-work') };
+		const local = resolveAgentProfile('grok', env, HOME);
+		const first = resolveAgentProfile('grok', env, HOME, { id: 'r1', name: 'build' });
+		const second = resolveAgentProfile('grok', env, HOME, { id: 'r2', name: 'build' });
+
+		expect(local).toMatchObject({ accountKey: env.GROK_HOME, sshRemoteId: null });
+		expect(first).toMatchObject({
+			accountKey: env.GROK_HOME,
+			sshRemoteId: 'r1',
+			label: 'Grok CLI - work @ build',
+		});
+		expect(second?.sshRemoteId).toBe('r2');
+		expect(new Set([local?.key, first?.key, second?.key]).size).toBe(3);
+	});
+
+	it.each(['', ' \t\n', '\u00a0'])(
+		'treats blank GROK_HOME %j as the default, never an account',
+		(blank) => {
+			expect(resolveAgentAccountKey('grok', { GROK_HOME: blank }, HOME)).toBe(
+				path.posix.join(HOME, '.grok')
+			);
+			expect(resolveAgentProfile('grok', { GROK_HOME: blank }, HOME)).toEqual(
+				resolveAgentProfile('grok', {}, HOME)
+			);
+			expect(resolveAgentProfile('grok', { GROK_HOME: blank }, undefined)).toBeNull();
+		}
+	);
+
+	it('waits for the owning host home only when no Grok root was selected', () => {
+		const remote = { id: 'r1', name: 'build' };
+		expect(resolveAgentProfile('grok', {}, undefined, remote)).toBeNull();
+		expect(
+			resolveAgentProfile(
+				'grok',
+				{ GROK_HOME: path.posix.join('~', '.grok-work') },
+				undefined,
+				remote
+			)
+		).toMatchObject({ accountKey: path.posix.join('~', '.grok-work'), sshRemoteId: 'r1' });
 	});
 });
