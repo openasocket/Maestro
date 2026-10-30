@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge in progress; MCOMP-01-03A, 03B, 03C and 03D staged (12 files), 32 files unmerged in the worktree; MCOMP-01-03E..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T01:54:28.898Z",
-		"updatedBy": "MCOMP-01-03D"
+		"state": "merge in progress; MCOMP-01-03A, 03B, 03C, 03D and 03E staged (15 files), 29 files unmerged in the worktree; MCOMP-01-03F..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
+		"updatedAt": "2026-10-30T02:15:25.384Z",
+		"updatedBy": "MCOMP-01-03E"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -304,6 +304,51 @@
 			"semanticConflictsForQ": [],
 			"unmergedAfter": 32,
 			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03d.mjs (not in git)"
+		},
+		"MCOMP-01-03E": {
+			"resolvedAt": "2026-10-29",
+			"resolvedBy": "Maestro-Claude",
+			"files": [
+				"src/main/utils/keyring-anchor.ts",
+				"src/main/cue/bundle/cue-bundle-exporter.ts",
+				"src/main/cue/bundle/cue-bundle-importer.ts"
+			],
+			"hunks": {
+				"src/main/utils/keyring-anchor.ts": [
+					"29-51 (the one hunk, the import block after the header comment; the base had no imports): the integration side (ec3e24593) added createHash and path with anchorAccountForDirectory(), the per-data-folder account name (read by index.ts, cli/services/host-managed.ts, lite/listener-authority.ts and the identity-store suite); upstream (cc86c6780) moved the KeyringEntry shape and the lazy module load into utils/keyring.ts and imports createKeyringEntry, loadKeyringModule, KeyringEntry and KeyringModuleLoader from it (its re-exports at 76-77 and the createKeyringAnchor signature over loadModule auto-merged); resolved as the two builtin imports, upstream import, then the integration function with its comment"
+				],
+				"src/main/cue/bundle/cue-bundle-exporter.ts": [
+					"737-752 (the one hunk, after required.sort() in buildAgentSettings): the integration side (9bc9058b7) inserted the authority-dropped warning and the managed credential reference ids (settings.managed = { credentialRefs }) ahead of the secret-by-value warning; upstream (0c5fa0c5d) guarded that warning with && !exact; the integration block kept whole (authority keys leave no bundle, exact or not, so that warning stays unconditional), then upstream if (secretByValue.length > 0 && !exact) in place of the base line",
+					"beyond the hunk, the integration rule re-applied on upstream exact copy (local.json carries customEnvVars, customEnvVarsDisabled and providerOverrides verbatim): isManagedAuthorityEnvKey() exported and joined by withoutManagedAuthorityEnv(field, value), which strips authority-shaped keys from those three fields (a provider one named provider.NAME) and returns the dropped names; buildLocalAgent(session, root, builder) runs every local field through it and warns \"the exact copy leaves them out\"; the one call site in the exact block passes the builder"
+				],
+				"src/main/cue/bundle/cue-bundle-importer.ts": [
+					"755-774 (after const entries = archive.entries): the integration forbidden-entry refusal first (isForbiddenBundleEntry over every archive path, FORBIDDEN_ENTRY before anything in the bundle is read), then upstream exact-copy parse (localData = manifest.local && options.useLocal !== false ? parseCueBundleLocalData(...) : undefined), so local.json is never read from a refused bundle",
+					"1216-1237 (the bundleFields record requiredSecrets): upstream comment and requiredSecrets: requiredSecretNames([...].filter((name) => !localEnv || !(name in localEnv))) (a name the exact copy gives a value is in the agent own env instead) in place of the base call, then the integration managedCredentialRefs: approvedRefs (ids only, the ones the host policy approved)",
+					"beyond the hunks, the integration rule re-applied on upstream exact copy: localAgentFields() runs customEnvVars and customEnvVarsDisabled through withoutManagedAuthorityEnv() ahead of the env sanitizer and providerOverrides through it as well, each with one authorityDroppedWarning() line per agent naming what was left out; the import from ./cue-bundle-exporter gains withoutManagedAuthorityEnv"
+				]
+			},
+			"checks": {
+				"staging": "merge-tool stage over the three files: prettier left all three unchanged, git add done, 29 files left unmerged, no marker left in any of the three, nothing unstaged",
+				"seams": "the governance seams stay whole: the per-data-folder anchor account still exists beside upstream shared keyring module; a bundle still refuses credential, grant and enrollment files before reading anything; authority-shaped env still leaves no bundle, now including the exact copy local.json on export and a foreign local.json on import; managed credential references still travel as ids only and are validated by the host policy before scheduling; upstream exact copy (local.json, useLocal, the filtered requiredSecrets, the silenced set-it-again warnings) rides beside them",
+				"suites": "node node_modules/vitest/vitest.mjs run in the worktree over src/__tests__/main/cue/bundle, enterprise/identity-store, plugins/authorization-ledger, plugins/plugin-manager-verify, cli/commands/bundle-export and cli/services/cue-standalone-import-restart: 10 files / 219 tests passed (bundle-export 3, identity-store 10, authorization-ledger 34, plugin-manager-verify 11, cue-bundle-claude-assets 22, cue-bundle-claude-roundtrip 19, cue-bundle-exact-copy 12, cue-bundle-exporter 37, cue-bundle-importer 50, cue-bundle-validator 21); cue-bundle-roundtrip.test.ts and cue-standalone-import-restart.test.ts cannot transform because they reach the still-unmerged src/shared/maestro-lib/run/start-turn.ts (MCOMP-01-03F), not defects of these files",
+				"throwaway": "a throwaway spec (zz-03e.throwaway.test.ts, run then deleted) proved the exact-copy guard: an agent with MAESTRO_MANAGED_LEASE and TEAM_GRANT_TOKEN in customEnvVars, ENROLLMENT_GRANT parked and a codex providerOverrides MAESTRO_MANAGED_LEASE exports under includeLocal with none of them in local.json, none of the values anywhere in the archive, one warning naming all four and the set-it-again warning silent; a tampered local.json carrying the same shapes imports with three authority warnings and a stored agent free of them; 2 tests passed",
+				"numstatVsHead": {
+					"src/main/utils/keyring-anchor.ts": "14+/22- (upstream shared keyring module)",
+					"src/main/cue/bundle/cue-bundle-exporter.ts": "176+/23- (upstream exact copy plus the local-copy guard)",
+					"src/main/cue/bundle/cue-bundle-importer.ts": "247+/29- (upstream exact copy plus the local-copy guard)"
+				},
+				"numstatVsMergeHead": {
+					"src/main/utils/keyring-anchor.ts": "14+/0- (anchorAccountForDirectory)",
+					"src/main/cue/bundle/cue-bundle-exporter.ts": "151+/5- (bundle governance plus the local-copy guard)",
+					"src/main/cue/bundle/cue-bundle-importer.ts": "133+/2- (bundle governance plus the local-copy guard)"
+				}
+			},
+			"semanticConflictsForQ": [],
+			"followUpsForR": [
+				"a permanent test case for the exact-copy authority guard (export under includeLocal with authority-shaped env in customEnvVars, customEnvVarsDisabled and providerOverrides; import of a tampered local.json) belongs in cue-bundle-exporter.test.ts (managed governance block) or cue-bundle-exact-copy.test.ts; proved here only with the deleted throwaway spec to keep this task at three authored files"
+			],
+			"unmergedAfter": 29,
+			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03e.mjs (not in git)"
 		}
 	}
 }
