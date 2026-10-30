@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge in progress; MCOMP-01-03A staged (3 files), 41 files unmerged in the worktree; MCOMP-01-03B..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T00:24:54.759Z",
-		"updatedBy": "MCOMP-01-03A"
+		"state": "merge in progress; MCOMP-01-03A and MCOMP-01-03B staged (6 files), 38 files unmerged in the worktree; MCOMP-01-03C..P resolve them, Q commits, R tests, S lands, T re-pins and closes",
+		"updatedAt": "2026-10-30T00:31:37.076Z",
+		"updatedBy": "MCOMP-01-03B"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -182,6 +182,45 @@
 			"semanticConflictsForQ": [],
 			"unmergedAfter": 41,
 			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03a.mjs (not in git)"
+		},
+		"MCOMP-01-03B": {
+			"resolvedAt": "2026-10-29",
+			"resolvedBy": "Maestro-Claude",
+			"files": [
+				".prettierignore",
+				"src/main/plugins/permission-broker.ts",
+				"src/main/plugins/plugin-manager.ts"
+			],
+			"hunks": {
+				".prettierignore": [
+					"20-33: both sides appended ignore sections at the end of the file; upstream two sections (the Dataview test vault src/__tests__/fixtures/dataview-vault/, the vendored Dataview source src/shared/dataview/vendor/) first, then the integration section (Plans/mega-maestro/evidence/, the handoff manifest and the digest-verified counterpart record); all three entries kept"
+				],
+				"src/main/plugins/permission-broker.ts": [
+					"344-355: the integration read RELEASE_METHODS.has(method) kept (the same set drives the exempt flag of the ceiling check at narrow()); upstream inline list, which grew by net.tlsClose, folded into the set",
+					"169-175 (outside the hunk): RELEASE_METHODS gains upstream net.tlsClose beside media.close, services.cancel and services.status, and the comment takes upstream wording (revocation must not block cancellation or denied status); the TLS close is exempt from the grant and from the ceiling the way the other release methods are"
+				],
+				"src/main/plugins/plugin-manager.ts": [
+					"686-690, 725-729, 738-742: upstream async shape (installDirectory() and install() return Promise<InstallResult>, the archive path awaits installDirectory()) with the integration admit?: InstallAdmission parameter threaded through all three; the directory path (return this.installDirectory(resolvedSource, admit), not in conflict) returns the promise from the async install(); the admission still runs after manifest validation and before the copy"
+				]
+			},
+			"checks": {
+				"staging": "merge-tool stage refused .prettierignore (prettier has no parser for it), so that file was git added directly after a marker check; the two TypeScript files staged through merge-tool stage (prettier re-wrapped the installDirectory signature, nothing else)",
+				"callers": "src/main/ipc/handlers/plugins.ts (auto-merged, unchanged upstream) returns manager.install(sourceDir, admit) from an async handler, so the promise is awaited; the handler suite plugins-handlers.test.ts mocks install synchronously, which the async handler also accepts",
+				"suites": "node node_modules/vitest/vitest.mjs run in the worktree over permission-broker*, plugin-manager*, ipc/plugins-handlers.test.ts and enterprise/plugin-policy.test.ts: 8 files passed, 132 tests passed; plugin-manager-verify.test.ts could not transform because it imports src/main/utils/keyring-anchor.ts, still unmerged (MCOMP-01-03E), not a defect of these files",
+				"numstatVsHead": {
+					".prettierignore": "8+/0-",
+					"src/main/plugins/permission-broker.ts": "3+/1-",
+					"src/main/plugins/plugin-manager.ts": "371+/68- (upstream reshape)"
+				},
+				"numstatVsMergeHead": {
+					".prettierignore": "5+/0-",
+					"src/main/plugins/permission-broker.ts": "352+/18- (the integration ceiling)",
+					"src/main/plugins/plugin-manager.ts": "13+/4-"
+				}
+			},
+			"semanticConflictsForQ": [],
+			"unmergedAfter": 38,
+			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03b.mjs (not in git)"
 		}
 	}
 }
