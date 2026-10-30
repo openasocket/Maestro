@@ -971,6 +971,8 @@ async function spawnClaudeAgent(
 		preOverrideArgs.push(...claudeFullAccessArgs(def));
 	}
 
+	preOverrideArgs.push(...buildAdditionalDirArgs(def, overrides.additionalDirectories));
+
 	if (agentSessionId) {
 		preOverrideArgs.push('--resume', agentSessionId);
 	} else {
@@ -1700,7 +1702,7 @@ async function spawnJsonLineAgent(
 	// Everything about the launch is final here; a managed host admits exactly
 	// this spec and the lease is re-checked against it inside `startTurn`.
 	const spec: TurnProcessSpec =
-		artifact?.owner === 'local'
+		artifact?.owner === 'local' && plan.env !== undefined
 			? turnProcessSpecFromPlan({ ...plan, env: spawnEnv })
 			: {
 					command: spawnCommand,
