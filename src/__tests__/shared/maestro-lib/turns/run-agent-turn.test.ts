@@ -45,6 +45,7 @@ import * as launchPlanner from '../../../../shared/maestro-lib/launch/launch-pla
 import * as runToCompletion from '../../../../shared/maestro-lib/run/run-to-completion';
 import * as pipeSpawn from '../../../../shared/maestro-lib/run/pipe-spawn';
 import * as turnArgs from '../../../../shared/maestro-lib/turns/args';
+import { logger } from '../../../../shared/maestro-lib/host';
 
 import {
 	assembleTurn,
@@ -798,26 +799,43 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 		);
 	});
 
-	it.each(['delivery', 'remote preparation', 'managed'] as const)(
-		'refuses %s without starting or retrying and cleans owned system preparation',
-		async (failure) => {
-			const owned = outFile('owned-system');
-			fs.writeFileSync(owned, 'synthetic system');
-			vi.spyOn(turnArgs, 'writeSystemPromptFile').mockImplementation(async (input) => ({
-				args: input.args,
-				prompt: input.prompt,
-				tempFile: owned,
-				delivery: 'file',
-			}));
-			const wrap = vi
-				.fn<NonNullable<RunAgentTurnDeps['wrapSpawnWithSsh']>>()
-				.mockRejectedValue(new Error('private bytes and path'));
-			const turn = assembleWithFakeAgent('grok', { recording: 'captured-opencode-normal' });
+	describe.each(['local', 'resolved SSH'] as const)('%s refusal', (host) => {
+		it.each([
+			'conflicting source',
+			'wrong owner',
+			'managed',
+			...(host === 'resolved SSH' ? ['remote preparation'] : []),
+		])('preserves %s diagnostics and cleans only owned preparation', async (failure) => {
+			const privateText = 'PRIVATE prompt "雪"\nnever disclose';
+			const owned = outFile('private-owned-system');
+			const untouched = outFile('unowned-preparation');
+			fs.writeFileSync(untouched, 'keep unowned bytes');
+			const destination =
+				host === 'resolved SSH'
+					? newRemotePromptFileDestination(remote.id, 'acp-json')
+					: { owner: 'local' as const, path: outFile('private-prompt') + '.json' };
+			const assembled = assembleTurn(
+				makeAgent({ toolType: 'grok', cwd: scratch.dir }),
+				makeTab(),
+				{ text: privateText },
+				makeContext('grok')
+			);
+			if (!assembled.ok) throw new Error(assembled.message);
+			const turn = assembled.turn;
+			turn.systemPrompt = privateText;
 			turn.systemPromptDelivery = { via: 'file' };
 			turn.launch.agent = fileAgent;
-			if (failure === 'delivery') turn.launch.args.push('-p', 'competing text');
-			if (failure === 'remote preparation')
+			turn.launch.promptFileDestination = destination;
+			if (host === 'resolved SSH')
 				turn.launch.sshRemoteConfig = { enabled: true, remoteId: remote.id };
+			// A managed route mismatch must win even over a competing prompt source.
+			if (failure === 'conflicting source' || failure === 'managed')
+				turn.launch.args.push('-p', privateText);
+			if (failure === 'wrong owner')
+				turn.launch.promptFileDestination = {
+					...destination,
+					owner: host === 'local' ? 'remote' : 'local',
+				};
 			if (failure === 'managed')
 				turn.launch.managed = {
 					route: {
@@ -829,24 +847,84 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 						permissionMode: null,
 					},
 				};
+			const write = vi
+				.spyOn(turnArgs, 'writeSystemPromptFile')
+				.mockImplementation(async (input) => {
+					fs.writeFileSync(owned, input.systemPrompt);
+					return { args: input.args, prompt: input.prompt, tempFile: owned, delivery: 'file' };
+				});
+			const cleanup = vi.spyOn(pipeSpawn, 'removeTempFiles');
+			const plan = vi.spyOn(launchPlanner, 'buildAgentLaunchPlan');
+			vi.mocked(runToCompletion.runTurn).mockImplementation(() => {
+				throw new Error('A refused launch must never start a process');
+			});
+			const logs = (['debug', 'info', 'warn', 'error'] as const).map((level) =>
+				vi.spyOn(logger, level).mockImplementation(() => {})
+			);
+			const getSshRemotes = vi.fn(() => [remote]);
+			const wrap = vi
+				.fn<NonNullable<RunAgentTurnDeps['wrapSpawnWithSsh']>>()
+				.mockRejectedValue(new Error(`${privateText} ${owned} ${destination.path}`));
 			const started = await runAgentTurn(
 				turn,
 				optionsFor({
-					sshStore: { getSshRemotes: () => [remote] },
-					deps: { wrapSpawnWithSsh: wrap },
+					sshStore: { getSshRemotes },
+					deps: { wrapSpawnWithSsh: wrap, env: {} },
 				})
 			);
-			expect(started).toMatchObject({
+			const message =
+				failure === 'managed'
+					? 'The policy routes this launch to codex, not grok.'
+					: failure === 'remote preparation'
+						? 'Remote prompt preparation unavailable.'
+						: failure === 'wrong owner'
+							? 'Prompt-file delivery requires a fresh owned .json destination on the executing host and a provider file-argument builder.'
+							: 'Prompt-file delivery conflicts with another prompt source in the launch arguments.';
+			expect(started).toEqual({
 				ok: false,
 				reason: failure === 'managed' ? 'managed-denied' : 'prompt-delivery-refused',
+				message,
 			});
-			expect(JSON.stringify(started)).not.toContain('private bytes and path');
+			expect(plan).toHaveBeenCalledOnce();
+			expect(getSshRemotes).toHaveBeenCalledTimes(host === 'resolved SSH' ? 1 : 0);
+			if (failure !== 'remote preparation') {
+				expect(plan.mock.results[0].value).toEqual({
+					ok: false,
+					reason: failure === 'managed' ? 'managed-route-refused' : 'prompt-delivery-refused',
+					error: message,
+				});
+			} else {
+				expect(plan.mock.results[0].value).toMatchObject({
+					ok: true,
+					plan: { target: { kind: 'remote' } },
+				});
+				expect(wrap.mock.calls[0][0]).toMatchObject({
+					prompt: undefined,
+					promptArtifact: destination,
+				});
+			}
 			expect(wrap).toHaveBeenCalledTimes(failure === 'remote preparation' ? 1 : 0);
 			expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+			expect(write).toHaveBeenCalledOnce();
+			expect(cleanup).toHaveBeenCalledExactlyOnceWith([owned]);
 			await waitUntil(() => !fs.existsSync(owned));
 			expect(fs.existsSync(owned)).toBe(false);
-		}
-	);
+			expect(fs.readFileSync(untouched, 'utf8')).toBe('keep unowned bytes');
+			if (host === 'local') expect(fs.existsSync(destination.path)).toBe(false);
+			expect(remoteSignals).toEqual([]);
+			const disclosure = JSON.stringify({ started, logs: logs.map((log) => log.mock.calls) });
+			for (const secret of [
+				privateText,
+				'never disclose',
+				turn.launch.prompt!,
+				owned,
+				destination.path,
+			]) {
+				expect(disclosure).not.toContain(secret);
+				expect(disclosure).not.toContain(JSON.stringify(secret).slice(1, -1));
+			}
+		});
+	});
 });
 
 describe('runAgentTurn: the Claude token source', () => {

@@ -46,6 +46,7 @@ import { embedSystemPromptInPrompt } from '../../../../../shared/embeddedSystemP
 import { isolateAgentEnv } from '../../../../helpers/agentEnvIsolation';
 import * as agentArgs from '../../../../../main/utils/agent-args';
 import * as launchPlan from '../../../../../shared/maestro-lib/launch/launch-plan';
+import * as promptDelivery from '../../../../../shared/maestro-lib/launch/prompt-delivery';
 import { resolveSshLaunchTarget } from '../../../../../shared/maestro-lib/launch/ssh-remote-resolver';
 import { logger } from '../../../../../main/utils/logger';
 import { getAgentCapabilities } from '../../../../../main/agents';
@@ -877,25 +878,107 @@ describe('process:spawn private prompt-file planning (GT1-02-10ET)', () => {
 			expect(await handleProcessSpawn(request, h.deps)).toEqual({ success: false, pid: 0 });
 			expect(plan).toHaveBeenCalledOnce();
 			expect(plan.mock.calls[0][0].hasImages).toBe(true);
-			expect(refusalSentToTab(h)).toBe(
-				'\r\n[Maestro] Image content is missing from the ACP prompt file.\r\n'
+			expect(plan.mock.results[0].value).toEqual({
+				ok: false,
+				reason: 'prompt-delivery-refused',
+				error: 'Image content is missing from the ACP prompt file.',
+			});
+			expect(h.sent).toEqual([
+				[
+					'process:data',
+					PROCESS,
+					'\r\n[Maestro] Image content is missing from the ACP prompt file.\r\n',
+				],
+			]);
+			expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+				'Prompt delivery refused; not spawning',
+				'[ProcessManager]',
+				{ sessionId: PROCESS, toolType: 'grok', reason: 'prompt-delivery-refused' }
 			);
+			expect(h.errors).toEqual([]);
 			expect(h.spawn).not.toHaveBeenCalled();
 			expect(port.asked).toHaveLength(0);
+			expect(port.authority.live()).toHaveLength(0);
 			for (const legacy of [legacyPrompt, legacyImages, legacyEmbed])
 				expect(legacy).not.toHaveBeenCalled();
 		}
 	);
 
-	it.each(['--prompt-json=private-source', '-pprivate-source'])(
-		'rejects competing source %s before spawning',
-		async (source) => {
+	it.each(
+		['local', 'remote'].flatMap((host) =>
+			['--prompt-file private-source', '--prompt-json=private-source', '-pprivate-source'].map(
+				(source) => ({ host, source })
+			)
+		)
+	)(
+		'reports $host competing source $source as prompt delivery without preparation or retry (GT1-02-10AT)',
+		async ({ host, source }) => {
+			request.prompt = 'private-prompt-body-AT\n私密 "quoted"';
+			request.appendSystemPrompt = 'private-system-body-AT';
 			request.sessionCustomArgs = source;
-			expect(await handleProcessSpawn(request, h.deps)).toEqual({ success: false, pid: 0 });
-			expect(refusalSentToTab(h)).toContain(
-				'Prompt-file delivery conflicts with another prompt source'
+			request.sessionSshRemoteConfig =
+				host === 'remote' ? { enabled: true, remoteId: remote.id } : undefined;
+			const plan = vi.spyOn(launchPlan, 'buildAgentLaunchPlan');
+			const destination = vi.spyOn(promptDelivery, 'selectPromptFileDestination');
+			const prepareSystem = vi.spyOn(systemDelivery, 'applySystemPromptDelivery');
+			const ssh = vi.spyOn(sshBuilder, 'buildSshCommandWithStdin');
+			const diagnostic =
+				'Prompt-file delivery conflicts with another prompt source in the launch arguments.';
+
+			const result = await handleProcessSpawn(request, h.deps);
+			expect(result).toEqual({ success: false, pid: 0 });
+			expect(plan).toHaveBeenCalledOnce();
+			const input = plan.mock.calls[0][0];
+			expect(input.prompt).toBe(
+				embedSystemPromptInPrompt(request.appendSystemPrompt, request.prompt)
 			);
+			expect(resolveSshLaunchTarget(input.sshStore, input.sshRemoteConfig)).toEqual(
+				host === 'remote' ? { kind: 'remote', remote } : { kind: 'local' }
+			);
+			expect(plan.mock.results[0].value).toEqual({
+				ok: false,
+				reason: 'prompt-delivery-refused',
+				error: diagnostic,
+			});
+			expect(destination).toHaveBeenCalledOnce();
+			const selected = destination.mock.results[0].value;
+			if (!selected) throw new Error('Expected a selected destination before refusal');
+			expect(selected.owner).toBe(host);
+			expect(selected.sshRemoteId).toBe(host === 'remote' ? remote.id : undefined);
+			expect(h.sent).toEqual([['process:data', PROCESS, `\r\n[Maestro] ${diagnostic}\r\n`]]);
+			expect(h.errors).toEqual([]);
+			expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+				'Prompt delivery refused; not spawning',
+				'[ProcessManager]',
+				{ sessionId: PROCESS, toolType: 'grok', reason: 'prompt-delivery-refused' }
+			);
+			// The early refusal owns no files: even system-prompt/SSH preparation
+			// is unreachable, as are admission, materialization and every retry.
+			expect(prepareSystem).not.toHaveBeenCalled();
+			expect(ssh).not.toHaveBeenCalled();
 			expect(h.spawn).not.toHaveBeenCalled();
+			expect(port.asked).toHaveLength(0);
+			expect(port.authority.live()).toHaveLength(0);
+			for (const legacy of [legacyPrompt, legacyImages, legacyEmbed])
+				expect(legacy).not.toHaveBeenCalled();
+			const diagnostics = JSON.stringify([
+				result,
+				h.sent,
+				h.errors,
+				...[logger.debug, logger.info, logger.warn, logger.error].map(
+					(log) => vi.mocked(log).mock.calls
+				),
+			]);
+			for (const privateValue of [
+				request.prompt,
+				'private-prompt-body-AT',
+				request.appendSystemPrompt,
+				'private-source',
+				selected.path,
+			]) {
+				expect(diagnostics).not.toContain(privateValue);
+				expect(diagnostics).not.toContain(JSON.stringify(privateValue).slice(1, -1));
+			}
 		}
 	);
 
