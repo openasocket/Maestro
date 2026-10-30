@@ -138,9 +138,9 @@
 	],
 	"tool": ".maestro/playbooks/Working/mcomp-01-03/merge-tool.mjs (verbs start, status, show, log, stage, link-modules; not in git)",
 	"status": {
-		"state": "merge in progress; MCOMP-01-03A..03L staged (34 files), 10 files unmerged in the worktree; MCOMP-01-03M..P resolve them (positional order mentionRouting, delegation, dispatchTicket on the dispatch callbacks, their relays, the handler calls and the preload remotes, see progress.MCOMP-01-03I, 03J, 03K and 03L positionalOrder), Q commits and type-checks (remote-fs.ts execRemoteCommand access slot, see progress.MCOMP-01-03L.semanticConflictsForQ), R tests (install the merged dependencies first: luxon, papaparse, parsimmon and their @types), S lands, T re-pins and closes",
-		"updatedAt": "2026-10-30T03:14:38.573Z",
-		"updatedBy": "MCOMP-01-03L"
+		"state": "merge in progress; MCOMP-01-03A..03M staged (36 files), 8 files unmerged in the worktree; MCOMP-01-03N..P resolve them (positional order mentionRouting, delegation, dispatchTicket on the dispatch callbacks, their relays, the handler calls, the preload remotes and the renderer hook, see progress.MCOMP-01-03I, 03J, 03K, 03L and 03M positionalOrder), Q commits and type-checks (remote-fs.ts execRemoteCommand access slot, see progress.MCOMP-01-03L.semanticConflictsForQ), R tests (install the merged dependencies first: luxon, papaparse, parsimmon and their @types; add the remote:newAITabWithPrompt relay case), S lands, T re-pins and closes",
+		"updatedAt": "2026-10-30T03:22:55.880Z",
+		"updatedBy": "MCOMP-01-03M"
 	},
 	"progress": {
 		"MCOMP-01-03A": {
@@ -700,6 +700,52 @@
 			],
 			"unmergedAfter": 10,
 			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03l.mjs (not in git)"
+		},
+		"MCOMP-01-03M": {
+			"resolvedAt": "2026-10-29",
+			"resolvedBy": "Maestro-Claude",
+			"files": [
+				"src/__tests__/main/web-server/web-server-factory.test.ts",
+				"src/__tests__/main/web-server/managers/CallbackRegistry.test.ts"
+			],
+			"positionalOrder": "the 03I registry order and the 03J wire order hold on every positional assertion of both suites: CallbackRegistry.test.ts asserts executeCommand(sessionId, command, inputMode, tabId, force, images, background, mentionRouting, delegation, dispatchTicket) (ten arguments, six cases); web-server-factory.test.ts asserts remote:enqueueCommand [channel, sessionId, command, responseChannel, inputMode, tabId, images, background, held, mentionRouting, delegation, dispatchTicket] (twelve elements, four cases) and remote:executeCommand [channel, sessionId, command, inputMode, tabId, force, images, background, mentionRouting, delegation, dispatchTicket, responseChannel] (twelve elements, two cases; the relay case reads the ticket at call[10] and the receipt channel at call[11])",
+			"hunks": {
+				"src/__tests__/main/web-server/managers/CallbackRegistry.test.ts": [
+					"387, 409, 431, 453, 475, 505 (the six executeCommand positional assertions; ours `undefined,` for the delegation ahead of the shared trailing `undefined` the ticket took, upstream nothing because its routing took that trailing slot): resolved as two `undefined,` ahead of the trailing one, ten arguments each; upstream setInterruptSessionCallback describe (4b178e998) had auto-merged"
+				],
+				"src/__tests__/main/web-server/web-server-factory.test.ts": [
+					"1863-1866 (the enqueue smoke case remote:enqueueCommand list) and 2779-2782 (the owning-window remote:executeCommand request): the same one-slot shape, resolved as two `undefined,` ahead of the trailing slot, twelve elements each",
+					"1871-1886, 1891-1926, 1933-1938 (one two-describe interleave after the enqueue smoke case: ours appended the delegation case MRC-07-04C and the ticket case MRC-08-02, upstream the dispatch --routing case c8913d2d8, git sharing the toHaveBeenCalledWith head and the middle of the list between the hunks): the three cases rebuilt whole, integration first; the delegation case hands `undefined, delegation` after held and expects `..., true, undefined, delegation, undefined`; the ticket case hands `undefined, undefined, tkt-1` and expects `..., false, undefined, undefined, tkt-1`; upstream routing case keeps its eight-argument call and expects `..., false, handoff, undefined, undefined`; the delegation case title now says \"after the mention routing\"",
+					"auto-merged case brought to the 03J shape, outside the hunks: the integration executeCommand relay case at 942-980 (MRC-07-04C, MRC-08-01B) hands `undefined, delegation` after background, compares call.slice(1, 10) with the routing undefined ahead of the record, reads the ticket at call[10] and the receipt channel at call[11], and its title names the routing slot; the terminal-tab ticket cases (MRC-08-02A, 1778-1843) and the agent-scoped queue routing case (2025) had auto-merged and assert nothing by position"
+				]
+			},
+			"checks": {
+				"staging": "merge-tool stage over the two files: prettier left both unchanged, git add done, 8 files left unmerged, no marker left in either, nothing unstaged, nothing untracked in the worktree",
+				"seams": "every assertion of both sides holds on the merged shape: the delegation record and the dispatch ticket sit one and two slots after the routing on the registry (03I) and on both relays (03J), the ticket cases of the terminal tabs (MRC-08-02A) are untouched, and upstream dispatch --routing reaches the renderer in the slot ahead of them",
+				"suites": "Working/mcomp-01-03/suites-03m.mjs web-server-factory.test CallbackRegistry.test (log suites-03m.log): 2 files / 213 tests passed, 0 failed, 0 skipped (web-server-factory.test.ts 120, CallbackRegistry.test.ts 93); no throwaway copy was needed, the factory suite mocks WebServer itself and nothing in its closure reaches the dataview vendor or luxon",
+				"throwaway": "none for the suites; for the type-check, Working/mcomp-01-03/tsc-sides-03m.mjs wrote the HEAD, MERGE_HEAD and base (6400a6da0) versions of web-server-factory.test.ts beside the suite as zz-03m-*.throwaway.test.ts, type-checked the three under the same throwaway config, and deleted them (log tsc-sides-03m.log)",
+				"typeCheck": "a throwaway tsconfig extending the worktree tsconfig.main.json over the two suites (Working/mcomp-01-03/tsconfig-03m.json, not in git; log tsc-03m.log): 0 errors in CallbackRegistry.test.ts; 9 in web-server-factory.test.ts, every one pre-existing and none on a merged line: the union of the integration side (7: the base five, TS6133 WebServer at 235, TS2348 at 1263, TS2352 x3 at 2767/2821/2899, plus TS2532 x2 at 1801/1831 from the MRC-08-02A terminal-tab cases) and upstream (7: the base five plus TS2339 getAll x2 at 1104/1133 from the interrupt cases 4b178e998); src/__tests__ is in no tsconfig (cli, main, lint, root), so npm run lint never sees them; the 262 errors elsewhere in the closure are the 03L set unchanged (259 in src/shared/dataview/vendor and src/main/lite/discovery behind the missing luxon, papaparse, parsimmon and their @types; the 3 TS2345 in src/main/utils/remote-fs.ts at 699, 1117, 1832 recorded under progress.MCOMP-01-03L.semanticConflictsForQ)",
+				"numstatVsHead": {
+					"src/__tests__/main/web-server/web-server-factory.test.ts": "202+/55- (upstream interrupt, closed-tab, context-ops, live and routing cases plus the routing slot on every positional list)",
+					"src/__tests__/main/web-server/managers/CallbackRegistry.test.ts": "48+/14- (upstream interrupt describe plus the routing slot on the six executeCommand lists)"
+				},
+				"numstatVsMergeHead": {
+					"src/__tests__/main/web-server/web-server-factory.test.ts": "184+/1- (the integration delegation, ticket and terminal-tab cases plus the delegation and ticket slots)",
+					"src/__tests__/main/web-server/managers/CallbackRegistry.test.ts": "12+/0- (the delegation and ticket slots on the six executeCommand lists)"
+				}
+			},
+			"semanticConflictsForQ": [],
+			"followUpsForR": [
+				"the 03J follow-up (permanent cases for the zz-03j throwaway send-argument assertions) is closed for two of the three relays by the resolved factory suite: remote:enqueueCommand at the smoke, delegation, ticket and routing cases (1846-1940) and remote:executeCommand at the relay case (942) and the owning-window case (2739); remote:newAITabWithPrompt has no positional case in any committed suite (browserTabCallbacks.ts is reached only through web-server-factory.ts), so 03R adds one asserting [sessionId, prompt, responseChannel, background, hidden, mentionRouting, delegation, dispatchTicket]",
+				"the nine pre-existing tsc errors of web-server-factory.test.ts (and the two TS1117 of dispatch.test.ts from 03G) are outside every tsconfig; 03R may list them as observations, they are not merge work"
+			],
+			"blockedSuites": [],
+			"observations": [
+				"the negative assertion at 2754 (mockWebContents.send not called with remote:executeCommand and nine expect.anything()) auto-merged at ten elements on both sides; it is inert against the twelve-element send either way (expect.anything() rejects undefined and the lengths differ), so it was left as merged rather than widened",
+				"the preload remotes of 03N must read the renderer slots the factory suite now asserts: remote:enqueueCommand [..., background, held, mentionRouting, delegation, dispatchTicket], remote:executeCommand [..., background, mentionRouting, delegation, dispatchTicket, responseChannel], remote:newAITabWithPrompt [sessionId, prompt, responseChannel, background, hidden, mentionRouting, delegation, dispatchTicket] (03J)"
+			],
+			"unmergedAfter": 8,
+			"driver": ".maestro/playbooks/Working/mcomp-01-03/apply-03m.mjs (not in git)"
 		}
 	}
 }
