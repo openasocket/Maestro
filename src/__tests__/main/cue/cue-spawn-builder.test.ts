@@ -1152,6 +1152,81 @@ describe('cue-spawn-builder', () => {
 			mockApplyOverrides.mockImplementationOnce(actual.applyAgentConfigOverrides);
 		});
 
+		it.each([
+			['explicit remote path', '/remote/Grok Tools/grok'],
+			['absent override', undefined],
+			['empty override', ''],
+		])('preserves SSH executable provenance with %s', async (_kind, customPath) => {
+			mockGetAgentDefinition.mockReturnValue({
+				...realDefinition('grok'),
+				command: '/local/detection/must-not-reach-ssh/grok',
+			});
+			const store = sshStoreWithRemotes();
+			const remote = store.getSshRemotes()[1];
+			const script = 'fixture-owned-remote-script';
+			mockWrapSpawnWithSsh.mockImplementationOnce(async (_input, _config, snapshot) => ({
+				command: 'ssh',
+				args: ['dev@r1.example.com'],
+				cwd: '/fixture-client',
+				sshStdinScript: script,
+				sshRemoteUsed: snapshot.getSshRemotes()[0],
+			}));
+			const prompt = 'PRIVATE quoted "\u03bb"\r\nCue request';
+			const config = createConfig({
+				toolType: 'grok',
+				projectRoot: '/chosen/remote project',
+				customPath,
+				customArgs: '--fixture-option "fixture value"',
+				customEnvVars: { GROK_HOME: '/chosen/remote account' },
+				appendSystemPrompt: 'SYSTEM',
+				sshRemoteConfig: { enabled: true, remoteId: 'r1' },
+				sshStore: store,
+			});
+			const result = await buildSpawnSpec(config, prompt);
+			if (!result.ok) throw new Error(result.message);
+			expect(mockWrapSpawnWithSsh).toHaveBeenCalledTimes(1);
+			const [input, sshConfig, snapshot] = mockWrapSpawnWithSsh.mock.lastCall!;
+			const artifact = result.spec.promptArtifact!;
+			expect(artifact).toMatchObject({
+				owner: 'remote',
+				sshRemoteId: 'r1',
+				encoding: 'utf8',
+				mode: 0o600,
+				flag: 'wx',
+				cleanup: 'turn',
+				content: JSON.stringify({
+					type: 'acp',
+					content: [{ type: 'text', text: embedSystemPromptInPrompt('SYSTEM', prompt) }],
+				}),
+			});
+			expect(input).toMatchObject({
+				command: customPath || 'grok',
+				agentBinaryName: customPath || 'grok',
+				cwd: '/chosen/remote project',
+				customEnvVars: { GROK_HOME: '/chosen/remote account' },
+				prompt: undefined,
+				launchViaStdinScript: true,
+			});
+			expect(input.promptArtifact).toBe(artifact);
+			expect(input.args.slice(-4)).toEqual([
+				'--fixture-option',
+				'fixture value',
+				'--prompt-file',
+				artifact.path,
+			]);
+			expect(input.args).not.toContain(prompt);
+			expect(sshConfig).toEqual(config.sshRemoteConfig);
+			expect(snapshot.getSshRemotes()).toEqual([remote]);
+			expect(result.spec).toMatchObject({
+				command: 'ssh',
+				args: ['dev@r1.example.com'],
+				cwd: '/fixture-client',
+				sshStdinScript: script,
+				sshRemoteUsed: remote,
+				stdinPrompt: undefined,
+			});
+		});
+
 		it.each(
 			[false, true].flatMap((remote) =>
 				['read', 'write', 'mixed', 'custom split', 'custom equals'].map((kind) => ({
