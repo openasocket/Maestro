@@ -100,7 +100,7 @@ export interface RuntimeGroupChats {
 	roundsInFlight(): number;
 	/** Stop every round and every Auto Run a chat started. For shutdown, and for a lost data directory. */
 	stopAll(): Promise<void>;
-	/** Wait for the store's queued writes. Call before the lock is released. */
+	/** Wait for queued usage updates and store writes. Call before the lock is released. */
 	drain(): Promise<void>;
 	/** The chat store, for the consult path's and a test's reads. */
 	readonly store: GroupChatStore;
@@ -630,7 +630,11 @@ export function createRuntimeGroupChats(options: RuntimeGroupChatsOptions): Runt
 				});
 			}
 		},
-		drain: () => store.drain(),
+		drain: async () => {
+			// Pending provider lookups can enqueue participant writes, so settle them first.
+			await engine.drainUsageUpdates();
+			await store.drain();
+		},
 		store,
 	};
 }
