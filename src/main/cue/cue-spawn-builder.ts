@@ -205,6 +205,8 @@ export async function buildSpawnSpec(
 		surface: 'cue',
 		agent: { ...agentDef, capabilities: agentConfig.capabilities },
 		command: customPath || agentDef.command,
+		// With no selected path, keep the planner's remote binary-name fallback.
+		remoteCommand: customPath,
 		args: finalArgs,
 		cwd: projectRoot,
 		// Preserve grants for planner refusal when the provider has no native builder.
