@@ -196,6 +196,15 @@ import {
 	type PolicyDecision,
 } from '../../../shared/maestro-lib/managed/authority';
 import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
+import { embedSystemPromptInPrompt } from '../../../shared/embeddedSystemPrompt';
+import * as remoteSignal from '../../../shared/maestro-lib/control/ssh-remote-signal';
+
+vi.mock('../../../shared/maestro-lib/control/ssh-remote-signal', async (importOriginal) => ({
+	...(await importOriginal<
+		typeof import('../../../shared/maestro-lib/control/ssh-remote-signal')
+	>()),
+	signalRemoteAgent: vi.fn(),
+}));
 
 const hostPlatform = process.platform;
 
@@ -4495,6 +4504,171 @@ Some text with [x] in it that's not a checkbox
 
 		beforeEach(() => {
 			mockSpawn.mockReturnValue(mockChild);
+		});
+
+		describe('opt-in Grok prompt artifacts', () => {
+			const grok = getAgentDefinition('grok')!;
+			const original = { promptFile: grok.promptFile, promptFileArgs: grok.promptFileArgs };
+			isolateAgentEnv(['GROK_HOME', 'GROK_AUTH', 'GROK_AUTH_PATH']);
+			beforeEach(() => {
+				// Opt in only this fixture; native provider activation has its own task.
+				grok.promptFile = { format: 'acp-json', exclusivePromptFlags: ['-p', '--prompt-file'] };
+				grok.promptFileArgs = (file) => ['--prompt-file', file];
+				vi.spyOn(fs, 'openSync').mockReturnValue(73);
+				vi.spyOn(fs, 'fstatSync').mockReturnValue({ dev: 1, ino: 73 } as fs.Stats);
+				vi.spyOn(fs, 'lstatSync').mockReturnValue({ dev: 1, ino: 73 } as fs.Stats);
+				vi.spyOn(fs, 'unlinkSync').mockImplementation(() => {});
+				vi.spyOn(fs, 'closeSync').mockImplementation(() => {});
+				vi.mocked(fs.writeFileSync).mockImplementation(() => {});
+			});
+			afterEach(() => {
+				Object.assign(grok, original);
+			});
+
+			describe.each([false, true])('host handoff (SSH=%s)', (remote) => {
+				it.each([
+					['', undefined, undefined, 0],
+					['  café\n\t末尾  ', 'private rules', undefined, 0],
+					['large λ\n'.repeat(8192), 'private rules', undefined, 1],
+					['resume exactly\n', 'already delivered rules', 'resume-id', 0],
+				] as const)(
+					'preserves prompt bytes and exit outcome for case %#',
+					async (prompt, rules, session, code) => {
+						const { host, authority } = managedAuthority(ALLOW);
+						if (remote) {
+							mockWrapSpawnWithSsh.mockImplementation(async (_config, _ssh, store) => {
+								mockReadSshRemotes.mockReturnValue([{ id: 'r1', host: 'replacement-host' }]);
+								expect(store.getSshRemotes()[0].host).toBe('remotehost');
+								return {
+									command: 'ssh',
+									args: ['remotehost', ...remoteSignal.SSH_STDIN_REMOTE_SHELL],
+									cwd: '/local',
+									sshStdinScript: 'exec grok --prompt-file /synthetic-owned-file',
+									sshRemoteUsed: { id: 'r1', name: 'r1', host: 'remotehost' },
+								};
+							});
+						}
+						const result = await driveSpawnToCompletion(
+							spawnAgent('grok', '/project', prompt, session, {
+								managed: authority,
+								appendSystemPrompt: rules,
+								customModel: 'fixture-model',
+								customEnvVars: { GROK_HOME: '/account/selected' },
+								sshRemoteConfig: remote ? { enabled: true, remoteId: 'r1' } : undefined,
+							}),
+							code,
+							'{"type":"text","data":"done"}\n{"type":"end","sessionId":"fixture-session"}\n'
+						);
+						expect(result).toMatchObject({
+							success: true,
+							response: 'done',
+							agentSessionId: 'fixture-session',
+							outcome: code === 0 ? 'completed' : 'completed-with-warning',
+						});
+						const composed = rules && !session ? embedSystemPromptInPrompt(rules, prompt) : prompt;
+						const content = JSON.stringify({
+							type: 'acp',
+							content: [{ type: 'text', text: composed }],
+						});
+						const wrapped = mockWrapSpawnWithSsh.mock.calls[0]?.[0];
+						const args = remote ? wrapped.args : spawnCall().args;
+						expect(args).toEqual(
+							expect.arrayContaining(['-m', 'fixture-model', '--cwd', '/project', '--prompt-file'])
+						);
+						expect(args).not.toContain('-p');
+						if (session) expect(args).toEqual(expect.arrayContaining(['--resume', session]));
+						if (remote) {
+							expect(wrapped).toMatchObject({
+								command: 'grok',
+								agentBinaryName: 'grok',
+								prompt: undefined,
+								customEnvVars: { GROK_HOME: '/account/selected' },
+								promptArtifact: {
+									owner: 'remote',
+									sshRemoteId: 'r1',
+									content,
+									encoding: 'utf8',
+									flag: 'wx',
+									mode: 0o600,
+									cleanup: 'turn',
+								},
+							});
+							expect(args[args.indexOf('--prompt-file') + 1]).toBe(wrapped.promptArtifact.path);
+							expect(fs.openSync).not.toHaveBeenCalled();
+							expect(fs.writeFileSync).not.toHaveBeenCalled();
+							expect(mockStdin.write).toHaveBeenCalledTimes(1);
+							expect(mockStdin.write.mock.calls[0][0]).toContain('exec grok --prompt-file');
+							expect(mockStdin.write.mock.calls[0][0]).not.toContain(content);
+						} else {
+							const file = args[args.indexOf('--prompt-file') + 1];
+							expect(fs.openSync).toHaveBeenCalledExactlyOnceWith(file, 'wx', 0o600);
+							expect(fs.writeFileSync).toHaveBeenCalledExactlyOnceWith(73, content, 'utf8');
+							expect(fs.unlinkSync).toHaveBeenCalledExactlyOnceWith(file);
+							expect(fs.closeSync).toHaveBeenCalledExactlyOnceWith(73);
+							expect(spawnCall().options.env.GROK_HOME).toBe('/account/selected');
+							expect(mockStdin.write).not.toHaveBeenCalled();
+						}
+						expect(mockSpawn).toHaveBeenCalledTimes(1);
+						expect(host.asked).toHaveLength(1);
+						expect(host.authority.live()).toHaveLength(0);
+					}
+				);
+
+				it('refuses competing sources without preparation or a text retry', async () => {
+					const result = await spawnAgent('grok', '/project', 'private-user-content', undefined, {
+						customArgs: '--prompt-file=/private/conflict.json',
+						sshRemoteConfig: remote ? { enabled: true, remoteId: 'r1' } : undefined,
+					});
+					expect(result.success).toBe(false);
+					expect(result.error).toContain('conflicts with another prompt source');
+					expect(JSON.stringify(result)).not.toMatch(/private-user-content|conflict.json/);
+					expect(mockSpawn).not.toHaveBeenCalled();
+					expect(fs.openSync).not.toHaveBeenCalled();
+					expect(mockWrapSpawnWithSsh).not.toHaveBeenCalled();
+				});
+			});
+
+			it.each(['write', 'cancel', 'final admission'] as const)(
+				'cleans a partial local preparation on %s',
+				async (failure) => {
+					const controller = new AbortController();
+					const { host, authority } = managedAuthority(ALLOW);
+					vi.mocked(fs.writeFileSync).mockImplementationOnce(() => {
+						if (failure === 'write') throw new Error('/private/artifact.json private-user-content');
+						if (failure === 'cancel') controller.abort();
+						if (failure === 'final admission') host.authority.revokeAll('fixture revocation');
+					});
+					const result = await spawnAgent('grok', '/project', 'private-user-content', undefined, {
+						managed: authority,
+						signal: controller.signal,
+					});
+					expect(result.success).toBe(false);
+					if (failure === 'cancel') expect(result.outcome).toBe('interrupted');
+					if (failure === 'final admission') expect(result.managed?.code).toBe('lease-invalid');
+					expect(JSON.stringify(result)).not.toMatch(/private-user-content|artifact.json/);
+					expect(fs.unlinkSync).toHaveBeenCalledExactlyOnceWith(
+						vi.mocked(fs.openSync).mock.calls[0][0]
+					);
+					expect(fs.closeSync).toHaveBeenCalledExactlyOnceWith(73);
+					expect(mockSpawn).not.toHaveBeenCalled();
+					expect(mockStdin.write).not.toHaveBeenCalled();
+					expect(host.authority.live()).toHaveLength(0);
+				}
+			);
+
+			it('refuses failed SSH preparation without a local artifact or fallback', async () => {
+				mockWrapSpawnWithSsh.mockRejectedValue(
+					new Error('/private/artifact.json private-user-content')
+				);
+				const result = await spawnAgent('grok', '/project', 'private-user-content', undefined, {
+					sshRemoteConfig: { enabled: true, remoteId: 'r1' },
+				});
+				expect(result.error).toBe('Remote prompt preparation unavailable.');
+				expect(mockWrapSpawnWithSsh).toHaveBeenCalledTimes(1);
+				expect(mockSpawn).not.toHaveBeenCalled();
+				expect(fs.openSync).not.toHaveBeenCalled();
+				expect(remoteSignal.signalRemoteAgent).not.toHaveBeenCalled();
+			});
 		});
 
 		it('refuses a denied launch with zero effect and never retries it as an effort rejection', async () => {

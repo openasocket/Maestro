@@ -144,6 +144,8 @@ import { resolveMaestroCliScriptPath } from '../../../main/cue/cue-cli-executor'
 import { logger } from '../../../main/utils/logger';
 import { embedSystemPromptInPrompt } from '../../../shared/embeddedSystemPrompt';
 import * as platformDetection from '../../../shared/platformDetection';
+import { ensureRemoteMaestroPProbed } from '../../../main/agents/probeRemoteMaestroP';
+import { isolateAgentEnv } from '../../helpers/agentEnvIsolation';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -230,6 +232,121 @@ describe('cue-spawn-builder', () => {
 	});
 
 	describe('buildSpawnSpec', () => {
+		describe('opt-in prompt-file plans', () => {
+			isolateAgentEnv();
+			beforeEach(() => {
+				mockGetAgentDefinition.mockReturnValue({
+					...defaultAgentDef,
+					id: 'grok',
+					command: 'grok',
+					binaryName: 'grok',
+					promptFile: { format: 'acp-json', exclusivePromptFlags: ['-p', '--prompt-file'] },
+					promptFileArgs: (file: string) => ['--prompt-file', file],
+				});
+			});
+
+			afterEach(() => {
+				mockWrapSpawnWithSsh.mockReset();
+			});
+
+			it.each([false, true])('preserves composed and empty bytes with SSH=%s', async (remote) => {
+				const store = sshStoreWithRemotes();
+				const selected = store.getSshRemotes()[0];
+				store.getSshRemotes.mockReturnValue([selected]);
+				if (remote)
+					vi.mocked(ensureRemoteMaestroPProbed).mockImplementationOnce(async () => {
+						selected.host = 'replacement.invalid';
+						return true;
+					});
+				mockWrapSpawnWithSsh.mockImplementation(async (input, _config, snapshot) => ({
+					command: 'ssh',
+					args: ['dev@remote-1.example.com'],
+					cwd: '/fixture-client',
+					sshStdinScript: 'fixture script',
+					sshRemoteUsed: snapshot.getSshRemotes()[0],
+				}));
+				for (const prompt of ['', 'quoted "λ"\r\n' + 'large '.repeat(7000)]) {
+					const config = createConfig({
+						toolType: 'grok',
+						customPath: '/fixture/grok',
+						customModel: 'fixture-model',
+						customEnvVars: { GROK_HOME: '/fixture/account' },
+						...(prompt ? { appendSystemPrompt: 'SYSTEM' } : {}),
+						...(remote
+							? { sshRemoteConfig: { enabled: true, remoteId: 'remote-1' }, sshStore: store }
+							: {}),
+					});
+					const result = await buildSpawnSpec(config, prompt);
+					if (!result.ok) throw new Error(result.message);
+					const artifact = result.spec.promptArtifact!;
+					expect(artifact).toMatchObject({
+						owner: remote ? 'remote' : 'local',
+						encoding: 'utf8',
+						mode: 0o600,
+						flag: 'wx',
+						cleanup: 'turn',
+						content: JSON.stringify({
+							type: 'acp',
+							content: [
+								{ type: 'text', text: prompt ? embedSystemPromptInPrompt('SYSTEM', prompt) : '' },
+							],
+						}),
+					});
+					expect(result.spec.stdinPrompt).toBeUndefined();
+					if (remote) {
+						const [input, , snapshot] = mockWrapSpawnWithSsh.mock.lastCall!;
+						expect(input).toMatchObject({
+							command: '/fixture/grok',
+							agentBinaryName: '/fixture/grok',
+							cwd: config.projectRoot,
+							prompt: undefined,
+							promptArtifact: artifact,
+							customEnvVars: { GROK_HOME: '/fixture/account' },
+						});
+						expect(input.args.slice(-2)).toEqual(['--prompt-file', artifact.path]);
+						expect(artifact.sshRemoteId).toBe('remote-1');
+						// Mutation while the probe awaits cannot retarget this launch.
+						if (!prompt) expect(snapshot.getSshRemotes()[0].host).toBe('remote-1.example.com');
+					} else {
+						expect(result.spec.args.slice(-2)).toEqual(['--prompt-file', artifact.path]);
+						expect(result.spec).toMatchObject({
+							command: '/fixture/grok',
+							env: { GROK_HOME: '/fixture/account' },
+						});
+					}
+				}
+				expect(mockWrapSpawnWithSsh).toHaveBeenCalledTimes(remote ? 2 : 0);
+			});
+
+			it.each(['competing source', 'wrapper failure'])(
+				'refuses %s without text fallback',
+				async (failure) => {
+					if (failure === 'competing source')
+						mockBuildAgentArgs.mockReturnValueOnce(['-p', 'PRIVATE']);
+					else mockWrapSpawnWithSsh.mockRejectedValueOnce(new Error('/private/file: PRIVATE'));
+					const result = await buildSpawnSpec(
+						createConfig({
+							toolType: 'grok',
+							sshRemoteConfig: { enabled: true, remoteId: 'r1' },
+							sshStore: sshStoreWithRemotes(),
+						}),
+						'PRIVATE'
+					);
+					expect(result).toEqual({
+						ok: false,
+						message:
+							failure === 'competing source'
+								? 'Prompt-file delivery conflicts with another prompt source in the launch arguments.'
+								: 'Remote prompt preparation unavailable.',
+					});
+					expect(mockBuildAgentArgs).toHaveBeenCalledTimes(1);
+					expect(mockWrapSpawnWithSsh).toHaveBeenCalledTimes(
+						failure === 'competing source' ? 0 : 1
+					);
+				}
+			);
+		});
+
 		describe('plugin proof preparation ownership', () => {
 			const privatePrompt = 'PRIVATE Cue prompt with credentials';
 			const privateError = new Error(`PRIVATE filesystem details: ${privatePrompt}`);
