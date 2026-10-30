@@ -482,7 +482,12 @@ export function applyAgentConfigOverrides(
 	// the resume selector last; put it back behind them.
 	finalArgs = placeResumeSelectorLast(agent, finalArgs);
 
-	const hasEnvVars = effectiveCustomEnvVars && Object.keys(effectiveCustomEnvVars).length > 0;
+	// An explicitly empty user record still replaces the provider environment.
+	// Preserve it and its source so callers cannot restore that environment via
+	// a fallback intended only for absent configuration.
+	const hasEnvVars =
+		userEnvVars != null ||
+		(effectiveCustomEnvVars && Object.keys(effectiveCustomEnvVars).length > 0);
 	const customEnvSource: AgentConfigResolution['customEnvSource'] = overrides.sessionCustomEnvVars
 		? 'session'
 		: agentConfigValues.customEnvVars
