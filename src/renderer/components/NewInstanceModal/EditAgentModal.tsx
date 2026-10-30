@@ -369,7 +369,8 @@ export function EditAgentModal({
 		// disabled, so the checkbox can stay toggled on for locally-executed
 		// agents that are controlled by another Maestro instance over SSH.
 		const persisted = session.sessionSshRemoteConfig;
-		if (persisted?.enabled && persisted.remoteId) {
+		// An unresolved enabled target must stay remote, never fall back to a local account.
+		if (persisted?.enabled) {
 			setSshRemoteConfig({
 				enabled: true,
 				remoteId: persisted.remoteId,
@@ -462,9 +463,10 @@ export function EditAgentModal({
 		return validateEditSession(name, session.id, existingSessions);
 	}, [instanceName, session, existingSessions]);
 
-	// Check if SSH remote is enabled
+	// A missing remote ID does not make an enabled SSH draft local. The existing
+	// path validator withholds checks until its remote is known.
 	const isSshEnabled = useMemo(() => {
-		return sshRemoteConfig?.enabled && !!sshRemoteConfig?.remoteId;
+		return sshRemoteConfig?.enabled;
 	}, [sshRemoteConfig]);
 
 	// Get SSH remote host for display
@@ -677,28 +679,28 @@ export function EditAgentModal({
 		const effortValue = agentConfig[getEffortConfigKey(agent)]?.trim() ?? undefined;
 
 		// Build per-session SSH remote config: ALWAYS pass explicitly to override any agent-level config.
-		// When disabled or no remoteId, we explicitly pass enabled: false to ensure local execution.
+		// Only an explicitly disabled/unconfigured draft is local. Keep enabled targets
+		// without a remote ID unresolved so the host can refuse them instead of running locally.
 		// `shareHistoryToProjectDir` is preserved independently of SSH enablement so a
 		// locally-executed agent can still be flagged as remote-controlled.
-		const sessionSshRemoteConfig =
-			sshRemoteConfig?.enabled && sshRemoteConfig?.remoteId
-				? {
-						enabled: true,
-						remoteId: sshRemoteConfig.remoteId,
-						// Ensure workingDirOverride is set: a newly entered directory wins, then
-						// the explicit override, then session's projectRoot (which is the remote
-						// path the user originally configured).
-						workingDirOverride: workingDirChanged
-							? trimmedWorkingDir
-							: sshRemoteConfig.workingDirOverride || session?.projectRoot || undefined,
-						syncHistory: sshRemoteConfig.syncHistory,
-						shareHistoryToProjectDir: sshRemoteConfig.shareHistoryToProjectDir,
-					}
-				: {
-						enabled: false,
-						remoteId: null,
-						shareHistoryToProjectDir: sshRemoteConfig?.shareHistoryToProjectDir,
-					};
+		const sessionSshRemoteConfig = sshRemoteConfig?.enabled
+			? {
+					enabled: true,
+					remoteId: sshRemoteConfig.remoteId,
+					// Ensure workingDirOverride is set: a newly entered directory wins, then
+					// the explicit override, then session's projectRoot (which is the remote
+					// path the user originally configured).
+					workingDirOverride: workingDirChanged
+						? trimmedWorkingDir
+						: sshRemoteConfig.workingDirOverride || session?.projectRoot || undefined,
+					syncHistory: sshRemoteConfig.syncHistory,
+					shareHistoryToProjectDir: sshRemoteConfig.shareHistoryToProjectDir,
+				}
+			: {
+					enabled: false,
+					remoteId: null,
+					shareHistoryToProjectDir: sshRemoteConfig?.shareHistoryToProjectDir,
+				};
 
 		// Save with per-session config fields including model, contextWindow, and SSH config
 		setMigrationSaving(true);

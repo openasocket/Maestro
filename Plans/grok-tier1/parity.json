@@ -1767,7 +1767,7 @@
 				{
 					"id": "grok-dialog-discovery-regressions-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-05I authors 19 renderer regressions in NewInstanceModal, EditAgentModal and AgentConfigPanel; execution remains not-run. Static review exposes persisted enabled SSH without a remote being normalized to local in EditAgentModal; I1 must repair initialization before verification. I2 completes bounded seeding/reopen/redetection and lifecycle/status coverage excluded by the packet size limit. GT1-02-13 runs all three suites; no behavioral or native acceptance is claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-05i-new-edit-and-shared-panel-regression-tests.",
+					"missingPrerequisite": "GT1-02-05I authors 19 renderer regressions in NewInstanceModal, EditAgentModal and AgentConfigPanel; execution remains not-run. GT1-02-05I1 preserves persisted enabled SSH without a remote ID through EditAgentModal initialization, typed discovery and save; path validation and browsing retain remote ownership instead of falling back locally. Static review passes; behavioral verification remains not-run. See Plans/grok-tier1/evidence/02.md#gt1-02-05i1-preserve-unresolved-ssh-drafts. I2 completes bounded seeding/reopen/redetection and lifecycle/status coverage excluded by the packet size limit. GT1-02-13 runs all three suites; no behavioral or native acceptance is claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-05i-new-edit-and-shared-panel-regression-tests.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
@@ -2270,7 +2270,7 @@
 				{
 					"id": "grok-dialog-discovery-regressions-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-05I authors 19 renderer regressions in NewInstanceModal, EditAgentModal and AgentConfigPanel; execution remains not-run. Static review exposes persisted enabled SSH without a remote being normalized to local in EditAgentModal; I1 must repair initialization before verification. I2 completes bounded seeding/reopen/redetection and lifecycle/status coverage excluded by the packet size limit. GT1-02-13 runs all three suites; no behavioral or native acceptance is claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-05i-new-edit-and-shared-panel-regression-tests.",
+					"missingPrerequisite": "GT1-02-05I authors 19 renderer regressions in NewInstanceModal, EditAgentModal and AgentConfigPanel; execution remains not-run. GT1-02-05I1 preserves persisted enabled SSH without a remote ID through EditAgentModal initialization, typed discovery and save; path validation and browsing retain remote ownership instead of falling back locally. Static review passes; behavioral verification remains not-run. See Plans/grok-tier1/evidence/02.md#gt1-02-05i1-preserve-unresolved-ssh-drafts. I2 completes bounded seeding/reopen/redetection and lifecycle/status coverage excluded by the packet size limit. GT1-02-13 runs all three suites; no behavioral or native acceptance is claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-05i-new-edit-and-shared-panel-regression-tests.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				},
 				{
@@ -12811,7 +12811,7 @@
 				{
 					"id": "grok-dialog-discovery-regressions-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-05I authors 19 renderer regressions in NewInstanceModal, EditAgentModal and AgentConfigPanel; execution remains not-run. Static review exposes persisted enabled SSH without a remote being normalized to local in EditAgentModal; I1 must repair initialization before verification. I2 completes bounded seeding/reopen/redetection and lifecycle/status coverage excluded by the packet size limit. GT1-02-13 runs all three suites; no behavioral or native acceptance is claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-05i-new-edit-and-shared-panel-regression-tests.",
+					"missingPrerequisite": "GT1-02-05I authors 19 renderer regressions in NewInstanceModal, EditAgentModal and AgentConfigPanel; execution remains not-run. GT1-02-05I1 preserves persisted enabled SSH without a remote ID through EditAgentModal initialization, typed discovery and save; path validation and browsing retain remote ownership instead of falling back locally. Static review passes; behavioral verification remains not-run. See Plans/grok-tier1/evidence/02.md#gt1-02-05i1-preserve-unresolved-ssh-drafts. I2 completes bounded seeding/reopen/redetection and lifecycle/status coverage excluded by the packet size limit. GT1-02-13 runs all three suites; no behavioral or native acceptance is claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-05i-new-edit-and-shared-panel-regression-tests.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				},
 				{
@@ -13550,7 +13550,7 @@
 				{
 					"id": "grok-dialog-discovery-regressions-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-05I authors 19 renderer regressions in NewInstanceModal, EditAgentModal and AgentConfigPanel; execution remains not-run. Static review exposes persisted enabled SSH without a remote being normalized to local in EditAgentModal; I1 must repair initialization before verification. I2 completes bounded seeding/reopen/redetection and lifecycle/status coverage excluded by the packet size limit. GT1-02-13 runs all three suites; no behavioral or native acceptance is claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-05i-new-edit-and-shared-panel-regression-tests.",
+					"missingPrerequisite": "GT1-02-05I authors 19 renderer regressions in NewInstanceModal, EditAgentModal and AgentConfigPanel; execution remains not-run. GT1-02-05I1 preserves persisted enabled SSH without a remote ID through EditAgentModal initialization, typed discovery and save; path validation and browsing retain remote ownership instead of falling back locally. Static review passes; behavioral verification remains not-run. See Plans/grok-tier1/evidence/02.md#gt1-02-05i1-preserve-unresolved-ssh-drafts. I2 completes bounded seeding/reopen/redetection and lifecycle/status coverage excluded by the packet size limit. GT1-02-13 runs all three suites; no behavioral or native acceptance is claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-05i-new-edit-and-shared-panel-regression-tests.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
