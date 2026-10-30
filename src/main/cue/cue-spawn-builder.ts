@@ -207,6 +207,8 @@ export async function buildSpawnSpec(
 		command: customPath || agentDef.command,
 		args: finalArgs,
 		cwd: projectRoot,
+		// Preserve grants for planner refusal when the provider has no native builder.
+		additionalDirectories: session?.additionalDirectories,
 		prompt: promptToSend,
 		...(agentDef.promptFile && fileTarget?.kind === 'remote'
 			? {

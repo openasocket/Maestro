@@ -466,6 +466,9 @@ async function handleProcessSpawnImpl(
 			remoteCommand: config.sessionCustomPath,
 			args: placed?.args ?? finalArgs,
 			cwd: config.cwd,
+			// Keep typed grants for planner validation even without a native arg builder.
+			// The final file replan below retains them through this captured input.
+			additionalDirectories: config.sessionAdditionalDirectories,
 			prompt: placed
 				? applyCopilotPreamble(agent?.id ?? config.toolType, placed.prompt, copilotPreamble)
 				: config.prompt,
@@ -498,6 +501,12 @@ async function handleProcessSpawnImpl(
 				});
 			} else if (planResult.reason === 'grok-model-effort-refused') {
 				logger.error('Grok model/effort selection refused; not spawning', LOG_CONTEXT, {
+					sessionId: config.sessionId,
+					toolType: config.toolType,
+					reason: planResult.reason,
+				});
+			} else if (planResult.reason === 'grok-directory-grants-refused') {
+				logger.error('Grok directory-grant configuration refused; not spawning', LOG_CONTEXT, {
 					sessionId: config.sessionId,
 					toolType: config.toolType,
 					reason: planResult.reason,

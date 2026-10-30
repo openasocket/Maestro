@@ -375,6 +375,7 @@ function planCliLaunch(
 		prompt: string;
 		promptFileDestination?: PromptFileDestination;
 		readOnlyMode?: boolean;
+		additionalDirectories?: AdditionalDirectory[];
 		/** The mode the launch asks for (`cliRequestedPermissionMode`); the plan measures it against the ceiling. */
 		permissionMode: LaunchPermissionMode;
 		/** The route a managed host pins for this provider (`cliManagedRoute`); nothing on a standalone host. */
@@ -399,6 +400,7 @@ function planCliLaunch(
 		agentCustomEnvVars: input.agentCustomEnvVars,
 		sessionCustomEnvVars: input.sessionCustomEnvVars,
 		readOnlyMode: input.readOnlyMode,
+		additionalDirectories: input.additionalDirectories,
 		permissionMode: input.permissionMode,
 		managed: input.managed,
 		batchMode: true,
@@ -1028,6 +1030,7 @@ async function spawnClaudeAgent(
 		cwd,
 		prompt,
 		readOnlyMode,
+		additionalDirectories: overrides.additionalDirectories,
 		permissionMode: cliRequestedPermissionMode('claude-code', readOnlyMode, baseArgs),
 		managed: cliManagedRoute(overrides.managed, 'claude-code'),
 		agentCustomEnvVars,
@@ -1500,8 +1503,9 @@ async function spawnJsonLineAgent(
 
 	// Native Additional Directories grants (e.g. `--add-dir`). Shares the exact
 	// mapping the desktop uses via `buildAgentArgs`, so a CLI/playbook spawn and
-	// an interactive turn hand the provider identical flags. Providers with no
-	// native mechanism emit nothing here and rely on the prompt block instead.
+	// an interactive turn hand the provider identical flags. The typed requests
+	// also reach launch planning: Grok refuses unqualified native grants there
+	// even though its absent builder emits no flags here.
 	// Emitted BEFORE the resume selector, same as the desktop: Codex resumes with
 	// a subcommand, and `codex exec resume` rejects `--add-dir` with exit 2.
 	preOverrideArgs.push(...buildAdditionalDirArgs(def, overrides.additionalDirectories));
@@ -1581,6 +1585,7 @@ async function spawnJsonLineAgent(
 		prompt: effectivePrompt,
 		promptFileDestination,
 		readOnlyMode,
+		additionalDirectories: overrides.additionalDirectories,
 		permissionMode: cliRequestedPermissionMode(toolType, readOnlyMode, baseArgs),
 		managed: cliManagedRoute(overrides.managed, toolType),
 		agentCustomEnvVars,
@@ -1952,7 +1957,8 @@ export interface SpawnAgentOptions {
 	 * the definition's `additionalDirArgs` (e.g. `--add-dir`); every agent also
 	 * receives them in the `{{ADDITIONAL_DIRECTORIES}}` system-prompt block built
 	 * by `prepareMaestroSystemPromptCli()`. Mirrors the desktop `process:spawn`
-	 * handler's `sessionAdditionalDirectories`.
+	 * handler's `sessionAdditionalDirectories`. Grok refuses active requests in
+	 * shared launch planning; a prompt block does not qualify a native grant.
 	 */
 	additionalDirectories?: AdditionalDirectory[];
 	/**
