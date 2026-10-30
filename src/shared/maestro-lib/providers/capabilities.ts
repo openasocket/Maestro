@@ -500,12 +500,12 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 		supportsCostTracking: true, // Verified (grok 1.0.41): end.total_cost_usd per turn; usage.json costUsdTicks per session
 		supportsUsageStats: true, // Verified (grok 1.0.41): a usage line per model call, turn totals on end
 		supportsBatchMode: true, // Verified: -p/--single <PROMPT> headless mode
-		requiresPromptToStart: true, // Verified: headless runs require -p <prompt>; no interactive PTY integration
+		requiresPromptToStart: true, // Headless turns require a prompt source; no interactive PTY integration
 		supportsStreaming: true, // Verified: token-sized thought/text deltas stream on stdout
 		supportsResultMessages: true, // Verified: distinct final end event with stopReason/sessionId/requestId
 		supportsModelSelection: true, // Verified: -m/--model flag; grok models lists grok-4.5 and grok-composer-2.5-fast
 		supportsStreamJsonInput: false, // Conservative default: no --input-format stream-json equivalent in grok --help
-		supportsPromptViaStdin: true, // Unverified - keeps the pre-existing Windows behavior
+		supportsPromptViaStdin: false, // Pinned native source has no raw-stdin prompt reader; use the owned JSON prompt file
 		supportsThinkingDisplay: true, // Verified: thought delta events precede text deltas
 		supportsContextMerge: false, // Conservative default: not yet exercised
 		supportsContextExport: true, // Verified: session storage reads full transcripts (chat_history.jsonl), same export path as siblings
@@ -513,7 +513,7 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 		supportsGroupChatModeration: false, // Conservative default: moderation flow not yet exercised
 		usesJsonLineOutput: true, // Verified: streaming-json is JSONL (one JSON object per line); also gates CLI batch spawning (spawnJsonLineAgent)
 		usesCombinedContextWindow: false, // Conservative default: on-disk signals.json reports a single contextTokensUsed but gauge math is unverified
-		supportsAppendSystemPrompt: false, // Verified absent: no --append-system-prompt equivalent in grok --help
+		supportsAppendSystemPrompt: false, // Native rules/append aliases remain unqualified; embed once and skip on resume
 		supportsProjectMemory: false, // Conservative default: no project memory mechanism observed
 		supportsAdditionalDirectories: false, // Unverified - no directory-grant flag confirmed for this CLI
 	},

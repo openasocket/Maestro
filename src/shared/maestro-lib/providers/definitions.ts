@@ -874,15 +874,15 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		binaryName: 'grok',
 		command: 'grok',
 		args: [], // Base args for interactive mode (default grok TUI)
-		requiresPty: false, // Batch mode (-p/--single) works over plain pipes
+		requiresPty: false, // Headless prompt-file turns work over plain pipes
 		// Known limitation: like Codex, Maestro drives grok in batch mode only
-		// (-p/--single per turn, --resume to chain turns). There is no interactive
+		// (--prompt-file per turn, --resume to chain turns). There is no interactive
 		// PTY integration - the grok TUI is not wired into Maestro's terminal
 		// (capabilities: requiresPromptToStart: true).
 		//
-		// Grok CLI argument builders (verified against `grok --help` v0.2.93)
-		// Batch mode: grok --cwd <dir> -p "prompt" --output-format streaming-json --always-approve
-		batchModePrefix: [], // No subcommand needed; -p/--single triggers headless mode
+		// Legacy flags were checked against v0.2.93; prompt-file syntax follows
+		// the pinned source in Plans/grok-tier1/DESIGN.md, pending binary qualification.
+		batchModePrefix: [], // No subcommand needed; --prompt-file selects headless input
 		// YOLO required by Maestro, mirroring Claude Code's --dangerously-skip-permissions.
 		// --always-approve (boolean auto-approve), NOT ['--permission-mode',
 		// 'bypassPermissions'], for two reasons (same pattern as Copilot's --allow-all):
@@ -898,6 +898,13 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		batchModeArgs: ['--always-approve'],
 		jsonOutputArgs: ['--output-format', 'streaming-json'], // JSONL event stream on stdout
 		promptArgs: (prompt: string) => ['-p', prompt], // Single-turn headless prompt
+		// The shared planner selects this ahead of argv/stdin on every host.
+		// Lowercase .json ACP text blocks preserve whitespace; plain files trim it.
+		promptFile: {
+			format: 'acp-json',
+			exclusivePromptFlags: ['-p', '--single', '--prompt-json', '--prompt-file'],
+		},
+		promptFileArgs: (filePath: string) => ['--prompt-file', filePath],
 		resumeArgs: (sessionId: string) => ['--resume', sessionId], // Resume by session UUID
 		// Plan mode alone is not enough for non-interactive read-only runs:
 		// headless grok answers every permission prompt with "cancelled" (there
@@ -921,9 +928,8 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 		// Do not add noToolsArgs unless grok ships a verified all-off flag.
 		yoloModeArgs: ['--always-approve'],
 		workingDirArgs: (dir: string) => ['--cwd', dir], // Set working directory
-		// No attachment flag. `--prompt-json` takes inline base64 image blocks but
-		// only as one argv string (a screenshot overruns ARG_MAX) and conflicts
-		// with -p, so the image path rides in the prompt and `read_file` opens it.
+		// Legacy path-mention builder. Explicit file plans require admitted ACP
+		// image blocks and refuse without them; they never fall back to tool reads.
 		imagePromptBuilder: plainPathImagePrompt,
 		// modelArgs and configOptions.model.argBuilder both emit -m; trim both
 		// so desktop spawn and settings UI stay aligned.
