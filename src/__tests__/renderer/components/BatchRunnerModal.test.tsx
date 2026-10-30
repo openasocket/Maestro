@@ -27,6 +27,7 @@ import {
 	validateAgentPromptHasTaskReference,
 } from '../../../renderer/components/BatchRunnerModal';
 import type { Theme, Playbook } from '../../../renderer/types';
+import type { AgentDiscoveryResult } from '../../../shared/types';
 import { useSettingsStore } from '../../../renderer/stores/settingsStore';
 
 // Mock LayerStackContext
@@ -3344,6 +3345,138 @@ describe('BatchRunnerModal - per-run model/effort override', () => {
 		const { useSessionStore } = await import('../../../renderer/stores/sessionStore');
 		useSessionStore.setState({ sessions: [], activeSessionId: '' });
 		vi.restoreAllMocks();
+	});
+
+	describe('Grok selected discovery context', () => {
+		beforeEach(async () => {
+			vi.useFakeTimers();
+			await setupSession('grok');
+			window.maestro.agents.getConfig = vi.fn().mockResolvedValue({});
+			window.maestro.agents.getConfigOptions = vi.fn().mockResolvedValue({
+				status: 'unavailable',
+				options: [],
+			});
+		});
+		afterEach(() => vi.useRealTimers());
+
+		it.each(['unavailable', 'configured-fallback', 'discovered'] as const)(
+			'preserves typed run overrides after a %s catalog omits them',
+			async (status) => {
+				window.maestro.agents.getModels = vi.fn().mockResolvedValue({
+					status,
+					options: status === 'unavailable' ? [] : ['catalog-model'],
+				});
+				window.maestro.agents.getConfigOptions = vi.fn().mockResolvedValue({
+					status,
+					options: status === 'unavailable' ? [] : ['catalog-effort'],
+				});
+				const props = createDefaultProps();
+				render(<BatchRunnerModal {...props} />);
+				fireEvent.change(screen.getByLabelText('Model for this run'), {
+					target: { value: 'manual-model' },
+				});
+				fireEvent.change(screen.getByLabelText('Reasoning effort for this run'), {
+					target: { value: 'manual-effort' },
+				});
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(300);
+				});
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+					providerId: 'grok',
+					context: expect.objectContaining({
+						kind: 'draft',
+						cwd: '/project',
+						model: 'manual-model',
+						effort: 'manual-effort',
+					}),
+				});
+				expect(!!screen.queryByText(/Model or effort options are unavailable/)).toBe(
+					status !== 'discovered'
+				);
+				expect(screen.getByLabelText('Model for this run')).toHaveValue('manual-model');
+				expect(screen.getByLabelText('Reasoning effort for this run')).toHaveValue('manual-effort');
+				fireEvent.click(screen.getByRole('button', { name: 'Go' }));
+				expect(props.onGo).toHaveBeenCalledWith(
+					expect.objectContaining({ model: 'manual-model', effort: 'manual-effort' })
+				);
+			}
+		);
+
+		it.each(['grok', 'codex'] as const)(
+			'uses the open %s worktree account and rejects late parent options',
+			async (toolType) => {
+				const { useSessionStore } = await import('../../../renderer/stores/sessionStore');
+				const parent = useSessionStore.getState().sessions[0];
+				const child = {
+					...parent,
+					id: 'child',
+					name: 'Child',
+					parentSessionId: parent.id,
+					toolType,
+					cwd: '/remote/child',
+					customPath: '/remote/bin/agent',
+					customEnvVars: { GROK_HOME: '/remote/account-b' },
+					customModel: 'child-model',
+					customEffort: 'high',
+					sshRemoteId: 'remote-b',
+					sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-b' },
+				};
+				useSessionStore.setState({ sessions: [parent, child] });
+				window.maestro.git.branches = vi.fn().mockResolvedValue({ branches: ['main'] });
+				window.maestro.git.branch = vi.fn().mockResolvedValue({ stdout: 'main' });
+				let resolveParent!: (value: AgentDiscoveryResult) => void;
+				const pending = new Promise<AgentDiscoveryResult>((resolve) => {
+					resolveParent = resolve;
+				});
+				const models = vi
+					.fn()
+					.mockReturnValueOnce(pending)
+					.mockResolvedValue(
+						toolType === 'grok'
+							? { status: 'discovered', options: ['child-model'] }
+							: ['child-model']
+					);
+				window.maestro.agents.getModels = models;
+				window.maestro.agents.getConfigOptions = vi
+					.fn()
+					.mockResolvedValueOnce({ status: 'discovered', options: ['high'] })
+					.mockResolvedValueOnce({ status: 'discovered', options: ['high'] })
+					.mockResolvedValue(
+						toolType === 'grok' ? { status: 'discovered', options: ['high'] } : ['high']
+					);
+				render(<BatchRunnerModal {...createDefaultProps()} />);
+				expect(models).toHaveBeenCalledTimes(1);
+				fireEvent.click(screen.getByText('Dispatch to a separate worktree'));
+				fireEvent.change(screen.getByRole('option', { name: /Child/ }).closest('select')!, {
+					target: { value: 'child' },
+				});
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(300);
+				});
+				expect(models).toHaveBeenLastCalledWith(
+					toolType === 'grok'
+						? {
+								providerId: 'grok',
+								context: {
+									kind: 'draft',
+									cwd: child.cwd,
+									customPath: child.customPath,
+									customEnvVars: child.customEnvVars,
+									model: 'child-model',
+									effort: 'high',
+									sshRemoteId: child.sshRemoteId,
+									sessionSshRemoteConfig: child.sessionSshRemoteConfig,
+								},
+							}
+						: 'codex'
+				);
+				await act(async () => {
+					resolveParent({ status: 'discovered', options: ['parent-only'] });
+				});
+				expect(screen.queryByRole('option', { name: 'parent-only' })).not.toBeInTheDocument();
+				expect(screen.getByRole('option', { name: 'child-model' })).toBeInTheDocument();
+			}
+		);
 	});
 
 	it('omits model and effort from the launched config when both pickers are untouched', async () => {

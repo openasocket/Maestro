@@ -1,6 +1,12 @@
 import React from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { AgentDiscoveryResult } from '../../../../../../shared/types';
+import {
+	useWizard,
+	type WizardState,
+} from '../../../../../../renderer/components/Wizard/WizardContext';
+import { initialState } from '../../../../../../renderer/components/Wizard/WizardContext/reducer';
 import type { AgentConfig } from '../../../../../../renderer/types';
 import { useAgentConfigurationPanel } from '../../../../../../renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useAgentConfigurationPanel';
 import { useAgentDetection } from '../../../../../../renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useAgentDetection';
@@ -9,6 +15,10 @@ import { useAgentSelectionKeyboard } from '../../../../../../renderer/components
 import { useSshRemotes } from '../../../../../../renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useSshRemotes';
 import { AGENT_TILES } from '../../../../../../renderer/components/Wizard/screens/AgentSelectionScreen/utils/agentTiles';
 import { captureException } from '../../../../../../renderer/utils/sentry';
+
+vi.mock('../../../../../../renderer/components/Wizard/WizardContext', () => ({
+	useWizard: vi.fn(),
+}));
 
 vi.mock('../../../../../../renderer/utils/sentry', () => ({
 	captureException: vi.fn(),
@@ -51,15 +61,21 @@ const FIRST_TILE_ID = AGENT_TILES[0].id;
 const SECOND_TILE_ID = AGENT_TILES[1].id;
 
 describe('AgentSelectionScreen hooks', () => {
+	let wizardState: WizardState;
 	beforeEach(() => {
 		vi.clearAllMocks();
 		vi.useRealTimers();
+		wizardState = { ...initialState, isOpen: true, directoryPath: '/project' };
+		vi.mocked(useWizard).mockImplementation(
+			() => ({ state: wizardState }) as ReturnType<typeof useWizard>
+		);
 		vi.mocked(window.maestro.agents.detect).mockResolvedValue([
 			agent({ id: 'claude-code', available: true }),
 			agent({ id: 'terminal', hidden: true }),
 		]);
 		vi.mocked(window.maestro.agents.getConfig).mockResolvedValue({});
-		vi.mocked(window.maestro.agents.getModels).mockResolvedValue([]);
+		vi.mocked(window.maestro.agents.getModels).mockReset().mockResolvedValue([]);
+		vi.mocked(window.maestro.agents.getConfigOptions).mockReset().mockResolvedValue([]);
 		vi.mocked(window.maestro.agents.setConfig).mockResolvedValue(undefined);
 		vi.mocked(window.maestro.agents.setCustomPath).mockResolvedValue(undefined);
 		vi.mocked(window.maestro.sshRemote.getConfigs).mockResolvedValue({
@@ -651,5 +667,184 @@ describe('AgentSelectionScreen hooks', () => {
 			},
 		});
 		expect(refreshAgentDetection).toHaveBeenCalledTimes(2);
+	});
+	describe('Grok configuration discovery', () => {
+		let args: Parameters<typeof useAgentConfigurationPanel>[0];
+		beforeEach(() => {
+			vi.useFakeTimers();
+			wizardState = { ...wizardState, selectedAgent: 'grok' };
+			args = {
+				detectedAgents: [
+					agent({
+						id: 'grok',
+						configOptions: [
+							{ key: 'model', type: 'text', label: 'Model', description: 'Model', default: '' },
+							{
+								key: 'reasoningEffort',
+								type: 'text',
+								label: 'Effort',
+								description: 'Effort',
+								default: '',
+							},
+						],
+					}),
+				],
+				configuringAgentId: 'grok',
+				sshRemoteConfig: undefined,
+				customPath: '/bin/grok',
+				customEnvVars: {},
+				setConfiguringAgentId: vi.fn(),
+				setSelectedAgent: vi.fn(),
+				setWizardCustomPath: vi.fn(),
+				setWizardCustomArgs: vi.fn(),
+				setWizardCustomEnvVars: vi.fn(),
+				setWizardSessionSshRemoteConfig: vi.fn(),
+				refreshAgentDetection: vi.fn(),
+				showConfigView: vi.fn(),
+				showGridView: vi.fn(),
+				announce: vi.fn(),
+			};
+			vi.mocked(window.maestro.agents.getConfig).mockResolvedValue({
+				model: 'manual-model',
+				reasoningEffort: 'manual-effort',
+			});
+			vi.mocked(window.maestro.agents.getModels).mockResolvedValue({
+				status: 'discovered',
+				options: ['catalog-model'],
+			} as never);
+			vi.mocked(window.maestro.agents.getConfigOptions).mockResolvedValue({
+				status: 'discovered',
+				options: ['high'],
+			} as never);
+		});
+
+		it.each([undefined, {}, { GROK_HOME: '' }] as (Record<string, string> | undefined)[])(
+			'preserves raw environment %j and provider-setting clears',
+			async (customEnvVars) => {
+				wizardState = { ...wizardState, customEnvVars };
+				const { result } = renderHook(() => useAgentConfigurationPanel(args));
+				await act(async () => result.current.handleOpenConfig('grok'));
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+					providerId: 'grok',
+					context: {
+						kind: 'provider-settings',
+						cwd: '/project',
+						customPath: '/bin/grok',
+						customEnvVars,
+						model: 'manual-model',
+						effort: 'manual-effort',
+						sessionSshRemoteConfig: undefined,
+					},
+				});
+				act(() => {
+					result.current.handleConfigChange('model', '');
+					result.current.handleConfigChange('reasoningEffort', '');
+				});
+				expect(result.current.availableModels).toEqual([]);
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+					providerId: 'grok',
+					context: expect.objectContaining({ model: '', effort: '', customEnvVars }),
+				});
+				expect(result.current.agentConfig).toEqual({ model: '', reasoningEffort: '' });
+			}
+		);
+
+		it.each(['unavailable', 'configured-fallback', 'discovered'] as const)(
+			'keeps manual values with %s metadata and counts only discovered options',
+			async (status) => {
+				vi.mocked(window.maestro.agents.getModels).mockResolvedValue({
+					status,
+					options: status === 'unavailable' ? [] : ['catalog-model'],
+				} as never);
+				const { result } = renderHook(() => useAgentConfigurationPanel(args));
+				await act(async () => result.current.handleOpenConfig('grok'));
+				act(() => result.current.handleConfigChange('model', 'typed-model'));
+				act(() => result.current.handleConfigChange('reasoningEffort', 'typed-effort'));
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				expect(result.current.modelDiscoveryStatus).toBe(status);
+				expect(result.current.availableModels).toEqual(
+					status === 'discovered' ? ['catalog-model'] : []
+				);
+				expect(result.current.agentConfig).toEqual({
+					model: 'typed-model',
+					reasoningEffort: 'typed-effort',
+				});
+				if (status !== 'discovered')
+					expect(result.current.detectedConfigAgent?.configOptions?.[0].description).toContain(
+						'Discovery is unavailable'
+					);
+			}
+		);
+
+		it.each(['missing cwd', 'unresolved SSH'])(
+			'forwards %s for host refusal without inventing a local target',
+			async (missing) => {
+				if (missing === 'missing cwd') wizardState = { ...wizardState, directoryPath: '' };
+				else args = { ...args, sshRemoteConfig: { enabled: true, remoteId: '' } };
+				vi.mocked(window.maestro.agents.getModels).mockResolvedValue({
+					status: 'unavailable',
+					options: [],
+				} as never);
+				const { result } = renderHook(() => useAgentConfigurationPanel(args));
+				await act(async () => result.current.handleOpenConfig('grok'));
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+					providerId: 'grok',
+					context: expect.objectContaining({
+						cwd: wizardState.directoryPath,
+						sessionSshRemoteConfig: args.sshRemoteConfig,
+					}),
+				});
+				expect(result.current.availableModels).toEqual([]);
+				expect(result.current.modelDiscoveryStatus).toBe('unavailable');
+				expect(result.current.agentConfig.model).toBe('manual-model');
+				expect(result.current.detectedConfigAgent?.configOptions?.[0].description).toContain(
+					missing === 'missing cwd'
+						? 'until a project directory is selected'
+						: 'Manual values are preserved'
+				);
+			}
+		);
+
+		it.each(['account', 'executable', 'remote', 'cwd'] as const)(
+			'rejects late options after a changed %s selection',
+			async (change) => {
+				let resolveModels!: (value: AgentDiscoveryResult) => void;
+				vi.mocked(window.maestro.agents.getModels).mockReturnValueOnce(
+					new Promise<AgentDiscoveryResult>((resolve) => {
+						resolveModels = resolve;
+					}) as never
+				);
+				const { result, rerender } = renderHook(() => useAgentConfigurationPanel(args));
+				await act(async () => result.current.handleOpenConfig('grok'));
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				if (change === 'account')
+					wizardState = { ...wizardState, customEnvVars: { GROK_HOME: '/accounts/second' } };
+				if (change === 'cwd') wizardState = { ...wizardState, directoryPath: '/other-project' };
+				if (change === 'executable') args = { ...args, customPath: '/other/grok' };
+				if (change === 'remote')
+					args = { ...args, sshRemoteConfig: { enabled: true, remoteId: 'remote-2' } };
+				rerender();
+				await act(async () => resolveModels({ status: 'discovered', options: ['stale-model'] }));
+				expect(result.current.availableModels).toEqual([]);
+				await act(async () => vi.advanceTimersByTimeAsync(300));
+				expect(result.current.availableModels).toEqual(['catalog-model']);
+				expect(result.current.agentConfig).toEqual({
+					model: 'manual-model',
+					reasoningEffort: 'manual-effort',
+				});
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+					providerId: 'grok',
+					context: expect.objectContaining({
+						cwd: wizardState.directoryPath,
+						customEnvVars: wizardState.customEnvVars,
+						customPath: args.customPath,
+						sessionSshRemoteConfig: args.sshRemoteConfig,
+					}),
+				});
+			}
+		);
 	});
 });
