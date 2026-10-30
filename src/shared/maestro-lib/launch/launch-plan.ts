@@ -28,6 +28,11 @@ import {
  */
 
 import { isWindows } from '../../platformDetection';
+import {
+	GrokModelEffortError,
+	resolveGrokModelEffortArgs,
+	type GrokEffortMenu,
+} from './agent-args';
 import type { QuerySource } from '../../querySource';
 import type { AgentSshRemoteConfig, SshRemoteConfig } from '../../types';
 import {
@@ -95,6 +100,8 @@ export interface AgentLaunchInput {
 	remoteCommand?: string;
 	/** Every argument except the prompt. */
 	args: string[];
+	/** Host-scoped native wire menu; picker options are not validation evidence. */
+	grokEffortMenu?: GrokEffortMenu;
 	cwd: string;
 	/** The user prompt, already final (system prompt embedded if that applies). */
 	prompt?: string;
@@ -291,7 +298,10 @@ export type AgentLaunchPlanResult =
 	| { ok: true; plan: AgentLaunchPlan }
 	| {
 			ok: false;
-			reason: Extract<SshLaunchTarget, { kind: 'unresolved' }>['reason'] | ManagedLaunchRefusal;
+			reason:
+				| Extract<SshLaunchTarget, { kind: 'unresolved' }>['reason']
+				| ManagedLaunchRefusal
+				| 'grok-model-effort-refused';
 			error: string;
 	  };
 
@@ -422,6 +432,28 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 			};
 		}
 	}
+	const pinnedModelArgs =
+		route?.model &&
+		agent?.modelArgs &&
+		!input.args.some(
+			(arg) =>
+				arg === '--model' ||
+				arg === '-m' ||
+				(agent.id === 'grok' && (arg.startsWith('--model=') || arg.startsWith('-m=')))
+		)
+			? agent.modelArgs(route.model)
+			: [];
+	let selectionArgs = [...input.args, ...pinnedModelArgs];
+	if (agent?.id === 'grok') {
+		try {
+			// Validate after the managed model pin, before prompts or secret reads.
+			// Direct launch-plan callers receive the same guard as config builders.
+			selectionArgs = resolveGrokModelEffortArgs(selectionArgs, input.grokEffortMenu);
+		} catch (error) {
+			if (!(error instanceof GrokModelEffortError)) throw error;
+			return { ok: false, reason: 'grok-model-effort-refused', error: error.message };
+		}
+	}
 	const layers = {
 		defaultEnvVars: agent?.defaultEnvVars,
 		batchModeEnvVars: input.batchMode ? agent?.batchModeEnvVars : undefined,
@@ -461,19 +493,14 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 			: undefined;
 
 	const knowledgeDirectory = envVars?.[TRANSLATION_KNOWLEDGE_ENV_VAR];
-	const pinnedModelArgs =
-		route?.model && agent?.modelArgs && !input.args.some((arg) => arg === '--model' || arg === '-m')
-			? agent.modelArgs(route.model)
-			: [];
 	const launchArgs =
 		target.kind === 'local' && agent?.id === 'claude-code' && knowledgeDirectory
 			? [
-					...input.args,
-					...pinnedModelArgs,
+					...selectionArgs,
 					'--settings',
 					JSON.stringify({ autoMemoryDirectory: path.join(knowledgeDirectory, 'memory') }),
 				]
-			: [...input.args, ...pinnedModelArgs];
+			: selectionArgs;
 	const effectivePrompt =
 		target.kind === 'local'
 			? bindTranslationKnowledge(input.prompt, envVars?.[TRANSLATION_KNOWLEDGE_ENV_VAR])
@@ -517,7 +544,7 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 				target,
 				command: input.remoteCommand || agent?.binaryName || input.command,
 				// The SSH wrapper places the prompt itself (inline or via its script).
-				args: [...input.args],
+				args: launchArgs,
 				cwd: input.cwd,
 				prompt,
 				stdin: undefined,

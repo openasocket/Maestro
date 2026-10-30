@@ -2169,7 +2169,8 @@
 					"GT1-02-05F1B",
 					"GT1-02-07A",
 					"GT1-02-07B",
-					"GT1-02-07C"
+					"GT1-02-07C",
+					"GT1-02-07A1"
 				],
 				"test": [
 					"GT1-02-06",
@@ -2194,7 +2195,8 @@
 					"GT1-02-05F1BT",
 					"GT1-02-07AT",
 					"GT1-02-07BT",
-					"GT1-02-07CT"
+					"GT1-02-07CT",
+					"GT1-02-07A1T"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -2271,7 +2273,7 @@
 				{
 					"id": "grok-effort-validation-and-retry-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-07 adds minimal/medium/max candidates requiring exact selected-model advertised wire values, native headless refusal parsing, ASCII-case-insensitive Grok refusal memory, and explicit config-builder refusal of none/remembered values. Current callers supply no menu and inherit; this is not native validation or tier-1 qualification. GT1-02-07A/AT own final argv/custom-alias validation; GT1-02-07B/BT own hint evidence propagation/replay; GT1-02-07C/CT own retry provenance and no-resend behavior. GT1-02-08/13 own core coverage/execution; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata. Native menu IDs may differ from wire values; no universal effort menu or model tiers are claimed.",
+					"missingPrerequisite": "GT1-02-07 adds evidence-gated minimal/medium/max candidates and native refusal memory. GT1-02-07A moves none/remembered-refusal guards from the scalar builder to canonical final argv composition and the shared launch planner, validates matching selected-model canonical wire menus, consolidates equivalent aliases and refuses conflicts/malformed selections. Current consumers supply no acknowledged menu, so none stays unavailable and explicit non-none values retain native validation; no native acceptance is claimed. GT1-02-07AT owns argv regression authoring and GT1-02-13 execution. GT1-02-07A1/A1T must preserve the new refusal identity in run-agent-turn.ts and process/handle-spawn.ts, which currently misclassify it as SSH. GT1-02-07B/BT own hint evidence propagation/replay; GT1-02-07C/CT own retry provenance and no-resend behavior. GT1-02-08/13 own core coverage/execution; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata and menu-ID mappings. No universal effort menu or model tiers are claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-07a-final-model-and-effort-validation.",
 					"affectedRows": ["P06", "REG-MODEL", "REG-DEFINITIONS", "P29", "P32", "S10", "S19"]
 				}
 			],
@@ -5569,7 +5571,8 @@
 					"GT1-02-07",
 					"GT1-02-07A",
 					"GT1-02-07B",
-					"GT1-02-07C"
+					"GT1-02-07C",
+					"GT1-02-07A1"
 				],
 				"test": [
 					"GT1-08-02",
@@ -5582,7 +5585,8 @@
 					"GT1-02-08",
 					"GT1-02-07AT",
 					"GT1-02-07BT",
-					"GT1-02-07CT"
+					"GT1-02-07CT",
+					"GT1-02-07A1T"
 				],
 				"verification": [
 					"GT1-08-07",
@@ -5649,7 +5653,7 @@
 				{
 					"id": "grok-effort-validation-and-retry-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-07 adds minimal/medium/max candidates requiring exact selected-model advertised wire values, native headless refusal parsing, ASCII-case-insensitive Grok refusal memory, and explicit config-builder refusal of none/remembered values. Current callers supply no menu and inherit; this is not native validation or tier-1 qualification. GT1-02-07A/AT own final argv/custom-alias validation; GT1-02-07B/BT own hint evidence propagation/replay; GT1-02-07C/CT own retry provenance and no-resend behavior. GT1-02-08/13 own core coverage/execution; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata. Native menu IDs may differ from wire values; no universal effort menu or model tiers are claimed.",
+					"missingPrerequisite": "GT1-02-07 adds evidence-gated minimal/medium/max candidates and native refusal memory. GT1-02-07A moves none/remembered-refusal guards from the scalar builder to canonical final argv composition and the shared launch planner, validates matching selected-model canonical wire menus, consolidates equivalent aliases and refuses conflicts/malformed selections. Current consumers supply no acknowledged menu, so none stays unavailable and explicit non-none values retain native validation; no native acceptance is claimed. GT1-02-07AT owns argv regression authoring and GT1-02-13 execution. GT1-02-07A1/A1T must preserve the new refusal identity in run-agent-turn.ts and process/handle-spawn.ts, which currently misclassify it as SSH. GT1-02-07B/BT own hint evidence propagation/replay; GT1-02-07C/CT own retry provenance and no-resend behavior. GT1-02-08/13 own core coverage/execution; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata and menu-ID mappings. No universal effort menu or model tiers are claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-07a-final-model-and-effort-validation.",
 					"affectedRows": ["P06", "REG-MODEL", "REG-DEFINITIONS", "P29", "P32", "S10", "S19"]
 				}
 			],
@@ -6043,7 +6047,8 @@
 					"GT1-02-07",
 					"GT1-02-07A",
 					"GT1-02-07B",
-					"GT1-02-07C"
+					"GT1-02-07C",
+					"GT1-02-07A1"
 				],
 				"test": [
 					"GT1-08-15",
@@ -6052,7 +6057,8 @@
 					"GT1-02-08",
 					"GT1-02-07AT",
 					"GT1-02-07BT",
-					"GT1-02-07CT"
+					"GT1-02-07CT",
+					"GT1-02-07A1T"
 				],
 				"verification": ["GT1-08-21", "GT1-11-11D", "GT1-02-13"],
 				"live": ["GT1-11-11", "GT1-11-11D"],
@@ -6110,7 +6116,7 @@
 				{
 					"id": "grok-effort-validation-and-retry-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-07 adds minimal/medium/max candidates requiring exact selected-model advertised wire values, native headless refusal parsing, ASCII-case-insensitive Grok refusal memory, and explicit config-builder refusal of none/remembered values. Current callers supply no menu and inherit; this is not native validation or tier-1 qualification. GT1-02-07A/AT own final argv/custom-alias validation; GT1-02-07B/BT own hint evidence propagation/replay; GT1-02-07C/CT own retry provenance and no-resend behavior. GT1-02-08/13 own core coverage/execution; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata. Native menu IDs may differ from wire values; no universal effort menu or model tiers are claimed.",
+					"missingPrerequisite": "GT1-02-07 adds evidence-gated minimal/medium/max candidates and native refusal memory. GT1-02-07A moves none/remembered-refusal guards from the scalar builder to canonical final argv composition and the shared launch planner, validates matching selected-model canonical wire menus, consolidates equivalent aliases and refuses conflicts/malformed selections. Current consumers supply no acknowledged menu, so none stays unavailable and explicit non-none values retain native validation; no native acceptance is claimed. GT1-02-07AT owns argv regression authoring and GT1-02-13 execution. GT1-02-07A1/A1T must preserve the new refusal identity in run-agent-turn.ts and process/handle-spawn.ts, which currently misclassify it as SSH. GT1-02-07B/BT own hint evidence propagation/replay; GT1-02-07C/CT own retry provenance and no-resend behavior. GT1-02-08/13 own core coverage/execution; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata and menu-ID mappings. No universal effort menu or model tiers are claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-07a-final-model-and-effort-validation.",
 					"affectedRows": ["P06", "REG-MODEL", "REG-DEFINITIONS", "P29", "P32", "S10", "S19"]
 				}
 			],
@@ -12367,7 +12373,8 @@
 					"GT1-02-05F1B",
 					"GT1-02-07A",
 					"GT1-02-07B",
-					"GT1-02-07C"
+					"GT1-02-07C",
+					"GT1-02-07A1"
 				],
 				"test": [
 					"GT1-02-06",
@@ -12391,7 +12398,8 @@
 					"GT1-02-05F1BT",
 					"GT1-02-07AT",
 					"GT1-02-07BT",
-					"GT1-02-07CT"
+					"GT1-02-07CT",
+					"GT1-02-07A1T"
 				],
 				"verification": ["GT1-02-13", "GT1-02-14", "GT1-03-13", "GT1-03-14", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
@@ -12461,7 +12469,7 @@
 				{
 					"id": "grok-effort-validation-and-retry-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-07 adds minimal/medium/max candidates requiring exact selected-model advertised wire values, native headless refusal parsing, ASCII-case-insensitive Grok refusal memory, and explicit config-builder refusal of none/remembered values. Current callers supply no menu and inherit; this is not native validation or tier-1 qualification. GT1-02-07A/AT own final argv/custom-alias validation; GT1-02-07B/BT own hint evidence propagation/replay; GT1-02-07C/CT own retry provenance and no-resend behavior. GT1-02-08/13 own core coverage/execution; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata. Native menu IDs may differ from wire values; no universal effort menu or model tiers are claimed.",
+					"missingPrerequisite": "GT1-02-07 adds evidence-gated minimal/medium/max candidates and native refusal memory. GT1-02-07A moves none/remembered-refusal guards from the scalar builder to canonical final argv composition and the shared launch planner, validates matching selected-model canonical wire menus, consolidates equivalent aliases and refuses conflicts/malformed selections. Current consumers supply no acknowledged menu, so none stays unavailable and explicit non-none values retain native validation; no native acceptance is claimed. GT1-02-07AT owns argv regression authoring and GT1-02-13 execution. GT1-02-07A1/A1T must preserve the new refusal identity in run-agent-turn.ts and process/handle-spawn.ts, which currently misclassify it as SSH. GT1-02-07B/BT own hint evidence propagation/replay; GT1-02-07C/CT own retry provenance and no-resend behavior. GT1-02-08/13 own core coverage/execution; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata and menu-ID mappings. No universal effort menu or model tiers are claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-07a-final-model-and-effort-validation.",
 					"affectedRows": ["P06", "REG-MODEL", "REG-DEFINITIONS", "P29", "P32", "S10", "S19"]
 				}
 			],
@@ -14375,8 +14383,22 @@
 				"src/cli/services/autorun-cli-deps.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-08-01", "GT1-02-07", "GT1-02-07A", "GT1-02-07B", "GT1-02-07C"],
-				"test": ["GT1-08-02", "GT1-02-08", "GT1-02-07AT", "GT1-02-07BT", "GT1-02-07CT"],
+				"implementation": [
+					"GT1-08-01",
+					"GT1-02-07",
+					"GT1-02-07A",
+					"GT1-02-07B",
+					"GT1-02-07C",
+					"GT1-02-07A1"
+				],
+				"test": [
+					"GT1-08-02",
+					"GT1-02-08",
+					"GT1-02-07AT",
+					"GT1-02-07BT",
+					"GT1-02-07CT",
+					"GT1-02-07A1T"
+				],
 				"verification": ["GT1-08-07", "GT1-11-11E", "GT1-02-13"],
 				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -14433,7 +14455,7 @@
 				{
 					"id": "grok-effort-validation-and-retry-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-07 adds minimal/medium/max candidates requiring exact selected-model advertised wire values, native headless refusal parsing, ASCII-case-insensitive Grok refusal memory, and explicit config-builder refusal of none/remembered values. Current callers supply no menu and inherit; this is not native validation or tier-1 qualification. GT1-02-07A/AT own final argv/custom-alias validation; GT1-02-07B/BT own hint evidence propagation/replay; GT1-02-07C/CT own retry provenance and no-resend behavior. GT1-02-08/13 own core coverage/execution; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata. Native menu IDs may differ from wire values; no universal effort menu or model tiers are claimed.",
+					"missingPrerequisite": "GT1-02-07 adds evidence-gated minimal/medium/max candidates and native refusal memory. GT1-02-07A moves none/remembered-refusal guards from the scalar builder to canonical final argv composition and the shared launch planner, validates matching selected-model canonical wire menus, consolidates equivalent aliases and refuses conflicts/malformed selections. Current consumers supply no acknowledged menu, so none stays unavailable and explicit non-none values retain native validation; no native acceptance is claimed. GT1-02-07AT owns argv regression authoring and GT1-02-13 execution. GT1-02-07A1/A1T must preserve the new refusal identity in run-agent-turn.ts and process/handle-spawn.ts, which currently misclassify it as SSH. GT1-02-07B/BT own hint evidence propagation/replay; GT1-02-07C/CT own retry provenance and no-resend behavior. GT1-02-08/13 own core coverage/execution; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata and menu-ID mappings. No universal effort menu or model tiers are claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-07a-final-model-and-effort-validation.",
 					"affectedRows": ["P06", "REG-MODEL", "REG-DEFINITIONS", "P29", "P32", "S10", "S19"]
 				}
 			],
@@ -15273,8 +15295,22 @@
 				"src/shared/maestro-lib/providers/capabilities.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-08-14", "GT1-02-07", "GT1-02-07A", "GT1-02-07B", "GT1-02-07C"],
-				"test": ["GT1-08-15", "GT1-02-08", "GT1-02-07AT", "GT1-02-07BT", "GT1-02-07CT"],
+				"implementation": [
+					"GT1-08-14",
+					"GT1-02-07",
+					"GT1-02-07A",
+					"GT1-02-07B",
+					"GT1-02-07C",
+					"GT1-02-07A1"
+				],
+				"test": [
+					"GT1-08-15",
+					"GT1-02-08",
+					"GT1-02-07AT",
+					"GT1-02-07BT",
+					"GT1-02-07CT",
+					"GT1-02-07A1T"
+				],
 				"verification": ["GT1-08-21", "GT1-11-11D", "GT1-02-13"],
 				"live": ["GT1-11-12", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -15331,7 +15367,7 @@
 				{
 					"id": "grok-effort-validation-and-retry-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-07 adds minimal/medium/max candidates requiring exact selected-model advertised wire values, native headless refusal parsing, ASCII-case-insensitive Grok refusal memory, and explicit config-builder refusal of none/remembered values. Current callers supply no menu and inherit; this is not native validation or tier-1 qualification. GT1-02-07A/AT own final argv/custom-alias validation; GT1-02-07B/BT own hint evidence propagation/replay; GT1-02-07C/CT own retry provenance and no-resend behavior. GT1-02-08/13 own core coverage/execution; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata. Native menu IDs may differ from wire values; no universal effort menu or model tiers are claimed.",
+					"missingPrerequisite": "GT1-02-07 adds evidence-gated minimal/medium/max candidates and native refusal memory. GT1-02-07A moves none/remembered-refusal guards from the scalar builder to canonical final argv composition and the shared launch planner, validates matching selected-model canonical wire menus, consolidates equivalent aliases and refuses conflicts/malformed selections. Current consumers supply no acknowledged menu, so none stays unavailable and explicit non-none values retain native validation; no native acceptance is claimed. GT1-02-07AT owns argv regression authoring and GT1-02-13 execution. GT1-02-07A1/A1T must preserve the new refusal identity in run-agent-turn.ts and process/handle-spawn.ts, which currently misclassify it as SSH. GT1-02-07B/BT own hint evidence propagation/replay; GT1-02-07C/CT own retry provenance and no-resend behavior. GT1-02-08/13 own core coverage/execution; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata and menu-ID mappings. No universal effort menu or model tiers are claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-07a-final-model-and-effort-validation.",
 					"affectedRows": ["P06", "REG-MODEL", "REG-DEFINITIONS", "P29", "P32", "S10", "S19"]
 				}
 			],
@@ -17495,7 +17531,8 @@
 					"GT1-09-09",
 					"GT1-02-07A",
 					"GT1-02-07B",
-					"GT1-02-07C"
+					"GT1-02-07C",
+					"GT1-02-07A1"
 				],
 				"test": [
 					"GT1-11-02",
@@ -17525,7 +17562,8 @@
 					"GT1-09-12",
 					"GT1-02-07AT",
 					"GT1-02-07BT",
-					"GT1-02-07CT"
+					"GT1-02-07CT",
+					"GT1-02-07A1T"
 				],
 				"verification": [
 					"GT1-01-07",
@@ -17604,7 +17642,7 @@
 				{
 					"id": "grok-effort-validation-and-retry-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-02-07 adds minimal/medium/max candidates requiring exact selected-model advertised wire values, native headless refusal parsing, ASCII-case-insensitive Grok refusal memory, and explicit config-builder refusal of none/remembered values. Current callers supply no menu and inherit; this is not native validation or tier-1 qualification. GT1-02-07A/AT own final argv/custom-alias validation; GT1-02-07B/BT own hint evidence propagation/replay; GT1-02-07C/CT own retry provenance and no-resend behavior. GT1-02-08/13 own core coverage/execution; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata. Native menu IDs may differ from wire values; no universal effort menu or model tiers are claimed.",
+					"missingPrerequisite": "GT1-02-07 adds evidence-gated minimal/medium/max candidates and native refusal memory. GT1-02-07A moves none/remembered-refusal guards from the scalar builder to canonical final argv composition and the shared launch planner, validates matching selected-model canonical wire menus, consolidates equivalent aliases and refuses conflicts/malformed selections. Current consumers supply no acknowledged menu, so none stays unavailable and explicit non-none values retain native validation; no native acceptance is claimed. GT1-02-07AT owns argv regression authoring and GT1-02-13 execution. GT1-02-07A1/A1T must preserve the new refusal identity in run-agent-turn.ts and process/handle-spawn.ts, which currently misclassify it as SSH. GT1-02-07B/BT own hint evidence propagation/replay; GT1-02-07C/CT own retry provenance and no-resend behavior. GT1-02-08/13 own core coverage/execution; GT1-03-10A/10B and existing phase08 owners must supply acknowledged account/host/version/model-scoped metadata and menu-ID mappings. No universal effort menu or model tiers are claimed. See Plans/grok-tier1/evidence/02.md#gt1-02-07a-final-model-and-effort-validation.",
 					"affectedRows": ["P06", "REG-MODEL", "REG-DEFINITIONS", "P29", "P32", "S10", "S19"]
 				}
 			],

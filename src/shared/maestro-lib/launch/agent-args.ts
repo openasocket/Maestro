@@ -1,5 +1,10 @@
 import type { AgentConfig, AgentDefinition } from '../providers/definitions';
-import type { AdditionalDirectory } from '../../types';
+import type {
+	AdditionalDirectory,
+	AgentDiscoveryResult,
+	AgentDiscoverySelection,
+} from '../../types';
+import { describeEffortRejection, getEffortRejection } from '../../effortRejection';
 import { logger } from '../host';
 import {
 	KNOWN_FULL_ACCESS_FLAGS,
@@ -13,9 +18,116 @@ import {
 type AgentConfigOverridable = Pick<
 	AgentConfig,
 	'configOptions' | 'defaultEnvVars' | 'readOnlyArgs' | 'resumeArgs' | 'batchModePrefix'
->;
+> &
+	Partial<Pick<AgentConfig, 'id'>>;
 
 const LOG_CONTEXT = '[AgentArgs]';
+
+/** Native wire vocabulary, not a list of efforts supported by any one model. */
+export const GROK_EFFORT_WIRE_VALUES = [
+	'none',
+	'minimal',
+	'low',
+	'medium',
+	'high',
+	'xhigh',
+	'max',
+] as const;
+
+/**
+ * Host-owned evidence for this launch's selected model, account, executable and
+ * local/SSH target. The host must invalidate it when that context changes.
+ * Discovery picker options include configured fallbacks and MUST NOT be used
+ * as wireValues. Native menu-ID mapping/acknowledgement belongs to the transport.
+ */
+export type GrokEffortMenu = Pick<AgentDiscoveryResult, 'status'> &
+	Required<Pick<AgentDiscoverySelection, 'model'>> & {
+		wireValues: readonly (typeof GROK_EFFORT_WIRE_VALUES)[number][];
+	};
+
+export class GrokModelEffortError extends Error {
+	readonly name = 'GrokModelEffortError';
+}
+
+/** Grok's value-taking selection aliases, before generic flag deduplication. */
+function grokSelectionFlag(arg: string): 'model' | 'effort' | undefined {
+	const flag = arg.split('=', 1)[0];
+	if (flag === '-m' || flag === '--model') return 'model';
+	if (flag === '--effort' || flag === '--reasoning-effort') return 'effort';
+	return undefined;
+}
+
+/**
+ * Validate the composed pre-prompt argv, keeping one authoritative selection.
+ * No model/rung substitution: absent or stale menus preserve explicit non-none
+ * requests for native validation, but cannot authorize none. This is not proof
+ * that the native process acknowledges the requested model and effort.
+ */
+export function resolveGrokModelEffortArgs(args: string[], menu?: GrokEffortMenu): string[] {
+	const selected: { model?: string; effort?: string } = {};
+	const normalized: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (arg === '--') {
+			throw new GrokModelEffortError(
+				'Grok launch arguments cannot end options before the generated model, effort and prompt flags.'
+			);
+		}
+		const selection = grokSelectionFlag(arg);
+		if (!selection) {
+			// Refuse attached short-model syntax rather than overlook a model switch.
+			if (arg.startsWith('-m') && !arg.startsWith('--')) {
+				throw new GrokModelEffortError(
+					'Use -m <model> or --model=<model> for Grok model selection.'
+				);
+			}
+			normalized.push(arg);
+			continue;
+		}
+		const equals = arg.indexOf('=');
+		const raw = equals >= 0 ? arg.slice(equals + 1) : args[++i];
+		const value = raw?.trim();
+		if (!value || value.startsWith('-')) {
+			throw new GrokModelEffortError(`Grok ${selection} selection requires a nonempty value.`);
+		}
+		// Native effort tokens match ignoring ASCII case; model IDs stay exact.
+		const comparable =
+			selection === 'effort' ? value.replace(/[A-Z]/g, (char) => char.toLowerCase()) : value;
+		if (selected[selection] !== undefined) {
+			if (selected[selection] !== comparable) {
+				throw new GrokModelEffortError(
+					`Conflicting Grok ${selection} selections. Configure one value across settings and custom arguments.`
+				);
+			}
+			continue;
+		}
+		selected[selection] = comparable;
+		normalized.push(selection === 'model' ? '-m' : '--reasoning-effort', value);
+	}
+
+	if (selected.effort !== undefined) {
+		const rejection = getEffortRejection('grok', selected.effort);
+		if (rejection) {
+			throw new GrokModelEffortError(describeEffortRejection('Grok CLI', rejection));
+		}
+		const matchingMenu =
+			menu?.status === 'discovered' &&
+			selected.model !== undefined &&
+			menu.model === selected.model;
+		const wireValue = GROK_EFFORT_WIRE_VALUES.find((value) => value === selected.effort);
+		if (matchingMenu && (wireValue === undefined || !menu.wireValues.includes(wireValue))) {
+			throw new GrokModelEffortError(
+				'Grok effort is not advertised as a wire value for the selected model. Choose a supported effort explicitly.'
+			);
+		}
+		if (selected.effort === 'none' && !matchingMenu) {
+			throw new GrokModelEffortError(
+				'Grok effort "none" requires verified support for the selected model.'
+			);
+		}
+	}
+	return normalized;
+}
 
 export type BuildAgentArgsOptions = {
 	baseArgs: string[];
@@ -63,6 +175,8 @@ type AgentConfigOverrides = {
 	sessionCustomEffort?: string;
 	sessionCustomArgs?: string;
 	sessionCustomEnvVars?: Record<string, string>;
+	/** Optional host-scoped wire menu, checked against the final model flag. */
+	grokEffortMenu?: GrokEffortMenu;
 	/**
 	 * Whether this spawn is read-only (plan mode). Config options are appended
 	 * AFTER `buildAgentArgs()` has already emitted `readOnlyArgs`, so a config
@@ -82,15 +196,42 @@ export type AgentConfigResolution = {
 };
 
 /** Parse a space-separated custom args string into an array, respecting quoted segments. */
-export function parseCustomArgs(customArgs?: string): string[] {
+export function parseCustomArgs(customArgs?: string, grokSelections = false): string[] {
 	if (!customArgs || typeof customArgs !== 'string') {
 		return [];
 	}
 
-	const customArgsArray = customArgs.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g) || [];
-	return customArgsArray.map((arg) => {
+	const matches = [...customArgs.matchAll(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)];
+	if (grokSelections) {
+		// The legacy tokenizer skips unmatched quotes. Do not let that silently
+		// turn one Grok model/effort value into a different value plus positionals.
+		let end = 0;
+		for (const match of matches) {
+			if (customArgs.slice(end, match.index).trim()) {
+				throw new GrokModelEffortError('Grok custom arguments contain an unmatched quote.');
+			}
+			end = match.index + match[0].length;
+		}
+		if (customArgs.slice(end).trim()) {
+			throw new GrokModelEffortError('Grok custom arguments contain an unmatched quote.');
+		}
+	}
+	return matches.map(([arg]) => {
 		if ((arg.startsWith('"') && arg.endsWith('"')) || (arg.startsWith("'") && arg.endsWith("'"))) {
 			return arg.slice(1, -1);
+		}
+		// Grok's final selection validator also accepts --flag="quoted value".
+		// Keep other providers' established tokenization unchanged.
+		if (grokSelections && grokSelectionFlag(arg)) {
+			const equals = arg.indexOf('=');
+			const value = arg.slice(equals + 1);
+			if (
+				equals >= 0 &&
+				((value.startsWith('"') && value.endsWith('"')) ||
+					(value.startsWith("'") && value.endsWith("'")))
+			) {
+				return arg.slice(0, equals + 1) + value.slice(1, -1);
+			}
 		}
 		return arg;
 	});
@@ -289,7 +430,17 @@ export function buildAgentArgs(
 	// Positional arguments (non-flags) are intentionally left untouched.
 	const seenFlags = new Set<string>();
 	const dedupe = (args: string[]): string[] =>
-		args.filter((arg) => {
+		args.filter((arg, index) => {
+			// Keep Grok selection pairs intact until config/custom args are joined.
+			// Dropping only a repeated flag would hide conflicts and orphan its value.
+			const previous = args[index - 1];
+			if (
+				agent.id === 'grok' &&
+				(grokSelectionFlag(arg) ||
+					(previous && !previous.includes('=') && grokSelectionFlag(previous)))
+			) {
+				return true;
+			}
 			if (!arg.startsWith('-')) return true;
 			if (seenFlags.has(arg)) return false;
 			seenFlags.add(arg);
@@ -450,7 +601,7 @@ export function applyAgentConfigOverrides(
 			: 'none';
 
 	const parsedCustomArgs = stripFlags(
-		parseCustomArgs(effectiveCustomArgs),
+		parseCustomArgs(effectiveCustomArgs, agent?.id === 'grok'),
 		readOnlyPinnedFlags,
 		readOnlyValueTakingFlags
 	);
@@ -458,6 +609,9 @@ export function applyAgentConfigOverrides(
 		finalArgs = [...finalArgs, ...parsedCustomArgs];
 	} else {
 		customArgsSource = 'none';
+	}
+	if (agent?.id === 'grok') {
+		finalArgs = resolveGrokModelEffortArgs(finalArgs, overrides.grokEffortMenu);
 	}
 
 	// Env vars: agent defaults (lowest), then ONE user-configured set on top. The
