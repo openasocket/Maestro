@@ -12,6 +12,11 @@
 import { isAbsolutePath } from '../../formatters';
 import type { AgentCapabilities } from '../../types';
 import type { AgentConfig } from '../providers/definitions';
+import {
+	buildAcpPromptFileContent,
+	type AcpPromptBlock,
+	type EmbeddedImageSupport,
+} from './image-refs';
 
 /** The parts of a provider definition that decide how its prompt is written. */
 export interface PromptDeliveryAgent {
@@ -99,8 +104,12 @@ export interface ResolvePromptDeliveryInput {
 	isWindowsHost: boolean;
 	/** The agent runs on an SSH remote. */
 	sshRemote: boolean;
-	/** The turn carries images. */
+	/** The turn carries images. A file route must receive their embedded bytes. */
 	hasImages?: boolean;
+	/** Ordered, resolved ACP blocks instead of `prompt`, never in addition to it. */
+	promptBlocks?: readonly AcpPromptBlock[];
+	/** Executing host's admitted image support; absence refuses embedded images. */
+	embeddedImageSupport?: EmbeddedImageSupport;
 	/** Arguments before prompt delivery, used to reject competing native sources. */
 	args?: readonly string[];
 	/** Required only for an explicitly declared prompt file. No I/O occurs here. */
@@ -123,24 +132,35 @@ export interface ResolvePromptDeliveryInput {
  */
 export function resolvePromptDelivery(input: ResolvePromptDeliveryInput): PromptDelivery {
 	const { agent, prompt } = input;
-	if (agent?.promptFile && prompt !== undefined) {
+	if (input.promptBlocks !== undefined) {
+		if (prompt !== undefined) {
+			return {
+				via: 'refused',
+				error: 'Supply either prompt text or ordered content blocks, not both.',
+			};
+		}
+		if (agent?.promptFile?.format !== 'acp-json') {
+			return { via: 'refused', error: 'Ordered content requires an ACP JSON prompt-file route.' };
+		}
+	}
+	if (
+		agent?.promptFile &&
+		(prompt !== undefined || input.promptBlocks !== undefined || input.hasImages)
+	) {
 		const { promptFileDestination: destination } = input;
+		const extension = agent.promptFile.format === 'acp-json' ? '.json' : '.txt';
 		if (
 			!agent.promptFileArgs ||
 			!destination ||
 			destination.owner !== (input.sshRemote ? 'remote' : 'local') ||
 			!isAbsolutePath(destination.path) ||
 			destination.path.includes('\0') ||
-			!destination.path.endsWith('.txt')
+			!destination.path.endsWith(extension)
 		) {
 			return {
 				via: 'refused',
-				error:
-					'Prompt-file delivery requires a fresh owned .txt destination on the executing host and a provider file-argument builder.',
+				error: `Prompt-file delivery requires a fresh owned ${extension} destination on the executing host and a provider file-argument builder.`,
 			};
-		}
-		if (input.hasImages) {
-			return { via: 'refused', error: 'This prompt-file format cannot carry embedded images.' };
 		}
 		if (
 			input.args?.some(
@@ -159,12 +179,26 @@ export function resolvePromptDelivery(input: ResolvePromptDeliveryInput): Prompt
 				error: 'Prompt-file delivery conflicts with another prompt source in the launch arguments.',
 			};
 		}
+		let content = prompt ?? '';
+		if (agent.promptFile.format === 'acp-json') {
+			const encoded = buildAcpPromptFileContent(
+				input.promptBlocks !== undefined ? input.promptBlocks : [{ type: 'text', text: content }],
+				input.embeddedImageSupport
+			);
+			if (!encoded.ok) return { via: 'refused', error: encoded.error };
+			if (input.hasImages && !encoded.hasImages) {
+				return { via: 'refused', error: 'Image content is missing from the ACP prompt file.' };
+			}
+			content = encoded.content;
+		} else if (input.hasImages) {
+			return { via: 'refused', error: 'This prompt-file format cannot carry embedded images.' };
+		}
 		return {
 			via: 'file',
 			args: agent.promptFileArgs(destination.path),
 			artifact: {
 				...destination,
-				content: prompt,
+				content,
 				encoding: 'utf8',
 				mode: 0o600,
 				flag: 'wx',

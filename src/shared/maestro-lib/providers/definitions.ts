@@ -129,7 +129,8 @@ export interface AgentConfig extends BaseAgentConfig {
 	 * This describes native input, not a public capability or materialization.
 	 */
 	promptFile?: {
-		format: 'text';
+		/** ACP JSON preserves text verbatim and can carry admitted embedded images. */
+		format: 'text' | 'acp-json';
 		/** All native prompt-source aliases, which must be absent from base args. */
 		exclusivePromptFlags: readonly string[];
 	};
