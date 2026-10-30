@@ -25,6 +25,12 @@ vi.mock('electron', () => ({
 	safeStorage: { isEncryptionAvailable: (): boolean => false },
 }));
 vi.mock('node-pty', () => ({ spawn: vi.fn() }));
+vi.mock('../../../../shared/maestro-lib/run/start-turn', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../../../shared/maestro-lib/run/start-turn')>()),
+	startTurn: vi.fn(() => {
+		throw new Error('Naming admission tests must never start a native process');
+	}),
+}));
 vi.mock('../../../../main/utils/logger', () => ({
 	logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
@@ -50,6 +56,8 @@ import {
 import { ProcessManager } from '../../../../main/process-manager';
 import type { ProcessConfig } from '../../../../main/process-manager/types';
 import { logger } from '../../../../main/utils/logger';
+import { startTurn } from '../../../../shared/maestro-lib/run/start-turn';
+import type { PolicyDecision } from '../../../../shared/maestro-lib/managed/authority';
 import type { ManagedDelegationContext } from '../../../../shared/maestro-lib/managed/delegation';
 import { MANAGED_CONTRACT_VERSION } from '../../../../shared/maestro-lib/managed/types';
 import { fakeSpawnPort, type FakeSpawnPort } from '../../../helpers/managedSpawnPort';
@@ -86,17 +94,17 @@ function fakeStore(data: Record<string, unknown>) {
 	};
 }
 
-function detector(): AgentDetector {
-	const definition = getAgentDefinition('codex');
-	if (!definition) throw new Error('no codex definition');
+function detector(provider: 'codex' | 'grok' = 'codex'): AgentDetector {
+	const definition = getAgentDefinition(provider);
+	if (!definition) throw new Error(`no ${provider} definition`);
 	const agent = {
 		...definition,
 		available: true,
-		path: '/usr/local/bin/codex',
-		capabilities: getAgentCapabilities('codex'),
+		path: `/usr/local/bin/${provider}`,
+		capabilities: getAgentCapabilities(provider),
 	};
 	return {
-		getAgent: async (id: string) => (id === 'codex' ? agent : null),
+		getAgent: async (id: string) => (id === provider ? agent : null),
 	} as unknown as AgentDetector;
 }
 
@@ -115,7 +123,10 @@ interface Harness {
  * authority). `spawn` is replaced at the very end unless `spySpawn` is false,
  * in which case the real sink runs and its result can be read off the spy.
  */
-function harness(port: FakeSpawnPort | null, options: { spySpawn?: boolean } = {}): Harness {
+function harness(
+	port: FakeSpawnPort | null,
+	options: { spySpawn?: boolean; provider?: 'codex' | 'grok' } = {}
+): Harness {
 	const processManager = port
 		? new ProcessManager(() => true, { spawnAuthority: () => port })
 		: new ProcessManager();
@@ -129,7 +140,7 @@ function harness(port: FakeSpawnPort | null, options: { spySpawn?: boolean } = {
 	}
 	const deps: TabNamingHandlerDependencies = {
 		getProcessManager: () => processManager,
-		getAgentDetector: detector,
+		getAgentDetector: () => detector(options.provider),
 		agentConfigsStore: fakeStore({
 			configs: {},
 		}) as unknown as TabNamingHandlerDependencies['agentConfigsStore'],
@@ -355,5 +366,147 @@ describe('generateTabName on a standalone host: unchanged', () => {
 		expect(config.admission).toBeUndefined();
 		h.answer('Login Form');
 		await expect(pending).resolves.toBe('Login Form');
+	});
+});
+
+describe('Grok naming prompt files at the managed sink (GT1-02-11D)', () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	it('binds the real Grok file plan to the dispatched child without disclosing bytes in admission', async () => {
+		const port = fakeSpawnPort();
+		const h = harness(port, { provider: 'grok' });
+		const pending = generateTabName(h.deps, {
+			...dispatchedConfig(),
+			agentType: 'grok',
+			userMessage: 'PRIVATE_GROK_TITLE_INPUT',
+		});
+		await vi.waitFor(() => expect(h.spawn).toHaveBeenCalledOnce());
+		const config = h.spawn.mock.calls[0][0] as ProcessConfig;
+		expect(config.promptArtifact).toMatchObject({
+			owner: 'local',
+			cleanup: 'turn',
+			flag: 'wx',
+			mode: 0o600,
+		});
+		expect(config.promptArtifact?.content).toContain('PRIVATE_GROK_TITLE_INPUT');
+		expect(config.args.slice(-2)).toEqual(['--prompt-file', config.promptArtifact?.path]);
+		expect(config.prompt).toBeUndefined();
+		expect(config.promptArgs).toBeUndefined();
+		expect(config.sendPromptViaStdin).toBe(false);
+		expect(config.sendPromptViaStdinRaw).toBe(false);
+		expect(config.delegation).toEqual(PLUGIN_CONTEXT);
+		expect(config.admission).toMatchObject({ provider: 'grok', ...DISPATCHED_AS });
+		expect(port.asked[0].snapshot).toMatchObject({ provider: 'grok', target: { kind: 'local' } });
+		expect(JSON.stringify(port.asked)).not.toContain('PRIVATE_GROK_TITLE_INPUT');
+		h.answer('Private Title');
+		await expect(pending).resolves.toBe('Private Title');
+		expect(startTurn).not.toHaveBeenCalled(); // the final spawn remains a declared fake
+	});
+
+	it('refuses policy-denied Grok naming before process/artifact creation and keeps diagnostics private', async () => {
+		const port = fakeSpawnPort({
+			decide: () => ({
+				decision: 'deny',
+				reason: 'Provider unavailable to this actor',
+				policyRevision: 1,
+				code: 'policy-denied',
+			}),
+		});
+		const h = harness(port, { provider: 'grok' });
+		await expect(
+			generateTabName(h.deps, {
+				...dispatchedConfig(),
+				agentType: 'grok',
+				userMessage: 'PRIVATE_REFUSED_PROMPT',
+			})
+		).resolves.toBeNull();
+		expect(port.asked).toHaveLength(1);
+		expect(h.spawn).not.toHaveBeenCalled();
+		expect(startTurn).not.toHaveBeenCalled();
+		expect(port.authority.live()).toHaveLength(0);
+		expect(logger.warn).toHaveBeenCalledWith(
+			'Dispatched tab naming spawn was not admitted',
+			'[TabNaming]',
+			expect.objectContaining({
+				managed: { state: 'denied', code: 'policy-denied' },
+				error: 'Prompt-file tab naming spawn refused.',
+			})
+		);
+		expect(
+			JSON.stringify([
+				h.errors,
+				port.asked,
+				...Object.values(logger).map((log) => vi.mocked(log).mock.calls),
+			])
+		).not.toContain('PRIVATE_REFUSED_PROMPT');
+	});
+
+	it.each(['allow', 'deny'] as const)(
+		'cancels a pending Grok admission before its late %s decision, releasing unused leases',
+		async (decision) => {
+			let settle!: (value: PolicyDecision) => void;
+			const admission = new Promise<PolicyDecision>((resolve) => {
+				settle = resolve;
+			});
+			const port = fakeSpawnPort({ decide: () => admission });
+			const h = harness(port, { provider: 'grok' });
+			const admitted = vi.spyOn(h.processManager, 'spawnAdmitted');
+			const stop = vi.spyOn(h.processManager, 'kill');
+			const controller = new AbortController();
+			const pending = generateTabName(
+				h.deps,
+				{ ...dispatchedConfig(), agentType: 'grok' },
+				controller.signal
+			);
+			await vi.waitFor(() => expect(port.asked).toHaveLength(1));
+			controller.abort();
+			await expect(pending).resolves.toBeNull();
+			expect(admitted.mock.calls[0][2]?.signal?.aborted).toBe(true);
+			settle(
+				decision === 'allow'
+					? { decision, policyRevision: 1 }
+					: { decision, policyRevision: 1, reason: 'Refused' }
+			);
+			await admitted.mock.results[0].value;
+			expect(h.spawn).not.toHaveBeenCalled();
+			expect(startTurn).not.toHaveBeenCalled();
+			expect(port.authority.live()).toHaveLength(0);
+			expect(h.errors).toEqual([]);
+			expect(stop).toHaveBeenCalledWith(admitted.mock.calls[0][0].sessionId);
+			expect(h.processManager.listenerCount('data')).toBe(0);
+			expect(h.processManager.listenerCount('raw-stdout')).toBe(0);
+		}
+	);
+
+	it('the real child sink refuses a naming artifact detached from its remote owner before starting a reader', async () => {
+		const h = harness(null, { provider: 'grok', spySpawn: false });
+		// Corrupt only the sink handoff: the production planner and Grok builders run.
+		h.spawn.mockImplementation((config: ProcessConfig) =>
+			ProcessManager.prototype.spawn.call(h.processManager, {
+				...config,
+				promptArtifact: {
+					...config.promptArtifact!,
+					owner: 'remote',
+					sshRemoteId: 'missing-owner',
+				},
+			})
+		);
+		await expect(
+			generateTabName(h.deps, {
+				...baseConfig(),
+				agentType: 'grok',
+				userMessage: 'PRIVATE_ORPHAN_PROMPT',
+			})
+		).resolves.toBeNull();
+		expect(h.spawn).toHaveBeenCalledOnce();
+		expect(h.spawn.mock.results[0].value).toEqual({
+			pid: -1,
+			success: false,
+			error: 'Prompt-file delivery does not match its host plan.',
+		});
+		expect(startTurn).not.toHaveBeenCalled();
+		expect(
+			JSON.stringify(Object.values(logger).map((log) => vi.mocked(log).mock.calls))
+		).not.toContain('PRIVATE_ORPHAN_PROMPT');
 	});
 });
