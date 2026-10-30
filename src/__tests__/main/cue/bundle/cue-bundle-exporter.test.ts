@@ -766,6 +766,93 @@ describe('exportCueBundle - agent resolution', () => {
 		expect(result.manifest.warnings?.some((w) => w.includes('no longer exists'))).toBe(false);
 	});
 
+	describe.each(['agent', 'provider'] as const)('Grok secrets from %s settings', (source) => {
+		it.each([
+			{
+				label: 'inline JSON and URL userinfo, query and path credentials',
+				env: {
+					GROK_AUTH: '{"apiKey":"fixture-inline-credential"}',
+					GROK_MODELS_BASE_URL: 'https://user:fixture-userinfo-credential@gateway.invalid/v1',
+					GROK_CLI_CHAT_PROXY_BASE_URL: 'https://gateway.invalid/v1?key=fixture-query-credential',
+					GROK_XAI_API_BASE_URL: 'https://gateway.invalid/fixture-path-credential/v1',
+				},
+				canaries: [
+					'fixture-inline-credential',
+					'fixture-userinfo-credential',
+					'fixture-query-credential',
+					'fixture-path-credential',
+				],
+			},
+			{
+				label: 'malformed JSON and malformed gateway URLs',
+				env: {
+					GROK_AUTH: '{"apiKey":"fixture-broken-json-credential',
+					GROK_MODELS_BASE_URL: 'https://[fixture-broken-model-credential',
+					GROK_CLI_CHAT_PROXY_BASE_URL: 'not a URL?key=fixture-broken-chat-credential',
+					GROK_XAI_API_BASE_URL: '://gateway/fixture-broken-api-credential',
+				},
+				canaries: [
+					'fixture-broken-json-credential',
+					'fixture-broken-model-credential',
+					'fixture-broken-chat-credential',
+					'fixture-broken-api-credential',
+				],
+			},
+		])('exports only required secret names for $label', async ({ env, canaries }) => {
+			const { sessions } = JSON.parse(
+				fs.readFileSync(path.join(dataDir, 'maestro-sessions.json'), 'utf-8')
+			) as { sessions: Array<Record<string, unknown>> };
+			const grok = sessions.find((session) => session.id === 'agent-alpha')!;
+			grok.toolType = 'grok';
+			delete grok.customEnvVars;
+			const customEnvVars = { ...env, LOG_LEVEL: 'debug', REGION: 'eu' };
+			if (source === 'agent') grok.customEnvVars = customEnvVars;
+			else {
+				const configPath = path.join(dataDir, 'maestro-agent-configs.json');
+				const { configs } = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+				writeJson(configPath, { configs: { ...configs, grok: { customEnvVars } } });
+			}
+			setSessions(sessions);
+
+			const out = path.join(tmp, 'grok-secrets.zip');
+			await exportCueBundle({
+				dataDir,
+				pipeline: 'Review',
+				outputPath: out,
+				env: ENV,
+				claudeConfigDir: path.join(tmp, 'claude-config'),
+			});
+			const entries = readZip(out);
+			const settings = JSON.parse(
+				entries.get('agents/agent-alpha.json')!.toString('utf-8')
+			) as CueBundleAgentSettings;
+			const required = [
+				'GROK_AUTH',
+				'GROK_CLI_CHAT_PROXY_BASE_URL',
+				'GROK_MODELS_BASE_URL',
+				'GROK_XAI_API_BASE_URL',
+			];
+			expect(settings.toolType).toBe('grok');
+			expect(settings.env).toEqual({ values: { LOG_LEVEL: 'debug', REGION: 'eu' }, required });
+			expect(manifestOf(entries).requirements.secrets).toEqual([
+				...required,
+				'HOOK_SECRET',
+				'OPENAI_API_KEY',
+			]);
+			const writer = JSON.parse(
+				entries.get('agents/agent-writer.json')!.toString('utf-8')
+			) as CueBundleAgentSettings;
+			expect(writer.env).toEqual({ values: { REGION: 'eu' }, required: ['OPENAI_API_KEY'] });
+			for (const [name, bytes] of entries) {
+				const text = bytes.toString('utf-8');
+				for (const value of [...Object.values(env), ...canaries, SECRET_VALUE]) {
+					expect(text, name).not.toContain(value);
+					expect(text, name).not.toContain(JSON.stringify(value).slice(1, -1));
+				}
+			}
+		});
+	});
+
 	it('exports a credential-shaped value under an unflagged key by name only', async () => {
 		setSessions([
 			{

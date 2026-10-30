@@ -2006,7 +2006,7 @@
 				{
 					"id": "grok-environment-disclosure-unverified",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots and documents opaque Grok bundle/gateway handling. GT1-02-03D/03I/13 still own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03h-opaque-settings-snapshots. Whole-row qualification remains pending.",
+					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots. GT1-02-03I authored 20 snapshot and 4 Cue-export regression cases, not executed. GT1-02-03D still owns helper/UI coverage and GT1-02-13 owns deterministic execution. See Plans/grok-tier1/evidence/02.md#gt1-02-03i-settings-snapshot-and-cue-export-test-authoring. Whole-row qualification remains pending.",
 					"affectedRows": ["P05"]
 				},
 				{
@@ -12062,7 +12062,7 @@
 				{
 					"id": "grok-environment-disclosure-unverified",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots and documents opaque Grok bundle/gateway handling. GT1-02-03D/03I/13 still own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03h-opaque-settings-snapshots. Whole-row qualification remains pending.",
+					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots. GT1-02-03I authored 20 snapshot and 4 Cue-export regression cases, not executed. GT1-02-03D still owns helper/UI coverage and GT1-02-13 owns deterministic execution. See Plans/grok-tier1/evidence/02.md#gt1-02-03i-settings-snapshot-and-cue-export-test-authoring. Whole-row qualification remains pending.",
 					"affectedRows": ["REG-AUTH"]
 				},
 				{
@@ -16722,7 +16722,7 @@
 				{
 					"id": "grok-environment-disclosure-unverified",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots and documents opaque Grok bundle/gateway handling. GT1-02-03D/03I/13 still own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03h-opaque-settings-snapshots. Whole-row qualification remains pending.",
+					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H propagates the masking key through settings snapshots. GT1-02-03I authored 20 snapshot and 4 Cue-export regression cases, not executed. GT1-02-03D still owns helper/UI coverage and GT1-02-13 owns deterministic execution. See Plans/grok-tier1/evidence/02.md#gt1-02-03i-settings-snapshot-and-cue-export-test-authoring. Whole-row qualification remains pending.",
 					"affectedRows": ["META-05"]
 				},
 				{
