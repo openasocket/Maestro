@@ -5,7 +5,7 @@
  * whether output should be processed as JSON lines or raw text.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 import * as nodeFs from 'fs';
 import * as nodeOs from 'os';
@@ -34,6 +34,11 @@ function createMockChildProcess() {
 }
 
 // Mock child_process before imports - wrap in function to avoid hoisting issues
+// Mutable namespace for scoped, descriptor-only artifact fixtures below.
+vi.mock('fs', async (importOriginal) => ({
+	...(await importOriginal<typeof import('fs')>()),
+}));
+
 vi.mock('child_process', async (importOriginal) => {
 	const actual = await importOriginal<typeof import('child_process')>();
 	return {
@@ -125,6 +130,9 @@ import { getAgentDefinition } from '../../../../main/agents/definitions';
 import { getAgentCapabilities as getRealAgentCapabilities } from '../../../../main/agents/capabilities';
 import { logger } from '../../../../main/utils/logger';
 import * as turnRunner from '../../../../shared/maestro-lib/run/start-turn';
+import * as agentDefinitions from '../../../../main/agents/definitions';
+import * as routeCapabilities from '../../../../shared/maestro-lib/providers/capabilities';
+import * as sentry from '../../../../main/utils/sentry';
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /**
@@ -611,6 +619,228 @@ describe('ChildProcessSpawner', () => {
 				await vi.waitFor(() => expect(onExit).toHaveBeenCalled());
 				expect(mockSpawn).toHaveBeenCalledTimes(1);
 			});
+		});
+	});
+
+	describe('local prompt-file sink (GT1-02-10ET)', () => {
+		const artifact: NonNullable<ProcessConfig['promptArtifact']> = {
+			owner: 'local',
+			path: nodePath.join(nodeOs.tmpdir(), 'maestro-prompt-synthetic-10et.json'),
+			content: JSON.stringify([{ type: 'text', text: '雪\nprivate-turn-10et' }]),
+			encoding: 'utf8',
+			mode: 0o600,
+			flag: 'wx',
+			cleanup: 'turn',
+		};
+		const config = createBaseConfig({
+			toolType: 'grok',
+			command: nodePath.join(nodeOs.tmpdir(), 'synthetic-grok.exe'),
+			args: ['--output-format', 'streaming-json', '--prompt-file', artifact.path],
+			promptArtifact: artifact,
+		});
+
+		beforeEach(() => {
+			// The production Grok file route remains inactive; opt in only this fixture.
+			const definition = getAgentDefinition('grok')!;
+			vi.spyOn(agentDefinitions, 'getAgentDefinition').mockReturnValue({
+				...definition,
+				promptFileArgs: (file) => ['--prompt-file', file],
+			});
+			vi.spyOn(nodeFs, 'openSync').mockReturnValue(41);
+			vi.spyOn(nodeFs, 'writeFileSync').mockImplementation(() => {});
+			vi.spyOn(nodeFs, 'fstatSync').mockReturnValue({ dev: 1, ino: 41 } as nodeFs.Stats);
+			vi.spyOn(nodeFs, 'lstatSync').mockReturnValue({ dev: 1, ino: 41 } as nodeFs.Stats);
+			vi.spyOn(nodeFs, 'unlinkSync').mockImplementation(() => {});
+			vi.spyOn(nodeFs, 'closeSync').mockImplementation(() => {});
+			vi.spyOn(sentry, 'captureException').mockResolvedValue();
+		});
+		afterEach(() => {
+			vi.restoreAllMocks();
+			vi.mocked(isWindows).mockReturnValue(false);
+		});
+
+		it.each([
+			{ name: 'empty', windows: false, content: '' },
+			{ name: 'Unicode', windows: false, content: artifact.content },
+			{
+				name: 'large Windows input',
+				windows: true,
+				content: JSON.stringify([{ type: 'text', text: '雪\n'.repeat(50000) }]),
+			},
+		])(
+			'delivers $name exactly once despite competing legacy options',
+			async ({ windows, content }) => {
+				vi.mocked(isWindows).mockReturnValue(windows);
+				const { spawner, processes } = createTestContext();
+				const imageArgs = vi.fn(() => ['--legacy-image']);
+				const imagePromptBuilder = vi.fn(() => 'legacy-image-prefix');
+				const promptArgs = vi.fn(() => ['--single']);
+				expect(
+					spawner.spawn({
+						...config,
+						promptArtifact: { ...artifact, content },
+						prompt: 'obsolete raw prompt',
+						images: ['data:image/png;base64,c3ludGhldGlj'],
+						imageArgs,
+						imagePromptBuilder,
+						promptArgs,
+						sendPromptViaStdin: true,
+						sendPromptViaStdinRaw: true,
+					})
+				).toMatchObject({ success: true });
+				expect(nodeFs.openSync).toHaveBeenCalledExactlyOnceWith(artifact.path, 'wx', 0o600);
+				expect(nodeFs.writeFileSync).toHaveBeenCalledExactlyOnceWith(41, content, 'utf8');
+				expect(mockSpawn).toHaveBeenCalledExactlyOnceWith(
+					config.command,
+					config.args,
+					expect.objectContaining({ shell: false })
+				);
+				for (const legacy of [
+					saveImageToTempFile,
+					buildStreamJsonMessage,
+					imageArgs,
+					imagePromptBuilder,
+					promptArgs,
+				]) {
+					expect(legacy).not.toHaveBeenCalled();
+				}
+				expect(mockChildProcess.stdin.write).not.toHaveBeenCalled();
+				expect(mockChildProcess.stdin.end).toHaveBeenCalledTimes(1);
+				expect(processes.get(config.sessionId)).toMatchObject({ isBatchMode: true, args: [] });
+				expect(processes.get(config.sessionId)?.tempFiles).toBeUndefined();
+				expect(nodeFs.unlinkSync).not.toHaveBeenCalled();
+				childHandlers(mockChildProcess).get('close')?.(0, null);
+				await vi.waitFor(() => expect(processes.size).toBe(0));
+				expect(nodeFs.unlinkSync).toHaveBeenCalledExactlyOnceWith(artifact.path);
+				expect(nodeFs.closeSync).toHaveBeenCalledExactlyOnceWith(41);
+			}
+		);
+
+		it.each(['preflight', 'final'] as const)(
+			'refuses managed %s before spawn and removes only an owned file',
+			(stage) => {
+				const { spawner, processes } = createTestContext();
+				const support = providerRouteSupport('codex');
+				const routes = vi.spyOn(routeCapabilities, 'providerRouteSupport').mockReturnValue([]);
+				routes.mockReturnValueOnce(support); // Initial route check before preparation.
+				if (stage === 'final') routes.mockReturnValueOnce(support);
+				const result = spawner.spawn({ ...config, admission: fakeAdmission({ provider: 'grok' }) });
+				expect(result).toMatchObject({
+					success: false,
+					managed: { state: 'unavailable', code: 'capability-unsupported' },
+				});
+				expect(mockSpawn).not.toHaveBeenCalled();
+				expect(processes.size).toBe(0);
+				if (stage === 'final') {
+					expect(nodeFs.writeFileSync).toHaveBeenCalledExactlyOnceWith(
+						41,
+						artifact.content,
+						'utf8'
+					);
+					expect(nodeFs.unlinkSync).toHaveBeenCalledExactlyOnceWith(artifact.path);
+					expect(nodeFs.closeSync).toHaveBeenCalledExactlyOnceWith(41);
+				} else {
+					expect(nodeFs.openSync).not.toHaveBeenCalled();
+					expect(nodeFs.unlinkSync).not.toHaveBeenCalled();
+				}
+			}
+		);
+
+		it('cleans an owned artifact on synchronous spawn failure using a fixed private diagnostic', () => {
+			const { spawner, processes } = createTestContext();
+			mockSpawn.mockImplementationOnce(() => {
+				throw new Error(`${artifact.path}: ${artifact.content}`);
+			});
+			expect(spawner.spawn(config)).toEqual({
+				pid: -1,
+				success: false,
+				error: 'Prompt-file process could not be started.',
+			});
+			expect(nodeFs.unlinkSync).toHaveBeenCalledExactlyOnceWith(artifact.path);
+			expect(nodeFs.closeSync).toHaveBeenCalledExactlyOnceWith(41);
+			expect(processes.size).toBe(0);
+			expect(sentry.captureException).toHaveBeenCalledExactlyOnceWith(
+				new Error('Prompt-file process could not be started.')
+			);
+			expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain(artifact.path);
+			expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain('private-turn-10et');
+		});
+
+		it.each(['error', 'cancelled'] as const)(
+			'cleans a started reader after %s and reports one outcome',
+			async (outcome) => {
+				const { spawner, processes, emitter } = createTestContext();
+				const exit = vi.fn();
+				const data = vi.fn();
+				const agentError = vi.fn();
+				emitter.on('exit', exit);
+				emitter.on('data', data);
+				emitter.on('agent-error', agentError);
+				spawner.spawn(config);
+				const handlers = childHandlers(mockChildProcess);
+				if (outcome === 'error') {
+					// An asynchronous spawn failure never acquired a native process.
+					mockChildProcess.pid = undefined;
+					handlers.get('error')?.(new Error(`${artifact.path}: ${artifact.content}`));
+				} else processes.get(config.sessionId)!.interrupted = true;
+				handlers.get('close')?.(
+					outcome === 'error' ? -1 : 130,
+					outcome === 'cancelled' ? 'SIGINT' : null
+				);
+				await vi.waitFor(() => expect(exit).toHaveBeenCalledTimes(1));
+				expect(processes.size).toBe(0);
+				expect(nodeFs.unlinkSync).toHaveBeenCalledExactlyOnceWith(artifact.path);
+				expect(nodeFs.closeSync).toHaveBeenCalledExactlyOnceWith(41);
+				const diagnostics = JSON.stringify([
+					exit.mock.calls,
+					data.mock.calls,
+					agentError.mock.calls,
+					vi.mocked(logger.error).mock.calls,
+				]);
+				expect(diagnostics).not.toContain(artifact.path);
+				expect(diagnostics).not.toContain('private-turn-10et');
+			}
+		);
+
+		it('cleans a superseded reader without touching the successor file or exit', async () => {
+			const { spawner, processes, emitter } = createTestContext();
+			const exit = vi.fn();
+			emitter.on('exit', exit);
+			spawner.spawn(config);
+			const oldChild = mockChildProcess;
+			const nextPath = nodePath.join(nodeOs.tmpdir(), 'maestro-prompt-successor-10et.json');
+			vi.mocked(nodeFs.openSync).mockReturnValueOnce(42);
+			spawner.spawn({
+				...config,
+				args: [...config.args.slice(0, -1), nextPath],
+				promptArtifact: { ...artifact, path: nextPath },
+			});
+			const successor = processes.get(config.sessionId);
+			childHandlers(oldChild).get('close')?.(143, 'SIGTERM');
+			await vi.waitFor(() => expect(nodeFs.closeSync).toHaveBeenCalledExactlyOnceWith(41));
+			expect(nodeFs.unlinkSync).toHaveBeenCalledExactlyOnceWith(artifact.path);
+			expect(processes.get(config.sessionId)).toBe(successor);
+			expect(exit).not.toHaveBeenCalled();
+			childHandlers(mockChildProcess).get('close')?.(0, null);
+			await vi.waitFor(() => expect(exit).toHaveBeenCalledTimes(1));
+			expect(nodeFs.unlinkSync).toHaveBeenNthCalledWith(2, nextPath);
+			expect(nodeFs.closeSync).toHaveBeenNthCalledWith(2, 42);
+		});
+
+		it.each([
+			{ sshRemoteId: 'remote-10et' },
+			{ sshStdinScript: 'exec remote-grok' },
+			{ args: [...config.args, '--single', 'second-source'] },
+		])('refuses local artifacts crossing host/argv boundaries (%j)', (overrides) => {
+			const { spawner, processes } = createTestContext();
+			expect(spawner.spawn({ ...config, ...overrides })).toEqual({
+				pid: -1,
+				success: false,
+				error: 'Prompt-file delivery does not match its host plan.',
+			});
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(nodeFs.openSync).not.toHaveBeenCalled();
+			expect(processes.size).toBe(0);
 		});
 	});
 

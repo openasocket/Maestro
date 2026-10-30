@@ -18,6 +18,7 @@
  * - a standalone host and a bare manager are unchanged.
  */
 import * as os from 'os';
+import * as path from 'path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('electron', () => ({
@@ -37,6 +38,12 @@ vi.mock('../../../../../main/coworking/coworking-socket-path', () => ({
 	getBridgeSocketPath: () => '/tmp/maestro-test-coworking.sock',
 }));
 
+import * as platform from '../../../../../shared/platformDetection';
+import * as sshPath from '../../../../../shared/maestro-lib/launch/ssh-path';
+import * as sshBuilder from '../../../../../main/utils/ssh-command-builder';
+import * as systemDelivery from '../../../../../main/utils/system-prompt-delivery';
+import { embedSystemPromptInPrompt } from '../../../../../shared/embeddedSystemPrompt';
+import { isolateAgentEnv } from '../../../../helpers/agentEnvIsolation';
 import * as agentArgs from '../../../../../main/utils/agent-args';
 import * as launchPlan from '../../../../../shared/maestro-lib/launch/launch-plan';
 import { resolveSshLaunchTarget } from '../../../../../shared/maestro-lib/launch/ssh-remote-resolver';
@@ -699,5 +706,243 @@ describe('process:spawn launch refusal classification', () => {
 		expect(h.spawn).not.toHaveBeenCalled();
 		expect(port.asked).toHaveLength(0);
 		expect(port.authority.live()).toHaveLength(0);
+	});
+});
+
+describe('process:spawn private prompt-file planning (GT1-02-10ET)', () => {
+	isolateAgentEnv();
+	let h: Harness;
+	let port: FakeSpawnPort;
+	let request: SpawnProcessConfig;
+	const remote = {
+		id: 'remote-file',
+		name: 'Synthetic file host',
+		host: 'file.example.test',
+		enabled: true,
+		port: 22,
+		username: 'synthetic',
+		privateKeyPath: '',
+	};
+	const legacyPrompt = vi.fn(() => ['-p', 'legacy prompt']);
+	const legacyImages = vi.fn(() => ['--image', 'legacy image']);
+	const legacyEmbed = vi.fn(() => 'legacy embedded image');
+
+	beforeEach(async () => {
+		vi.clearAllMocks();
+		vi.spyOn(platform, 'isWindows').mockReturnValue(false);
+		vi.spyOn(sshPath, 'resolveSshPath').mockResolvedValue('ssh');
+		port = denyProvider('grok', 'Synthetic file policy denial');
+		port.setStanding('standalone');
+		h = harness(port, { provider: 'grok' });
+		const detector = h.deps.getAgentDetector()!;
+		const agent = (await detector.getAgent('grok'))!;
+		// Opt in only this fixture; the production Grok route remains withheld.
+		h.deps.getAgentDetector = () => detector;
+		vi.spyOn(detector, 'getAgent').mockResolvedValue({
+			...agent,
+			promptFile: {
+				format: 'acp-json',
+				exclusivePromptFlags: ['-p', '--prompt-file', '--prompt-json'],
+			},
+			promptFileArgs: (file) => ['--prompt-file', file],
+			promptArgs: legacyPrompt,
+			imageArgs: legacyImages,
+			imagePromptBuilder: legacyEmbed,
+		});
+		h.deps.settingsStore.set('sshRemotes', [remote]);
+		request = payload({ toolType: 'grok', command: agent.command, args: [...agent.args] });
+	});
+
+	afterEach(() => vi.restoreAllMocks());
+
+	it.each(
+		['local', 'remote'].flatMap((host) => [
+			{ host, label: 'empty', prompt: '', system: undefined, resume: undefined },
+			{
+				host,
+				label: 'composed Unicode',
+				prompt: '私密 🪶\n"quoted"\n',
+				system: 'System fixture',
+				resume: undefined,
+			},
+			{
+				host,
+				label: 'large',
+				prompt: 'large-file-only '.repeat(5000),
+				system: undefined,
+				resume: undefined,
+			},
+			{
+				host,
+				label: 'resume',
+				prompt: 'resume-file-only',
+				system: 'Already delivered',
+				resume: 'native-session',
+			},
+		])
+	)(
+		'keeps one $host artifact for $label through both plans and the sink',
+		async ({ host, prompt, system, resume }) => {
+			const plan = vi.spyOn(launchPlan, 'buildAgentLaunchPlan');
+			const ssh = vi.spyOn(sshBuilder, 'buildSshCommandWithStdin');
+			request = {
+				...request,
+				cwd: host === 'remote' ? '/srv/synthetic-project' : os.tmpdir(),
+				prompt,
+				appendSystemPrompt: system,
+				agentSessionId: resume,
+				sessionSshRemoteConfig:
+					host === 'remote' ? { enabled: true, remoteId: remote.id } : undefined,
+			};
+			expect(await handleProcessSpawn(request, h.deps)).toMatchObject({ success: true });
+			expect(plan).toHaveBeenCalledTimes(2);
+			const early = plan.mock.results[0].value;
+			const final = plan.mock.results[1].value;
+			if (!early.ok || early.plan.prompt.via !== 'file' || !final.ok)
+				throw new Error('Expected file plans');
+			const artifact = early.plan.prompt.artifact;
+			expect(plan.mock.calls[1][0].promptFileDestination).toEqual(artifact);
+			expect(final.plan.prompt).toEqual(early.plan.prompt);
+			expect(artifact.content).toBe(
+				JSON.stringify({
+					type: 'acp',
+					content: [
+						{
+							type: 'text',
+							text: system && !resume ? embedSystemPromptInPrompt(system, prompt) : prompt,
+						},
+					],
+				})
+			);
+			expect(artifact.owner).toBe(host);
+			const config = spawned(h);
+			expect(config.promptArtifact).toEqual(artifact);
+			expect(config).toMatchObject({
+				prompt: undefined,
+				images: undefined,
+				sendPromptViaStdin: false,
+				sendPromptViaStdinRaw: false,
+				promptArgs: undefined,
+				imageArgs: undefined,
+				imagePromptBuilder: undefined,
+			});
+			expect(config).not.toHaveProperty('appendSystemPrompt');
+			expect(final.plan.args.filter((arg) => arg === '--prompt-file')).toHaveLength(1);
+			expect(final.plan.args.slice(-2)).toEqual(['--prompt-file', artifact.path]);
+			expect(final.plan.args).not.toContain('-p');
+			expect(final.plan.args).toContain('--always-approve');
+			if (host === 'remote') {
+				expect(artifact.sshRemoteId).toBe(remote.id);
+				expect(artifact.path).toMatch(/^\/tmp\/maestro-prompt-[\w-]+\.json$/);
+				expect(config).toMatchObject({ command: 'ssh', cwd: os.homedir(), sshRemoteId: remote.id });
+				expect(ssh).toHaveBeenCalledOnce();
+				expect(ssh.mock.calls[0][0]).toEqual(remote);
+				expect(ssh.mock.calls[0][1]).toMatchObject({
+					cwd: '/srv/synthetic-project',
+					promptArtifact: artifact,
+					stdinInput: undefined,
+					images: undefined,
+					imageArgs: undefined,
+					imagePromptBuilder: undefined,
+				});
+				expect(config.sshStdinScript).toContain(Buffer.from(artifact.content).toString('base64'));
+				expect(config.sshRemoteCommand).not.toContain(artifact.path);
+			} else {
+				expect(artifact.sshRemoteId).toBeUndefined();
+				expect(path.dirname(artifact.path)).toBe(os.tmpdir());
+				expect(config.args).toEqual(final.plan.args);
+				expect(config.sshStdinScript).toBeUndefined();
+				expect(ssh).not.toHaveBeenCalled();
+			}
+			for (const legacy of [legacyPrompt, legacyImages, legacyEmbed])
+				expect(legacy).not.toHaveBeenCalled();
+			const diagnostics = JSON.stringify([
+				h.sent,
+				vi.mocked(logger.debug).mock.calls,
+				vi.mocked(logger.info).mock.calls,
+				vi.mocked(logger.error).mock.calls,
+			]);
+			expect(diagnostics).not.toContain(artifact.path);
+			if (prompt) expect(diagnostics).not.toContain(prompt.split(/\s/)[0]);
+		}
+	);
+
+	it.each(['local', 'remote'])(
+		'refuses %s images without host-owned blocks before planning a text-only fallback',
+		async (host) => {
+			const plan = vi.spyOn(launchPlan, 'buildAgentLaunchPlan');
+			request.images = ['data:image/png;base64,c3ludGhldGlj'];
+			request.sessionSshRemoteConfig =
+				host === 'remote' ? { enabled: true, remoteId: remote.id } : undefined;
+			expect(await handleProcessSpawn(request, h.deps)).toEqual({ success: false, pid: 0 });
+			expect(plan).toHaveBeenCalledOnce();
+			expect(plan.mock.calls[0][0].hasImages).toBe(true);
+			expect(refusalSentToTab(h)).toBe(
+				'\r\n[Maestro] Image content is missing from the ACP prompt file.\r\n'
+			);
+			expect(h.spawn).not.toHaveBeenCalled();
+			expect(port.asked).toHaveLength(0);
+			for (const legacy of [legacyPrompt, legacyImages, legacyEmbed])
+				expect(legacy).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['--prompt-json=private-source', '-pprivate-source'])(
+		'rejects competing source %s before spawning',
+		async (source) => {
+			request.sessionCustomArgs = source;
+			expect(await handleProcessSpawn(request, h.deps)).toEqual({ success: false, pid: 0 });
+			expect(refusalSentToTab(h)).toContain(
+				'Prompt-file delivery conflicts with another prompt source'
+			);
+			expect(h.spawn).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['content', 'target'])(
+		'refuses changed %s between early and final plans',
+		async (change) => {
+			const deliver = systemDelivery.applySystemPromptDelivery;
+			vi.spyOn(systemDelivery, 'applySystemPromptDelivery').mockImplementation(async (input) => {
+				const delivered = await deliver(input);
+				if (change === 'target')
+					h.deps.settingsStore.set('sshRemotes', [{ ...remote, host: 'replacement.example.test' }]);
+				return change === 'content' ? { ...delivered, prompt: 'changed-private-body' } : delivered;
+			});
+			request.sessionSshRemoteConfig =
+				change === 'target' ? { enabled: true, remoteId: remote.id } : undefined;
+			const plan = vi.spyOn(launchPlan, 'buildAgentLaunchPlan');
+			expect(await handleProcessSpawn(request, h.deps)).toEqual({ success: false, pid: 0 });
+			expect(plan).toHaveBeenCalledTimes(2);
+			expect(refusalSentToTab(h)).toBe(
+				'\r\n[Maestro] Prompt-file content or target changed during launch preparation. Nothing was started.\r\n'
+			);
+			expect(h.spawn).not.toHaveBeenCalled();
+			expect(port.asked).toHaveLength(0);
+		}
+	);
+
+	it('preserves managed final admission refusal and hides private exception details', async () => {
+		port.setStanding('managed');
+		await expect(handleProcessSpawn(request, h.deps)).rejects.toThrow(
+			'Private prompt-file launch failed.'
+		);
+		expect(h.spawn).not.toHaveBeenCalled();
+		expect(port.asked).toHaveLength(1);
+		expect(port.authority.live()).toHaveLength(0);
+		expect(h.errors).toEqual([[PROCESS, 'Synthetic file policy denial']]);
+	});
+
+	it('hides private spawn failure details without an argv retry', async () => {
+		h.spawn.mockImplementation(() => {
+			throw new Error('private path and body from failed sink');
+		});
+		await expect(handleProcessSpawn(request, h.deps)).rejects.toThrow(
+			'Private prompt-file launch failed.'
+		);
+		expect(h.spawn).toHaveBeenCalledOnce();
+		expect(JSON.stringify([h.sent, h.errors, vi.mocked(logger.error).mock.calls])).not.toContain(
+			'private path and body'
+		);
 	});
 });
