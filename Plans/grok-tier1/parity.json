@@ -309,6 +309,15 @@
 			"acceptanceRun": false,
 			"status": "fail",
 			"affectedRows": ["P46"]
+		},
+		"phase02-parser-reverification": {
+			"path": "Plans/grok-tier1/evidence/02.md#gt1-02-13q-parser-isolation-and-regression-verification",
+			"receiptPath": "Plans/grok-tier1/evidence/02-parser-reverification.json",
+			"sourceCommit": "af6fe10df1c8e52c46a31528fa7bde410371b1bc",
+			"provenance": "deterministic-tests-and-typechecks",
+			"acceptanceRun": false,
+			"status": "fail",
+			"affectedRows": ["P46"]
 		}
 	},
 	"sourceCatalog": {
@@ -8399,9 +8408,9 @@
 				{
 					"id": "gap:P46",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-02-13N verified source 459ba9a14b757f9e662c3e9eb928a08ed062d35e: full OpenCode storage (15) and desktop group-chat (49) suites pass all 64 assertions, including all eight new/repaired cases, with no skips or unhandled errors. The unchanged completeness sentinel now fails in beforeAll after collection: two refused outside-checkout operations, existsSync then readFileSync, and 115 skipped assertions (13 selected setup-blocked, 102 filtered). Full completeness remains not-run. Static tracing matches eager Codex parser constructor config/cache reads; GT1-02-13O repairs the canonical parser, GT1-02-13P covers synthetic parsing/registration/usage boundaries, and GT1-02-13Q verifies before GT1-02-14 reconciliation. Main/CLI compiler checks pass; lint retains only unchanged dispatcher TS2339 owned by GT1-12-03. No guard waiver, unchanged retry or acceptance promotion. Historical 13J results remain in 02-reverification.json; current exact commands, hashes, exits, durations and diagnostics are in 02-isolation-reverification.json. GT1-02-13O implemented per-instance deferred Codex config/cache initialization in the canonical parser, with both parse entry points and native contextWindowReported preserved by static review; see 02.md#gt1-02-13o-deferred-codex-parser-configuration. Scoped formatting/ESLint pass, but no tests, collection or type checks ran. GT1-02-13P authored 34 synthetic regression cases in the three named parser/registry/usage suites with pre-import filesystem boundaries, both parsing entry points, fallback precedence, per-instance state and native provenance; see 02.md#gt1-02-13p-deferred-codex-parser-regression-coverage. Scoped formatting/ESLint and independent static review pass, but tests, collection and type checks remain not-run. GT1-02-13Q execution remains required; the failed sentinel and P46 status are not promoted.",
+					"missingPrerequisite": "GT1-02-13Q verified source af6fe10df1c8e52c46a31528fa7bde410371b1bc: unchanged completeness sentinel passes 13 selected cases (102 filtered, not passes), followed by full completeness (115) and full Codex parser (200), parser index (34), usage accumulator (17) and desktop group-chat (49). All 415 full-suite assertions and all 34 new deferred-parser cases pass with zero full-suite skips, assertion/setup failures or reported unhandled errors. This resolves the prior parser-registration storage refusal without guard exceptions or home mutations. Main/CLI compiler checks pass; lint retains only unchanged dispatcher TS2339 owned by GT1-12-03. P46 remains fail pending that baseline repair and broader required validation; no native acceptance promotion. Exact commands, hashes, exits, durations, skipped case names and diagnostics: 02-parser-reverification.json; analysis: 02.md#gt1-02-13q-parser-isolation-and-regression-verification. Historical 13/13J/13N receipts remain unchanged; GT1-02-14 reconciliation is next.",
 					"affectedRows": ["P46"],
-					"evidenceRef": "phase02-isolation-reverification"
+					"evidenceRef": "phase02-parser-reverification"
 				},
 				{
 					"id": "baseline-typescript-dispatcher",

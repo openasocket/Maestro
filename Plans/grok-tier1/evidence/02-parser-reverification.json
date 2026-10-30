@@ -1,0 +1,676 @@
+{
+	"schemaVersion": 1,
+	"taskId": "GT1-02-13Q",
+	"recordedAt": "2026-10-30T23:16:51.570913+00:00",
+	"sourceCommit": "af6fe10df1c8e52c46a31528fa7bde410371b1bc",
+	"sourceTree": "d11e345e1c0e6cf73fc49d879168ceeadd8fc4bf",
+	"executionRoot": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+	"branch": "auto-run-feature/grok-cli-integration",
+	"baseObservation": {
+		"ref": "feature/mega-maestro-v1.1.0-rc",
+		"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
+		"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+		"aheadBehind": [133, 10],
+		"baseIsAncestorOfSource": false,
+		"sourceIsAncestorOfBase": false
+	},
+	"environment": {
+		"platform": "darwin",
+		"architecture": "arm64",
+		"node": "v26.13.0",
+		"npm": "11.20.0",
+		"vitest": "4.1.11",
+		"typescript": "6.0.3",
+		"mode": "isolated deterministic fixtures, mock providers and local fake endpoint",
+		"live": "not-run"
+	},
+	"inputsSha256": {
+		"src/__tests__/main/storage/opencode-session-storage.test.ts": "641164a998d73d0a2f71ed623183ee7433afbac28e60e8db38c90bc403a973f9",
+		"src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts": "c02f39294db577aa113400ef3cb5705765a3958b14ab8b5344c1126b5bd2bcb8",
+		"src/__tests__/main/agents/agent-completeness.test.ts": "ac036a6c217b46e5f9cf6603f4b1c8b6938b89b31c9315a4c3b4cdd38bc61f71",
+		"src/__tests__/main/enterprise/fakeEndpoint.ts": "5cb86865bcd95b5d45472c6cabe96e7b99d2e1e513bd1ef492d6ca2cce7d9e4e",
+		"src/main/storage/opencode-session-storage.ts": "a17bc6cddf8b4032e8f67198c7444b30ae498a7a7fdfdf0198f3f7a860175052",
+		"src/main/group-chat/spawnGroupChatAgent.ts": "3044d5cbe31854d4d7c434a50674d59c158ea39559536dd1ec98f0d8d72265a2",
+		"src/main/plugins/plugin-host-handlers.ts": "81ff275887037b6ec7596ebc68821661db52f739d1ba91f06eae9b774a026986",
+		"package.json": "c6c1e45b7ba259420616990f408c70d9c07cd4226b9a8283197dd5944ba8b93b",
+		"package-lock.json": "0b6b52f5ae6660b8cf2ca74cf9c7992e9630b08ce685c8413040caa305ecb747",
+		"vitest.config.mts": "c72dbc05459559b23dce670db0f17c064dfdf026d46d3c0d2ea4777af654ac77",
+		"tsconfig.lint.json": "ea576d76e80ddf428e64e16d6495bcb2b5cd6bd1b1eb578116bd78decb22c083",
+		"tsconfig.main.json": "1a4b54a2a4613cb1c27771632697cd0f5ef130a5ea24659b461492e978f5d745",
+		"tsconfig.cli.json": "31213859259324304c3449b67dc48519c21fa94e0c3dcfd4e53ca593b587ed95",
+		"Plans/grok-tier1/evidence/02-reverification.json": "2abf498e9fb8c6e3cb1b140fb6834bf518e45f3fb876da0ff66406c74f3b43b6",
+		"Plans/grok-tier1/evidence/02-verification.json": "63673235a5314ddd452e568c89074c4c5933a6831e3410edf945e7893dbcf390",
+		"src/shared/maestro-lib/parsers/codex-output-parser.ts": "8be7fbda9019412f9e94c962db65afc3fdcaa044fa6c12fcb16feaab337139fe",
+		"src/shared/maestro-lib/parsers/index.ts": "7a452d866d95a9c05a665ea7e4e2e4d71ed2c4ae89b81a1177246d75b9527bbe",
+		"src/main/parsers/codex-output-parser.ts": "cfeed8e1bd88517e99f64e753ae4016f2bf025e925ff4eeaa227d4ed021fb2f0",
+		"src/main/parsers/index.ts": "56646a78657e5f7401096e82fb76bd92db342f1f32bd2e49ba8219c68d78ac50",
+		"src/__tests__/main/parsers/codex-output-parser.test.ts": "83bcb31846d42f1c04a6c25a5124728b0285059cfeb4dabd42c3ce6008afa750",
+		"src/__tests__/main/parsers/index.test.ts": "66175f912b6494265d7c17ce96eb89b12a897a99a836ab64ed38f45f7aa82900",
+		"src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts": "bce7ca2045ad98cc450e4c4c08389fafd949b0aa3d6ef5474746eea7a0021384",
+		"Plans/grok-tier1/evidence/02-isolation-reverification.json": "21c352905f5adc332979bb97f540d6dd8505ed47794c6ee131910f72fc2588bb",
+		"src/shared/maestro-lib/streaming/usage-accumulator.ts": "fa8cb51aaefc62d7713779293eaf25a02b2de95be0c8ef1ed5c2554cdb0953ab",
+		"src/shared/maestro-lib/streaming/usage-totals.ts": "95f4be25f261f967d91df68fe2d03be1fa0f315f7fa6fd481b8841e1c3c6418b"
+	},
+	"runner": {
+		"path": "tmp/grok-tier1-phase02-13q/run-check.py",
+		"sha256": "34538a5e4fe088a5654f70c727ceb8286dab23ade532e0deb7f37590777aee34",
+		"reusedFrom": "tmp/grok-tier1-phase02-13n/run-check.py",
+		"changes": "Only scratch-directory path changed. Package-script, environment isolation, socket prevalidation and receipt logic unchanged.",
+		"wrapperExitIsNotChildExit": true
+	},
+	"checks": [
+		{
+			"id": "sentinel",
+			"sourceCommit": "af6fe10df1c8e52c46a31528fa7bde410371b1bc",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/main/agents/agent-completeness.test.ts",
+				"-t",
+				"Agent completeness storage isolation",
+				"--maxWorkers=2",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/sentinel/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-10-30T23:14:40.983203+00:00",
+			"finishedAt": "2026-10-30T23:14:42.931139+00:00",
+			"durationSeconds": 1.948,
+			"exitCode": 0,
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/sentinel/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/sentinel/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/sentinel/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/sentinel/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/sentinel/xdg-data"
+			},
+			"homeAndCodexHomeUnchanged": true,
+			"socketPrevalidation": {
+				"pathTemplate": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/fake-endpoint-XXXXXX/runtime.sock",
+				"bytes": 101,
+				"maxBytes": 103
+			},
+			"log": "tmp/grok-tier1-phase02-13q/sentinel/output.log",
+			"rawReceiptPath": "tmp/grok-tier1-phase02-13q/sentinel/receipt.json",
+			"rawReceiptSha256": "ea514afd20d2f3816d11f94834af04b0a0bcefddcbb373e4a64ca8f2b10bf293",
+			"status": "pass",
+			"logSha256": "6a478252ae0963d3b4059956cf0df6ffce360ea4fa8307bbba674fbf77900c7d",
+			"credentialIsolation": "Inherited provider/credential environment removed without recording values; HOME and CODEX_HOME unchanged.",
+			"reportedUnhandledErrors": 0,
+			"unhandledErrorObservation": "No Vitest unhandled-error/rejection report in the complete retained log; JSON reporter has no separate unhandled-errors field.",
+			"resultsSha256": "18cb6d768fbd36f94acb6735995cc4e45d9e1e153d86e297fc4cb2c62558d241",
+			"resultsPath": "tmp/grok-tier1-phase02-13q/sentinel/results.json",
+			"suites": [
+				{
+					"file": "src/__tests__/main/agents/agent-completeness.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 13,
+						"skipped": 102
+					},
+					"failures": [],
+					"skipped": [
+						"Agent Completeness AGENT_IDS \u2194 AGENT_DEFINITIONS consistency every agent in AGENT_DEFINITIONS should have an ID in AGENT_IDS",
+						"Agent Completeness AGENT_IDS \u2194 AGENT_DEFINITIONS consistency every ID in AGENT_IDS should have a definition in AGENT_DEFINITIONS",
+						"Agent Completeness per-agent completeness terminal has capabilities defined in AGENT_CAPABILITIES",
+						"Agent Completeness per-agent completeness terminal has all required capability fields",
+						"Agent Completeness per-agent completeness terminal declares additionalDirArgs iff supportsAdditionalDirectories",
+						"Agent Completeness per-agent completeness terminal emits no directory args when the agent has no grants",
+						"Agent Completeness per-agent completeness terminal has output parser if supportsJsonOutput",
+						"Agent Completeness per-agent completeness terminal has session storage if supportsSessionStorage",
+						"Agent Completeness per-agent completeness terminal has error patterns if has output parser",
+						"Agent Completeness per-agent completeness claude-code has capabilities defined in AGENT_CAPABILITIES",
+						"Agent Completeness per-agent completeness claude-code has all required capability fields",
+						"Agent Completeness per-agent completeness claude-code declares additionalDirArgs iff supportsAdditionalDirectories",
+						"Agent Completeness per-agent completeness claude-code emits no directory args when the agent has no grants",
+						"Agent Completeness per-agent completeness claude-code has output parser if supportsJsonOutput",
+						"Agent Completeness per-agent completeness claude-code has session storage if supportsSessionStorage",
+						"Agent Completeness per-agent completeness claude-code has error patterns if has output parser",
+						"Agent Completeness per-agent completeness codex has capabilities defined in AGENT_CAPABILITIES",
+						"Agent Completeness per-agent completeness codex has all required capability fields",
+						"Agent Completeness per-agent completeness codex declares additionalDirArgs iff supportsAdditionalDirectories",
+						"Agent Completeness per-agent completeness codex emits no directory args when the agent has no grants",
+						"Agent Completeness per-agent completeness codex has output parser if supportsJsonOutput",
+						"Agent Completeness per-agent completeness codex has session storage if supportsSessionStorage",
+						"Agent Completeness per-agent completeness codex has error patterns if has output parser",
+						"Agent Completeness per-agent completeness gemini-cli has capabilities defined in AGENT_CAPABILITIES",
+						"Agent Completeness per-agent completeness gemini-cli has all required capability fields",
+						"Agent Completeness per-agent completeness gemini-cli declares additionalDirArgs iff supportsAdditionalDirectories",
+						"Agent Completeness per-agent completeness gemini-cli emits no directory args when the agent has no grants",
+						"Agent Completeness per-agent completeness gemini-cli has output parser if supportsJsonOutput",
+						"Agent Completeness per-agent completeness gemini-cli has session storage if supportsSessionStorage",
+						"Agent Completeness per-agent completeness gemini-cli has error patterns if has output parser",
+						"Agent Completeness per-agent completeness antigravity has capabilities defined in AGENT_CAPABILITIES",
+						"Agent Completeness per-agent completeness antigravity has all required capability fields",
+						"Agent Completeness per-agent completeness antigravity declares additionalDirArgs iff supportsAdditionalDirectories",
+						"Agent Completeness per-agent completeness antigravity emits no directory args when the agent has no grants",
+						"Agent Completeness per-agent completeness antigravity has output parser if supportsJsonOutput",
+						"Agent Completeness per-agent completeness antigravity has session storage if supportsSessionStorage",
+						"Agent Completeness per-agent completeness antigravity has error patterns if has output parser",
+						"Agent Completeness per-agent completeness qwen3-coder has capabilities defined in AGENT_CAPABILITIES",
+						"Agent Completeness per-agent completeness qwen3-coder has all required capability fields",
+						"Agent Completeness per-agent completeness qwen3-coder declares additionalDirArgs iff supportsAdditionalDirectories",
+						"Agent Completeness per-agent completeness qwen3-coder emits no directory args when the agent has no grants",
+						"Agent Completeness per-agent completeness qwen3-coder has output parser if supportsJsonOutput",
+						"Agent Completeness per-agent completeness qwen3-coder has session storage if supportsSessionStorage",
+						"Agent Completeness per-agent completeness qwen3-coder has error patterns if has output parser",
+						"Agent Completeness per-agent completeness hermes has capabilities defined in AGENT_CAPABILITIES",
+						"Agent Completeness per-agent completeness hermes has all required capability fields",
+						"Agent Completeness per-agent completeness hermes declares additionalDirArgs iff supportsAdditionalDirectories",
+						"Agent Completeness per-agent completeness hermes emits no directory args when the agent has no grants",
+						"Agent Completeness per-agent completeness hermes has output parser if supportsJsonOutput",
+						"Agent Completeness per-agent completeness hermes has session storage if supportsSessionStorage",
+						"Agent Completeness per-agent completeness hermes has error patterns if has output parser",
+						"Agent Completeness per-agent completeness pi has capabilities defined in AGENT_CAPABILITIES",
+						"Agent Completeness per-agent completeness pi has all required capability fields",
+						"Agent Completeness per-agent completeness pi declares additionalDirArgs iff supportsAdditionalDirectories",
+						"Agent Completeness per-agent completeness pi emits no directory args when the agent has no grants",
+						"Agent Completeness per-agent completeness pi has output parser if supportsJsonOutput",
+						"Agent Completeness per-agent completeness pi has session storage if supportsSessionStorage",
+						"Agent Completeness per-agent completeness pi has error patterns if has output parser",
+						"Agent Completeness per-agent completeness omp has capabilities defined in AGENT_CAPABILITIES",
+						"Agent Completeness per-agent completeness omp has all required capability fields",
+						"Agent Completeness per-agent completeness omp declares additionalDirArgs iff supportsAdditionalDirectories",
+						"Agent Completeness per-agent completeness omp emits no directory args when the agent has no grants",
+						"Agent Completeness per-agent completeness omp has output parser if supportsJsonOutput",
+						"Agent Completeness per-agent completeness omp has session storage if supportsSessionStorage",
+						"Agent Completeness per-agent completeness omp has error patterns if has output parser",
+						"Agent Completeness per-agent completeness opencode has capabilities defined in AGENT_CAPABILITIES",
+						"Agent Completeness per-agent completeness opencode has all required capability fields",
+						"Agent Completeness per-agent completeness opencode declares additionalDirArgs iff supportsAdditionalDirectories",
+						"Agent Completeness per-agent completeness opencode emits no directory args when the agent has no grants",
+						"Agent Completeness per-agent completeness opencode has output parser if supportsJsonOutput",
+						"Agent Completeness per-agent completeness opencode has session storage if supportsSessionStorage",
+						"Agent Completeness per-agent completeness opencode has error patterns if has output parser",
+						"Agent Completeness per-agent completeness factory-droid has capabilities defined in AGENT_CAPABILITIES",
+						"Agent Completeness per-agent completeness factory-droid has all required capability fields",
+						"Agent Completeness per-agent completeness factory-droid declares additionalDirArgs iff supportsAdditionalDirectories",
+						"Agent Completeness per-agent completeness factory-droid emits no directory args when the agent has no grants",
+						"Agent Completeness per-agent completeness factory-droid has output parser if supportsJsonOutput",
+						"Agent Completeness per-agent completeness factory-droid has session storage if supportsSessionStorage",
+						"Agent Completeness per-agent completeness factory-droid has error patterns if has output parser",
+						"Agent Completeness per-agent completeness copilot-cli has capabilities defined in AGENT_CAPABILITIES",
+						"Agent Completeness per-agent completeness copilot-cli has all required capability fields",
+						"Agent Completeness per-agent completeness copilot-cli declares additionalDirArgs iff supportsAdditionalDirectories",
+						"Agent Completeness per-agent completeness copilot-cli emits no directory args when the agent has no grants",
+						"Agent Completeness per-agent completeness copilot-cli has output parser if supportsJsonOutput",
+						"Agent Completeness per-agent completeness copilot-cli has session storage if supportsSessionStorage",
+						"Agent Completeness per-agent completeness copilot-cli has error patterns if has output parser",
+						"Agent Completeness per-agent completeness grok has capabilities defined in AGENT_CAPABILITIES",
+						"Agent Completeness per-agent completeness grok has all required capability fields",
+						"Agent Completeness per-agent completeness grok declares additionalDirArgs iff supportsAdditionalDirectories",
+						"Agent Completeness per-agent completeness grok emits no directory args when the agent has no grants",
+						"Agent Completeness per-agent completeness grok has output parser if supportsJsonOutput",
+						"Agent Completeness per-agent completeness grok has session storage if supportsSessionStorage",
+						"Agent Completeness per-agent completeness grok has error patterns if has output parser",
+						"Agent Completeness keeps unqualified Grok directory-grant evidence separate from public availability",
+						"Agent Completeness provider picker registration every agent id has a picker decision, shown or explicitly withheld",
+						"Agent Completeness provider picker registration offers providers alphabetically by display name",
+						"Agent Completeness provider picker registration auto-selects a real pickable agent rather than whatever sorts first",
+						"Agent Completeness provider picker registration every pickable agent is a real, non-hidden definition",
+						"Agent Completeness provider picker registration every pickable agent can be re-authenticated from the UI",
+						"Agent Completeness no orphaned capabilities every agent in AGENT_CAPABILITIES should be in AGENT_DEFINITIONS",
+						"Agent Completeness runtime agents live outside the static core a registered runtime agent is known but is not a built-in",
+						"Agent Completeness runtime agents live outside the static core every built-in id is reported as built-in by the registry"
+					],
+					"suiteError": ""
+				}
+			],
+			"counts": {
+				"files": 1,
+				"passedFiles": 1,
+				"failedFiles": 0,
+				"passed": 13,
+				"failed": 0,
+				"skipped": 102,
+				"todo": 0,
+				"suiteSetupErrors": 0
+			},
+			"skippedClassification": {
+				"selectedIsolationCasesPassed": 13,
+				"selectedIsolationCasesBlockedBySetup": 0,
+				"filteredOutByTestName": 102,
+				"totalReportedSkipped": 102,
+				"passingEvidenceFromSkipped": 0
+			}
+		},
+		{
+			"id": "completeness",
+			"sourceCommit": "af6fe10df1c8e52c46a31528fa7bde410371b1bc",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/main/agents/agent-completeness.test.ts",
+				"--maxWorkers=2",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/completeness/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-10-30T23:15:18.003747+00:00",
+			"finishedAt": "2026-10-30T23:15:19.846139+00:00",
+			"durationSeconds": 1.842,
+			"exitCode": 0,
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/completeness/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/completeness/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/completeness/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/completeness/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/completeness/xdg-data"
+			},
+			"homeAndCodexHomeUnchanged": true,
+			"socketPrevalidation": {
+				"pathTemplate": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/fake-endpoint-XXXXXX/runtime.sock",
+				"bytes": 101,
+				"maxBytes": 103
+			},
+			"log": "tmp/grok-tier1-phase02-13q/completeness/output.log",
+			"rawReceiptPath": "tmp/grok-tier1-phase02-13q/completeness/receipt.json",
+			"rawReceiptSha256": "380536afb147d443f8c4726d6742336f4e17e01d785c3518178bcfde38fac93f",
+			"status": "pass",
+			"logSha256": "c549d4e40ec63b79c94323af68008170fb00389445c7afef7774f28e99227cf9",
+			"credentialIsolation": "Inherited provider/credential environment removed without recording values; HOME and CODEX_HOME unchanged.",
+			"reportedUnhandledErrors": 0,
+			"unhandledErrorObservation": "No Vitest unhandled-error/rejection report in the complete retained log; JSON reporter has no separate unhandled-errors field.",
+			"resultsSha256": "f6217d6e9a1c4b00160540cd84ec92a8a4516a9a17dc40987dbdd833338081f7",
+			"resultsPath": "tmp/grok-tier1-phase02-13q/completeness/results.json",
+			"suites": [
+				{
+					"file": "src/__tests__/main/agents/agent-completeness.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 115
+					},
+					"failures": [],
+					"skipped": [],
+					"suiteError": ""
+				}
+			],
+			"counts": {
+				"files": 1,
+				"passedFiles": 1,
+				"failedFiles": 0,
+				"passed": 115,
+				"failed": 0,
+				"skipped": 0,
+				"todo": 0,
+				"suiteSetupErrors": 0
+			}
+		},
+		{
+			"id": "node",
+			"sourceCommit": "af6fe10df1c8e52c46a31528fa7bde410371b1bc",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/main/parsers/codex-output-parser.test.ts",
+				"src/__tests__/main/parsers/index.test.ts",
+				"src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts",
+				"src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts",
+				"--maxWorkers=2",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/node/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-10-30T23:15:18.003740+00:00",
+			"finishedAt": "2026-10-30T23:15:20.099442+00:00",
+			"durationSeconds": 2.095,
+			"exitCode": 0,
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/node/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/node/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/node/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/node/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/node/xdg-data"
+			},
+			"homeAndCodexHomeUnchanged": true,
+			"socketPrevalidation": {
+				"pathTemplate": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/fake-endpoint-XXXXXX/runtime.sock",
+				"bytes": 101,
+				"maxBytes": 103
+			},
+			"log": "tmp/grok-tier1-phase02-13q/node/output.log",
+			"rawReceiptPath": "tmp/grok-tier1-phase02-13q/node/receipt.json",
+			"rawReceiptSha256": "2daba53b3a969d2759a6cd274d167b551d672d1b8a2c9b706d778e432f9e9153",
+			"status": "pass",
+			"logSha256": "5b8469a207760e70c9dbdc33af3de59f05718fdefca0b4fd744bac9030d10084",
+			"credentialIsolation": "Inherited provider/credential environment removed without recording values; HOME and CODEX_HOME unchanged.",
+			"reportedUnhandledErrors": 0,
+			"unhandledErrorObservation": "No Vitest unhandled-error/rejection report in the complete retained log; JSON reporter has no separate unhandled-errors field.",
+			"resultsSha256": "380330b9c86530c0dea4561c29d10a3ba3a4a8f4c9b9d27e986ee5e13fa870f2",
+			"resultsPath": "tmp/grok-tier1-phase02-13q/node/results.json",
+			"suites": [
+				{
+					"file": "src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 49
+					},
+					"failures": [],
+					"skipped": [],
+					"suiteError": ""
+				},
+				{
+					"file": "src/__tests__/main/parsers/codex-output-parser.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 200
+					},
+					"failures": [],
+					"skipped": [],
+					"suiteError": ""
+				},
+				{
+					"file": "src/__tests__/main/parsers/index.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 34
+					},
+					"failures": [],
+					"skipped": [],
+					"suiteError": ""
+				},
+				{
+					"file": "src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 17
+					},
+					"failures": [],
+					"skipped": [],
+					"suiteError": ""
+				}
+			],
+			"counts": {
+				"files": 4,
+				"passedFiles": 4,
+				"failedFiles": 0,
+				"passed": 300,
+				"failed": 0,
+				"skipped": 0,
+				"todo": 0,
+				"suiteSetupErrors": 0
+			},
+			"newRegressionCases": [
+				"CodexOutputParser deferred configuration does not probe storage on import, construction or invalid input",
+				"CodexOutputParser deferred configuration object entry point resolves explicit override only on parsing",
+				"CodexOutputParser deferred configuration object entry point resolves dynamic exact match only on parsing",
+				"CodexOutputParser deferred configuration object entry point resolves static exact match only on parsing",
+				"CodexOutputParser deferred configuration object entry point resolves static prefix match only on parsing",
+				"CodexOutputParser deferred configuration object entry point resolves default for unknown model only on parsing",
+				"CodexOutputParser deferred configuration object entry point resolves missing configuration and cache only on parsing",
+				"CodexOutputParser deferred configuration object entry point resolves malformed configuration and cache only on parsing",
+				"CodexOutputParser deferred configuration object entry point resolves unreadable configuration and cache only on parsing",
+				"CodexOutputParser deferred configuration object entry point resolves malformed cache uses static table only on parsing",
+				"CodexOutputParser deferred configuration object entry point resolves invalid cache schema uses static table only on parsing",
+				"CodexOutputParser deferred configuration object entry point resolves invalid cached window uses static table only on parsing",
+				"CodexOutputParser deferred configuration object entry point resolves dynamic cache requires exact slug only on parsing",
+				"CodexOutputParser deferred configuration object entry point samples configuration separately and retains native state per parser",
+				"CodexOutputParser deferred configuration object entry point keeps a first-event native window from turn_context through completion",
+				"CodexOutputParser deferred configuration object entry point keeps a first-event native window from token_count through completion",
+				"CodexOutputParser deferred configuration line entry point resolves explicit override only on parsing",
+				"CodexOutputParser deferred configuration line entry point resolves dynamic exact match only on parsing",
+				"CodexOutputParser deferred configuration line entry point resolves static exact match only on parsing",
+				"CodexOutputParser deferred configuration line entry point resolves static prefix match only on parsing",
+				"CodexOutputParser deferred configuration line entry point resolves default for unknown model only on parsing",
+				"CodexOutputParser deferred configuration line entry point resolves missing configuration and cache only on parsing",
+				"CodexOutputParser deferred configuration line entry point resolves malformed configuration and cache only on parsing",
+				"CodexOutputParser deferred configuration line entry point resolves unreadable configuration and cache only on parsing",
+				"CodexOutputParser deferred configuration line entry point resolves malformed cache uses static table only on parsing",
+				"CodexOutputParser deferred configuration line entry point resolves invalid cache schema uses static table only on parsing",
+				"CodexOutputParser deferred configuration line entry point resolves invalid cached window uses static table only on parsing",
+				"CodexOutputParser deferred configuration line entry point resolves dynamic cache requires exact slug only on parsing",
+				"CodexOutputParser deferred configuration line entry point samples configuration separately and retains native state per parser",
+				"CodexOutputParser deferred configuration line entry point keeps a first-event native window from turn_context through completion",
+				"CodexOutputParser deferred configuration line entry point keeps a first-event native window from token_count through completion",
+				"parsers/index defers import, construction and real registration storage probes until parsing",
+				"usage provenance preserves native window provenance (undefined) across deferred config, completion and normalization",
+				"usage provenance preserves native window provenance (98304) across deferred config, completion and normalization"
+			]
+		},
+		{
+			"id": "lint",
+			"sourceCommit": "af6fe10df1c8e52c46a31528fa7bde410371b1bc",
+			"command": ["npm", "run", "lint"],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-10-30T23:15:18.003792+00:00",
+			"finishedAt": "2026-10-30T23:15:39.367592+00:00",
+			"durationSeconds": 21.363,
+			"exitCode": 2,
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/lint/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/lint/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/lint/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/lint/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/lint/xdg-data"
+			},
+			"homeAndCodexHomeUnchanged": true,
+			"socketPrevalidation": {
+				"pathTemplate": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/fake-endpoint-XXXXXX/runtime.sock",
+				"bytes": 101,
+				"maxBytes": 103
+			},
+			"log": "tmp/grok-tier1-phase02-13q/lint/output.log",
+			"rawReceiptPath": "tmp/grok-tier1-phase02-13q/lint/receipt.json",
+			"rawReceiptSha256": "5a4b011c1dd0b977eadb7ab8536da064614eebf878d7a3b06feb994afd116968",
+			"status": "fail",
+			"logSha256": "e5bb5e6a2d1a35e8e846e9eaabfca1ed1ec257e2e7a3919a6509f43f23c94fad",
+			"credentialIsolation": "Inherited provider/credential environment removed without recording values; HOME and CODEX_HOME unchanged.",
+			"reportedUnhandledErrors": 0,
+			"unhandledErrorObservation": "No Vitest unhandled-error/rejection report in the complete retained log; JSON reporter has no separate unhandled-errors field."
+		},
+		{
+			"id": "tsc-main",
+			"sourceCommit": "af6fe10df1c8e52c46a31528fa7bde410371b1bc",
+			"command": ["./node_modules/.bin/tsc", "-p", "tsconfig.main.json", "--noEmit"],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-10-30T23:15:44.861144+00:00",
+			"finishedAt": "2026-10-30T23:15:51.369146+00:00",
+			"durationSeconds": 6.508,
+			"exitCode": 0,
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/tsc-main/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/tsc-main/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/tsc-main/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/tsc-main/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/tsc-main/xdg-data"
+			},
+			"homeAndCodexHomeUnchanged": true,
+			"socketPrevalidation": {
+				"pathTemplate": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/fake-endpoint-XXXXXX/runtime.sock",
+				"bytes": 101,
+				"maxBytes": 103
+			},
+			"log": "tmp/grok-tier1-phase02-13q/tsc-main/output.log",
+			"rawReceiptPath": "tmp/grok-tier1-phase02-13q/tsc-main/receipt.json",
+			"rawReceiptSha256": "0cdb44fe26828bb2895d21fad7a45009e1a2c4ee8e411bd842e569699a3589ac",
+			"status": "pass",
+			"logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			"credentialIsolation": "Inherited provider/credential environment removed without recording values; HOME and CODEX_HOME unchanged.",
+			"reportedUnhandledErrors": 0,
+			"unhandledErrorObservation": "No Vitest unhandled-error/rejection report in the complete retained log; JSON reporter has no separate unhandled-errors field."
+		},
+		{
+			"id": "tsc-cli",
+			"sourceCommit": "af6fe10df1c8e52c46a31528fa7bde410371b1bc",
+			"command": ["./node_modules/.bin/tsc", "-p", "tsconfig.cli.json", "--noEmit"],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-10-30T23:15:44.861150+00:00",
+			"finishedAt": "2026-10-30T23:15:50.454136+00:00",
+			"durationSeconds": 5.593,
+			"exitCode": 0,
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/tsc-cli/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/tsc-cli/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/tsc-cli/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/tsc-cli/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase02-13q/tsc-cli/xdg-data"
+			},
+			"homeAndCodexHomeUnchanged": true,
+			"socketPrevalidation": {
+				"pathTemplate": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/fake-endpoint-XXXXXX/runtime.sock",
+				"bytes": 101,
+				"maxBytes": 103
+			},
+			"log": "tmp/grok-tier1-phase02-13q/tsc-cli/output.log",
+			"rawReceiptPath": "tmp/grok-tier1-phase02-13q/tsc-cli/receipt.json",
+			"rawReceiptSha256": "bc0a124e515321caf57179333dc3336f33a2d585db3a3493b94d6d04f665041e",
+			"status": "pass",
+			"logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			"credentialIsolation": "Inherited provider/credential environment removed without recording values; HOME and CODEX_HOME unchanged.",
+			"reportedUnhandledErrors": 0,
+			"unhandledErrorObservation": "No Vitest unhandled-error/rejection report in the complete retained log; JSON reporter has no separate unhandled-errors field."
+		}
+	],
+	"fullCompleteness": {
+		"status": "pass",
+		"sentinelGate": "pass",
+		"unchangedGuardSha256": "ac036a6c217b46e5f9cf6603f4b1c8b6938b89b31c9315a4c3b4cdd38bc61f71"
+	},
+	"typeDiagnostics": [
+		{
+			"path": "src/main/plugins/plugin-host-handlers.ts",
+			"line": 1196,
+			"column": 76,
+			"code": "TS2339",
+			"message": "Property 'dispatcher' does not exist on type 'RequestInit'.",
+			"checks": ["lint"],
+			"sourceFileSha256": "81ff275887037b6ec7596ebc68821661db52f739d1ba91f06eae9b774a026986",
+			"unchangedFromPreviousReceipt": true,
+			"ownerTask": "GT1-12-03"
+		}
+	],
+	"summary": {
+		"status": "fail",
+		"fullSuiteFiles": 5,
+		"passedFiles": 5,
+		"failedFiles": 0,
+		"passedAssertions": 415,
+		"failedAssertions": 0,
+		"skippedAssertions": 0,
+		"todoAssertions": 0,
+		"suiteSetupErrors": 0,
+		"newRegressionCasesPassing": 34,
+		"sentinel": "pass",
+		"sentinelPassedAssertions": 13,
+		"sentinelReportedSkipped": 102,
+		"sentinelSelectedCasesBlockedBySetup": 0,
+		"sentinelFilteredOutCases": 102,
+		"sentinelAssertionsExcludedFromFullSuiteTotals": true,
+		"reportedUnhandledErrors": 0,
+		"fullCompleteness": "pass",
+		"uniqueTypeDiagnostics": 1,
+		"phaseOwnedTypeDiagnostics": 0,
+		"nativeQualification": "not-run"
+	},
+	"followUpOwnership": [
+		{
+			"id": "baseline-typescript-dispatcher",
+			"status": "fail",
+			"ownerTasks": ["GT1-12-03"],
+			"cause": "Unchanged RequestInit.dispatcher TS2339; not waived."
+		}
+	],
+	"resolvedPriorFailures": [
+		{
+			"id": "completeness-parser-initialization-storage-discovery",
+			"status": "pass",
+			"ownerTasks": ["GT1-02-13O", "GT1-02-13P", "GT1-02-13Q"],
+			"scope": "Unchanged sentinel passes 13 selected cases; full completeness passes all 115; 34 new parser/registry/usage cases pass within their full suites."
+		}
+	],
+	"independentReview": "pass",
+	"limits": [
+		"No source/test edits, guard exceptions, unchanged retries, native provider calls, paid calls, real SSH hosts, branch switching or pushes.",
+		"The 102 sentinel skips are filtered cases, not passes; full completeness subsequently ran all 115. Sentinel passes are not double-counted in the 415 full-suite assertions. File counts use distinct testResults names, not nested Vitest suite totals.",
+		"Previous JSON receipts and evidence sections remain unchanged historical evidence; this is not a full phase rerun.",
+		"P46 remains fail on the baseline type error; broader checks and native/Linux/Windows qualification remain pending.",
+		"Full logs/raw reporter JSON and runner remain in ignored checkout-local scratch; hashes and decisive diagnostics are retained in this receipt."
+	],
+	"setupNotes": [
+		"Two input-hash snapshot preparation attempts failed before writing the snapshot because a guessed base-parser filename did not exist. The corrected input list excludes that unrelated nonexistent path. Sentinel ran once; no source/test edits or test retries occurred."
+	],
+	"artifactChecks": {
+		"status": "pass",
+		"commands": [
+			{
+				"command": [
+					"./node_modules/.bin/prettier",
+					"--check",
+					"Plans/grok-tier1/evidence/02-parser-reverification.json",
+					"Plans/grok-tier1/evidence/02.md",
+					"Plans/grok-tier1/parity.json"
+				],
+				"environmentOverrides": {
+					"NODE_DISABLE_COMPILE_CACHE": "1"
+				},
+				"exitCode": 0
+			},
+			{
+				"command": ["git", "diff", "--check"],
+				"exitCode": 0
+			},
+			{
+				"command": [
+					"git",
+					"diff",
+					"--exit-code",
+					"--",
+					"src",
+					"package.json",
+					"package-lock.json",
+					"vitest.config.mts"
+				],
+				"exitCode": 0
+			}
+		],
+		"invariants": [
+			"Input/log/result hashes match retained bytes and the source revision.",
+			"Historical evidence is an unchanged prefix; prior JSON receipts match input hashes.",
+			"All acceptance fields unchanged; only P46 blocker and new evidence catalog entry changed.",
+			"Only GT1-02-13Q is completed; existing task text is preserved and GT1-02-14 remains unchecked."
+		]
+	},
+	"taskStatus": "complete"
+}
