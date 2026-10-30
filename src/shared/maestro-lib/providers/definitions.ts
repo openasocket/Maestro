@@ -122,7 +122,17 @@ export interface AgentConfig extends BaseAgentConfig {
 	imageArgs?: (imagePath: string) => string[]; // Function to build image attachment args (e.g., ['-i', imagePath] for Codex)
 	imagePromptBuilder?: (imagePaths: string[]) => string; // Function to embed image references into the prompt (e.g., Copilot @mentions)
 	promptArgs?: (prompt: string) => string[]; // Function to build prompt args (e.g., ['-p', prompt] for OpenCode)
-	promptFileArgs?: (filePath: string) => string[]; // Replaces the final prompt and its separator with a Windows file attachment
+	promptFileArgs?: (filePath: string) => string[]; // Builds the file source; alone, retains the legacy Windows attachment fallback
+	/**
+	 * Opt into an owned prompt file on every host/surface, ahead of stdin or
+	 * SSH script delivery. Requires promptFileArgs and a host-owned destination.
+	 * This describes native input, not a public capability or materialization.
+	 */
+	promptFile?: {
+		format: 'text';
+		/** All native prompt-source aliases, which must be absent from base args. */
+		exclusivePromptFlags: readonly string[];
+	};
 	stdinPromptArgs?: string[]; // Args required to read a raw query from stdin instead of argv
 	noPromptSeparator?: boolean; // If true, don't add '--' before the prompt in batch mode (OpenCode doesn't support it)
 	defaultEnvVars?: Record<string, string>; // Default environment variables for this agent (merged with user customEnvVars)

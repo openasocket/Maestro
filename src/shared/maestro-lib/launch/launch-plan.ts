@@ -64,6 +64,7 @@ import {
 	resolvePromptDelivery,
 	type PromptDelivery,
 	type PromptDeliveryAgent,
+	type PromptFileDestination,
 } from './prompt-delivery';
 import {
 	resolveSshLaunchTarget,
@@ -106,6 +107,8 @@ export interface AgentLaunchInput {
 	/** The user prompt, already final (system prompt embedded if that applies). */
 	prompt?: string;
 	hasImages?: boolean;
+	/** Fresh executing-host path; the launch owner materializes and cleans the planned artifact. */
+	promptFileDestination?: PromptFileDestination;
 
 	/** Settings -> Environment. Applied on desktop only. */
 	globalShellEnvVars?: Record<string, string>;
@@ -248,7 +251,7 @@ interface LaunchPlanCommon {
 	command: string;
 	args: string[];
 	cwd: string;
-	prompt: PromptDelivery;
+	prompt: Exclude<PromptDelivery, { via: 'refused' }>;
 	/**
 	 * Text to write to the child's stdin and then close it, for a stdin
 	 * delivery. Undefined when the prompt travels any other way.
@@ -301,7 +304,8 @@ export type AgentLaunchPlanResult =
 			reason:
 				| Extract<SshLaunchTarget, { kind: 'unresolved' }>['reason']
 				| ManagedLaunchRefusal
-				| 'grok-model-effort-refused';
+				| 'grok-model-effort-refused'
+				| 'prompt-delivery-refused';
 			error: string;
 	  };
 
@@ -516,7 +520,12 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 			input.cmdShellLaunch === true,
 		sshRemote: target.kind === 'remote',
 		hasImages: input.hasImages,
+		args: launchArgs,
+		promptFileDestination: input.promptFileDestination,
 	});
+	if (prompt.via === 'refused') {
+		return { ok: false, reason: 'prompt-delivery-refused', error: prompt.error };
+	}
 
 	if (target.kind === 'remote') {
 		// A value read here belongs to this host. It is never sent over SSH, so a
@@ -543,8 +552,9 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 			plan: {
 				target,
 				command: input.remoteCommand || agent?.binaryName || input.command,
-				// The SSH wrapper places the prompt itself (inline or via its script).
-				args: launchArgs,
+				// A file source is final: the SSH wrapper must not append the prompt
+				// again. Other deliveries retain the wrapper's script placement.
+				args: prompt.via === 'file' ? [...launchArgs, ...prompt.args] : launchArgs,
 				cwd: input.cwd,
 				prompt,
 				stdin: undefined,
@@ -579,7 +589,7 @@ export function buildAgentLaunchPlan(input: AgentLaunchInput): AgentLaunchPlanRe
 	if (managedReport && credentials?.ok) managedReport.delivered = credentials.delivered;
 
 	const args =
-		prompt.via === 'argv' || prompt.via === 'stdin'
+		prompt.via === 'argv' || prompt.via === 'stdin' || prompt.via === 'file'
 			? [...launchArgs, ...prompt.args]
 			: [...launchArgs];
 

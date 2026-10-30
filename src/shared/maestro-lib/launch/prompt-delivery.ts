@@ -9,12 +9,17 @@
  * call sites. Every surface now asks here.
  */
 
+import { isAbsolutePath } from '../../formatters';
 import type { AgentCapabilities } from '../../types';
+import type { AgentConfig } from '../providers/definitions';
 
 /** The parts of a provider definition that decide how its prompt is written. */
 export interface PromptDeliveryAgent {
 	/** Builds the prompt flag, e.g. `['-p', prompt]`. Wins over the positional forms. */
 	promptArgs?: (prompt: string) => string[];
+	/** Explicit file delivery, independent of the legacy Windows-only builder. */
+	promptFile?: AgentConfig['promptFile'];
+	promptFileArgs?: AgentConfig['promptFileArgs'];
 	/** The CLI rejects `--` before a positional prompt (Pi, Factory Droid). */
 	noPromptSeparator?: boolean;
 	/** Args that make the CLI read its query from stdin (Hermes: `--query-file -`). */
@@ -36,6 +41,17 @@ export function buildPromptArgv(
 	return ['--', prompt];
 }
 
+/**
+ * A destination chosen by the executing host, without creating the file yet.
+ * The host allocates a fresh collision-resistant name for each launch attempt
+ * (for example maestro-prompt-<randomUUID>.txt), never a session-id-only name.
+ * Remote paths come from that remote, never from the local temporary directory.
+ */
+export interface PromptFileDestination {
+	path: string;
+	owner: 'local' | 'remote';
+}
+
 /** Where the user prompt goes. */
 export type PromptDelivery =
 	/** Nothing to deliver. */
@@ -49,6 +65,27 @@ export type PromptDelivery =
 	 * travel with it.
 	 */
 	| { via: 'stdin'; format: 'raw' | 'stream-json'; args: string[] }
+	/** Materialize on the executing host before spawning with these prompt-only args. */
+	| {
+			via: 'file';
+			args: string[];
+			artifact: PromptFileDestination & {
+				/** Private prompt content. Never include the artifact in diagnostics. */
+				content: string;
+				encoding: 'utf8';
+				mode: 0o600;
+				/** Refuse a collision; never overwrite or claim an existing file. */
+				flag: 'wx';
+				/**
+				 * Remove only an exclusively created file, after its reader closes.
+				 * Also required on refusal, failed upload/spawn, cancellation, timeout
+				 * and supersession. A remote file needs cleanup on that same host.
+				 */
+				cleanup: 'turn';
+			};
+	  }
+	/** Mandatory delivery could not be planned; no argv/stdin fallback is allowed. */
+	| { via: 'refused'; error: string }
 	/** The SSH stdin script carries it; nothing is added locally. */
 	| { via: 'ssh' };
 
@@ -64,12 +101,18 @@ export interface ResolvePromptDeliveryInput {
 	sshRemote: boolean;
 	/** The turn carries images. */
 	hasImages?: boolean;
+	/** Arguments before prompt delivery, used to reject competing native sources. */
+	args?: readonly string[];
+	/** Required only for an explicitly declared prompt file. No I/O occurs here. */
+	promptFileDestination?: PromptFileDestination;
 }
 
 /**
  * Decide how the user prompt reaches the agent.
  *
- * - Over SSH the remote script always carries it.
+ * - An explicit prompt-file declaration wins on every host and surface. The
+ *   caller supplies a fresh executing-host path and owns creation and cleanup.
+ * - Otherwise, over SSH the remote script carries it.
  * - On a Windows host, an agent that declared `supportsPromptViaStdin` gets it
  *   over stdin, to stay under the CreateProcess command-line limit. With images
  *   and stream-json input it is one stream-json message; otherwise raw text.
@@ -80,6 +123,55 @@ export interface ResolvePromptDeliveryInput {
  */
 export function resolvePromptDelivery(input: ResolvePromptDeliveryInput): PromptDelivery {
 	const { agent, prompt } = input;
+	if (agent?.promptFile && prompt !== undefined) {
+		const { promptFileDestination: destination } = input;
+		if (
+			!agent.promptFileArgs ||
+			!destination ||
+			destination.owner !== (input.sshRemote ? 'remote' : 'local') ||
+			!isAbsolutePath(destination.path) ||
+			destination.path.includes('\0') ||
+			!destination.path.endsWith('.txt')
+		) {
+			return {
+				via: 'refused',
+				error:
+					'Prompt-file delivery requires a fresh owned .txt destination on the executing host and a provider file-argument builder.',
+			};
+		}
+		if (input.hasImages) {
+			return { via: 'refused', error: 'This prompt-file format cannot carry embedded images.' };
+		}
+		if (
+			input.args?.some(
+				(arg) =>
+					arg === '--' ||
+					agent.promptFile!.exclusivePromptFlags.some(
+						(flag) =>
+							arg === flag ||
+							arg.startsWith(`${flag}=`) ||
+							(flag.length === 2 && arg.startsWith(flag))
+					)
+			)
+		) {
+			return {
+				via: 'refused',
+				error: 'Prompt-file delivery conflicts with another prompt source in the launch arguments.',
+			};
+		}
+		return {
+			via: 'file',
+			args: agent.promptFileArgs(destination.path),
+			artifact: {
+				...destination,
+				content: prompt,
+				encoding: 'utf8',
+				mode: 0o600,
+				flag: 'wx',
+				cleanup: 'turn',
+			},
+		};
+	}
 	if (!prompt) return { via: 'none' };
 	if (input.sshRemote) return { via: 'ssh' };
 

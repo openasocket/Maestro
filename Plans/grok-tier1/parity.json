@@ -2339,9 +2339,10 @@
 					"GT1-02-10",
 					"GT1-02-11",
 					"GT1-02-09A",
-					"GT1-05-06A"
+					"GT1-05-06A",
+					"GT1-02-10A"
 				],
-				"test": ["GT1-05-06", "GT1-08-02", "GT1-02-12", "GT1-02-09B", "GT1-05-06B"],
+				"test": ["GT1-05-06", "GT1-08-02", "GT1-02-12", "GT1-02-09B", "GT1-05-06B", "GT1-02-10AT"],
 				"verification": [
 					"GT1-01-07",
 					"GT1-05-13",
@@ -2388,7 +2389,7 @@
 				{
 					"id": "gap:P07",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
+					"missingPrerequisite": "GT1-02-09 adds an inactive pure opt-in prompt-file plan with UTF-8 content, executing-host destination ownership, exclusive creation/cleanup obligations, final file argv and fixed delivery refusals. Existing provider routing is unchanged. GT1-02-09A owns native ACP JSON/images; GT1-02-10 owns allocation/materialization and all local/SSH consumer wiring; GT1-02-10A owns refusal classification before GT1-02-11 activation and stdin-claim correction. GT1-02-09B/10AT/12 author regressions and GT1-02-13 executes them. No deterministic or native prompt-file delivery is certified. See Plans/grok-tier1/evidence/02.md.",
 					"affectedRows": ["P07"]
 				},
 				{
@@ -7258,9 +7259,10 @@
 					"GT1-10-06",
 					"GT1-02-09",
 					"GT1-02-10",
-					"GT1-02-11"
+					"GT1-02-11",
+					"GT1-02-10A"
 				],
-				"test": ["GT1-02-06", "GT1-10-07", "GT1-02-12"],
+				"test": ["GT1-02-06", "GT1-10-07", "GT1-02-12", "GT1-02-10AT"],
 				"verification": ["GT1-02-13", "GT1-10-12", "GT1-11-10", "GT1-02-14", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -7299,7 +7301,7 @@
 				{
 					"id": "gap:P39",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
+					"missingPrerequisite": "GT1-02-09 adds an inactive pure opt-in prompt-file plan with UTF-8 content, executing-host destination ownership, exclusive creation/cleanup obligations, final file argv and fixed delivery refusals. Existing provider routing is unchanged. GT1-02-09A owns native ACP JSON/images; GT1-02-10 owns allocation/materialization and all local/SSH consumer wiring; GT1-02-10A owns refusal classification before GT1-02-11 activation and stdin-claim correction. GT1-02-09B/10AT/12 author regressions and GT1-02-13 executes them. No deterministic or native prompt-file delivery is certified. See Plans/grok-tier1/evidence/02.md.",
 					"affectedRows": ["P39"]
 				},
 				{
@@ -10465,8 +10467,15 @@
 				"src/shared/maestro-lib/launch/prompt-delivery.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-09", "GT1-02-10", "GT1-02-11", "GT1-11-14A", "GT1-02-09A"],
-				"test": ["GT1-02-12", "GT1-11-14B", "GT1-02-09B"],
+				"implementation": [
+					"GT1-02-09",
+					"GT1-02-10",
+					"GT1-02-11",
+					"GT1-11-14A",
+					"GT1-02-09A",
+					"GT1-02-10A"
+				],
+				"test": ["GT1-02-12", "GT1-11-14B", "GT1-02-09B", "GT1-02-10AT"],
 				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -10505,7 +10514,7 @@
 				{
 					"id": "gap:C-supportsPromptViaStdin",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
+					"missingPrerequisite": "GT1-02-09 adds an inactive pure opt-in prompt-file plan with UTF-8 content, executing-host destination ownership, exclusive creation/cleanup obligations, final file argv and fixed delivery refusals. Existing provider routing is unchanged. GT1-02-09A owns native ACP JSON/images; GT1-02-10 owns allocation/materialization and all local/SSH consumer wiring; GT1-02-10A owns refusal classification before GT1-02-11 activation and stdin-claim correction. GT1-02-09B/10AT/12 author regressions and GT1-02-13 executes them. No deterministic or native prompt-file delivery is certified. See Plans/grok-tier1/evidence/02.md.",
 					"affectedRows": ["C-supportsPromptViaStdin"]
 				},
 				{
@@ -17554,7 +17563,8 @@
 					"GT1-02-07B",
 					"GT1-02-07C",
 					"GT1-02-07A1",
-					"GT1-08-14E"
+					"GT1-08-14E",
+					"GT1-02-10A"
 				],
 				"test": [
 					"GT1-11-02",
@@ -17586,7 +17596,8 @@
 					"GT1-02-07BT",
 					"GT1-02-07CT",
 					"GT1-02-07A1T",
-					"GT1-08-14F"
+					"GT1-08-14F",
+					"GT1-02-10AT"
 				],
 				"verification": [
 					"GT1-01-07",
@@ -17647,7 +17658,7 @@
 				{
 					"id": "gap:REG-DEFINITIONS",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
+					"missingPrerequisite": "GT1-02-09 adds an inactive pure opt-in prompt-file plan with UTF-8 content, executing-host destination ownership, exclusive creation/cleanup obligations, final file argv and fixed delivery refusals. Existing provider routing is unchanged. GT1-02-09A owns native ACP JSON/images; GT1-02-10 owns allocation/materialization and all local/SSH consumer wiring; GT1-02-10A owns refusal classification before GT1-02-11 activation and stdin-claim correction. GT1-02-09B/10AT/12 author regressions and GT1-02-13 executes them. No deterministic or native prompt-file delivery is certified. See Plans/grok-tier1/evidence/02.md.",
 					"affectedRows": ["REG-DEFINITIONS"]
 				},
 				{
