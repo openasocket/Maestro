@@ -1899,7 +1899,10 @@
 				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
 				"src/shared/maestro-lib/parsers/claude-output-parser.ts",
 				"src/shared/maestro-lib/parsers/codex-output-parser.ts",
-				"src/shared/maestro-lib/parsers/antigravity-output-parser.ts"
+				"src/shared/maestro-lib/parsers/antigravity-output-parser.ts",
+				"src/main/process-manager/handlers/StdoutHandler.ts",
+				"src/renderer/hooks/agent/useAgentErrorRecovery.tsx",
+				"src/renderer/components/Wizard/services/wizardErrorDetection.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -1908,9 +1911,18 @@
 					"GT1-03-11",
 					"GT1-03-11A",
 					"GT1-02-03B",
-					"GT1-02-03H"
+					"GT1-02-03H",
+					"GT1-02-03C"
 				],
-				"test": ["GT1-02-02", "GT1-02-04", "GT1-03-12", "GT1-03-11B", "GT1-02-03D", "GT1-02-03I"],
+				"test": [
+					"GT1-02-02",
+					"GT1-02-04",
+					"GT1-03-12",
+					"GT1-03-11B",
+					"GT1-02-03D",
+					"GT1-02-03I",
+					"GT1-02-03E"
+				],
 				"verification": [
 					"GT1-02-13",
 					"GT1-02-14",
@@ -1975,6 +1987,12 @@
 					"id": "grok-environment-disclosure-unverified",
 					"code": "implementation-or-evidence-pending",
 					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H must propagate the masking key through settings snapshots. GT1-02-03D/03I/13 own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03b-opaque-environment-disclosure. Whole-row qualification remains pending.",
+					"affectedRows": ["P05"]
+				},
+				{
+					"id": "grok-recovery-guidance-unverified",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-02-03C replaces unconditional login remedies in StdoutHandler, recovery actions and wizard messages/hints where active credential context is absent; GT1-02-03E/13 own deterministic proof. Canonical Grok auth messages still reach stderr/exit consumers with unconditional login advice: existing GT1-03-11A/11B/13 must replace those remedies and verify the bank. Selected native credentials and login success remain unqualified. See Plans/grok-tier1/evidence/02.md#gt1-02-03c-credential-neutral-error-recovery.",
 					"affectedRows": ["P05"]
 				}
 			],
@@ -11951,11 +11969,14 @@
 				"src/shared/agentMetadata.ts",
 				"src/renderer/utils/loginUrl.ts",
 				"src/shared/maestro-lib/launch/env.ts",
-				"src/shared/envVarCatalog.ts"
+				"src/shared/envVarCatalog.ts",
+				"src/main/process-manager/handlers/StdoutHandler.ts",
+				"src/renderer/hooks/agent/useAgentErrorRecovery.tsx",
+				"src/renderer/components/Wizard/services/wizardErrorDetection.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-01", "GT1-02-03", "GT1-02-03B", "GT1-02-03H"],
-				"test": ["GT1-02-02", "GT1-02-04", "GT1-02-03D", "GT1-02-03I"],
+				"implementation": ["GT1-02-01", "GT1-02-03", "GT1-02-03B", "GT1-02-03H", "GT1-02-03C"],
+				"test": ["GT1-02-02", "GT1-02-04", "GT1-02-03D", "GT1-02-03I", "GT1-02-03E"],
 				"verification": ["GT1-02-13", "GT1-02-14", "GT1-11-11A"],
 				"live": ["GT1-11-12", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -12013,6 +12034,12 @@
 					"id": "grok-environment-disclosure-unverified",
 					"code": "implementation-or-evidence-pending",
 					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H must propagate the masking key through settings snapshots. GT1-02-03D/03I/13 own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03b-opaque-environment-disclosure. Whole-row qualification remains pending.",
+					"affectedRows": ["REG-AUTH"]
+				},
+				{
+					"id": "grok-recovery-guidance-unverified",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-02-03C replaces unconditional login remedies in StdoutHandler, recovery actions and wizard messages/hints where active credential context is absent; GT1-02-03E/13 own deterministic proof. Canonical Grok auth messages still reach stderr/exit consumers with unconditional login advice: existing GT1-03-11A/11B/13 must replace those remedies and verify the bank. Selected native credentials and login success remain unqualified. See Plans/grok-tier1/evidence/02.md#gt1-02-03c-credential-neutral-error-recovery.",
 					"affectedRows": ["REG-AUTH"]
 				}
 			],
@@ -16559,7 +16586,8 @@
 				"src/shared/agentMetadata.ts",
 				"src/renderer/components/ReauthModal.tsx",
 				"src/renderer/hooks/agent/useAgentErrorRecovery.tsx",
-				"src/main/process-manager/handlers/StdoutHandler.ts"
+				"src/main/process-manager/handlers/StdoutHandler.ts",
+				"src/renderer/components/Wizard/services/wizardErrorDetection.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -16578,7 +16606,8 @@
 					"GT1-02-10",
 					"GT1-02-11",
 					"GT1-02-03B",
-					"GT1-02-03H"
+					"GT1-02-03H",
+					"GT1-02-03C"
 				],
 				"test": [
 					"GT1-02-02",
@@ -16593,7 +16622,8 @@
 					"GT1-10-07",
 					"GT1-02-12",
 					"GT1-02-03D",
-					"GT1-02-03I"
+					"GT1-02-03I",
+					"GT1-02-03E"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -16663,6 +16693,12 @@
 					"id": "grok-environment-disclosure-unverified",
 					"code": "implementation-or-evidence-pending",
 					"missingPrerequisite": "GT1-02-03B implements opaque ReauthModal disclosure; GT1-02-03H must propagate the masking key through settings snapshots. GT1-02-03D/03I/13 own deterministic proof, including Cue secret exports. See Plans/grok-tier1/evidence/02.md#gt1-02-03b-opaque-environment-disclosure. Whole-row qualification remains pending.",
+					"affectedRows": ["META-05"]
+				},
+				{
+					"id": "grok-recovery-guidance-unverified",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-02-03C replaces unconditional login remedies in StdoutHandler, recovery actions and wizard messages/hints where active credential context is absent; GT1-02-03E/13 own deterministic proof. Canonical Grok auth messages still reach stderr/exit consumers with unconditional login advice: existing GT1-03-11A/11B/13 must replace those remedies and verify the bank. Selected native credentials and login success remain unqualified. See Plans/grok-tier1/evidence/02.md#gt1-02-03c-credential-neutral-error-recovery.",
 					"affectedRows": ["META-05"]
 				}
 			],

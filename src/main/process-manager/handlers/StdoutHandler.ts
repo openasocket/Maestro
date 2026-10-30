@@ -509,7 +509,17 @@ export class StdoutHandler {
 					agentError.sshRemoteId = managedProcess.sshRemoteId;
 				}
 
-				if (agentError.type === 'auth_expired' && managedProcess.sshRemoteHost) {
+				if (agentError.type === 'auth_expired' && toolType === 'grok') {
+					// maestroEnvVars omits inherited credentials and cannot establish
+					// Grok's active auth mode. Replace any parser-supplied login remedy
+					// without guessing from the error text or the local SSH executable.
+					const host = managedProcess.sshRemoteHost
+						? ` on remote host "${managedProcess.sshRemoteHost}"`
+						: managedProcess.sshRemoteId
+							? ' on the remote host'
+							: '';
+					agentError.message = `Authentication failed${host}. Check the active Grok credentials on the host running the agent. Sign in only if this account uses provider login; API keys, gateway credentials and inline overrides must be corrected at their source.`;
+				} else if (agentError.type === 'auth_expired' && managedProcess.sshRemoteHost) {
 					// Choose the login command by agentId - error-pattern messages
 					// are often generic (no CLI name) and first-match-wins ordering
 					// can shadow the ones that do name a command. A small map keeps
