@@ -4506,6 +4506,181 @@ Some text with [x] in it that's not a checkbox
 			mockSpawn.mockReturnValue(mockChild);
 		});
 
+		describe('Grok directory-grant launch composition', () => {
+			isolateAgentEnv(['GROK_HOME', 'GROK_AUTH', 'GROK_AUTH_PATH']);
+			const read = { path: '/private/read λ', read: true, write: false };
+			const write = { path: '/private/write λ', read: false, write: true };
+			const unsupported =
+				'Grok CLI additional-directory read and write grants have no qualified native mechanism. Remove the grants to run with the selected working directory.';
+			const readonly = "Grok CLI writable directory grants exceed this launch's read-only mode.";
+			const customConflict =
+				'Grok CLI has no qualified --add-dir argument for additional-directory grants.';
+			beforeEach(() => {
+				vi.spyOn(fs, 'openSync').mockReturnValue(73);
+				vi.spyOn(fs, 'fstatSync').mockReturnValue({ dev: 1, ino: 73 } as fs.Stats);
+				vi.spyOn(fs, 'lstatSync').mockReturnValue({ dev: 1, ino: 73 } as fs.Stats);
+				vi.spyOn(fs, 'unlinkSync').mockImplementation(() => {});
+				vi.spyOn(fs, 'closeSync').mockImplementation(() => {});
+				vi.mocked(fs.writeFileSync).mockImplementation(() => {});
+			});
+
+			describe.each([false, true])('SSH=%s', (remote) => {
+				describe.each([undefined, 'selected-resume'])('resume=%s', (session) => {
+					it.each([
+						['read', [read], false, undefined, unsupported],
+						['write', [write], false, undefined, unsupported],
+						['mixed', [read, write], false, undefined, unsupported],
+						['readonly write', [write], true, undefined, readonly],
+						['readonly read', [read], true, undefined, unsupported],
+						['custom separate', [], false, '--add-dir "/private/custom λ"', customConflict],
+						['custom equals', [], false, '--add-dir=/private/custom', customConflict],
+					] as const)(
+						'refuses %s before artifacts, admission or spawn',
+						async (_label, dirs, readOnlyMode, customArgs, error) => {
+							const { host, authority } = managedAuthority(ALLOW);
+							const result = await spawnAgent(
+								'grok',
+								'/selected/project',
+								'private-user-content',
+								session,
+								{
+									additionalDirectories: [...dirs],
+									readOnlyMode,
+									customArgs,
+									managed: authority,
+									customEnvVars: { GROK_HOME: '/account/selected' },
+									sshRemoteConfig: remote ? { enabled: true, remoteId: 'r1' } : undefined,
+								}
+							);
+							expect(result).toMatchObject({ success: false, error });
+							expect(result.managed).toBeUndefined();
+							expect(JSON.stringify(result)).not.toMatch(
+								/private-user-content|\/private\/|SSH|ssh-unresolved/
+							);
+							expect(fs.openSync).not.toHaveBeenCalled();
+							expect(fs.writeFileSync).not.toHaveBeenCalled();
+							expect(mockWrapSpawnWithSsh).not.toHaveBeenCalled();
+							expect(mockSpawn).not.toHaveBeenCalled();
+							expect(mockStdin.write).not.toHaveBeenCalled();
+							expect(host.asked).toHaveLength(0);
+							expect(host.authority.live()).toHaveLength(0);
+						}
+					);
+
+					it.each([
+						{ additionalDirectories: [] },
+						{
+							additionalDirectories: [
+								{ path: ' ', read: true, write: true },
+								read,
+								{ ...read, read: false },
+							],
+						},
+					])(
+						'runs empty/inert grant case %# with selected identity',
+						async ({ additionalDirectories }) => {
+							if (remote)
+								mockWrapSpawnWithSsh.mockImplementation(async (_config, ssh, store) => {
+									expect(ssh.remoteId).toBe('r1');
+									expect(store.getSshRemotes()[0].host).toBe('remotehost');
+									return {
+										command: 'ssh',
+										args: ['remotehost', ...remoteSignal.SSH_STDIN_REMOTE_SHELL],
+										cwd: '/local',
+										sshStdinScript: 'exec grok --prompt-file /synthetic-owned-file',
+										sshRemoteUsed: { id: 'r1', name: 'r1', host: 'remotehost' },
+									};
+								});
+							const result = await driveSpawnToCompletion(
+								spawnAgent('grok', '/selected/project', 'hello', session, {
+									additionalDirectories,
+									customEnvVars: { GROK_HOME: '/account/selected' },
+									sshRemoteConfig: remote ? { enabled: true, remoteId: 'r1' } : undefined,
+								}),
+								0,
+								'{"type":"text","data":"done"}\n{"type":"end","sessionId":"selected-resume"}\n'
+							);
+							expect(result.success).toBe(true);
+							const wrapped = mockWrapSpawnWithSsh.mock.calls[0]?.[0];
+							const args = remote ? wrapped.args : spawnCall().args;
+							expect(args).toEqual(
+								expect.arrayContaining(['--cwd', '/selected/project', '--prompt-file'])
+							);
+							expect(args).not.toContain('--add-dir');
+							expect(args.join(' ')).not.toContain('/private/');
+							if (session) expect(args).toEqual(expect.arrayContaining(['--resume', session]));
+							else expect(args).not.toContain('--resume');
+							if (remote)
+								expect(wrapped).toMatchObject({
+									cwd: '/selected/project',
+									customEnvVars: { GROK_HOME: '/account/selected' },
+								});
+							else
+								expect(mockSpawn.mock.calls[0][2]).toMatchObject({
+									cwd: '/selected/project',
+									env: { GROK_HOME: '/account/selected' },
+								});
+							expect(mockSpawn).toHaveBeenCalledTimes(1);
+						}
+					);
+				});
+			});
+
+			it.each([read, write])(
+				'holds a $path request under a managed readonly ceiling',
+				async (grant) => {
+					const host = hostAuthority(ALLOW);
+					const authority = createHeadlessSpawnAuthority({
+						installation: INSTALLATION,
+						binding: ENROLLED,
+						host: {
+							...host,
+							routeCeiling: () => ({ ...ceilingRoute('readonly'), providerId: 'grok' }),
+						},
+						origin: 'cli',
+						actor: ACTOR,
+					});
+					const result = await spawnAgent(
+						'grok',
+						'/selected/project',
+						'private-user-content',
+						undefined,
+						{
+							additionalDirectories: [grant],
+							readOnlyMode: true,
+							managed: authority,
+						}
+					);
+					expect(result).toMatchObject({
+						success: false,
+						error: grant.write ? readonly : unsupported,
+					});
+					expect(result.managed).toBeUndefined();
+					expect(fs.openSync).not.toHaveBeenCalled();
+					expect(mockSpawn).not.toHaveBeenCalled();
+					expect(host.asked).toHaveLength(0);
+				}
+			);
+
+			it.each(['claude-code', 'codex'] as const)(
+				'retains the %s native grant builder',
+				async (provider) => {
+					const result = await driveSpawnToCompletion(
+						spawnAgent(provider, '/selected/project', 'hello', undefined, {
+							additionalDirectories: [read, write],
+						}),
+						0,
+						provider === 'claude-code' ? CLAUDE_OK() : CODEX_INIT()
+					);
+					expect(result.success).toBe(true);
+					const { args } = spawnCall();
+					expect(args).toEqual(expect.arrayContaining(['--add-dir', write.path]));
+					if (provider === 'claude-code') expect(args).toContain(read.path);
+					else expect(args).not.toContain(read.path);
+				}
+			);
+		});
+
 		describe('opt-in Grok prompt artifacts', () => {
 			const grok = getAgentDefinition('grok')!;
 			const original = { promptFile: grok.promptFile, promptFileArgs: grok.promptFileArgs };

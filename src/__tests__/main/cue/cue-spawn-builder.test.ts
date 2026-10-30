@@ -10,6 +10,9 @@ import type { CueExecutionConfig } from '../../../main/cue/cue-executor';
 import type { CueEvent, CueSubscription } from '../../../main/cue/cue-types';
 import type { SessionInfo } from '../../../shared/types';
 import type { TemplateContext } from '../../../shared/templateVariables';
+import type * as AgentArgs from '../../../shared/maestro-lib/launch/agent-args';
+import { getAgentDefinition as realDefinition } from '../../../shared/maestro-lib/providers/definitions';
+import { getAgentCapabilities as realCapabilities } from '../../../shared/maestro-lib/providers/capabilities';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -41,8 +44,8 @@ vi.mock('../../../main/agents', () => ({
 	getAgentCapabilities: (...args: unknown[]) => mockGetAgentCapabilities(...args),
 }));
 
-const mockBuildAgentArgs = vi.fn((_agent: unknown, _opts: unknown) => ['--print', '--verbose']);
-const mockApplyOverrides = vi.fn((_agent: unknown, args: string[], _overrides: unknown) => ({
+const mockBuildAgentArgs = vi.fn<typeof AgentArgs.buildAgentArgs>(() => ['--print', '--verbose']);
+const mockApplyOverrides = vi.fn<typeof AgentArgs.applyAgentConfigOverrides>((_agent, args) => ({
 	args,
 	effectiveCustomEnvVars: undefined,
 	customArgsSource: 'none' as const,
@@ -50,9 +53,12 @@ const mockApplyOverrides = vi.fn((_agent: unknown, args: string[], _overrides: u
 	modelSource: 'default' as const,
 }));
 
-vi.mock('../../../shared/maestro-lib/launch/agent-args', () => ({
-	buildAgentArgs: (...args: unknown[]) => mockBuildAgentArgs(...args),
-	applyAgentConfigOverrides: (...args: unknown[]) => mockApplyOverrides(...args),
+vi.mock('../../../shared/maestro-lib/launch/agent-args', async (importOriginal) => ({
+	...(await importOriginal<typeof AgentArgs>()),
+	buildAgentArgs: (...args: Parameters<typeof AgentArgs.buildAgentArgs>) =>
+		mockBuildAgentArgs(...args),
+	applyAgentConfigOverrides: (...args: Parameters<typeof AgentArgs.applyAgentConfigOverrides>) =>
+		mockApplyOverrides(...args),
 }));
 
 const mockWrapSpawnWithSsh = vi.fn();
@@ -1124,6 +1130,145 @@ describe('cue-spawn-builder', () => {
 			if (!result.ok) return;
 			expect(result.spec.args.slice(-2)).toEqual(['--', 'Do it']);
 			expect(result.spec.args).not.toContain('--append-system-prompt');
+		});
+	});
+	describe('Grok directory grants through real launch composition', () => {
+		isolateAgentEnv();
+		const privateRoot = '/PRIVATE outside λ';
+		const privatePrompt = 'PRIVATE Cue grant request';
+		const read = { path: privateRoot, read: true, write: false };
+		const write = { path: privateRoot, read: false, write: true };
+		beforeEach(async () => {
+			const actual = await vi.importActual<typeof AgentArgs>(
+				'../../../shared/maestro-lib/launch/agent-args'
+			);
+			mockGetAgentDefinition.mockReturnValue(realDefinition('grok'));
+			const fallbackCapabilities = mockGetAgentCapabilities();
+			mockGetAgentCapabilities.mockImplementationOnce(() => ({
+				...fallbackCapabilities,
+				...realCapabilities(mockGetAgentDefinition().id),
+			}));
+			mockBuildAgentArgs.mockImplementationOnce(actual.buildAgentArgs);
+			mockApplyOverrides.mockImplementationOnce(actual.applyAgentConfigOverrides);
+		});
+
+		it.each(
+			[false, true].flatMap((remote) =>
+				['read', 'write', 'mixed', 'custom split', 'custom equals'].map((kind) => ({
+					remote,
+					kind,
+				}))
+			)
+		)('refuses $kind before preparing a local/SSH spec (SSH=$remote)', async ({ remote, kind }) => {
+			const grants =
+				kind === 'read'
+					? [read]
+					: kind === 'write'
+						? [write]
+						: kind === 'mixed'
+							? [read, { ...write, path: `${privateRoot}/second` }]
+							: [];
+			const config = createConfig({
+				toolType: 'grok',
+				session: { ...createConfig().session, toolType: 'grok', additionalDirectories: grants },
+				customArgs:
+					kind === 'custom split'
+						? `--add-dir "${privateRoot}"`
+						: kind === 'custom equals'
+							? `--add-dir="${privateRoot}"`
+							: undefined,
+				...(remote
+					? { sshRemoteConfig: { enabled: true, remoteId: 'r1' }, sshStore: sshStoreWithRemotes() }
+					: {}),
+			});
+			const result = await buildSpawnSpec(config, privatePrompt);
+			expect(result).toEqual({
+				ok: false,
+				message: kind.startsWith('custom')
+					? 'Grok CLI has no qualified --add-dir argument for additional-directory grants.'
+					: 'Grok CLI additional-directory read and write grants have no qualified native mechanism. Remove the grants to run with the selected working directory.',
+			});
+			expect(result).not.toHaveProperty('spec');
+			expect(mockWrapSpawnWithSsh).not.toHaveBeenCalled();
+			expect(ensureRemoteMaestroPProbed).not.toHaveBeenCalled();
+			expect(createPluginRunProofFile).not.toHaveBeenCalled();
+			expect(config.onLog).not.toHaveBeenCalled();
+			for (const secret of [privateRoot, privatePrompt])
+				expect(
+					JSON.stringify([
+						result,
+						vi.mocked(logger.error).mock.calls,
+						vi.mocked(logger.warn).mock.calls,
+					])
+				).not.toContain(secret);
+		});
+
+		it.each(
+			[false, true].flatMap((remote) =>
+				['empty', 'blank', 'disabled duplicate'].map((kind) => ({ remote, kind }))
+			)
+		)(
+			'keeps the selected cwd/account/host for $kind grants (SSH=$remote)',
+			async ({ remote, kind }) => {
+				const additionalDirectories =
+					kind === 'empty'
+						? []
+						: kind === 'blank'
+							? [{ ...write, path: '  ' }]
+							: [write, { ...read, read: false }];
+				const store = sshStoreWithRemotes();
+				if (remote)
+					mockWrapSpawnWithSsh.mockImplementationOnce(async (input, _config, snapshot) => ({
+						command: 'ssh',
+						args: ['dev@r1.example.com'],
+						cwd: '/fixture-client',
+						sshRemoteUsed: snapshot.getSshRemotes()[0],
+					}));
+				const config = createConfig({
+					toolType: 'grok',
+					projectRoot: '/chosen/project',
+					customEnvVars: { GROK_HOME: '/chosen/account' },
+					session: { ...createConfig().session, toolType: 'grok', additionalDirectories },
+					...(remote
+						? { sshRemoteConfig: { enabled: true, remoteId: 'r1' }, sshStore: store }
+						: {}),
+				});
+				const result = await buildSpawnSpec(config, privatePrompt);
+				if (!result.ok) throw new Error(result.message);
+				const launch = remote ? mockWrapSpawnWithSsh.mock.lastCall![0] : result.spec;
+				expect(launch.cwd).toBe('/chosen/project');
+				expect(remote ? launch.customEnvVars : launch.env).toMatchObject({
+					GROK_HOME: '/chosen/account',
+				});
+				expect(launch.args).not.toContain('--add-dir');
+				expect(launch.args).not.toContain('--resume'); // Cue always starts a fresh turn.
+				expect(result.spec.promptArtifact).toMatchObject({
+					owner: remote ? 'remote' : 'local',
+					content: JSON.stringify({
+						type: 'acp',
+						content: [{ type: 'text', text: privatePrompt }],
+					}),
+				});
+				if (remote)
+					expect(result.spec.sshRemoteUsed).toMatchObject({ id: 'r1', host: 'r1.example.com' });
+			}
+		);
+
+		it('retains Claude native read/write directory argument construction', async () => {
+			mockGetAgentDefinition.mockReturnValue(realDefinition('claude-code'));
+			const config = createConfig({
+				enableMaestroP: false,
+				session: {
+					...createConfig().session,
+					additionalDirectories: [read, { ...write, path: '/write-root' }],
+				},
+			});
+			const result = await buildSpawnSpec(config, 'ordinary prompt');
+			if (!result.ok) throw new Error(result.message);
+			expect(result.spec.args).toEqual(
+				expect.arrayContaining(['--add-dir', privateRoot, '/write-root'])
+			);
+			expect(result.spec.promptArtifact).toBeUndefined();
 		});
 	});
 });

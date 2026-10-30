@@ -1029,3 +1029,170 @@ describe('process:spawn private prompt-file planning (GT1-02-10ET)', () => {
 		);
 	});
 });
+
+describe('process:spawn Grok directory-grant refusal (GT1-02-11A1T)', () => {
+	isolateAgentEnv();
+	const definition = getAgentDefinition('grok')!;
+	const remote = {
+		id: 'grant-host',
+		name: 'Grant host',
+		host: 'grants.example.test',
+		enabled: true,
+		port: 22,
+		username: 'synthetic',
+		privateKeyPath: '',
+	};
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.spyOn(platform, 'isWindows').mockReturnValue(false);
+		vi.spyOn(sshPath, 'resolveSshPath').mockResolvedValue('ssh');
+	});
+	afterEach(() => vi.restoreAllMocks());
+
+	it.each(
+		['local', 'remote'].flatMap((host) =>
+			[false, true].flatMap((resume) =>
+				['read', 'write', 'mixed', 'readonly-read', 'readonly-write', 'flag', 'flag-equals'].map(
+					(kind) => ({ host, resume, kind })
+				)
+			)
+		)
+	)(
+		'refuses $host resume=$resume $kind before preparation or admission',
+		async ({ host, resume, kind }) => {
+			const port = fakeSpawnPort();
+			const h = harness(port, { provider: 'grok' });
+			h.deps.settingsStore.set('sshRemotes', [remote]);
+			const readonly = kind.includes('readonly');
+			const root = '/private/grant root 私密';
+			const grants = kind.startsWith('flag')
+				? []
+				: [
+						{
+							path: root,
+							read: kind.endsWith('read') || kind === 'mixed',
+							write: kind.endsWith('write'),
+						},
+						...(kind === 'mixed' ? [{ path: `${root}/second`, read: false, write: true }] : []),
+					];
+			const request = payload({
+				toolType: 'grok',
+				command: definition.command,
+				args: [...definition.args],
+				cwd: host === 'remote' ? '/srv/chosen-project' : os.tmpdir(),
+				prompt: 'private-grant-prompt 私密',
+				appendSystemPrompt: 'private-grant-system',
+				agentSessionId: resume ? 'native-grant-session' : undefined,
+				permissionMode: readonly ? 'readonly' : 'full',
+				readOnlyMode: readonly,
+				sessionAdditionalDirectories: grants,
+				sessionCustomArgs:
+					kind === 'flag'
+						? `--add-dir "${root}"`
+						: kind === 'flag-equals'
+							? `--add-dir="${root}"`
+							: undefined,
+				sessionCustomEnvVars: { GROK_HOME: '/synthetic/selected-account' },
+				sessionSshRemoteConfig:
+					host === 'remote' ? { enabled: true, remoteId: remote.id } : undefined,
+			});
+			const plan = vi.spyOn(launchPlan, 'buildAgentLaunchPlan');
+			const destination = vi.spyOn(promptDelivery, 'selectPromptFileDestination');
+			const prepareSystem = vi.spyOn(systemDelivery, 'applySystemPromptDelivery');
+			const ssh = vi.spyOn(sshBuilder, 'buildSshCommandWithStdin');
+			const diagnostic = kind.startsWith('flag')
+				? 'Grok CLI has no qualified --add-dir argument for additional-directory grants.'
+				: readonly && kind.endsWith('write')
+					? "Grok CLI writable directory grants exceed this launch's read-only mode."
+					: 'Grok CLI additional-directory read and write grants have no qualified native mechanism. Remove the grants to run with the selected working directory.';
+			expect(await handleProcessSpawn(request, h.deps)).toEqual({ success: false, pid: 0 });
+			expect(plan).toHaveBeenCalledOnce();
+			const input = plan.mock.calls[0][0];
+			expect(input).toMatchObject({
+				additionalDirectories: grants,
+				cwd: request.cwd,
+				sessionCustomEnvVars: request.sessionCustomEnvVars,
+				readOnlyMode: readonly,
+			});
+			expect(input.args.includes('--resume')).toBe(resume);
+			if (resume) expect(input.args).toContain('native-grant-session');
+			expect(resolveSshLaunchTarget(input.sshStore, input.sshRemoteConfig)).toEqual(
+				host === 'remote' ? { kind: 'remote', remote } : { kind: 'local' }
+			);
+			expect(plan.mock.results[0].value).toEqual({
+				ok: false,
+				reason: 'grok-directory-grants-refused',
+				error: diagnostic,
+			});
+			expect(h.sent).toEqual([['process:data', PROCESS, `\r\n[Maestro] ${diagnostic}\r\n`]]);
+			expect(logger.error).toHaveBeenCalledExactlyOnceWith(
+				'Grok directory-grant configuration refused; not spawning',
+				'[ProcessManager]',
+				{ sessionId: PROCESS, toolType: 'grok', reason: 'grok-directory-grants-refused' }
+			);
+			expect(h.errors).toEqual([]);
+			for (const boundary of [destination, prepareSystem, ssh, h.spawn])
+				expect(boundary).not.toHaveBeenCalled();
+			expect(port.asked).toHaveLength(0);
+			expect(port.authority.live()).toHaveLength(0);
+			const diagnostics = JSON.stringify([
+				h.sent,
+				h.errors,
+				...[logger.debug, logger.info, logger.warn, logger.error].map(
+					(log) => vi.mocked(log).mock.calls
+				),
+			]);
+			for (const value of [root, request.prompt!, request.appendSystemPrompt!]) {
+				expect(diagnostics).not.toContain(value);
+				expect(diagnostics).not.toContain(JSON.stringify(value).slice(1, -1));
+			}
+		}
+	);
+
+	it.each(
+		['local', 'remote'].flatMap((host) =>
+			[false, true].flatMap((resume) => ['empty', 'inert'].map((kind) => ({ host, resume, kind })))
+		)
+	)(
+		'keeps $host resume=$resume $kind grants on the selected launch',
+		async ({ host, resume, kind }) => {
+			const h = harness(fakeSpawnPort({ standing: 'standalone' }), { provider: 'grok' });
+			h.deps.settingsStore.set('sshRemotes', [remote]);
+			const grants =
+				kind === 'empty'
+					? []
+					: [
+							{ path: ' ', read: true, write: true },
+							{ path: '/disabled-root', read: true, write: true },
+							{ path: '/disabled-root', read: false, write: false },
+						];
+			const request = payload({
+				toolType: 'grok',
+				command: definition.command,
+				args: [...definition.args],
+				cwd: host === 'remote' ? '/srv/chosen-project' : os.tmpdir(),
+				agentSessionId: resume ? 'native-grant-session' : undefined,
+				sessionAdditionalDirectories: grants,
+				sessionCustomEnvVars: { GROK_HOME: '/synthetic/selected-account' },
+				sessionSshRemoteConfig:
+					host === 'remote' ? { enabled: true, remoteId: remote.id } : undefined,
+			});
+			const plan = vi.spyOn(launchPlan, 'buildAgentLaunchPlan');
+			expect(await handleProcessSpawn(request, h.deps)).toMatchObject({ success: true });
+			expect(plan).toHaveBeenCalledTimes(2);
+			for (const [input] of plan.mock.calls) expect(input.additionalDirectories).toEqual(grants);
+			const result = plan.mock.results[1].value;
+			if (!result.ok) throw new Error('Expected a launch with inert grants');
+			expect(result.plan.cwd).toBe(request.cwd);
+			expect(result.plan.envVars?.GROK_HOME).toBe('/synthetic/selected-account');
+			expect(result.plan.args).not.toContain('--add-dir');
+			expect(result.plan.args.includes('--resume')).toBe(resume);
+			if (resume) expect(result.plan.args).toContain('native-grant-session');
+			expect(result.plan.target).toEqual(
+				host === 'remote' ? { kind: 'remote', remote } : { kind: 'local' }
+			);
+			expect(spawned(h).promptArtifact).toMatchObject({ owner: host });
+			expect(h.errors).toEqual([]);
+		}
+	);
+});
