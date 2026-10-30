@@ -12,6 +12,7 @@ import type {
 } from '../../types';
 import { isWindows } from '../../platformDetection';
 import { dirsWithAnyAccess, dirsWithWriteAccess, repeatDirFlag } from '../../additionalDirectories';
+import { describeEffortRejection, getEffortRejection } from '../../effortRejection';
 export type { AgentCapabilities } from '../../types';
 
 // ============ Configuration Types ============
@@ -943,11 +944,24 @@ export const AGENT_DEFINITIONS: AgentDefinition[] = [
 				type: 'text',
 				label: 'Reasoning Effort',
 				description:
-					'Leave empty to inherit the selected model default. Available effort levels depend on the model and CLI version.',
-				// Preserve explicit values until a scoped per-model menu is available.
+					'Leave empty to inherit the selected model default. Effort levels depend on its advertised menu; none requires selected-model validation and is unavailable here.',
+				// This builder has no selected-model menu. Refuse none until that
+				// evidence can be supplied, rather than sending it to a rejecting model.
+				// A retry that falls back to a refused configured value must fail
+				// explicitly before spawn, not resend it or silently lower the effort.
 				default: '',
-				argBuilder: (value: string) =>
-					value && value.trim() ? ['--reasoning-effort', value.trim()] : [],
+				argBuilder: (value: string) => {
+					const effort = value?.trim();
+					if (!effort) return [];
+					const rejection = getEffortRejection('grok', effort);
+					if (rejection) {
+						throw new Error(describeEffortRejection('Grok CLI', rejection));
+					}
+					if (effort.toLowerCase() === 'none') {
+						throw new Error('Grok effort "none" requires verified support for the selected model.');
+					}
+					return ['--reasoning-effort', effort];
+				},
 			},
 			{
 				key: 'contextWindow',
