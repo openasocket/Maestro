@@ -40,6 +40,7 @@ import {
 	type ManagedRouteCeiling,
 } from '../../shared/maestro-lib/launch/env';
 import type { LaunchPermissionDecision } from '../../shared/maestro-lib/launch/launch-plan';
+import type { PromptDelivery } from '../../shared/maestro-lib/launch/prompt-delivery';
 import type { SteeringRunIdentity } from '../../shared/chatSteering';
 
 // ============================================================================
@@ -469,6 +470,13 @@ export interface ProcessConfig {
 	reuseTerminal?: boolean;
 	requiresPty?: boolean;
 	prompt?: string;
+	/**
+	 * Private, host-planned prompt file, retained through request copies and bound
+	 * by the admission snapshot. Local files belong to startTurn; remote files
+	 * belong to the SSH script owner. Never log, persist or expose this artifact
+	 * in Process Details, renderer responses or spawn capture events.
+	 */
+	promptArtifact?: Extract<PromptDelivery, { via: 'file' }>['artifact'];
 	shell?: string;
 	shellArgs?: string;
 	shellEnvVars?: Record<string, string>;

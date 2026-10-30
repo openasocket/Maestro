@@ -146,6 +146,8 @@ export function buildSpawnRequestSnapshot(config: ProcessConfig): DispatchSnapsh
 			cwd: config.cwd,
 			env: { ...(config.shellEnvVars ?? {}), ...(config.customEnvVars ?? {}) },
 			stdin: config.sshStdinScript ?? config.prompt,
+			// The shared snapshot binds bytes, destination and ownership by digest only.
+			...(config.promptArtifact ? { promptArtifact: config.promptArtifact } : {}),
 			shell: config.runInShell ? (config.shell ?? true) : false,
 		},
 		{
@@ -1137,7 +1139,13 @@ export class ProcessManager extends EventEmitter {
 	 */
 	private emitSpawn(config: ProcessConfig): void {
 		try {
-			this.emit('spawn', config);
+			if (config.promptArtifact) {
+				// Capture listeners receive metadata, never the private file handoff.
+				const { promptArtifact: _promptArtifact, ...captureConfig } = config;
+				this.emit('spawn', captureConfig);
+			} else {
+				this.emit('spawn', config);
+			}
 		} catch {
 			// Capture is best-effort; never let it break process spawning.
 		}
