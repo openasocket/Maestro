@@ -6,6 +6,7 @@
 
 import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
 import {
+	generateInlineDocuments,
 	parseGeneratedDocuments,
 	splitIntoPhases,
 	sanitizeFilename,
@@ -813,5 +814,235 @@ CONTENT:
 			await emitter.tryEmitFile('Phase-01-Setup.md');
 			expect(emitter.hasEmitted()).toBe(true);
 		});
+	});
+	describe('Grok complete generation', () => {
+		const document =
+			'---BEGIN DOCUMENT---\nFILENAME: Phase-01-Setup.md\nCONTENT:\n- [ ] Build it\n---END DOCUMENT---';
+		let onComplete: ReturnType<typeof vi.fn>;
+		let onDocumentComplete: ReturnType<typeof vi.fn>;
+		let onError: ReturnType<typeof vi.fn>;
+		let removeListener: ReturnType<typeof vi.fn>;
+
+		beforeEach(() => {
+			onComplete = vi.fn();
+			onDocumentComplete = vi.fn();
+			onError = vi.fn();
+			removeListener = vi.fn();
+			window.maestro.agents.get = vi
+				.fn()
+				.mockResolvedValue({ id: 'grok', available: true, command: 'grok', args: [] });
+			Object.assign(window.maestro.process, {
+				spawn: vi.fn().mockResolvedValue({ pid: 123, success: true }),
+				onData: vi.fn(() => removeListener),
+				onExit: vi.fn(() => removeListener),
+				onAgentError: vi.fn(() => removeListener),
+				kill: vi.fn().mockResolvedValue(true),
+			});
+			Object.assign(window.maestro.autorun, {
+				listDocs: vi.fn().mockResolvedValue({ success: true, files: [], tree: [] }),
+				watchFolder: vi.fn().mockResolvedValue({ success: true }),
+				unwatchFolder: vi.fn().mockResolvedValue({ success: true }),
+				onFileChanged: vi.fn(() => removeListener),
+				writeDoc: vi.fn().mockResolvedValue({ success: true }),
+			});
+		});
+
+		async function start(signal?: AbortSignal) {
+			const pending = generateInlineDocuments({
+				agentType: 'grok',
+				directoryPath: '/project',
+				projectName: 'Plan',
+				conversationHistory: [],
+				mode: 'new',
+				autoRunFolderPath: '/playbooks',
+				signal,
+				callbacks: { onComplete, onDocumentComplete, onError },
+			});
+			await vi.waitFor(() => expect(window.maestro.process.spawn).toHaveBeenCalledOnce());
+			return {
+				pending,
+				id: vi.mocked(window.maestro.process.spawn).mock.calls[0][0].sessionId,
+				data: vi.mocked(window.maestro.process.onData).mock.calls[0][0],
+				exit: vi.mocked(window.maestro.process.onExit).mock.calls[0][0],
+			};
+		}
+
+		it.each(['normalized', 'native'])(
+			'saves the entire %s answer and only then completes',
+			async (transport) => {
+				const content = '- [ ] Begin\n' + 'Details\n'.repeat(4000) + '- [ ] Final task';
+				const output = document.replace('- [ ] Build it', content);
+				const { pending, id, data, exit } = await start();
+				expect(window.maestro.process.spawn).toHaveBeenCalledWith(
+					expect.objectContaining({
+						toolType: 'grok',
+						permissionMode: 'full',
+						args: ['--max-turns', '32', '--no-subagents'],
+					})
+				);
+				data('other-process', document);
+				if (transport === 'native') {
+					for (const event of [
+						{ type: 'thought', data: document.replace('Build it', 'Never save thinking') },
+						{
+							type: 'tool_call',
+							toolCallId: 'read-1',
+							toolName: 'read_file',
+							rawInput: { text: document },
+						},
+						{ type: 'text', data: output },
+						{ type: 'end', stopReason: 'EndTurn', sessionId: 'native-id' },
+					])
+						data(id, JSON.stringify(event) + '\n');
+				} else {
+					data(id, output.slice(0, 30));
+					data(id, output.slice(30));
+				}
+				expect(onDocumentComplete).not.toHaveBeenCalled();
+				expect(onComplete).not.toHaveBeenCalled();
+				exit(id, 0);
+				const result = await pending;
+				expect(result.success).toBe(true);
+				expect(result.documents).toEqual([expect.objectContaining({ content, taskCount: 2 })]);
+				expect(window.maestro.autorun.writeDoc).toHaveBeenCalledExactlyOnceWith(
+					expect.any(String),
+					'Phase-01-Setup.md',
+					content,
+					undefined
+				);
+				expect(onDocumentComplete).toHaveBeenCalledOnce();
+				expect(onComplete).toHaveBeenCalledExactlyOnceWith(result.documents);
+				expect(onError).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each([
+			['absent', ''],
+			['unstructured', '- [ ] Not a complete document'],
+			['truncated tail', document + '\n---BEGIN DOCUMENT---\nFILENAME: Phase-02.md'],
+			['missing filename', document.replace('FILENAME: Phase-01-Setup.md\n', '')],
+			['missing content', document.replace('CONTENT:\n', '')],
+			[
+				'end before content',
+				document
+					.replace('CONTENT:\n', '---END DOCUMENT---\nCONTENT:\n')
+					.replace(/---END DOCUMENT---$/, ''),
+			],
+			['task-free', document.replace('- [ ] Build it', '# Notes')],
+			['duplicate', document + '\n' + document],
+			['unsafe name', document.replace('Phase-01-Setup.md', '../Phase-01.md')],
+			[
+				'thinking only',
+				JSON.stringify({ type: 'thought', data: document }) +
+					'\n' +
+					JSON.stringify({ type: 'end', stopReason: 'EndTurn' }),
+			],
+		])('refuses %s without saving a partial plan', async (_case, output) => {
+			const { pending, id, data, exit } = await start();
+			data(id, output);
+			exit(id, 0);
+			expect(await pending).toMatchObject({ success: false, error: expect.any(String) });
+			expect(window.maestro.autorun.writeDoc).not.toHaveBeenCalled();
+			expect(onDocumentComplete).not.toHaveBeenCalled();
+			expect(onComplete).not.toHaveBeenCalled();
+			expect(onError).toHaveBeenCalledOnce();
+		});
+
+		it.each(['abort', 'signal', 'denial', 'spawn-refusal'])(
+			'does not complete streamed documents after %s',
+			async (failure) => {
+				if (failure === 'spawn-refusal')
+					vi.mocked(window.maestro.process.spawn).mockResolvedValue({ pid: -1, success: false });
+				const controller = new AbortController();
+				const { pending, id, data, exit } = await start(controller.signal);
+				data(id, document);
+				if (failure === 'abort') controller.abort();
+				if (failure === 'denial')
+					vi.mocked(window.maestro.process.onAgentError).mock.calls[0][0](id, {
+						type: 'permission_denied',
+						message: 'Managed generation refused',
+						recoverable: false,
+						agentId: 'grok',
+						timestamp: 1,
+					});
+				exit(id, 0, failure === 'signal' ? 15 : undefined);
+				expect(await pending).toMatchObject({ success: false, error: expect.any(String) });
+				data(id, document);
+				exit(id, 0);
+				expect(window.maestro.autorun.writeDoc).not.toHaveBeenCalled();
+				expect(onComplete).not.toHaveBeenCalled();
+				expect(onDocumentComplete).not.toHaveBeenCalled();
+				expect(removeListener).toHaveBeenCalled();
+				if (failure === 'abort') expect(window.maestro.process.kill).toHaveBeenCalledWith(id);
+			}
+		);
+
+		it.each(['listing', 'second-save'])(
+			'refuses %s failure instead of reporting partial success',
+			async (failure) => {
+				const { pending, id, data, exit } = await start();
+				if (failure === 'listing')
+					vi.mocked(window.maestro.autorun.listDocs).mockResolvedValue({
+						success: false,
+						error: 'Unreadable',
+					});
+				else
+					vi.mocked(window.maestro.autorun.writeDoc)
+						.mockResolvedValueOnce({ success: true })
+						.mockResolvedValueOnce({ success: false, error: 'Write refused' });
+				data(id, document + '\n' + document.replace('Phase-01-Setup.md', 'Phase-02-Build.md'));
+				exit(id, 0);
+				expect(await pending).toMatchObject({ success: false, error: expect.any(String) });
+				expect(onComplete).not.toHaveBeenCalled();
+				expect(onDocumentComplete).not.toHaveBeenCalled();
+				expect(window.maestro.autorun.writeDoc).toHaveBeenCalledTimes(
+					failure === 'listing' ? 0 : 2
+				);
+			}
+		);
+		it.each(['disk', 'mixed', 'conflict', 'read-failure'])(
+			'validates final disk documents for %s output',
+			async (mode) => {
+				const { pending, id, data, exit } = await start();
+				vi.mocked(window.maestro.autorun.listDocs).mockResolvedValue({
+					success: true,
+					files: ['Phase-02-Build'],
+				});
+				window.maestro.fs.readFile = vi.fn().mockResolvedValue('- [ ] In-progress');
+				window.maestro.autorun.readDoc = vi
+					.fn()
+					.mockResolvedValue(
+						mode === 'read-failure'
+							? { success: false, error: 'Unreadable' }
+							: { success: true, content: '- [ ] Final disk task' }
+					);
+				const folderPath = vi.mocked(window.maestro.autorun.watchFolder).mock.calls[0][0];
+				vi.mocked(window.maestro.autorun.onFileChanged).mock.calls[0][0]({
+					folderPath,
+					filename: 'Phase-02-Build.md',
+					eventType: 'change',
+				});
+				await vi.waitFor(() => expect(window.maestro.fs.readFile).toHaveBeenCalled());
+				expect(onDocumentComplete).not.toHaveBeenCalled();
+				if (mode === 'mixed') data(id, document);
+				if (mode === 'conflict')
+					data(id, document.replace('Phase-01-Setup.md', 'Phase-02-Build.md'));
+				exit(id, 0);
+				const result = await pending;
+				expect(result.success).toBe(mode === 'disk' || mode === 'mixed');
+				if (result.success) {
+					expect(result.documents?.map((doc) => doc.content)).toEqual(
+						mode === 'mixed'
+							? ['- [ ] Build it', '- [ ] Final disk task']
+							: ['- [ ] Final disk task']
+					);
+					expect(onComplete).toHaveBeenCalledExactlyOnceWith(result.documents);
+				} else {
+					expect(onComplete).not.toHaveBeenCalled();
+					expect(onDocumentComplete).not.toHaveBeenCalled();
+					expect(window.maestro.autorun.writeDoc).not.toHaveBeenCalled();
+				}
+			}
+		);
 	});
 });
