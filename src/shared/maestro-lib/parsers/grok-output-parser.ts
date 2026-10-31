@@ -64,6 +64,7 @@ import { usageCostUsd } from '../streaming/usage-totals';
 import type { AgentOutputParser, ParsedEvent } from './agent-output-parser';
 import { getErrorPatterns, matchErrorPattern, stripJsonEventLines } from './error-patterns';
 import { cleanToolOutputText } from '../../toolOutput';
+import { preserveJsonNumberTokens } from '../../jsonUtils';
 
 /** Cap for user-facing unmatched error bodies in UI/logs. */
 const MAX_ERROR_MESSAGE_CHARS = 500;
@@ -327,7 +328,7 @@ export class GrokOutputParser implements AgentOutputParser {
 
 		let parsed: unknown;
 		try {
-			parsed = JSON.parse(line);
+			parsed = JSON.parse(preserveJsonNumberTokens(line, 'total_cost_usd_ticks'));
 		} catch {
 			// Preserve plain stderr handling, but never swallow a broken JSON frame.
 			return /^[\s]*[\[{]/.test(line) ? this.malformedEvent() : null;
