@@ -3310,6 +3310,29 @@
 				"Tests authored only; GT1-05-13 must execute both complete main suites and GT1-05-06B1 renderer coverage. No semantic typecheck or behavioral pass claimed.",
 				"Synthetic remote observations and policy ports do not qualify native routes or real provider enforcement. Native commands and remote macro attachments remain unsupported."
 			]
+		},
+		"phase05-custom-command-producer-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-06b-custom-command-producer-and-template-tests",
+			"sourceCommit": "7b24f3bf8780fb039be45a06df33f35871a222e6",
+			"sourceRevisionScope": "Pre-task HEAD plus authored test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/hooks/useInputProcessing.test.ts": "6ce1e4f54a8333ce788eee9bc149d995be454b48300ebc5f9cb5c3278a4f464e",
+				"src/__tests__/renderer/hooks/useRemoteHandlers.test.ts": "556eff0e013ad2e6cbec5ada46f9205f15c7bd0e8f224ccb59ab10f95655b253",
+				"src/__tests__/shared/templateVariables.test.ts": "fe987a2e75d777446bb963fdb97134c091ebe181c2bd679ec94f17f8c9e2f1ef"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P07", "S31"],
+			"authoredCases": 26,
+			"updatedExistingCases": 4,
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"Producer handoff and literal substitution only; final queue expansion, ownership, cancellation and managed refusal remain GT1-05-06B1. GT1-05-13 executes all suites; no runtime or semantic typecheck pass claimed.",
+				"Composer macro attachments are omitted at enqueue; GT1-05-06A3/B3 own bounded repair/coverage. Native commands and remote macro attachments remain unsupported."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -5507,7 +5530,8 @@
 					"GT1-05-06A1",
 					"GT1-05-06A2",
 					"GT1-05-06A1C",
-					"GT1-05-06A1H"
+					"GT1-05-06A1H",
+					"GT1-05-06A3"
 				],
 				"test": [
 					"GT1-05-06",
@@ -5532,7 +5556,8 @@
 					"GT1-02-11D",
 					"GT1-05-06B1",
 					"GT1-05-06B2",
-					"GT1-05-06A1T"
+					"GT1-05-06A1T",
+					"GT1-05-06B3"
 				],
 				"verification": [
 					"GT1-01-07",
@@ -5554,7 +5579,8 @@
 				"Owned ACP JSON prompt-file delivery, host-local materialization/cleanup, consumer handoffs including tab naming, and first-turn system embedding/resume skipping have scoped deterministic evidence. Raw prompt stdin and native append/rules are disabled. Exact-binary text/system behavior, real SSH cleanup, Linux-only skipped shell cases and Windows permissions remain unqualified. Template/command integration remains GT1-05-05/06/06A/06B/13/14; utility retries remain GT1-08-14E/14F/21; native/platform qualification remains phase10/11.",
 				"GT1-05-06A1 binds queued Grok macros to ephemeral selected-tab/provider/account/cwd/native/permission evidence, compares bounded provider/global/selected-SSH configuration reads at drain and after preparation, preserves attachments, handles returned spawn refusals and protects live owners during cancellation/recovery. Persisted/legacy missing evidence holds explicitly. GT1-05-06A1C/H now forwards the enqueue fingerprint and compares main provider/global/selected-SSH configuration before preparation and at the existing beforeSpawn boundary. Queue/main race regression coverage and execution remain GT1-05-06B1/06A1T/13. GT1-05-06A2 implements literal argument insertion, configured local/SSH system context and selected native identity, and new-tab native-command refusal before creation or acknowledgement. Static checks pass apart from the known renderer RequestInit.dispatcher baseline; behavioral execution remains not-run. See Plans/grok-tier1/evidence/05.md#gt1-05-06a2-literal-arguments-and-new-tab-context. GT1-05-06B/B1/B2/13 own remaining behavioral coverage/execution. Native commands and remote macro attachments remain unsupported; no parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1-queued-command-ownership.",
 				"GT1-05-06A1C defines the shared canonical expected-selection projection and ephemeral SHA-256 fingerprint on process:spawn. It excludes frozen model/effort and carries no raw environment values. Preload already preserves the optional field. GT1-05-06A1H consumes the contract in the existing receipt and command spawn, rejects unavailable/stale evidence at main entry and preparation rechecks, and retains native/managed admission. GT1-05-06B1/06A1T coverage and GT1-05-13 execution remain pending; no route or parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1c-expected-selection-contract.",
-				"GT1-05-06A1T authors 62 main-entry, discovery, SSH preparation, observation and managed admission regression cases in the two existing main suites. Static checks pass; execution remains not-run for GT1-05-13. Renderer forwarding/hash coverage remains GT1-05-06B1. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests."
+				"GT1-05-06A1T authors 62 main-entry, discovery, SSH preparation, observation and managed admission regression cases in the two existing main suites. Static checks pass; execution remains not-run for GT1-05-13. Renderer forwarding/hash coverage remains GT1-05-06B1. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests.",
+				"GT1-05-06B authors 26 producer/template regressions and repairs four obsolete remote macro assertions in three existing suites. Static checks pass; execution stays not-run for GT1-05-13. GT1-05-06B1/B2 retain final queue and system-context/new-tab coverage; GT1-05-06A3/B3 own the demonstrated composer image omission. See Plans/grok-tier1/evidence/05.md#gt1-05-06b-custom-command-producer-and-template-tests."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -5603,6 +5629,12 @@
 					"id": "queued-command-main-entry-race",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-05-06A1C/H implement enqueue-to-main comparisons; GT1-05-06A1T now authors main-entry/preparation/native-observation/managed-admission regressions, including fresh/resumed and reference-provider controls. GT1-05-06B1 must cover renderer forwarding and GT1-05-13 must execute both main suites plus renderer coverage. Authoring and static checks do not certify the guarded route. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests.",
+					"affectedRows": ["P07", "S31"]
+				},
+				{
+					"id": "composer-command-images-omitted",
+					"code": "implementation-pending",
+					"missingPrerequisite": "The composer custom-command producer omits effectiveImages from buildQueuedMessageItem. GT1-05-06A3 must forward attachments and GT1-05-06B3 must cover staged/explicit input; GT1-05-13 must execute the regressions. Existing queue-spawn forwarding cannot recover discarded images. See Plans/grok-tier1/evidence/05.md#gt1-05-06b-custom-command-producer-and-template-tests.",
 					"affectedRows": ["P07", "S31"]
 				}
 			],
@@ -22532,7 +22564,8 @@
 					"GT1-05-06A1",
 					"GT1-05-06A2",
 					"GT1-05-06A1C",
-					"GT1-05-06A1H"
+					"GT1-05-06A1H",
+					"GT1-05-06A3"
 				],
 				"test": [
 					"GT1-05-06",
@@ -22540,7 +22573,8 @@
 					"GT1-05-06B",
 					"GT1-05-06B1",
 					"GT1-05-06B2",
-					"GT1-05-06A1T"
+					"GT1-05-06A1T",
+					"GT1-05-06B3"
 				],
 				"verification": ["GT1-01-07", "GT1-05-13", "GT1-08-07", "GT1-05-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -22554,7 +22588,8 @@
 				"Grok is reached through generic queue, but command collisions, argument expansion, selected tab/account and managed dispatch need proof. GT1-05-05/06 ownership is provisional until GT1-01-07 confirms explicit template-consumer coverage.",
 				"GT1-05-06A1 binds queued Grok macros to ephemeral selected-tab/provider/account/cwd/native/permission evidence, compares bounded provider/global/selected-SSH configuration reads at drain and after preparation, preserves attachments, handles returned spawn refusals and protects live owners during cancellation/recovery. Persisted/legacy missing evidence holds explicitly. GT1-05-06A1C/H now forwards the enqueue fingerprint and compares main provider/global/selected-SSH configuration before preparation and at the existing beforeSpawn boundary. Queue/main race regression coverage and execution remain GT1-05-06B1/06A1T/13. GT1-05-06A2 implements literal argument insertion, configured local/SSH system context and selected native identity, and new-tab native-command refusal before creation or acknowledgement. Static checks pass apart from the known renderer RequestInit.dispatcher baseline; behavioral execution remains not-run. See Plans/grok-tier1/evidence/05.md#gt1-05-06a2-literal-arguments-and-new-tab-context. GT1-05-06B/B1/B2/13 own remaining behavioral coverage/execution. Native commands and remote macro attachments remain unsupported; no parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1-queued-command-ownership.",
 				"GT1-05-06A1C defines the shared canonical expected-selection projection and ephemeral SHA-256 fingerprint on process:spawn. It excludes frozen model/effort and carries no raw environment values. Preload already preserves the optional field. GT1-05-06A1H consumes the contract in the existing receipt and command spawn, rejects unavailable/stale evidence at main entry and preparation rechecks, and retains native/managed admission. GT1-05-06B1/06A1T coverage and GT1-05-13 execution remain pending; no route or parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1c-expected-selection-contract.",
-				"GT1-05-06A1T authors 62 main-entry, discovery, SSH preparation, observation and managed admission regression cases in the two existing main suites. Static checks pass; execution remains not-run for GT1-05-13. Renderer forwarding/hash coverage remains GT1-05-06B1. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests."
+				"GT1-05-06A1T authors 62 main-entry, discovery, SSH preparation, observation and managed admission regression cases in the two existing main suites. Static checks pass; execution remains not-run for GT1-05-13. Renderer forwarding/hash coverage remains GT1-05-06B1. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests.",
+				"GT1-05-06B authors 26 producer/template regressions and repairs four obsolete remote macro assertions in three existing suites. Static checks pass; execution stays not-run for GT1-05-13. GT1-05-06B1/B2 retain final queue and system-context/new-tab coverage; GT1-05-06A3/B3 own the demonstrated composer image omission. See Plans/grok-tier1/evidence/05.md#gt1-05-06b-custom-command-producer-and-template-tests."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22602,6 +22637,12 @@
 					"id": "queued-command-main-entry-race",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-05-06A1C/H implement enqueue-to-main comparisons; GT1-05-06A1T now authors main-entry/preparation/native-observation/managed-admission regressions, including fresh/resumed and reference-provider controls. GT1-05-06B1 must cover renderer forwarding and GT1-05-13 must execute both main suites plus renderer coverage. Authoring and static checks do not certify the guarded route. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests.",
+					"affectedRows": ["P07", "S31"]
+				},
+				{
+					"id": "composer-command-images-omitted",
+					"code": "implementation-pending",
+					"missingPrerequisite": "The composer custom-command producer omits effectiveImages from buildQueuedMessageItem. GT1-05-06A3 must forward attachments and GT1-05-06B3 must cover staged/explicit input; GT1-05-13 must execute the regressions. Existing queue-spawn forwarding cannot recover discarded images. See Plans/grok-tier1/evidence/05.md#gt1-05-06b-custom-command-producer-and-template-tests.",
 					"affectedRows": ["P07", "S31"]
 				}
 			],

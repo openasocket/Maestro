@@ -1257,6 +1257,137 @@ describe('useInputProcessing', () => {
 			}
 		);
 
+		it.each([
+			['idle', false, '\t'],
+			['idle', true, '\n'],
+			['busy', false, '\n'],
+			['busy', true, '  '],
+		] as const)(
+			'keeps custom command arguments raw at the %s queue boundary (SSH: %s)',
+			async (state, remote, separator) => {
+				const target = createMockTab({
+					id: 'command-target',
+					name: 'Selected command tab',
+					state,
+					permissionMode: 'readonly',
+					customModel: 'grok-composer-2.5-fast',
+					customEffort: 'low',
+				});
+				session = {
+					...session,
+					state,
+					cwd: remote ? '/remote/project-a' : '/local/project-a',
+					aiTabs: [...session.aiTabs, target],
+					...(remote && { sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-a' } }),
+				};
+				const args = "$& $$ $` $' {{agent_name}}\nnext  line";
+				const commandText = `/review${separator}${args}`;
+				const readPrompt = vi.fn(() => 'Review {{agent_name}}: $ARGUMENTS');
+				const getBranch = vi.spyOn(window.maestro.git, 'getBranch');
+				try {
+					const deps = createDeps({
+						activeSession: session,
+						inputValue: `  ${commandText}  `,
+						customAICommands: [
+							{
+								id: 'custom-review',
+								command: '/review',
+								description: 'Maestro review',
+								get prompt() {
+									return readPrompt();
+								},
+							},
+						],
+					});
+					const { result } = renderHook(() => useInputProcessing(deps));
+					await act(async () => {
+						await result.current.processInput(undefined, { tabId: target.id });
+					});
+					expect(mockProcessQueuedItemRef.current).not.toHaveBeenCalled();
+					await act(async () => {
+						await vi.advanceTimersByTimeAsync(50);
+					});
+					const current = useSessionStore.getState().sessions[0];
+					const item =
+						state === 'idle'
+							? (mockProcessQueuedItemRef.current.mock.calls[0][1] as QueuedItem)
+							: current.executionQueue[0];
+					expect(item).toMatchObject({
+						type: 'command',
+						command: '/review',
+						commandArgs: args,
+						commandDescription: 'Maestro review',
+						tabId: target.id,
+						tabName: target.name,
+						readOnlyMode: true,
+						turnSettings: { model: target.customModel, effort: target.customEffort },
+						commandScope: { provider: 'grok' },
+					});
+					expect(item).not.toHaveProperty('text');
+					expect(item).not.toHaveProperty('prompt');
+					if (state === 'idle') {
+						expect(mockProcessQueuedItemRef.current).toHaveBeenCalledExactlyOnceWith(
+							session.id,
+							item
+						);
+						expect(current.executionQueue).toEqual([]);
+					} else {
+						expect(mockProcessQueuedItemRef.current).not.toHaveBeenCalled();
+						expect(current.executionQueue).toEqual([item]);
+					}
+					expect(current).toMatchObject({
+						toolType: 'grok',
+						cwd: session.cwd,
+						customEnvVars: session.customEnvVars,
+						activeTabId: session.activeTabId,
+						aiCommandHistory: [commandText],
+					});
+					expect(current.aiTabs[0]).toEqual(session.aiTabs[0]);
+					expect(mockSyncAiInputToSession).toHaveBeenCalledExactlyOnceWith('', {
+						sessionId: session.id,
+						tabId: target.id,
+					});
+					for (const effect of [
+						readPrompt,
+						getBranch,
+						discover,
+						window.maestro.process.spawn,
+						window.maestro.process.write,
+						window.maestro.agents.get,
+					]) {
+						expect(effect).not.toHaveBeenCalled();
+					}
+				} finally {
+					getBranch.mockRestore();
+				}
+			}
+		);
+
+		it('keeps a custom command draft when its explicit target tab disappeared', async () => {
+			const deps = createDeps({
+				activeSession: session,
+				inputValue: '/review $ARGUMENTS',
+				customAICommands: [
+					{ id: 'review', command: '/review', description: 'Review', prompt: 'Run' },
+				],
+			});
+			const { result } = renderHook(() => useInputProcessing(deps));
+			await act(async () => {
+				await result.current.processInput(undefined, { tabId: 'removed-tab' });
+				await vi.advanceTimersByTimeAsync(50);
+			});
+			expect(useSessionStore.getState().sessions).toEqual([session]);
+			for (const effect of [
+				mockSetInputValue,
+				mockSyncAiInputToSession,
+				mockProcessQueuedItemRef.current,
+				discover,
+				window.maestro.process.spawn,
+			]) {
+				expect(effect).not.toHaveBeenCalled();
+			}
+		});
+
 		it.each(['resolve', 'reject'])(
 			'bounds a disconnected lookup and ignores its late %s',
 			async (outcome) => {
