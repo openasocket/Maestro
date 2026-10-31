@@ -371,8 +371,17 @@ describe('remote-fs', () => {
 			inode: '9007199254740993',
 			kind: 'file',
 		};
+		const launchReceipt = {
+			launchCwd: { ...identity, kind: 'directory' },
+			processCwd: { ...identity, kind: 'directory' },
+			cwd: { ...identity, kind: 'directory' },
+			account: { ...identity, kind: 'directory' },
+			inherited: { HOME: null, GROK_HOME: null },
+			effective: { HOME: null, GROK_HOME: null },
+		};
 		afterEach(() => {
 			setRemoteAccessAuthority(null);
+			vi.useRealTimers();
 			vi.restoreAllMocks();
 			vi.clearAllMocks();
 		});
@@ -457,16 +466,7 @@ describe('remote-fs', () => {
 			{ inherited: { HOME: null, GROK_HOME: 'bad\nroot' } },
 			{ extra: 'not-a-receipt' },
 		])('rejects malformed launch ownership field %#', async (patch) => {
-			const directory = { ...identity, kind: 'directory' };
-			const stdout = JSON.stringify({
-				launchCwd: directory,
-				processCwd: directory,
-				cwd: directory,
-				account: directory,
-				inherited: { HOME: null, GROK_HOME: null },
-				effective: { HOME: null, GROK_HOME: null },
-				...patch,
-			});
+			const stdout = JSON.stringify({ ...launchReceipt, ...patch });
 			const deps = createMockDeps({ stdout, stderr: '', exitCode: 0 });
 			expect(await observePathRemote('/alias', baseConfig, deps, { env: {} })).toMatchObject({
 				success: false,
@@ -488,6 +488,92 @@ describe('remote-fs', () => {
 				expect(deps.buildSshArgs).not.toHaveBeenCalled();
 			}
 		});
+
+		it.each([100000, 100001])('bounds the launch receipt at %i ASCII bytes', async (size) => {
+			const stdout = JSON.stringify(launchReceipt).padEnd(size, ' ');
+			expect(Buffer.byteLength(stdout)).toBe(size);
+			const deps = createMockDeps({ stdout, stderr: '', exitCode: 0 });
+			const result = await observePathRemote('/alias', baseConfig, deps, { env: {} });
+			if (size === 100000) expect(result).toEqual({ success: true, data: launchReceipt });
+			else {
+				expect(result).toMatchObject({ success: false, errorCode: 'identity-unavailable' });
+				expect(result.data).toBeUndefined();
+			}
+			expect(deps.execSsh).toHaveBeenCalledTimes(1);
+		});
+
+		it.each([
+			['launchCwd', 'canonicalPath'],
+			['processCwd', 'canonicalPath'],
+			['cwd', 'canonicalPath'],
+			['account', 'canonicalPath'],
+			['inherited', 'HOME'],
+			['inherited', 'GROK_HOME'],
+			['effective', 'HOME'],
+			['effective', 'GROK_HOME'],
+		] as const)('bounds launch receipt field %s.%s independently', async (section, key) => {
+			for (const size of [16384, 16385]) {
+				const receipt = {
+					...launchReceipt,
+					[section]: { ...launchReceipt[section], [key]: '/' + 'a'.repeat(size - 1) },
+				};
+				const deps = createMockDeps({ stdout: JSON.stringify(receipt), stderr: '', exitCode: 0 });
+				const result = await observePathRemote('/alias', baseConfig, deps, { env: {} });
+				if (size === 16384) expect(result).toEqual({ success: true, data: receipt });
+				else {
+					expect(result).toMatchObject({ success: false, errorCode: 'identity-unavailable' });
+					expect(result.data).toBeUndefined();
+				}
+				expect(deps.execSsh).toHaveBeenCalledTimes(1);
+			}
+		});
+
+		it.each([
+			{ failures: 1, exitCode: 255, stderr: 'Connection reset by peer' },
+			{ failures: 3, exitCode: 255, stderr: 'Broken pipe' },
+			{ failures: 4, exitCode: 255, stderr: 'Connection reset by peer' },
+			{ failures: 4, exitCode: 'ETIMEDOUT', stderr: '' },
+		])(
+			'bounds launch retries and ignores failed receipts %#',
+			async ({ failures, exitCode, stderr }) => {
+				vi.useFakeTimers();
+				vi.spyOn(Math, 'random').mockReturnValue(0);
+				const deps = createMockDeps({ stdout: JSON.stringify(launchReceipt), stderr, exitCode });
+				vi.mocked(deps.buildSshArgs).mockImplementation(() => ['inert-fixture-host']);
+				vi.mocked(deps.execSsh).mockImplementation(async () =>
+					vi.mocked(deps.execSsh).mock.calls.length <= failures
+						? { stdout: JSON.stringify(launchReceipt), stderr, exitCode }
+						: { stdout: JSON.stringify(launchReceipt), stderr: '', exitCode: 0 }
+				);
+				const pending = observePathRemote('/alias', baseConfig, deps, { env: {} });
+				await vi.advanceTimersByTimeAsync(0);
+				expect(deps.execSsh).toHaveBeenCalledTimes(1);
+				const attempts = Math.min(failures + 1, 4);
+				for (let retry = 0; retry < attempts - 1; retry++) {
+					await vi.advanceTimersByTimeAsync(500 * 2 ** retry - 1);
+					expect(deps.execSsh).toHaveBeenCalledTimes(retry + 1);
+					await vi.advanceTimersByTimeAsync(1);
+					expect(deps.execSsh).toHaveBeenCalledTimes(retry + 2);
+				}
+				const result = await pending;
+				if (failures < 4) expect(result).toEqual({ success: true, data: launchReceipt });
+				else {
+					expect(result).toEqual({
+						success: false,
+						errorCode: undefined,
+						error: stderr || 'Remote path identity unavailable',
+					});
+					expect(result.data).toBeUndefined();
+				}
+				expect(vi.getTimerCount()).toBe(0);
+				await vi.advanceTimersByTimeAsync(60000);
+				expect(deps.execSsh).toHaveBeenCalledTimes(attempts);
+				expect(deps.buildSshArgs).toHaveBeenCalledTimes(attempts);
+				for (const call of vi.mocked(deps.execSsh).mock.calls)
+					expect(call).toEqual(vi.mocked(deps.execSsh).mock.calls[0]);
+				expect(execFileNoThrow).not.toHaveBeenCalled();
+			}
+		);
 
 		it.each(['', '/bad\npath', '/bad\0path', 'a'.repeat(16385)])(
 			'rejects invalid observer path %# before SSH',
@@ -704,6 +790,8 @@ describe('remote-fs', () => {
 		let account: string;
 		let fault = '';
 		let deps: RemoteFsDeps;
+		let inherited: NodeJS.ProcessEnv;
+		let passwdHome: string | null;
 		const audits: Array<{
 			reads: number;
 			bytes: number;
@@ -715,29 +803,53 @@ describe('remote-fs', () => {
 			writes: string[];
 			flags: number[];
 			outputBytes: number;
+			fileOpens: string[];
+			passwdCalls: number;
+			mutations: number;
 		}> = [];
 		// Instrument syscalls, not the program's branches. Faults model an external writer.
-		const instrument = `import os, sys, json, shlex, signal, errno
+		const instrument = `import os, sys, json, shlex, signal, errno, stat, base64, pwd, types
 v = json.load(sys.stdin)
 args = shlex.split(v['command'])
+root, fault = v['root'], v['fault']
+launch = args[0] == '/bin/bash'
+if launch:
+ assert args[:4] == ['/bin/bash', '--norc', '--noprofile', '-c'] and len(args) == 5
+ args = shlex.split(args[4])
+ # Only the new absolute-cwd cases use this transport. Real Bash controls below
+ # separately verify shell cd and literal export semantics.
+ assert args[:6] == ['cd', root, '||', 'exit', '70;', 'exec']
+ args = args[6:]
 assert args[:5] == ['python3', '-I', '-S', '-B', '-c']
 program, sys.argv = args[5], ['-c'] + args[6:]
-root, fault = v['root'], v['fault']
 assert all(os.path.commonpath([root, p]) == root for p in sys.argv[1:] if p.startswith('/'))
-audit = dict(reads=0, bytes=0, requests=[], opened=0, closed=0, live=0, alarm=0, writes=[], flags=[])
+audit = dict(reads=0, bytes=0, requests=[], opened=0, closed=0, live=0, alarm=0,
+ writes=[], flags=[], fileOpens=[], passwdCalls=0, mutations=0)
 opened = set()
 original_open, original_read, original_close = os.open, os.read, os.close
+original_stat = os.stat
 original_alarm = signal.alarm
 injected = False
+def passwd_home(uid):
+ audit['passwdCalls'] += 1
+ assert uid == os.getuid()
+ if v['passwdHome'] is None: raise KeyError(uid)
+ return types.SimpleNamespace(pw_dir=v['passwdHome'])
+pwd.getpwuid = passwd_home
 def mutation(which):
  global injected
  injected = True
+ audit['mutations'] += 1
  try:
   if which == 'replace': os.replace(root + '/replacement', root + '/transcript')
   elif which == 'grow':
    fd = original_open(root + '/transcript', os.O_WRONLY | os.O_APPEND)
    try: os.write(fd, b'yz')
    finally: original_close(fd)
+  elif which in ('home', 'cwd'):
+   link = root + '/' + which + '-alias'
+   os.unlink(link)
+   os.symlink(root + '/account-b', link)
   else:
    link = root + ('/account-alias' if which == 'guard' else '/transcript-alias')
    os.unlink(link)
@@ -748,7 +860,18 @@ def audit_event(event, args):
  if not injected and (writing or event in ('os.remove', 'os.rename', 'os.symlink', 'os.mkdir')):
   audit['writes'].append(event)
   raise RuntimeError('Reader attempted a mutation')
+ if not injected and event == 'open':
+  audit['fileOpens'].append(str(args[0]))
+  if launch: raise RuntimeError('Launch observer attempted a content read')
 sys.addaudithook(audit_event)
+def tracked_stat(p, *args, **kw):
+ assert os.path.commonpath([root, os.path.abspath(p)]) == root
+ result = original_stat(p, *args, **kw)
+ trigger = root + ('/account-a/.grok' if fault == 'home' else '/.grok')
+ if fault in ('home', 'cwd') and str(p) == trigger and audit['mutations'] == 0:
+  mutation(fault)
+ return result
+os.stat = tracked_stat
 def tracked_open(p, flags, *rest, **kw):
  if fault == 'replace-before-open': mutation('replace')
  fd = original_open(p, flags, *rest, **kw)
@@ -814,11 +937,14 @@ finally:
 			fs.symlinkSync(path.join(root, 'account-a'), account);
 			fs.symlinkSync(path.join(root, 'pool'), path.join(root, 'account-a/sessions'));
 			fault = '';
+			inherited = { PATH: process.env.PATH, HOME: root, GROK_HOME: account };
+			passwdHome = null;
 			deps = createMockDeps({ stdout: '', stderr: '', exitCode: 0 });
 			vi.mocked(deps.buildSshArgs).mockImplementation(() => ['inert-fixture-host']);
 			vi.mocked(deps.execSsh).mockImplementation(async (_ssh, args) => {
 				const result = spawnSync('python3', ['-I', '-S', '-B', '-c', instrument], {
-					input: JSON.stringify({ command: args.at(-1), root, fault }),
+					input: JSON.stringify({ command: args.at(-1), root, fault, passwdHome }),
+					env: inherited,
 					encoding: 'utf8',
 					cwd: root,
 					timeout: 3000,
@@ -847,8 +973,129 @@ finally:
 			}
 		});
 
+		describe('audited Grok launch ownership', () => {
+			beforeEach(() => {
+				for (const dir of ['.grok', 'passwd-home/.grok', 'account-a/.grok', 'account-b/.grok']) {
+					fs.mkdirSync(path.join(root, dir), { recursive: true });
+					// Synthetic contents make unexpected access detectable without real account data.
+					fs.writeFileSync(path.join(root, dir, 'auth.json'), '{"fixture":"not-a-credential"}');
+					fs.writeFileSync(path.join(root, dir, 'chat_history.jsonl'), '{"fixture":"not-a-chat"}');
+				}
+			});
+			afterEach(() => {
+				if (!root) return; // The enclosing POSIX prerequisite may skip this case.
+				expect(audits).toHaveLength(1);
+				expect(audits[0]).toMatchObject({
+					fileOpens: [],
+					reads: 0,
+					bytes: 0,
+					opened: 0,
+					closed: 0,
+					live: 0,
+					writes: [],
+				});
+				expect(deps.execSsh).toHaveBeenCalledTimes(1);
+			});
+
+			it.each(
+				[undefined, ''].flatMap((home) =>
+					[
+						{
+							label: 'fixture home',
+							passwd: 'passwd-home',
+							success: true,
+							suffix: 'passwd-home/.grok',
+						},
+						{ label: 'empty passwd home', passwd: '', success: true, suffix: '.grok' },
+						{ label: 'missing passwd entry', passwd: null, success: false, suffix: '' },
+						{
+							label: 'missing passwd directory',
+							passwd: 'missing-home',
+							success: false,
+							suffix: '',
+						},
+					].map((scenario) => ({ home, ...scenario }))
+				)
+			)(
+				'uses only the stubbed passwd fallback for HOME=$home, $label',
+				async ({ home, passwd, success, suffix }) => {
+					inherited.HOME = home;
+					delete inherited.GROK_HOME;
+					passwdHome = passwd ? path.join(root, passwd) : passwd;
+					const result = await observePathRemote(root, baseConfig, deps, { env: {} });
+					if (success) {
+						expect(result).toMatchObject({
+							success: true,
+							data: {
+								account: { canonicalPath: path.join(root, suffix), kind: 'directory' },
+								inherited: { HOME: home ?? null, GROK_HOME: null },
+								effective: { HOME: home ?? null, GROK_HOME: null },
+							},
+						});
+					} else {
+						expect(result).toMatchObject({ success: false, errorCode: 'identity-unavailable' });
+						expect(result.data).toBeUndefined();
+					}
+					expect(audits[0]).toMatchObject({ passwdCalls: 1, mutations: 0 });
+				}
+			);
+
+			it.each([undefined, ''])(
+				'resolves empty passwd home from native process cwd with HOME=%j',
+				async (home) => {
+					inherited.HOME = home;
+					delete inherited.GROK_HOME;
+					passwdHome = '';
+					const nativeCwd = path.join(root, 'account-a');
+					expect(
+						await observePathRemote(root, baseConfig, deps, { env: {}, nativeCwd })
+					).toMatchObject({
+						success: true,
+						data: {
+							launchCwd: { canonicalPath: root },
+							processCwd: { canonicalPath: nativeCwd },
+							cwd: { canonicalPath: nativeCwd },
+							account: { canonicalPath: path.join(nativeCwd, '.grok') },
+						},
+					});
+					expect(audits[0]).toMatchObject({ passwdCalls: 1, mutations: 0 });
+				}
+			);
+
+			it.each([undefined, ''])(
+				'keeps an explicit account independent of HOME=%j and missing passwd',
+				async (home) => {
+					inherited.HOME = home;
+					const result = await observePathRemote(root, baseConfig, deps, { env: {} });
+					expect(result).toMatchObject({
+						success: true,
+						data: { account: { canonicalPath: path.join(root, 'account-a') } },
+					});
+					expect(audits[0]).toMatchObject({ passwdCalls: 0, mutations: 0 });
+				}
+			);
+
+			it.each(['home', 'cwd'] as const)(
+				'rejects a %s alias retargeted after initial observation',
+				async (scenario) => {
+					const link = path.join(root, `${scenario}-alias`);
+					fs.symlinkSync(path.join(root, 'account-a'), link);
+					inherited.HOME = scenario === 'home' ? link : root;
+					inherited.GROK_HOME = scenario === 'home' ? undefined : path.join(root, '.grok');
+					fault = scenario;
+					const result = await observePathRemote(root, baseConfig, deps, {
+						env: {},
+						nativeCwd: scenario === 'cwd' ? link : undefined,
+					});
+					expect(result).toMatchObject({ success: false, errorCode: 'identity-mismatch' });
+					expect(result.data).toBeUndefined();
+					expect(audits[0]).toMatchObject({ passwdCalls: 0, mutations: 1 });
+					expect(fs.realpathSync(link)).toBe(path.join(root, 'account-b'));
+				}
+			);
+		});
+
 		describe('Grok launch environment through the emitted bash wrapper', () => {
-			let inherited: NodeJS.ProcessEnv;
 			beforeEach(() => {
 				inherited = { PATH: process.env.PATH, HOME: root, GROK_HOME: account };
 				for (const dir of [
