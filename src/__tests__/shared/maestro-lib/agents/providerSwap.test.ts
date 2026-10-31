@@ -19,6 +19,7 @@ import {
 	switchAgentProvider,
 	switchTabProvider,
 	updateProviderSlot,
+	type NativeSessionBinding,
 	type ProviderAgentOverrides,
 	type ProviderSwitchAgent,
 	type ProviderSwitchQueuedItem,
@@ -258,6 +259,172 @@ describe('updateProviderSlot', () => {
 			customModel: 'opus',
 			usageStats: usage(3),
 		});
+	});
+});
+
+describe('native session ownership', () => {
+	const bound: Extract<NativeSessionBinding, { state: 'bound' }> = {
+		version: 1,
+		state: 'bound',
+		provider: 'grok',
+		nativeSessionId: 'shared-native-id',
+		accountRef: 'fixture-account-a',
+		host: { kind: 'ssh', identity: 'fixture-endpoint-a' },
+		cwd: '/work/project',
+	};
+
+	it.each([
+		undefined,
+		{ version: 1, state: 'unknown', reason: 'legacy' } as const,
+		{ version: 1, state: 'unknown', reason: 'unobserved' } as const,
+		bound,
+	])('round-trips recorded ownership without inferring legacy scope: %j', (binding) => {
+		const original = makeTab({
+			agentSessionId: bound.nativeSessionId,
+			nativeSessionBinding: binding,
+		});
+		const parked = switchTabProvider(original, 'grok', 'codex');
+		expect(parked.nativeSessionBinding).toBeUndefined();
+		expect(parked.providerSessions?.grok?.nativeSessionBinding).toEqual(binding);
+		const restored = switchTabProvider(JSON.parse(JSON.stringify(parked)), 'codex', 'grok');
+		expect(restored.agentSessionId).toBe(bound.nativeSessionId);
+		expect(restored.nativeSessionBinding).toEqual(binding);
+		expect(restored.providerSessions?.grok).toBeUndefined();
+		expect(original.nativeSessionBinding).toBe(binding);
+	});
+
+	describe.each(['grok', 'codex'] as const)(
+		'updates when the current provider is %s',
+		(current) => {
+			it.each([undefined, { version: 1, state: 'unknown', reason: 'legacy' } as const, bound])(
+				'preserves ownership for usage-only and undefined-ID updates: %j',
+				(binding) => {
+					const original = makeTab({
+						agentSessionId: bound.nativeSessionId,
+						nativeSessionBinding: binding,
+					});
+					const tab = switchTabProvider(original, 'grok', current);
+					for (const update of [
+						{ usageStats: usage(7) },
+						{ usageStats: usage(7), agentSessionId: undefined },
+						{ usageStats: usage(7), agentSessionId: bound.nativeSessionId },
+					]) {
+						const result = updateProviderSlot(tab, makeAgent(current), 'grok', update);
+						const slot = current === 'grok' ? result : result.providerSessions!.grok!;
+						expect(slot.nativeSessionBinding).toBe(binding);
+						expect(slot.agentSessionId).toBe(bound.nativeSessionId);
+						expect(slot.usageStats).toEqual(usage(7));
+						if (current === 'codex') {
+							expect(result.agentSessionId).toBeNull();
+							expect(result.nativeSessionBinding).toBeUndefined();
+						}
+					}
+					expect(original.usageStats).toBeUndefined();
+				}
+			);
+
+			it.each(['replacement-id', null])(
+				'invalidates prior ownership on an unscoped ID change: %s',
+				(id) => {
+					const original = makeTab({
+						agentSessionId: bound.nativeSessionId,
+						nativeSessionBinding: bound,
+					});
+					const tab = switchTabProvider(original, 'grok', current);
+					const result = updateProviderSlot(tab, makeAgent(current), 'grok', {
+						agentSessionId: id,
+					});
+					const slot = current === 'grok' ? result : result.providerSessions!.grok!;
+					expect(slot.agentSessionId).toBe(id);
+					expect(slot.nativeSessionBinding).toEqual(
+						id ? { version: 1, state: 'unknown', reason: 'unobserved' } : undefined
+					);
+					expect(original.nativeSessionBinding).toBe(bound);
+					expect(original.agentSessionId).toBe(bound.nativeSessionId);
+				}
+			);
+
+			it('clears explicitly undefined scope without clearing the native ID', () => {
+				const tab = switchTabProvider(
+					makeTab({ agentSessionId: bound.nativeSessionId, nativeSessionBinding: bound }),
+					'grok',
+					current
+				);
+				const result = updateProviderSlot(tab, makeAgent(current), 'grok', {
+					nativeSessionBinding: undefined,
+				});
+				const slot = current === 'grok' ? result : result.providerSessions!.grok!;
+				expect(slot.agentSessionId).toBe(bound.nativeSessionId);
+				expect(slot.nativeSessionBinding).toBeUndefined();
+			});
+
+			it.each([
+				{ ...bound, provider: 'codex' as const },
+				{ ...bound, nativeSessionId: 'other-native-id' },
+			])('rejects a mismatched supplied binding before changing a slot: %j', (binding) => {
+				const tab = switchTabProvider(
+					makeTab({ agentSessionId: bound.nativeSessionId, nativeSessionBinding: bound }),
+					'grok',
+					current
+				);
+				const before = structuredClone(tab);
+				expect(() =>
+					updateProviderSlot(tab, makeAgent(current), 'grok', {
+						nativeSessionBinding: binding,
+						usageStats: usage(9),
+					})
+				).toThrow('Native session binding does not match the provider slot.');
+				expect(tab).toStrictEqual(before);
+				expect(() =>
+					updateProviderSlot(tab, makeAgent(current), 'grok', {
+						agentSessionId: null,
+						nativeSessionBinding: bound,
+					})
+				).toThrow('Native session binding does not match the provider slot.');
+				expect(tab).toStrictEqual(before);
+			});
+
+			it('replaces observed scope atomically and leaves earlier snapshots intact', () => {
+				const original = makeTab({
+					agentSessionId: bound.nativeSessionId,
+					nativeSessionBinding: bound,
+				});
+				const tab = switchTabProvider(original, 'grok', current);
+				const replacement: NativeSessionBinding = {
+					...bound,
+					nativeSessionId: 'next-id',
+					accountRef: 'fixture-account-b',
+					host: { kind: 'local', identity: 'fixture-machine-b' },
+					cwd: '/other/project',
+				};
+				const result = updateProviderSlot(tab, makeAgent(current), 'grok', {
+					agentSessionId: 'next-id',
+					nativeSessionBinding: replacement,
+				});
+				const restored = switchTabProvider(result, current, 'grok');
+				expect(restored.nativeSessionBinding).toEqual(replacement);
+				expect(restored.agentSessionId).toBe('next-id');
+				expect(original.nativeSessionBinding).toStrictEqual(bound);
+				expect(original.agentSessionId).toBe(bound.nativeSessionId);
+			});
+		}
+	);
+
+	it('accepts a late observed Grok allocation without changing a colliding live provider ID', () => {
+		const incoming: NativeSessionBinding = {
+			...bound,
+			provider: 'codex',
+			accountRef: 'fixture-codex',
+		};
+		const tab = makeTab({ agentSessionId: bound.nativeSessionId, nativeSessionBinding: incoming });
+		const result = updateProviderSlot(tab, makeAgent('codex'), 'grok', {
+			agentSessionId: bound.nativeSessionId,
+			nativeSessionBinding: bound,
+		});
+		expect(result.nativeSessionBinding).toBe(incoming);
+		expect(result.agentSessionId).toBe(bound.nativeSessionId);
+		expect(result.providerSessions?.grok?.nativeSessionBinding).toBe(bound);
+		expect(tab.providerSessions).toBeUndefined();
 	});
 });
 

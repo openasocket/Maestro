@@ -1314,6 +1314,35 @@
 			],
 			"testOwners": ["GT1-04-07AT", "GT1-04-08"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-native-session-binding-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07at-native-session-ownership-tests",
+			"sourceCommit": "83b90f754e739ce49cdfa7ba08d2149c406e6a82",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/shared/maestro-lib/agents/providerSwap.test.ts": "853020f43a56782ed63b6d52c5a00b965e9d5ac7ca2d3f0f7a40688da3b248ef",
+				"src/__tests__/shared/maestro-lib/translation-session.test.ts": "60a31209e828feab08e465d242d898958c44ffc84da93508beeb3d128087b46b",
+				"src/__tests__/renderer/hooks/utils/useDebouncedPersistence.test.ts": "850030f9e3af3e3a3f48f0a8e5ed53119e89769eb0b04e01baddbc0fc8ee307a"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"authoredCases": 56,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Pre-existing RequestInit.dispatcher TS2339 in src/main/plugins/plugin-host-handlers.ts:1196; no changed-file diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "Native ownership retention/invalidation in live/parked slots, translation snapshots/replay and open/snoozed hook serialization. No tests run or collected; native admission, History writers and Grok translation remain unqualified.",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -2952,7 +2981,8 @@
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
 				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
-				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations"
+				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
+				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5156,7 +5186,8 @@
 				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
 				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
 				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
-				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations"
+				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
+				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5313,7 +5344,8 @@
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
 				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
 				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
-				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations"
+				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
+				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10360,7 +10392,8 @@
 				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
 				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
 				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
-				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations"
+				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
+				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10858,7 +10891,8 @@
 				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
 				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
 				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
-				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations"
+				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
+				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -15425,7 +15459,8 @@
 				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
 				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
 				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
-				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations"
+				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
+				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
