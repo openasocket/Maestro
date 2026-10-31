@@ -2,10 +2,10 @@
  * Tests for the Cost & Tokens accessor's pure derivation + aggregation logic
  * (exposed via `_internal`): turning an `AgentSessionInfo` into a per-session
  * breakdown, rolling breakdowns up into the dashboard aggregate, and time
- * bucketing. The storage-reading / caching path is covered separately.
+ * bucketing, plus Grok collection with isolated storage and cache ports.
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -16,7 +16,25 @@ vi.mock('electron', () => ({
 	},
 }));
 
-import { _internal } from '../../../../main/stats/token-usage/token-usage-accessor';
+vi.mock('../../../../main/stats/singleton', () => ({ getStatsDB: vi.fn() }));
+vi.mock('../../../../main/agents', () => ({ getSessionStorage: vi.fn() }));
+vi.mock('../../../../main/agents/provider-account-dirs', () => ({
+	getProviderAccountDirs: vi.fn(),
+}));
+
+import {
+	_internal,
+	getTokenUsageAggregate,
+	invalidateTokenUsageMemo,
+} from '../../../../main/stats/token-usage/token-usage-accessor';
+import { getStatsDB } from '../../../../main/stats/singleton';
+import { getSessionStorage } from '../../../../main/agents';
+import { getProviderAccountDirs } from '../../../../main/agents/provider-account-dirs';
+import {
+	TokenUsageCache,
+	setTokenUsageCacheForTest,
+} from '../../../../main/stats/token-usage/token-usage-cache';
+import { usageCostUsd } from '../../../../shared/maestro-lib/streaming/usage-totals';
 import type { AgentSessionInfo } from '../../../../main/agents/session-storage';
 import {
 	DEFAULT_ACCOUNT_KEY,
@@ -210,7 +228,10 @@ describe('aggregate', () => {
 
 	it('records per-agent coverage in the aggregate', () => {
 		const agg = aggregate(
-			[breakdown({ agentType: 'claude-code' }), breakdown({ sessionId: 's2', agentType: 'codex' })],
+			[
+				breakdown({ agentType: 'claude-code' }),
+				breakdown({ sessionId: 's2', agentType: 'codex', coverage: 'partial' }),
+			],
 			{}
 		);
 		expect(agg.coverageByAgent['claude-code']).toBe('full');
@@ -225,6 +246,254 @@ describe('aggregate', () => {
 		const agg = aggregate(all, { granularity: 'day' });
 		expect(agg.timeline).toHaveLength(2);
 		expect(agg.timeline[0].startMs).toBeLessThan(agg.timeline[1].startMs);
+	});
+});
+
+describe('Grok native lifetime accounting', () => {
+	const project = path.resolve('src/__tests__/fixtures/grok-usage/project');
+	const accounts = ['alpha', 'beta'].map((name) =>
+		path.resolve('src/__tests__/fixtures/grok-usage', name)
+	);
+	// Disjoint first/resumed-turn buckets from GT1-03 and GT1-04-06D.
+	const turns: NonNullable<NonNullable<AgentSessionInfo['accounting']>['models']> = [
+		{
+			model: 'grok-fixture',
+			inputTokens: 60,
+			outputTokens: 20,
+			cacheReadInputTokens: 30,
+			cacheCreationInputTokens: 10,
+			reasoningTokens: 5,
+			completeness: 'complete',
+			cost: { status: 'exact', costUsdTicks: '9007199254740993' },
+		},
+		{
+			model: 'unknown-model-raw',
+			inputTokens: 45,
+			outputTokens: 30,
+			cacheReadInputTokens: 10,
+			cacheCreationInputTokens: 5,
+			reasoningTokens: 5,
+			completeness: 'complete',
+			cost: { status: 'exact', costUsdTicks: '13' },
+		},
+	];
+	const native = makeInfo({
+		projectPath: project,
+		inputTokens: 105,
+		outputTokens: 50,
+		cacheReadTokens: 40,
+		cacheCreationTokens: 15,
+		accounting: {
+			source: 'runtime-stream',
+			scope: 'native-session',
+			reporting: 'snapshot',
+			providerSessionId: 'sess-1',
+			cacheReadCounting: 'beside-input',
+			cacheCreationCounting: 'beside-input',
+			completeness: 'complete',
+			childInclusion: 'completed',
+			childCompleteness: 'unknown',
+			cost: { status: 'exact', costUsdTicks: '9007199254741006' },
+			models: turns,
+		},
+	});
+
+	afterEach(() => {
+		invalidateTokenUsageMemo();
+		setTokenUsageCacheForTest(null);
+		vi.restoreAllMocks();
+	});
+
+	it('reconciles new and resumed models to one native lifetime without summing detail twice', () => {
+		const bd = toBreakdown('grok', native, accounts[0]);
+		const result = aggregate([bd], {});
+		expect(result.totals).toMatchObject({
+			sessionCount: 1,
+			inputTokens: 60 + 45,
+			outputTokens: 20 + 30,
+			cacheReadTokens: 30 + 10,
+			cacheCreationTokens: 10 + 5,
+			accounting: { cost: { status: 'exact', costUsdTicks: '9007199254741006' } },
+		});
+		expect(result.byModel.map((m) => [m.label, m.inputTokens, m.accounting?.cost])).toEqual([
+			['grok-fixture', 60, turns[0].cost],
+			['unknown-model-raw', 45, turns[1].cost],
+		]);
+		expect(bd.byModel.map((m) => m.rawModel)).toEqual(turns.map((m) => m.model));
+		expect(bd.accounting).not.toBe(native.accounting);
+		expect(bd.byModel[0].accounting).not.toBe(turns[0]);
+		expect(Object.values(result.series.byDay)).toEqual([210]);
+	});
+
+	it.each([
+		{ status: 'unknown' },
+		{ status: 'partial', costUsdTicks: '0' },
+		{ status: 'exact', costUsdTicks: '0' },
+	] as const)('keeps $status cost evidence distinct from compatibility zero', (cost) => {
+		const { status } = cost;
+		const bd = toBreakdown(
+			'grok',
+			makeInfo({
+				...native,
+				accounting: {
+					...native.accounting!,
+					cost,
+					models: undefined,
+					completeness: status === 'exact' ? 'complete' : 'partial',
+				},
+			}),
+			accounts[0]
+		);
+		const result = aggregate([bd], {});
+		expect(result.totals.costUsd).toBe(0);
+		expect(result.totals.accounting?.cost).toEqual(cost);
+		expect(usageCostUsd(result.totals.accounting!.cost)).toBe(status === 'unknown' ? undefined : 0);
+		expect(result.coverageByAgent.grok).toBe(status === 'exact' ? 'full' : 'partial');
+		expect(result.byModel[0].accounting?.cost).toEqual(cost);
+	});
+
+	it.each([false, true])(
+		'retains interrupted coverage regardless of order (reverse=%s)',
+		(reverse) => {
+			const interrupted = toBreakdown(
+				'grok',
+				makeInfo({
+					...native,
+					sessionId: 'interrupted',
+					accounting: {
+						...native.accounting!,
+						completeness: 'partial',
+						cost: { status: 'unknown' },
+						models: [{ ...turns[0], cost: { status: 'unknown' } }],
+					},
+				}),
+				accounts[1]
+			);
+			const all = [interrupted, toBreakdown('grok', native, accounts[0])];
+			const result = aggregate(reverse ? all.reverse() : all, {});
+			expect(result.totals.inputTokens).toBe(210);
+			expect(result.coverageByAgent.grok).toBe('partial');
+			expect(result.totals.accounting?.cost).toMatchObject({
+				status: 'partial',
+				costUsdTicks: '9007199254741006',
+			});
+			expect(result.byAccount.find((a) => a.key.endsWith(accounts[1]))?.accounting?.cost).toEqual({
+				status: 'unknown',
+			});
+			expect(result.byModel.find((m) => m.label === 'grok-fixture')?.accounting?.cost.status).toBe(
+				'partial'
+			);
+		}
+	);
+
+	it('keeps unknown native dates out of timelines without losing lifetime totals', () => {
+		const bd = toBreakdown(
+			'grok',
+			makeInfo({ ...native, timestamp: '', modifiedAt: '' }),
+			accounts[0]
+		);
+		const result = aggregate([bd], {});
+		expect(bd.timestampMs).toBe(0);
+		expect(result.totals.inputTokens).toBe(105);
+		expect(result.timeline).toEqual([]);
+		expect(result.series.byDay).toEqual({});
+		expect(result.series.byHour).toEqual({});
+		expect(result.series.bySessionByDay).toEqual({});
+	});
+
+	describe('collection through isolated ports', () => {
+		let cache: TokenUsageCache;
+		const listSessions = vi.fn();
+
+		beforeEach(() => {
+			vi.mocked(getStatsDB).mockReset();
+			vi.mocked(getSessionStorage).mockReset();
+			vi.mocked(getProviderAccountDirs).mockReset();
+			listSessions.mockReset();
+			// Reuse the real in-memory cache; every disk boundary is replaced.
+			cache = new TokenUsageCache(path.join(project, 'cache.json'));
+			vi.spyOn(cache, 'load').mockResolvedValue(undefined);
+			vi.spyOn(cache, 'persist').mockResolvedValue(undefined);
+			vi.spyOn(cache, 'get');
+			vi.spyOn(cache, 'set');
+			setTokenUsageCacheForTest(cache);
+			vi.mocked(getStatsDB).mockReturnValue({
+				isReady: () => true,
+				getSessionLifecycleEvents: () =>
+					[project, path.join(project, 'alias')].map((projectPath) => ({
+						agentType: 'grok',
+						projectPath,
+						isRemote: false,
+					})),
+			} as unknown as ReturnType<typeof getStatsDB>);
+			vi.mocked(getSessionStorage).mockReturnValue({ listSessions } as unknown as ReturnType<
+				typeof getSessionStorage
+			>);
+			vi.mocked(getProviderAccountDirs).mockResolvedValue(accounts);
+		});
+
+		it('keeps colliding account IDs separate, deduplicates cwd aliases and omits ambiguous tab series', async () => {
+			listSessions.mockImplementation(async (_project, _ssh, account) => [
+				makeInfo({
+					...native,
+					inputTokens: account === accounts[0] ? 105 : 7,
+					accounting: { ...native.accounting!, models: undefined },
+				}),
+			]);
+			const result = await getTokenUsageAggregate({}, true);
+			expect(result.totals).toMatchObject({ sessionCount: 2, inputTokens: 112 });
+			expect(result.byAccount.map((a) => [a.key, a.inputTokens])).toEqual([
+				[`grok::${accounts[0]}`, 105],
+				[`grok::${accounts[1]}`, 7],
+			]);
+			expect(result.byProject).toHaveLength(1);
+			expect(result.series.bySessionByDay).toEqual({});
+			expect(Object.values(result.series.byDay)).toEqual([322]);
+			expect(new Set(vi.mocked(cache.set).mock.calls.map(([key]) => key)).size).toBe(2);
+			expect(
+				new Set(vi.mocked(cache.set).mock.calls.map(([, , bd]) => bd.accounting?.scopeId)).size
+			).toBe(2);
+			for (const account of accounts)
+				expect(listSessions).toHaveBeenCalledWith(project, undefined, account);
+		});
+
+		it('refreshes usage-only changes and unavailable usage despite unchanged metadata', async () => {
+			vi.mocked(getProviderAccountDirs).mockResolvedValue([accounts[0]]);
+			listSessions.mockResolvedValue([native]);
+			const initial = await getTokenUsageAggregate({}, true);
+			const next = makeInfo({
+				...native,
+				inputTokens: 106,
+				accounting: {
+					...native.accounting!,
+					cost: { status: 'exact', costUsdTicks: '9007199254741007' },
+				},
+			});
+			listSessions.mockResolvedValue([next]);
+			const refreshed = await getTokenUsageAggregate({}, true);
+			expect(initial.totals.inputTokens).toBe(105);
+			expect(refreshed.totals.inputTokens).toBe(106);
+			expect(refreshed.totals.accounting?.cost).toEqual(next.accounting!.cost);
+			listSessions.mockResolvedValue([
+				makeInfo({
+					...native,
+					accounting: {
+						...native.accounting!,
+						source: 'none',
+						completeness: 'unknown',
+						cost: { status: 'unknown' },
+						models: undefined,
+					},
+				}),
+			]);
+			const unavailable = await getTokenUsageAggregate({}, true);
+			expect(unavailable.totals.accounting?.cost).toEqual({ status: 'unknown' });
+			expect(unavailable.coverageByAgent.grok).toBe('partial');
+			expect(cache.get).not.toHaveBeenCalled();
+			expect(
+				new Set(vi.mocked(cache.set).mock.calls.map(([, fingerprint]) => fingerprint)).size
+			).toBe(1);
+		});
 	});
 });
 

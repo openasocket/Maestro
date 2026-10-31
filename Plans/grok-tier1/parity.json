@@ -2856,6 +2856,20 @@
 			"static": "pass",
 			"deterministic": "not-run",
 			"live": "not-run"
+		},
+		"phase04-usage-accessor-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-12-usage-accessor-regression-tests",
+			"sourceCommit": "ecd66d59f216a155b3e8fb5e52dd57e704c051ec",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/stats/token-usage/token-usage-accessor.test.ts": "d5dba2f7b7a7f5f7443cbb225f76d3f5e63450672b4015aaa5c05a3a06171504",
+				"src/__tests__/main/cue/cue-token-accessor.test.ts": "7873ce9a19e05b8950c05c24cf72a25b49acde6f524be45f8a57fcd0e01b5297"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run"
 		}
 	},
 	"sourceCatalog": {
@@ -6134,7 +6148,8 @@
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
 				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
 				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting",
-				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery"
+				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery",
+				"phase04UsageAccessorTestsEvidenceRef": "phase04-usage-accessor-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6194,7 +6209,7 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run. GT1-04-12 authored 18 accessor cases and migrated Cue pair-key assertions; static checks pass, but tests were neither run nor collected. Event-stream reconciliation remains GT1-04-12A, with all execution owned by GT1-04-13.",
 					"affectedRows": ["P11"],
 					"evidenceRef": "phase04-canonical-account-discovery"
 				}
@@ -7265,7 +7280,8 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting",
-				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery"
+				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery",
+				"phase04UsageAccessorTestsEvidenceRef": "phase04-usage-accessor-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7303,7 +7319,7 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run. GT1-04-12 authored 18 accessor cases and migrated Cue pair-key assertions; static checks pass, but tests were neither run nor collected. Event-stream reconciliation remains GT1-04-12A, with all execution owned by GT1-04-13.",
 					"affectedRows": ["P16"],
 					"evidenceRef": "phase04-canonical-account-discovery"
 				}
@@ -11215,7 +11231,8 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting",
-				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery"
+				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery",
+				"phase04UsageAccessorTestsEvidenceRef": "phase04-usage-accessor-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11260,7 +11277,7 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run. GT1-04-12 authored 18 accessor cases and migrated Cue pair-key assertions; static checks pass, but tests were neither run nor collected. Event-stream reconciliation remains GT1-04-12A, with all execution owned by GT1-04-13.",
 					"affectedRows": ["P40"],
 					"evidenceRef": "phase04-canonical-account-discovery"
 				}
@@ -13647,7 +13664,8 @@
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
 				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
 				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting",
-				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery"
+				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery",
+				"phase04UsageAccessorTestsEvidenceRef": "phase04-usage-accessor-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13707,7 +13725,7 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run. GT1-04-12 authored 18 accessor cases and migrated Cue pair-key assertions; static checks pass, but tests were neither run nor collected. Event-stream reconciliation remains GT1-04-12A, with all execution owned by GT1-04-13.",
 					"affectedRows": ["C-supportsCostTracking"],
 					"evidenceRef": "phase04-canonical-account-discovery"
 				}
@@ -13876,7 +13894,8 @@
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
 				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
 				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting",
-				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery"
+				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery",
+				"phase04UsageAccessorTestsEvidenceRef": "phase04-usage-accessor-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13936,7 +13955,7 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run. GT1-04-12 authored 18 accessor cases and migrated Cue pair-key assertions; static checks pass, but tests were neither run nor collected. Event-stream reconciliation remains GT1-04-12A, with all execution owned by GT1-04-13.",
 					"affectedRows": ["C-supportsUsageStats"],
 					"evidenceRef": "phase04-canonical-account-discovery"
 				}
@@ -17205,7 +17224,8 @@
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
 				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
 				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting",
-				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery"
+				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery",
+				"phase04UsageAccessorTestsEvidenceRef": "phase04-usage-accessor-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17265,7 +17285,7 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run. GT1-04-12 authored 18 accessor cases and migrated Cue pair-key assertions; static checks pass, but tests were neither run nor collected. Event-stream reconciliation remains GT1-04-12A, with all execution owned by GT1-04-13.",
 					"affectedRows": ["REG-USAGE"],
 					"evidenceRef": "phase04-canonical-account-discovery"
 				}
@@ -20993,7 +21013,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting",
-				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery"
+				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery",
+				"phase04UsageAccessorTestsEvidenceRef": "phase04-usage-accessor-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21031,7 +21052,7 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run. GT1-04-12 authored 18 accessor cases and migrated Cue pair-key assertions; static checks pass, but tests were neither run nor collected. Event-stream reconciliation remains GT1-04-12A, with all execution owned by GT1-04-13.",
 					"affectedRows": ["S26"],
 					"evidenceRef": "phase04-canonical-account-discovery"
 				}
