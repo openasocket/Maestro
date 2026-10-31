@@ -1896,6 +1896,35 @@
 			"remainingImplementationOwners": ["GT1-04-07D", "GT1-04-07E", "GT1-04-07F"],
 			"testOwners": ["GT1-04-07CT", "GT1-04-07C5UT"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-unified-history-scope-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c5ut-unified-history-scope-tests",
+			"sourceCommit": "a1100985dafd07d8a68c41668279b1d2d5802778",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/components/DirectorNotes/UnifiedHistoryTab.test.tsx": "806c86803c26324e6e9214796e1fa24c26d695b9b890ddf513417ec2140f8dfa",
+				"src/__tests__/renderer/components/DirectorNotes/DirectorNotesModal.test.tsx": "9b5c7e286260ef01a6911d0d22c458d0d477c72c24c7ccbac9592ee517752b67",
+				"src/__tests__/renderer/hooks/useModalHandlers.test.ts": "cebf6dbbfad64e78bf6902c13bfd224aaac5a81b41d587e9b1df46f2564c1609"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Existing RequestInit.dispatcher TS2339; supplemental test semantic review retains eight baseline diagnostics and adds none.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "Three existing suites: exact row/keyboard/detail source ownership and cloned binding across colliding IDs; missing/unknown scope; boolean/void/rejected/deferred outcomes; component generation and parked-tab invalidation; success-only outer navigation and exact admitted focus, including non-Grok behavior.",
+			"remainingTestOwners": ["GT1-04-07C5UT1", "GT1-04-07CT"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -3502,7 +3531,9 @@
 					"GT1-02-03D",
 					"GT1-02-03G",
 					"GT1-02-05C2T",
-					"GT1-02-05C2AT"
+					"GT1-02-05C2AT",
+					"GT1-04-07C5UT",
+					"GT1-04-07C5UT1"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -3535,7 +3566,8 @@
 				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
 				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
 				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
-				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests"
+				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
+				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5716,7 +5748,15 @@
 					"GT1-04-07E",
 					"GT1-04-07F"
 				],
-				"test": ["GT1-04-08", "GT1-04-08B", "GT1-04-08D", "GT1-04-10", "GT1-04-07T"],
+				"test": [
+					"GT1-04-08",
+					"GT1-04-08B",
+					"GT1-04-08D",
+					"GT1-04-10",
+					"GT1-04-07T",
+					"GT1-04-07C5UT",
+					"GT1-04-07C5UT1"
+				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -5740,7 +5780,8 @@
 				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
 				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
 				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
-				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests"
+				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
+				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5861,7 +5902,9 @@
 					"GT1-04-06D",
 					"GT1-04-06E",
 					"GT1-04-06E2",
-					"GT1-04-06C"
+					"GT1-04-06C",
+					"GT1-04-07C5UT",
+					"GT1-04-07C5UT1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-02-13", "GT1-02-14", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
@@ -5898,7 +5941,8 @@
 				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
 				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
 				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
-				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests"
+				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
+				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10922,7 +10966,7 @@
 					"GT1-04-07E",
 					"GT1-04-07F"
 				],
-				"test": ["GT1-04-08", "GT1-11-14B", "GT1-04-07T"],
+				"test": ["GT1-04-08", "GT1-11-14B", "GT1-04-07T", "GT1-04-07C5UT", "GT1-04-07C5UT1"],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -10946,7 +10990,8 @@
 				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
 				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
 				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
-				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests"
+				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
+				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11421,7 +11466,7 @@
 					"GT1-04-07E",
 					"GT1-04-07F"
 				],
-				"test": ["GT1-04-08", "GT1-11-14B", "GT1-04-07T"],
+				"test": ["GT1-04-08", "GT1-11-14B", "GT1-04-07T", "GT1-04-07C5UT", "GT1-04-07C5UT1"],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -11445,7 +11490,8 @@
 				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
 				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
 				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
-				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests"
+				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
+				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -15989,7 +16035,15 @@
 					"GT1-04-07E",
 					"GT1-04-07F"
 				],
-				"test": ["GT1-04-08", "GT1-04-08B", "GT1-04-08D", "GT1-04-10", "GT1-04-07T"],
+				"test": [
+					"GT1-04-08",
+					"GT1-04-08B",
+					"GT1-04-08D",
+					"GT1-04-10",
+					"GT1-04-07T",
+					"GT1-04-07C5UT",
+					"GT1-04-07C5UT1"
+				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -16013,7 +16067,8 @@
 				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
 				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
 				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
-				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests"
+				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
+				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests"
 			},
 			"evidenceApplicability": {
 				"static": {

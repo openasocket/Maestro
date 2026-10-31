@@ -27,6 +27,7 @@ vi.mock('../../../renderer/contexts/GitStatusContext', () => ({
 	}),
 }));
 
+import type { UseAgentSessionManagementReturn } from '../../../renderer/hooks/agent/useAgentSessionManagement';
 import { useModalHandlers } from '../../../renderer/hooks/modal/useModalHandlers';
 import { useModalStore, getModalActions } from '../../../renderer/stores/modalStore';
 import { useAuthOutageStore } from '../../../renderer/stores/authOutageStore';
@@ -2009,114 +2010,96 @@ describe('useModalHandlers', () => {
 	});
 
 	describe('handleDirectorNotesResumeSession', () => {
-		it('closes the director notes modal', () => {
+		beforeEach(() => {
 			getModalActions().setDirectorNotesOpen(true);
-
-			const session = createMockSession({ id: 'session-1' });
-			useSessionStore.setState({ sessions: [session], activeSessionId: session.id });
-
-			const resumeRef = { current: vi.fn() };
-			const { result } = renderHook(() =>
-				useModalHandlers(createInputRef(), createTerminalOutputRef(), resumeRef)
-			);
-
-			act(() => {
-				result.current.handleDirectorNotesResumeSession('session-1', 'agent-sess-1');
-			});
-
-			expect(useModalStore.getState().isOpen('directorNotes')).toBe(false);
-		});
-
-		it('calls handleResumeSession directly when already on target session', () => {
-			const session = createMockSession({ id: 'session-1' });
-			useSessionStore.setState({ sessions: [session], activeSessionId: session.id });
-
-			const resumeRef = { current: vi.fn() };
-			const { result } = renderHook(() =>
-				useModalHandlers(createInputRef(), createTerminalOutputRef(), resumeRef)
-			);
-
-			act(() => {
-				result.current.handleDirectorNotesResumeSession('session-1', 'agent-sess-1', 'My Session');
-			});
-
-			// Arg 2 is `providedMessages`, left undefined so the resume reads the
-			// transcript itself; the name goes in arg 3.
-			expect(resumeRef.current).toHaveBeenCalledWith('agent-sess-1', undefined, 'My Session');
-		});
-
-		it('defers resume when on different session, then resumes after activeSession change', () => {
-			const session1 = createMockSession({ id: 'session-1' });
-			const session2 = createMockSession({ id: 'session-2' });
 			useSessionStore.setState({
-				sessions: [session1, session2],
-				activeSessionId: 'session-2',
-			});
-
-			const resumeRef = { current: vi.fn() };
-			const { result } = renderHook(() =>
-				useModalHandlers(createInputRef(), createTerminalOutputRef(), resumeRef)
-			);
-
-			// Call with sourceSessionId='session-1' while activeSession is session-2
-			act(() => {
-				result.current.handleDirectorNotesResumeSession('session-1', 'agent-sess-1', 'My Session');
-			});
-
-			// Should have switched to session-1
-			expect(useSessionStore.getState().activeSessionId).toBe('session-1');
-
-			// The setActiveSessionId triggers a store update + re-render within the same act(),
-			// which fires the pending resume effect synchronously. The resume should have been
-			// called with the deferred agentSessionId - and the name, which has to
-			// survive the agent switch because the entry that carried it is gone.
-			expect(resumeRef.current).toHaveBeenCalledWith('agent-sess-1', undefined, 'My Session');
-		});
-
-		it('leaves the active group chat when jumping to a different agent', () => {
-			const session1 = createMockSession({ id: 'session-1' });
-			const session2 = createMockSession({ id: 'session-2' });
-			useSessionStore.setState({
-				sessions: [session1, session2],
+				sessions: ['session-1', 'session-2'].map((id) =>
+					createMockSession({
+						id,
+						toolType: 'grok',
+						activeTabId: 'tab-1',
+						aiTabs: [createMockAITab()],
+					})
+				),
 				activeSessionId: 'session-2',
 			});
 			useGroupChatStore.setState({ activeGroupChatId: 'gc-1' });
-
-			const resumeRef = { current: vi.fn() };
-			const { result } = renderHook(() =>
-				useModalHandlers(createInputRef(), createTerminalOutputRef(), resumeRef)
-			);
-
-			act(() => {
-				result.current.handleDirectorNotesResumeSession('session-1', 'agent-sess-1');
-			});
-
-			expect(useGroupChatStore.getState().activeGroupChatId).toBeNull();
-			expect(useSessionStore.getState().activeSessionId).toBe('session-1');
-			// Arg 2 is `providedMessages` and arg 3 the recorded session name; both
-			// are absent here because this call supplies no name.
-			expect(resumeRef.current).toHaveBeenCalledWith('agent-sess-1', undefined, undefined);
 		});
 
-		it('leaves the active group chat when the target agent is already active', () => {
-			const session = createMockSession({ id: 'session-1' });
-			useSessionStore.setState({ sessions: [session], activeSessionId: session.id });
-			useGroupChatStore.setState({ activeGroupChatId: 'gc-1' });
+		it.each([true, false, undefined, 'reject'] as const)(
+			'waits for %s before changing agent, modal or Group Chat',
+			async (outcome) => {
+				let settle!: (value: boolean | undefined) => void;
+				let reject!: (reason: Error) => void;
+				const resumeRef = {
+					current: vi.fn<UseAgentSessionManagementReturn['handleResumeSession']>(
+						() =>
+							new Promise<boolean>((resolve, fail) => {
+								settle = resolve as typeof settle;
+								reject = fail;
+							})
+					),
+				};
+				const binding = {
+					version: 1,
+					state: 'bound',
+					provider: 'grok',
+					nativeSessionId: 'native',
+					accountRef: 'fixture-account',
+					host: { kind: 'ssh', identity: 'fixture-host' },
+					cwd: '/recorded',
+				} as const;
+				const { result } = renderHook(() =>
+					useModalHandlers(createInputRef(), createTerminalOutputRef(), resumeRef)
+				);
+				let pending!: Promise<boolean>;
+				act(() => {
+					pending = result.current.handleDirectorNotesResumeSession(
+						'session-1',
+						'native',
+						'Recorded',
+						'/recorded',
+						{ nativeSessionBinding: binding }
+					);
+				});
+				expect(resumeRef.current).toHaveBeenCalledWith(
+					'native',
+					undefined,
+					'Recorded',
+					undefined,
+					undefined,
+					'/recorded',
+					{
+						targetSessionId: 'session-1',
+						nativeSessionBinding: binding,
+						canResume: expect.any(Function),
+					}
+				);
+				expect(resumeRef.current.mock.calls[0][6]!.nativeSessionBinding).not.toBe(binding);
+				expect(useSessionStore.getState().activeSessionId).toBe('session-2');
+				expect(useGroupChatStore.getState().activeGroupChatId).toBe('gc-1');
+				expect(useModalStore.getState().isOpen('directorNotes')).toBe(true);
+				await act(async () => {
+					if (outcome === 'reject') {
+						const assertion = expect(pending).rejects.toThrow('fixture refusal');
+						reject(new Error('fixture refusal'));
+						await assertion;
+					} else {
+						settle(outcome);
+						expect(await pending).toBe(outcome === true);
+					}
+				});
+				expect(useSessionStore.getState().activeSessionId).toBe(
+					outcome === true ? 'session-1' : 'session-2'
+				);
+				expect(useGroupChatStore.getState().activeGroupChatId).toBe(
+					outcome === true ? null : 'gc-1'
+				);
+				expect(useModalStore.getState().isOpen('directorNotes')).toBe(outcome !== true);
+			}
+		);
 
-			const resumeRef = { current: vi.fn() };
-			const { result } = renderHook(() =>
-				useModalHandlers(createInputRef(), createTerminalOutputRef(), resumeRef)
-			);
-
-			act(() => {
-				result.current.handleDirectorNotesResumeSession('session-1', 'agent-sess-1');
-			});
-
-			expect(useGroupChatStore.getState().activeGroupChatId).toBeNull();
-			expect(resumeRef.current).toHaveBeenCalledWith('agent-sess-1', undefined, undefined);
-		});
-
-		it('does not call resume when ref is null', () => {
+		it('does not call resume when ref is null', async () => {
 			const session = createMockSession({ id: 'session-1' });
 			useSessionStore.setState({ sessions: [session], activeSessionId: session.id });
 
@@ -2125,12 +2108,51 @@ describe('useModalHandlers', () => {
 				useModalHandlers(createInputRef(), createTerminalOutputRef(), resumeRef)
 			);
 
-			act(() => {
-				result.current.handleDirectorNotesResumeSession('session-1', 'agent-sess-1');
+			await act(async () => {
+				expect(
+					await result.current.handleDirectorNotesResumeSession('session-1', 'agent-sess-1')
+				).toBe(false);
 			});
 
-			// Should not throw - no-op
-			expect(useModalStore.getState().isOpen('directorNotes')).toBe(false);
+			expect(useModalStore.getState().isOpen('directorNotes')).toBe(true);
 		});
+
+		it.each(['grok', 'claude-code'] as const)(
+			'accepts only its own focus commit for the already active %s owner',
+			async (toolType) => {
+				const owner = createMockSession({
+					id: 'session-1',
+					toolType,
+					aiTabs: [createMockAITab()],
+					activeTabId: 'tab-1',
+				});
+				useSessionStore.setState({ sessions: [owner], activeSessionId: owner.id });
+				const next = {
+					...owner,
+					activeTabId: 'resumed',
+					aiTabs: [...owner.aiTabs, createMockAITab({ id: 'resumed', agentSessionId: 'native' })],
+				};
+				const resume = vi
+					.fn<UseAgentSessionManagementReturn['handleResumeSession']>()
+					.mockImplementation(async (...args) => {
+						expect(args[6]!.nativeSessionBinding).toBeUndefined();
+						expect(args[6]!.canResume!(next)).toBe(true);
+						useSessionStore.setState({ sessions: [next] });
+						expect(args[6]!.canResume!()).toBe(true);
+						return true;
+					});
+				const { result } = renderHook(() =>
+					useModalHandlers(createInputRef(), createTerminalOutputRef(), { current: resume })
+				);
+				await act(async () => {
+					expect(await result.current.handleDirectorNotesResumeSession('session-1', 'native')).toBe(
+						true
+					);
+				});
+				expect(useSessionStore.getState().sessions[0]).toBe(next);
+				expect(useGroupChatStore.getState().activeGroupChatId).toBeNull();
+				expect(useModalStore.getState().isOpen('directorNotes')).toBe(false);
+			}
+		);
 	});
 });
