@@ -91,6 +91,7 @@ function handleToolExecution(
 
 function createSendCallbacks({
 	mode,
+	agentType,
 	setters,
 	refs,
 	addMessage,
@@ -103,6 +104,7 @@ function createSendCallbacks({
 	isCurrentRequest,
 }: {
 	mode: 'message' | 'continue';
+	agentType: NonNullable<WizardConversationState['selectedAgent']>;
 	setters: SendStateSetters;
 	refs: WizardConversationSendParams['refs'];
 	addMessage: WizardConversationSendParams['addMessage'];
@@ -114,6 +116,7 @@ function createSendCallbacks({
 	markErrorHandled?: () => void;
 	isCurrentRequest: () => boolean;
 }): ConversationCallbacks {
+	let grokOutput = '';
 	return {
 		onSending: () => {
 			// Loading state is already set before sending.
@@ -123,6 +126,13 @@ function createSendCallbacks({
 		},
 		onChunk: (chunk) => {
 			if (!isCurrentRequest()) return;
+			if (agentType === 'grok') {
+				grokOutput += chunk;
+				// Replace the projection of this turn: reparsing a split native
+				// record must not append text that was already displayed.
+				setters.setStreamingText(extractStreamingTextFromChunk(grokOutput, agentType));
+				return;
+			}
 			appendStreamingChunk(chunk, setters.setStreamingText);
 		},
 		onThinkingChunk: (content) => {
@@ -360,6 +370,7 @@ export function useWizardConversationSend({
 				state.conversationHistory,
 				createSendCallbacks({
 					mode: 'message',
+					agentType: state.selectedAgent,
 					isCurrentRequest,
 					setters,
 					refs,
@@ -474,6 +485,7 @@ export function useWizardConversationSend({
 					state.conversationHistory,
 					createSendCallbacks({
 						mode: 'continue',
+						agentType: state.selectedAgent,
 						isCurrentRequest,
 						setters,
 						refs,

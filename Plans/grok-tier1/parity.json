@@ -3604,6 +3604,29 @@
 				"GT1-05-12B owns generation consumer regression authoring; GT1-05-13 owns execution. GT1-05-11D still owns conversation streaming preview.",
 				"Native qualification, capability and beta promotion remain withheld. In-flight writes cannot be rolled back; cancelled hook requests cannot publish saved results or navigate."
 			]
+		},
+		"phase05-onboarding-streaming-preview": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-11d-onboarding-streaming-preview",
+			"sourceCommit": "ef55411a607125630485f247a87e46818522d800",
+			"sourceRevisionScope": "Pre-task HEAD plus source hashes in the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/components/Wizard/screens/ConversationScreen/utils/streamingChunks.ts": "d5eee41d86739fde0ba3f7b185af4ae2e9cd69a8d607b18a4ccaef4ebab3a26c",
+				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useWizardConversationSend.ts": "dd089e7a55d55b368512bbef4d99834f4ccacff1a335518836e0bc9c39fccd59"
+			},
+			"provenance": "implementation-and-static-review",
+			"static": "pass",
+			"typecheck": "fail",
+			"typecheckLimitation": "Renderer TypeScript retains only the existing RequestInit.dispatcher diagnostic in plugin-host-handlers.ts(1196,76).",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P20", "S05", "C-supportsWizard"],
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"GT1-05-11D projects cumulative request-owned Grok output through canonical text helpers in both onboarding send paths. Prompted compact wizard JSON streams early; split native records retain text while thought/tool/error/metadata envelopes remain hidden.",
+				"A compact JSON object beginning with an ambiguous key such as message is buffered until its first record is complete; the prompted confidence/ready/projectName-leading schema streams before completion. Unknown typed leading objects are treated conservatively as envelopes.",
+				"GT1-05-12/12A own utility and caller regression authoring; GT1-05-13 owns execution. Manager completion remains authoritative. Native qualification, capability and beta promotion remain withheld."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -8767,7 +8790,7 @@
 			},
 			"limitations": [
 				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. GT1-05-09A implements selected-tab model/effort capture and conversation handoff. GT1-05-09B implements per-tab generation cancellation and captured effort forwarding; tests are not run and native continuation remains unqualified.",
-				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. Caller/account/host/generation/preview continuations GT1-05-11A/B/C/D and tests/verification remain required; no onboarding parity claim."
+				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. GT1-05-11A/B/C/D implement selected configuration, account/host readiness, generation and streaming preview with static checks only. Tests/verification and native qualification remain required; no onboarding parity claim."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8786,7 +8809,8 @@
 				"phase05OnboardingDiscoveryEvidenceRef": "phase05-onboarding-discovery-contract",
 				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff",
 				"phase05OnboardingReadinessEvidenceRef": "phase05-onboarding-account-host-readiness",
-				"phase05OnboardingGenerationEvidenceRef": "phase05-onboarding-generation-contract"
+				"phase05OnboardingGenerationEvidenceRef": "phase05-onboarding-generation-contract",
+				"phase05OnboardingPreviewEvidenceRef": "phase05-onboarding-streaming-preview"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8831,9 +8855,9 @@
 				{
 					"id": "grok-onboarding-callers:P20",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-11A/B/C selected configuration, account/host readiness and generation contracts are implemented with static checks only. Complete GT1-05-11D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
+					"missingPrerequisite": "GT1-05-11A/B/C/D selected configuration, account/host readiness, generation and streaming preview are implemented with static checks only. Author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
 					"affectedRows": ["P20"],
-					"evidenceRef": "phase05-onboarding-generation-contract"
+					"evidenceRef": "phase05-onboarding-streaming-preview"
 				}
 			],
 			"phase": "05",
@@ -16577,7 +16601,7 @@
 			"limitations": [
 				"Existing Grok wizard adapter needs malformed/partial JSON, tool failures, reset/resume and read-only utility coverage.",
 				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. GT1-05-09A implements selected-tab model/effort capture and conversation handoff. GT1-05-09B implements per-tab generation cancellation and captured effort forwarding; tests are not run and native continuation remains unqualified.",
-				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. Caller/account/host/generation/preview continuations GT1-05-11A/B/C/D and tests/verification remain required; no onboarding parity claim."
+				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. GT1-05-11A/B/C/D implement selected configuration, account/host readiness, generation and streaming preview with static checks only. Tests/verification and native qualification remain required; no onboarding parity claim."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -16596,7 +16620,8 @@
 				"phase05OnboardingDiscoveryEvidenceRef": "phase05-onboarding-discovery-contract",
 				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff",
 				"phase05OnboardingReadinessEvidenceRef": "phase05-onboarding-account-host-readiness",
-				"phase05OnboardingGenerationEvidenceRef": "phase05-onboarding-generation-contract"
+				"phase05OnboardingGenerationEvidenceRef": "phase05-onboarding-generation-contract",
+				"phase05OnboardingPreviewEvidenceRef": "phase05-onboarding-streaming-preview"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16641,9 +16666,9 @@
 				{
 					"id": "grok-onboarding-callers:C-supportsWizard",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-11A/B/C selected configuration, account/host readiness and generation contracts are implemented with static checks only. Complete GT1-05-11D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
+					"missingPrerequisite": "GT1-05-11A/B/C/D selected configuration, account/host readiness, generation and streaming preview are implemented with static checks only. Author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
 					"affectedRows": ["C-supportsWizard"],
-					"evidenceRef": "phase05-onboarding-generation-contract"
+					"evidenceRef": "phase05-onboarding-streaming-preview"
 				}
 			],
 			"field": "supportsWizard",
@@ -20192,7 +20217,7 @@
 			},
 			"limitations": [
 				"Grok has a dedicated shared discovery-args branch and text extraction. Account/model, unavailable binary, resume and error handling need consumer evidence.",
-				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. Caller/account/host/generation/preview continuations GT1-05-11A/B/C/D and tests/verification remain required; no onboarding parity claim."
+				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. GT1-05-11A/B/C/D implement selected configuration, account/host readiness, generation and streaming preview with static checks only. Tests/verification and native qualification remain required; no onboarding parity claim."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20207,7 +20232,8 @@
 				"phase05OnboardingDiscoveryEvidenceRef": "phase05-onboarding-discovery-contract",
 				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff",
 				"phase05OnboardingReadinessEvidenceRef": "phase05-onboarding-account-host-readiness",
-				"phase05OnboardingGenerationEvidenceRef": "phase05-onboarding-generation-contract"
+				"phase05OnboardingGenerationEvidenceRef": "phase05-onboarding-generation-contract",
+				"phase05OnboardingPreviewEvidenceRef": "phase05-onboarding-streaming-preview"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20252,9 +20278,9 @@
 				{
 					"id": "grok-onboarding-callers:S05",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-11A/B/C selected configuration, account/host readiness and generation contracts are implemented with static checks only. Complete GT1-05-11D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
+					"missingPrerequisite": "GT1-05-11A/B/C/D selected configuration, account/host readiness, generation and streaming preview are implemented with static checks only. Author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
 					"affectedRows": ["S05"],
-					"evidenceRef": "phase05-onboarding-generation-contract"
+					"evidenceRef": "phase05-onboarding-streaming-preview"
 				}
 			],
 			"branchAuditRefs": ["B15", "B27"]
