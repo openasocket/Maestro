@@ -2834,6 +2834,47 @@ describe('Grok completion assembly and real keyboard acceptance', () => {
 		expect(useSettingsStore.getState().customAICommands).toEqual(custom);
 	});
 
+	describe.each(['claude-code', 'codex', 'opencode', 'copilot-cli', 'antigravity'] as const)(
+		'%s completion compatibility',
+		(toolType) => {
+			it.each([false, true])(
+				'preserves provider capability gating (%s) and ignores Grok receipts',
+				(supportsProviderCommands) => {
+					const agentCommands = [
+						{
+							command: '/provider:review',
+							description: 'Review the selected project',
+							prompt: 'PRIVATE PROVIDER PROMPT BODY',
+						},
+					];
+					useSessionStore.setState({
+						sessions: [{ ...useSessionStore.getState().sessions[0], toolType, agentCommands }],
+					});
+					const sessionsBefore = structuredClone(useSessionStore.getState().sessions);
+					const options = { toolType, supportsProviderCommands };
+					const commands = completions(options);
+					expect(commands).toEqual(completions({ ...options, grokDiscovery: null }));
+					expect(commands.map(({ command }) => command)).toEqual([
+						'/history',
+						'/wizard',
+						...(toolType === 'claude-code' ? ['/skills'] : []),
+						...(supportsProviderCommands ? ['/provider:review'] : []),
+					]);
+					if (supportsProviderCommands) {
+						expect(commands.at(-1)).toEqual({
+							command: '/provider:review',
+							description: 'Review the selected project',
+							aiOnly: true,
+						});
+					}
+					expect(commands.every((command) => !command.nativeCommand && !command.prompt)).toBe(true);
+					expect(useSessionStore.getState().sessions).toEqual(sessionsBefore);
+					expect(useSettingsStore.getState().customAICommands).toEqual([]);
+				}
+			);
+		}
+	);
+
 	it.each([
 		['object', {}],
 		['sparse', new Array(1)],

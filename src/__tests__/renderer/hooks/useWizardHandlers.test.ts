@@ -377,6 +377,113 @@ describe('useWizardHandlers', () => {
 			resetStores(useSessionStore, useSettingsStore, useModalStore, useUIStore);
 		});
 
+		it.each(['claude-code', 'codex', 'opencode', 'copilot-cli', 'antigravity'] as const)(
+			'clears Grok discovery on %s selection and preserves its legacy discovery behavior',
+			async (toolType) => {
+				const { result, unmount } = await mountDiscovery();
+				expect(result.current.grokCommandDiscovery).toEqual(receipt);
+				expect(window.maestro.settings.onExternalChange).toHaveBeenCalledOnce();
+				const next = createMockSession({
+					id: 'other-provider',
+					toolType,
+					cwd: resolve('other-project'),
+					projectRoot: resolve('other-project'),
+					customPath: resolve('bin', toolType),
+					customEnvVars: { CODEX_HOME: resolve('other-account') },
+				});
+				const legacyCommand = {
+					name: 'legacy-skill',
+					description: 'Selected provider skill',
+					prompt: 'Selected provider prompt body',
+				};
+				discover.mockClear().mockResolvedValue([legacyCommand]);
+				await act(async () =>
+					useSessionStore.setState({ sessions: [session, next], activeSessionId: next.id })
+				);
+
+				expect(result.current.grokCommandDiscovery).toBeNull();
+				expect(unsubscribe).toHaveBeenCalledOnce();
+				expect(window.maestro.settings.onExternalChange).toHaveBeenCalledOnce();
+				const expectedCalls =
+					toolType === 'antigravity'
+						? []
+						: [
+								[
+									toolType,
+									next.cwd,
+									next.customPath,
+									undefined,
+									...(toolType === 'codex' ? [next.customEnvVars] : []),
+								],
+							];
+				expect(discover.mock.calls).toEqual(expectedCalls);
+				expect(vi.mocked(window.maestro.claude.getCommands).mock.calls).toEqual(
+					toolType === 'claude-code' ? [[next.projectRoot]] : []
+				);
+				expect(useSessionStore.getState().sessions).toEqual([
+					session,
+					toolType === 'antigravity'
+						? next
+						: {
+								...next,
+								agentCommands: [
+									{
+										command: '/legacy-skill',
+										description: legacyCommand.description,
+										prompt: legacyCommand.prompt,
+									},
+								],
+							},
+				]);
+				await act(async () => window.dispatchEvent(new Event('focus')));
+				expect(result.current.grokCommandDiscovery).toBeNull();
+				expect(discover.mock.calls).toEqual(expectedCalls);
+				expect(vi.getTimerCount()).toBe(0);
+				unmount();
+				expect(unsubscribe).toHaveBeenCalledOnce();
+			}
+		);
+
+		it.each(['object', 'sparse', 'null catalog', 'null entry', 'missing description'])(
+			'rejects a %s catalog received over IPC without changing stores',
+			async (shape) => {
+				const command = receipt.commands[0];
+				const malformed: Record<string, unknown> = {
+					object: { 0: command, length: 1 },
+					sparse: new Array(1),
+					'null catalog': null,
+					'null entry': [null],
+					'missing description': [{ name: command.name, kind: command.kind }],
+				};
+				discover.mockResolvedValue({ ...receipt, commands: malformed[shape] });
+				const stores = [useSessionStore, useSettingsStore, useModalStore, useUIStore];
+				const before = stores.map((store) => store.getState());
+				const { result } = await mountDiscovery();
+
+				expect(result.current.grokCommandDiscovery).toEqual({
+					status: 'unavailable',
+					commands: [],
+					reason: 'invalid-catalog',
+				});
+				expect(discover.mock.calls).toEqual([
+					[
+						{
+							providerId: 'grok',
+							context: {
+								kind: 'agent',
+								sessionId: session.id,
+								model: session.customModel,
+								effort: session.customEffort,
+							},
+						},
+					],
+				]);
+				stores.forEach((store, index) => expect(store.getState()).toBe(before[index]));
+				expect(window.maestro.claude.getCommands).not.toHaveBeenCalled();
+				expect(vi.getTimerCount()).toBe(0);
+			}
+		);
+
 		it.each([
 			'cwd',
 			'account',

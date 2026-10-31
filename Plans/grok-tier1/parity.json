@@ -3268,6 +3268,27 @@
 				"Tests authored only; no runtime or semantic type-check pass. GT1-05-06C1 owns remaining other-provider compatibility and malformed IPC read coverage before GT1-05-13.",
 				"Synthetic discovery does not authorize native invocation. Capabilities, beta status and native qualification remain unchanged."
 			]
+		},
+		"phase05-slash-completion-compatibility-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-06c1-provider-compatibility-and-ipc-validation-tests",
+			"sourceCommit": "4e90f04e363189db73e94b55f09498ff2b58b1fd",
+			"sourceRevisionScope": "Pre-task HEAD plus authored test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/hooks/useWizardHandlers.test.ts": "c8b2cb8d390b2f9159175edeb7dd3967d33e2f4e0d43bcc4cb3fffd226aad5f1",
+				"src/__tests__/renderer/hooks/useInputHandlers.test.ts": "3e77eeac1c3b7b4bed41768e3a829661d96ed55f7dd4499a73f03656b256d53b"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P18", "S02", "C-supportsSlashCommands"],
+			"authoredCases": 20,
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"Tests authored only; no runtime or semantic type-check pass. GT1-05-13 must execute both suites.",
+				"Synthetic discovery does not authorize native invocation. Capabilities, beta status and native qualification remain unchanged."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -8158,7 +8179,7 @@
 				"deterministic": "not-run",
 				"live": "not-run",
 				"nativeDispatch": "unsupported",
-				"remainingOwners": ["GT1-05-06C1", "GT1-05-13", "GT1-07-02", "GT1-07-04"],
+				"remainingOwners": ["GT1-05-13", "GT1-07-02", "GT1-07-04"],
 				"sourceHashes": {
 					"src/renderer/slashCommands.ts": "c40527704a7a564d908438f0b6e5e6d0d777dd92971628fc8f36dbaaabf804ae",
 					"src/renderer/hooks/wizard/useWizardHandlers.ts": "9504e070631c0895559356dce4b57d31c45611f17317c0de74a26c54a60b1a8f",
@@ -8171,8 +8192,15 @@
 					"deterministic": "not-run",
 					"live": "not-run",
 					"verificationTask": "GT1-05-13",
-					"remainingOwner": "GT1-05-06C1",
-					"scope": "Grok selected-context lifecycle, advisory metadata and real keyboard completion; bounded continuation owns other-provider isolation and malformed IPC read assertions."
+					"scope": "Grok selected-context lifecycle, advisory metadata and keyboard completion, plus provider compatibility and malformed IPC validation in GT1-05-06C1.",
+					"continuation": {
+						"task": "GT1-05-06C1",
+						"evidenceRef": "phase05-slash-completion-compatibility-tests",
+						"static": "pass",
+						"deterministic": "not-run",
+						"live": "not-run",
+						"verificationTask": "GT1-05-13"
+					}
 				}
 			}
 		},
@@ -14065,7 +14093,7 @@
 				"deterministic": "not-run",
 				"live": "not-run",
 				"nativeDispatch": "unsupported",
-				"remainingOwners": ["GT1-05-06C1", "GT1-05-13", "GT1-07-02", "GT1-07-04"],
+				"remainingOwners": ["GT1-05-13", "GT1-07-02", "GT1-07-04"],
 				"sourceHashes": {
 					"src/renderer/slashCommands.ts": "c40527704a7a564d908438f0b6e5e6d0d777dd92971628fc8f36dbaaabf804ae",
 					"src/renderer/hooks/wizard/useWizardHandlers.ts": "9504e070631c0895559356dce4b57d31c45611f17317c0de74a26c54a60b1a8f",
@@ -14078,8 +14106,15 @@
 					"deterministic": "not-run",
 					"live": "not-run",
 					"verificationTask": "GT1-05-13",
-					"remainingOwner": "GT1-05-06C1",
-					"scope": "Grok selected-context lifecycle, advisory metadata and real keyboard completion; bounded continuation owns other-provider isolation and malformed IPC read assertions."
+					"scope": "Grok selected-context lifecycle, advisory metadata and keyboard completion, plus provider compatibility and malformed IPC validation in GT1-05-06C1.",
+					"continuation": {
+						"task": "GT1-05-06C1",
+						"evidenceRef": "phase05-slash-completion-compatibility-tests",
+						"static": "pass",
+						"deterministic": "not-run",
+						"live": "not-run",
+						"verificationTask": "GT1-05-13"
+					}
 				}
 			}
 		},
@@ -19377,7 +19412,7 @@
 				"deterministic": "not-run",
 				"live": "not-run",
 				"nativeDispatch": "unsupported",
-				"remainingOwners": ["GT1-05-06C1", "GT1-05-13", "GT1-07-02", "GT1-07-04"],
+				"remainingOwners": ["GT1-05-13", "GT1-07-02", "GT1-07-04"],
 				"sourceHashes": {
 					"src/renderer/slashCommands.ts": "c40527704a7a564d908438f0b6e5e6d0d777dd92971628fc8f36dbaaabf804ae",
 					"src/renderer/hooks/wizard/useWizardHandlers.ts": "9504e070631c0895559356dce4b57d31c45611f17317c0de74a26c54a60b1a8f",
@@ -19390,8 +19425,15 @@
 					"deterministic": "not-run",
 					"live": "not-run",
 					"verificationTask": "GT1-05-13",
-					"remainingOwner": "GT1-05-06C1",
-					"scope": "Grok selected-context lifecycle, advisory metadata and real keyboard completion; bounded continuation owns other-provider isolation and malformed IPC read assertions."
+					"scope": "Grok selected-context lifecycle, advisory metadata and keyboard completion, plus provider compatibility and malformed IPC validation in GT1-05-06C1.",
+					"continuation": {
+						"task": "GT1-05-06C1",
+						"evidenceRef": "phase05-slash-completion-compatibility-tests",
+						"static": "pass",
+						"deterministic": "not-run",
+						"live": "not-run",
+						"verificationTask": "GT1-05-13"
+					}
 				}
 			}
 		},
