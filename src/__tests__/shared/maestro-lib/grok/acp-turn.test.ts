@@ -701,4 +701,329 @@ describe('public Grok ACP turn composition', () => {
 		expect(onQuestion).toHaveBeenCalledTimes(1);
 		expect(h.onRequestSettlement).toHaveBeenCalledTimes(1);
 	});
+
+	describe('qualified process accounting', () => {
+		const extensions = { agentVersion: 'fixture-version', sessionUsage: true, promptId: true };
+		const meta = { grokShell: true, agentVersion: extensions.agentVersion };
+		const baseline = {
+			inputTokens: 100,
+			outputTokens: 20,
+			cachedReadTokens: 30,
+			cacheCreationTokens: 10,
+			reasoningTokens: 5,
+			costUsdTicks: '9007199254740993',
+		};
+		const finalLedger = {
+			inputTokens: 160,
+			outputTokens: 50,
+			cachedReadTokens: 40,
+			cacheCreationTokens: 15,
+			reasoningTokens: 10,
+			costUsdTicks: '9007199254741006',
+		};
+		async function allocated(overrides: Partial<GrokAcpTurnOptions> = {}) {
+			const h = fixture({ extensions, ...overrides });
+			h.start();
+			const allocation = await h.allocation(meta);
+			expect(h.calls('_x.ai/session/usage')).toHaveLength(0);
+			expect(h.calls('session/prompt')).toHaveLength(0);
+			h.reply(allocation, { sessionId: 'native-1' });
+			return h;
+		}
+
+		it.each(['absent', 'disabled', 'version', 'peer', 'unidentified', 'no-version'])(
+			'keeps accounting and native prompt binding gated with %s qualification',
+			async (kind) => {
+				const h = fixture({ extensions: { ...extensions } });
+				if (kind === 'absent') h.options.extensions = undefined;
+				if (kind === 'disabled') {
+					h.options.extensions!.sessionUsage = false;
+					h.options.extensions!.promptId = false;
+				}
+				if (kind === 'version') h.options.extensions!.agentVersion = 'other-version';
+				h.start();
+				const prompt = await h.ready({
+					...meta,
+					grokShell: kind !== 'unidentified',
+					agentVersion:
+						kind === 'no-version' ? undefined : kind === 'peer' ? 'other' : meta.agentVersion,
+				});
+				expect(prompt.params).not.toHaveProperty('_meta');
+				h.reply(prompt, { stopReason: 'end_turn' });
+				expect((await h.finish()).usage).toBeUndefined();
+				expect(h.calls('_x.ai/session/usage')).toHaveLength(0);
+				expect(h.calls('session/prompt')).toHaveLength(1);
+			}
+		);
+
+		it.each(['nonzero', 'zero', 'partial', 'missing', 'missing-cache', 'unknown-cost'])(
+			'attributes only proven %s baselines and keeps ledger observations separate',
+			async (kind) => {
+				const h = await allocated();
+				const before = {
+					...baseline,
+					...(kind === 'zero'
+						? {
+								inputTokens: 0,
+								outputTokens: 0,
+								cachedReadTokens: 0,
+								cacheCreationTokens: 0,
+								reasoningTokens: 0,
+								costUsdTicks: '0',
+							}
+						: {}),
+					usageIsIncomplete: kind === 'partial',
+					...(kind === 'missing-cache' ? { cachedReadTokens: undefined } : {}),
+					...(kind === 'unknown-cost' ? { costUsdTicks: undefined } : {}),
+				};
+				const query = await h.next('_x.ai/session/usage');
+				expect(query.params).toEqual({ sessionId: 'native-1' });
+				expect(h.calls('session/prompt')).toHaveLength(0);
+				h.reply(query, {
+					usage:
+						kind === 'missing' ? undefined : { ...before, modelUsage: { 'grok-fixture': before } },
+				});
+				const prompt = await h.next('session/prompt');
+				expect(prompt.params).toHaveProperty('_meta.promptId', expect.any(String));
+				expect((prompt.params as { _meta: { promptId: string } })._meta.promptId).not.toBe(
+					h.options.turnId
+				);
+				await vi.advanceTimersByTimeAsync(10);
+				expect(h.calls('_x.ai/session/usage')).toHaveLength(1);
+				h.reply(prompt, { stopReason: 'end_turn' });
+				const after = await h.next('_x.ai/session/usage', 2);
+				const sampled = {
+					result: { usage: { ...finalLedger, modelUsage: { 'grok-fixture': finalLedger } } },
+				};
+				h.reply(after, sampled);
+				h.reply(after, sampled);
+				const result = await h.finish();
+				expect(result.terminal.status).toBe('success');
+				if (['partial', 'missing', 'missing-cache'].includes(kind)) {
+					expect(result.usage).toBeUndefined();
+				} else {
+					expect(result.usage).toMatchObject({
+						inputTokens: kind === 'zero' ? 105 : 45,
+						outputTokens: kind === 'zero' ? 50 : 30,
+						cacheReadInputTokens: kind === 'zero' ? 40 : 10,
+						cacheCreationInputTokens: kind === 'zero' ? 15 : 5,
+						reasoningTokens: kind === 'zero' ? 10 : 5,
+						accounting: {
+							final: false,
+							completeness: 'partial',
+							cost:
+								kind === 'unknown-cost'
+									? { status: 'unknown' }
+									: {
+											status: 'partial',
+											costUsdTicks: kind === 'zero' ? finalLedger.costUsdTicks : '13',
+										},
+						},
+					});
+					expect(result.usage?.accounting?.models).toMatchObject([
+						{
+							model: 'grok-fixture',
+							inputTokens: kind === 'zero' ? 105 : 45,
+							cacheReadInputTokens: kind === 'zero' ? 40 : 10,
+							cacheCreationInputTokens: kind === 'zero' ? 15 : 5,
+							cost: { status: kind === 'unknown-cost' ? 'unknown' : 'exact' },
+						},
+					]);
+				}
+				expect(result.usageReports).toHaveLength(1);
+				expect(result.usageReports[0]).toMatchObject({
+					inputTokens: 105,
+					accounting: {
+						scope: 'process-session',
+						providerSessionId: 'native-1',
+						turnId: h.options.turnId,
+						processGeneration: h.options.processGeneration,
+						cost: { status: 'exact', costUsdTicks: finalLedger.costUsdTicks },
+					},
+				});
+				expect(JSON.parse(result.usageReports[0].accounting!.scopeId!)).toEqual([
+					h.options.account,
+					h.options.host,
+				]);
+				expect(h.calls('session/prompt')).toHaveLength(1);
+				expect(h.onEvent.mock.calls.filter(([e]) => e.terminal)).toHaveLength(1);
+			}
+		);
+
+		it.each(['exact', 'unknown'])(
+			'replaces provisional spend once with %s final cost through raw byte frames',
+			async (cost) => {
+				for (const resumeSessionId of [undefined, 'native-1']) {
+					const h = await allocated({ resumeSessionId });
+					h.reply(await h.next('_x.ai/session/usage'), { usage: baseline });
+					const prompt = await h.next('session/prompt');
+					const row = {
+						inputTokens: 20,
+						outputTokens: 10,
+						cachedReadTokens: 6,
+						cacheCreationTokens: 2,
+						reasoningTokens: 1,
+						...(cost === 'exact' ? { costUsdTicks: '9223372036854775807' } : {}),
+					};
+					const usage = { ...row, modelUsage: { 'grok-fixture': row } };
+					const frame =
+						JSON.stringify({
+							jsonrpc: '2.0',
+							id: prompt.id,
+							result: { stopReason: 'end_turn', _meta: { usage } },
+						}).replace(/"costUsdTicks":"(\d+)"/g, '"costUsdTicks":$1') + '\n';
+					h.child.stdout.write(Buffer.from(frame + frame));
+					const query = await h.next('_x.ai/session/usage', 2);
+					h.child.stdout.write(
+						Buffer.from(
+							JSON.stringify({
+								jsonrpc: '2.0',
+								id: query.id,
+								result: { usage: finalLedger },
+							}).replace(/"costUsdTicks":"(\d+)"/g, '"costUsdTicks":$1') + '\n'
+						)
+					);
+					const result = await h.finish();
+					const expectedCost =
+						cost === 'exact'
+							? { status: 'exact', costUsdTicks: '9223372036854775807' }
+							: { status: 'unknown' };
+					expect(result.usage).toMatchObject({
+						inputTokens: 12,
+						outputTokens: 10,
+						cacheReadInputTokens: 6,
+						cacheCreationInputTokens: 2,
+						reasoningTokens: 1,
+						accounting: {
+							final: true,
+							completeness: 'complete',
+							cost: cost === 'exact' ? expectedCost : { status: 'partial', costUsdTicks: '13' },
+							models: [{ model: 'grok-fixture', inputTokens: 12, cost: expectedCost }],
+						},
+					});
+					expect(result.usageReports).toHaveLength(2);
+					expect(result.usageReports[0].accounting?.cost).toMatchObject({
+						status: 'exact',
+						costUsdTicks: finalLedger.costUsdTicks,
+					});
+					expect(
+						result.usageReports.every(
+							(r) => r.accounting?.processGeneration === h.options.processGeneration
+						)
+					).toBe(true);
+					expect(h.calls('session/prompt')).toHaveLength(1);
+					expect(h.onEvent.mock.calls.filter(([e]) => e.terminal)).toHaveLength(1);
+				}
+			}
+		);
+
+		it('claims the native session before sampling even when a competing owner uses another cwd', async () => {
+			const owner = await allocated();
+			const baselineQuery = await owner.next('_x.ai/session/usage');
+			const duplicate = await allocated({ cwd: path.resolve('synthetic-other-project') });
+			expect((await duplicate.finish()).terminal).toMatchObject({
+				status: 'failed',
+				reason: 'busy',
+				dispatchState: 'not-dispatched',
+			});
+			expect(duplicate.calls('_x.ai/session/usage')).toHaveLength(0);
+			expect(duplicate.calls('session/prompt')).toHaveLength(0);
+			expect(owner.calls('session/prompt')).toHaveLength(0);
+			owner.reply(baselineQuery, { usage: baseline });
+			owner.reply(await owner.next('session/prompt'), { stopReason: 'end_turn' });
+			owner.reply(await owner.next('_x.ai/session/usage', 2), { usage: finalLedger });
+			expect((await owner.finish()).terminal.status).toBe('success');
+			expect(owner.calls('session/prompt')).toHaveLength(1);
+		});
+
+		it('does not retry unavailable accounting or replay the prompt', async () => {
+			const h = await allocated();
+			h.receive({
+				id: (await h.next('_x.ai/session/usage')).id,
+				error: { code: -32601, message: 'Method not found' },
+			});
+			const prompt = await h.next('session/prompt');
+			h.reply(prompt, { stopReason: 'end_turn' });
+			expect((await h.finish()).usage).toBeUndefined();
+			expect(h.calls('_x.ai/session/usage')).toHaveLength(1);
+			expect(h.calls('session/prompt')).toHaveLength(1);
+		});
+
+		it.each(['cancel', 'idle', 'process'])(
+			'preserves %s failure during baseline collection before dispatch',
+			async (cause) => {
+				const h = await allocated({ requestTimeoutMs: 200 });
+				const query = await h.next('_x.ai/session/usage');
+				if (cause === 'idle') await vi.advanceTimersByTimeAsync(100);
+				if (cause === 'process') h.child.emit('exit', 1, null);
+				h.run.cancel();
+				h.reply(query, { usage: baseline });
+				expect((await h.finish()).terminal).toMatchObject({
+					status: cause === 'idle' ? 'timeout' : cause === 'process' ? 'failed' : 'cancelled',
+					reason:
+						cause === 'idle'
+							? 'idle-timeout'
+							: cause === 'process'
+								? 'process-lost'
+								: 'host-cancelled',
+					dispatchState: 'not-dispatched',
+				});
+				expect(h.calls('session/prompt')).toHaveLength(0);
+				expect(h.calls('_x.ai/session/usage')).toHaveLength(1);
+			}
+		);
+
+		it.each(
+			['success', 'refused', 'cancelled', 'durable'].flatMap((status) =>
+				['cancel', 'idle', 'process', 'unavailable'].map((loss) => ({ status, loss }))
+			)
+		)('retains $status after $loss during final accounting', async ({ status, loss }) => {
+			const h = await allocated({ requestTimeoutMs: 200 });
+			h.reply(await h.next('_x.ai/session/usage'), { usage: baseline });
+			const prompt = await h.next('session/prompt');
+			h.update({
+				sessionUpdate: 'agent_message_chunk',
+				content: { type: 'text', text: 'Partial answer' },
+			});
+			if (status === 'durable')
+				h.receive({
+					method: '_x.ai/session/update',
+					params: {
+						sessionId: 'native-1',
+						update: {
+							sessionUpdate: 'turn_completed',
+							prompt_id: (prompt.params as { _meta: { promptId: string } })._meta.promptId,
+							stop_reason: 'end_turn',
+							error_kind: 'provider_fault',
+						},
+					},
+				});
+			h.reply(prompt, {
+				stopReason: status === 'cancelled' ? 'cancelled' : 'end_turn',
+				_meta: {
+					usage: baseline,
+					...(status === 'refused' ? { cancellationCategory: 'PermissionRejected' } : {}),
+				},
+			});
+			const query = await h.next('_x.ai/session/usage', 2);
+			if (loss === 'cancel') h.run.cancel();
+			if (loss === 'idle') await vi.advanceTimersByTimeAsync(100);
+			if (loss === 'process') h.child.emit('exit', 1, null);
+			if (loss === 'unavailable')
+				h.reply(query, { result: { usage: finalLedger }, error: { code: 'unavailable' } });
+			else h.reply(query, { usage: finalLedger });
+			const result = await h.finish();
+			expect(result).toMatchObject({
+				answerText: 'Partial answer',
+				terminal: {
+					status: status === 'durable' ? 'failed' : status,
+					dispatchState: 'dispatched',
+				},
+				usage: { inputTokens: 60, outputTokens: 20 },
+			});
+			expect(h.calls('_x.ai/session/usage')).toHaveLength(2);
+			expect(h.calls('session/prompt')).toHaveLength(1);
+			expect(h.onEvent.mock.calls.filter(([e]) => e.terminal)).toHaveLength(1);
+		});
+	});
 });

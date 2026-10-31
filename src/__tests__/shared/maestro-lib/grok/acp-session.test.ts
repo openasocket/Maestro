@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	GrokAcpSession,
@@ -69,6 +70,15 @@ describe('GrokAcpSession lifecycle over fake ACP bytes', () => {
 		};
 		fixtures.push(fixture);
 		return fixture;
+	}
+	async function usageReady(h: ReturnType<typeof harness>) {
+		const opening = h.session.open();
+		h.reply(await h.next('initialize'), {
+			protocolVersion: 1,
+			_meta: { grokShell: true, agentVersion: 'fixture-version' },
+		});
+		h.reply(await h.next('session/new'), { sessionId: 'native-1' });
+		await opening;
 	}
 	beforeEach(() => {
 		vi.useFakeTimers();
@@ -732,7 +742,7 @@ describe('GrokAcpSession lifecycle over fake ACP bytes', () => {
 	});
 
 	it.each(
-		['setter', 'discovery'].flatMap((operation) =>
+		['setter', 'discovery', 'usage'].flatMap((operation) =>
 			[
 				'pre-aborted',
 				'pending',
@@ -745,16 +755,21 @@ describe('GrokAcpSession lifecycle over fake ACP bytes', () => {
 	)(
 		'preserves $operation cancellation/failure at $stage and excludes overlapping work',
 		async ({ operation, stage }) => {
-			const h = harness({ extensions: { agentVersion: 'fixture-version', modelsList: true } });
+			const h = harness({
+				extensions: { agentVersion: 'fixture-version', modelsList: true, sessionUsage: true },
+			});
 			if (operation === 'setter')
 				await h.ready({ sessionId: 'native-1', configOptions: selectableConfig });
+			if (operation === 'usage') await usageReady(h);
 			const controller = new AbortController();
 			const remove = vi.spyOn(controller.signal, 'removeEventListener');
 			if (stage === 'pre-aborted') controller.abort();
 			const operationResult = (
 				operation === 'setter'
 					? h.session.setConfiguration({ effort: 'high' }, controller.signal)
-					: h.session.discoverModels(controller.signal)
+					: operation === 'usage'
+						? h.session.processUsage(controller.signal)
+						: h.session.discoverModels(controller.signal)
 			).catch((error: unknown) => error);
 			if (stage !== 'pre-aborted') {
 				if (operation === 'discovery')
@@ -763,7 +778,11 @@ describe('GrokAcpSession lifecycle over fake ACP bytes', () => {
 						_meta: { grokShell: true, agentVersion: 'fixture-version' },
 					});
 				const request = await h.next(
-					operation === 'setter' ? 'session/set_config_option' : '_x.ai/models/list'
+					operation === 'setter'
+						? 'session/set_config_option'
+						: operation === 'usage'
+							? '_x.ai/session/usage'
+							: '_x.ai/models/list'
 				);
 				await expect(h.session.prompt('overlap')).rejects.toMatchObject({ reason: 'busy' });
 				await expect(h.session.discoverModels()).rejects.toMatchObject({ reason: 'busy' });
@@ -772,7 +791,8 @@ describe('GrokAcpSession lifecycle over fake ACP bytes', () => {
 					await expect(h.session.setConfiguration({ effort: 'high' })).rejects.toMatchObject({
 						reason: 'busy',
 					});
-				else await expect(h.session.open()).rejects.toMatchObject({ reason: 'busy' });
+				else if (operation === 'discovery')
+					await expect(h.session.open()).rejects.toMatchObject({ reason: 'busy' });
 				if (stage === 'reply-first')
 					h.reply(
 						request,
@@ -782,7 +802,9 @@ describe('GrokAcpSession lifecycle over fake ACP bytes', () => {
 										o.id === 'reasoning_effort' ? { ...o, currentValue: 'high' } : o
 									),
 								}
-							: { result: { currentModelId: 'first', availableModels: [] } }
+							: operation === 'usage'
+								? { usage: { inputTokens: 4, outputTokens: 1 } }
+								: { result: { currentModelId: 'first', availableModels: [] } }
 					);
 				if (stage === 'process-lost') h.child.emit('exit');
 				if (stage === 'idle-timeout') await vi.advanceTimersByTimeAsync(100);
@@ -808,6 +830,78 @@ describe('GrokAcpSession lifecycle over fake ACP bytes', () => {
 			expect(vi.getTimerCount()).toBe(0);
 		}
 	);
+
+	it.each([
+		'direct',
+		'nested',
+		'outer-error',
+		'inner-error',
+		'method-not-found',
+		'null',
+		'nested-null',
+		'malformed',
+		'nested-malformed',
+		'foreign-session',
+	])('reads optional usage %s without inventing a ledger or replaying prompts', async (mode) => {
+		const h = harness({ extensions: { agentVersion: 'fixture-version', sessionUsage: true } });
+		await expect(h.session.processUsage()).rejects.toMatchObject({ reason: 'missing-session-id' });
+		await usageReady(h);
+		const pending = h.session.processUsage().catch((error: unknown) => error);
+		const request = await h.next('_x.ai/session/usage');
+		expect(request.params).toEqual({ sessionId: 'native-1' });
+		const usage = { usage: { inputTokens: 4, outputTokens: 1 } };
+		const error = { code: 'unavailable', message: 'synthetic-private-diagnostic' };
+		const responses: Record<string, unknown> = {
+			direct: usage,
+			nested: { result: usage },
+			'outer-error': { result: usage, error },
+			'inner-error': { result: { ...usage, error } },
+			null: null,
+			'nested-null': { result: null },
+			malformed: [],
+			'nested-malformed': { result: [] },
+			'foreign-session': { ...usage, sessionId: 'foreign' },
+		};
+		if (mode === 'method-not-found')
+			h.receive({ id: request.id, error: { code: -32601, message: error.message } });
+		else h.reply(request, responses[mode]);
+		const result = await pending;
+		if (mode.includes('malformed') || mode === 'foreign-session') {
+			expect(result).toMatchObject({ reason: 'invalid-response', dispatchMayHaveOccurred: false });
+			await expect(h.session.processUsage()).rejects.toBe(result);
+		} else if (mode === 'direct' || mode === 'nested') expect(result).toEqual(usage);
+		else {
+			expect(result).toBeUndefined();
+			if (!mode.includes('null')) await expect(h.session.processUsage()).resolves.toBeUndefined();
+			expect(h.session.error).toBeUndefined();
+			expect(h.terminate).not.toHaveBeenCalled();
+		}
+		expect(String(result)).not.toContain(error.message);
+		expect(h.sent('_x.ai/session/usage')).toHaveLength(1);
+		expect(h.sent('session/prompt')).toHaveLength(0);
+	});
+
+	it('excludes prompts and other queries during sampling, and sampling during a prompt', async () => {
+		const h = harness({ extensions: { agentVersion: 'fixture-version', sessionUsage: true } });
+		await usageReady(h);
+		const sampling = h.session.processUsage();
+		const request = await h.next('_x.ai/session/usage');
+		await expect(h.session.processUsage()).rejects.toMatchObject({ reason: 'busy' });
+		await expect(h.session.discoverModels()).rejects.toMatchObject({ reason: 'busy' });
+		await expect(h.session.setConfiguration({ model: 'other' })).rejects.toMatchObject({
+			reason: 'busy',
+		});
+		await expect(h.session.prompt('overlap')).rejects.toMatchObject({ reason: 'busy' });
+		h.reply(request, { usage: { inputTokens: 0, outputTokens: 0 } });
+		await sampling;
+		const turn = h.session.prompt('once');
+		const prompt = await h.next('session/prompt');
+		await expect(h.session.processUsage()).rejects.toMatchObject({ reason: 'busy' });
+		expect(h.sent('_x.ai/session/usage')).toHaveLength(1);
+		h.reply(prompt, { stopReason: 'end_turn' });
+		await turn;
+		expect(h.sent('session/prompt')).toHaveLength(1);
+	});
 
 	it('excludes discovery and setters during allocation and an active turn', async () => {
 		const h = harness();
@@ -903,7 +997,10 @@ describe('GrokAcpSession lifecycle over fake ACP bytes', () => {
 		expect(h.terminate).toHaveBeenCalledTimes(1);
 		expect(h.child.listenerCount('exit')).toBe(0);
 		expect(h.child.listenerCount('error')).toBe(1);
-		const duplicate = harness({ resumeSessionId: 'native-1' });
+		const duplicate = harness({
+			resumeSessionId: 'native-1',
+			cwd: path.resolve('synthetic-other-project'),
+		});
 		const failed = duplicate.session.open().catch((error: unknown) => error);
 		duplicate.reply(await duplicate.next('initialize'), {
 			protocolVersion: 1,
