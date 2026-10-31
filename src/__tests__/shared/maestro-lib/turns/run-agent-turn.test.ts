@@ -46,6 +46,15 @@ import * as runToCompletion from '../../../../shared/maestro-lib/run/run-to-comp
 import * as pipeSpawn from '../../../../shared/maestro-lib/run/pipe-spawn';
 import * as turnArgs from '../../../../shared/maestro-lib/turns/args';
 import { logger } from '../../../../shared/maestro-lib/host';
+import {
+	createContextVerifier,
+	createLocalHostAuthority,
+	type PolicyDecision,
+} from '../../../../shared/maestro-lib/managed/authority';
+import { inProcessContext } from '../../../../shared/maestro-lib/managed/operations';
+import { managedAccountRef } from '../../../../shared/maestro-lib/managed/credentials';
+import type { GrokLaunchScopePorts } from '../../../../shared/agentAccountDir';
+import type { NativeSessionBinding } from '../../../../shared/maestro-lib/agents/providerSwap';
 
 import {
 	assembleTurn,
@@ -66,18 +75,16 @@ import {
 	CAPTURED_CLAUDE_CODE_SESSION_ID,
 	CAPTURED_OPENCODE_SESSION_ID,
 } from '../../../main/process-manager/recordings/captured';
-import {
-	createScratchDir,
-	FAKE_AGENT_PATH,
-	fakeTurnFromRecording,
-	writeFakeTurn,
-} from '../run/fakeAgent';
+import { FAKE_AGENT_PATH, fakeTurnFromRecording, writeFakeTurn } from '../run/fakeAgent';
 import { makeAgent, makeContext, makeTab } from './fixtures';
 
 let scratch: { dir: string; cleanup: () => void };
 
 beforeAll(() => {
-	scratch = createScratchDir('maestro-run-agent-turn');
+	const root = path.resolve(__dirname, '../../../../../tmp');
+	fs.mkdirSync(root, { recursive: true });
+	const dir = fs.mkdtempSync(path.join(root, 'maestro-run-agent-turn-'));
+	scratch = { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 });
 
 afterAll(() => {
@@ -153,6 +160,68 @@ async function collect(run: AgentTurnRun): Promise<ParsedEvent[]> {
 	const events: ParsedEvent[] = [];
 	for await (const event of run.events) events.push(event);
 	return events;
+}
+
+/** Directory observations only; no account contents or remote transport are accessed. */
+function grokScopeFixture(cwd: string, account: string, remote?: SshRemoteConfig) {
+	const canonicalCwd = remote ? '/native/work' : cwd;
+	const canonicalAccount = remote ? '/native/account' : account;
+	const host = {
+		kind: remote ? ('ssh' as const) : ('local' as const),
+		identity: 'fixture-installation',
+	};
+	const ports = {
+		local: {
+			homedir: vi.fn(() => scratch.dir),
+			realpath: vi.fn(async (directory: string) => directory),
+			stat: vi.fn(async () => ({ isDirectory: () => true })),
+			realpathSync: vi.fn((directory: string) => directory),
+			isExpectedError: vi.fn(
+				(error: unknown) => (error as NodeJS.ErrnoException)?.code === 'ENOENT'
+			),
+			installationId: vi.fn(() => host.identity),
+		},
+		remote: {
+			qualify: vi.fn<GrokLaunchScopePorts['remote']['qualify']>(async () =>
+				remote
+					? {
+							kind: 'remote',
+							remote: structuredClone(remote),
+							endpoint: {
+								contractVersion: '1',
+								installationId: host.identity,
+								runtimeId: 'r',
+								processEpoch: 'e',
+								tenantId: 'tenant',
+								orgId: 'org',
+								authorityId: 'authority',
+								policyRevision: 1,
+								authority: 'registered',
+								routes: [],
+							},
+						}
+					: undefined
+			),
+			observe: vi.fn<GrokLaunchScopePorts['remote']['observe']>(async () => ({
+				success: true,
+				data: {
+					cwd: { canonicalPath: canonicalCwd },
+					account: { canonicalPath: canonicalAccount },
+				},
+			})),
+			isExpectedError: vi.fn(() => false),
+		},
+	} satisfies GrokLaunchScopePorts;
+	const binding = {
+		version: 1,
+		state: 'bound',
+		provider: 'grok',
+		nativeSessionId: 'grok-native-session',
+		cwd: canonicalCwd,
+		accountRef: managedAccountRef('grok', canonicalAccount),
+		host: { ...host },
+	} satisfies NativeSessionBinding;
+	return { ports, binding };
 }
 
 describe('runAgentTurn: a local turn', () => {
@@ -811,7 +880,12 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 
 	describe.each(['local', 'SSH'] as const)('%s owner', (host) => {
 		it.each([
-			{ name: 'short fresh', text: 'Unicode 雪', resume: null, grants: 'empty' },
+			{
+				name: 'short fresh',
+				text: '--resume another-id --cwd /elsewhere agent stdio Unicode 雪',
+				resume: null,
+				grants: 'empty',
+			},
 			{
 				name: 'long resumed',
 				text: 'large 雪\n'.repeat(12_000),
@@ -876,7 +950,14 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 				}));
 				const plan = vi.spyOn(launchPlanner, 'buildAgentLaunchPlan');
 				const getSshRemotes = vi.fn(() => [remote]);
+				const scope = grokScopeFixture(
+					scratch.dir,
+					env.GROK_HOME,
+					host === 'SSH' ? remote : undefined
+				);
 				const run = await start(turn, {
+					grokLaunchScope: scope.ports,
+					retainedNativeSessionBinding: resume ? scope.binding : undefined,
 					sshStore: { getSshRemotes },
 					deps: { wrapSpawnWithSsh: wrap, env: { ...process.env, ...env } },
 				});
@@ -890,7 +971,7 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 					});
 					expect(runToCompletion.runTurn).toHaveBeenCalledOnce();
 					expect(plan).toHaveBeenCalledOnce();
-					expect(getSshRemotes).toHaveBeenCalledTimes(host === 'SSH' ? 1 : 0);
+					expect(getSshRemotes).toHaveBeenCalledTimes(host === 'SSH' ? 3 : 0);
 					expect(plan.mock.calls[0][0].additionalDirectories).toEqual(
 						turn.launch.additionalDirectories
 					);
@@ -921,9 +1002,39 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 						expect(fs.readFileSync(stdinOut, 'utf8')).toContain('synthetic remote transfer');
 					}
 					if (resume) expect(turn.launch.args).toContain(resume);
+					const receipt = run.nativeLaunchReceipt!;
+					const { nativeSessionId: _id, ...expectedScope } = structuredClone(scope.binding);
+					expect(receipt).toEqual({
+						scope: expectedScope,
+						requestedNativeSessionId: resume ?? undefined,
+					});
+					expect(receipt.scope).not.toHaveProperty('nativeSessionId');
+					expect(Object.getOwnPropertyDescriptor(run, 'nativeLaunchReceipt')).toMatchObject({
+						writable: false,
+						configurable: false,
+					});
+					for (const value of [
+						receipt,
+						receipt.scope,
+						receipt.scope.state === 'bound' && receipt.scope.host,
+					])
+						expect(Object.isFrozen(value)).toBe(true);
+					scope.binding.host.identity = 'changed after spawn';
+					expect(receipt.scope).toEqual(expectedScope);
+					if (host === 'SSH') {
+						expect(scope.ports.local.realpath).not.toHaveBeenCalled();
+						expect(scope.ports.remote.observe).toHaveBeenCalledWith(scratch.dir, remote, {
+							env: expect.objectContaining({ GROK_HOME: env.GROK_HOME }),
+							nativeCwd: scratch.dir,
+						});
+					} else {
+						expect(scope.ports.local.realpath.mock.calls).toEqual([[scratch.dir], [env.GROK_HOME]]);
+						expect(scope.ports.remote.observe).not.toHaveBeenCalled();
+					}
 				} finally {
 					run.terminate();
 					await run.result;
+					expect(await collect(run)).toEqual([]);
 				}
 				if (host === 'local') {
 					expect(fs.existsSync(destination.path)).toBe(false);
@@ -1092,6 +1203,250 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 				expect(disclosure).not.toContain(JSON.stringify(secret).slice(1, -1));
 			}
 		});
+	});
+});
+
+describe.each(['local', 'SSH'] as const)('runAgentTurn: Grok native ownership on %s', (host) => {
+	let turn: AssembledTurn;
+	let options: RunAgentTurnOptions;
+	let scope: ReturnType<typeof grokScopeFixture>;
+	let remote: SshRemoteConfig;
+	beforeEach(() => {
+		remote = {
+			id: 'native-host',
+			name: 'Native host',
+			host: 'native.example.test',
+			port: 22,
+			username: 'dev',
+			privateKeyPath: '~/.ssh/id_ed25519',
+			enabled: true,
+		};
+		const account =
+			host === 'SSH' ? '/selected/account' : path.join(scratch.dir, 'selected-account');
+		turn = assembleWithFakeAgent('grok', {
+			recording: 'captured-opencode-normal',
+			tab: { agentSessionId: 'grok-native-session' },
+			env: { GROK_HOME: account },
+		});
+		if (host === 'SSH') turn.launch.sshRemoteConfig = { enabled: true, remoteId: remote.id };
+		else
+			turn.launch.promptFileDestination = {
+				owner: 'local',
+				path: outFile('native-prompt') + '.json',
+			};
+		scope = grokScopeFixture(scratch.dir, account, host === 'SSH' ? remote : undefined);
+		options = optionsFor({
+			grokLaunchScope: scope.ports,
+			retainedNativeSessionBinding: scope.binding,
+			sshStore: { getSshRemotes: () => [remote] },
+			deps: {
+				wrapSpawnWithSsh: vi.fn(async () => ({
+					command: process.execPath,
+					args: [FAKE_AGENT_PATH, 'dev@native.example.test', ...SSH_STDIN_REMOTE_SHELL],
+					sshStdinScript: 'synthetic remote transfer',
+					cwd: scratch.dir,
+					sshRemoteUsed: structuredClone(remote),
+				})),
+			},
+		});
+		vi.spyOn(runToCompletion, 'runTurn').mockImplementation(() => {
+			throw new Error('Unexpected process start');
+		});
+	});
+	afterEach(() => vi.restoreAllMocks());
+
+	it.each([
+		'wrong account',
+		'wrong cwd',
+		'wrong host',
+		'wrong ID',
+		'unknown binding',
+		'unobserved',
+		'missing root',
+		'resume selector',
+		'cwd selector',
+		'injected resume',
+		'ACP route',
+		'malformed ID',
+	])('refuses %s without a process, receipt or fresh-session fallback', async (failure) => {
+		if (failure === 'wrong account')
+			scope.binding.accountRef = managedAccountRef('grok', '/other/account');
+		if (failure === 'wrong cwd') scope.binding.cwd += '/other';
+		if (failure === 'wrong host') scope.binding.host.identity = 'another-installation';
+		if (failure === 'wrong ID') scope.binding.nativeSessionId = 'another-native-id';
+		if (failure === 'unknown binding')
+			options.retainedNativeSessionBinding = { version: 1, state: 'unknown', reason: 'unobserved' };
+		if (failure === 'unobserved') options.grokLaunchScope = undefined;
+		if (failure === 'missing root') {
+			scope.ports.local.realpath.mockRejectedValue(
+				Object.assign(new Error('missing'), { code: 'ENOENT' })
+			);
+			scope.ports.remote.observe.mockResolvedValue({ success: false, errorCode: 'ENOENT' });
+		}
+		if (failure === 'resume selector') turn.launch.args.push('--resume', 'another-native-id');
+		if (failure === 'cwd selector') turn.launch.args.push('--cwd', '/another/cwd');
+		if (failure === 'injected resume') turn.resumeSessionId = undefined;
+		if (failure === 'ACP route') turn.launch.args.push('agent', 'stdio');
+		if (failure === 'malformed ID') {
+			turn.resumeSessionId = '';
+			turn.launch.args[turn.launch.args.indexOf('--resume') + 1] = '';
+		}
+		const started = await runAgentTurn(turn, options);
+		expect(started).toMatchObject({ ok: false, reason: 'grok-native-session-refused' });
+		expect(started).not.toHaveProperty('run');
+		expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		'args',
+		'env',
+		'cwd',
+		'binding',
+		'native ID',
+		'selection callback',
+		'directory',
+		'installation',
+		'endpoint',
+		'recheck throws',
+		'denied',
+		'spawn throws',
+	])('rechecks %s after pending admission and releases unused ownership', async (change) => {
+		const entered = Promise.withResolvers<void>();
+		const decision = Promise.withResolvers<PolicyDecision>();
+		const authority = createLocalHostAuthority({
+			authorityId: 'scope-test',
+			decide: () => {
+				entered.resolve();
+				return decision.promise;
+			},
+			now: () => 0,
+			newId: () => 'scope-lease',
+		});
+		const context = createContextVerifier({
+			verifierId: 'scope-test',
+			peer: 'in-process',
+			now: () => 0,
+			accept: () => [],
+		}).verify(
+			inProcessContext({
+				installation: {
+					installationId: 'fixture-installation',
+					runtimeId: 'runtime',
+					processEpoch: 'epoch',
+				},
+				actor: { kind: 'service', id: 'fixture' },
+				delegation: { chain: [], grantRef: null },
+				identity: {
+					requestId: 'q',
+					idempotencyKey: 'k',
+					attemptId: 'a',
+					runId: null,
+					rootRunId: null,
+					parentRunId: null,
+				},
+				policyRevision: 1,
+				workflow: null,
+				traceId: 'trace',
+				requestedCapabilities: ['runs.submit'],
+			})
+		);
+		if (!context.ok) throw new Error(context.problems.join());
+		const released = vi.fn();
+		options.managed = {
+			authority,
+			context: context.context,
+			policy: { sources: [], policyRevision: 1 },
+			onLease: (lease) => {
+				const release = lease.release.bind(lease);
+				vi.spyOn(lease, 'release').mockImplementation((result) => {
+					released(result);
+					release(result);
+				});
+			},
+		};
+		const owned = outFile('native-owned-system');
+		turn.systemPromptDelivery = { via: 'file' };
+		vi.spyOn(turnArgs, 'writeSystemPromptFile').mockImplementation(async (input) => {
+			fs.writeFileSync(owned, 'fixture system');
+			return { args: input.args, prompt: input.prompt, tempFile: owned, delivery: 'file' };
+		});
+		const cleanup = vi.spyOn(pipeSpawn, 'removeTempFiles');
+		const pending = runAgentTurn(turn, options);
+		await entered.promise;
+		expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+		if (change === 'args') turn.launch.args.push('--resume', 'other');
+		if (change === 'env') turn.launch.sessionCustomEnvVars = { GROK_HOME: '/another/account' };
+		if (change === 'cwd') turn.launch.cwd += '/other';
+		if (change === 'binding') scope.binding.accountRef = 'changed';
+		if (change === 'native ID') turn.resumeSessionId = 'other';
+		if (change === 'selection callback') options.recheckNativeSelection = () => false;
+		if (change === 'directory') {
+			scope.ports.local.realpathSync.mockReturnValue(path.join(scratch.dir, 'replacement'));
+			scope.ports.remote.observe.mockResolvedValue({ success: false, errorCode: 'ENOENT' });
+		}
+		if (change === 'installation') {
+			scope.ports.local.installationId.mockReturnValue('replacement');
+			scope.ports.remote.qualify.mockResolvedValue(undefined);
+		}
+		if (change === 'endpoint') {
+			if (host === 'SSH') remote.host = 'changed.example.test';
+			else scope.ports.local.installationId.mockReturnValue('replacement');
+		}
+		const unexpected = new Error('unexpected directory failure');
+		if (change === 'recheck throws') {
+			scope.ports.local.realpathSync.mockImplementation(() => {
+				throw unexpected;
+			});
+			scope.ports.remote.observe.mockRejectedValue(unexpected);
+		}
+		// Observe the rejection before resolving the gate, so no promise goes unhandled.
+		const rejected =
+			change === 'recheck throws' ? expect(pending).rejects.toBe(unexpected) : undefined;
+		decision.resolve(
+			change === 'denied'
+				? { decision: 'deny', reason: 'fixture denial', policyRevision: 1 }
+				: { decision: 'allow', policyRevision: 1 }
+		);
+		if (rejected) await rejected;
+		else {
+			const started = await pending;
+			expect(started).toMatchObject({
+				ok: false,
+				reason:
+					change === 'denied'
+						? 'managed-denied'
+						: change === 'spawn throws'
+							? 'launch'
+							: 'grok-native-session-refused',
+			});
+			expect(started).not.toHaveProperty('run');
+		}
+		expect(runToCompletion.runTurn).toHaveBeenCalledTimes(change === 'spawn throws' ? 1 : 0);
+		expect(released).toHaveBeenCalledTimes(change === 'denied' ? 0 : 1);
+		if (change !== 'denied')
+			expect(released).toHaveBeenCalledWith(expect.objectContaining({ outcome: 'spawn-failed' }));
+		expect(authority.live()).toEqual([]);
+		expect(cleanup).toHaveBeenCalledExactlyOnceWith([owned]);
+		await waitUntil(() => !fs.existsSync(owned));
+	});
+
+	it('does not attach a receipt to an asynchronous spawn failure', async () => {
+		vi.mocked(runToCompletion.runTurn).mockRestore();
+		turn.launch.command = path.join(scratch.dir, 'missing-executable');
+		options.deps!.wrapSpawnWithSsh = async () => ({
+			command: turn.launch.command,
+			args: ['dev@native.example.test', ...SSH_STDIN_REMOTE_SHELL],
+			sshStdinScript: 'synthetic remote transfer',
+			cwd: scratch.dir,
+			sshRemoteUsed: remote,
+		});
+		const started = await runAgentTurn(turn, options);
+		expect(started.ok).toBe(true);
+		if (!started.ok) return;
+		expect(started.run.pid).toBeUndefined();
+		expect(started.run).not.toHaveProperty('nativeLaunchReceipt');
+		expect((await started.run.result).outcome).toBe('crashed');
+		expect(await collect(started.run)).toEqual([]);
 	});
 });
 

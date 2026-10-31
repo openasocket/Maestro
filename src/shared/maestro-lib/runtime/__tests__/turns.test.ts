@@ -8,7 +8,6 @@
  */
 import { createHash } from 'node:crypto';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -22,6 +21,7 @@ import {
 	fakeTurnFromRecording,
 	writeFakeTurn,
 } from '../../../../__tests__/shared/maestro-lib/run/fakeAgent';
+import { resolveAgentAccountRef } from '../../../agentAccountDir';
 import * as repositories from '../../agents/repository';
 import { DEFAULT_TAB_DEFAULTS } from '../../agents/rules';
 import type { ClientResult, ManagedApi, TurnEvent } from '../../client/types';
@@ -200,8 +200,10 @@ describe('runtime turns', () => {
 		JSON.parse(fs.readFileSync(path.join(dir, 'maestro-sessions.json'), 'utf-8'));
 
 	beforeEach(() => {
-		dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-runtime-turns-'));
-		work = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-runtime-turns-work-'));
+		const fixtureRoot = path.resolve(__dirname, '../../../../../tmp');
+		fs.mkdirSync(fixtureRoot, { recursive: true });
+		dir = fs.mkdtempSync(path.join(fixtureRoot, 'maestro-runtime-turns-'));
+		work = fs.mkdtempSync(path.join(fixtureRoot, 'maestro-runtime-turns-work-'));
 		open = [];
 		hold = false;
 		argvFiles = [];
@@ -693,7 +695,13 @@ describe('runtime turns', () => {
 				let changeScope: () => void = () => undefined;
 				const run: RuntimeDeps['turns']['runAgentTurn'] = async (assembled, options) => {
 					expect(assembled.resumeSessionId).toBe(resume);
-					const started = await fakeProvider(assembled, options);
+					const started = await fakeProvider(assembled, {
+						...options,
+						grokLaunchScope: {
+							...options.grokLaunchScope!,
+							local: { ...options.grokLaunchScope!.local, installationId: () => 'recording-host' },
+						},
+					});
 					if (!started.ok) return started;
 					return {
 						ok: true,
@@ -764,18 +772,31 @@ describe('runtime turns', () => {
 					});
 				}
 				const binding = { version: 1, state: 'unknown', reason: 'unobserved' };
+				const resumeBinding = {
+					version: 1,
+					state: 'bound',
+					provider: 'grok',
+					nativeSessionId: resume,
+					cwd: fs.realpathSync(work),
+					accountRef: resolveAgentAccountRef(
+						{ toolType: 'grok', managedAccountDir: fs.realpathSync(work) },
+						{ homeDir: '' }
+					),
+					host: { kind: 'local', identity: 'recording-host' },
+				};
 				const runtime = await startManaged(
 					managedAuthority(),
 					{ turns: { runAgentTurn: run } },
 					seedAgent({
 						toolType: 'grok',
+						customEnvVars: { GROK_HOME: work },
 						aiTabs: [
 							{
 								id: 't1',
 								agentSessionId: resume ?? null,
 								name: null,
 								logs: [],
-								...(resume ? { nativeSessionBinding: binding } : {}),
+								...(resume ? { nativeSessionBinding: resumeBinding } : {}),
 							},
 						],
 					})
@@ -817,7 +838,7 @@ describe('runtime turns', () => {
 					: current;
 				expect(tab.agentSessionId).toBe(retained);
 				expect(current.runtimeTurnId).toEqual(expect.any(String));
-				if (retained) expect(tab.nativeSessionBinding).toEqual(binding);
+				if (retained) expect(tab.nativeSessionBinding).toEqual(resume ? resumeBinding : binding);
 				else expect(tab.nativeSessionBinding).toBeUndefined();
 				expect(turn.outcomes()).toEqual([
 					refused ? 'crashed' : cancel ? 'interrupted' : 'completed',
@@ -862,6 +883,96 @@ describe('runtime turns', () => {
 				} else expect(tab.usageStats).toMatchObject({ inputTokens: 7, outputTokens: 3 });
 			}
 		);
+
+		it.each([
+			{ stage: 'invalid', change: 'id', rawId: '' },
+			{ stage: 'invalid', change: 'id', rawId: 7 },
+			{ stage: 'launch', change: 'none' },
+			...['context', 'launch'].flatMap((stage) =>
+				['id', 'binding', 'account', 'ssh'].map((change) => ({ stage, change }))
+			),
+		])('refuses Grok resume without replacing history: $stage / $change', async (test) => {
+			let repository: ReturnType<typeof repositories.createAgentRepository>;
+			const create = repositories.createAgentRepository;
+			vi.spyOn(repositories, 'createAgentRepository').mockImplementationOnce((options) => {
+				repository = create(options);
+				return repository;
+			});
+			const binding = { version: 1, state: 'unknown', reason: 'legacy' } as const;
+			const changeSelection = () => {
+				const tab = repository.getTab('a1', 't1')!;
+				if (test.change === 'id') tab.agentSessionId = 'replacement';
+				if (test.change === 'binding')
+					Object.assign(tab.nativeSessionBinding!, { reason: 'unobserved' });
+				if (test.change === 'account' || test.change === 'ssh') {
+					const get = repository.getAgent.bind(repository);
+					vi.spyOn(repository, 'getAgent').mockImplementation((id) => {
+						const agent = get(id);
+						return (
+							agent && {
+								...agent,
+								...(test.change === 'account'
+									? { customEnvVars: { GROK_HOME: path.join(work, 'other-account') } }
+									: { sessionSshRemoteConfig: { enabled: true, remoteId: 'other-host' } }),
+							}
+						);
+					});
+				}
+			};
+			const launch = vi.fn<NonNullable<RuntimeDeps['turns']['runAgentTurn']>>(
+				async (assembled, options) => {
+					expect(assembled.resumeSessionId).toBe('original');
+					expect(options.retainedNativeSessionBinding).toEqual(binding);
+					expect(options.retainedNativeSessionBinding).not.toBe(
+						repository.getTab('a1', 't1')!.nativeSessionBinding
+					);
+					expect(options.recheckNativeSelection?.()).toBe(true);
+					if (test.stage === 'launch') changeSelection();
+					expect(options.retainedNativeSessionBinding).toEqual(binding);
+					expect(options.recheckNativeSelection?.()).toBe(test.change === 'none');
+					const result = await fakeProvider(assembled, options);
+					expect(result).toMatchObject({ ok: false, reason: 'grok-native-session-refused' });
+					expect(result).not.toHaveProperty('run');
+					return result;
+				}
+			);
+			const runtime = await startManaged(
+				null,
+				{
+					turns: {
+						runAgentTurn: launch,
+						probeBinary: async () => {
+							if (test.stage === 'context') changeSelection();
+							return { exists: true, path: process.execPath };
+						},
+					},
+				},
+				seedAgent({
+					toolType: 'grok',
+					customEnvVars: { GROK_HOME: work },
+					aiTabs: [
+						{
+							id: 't1',
+							agentSessionId: 'rawId' in test ? test.rawId : 'original',
+							nativeSessionBinding: binding,
+							logs: [],
+						},
+					],
+				})
+			);
+			const before = sessions().sessions[0].aiTabs[0];
+			const turn = watch(runtime);
+			const result = await runtime.turns.send('a1', 't1', { text: 'resume original' });
+			expect(errorOf(result).message).toContain('Grok');
+			expect(launch).toHaveBeenCalledTimes(test.stage === 'launch' ? 1 : 0);
+			expect(ran()).toEqual([]);
+			expect(await transcript(runtime)).toEqual([]);
+			expect(
+				turn.events.some((event) => ['started', 'session', 'outcome'].includes(event.kind))
+			).toBe(false);
+			expect(readHistory(runtime.paths, 'a1').status).toBe('missing');
+			expect(sessions().sessions[0].aiTabs[0]).toEqual(before);
+		});
 
 		it('denies with zero effect: no process, no transcript, no queue item, a failed attempt in the journal', async () => {
 			const runtime = await startManaged(

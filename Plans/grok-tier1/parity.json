@@ -2531,6 +2531,29 @@
 			],
 			"testOwner": "GT1-04-07F4T",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-shared-admitted-launch-receipt-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07f4t-shared-admitted-launch-receipt-tests",
+			"sourceCommit": "00d878cb1d1c6a0313c3045f71ff2fcbe387fe76",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts": "633a2880fc34f328e6de852b190dff52c91d0f7d88a7ac9446a874907e60f0f7",
+				"src/shared/maestro-lib/runtime/__tests__/turns.test.ts": "6d453760b39747689d7f6599d2c228d9fe0dbfaeaf5d889f6340f740ade17c34"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "61 new parameter-expanded cases plus six strengthened prompt-file cases: immutable admitted local/injected-SSH receipts, native scope and selector refusals, pending admission mutation, unused lease/prompt cleanup, denied and failed spawns, cancellation drainage and runtime refusal without new history. Existing recording fixtures now supply observed resume ownership.",
+			"limitations": [
+				"Tests authored only; GT1-04-13 owns execution. No native account, provider or SSH qualification.",
+				"Scoped compiler comparison adds no diagnostics; existing RequestInit.dispatcher error still blocks a clean TypeScript check.",
+				"GT1-04-07F5 owns receipt consumption and complete persistence fencing; production headless SSH observation remains unavailable."
+			],
+			"testOwner": "GT1-04-07F4T",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6471,7 +6494,8 @@
 				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
 				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
 				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests",
-				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt"
+				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt",
+				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11790,7 +11814,8 @@
 				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
 				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
 				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests",
-				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt"
+				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt",
+				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12378,7 +12403,8 @@
 				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
 				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
 				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests",
-				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt"
+				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt",
+				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17036,7 +17062,8 @@
 				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
 				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
 				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests",
-				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt"
+				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt",
+				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
