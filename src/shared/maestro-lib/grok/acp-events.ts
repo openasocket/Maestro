@@ -42,7 +42,7 @@ export class GrokAcpEventAdapter {
 			name: string;
 			state: Record<string, unknown>;
 			outputText?: string;
-			decoder?: TextDecoder;
+			decoder?: InstanceType<typeof TextDecoder>;
 		}
 	>();
 	private response?: { id?: string; model?: string };
@@ -502,10 +502,9 @@ export class GrokAcpEventAdapter {
 				: count(row.costUsdTicks)?.toString();
 		const cost: UsageCost =
 			ticks !== undefined
-				? {
-						status: complete && row.costIsPartial !== true ? 'exact' : 'partial',
-						costUsdTicks: ticks,
-					}
+				? complete && row.costIsPartial !== true
+					? { status: 'exact', costUsdTicks: ticks }
+					: { status: 'partial', costUsdTicks: ticks }
 				: row.costIsPartial === true
 					? { status: 'partial' }
 					: { status: 'unknown' };

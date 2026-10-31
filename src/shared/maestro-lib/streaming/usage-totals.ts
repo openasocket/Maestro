@@ -527,10 +527,9 @@ export function mergeUsageCost(left: UsageCost, right: UsageCost): UsageCost {
 					? { costUsdTicks: ticksA }
 					: {}),
 	};
-	return {
-		status: left.status === 'exact' && right.status === 'exact' ? 'exact' : 'partial',
-		...amount,
-	};
+	return left.status === 'exact' && right.status === 'exact'
+		? { status: 'exact', ...amount }
+		: { status: 'partial', ...amount };
 }
 
 function mergeUsageAccounting(

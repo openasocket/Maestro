@@ -481,13 +481,9 @@ export class GrokOutputParser implements AgentOutputParser {
 					? { costUsd: dollars }
 					: undefined;
 		const cost: UsageCost = amount
-			? {
-					...amount,
-					status:
-						complete && (msg.cost_is_partial === undefined || msg.cost_is_partial === false)
-							? 'exact'
-							: 'partial',
-				}
+			? complete && (msg.cost_is_partial === undefined || msg.cost_is_partial === false)
+				? { ...amount, status: 'exact' }
+				: { ...amount, status: 'partial' }
 			: msg.cost_is_partial === true || msg.usage_is_incomplete === true
 				? { status: 'partial' }
 				: { status: 'unknown' };
@@ -562,10 +558,9 @@ export class GrokOutputParser implements AgentOutputParser {
 						cost:
 							modelCost === undefined
 								? { status: 'unknown' }
-								: {
-										status: complete && valid && cost.status === 'exact' ? 'exact' : 'partial',
-										costUsd: modelCost,
-									},
+								: complete && valid && cost.status === 'exact'
+									? { status: 'exact', costUsd: modelCost }
+									: { status: 'partial', costUsd: modelCost },
 					};
 				}),
 			},
