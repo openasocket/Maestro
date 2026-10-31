@@ -2,7 +2,10 @@ import { act, render, renderHook, screen, waitFor } from '@testing-library/react
 import React from 'react';
 import { mockTheme } from '../../../../../helpers/mockTheme';
 import { StreamingResponseBubble } from '../../../../../../renderer/components/Wizard/screens/ConversationScreen/components/StreamingResponseBubble';
-import type { ConversationCallbacks } from '../../../../../../renderer/components/Wizard/services/conversationManager';
+import type {
+	ConversationCallbacks,
+	SendMessageResult,
+} from '../../../../../../renderer/components/Wizard/services/conversationManager';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useConversationAnnouncements } from '../../../../../../renderer/components/Wizard/screens/ConversationScreen/hooks/useConversationAnnouncements';
 import { useConversationAutoContinue } from '../../../../../../renderer/components/Wizard/screens/ConversationScreen/hooks/useConversationAutoContinue';
@@ -490,6 +493,387 @@ describe('ConversationScreen hooks', () => {
 	});
 
 	describe('useWizardConversationSend', () => {
+		describe.each(['message', 'survey', 'existing-docs'] as const)('%s ownership', (mode) => {
+			describe.each([
+				['document list', 'resolve'],
+				['document list', 'reject'],
+				['document read', 'resolve'],
+				['document read', 'reject'],
+				['preparation', 'resolve'],
+				['preparation', 'reject'],
+			] as const)('pending %s that will %s', (stage, outcome) => {
+				it.each(['configuration', 'provider', 'host', 'unmount'] as const)(
+					'ignores late preparation after %s without disturbing the replacement',
+					async (change) => {
+						let release!: () => void;
+						vi.mocked(window.maestro.autorun.listDocs).mockResolvedValue({
+							success: true,
+							files: ['plan.md'],
+						});
+						if (stage === 'document list') {
+							vi.mocked(window.maestro.autorun.listDocs).mockReturnValueOnce(
+								new Promise((resolve, reject) => {
+									release = () =>
+										outcome === 'reject'
+											? reject(new Error('obsolete listing'))
+											: resolve({ success: true, files: ['obsolete.md'] });
+								})
+							);
+						} else if (stage === 'document read') {
+							vi.mocked(window.maestro.autorun.readDoc).mockReturnValueOnce(
+								new Promise((resolve, reject) => {
+									release = () =>
+										outcome === 'reject'
+											? reject(new Error('obsolete read'))
+											: resolve({ success: true, content: 'Obsolete plan' });
+								})
+							);
+						} else {
+							conversationMocks.startConversation.mockReturnValueOnce(
+								new Promise((resolve, reject) => {
+									release = () =>
+										outcome === 'reject'
+											? reject(new Error('obsolete preparation'))
+											: resolve('obsolete-session');
+								})
+							);
+						}
+						const state = createState({
+							selectedAgent: 'grok',
+							existingDocsChoice: 'continue',
+							customEnvVars: { GROK_HOME: '/accounts/a' },
+						});
+						const hook = renderSendHook({ state, showInitialQuestion: false });
+						let stale!: Promise<void>;
+						act(() => {
+							stale =
+								mode === 'message'
+									? hook.result.current.handleSendMessage()
+									: hook.result.current.sendOpeningMessage(mode);
+						});
+						const boundary =
+							stage === 'document list'
+								? window.maestro.autorun.listDocs
+								: stage === 'document read'
+									? window.maestro.autorun.readDoc
+									: conversationMocks.startConversation;
+						await waitFor(() => expect(boundary).toHaveBeenCalledOnce());
+						expect(conversationMocks.sendMessage).not.toHaveBeenCalled();
+						const currentState = {
+							...state,
+							...(change === 'configuration'
+								? {
+										directoryPath: '/replacement',
+										customPath: '/custom/grok',
+										customArgs: '--reasoning-effort high',
+										plannerModel: 'grok-4.5',
+										customEnvVars: { GROK_HOME: '/accounts/b' },
+									}
+								: change === 'provider'
+									? { selectedAgent: 'claude-code' as const }
+									: { sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-b' } }),
+						};
+						if (change === 'unmount') hook.unmount();
+						else hook.rerender(currentState);
+						expect(conversationMocks.endConversation).toHaveBeenCalledOnce();
+						expect(hook.refs.isSendingRef.current).toBe(false);
+						let finish!: () => void;
+						let replacement: Promise<void> | undefined;
+						if (change !== 'unmount') {
+							conversationMocks.sendMessage.mockImplementationOnce(
+								() =>
+									new Promise((resolve) => {
+										finish = () => resolve({ success: true });
+									})
+							);
+							act(() => {
+								replacement = hook.result.current.handleSendMessage();
+							});
+							await waitFor(() => expect(conversationMocks.sendMessage).toHaveBeenCalledOnce());
+							expect(conversationMocks.startConversation).toHaveBeenLastCalledWith(
+								expect.objectContaining({
+									agentType: currentState.selectedAgent,
+									directoryPath: currentState.directoryPath,
+									model: currentState.plannerModel,
+									sessionCustomEnvVars: currentState.customEnvVars,
+									sshRemoteConfig: currentState.sessionSshRemoteConfig,
+									existingDocs: [{ filename: 'plan.md', content: 'Current plan' }],
+								})
+							);
+						}
+						// Only the old continuation runs after this snapshot; invalidation itself is allowed to clean up.
+						const observers = [
+							conversationMocks.startConversation,
+							conversationMocks.sendMessage,
+							conversationMocks.endConversation,
+							...Object.values(hook.setters),
+							hook.addMessage,
+							hook.setConversationLoading,
+							hook.setConversationError,
+							hook.setConfidenceLevel,
+							hook.setIsReadyToProceed,
+							hook.announce,
+							hook.scheduleAutoContinue,
+							vi.mocked(hook.refs.inputRef.current!.focus),
+						];
+						const counts = observers.map((observer) => vi.mocked(observer).mock.calls.length);
+						await act(async () => {
+							release();
+							await stale;
+						});
+						observers.forEach((observer, i) => expect(observer).toHaveBeenCalledTimes(counts[i]));
+						expect(hook.refs.isSendingRef.current).toBe(change !== 'unmount');
+						if (replacement) {
+							await act(async () => {
+								finish();
+								await replacement;
+							});
+							expect(hook.refs.isSendingRef.current).toBe(false);
+							expect(hook.refs.inputRef.current?.focus).toHaveBeenCalledOnce();
+						}
+					}
+				);
+			});
+
+			describe.each(['failure', 'rejection'] as const)('late %s', (outcome) => {
+				it.each([
+					['custom path', { customPath: '/replacement/grok' }],
+					['custom args', { customArgs: '--reasoning-effort low' }],
+					['account environment', { customEnvVars: { GROK_HOME: '/accounts/b' } }],
+					['planner model', { plannerModel: 'grok-4.5' }],
+					['SSH host', { sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-b' } }],
+					['Claude token opt-in', { enableMaestroP: false }],
+					['Claude token mode', { maestroPMode: 'interactive' }],
+					['Claude token executable', { maestroPPath: '/replacement/maestro-p' }],
+					['provider', { selectedAgent: 'claude-code' }],
+					['unmount', null],
+				] satisfies [string, Partial<WizardConversationState> | null][])(
+					'ignores stale callbacks and cleanup after changing %s',
+					async (change, patch) => {
+						const pending: {
+							callbacks: ConversationCallbacks;
+							resolve: (value: SendMessageResult) => void;
+							reject: (error: Error) => void;
+						}[] = [];
+						conversationMocks.sendMessage.mockImplementation(
+							(_message, _history, callbacks) =>
+								new Promise<SendMessageResult>((resolve, reject) => {
+									pending.push({ callbacks, resolve, reject });
+								})
+						);
+						const state = createState({
+							selectedAgent: change.startsWith('Claude') ? 'claude-code' : 'grok',
+							...(change.startsWith('Claude')
+								? {
+										enableMaestroP: true,
+										maestroPMode: 'dynamic' as const,
+										maestroPPath: '/original/maestro-p',
+									}
+								: {}),
+							customEnvVars: { GROK_HOME: '/accounts/a' },
+						});
+						const hook = renderSendHook({ state, showInitialQuestion: false });
+						let stale!: Promise<void>;
+						act(() => {
+							stale =
+								mode === 'message'
+									? hook.result.current.handleSendMessage()
+									: hook.result.current.sendOpeningMessage(mode);
+						});
+						await waitFor(() => expect(pending).toHaveLength(1));
+						if (patch) hook.rerender({ ...state, ...patch });
+						else hook.unmount();
+						expect(conversationMocks.endConversation).toHaveBeenCalledOnce();
+						let replacement: Promise<void> | undefined;
+						if (patch) {
+							act(() => {
+								replacement =
+									mode === 'message'
+										? hook.result.current.handleSendMessage()
+										: hook.result.current.sendOpeningMessage(mode);
+							});
+							await waitFor(() => expect(pending).toHaveLength(2));
+							const current = { ...state, ...patch };
+							expect(conversationMocks.startConversation).toHaveBeenLastCalledWith(
+								expect.objectContaining({
+									agentType: current.selectedAgent,
+									model: current.plannerModel,
+									sessionCustomPath: current.customPath,
+									sessionCustomArgs: current.customArgs,
+									sessionCustomEnvVars: current.customEnvVars,
+									sshRemoteConfig: current.sessionSshRemoteConfig,
+									claudeTokenSource: {
+										enableMaestroP: current.enableMaestroP,
+										maestroPMode: current.maestroPMode,
+										maestroPPath: current.maestroPPath,
+									},
+								})
+							);
+							act(() => pending[1].callbacks.onChunk?.('replacement stream'));
+						}
+						const observers = [
+							...Object.values(hook.setters),
+							hook.addMessage,
+							hook.setConversationLoading,
+							hook.setConversationError,
+							hook.setConfidenceLevel,
+							hook.setIsReadyToProceed,
+							hook.announce,
+							hook.scheduleAutoContinue,
+							conversationMocks.endConversation,
+							vi.mocked(hook.refs.inputRef.current!.focus),
+						];
+						const counts = observers.map((observer) => vi.mocked(observer).mock.calls.length);
+						const completion: SendMessageResult = {
+							success: true,
+							response: {
+								structured: {
+									confidence: 90,
+									ready: true,
+									message: 'Let me research this for you.',
+								},
+								rawText: 'Owned response',
+								parseSuccess: true,
+							},
+						};
+						await act(async () => {
+							pending[0].callbacks.onChunk?.('stale stream');
+							pending[0].callbacks.onThinkingChunk?.('stale thinking');
+							pending[0].callbacks.onToolExecution?.({ toolName: 'Read', timestamp: 1 });
+							pending[0].callbacks.onComplete?.(completion);
+							pending[0].callbacks.onError?.('stale callback failure');
+							if (outcome === 'rejection') pending[0].reject(new Error('stale rejection'));
+							else
+								pending[0].resolve({
+									success: false,
+									error: 'stale failure',
+									detectedError: {
+										type: 'rate_limited',
+										title: 'Rate limited',
+										message: 'Stale limit',
+										recoveryHint: 'Try later',
+										canRetry: true,
+									},
+								});
+							await stale;
+						});
+						observers.forEach((observer, i) => expect(observer).toHaveBeenCalledTimes(counts[i]));
+						expect(hook.refs.isSendingRef.current).toBe(patch !== null);
+						expect(hook.refs.autoContinueTriggeredRef.current).toBe(false);
+						if (replacement) {
+							await act(async () => {
+								pending[1].callbacks.onComplete?.(completion);
+								pending[1].resolve(completion);
+								await replacement;
+							});
+							expect(hook.setConfidenceLevel).toHaveBeenCalledExactlyOnceWith(90);
+							expect(hook.setIsReadyToProceed).toHaveBeenCalledExactlyOnceWith(true);
+							expect(hook.setConversationLoading).toHaveBeenLastCalledWith(false);
+							expect(hook.refs.isSendingRef.current).toBe(false);
+							expect(hook.refs.inputRef.current?.focus).toHaveBeenCalledOnce();
+						}
+					}
+				);
+			});
+
+			it('keeps ownership across history/loading renders and replays retained context next time', async () => {
+				vi.mocked(window.maestro.autorun.listDocs).mockResolvedValue({
+					success: true,
+					files: ['plan.md'],
+				});
+				const state = createState({
+					selectedAgent: 'grok',
+					existingDocsChoice: 'continue',
+					customEnvVars: { GROK_HOME: '/accounts/a' },
+					conversationHistory: [
+						{ id: 'prior', role: 'assistant', content: 'Prior plan', timestamp: 1 },
+					],
+				});
+				let callbacks!: ConversationCallbacks;
+				let finish!: () => void;
+				conversationMocks.sendMessage.mockImplementationOnce((_message, _history, handlers) => {
+					callbacks = handlers;
+					return new Promise((resolve) => {
+						finish = () => resolve({ success: true });
+					});
+				});
+				const hook = renderSendHook({ state, showInitialQuestion: false });
+				let send!: Promise<void>;
+				act(() => {
+					send =
+						mode === 'message'
+							? hook.result.current.handleSendMessage()
+							: hook.result.current.sendOpeningMessage(mode);
+				});
+				await waitFor(() => expect(conversationMocks.sendMessage).toHaveBeenCalledOnce());
+				const user = hook.addMessage.mock.calls[0][0];
+				const history = [...state.conversationHistory, { ...user, id: 'user', timestamp: 2 }];
+				hook.rerender({ ...state, conversationHistory: history, isConversationLoading: true });
+				expect(conversationMocks.endConversation).not.toHaveBeenCalled();
+				expect(hook.refs.isSendingRef.current).toBe(true);
+				act(() => callbacks.onChunk?.('{"type":"text","data":"Still owned"}\n'));
+				expect(hook.setters.setStreamingText).toHaveBeenLastCalledWith('Still owned');
+				hook.rerender({ ...state, conversationHistory: history, isConversationLoading: false });
+				await act(async () => {
+					await hook.result.current.handleSendMessage();
+					await hook.result.current.sendOpeningMessage('survey');
+				});
+				expect(conversationMocks.sendMessage).toHaveBeenCalledOnce();
+				await act(async () => {
+					callbacks.onComplete?.({
+						success: true,
+						response: {
+							structured: { confidence: 90, ready: true, message: 'Retained answer' },
+							rawText: 'Retained answer',
+							parseSuccess: true,
+						},
+					});
+					finish();
+					await send;
+				});
+				expect(hook.setIsReadyToProceed).toHaveBeenCalledExactlyOnceWith(true);
+				expect(hook.refs.inputRef.current?.focus).toHaveBeenCalledOnce();
+				const assistant = hook.addMessage.mock.calls.at(-1)![0];
+				const retained = [...history, { ...assistant, id: 'answer', timestamp: 3 }];
+				const current = {
+					...state,
+					conversationHistory: retained,
+					customPath: '/custom/grok',
+					customArgs: '--reasoning-effort high',
+					customEnvVars: { GROK_HOME: '/accounts/b' },
+					plannerModel: 'grok-4.5',
+					sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-b' },
+				};
+				hook.rerender(current);
+				await act(async () => {
+					await hook.result.current.handleSendMessage();
+				});
+				expect(conversationMocks.startConversation).toHaveBeenLastCalledWith(
+					expect.objectContaining({
+						agentType: 'grok',
+						model: current.plannerModel,
+						sessionCustomPath: current.customPath,
+						sessionCustomArgs: current.customArgs,
+						sessionCustomEnvVars: current.customEnvVars,
+						sshRemoteConfig: current.sessionSshRemoteConfig,
+						existingDocs: [{ filename: 'plan.md', content: 'Current plan' }],
+					})
+				);
+				expect(conversationMocks.sendMessage).toHaveBeenLastCalledWith(
+					'Build a dashboard',
+					retained,
+					expect.any(Object)
+				);
+				expect(retained.map((message) => message.content)).toEqual([
+					'Prior plan',
+					user.content,
+					'Retained answer',
+				]);
+				expect(window.maestro.autorun.readDoc).toHaveBeenCalledTimes(2);
+				expect(conversationMocks.endConversation).not.toHaveBeenCalled();
+			});
+		});
+
 		it('sends a normal message, streams callbacks, and marks ready', async () => {
 			const response = {
 				structured: { confidence: 85, ready: true, message: 'Ready' },
