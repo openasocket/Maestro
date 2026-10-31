@@ -504,6 +504,36 @@
 				"REG-USAGE"
 			],
 			"sourcePaths": ["src/shared/maestro-lib/grok/acp-protocol.ts"]
+		},
+		"phase03-acp-event-tests": {
+			"path": "Plans/grok-tier1/evidence/03.md#gt1-03-06-acp-event-and-wire-fixture-authoring",
+			"sourceCommit": "7767ea9c4cf8892f18d8bf9178e2389ec0b99095",
+			"provenance": "authored-tests",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"scope": "GT1-03-06 authors 52 synthetic ACP adapter/wire cases in two files, using real capture, accumulator and event mapper. Expanded terminal/ownership/model-cost edges remain GT1-03-06C; execution and compiler/build checks remain GT1-03-13. No native or consumer-route qualification claim.",
+			"testPaths": [
+				"src/__tests__/shared/maestro-lib/grok/acp-events.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-protocol.test.ts"
+			],
+			"testHashesSha256": {
+				"src/__tests__/shared/maestro-lib/grok/acp-events.test.ts": "6d754e745ef1184919c34a57ca304a5bac5e72bde25c5dbc7d4ee814f4595477",
+				"src/__tests__/shared/maestro-lib/grok/acp-protocol.test.ts": "533a217f19465b9cb12b343eada2830e91098c0c18a3d591e2aca745999aef44"
+			},
+			"affectedRows": [
+				"P09",
+				"P10",
+				"P11",
+				"P12",
+				"P16",
+				"C-supportsCostTracking",
+				"C-supportsUsageStats",
+				"C-supportsResultMessages",
+				"C-supportsStreaming",
+				"C-supportsThinkingDisplay",
+				"REG-PARSER",
+				"REG-USAGE"
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -3074,7 +3104,8 @@
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
-				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
+				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3112,7 +3143,7 @@
 				{
 					"id": "acp-wire-tick-precision:P09",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C owns expanded terminal/ownership/model-cost edges; GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["P09"]
 				}
 			],
@@ -3357,7 +3388,8 @@
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
-				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
+				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3395,7 +3427,7 @@
 				{
 					"id": "acp-wire-tick-precision:P10",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C owns expanded terminal/ownership/model-cost edges; GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["P10"]
 				}
 			],
@@ -3530,7 +3562,8 @@
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
-				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
+				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3568,7 +3601,7 @@
 				{
 					"id": "acp-wire-tick-precision:P11",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C owns expanded terminal/ownership/model-cost edges; GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["P11"]
 				}
 			],
@@ -3762,7 +3795,8 @@
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
-				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
+				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3800,7 +3834,7 @@
 				{
 					"id": "acp-wire-tick-precision:P12",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C owns expanded terminal/ownership/model-cost edges; GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["P12"]
 				}
 			],
@@ -4344,7 +4378,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10143,7 +10178,8 @@
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
-				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
+				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10181,7 +10217,7 @@
 				{
 					"id": "acp-wire-tick-precision:C-supportsCostTracking",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C owns expanded terminal/ownership/model-cost edges; GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["C-supportsCostTracking"]
 				}
 			],
@@ -10301,7 +10337,8 @@
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
-				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
+				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10339,7 +10376,7 @@
 				{
 					"id": "acp-wire-tick-precision:C-supportsUsageStats",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C owns expanded terminal/ownership/model-cost edges; GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["C-supportsUsageStats"]
 				}
 			],
@@ -10653,7 +10690,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10787,7 +10825,8 @@
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
-				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
+				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10825,7 +10864,7 @@
 				{
 					"id": "acp-wire-tick-precision:C-supportsResultMessages",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C owns expanded terminal/ownership/model-cost edges; GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["C-supportsResultMessages"]
 				}
 			],
@@ -11333,7 +11372,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12676,7 +12716,8 @@
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
-				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
+				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12714,7 +12755,7 @@
 				{
 					"id": "acp-wire-tick-precision:REG-PARSER",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C owns expanded terminal/ownership/model-cost edges; GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["REG-PARSER"]
 				}
 			],
@@ -13376,7 +13417,8 @@
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
-				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
+				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13414,7 +13456,7 @@
 				{
 					"id": "acp-wire-tick-precision:REG-USAGE",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C owns expanded terminal/ownership/model-cost edges; GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["REG-USAGE"]
 				}
 			],
