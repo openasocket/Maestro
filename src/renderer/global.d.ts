@@ -3,6 +3,7 @@ import type {
 	TranslationReport,
 } from '../shared/maestro-lib/translation/types';
 import type { NativeSessionLaunch } from '../main/process-manager/types';
+import type { ProcessSpawnAttempt } from '../main/preload/process/core';
 import type {
 	AgentDiscoveryRequest,
 	AgentDiscoveryResult,
@@ -422,6 +423,8 @@ interface MaestroAPI {
 			result: import('../shared/autoRunRemote').AutoRunRemoteResult
 		) => void;
 		spawn: (config: ProcessConfig) => Promise<{ pid: number; success: boolean }>;
+		/** Desktop-only, synchronous before spawn IPC; absent on older/web bridges. */
+		onSpawnAttempt?: (callback: (attempt: ProcessSpawnAttempt) => void) => () => void;
 		spawnTerminalTab: (config: {
 			sessionId: string;
 			cwd: string;
