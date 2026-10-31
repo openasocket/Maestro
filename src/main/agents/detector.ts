@@ -845,14 +845,14 @@ export class AgentDetector {
 			if (
 				canonicalJson(actualLaunch) !== canonicalJson(launch) ||
 				observation.cwd !== context.cwd ||
-				!agentVersion ||
+				!agentVersion?.trim() ||
 				configuration.agentVersion !== agentVersion ||
-				!configGeneration ||
+				!configGeneration?.trim() ||
 				(context.configGeneration !== undefined && context.configGeneration !== configGeneration) ||
-				!observation.account ||
-				!observation.host ||
-				!observation.processGeneration ||
-				!observation.sessionId ||
+				!observation.account?.trim() ||
+				!observation.host?.trim() ||
+				!observation.processGeneration?.trim() ||
+				!observation.sessionId?.trim() ||
 				!Number.isFinite(observedAt) ||
 				observedAt > Date.now() ||
 				Date.now() - observedAt >= this.modelCacheTtlMs
