@@ -3032,6 +3032,28 @@
 				"Production ACP selection/refusal remains phase07 work; custom route arguments are preserved, not certified.",
 				"Missing/custom binary and admitted launch behavior await consumer tests."
 			]
+		},
+		"phase05-worktree-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-02b-worktree-regression-tests",
+			"sourceCommit": "b0c9d26c39b2da8577b3e18578a56c631aeb800a",
+			"sourceRevisionScope": "Pre-task HEAD plus three authored test hashes and task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/hooks/useWorktreeHandlers.test.ts": "8cfd0d3cdfe150ccc35a78bb01912b67745421c78ac0378845bc0e1a6bc08414",
+				"src/__tests__/renderer/utils/worktreeSession.test.ts": "e5294372e2894517698b1bb50cbc9798317dc2aa90c7ecb041d4d638886bf89d",
+				"src/__tests__/renderer/utils/worktreeSpawn.test.ts": "f5a7fa83ef426fb2ea934e0ddf2dce3f268c477842fc1d86d80e2d7d3f6ca7c6"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P04", "P17", "S29"],
+			"verificationTask": "GT1-05-13",
+			"continuationTask": "GT1-05-02B1",
+			"limitations": [
+				"Actual binary detection, admitted launch and explicit route refusal require the bounded continuation in existing turn consumer suites.",
+				"Production ACP routing remains phase07; Auto Run ownership remains phase08."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -4647,7 +4669,8 @@
 					"GT1-04-07CQT1",
 					"GT1-04-07CUIT",
 					"GT1-04-07CUIAT",
-					"GT1-04-07CUIAT1"
+					"GT1-04-07CUIAT1",
+					"GT1-05-02B1"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -4693,7 +4716,8 @@
 				"phase04EvidenceRef": "phase04-reconciliation",
 				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
 				"phase05ControlsEvidenceRef": "phase05-controls",
-				"phase05ControlTestsEvidenceRef": "phase05-control-tests"
+				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
+				"phase05WorktreeTestsEvidenceRef": "phase05-worktree-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7617,7 +7641,15 @@
 					"GT1-05-02C",
 					"GT1-05-02E1"
 				],
-				"test": ["GT1-05-02", "GT1-05-12", "GT1-10-02", "GT1-05-02B", "GT1-05-02D", "GT1-05-02E"],
+				"test": [
+					"GT1-05-02",
+					"GT1-05-12",
+					"GT1-10-02",
+					"GT1-05-02B",
+					"GT1-05-02D",
+					"GT1-05-02E",
+					"GT1-05-02B1"
+				],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-01-07", "GT1-10-05"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -7641,7 +7673,8 @@
 				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
 				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests",
 				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair",
-				"phase05WorktreeConfigurationEvidenceRef": "phase05-worktree-configuration"
+				"phase05WorktreeConfigurationEvidenceRef": "phase05-worktree-configuration",
+				"phase05WorktreeTestsEvidenceRef": "phase05-worktree-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21579,7 +21612,7 @@
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-01", "GT1-10-01", "GT1-05-02A"],
-				"test": ["GT1-05-02", "GT1-10-02", "GT1-05-02B"],
+				"test": ["GT1-05-02", "GT1-10-02", "GT1-05-02B", "GT1-05-02B1"],
 				"verification": ["GT1-01-07", "GT1-05-13", "GT1-10-05", "GT1-05-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -21599,7 +21632,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase05WorktreeConfigurationEvidenceRef": "phase05-worktree-configuration"
+				"phase05WorktreeConfigurationEvidenceRef": "phase05-worktree-configuration",
+				"phase05WorktreeTestsEvidenceRef": "phase05-worktree-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
