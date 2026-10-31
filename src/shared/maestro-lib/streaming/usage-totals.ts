@@ -204,7 +204,12 @@ export function addUsageStats(current: UsageStats | undefined, step: UsageStats)
  * `mergeUsageStats`, so a trailing event without an occupancy snapshot does not
  * erase the one the turn's last call reported.
  */
-export function replaceUsageStats(current: UsageStats | undefined, next: UsageStats): UsageStats {
+export function replaceUsageStats(
+	current: UsageStats | undefined,
+	next: UsageStats,
+	/** Provisional snapshots cannot revoke an already observed cost lower bound. */
+	preserveLowerBounds = false
+): UsageStats {
 	const {
 		contextWindowResolved: _resolved,
 		contextWindowModel: _model,
@@ -218,17 +223,199 @@ export function replaceUsageStats(current: UsageStats | undefined, next: UsageSt
 			replaced.accounting.cost = mergeUsageCost(current.accounting.cost, next.accounting.cost);
 			replaced.totalCostUsd = usageCostUsd(replaced.accounting.cost) ?? 0;
 		}
-		if (!next.accounting.models && current?.accounting?.models) {
-			replaced.accounting.models = current.accounting.models.map((model) => ({
-				...structuredClone(model),
-				completeness: 'partial',
-			}));
+		if (
+			(preserveLowerBounds || next.accounting.cost.status === 'partial') &&
+			current?.accounting &&
+			usageCostIsLower(next.accounting.cost, current.accounting.cost)
+		) {
+			replaced.accounting.cost = mergeUsageCost(current.accounting.cost, { status: 'unknown' });
+			replaced.totalCostUsd = usageCostUsd(replaced.accounting.cost) ?? 0;
+		}
+		for (const previous of current?.accounting?.models ?? []) {
+			const models = (replaced.accounting.models ??= []);
+			const model = models.find((entry) => entry.model === previous.model);
+			if (!model) {
+				models.push({
+					...structuredClone(previous),
+					completeness: 'partial',
+					cost: mergeUsageCost(previous.cost, { status: 'unknown' }),
+				});
+				continue;
+			}
+			if (usageCostUsd(model.cost) === undefined)
+				model.cost = mergeUsageCost(previous.cost, model.cost);
+			else if (
+				(preserveLowerBounds || model.cost.status === 'partial') &&
+				usageCostIsLower(model.cost, previous.cost)
+			)
+				model.cost = mergeUsageCost(previous.cost, { status: 'unknown' });
+			for (const key of [
+				'inputTokens',
+				'outputTokens',
+				'cacheReadInputTokens',
+				'cacheCreationInputTokens',
+				'reasoningTokens',
+				'callCount',
+				'mainAgentRounds',
+			] as const) {
+				if (model[key] === undefined && previous[key] !== undefined) {
+					model[key] = previous[key];
+					model.completeness = 'partial';
+				}
+			}
 		}
 		if (!next.accounting.children && current?.accounting?.children) {
 			replaced.accounting.children = structuredClone(current.accounting.children);
 		}
 	}
 	return replaced;
+}
+
+/**
+ * Difference between two explicitly related, normalized scope snapshots. The
+ * caller proves identity/ownership; this helper never invents a zero baseline.
+ * Raw model/child observations remain available on the caller's scope reports.
+ */
+export function subtractUsageStats(next: UsageStats, baseline: UsageStats): UsageStats | undefined {
+	const current = next.accounting,
+		before = baseline.accounting;
+	if (!current || !before) return undefined;
+	for (const key of ['cacheReadCounting', 'cacheCreationCounting'] as const) {
+		if (current[key] !== before[key] || current[key] !== 'beside-input') return undefined;
+	}
+	const result = structuredClone(next);
+	const difference = (a: number | undefined, b: number | undefined) =>
+		a !== undefined &&
+		b !== undefined &&
+		Number.isFinite(a) &&
+		Number.isFinite(b) &&
+		b >= 0 &&
+		a >= b
+			? a - b
+			: undefined;
+	for (const key of [
+		'inputTokens',
+		'outputTokens',
+		'cacheReadInputTokens',
+		'cacheCreationInputTokens',
+	] as const) {
+		const delta = difference(next[key], baseline[key]);
+		if (delta === undefined) return undefined;
+		result[key] = delta;
+	}
+	if (next.reasoningTokens !== undefined && baseline.reasoningTokens !== undefined) {
+		const delta = difference(next.reasoningTokens, baseline.reasoningTokens);
+		if (delta === undefined) return undefined;
+		result.reasoningTokens = delta;
+	} else delete result.reasoningTokens;
+	const subtractCost = (now: UsageCost, prior: UsageCost): UsageCost => {
+		// A partial ledger minus all prior spend is a conservative lower bound.
+		if ((now.status === 'exact' || now.status === 'partial') && prior.status === 'exact') {
+			const a = costTicks(now),
+				b = costTicks(prior);
+			if (
+				a !== undefined &&
+				b !== undefined &&
+				/^\d+$/.test(a) &&
+				/^\d+$/.test(b) &&
+				BigInt(a) >= BigInt(b)
+			) {
+				const ticks = (BigInt(a) - BigInt(b)).toString();
+				return { status: now.status, costUsdTicks: ticks, costUsd: Number(ticks) / 1e10 };
+			}
+		}
+		if (
+			now.status === 'estimated' &&
+			prior.status === 'estimated' &&
+			now.model === prior.model &&
+			now.pricingRevision === prior.pricingRevision &&
+			Number.isFinite(now.costUsd) &&
+			Number.isFinite(prior.costUsd) &&
+			prior.costUsd >= 0 &&
+			now.costUsd >= prior.costUsd
+		) {
+			return {
+				...now,
+				costUsd: now.costUsd - prior.costUsd,
+				completeness:
+					now.completeness === 'complete' && prior.completeness === 'complete'
+						? 'complete'
+						: 'partial',
+			};
+		}
+		return { status: 'unknown', reason: 'Snapshot cost difference is not established' };
+	};
+	const accounting = result.accounting!;
+	accounting.cost = subtractCost(current.cost, before.cost);
+	accounting.completeness =
+		current.completeness === 'complete' && before.completeness === 'complete'
+			? 'complete'
+			: 'partial';
+	if (current.estimatedCost && before.estimatedCost) {
+		const estimate = subtractCost(current.estimatedCost, before.estimatedCost);
+		if (estimate.status === 'estimated') accounting.estimatedCost = estimate;
+		else delete accounting.estimatedCost;
+	} else delete accounting.estimatedCost;
+	for (const key of ['callCount', 'mainAgentRounds'] as const) {
+		const delta = difference(current[key], before[key]);
+		if (delta !== undefined) accounting[key] = delta;
+		else delete accounting[key];
+	}
+	// Only a complete, empty model ledger with zero totals proves new-model zero.
+	const emptyModels =
+		before.completeness === 'complete' &&
+		before.models?.length === 0 &&
+		[
+			baseline.inputTokens,
+			baseline.outputTokens,
+			baseline.cacheReadInputTokens,
+			baseline.cacheCreationInputTokens,
+		].every((value) => value === 0);
+	const zeroModel: UsageBreakdown | undefined = emptyModels
+		? {
+				inputTokens: 0,
+				outputTokens: 0,
+				cacheReadInputTokens: 0,
+				cacheCreationInputTokens: 0,
+				reasoningTokens: 0,
+				callCount: before.callCount === 0 ? 0 : undefined,
+				mainAgentRounds: before.mainAgentRounds === 0 ? 0 : undefined,
+				completeness: 'complete',
+				cost:
+					before.cost.status === 'exact' && costTicks(before.cost) === '0'
+						? before.cost
+						: { status: 'unknown' },
+			}
+		: undefined;
+	accounting.models = current.models?.map((model) => {
+		const prior = before.models?.find((entry) => entry.model === model.model) ?? zeroModel;
+		const delta: UsageBreakdown & { model: string } = {
+			model: model.model,
+			cost: subtractCost(model.cost, prior?.cost ?? { status: 'unknown' }),
+			completeness:
+				model.completeness === 'complete' && prior?.completeness === 'complete'
+					? 'complete'
+					: 'partial',
+		};
+		for (const key of [
+			'inputTokens',
+			'outputTokens',
+			'cacheReadInputTokens',
+			'cacheCreationInputTokens',
+			'reasoningTokens',
+			'callCount',
+			'mainAgentRounds',
+		] as const) {
+			const value = difference(model[key], prior?.[key]);
+			if (value !== undefined) delta[key] = value;
+			else if (model[key] !== undefined) delta.completeness = 'partial';
+		}
+		return delta;
+	});
+	// A child's running total is not this scope's delta. Keep it only in raw reports.
+	delete accounting.children;
+	result.totalCostUsd = usageCostUsd(accounting.cost) ?? 0;
+	return result;
 }
 
 /** Numeric display projection only; exact decimal ticks stay on the accounting fact. */
@@ -256,6 +443,31 @@ function costTicks(cost: UsageCost): string | undefined {
 	if (scale >= 0) return (digits * 10n ** BigInt(scale)).toString();
 	const divisor = 10n ** BigInt(-scale);
 	return digits % divisor === 0n ? (digits / divisor).toString() : undefined;
+}
+
+/** Compare reported amounts without projecting exact tick strings through Number. */
+export function usageCostIsLower(next: UsageCost, previous: UsageCost): boolean {
+	if (
+		next.status === 'unknown' ||
+		next.status === 'estimated' ||
+		previous.status === 'unknown' ||
+		previous.status === 'estimated'
+	)
+		return false;
+	const a = costTicks(next),
+		b = costTicks(previous);
+	if (a !== undefined && b !== undefined && /^\d+$/.test(a) && /^\d+$/.test(b))
+		return BigInt(a) < BigInt(b);
+	if (next.costUsdTicks !== undefined || previous.costUsdTicks !== undefined) return false;
+	return (
+		next.costUsd !== undefined &&
+		previous.costUsd !== undefined &&
+		Number.isFinite(next.costUsd) &&
+		Number.isFinite(previous.costUsd) &&
+		next.costUsd >= 0 &&
+		previous.costUsd >= 0 &&
+		next.costUsd < previous.costUsd
+	);
 }
 
 /** Combine independent costs. Missing evidence cannot make a complete/free total. */
