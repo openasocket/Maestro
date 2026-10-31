@@ -15,7 +15,7 @@ import type { AgentConfig } from '../../../renderer/types';
 import type { AgentDiscoveryResult } from '../../../shared/types';
 import { getAgentDefinition } from '../../../shared/maestro-lib/providers/definitions';
 import { getAgentCapabilities } from '../../../shared/maestro-lib/providers/capabilities';
-import { createMockSession } from '../../helpers';
+import { createMockAITab, createMockSession } from '../../helpers';
 
 // lucide-react icons are mocked globally in src/__tests__/setup.ts using a Proxy
 
@@ -588,7 +588,7 @@ describe('NewInstanceModal', () => {
 				fireEvent.click(refreshButton);
 			});
 
-			expect(window.maestro.agents.refresh).toHaveBeenCalledWith('claude-code');
+			expect(window.maestro.agents.refresh).toHaveBeenCalledWith('claude-code', undefined);
 		});
 
 		it('should display debug info when agent refresh shows not found', async () => {
@@ -884,7 +884,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				undefined // permissionMode: ordinary creation keeps defaults
 			);
 		});
 
@@ -941,7 +942,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				undefined // permissionMode: ordinary creation keeps defaults
 			);
 		});
 
@@ -998,7 +1000,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				undefined // permissionMode: ordinary creation keeps defaults
 			);
 		});
 	});
@@ -1056,7 +1059,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				undefined // permissionMode: ordinary creation keeps defaults
 			);
 			expect(onClose).toHaveBeenCalled();
 		});
@@ -1612,7 +1616,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				undefined // permissionMode: ordinary creation keeps defaults
 			);
 		});
 
@@ -1769,7 +1774,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				undefined // permissionMode: ordinary creation keeps defaults
 			);
 		});
 	});
@@ -2163,8 +2169,292 @@ describe('NewInstanceModal', () => {
 		});
 
 		it.each([
+			{
+				account: 'a',
+				explicit: false,
+				env: { GROK_HOME: '/synthetic/account-a' },
+				mode: undefined,
+				expected: 'readonly',
+			},
+			{
+				account: 'b',
+				explicit: true,
+				env: { GROK_HOME: '/synthetic/account-b' },
+				mode: 'full' as const,
+				expected: 'full',
+			},
+			{
+				account: 'empty',
+				explicit: false,
+				env: {},
+				mode: 'readonly' as const,
+				expected: 'readonly',
+			},
+			{
+				account: 'inherit',
+				explicit: true,
+				env: undefined,
+				mode: 'standard' as const,
+				expected: 'standard',
+			},
+		])(
+			'submits account $account without pinning inherited selections or copying native identity',
+			async ({ account, explicit, env, mode, expected }) => {
+				const defaults = {
+					model: 'provider-model',
+					effort: 'old-alias',
+					reasoningEffort: 'provider-effort',
+					customEnvVars: { GROK_HOME: '/synthetic/provider' },
+				};
+				vi.mocked(window.maestro.agents.getConfig).mockResolvedValue(defaults);
+				const draft = {
+					...source,
+					id: `account-${account}`,
+					customEnvVars: env,
+					customModel: explicit ? 'grok-4.5' : undefined,
+					customEffort: explicit ? 'high' : undefined,
+					customArgs: '--max-turns 2',
+					agentSessionId: 'original-native',
+					activeTabId: 'active',
+					aiTabs: [
+						createMockAITab({ id: 'inactive', permissionMode: 'full' }),
+						createMockAITab({
+							id: 'active',
+							agentSessionId: 'original-native',
+							permissionMode: mode,
+							readOnlyMode: true,
+						}),
+					],
+				};
+				const before = structuredClone({ draft, defaults });
+				render(
+					<NewInstanceModal
+						isOpen
+						onClose={onClose}
+						onCreate={onCreate}
+						theme={theme}
+						existingSessions={[]}
+						sourceSession={draft}
+					/>
+				);
+				await act(async () => {});
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(300);
+				});
+				expect(screen.getByRole('textbox', { name: 'Model' })).toHaveValue(draft.customModel ?? '');
+				expect(screen.getByRole('textbox', { name: 'Reasoning Effort' })).toHaveValue(
+					draft.customEffort ?? ''
+				);
+				fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }));
+				expect(onCreate).toHaveBeenCalledExactlyOnceWith(
+					'grok',
+					'/home/testuser/project',
+					'Grok A (Copy)',
+					undefined,
+					undefined,
+					'/synthetic/bin/grok',
+					'--max-turns 2',
+					env,
+					draft.customModel,
+					undefined,
+					undefined,
+					{ enabled: false, remoteId: null, shareHistoryToProjectDir: undefined },
+					draft.customEffort,
+					undefined,
+					undefined,
+					undefined,
+					undefined,
+					true,
+					true,
+					undefined,
+					false,
+					'exec',
+					expected
+				);
+				expect({ draft, defaults }).toEqual(before);
+				expect(window.maestro.agents.setConfig).not.toHaveBeenCalled();
+				expect(window.maestro.process.spawn).not.toHaveBeenCalled();
+				expect(onClose).toHaveBeenCalledOnce();
+				// The next packet exercises fresh record allocation and unsupported-mode refusal.
+			}
+		);
+
+		it.each(['create', 'cancel'])(
+			'keeps final-key removal and model edits in the draft on %s',
+			async (action) => {
+				const defaults = {
+					model: 'provider-model',
+					reasoningEffort: 'medium',
+					customEnvVars: { GROK_HOME: '/synthetic/provider' },
+				};
+				vi.mocked(window.maestro.agents.getConfig).mockResolvedValue(defaults);
+				const before = structuredClone({ source, defaults });
+				render(
+					<NewInstanceModal
+						isOpen
+						onClose={onClose}
+						onCreate={onCreate}
+						theme={theme}
+						existingSessions={[]}
+						sourceSession={source}
+					/>
+				);
+				await act(async () => {});
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(300);
+				});
+				for (const [name, value] of [
+					['Model', 'grok-4.5'],
+					['Reasoning Effort', 'high'],
+					['Path', '/synthetic/edited-grok'],
+				]) {
+					const input = screen.getByRole('textbox', { name });
+					fireEvent.change(input, { target: { value } });
+					fireEvent.blur(input);
+				}
+				fireEvent.click(screen.getByTitle('Remove variable'));
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(300);
+				});
+				expect(window.maestro.agents.getModels).toHaveBeenLastCalledWith({
+					providerId: 'grok',
+					context: expect.objectContaining({
+						customEnvVars: {},
+						model: 'grok-4.5',
+						effort: 'high',
+					}),
+				});
+				fireEvent.click(
+					screen.getByRole('button', { name: action === 'create' ? 'Create Agent' : 'Cancel' })
+				);
+				if (action === 'create') {
+					expect(onCreate).toHaveBeenCalledOnce();
+					expect(onCreate.mock.calls[0].slice(5, 9)).toEqual([
+						'/synthetic/edited-grok',
+						undefined,
+						{},
+						'grok-4.5',
+					]);
+					expect(onCreate.mock.calls[0][12]).toBe('high');
+				} else expect(onCreate).not.toHaveBeenCalled();
+				expect({ source, defaults }).toEqual(before);
+				expect(window.maestro.agents.setConfig).not.toHaveBeenCalled();
+				expect(window.maestro.agents.setCustomPath).not.toHaveBeenCalled();
+				expect(onClose).toHaveBeenCalledOnce();
+			}
+		);
+
+		it.each(['Enter', ' '])(
+			'selects missing Grok with %s and only saves a custom executable draft',
+			async (key) => {
+				vi.mocked(window.maestro.agents.detect).mockResolvedValue([
+					createAgentConfig(),
+					createAgentConfig({
+						...getAgentDefinition('grok'),
+						capabilities: getAgentCapabilities('grok'),
+						available: false,
+						path: undefined,
+					}),
+				]);
+				render(
+					<NewInstanceModal
+						isOpen
+						onClose={onClose}
+						onCreate={onCreate}
+						theme={theme}
+						existingSessions={[]}
+					/>
+				);
+				await act(async () => {});
+				fireEvent.change(screen.getByRole('textbox', { name: 'Agent Name' }), {
+					target: { value: 'Custom Grok' },
+				});
+				fireEvent.change(screen.getByPlaceholderText('Select directory...'), {
+					target: { value: '/synthetic/project' },
+				});
+				fireEvent.click(screen.getByRole('switch', { name: 'Show all supported providers' }));
+				const row = screen.getByRole('option', { name: /Grok CLI/ });
+				fireEvent.keyDown(row, { key });
+				expect(row).toHaveAttribute('aria-selected', 'true');
+				expect(row).toHaveAttribute('aria-expanded', 'true');
+				expect(screen.getByRole('option', { name: /Claude Code/ })).toHaveAttribute(
+					'aria-selected',
+					'false'
+				);
+				expect(screen.getByRole('button', { name: 'Create Agent' })).toBeDisabled();
+				fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true });
+				expect(onCreate).not.toHaveBeenCalled();
+				fireEvent.change(screen.getByRole('textbox', { name: 'Path' }), {
+					target: { value: ' /synthetic/unverified-grok ' },
+				});
+				expect(within(row).getByText('Not Found')).toBeInTheDocument();
+				expect(screen.getByRole('button', { name: 'Create Agent' })).toBeEnabled();
+				fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true });
+				expect(onCreate).toHaveBeenCalledOnce();
+				expect(onCreate.mock.calls[0].slice(0, 6)).toEqual([
+					'grok',
+					'/synthetic/project',
+					'Custom Grok',
+					undefined,
+					undefined,
+					'/synthetic/unverified-grok',
+				]);
+				expect(onCreate.mock.calls[0][22]).toBeUndefined();
+				expect(window.maestro.process.spawn).not.toHaveBeenCalled();
+			}
+		);
+
+		it('rejects a stale local refresh after host change and uses the current host for refresh', async () => {
+			const agent = createAgentConfig({
+				...getAgentDefinition('grok'),
+				capabilities: getAgentCapabilities('grok'),
+			});
+			let resolveOld!: (result: Awaited<ReturnType<typeof window.maestro.agents.refresh>>) => void;
+			vi.mocked(window.maestro.agents.refresh).mockReturnValueOnce(
+				new Promise((resolve) => {
+					resolveOld = resolve;
+				})
+			);
+			render(
+				<NewInstanceModal
+					isOpen
+					onClose={onClose}
+					onCreate={onCreate}
+					theme={theme}
+					existingSessions={[]}
+					sourceSession={{ ...source, customPath: undefined }}
+				/>
+			);
+			await act(async () => {});
+			fireEvent.click(screen.getByTitle('Refresh detection'));
+			expect(window.maestro.agents.refresh).toHaveBeenLastCalledWith('grok', undefined);
+			expect(screen.getByRole('button', { name: 'Create Agent' })).toBeDisabled();
+			fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true });
+			expect(onCreate).not.toHaveBeenCalled();
+			fireEvent.change(screen.getByDisplayValue('Local Execution'), {
+				target: { value: 'remote-b' },
+			});
+			await act(async () => {});
+			expect(window.maestro.agents.detect).toHaveBeenLastCalledWith('remote-b');
+			await act(async () => {
+				resolveOld({ agents: [{ ...agent, available: false }], debugInfo: null });
+			});
+			expect(screen.getByRole('button', { name: 'Create Agent' })).toBeEnabled();
+			vi.mocked(window.maestro.agents.refresh).mockResolvedValueOnce({
+				agents: [{ ...agent, available: false }],
+				debugInfo: null,
+			});
+			fireEvent.click(screen.getByTitle('Refresh detection'));
+			await act(async () => {});
+			expect(window.maestro.agents.refresh).toHaveBeenLastCalledWith('grok', 'remote-b');
+			expect(screen.getByRole('button', { name: 'Create Agent' })).toBeDisabled();
+			fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true });
+			expect(onCreate).not.toHaveBeenCalled();
+		});
+
+		it.each([
 			{ label: 'absent environment', overrides: { customEnvVars: undefined }, env: undefined },
-			{ label: 'empty new-draft environment', overrides: { customEnvVars: {} }, env: undefined },
+			{ label: 'empty new-draft environment', overrides: { customEnvVars: {} }, env: {} },
 			{
 				label: 'explicit blank unset',
 				overrides: { customEnvVars: { GROK_HOME: '' } },
@@ -2330,6 +2620,9 @@ describe('NewInstanceModal', () => {
 				await act(async () => {
 					await vi.advanceTimersByTimeAsync(300);
 				});
+				expect(screen.getByRole('button', { name: 'Create Agent' })).toBeDisabled();
+				fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true });
+				expect(onCreate).not.toHaveBeenCalled();
 				expect(window.maestro.agents.getConfig).toHaveBeenCalledOnce();
 				expect(window.maestro.agents.getModels).not.toHaveBeenCalled();
 				expect(window.maestro.agents.getConfigOptions).not.toHaveBeenCalled();
@@ -2420,6 +2713,9 @@ describe('NewInstanceModal', () => {
 			fireEvent.change(screen.getByDisplayValue('Local Execution'), {
 				target: { value: 'remote-b' },
 			});
+			expect(screen.getByRole('button', { name: 'Create Agent' })).toBeDisabled();
+			fireEvent.keyDown(window, { key: 'Enter', ctrlKey: true });
+			expect(onCreate).not.toHaveBeenCalled();
 			expect(window.maestro.agents.detect).toHaveBeenLastCalledWith('remote-b');
 			await act(async () => {
 				await vi.advanceTimersByTimeAsync(300);
@@ -3384,7 +3680,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				undefined // permissionMode: ordinary creation keeps defaults
 			);
 		});
 
@@ -3618,7 +3915,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				undefined // permissionMode: ordinary creation keeps defaults
 			);
 		});
 
@@ -3931,7 +4229,8 @@ describe('NewInstanceModal', () => {
 				true, // retryOnTokenExhaustion
 				undefined, // additionalDirectories
 				false, // codexAutoResetOnExhaustion: off by default
-				'exec' // codexTransport: Standard by default
+				'exec', // codexTransport: Standard by default
+				'full' // permissionMode: source has no read-only override
 			);
 		});
 

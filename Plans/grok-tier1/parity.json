@@ -3122,6 +3122,27 @@
 				"Fresh records are idle drafts with no native binding; canonical launch admission and native permission enforcement are not certified here.",
 				"Grok Standard and production ACP remain unavailable; no capability or beta promotion."
 			]
+		},
+		"phase05-creation-dialog-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-02d-creation-dialog-regression-tests",
+			"sourceCommit": "28cd23e29f3f43ed07d3e9c1c36e34faf606f206",
+			"sourceRevisionScope": "Pre-task HEAD plus the two authored test hashes and task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/components/NewInstanceModal.test.tsx": "67731ee304a015febc7e941016add85ba2e81a6cb7020cdfb3e39e7ea6bbb9bc",
+				"src/__tests__/renderer/components/AgentCreationDialog.test.tsx": "1816d6160be064aa1c25c9000e011fcfd1acfbb5c904e5ff5b275c4408e7d6b2"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P04", "P17", "S30", "META-01"],
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"Fifteen additional cases and updated existing assertions are authored only; no executed behavior or semantic type-check pass.",
+				"GT1-05-02D1 owns real creation-consumer allocation, permission refusal and fresh native identity; custom executable strings are draft configuration, not validated launches.",
+				"Production ACP stays phase07, Symphony execution phase08 and native/platform qualification phase11; no capability or beta promotion."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -4787,7 +4808,8 @@
 				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
 				"phase05WorktreeTestsEvidenceRef": "phase05-worktree-tests",
 				"phase05WorktreeLaunchTestsEvidenceRef": "phase05-worktree-launch-tests",
-				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation"
+				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation",
+				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7749,7 +7771,8 @@
 				"phase05WorktreeTestsEvidenceRef": "phase05-worktree-tests",
 				"phase05WorktreeLaunchTestsEvidenceRef": "phase05-worktree-launch-tests",
 				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation",
-				"phase05DuplicatePermissionsEvidenceRef": "phase05-duplicate-permissions"
+				"phase05DuplicatePermissionsEvidenceRef": "phase05-duplicate-permissions",
+				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21821,7 +21844,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation",
-				"phase05DuplicatePermissionsEvidenceRef": "phase05-duplicate-permissions"
+				"phase05DuplicatePermissionsEvidenceRef": "phase05-duplicate-permissions",
+				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21858,8 +21882,8 @@
 				},
 				{
 					"id": "duplicate-permission-handoff:S30",
-					"code": "implementation-pending",
-					"missingPrerequisite": "GT1-05-02C1 must thread selected-tab permission into the fresh initial tab; GT1-05-02D/D1 and GT1-05-13 must prove creation behavior.",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-05-02C1 implemented permission handoff; GT1-05-02D authored component assertions. GT1-05-02D1 must cover actual fresh-record creation/refusal and GT1-05-13 must execute all three suites.",
 					"affectedRows": ["S30"]
 				}
 			],
@@ -22075,7 +22099,8 @@
 				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
 				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests",
 				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair",
-				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation"
+				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation",
+				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests"
 			},
 			"evidenceApplicability": {
 				"static": {

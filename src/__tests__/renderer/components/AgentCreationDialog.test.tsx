@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { AgentCreationDialog } from '../../../renderer/components/AgentCreationDialog';
 import { LayerStackProvider } from '../../../renderer/contexts/LayerStackContext';
 import { getAgentDefinition } from '../../../shared/maestro-lib/providers/definitions';
@@ -7,6 +8,9 @@ import { getAgentCapabilities } from '../../../shared/maestro-lib/providers/capa
 import type { AgentDiscoveryRequest, AgentDiscoveryResult } from '../../../shared/types';
 import type { RegisteredRepository, SymphonyIssue } from '../../../shared/symphony-types';
 import { mockTheme } from '../../helpers/mockTheme';
+import { resetStore } from '../../helpers/resetStores';
+import { useSettingsStore } from '../../../renderer/stores/settingsStore';
+import { AGENT_CONFIG_LOCK_KEYS } from '../../../shared/managedSettingsLock';
 
 // Isolate store-backed UI utilities; exercise the real config panel and discovery hooks.
 vi.mock('../../../renderer/utils/openUrl', () => ({ openUrl: vi.fn() }));
@@ -57,6 +61,7 @@ const change = (input: HTMLElement, value: string) =>
 	fireEvent.change(input, { target: { value } });
 
 beforeEach(() => {
+	resetStore(useSettingsStore);
 	vi.useFakeTimers();
 	vi.clearAllMocks();
 	vi.mocked(window.maestro.agents.detect).mockResolvedValue(
@@ -82,6 +87,7 @@ beforeEach(() => {
 });
 afterEach(() => {
 	cleanup();
+	resetStore(useSettingsStore);
 	window.maestro.agents.getModels = originalModels;
 	window.maestro.agents.getConfigOptions = originalOptions;
 	vi.mocked(window.maestro.agents.getConfig).mockReset().mockResolvedValue({});
@@ -92,7 +98,174 @@ afterEach(() => {
 });
 
 describe('Symphony Grok draft discovery', () => {
-	it.each(['absent', 'removed', 'blank', 'account'])(
+	it.each(['Enter', ' '])('selects Grok with %s and submits only the chosen draft', async (key) => {
+		const defaults = {
+			model: 'provider-model',
+			reasoningEffort: 'high',
+			customEnvVars: { GROK_HOME: '/synthetic/default' },
+		};
+		const original = structuredClone({ defaults, repo, issue });
+		vi.mocked(window.maestro.agents.getConfig).mockResolvedValue(defaults);
+		render(dialog());
+		await act(async () => {});
+		fireEvent.click(screen.getByText('Codex'));
+		const grok = screen.getByRole('button', { name: /^Grok CLI/ });
+		fireEvent.keyDown(grok, { key });
+		expect(screen.getByRole('dialog', { name: 'Create Symphony Agent' })).toBeInTheDocument();
+		change(screen.getByRole('textbox', { name: 'Session Name' }), '  Grok contribution  ');
+		change(screen.getByRole('textbox', { name: 'Working Directory' }), '  /synthetic/work  ');
+		change(screen.getByRole('textbox', { name: 'Path' }), '  /synthetic/custom grok  ');
+		change(screen.getByRole('textbox', { name: 'Custom Arguments' }), '  --verbose  ');
+		const explicit = key === ' ';
+		if (explicit) {
+			change(field('Model'), 'grok-4.5');
+			change(field('Reasoning Effort'), 'low');
+		}
+		fireEvent.blur(screen.getByRole('textbox', { name: 'Path' }));
+		await settle();
+		await act(async () => {
+			fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }));
+		});
+		expect(onCreateAgent).toHaveBeenCalledExactlyOnceWith({
+			agentType: 'grok',
+			sessionName: 'Grok contribution',
+			workingDirectory: '/synthetic/work',
+			repo,
+			issue,
+			customPath: '/synthetic/custom grok',
+			customArgs: '--verbose',
+			customEnvVars: undefined,
+			agentConfig: explicit ? { model: 'grok-4.5', reasoningEffort: 'low' } : undefined,
+			enableMaestroP: undefined,
+			maestroPMode: undefined,
+			maestroPPath: undefined,
+		});
+		expect(onCreateAgent.mock.calls[0][0]).not.toHaveProperty('agentSessionId');
+		expect(onCreateAgent.mock.calls[0][0]).not.toHaveProperty('nativeSessionBinding');
+		expect(window.maestro.process.spawn).not.toHaveBeenCalled();
+		expect(window.maestro.agents.setConfig).not.toHaveBeenCalled();
+		expect({ defaults, repo, issue }).toEqual(original);
+	});
+
+	it('keeps managed Grok fields disabled while allowing creation with inherited config', async () => {
+		const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+		useSettingsStore.setState({
+			managedLocks: {
+				policyRevision: 7,
+				locks: Object.fromEntries(
+					AGENT_CONFIG_LOCK_KEYS.map((key) => [
+						key,
+						{ code: 'locked', message: `Policy holds ${key}`, pinned: false },
+					])
+				),
+			},
+		});
+		render(dialog());
+		await act(async () => {});
+		fireEvent.click(screen.getByText('Grok CLI'));
+		await settle();
+		for (const name of ['Path', 'Custom Arguments', 'Model', 'Reasoning Effort'])
+			expect(screen.getByRole('textbox', { name })).toBeDisabled();
+		expect(screen.getByRole('button', { name: 'Add Variable' })).toBeDisabled();
+		for (const key of AGENT_CONFIG_LOCK_KEYS)
+			expect(screen.getByRole('note', { name: `Policy holds ${key}` })).toBeInTheDocument();
+		await user.click(screen.getByRole('button', { name: 'Add Variable' }));
+		await act(async () => {
+			fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }));
+		});
+		expect(onCreateAgent).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentType: 'grok',
+				customPath: undefined,
+				customArgs: undefined,
+				customEnvVars: undefined,
+				agentConfig: undefined,
+			})
+		);
+		expect(window.maestro.agents.setConfig).not.toHaveBeenCalled();
+	});
+
+	it('blocks creation until initial detection and working directory initialization finish', async () => {
+		let resolveDetection!: (
+			agents: Awaited<ReturnType<typeof window.maestro.agents.detect>>
+		) => void;
+		let resolveHome!: (home: string) => void;
+		vi.mocked(window.maestro.agents.detect).mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolveDetection = resolve;
+			})
+		);
+		vi.mocked(window.maestro.fs.homeDir).mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolveHome = resolve;
+			})
+		);
+		render(dialog());
+		const create = screen.getByRole('button', { name: 'Create Agent' });
+		expect(create).toBeDisabled();
+		fireEvent.click(create);
+		await act(async () => {
+			resolveDetection([
+				{
+					...getAgentDefinition('grok')!,
+					available: true,
+					path: '/synthetic/bin/grok',
+					capabilities: getAgentCapabilities('grok'),
+				},
+			]);
+		});
+		expect(create).toBeDisabled();
+		fireEvent.click(create);
+		expect(onCreateAgent).not.toHaveBeenCalled();
+		await act(async () => {
+			resolveHome('/synthetic/home');
+		});
+		expect(create).not.toBeDisabled();
+		await act(async () => {
+			fireEvent.click(create);
+		});
+		expect(onCreateAgent).toHaveBeenCalledWith(
+			expect.objectContaining({
+				agentType: 'grok',
+				workingDirectory: '/synthetic/home/Maestro-Symphony/test-owner-test-repo-1',
+			})
+		);
+	});
+
+	it('blocks refresh and a missing binary without substituting another provider', async () => {
+		const agent = {
+			...getAgentDefinition('grok')!,
+			available: true,
+			path: '/synthetic/bin/grok',
+			capabilities: getAgentCapabilities('grok'),
+		};
+		vi.mocked(window.maestro.agents.detect).mockResolvedValue([agent]);
+		render(dialog());
+		await act(async () => {});
+		fireEvent.click(screen.getByText('Grok CLI'));
+		change(screen.getByRole('textbox', { name: 'Path' }), '/synthetic/unverified-custom');
+		let resolveDetection!: (agents: (typeof agent)[]) => void;
+		vi.mocked(window.maestro.agents.detect).mockReturnValueOnce(
+			new Promise((resolve) => {
+				resolveDetection = resolve;
+			})
+		);
+		fireEvent.click(screen.getByRole('button', { name: 'Refresh detection' }));
+		const create = screen.getByRole('button', { name: 'Create Agent' });
+		expect(create).toBeDisabled();
+		fireEvent.click(create);
+		await act(async () => {
+			resolveDetection([{ ...agent, available: false }]);
+		});
+		expect(screen.getByText('No compatible AI agents detected.')).toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: /^Grok CLI/ })).not.toBeInTheDocument();
+		expect(create).toBeDisabled();
+		fireEvent.click(create);
+		expect(onCreateAgent).not.toHaveBeenCalled();
+		expect(window.maestro.process.spawn).not.toHaveBeenCalled();
+	});
+
+	it.each(['absent', 'removed', 'blank', 'account', 'account-b'])(
 		'uses the same %s environment for discovery and creation',
 		async (mode) => {
 			render(dialog());
@@ -107,16 +280,21 @@ describe('Symphony Grok draft discovery', () => {
 				const key = screen.getByRole('combobox');
 				change(key, 'GROK_HOME');
 				fireEvent.blur(key);
-				if (mode === 'account')
-					change(screen.getByPlaceholderText('value'), '/synthetic/account-a');
+				if (mode.startsWith('account'))
+					change(
+						screen.getByPlaceholderText('value'),
+						`/synthetic/${mode === 'account' ? 'account-a' : mode}`
+					);
 				if (mode === 'removed') fireEvent.click(screen.getByTitle('Remove variable'));
 			}
 			const customEnvVars =
 				mode === 'blank'
 					? { GROK_HOME: '' }
-					: mode === 'account'
-						? { GROK_HOME: '/synthetic/account-a' }
-						: undefined;
+					: mode.startsWith('account')
+						? { GROK_HOME: `/synthetic/${mode === 'account' ? 'account-a' : mode}` }
+						: mode === 'removed'
+							? {}
+							: undefined;
 			const context: AgentDiscoveryRequest['context'] = {
 				kind: 'draft',
 				cwd: '/synthetic/work',
