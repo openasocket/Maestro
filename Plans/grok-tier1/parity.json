@@ -1952,6 +1952,34 @@
 			"scope": "Outer resume admission, current-owner scope changes, same-owner and visible-agent navigation/away-and-back, caller composition, unknown scope, exact existing/tiled focus, metadata and non-Grok success, newer requests/content, and synchronous subscription disposal.",
 			"remainingTestOwners": ["GT1-04-07CT"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-canonical-scoped-resume-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07ct-canonical-scoped-resume-tests",
+			"sourceCommit": "50e2f02a33df9f9a7c45aba49c6b86ae62a9e1cf",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/hooks/useAgentSessionManagement.test.ts": "160e4dc20b316da9f180dbf508a0a4c025787fcb5736601709a4b99c1d80b755",
+				"src/__tests__/renderer/hooks/agent/useAgentSessionManagement.test.tsx": "c55e29519ed66026579c9d6617aa948c2aa5996b6561fdfe8bae6cb30bc7ca07",
+				"src/__tests__/renderer/services/resumableSession.relay.test.ts": "7618b2090ca59f14f30278208e84ecb19edc1ae8d44af6e6bb57ce9c5eed1350"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "12 baseline diagnostics remain (11 legacy test fixture/type diagnostics plus RequestInit.dispatcher TS2339); supplemental compiler-API comparison adds zero diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "66 synthetic canonical hook/loader cases for owner forwarding, complete and legacy binding comparisons, native receipt validation, supplied logs, retained metadata, selection/commit races, latest request wins, deduplication and caller/subscriber mutation admission; synchronous store mocks.",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -3560,7 +3588,8 @@
 					"GT1-02-05C2T",
 					"GT1-02-05C2AT",
 					"GT1-04-07C5UT",
-					"GT1-04-07C5UT1"
+					"GT1-04-07C5UT1",
+					"GT1-04-07CT"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -3595,7 +3624,8 @@
 				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
 				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
-				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests"
+				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
+				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5783,7 +5813,8 @@
 					"GT1-04-10",
 					"GT1-04-07T",
 					"GT1-04-07C5UT",
-					"GT1-04-07C5UT1"
+					"GT1-04-07C5UT1",
+					"GT1-04-07CT"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -5810,7 +5841,8 @@
 				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
 				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
-				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests"
+				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
+				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5933,7 +5965,8 @@
 					"GT1-04-06E2",
 					"GT1-04-06C",
 					"GT1-04-07C5UT",
-					"GT1-04-07C5UT1"
+					"GT1-04-07C5UT1",
+					"GT1-04-07CT"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-02-13", "GT1-02-14", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
@@ -5972,7 +6005,8 @@
 				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
 				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
-				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests"
+				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
+				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10996,7 +11030,14 @@
 					"GT1-04-07E",
 					"GT1-04-07F"
 				],
-				"test": ["GT1-04-08", "GT1-11-14B", "GT1-04-07T", "GT1-04-07C5UT", "GT1-04-07C5UT1"],
+				"test": [
+					"GT1-04-08",
+					"GT1-11-14B",
+					"GT1-04-07T",
+					"GT1-04-07C5UT",
+					"GT1-04-07C5UT1",
+					"GT1-04-07CT"
+				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -11022,7 +11063,8 @@
 				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
 				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
-				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests"
+				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
+				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11497,7 +11539,14 @@
 					"GT1-04-07E",
 					"GT1-04-07F"
 				],
-				"test": ["GT1-04-08", "GT1-11-14B", "GT1-04-07T", "GT1-04-07C5UT", "GT1-04-07C5UT1"],
+				"test": [
+					"GT1-04-08",
+					"GT1-11-14B",
+					"GT1-04-07T",
+					"GT1-04-07C5UT",
+					"GT1-04-07C5UT1",
+					"GT1-04-07CT"
+				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -11523,7 +11572,8 @@
 				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
 				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
-				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests"
+				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
+				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16074,7 +16124,8 @@
 					"GT1-04-10",
 					"GT1-04-07T",
 					"GT1-04-07C5UT",
-					"GT1-04-07C5UT1"
+					"GT1-04-07C5UT1",
+					"GT1-04-07CT"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -16101,7 +16152,8 @@
 				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations",
 				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
-				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests"
+				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
+				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
