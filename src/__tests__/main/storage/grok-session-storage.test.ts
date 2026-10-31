@@ -37,6 +37,11 @@ vi.mock('fs/promises', async () => ({
 		readFile: vi.fn(),
 		readdir: vi.fn(),
 		stat: vi.fn(),
+		writeFile: vi.fn(),
+		appendFile: vi.fn(),
+		rename: vi.fn(),
+		unlink: vi.fn(),
+		mkdir: vi.fn(),
 	},
 }));
 
@@ -232,6 +237,8 @@ function mockLocalFs(
 			size:
 				options.sizeOverrides?.[p] ?? Buffer.byteLength(options.bytesOverrides?.[p] ?? files[p]),
 			mtimeMs: 1_752_082_000_000,
+			ctimeMs: 1_752_082_000_000,
+			dev: 1,
 			ino: 1,
 			isFile: () => true,
 		} as never;
@@ -561,16 +568,21 @@ describe('GrokSessionStorage - local listing', () => {
 			cacheCreationTokens: 0,
 		});
 		expect(session.costUsd).toBeCloseTo(0.0262106, 10);
-		expect(session.byModel).toEqual([
-			{
+		expect(session.byModel).toBeUndefined();
+		expect(session.accounting?.models).toEqual([
+			expect.objectContaining({
 				model: 'grok-4.7-build',
 				inputTokens: 19374,
 				outputTokens: 193,
-				cacheReadTokens: 74368,
-				cacheCreationTokens: 0,
-				costUsd: expect.closeTo(0.0262106, 10),
-				costEstimated: false,
-			},
+				cacheReadInputTokens: 74368,
+				cacheCreationInputTokens: 0,
+				completeness: 'partial',
+				cost: {
+					status: 'partial',
+					costUsdTicks: '262106000',
+					reason: 'cross-file-generation-unverified',
+				},
+			}),
 		]);
 	});
 
@@ -848,6 +860,8 @@ describe('GrokSessionStorage - SSH remote', () => {
 		expect(fs.open).not.toHaveBeenCalled();
 		expect(fs.readFile).not.toHaveBeenCalled();
 		expect(fs.stat).not.toHaveBeenCalled();
+		for (const mutation of [fs.writeFile, fs.appendFile, fs.rename, fs.unlink, fs.mkdir])
+			expect(mutation).not.toHaveBeenCalled();
 		expect(execFileNoThrow).not.toHaveBeenCalled();
 	});
 
@@ -896,6 +910,123 @@ describe('GrokSessionStorage - SSH remote', () => {
 		return { sessionsDir, cwdDir, directories, files };
 	}
 
+	it.each(['summary.json', 'chat_history.jsonl', 'usage.json'])(
+		'discloses remote %s changes or lost comparison reads with fixed stats',
+		async (name) => {
+			for (const disconnect of [false, true]) {
+				vi.clearAllMocks();
+				const { cwdDir, files } = mockRemoteSession({ accountDir: '~/selected account' });
+				const file = path.posix.join(cwdDir, SESSION_ID, name);
+				files[path.posix.join(cwdDir, SESSION_ID, 'usage.json')] =
+					'{"session":{"inputTokens":100,"costUsdTicks":9007199254740993}}';
+				const read = vi.mocked(remoteFs.readFileRemote).getMockImplementation()!;
+				let samples = 0;
+				vi.mocked(remoteFs.readFileRemote).mockImplementation(async (...args) => {
+					if (args[0] === file && ++samples === 2) {
+						if (disconnect) return { success: false, error: 'Connection reset by peer' };
+						// Same length and mtime cannot hide a rewrite from the content comparison.
+						files[file] = files[file]
+							.replaceAll('Create', 'Update')
+							.replace('9007199254740993', '9007199254740994');
+					}
+					return read(...args);
+				});
+				const [session] = await new GrokSessionStorage('~/selected account').listSessions(
+					PROJECT,
+					sshConfig
+				);
+				for (const source of Object.values(session.nativeMetadata!.sources!))
+					expect(source).toMatchObject({
+						status: 'partial',
+						reason: 'changed-or-unavailable-during-snapshot',
+					});
+				expect(session).toMatchObject({
+					messageCount: 3,
+					firstMessage: expect.stringContaining('Create'),
+					accounting: { cost: { status: 'partial', costUsdTicks: '9007199254740993' } },
+				});
+				expect(remoteFs.readFileRemote).toHaveBeenCalledTimes(6);
+				expect(samples).toBe(2);
+				expect(remoteFs.statRemote).toHaveBeenCalledTimes(disconnect ? 11 : 12);
+				if (disconnect)
+					expect(captureException).toHaveBeenCalledExactlyOnceWith(
+						expect.objectContaining({ message: 'Connection reset by peer' }),
+						expect.objectContaining({ operation: 'grokStorage:readSessionFile' })
+					);
+				else expect(captureException).not.toHaveBeenCalled();
+			}
+		}
+	);
+
+	it.each(['rewrite', 'disconnect'])(
+		'keeps the first transcript partial after %s and reads fresh content on reconnect',
+		async (failure) => {
+			const { cwdDir, files } = mockRemoteSession();
+			const file = path.posix.join(cwdDir, SESSION_ID, 'chat_history.jsonl');
+			const read = vi.mocked(remoteFs.readFileRemote).getMockImplementation()!;
+			let samples = 0;
+			vi.mocked(remoteFs.readFileRemote).mockImplementation(async (...args) => {
+				if (++samples === 2) {
+					files[file] = files[file].replaceAll('Create', 'Update');
+					if (failure === 'disconnect')
+						return { success: false, error: 'Connection reset by peer' };
+				}
+				return read(...args);
+			});
+			const storage = new GrokSessionStorage();
+			const first = await storage.readSessionMessages(PROJECT, SESSION_ID, undefined, sshConfig);
+			expect(first.source).toMatchObject({
+				status: 'partial',
+				reason: 'changed-or-unavailable-during-read',
+			});
+			expect(first.messages[0].content).toContain('Create');
+			expect(samples).toBe(2);
+			const reconnected = await storage.readSessionMessages(
+				PROJECT,
+				SESSION_ID,
+				undefined,
+				sshConfig
+			);
+			expect(reconnected.source?.status).toBe('available');
+			expect(reconnected.messages[0].content).toContain('Update');
+			expect(reconnected.messages.map((m) => m.uuid)).toEqual(first.messages.map((m) => m.uuid));
+			expect(samples).toBe(4);
+			if (failure === 'disconnect')
+				expect(captureException).toHaveBeenCalledExactlyOnceWith(
+					expect.objectContaining({ message: 'Connection reset by peer' }),
+					expect.objectContaining({ operation: 'grokStorage:readSessionFile' })
+				);
+			else expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it('keeps the same native ID and path separate across host endpoints and generations', async () => {
+		const { files } = mockRemoteSession({ accountDir: '~/shared' });
+		const read = vi.mocked(remoteFs.readFileRemote).getMockImplementation()!;
+		const otherHost = { ...sshConfig, host: 'other-host' }; // The saved remote ID alone is not identity.
+		vi.mocked(remoteFs.readFileRemote).mockImplementation(async (...args) => {
+			const result = await read(...args);
+			return args[1].host === otherHost.host && result.data
+				? { ...result, data: result.data.replaceAll('Create', 'Update') }
+				: result;
+		});
+		const storage = new GrokSessionStorage('~/shared');
+		const [first] = await storage.listSessions(PROJECT, sshConfig);
+		const [other] = await storage.listSessions(PROJECT, otherHost);
+		for (const file of Object.keys(files)) files[file] = files[file].replaceAll('Create', 'Review');
+		const [later] = await storage.listSessions(PROJECT, sshConfig);
+		expect([first, other, later].map((s) => [s.sessionId, s.firstMessage.slice(0, 6)])).toEqual([
+			[SESSION_ID, 'Create'],
+			[SESSION_ID, 'Update'],
+			[SESSION_ID, 'Review'],
+		]);
+		expect(remoteFs.readFileRemote).toHaveBeenCalledTimes(12);
+		expect(
+			vi.mocked(remoteFs.readFileRemote).mock.calls.filter(([, host]) => host === otherHost)
+		).toHaveLength(4);
+		expect(captureException).not.toHaveBeenCalled();
+	});
+
 	it.each([
 		['summary.json', 0],
 		['summary.json', 1],
@@ -909,7 +1040,7 @@ describe('GrokSessionStorage - SSH remote', () => {
 		files[file] = content.padEnd(maxBytes + overflow, ' ');
 		const [session] = await new GrokSessionStorage().listSessions(PROJECT, sshConfig);
 		expect(session.nativeMetadata?.sources?.[name]).toMatchObject({
-			status: overflow ? 'unavailable' : 'available',
+			status: overflow ? 'unavailable' : 'partial',
 			sizeBytes: maxBytes + overflow,
 			maxBytes,
 		});
@@ -1066,8 +1197,9 @@ describe('GrokSessionStorage - SSH remote', () => {
 					expect(session).toMatchObject({ timestamp: '', modifiedAt: '', durationSeconds: 0 });
 					// Only the failed source is discarded; the independent valid ledger survives.
 					expect(session.accounting?.cost).toEqual({
-						status: 'exact',
+						status: 'partial',
 						costUsdTicks: '9007199254740993',
+						reason: 'changed-or-unavailable-during-snapshot',
 					});
 				} else {
 					expect(session.nativeMetadata?.summaryStatus).toBe('available');
@@ -1332,8 +1464,8 @@ describe('GrokSessionStorage - SSH remote', () => {
 		expect(peak).toBeGreaterThan(1);
 		expect(peak).toBeLessThanOrEqual(REMOTE_SESSION_READ_CONCURRENCY);
 		expect(active).toBe(0);
-		expect(remoteFs.statRemote).toHaveBeenCalledTimes(ids.length * 5);
-		expect(remoteFs.readFileRemote).toHaveBeenCalledTimes(ids.length * 2);
+		expect(remoteFs.statRemote).toHaveBeenCalledTimes(ids.length * 10);
+		expect(remoteFs.readFileRemote).toHaveBeenCalledTimes(ids.length * 4);
 	});
 
 	it.each([
@@ -1414,7 +1546,7 @@ describe('GrokSessionStorage - SSH remote', () => {
 			expect(await new GrokSessionStorage(accountDir).listSessions(cwd, sshConfig)).toEqual([
 				expect.objectContaining({ sessionId: id, projectPath: cwd, messageCount: 3 }),
 			]);
-			expect(deps.execSsh).toHaveBeenCalledTimes(9);
+			expect(deps.execSsh).toHaveBeenCalledTimes(16);
 			expect(captureException).not.toHaveBeenCalled();
 		}
 	);
@@ -1697,7 +1829,8 @@ describe('GrokSessionStorage - bounded local reads', () => {
 			const [session] = await storage.listSessions(PROJECT);
 			expect(session.nativeMetadata?.sources?.[name]).toEqual({
 				provider: 'grok',
-				status: 'available',
+				status: 'partial',
+				reason: 'cross-file-generation-unverified',
 				sizeBytes: cap,
 				maxBytes: cap,
 			});
@@ -2001,6 +2134,291 @@ describe('GrokSessionStorage - bounded local reads', () => {
 			expect(rest.messages.at(-1)?.uuid).toBe('grok-line-' + (1001 - messageCount));
 		}
 	);
+});
+
+describe('GrokSessionStorage - concurrent native writers', () => {
+	const account = path.resolve('src/__tests__/fixtures/grok-accounts/concurrent');
+	const sessionsDir = path.join(account, 'sessions');
+	const dir = path.join(sessionsDir, encodeURIComponent(PROJECT), SESSION_ID);
+	const transcript = path.join(dir, 'chat_history.jsonl');
+	let files: Record<string, string>;
+	let storage: GrokSessionStorage;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		files = sessionFiles(
+			PROJECT,
+			SESSION_ID,
+			'{"generated_title":"old"}',
+			'{"type":"user","content":"old"}',
+			sessionsDir
+		);
+		files[path.join(dir, 'usage.json')] =
+			'{"session":{"inputTokens":100,"outputTokens":20,"cachedReadTokens":30,"cacheCreationTokens":10,"costUsdTicks":9007199254740993}}';
+		mockLocalFs(files);
+		storage = new GrokSessionStorage(account);
+	});
+	afterEach(async () => {
+		for (const [file, flags] of vi.mocked(fs.open).mock.calls) {
+			expect(String(file) in files).toBe(true);
+			expect(flags).toBe(fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+		}
+		for (const result of await Promise.allSettled(
+			vi.mocked(fs.open).mock.results.map((r) => r.value)
+		))
+			if (result.status === 'fulfilled')
+				expect(result.value.close).toHaveBeenCalledExactlyOnceWith();
+		for (const mutation of [fs.writeFile, fs.appendFile, fs.rename, fs.unlink, fs.mkdir])
+			expect(mutation).not.toHaveBeenCalled();
+		expect(fs.readFile).not.toHaveBeenCalled();
+		expect(remoteFs.readFileRemote).not.toHaveBeenCalled();
+		expect(execFileNoThrow).not.toHaveBeenCalled();
+		vi.restoreAllMocks();
+	});
+
+	it.each(['unchanged', 'summary.json', 'chat_history.jsonl', 'usage.json'])(
+		'discloses %s across two samples without waiting for a writer to settle',
+		async (changed) => {
+			mockLocalFs(files, {
+				onOpen: (handle, file) => {
+					if (path.basename(file) === changed)
+						vi.mocked(handle.close).mockImplementation(async () => {
+							// Equal-size writes after every sample, including the comparison sample.
+							if (changed === 'usage.json') {
+								files[file] = files[file].includes('9007199254740993')
+									? files[file].replace('9007199254740993', '9007199254740994')
+									: files[file].replace('9007199254740994', '9007199254740993');
+							} else
+								files[file] = files[file].includes('old')
+									? files[file].replace('old', 'new')
+									: files[file].replace('new', 'old');
+						});
+				},
+			});
+			const [session] = await storage.listSessions(PROJECT);
+			const reason =
+				changed === 'unchanged'
+					? 'cross-file-generation-unverified'
+					: 'changed-or-unavailable-during-snapshot';
+			expect(session).toMatchObject({
+				sessionName: 'old',
+				firstMessage: 'old',
+				messageCount: 1,
+				inputTokens: 60,
+				accounting: {
+					completeness: 'partial',
+					cost: { status: 'partial', costUsdTicks: '9007199254740993', reason },
+				},
+			});
+			for (const source of Object.values(session.nativeMetadata!.sources!))
+				expect(source).toMatchObject({ status: 'partial', reason });
+			expect(session.byModel).toBeUndefined();
+			expect(fs.open).toHaveBeenCalledTimes(6);
+			for (const file of Object.keys(files))
+				expect(vi.mocked(fs.open).mock.calls.filter(([p]) => p === file)).toHaveLength(2);
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['summary.json', 'chat_history.jsonl', 'usage.json'])(
+		'keeps %s comparison failure partial without retrying indefinitely',
+		async (name) => {
+			let samples = 0;
+			mockLocalFs(files, {
+				onOpen: (handle, file) => {
+					if (path.basename(file) === name && ++samples === 2)
+						vi.mocked(handle.read).mockRejectedValueOnce(
+							Object.assign(new Error('writer moved file'), { code: 'ENOENT' })
+						);
+				},
+			});
+			const [session] = await storage.listSessions(PROJECT);
+			expect(session).toMatchObject({
+				firstMessage: 'old',
+				inputTokens: 60,
+				accounting: { cost: { status: 'partial', costUsdTicks: '9007199254740993' } },
+			});
+			for (const source of Object.values(session.nativeMetadata!.sources!))
+				expect(source).toMatchObject({
+					status: 'partial',
+					reason: 'changed-or-unavailable-during-snapshot',
+				});
+			expect(samples).toBe(2);
+			expect(fs.open).toHaveBeenCalledTimes(6);
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it('withholds a changing usage ledger even when the sampled JSON parses', async () => {
+		const usageFile = path.join(dir, 'usage.json');
+		const initial = await fs.stat(usageFile);
+		mockLocalFs(files, {
+			onOpen: (handle, file) => {
+				if (file === usageFile)
+					vi.mocked(handle.stat)
+						.mockResolvedValueOnce(initial)
+						.mockResolvedValueOnce({ ...initial, ctimeMs: initial.ctimeMs + 1 });
+			},
+		});
+		const [session] = await storage.listSessions(PROJECT);
+		expect(session.nativeMetadata?.sources?.['usage.json']).toMatchObject({
+			status: 'partial',
+			reason: 'changed-during-read',
+		});
+		expect(session.accounting).toMatchObject({
+			source: 'none',
+			completeness: 'unknown',
+			cost: { status: 'unknown' },
+		});
+		expect(session.costUsd).toBeUndefined();
+		expect(session.byModel).toBeUndefined();
+		expect(fs.open).toHaveBeenCalledTimes(6);
+		expect(captureException).not.toHaveBeenCalled();
+	});
+
+	it.each(['dev', 'ino', 'ctimeMs', 'mtimeMs', 'isFile'] as const)(
+		'detects pathname replacement by %s while the open descriptor stays unchanged',
+		async (field) => {
+			const initial = await fs.stat(transcript);
+			mockLocalFs(files, { onOpen: (handle) => vi.mocked(handle.stat).mockResolvedValue(initial) });
+			vi.mocked(fs.stat)
+				.mockResolvedValueOnce(initial)
+				.mockResolvedValueOnce({
+					...initial,
+					[field]: field === 'isFile' ? () => false : Number(initial[field]) + 1,
+				} as never);
+			const result = await storage.readSessionMessages(PROJECT, SESSION_ID);
+			expect(result).toMatchObject({
+				total: 1,
+				messages: [{ content: 'old' }],
+				source: { status: 'partial', reason: 'changed-during-read' },
+			});
+			expect(fs.open).toHaveBeenCalledTimes(1);
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['ENOENT', 'EACCES', 'EMFILE', 'RangeError', 'oversized'])(
+		'classifies final pathname %s after a successful descriptor read',
+		async (code) => {
+			const initial = await fs.stat(transcript);
+			mockLocalFs(files, { onOpen: (handle) => vi.mocked(handle.stat).mockResolvedValue(initial) });
+			const stat = vi.mocked(fs.stat).mockResolvedValueOnce(initial);
+			const error =
+				code === 'RangeError'
+					? new RangeError('fixture')
+					: Object.assign(new Error(code), { code });
+			if (code === 'oversized')
+				stat.mockResolvedValueOnce({ ...initial, size: 64 * 1024 * 1024 + 1 });
+			else stat.mockRejectedValueOnce(error);
+			const result = await storage.readSessionMessages(PROJECT, SESSION_ID);
+			const rejected = code === 'oversized' || code === 'RangeError';
+			expect(result).toMatchObject({
+				total: rejected ? 0 : 1,
+				source: {
+					status: rejected ? 'unavailable' : 'partial',
+					reason: rejected ? 'too-large' : 'post-read-stat-unavailable',
+				},
+			});
+			expect(fs.open).toHaveBeenCalledTimes(1);
+			if (code === 'EMFILE')
+				expect(captureException).toHaveBeenCalledExactlyOnceWith(
+					error,
+					expect.objectContaining({ operation: 'grokStorage:statSessionFile' })
+				);
+			else expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it('preserves an interrupted append tail and rereads its completed generation', async () => {
+		const tail = '{"type":"assistant","content":"new';
+		files[transcript] += '\n' + tail;
+		const interrupted = await storage.readSessionMessages(PROJECT, SESSION_ID, {
+			includeNativeRecords: true,
+		});
+		expect(interrupted.source).toMatchObject({ status: 'partial', reason: 'malformed-records' });
+		expect(interrupted.messages[0]).toMatchObject({ content: 'old', native: { line: 1 } });
+		expect(interrupted.messages[1]).toMatchObject({
+			native: { line: 2, raw: tail, issues: ['malformed-record'] },
+		});
+		const [listed] = await storage.listSessions(PROJECT);
+		expect(listed.nativeMetadata?.sources?.['chat_history.jsonl']).toMatchObject({
+			status: 'partial',
+			reason: 'malformed-records',
+		});
+		files[transcript] += '"}';
+		const complete = await storage.readSessionMessages(PROJECT, SESSION_ID, {
+			includeNativeRecords: true,
+		});
+		expect(complete.source?.status).toBe('available');
+		expect(complete.messages.map((m) => [m.uuid, m.content])).toEqual([
+			[interrupted.messages[0].uuid, 'old'],
+			[interrupted.messages[1].uuid, 'new'],
+		]);
+		expect(fs.open).toHaveBeenCalledTimes(8);
+		expect(captureException).not.toHaveBeenCalled();
+	});
+
+	it('does not borrow same-ID account totals when completed child usage arrives later', async () => {
+		const otherAccount = path.join(account, 'other-account');
+		const otherDir = path.join(otherAccount, 'sessions', encodeURIComponent(PROJECT), SESSION_ID);
+		Object.assign(
+			files,
+			sessionFiles(
+				PROJECT,
+				SESSION_ID,
+				'{}',
+				'{"type":"user","content":"other"}',
+				path.join(otherAccount, 'sessions')
+			)
+		);
+		files[path.join(otherDir, 'usage.json')] =
+			'{"session":{"inputTokens":7,"outputTokens":0,"cachedReadTokens":0,"cacheCreationTokens":0,"costUsdTicks":7}}';
+		mockLocalFs(files);
+		const [before] = await storage.listSessions(PROJECT);
+		// Native totals include completed children once; the active child inventory is unknown.
+		files[path.join(dir, 'usage.json')] = JSON.stringify({
+			sessionId: 'inherited-parent',
+			session: {
+				inputTokens: 160,
+				outputTokens: 50,
+				cachedReadTokens: 40,
+				cacheCreationTokens: 15,
+				costUsdTicks: '9007199254741006',
+			},
+			turns: [{ usage: { inputTokens: 60, costUsdTicks: 13 } }],
+		}).replace('"9007199254741006"', '9007199254741006');
+		const [other] = await storage.listSessions(PROJECT, undefined, otherAccount);
+		const [after] = await storage.listSessions(PROJECT);
+		expect(before.inputTokens).toBe(60);
+		expect(other).toMatchObject({
+			firstMessage: 'other',
+			inputTokens: 7,
+			accounting: { providerSessionId: SESSION_ID, cost: { costUsdTicks: '7' } },
+		});
+		expect(after).toMatchObject({
+			firstMessage: 'old',
+			messageCount: 1,
+			inputTokens: 105,
+			outputTokens: 50,
+			cacheReadTokens: 40,
+			cacheCreationTokens: 15,
+			accounting: {
+				providerSessionId: SESSION_ID,
+				completeness: 'partial',
+				childInclusion: 'completed',
+				childCompleteness: 'unknown',
+				cost: {
+					status: 'partial',
+					costUsdTicks: '9007199254741006',
+					reason: 'cross-file-generation-unverified',
+				},
+			},
+		});
+		expect(before.accounting?.cost).toMatchObject({ costUsdTicks: '9007199254740993' });
+		expect(fs.open).toHaveBeenCalledTimes(18);
+		expect(captureException).not.toHaveBeenCalled();
+	});
 });
 
 describe('GrokSessionStorage - native normalization regressions', () => {
@@ -2482,10 +2900,14 @@ describe('GrokSessionStorage - native normalization regressions', () => {
 				scope: 'native-session',
 				reporting: 'snapshot',
 				providerSessionId: SESSION_ID,
-				completeness: 'complete',
+				completeness: 'partial',
 				childInclusion: 'completed',
 				childCompleteness: 'unknown',
-				cost: { status: 'exact', costUsdTicks: '9007199254741006' },
+				cost: {
+					status: 'partial',
+					costUsdTicks: '9007199254741006',
+					reason: 'cross-file-generation-unverified',
+				},
 			},
 		});
 		expect(actual.accounting?.models).toEqual([
@@ -2493,16 +2915,20 @@ describe('GrokSessionStorage - native normalization regressions', () => {
 				model: 'grok-fixture',
 				inputTokens: 60,
 				reasoningTokens: 5,
-				cost: { status: 'exact', costUsdTicks: '9007199254740993' },
+				cost: {
+					status: 'partial',
+					costUsdTicks: '9007199254740993',
+					reason: 'cross-file-generation-unverified',
+				},
 			}),
 			expect.objectContaining({
 				model: 'unknown-model-raw',
 				inputTokens: 45,
 				reasoningTokens: 5,
-				cost: { status: 'exact', costUsdTicks: '13' },
+				cost: { status: 'partial', costUsdTicks: '13', reason: 'cross-file-generation-unverified' },
 			}),
 		]);
-		expect(actual.byModel?.map((model) => model.inputTokens)).toEqual([60, 45]);
+		expect(actual.byModel).toBeUndefined();
 		expect(actual.costUsd).toBeCloseTo(Number(9007199254741006n) / 1e10, 8);
 	});
 
