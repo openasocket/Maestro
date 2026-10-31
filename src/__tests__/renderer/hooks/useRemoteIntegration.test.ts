@@ -2930,6 +2930,108 @@ describe('useRemoteIntegration', () => {
 	});
 
 	describe('remote rename tab', () => {
+		it.each([
+			['grok', undefined],
+			['grok', 'claude-code'],
+			['codex', 'grok'],
+		] as const)(
+			'keeps %s tabs with %s turn ownership locally named',
+			async (toolType, turnProvider) => {
+				const binding: NonNullable<AITab['nativeSessionBinding']> = {
+					version: 1,
+					state: 'bound',
+					provider: 'grok',
+					nativeSessionId: 'shared-native',
+					accountRef: 'grok:fixture-account-a',
+					host: { kind: 'ssh', identity: 'fixture-host-a' },
+					cwd: '/fixture/project',
+				};
+				const tab = createMockTab({
+					id: 'grok-tab',
+					agentSessionId: 'shared-native',
+					name: 'Original label',
+					turnProvider,
+					isGeneratingName: true,
+					nativeSessionBinding: { ...binding, provider: toolType },
+					providerSessions:
+						toolType === 'codex'
+							? { grok: { agentSessionId: 'shared-native', nativeSessionBinding: binding } }
+							: undefined,
+				});
+				const sibling = createMockTab({
+					id: 'sibling',
+					agentSessionId: 'shared-native',
+					name: 'Sibling',
+					nativeSessionBinding: binding,
+				});
+				const session = createMockSession({ id: 'grok-agent', toolType, aiTabs: [tab, sibling] });
+				const others = [
+					{ ...binding, accountRef: 'grok:fixture-account-b' },
+					{ ...binding, host: { kind: 'ssh' as const, identity: 'fixture-host-b' } },
+				].map((nativeSessionBinding, index) =>
+					createMockSession({
+						id: `other-agent-${index}`,
+						toolType: 'grok',
+						aiTabs: [
+							createMockTab({
+								id: `other-tab-${index}`,
+								agentSessionId: 'shared-native',
+								name: 'Other label',
+								nativeSessionBinding,
+							}),
+						],
+					})
+				);
+				const deps = createDeps({ sessions: [session, ...others] });
+				renderHook(() => useRemoteIntegration(deps));
+
+				for (const name of ['Maestro local label', '']) {
+					await act(async () => {
+						await onRemoteRenameTabHandler?.(session.id, tab.id, name, 'grok-rename');
+					});
+					const [renamed, ...unchanged] = useSessionStore.getState().sessions;
+					expect(renamed).toEqual({
+						...session,
+						aiTabs: [{ ...tab, name: name || null, isGeneratingName: false }, sibling],
+					});
+					expect(unchanged).toEqual(others);
+					expect(mockProcess.sendRemoteRenameTabResponse).toHaveBeenLastCalledWith('grok-rename', {
+						success: true,
+					});
+				}
+				expect(mockAgentSessions.setSessionName).not.toHaveBeenCalled();
+				expect(mockAgentSessions.updateSessionName).not.toHaveBeenCalled();
+				expect(mockClaude.updateSessionName).not.toHaveBeenCalled();
+				expect(mockHistory.updateSessionName).not.toHaveBeenCalled();
+				expect(captureException).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each(['Codex label', ''])(
+			'retains non-Grok metadata and History writes for %j',
+			async (name) => {
+				const tab = createMockTab({ id: 'codex-tab', agentSessionId: 'codex-native', name: 'Old' });
+				const session = createMockSession({ id: 'codex-agent', toolType: 'codex', aiTabs: [tab] });
+				const deps = createDeps({ sessions: [session] });
+				renderHook(() => useRemoteIntegration(deps));
+				await act(async () => {
+					await onRemoteRenameTabHandler?.(session.id, tab.id, name, 'codex-rename');
+				});
+				expect(mockAgentSessions.setSessionName).toHaveBeenCalledWith(
+					'codex',
+					session.projectRoot,
+					'codex-native',
+					name || null
+				);
+				expect(mockHistory.updateSessionName).toHaveBeenCalledWith('codex-native', name);
+				expect(useSessionStore.getState().sessions[0].aiTabs[0].name).toBe(name || null);
+				expect(mockProcess.sendRemoteRenameTabResponse).toHaveBeenCalledWith('codex-rename', {
+					success: true,
+				});
+				expect(mockClaude.updateSessionName).not.toHaveBeenCalled();
+			}
+		);
+
 		it('renames tab and persists to agent session before reporting success', async () => {
 			const tab = createMockTab({ id: 'tab-1', agentSessionId: 'agent-session-1' });
 			const session = createMockSession({
@@ -3073,6 +3175,12 @@ describe('useRemoteIntegration', () => {
 				success: false,
 				error: 'history unreadable',
 			});
+			expect(window.maestro.logger.log).toHaveBeenCalledWith(
+				'error',
+				'Failed to persist remote tab name:',
+				undefined,
+				expect.objectContaining({ message: 'history unreadable' })
+			);
 		});
 
 		// `tabCallbacks.ts` stops waiting on a rename after a bounded delay and

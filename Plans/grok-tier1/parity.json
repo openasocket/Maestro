@@ -2677,6 +2677,30 @@
 			"implementationOwner": "GT1-04-08A1",
 			"testOwner": "GT1-04-08A1T",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-grok-rename-consumer-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-08a1t-grok-rename-consumer-tests",
+			"sourceCommit": "b0274044efddb47e8ebbcc9e1dd3ac7ea27c7685",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/hooks/useSessionLifecycle.test.ts": "cf85d03ff777646f617ef9b65fd4a36b64a595193e04c18bbe39844199cc8e0f",
+				"src/__tests__/renderer/hooks/useRemoteIntegration.test.ts": "263a7c99b9312c15240f457231bc353d6aa4db6b60a9a153459b02bc62a2a977",
+				"src/__tests__/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsRename.test.ts": "725972a9e0533702a28a144248c2e4d14283aeaa3f124ef2867dd984a23c9396"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "REG-SESSION-MUTATION"],
+			"scope": "15 new parameter-expanded cases and one strengthened failure assertion across the three existing suites: local Grok label set/reset and real serializer/startup reload, retained provider ownership, account/host/native-ID collisions, unchanged live/parked bindings, suppressed unscoped writes, visible History-browser refusal, and non-Grok success/error controls.",
+			"limitations": [
+				"Tests neither run nor collected; GT1-04-13 owns execution. No native mutation or native title compliance is inferred.",
+				"Static comparisons add no diagnostics; seven existing TypeScript errors and three existing ESLint warnings remain.",
+				"No native files, real accounts, SSH or provider binary access. Native rename remains unsupported; Grok remains beta."
+			],
+			"testOwner": "GT1-04-08A1T",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6628,7 +6652,8 @@
 				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests",
 				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests",
 				"phase04NativeForkRenameRefusalsRef": "phase04-native-fork-rename-refusals",
-				"phase04GrokRenameConsumersRef": "phase04-grok-rename-consumers"
+				"phase04GrokRenameConsumersRef": "phase04-grok-rename-consumers",
+				"phase04GrokRenameConsumerTestsRef": "phase04-grok-rename-consumer-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6690,7 +6715,7 @@
 				{
 					"id": "grok-rename-consumer-isolation-pending",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-04-08A1 implements local-only Grok tab labels and visible unsupported History-browser rename, including retained Grok turn ownership. GT1-04-08A1T must author reload, colliding account/host IDs, unchanged native/history bindings, refusal and non-Grok regressions; GT1-04-13 must execute them. Static review only; native title mutation remains unsupported.",
+					"missingPrerequisite": "GT1-04-08A1 implements local-only Grok labels and visible unsupported History rename; GT1-04-08A1T authors serializer/startup reload, retained ownership, account/host collisions, preserved bindings, refusal and non-Grok controls. GT1-04-13 must execute the three suites. Static checks add no diagnostics; native title mutation remains unsupported.",
 					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -17224,7 +17249,8 @@
 				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests",
 				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests",
 				"phase04NativeForkRenameRefusalsRef": "phase04-native-fork-rename-refusals",
-				"phase04GrokRenameConsumersRef": "phase04-grok-rename-consumers"
+				"phase04GrokRenameConsumersRef": "phase04-grok-rename-consumers",
+				"phase04GrokRenameConsumerTestsRef": "phase04-grok-rename-consumer-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17286,7 +17312,7 @@
 				{
 					"id": "grok-rename-consumer-isolation-pending",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-04-08A1 implements local-only Grok tab labels and visible unsupported History-browser rename, including retained Grok turn ownership. GT1-04-08A1T must author reload, colliding account/host IDs, unchanged native/history bindings, refusal and non-Grok regressions; GT1-04-13 must execute them. Static review only; native title mutation remains unsupported.",
+					"missingPrerequisite": "GT1-04-08A1 implements local-only Grok labels and visible unsupported History rename; GT1-04-08A1T authors serializer/startup reload, retained ownership, account/host collisions, preserved bindings, refusal and non-Grok controls. GT1-04-13 must execute the three suites. Static checks add no diagnostics; native title mutation remains unsupported.",
 					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
 				}
 			],
