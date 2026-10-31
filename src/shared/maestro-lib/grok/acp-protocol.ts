@@ -55,11 +55,54 @@ function object(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+/**
+ * Quote cost number tokens before JSON.parse can round them. This is lexical
+ * preservation, not accounting: even negative/fractional/exponent forms stay
+ * verbatim strings so the adapter can reject them instead of accepting a rounded
+ * integer. Other fields and quoted content remain untouched. JSON.parse still
+ * owns syntax validation; only complete, valid JSON number tokens are quoted.
+ */
+function preserveAcpCostTicks(line: string): string {
+	const number = /-?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?/y;
+	const pieces: string[] = [];
+	let copiedThrough = 0;
+	for (let index = 0; index < line.length; index++) {
+		if (line[index] !== '"') continue;
+		const start = index++;
+		// Consume whole strings, including escaped quotes, before looking for keys.
+		while (index < line.length && line[index] !== '"') {
+			if (line[index] === '\\') index++;
+			index++;
+		}
+		if (index >= line.length) break;
+		let cursor = index + 1;
+		while (cursor < line.length && /[\t\r\n ]/.test(line[cursor])) cursor++;
+		if (line[cursor] !== ':') continue;
+		const key = line.slice(start, index + 1);
+		if (key !== '"costUsdTicks"' && (!key.includes('\\') || JSON.parse(key) !== 'costUsdTicks'))
+			continue;
+		cursor++;
+		while (cursor < line.length && /[\t\r\n ]/.test(line[cursor])) cursor++;
+		number.lastIndex = cursor;
+		const match = number.exec(line);
+		if (!match) continue;
+		const end = number.lastIndex;
+		// Never turn invalid syntax such as 01, 1., or 1e+ into a valid string.
+		if (end < line.length && !/[\t\r\n ,}\]]/.test(line[end])) continue;
+		pieces.push(line.slice(copiedThrough, cursor), '"', match[0], '"');
+		copiedThrough = end;
+		index = end - 1;
+	}
+	if (!pieces.length) return line;
+	pieces.push(line.slice(copiedThrough));
+	return pieces.join('');
+}
+
 /** Validate envelopes only; session/event/permission schemas belong to their adapters. */
 export function parseAcpMessage(line: string): AcpMessage {
 	let value: unknown;
 	try {
-		value = JSON.parse(line);
+		value = JSON.parse(preserveAcpCostTicks(line));
 	} catch {
 		throw new GrokAcpTransportError('malformed-frame');
 	}

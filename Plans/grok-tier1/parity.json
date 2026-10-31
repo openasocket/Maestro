@@ -483,6 +483,27 @@
 				"src/shared/maestro-lib/grok/acp-events.ts",
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
 			]
+		},
+		"phase03-acp-wire-ticks": {
+			"path": "Plans/grok-tier1/evidence/03.md#gt1-03-05e-lossless-acp-cost-tokens",
+			"sourceCommit": "b7d52a00d7f4b657ab12f24dcab9c3edebe97ec8",
+			"sourceSha256": "fa9dcbcb0f26144bc9f519e3cc9f51686983713f14600e097f89fb5e9ee1b77a",
+			"provenance": "source-review",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"scope": "GT1-03-05E implements lexical costUsdTicks preservation before JSON.parse, including nested model rows. Scoped formatting/lint and independent static review pass. GT1-03-06 owns raw-byte regression fixtures; GT1-03-13 owns execution/compiler checks. No runtime or native qualification claim.",
+			"affectedRows": [
+				"P09",
+				"P10",
+				"P11",
+				"P12",
+				"C-supportsCostTracking",
+				"C-supportsUsageStats",
+				"C-supportsResultMessages",
+				"REG-PARSER",
+				"REG-USAGE"
+			],
+			"sourcePaths": ["src/shared/maestro-lib/grok/acp-protocol.ts"]
 		}
 	},
 	"sourceCatalog": {
@@ -2979,7 +3000,8 @@
 				"src/shared/types.ts",
 				"src/renderer/components/MainPanel/MainPanelContent.tsx",
 				"src/shared/maestro-lib/grok/acp-events.ts",
-				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
+				"src/shared/maestro-lib/grok/acp-protocol.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3051,7 +3073,8 @@
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
-				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3088,8 +3111,8 @@
 				},
 				{
 					"id": "acp-wire-tick-precision:P09",
-					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["P09"]
 				}
 			],
@@ -3252,7 +3275,8 @@
 				"src/main/stats/token-usage/token-usage-accessor.ts",
 				"src/main/cue/stats/cue-token-accessor.ts",
 				"src/shared/maestro-lib/grok/acp-events.ts",
-				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
+				"src/shared/maestro-lib/grok/acp-protocol.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3332,7 +3356,8 @@
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
-				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3369,8 +3394,8 @@
 				},
 				{
 					"id": "acp-wire-tick-precision:P10",
-					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["P10"]
 				}
 			],
@@ -3447,7 +3472,8 @@
 				"src/main/agents/limitResetEstimator.ts",
 				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts",
 				"src/shared/maestro-lib/grok/acp-events.ts",
-				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
+				"src/shared/maestro-lib/grok/acp-protocol.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3503,7 +3529,8 @@
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
-				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3540,8 +3567,8 @@
 				},
 				{
 					"id": "acp-wire-tick-precision:P11",
-					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["P11"]
 				}
 			],
@@ -3673,7 +3700,8 @@
 				"src/main/group-chat/spawnGroupChatAgent.ts",
 				"src/main/group-chat/output-parser.ts",
 				"src/shared/maestro-lib/grok/acp-events.ts",
-				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
+				"src/shared/maestro-lib/grok/acp-protocol.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3733,7 +3761,8 @@
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
-				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3770,8 +3799,8 @@
 				},
 				{
 					"id": "acp-wire-tick-precision:P12",
-					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["P12"]
 				}
 			],
@@ -10059,7 +10088,8 @@
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
 				"src/shared/maestro-lib/grok/acp-events.ts",
-				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
+				"src/shared/maestro-lib/grok/acp-protocol.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -10112,7 +10142,8 @@
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
-				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10149,8 +10180,8 @@
 				},
 				{
 					"id": "acp-wire-tick-precision:C-supportsCostTracking",
-					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["C-supportsCostTracking"]
 				}
 			],
@@ -10215,7 +10246,8 @@
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
 				"src/shared/maestro-lib/grok/acp-events.ts",
-				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
+				"src/shared/maestro-lib/grok/acp-protocol.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -10268,7 +10300,8 @@
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
-				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10305,8 +10338,8 @@
 				},
 				{
 					"id": "acp-wire-tick-precision:C-supportsUsageStats",
-					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["C-supportsUsageStats"]
 				}
 			],
@@ -10717,7 +10750,8 @@
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/main/process-manager/handlers/StdoutHandler.ts",
 				"src/shared/maestro-lib/grok/acp-events.ts",
-				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
+				"src/shared/maestro-lib/grok/acp-protocol.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -10752,7 +10786,8 @@
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
-				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10789,8 +10824,8 @@
 				},
 				{
 					"id": "acp-wire-tick-precision:C-supportsResultMessages",
-					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["C-supportsResultMessages"]
 				}
 			],
@@ -12592,7 +12627,8 @@
 				"src/shared/maestro-lib/runtime/providers.ts",
 				"src/cli/services/agent-spawner.ts",
 				"src/shared/maestro-lib/grok/acp-events.ts",
-				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
+				"src/shared/maestro-lib/grok/acp-protocol.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -12639,7 +12675,8 @@
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
-				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12676,8 +12713,8 @@
 				},
 				{
 					"id": "acp-wire-tick-precision:REG-PARSER",
-					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["REG-PARSER"]
 				}
 			],
@@ -13282,7 +13319,8 @@
 				"src/main/agents/limitResetEstimator.ts",
 				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts",
 				"src/shared/maestro-lib/grok/acp-events.ts",
-				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
+				"src/shared/maestro-lib/grok/acp-protocol.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -13337,7 +13375,8 @@
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
 				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
-				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
+				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13374,8 +13413,8 @@
 				},
 				{
 					"id": "acp-wire-tick-precision:REG-USAGE",
-					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes as strings in the ACP decoder, including nested model rows and invalid numeric tick forms. Static review/format/lint pass; raw byte-frame coverage belongs to GT1-03-06 and execution/compiler checks to GT1-03-13. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["REG-USAGE"]
 				}
 			],
