@@ -588,6 +588,29 @@
 				"src/__tests__/shared/maestro-lib/grok/acp-events.test.ts": "0b7a555268633f2277445a187b802b9869a99dd847fcb8c0d630ed6ba7b65736"
 			},
 			"affectedRows": ["P09", "P34", "P37", "S22"]
+		},
+		"phase03-acp-permissions": {
+			"path": "Plans/grok-tier1/evidence/03.md#gt1-03-07-acp-permission-request-lifetime",
+			"sourceCommit": "9ac0efd3a2eaf65215ad44048d1fa0c65eed1e4d",
+			"sourceRevisionScope": "Pre-task HEAD plus the GT1-03-07 diff identified by source SHA-256 in evidence.",
+			"provenance": "source-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P09",
+				"P10",
+				"P33",
+				"P34",
+				"P35",
+				"P36",
+				"C-supportsStandardPermissionMode",
+				"REG-MANAGED-ROUTES",
+				"META-03",
+				"REG-DEFINITIONS"
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -3085,7 +3108,8 @@
 				"src/renderer/components/MainPanel/MainPanelContent.tsx",
 				"src/shared/maestro-lib/grok/acp-events.ts",
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
-				"src/shared/maestro-lib/grok/acp-protocol.ts"
+				"src/shared/maestro-lib/grok/acp-protocol.ts",
+				"src/shared/maestro-lib/grok/acp-requests.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3163,7 +3187,8 @@
 				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests",
 				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
 				"phase03AcpPlansEvidenceRef": "phase03-acp-plans",
-				"phase03AcpPlanTestsEvidenceRef": "phase03-acp-plan-tests"
+				"phase03AcpPlanTestsEvidenceRef": "phase03-acp-plan-tests",
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3208,6 +3233,12 @@
 					"id": "acp-plan-consumers:P09",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-06A plan snapshots implemented, unverified. GT1-03-06B authored 42 synthetic plan cases; GT1-03-13 must execute them and compiler checks. GT1-03-09 must bind original dispatch context and confirmed promptId, not receive-time active turn; phases07/10 must preserve empty replacement, cancelled and unsupported states through consumers. Remaining permission/ask-back and native qualification owners are unchanged.",
+					"affectedRows": ["P09"]
+				},
+				{
+					"id": "acp-permission-consumers:P09",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
 					"affectedRows": ["P09"]
 				}
 			],
@@ -3371,7 +3402,8 @@
 				"src/main/cue/stats/cue-token-accessor.ts",
 				"src/shared/maestro-lib/grok/acp-events.ts",
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
-				"src/shared/maestro-lib/grok/acp-protocol.ts"
+				"src/shared/maestro-lib/grok/acp-protocol.ts",
+				"src/shared/maestro-lib/grok/acp-requests.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3455,7 +3487,8 @@
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
 				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
 				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests",
-				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests"
+				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3494,6 +3527,12 @@
 					"id": "acp-wire-tick-precision:P10",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C authors expanded terminal/ownership/model-cost and unbaselined-process cases (not executed); GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"affectedRows": ["P10"]
+				},
+				{
+					"id": "acp-permission-consumers:P10",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
 					"affectedRows": ["P10"]
 				}
 			],
@@ -6711,7 +6750,8 @@
 				"src/main/cross-agent/consult-runner.ts",
 				"src/shared/pianola/pianola-agent-select.ts",
 				"src/cli/commands/pianola-orchestrate.ts",
-				"src/main/pianola/pianola-supervisor.ts"
+				"src/main/pianola/pianola-supervisor.ts",
+				"src/shared/maestro-lib/grok/acp-requests.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6763,7 +6803,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6796,6 +6837,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P33"]
+				},
+				{
+					"id": "acp-permission-consumers:P33",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
 					"affectedRows": ["P33"]
 				}
 			],
@@ -6901,7 +6948,8 @@
 				"src/shared/types.ts",
 				"src/renderer/components/InputArea/InputArea.tsx",
 				"src/shared/maestro-lib/grok/acp-events.ts",
-				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
+				"src/shared/maestro-lib/grok/acp-requests.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6963,7 +7011,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03AcpPlansEvidenceRef": "phase03-acp-plans",
-				"phase03AcpPlanTestsEvidenceRef": "phase03-acp-plan-tests"
+				"phase03AcpPlanTestsEvidenceRef": "phase03-acp-plan-tests",
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7002,6 +7051,12 @@
 					"id": "acp-plan-consumers:P34",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-06A plan snapshots implemented, unverified. GT1-03-06B authored 42 synthetic plan cases; GT1-03-13 must execute them and compiler checks. GT1-03-09 must bind original dispatch context and confirmed promptId, not receive-time active turn; phases07/10 must preserve empty replacement, cancelled and unsupported states through consumers. Remaining permission/ask-back and native qualification owners are unchanged.",
+					"affectedRows": ["P34"]
+				},
+				{
+					"id": "acp-permission-consumers:P34",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
 					"affectedRows": ["P34"]
 				}
 			],
@@ -7103,7 +7158,8 @@
 				"src/shared/feedbackAccounts.ts",
 				"docs/feedback.md",
 				"src/shared/maestro-lib/providers/definitions.ts",
-				"src/shared/maestro-lib/launch/launch-plan.ts"
+				"src/shared/maestro-lib/launch/launch-plan.ts",
+				"src/shared/maestro-lib/grok/acp-requests.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -7171,7 +7227,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7211,6 +7268,12 @@
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Active read/write grants and custom --add-dir refuse before prompt preparation in planner, desktop, CLI, Cue and shared turns; empty/inert grants and other-provider builders have scoped deterministic evidence (13/13J), and full completeness passes in 13Q. Public capability remains false and builder absent. Native CLI root grants, symlink containment, managed preventive effects and platforms remain GT1-09-07/08/11/12 and phase11; pinned-source ACP resume roots are unsupported. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
 					"affectedRows": ["P08", "P35", "C-supportsAdditionalDirectories", "REG-DEFINITIONS"]
+				},
+				{
+					"id": "acp-permission-consumers:P35",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
+					"affectedRows": ["P35"]
 				}
 			],
 			"phase": "09",
@@ -7326,7 +7389,8 @@
 				"src/shared/maestro-lib/launch/env.ts",
 				"src/shared/envVarCatalog.ts",
 				"src/main/cross-agent/cross-agent-router.ts",
-				"src/main/cross-agent/consult-runner.ts"
+				"src/main/cross-agent/consult-runner.ts",
+				"src/shared/maestro-lib/grok/acp-requests.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -7390,7 +7454,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7423,6 +7488,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P36"]
+				},
+				{
+					"id": "acp-permission-consumers:P36",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
 					"affectedRows": ["P36"]
 				}
 			],
@@ -9273,7 +9344,8 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/components/InputArea/InputArea.tsx"
+				"src/renderer/components/InputArea/InputArea.tsx",
+				"src/shared/maestro-lib/grok/acp-requests.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-03-07", "GT1-09-07", "GT1-11-14A"],
@@ -9296,7 +9368,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -9329,6 +9402,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["C-supportsStandardPermissionMode"]
+				},
+				{
+					"id": "acp-permission-consumers:C-supportsStandardPermissionMode",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
 					"affectedRows": ["C-supportsStandardPermissionMode"]
 				}
 			],
@@ -14307,7 +14386,8 @@
 				"src/main/process-manager/ProcessManager.ts",
 				"src/main/cross-agent/cross-agent-router.ts",
 				"src/main/cross-agent/consult-runner.ts",
-				"src/main/utils/context-groomer.ts"
+				"src/main/utils/context-groomer.ts",
+				"src/shared/maestro-lib/grok/acp-requests.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -14346,7 +14426,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14379,6 +14460,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["REG-MANAGED-ROUTES"]
+				},
+				{
+					"id": "acp-permission-consumers:REG-MANAGED-ROUTES",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
 					"affectedRows": ["REG-MANAGED-ROUTES"]
 				}
 			],
@@ -17712,7 +17799,8 @@
 			"sourcePaths": [
 				"src/shared/agentMetadata.ts",
 				"src/renderer/components/PromptComposerModal.tsx",
-				"src/renderer/components/InputArea/InputArea.tsx"
+				"src/renderer/components/InputArea/InputArea.tsx",
+				"src/shared/maestro-lib/grok/acp-requests.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -17781,7 +17869,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"observation": "Claude Plan-Mode, Codex/Antigravity/Grok Read-Only label; actual availability separately gated.",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17814,6 +17903,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["META-03"]
+				},
+				{
+					"id": "acp-permission-consumers:META-03",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
 					"affectedRows": ["META-03"]
 				}
 			],
@@ -18483,7 +18578,8 @@
 				"src/main/utils/context-groomer.ts",
 				"src/shared/maestro-lib/runtime/background-turns.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/shared/maestro-lib/launch/launch-plan.ts"
+				"src/shared/maestro-lib/launch/launch-plan.ts",
+				"src/shared/maestro-lib/grok/acp-requests.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -18629,7 +18725,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18675,6 +18772,12 @@
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Active read/write grants and custom --add-dir refuse before prompt preparation in planner, desktop, CLI, Cue and shared turns; empty/inert grants and other-provider builders have scoped deterministic evidence (13/13J), and full completeness passes in 13Q. Public capability remains false and builder absent. Native CLI root grants, symlink containment, managed preventive effects and platforms remain GT1-09-07/08/11/12 and phase11; pinned-source ACP resume roots are unsupported. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
 					"affectedRows": ["P08", "P35", "C-supportsAdditionalDirectories", "REG-DEFINITIONS"]
+				},
+				{
+					"id": "acp-permission-consumers:REG-DEFINITIONS",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
+					"affectedRows": ["REG-DEFINITIONS"]
 				}
 			],
 			"definitionInventory": [
