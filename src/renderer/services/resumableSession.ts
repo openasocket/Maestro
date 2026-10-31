@@ -117,10 +117,13 @@ export async function loadResumableSession(
 ): Promise<ResumableSession | null> {
 	const { toolType, projectRoot, sshRemoteId, agentSessionId, providedMessages, sessionName } =
 		options;
-	const binding = options.nativeSessionBinding;
+	const binding =
+		options.nativeSessionBinding === undefined
+			? undefined
+			: structuredClone(options.nativeSessionBinding);
 	if (
-		binding &&
-		(binding.state !== 'bound' ||
+		binding !== undefined &&
+		(binding?.state !== 'bound' ||
 			!matchesNativeSessionBinding(binding, binding) ||
 			binding.provider !== toolType ||
 			binding.nativeSessionId !== agentSessionId)
@@ -132,6 +135,11 @@ export async function loadResumableSession(
 	if (toolType === 'grok' && !options.ownerAgentId) {
 		throw new SessionResumeRefusedError(
 			'Select the owning Grok agent before reopening its history.'
+		);
+	}
+	if (toolType === 'grok' && !binding) {
+		throw new SessionResumeRefusedError(
+			'Grok history ownership is unknown. Select a verified native history record first.'
 		);
 	}
 
@@ -149,6 +157,9 @@ export async function loadResumableSession(
 				offset: 0,
 				limit: TRANSCRIPT_RESUME_READ_LIMIT,
 				...(options.ownerAgentId === undefined ? {} : { ownerAgentId: options.ownerAgentId }),
+				...(toolType === 'grok' && binding
+					? { nativeSessionBinding: structuredClone(binding) }
+					: {}),
 			},
 			sshRemoteId
 		);
@@ -158,13 +169,11 @@ export async function loadResumableSession(
 					'Grok history is unavailable or incomplete. Retained history was kept.'
 				);
 			}
-			// GT1-04-07C1 supplies the observed account/endpoint receipt. An owner
-			// selection or retained logs cannot prove that this read has that owner.
-			// Keep this refusal until that typed receipt is validated here, before
-			// using messages or the unscoped origins store (which can collide too).
-			throw new SessionResumeRefusedError(
-				'Grok history ownership cannot yet be verified. Retained history was kept.'
-			);
+			if (!matchesNativeSessionBinding(binding, result.nativeSessionBinding)) {
+				throw new SessionResumeRefusedError(
+					'Grok history ownership could not be verified. Retained history was kept.'
+				);
+			}
 		}
 
 		// Strip the Auto Run synopsis turns, then convert. Shared with the
@@ -187,6 +196,11 @@ export async function loadResumableSession(
 	let name = sessionName && !isSessionIdLabel(sessionName, agentSessionId) ? sessionName : null;
 	let storedContextUsage: number | undefined;
 	let usageStats = options.usageStats;
+	if (toolType === 'grok') {
+		// Only the selected record's metadata is scoped by the validated binding.
+		// The origins store is keyed by ID/project, so another account can own it.
+		return { messages, name, starred: isStarred, usageStats, nativeSessionBinding: binding };
+	}
 
 	let origin: ResumableSession['origin'];
 	try {

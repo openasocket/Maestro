@@ -17,6 +17,7 @@
 import type { ToolType, SshRemoteConfig, UsageAccounting } from '../../shared/types';
 import type { ModelTokenUsage } from '../../shared/tokenUsage';
 import type { TokenSpeedBucket } from '../../shared/tokenSpeed';
+import type { NativeSessionBinding } from '../../shared/maestro-lib/agents/providerSwap';
 import { isValidAgentId } from '../../shared/agentIds';
 import { logger } from '../utils/logger';
 
@@ -125,6 +126,12 @@ export interface PaginatedSessionsResult {
  * Session messages result with pagination info
  */
 export interface SessionMessagesResult {
+	/** Observed ownership, independent of source completeness. An adapter may
+	 * return the caller's binding only after validating the actual native source
+	 * account, cwd and ID against it. Missing/unknown is never proof of ownership.
+	 * The IPC boundary also rechecks the owner and executing endpoint after I/O.
+	 */
+	nativeSessionBinding?: NativeSessionBinding;
 	messages: SessionMessage[];
 	total: number;
 	hasMore: boolean;
@@ -174,6 +181,12 @@ export interface SessionListOptions {
  * Options for reading session messages
  */
 export interface SessionReadOptions {
+	/** Retained ownership to validate before reading, never a request to relabel
+	 * history. At the storage boundary this is the host-observed read scope:
+	 * adapters must pin/validate the actual source before returning it as a receipt.
+	 * Legacy adapters that cannot do so must leave the result binding absent.
+	 */
+	nativeSessionBinding?: NativeSessionBinding;
 	/** Request ordered context, reasoning and tool-result rows from supporting adapters.
 	 * Display readers may otherwise fold tool results and omit context-only rows.
 	 * This view supports context export, not certified native migration.

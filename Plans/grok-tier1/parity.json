@@ -1388,6 +1388,40 @@
 				"GT1-04-07CUIAT"
 			],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-history-ownership-receipts": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c1-native-history-ownership-contract",
+			"sourceCommit": "e12cd5a138114f2974b88ecb5fe8009f4da5f052",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/ipc/handlers/agentSessions.ts": "78eb42bcd9f60d6e6561aea26eef876bbe41d444367014409e3c1e4e7c4fc4ea",
+				"src/main/agents/session-storage.ts": "e1bc51deb3668a65b244f8e3eec70aca475fc42744c171c920920fbbf0d546bf",
+				"src/renderer/services/resumableSession.ts": "58bb0342d6bce93babaae5ee671bdb279316ebce8d3e19330c84c6c3735bf531"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"mainTypeCheck": "pass",
+			"typeCheckBlocker": "Pre-existing RequestInit.dispatcher TS2339 in src/main/plugins/plugin-host-handlers.ts:1196; no changed-file diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P13", "P14", "P15", "C-supportsResume", "REG-SESSION-MUTATION"],
+			"scope": "Typed retained/observed native binding, canonical local account/cwd and installation capture, before/after ownership validation and Grok receipt admission. No adapter receipt is fabricated: Grok reopening remains refused until actual native-source validation is connected; scoped SSH reads remain unavailable without endpoint observation. Existing non-Grok resume argument shapes remain unchanged.",
+			"remainingImplementationOwners": [
+				"GT1-04-07C1S",
+				"GT1-04-07C1R",
+				"GT1-04-07C2",
+				"GT1-04-07C3",
+				"GT1-04-07C4",
+				"GT1-04-07C5",
+				"GT1-04-07D",
+				"GT1-04-07E",
+				"GT1-04-07F"
+			],
+			"testOwners": ["GT1-04-07C1ST", "GT1-04-07C1RT", "GT1-04-07C1T", "GT1-04-07CT"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {

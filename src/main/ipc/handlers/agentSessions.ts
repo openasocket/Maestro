@@ -23,7 +23,7 @@ import { logger } from '../../utils/logger';
 import { withIpcErrorLogging } from '../../utils/ipcHandler';
 import { createSafeSend } from '../../utils/safe-send';
 import { getSessionStorage, hasSessionStorage, getAllSessionStorages } from '../../agents';
-import { getLiveSessions, getSshRemoteById } from '../../stores';
+import { getLiveSessions, getSshRemoteById, getProductionDataPath } from '../../stores';
 import { calculateModelCost } from '../../utils/pricing';
 import {
 	computeClaudeUsageWithSubagents,
@@ -72,6 +72,10 @@ import {
 import { countClaudeTranscriptMessages } from '../../../shared/claudeTranscriptMessages';
 import { resolveAgentAccountDir } from '../../agents/provider-account-dirs';
 import { resolveSshLaunchTarget } from '../../utils/ssh-remote-resolver';
+import { resolveAgentAccountRef } from '../../../shared/agentAccountDir';
+import { canonicalJson } from '../../../shared/canonicalJson';
+import { installationIdentity } from '../../../shared/maestro-lib/managed/host-adapter';
+import type { NativeSessionBinding } from '../../../shared/maestro-lib/agents/providerSwap';
 
 // Re-export for backwards compatibility
 export type { GlobalAgentStats, ProviderStats };
@@ -117,7 +121,12 @@ function resolveHistoryScope(
 	sshRemoteId?: string,
 	ownerAgentId?: string,
 	configDir?: string
-): { sshConfig?: SshRemoteConfig; configDir?: string } {
+): {
+	sshConfig?: SshRemoteConfig;
+	configDir?: string;
+	ownerProjectPath?: string;
+	selectionKey: string;
+} {
 	for (const [name, value] of [
 		['ownerAgentId', ownerAgentId],
 		['sshRemoteId', sshRemoteId],
@@ -190,7 +199,94 @@ function resolveHistoryScope(
 			throw new Error('History owner account could not be resolved.');
 		}
 	}
-	return { sshConfig: target.kind === 'remote' ? target.remote : undefined, configDir };
+	const sshConfig = target.kind === 'remote' ? structuredClone(target.remote) : undefined;
+	const ownerProjectPath = owner
+		? sshConfig
+			? owner.remoteCwd || sessionSshConfig?.workingDirOverride || owner.projectRoot
+			: owner.projectRoot
+		: undefined;
+	return {
+		sshConfig,
+		configDir,
+		ownerProjectPath,
+		// Capture values, not references to mutable store objects. This fence is
+		// private to this read; it may contain env values and must never be logged.
+		selectionKey: canonicalJson({
+			owner: owner && {
+				id: owner.id,
+				provider: owner.toolType,
+				cwd: owner.cwd,
+				projectRoot: owner.projectRoot,
+				remoteCwd: owner.remoteCwd,
+				ssh: sessionSshConfig,
+				customPath: owner.customPath,
+				customArgs: owner.customArgs,
+				customEnvVars: owner.customEnvVars,
+			},
+			sshConfig,
+			configDir,
+		}),
+	};
+}
+
+/** Capture a local read's physical scope. This is not yet a native-source receipt:
+ * the adapter must confirm which transcript it actually opened, then we recheck.
+ * SSH needs an observed endpoint and remote canonical paths; a config is not one.
+ */
+async function observeGrokHistoryScope(
+	scope: ReturnType<typeof resolveHistoryScope>,
+	projectPath: string,
+	sessionId: string
+): Promise<{ binding: NativeSessionBinding; configDir?: string }> {
+	if (scope.sshConfig) {
+		return { binding: { version: 1, state: 'unknown', reason: 'unobserved' } };
+	}
+	if (
+		!scope.configDir ||
+		!scope.ownerProjectPath ||
+		![projectPath, scope.ownerProjectPath, scope.configDir].every(
+			(value) => typeof value === 'string' && !value.includes('\0') && path.isAbsolute(value)
+		)
+	) {
+		throw new Error('History requires an absolute owner project and selected account.');
+	}
+	try {
+		const [cwd, ownerCwd, configDir] = await Promise.all([
+			fs.realpath(projectPath),
+			fs.realpath(scope.ownerProjectPath),
+			fs.realpath(scope.configDir),
+		]);
+		if (cwd !== ownerCwd) throw new Error('History project does not match its owner.');
+		const accountRef = resolveAgentAccountRef(
+			{ toolType: 'grok', managedAccountDir: configDir },
+			{ homeDir: os.homedir() }
+		);
+		if (!accountRef) throw new Error('History account identity is unavailable.');
+		return {
+			configDir,
+			binding: {
+				version: 1,
+				state: 'bound',
+				provider: 'grok',
+				nativeSessionId: sessionId,
+				accountRef,
+				cwd,
+				host: {
+					kind: 'local',
+					identity: installationIdentity({
+						hostname: os.hostname(),
+						productionDataDir: getProductionDataPath(),
+						mode: 'desktop',
+						pid: process.pid,
+						startedAt: '',
+					}).installationId,
+				},
+			},
+		};
+	} catch (error) {
+		if (!isExpectedSessionReadError(error)) throw error;
+		return { binding: { version: 1, state: 'unknown', reason: 'unobserved' } };
+	}
 }
 
 /**
@@ -535,18 +631,67 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 				options?: SessionReadOptions & { ownerAgentId?: string },
 				sshRemoteId?: string
 			): Promise<SessionMessagesResult> => {
+				const retained = options?.nativeSessionBinding;
+				if (
+					retained !== undefined &&
+					(retained?.version !== 1 ||
+						retained.state !== 'bound' ||
+						retained.provider !== agentId ||
+						retained.nativeSessionId !== sessionId ||
+						!options?.ownerAgentId ||
+						agentId !== 'grok')
+				) {
+					throw new Error('History ownership is unknown, mismatched or unsupported.');
+				}
+				const retainedKey = retained === undefined ? undefined : canonicalJson(retained);
 				const storage = getSessionStorage(agentId);
 				if (!storage) {
 					logger.warn(`No session storage available for agent: ${agentId}`, LOG_CONTEXT);
 					return { messages: [], total: 0, hasMore: false };
 				}
 
-				const { sshConfig, configDir } = resolveHistoryScope(
+				const scope = resolveHistoryScope(
 					agentId,
 					sshRemoteId,
 					options?.ownerAgentId,
 					options?.configDir
 				);
+				const { sshConfig } = scope;
+				let configDir = scope.configDir;
+				let readProjectPath = projectPath;
+				let observed: Awaited<ReturnType<typeof observeGrokHistoryScope>> | undefined;
+				const assertCurrentSelection = () => {
+					if (
+						resolveHistoryScope(agentId, sshRemoteId, options?.ownerAgentId, options?.configDir)
+							.selectionKey !== scope.selectionKey
+					) {
+						throw new Error(
+							'History owner settings changed during the read. Refresh the selection.'
+						);
+					}
+				};
+				if (agentId === 'grok' && options?.ownerAgentId !== undefined) {
+					observed = await observeGrokHistoryScope(scope, projectPath, sessionId);
+					assertCurrentSelection();
+					if (observed.binding.state !== 'bound') {
+						return {
+							messages: [],
+							total: 0,
+							hasMore: false,
+							nativeSessionBinding: observed.binding,
+							source: {
+								provider: 'grok',
+								status: 'unavailable',
+								reason: 'history-scope-unobserved',
+							},
+						};
+					}
+					if (retainedKey !== undefined && retainedKey !== canonicalJson(observed.binding)) {
+						throw new Error('History ownership does not match the selected account, host or cwd.');
+					}
+					configDir = observed.configDir;
+					readProjectPath = observed.binding.cwd;
+				}
 
 				// Rehydrate an aged-out starred session: on the initial load of a LOCAL
 				// session, if the provider transcript is gone but we hold a mirror, copy
@@ -565,7 +710,7 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 				}
 
 				const result = await storage.readSessionMessages(
-					projectPath,
+					readProjectPath,
 					sessionId,
 					options?.ownerAgentId === undefined
 						? options
@@ -574,14 +719,43 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 								limit: options.limit,
 								includeNativeRecords: options.includeNativeRecords,
 								configDir,
+								...(observed ? { nativeSessionBinding: structuredClone(observed.binding) } : {}),
 							},
 					sshConfig
 				);
+				if (observed) {
+					assertCurrentSelection();
+					const rechecked = await observeGrokHistoryScope(scope, projectPath, sessionId);
+					assertCurrentSelection();
+					if (canonicalJson(rechecked) !== canonicalJson(observed)) {
+						throw new Error('History account, host or cwd changed during the read.');
+					}
+					if (result.nativeSessionBinding?.state === 'bound') {
+						if (canonicalJson(result.nativeSessionBinding) !== canonicalJson(observed.binding)) {
+							throw new Error('The native transcript does not match the observed history scope.');
+						}
+					} else {
+						// A requested scope is not evidence of the source the adapter read.
+						return {
+							...result,
+							nativeSessionBinding: { version: 1, state: 'unknown', reason: 'unobserved' },
+						};
+					}
+				}
 				logger.info(
 					`Read ${result.messages.length} messages for session ${sessionId} (agent: ${agentId})${sshRemoteId ? ' (remote via SSH)' : ''}`,
 					LOG_CONTEXT
 				);
-				return result;
+				return agentId === 'grok'
+					? {
+							...result,
+							nativeSessionBinding: observed?.binding ?? {
+								version: 1,
+								state: 'unknown',
+								reason: 'legacy',
+							},
+						}
+					: result;
 			}
 		)
 	);
