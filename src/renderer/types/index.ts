@@ -520,6 +520,9 @@ export interface QueuedItem {
 	command?: string; // Slash command (e.g., '/commit')
 	commandArgs?: string; // Arguments passed after the command (e.g., 'Blah blah' from '/speckit.plan Blah blah')
 	commandDescription?: string; // Command description for display
+	// Opaque renderer receipt. Its evidence lives only in queuedPrompt's WeakMap;
+	// restored/cloned items must be requeued, never rebound to current settings.
+	commandScope?: { readonly provider: ToolType };
 	// Display metadata
 	// Last-known tab label, snapshotted when the item was queued. This is a
 	// FALLBACK only: the queue UI resolves the live tab name first (see

@@ -3071,7 +3071,7 @@
 			"affectedRows": ["P04", "P17", "S29"],
 			"verificationTask": "GT1-05-13",
 			"limitations": [
-				"Fourteen authored cases await execution together with GT1-05-02B\u2019s three worktree suites; no behavior or type-check pass is claimed.",
+				"Fourteen authored cases await execution together with GT1-05-02B’s three worktree suites; no behavior or type-check pass is claimed.",
 				"The real shared runner uses a fake provider process and synthetic in-process authority; SSH wrapping and directory observation are fixture ports, not live host or policy qualification.",
 				"Production ACP routing remains phase07; Auto Run ownership remains phase08; exact-binary and platform qualification remains phase11."
 			]
@@ -5481,7 +5481,9 @@
 					"GT1-02-10G2",
 					"GT1-02-11C",
 					"GT1-05-06A1",
-					"GT1-05-06A2"
+					"GT1-05-06A2",
+					"GT1-05-06A1C",
+					"GT1-05-06A1H"
 				],
 				"test": [
 					"GT1-05-06",
@@ -5505,7 +5507,8 @@
 					"GT1-02-10G1T",
 					"GT1-02-11D",
 					"GT1-05-06B1",
-					"GT1-05-06B2"
+					"GT1-05-06B2",
+					"GT1-05-06A1T"
 				],
 				"verification": [
 					"GT1-01-07",
@@ -5525,7 +5528,7 @@
 			},
 			"limitations": [
 				"Owned ACP JSON prompt-file delivery, host-local materialization/cleanup, consumer handoffs including tab naming, and first-turn system embedding/resume skipping have scoped deterministic evidence. Raw prompt stdin and native append/rules are disabled. Exact-binary text/system behavior, real SSH cleanup, Linux-only skipped shell cases and Windows permissions remain unqualified. Template/command integration remains GT1-05-05/06/06A/06B/13/14; utility retries remain GT1-08-14E/14F/21; native/platform qualification remains phase10/11.",
-				"GT1-05-06A reuses canonical composer/remote command queue items and single-pass template substitution; remote native/literal Grok slash dispatch and command attachments explicitly refuse. Queue account/cwd/host ownership across enqueue/drain/async preparation, literal dollar arguments, SSH/system context and new-tab classification/acknowledgements remain GT1-05-06A1/A2. GT1-05-06B/B1/B2 author tests; GT1-05-13 executes them. Static checks do not certify dispatch or native behavior. See Plans/grok-tier1/evidence/05.md#gt1-05-06a-custom-command-and-template-dispatch-audit."
+				"GT1-05-06A1 binds queued Grok macros to ephemeral selected-tab/provider/account/cwd/native/permission evidence, compares bounded provider/global/selected-SSH configuration reads at drain and after preparation, preserves attachments, handles returned spawn refusals and protects live owners during cancellation/recovery. Persisted/legacy missing evidence holds explicitly. Fresh-tab default changes between the final renderer read and main entry remain GT1-05-06A1C/H, with main-sink tests GT1-05-06A1T. GT1-05-06A2 still owns literal dollar arguments, system context and new-tab classification. GT1-05-06B/B1/B2/13 own remaining behavioral coverage/execution. Native commands and remote macro attachments remain unsupported; no parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1-queued-command-ownership."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -5569,6 +5572,12 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["P07"]
+				},
+				{
+					"id": "queued-command-main-entry-race",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-05-06A1C/H must bind the enqueue fingerprint at the main spawn boundary for fresh tabs; GT1-05-06A1T/B1/13 must cover and execute the account/default race regressions. Renderer comparisons alone are not atomic main admission.",
+					"affectedRows": ["P07", "S31"]
 				}
 			],
 			"phase": "02",
@@ -22486,8 +22495,23 @@
 				"src/renderer/utils/spawnHelpers.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-05", "GT1-08-01", "GT1-05-06A", "GT1-05-06A1", "GT1-05-06A2"],
-				"test": ["GT1-05-06", "GT1-08-02", "GT1-05-06B", "GT1-05-06B1", "GT1-05-06B2"],
+				"implementation": [
+					"GT1-05-05",
+					"GT1-08-01",
+					"GT1-05-06A",
+					"GT1-05-06A1",
+					"GT1-05-06A2",
+					"GT1-05-06A1C",
+					"GT1-05-06A1H"
+				],
+				"test": [
+					"GT1-05-06",
+					"GT1-08-02",
+					"GT1-05-06B",
+					"GT1-05-06B1",
+					"GT1-05-06B2",
+					"GT1-05-06A1T"
+				],
 				"verification": ["GT1-01-07", "GT1-05-13", "GT1-08-07", "GT1-05-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -22498,7 +22522,7 @@
 			},
 			"limitations": [
 				"Grok is reached through generic queue, but command collisions, argument expansion, selected tab/account and managed dispatch need proof. GT1-05-05/06 ownership is provisional until GT1-01-07 confirms explicit template-consumer coverage.",
-				"GT1-05-06A reuses canonical composer/remote command queue items and single-pass template substitution; remote native/literal Grok slash dispatch and command attachments explicitly refuse. Queue account/cwd/host ownership across enqueue/drain/async preparation, literal dollar arguments, SSH/system context and new-tab classification/acknowledgements remain GT1-05-06A1/A2. GT1-05-06B/B1/B2 author tests; GT1-05-13 executes them. Static checks do not certify dispatch or native behavior. See Plans/grok-tier1/evidence/05.md#gt1-05-06a-custom-command-and-template-dispatch-audit."
+				"GT1-05-06A1 binds queued Grok macros to ephemeral selected-tab/provider/account/cwd/native/permission evidence, compares bounded provider/global/selected-SSH configuration reads at drain and after preparation, preserves attachments, handles returned spawn refusals and protects live owners during cancellation/recovery. Persisted/legacy missing evidence holds explicitly. Fresh-tab default changes between the final renderer read and main entry remain GT1-05-06A1C/H, with main-sink tests GT1-05-06A1T. GT1-05-06A2 still owns literal dollar arguments, system context and new-tab classification. GT1-05-06B/B1/B2/13 own remaining behavioral coverage/execution. Native commands and remote macro attachments remain unsupported; no parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1-queued-command-ownership."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22527,7 +22551,7 @@
 				{
 					"id": "gap:S31",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-05-06A reuses canonical composer/remote command queue items and single-pass template substitution; remote native/literal Grok slash dispatch and command attachments explicitly refuse. Queue account/cwd/host ownership across enqueue/drain/async preparation, literal dollar arguments, SSH/system context and new-tab classification/acknowledgements remain GT1-05-06A1/A2. GT1-05-06B/B1/B2 author tests; GT1-05-13 executes them. Static checks do not certify dispatch or native behavior. See Plans/grok-tier1/evidence/05.md#gt1-05-06a-custom-command-and-template-dispatch-audit.",
+					"missingPrerequisite": "GT1-05-06A1 binds queued Grok macros to ephemeral selected-tab/provider/account/cwd/native/permission evidence, compares bounded provider/global/selected-SSH configuration reads at drain and after preparation, preserves attachments, handles returned spawn refusals and protects live owners during cancellation/recovery. Persisted/legacy missing evidence holds explicitly. Fresh-tab default changes between the final renderer read and main entry remain GT1-05-06A1C/H, with main-sink tests GT1-05-06A1T. GT1-05-06A2 still owns literal dollar arguments, system context and new-tab classification. GT1-05-06B/B1/B2/13 own remaining behavioral coverage/execution. Native commands and remote macro attachments remain unsupported; no parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1-queued-command-ownership.",
 					"affectedRows": ["S31"]
 				},
 				{
@@ -22541,6 +22565,12 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S31"]
+				},
+				{
+					"id": "queued-command-main-entry-race",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-05-06A1C/H must bind the enqueue fingerprint at the main spawn boundary for fresh tabs; GT1-05-06A1T/B1/13 must cover and execute the account/default race regressions. Renderer comparisons alone are not atomic main admission.",
+					"affectedRows": ["P07", "S31"]
 				}
 			],
 			"ownerScopeReview": {
