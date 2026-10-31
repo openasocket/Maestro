@@ -2,6 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
 	readDirRemote,
 	readFileRemote,
+	observePathRemote,
+	type RemotePathIdentity,
 	readBinaryFileRemoteAsBase64,
 	readBinaryFileBlockRemoteAsBase64,
 	readFileTailRemote,
@@ -21,6 +23,8 @@ import {
 import type { SshRemoteConfig } from '../../../shared/types';
 import type { ExecResult } from '../../../main/utils/execFile';
 import { execFileNoThrow } from '../../../main/utils/execFile';
+import { resolveSshPath } from '../../../main/utils/cliDetection';
+import { setRemoteAccessAuthority } from '../../../main/ssh-remote-manager';
 
 // All transports are injected; even SSH discovery must stay off the real host.
 vi.mock('../../../main/utils/cliDetection', () => ({
@@ -354,6 +358,254 @@ describe('remote-fs', () => {
 			// Path-bearing patterns are dropped - they cannot work with -name.
 			expect(remoteCommand).not.toContain('dist/cache');
 			expect(remoteCommand).not.toContain('build/**');
+		});
+	});
+
+	describe('remote physical source identity', () => {
+		const identity: RemotePathIdentity = {
+			canonicalPath: '/physical/account/sessions/chat_history.jsonl',
+			device: '18446744073709551615',
+			inode: '9007199254740993',
+			kind: 'file',
+		};
+		afterEach(() => {
+			setRemoteAccessAuthority(null);
+			vi.restoreAllMocks();
+			vi.clearAllMocks();
+		});
+
+		it.each(['file', 'directory'] as const)(
+			'observes a physical %s without inventing endpoint identity',
+			async (kind) => {
+				const data = { ...identity, kind };
+				const deps = createMockDeps({ stdout: JSON.stringify(data), stderr: '', exitCode: 0 });
+				expect(await observePathRemote('~/account-alias', baseConfig, deps)).toEqual({
+					success: true,
+					data,
+				});
+				expect(deps.execSsh).toHaveBeenCalledTimes(1);
+				expect(execFileNoThrow).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each([
+			'null',
+			'[]',
+			'{}',
+			'{',
+			' '.repeat(100001),
+			...[
+				{ canonicalPath: 'relative' },
+				{ canonicalPath: '/a/../b' },
+				{ canonicalPath: '/a\0b' },
+				{ canonicalPath: '/' + 'a'.repeat(16384) },
+				{ device: 1 },
+				{ device: '-1' },
+				{ inode: '0' },
+				{ inode: '01' },
+				{ inode: '1'.repeat(21) },
+				{ kind: 'symlink' },
+				{ endpoint: 'configured-host-is-not-proof' },
+			].map((patch) => JSON.stringify({ ...identity, ...patch })),
+		])('rejects malformed physical observation %#', async (stdout) => {
+			const deps = createMockDeps({ stdout, stderr: '', exitCode: 0 });
+			expect(await observePathRemote('/alias', baseConfig, deps)).toMatchObject({
+				success: false,
+				errorCode: 'identity-unavailable',
+			});
+			expect(deps.execSsh).toHaveBeenCalledTimes(1);
+		});
+
+		it.each(['', '/bad\npath', '/bad\0path', 'a'.repeat(16385)])(
+			'rejects invalid observer path %# before SSH',
+			async (filePath) => {
+				const deps = createMockDeps({ stdout: '', stderr: '', exitCode: 0 });
+				expect(await observePathRemote(filePath, baseConfig, deps)).toMatchObject({
+					success: false,
+					errorCode: 'identity-unavailable',
+				});
+				expect(deps.execSsh).not.toHaveBeenCalled();
+				expect(deps.buildSshArgs).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each([
+			[70, 'absent, non-directory or inaccessible path', 'identity-unavailable'],
+			[71, 'Remote source identity changed', 'identity-mismatch'],
+			[127, 'python3 unavailable', 'identity-unavailable'],
+			[73, 'unexpected filesystem failure', undefined],
+			[255, 'Permission denied (publickey)', undefined],
+		] as const)(
+			'preserves observer/read refusal %s without a receipt or content',
+			async (exitCode, stderr, errorCode) => {
+				for (const operation of ['observe', 'read']) {
+					const deps = createMockDeps({ stdout: 'untrusted bytes', stderr, exitCode });
+					const result =
+						operation === 'observe'
+							? await observePathRemote('/alias', baseConfig, deps)
+							: await readFileRemote('/alias', baseConfig, deps, {
+									maxBytes: 8,
+									expectedIdentity: identity,
+								});
+					expect(result).toEqual({ success: false, errorCode, error: stderr });
+					expect(deps.execSsh).toHaveBeenCalledTimes(1);
+				}
+			}
+		);
+
+		it.each([
+			{ body: Buffer.from('雪'), changed: false, exitCode: 0, errorCode: undefined },
+			{ body: Buffer.from(''), changed: true, exitCode: 0, errorCode: undefined },
+			{
+				body: Buffer.from([0xf0, 0x90, 0x80]),
+				changed: false,
+				exitCode: 0,
+				errorCode: 'invalid-encoding',
+			},
+			{ body: Buffer.from('four'), changed: true, exitCode: 0, errorCode: 'too-large' },
+			{ body: Buffer.from(''), changed: false, exitCode: 72, errorCode: 'too-large' },
+		])(
+			'keeps descriptor ownership independent of content availability %#',
+			async ({ body, changed, exitCode, errorCode }) => {
+				const deps = createMockDeps({
+					stdout:
+						JSON.stringify({ identity, contentChanged: changed }) +
+						'\n' +
+						Buffer.concat([body, Buffer.from('\n0')]).toString('base64'),
+					stderr: '',
+					exitCode,
+				});
+				const result = await readFileRemote('/alias', baseConfig, deps, {
+					maxBytes: 3,
+					expectedIdentity: identity,
+				});
+				expect(result).toMatchObject({
+					success: !errorCode,
+					observedIdentity: identity,
+					contentChanged: changed,
+				});
+				if (errorCode) {
+					expect(result.errorCode).toBe(errorCode);
+					expect(result.data).toBeUndefined();
+				} else expect(result.data).toBe(body.toString('utf8'));
+				expect(deps.execSsh).toHaveBeenCalledTimes(1);
+			}
+		);
+
+		it.each([
+			'{}',
+			'{',
+			JSON.stringify({ identity }),
+			JSON.stringify({ identity, contentChanged: 'false' }),
+			...[
+				{ canonicalPath: '/replaced' },
+				{ inode: '2' },
+				{ device: '2' },
+				{ kind: 'directory' },
+			].map((patch) =>
+				JSON.stringify({ identity: { ...identity, ...patch }, contentChanged: false })
+			),
+			' '.repeat(100001),
+		])(
+			'never exposes content from malformed or mismatched descriptor header %#',
+			async (header) => {
+				const deps = createMockDeps({ stdout: header + '\neAow', stderr: '', exitCode: 0 });
+				expect(
+					await readFileRemote('/alias', baseConfig, deps, {
+						maxBytes: 8,
+						expectedIdentity: identity,
+					})
+				).toEqual({
+					success: false,
+					errorCode: 'identity-unavailable',
+					error: 'Remote descriptor identity unavailable',
+				});
+			}
+		);
+
+		it.each([
+			['~/account 雪/file', '"$HOME/account 雪/file"'],
+			["/account's/file", "'/account'\\''s/file'"],
+			['-n', "'-n'"],
+			['/a/$(whoami);`id`', "'/a/$(whoami);`id`'"],
+		])('quotes observer/read path %s and every guarded alias', async (filePath, escaped) => {
+			const deps = createMockDeps({ stdout: '', stderr: '', exitCode: 70 });
+			vi.mocked(deps.buildSshArgs).mockImplementation(() => ['testuser@dev.example.com']);
+			await observePathRemote(filePath, baseConfig, deps);
+			await readFileRemote(filePath, baseConfig, deps, {
+				maxBytes: 8,
+				expectedIdentity: identity,
+				expectedPaths: [{ path: "~/parent's 雪", identity: { ...identity, kind: 'directory' } }],
+			});
+			const commands = vi.mocked(deps.execSsh).mock.calls.map((call) => call[1].at(-1)!);
+			expect(commands[0]).toMatch(/^python3 -I -S -B -c /);
+			expect(commands[0].endsWith(' ' + escaped)).toBe(true);
+			expect(commands[1]).toContain(` ${escaped} 8 '${JSON.stringify(identity)}'`);
+			expect(commands[1]).toContain(' "$HOME/parent\'s 雪" ');
+		});
+
+		it.each(['observePath', 'readFile'])(
+			'admits %s before SSH discovery and refuses without retries',
+			async (operation) => {
+				vi.mocked(resolveSshPath).mockClear();
+				const hold = vi.fn().mockResolvedValue({
+					allowed: false,
+					code: 'remote-unqualified',
+					message: 'Endpoint unavailable',
+					managed: {
+						policyRevision: null,
+						class: 'read',
+						operation,
+						remoteId: baseConfig.id,
+						target: '/alias',
+						count: 1,
+						endpoint: null,
+						effect: null,
+						outcome: 'remote-unqualified',
+					},
+				});
+				setRemoteAccessAuthority({ hold });
+				const deps = createMockDeps({ stdout: '', stderr: '', exitCode: 0 });
+				const result =
+					operation === 'observePath'
+						? await observePathRemote('/alias', baseConfig, deps)
+						: await readFileRemote('/alias', baseConfig, deps, {
+								maxBytes: 8,
+								expectedIdentity: identity,
+							});
+				expect(result).toEqual({
+					success: false,
+					errorCode: 'identity-unavailable',
+					error: '[managed-remote-unqualified] Endpoint unavailable',
+				});
+				expect(hold).toHaveBeenCalledExactlyOnceWith({
+					class: 'read',
+					operation,
+					target: '/alias',
+					remote: baseConfig,
+				});
+				expect(resolveSshPath).not.toHaveBeenCalled();
+				expect(deps.buildSshArgs).not.toHaveBeenCalled();
+				expect(deps.execSsh).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each(['observe', 'read'])('bounds the default %s SSH timeout', async (operation) => {
+			vi.mocked(execFileNoThrow).mockResolvedValueOnce({
+				stdout: '',
+				stderr: 'unavailable',
+				exitCode: 70,
+			});
+			if (operation === 'observe') await observePathRemote('/alias', baseConfig);
+			else
+				await readFileRemote('/alias', baseConfig, undefined, {
+					maxBytes: 1,
+					expectedIdentity: identity,
+				});
+			expect(execFileNoThrow).toHaveBeenCalledExactlyOnceWith('ssh', expect.any(Array), undefined, {
+				timeout: 30000,
+				input: undefined,
+			});
 		});
 	});
 

@@ -1494,6 +1494,28 @@
 			],
 			"testOwners": ["GT1-04-07C1SRT", "GT1-04-07C1ST", "GT1-04-07C1RT", "GT1-04-07C1T"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-remote-native-source-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c1srt-remote-native-source-tests",
+			"sourceCommit": "b0dae2a67cb12eabf8d0bf9a5ad7cd005d2bafee",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/storage/grok-session-storage.test.ts": "ddc5bcaddd814a25da155b27011fa6e32de82d3a3f1a81a7b8e9543dc6b41f07",
+				"src/__tests__/main/utils/remote-fs.test.ts": "5b31a8dc141c9bc050ae4029b93ac18775c0f3350d8fe1231dd7b5320919b18d"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"authoredCases": 74,
+			"static": "pass",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"scopedTypeCheck": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P13", "P14", "P15", "C-supportsResume", "REG-SESSION-MUTATION"],
+			"scope": "Fake-remote source selection and inode/candidate races, canonical account/pool aliases, independent ownership/content receipts, inert SSH observation/header validation, admission, quoting and finite bounds. No tests run or collected; no endpoint or native qualification.",
+			"remainingTestOwners": ["GT1-04-07C1SRT1"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {

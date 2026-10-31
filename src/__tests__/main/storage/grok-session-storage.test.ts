@@ -17,6 +17,7 @@ vi.mock('../../../main/utils/remote-fs', () => ({
 	readFileRemote: vi.fn(),
 	readDirRemote: vi.fn(),
 	statRemote: vi.fn(),
+	observePathRemote: vi.fn(),
 }));
 
 // The command-boundary cases use real remote-fs with an inert SSH transport.
@@ -60,6 +61,7 @@ import { execFileNoThrow } from '../../../main/utils/execFile';
 import { REMOTE_SESSION_READ_CONCURRENCY } from '../../../main/utils/concurrency';
 import type { SshRemoteConfig } from '../../../shared/types';
 import { isolateAgentEnv } from '../../helpers/agentEnvIsolation';
+import { resolveAgentAccountRef } from '../../../shared/agentAccountDir';
 
 isolateAgentEnv(['GROK_HOME']);
 
@@ -852,6 +854,7 @@ describe('GrokSessionStorage - SSH remote', () => {
 		vi.mocked(remoteFs.readDirRemote).mockReset();
 		vi.mocked(remoteFs.readFileRemote).mockReset();
 		vi.mocked(remoteFs.statRemote).mockReset();
+		vi.mocked(remoteFs.observePathRemote).mockReset();
 	});
 
 	afterEach(() => {
@@ -909,6 +912,244 @@ describe('GrokSessionStorage - SSH remote', () => {
 		});
 		return { sessionsDir, cwdDir, directories, files };
 	}
+
+	describe('native remote source ownership', () => {
+		const account = '/remote/selected';
+		const binding = {
+			version: 1,
+			state: 'bound',
+			provider: 'grok',
+			nativeSessionId: SESSION_ID,
+			accountRef: resolveAgentAccountRef(
+				{ toolType: 'grok', managedAccountDir: account, sshRemote: true },
+				{ homeDir: '' }
+			)!,
+			cwd: PROJECT,
+			host: { kind: 'ssh', identity: 'fixture-endpoint-installation' },
+		} as const;
+		function scopedRemote(selected = account, pool = `${account}/sessions`) {
+			const fixture = mockRemoteSession({ accountDir: path.posix.dirname(pool) });
+			const session = path.posix.join(fixture.cwdDir, SESSION_ID);
+			const file = path.posix.join(session, 'chat_history.jsonl');
+			const identities = new Map<string, remoteFs.RemotePathIdentity>();
+			for (const [i, p] of [account, PROJECT, pool, fixture.cwdDir, session, file].entries()) {
+				identities.set(p, {
+					canonicalPath: p,
+					device: '1',
+					inode: String(i + 1),
+					kind: p === file ? 'file' : 'directory',
+				});
+			}
+			identities.set(selected, identities.get(account)!);
+			identities.set(`${account}/sessions`, identities.get(pool)!);
+			vi.mocked(remoteFs.observePathRemote).mockImplementation(async (p) =>
+				identities.has(p)
+					? { success: true, data: { ...identities.get(p)! } }
+					: { success: false, errorCode: 'identity-unavailable', error: 'Path not found' }
+			);
+			const read = vi.mocked(remoteFs.readFileRemote).getMockImplementation()!;
+			vi.mocked(remoteFs.readFileRemote).mockImplementation(async (...args) => ({
+				...(await read(...args)),
+				observedIdentity: identities.get(args[0]),
+			}));
+			return {
+				...fixture,
+				identities,
+				session,
+				file,
+				read: () =>
+					new GrokSessionStorage().readSessionMessages(
+						PROJECT,
+						SESSION_ID,
+						{ configDir: selected, nativeSessionBinding: binding, includeNativeRecords: true },
+						sshConfig
+					),
+			};
+		}
+
+		it.each([account, '~/selected alias'])(
+			'pins selected account %s and a shared sessions alias to the actual descriptor',
+			async (selected) => {
+				const f = scopedRemote(selected, '/remote/shared/sessions');
+				const target = path.posix.join(f.session, 'transcript-target');
+				f.identities.set(f.file, { ...f.identities.get(f.file)!, canonicalPath: target });
+				f.identities.set(target, f.identities.get(f.file)!);
+				f.files[target] = f.files[f.file];
+				const result = await f.read();
+				expect(result.messages).toHaveLength(3);
+				expect(result.nativeSessionBinding).toEqual(binding);
+				expect(result.source?.status).toBe('available');
+				expect(remoteFs.readFileRemote).toHaveBeenCalledWith(
+					target,
+					sshConfig,
+					undefined,
+					expect.objectContaining({
+						maxBytes: 64 * 1024 * 1024,
+						expectedIdentity: f.identities.get(target),
+						expectedPaths: expect.arrayContaining([
+							{ path: selected, identity: f.identities.get(account) },
+							{
+								path: `${account}/sessions`,
+								identity: f.identities.get('/remote/shared/sessions'),
+							},
+							{ path: f.file, identity: f.identities.get(target) },
+						]),
+					})
+				);
+				expect(remoteFs.readFileRemote).toHaveBeenCalledTimes(1);
+				expect(captureException).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each([false, true])(
+			'selects exact cwd with descendant collision, exact absent=%s',
+			async (absent) => {
+				const f = scopedRemote();
+				const child = `${PROJECT}/child`;
+				const childFolder = path.posix.join(f.sessionsDir, encodeURIComponent(child));
+				f.identities.set(child, {
+					...f.identities.get(PROJECT)!,
+					canonicalPath: child,
+					inode: '99',
+				});
+				f.directories
+					.get(f.sessionsDir)!
+					.push({ name: encodeURIComponent(child), isDirectory: true, isSymlink: false });
+				f.directories.set(childFolder, [{ name: SESSION_ID, isDirectory: true, isSymlink: false }]);
+				if (absent) f.directories.set(f.cwdDir, []);
+				const result = await f.read();
+				expect(result.nativeSessionBinding).toEqual(absent ? undefined : binding);
+				expect(remoteFs.readFileRemote).toHaveBeenCalledTimes(absent ? 0 : 1);
+				expect(remoteFs.readDirRemote).not.toHaveBeenCalledWith(childFolder, sshConfig);
+				if (absent) expect(result.source?.reason).toBe('session-not-found');
+			}
+		);
+
+		it.each(['directory', 'dangling', 'file'])(
+			'refuses ambiguous cwd aliases even when the duplicate is a %s',
+			async (kind) => {
+				const f = scopedRemote();
+				const alias = '/remote/project-alias';
+				f.identities.set(alias, f.identities.get(PROJECT)!);
+				f.directories
+					.get(f.sessionsDir)!
+					.push({ name: encodeURIComponent(alias), isDirectory: false, isSymlink: true });
+				f.directories.set(path.posix.join(f.sessionsDir, encodeURIComponent(alias)), [
+					{ name: SESSION_ID, isDirectory: kind === 'directory', isSymlink: kind === 'dangling' },
+				]);
+				expect(await f.read()).toMatchObject({
+					messages: [],
+					source: { reason: 'native-source-ambiguous' },
+				});
+				expect(remoteFs.readFileRemote).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each([
+			'account',
+			'cwd',
+			'folder',
+			'session',
+			'transcript',
+			'missing-root',
+			'file-root',
+			'missing-pool',
+		])('refuses %s mismatch before content I/O', async (scenario) => {
+			const f = scopedRemote();
+			const key = {
+				account,
+				cwd: PROJECT,
+				folder: f.cwdDir,
+				session: f.session,
+				transcript: f.file,
+				'missing-root': account,
+				'file-root': account,
+				'missing-pool': f.sessionsDir,
+			}[scenario]!;
+			if (scenario.startsWith('missing')) f.identities.delete(key);
+			else
+				f.identities.set(key, {
+					...f.identities.get(key)!,
+					...(scenario === 'file-root'
+						? { kind: 'file' as const }
+						: { canonicalPath: '/remote/other' }),
+				});
+			const result = await f.read();
+			expect(result).toMatchObject({ messages: [], source: { status: 'unavailable' } });
+			expect(result.nativeSessionBinding).toBeUndefined();
+			expect(remoteFs.readFileRemote).not.toHaveBeenCalled();
+			expect(captureException).not.toHaveBeenCalled();
+		});
+
+		it.each(['account', 'pool', 'file', 'duplicate'])(
+			'rechecks changed %s before and after reading',
+			async (scenario) => {
+				for (const duringRead of [false, true]) {
+					vi.clearAllMocks();
+					const f = scopedRemote();
+					const mutate = () => {
+						if (scenario === 'duplicate') {
+							f.directories.get(f.sessionsDir)!.push(...f.directories.get(f.sessionsDir)!);
+						} else {
+							const key =
+								scenario === 'account' ? account : scenario === 'pool' ? f.sessionsDir : f.file;
+							f.identities.set(key, { ...f.identities.get(key)!, inode: '777' });
+						}
+					};
+					if (duringRead) {
+						const read = vi.mocked(remoteFs.readFileRemote).getMockImplementation()!;
+						vi.mocked(remoteFs.readFileRemote).mockImplementation(async (...args) => {
+							const result = await read(...args);
+							mutate();
+							return result;
+						});
+					} else {
+						const stat = vi.mocked(remoteFs.statRemote).getMockImplementation()!;
+						vi.mocked(remoteFs.statRemote).mockImplementation(async (...args) => {
+							const result = await stat(...args);
+							mutate();
+							return result;
+						});
+					}
+					const result = await f.read();
+					expect(result).toMatchObject({
+						messages: [],
+						source: { reason: 'native-source-changed' },
+					});
+					expect(result.nativeSessionBinding).toBeUndefined();
+					expect(remoteFs.readFileRemote).toHaveBeenCalledTimes(duringRead ? 1 : 0);
+				}
+			}
+		);
+
+		it.each([
+			'missing',
+			'wrong-inode',
+			'identity-mismatch',
+			'too-large',
+			'invalid-encoding',
+			'partial',
+		])('keeps receipt separate from %s content availability', async (scenario) => {
+			const f = scopedRemote();
+			const observedIdentity = { ...f.identities.get(f.file)! };
+			if (scenario === 'wrong-inode') observedIdentity.inode = '999';
+			const proven = ['too-large', 'invalid-encoding', 'partial'].includes(scenario);
+			vi.mocked(remoteFs.readFileRemote).mockResolvedValue({
+				success: ['missing', 'wrong-inode', 'partial'].includes(scenario),
+				data: f.files[f.file],
+				observedIdentity: scenario === 'missing' ? undefined : observedIdentity,
+				...(scenario === 'identity-mismatch'
+					? { observedIdentity: undefined, errorCode: 'identity-mismatch' as const }
+					: scenario === 'too-large' || scenario === 'invalid-encoding'
+						? { errorCode: scenario }
+						: { contentChanged: scenario === 'partial' }),
+			});
+			const result = await f.read();
+			expect(result.nativeSessionBinding).toEqual(proven ? binding : undefined);
+			expect(result.source?.status).toBe(scenario === 'partial' ? 'partial' : 'unavailable');
+			expect(result.messages).toHaveLength(scenario === 'partial' ? 3 : 0);
+		});
+	});
 
 	it.each(['summary.json', 'chat_history.jsonl', 'usage.json'])(
 		'discloses remote %s changes or lost comparison reads with fixed stats',
