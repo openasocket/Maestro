@@ -2243,6 +2243,30 @@
 			"continuationOwner": "GT1-04-07E1",
 			"testOwners": ["GT1-04-07ET", "GT1-04-07E1T"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-native-request-correlation": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07e1-native-launch-request-correlation",
+			"sourceCommit": "dc81dc4b9a55ee14439c18c3a604f24f08f83181",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/process-manager/types.ts": "8be7886d7e8cb9d337652aae4a0228d12fe13d448d495376ffb7f57abe47dab8",
+				"src/main/ipc/handlers/process/spawn-types.ts": "5337d8a7bb4f682336f027d137aefb76ddceecfd857f2ce6505ab37fc647c867",
+				"src/main/process-manager/ProcessManager.ts": "46fcfb30524021337ed8e6a7a9fe4b3383241b322fe1796c188f8841034dd875"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"staticReview": "pass",
+			"mainTypeCheck": "pass",
+			"formattingAndLint": "pass",
+			"staticLimitations": "Scoped host prerequisite only; no renderer compiler or tests run. Existing broader RequestInit.dispatcher diagnostic is not repaired or waived.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "Three-file host correlation prerequisite: optional bounded caller token survives existing pre-await config snapshots and successful frozen Grok launch receipts. No token minting, renderer current-turn fence or binding write yet; no ACP desktop routing claim.",
+			"continuationOwner": "GT1-04-07E1A",
+			"testOwners": ["GT1-04-07E1PT", "GT1-04-07ET", "GT1-04-07E1T"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6095,7 +6119,8 @@
 					"GT1-04-07F",
 					"GT1-04-07CQT1A",
 					"GT1-04-07D1",
-					"GT1-04-07E1"
+					"GT1-04-07E1",
+					"GT1-04-07E1A"
 				],
 				"test": [
 					"GT1-04-08",
@@ -6114,7 +6139,8 @@
 					"GT1-04-07D1T",
 					"GT1-04-07D1T1",
 					"GT1-04-07ET",
-					"GT1-04-07E1T"
+					"GT1-04-07E1T",
+					"GT1-04-07E1PT"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -6153,7 +6179,8 @@
 				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation",
 				"phase04RemoteLaunchObservationTestsRef": "phase04-remote-launch-observation-tests",
 				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests",
-				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge"
+				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge",
+				"phase04NativeRequestCorrelationRef": "phase04-native-request-correlation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6197,7 +6224,7 @@
 				{
 					"id": "grok-remote-launch-account-unobserved",
 					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E now delivers captured launch receipts through the desktop bridge; 07E1/07F still own durable consumer persistence/current-turn fencing, with 07ET/07E1T tests unexecuted. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
+					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E now delivers captured launch receipts through the desktop bridge; 07E1/07F still own durable consumer persistence/current-turn fencing, with 07ET/07E1T tests unexecuted. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run. GT1-04-07E1 adds the host request-token echo only; 07E1A now owns the synchronous renderer current-turn baseline and binding persistence, and 07E1PT owns host correlation tests. Neither the renderer fence nor durable write is implemented yet.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -11379,7 +11406,8 @@
 					"GT1-04-07F",
 					"GT1-04-07CQT1A",
 					"GT1-04-07D1",
-					"GT1-04-07E1"
+					"GT1-04-07E1",
+					"GT1-04-07E1A"
 				],
 				"test": [
 					"GT1-04-08",
@@ -11396,7 +11424,8 @@
 					"GT1-04-07D1T",
 					"GT1-04-07D1T1",
 					"GT1-04-07ET",
-					"GT1-04-07E1T"
+					"GT1-04-07E1T",
+					"GT1-04-07E1PT"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -11435,7 +11464,8 @@
 				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation",
 				"phase04RemoteLaunchObservationTestsRef": "phase04-remote-launch-observation-tests",
 				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests",
-				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge"
+				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge",
+				"phase04NativeRequestCorrelationRef": "phase04-native-request-correlation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11479,7 +11509,7 @@
 				{
 					"id": "grok-remote-launch-account-unobserved",
 					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E now delivers captured launch receipts through the desktop bridge; 07E1/07F still own durable consumer persistence/current-turn fencing, with 07ET/07E1T tests unexecuted. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
+					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E now delivers captured launch receipts through the desktop bridge; 07E1/07F still own durable consumer persistence/current-turn fencing, with 07ET/07E1T tests unexecuted. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run. GT1-04-07E1 adds the host request-token echo only; 07E1A now owns the synchronous renderer current-turn baseline and binding persistence, and 07E1PT owns host correlation tests. Neither the renderer fence nor durable write is implemented yet.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -11930,7 +11960,8 @@
 					"GT1-04-07F",
 					"GT1-04-07CQT1A",
 					"GT1-04-07D1",
-					"GT1-04-07E1"
+					"GT1-04-07E1",
+					"GT1-04-07E1A"
 				],
 				"test": [
 					"GT1-04-08",
@@ -11947,7 +11978,8 @@
 					"GT1-04-07D1T",
 					"GT1-04-07D1T1",
 					"GT1-04-07ET",
-					"GT1-04-07E1T"
+					"GT1-04-07E1T",
+					"GT1-04-07E1PT"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
@@ -11986,7 +12018,8 @@
 				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation",
 				"phase04RemoteLaunchObservationTestsRef": "phase04-remote-launch-observation-tests",
 				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests",
-				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge"
+				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge",
+				"phase04NativeRequestCorrelationRef": "phase04-native-request-correlation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12030,7 +12063,7 @@
 				{
 					"id": "grok-remote-launch-account-unobserved",
 					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E now delivers captured launch receipts through the desktop bridge; 07E1/07F still own durable consumer persistence/current-turn fencing, with 07ET/07E1T tests unexecuted. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
+					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E now delivers captured launch receipts through the desktop bridge; 07E1/07F still own durable consumer persistence/current-turn fencing, with 07ET/07E1T tests unexecuted. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run. GT1-04-07E1 adds the host request-token echo only; 07E1A now owns the synchronous renderer current-turn baseline and binding persistence, and 07E1PT owns host correlation tests. Neither the renderer fence nor durable write is implemented yet.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -16550,7 +16583,8 @@
 					"GT1-04-07F",
 					"GT1-04-07CQT1A",
 					"GT1-04-07D1",
-					"GT1-04-07E1"
+					"GT1-04-07E1",
+					"GT1-04-07E1A"
 				],
 				"test": [
 					"GT1-04-08",
@@ -16569,7 +16603,8 @@
 					"GT1-04-07D1T",
 					"GT1-04-07D1T1",
 					"GT1-04-07ET",
-					"GT1-04-07E1T"
+					"GT1-04-07E1T",
+					"GT1-04-07E1PT"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -16608,7 +16643,8 @@
 				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation",
 				"phase04RemoteLaunchObservationTestsRef": "phase04-remote-launch-observation-tests",
 				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests",
-				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge"
+				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge",
+				"phase04NativeRequestCorrelationRef": "phase04-native-request-correlation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16652,7 +16688,7 @@
 				{
 					"id": "grok-remote-launch-account-unobserved",
 					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E now delivers captured launch receipts through the desktop bridge; 07E1/07F still own durable consumer persistence/current-turn fencing, with 07ET/07E1T tests unexecuted. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
+					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E now delivers captured launch receipts through the desktop bridge; 07E1/07F still own durable consumer persistence/current-turn fencing, with 07ET/07E1T tests unexecuted. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run. GT1-04-07E1 adds the host request-token echo only; 07E1A now owns the synchronous renderer current-turn baseline and binding persistence, and 07E1PT owns host correlation tests. Neither the renderer fence nor durable write is implemented yet.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],

@@ -532,6 +532,13 @@ export interface NativeSessionLaunch {
 	readonly processGeneration: number;
 	readonly tabId?: string;
 	readonly requestedNativeSessionId?: string;
+	/**
+	 * Echo of the caller's per-spawn correlation token, when valid. Identifies
+	 * the renderer attempt before a native ID arrives; not native ownership or
+	 * managed authority. Absent on legacy/headless callers, never synthesized.
+	 * Valid tokens contain 1-128 ASCII letters, digits, underscores or hyphens.
+	 */
+	readonly nativeSessionRequestId?: string;
 }
 
 export interface ProcessConfig {
@@ -630,6 +637,8 @@ export interface ProcessConfig {
 	 *  never runs and the renderer falls back to streamed commentary instead
 	 *  of the authoritative final answer / context window snapshot. */
 	agentSessionId?: string;
+	/** Caller correlation only; see NativeSessionLaunch.nativeSessionRequestId. */
+	nativeSessionRequestId?: NativeSessionLaunch['nativeSessionRequestId'];
 	/** Host-observed scope, never accepted from an IPC payload. */
 	nativeSessionScope?: NativeSessionLaunchScope;
 	/** Retained owner/tab binding that a Grok resume must match. */

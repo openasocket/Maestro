@@ -2,6 +2,7 @@ import type { AdditionalDirectory } from '../../../../shared/types';
 import type { CodexTransport } from '../../../../shared/codexTransport';
 import type { AutoRunSpawnLineage } from '../../../../shared/maestro-lib/autorun/attribution';
 import type { ManagedDelegationContext } from '../../../../shared/maestro-lib/managed/delegation';
+import type { NativeSessionLaunch } from '../../../process-manager/types';
 
 /**
  * IPC payload for `process:spawn`.
@@ -22,6 +23,8 @@ export interface SpawnProcessConfig {
 	sendPromptViaStdinRaw?: boolean; // If true, send prompt via stdin as raw text (for OpenCode, Codex, etc.)
 	// Agent-specific spawn options (used to build args via agent config)
 	agentSessionId?: string; // For session resume
+	/** Caller correlation only; does not supply a native ID, scope or admission. */
+	nativeSessionRequestId?: NativeSessionLaunch['nativeSessionRequestId'];
 	readOnlyMode?: boolean; // For read-only/plan mode
 	modelId?: string; // For model selection
 	yoloMode?: boolean; // For YOLO/full-access mode (bypasses confirmations)

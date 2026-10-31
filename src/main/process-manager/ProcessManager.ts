@@ -445,6 +445,18 @@ export class ProcessManager extends EventEmitter {
 	 * creation attaches to a live handle; generic terminal spawn can still replace it.
 	 */
 	spawn(config: ProcessConfig): SpawnResult {
+		// Capture before admission/spawner callbacks can mutate the caller's record.
+		// This is an opaque correlation echo, never an ownership/admission claim.
+		// Invalid untyped inputs remain absent rather than manufacturing a token.
+		const requestId = config.nativeSessionRequestId;
+		const nativeSessionRequestId =
+			config.toolType === 'grok' &&
+			typeof requestId === 'string' &&
+			requestId.length > 0 &&
+			requestId.length <= 128 &&
+			!/[^A-Za-z0-9_-]/.test(requestId)
+				? requestId
+				: undefined;
 		const existing = this.processes.get(config.sessionId);
 		if (
 			config.reuseTerminal &&
@@ -807,6 +819,7 @@ export class ProcessManager extends EventEmitter {
 					processGeneration: proc.spawnGeneration,
 					tabId: config.tabId,
 					requestedNativeSessionId: config.agentSessionId,
+					...(nativeSessionRequestId === undefined ? {} : { nativeSessionRequestId }),
 				});
 				proc.nativeSessionLaunch = captured;
 				this.nativeSessionLaunches.set(config.sessionId, captured);
