@@ -1327,7 +1327,7 @@ async function handleProcessSpawnImpl(
 			: undefined;
 	const nativeObservation =
 		config.toolType === 'grok'
-			? await observeGrokLaunchScope(config, sshRemoteUsed, grokLaunchEnv!, deps)
+			? await observeGrokLaunchScope(config, sshRemoteUsed, grokLaunchEnv!, finalArgs, deps)
 			: undefined;
 	const nativeSessionScope = nativeObservation?.scope;
 	const beforeSpawn =
@@ -1738,6 +1738,7 @@ async function observeGrokLaunchScope(
 	config: SpawnProcessConfig,
 	remote: SshRemoteConfig | null,
 	env: NodeJS.ProcessEnv,
+	args: readonly string[],
 	deps: Pick<SpawnHandlerDependencies, 'remoteQualifier'>
 ): Promise<{ scope: NativeSessionLaunchScope; recheck?: () => boolean | Promise<boolean> }> {
 	const unknown = { scope: { version: 1, state: 'unknown', reason: 'unobserved' } } as const;
@@ -1746,15 +1747,17 @@ async function observeGrokLaunchScope(
 	let account: string;
 	let identity: string;
 	if (remote) {
-		if (!path.posix.isAbsolute(config.cwd)) return unknown;
-		// SSH exports literal values after cd. The directory observer runs in the
-		// login environment, so it cannot prove inherited/default or tilde roots.
-		const accountDir = resolveAgentAccountDir(
-			{ toolType: 'grok', sshRemote: true, customEnvVars: { GROK_HOME: env.GROK_HOME ?? '' } },
-			{ homeDir: '' }
-		);
-		if (!accountDir || accountDir !== env.GROK_HOME || !path.posix.isAbsolute(accountDir))
-			return unknown;
+		// The selectors have already passed grokLaunchArgsProblem. Observe the
+		// native argument separately from the shell cd: relative/tilde CLI values
+		// are literal and can select a different directory after that first cd.
+		const cwdIndex = args.findIndex((arg) => arg === '--cwd' || arg.startsWith('--cwd='));
+		const nativeCwd =
+			cwdIndex < 0
+				? undefined
+				: args[cwdIndex] === '--cwd'
+					? args[cwdIndex + 1]
+					: args[cwdIndex].slice('--cwd='.length);
+		const observe = () => observePathRemote(config.cwd, remote, undefined, { env, nativeCwd });
 		const qualify = async () => {
 			const target = await deps.remoteQualifier?.()?.qualifyResolved(structuredClone(remote));
 			return target?.kind === 'remote' && canonicalJson(target.remote) === canonicalJson(remote)
@@ -1763,35 +1766,27 @@ async function observeGrokLaunchScope(
 		};
 		const endpoint = await qualify();
 		if (!endpoint || !endpoint.trim() || /[\x00-\x1f\x7f]/.test(endpoint)) return unknown;
-		const paths = await Promise.all(
-			[config.cwd, accountDir].map((value) => observePathRemote(value, remote))
-		);
-		for (const observed of paths) {
-			if (!observed.success || !observed.data) {
-				if (!observed.errorCode && !isExpectedRemoteError(observed.error))
-					throw new Error(observed.error || 'Grok launch path observation failed.');
-				return unknown;
-			}
-			if (observed.data.kind !== 'directory') return unknown;
+		const observed = await observe();
+		if (!observed.success || !observed.data) {
+			if (!observed.errorCode && !isExpectedRemoteError(observed.error))
+				throw new Error(observed.error || 'Grok launch path observation failed.');
+			return unknown;
 		}
 		if ((await qualify()) !== endpoint) return unknown;
-		cwd = paths[0].data!.canonicalPath;
-		account = paths[1].data!.canonicalPath;
+		cwd = observed.data.cwd.canonicalPath;
+		account = observed.data.account.canonicalPath;
+		// The shared binding/account wire normalizes these spellings. Do not label
+		// a literal native directory as a different account to make it representable.
+		if (cwd !== cwd.trim() || account !== account.trim() || /\\/.test(cwd + account))
+			return unknown;
 		identity = endpoint;
 		recheck = async () => {
 			if ((await qualify()) !== endpoint) return false;
-			const next = await Promise.all(
-				[config.cwd, accountDir].map((value) => observePathRemote(value, remote))
-			);
-			for (const observed of next) {
-				if (!observed.success && !observed.errorCode && !isExpectedRemoteError(observed.error))
-					throw new Error(observed.error || 'Grok launch path observation failed.');
-			}
+			const next = await observe();
+			if (!next.success && !next.errorCode && !isExpectedRemoteError(next.error))
+				throw new Error(next.error || 'Grok launch path observation failed.');
 			if ((await qualify()) !== endpoint) return false;
-			return next.every(
-				(observed, index) =>
-					observed.success && canonicalJson(observed.data) === canonicalJson(paths[index].data)
-			);
+			return next.success && canonicalJson(next.data) === canonicalJson(observed.data);
 		};
 	} else {
 		const homeDir = (isWindows() ? env.USERPROFILE : env.HOME) || os.homedir();

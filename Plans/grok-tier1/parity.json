@@ -2164,6 +2164,23 @@
 			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
 			"scope": "Immutable launch account/cwd/qualified endpoint capture; exact persisted-tab and native CLI selector admission; configuration, physical path and endpoint rechecks; generation-scoped scope retained through final output after kill. Remote inherited/default/relative scope remains unknown pending 07D1.",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-remote-launch-account-observation": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07d1-remote-launch-account-observation",
+			"sourceCommit": "d75a4f5506d33365a0fae0b7d9069851fc759c76",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/ipc/handlers/process/handle-spawn.ts": "64344d1abce4633c62c494de9acb3a0c6e433a51c3c8012d4970a0cfcee31281",
+				"src/main/utils/remote-fs.ts": "4980ea2a95a2db119da38f02be01bb180ec552e427370c5fb57af734a552e0b0"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "Bounded remote login HOME/GROK_HOME observation plus literal selected exports; distinct shell/process/headless cwd interpretation; canonical account and directory identities rechecked around endpoint qualification and admission. No account contents or credentials read.",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -5996,7 +6013,8 @@
 				"src/main/index.ts",
 				"src/main/ipc/handlers/process/handle-spawn.ts",
 				"src/main/process-manager/ProcessManager.ts",
-				"src/main/process-manager/types.ts"
+				"src/main/process-manager/types.ts",
+				"src/main/utils/remote-fs.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6062,7 +6080,8 @@
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
 				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
-				"phase04LaunchOwnershipRef": "phase04-launch-ownership"
+				"phase04LaunchOwnershipRef": "phase04-launch-ownership",
+				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6105,8 +6124,8 @@
 				},
 				{
 					"id": "grok-remote-launch-account-unobserved",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-07D captures local and explicit absolute qualified SSH launch scope and refuses unknown/mismatched resumes. GT1-04-07D1 must prove remote inherited/default/relative account environment and native cwd interpretation; 07E/07F deliver and persist IDs; 07D1T/08 author tests and 13 executes them. Unqualified standalone endpoints remain unknown.",
+					"code": "verification-and-propagation-pending",
+					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. 07D1T/08 author inert regressions and 13 executes them; 07E/07F deliver and persist native IDs. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -11270,7 +11289,8 @@
 				"src/shared/maestro-lib/run/session.ts",
 				"src/main/ipc/handlers/process/handle-spawn.ts",
 				"src/main/process-manager/ProcessManager.ts",
-				"src/main/process-manager/types.ts"
+				"src/main/process-manager/types.ts",
+				"src/main/utils/remote-fs.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -11332,7 +11352,8 @@
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
 				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
-				"phase04LaunchOwnershipRef": "phase04-launch-ownership"
+				"phase04LaunchOwnershipRef": "phase04-launch-ownership",
+				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11375,8 +11396,8 @@
 				},
 				{
 					"id": "grok-remote-launch-account-unobserved",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-07D captures local and explicit absolute qualified SSH launch scope and refuses unknown/mismatched resumes. GT1-04-07D1 must prove remote inherited/default/relative account environment and native cwd interpretation; 07E/07F deliver and persist IDs; 07D1T/08 author tests and 13 executes them. Unqualified standalone endpoints remain unknown.",
+					"code": "verification-and-propagation-pending",
+					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. 07D1T/08 author inert regressions and 13 executes them; 07E/07F deliver and persist native IDs. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -11809,7 +11830,8 @@
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
 				"src/main/ipc/handlers/process/handle-spawn.ts",
 				"src/main/process-manager/ProcessManager.ts",
-				"src/main/process-manager/types.ts"
+				"src/main/process-manager/types.ts",
+				"src/main/utils/remote-fs.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -11871,7 +11893,8 @@
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
 				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
-				"phase04LaunchOwnershipRef": "phase04-launch-ownership"
+				"phase04LaunchOwnershipRef": "phase04-launch-ownership",
+				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11914,8 +11937,8 @@
 				},
 				{
 					"id": "grok-remote-launch-account-unobserved",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-07D captures local and explicit absolute qualified SSH launch scope and refuses unknown/mismatched resumes. GT1-04-07D1 must prove remote inherited/default/relative account environment and native cwd interpretation; 07E/07F deliver and persist IDs; 07D1T/08 author tests and 13 executes them. Unqualified standalone endpoints remain unknown.",
+					"code": "verification-and-propagation-pending",
+					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. 07D1T/08 author inert regressions and 13 executes them; 07E/07F deliver and persist native IDs. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -16415,7 +16438,8 @@
 				"src/main/index.ts",
 				"src/main/ipc/handlers/process/handle-spawn.ts",
 				"src/main/process-manager/ProcessManager.ts",
-				"src/main/process-manager/types.ts"
+				"src/main/process-manager/types.ts",
+				"src/main/utils/remote-fs.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -16481,7 +16505,8 @@
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
 				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
-				"phase04LaunchOwnershipRef": "phase04-launch-ownership"
+				"phase04LaunchOwnershipRef": "phase04-launch-ownership",
+				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16524,8 +16549,8 @@
 				},
 				{
 					"id": "grok-remote-launch-account-unobserved",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-07D captures local and explicit absolute qualified SSH launch scope and refuses unknown/mismatched resumes. GT1-04-07D1 must prove remote inherited/default/relative account environment and native cwd interpretation; 07E/07F deliver and persist IDs; 07D1T/08 author tests and 13 executes them. Unqualified standalone endpoints remain unknown.",
+					"code": "verification-and-propagation-pending",
+					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. 07D1T/08 author inert regressions and 13 executes them; 07E/07F deliver and persist native IDs. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],

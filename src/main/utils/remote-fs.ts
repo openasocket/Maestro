@@ -628,6 +628,16 @@ export interface RemotePathIdentity {
 	kind: 'file' | 'directory';
 }
 
+/** Private launch receipt: path metadata only, never credentials or native content. */
+export interface RemoteGrokLaunchIdentity {
+	launchCwd: RemotePathIdentity;
+	processCwd: RemotePathIdentity;
+	cwd: RemotePathIdentity;
+	account: RemotePathIdentity;
+	inherited: { HOME: string | null; GROK_HOME: string | null };
+	effective: { HOME: string | null; GROK_HOME: string | null };
+}
+
 // Python's descriptor APIs work on macOS and Linux without relying on /proc or
 // platform-specific stat flags. Hosts without Python 3 cannot supply this proof.
 // Isolated/no-site/no-bytecode mode avoids user modules and import cache writes.
@@ -644,9 +654,44 @@ def identity(p):
  return dict(canonicalPath=c, device=str(s.st_dev), inode=str(s.st_ino), kind=kind)
 def check(p, expected):
  if identity(p) != expected: raise Changed()
+def grok_launch(options):
+ # Match the pinned headless startup: shell cd, literal exports, native
+ # apply_cwd, then headless canonicalize(--cwd) without another chdir.
+ inherited = {key: os.environ.get(key) for key in ('HOME', 'GROK_HOME')}
+ launch = identity('.')
+ effective = dict(inherited, **options['env'])
+ native_cwd = options.get('nativeCwd')
+ process_path = os.path.join(launch['canonicalPath'], native_cwd) if native_cwd is not None else launch['canonicalPath']
+ if native_cwd is not None: os.chdir(native_cwd)
+ process_cwd = identity('.')
+ cwd = identity(native_cwd if native_cwd is not None else '.')
+ root = effective['GROK_HOME']
+ home_identity = None
+ if not root:
+  home = effective['HOME']
+  if not home:
+   import pwd
+   try: home = pwd.getpwuid(os.getuid()).pw_dir
+   except KeyError: raise ValueError('Remote home unavailable')
+  # Native xai-dirs canonicalizes HOME, then appends .grok; empty passwd
+  # home is a relative fallback. Never expand a literal tilde in env/args.
+  home_identity = identity(home) if home else None
+  root = os.path.join(home_identity['canonicalPath'] if home_identity else '.', '.grok')
+ account = identity(root)
+ if any(item['kind'] != 'directory' for item in (launch, process_cwd, cwd, account)):
+  raise ValueError('Remote launch path is not a directory')
+ check('.', process_cwd)
+ check(process_path, process_cwd)
+ check(native_cwd if native_cwd is not None else '.', cwd)
+ check(root, account)
+ if home_identity: check(home, home_identity)
+ print(json.dumps(dict(launchCwd=launch, processCwd=process_cwd, cwd=cwd,
+  account=account, inherited=inherited, effective=effective), ensure_ascii=True))
 try:
  p = sys.argv[1]
- if len(sys.argv) == 2:
+ if len(sys.argv) == 3 and p == '--grok-launch':
+  grok_launch(json.loads(sys.argv[2]))
+ elif len(sys.argv) == 2:
   print(json.dumps(identity(p), ensure_ascii=True))
  else:
   limit = int(sys.argv[2])
@@ -705,11 +750,23 @@ function isRemotePathIdentity(value: unknown): value is RemotePathIdentity {
 }
 
 /** Observe physical targets with the same admission, timeout and retry bounds as other reads. */
+export function observePathRemote(
+	filePath: string,
+	sshRemote: SshRemoteConfig,
+	deps?: RemoteFsDeps
+): Promise<RemoteFsResult<RemotePathIdentity>>;
+export function observePathRemote(
+	filePath: string,
+	sshRemote: SshRemoteConfig,
+	deps: RemoteFsDeps | undefined,
+	grokLaunch: { env: NodeJS.ProcessEnv; nativeCwd?: string }
+): Promise<RemoteFsResult<RemoteGrokLaunchIdentity>>;
 export async function observePathRemote(
 	filePath: string,
 	sshRemote: SshRemoteConfig,
-	deps: RemoteFsDeps = defaultDeps
-): Promise<RemoteFsResult<RemotePathIdentity>> {
+	deps: RemoteFsDeps = defaultDeps,
+	grokLaunch?: { env: NodeJS.ProcessEnv; nativeCwd?: string }
+): Promise<RemoteFsResult<RemotePathIdentity | RemoteGrokLaunchIdentity>> {
 	if (
 		typeof filePath !== 'string' ||
 		!filePath ||
@@ -718,16 +775,65 @@ export async function observePathRemote(
 	) {
 		return { success: false, errorCode: 'identity-unavailable', error: 'Invalid remote path' };
 	}
+	let command = `python3 -I -S -B -c ${shellEscape(REMOTE_IDENTITY_SCRIPT)} ${shellEscapeRemotePath(filePath)}`;
+	if (grokLaunch) {
+		// Only these two keys affect native account selection. Do not transmit or
+		// echo the rest of the launch environment (which can contain credentials).
+		const env = Object.fromEntries(
+			['HOME', 'GROK_HOME']
+				.filter((key) => grokLaunch.env[key] !== undefined)
+				.map((key) => [key, grokLaunch.env[key]])
+		);
+		if (
+			[...Object.values(env), grokLaunch.nativeCwd].some(
+				(value) =>
+					value !== undefined &&
+					(typeof value !== 'string' || value.length > 16384 || /[\x00-\x1f\x7f]/.test(value))
+			)
+		) {
+			return { success: false, errorCode: 'identity-unavailable', error: 'Invalid launch path' };
+		}
+		const options = JSON.stringify({ env, nativeCwd: grokLaunch.nativeCwd });
+		// Match the spawn wrapper's bash and cd BEFORE literal exports. No local
+		// home expansion, shell evaluation of env values, or provider execution.
+		const script = `cd ${shellEscapeRemotePath(filePath)} || exit 70; exec python3 -I -S -B -c ${shellEscape(REMOTE_IDENTITY_SCRIPT)} --grok-launch ${shellEscape(options)}`;
+		command = `/bin/bash --norc --noprofile -c ${shellEscape(script)}`;
+	}
 	const result = await execRemoteCommand(
 		sshRemote,
-		`python3 -I -S -B -c ${shellEscape(REMOTE_IDENTITY_SCRIPT)} ${shellEscapeRemotePath(filePath)}`,
-		read('observePath', filePath),
+		command,
+		read(grokLaunch ? 'observeGrokLaunch' : 'observePath', filePath),
 		deps
 	);
 	if (result.exitCode === 0 && result.stdout.length <= 100000) {
 		try {
 			const observed: unknown = JSON.parse(result.stdout);
-			if (isRemotePathIdentity(observed)) return { success: true, data: observed };
+			if (!grokLaunch && isRemotePathIdentity(observed)) return { success: true, data: observed };
+			if (grokLaunch && observed && typeof observed === 'object') {
+				const launch = observed as RemoteGrokLaunchIdentity;
+				if (
+					Object.keys(launch).length === 6 &&
+					[launch.launchCwd, launch.processCwd, launch.cwd, launch.account].every(
+						(value) => isRemotePathIdentity(value) && value.kind === 'directory'
+					) &&
+					[launch.inherited, launch.effective].every(
+						(env) =>
+							env &&
+							typeof env === 'object' &&
+							Object.keys(env).length === 2 &&
+							(['HOME', 'GROK_HOME'] as const).every((key) => {
+								const value = env[key];
+								return (
+									value === null ||
+									(typeof value === 'string' &&
+										value.length <= 16384 &&
+										!/[\x00-\x1f\x7f]/.test(value))
+								);
+							})
+					)
+				)
+					return { success: true, data: launch };
+			}
 		} catch {
 			/* An unsupported/malformed observer cannot establish ownership. */
 		}
