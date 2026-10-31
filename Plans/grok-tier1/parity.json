@@ -3327,7 +3327,8 @@
 					"GT1-03-05C",
 					"GT1-03-05C1",
 					"GT1-03-05E",
-					"GT1-03-09A"
+					"GT1-03-09A",
+					"GT1-03-11C"
 				],
 				"test": [
 					"GT1-03-02",
@@ -3452,6 +3453,12 @@
 					"id": "acp-turn-consumers:P09",
 					"code": "implementation-and-verification-pending",
 					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"affectedRows": ["P09"]
+				},
+				{
+					"id": "native-parser-followup:P09",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C must share the existing lossless tick lexer and wire native raw decoding. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
 					"affectedRows": ["P09"]
 				}
 			],
@@ -3644,7 +3651,8 @@
 					"GT1-03-05C",
 					"GT1-03-05C1",
 					"GT1-03-05E",
-					"GT1-03-09A"
+					"GT1-03-09A",
+					"GT1-03-11C"
 				],
 				"test": [
 					"GT1-03-02",
@@ -3769,6 +3777,12 @@
 					"code": "implementation-and-verification-pending",
 					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P10"]
+				},
+				{
+					"id": "native-parser-followup:P10",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C must share the existing lossless tick lexer and wire native raw decoding. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"affectedRows": ["P10"]
 				}
 			],
 			"phase": "03",
@@ -3862,7 +3876,8 @@
 					"GT1-03-05C",
 					"GT1-03-05C1",
 					"GT1-03-05E",
-					"GT1-03-09A"
+					"GT1-03-09A",
+					"GT1-03-11C"
 				],
 				"test": [
 					"GT1-03-06",
@@ -3956,6 +3971,12 @@
 					"code": "implementation-and-verification-pending",
 					"affectedRows": ["P11"],
 					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted."
+				},
+				{
+					"id": "native-parser-followup:P11",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C must share the existing lossless tick lexer and wire native raw decoding. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"affectedRows": ["P11"]
 				}
 			],
 			"phase": "03",
@@ -4105,7 +4126,8 @@
 					"GT1-03-05C",
 					"GT1-03-05C1",
 					"GT1-03-05E",
-					"GT1-03-09A"
+					"GT1-03-09A",
+					"GT1-03-11C"
 				],
 				"test": [
 					"GT1-03-02",
@@ -4202,6 +4224,12 @@
 					"id": "acp-turn-consumers:P12",
 					"code": "implementation-and-verification-pending",
 					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"affectedRows": ["P12"]
+				},
+				{
+					"id": "native-parser-followup:P12",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C must share the existing lossless tick lexer and wire native raw decoding. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
 					"affectedRows": ["P12"]
 				}
 			],
@@ -10681,7 +10709,8 @@
 					"GT1-03-05C",
 					"GT1-03-05C1",
 					"GT1-03-05E",
-					"GT1-03-09A"
+					"GT1-03-09A",
+					"GT1-03-11C"
 				],
 				"test": [
 					"GT1-03-06",
@@ -10773,6 +10802,12 @@
 					"code": "implementation-and-verification-pending",
 					"affectedRows": ["C-supportsCostTracking"],
 					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted."
+				},
+				{
+					"id": "native-parser-followup:C-supportsCostTracking",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C must share the existing lossless tick lexer and wire native raw decoding. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"affectedRows": ["C-supportsCostTracking"]
 				}
 			],
 			"field": "supportsCostTracking",
@@ -10853,7 +10888,8 @@
 					"GT1-03-05C",
 					"GT1-03-05C1",
 					"GT1-03-05E",
-					"GT1-03-09A"
+					"GT1-03-09A",
+					"GT1-03-11C"
 				],
 				"test": [
 					"GT1-03-06",
@@ -10945,6 +10981,12 @@
 					"code": "implementation-and-verification-pending",
 					"affectedRows": ["C-supportsUsageStats"],
 					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted."
+				},
+				{
+					"id": "native-parser-followup:C-supportsUsageStats",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C must share the existing lossless tick lexer and wire native raw decoding. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"affectedRows": ["C-supportsUsageStats"]
 				}
 			],
 			"field": "supportsUsageStats",
@@ -11394,7 +11436,8 @@
 					"GT1-03-05A",
 					"GT1-03-05C",
 					"GT1-03-05C1",
-					"GT1-03-05E"
+					"GT1-03-05E",
+					"GT1-03-11C"
 				],
 				"test": ["GT1-03-06", "GT1-03-12", "GT1-11-14B", "GT1-03-05B", "GT1-03-05D", "GT1-03-06C"],
 				"verification": ["GT1-03-13", "GT1-03-14", "GT1-11-14C"],
@@ -11461,6 +11504,12 @@
 					"id": "acp-wire-tick-precision:C-supportsResultMessages",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C authors expanded terminal/ownership/model-cost and unbaselined-process cases (not executed); GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"affectedRows": ["C-supportsResultMessages"]
+				},
+				{
+					"id": "native-parser-followup:C-supportsResultMessages",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C must share the existing lossless tick lexer and wire native raw decoding. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
 					"affectedRows": ["C-supportsResultMessages"]
 				}
 			],
@@ -13294,7 +13343,8 @@
 					"GT1-03-05C",
 					"GT1-03-05C1",
 					"GT1-03-05E",
-					"GT1-03-09A"
+					"GT1-03-09A",
+					"GT1-03-11C"
 				],
 				"test": [
 					"GT1-03-02",
@@ -13379,6 +13429,12 @@
 					"id": "acp-turn-consumers:REG-PARSER",
 					"code": "implementation-and-verification-pending",
 					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"affectedRows": ["REG-PARSER"]
+				},
+				{
+					"id": "native-parser-followup:REG-PARSER",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C must share the existing lossless tick lexer and wire native raw decoding. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
 					"affectedRows": ["REG-PARSER"]
 				}
 			],
@@ -14014,7 +14070,8 @@
 					"GT1-03-05C",
 					"GT1-03-05C1",
 					"GT1-03-05E",
-					"GT1-03-09A"
+					"GT1-03-09A",
+					"GT1-03-11C"
 				],
 				"test": [
 					"GT1-03-06",
@@ -14107,6 +14164,12 @@
 					"code": "implementation-and-verification-pending",
 					"affectedRows": ["REG-USAGE"],
 					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted."
+				},
+				{
+					"id": "native-parser-followup:REG-USAGE",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C must share the existing lossless tick lexer and wire native raw decoding. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"affectedRows": ["REG-USAGE"]
 				}
 			],
 			"branchAuditRefs": ["B12", "B32", "B35", "B38", "B42", "B43"]
