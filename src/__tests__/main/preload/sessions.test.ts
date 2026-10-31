@@ -232,6 +232,93 @@ describe('Sessions Preload API', () => {
 			});
 		});
 
+		describe('Grok history scope forwarding', () => {
+			it.each([undefined, 'ssh-remote-1'])(
+				'forwards owner, host %s and pagination through every read API',
+				async (sshRemoteId) => {
+					const ownerAgentId = 'maestro-grok-owner';
+					const listOptions = { ownerAgentId, cursor: 'page-2', limit: 20 };
+					const readOptions = { ownerAgentId, offset: 3, limit: 10, includeNativeRecords: true };
+					mockInvoke.mockResolvedValue(null);
+
+					await api.list('grok', '/project', sshRemoteId, ownerAgentId);
+					await api.listPaginated('grok', '/project', listOptions, sshRemoteId);
+					await api.read('grok', '/project', 'native-collision', readOptions, sshRemoteId);
+					await api.search('grok', '/project', 'needle', 'all', sshRemoteId, ownerAgentId);
+					await api.getPath('grok', '/project', 'native-collision', sshRemoteId, ownerAgentId);
+
+					expect(mockInvoke.mock.calls).toEqual([
+						['agentSessions:list', 'grok', '/project', sshRemoteId, ownerAgentId],
+						['agentSessions:listPaginated', 'grok', '/project', listOptions, sshRemoteId],
+						[
+							'agentSessions:read',
+							'grok',
+							'/project',
+							'native-collision',
+							readOptions,
+							sshRemoteId,
+						],
+						[
+							'agentSessions:search',
+							'grok',
+							'/project',
+							'needle',
+							'all',
+							sshRemoteId,
+							ownerAgentId,
+						],
+						[
+							'agentSessions:getPath',
+							'grok',
+							'/project',
+							'native-collision',
+							sshRemoteId,
+							ownerAgentId,
+						],
+					]);
+				}
+			);
+
+			it.each(['partial', 'unavailable'] as const)(
+				'preserves %s source provenance and explicit account read options',
+				async (status) => {
+					const result = {
+						messages: [],
+						total: 0,
+						hasMore: false,
+						source: { provider: 'grok', status, reason: 'invalid-encoding' },
+					};
+					const options = { configDir: '~/selected account', includeNativeRecords: true };
+					mockInvoke.mockResolvedValue(result);
+
+					await expect(api.read('grok', '/project', 'native-id', options, 'ssh-1')).resolves.toBe(
+						result
+					);
+					expect(mockInvoke).toHaveBeenCalledExactlyOnceWith(
+						'agentSessions:read',
+						'grok',
+						'/project',
+						'native-id',
+						options,
+						'ssh-1'
+					);
+				}
+			);
+
+			it('propagates scope rejection without retrying an unscoped read', async () => {
+				const error = new Error('Selected SSH remote is unavailable');
+				mockInvoke.mockRejectedValueOnce(error);
+
+				await expect(
+					api.read('grok', '/project', 'native-id', {
+						ownerAgentId: 'missing-owner',
+						includeNativeRecords: true,
+					})
+				).rejects.toBe(error);
+				expect(mockInvoke).toHaveBeenCalledTimes(1);
+			});
+		});
+
 		describe('deleteMessagePair', () => {
 			it('should invoke agentSessions:deleteMessagePair', async () => {
 				mockInvoke.mockResolvedValue({ success: true });

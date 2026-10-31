@@ -21,6 +21,14 @@ import {
 import os from 'os';
 import path from 'path';
 import { promises as realFs } from 'fs';
+import { getLiveSessions, getSshRemoteById } from '../../../../main/stores';
+import * as mirrors from '../../../../main/storage/starred-transcript-mirror';
+import { createMockSession } from '../../../helpers/mockSession';
+
+const accountStores = vi.hoisted(() => ({
+	provider: {} as Record<string, string>,
+	global: {} as Record<string, string>,
+}));
 
 // Mock electron's ipcMain
 vi.mock('electron', () => ({
@@ -37,12 +45,24 @@ vi.mock('../../../../main/agents', () => ({
 	getAllSessionStorages: vi.fn(),
 }));
 
-// Mock the stores module. The agentSessions handler now resolves SSH remotes
-// through the canonical store getter; in the absence of a configured remote
-// we want a clean undefined return (matching the prior "no settings store"
-// behavior the tests below assert against), not an "uninitialized" throw.
+// Keep account resolution real, with only its stores replaced by inert inputs.
 vi.mock('../../../../main/stores', () => ({
 	getSshRemoteById: vi.fn().mockReturnValue(undefined),
+	getLiveSessions: vi.fn().mockReturnValue([]),
+}));
+vi.mock('../../../../main/stores/instances', () => ({ isInitialized: () => true }));
+vi.mock('../../../../main/stores/getters', () => ({
+	getAgentConfigsStore: () => ({
+		get: () => ({ grok: { customEnvVars: accountStores.provider } }),
+	}),
+	getSettingsStore: () => ({ get: () => accountStores.global }),
+}));
+vi.mock('../../../../main/storage/starred-transcript-mirror', () => ({
+	restoreStarredTranscript: vi.fn().mockResolvedValue(false),
+	snapshotStarredTranscript: vi.fn(),
+	releaseTranscriptMirror: vi.fn(),
+	releaseSnoozedTranscriptMirror: vi.fn(),
+	listMirroredStarredSessions: vi.fn().mockResolvedValue([]),
 }));
 
 // The global stats scan reads and writes a cache under userData; start cold
@@ -64,11 +84,15 @@ vi.mock('../../../../main/utils/logger', () => ({
 }));
 
 describe('agentSessions IPC handlers', () => {
-	let handlers: Map<string, Function>;
+	let handlers: Map<string, (...args: any[]) => any>;
 
 	beforeEach(() => {
 		// Clear mocks
 		vi.clearAllMocks();
+		vi.mocked(getLiveSessions).mockReset().mockReturnValue([]);
+		vi.mocked(getSshRemoteById).mockReset().mockReturnValue(undefined);
+		accountStores.provider = {};
+		accountStores.global = {};
 
 		// Capture all registered handlers
 		handlers = new Map();
@@ -82,6 +106,8 @@ describe('agentSessions IPC handlers', () => {
 
 	afterEach(() => {
 		handlers.clear();
+		vi.restoreAllMocks();
+		vi.unstubAllEnvs();
 	});
 
 	describe('registration', () => {
@@ -135,7 +161,7 @@ describe('agentSessions IPC handlers', () => {
 			expect(result).toEqual([]);
 		});
 
-		it('should pass sshRemoteId to storage when provided', async () => {
+		it('refuses a missing SSH remote instead of reading local history', async () => {
 			const mockSessions = [{ sessionId: 'session-1', projectPath: '/test' }];
 
 			const mockStorage = {
@@ -148,12 +174,11 @@ describe('agentSessions IPC handlers', () => {
 			);
 
 			const handler = handlers.get('agentSessions:list');
-			// Note: Without settings store, sshConfig will be undefined even if sshRemoteId is passed
-			const result = await handler!({} as any, 'claude-code', '/test', 'ssh-remote-1');
-
-			// Since no settings store is configured, sshConfig should be undefined
-			expect(mockStorage.listSessions).toHaveBeenCalledWith('/test', undefined);
-			expect(result).toEqual(mockSessions);
+			await expect(handler!({} as any, 'claude-code', '/test', 'ssh-remote-1')).rejects.toThrow(
+				/History SSH target unavailable/
+			);
+			expect(mockStorage.listSessions).not.toHaveBeenCalled();
+			expect(mirrors.restoreStarredTranscript).not.toHaveBeenCalled();
 		});
 	});
 
@@ -200,7 +225,7 @@ describe('agentSessions IPC handlers', () => {
 			});
 		});
 
-		it('should pass sshRemoteId to storage when provided', async () => {
+		it('refuses a missing SSH remote instead of reading local history', async () => {
 			const mockResult = {
 				sessions: [{ sessionId: 'session-1' }],
 				hasMore: false,
@@ -218,21 +243,11 @@ describe('agentSessions IPC handlers', () => {
 			);
 
 			const handler = handlers.get('agentSessions:listPaginated');
-			const result = await handler!(
-				{} as any,
-				'claude-code',
-				'/test',
-				{ limit: 10 },
-				'ssh-remote-1'
-			);
-
-			// Since no settings store is configured, sshConfig should be undefined
-			expect(mockStorage.listSessionsPaginated).toHaveBeenCalledWith(
-				'/test',
-				{ limit: 10 },
-				undefined
-			);
-			expect(result).toEqual(mockResult);
+			await expect(
+				handler!({} as any, 'claude-code', '/test', { limit: 10 }, 'ssh-remote-1')
+			).rejects.toThrow(/History SSH target unavailable/);
+			expect(mockStorage.listSessionsPaginated).not.toHaveBeenCalled();
+			expect(mirrors.restoreStarredTranscript).not.toHaveBeenCalled();
 		});
 	});
 
@@ -268,6 +283,11 @@ describe('agentSessions IPC handlers', () => {
 				},
 				undefined
 			);
+			expect(mirrors.restoreStarredTranscript).toHaveBeenCalledExactlyOnceWith({
+				agentId: 'claude-code',
+				projectPath: '/test',
+				sessionId: 'session-1',
+			});
 			expect(result).toEqual(mockResult);
 		});
 
@@ -280,7 +300,7 @@ describe('agentSessions IPC handlers', () => {
 			expect(result).toEqual({ messages: [], total: 0, hasMore: false });
 		});
 
-		it('should pass sshRemoteId to storage when provided', async () => {
+		it('refuses a missing SSH remote instead of reading local history', async () => {
 			const mockResult = {
 				messages: [{ type: 'user', content: 'Hello' }],
 				total: 1,
@@ -297,23 +317,18 @@ describe('agentSessions IPC handlers', () => {
 			);
 
 			const handler = handlers.get('agentSessions:read');
-			const result = await handler!(
-				{} as any,
-				'claude-code',
-				'/test',
-				'session-1',
-				{ offset: 0, limit: 20 },
-				'ssh-remote-1'
-			);
-
-			// Since no settings store is configured, sshConfig should be undefined
-			expect(mockStorage.readSessionMessages).toHaveBeenCalledWith(
-				'/test',
-				'session-1',
-				{ offset: 0, limit: 20 },
-				undefined
-			);
-			expect(result).toEqual(mockResult);
+			await expect(
+				handler!(
+					{} as any,
+					'claude-code',
+					'/test',
+					'session-1',
+					{ offset: 0, limit: 20 },
+					'ssh-remote-1'
+				)
+			).rejects.toThrow(/History SSH target unavailable/);
+			expect(mockStorage.readSessionMessages).not.toHaveBeenCalled();
+			expect(mirrors.restoreStarredTranscript).not.toHaveBeenCalled();
 		});
 	});
 
@@ -353,7 +368,7 @@ describe('agentSessions IPC handlers', () => {
 			expect(result).toEqual([]);
 		});
 
-		it('should pass sshRemoteId to storage when provided', async () => {
+		it('refuses a missing SSH remote instead of reading local history', async () => {
 			const mockResults = [
 				{
 					sessionId: 'session-1',
@@ -373,18 +388,11 @@ describe('agentSessions IPC handlers', () => {
 			);
 
 			const handler = handlers.get('agentSessions:search');
-			const result = await handler!(
-				{} as any,
-				'claude-code',
-				'/test',
-				'hello',
-				'all',
-				'ssh-remote-1'
-			);
-
-			// Since no settings store is configured, sshConfig should be undefined
-			expect(mockStorage.searchSessions).toHaveBeenCalledWith('/test', 'hello', 'all', undefined);
-			expect(result).toEqual(mockResults);
+			await expect(
+				handler!({} as any, 'claude-code', '/test', 'hello', 'all', 'ssh-remote-1')
+			).rejects.toThrow(/History SSH target unavailable/);
+			expect(mockStorage.searchSessions).not.toHaveBeenCalled();
+			expect(mirrors.restoreStarredTranscript).not.toHaveBeenCalled();
 		});
 	});
 
@@ -413,6 +421,290 @@ describe('agentSessions IPC handlers', () => {
 			const result = await handler!({} as any, 'unknown-agent', '/test', 'session-1');
 
 			expect(result).toBe(null);
+		});
+	});
+
+	describe.each([
+		{ api: 'list', method: 'listSessions', args: [], options: undefined },
+		{
+			api: 'listPaginated',
+			method: 'listSessionsPaginated',
+			args: [],
+			options: { cursor: 'previous', limit: 2 },
+		},
+		{
+			api: 'read',
+			method: 'readSessionMessages',
+			args: ['native-collision'],
+			options: { offset: 1, limit: 2, includeNativeRecords: true },
+		},
+		{ api: 'search', method: 'searchSessions', args: ['needle', 'all'], options: undefined },
+		{ api: 'getPath', method: 'getSessionPath', args: ['native-collision'], options: undefined },
+	] as const)('Grok history scope: $api', ({ api, method, args, options }) => {
+		const home = path.resolve('tmp/grok-history-ipc/home');
+		const remote = {
+			id: 'remote-a',
+			name: 'A',
+			host: 'a.invalid',
+			port: 22,
+			username: 'fixture',
+			privateKeyPath: '',
+			enabled: true,
+		};
+		let owner: ReturnType<typeof getLiveSessions>[number];
+		let storage: Record<string, ReturnType<typeof vi.fn>>;
+		const invoke = (ownerAgentId: unknown = 'owner', sshRemoteId?: unknown) =>
+			handlers.get(`agentSessions:${api}`)!(
+				{},
+				'grok',
+				'/project',
+				...args,
+				...(options ? [{ ...options, ownerAgentId }, sshRemoteId] : [sshRemoteId, ownerAgentId])
+			);
+
+		const expectScope = (configDir?: string, target?: ReturnType<typeof getSshRemoteById>) =>
+			expect(storage[method]).toHaveBeenCalledExactlyOnceWith(
+				'/project',
+				...args,
+				...(options ? [{ ...options, configDir }, target] : [target, configDir])
+			);
+
+		beforeEach(() => {
+			vi.spyOn(os, 'homedir').mockReturnValue(home);
+			vi.stubEnv('GROK_HOME', path.join(home, 'process-account'));
+			owner = { ...createMockSession({ id: 'owner', toolType: 'grok' }) };
+			vi.mocked(getLiveSessions).mockImplementation(() => [owner]);
+			vi.mocked(getSshRemoteById).mockImplementation((id) =>
+				id === remote.id ? remote : undefined
+			);
+			storage = {
+				listSessions: vi.fn().mockResolvedValue([]),
+				listSessionsPaginated: vi
+					.fn()
+					.mockResolvedValue({ sessions: [], totalCount: 0, hasMore: false, nextCursor: null }),
+				readSessionMessages: vi.fn().mockResolvedValue({ messages: [], total: 0, hasMore: false }),
+				searchSessions: vi.fn().mockResolvedValue([]),
+				getSessionPath: vi.fn().mockReturnValue(null),
+			};
+			vi.mocked(agentSessionStorage.getSessionStorage).mockReturnValue(
+				storage as unknown as agentSessionStorage.AgentSessionStorage
+			);
+		});
+
+		afterEach(() => {
+			for (const mirror of Object.values(mirrors)) expect(mirror).not.toHaveBeenCalled();
+		});
+
+		it.each([false, true])(
+			'keeps colliding native IDs in their selected accounts/hosts (SSH=%s)',
+			async (ssh) => {
+				const owners = ['a', 'b'].map((suffix) => ({
+					...owner,
+					id: `owner-${suffix}`,
+					customEnvVars: { GROK_HOME: ssh ? `~/Grok ${suffix}/账户` : path.join(home, suffix) },
+					sessionSshRemoteConfig: ssh ? { enabled: true, remoteId: `remote-${suffix}` } : undefined,
+				}));
+				vi.mocked(getLiveSessions).mockReturnValue(owners);
+				vi.mocked(getSshRemoteById).mockImplementation((id) => ({
+					...remote,
+					id,
+					host: `${id}.invalid`,
+				}));
+				for (const selected of owners) {
+					const configDir = selected.customEnvVars.GROK_HOME;
+					const id = selected.sessionSshRemoteConfig?.remoteId;
+					const target = id ? { ...remote, id, host: `${id}.invalid` } : undefined;
+					const row = { sessionId: 'native-collision', firstMessage: selected.id };
+					const result =
+						api === 'listPaginated'
+							? { sessions: [row], totalCount: 2, hasMore: true, nextCursor: 'next' }
+							: api === 'read'
+								? {
+										messages: [{ type: 'user', content: selected.id }],
+										total: 3,
+										hasMore: true,
+										source: { provider: 'grok', status: 'partial', reason: 'inconsistent' },
+									}
+								: api === 'getPath'
+									? `${configDir}/native-collision`
+									: [row];
+					storage[method].mockReturnValueOnce(result);
+					expect(await invoke(selected.id, target?.id)).toBe(result);
+					expect(storage[method]).toHaveBeenLastCalledWith(
+						'/project',
+						...args,
+						...(options ? [{ ...options, configDir }, target] : [target, configDir])
+					);
+				}
+				expect(storage[method]).toHaveBeenCalledTimes(2);
+			}
+		);
+
+		it.each([
+			['agent wins', { GROK_HOME: '~/agent' }, '~/provider', '~/global', 'agent'],
+			['provider beats global/process', undefined, '~/provider', '~/global', 'provider'],
+			[
+				'session map replaces provider',
+				{ UNRELATED: 'fixture' },
+				'~/provider',
+				'~/global',
+				'global',
+			],
+			['global beats process', undefined, undefined, '~/global', 'global'],
+			['process fallback', undefined, undefined, undefined, 'process-account'],
+			['agent blank unsets lower layers', { GROK_HOME: ' \t' }, '~/provider', '~/global', '.grok'],
+			['provider blank unsets lower layers', undefined, '', '~/global', '.grok'],
+			['global blank unsets process', undefined, undefined, '\t', '.grok'],
+		] as const)('%s', async (_label, custom, provider, global, expected) => {
+			owner.customEnvVars = custom;
+			if (provider !== undefined) accountStores.provider.GROK_HOME = provider;
+			if (global !== undefined) accountStores.global.GROK_HOME = global;
+			await invoke();
+			const configDir = path.join(home, expected);
+			expectScope(configDir);
+		});
+
+		it.each([undefined, ' \t', '~/custom remote'])(
+			'keeps remote home %j independent of local env',
+			async (custom) => {
+				owner.customEnvVars = custom === undefined ? {} : { GROK_HOME: custom };
+				owner.sessionSshRemoteConfig = { enabled: true, remoteId: remote.id };
+				accountStores.global.GROK_HOME = '~/local-global';
+				await invoke();
+				const configDir = custom?.trim() || undefined;
+				expectScope(configDir, remote);
+			}
+		);
+
+		it('does not retry another account when the selected root has no history', async () => {
+			const configDir = path.join(home, 'absent-account');
+			owner.customEnvVars = { GROK_HOME: configDir };
+			const result = await invoke();
+			expect(result).toEqual(
+				api === 'getPath'
+					? null
+					: api === 'read'
+						? { messages: [], total: 0, hasMore: false }
+						: api === 'listPaginated'
+							? { sessions: [], totalCount: 0, hasMore: false, nextCursor: null }
+							: []
+			);
+			expectScope(configDir);
+		});
+
+		it.each([
+			['missing owner', { id: 'other-owner' }, undefined, /owner is unavailable/],
+			['wrong provider', { toolType: 'codex' }, undefined, /different provider/],
+			['missing', { enabled: true, remoteId: 'missing' }, undefined, /remote-not-found/],
+			['disabled', { enabled: true, remoteId: 'remote-a' }, undefined, /remote-disabled/],
+			['unselected', { enabled: true }, undefined, /no-remote-selected/],
+			['conflicting', { enabled: true, remoteId: 'remote-a' }, 'other', /does not match/],
+			['remote for local owner', {}, 'remote-a', /does not match/],
+		] as const)(
+			'refuses %s scope before storage or mirrors',
+			async (label, patch, requested, error) => {
+				if ('enabled' in patch) owner.sessionSshRemoteConfig = patch;
+				else Object.assign(owner, patch);
+				if (label === 'disabled')
+					vi.mocked(getSshRemoteById).mockReturnValue({ ...remote, enabled: false });
+				await expect(invoke('owner', requested)).rejects.toThrow(error);
+				for (const call of Object.values(storage)) expect(call).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each([false, 0, '', [], {}, { enabled: 'true' }, { enabled: 0 }])(
+			'refuses malformed saved SSH config %j',
+			async (config) => {
+				Object.assign(owner, { sessionSshRemoteConfig: config, sshRemoteId: 'remote-a' });
+				await expect(invoke()).rejects.toThrow(/invalid SSH configuration/);
+				for (const call of Object.values(storage)) expect(call).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each([false, 0, '', ' ', 42])(
+			'refuses malformed/unselected saved remote ID %j',
+			async (remoteId) => {
+				Object.assign(owner, { sessionSshRemoteConfig: { enabled: true, remoteId } });
+				await expect(invoke()).rejects.toThrow(/History SSH target unavailable/);
+				for (const call of Object.values(storage)) expect(call).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each([null, false, 0, '', ' \t', 'bad\0id'])(
+			'refuses malformed requested owner/remote %j',
+			async (id) => {
+				await expect(invoke(id)).rejects.toThrow(/Invalid history ownerAgentId/);
+				await expect(invoke('owner', id)).rejects.toThrow(/Invalid history sshRemoteId/);
+				for (const call of Object.values(storage)) expect(call).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each(['legacy', 'configured', 'disabled'] as const)(
+			'resolves %s SSH selection ahead of the observed ID',
+			async (mode) => {
+				owner.sshRemoteId = mode === 'legacy' ? 'remote-a' : 'stale-remote';
+				owner.sessionSshRemoteConfig =
+					mode === 'legacy' ? undefined : { enabled: mode === 'configured', remoteId: 'remote-a' };
+				await invoke();
+				const target = mode === 'disabled' ? undefined : remote;
+				const configDir = target ? undefined : path.join(home, 'process-account');
+				expectScope(configDir, target);
+			}
+		);
+	});
+
+	describe('Grok read provenance and explicit scope', () => {
+		it.each([undefined, '', ' ', '/selected-account'])(
+			'forwards explicit configDir %j and unavailable evidence without restoration',
+			async (configDir) => {
+				const result: agentSessionStorage.SessionMessagesResult = {
+					messages: [],
+					total: 0,
+					hasMore: false,
+					source: { provider: 'grok', status: 'unavailable', reason: 'missing' },
+				};
+				const storage = { readSessionMessages: vi.fn().mockResolvedValue(result) };
+				vi.mocked(agentSessionStorage.getSessionStorage).mockReturnValue(
+					storage as unknown as agentSessionStorage.AgentSessionStorage
+				);
+				const options = { offset: 0, limit: 7, includeNativeRecords: true, configDir };
+				expect(
+					await handlers.get('agentSessions:read')!({}, 'grok', '/project', 'native', options)
+				).toBe(result);
+				expect(storage.readSessionMessages).toHaveBeenCalledExactlyOnceWith(
+					'/project',
+					'native',
+					options,
+					undefined
+				);
+				expect(mirrors.restoreStarredTranscript).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each([
+			['owner', '/override', /cannot override/],
+			['owner', '', /cannot override/],
+			['owner', ' ', /cannot override/],
+			[undefined, null, /Invalid history account directory/],
+			[undefined, false, /Invalid history account directory/],
+			[undefined, 0, /Invalid history account directory/],
+			[undefined, 'bad\0path', /Invalid history account directory/],
+		] as const)('rejects owner %j with account %j', async (ownerAgentId, configDir, error) => {
+			vi.mocked(getLiveSessions).mockReturnValue([
+				{ ...createMockSession({ id: 'owner', toolType: 'grok' }) },
+			]);
+			const storage = { readSessionMessages: vi.fn() };
+			vi.mocked(agentSessionStorage.getSessionStorage).mockReturnValue(
+				storage as unknown as agentSessionStorage.AgentSessionStorage
+			);
+			await expect(
+				handlers.get('agentSessions:read')!({}, 'grok', '/project', 'native', {
+					ownerAgentId,
+					configDir,
+				})
+			).rejects.toThrow(error);
+			expect(storage.readSessionMessages).not.toHaveBeenCalled();
+			expect(mirrors.restoreStarredTranscript).not.toHaveBeenCalled();
 		});
 	});
 
@@ -545,7 +837,7 @@ describe('agentSessions:getGlobalStats discovery', () => {
 	beforeEach(async () => {
 		home = await realFs.mkdtemp(path.join(os.tmpdir(), 'maestro-global-stats-'));
 		vi.spyOn(os, 'homedir').mockReturnValue(home);
-		const handlers = new Map<string, Function>();
+		const handlers = new Map<string, (...args: any[]) => any>();
 		vi.mocked(ipcMain.handle).mockImplementation((channel, handler) => {
 			handlers.set(channel, handler);
 		});
