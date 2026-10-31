@@ -3071,7 +3071,7 @@
 			"affectedRows": ["P04", "P17", "S29"],
 			"verificationTask": "GT1-05-13",
 			"limitations": [
-				"Fourteen authored cases await execution together with GT1-05-02B\u2019s three worktree suites; no behavior or type-check pass is claimed.",
+				"Fourteen authored cases await execution together with GT1-05-02B’s three worktree suites; no behavior or type-check pass is claimed.",
 				"The real shared runner uses a fake provider process and synthetic in-process authority; SSH wrapping and directory observation are fixture ports, not live host or policy qualification.",
 				"Production ACP routing remains phase07; Auto Run ownership remains phase08; exact-binary and platform qualification remains phase11."
 			]
@@ -7888,10 +7888,18 @@
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/renderer/App.tsx",
 				"src/renderer/hooks/wizard/useWizardHandlers.ts",
-				"src/renderer/hooks/input/useInputProcessing.ts"
+				"src/renderer/hooks/input/useInputProcessing.ts",
+				"src/main/agents/grok-skills.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-03", "GT1-05-05", "GT1-08-01"],
+				"implementation": [
+					"GT1-05-03",
+					"GT1-05-05",
+					"GT1-08-01",
+					"GT1-05-03A",
+					"GT1-05-03B",
+					"GT1-07-02"
+				],
 				"test": ["GT1-05-04", "GT1-05-06", "GT1-08-02"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-01-07", "GT1-08-07", "GT1-11-11B"],
 				"live": ["GT1-11-11", "GT1-11-11B"],
@@ -7902,7 +7910,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok has no discovery branch (agents.ts:1994), so native skills/commands are unavailable via this API despite upstream features. Grok is reached through generic queue, but command collisions, argument expansion, selected tab/account and managed dispatch need proof. GT1-05-05/06 ownership is provisional until GT1-01-07 confirms explicit template-consumer coverage. Grok discovery/autocomplete/expansion absent; native command names alone cannot be treated as Maestro verbs."
+				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A/B retain native capture and public API exposure; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -7949,7 +7957,16 @@
 			],
 			"phase": "05",
 			"supportingRows": ["C-supportsSlashCommands", "S02", "S31"],
-			"branchAuditRefs": ["B16", "B17", "B33"]
+			"branchAuditRefs": ["B16", "B17", "B33"],
+			"phase05Discovery": {
+				"task": "GT1-05-03",
+				"evidence": "Plans/grok-tier1/evidence/05.md",
+				"sourceBase": "2a6580df7ddfb83284f55b4f52a447cfb995deb4",
+				"scope": "bounded advertisement consumer and selected-agent IPC only",
+				"deterministic": "not-run",
+				"live": "not-run",
+				"productionDiscovery": "unavailable"
+			}
 		},
 		{
 			"id": "P19",
@@ -13657,10 +13674,18 @@
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/renderer/App.tsx",
-				"src/main/ipc/handlers/agents.ts"
+				"src/main/ipc/handlers/agents.ts",
+				"src/main/agents/grok-skills.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-03", "GT1-05-05", "GT1-11-14A"],
+				"implementation": [
+					"GT1-05-03",
+					"GT1-05-05",
+					"GT1-11-14A",
+					"GT1-05-03A",
+					"GT1-05-03B",
+					"GT1-07-02"
+				],
 				"test": ["GT1-05-04", "GT1-05-06", "GT1-11-14B"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-14C", "GT1-11-11B"],
 				"live": ["GT1-11-11", "GT1-11-11B"],
@@ -13671,7 +13696,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok discovery/autocomplete/expansion absent; native command names alone cannot be treated as Maestro verbs."
+				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A/B retain native capture and public API exposure; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -13732,7 +13757,16 @@
 					"behavior": "Only includes active provider commands when capability allows them; Claude/Codex are true while Antigravity and Grok are false."
 				}
 			],
-			"branchAuditRefs": ["B33"]
+			"branchAuditRefs": ["B33"],
+			"phase05Discovery": {
+				"task": "GT1-05-03",
+				"evidence": "Plans/grok-tier1/evidence/05.md",
+				"sourceBase": "2a6580df7ddfb83284f55b4f52a447cfb995deb4",
+				"scope": "bounded advertisement consumer and selected-agent IPC only",
+				"deterministic": "not-run",
+				"live": "not-run",
+				"productionDiscovery": "unavailable"
+			}
 		},
 		{
 			"id": "C-supportsSessionStorage",
@@ -18864,10 +18898,11 @@
 				"src/main/ipc/handlers/agents.ts",
 				"src/renderer/slashCommands.ts",
 				"src/renderer/hooks/wizard/useWizardHandlers.ts",
-				"src/renderer/hooks/input/useInputProcessing.ts"
+				"src/renderer/hooks/input/useInputProcessing.ts",
+				"src/main/agents/grok-skills.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-03", "GT1-05-05"],
+				"implementation": ["GT1-05-03", "GT1-05-05", "GT1-05-03A", "GT1-05-03B", "GT1-07-02"],
 				"test": ["GT1-05-04", "GT1-05-06"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-11B"],
 				"live": ["GT1-11-11", "GT1-11-12", "GT1-11-11B"],
@@ -18878,7 +18913,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok has no discovery branch (agents.ts:1994), so native skills/commands are unavailable via this API despite upstream features."
+				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A/B retain native capture and public API exposure; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -18923,7 +18958,16 @@
 					"affectedRows": ["S02"]
 				}
 			],
-			"branchAuditRefs": ["B16", "B17", "B33"]
+			"branchAuditRefs": ["B16", "B17", "B33"],
+			"phase05Discovery": {
+				"task": "GT1-05-03",
+				"evidence": "Plans/grok-tier1/evidence/05.md",
+				"sourceBase": "2a6580df7ddfb83284f55b4f52a447cfb995deb4",
+				"scope": "bounded advertisement consumer and selected-agent IPC only",
+				"deterministic": "not-run",
+				"live": "not-run",
+				"productionDiscovery": "unavailable"
+			}
 		},
 		{
 			"id": "S03",

@@ -29,9 +29,15 @@ import {
 } from '../../ssh-remote-manager';
 import type { RemoteAccessRequest } from '../../enterprise/remote';
 import { discoverCodexSkills } from '../../agents/codex-skills';
+import {
+	discoverGrokSlashCommands,
+	type GrokCommandDiscoveryResult,
+	type GrokCommandObservationReader,
+} from '../../agents/grok-skills';
 import { providerProbeManaged, type ProviderProbeManaged } from '../../agents/provider-probe';
 import { DispatchRefusedError } from '../../../shared/maestro-lib/run/start-turn';
 import type { ProcessSpawnAuthorityPort } from '../../process-manager/types';
+import type { AITabRecord } from '../../../shared/maestro-lib/store/records';
 import { checkCustomPath } from '../../agents/path-prober';
 import { CodexRpcRequestError, CodexRpcTransportError } from '../../codex-app-server/rpc-client';
 import { buildChildProcessEnv } from '../../process-manager/utils/envBuilder';
@@ -61,6 +67,7 @@ import {
 import { MaestroSettings } from './persistence';
 import { captureException } from '../../utils/sentry';
 import { parseJsonWithBom } from '../../../shared/jsonUtils';
+import { canonicalJson } from '../../../shared/canonicalJson';
 import {
 	getAllSnapshots as getAllClaudeUsageSnapshots,
 	getRetainedSnapshots as getRetainedClaudeUsageSnapshots,
@@ -551,6 +558,8 @@ export interface AgentsHandlerDependencies {
 /** The slice of the process manager these handlers read: liveness, and the managed port when there is one. */
 export type ProcessManagerForAgents = ProcessLivenessProbe & {
 	managedPort?(): ProcessSpawnAuthorityPort | null;
+	/** Current local ACP advertisements, validated by the admitted process owner. */
+	grokCommandObservation?: GrokCommandObservationReader;
 };
 
 /**
@@ -2150,12 +2159,110 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 		withIpcErrorLogging(
 			handlerOpts('discoverSlashCommands'),
 			async (
-				agentId: string,
+				request: string | AgentDiscoveryRequest,
 				cwd: string,
 				customPath?: string,
 				sshRemoteId?: string,
 				customEnvVars?: Record<string, string>
 			) => {
+				const agentId = typeof request === 'string' ? request : request?.providerId;
+				if (agentId === 'grok') {
+					// The legacy shape cannot identify a native session or carry route binding.
+					// Never feed its consumers ACP-only commands as ordinary headless prompts.
+					if (typeof request === 'string') return null;
+					const unavailable = (): GrokCommandDiscoveryResult => ({
+						status: 'unavailable',
+						commands: [],
+						reason: 'missing-context',
+					});
+					try {
+						const source = request.context;
+						if (source?.kind !== 'agent' || !settingsStore || !sessionsStore) return unavailable();
+						// Read only selected fields, and re-read after the discovery promise settles.
+						// A tab/account/settings edit must invalidate the in-flight answer.
+						const selected = () => {
+							const session = sessionsStore
+								.get('sessions', [])
+								.find((s) => s.id === source.sessionId);
+							if (!session || session.toolType !== 'grok') return undefined;
+							const tab: AITabRecord | undefined = session.aiTabs?.find(
+								(t: AITabRecord) => t.id === session.activeTabId
+							);
+							const provider = agentConfigsStore.get('configs', {}).grok ?? {};
+							const ssh = session.sessionSshRemoteConfig;
+							if (
+								session.sshRemoteId &&
+								ssh &&
+								(!ssh.enabled || ssh.remoteId !== session.sshRemoteId)
+							)
+								return undefined;
+							const context: ModelDiscoveryContext = {
+								target: resolveSshLaunchTarget(
+									createSshRemoteStoreAdapter(settingsStore),
+									ssh ??
+										(session.sshRemoteId
+											? { enabled: true, remoteId: session.sshRemoteId }
+											: undefined)
+								),
+								cwd: session.cwd,
+								customPath: session.customPath || provider.customPath,
+								model: tab?.customModel || session.customModel || provider.model,
+								effort:
+									tab?.customEffort ||
+									session.customEffort ||
+									(provider.reasoningEffort ?? provider.effort),
+								environment: {
+									surface: 'desktop',
+									defaultEnvVars: AGENT_DEFINITIONS.find((agent) => agent.id === 'grok')
+										?.defaultEnvVars,
+									globalShellEnvVars: settingsStore.get('shellEnvVars', {}),
+									agentCustomEnvVars: provider.customEnvVars,
+									sessionCustomEnvVars: session.customEnvVars,
+								},
+							};
+							return { context, tabId: tab?.id, nativeSessionId: tab?.agentSessionId ?? undefined };
+						};
+						const selection = selected();
+						if (!selection || !selection.nativeSessionId) return unavailable();
+						const { context } = selection;
+						if (
+							[context.cwd, context.customPath, context.model, context.effort].some(
+								(value) => value !== undefined && typeof value !== 'string'
+							) ||
+							(source.model !== undefined && source.model !== context.model) ||
+							(source.effort !== undefined && source.effort !== context.effort) ||
+							[
+								context.environment.globalShellEnvVars,
+								context.environment.agentCustomEnvVars,
+								context.environment.sessionCustomEnvVars,
+							].some(
+								(env) =>
+									env !== undefined &&
+									(!env ||
+										typeof env !== 'object' ||
+										Array.isArray(env) ||
+										![Object.prototype, null].includes(Object.getPrototypeOf(env)) ||
+										Object.values(env).some((value) => typeof value !== 'string'))
+							)
+						)
+							return unavailable();
+						const before = canonicalJson(selection);
+						const result = await discoverGrokSlashCommands(
+							context,
+							selection.nativeSessionId,
+							(selection) => deps.getProcessManager?.()?.grokCommandObservation?.(selection),
+							() => probeManagedOf(deps.getProcessManager?.() ?? null)
+						);
+						const current = selected();
+						return current && canonicalJson(current) === before ? result : unavailable();
+					} catch {
+						void captureException(new Error('Selected Grok command discovery failed'), {
+							operation: 'agents:discoverSlashCommands',
+						});
+						return unavailable();
+					}
+				}
+				if (typeof request !== 'string') return null;
 				const agentDetector = requireDependency(getAgentDetector, 'Agent detector');
 				logger.info(`Discovering slash commands for agent: ${agentId} in ${cwd}`, LOG_CONTEXT);
 
