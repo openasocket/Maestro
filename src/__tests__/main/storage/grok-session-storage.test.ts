@@ -1001,6 +1001,95 @@ describe('GrokSessionStorage - SSH remote', () => {
 		} else expect(captureException).not.toHaveBeenCalled();
 	});
 
+	it.each(['chat_history.jsonl', 'summary.json', 'usage.json'] as const)(
+		'keeps remote %s unavailable when the byte transport rejects its encoding',
+		async (name) => {
+			const accountDir = "~/Grok accounts/O'Brien/研究";
+			const { cwdDir, files } = mockRemoteSession({ accountDir });
+			const file = path.posix.join(cwdDir, SESSION_ID, name);
+			// Phase 03's first-turn ledger would supply exact accounting if accepted.
+			const totals = {
+				inputTokens: 100,
+				outputTokens: 20,
+				cachedReadTokens: 30,
+				cacheCreationTokens: 10,
+				reasoningTokens: 5,
+				costUsdTicks: '9007199254740993',
+			};
+			files[path.posix.join(cwdDir, SESSION_ID, 'usage.json')] = JSON.stringify({
+				session: { ...totals, modelUsage: { 'grok-fixture': totals } },
+			}).replace(/"costUsdTicks":"(\d+)"/g, '"costUsdTicks":$1');
+			const read = vi.mocked(remoteFs.readFileRemote).getMockImplementation()!;
+			vi.mocked(remoteFs.readFileRemote).mockImplementation(async (...args) =>
+				args[0] === file
+					? {
+							success: false,
+							errorCode: 'invalid-encoding',
+							error: `File is not valid UTF-8: ${file}`,
+						}
+					: read(...args)
+			);
+			const storage = new GrokSessionStorage(accountDir);
+			const sessions = await storage.listSessions(PROJECT, sshConfig);
+			const messages = await storage.readSessionMessages(PROJECT, SESSION_ID, undefined, sshConfig);
+			const provenance = {
+				provider: 'grok',
+				status: 'unavailable',
+				reason: 'invalid-encoding',
+				sizeBytes: Buffer.byteLength(files[file]),
+				maxBytes: (name === 'chat_history.jsonl' ? 64 : 1) * 1024 * 1024,
+			};
+			if (name === 'chat_history.jsonl') {
+				expect(sessions).toEqual([]);
+				expect(messages).toEqual({ messages: [], total: 0, hasMore: false, source: provenance });
+				const native = await storage.readSessionMessages(
+					PROJECT,
+					SESSION_ID,
+					{ includeNativeRecords: true },
+					sshConfig
+				);
+				expect(native).toEqual(messages);
+			} else {
+				expect(sessions).toHaveLength(1);
+				const [session] = sessions;
+				expect(session).toMatchObject({
+					sessionId: SESSION_ID,
+					projectPath: PROJECT,
+					messageCount: 3,
+				});
+				expect(session.nativeMetadata?.sources?.[name]).toEqual(provenance);
+				expect(messages).toMatchObject({ total: 3, source: { status: 'available' } });
+				if (name === 'summary.json') {
+					expect(session.nativeMetadata?.summaryStatus).toBe('unavailable');
+					expect(session.nativeMetadata?.summary).toBeUndefined();
+					expect(session.sessionName).toBeUndefined();
+					expect(session).toMatchObject({ timestamp: '', modifiedAt: '', durationSeconds: 0 });
+					// Only the failed source is discarded; the independent valid ledger survives.
+					expect(session.accounting?.cost).toEqual({
+						status: 'exact',
+						costUsdTicks: '9007199254740993',
+					});
+				} else {
+					expect(session.nativeMetadata?.summaryStatus).toBe('available');
+					expect(session.accounting).toMatchObject({
+						source: 'none',
+						completeness: 'unknown',
+						cost: { status: 'unknown' },
+						providerSessionId: SESSION_ID,
+					});
+					expect(session.costUsd).toBeUndefined();
+					expect(session.byModel).toBeUndefined();
+					expect(session.accounting?.models).toBeUndefined();
+					expect(session.reasoningTokens).toBeUndefined();
+				}
+			}
+			expect(remoteFs.readFileRemote).toHaveBeenCalledWith(file, sshConfig, undefined, {
+				maxBytes: provenance.maxBytes,
+			});
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
 	it.each([undefined, '', ' \t ', '/srv/Grok accounts/研究', "~/O'Brien/研究", '~'])(
 		'keeps all remote operations scoped to account %j, ignoring the local environment',
 		async (accountDir) => {
@@ -1283,9 +1372,12 @@ describe('GrokSessionStorage - SSH remote', () => {
 				} else {
 					const maxBytes = suffix.endsWith('chat_history.jsonl') ? 64 * 1024 * 1024 : 1024 * 1024;
 					commands.set(
-						`if test -f ${token}; then head -c ${maxBytes + 1} < ${token}; ` +
+						`if test -f ${token}; then { head -c ${maxBytes + 1} < ${token}; ` +
+							`printf '\\n%s' "$?"; } | base64; ` +
 							`else echo 'File not found or not a regular file' >&2; exit 1; fi`,
-						stdout
+						stdout === undefined
+							? undefined
+							: Buffer.from(`${stdout}\n0`, 'utf8').toString('base64')
 					);
 					commands.set(
 						`stat --printf='%s\\n%F\\n%Y' ${token} 2>/dev/null || stat -f $'%z\\n%HT\\n%m' ${token}`,

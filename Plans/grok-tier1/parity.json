@@ -1069,6 +1069,35 @@
 			"scope": "Original-byte UTF-8 validation for local Grok reads and bounded SSH base64 envelopes. Local corruption remains partial; remote corruption is explicitly unavailable. No tests collected/executed or native qualification claimed.",
 			"testOwners": ["GT1-04-06E", "GT1-04-06E2", "GT1-04-06C"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-remote-encoding-adapter-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-06e2-remote-encoding-adapter-tests",
+			"sourceCommit": "74c2e33f7a7e9c81fb2670104f87da802dbb8ac2",
+			"sourceCommitScope": "Pre-task HEAD plus the test hash and task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/storage/grok-session-storage.test.ts": "ddf26633f5d9053e18be609cece8090283bfde9d54e069ad5bd307f17680ee00"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P11",
+				"P13",
+				"P15",
+				"P21",
+				"C-supportsSessionStorage",
+				"C-supportsCostTracking",
+				"C-supportsUsageStats",
+				"REG-STORAGE",
+				"REG-USAGE",
+				"S06"
+			],
+			"scope": "Updated two real remote-helper quoting cases for framed base64 transport and added three invalid-encoding storage adapter cases. Preserved local UTF-8 controls. Tests not run or collected.",
+			"verificationOwner": "GT1-04-13",
+			"remoteHelperTestOwner": "GT1-04-06C"
 		}
 	},
 	"sourceCatalog": {
@@ -4303,7 +4332,8 @@
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
 				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
 				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests",
-				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance"
+				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance",
+				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4763,7 +4793,8 @@
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
 				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
 				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests",
-				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance"
+				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance",
+				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5032,7 +5063,8 @@
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
 				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
 				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests",
-				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance"
+				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance",
+				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5881,7 +5913,8 @@
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
 				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
 				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests",
-				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance"
+				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance",
+				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11153,7 +11186,8 @@
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
 				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
 				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests",
-				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance"
+				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance",
+				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11333,7 +11367,8 @@
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
 				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
 				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests",
-				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance"
+				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance",
+				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11535,7 +11570,8 @@
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
 				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
 				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests",
-				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance"
+				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance",
+				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14181,7 +14217,8 @@
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
 				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
 				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests",
-				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance"
+				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance",
+				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14827,7 +14864,8 @@
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
 				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
 				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests",
-				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance"
+				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance",
+				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16343,7 +16381,8 @@
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
 				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
 				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests",
-				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance"
+				"phase04NativeUtf8EvidenceRef": "phase04-native-utf8-provenance",
+				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
