@@ -702,6 +702,330 @@ describe('public Grok ACP turn composition', () => {
 		expect(h.onRequestSettlement).toHaveBeenCalledTimes(1);
 	});
 
+	it.each(['aborted', 'blank-turn', 'stdin'])(
+		'rejects %s preflight before admission or allocating lifecycle work',
+		(kind) => {
+			const h = fixture();
+			if (kind === 'aborted') h.options.signal = AbortSignal.abort();
+			if (kind === 'blank-turn') h.options.turnId = ' ';
+			const spec = kind === 'stdin' ? { ...h.spec, stdin: 'wrong route' } : h.spec;
+			expect(() => startGrokAcpTurn(spec, h.options)).toThrow(
+				kind === 'aborted' ? 'cancelled' : 'invalid-options'
+			);
+			expect(h.admit).not.toHaveBeenCalled();
+			expect(childProcess.spawn).not.toHaveBeenCalled();
+			expect(vi.getTimerCount()).toBe(0);
+		}
+	);
+
+	it('leaves no turn work after synchronous spawn failure', () => {
+		const h = fixture();
+		const error = new Error('Synthetic spawn failure');
+		vi.mocked(childProcess.spawn).mockImplementationOnce(() => {
+			throw error;
+		});
+		expect(() => startGrokAcpTurn(h.spec, h.options)).toThrow(error);
+		expect(h.admit).toHaveBeenCalledTimes(1);
+		expect(h.bound).not.toHaveBeenCalled();
+		expect(h.messages).toEqual([]);
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it.each(['options', 'started-observer', 'spawn-error', 'missing-id', 'model'])(
+		'cleans owned setup after %s failure without dispatch or success',
+		async (cause) => {
+			const h = fixture(
+				cause === 'options' ? { idleTimeoutMs: 0 } : cause === 'model' ? { model: 'wanted' } : {},
+				cause === 'started-observer'
+					? {
+							onStarted: () => {
+								throw new Error('Observer');
+							},
+						}
+					: {}
+			);
+			if (cause === 'spawn-error') Object.assign(h.child, { pid: undefined });
+			h.start();
+			if (cause === 'spawn-error') h.child.emit('error', new Error('Synthetic ENOENT'));
+			if (cause === 'missing-id' || cause === 'model') {
+				const allocation = await h.allocation();
+				h.reply(
+					allocation,
+					cause === 'missing-id'
+						? {}
+						: {
+								sessionId: 'native-1',
+								models: { currentModelId: 'other', availableModels: [] },
+							}
+				);
+			}
+			await vi.advanceTimersByTimeAsync(0);
+			expect(h.released).toHaveBeenCalledTimes(cause === 'spawn-error' ? 1 : 0);
+			const result = await h.finish();
+			expect(result.terminal).toMatchObject({
+				status: 'failed',
+				dispatchState: 'not-dispatched',
+				reason:
+					cause === 'options'
+						? 'invalid-options'
+						: cause === 'missing-id'
+							? 'missing-session-id'
+							: cause === 'model'
+								? 'model-unacknowledged'
+								: cause === 'spawn-error'
+									? 'process-lost'
+									: 'transport-lost',
+			});
+			expect(h.calls('session/prompt')).toHaveLength(0);
+			expect(h.onEvent.mock.calls.filter(([event]) => event.terminal)).toHaveLength(1);
+			expect(h.released).toHaveBeenCalledTimes(1);
+			expect(h.unsubscribe).toHaveBeenCalledTimes(1);
+			expect(h.child.stdout.listenerCount('end')).toBe(0);
+			expect(h.child.stderr.listenerCount('error')).toBe(0);
+		}
+	);
+
+	it.each(['success', 'durable-failure'])(
+		'binds %s durable updates to the dispatched native prompt and settles once',
+		async (outcome) => {
+			const h = fixture({ extensions: { agentVersion: 'fixture-version', promptId: true } });
+			h.start();
+			const prompt = await h.ready({ grokShell: true, agentVersion: 'fixture-version' });
+			const { promptId } = (prompt.params as { _meta: { promptId: string } })._meta;
+			expect(promptId).not.toBe(h.options.turnId);
+			const durable = {
+				method: '_x.ai/session/update',
+				params: {
+					sessionId: 'native-1',
+					update: {
+						sessionUpdate: 'turn_completed',
+						prompt_id: promptId,
+						stop_reason: 'end_turn',
+						agent_result: 'Owned answer',
+						...(outcome === 'durable-failure' ? { error_kind: 'provider_fault' } : {}),
+					},
+				},
+			};
+			for (const foreign of ['session', 'prompt', 'host-turn']) {
+				const frame = structuredClone(durable);
+				if (foreign === 'session') frame.params.sessionId = 'foreign-session';
+				else frame.params.update.prompt_id = foreign === 'prompt' ? 'old-prompt' : h.options.turnId;
+				frame.params.update.error_kind = 'foreign_fault';
+				frame.params.update.agent_result = 'Foreign answer';
+				h.receive(frame);
+			}
+			h.permission('foreign', { promptId: 'old-prompt' });
+			h.receive(durable);
+			h.receive({
+				...durable,
+				params: {
+					...durable.params,
+					update: {
+						...durable.params.update,
+						agent_result: 'Duplicate rewrite',
+						error_kind: 'duplicate_fault',
+					},
+				},
+			});
+			expect(h.decide).not.toHaveBeenCalled();
+			expect(h.onEvent.mock.calls.filter(([event]) => event.terminal)).toHaveLength(0);
+			const record = vi.fn();
+			void h.run.completed.then(record);
+			h.reply(prompt, { stopReason: 'end_turn' });
+			h.reply(prompt, { stopReason: 'end_turn' });
+			const result = await h.finish();
+			expect(result.terminal).toMatchObject({
+				status: outcome === 'success' ? 'success' : 'failed',
+				dispatchState: 'dispatched',
+			});
+			expect(result.answerText).toBe('Owned answer');
+			const count = h.onEvent.mock.calls.length;
+			h.receive(durable);
+			h.update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Late' } });
+			h.run.cancel();
+			expect(await h.run.completed).toBe(result);
+			expect(record).toHaveBeenCalledExactlyOnceWith(result);
+			expect(h.onEvent).toHaveBeenCalledTimes(count);
+			expect(h.onEvent.mock.calls.filter(([event]) => event.terminal)).toHaveLength(1);
+			expect(h.calls('session/prompt')).toHaveLength(1);
+		}
+	);
+
+	it.each(['sessionId', 'promptId'])(
+		'refuses mismatched response %s without losing the owned partial answer',
+		async (field) => {
+			const h = fixture({ extensions: { agentVersion: 'fixture-version', promptId: true } });
+			h.start();
+			const prompt = await h.ready({ grokShell: true, agentVersion: 'fixture-version' });
+			h.update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Owned' } });
+			h.reply(prompt, { stopReason: 'end_turn', _meta: { [field]: 'foreign' } });
+			expect(await h.finish()).toMatchObject({
+				answerText: 'Owned',
+				terminal: { status: 'failed', kind: 'protocol' },
+			});
+			expect(h.calls('session/prompt')).toHaveLength(1);
+			expect(h.onEvent.mock.calls.filter(([event]) => event.terminal)).toHaveLength(1);
+		}
+	);
+
+	it.each(['mutate', 'throw'])(
+		'preserves captured text and terminal ownership when an event observer chooses to %s',
+		async (behavior) => {
+			const observer = vi.fn<NonNullable<GrokAcpTurnHandlers['onEvent']>>((event) => {
+				if (event.type === 'text') {
+					event.text = 'Observer rewrite';
+					if (behavior === 'throw') throw new Error('Observer fault');
+				}
+				if (event.terminal) event.terminal.status = 'success';
+			});
+			const h = fixture({}, { onEvent: observer });
+			h.start();
+			const prompt = await h.ready();
+			h.update({
+				sessionUpdate: 'agent_message_chunk',
+				content: { type: 'text', text: 'Original' },
+			});
+			h.reply(prompt, { stopReason: 'cancelled' });
+			expect(await h.finish()).toMatchObject({
+				answerText: 'Original',
+				terminal: { status: behavior === 'throw' ? 'failed' : 'cancelled' },
+			});
+			expect(h.calls('session/prompt')).toHaveLength(1);
+			expect(observer.mock.calls.filter(([event]) => event.terminal)).toHaveLength(1);
+		}
+	);
+
+	it.each(['mutate', 'throw'])(
+		'keeps permission refusal when its settlement observer chooses to %s',
+		async (behavior) => {
+			const observer = vi.fn<NonNullable<GrokAcpTurnHandlers['onRequestSettlement']>>((value) => {
+				if (value.terminal) Object.assign(value.terminal, { status: 'success' });
+				if (behavior === 'throw') throw new Error('Settlement observer');
+			});
+			const h = fixture({}, { onRequestSettlement: observer });
+			h.decide.mockReturnValue({ decision: 'deny' });
+			h.start();
+			const prompt = await h.ready();
+			h.permission();
+			await vi.advanceTimersByTimeAsync(0);
+			h.reply(prompt, { stopReason: 'cancelled' });
+			expect((await h.finish()).terminal).toMatchObject({
+				status: behavior === 'throw' ? 'failed' : 'refused',
+				reason: behavior === 'throw' ? 'acp-transport-fault' : 'permission-denied',
+			});
+			expect(observer).toHaveBeenCalledTimes(1);
+			expect(h.messages.filter((message) => message.id === 'permission')).toHaveLength(1);
+		}
+	);
+
+	it.each(['cancel', 'revoke', 'terminate'])(
+		'aborts authority before a failing cancellation write or OS signal on %s',
+		async (cause) => {
+			const h = fixture();
+			let signal: AbortSignal;
+			let grant: (value: { decision: 'allow' }) => void;
+			h.decide.mockImplementation((_effect, _binding, pending) => {
+				signal = pending;
+				return new Promise((resolve) => {
+					grant = resolve;
+				});
+			});
+			h.start();
+			const prompt = await h.ready();
+			h.permission();
+			await vi.advanceTimersByTimeAsync(0);
+			const atSignal: boolean[] = [];
+			const atWrite: boolean[] = [];
+			h.child.kill.mockImplementation(() => {
+				atSignal.push(signal.aborted);
+				return true;
+			});
+			const write = vi.spyOn(h.child.stdin, 'write').mockImplementation(() => {
+				atWrite.push(signal.aborted);
+				throw new Error('Synthetic cancellation write failure');
+			});
+			if (cause === 'cancel') h.run.cancel();
+			else if (cause === 'revoke') h.revoke();
+			else h.run.handle.terminate();
+			expect(signal!.aborted).toBe(true);
+			expect(atWrite).toEqual([true]);
+			expect(atSignal).toEqual([true]);
+			expect(write).toHaveBeenCalledTimes(1);
+			expect(h.child.kill).toHaveBeenCalledExactlyOnceWith('SIGTERM');
+			grant!({ decision: 'allow' });
+			h.reply(prompt, { stopReason: 'end_turn' });
+			const result = await h.finish();
+			expect(result.terminal).toMatchObject({
+				status: cause === 'revoke' ? 'refused' : 'cancelled',
+				reason:
+					cause === 'revoke'
+						? 'lease-revoked'
+						: cause === 'cancel'
+							? 'host-cancelled'
+							: 'process-stopped',
+			});
+			expect(h.onRequestSettlement).toHaveBeenCalledTimes(1);
+			expect(h.onEvent.mock.calls.filter(([event]) => event.terminal)).toHaveLength(1);
+			expect(h.calls('session/prompt')).toHaveLength(1);
+			expect(h.released).toHaveBeenCalledTimes(1);
+		}
+	);
+
+	it.each(['hard', 'cancel'])(
+		'enforces the %s deadline without overwriting the original failure or replaying',
+		async (deadline) => {
+			const h = fixture({ idleTimeoutMs: 1000 });
+			h.start();
+			const prompt = await h.ready();
+			if (deadline === 'cancel') h.run.cancel();
+			const budget = deadline === 'cancel' ? h.options.cancelGraceMs! : h.options.maxTurnMs;
+			await vi.advanceTimersByTimeAsync(budget - 1);
+			expect(h.child.kill).not.toHaveBeenCalled();
+			await vi.advanceTimersByTimeAsync(1);
+			expect(h.child.kill).toHaveBeenCalledExactlyOnceWith('SIGTERM');
+			h.run.cancel();
+			h.reply(prompt, { stopReason: 'end_turn' });
+			expect((await h.finish()).terminal).toMatchObject({
+				status: deadline === 'hard' ? 'timeout' : 'cancelled',
+				reason: deadline === 'hard' ? 'turn-timeout' : 'host-cancelled',
+				dispatchState: 'unknown',
+			});
+			expect(h.calls('session/cancel')).toHaveLength(deadline === 'cancel' ? 1 : 0);
+			expect(h.calls('session/prompt')).toHaveLength(1);
+			expect(h.onEvent.mock.calls.filter(([event]) => event.terminal)).toHaveLength(1);
+		}
+	);
+
+	it('preserves a permission deadline after provider cancellation and a late grant', async () => {
+		const h = fixture();
+		let grant: (value: { decision: 'allow' }) => void;
+		h.decide.mockImplementation(
+			() =>
+				new Promise((resolve) => {
+					grant = resolve;
+				})
+		);
+		h.start();
+		const prompt = await h.ready();
+		h.permission();
+		await vi.advanceTimersByTimeAsync(h.options.requestTimeoutMs!);
+		expect(h.decide.mock.calls[0][2].aborted).toBe(true);
+		expect(h.onRequestSettlement).toHaveBeenCalledTimes(1);
+		h.reply(prompt, { stopReason: 'cancelled' });
+		grant!({ decision: 'allow' });
+		expect((await h.finish()).terminal).toMatchObject({
+			status: 'timeout',
+			kind: 'deadline',
+			reason: 'permission-timeout',
+			dispatchState: 'dispatched',
+		});
+		expect(h.messages.filter((message) => message.id === 'permission')).toEqual([
+			{ jsonrpc: '2.0', id: 'permission', result: { outcome: { outcome: 'cancelled' } } },
+		]);
+		expect(h.onRequestSettlement).toHaveBeenCalledTimes(1);
+		expect(h.calls('session/prompt')).toHaveLength(1);
+	});
+
 	describe('qualified process accounting', () => {
 		const extensions = { agentVersion: 'fixture-version', sessionUsage: true, promptId: true };
 		const meta = { grokShell: true, agentVersion: extensions.agentVersion };

@@ -39,6 +39,7 @@ import path from 'node:path';
 import {
 	applyWindowsShellRules,
 	DispatchRefusedError,
+	leaseAdmission,
 	startTurn,
 	turnProcessSpecFromPlan,
 	type DispatchAdmission,
@@ -1182,6 +1183,111 @@ describe('managed admission at the spawn', () => {
 			});
 			return { turn: current, lease, release, seen, unsubscribe };
 		}
+
+		it.each(['both', 'stdout', 'stderr'] as const)(
+			'preserves raw %s bytes alongside independently decoded text and lines',
+			async (raw) => {
+				const stdout = Buffer.from('out:雪\nlast🦊');
+				const stderr = Buffer.concat([Buffer.from('err:☃'), Buffer.from([0xe2, 0x82])]);
+				const outChunks = [stdout.subarray(0, 5), stdout.subarray(5, 13), stdout.subarray(13)];
+				const errChunks = [stderr.subarray(0, 5), stderr.subarray(5, 7), stderr.subarray(7)];
+				const outBytes: Buffer[] = [];
+				const errBytes: Buffer[] = [];
+				const outText: string[] = [];
+				const errText: string[] = [];
+				const lines: string[] = [];
+				const { turn } = await observed(
+					{ stdoutTailLimit: 9, stderrTailLimit: 4 },
+					{
+						onStdoutBytes:
+							raw !== 'stderr' ? (chunk) => outBytes.push(Buffer.from(chunk)) : undefined,
+						onStderrBytes:
+							raw !== 'stdout' ? (chunk) => errBytes.push(Buffer.from(chunk)) : undefined,
+						onStdout: (text) => outText.push(text),
+						onStderr: (text) => errText.push(text),
+						onLine: (line) => lines.push(line),
+					}
+				);
+				for (let index = 0; index < outChunks.length; index++) {
+					(child.stdout as PassThrough).write(outChunks[index]);
+					(child.stderr as PassThrough).write(errChunks[index]);
+				}
+				expect(outText.join('')).toBe(stdout.toString());
+				expect(errText.join('')).toBe('err:☃');
+				// Drain the legacy stream decoder as Node does before the process close.
+				(child.stdout as PassThrough).end();
+				(child.stderr as PassThrough).end();
+				await vi.advanceTimersByTimeAsync(0);
+				child.emit('close', 0, null);
+				expect(await turn.done).toMatchObject({
+					stdoutText: stdout.toString().slice(-9),
+					stderrText: stderr.toString().slice(-4),
+					droppedOutputBytes: 0,
+				});
+				expect(outBytes).toEqual(raw === 'stderr' ? [] : outChunks);
+				expect(errBytes).toEqual(raw === 'stdout' ? [] : errChunks);
+				expect(outText.join('')).toBe(stdout.toString());
+				expect(errText.join('')).toBe(stderr.toString());
+				expect(lines).toEqual(['out:雪', 'last🦊']);
+				expect(vi.getTimerCount()).toBe(0);
+			}
+		);
+
+		it.each(['exit', 'caller', 'authority', 'spawn-error'] as const)(
+			'uses leaseAdmission to bind and release once after %s',
+			async (ending) => {
+				const spec = { command: process.execPath, args: [], cwd: scratch.dir, env: {} };
+				const { auth } = authority();
+				const { lease } = await gateFor(auth, spec);
+				const bind = vi.spyOn(lease, 'bind');
+				const release = vi.spyOn(lease, 'release');
+				const stopped = vi.fn();
+				const error = new Error('synthetic executable unavailable');
+				if (ending === 'spawn-error') Object.assign(child, { pid: undefined });
+				current = startTurn(
+					spec,
+					{ onStopRequested: stopped },
+					{
+						...OPTIONS,
+						trackDescendants: true,
+						admission: { gate: leaseAdmission(auth, lease), attribution: ATTRIBUTION },
+					}
+				);
+				expect(bind).toHaveBeenCalledExactlyOnceWith(child.pid);
+				expect(lease.state()).toBe('bound');
+				expect(release).not.toHaveBeenCalled();
+				if (ending === 'caller') current.terminate();
+				if (ending === 'authority') expect(auth.revoke(lease.leaseId, 'withdrawn')).toBe(true);
+				if (ending === 'spawn-error') child.emit('error', error);
+				child.emit('close', 7, null);
+				const settled = vi.fn();
+				const exit = await current.done.then((result) => {
+					settled();
+					return result;
+				});
+				expect(release).toHaveBeenCalledExactlyOnceWith(
+					ending === 'spawn-error'
+						? { outcome: 'spawn-failed', message: error.message }
+						: ending === 'exit'
+							? { outcome: 'exited', exitCode: 7, signal: null }
+							: { outcome: 'stopped', by: ending }
+				);
+				expect(exit.spawnError).toBe(ending === 'spawn-error' ? error : undefined);
+				if (ending === 'caller' || ending === 'authority') {
+					expect(stopped).toHaveBeenCalledExactlyOnceWith(ending);
+					expect(child.kill).toHaveBeenCalledWith('SIGTERM');
+				} else expect(stopped).not.toHaveBeenCalled();
+				expect(lease.state()).toBe(ending === 'authority' ? 'revoked' : 'released');
+				expect(auth.live()).toEqual([]);
+				expect(auth.revoke(lease.leaseId, 'late')).toBe(false);
+				current.terminateNow();
+				child.emit('close', 0, null);
+				expect(await current.done).toBe(exit);
+				expect(settled).toHaveBeenCalledTimes(1);
+				expect(release).toHaveBeenCalledTimes(1);
+				expect(vi.getTimerCount()).toBe(0);
+			}
+		);
 
 		it.each(['timeout', 'cancellation'] as const)(
 			'joins a late observation after parent exit and %s before releasing the lease',
