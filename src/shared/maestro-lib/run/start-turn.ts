@@ -3,6 +3,7 @@
 import { spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
+import { StringDecoder } from 'node:string_decoder';
 
 import type { AgentOutputParser, ParsedEvent } from '../parsers/agent-output-parser';
 import { createOutputParser } from '../parsers/parser-factory';
@@ -138,6 +139,11 @@ export interface TurnHandlers {
 	/** Each stdout chunk as it arrived, before it is split into lines. */
 	onStdout?(text: string): void;
 	onStderr?(text: string): void;
+	/** Original pipe bytes, before UTF-8 decoding. Opts that pipe out of setEncoding. */
+	onStdoutBytes?(chunk: Uint8Array): void;
+	onStderrBytes?(chunk: Uint8Array): void;
+	/** Synchronous invalidation before signals reach the process. Must not throw or stop again. */
+	onStopRequested?(by: 'caller' | 'authority'): void;
 	/** Each complete stdout line, including an unterminated last one at exit. */
 	onLine?(line: string): void;
 	/** Each line the provider's parser understood. */
@@ -495,6 +501,7 @@ export function startTurn(
 				onStopRequested: () => {
 					stopWasRequested = true;
 					stoppedBy ??= by;
+					handlers.onStopRequested?.(by);
 				},
 				sessionId: options.sessionId,
 				label: options.label,
@@ -550,23 +557,43 @@ export function startTurn(
 		// Decode on the stream, not per chunk: a multibyte character split across
 		// two reads would otherwise decode to replacement characters on both
 		// sides of the boundary.
-		child.stdout?.setEncoding('utf8');
-		child.stderr?.setEncoding('utf8');
+		const stdoutDecoder = handlers.onStdoutBytes ? new StringDecoder('utf8') : undefined;
+		const stderrDecoder = handlers.onStderrBytes ? new StringDecoder('utf8') : undefined;
+		if (!stdoutDecoder) child.stdout?.setEncoding('utf8');
+		if (!stderrDecoder) child.stderr?.setEncoding('utf8');
 
-		child.stdout?.on('data', (text: string) => {
+		const readStdout = (text: string): void => {
 			stdoutText = appendBoundedTail(stdoutText, text, tailLimit);
 			handlers.onStdout?.(text);
 			if (framesLines) for (const line of lineReader.push(text)) readLine(line);
-		});
+		};
 
-		child.stderr?.on('data', (text: string) => {
+		const readStderr = (text: string): void => {
 			stderrText = appendBoundedTail(stderrText, text, options.stderrTailLimit);
 			handlers.onStderr?.(text);
+		};
+		child.stdout?.on('data', (chunk: Buffer | string) => {
+			if (stdoutDecoder) {
+				handlers.onStdoutBytes!(chunk as Buffer);
+				const text = stdoutDecoder.write(chunk as Buffer);
+				if (text) readStdout(text);
+			} else readStdout(chunk as string);
+		});
+		child.stderr?.on('data', (chunk: Buffer | string) => {
+			if (stderrDecoder) {
+				handlers.onStderrBytes!(chunk as Buffer);
+				const text = stderrDecoder.write(chunk as Buffer);
+				if (text) readStderr(text);
+			} else readStderr(chunk as string);
 		});
 
 		// `close`, not `exit`: it fires once the streams have ended, so every
 		// line the process wrote has been read by the time the turn settles.
 		child.on('close', (exitCode, signal) => {
+			const stdoutEnd = stdoutDecoder?.end();
+			const stderrEnd = stderrDecoder?.end();
+			if (stdoutEnd) readStdout(stdoutEnd);
+			if (stderrEnd) readStderr(stderrEnd);
 			// The last line may have no trailing newline.
 			const trailing = lineReader.flush();
 			if (trailing) readLine(trailing);

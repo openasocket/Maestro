@@ -663,6 +663,40 @@
 				"src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts": "5e4f2e69ebf13a7319ea71f22aaa0f186ce3e4e31f86a5fdcd37f39c788e95c3"
 			},
 			"affectedRows": ["P09", "P10", "P34", "P37", "S22"]
+		},
+		"phase03-acp-turn-composition": {
+			"path": "Plans/grok-tier1/evidence/03.md#gt1-03-09-shared-acp-turn-composition",
+			"sourceCommit": "7a647c2f5e62fe5823a62b1ff56da22875350244",
+			"sourceRevisionScope": "Pre-task HEAD plus GT1-03-09 diff identified by source SHA-256 in evidence.",
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"implementationScope": "Local process-per-turn composition only. Native prompt binding and correlated process usage remain GT1-03-09A; consumer routes, positive questions, managed and native qualification remain withheld.",
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P09",
+				"P10",
+				"P12",
+				"P29",
+				"P33",
+				"P34",
+				"P35",
+				"P36",
+				"P38",
+				"P40",
+				"C-supportsBatchMode",
+				"C-requiresPromptToStart",
+				"C-usesJsonLineOutput",
+				"REG-PARSER",
+				"REG-MANAGED-ROUTES",
+				"S28",
+				"META-03",
+				"META-06",
+				"META-07",
+				"REG-DEFINITIONS"
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -3161,7 +3195,9 @@
 				"src/shared/maestro-lib/grok/acp-events.ts",
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
 				"src/shared/maestro-lib/grok/acp-protocol.ts",
-				"src/shared/maestro-lib/grok/acp-requests.ts"
+				"src/shared/maestro-lib/grok/acp-requests.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3184,7 +3220,8 @@
 					"GT1-07-03A",
 					"GT1-03-05C",
 					"GT1-03-05C1",
-					"GT1-03-05E"
+					"GT1-03-05E",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-03-02",
@@ -3243,7 +3280,8 @@
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
 				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
-				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests"
+				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3300,6 +3338,12 @@
 					"id": "acp-question-negotiation:P09",
 					"code": "unsupported-capability",
 					"missingPrerequisite": "Pinned Grok initialize advertises neither ask-back nor elicitation. GT1-03-08A cancels known wire requests and exposes unavailable event/answer ports only. Positive pending questions/answers require a verified advertised contract; GT1-03-08B authored 76 synthetic negative cases; GT1-03-13 must execute them and compiler checks, GT1-03-09 compose it, phases07/10 retain unavailable status, and phase11 qualify the native route. Permission support is not conversational support.",
+					"affectedRows": ["P09"]
+				},
+				{
+					"id": "acp-turn-consumers:P09",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P09"]
 				}
 			],
@@ -3464,7 +3508,9 @@
 				"src/shared/maestro-lib/grok/acp-events.ts",
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
 				"src/shared/maestro-lib/grok/acp-protocol.ts",
-				"src/shared/maestro-lib/grok/acp-requests.ts"
+				"src/shared/maestro-lib/grok/acp-requests.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3488,7 +3534,8 @@
 					"GT1-07-04C",
 					"GT1-03-05C",
 					"GT1-03-05C1",
-					"GT1-03-05E"
+					"GT1-03-05E",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-03-02",
@@ -3552,7 +3599,8 @@
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
 				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
-				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests"
+				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3603,6 +3651,12 @@
 					"id": "acp-question-negotiation:P10",
 					"code": "unsupported-capability",
 					"missingPrerequisite": "Pinned Grok initialize advertises neither ask-back nor elicitation. GT1-03-08A cancels known wire requests and exposes unavailable event/answer ports only. Positive pending questions/answers require a verified advertised contract; GT1-03-08B authored 76 synthetic negative cases; GT1-03-13 must execute them and compiler checks, GT1-03-09 compose it, phases07/10 retain unavailable status, and phase11 qualify the native route. Permission support is not conversational support.",
+					"affectedRows": ["P10"]
+				},
+				{
+					"id": "acp-turn-consumers:P10",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P10"]
 				}
 			],
@@ -3911,7 +3965,9 @@
 				"src/main/group-chat/output-parser.ts",
 				"src/shared/maestro-lib/grok/acp-events.ts",
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
-				"src/shared/maestro-lib/grok/acp-protocol.ts"
+				"src/shared/maestro-lib/grok/acp-protocol.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3925,7 +3981,8 @@
 					"GT1-03-11A",
 					"GT1-03-05C",
 					"GT1-03-05C1",
-					"GT1-03-05E"
+					"GT1-03-05E",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-03-02",
@@ -3975,7 +4032,8 @@
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
 				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
 				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests",
-				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests"
+				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4014,6 +4072,12 @@
 					"id": "acp-wire-tick-precision:P12",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C authors expanded terminal/ownership/model-cost and unbaselined-process cases (not executed); GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"affectedRows": ["P12"]
+				},
+				{
+					"id": "acp-turn-consumers:P12",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P12"]
 				}
 			],
@@ -6190,7 +6254,10 @@
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/shared/maestro-lib/turns/assemble.ts",
-				"src/cli/services/autorun-cli-deps.ts"
+				"src/cli/services/autorun-cli-deps.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6206,7 +6273,8 @@
 					"GT1-02-07B",
 					"GT1-02-07C",
 					"GT1-02-07A1",
-					"GT1-08-14E"
+					"GT1-08-14E",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-08-02",
@@ -6252,7 +6320,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6292,6 +6361,12 @@
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Final model/effort aliases, conflicts, none and remembered refusals are guarded; exact advertised wire membership gates minimal/medium/max hints, with no invented model tiers. Scoped deterministic tests pass for exercised cases (13 and repaired CLI 13J). Actual consumers still lack acknowledged account/host/version/model menus, owned by GT1-03-10A/10B/13/14 and phase08. Tab-naming/runtime retry provenance and captured cross-attempt configuration remain GT1-08-14E/14F/21; native effort acceptance is not-run. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
 					"affectedRows": ["P06", "REG-MODEL", "REG-DEFINITIONS", "P29", "P32", "S10", "S19"]
+				},
+				{
+					"id": "acp-turn-consumers:P29",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"affectedRows": ["P29"]
 				}
 			],
 			"phase": "08",
@@ -6821,7 +6896,9 @@
 				"src/shared/pianola/pianola-agent-select.ts",
 				"src/cli/commands/pianola-orchestrate.ts",
 				"src/main/pianola/pianola-supervisor.ts",
-				"src/shared/maestro-lib/grok/acp-requests.ts"
+				"src/shared/maestro-lib/grok/acp-requests.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6833,7 +6910,8 @@
 					"GT1-09-02",
 					"GT1-09-04",
 					"GT1-09-07",
-					"GT1-09-09"
+					"GT1-09-09",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-03-02",
@@ -6875,7 +6953,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
-				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6914,6 +6993,12 @@
 					"id": "acp-permission-consumers:P33",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
+					"affectedRows": ["P33"]
+				},
+				{
+					"id": "acp-turn-consumers:P33",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P33"]
 				}
 			],
@@ -7020,7 +7105,9 @@
 				"src/renderer/components/InputArea/InputArea.tsx",
 				"src/shared/maestro-lib/grok/acp-events.ts",
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
-				"src/shared/maestro-lib/grok/acp-requests.ts"
+				"src/shared/maestro-lib/grok/acp-requests.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -7036,7 +7123,8 @@
 					"GT1-10-04A",
 					"GT1-09-04",
 					"GT1-09-07",
-					"GT1-09-09"
+					"GT1-09-09",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-03-02",
@@ -7086,7 +7174,8 @@
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
 				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
-				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests"
+				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7137,6 +7226,12 @@
 					"id": "acp-question-negotiation:P34",
 					"code": "unsupported-capability",
 					"missingPrerequisite": "Pinned Grok initialize advertises neither ask-back nor elicitation. GT1-03-08A cancels known wire requests and exposes unavailable event/answer ports only. Positive pending questions/answers require a verified advertised contract; GT1-03-08B authored 76 synthetic negative cases; GT1-03-13 must execute them and compiler checks, GT1-03-09 compose it, phases07/10 retain unavailable status, and phase11 qualify the native route. Permission support is not conversational support.",
+					"affectedRows": ["P34"]
+				},
+				{
+					"id": "acp-turn-consumers:P34",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P34"]
 				}
 			],
@@ -7239,7 +7334,9 @@
 				"docs/feedback.md",
 				"src/shared/maestro-lib/providers/definitions.ts",
 				"src/shared/maestro-lib/launch/launch-plan.ts",
-				"src/shared/maestro-lib/grok/acp-requests.ts"
+				"src/shared/maestro-lib/grok/acp-requests.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -7257,7 +7354,8 @@
 					"GT1-08-14A",
 					"GT1-08-14B",
 					"GT1-02-11A1",
-					"GT1-02-11A2"
+					"GT1-02-11A2",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-03-02",
@@ -7309,7 +7407,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
-				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7354,6 +7453,12 @@
 					"id": "acp-permission-consumers:P35",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
+					"affectedRows": ["P35"]
+				},
+				{
+					"id": "acp-turn-consumers:P35",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P35"]
 				}
 			],
@@ -7471,7 +7576,9 @@
 				"src/shared/envVarCatalog.ts",
 				"src/main/cross-agent/cross-agent-router.ts",
 				"src/main/cross-agent/consult-runner.ts",
-				"src/shared/maestro-lib/grok/acp-requests.ts"
+				"src/shared/maestro-lib/grok/acp-requests.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -7487,7 +7594,8 @@
 					"GT1-09-02",
 					"GT1-09-04",
 					"GT1-09-07",
-					"GT1-09-09"
+					"GT1-09-09",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-02-02",
@@ -7537,7 +7645,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
-				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7576,6 +7685,12 @@
 					"id": "acp-permission-consumers:P36",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
+					"affectedRows": ["P36"]
+				},
+				{
+					"id": "acp-turn-consumers:P36",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P36"]
 				}
 			],
@@ -7826,7 +7941,9 @@
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/shared/maestro-lib/turns/assemble.ts",
 				"src/cli/commands/list-sessions.ts",
-				"src/__tests__/cli/commands/list-sessions.test.ts"
+				"src/__tests__/cli/commands/list-sessions.test.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -7837,7 +7954,8 @@
 					"GT1-10-01",
 					"GT1-05-01",
 					"GT1-03-09",
-					"GT1-07-03D"
+					"GT1-07-03D",
+					"GT1-03-09A"
 				],
 				"test": ["GT1-08-06", "GT1-07-04", "GT1-10-02", "GT1-05-02", "GT1-03-10", "GT1-07-03E"],
 				"verification": [
@@ -7869,7 +7987,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7902,6 +8021,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P38"]
+				},
+				{
+					"id": "acp-turn-consumers:P38",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P38"]
 				}
 			],
@@ -8253,7 +8378,9 @@
 				"src/renderer/components/AboutModal.tsx",
 				"src/renderer/components/AchievementShareButton.tsx",
 				"src/main/agents/limitResetEstimator.ts",
-				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts"
+				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -8271,7 +8398,8 @@
 					"GT1-10-09A",
 					"GT1-10-09C",
 					"GT1-10-09D",
-					"GT1-10-09E"
+					"GT1-10-09E",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-02-02",
@@ -8288,7 +8416,8 @@
 					"GT1-10-09B",
 					"GT1-10-09F",
 					"GT1-10-09G",
-					"GT1-10-11A"
+					"GT1-10-11A",
+					"GT1-03-10"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -8321,7 +8450,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8354,6 +8484,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P40"]
+				},
+				{
+					"id": "acp-turn-consumers:P40",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P40"]
 				}
 			],
@@ -10704,10 +10840,13 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/shared/maestro-lib/turns/assemble.ts"
+				"src/shared/maestro-lib/turns/assemble.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-03-09", "GT1-08-05", "GT1-10-01", "GT1-11-14A"],
+				"implementation": ["GT1-03-09", "GT1-08-05", "GT1-10-01", "GT1-11-14A", "GT1-03-09A"],
 				"test": ["GT1-03-10", "GT1-08-06", "GT1-10-02", "GT1-11-14B"],
 				"verification": ["GT1-03-13", "GT1-08-07", "GT1-10-05", "GT1-11-14C", "GT1-11-11E"],
 				"live": ["GT1-11-11", "GT1-11-11E"],
@@ -10727,7 +10866,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10760,6 +10900,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["C-supportsBatchMode"]
+				},
+				{
+					"id": "acp-turn-consumers:C-supportsBatchMode",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["C-supportsBatchMode"]
 				}
 			],
@@ -10815,9 +10961,15 @@
 				"win32-arm64"
 			],
 			"mechanism": "Require truthful route-specific declarations and equivalent user outcomes, not identical flags or transport syntax.",
-			"sourcePaths": ["src/shared/types.ts", "src/shared/maestro-lib/providers/capabilities.ts"],
+			"sourcePaths": [
+				"src/shared/types.ts",
+				"src/shared/maestro-lib/providers/capabilities.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/index.ts"
+			],
 			"ownerTasks": {
-				"implementation": ["GT1-03-09", "GT1-08-05", "GT1-10-01", "GT1-11-14A"],
+				"implementation": ["GT1-03-09", "GT1-08-05", "GT1-10-01", "GT1-11-14A", "GT1-03-09A"],
 				"test": ["GT1-03-10", "GT1-08-06", "GT1-10-02", "GT1-11-14B"],
 				"verification": ["GT1-03-13", "GT1-08-07", "GT1-10-05", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
@@ -10837,7 +10989,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10870,6 +11023,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["C-requiresPromptToStart"]
+				},
+				{
+					"id": "acp-turn-consumers:C-requiresPromptToStart",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["C-requiresPromptToStart"]
 				}
 			],
@@ -12207,10 +12366,13 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/cli/services/agent-spawner.ts"
+				"src/cli/services/agent-spawner.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-03-09", "GT1-08-05", "GT1-10-01", "GT1-11-14A"],
+				"implementation": ["GT1-03-09", "GT1-08-05", "GT1-10-01", "GT1-11-14A", "GT1-03-09A"],
 				"test": ["GT1-03-10", "GT1-08-06", "GT1-10-02", "GT1-11-14B"],
 				"verification": ["GT1-03-13", "GT1-08-07", "GT1-10-05", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
@@ -12228,7 +12390,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12261,6 +12424,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["C-usesJsonLineOutput"]
+				},
+				{
+					"id": "acp-turn-consumers:C-usesJsonLineOutput",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["C-usesJsonLineOutput"]
 				}
 			],
@@ -12935,7 +13104,10 @@
 				"src/cli/services/agent-spawner.ts",
 				"src/shared/maestro-lib/grok/acp-events.ts",
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
-				"src/shared/maestro-lib/grok/acp-protocol.ts"
+				"src/shared/maestro-lib/grok/acp-protocol.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -12948,7 +13120,8 @@
 					"GT1-03-05A",
 					"GT1-03-05C",
 					"GT1-03-05C1",
-					"GT1-03-05E"
+					"GT1-03-05E",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-03-02",
@@ -12986,7 +13159,8 @@
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
 				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
 				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests",
-				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests"
+				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13025,6 +13199,12 @@
 					"id": "acp-wire-tick-precision:REG-PARSER",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C authors expanded terminal/ownership/model-cost and unbaselined-process cases (not executed); GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
+					"affectedRows": ["REG-PARSER"]
+				},
+				{
+					"id": "acp-turn-consumers:REG-PARSER",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["REG-PARSER"]
 				}
 			],
@@ -14479,7 +14659,9 @@
 				"src/main/cross-agent/cross-agent-router.ts",
 				"src/main/cross-agent/consult-runner.ts",
 				"src/main/utils/context-groomer.ts",
-				"src/shared/maestro-lib/grok/acp-requests.ts"
+				"src/shared/maestro-lib/grok/acp-requests.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -14489,7 +14671,8 @@
 					"GT1-03-09",
 					"GT1-07-01",
 					"GT1-09-02",
-					"GT1-03-01A"
+					"GT1-03-01A",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-03-02",
@@ -14520,7 +14703,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
-				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14559,6 +14743,12 @@
 					"id": "acp-permission-consumers:REG-MANAGED-ROUTES",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
+					"affectedRows": ["REG-MANAGED-ROUTES"]
+				},
+				{
+					"id": "acp-turn-consumers:REG-MANAGED-ROUTES",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["REG-MANAGED-ROUTES"]
 				}
 			],
@@ -17377,12 +17567,14 @@
 				"src/__tests__/main/process-manager/recordings/turn-recordings.test.ts",
 				"src/shared/maestro-lib/run/turn-capture.ts",
 				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
-				"src/main/process-manager/handlers/StdoutHandler.ts"
+				"src/main/process-manager/handlers/StdoutHandler.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-03-09"],
-				"test": ["GT1-10-13"],
-				"verification": ["GT1-10-14", "GT1-10-16", "GT1-11-11F"],
+				"implementation": ["GT1-03-09", "GT1-03-09A"],
+				"test": ["GT1-10-13", "GT1-03-10"],
+				"verification": ["GT1-10-14", "GT1-10-16", "GT1-11-11F", "GT1-03-13"],
 				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -17400,7 +17592,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17433,6 +17626,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["S28"]
+				},
+				{
+					"id": "acp-turn-consumers:S28",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["S28"]
 				}
 			],
@@ -17902,7 +18101,10 @@
 				"src/shared/agentMetadata.ts",
 				"src/renderer/components/PromptComposerModal.tsx",
 				"src/renderer/components/InputArea/InputArea.tsx",
-				"src/shared/maestro-lib/grok/acp-requests.ts"
+				"src/shared/maestro-lib/grok/acp-requests.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -17919,7 +18121,8 @@
 					"GT1-09-04",
 					"GT1-09-07",
 					"GT1-09-09",
-					"GT1-02-11A"
+					"GT1-02-11A",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-05-02",
@@ -17973,7 +18176,8 @@
 				"observation": "Claude Plan-Mode, Codex/Antigravity/Grok Read-Only label; actual availability separately gated.",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
-				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18012,6 +18216,12 @@
 					"id": "acp-permission-consumers:META-03",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
+					"affectedRows": ["META-03"]
+				},
+				{
+					"id": "acp-turn-consumers:META-03",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["META-03"]
 				}
 			],
@@ -18340,7 +18550,10 @@
 				"src/shared/maestro-lib/parsers/usage-aggregator.ts",
 				"src/renderer/utils/contextUsage.ts",
 				"src/renderer/utils/contextWindowResolver.ts",
-				"src/main/provider-translation-service.ts"
+				"src/main/provider-translation-service.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -18362,7 +18575,8 @@
 					"GT1-04-01",
 					"GT1-10-10",
 					"GT1-02-03",
-					"GT1-03-10A"
+					"GT1-03-10A",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-02-06",
@@ -18421,7 +18635,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"observation": "Grok default context is 0/unknown; provider/host-only snapshot windows are ignored for Grok without selected model/account provenance. Positive per-agent/provider overrides remain supported. Group-chat unknown/accumulated observations preserve costs; native window propagation remains GT1-07-02/04/11.",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18454,6 +18669,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["META-06"]
+				},
+				{
+					"id": "acp-turn-consumers:META-06",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["META-06"]
 				}
 			],
@@ -18498,7 +18719,10 @@
 			"sourcePaths": [
 				"src/shared/agentConstants.ts",
 				"src/renderer/utils/contextWindowResolver.ts",
-				"src/shared/maestro-lib/runtime/turns.ts"
+				"src/shared/maestro-lib/runtime/turns.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/run/start-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -18517,7 +18741,8 @@
 					"GT1-04-05",
 					"GT1-10-08",
 					"GT1-10-10",
-					"GT1-02-03"
+					"GT1-02-03",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-08-02",
@@ -18574,7 +18799,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"observation": "1M threshold and Claude [1m] marker; adaptive mode defaults off for every provider; resilience defaults true unless explicitly disabled.",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18607,6 +18833,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["META-07"]
+				},
+				{
+					"id": "acp-turn-consumers:META-07",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["META-07"]
 				}
 			],
@@ -18682,7 +18914,9 @@
 				"src/shared/maestro-lib/runtime/background-turns.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/shared/maestro-lib/launch/launch-plan.ts",
-				"src/shared/maestro-lib/grok/acp-requests.ts"
+				"src/shared/maestro-lib/grok/acp-requests.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/shared/maestro-lib/index.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -18737,7 +18971,8 @@
 					"GT1-02-10G2",
 					"GT1-02-11C",
 					"GT1-02-11A1",
-					"GT1-02-11A2"
+					"GT1-02-11A2",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-11-02",
@@ -18830,7 +19065,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
-				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18881,6 +19117,12 @@
 					"id": "acp-permission-consumers:REG-DEFINITIONS",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
+					"affectedRows": ["REG-DEFINITIONS"]
+				},
+				{
+					"id": "acp-turn-consumers:REG-DEFINITIONS",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["REG-DEFINITIONS"]
 				}
 			],
