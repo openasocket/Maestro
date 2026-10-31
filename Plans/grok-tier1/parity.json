@@ -2776,6 +2776,34 @@
 			],
 			"testOwner": "GT1-04-08D",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-grok-context-export": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-09-scoped-grok-context-export",
+			"sourceCommit": "f7ab7e3c4a831bc55d395f979772284c9047f264",
+			"sourceCommitScope": "Pre-task HEAD plus production hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/ipc/handlers/context.ts": "305d52827daa379118733224fdd02439ee58664af41fda0c41431e02402f3500",
+				"src/renderer/utils/contextExtractor.ts": "3fb1a748a9a26773c18780ae4326814bedded9d6d6b89451db688e14b57bee33"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "P21", "C-supportsContextExport"],
+			"scope": "Existing stored-context extractor uses owned agentSessions.read with includeNativeRecords and one bounded chronological tail snapshot. Exports retain observed scope, roles, source-line and tool linkage, inert image references, explicit visibility/source/pagination omissions and canonical redaction. Legacy unscoped Grok context IPC refuses before reading storage; grooming and clipboard preserve evidence.",
+			"limitations": [
+				"Tests neither authored, run nor collected: GT1-04-10 authors context/IPC regressions and GT1-04-13 executes them.",
+				"At most the latest 1,000 normalized records are projected; hasMore/total disclose omitted earlier content. No cross-generation page stitching.",
+				"Raw native payloads and opaque reasoning are omitted. Backend-tool and unknown records whose detail is available only in raw retain source-line provenance and explicit missing-content notices.",
+				"Only normalized visible reasoning text can be included via includeThinking; clipboard independently defaults to hiding it. Referenced images are neither fetched nor interpreted.",
+				"extractStoredSessionContext and legacy context.getStoredSession have no production callers. GT1-06-01 owns UI/CLI export/merge wiring; this packet does not claim a new visible workflow.",
+				"No capability, translation direction or qualification status changed. Native migration/resume and real local/SSH provider qualification remain separate and not-run."
+			],
+			"implementationOwner": "GT1-04-09",
+			"testOwner": "GT1-04-10",
+			"verificationOwner": "GT1-04-13",
+			"consumerOwner": "GT1-06-01"
 		}
 	},
 	"sourceCatalog": {
@@ -6732,7 +6760,8 @@
 				"phase04GrokRenameConsumerTestsRef": "phase04-grok-rename-consumer-tests",
 				"phase04NativeForkRenameTestsRef": "phase04-native-fork-rename-tests",
 				"phase04GrokHistoryMutationRefusalsRef": "phase04-grok-history-mutation-refusals",
-				"phase04GrokHistoryMutationTestsRef": "phase04-grok-history-mutation-tests"
+				"phase04GrokHistoryMutationTestsRef": "phase04-grok-history-mutation-tests",
+				"phase04ContextExportEvidenceRef": "phase04-grok-context-export"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6802,6 +6831,13 @@
 					"code": "native-mutation-unsupported",
 					"missingPrerequisite": "Version-qualified account/cwd/host-bound native mutation transaction, native prompt mapping and active-writer/generation fencing. GT1-04-08C preserves history and refuses unsafe UI/IPC mutations; GT1-04-08D/13 must author/execute refusal and isolation regressions. Pinned whole-session delete and rewind cannot substitute for arbitrary message-pair edits. Native compliance remains not-run.",
 					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
+				},
+				{
+					"id": "grok-context-export-consumers-and-verification-pending",
+					"code": "verification-and-consumer-wiring-pending",
+					"missingPrerequisite": "GT1-04-09 implements scoped stored-context normalization and truthful bounded/visibility omissions. GT1-04-10/13 must author/execute regressions; GT1-06-01 owns UI/CLI consumer wiring. Backend-only raw evidence remains explicitly omitted. Context export alone does not certify native translation or resume.",
+					"affectedRows": ["P14"],
+					"evidenceRef": "phase04-grok-context-export"
 				}
 			],
 			"phase": "04",
@@ -7806,7 +7842,8 @@
 				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests",
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
-				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests"
+				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
+				"phase04ContextExportEvidenceRef": "phase04-grok-context-export"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7840,6 +7877,13 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["P21"]
+				},
+				{
+					"id": "grok-context-export-consumers-and-verification-pending",
+					"code": "verification-and-consumer-wiring-pending",
+					"missingPrerequisite": "GT1-04-09 implements scoped stored-context normalization and truthful bounded/visibility omissions. GT1-04-10/13 must author/execute regressions; GT1-06-01 owns UI/CLI consumer wiring. Backend-only raw evidence remains explicitly omitted. Context export alone does not certify native translation or resume.",
+					"affectedRows": ["P21"],
+					"evidenceRef": "phase04-grok-context-export"
 				}
 			],
 			"phase": "06",
@@ -15042,7 +15086,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04ContextExportEvidenceRef": "phase04-grok-context-export"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -15076,6 +15121,13 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["C-supportsContextExport"]
+				},
+				{
+					"id": "grok-context-export-consumers-and-verification-pending",
+					"code": "verification-and-consumer-wiring-pending",
+					"missingPrerequisite": "GT1-04-09 implements scoped stored-context normalization and truthful bounded/visibility omissions. GT1-04-10/13 must author/execute regressions; GT1-06-01 owns UI/CLI consumer wiring. Backend-only raw evidence remains explicitly omitted. Context export alone does not certify native translation or resume.",
+					"affectedRows": ["C-supportsContextExport"],
+					"evidenceRef": "phase04-grok-context-export"
 				}
 			],
 			"field": "supportsContextExport",
