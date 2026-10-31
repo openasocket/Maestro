@@ -33,7 +33,7 @@ vi.mock('../../../main/utils/sentry', () => ({
 // kill tests flip this to true to exercise the taskkill branch.
 const { mockIsWindows, mockExecFile, mockExecFileSync } = vi.hoisted(() => ({
 	mockIsWindows: vi.fn(() => false),
-	mockExecFile: vi.fn((_cmd: unknown, _args: unknown, cb?: unknown) => {
+	mockExecFile: vi.fn((_cmd: unknown, _args: unknown, _options: unknown, cb?: unknown) => {
 		if (typeof cb === 'function') (cb as (e: Error | null) => void)(null);
 	}),
 	mockExecFileSync: vi.fn(),
@@ -83,12 +83,14 @@ vi.mock('child_process', async (importOriginal) => {
 	return {
 		...actual,
 		spawn: (...args: unknown[]) => mockSpawn(...args),
-		execFile: (...args: unknown[]) => mockExecFile(...(args as [unknown, unknown, unknown?])),
+		execFile: (...args: unknown[]) =>
+			mockExecFile(...(args as [unknown, unknown, unknown, unknown?])),
 		execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
 		default: {
 			...actual,
 			spawn: (...args: unknown[]) => mockSpawn(...args),
-			execFile: (...args: unknown[]) => mockExecFile(...(args as [unknown, unknown, unknown?])),
+			execFile: (...args: unknown[]) =>
+				mockExecFile(...(args as [unknown, unknown, unknown, unknown?])),
 			execFileSync: (...args: unknown[]) => mockExecFileSync(...args),
 		},
 	};
@@ -1459,6 +1461,7 @@ describe('cue-process-lifecycle', () => {
 			expect(mockExecFile).toHaveBeenCalledWith(
 				'taskkill',
 				['/pid', String(mockChild.pid), '/t', '/f'],
+				{ timeout: 5000 },
 				expect.any(Function)
 			);
 			// POSIX signals must not be used on Windows (no-op for shell-spawned trees).
@@ -1470,19 +1473,30 @@ describe('cue-process-lifecycle', () => {
 
 		it('tolerates taskkill failing because the process is already dead', async () => {
 			mockIsWindows.mockReturnValue(true);
-			mockExecFile.mockImplementationOnce((_cmd: unknown, _args: unknown, cb?: unknown) => {
-				if (typeof cb === 'function') {
-					(cb as (e: Error | null) => void)(new Error('ERROR: The process "12345" not found.'));
+			mockExecFile.mockImplementationOnce(
+				(_cmd: unknown, _args: unknown, _options: unknown, cb?: unknown) => {
+					// The child exits after dispatch, before taskkill reports its failure.
+					// Its exit state, not localized error text, makes the failure benign.
+					mockChild.exitCode = 1;
+					if (typeof cb === 'function') {
+						(cb as (e: Error | null) => void)(new Error('ERROR: The process "12345" not found.'));
+					}
 				}
-			});
+			);
 
 			const resultPromise = runProcess('win-dead', createSpec(), createOptions());
 			await vi.advanceTimersByTimeAsync(0);
 
-			// The child exited before taskkill ran. The exit code, not the
-			// (localized) error text, is what marks the failure as benign.
-			mockChild.exitCode = 1;
-			stopProcess('win-dead');
+			const childKill = vi.spyOn(mockChild, 'kill');
+			expect(stopProcess('win-dead')).toBe(true);
+			expect(mockExecFile).toHaveBeenCalledWith(
+				'taskkill',
+				['/pid', String(mockChild.pid), '/t', '/f'],
+				{ timeout: 5000 },
+				expect.any(Function)
+			);
+			expect(mockChild.exitCode).toBe(1);
+			expect(childKill).not.toHaveBeenCalled();
 			// Already-dead is expected on Windows and must not be reported to Sentry.
 			expect(mockCaptureException).not.toHaveBeenCalled();
 

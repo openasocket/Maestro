@@ -1102,7 +1102,12 @@ describe('process-manager.ts', () => {
 		});
 
 		describe('kill method - Windows tree kill', () => {
-			const TASKKILL_PTY = ['taskkill', ['/pid', '12345', '/t', '/f'], expect.any(Function)];
+			const TASKKILL_PTY = [
+				'taskkill',
+				['/pid', '12345', '/t', '/f'],
+				{ timeout: 5000 },
+				expect.any(Function),
+			];
 
 			// A running child, as Node reports one: the stop ladder signals only a
 			// process whose exit state is still null.
@@ -1168,8 +1173,12 @@ describe('process-manager.ts', () => {
 			it('should not throw when taskkill fails for a process that is already gone', () => {
 				mockIsWindows.mockReturnValue(true);
 				mockExecFile.mockImplementationOnce(
-					(_command: string, _arguments: string[], callback: (callbackError: Error) => void) =>
-						callback(new Error('taskkill failed'))
+					(
+						_command: string,
+						_arguments: string[],
+						_options: { timeout: number },
+						callback: (callbackError: Error) => void
+					) => callback(new Error('taskkill failed'))
 				);
 				trackPty({ pid: 12345, kill: vi.fn(), onExit: vi.fn() });
 
@@ -1209,6 +1218,7 @@ describe('process-manager.ts', () => {
 				expect(mockExecFile).toHaveBeenCalledWith(
 					'taskkill',
 					['/pid', '99999', '/t', '/f'],
+					{ timeout: 5000 },
 					expect.any(Function)
 				);
 				expect(mockChildProcess.kill).not.toHaveBeenCalled();
