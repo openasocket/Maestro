@@ -3071,7 +3071,7 @@
 			"affectedRows": ["P04", "P17", "S29"],
 			"verificationTask": "GT1-05-13",
 			"limitations": [
-				"Fourteen authored cases await execution together with GT1-05-02B’s three worktree suites; no behavior or type-check pass is claimed.",
+				"Fourteen authored cases await execution together with GT1-05-02B\u2019s three worktree suites; no behavior or type-check pass is claimed.",
 				"The real shared runner uses a fake provider process and synthetic in-process authority; SSH wrapping and directory observation are fixture ports, not live host or policy qualification.",
 				"Production ACP routing remains phase07; Auto Run ownership remains phase08; exact-binary and platform qualification remains phase11."
 			]
@@ -3288,6 +3288,27 @@
 			"limitations": [
 				"Tests authored only; no runtime or semantic type-check pass. GT1-05-13 must execute both suites.",
 				"Synthetic discovery does not authorize native invocation. Capabilities, beta status and native qualification remain unchanged."
+			]
+		},
+		"phase05-enqueue-fingerprint-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests",
+			"sourceCommit": "cb638b6a35c2f07eb20627d504f57095229fa939",
+			"sourceRevisionScope": "Pre-task HEAD plus authored test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/ipc/handlers/process.test.ts": "83259079ac1193aff1c938ef655f2b5100b8c5f6b45322cef6d2df8a674445c3",
+				"src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts": "86ddc1f6a40b183d36b7d0e6db690a2c4deb20574fc514458ff6b117801ed37d"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P07", "S31"],
+			"authoredCases": 62,
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"Tests authored only; GT1-05-13 must execute both complete main suites and GT1-05-06B1 renderer coverage. No semantic typecheck or behavioral pass claimed.",
+				"Synthetic remote observations and policy ports do not qualify native routes or real provider enforcement. Native commands and remote macro attachments remain unsupported."
 			]
 		}
 	},
@@ -5532,7 +5553,8 @@
 			"limitations": [
 				"Owned ACP JSON prompt-file delivery, host-local materialization/cleanup, consumer handoffs including tab naming, and first-turn system embedding/resume skipping have scoped deterministic evidence. Raw prompt stdin and native append/rules are disabled. Exact-binary text/system behavior, real SSH cleanup, Linux-only skipped shell cases and Windows permissions remain unqualified. Template/command integration remains GT1-05-05/06/06A/06B/13/14; utility retries remain GT1-08-14E/14F/21; native/platform qualification remains phase10/11.",
 				"GT1-05-06A1 binds queued Grok macros to ephemeral selected-tab/provider/account/cwd/native/permission evidence, compares bounded provider/global/selected-SSH configuration reads at drain and after preparation, preserves attachments, handles returned spawn refusals and protects live owners during cancellation/recovery. Persisted/legacy missing evidence holds explicitly. GT1-05-06A1C/H now forwards the enqueue fingerprint and compares main provider/global/selected-SSH configuration before preparation and at the existing beforeSpawn boundary. Queue/main race regression coverage and execution remain GT1-05-06B1/06A1T/13. GT1-05-06A2 implements literal argument insertion, configured local/SSH system context and selected native identity, and new-tab native-command refusal before creation or acknowledgement. Static checks pass apart from the known renderer RequestInit.dispatcher baseline; behavioral execution remains not-run. See Plans/grok-tier1/evidence/05.md#gt1-05-06a2-literal-arguments-and-new-tab-context. GT1-05-06B/B1/B2/13 own remaining behavioral coverage/execution. Native commands and remote macro attachments remain unsupported; no parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1-queued-command-ownership.",
-				"GT1-05-06A1C defines the shared canonical expected-selection projection and ephemeral SHA-256 fingerprint on process:spawn. It excludes frozen model/effort and carries no raw environment values. Preload already preserves the optional field. GT1-05-06A1H consumes the contract in the existing receipt and command spawn, rejects unavailable/stale evidence at main entry and preparation rechecks, and retains native/managed admission. GT1-05-06B1/06A1T coverage and GT1-05-13 execution remain pending; no route or parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1c-expected-selection-contract."
+				"GT1-05-06A1C defines the shared canonical expected-selection projection and ephemeral SHA-256 fingerprint on process:spawn. It excludes frozen model/effort and carries no raw environment values. Preload already preserves the optional field. GT1-05-06A1H consumes the contract in the existing receipt and command spawn, rejects unavailable/stale evidence at main entry and preparation rechecks, and retains native/managed admission. GT1-05-06B1/06A1T coverage and GT1-05-13 execution remain pending; no route or parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1c-expected-selection-contract.",
+				"GT1-05-06A1T authors 62 main-entry, discovery, SSH preparation, observation and managed admission regression cases in the two existing main suites. Static checks pass; execution remains not-run for GT1-05-13. Renderer forwarding/hash coverage remains GT1-05-06B1. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -5580,7 +5602,7 @@
 				{
 					"id": "queued-command-main-entry-race",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-05-06A1C/H implement the shared enqueue fingerprint and main-entry/preparation/beforeSpawn comparisons, preserving native ownership and managed admission. GT1-05-06A1T/B1/13 must cover and execute fresh/resumed account, executable, global-env and same-ID SSH endpoint race regressions. Static checks alone do not certify the guarded route. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1h-enqueue-to-main-selection-check.",
+					"missingPrerequisite": "GT1-05-06A1C/H implement enqueue-to-main comparisons; GT1-05-06A1T now authors main-entry/preparation/native-observation/managed-admission regressions, including fresh/resumed and reference-provider controls. GT1-05-06B1 must cover renderer forwarding and GT1-05-13 must execute both main suites plus renderer coverage. Authoring and static checks do not certify the guarded route. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests.",
 					"affectedRows": ["P07", "S31"]
 				}
 			],
@@ -22531,7 +22553,8 @@
 			"limitations": [
 				"Grok is reached through generic queue, but command collisions, argument expansion, selected tab/account and managed dispatch need proof. GT1-05-05/06 ownership is provisional until GT1-01-07 confirms explicit template-consumer coverage.",
 				"GT1-05-06A1 binds queued Grok macros to ephemeral selected-tab/provider/account/cwd/native/permission evidence, compares bounded provider/global/selected-SSH configuration reads at drain and after preparation, preserves attachments, handles returned spawn refusals and protects live owners during cancellation/recovery. Persisted/legacy missing evidence holds explicitly. GT1-05-06A1C/H now forwards the enqueue fingerprint and compares main provider/global/selected-SSH configuration before preparation and at the existing beforeSpawn boundary. Queue/main race regression coverage and execution remain GT1-05-06B1/06A1T/13. GT1-05-06A2 implements literal argument insertion, configured local/SSH system context and selected native identity, and new-tab native-command refusal before creation or acknowledgement. Static checks pass apart from the known renderer RequestInit.dispatcher baseline; behavioral execution remains not-run. See Plans/grok-tier1/evidence/05.md#gt1-05-06a2-literal-arguments-and-new-tab-context. GT1-05-06B/B1/B2/13 own remaining behavioral coverage/execution. Native commands and remote macro attachments remain unsupported; no parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1-queued-command-ownership.",
-				"GT1-05-06A1C defines the shared canonical expected-selection projection and ephemeral SHA-256 fingerprint on process:spawn. It excludes frozen model/effort and carries no raw environment values. Preload already preserves the optional field. GT1-05-06A1H consumes the contract in the existing receipt and command spawn, rejects unavailable/stale evidence at main entry and preparation rechecks, and retains native/managed admission. GT1-05-06B1/06A1T coverage and GT1-05-13 execution remain pending; no route or parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1c-expected-selection-contract."
+				"GT1-05-06A1C defines the shared canonical expected-selection projection and ephemeral SHA-256 fingerprint on process:spawn. It excludes frozen model/effort and carries no raw environment values. Preload already preserves the optional field. GT1-05-06A1H consumes the contract in the existing receipt and command spawn, rejects unavailable/stale evidence at main entry and preparation rechecks, and retains native/managed admission. GT1-05-06B1/06A1T coverage and GT1-05-13 execution remain pending; no route or parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1c-expected-selection-contract.",
+				"GT1-05-06A1T authors 62 main-entry, discovery, SSH preparation, observation and managed admission regression cases in the two existing main suites. Static checks pass; execution remains not-run for GT1-05-13. Renderer forwarding/hash coverage remains GT1-05-06B1. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22578,7 +22601,7 @@
 				{
 					"id": "queued-command-main-entry-race",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-05-06A1C/H implement the shared enqueue fingerprint and main-entry/preparation/beforeSpawn comparisons, preserving native ownership and managed admission. GT1-05-06A1T/B1/13 must cover and execute fresh/resumed account, executable, global-env and same-ID SSH endpoint race regressions. Static checks alone do not certify the guarded route. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1h-enqueue-to-main-selection-check.",
+					"missingPrerequisite": "GT1-05-06A1C/H implement enqueue-to-main comparisons; GT1-05-06A1T now authors main-entry/preparation/native-observation/managed-admission regressions, including fresh/resumed and reference-provider controls. GT1-05-06B1 must cover renderer forwarding and GT1-05-13 must execute both main suites plus renderer coverage. Authoring and static checks do not certify the guarded route. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests.",
 					"affectedRows": ["P07", "S31"]
 				}
 			],

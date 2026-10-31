@@ -53,6 +53,8 @@ vi.mock('../../../../../main/utils/remote-fs', async (importOriginal) => ({
 
 import * as platform from '../../../../../shared/platformDetection';
 import { resolveAgentAccountRef } from '../../../../../shared/agentAccountDir';
+import { fingerprintGrokSpawnSelection } from '../../../../../shared/grokSpawnSelection';
+import { sha256Hex } from '../../../../../shared/maestro-lib/managed/authority';
 import type { NativeSessionBinding } from '../../../../../shared/maestro-lib/agents/providerSwap';
 import { installationIdentity } from '../../../../../shared/maestro-lib/managed/host-adapter';
 import type { SshRemoteConfig } from '../../../../../shared/types';
@@ -1507,6 +1509,189 @@ describe('process:spawn native request correlation (GT1-04-07E1PT)', () => {
 			else expect(h.spawn).toHaveBeenCalledOnce();
 			if (failure === 'ownership') expect(port.asked).toHaveLength(0);
 			expect(h.processManager.nativeSessionLaunchOf(PROCESS)).toBeUndefined();
+		}
+	);
+});
+
+describe('process:spawn queued Grok selection and admission (GT1-05-06A1T)', () => {
+	isolateAgentEnv();
+	isolateAgentEnv(['GROK_HOME', 'GROK_AUTH', 'GROK_AUTH_PATH']);
+	const definition = getAgentDefinition('grok')!;
+	const cwd = path.resolve('src', '__tests__');
+	let h: Harness;
+	let port: FakeSpawnPort;
+	let request: SpawnProcessConfig;
+	let changeAtAdmission: (() => void) | undefined;
+	let deny: boolean;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.spyOn(platform, 'isWindows').mockReturnValue(false);
+		changeAtAdmission = undefined;
+		deny = false;
+		port = fakeSpawnPort({
+			decide: async () => {
+				changeAtAdmission?.();
+				return deny
+					? {
+							decision: 'deny',
+							reason: 'Synthetic queued command denial',
+							policyRevision: 1,
+							code: 'policy-denied',
+						}
+					: { decision: 'allow', policyRevision: 1 };
+			},
+		});
+		h = harness(port, { provider: 'grok' });
+		h.deps.agentConfigsStore.set('configs', {
+			grok: { customEnvVars: { GROK_HOME: GROK_ACCOUNT } },
+		});
+		request = payload({
+			toolType: 'grok',
+			command: definition.command,
+			args: [...definition.args],
+			cwd,
+			sessionCustomEnvVars: { GROK_HOME: GROK_ACCOUNT },
+			expectedGrokSpawnSelection: fingerprintGrokSpawnSelection(
+				{
+					providerConfig: h.deps.agentConfigsStore.get('configs').grok,
+					shellEnvVars: {},
+					sshRemote: null,
+				},
+				sha256Hex
+			),
+		});
+	});
+	afterEach(() => vi.restoreAllMocks());
+
+	it.each([false, true])(
+		'admits an unchanged local queued selection, resume=%s',
+		async (resume) => {
+			request.agentSessionId = resume ? 'native-queued-session' : undefined;
+			const binding = seedGrokLaunch(h, request);
+			// The native fixture seeds ownership; this turn inherits the provider account.
+			delete request.sessionCustomEnvVars;
+			expect(await handleProcessSpawn(request, h.deps)).toMatchObject({ success: true });
+			const config = spawned(h);
+			expect(config).toMatchObject({
+				toolType: 'grok',
+				cwd,
+				customEnvVars: { GROK_HOME: GROK_ACCOUNT },
+				nativeSessionScope: {
+					state: 'bound',
+					provider: 'grok',
+					cwd: realpathSync(cwd),
+					accountRef: resolveAgentAccountRef(
+						{ toolType: 'grok', managedAccountDir: realpathSync(GROK_ACCOUNT) },
+						{ homeDir: '' }
+					),
+				},
+			});
+			expect(config.args.includes('--resume')).toBe(resume);
+			expect(config.nativeSessionBinding).toEqual(binding);
+			expect(config.agentSessionId).toBe(request.agentSessionId);
+			if (resume) expect(config.args).toContain('native-queued-session');
+			expect(port.asked).toHaveLength(1);
+			expect(port.asked[0].snapshot).toMatchObject({
+				provider: 'grok',
+				operation: resume ? 'resume' : 'start',
+			});
+			expect(port.authority.live()[0].leaseId).toBe(config.admission?.leaseId);
+			expect(config).not.toHaveProperty('expectedGrokSpawnSelection');
+			for (const value of [
+				config,
+				port.asked,
+				h.sent,
+				h.errors,
+				vi.mocked(logger.debug).mock.calls,
+			])
+				expect(JSON.stringify(value)).not.toContain(request.expectedGrokSpawnSelection);
+		}
+	);
+
+	it.each(['account', 'executable', 'arguments', 'global environment'])(
+		'refuses a changed %s during admission and releases the minted lease',
+		async (change) => {
+			changeAtAdmission = () => {
+				if (change === 'global environment') {
+					h.deps.settingsStore.set('shellEnvVars', { QUEUED_FIXTURE: 'changed' });
+				} else {
+					const selected = h.deps.agentConfigsStore.get('configs').grok;
+					h.deps.agentConfigsStore.set('configs', {
+						grok: {
+							...selected,
+							...(change === 'account' ? { customEnvVars: { GROK_HOME: cwd } } : {}),
+							...(change === 'executable'
+								? { customPath: path.join(cwd, 'replacement-grok') }
+								: {}),
+							...(change === 'arguments' ? { customArgs: '--verbose' } : {}),
+						},
+					});
+				}
+			};
+			const admitted = vi.spyOn(h.processManager, 'spawnAdmitted');
+			await expect(handleProcessSpawn(request, h.deps)).rejects.toThrow(
+				'Private prompt-file launch failed.'
+			);
+			expect(admitted).toHaveBeenCalledOnce();
+			expect(admitted.mock.calls[0][0]).not.toHaveProperty('expectedGrokSpawnSelection');
+			expect(port.asked).toHaveLength(1);
+			expect(port.authority.live()).toHaveLength(0);
+			expect(h.spawn).not.toHaveBeenCalled();
+			expect(h.errors).toEqual([]);
+			expect(refusalSentToTab(h)).toContain(
+				'Queued Grok command configuration is unavailable or changed'
+			);
+			expect(h.processManager.nativeSessionLaunchOf(PROCESS)).toBeUndefined();
+		}
+	);
+
+	it.each([false, true])(
+		'a matching fingerprint cannot override policy refusal, resume=%s',
+		async (resume) => {
+			request.agentSessionId = resume ? 'native-queued-session' : undefined;
+			seedGrokLaunch(h, request);
+			deny = true;
+			await expect(handleProcessSpawn(request, h.deps)).rejects.toThrow(
+				'Private prompt-file launch failed.'
+			);
+			expect(port.asked).toHaveLength(1);
+			expect(port.authority.live()).toHaveLength(0);
+			expect(h.spawn).not.toHaveBeenCalled();
+			expect(h.errors).toEqual([[PROCESS, 'Synthetic queued command denial']]);
+			expect(refusalSentToTab(h)).toContain('Synthetic queued command denial');
+			expect(h.processManager.nativeSessionLaunchOf(PROCESS)).toBeUndefined();
+		}
+	);
+
+	it('a matching fingerprint cannot manufacture native ownership for resume', async () => {
+		request.agentSessionId = 'unowned-queued-session';
+		const prepare = vi.spyOn(systemDelivery, 'applySystemPromptDelivery');
+		expect(await handleProcessSpawn(request, h.deps)).toMatchObject({
+			success: false,
+			pid: 0,
+			error: expect.stringContaining('no retained native ownership'),
+		});
+		expect(prepare).not.toHaveBeenCalled();
+		expect(port.asked).toHaveLength(0);
+		expect(h.spawn).not.toHaveBeenCalled();
+	});
+
+	it.each([undefined, null, 'invalid' as const])(
+		'keeps Codex admission unchanged for a Grok fingerprint of %s',
+		async (fingerprint) => {
+			const reference = harness(port);
+			const config = payload();
+			if (fingerprint !== undefined)
+				config.expectedGrokSpawnSelection =
+					fingerprint as SpawnProcessConfig['expectedGrokSpawnSelection'];
+			expect(await handleProcessSpawn(config, reference.deps)).toMatchObject({ success: true });
+			const admitted = spawned(reference);
+			expect(admitted.toolType).toBe('codex');
+			expect(admitted).not.toHaveProperty('expectedGrokSpawnSelection');
+			expect(port.asked).toHaveLength(1);
+			expect(port.asked[0].snapshot.provider).toBe('codex');
+			expect(port.authority.live()[0].leaseId).toBe(admitted.admission?.leaseId);
 		}
 	);
 });

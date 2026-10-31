@@ -15,9 +15,13 @@ import { trackHeadlessAgentActivity } from '../../../../main/utils/headless-agen
 import * as os from 'os';
 import * as fsp from 'fs/promises';
 import { observePathRemote, type RemoteGrokLaunchIdentity } from '../../../../main/utils/remote-fs';
+import { buildSshCommandWithStdin } from '../../../../main/utils/ssh-command-builder';
 import { applyAgentConfigOverrides } from '../../../../shared/maestro-lib/launch/agent-args';
 import { buildCallerIdentityEnv } from '../../../../shared/agentDelegation';
 import { resolveAgentAccountRef } from '../../../../shared/agentAccountDir';
+import { fingerprintGrokSpawnSelection } from '../../../../shared/grokSpawnSelection';
+import { sha256Hex } from '../../../../shared/maestro-lib/managed/authority';
+import type { SpawnProcessConfig } from '../../../../main/ipc/handlers/process/spawn-types';
 import type { SshRemoteConfig } from '../../../../shared/types';
 import type { ProviderSwitchTab } from '../../../../shared/maestro-lib/agents/providerSwap';
 import type {
@@ -4857,12 +4861,17 @@ describe('process IPC handlers', () => {
 		let remote: SshRemoteConfig;
 		let globalEnv: Record<string, string>;
 		let providerEnv: Record<string, string>;
+		let providerConfig: Record<string, unknown>;
 		let receipt: RemoteGrokLaunchIdentity;
 		let endpoint: string;
 		let duringAdmission: () => void;
 		let previousOverrides: typeof applyAgentConfigOverrides | undefined;
 		const qualifyResolved = vi.fn();
-		const launch = (cwd = '/remote/project', sessionCustomEnvVars?: Record<string, string>) =>
+		const launch = (
+			cwd = '/remote/project',
+			sessionCustomEnvVars?: Record<string, string>,
+			overrides: Partial<SpawnProcessConfig> = {}
+		) =>
 			handlers.get('process:spawn')!(
 				{},
 				{
@@ -4873,7 +4882,13 @@ describe('process IPC handlers', () => {
 					args: ['--cwd', cwd],
 					sessionCustomEnvVars,
 					sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+					...overrides,
 				}
+			);
+		const enqueueFingerprint = () =>
+			fingerprintGrokSpawnSelection(
+				{ providerConfig, shellEnvVars: globalEnv, sshRemote: remote },
+				sha256Hex
 			);
 
 		beforeEach(() => {
@@ -4889,6 +4904,7 @@ describe('process IPC handlers', () => {
 			};
 			globalEnv = {};
 			providerEnv = {};
+			providerConfig = { customEnvVars: providerEnv };
 			endpoint = 'remote-installation';
 			duringAdmission = () => {};
 			const directory = {
@@ -4917,7 +4933,7 @@ describe('process IPC handlers', () => {
 			mockSettingsStore.get.mockImplementation((key, fallback) =>
 				key === 'sshRemotes' ? [remote] : key === 'shellEnvVars' ? globalEnv : fallback
 			);
-			mockAgentConfigsStore.get.mockReturnValue({ grok: { customEnvVars: providerEnv } });
+			mockAgentConfigsStore.get.mockReturnValue({ grok: providerConfig });
 			mockAgentDetector.getAgent.mockResolvedValue({
 				id: 'grok',
 				binaryName: 'grok',
@@ -5041,6 +5057,216 @@ describe('process IPC handlers', () => {
 			}
 		);
 
+		describe('queued selection at main entry (GT1-05-06A1T)', () => {
+			it.each(['claude-code', 'antigravity'])(
+				'keeps %s launches unchanged by unavailable Grok evidence',
+				async (toolType) => {
+					mockAgentDetector.getAgent.mockResolvedValue({ id: toolType, requiresPty: false });
+					expect(
+						await launch('/fixture/project', undefined, {
+							toolType,
+							command: toolType,
+							args: [],
+							sessionSshRemoteConfig: undefined,
+							expectedGrokSpawnSelection: null,
+						})
+					).toMatchObject({ success: true, pid: 777 });
+					expect(mockProcessManager.spawnAdmitted).toHaveBeenCalledTimes(1);
+					expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+					expect(mockProcessManager.spawn.mock.lastCall![0]).toMatchObject({
+						toolType,
+						command: toolType,
+					});
+					expect(mockProcessManager.spawn.mock.lastCall![0]).not.toHaveProperty(
+						'expectedGrokSpawnSelection'
+					);
+					expect(observePathRemote).not.toHaveBeenCalled();
+					expect(qualifyResolved).not.toHaveBeenCalled();
+				}
+			);
+
+			describe.each(['entry', 'discovery', 'SSH preparation'] as const)(
+				'changed selection at %s',
+				(boundary) => {
+					it.each([
+						[
+							'inherited account',
+							() => {
+								providerEnv.GROK_HOME = '/remote/other';
+							},
+						],
+						[
+							'executable',
+							() => {
+								providerConfig.customPath = '/other/bin/grok';
+							},
+						],
+						[
+							'arguments',
+							() => {
+								providerConfig.customArgs = '--max-turns 2';
+							},
+						],
+						[
+							'global environment',
+							() => {
+								globalEnv.GROK_HOME = '/global/other';
+							},
+						],
+						[
+							'same-ID host',
+							() => {
+								remote.host = 'replacement.invalid';
+							},
+						],
+						[
+							'same-ID port',
+							() => {
+								remote.port = 2222;
+							},
+						],
+						[
+							'same-ID user',
+							() => {
+								remote.username = 'other-user';
+							},
+						],
+						[
+							'same-ID key path',
+							() => {
+								remote.privateKeyPath = '/fixture/other-key';
+							},
+						],
+						[
+							'same-ID SSH options',
+							() => {
+								remote.sshOptions = { ProxyJump: 'other.invalid' };
+							},
+						],
+						[
+							'same-ID remote environment',
+							() => {
+								remote.remoteEnv = { GROK_HOME: '/remote/other' };
+							},
+						],
+						[
+							'disabled remote',
+							() => {
+								remote.enabled = false;
+							},
+						],
+						[
+							'missing selected remote',
+							() => {
+								remote.id = 'removed-selected-remote';
+							},
+						],
+					] as const)('refuses changed %s before remote effects', async (_label, mutate) => {
+						// Keep the renderer's final fingerprint; never recapture the mutation.
+						const expectedGrokSpawnSelection = enqueueFingerprint();
+						if (boundary === 'entry') mutate();
+						else if (boundary === 'discovery')
+							mockAgentDetector.getAgent.mockImplementationOnce(async () => {
+								mutate();
+								return { id: 'grok', binaryName: 'grok', requiresPty: false };
+							});
+						else {
+							const build = vi.mocked(buildSshCommandWithStdin).getMockImplementation()!;
+							vi.mocked(buildSshCommandWithStdin).mockImplementationOnce(async (...args) => {
+								const result = await build(...args);
+								mutate();
+								return result;
+							});
+						}
+						expect(
+							await launch('/remote/project', undefined, { expectedGrokSpawnSelection })
+						).toEqual({
+							success: false,
+							pid: 0,
+							error:
+								'Queued Grok command configuration is unavailable or changed. Requeue it with the intended settings.',
+						});
+						expect(mockAgentDetector.getAgent).toHaveBeenCalledTimes(boundary === 'entry' ? 0 : 1);
+						expect(checkCustomPath).not.toHaveBeenCalled();
+						expect(observePathRemote).not.toHaveBeenCalled();
+						expect(qualifyResolved).not.toHaveBeenCalled();
+						expect(applyAgentConfigOverrides).toHaveBeenCalledTimes(
+							boundary === 'SSH preparation' ? 1 : 0
+						);
+						expect(mockProcessManager.spawnAdmitted).not.toHaveBeenCalled();
+						expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+						expect(mockSessionsStore.set).not.toHaveBeenCalled();
+					});
+				}
+			);
+
+			it.each([
+				null,
+				undefined,
+				'',
+				'grok-spawn-selection-v2:' + 'a'.repeat(64),
+				'grok-spawn-selection-v1:bad',
+				'grok-spawn-selection-v1:' + 'g'.repeat(64),
+			])('refuses missing or malformed guarded evidence %s before discovery', async (expected) => {
+				expect(
+					await launch('/remote/project', undefined, {
+						expectedGrokSpawnSelection:
+							expected as SpawnProcessConfig['expectedGrokSpawnSelection'],
+					})
+				).toMatchObject({
+					success: false,
+					pid: 0,
+					error: expect.stringContaining('Queued Grok command configuration'),
+				});
+				expect(mockAgentDetector.getAgent).not.toHaveBeenCalled();
+				expect(observePathRemote).not.toHaveBeenCalled();
+				expect(qualifyResolved).not.toHaveBeenCalled();
+				expect(mockProcessManager.spawnAdmitted).not.toHaveBeenCalled();
+				expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+			});
+
+			it('admits one fresh turn with the matching fingerprint and strips it from the sink', async () => {
+				providerEnv.GROK_HOME = '/remote/account';
+				const expectedGrokSpawnSelection = enqueueFingerprint();
+				// Frozen model/effort and display metadata are outside the projection.
+				Object.assign(providerConfig, { model: 'changed-default', effort: 'low' });
+				remote.name = 'Renamed fixture';
+				expect(
+					await launch('/remote/project', undefined, { expectedGrokSpawnSelection })
+				).toMatchObject({ success: true, pid: 777 });
+				expect(mockProcessManager.spawnAdmitted).toHaveBeenCalledTimes(1);
+				expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				const spawned = mockProcessManager.spawn.mock.lastCall![0];
+				expect(spawned).toMatchObject({
+					command: 'ssh',
+					sshRemoteId: 'remote-1',
+					nativeSessionScope: { provider: 'grok', state: 'bound' },
+				});
+				expect(spawned).not.toHaveProperty('expectedGrokSpawnSelection');
+				expect(spawned.agentSessionId).toBeUndefined();
+				expect(spawned.sshStdinScript).toContain("export GROK_HOME='/remote/account'");
+				expect(observePathRemote).toHaveBeenCalledTimes(2);
+			});
+
+			it.each([1, 2])(
+				'rechecks the enqueue fingerprint after remote observation %s',
+				async (changedSample) => {
+					const expectedGrokSpawnSelection = enqueueFingerprint();
+					let samples = 0;
+					vi.mocked(observePathRemote).mockImplementation(async () => {
+						if (++samples === changedSample) providerEnv.GROK_HOME = '/remote/other';
+						return { success: true, data: structuredClone(receipt) };
+					});
+					await expect(
+						launch('/remote/project', undefined, { expectedGrokSpawnSelection })
+					).rejects.toThrow('Queued Grok command configuration');
+					expect(samples).toBe(changedSample);
+					expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+					expect(mockSessionsStore.set).not.toHaveBeenCalled();
+				}
+			);
+		});
+
 		describe('retained native resume ownership (GT1-04-08)', () => {
 			let stored: Array<{
 				id: string;
@@ -5048,7 +5274,11 @@ describe('process IPC handlers', () => {
 				cwd: string;
 				aiTabs: Array<ProviderSwitchTab & { id: string; logs: string[] }>;
 			}>;
-			const resume = (tabId = 'tab1', account = '/remote/account') =>
+			const resume = (
+				tabId = 'tab1',
+				account = '/remote/account',
+				overrides: Partial<SpawnProcessConfig> = {}
+			) =>
 				handlers.get('process:spawn')!(
 					{},
 					{
@@ -5060,6 +5290,7 @@ describe('process IPC handlers', () => {
 						agentSessionId: 'native-collision',
 						sessionCustomEnvVars: { GROK_HOME: account },
 						sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+						...overrides,
 					}
 				);
 
@@ -5126,6 +5357,50 @@ describe('process IPC handlers', () => {
 				expect(stored).toEqual(original);
 				expect(mockSessionsStore.set).not.toHaveBeenCalled();
 			});
+
+			it('retains native ownership on a matching queued resume (GT1-05-06A1T)', async () => {
+				const original = structuredClone(stored);
+				const expectedGrokSpawnSelection = enqueueFingerprint();
+				expect(
+					await resume('tab1', '/remote/account', { expectedGrokSpawnSelection })
+				).toMatchObject({
+					success: true,
+					pid: 777,
+				});
+				expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				const spawned = mockProcessManager.spawn.mock.lastCall![0];
+				expect(spawned.nativeSessionBinding).toEqual(stored[0].aiTabs[0].nativeSessionBinding);
+				expect(spawned).not.toHaveProperty('expectedGrokSpawnSelection');
+				expect(stored).toEqual(original);
+				expect(mockSessionsStore.set).not.toHaveBeenCalled();
+			});
+
+			it.each(['entry', 'discovery'] as const)(
+				'refuses a queued resume when the inherited account changes at %s (GT1-05-06A1T)',
+				async (boundary) => {
+					const expectedGrokSpawnSelection = enqueueFingerprint();
+					const original = structuredClone(stored);
+					if (boundary === 'entry') providerEnv.GROK_HOME = '/remote/other';
+					else
+						mockAgentDetector.getAgent.mockImplementationOnce(async () => {
+							providerEnv.GROK_HOME = '/remote/other';
+							return { id: 'grok', binaryName: 'grok', requiresPty: false };
+						});
+					expect(
+						await resume('tab1', '/remote/account', { expectedGrokSpawnSelection })
+					).toMatchObject({
+						success: false,
+						pid: 0,
+						error: expect.stringContaining('Queued Grok command configuration'),
+					});
+					expect(observePathRemote).not.toHaveBeenCalled();
+					expect(qualifyResolved).not.toHaveBeenCalled();
+					expect(mockProcessManager.spawnAdmitted).not.toHaveBeenCalled();
+					expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+					expect(stored).toEqual(original);
+					expect(mockSessionsStore.set).not.toHaveBeenCalled();
+				}
+			);
 
 			it.each(['missing binding', 'different provider', 'different native ID', 'missing tab'])(
 				'refuses %s without borrowing a colliding tab or erasing retained history',
