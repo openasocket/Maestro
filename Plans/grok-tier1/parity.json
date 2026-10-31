@@ -431,6 +431,35 @@
 				"REG-PARSER",
 				"REG-USAGE"
 			]
+		},
+		"phase03-usage-reconciliation-tests": {
+			"path": "Plans/grok-tier1/evidence/03.md#gt1-03-05d-usage-reconciliation-test-authoring",
+			"sourceCommit": "42ca6f823840519123c41a456c26c75ba94ee1f0",
+			"provenance": "authored-tests",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"scope": "GT1-03-05D authors normalized native/ACP usage, scoped reconciliation and TurnCapture regressions. Tests and compiler/build execution remain GT1-03-13; wire adapters, consumer propagation and native qualification remain downstream work.",
+			"testPaths": [
+				"src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts",
+				"src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts",
+				"src/__tests__/shared/maestro-lib/run/turn-capture.test.ts"
+			],
+			"testHashesSha256": {
+				"src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts": "fe3c7651d4a5539e2ebd009c262201b306dc8ca17933c2d7cca0086443e597d6",
+				"src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts": "58315e33fa9b1aea17ff7dcc94ce722cdb5c652e379bd8c00ec68bc78a50fb3a",
+				"src/__tests__/shared/maestro-lib/run/turn-capture.test.ts": "ec9bfb203e7631b50f7ae6254d48764ea857712510e436096f6f30dabd43abb9"
+			},
+			"affectedRows": [
+				"P09",
+				"P10",
+				"P11",
+				"P12",
+				"C-supportsCostTracking",
+				"C-supportsUsageStats",
+				"C-supportsResultMessages",
+				"REG-PARSER",
+				"REG-USAGE"
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -2994,7 +3023,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
-				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests"
+				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3014,7 +3044,7 @@
 				{
 					"id": "gap:P09",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. Complete GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["P09"]
 				},
 				{
@@ -3264,7 +3294,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
-				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests"
+				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3284,7 +3315,7 @@
 				{
 					"id": "gap:P10",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. Complete GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["P10"]
 				},
 				{
@@ -3424,7 +3455,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
-				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests"
+				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3444,7 +3476,7 @@
 				{
 					"id": "gap:P11",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. Complete GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["P11"]
 				},
 				{
@@ -3643,7 +3675,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
-				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests"
+				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3663,7 +3696,7 @@
 				{
 					"id": "gap:P12",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. Complete GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["P12"]
 				},
 				{
@@ -10011,7 +10044,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
-				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests"
+				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10031,7 +10065,7 @@
 				{
 					"id": "gap:C-supportsCostTracking",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. Complete GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["C-supportsCostTracking"]
 				},
 				{
@@ -10156,7 +10190,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
-				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests"
+				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10176,7 +10211,7 @@
 				{
 					"id": "gap:C-supportsUsageStats",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. Complete GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["C-supportsUsageStats"]
 				},
 				{
@@ -10629,7 +10664,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
-				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests"
+				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10649,7 +10685,7 @@
 				{
 					"id": "gap:C-supportsResultMessages",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. Complete GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["C-supportsResultMessages"]
 				},
 				{
@@ -12505,7 +12541,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
-				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests"
+				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12525,7 +12562,7 @@
 				{
 					"id": "gap:REG-PARSER",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. Complete GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["REG-PARSER"]
 				},
 				{
@@ -13192,7 +13229,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
-				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests"
+				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13212,7 +13250,7 @@
 				{
 					"id": "gap:REG-USAGE",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. Complete GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["REG-USAGE"]
 				},
 				{
