@@ -649,6 +649,20 @@
 			"deterministic": "not-run",
 			"live": "not-run",
 			"affectedRows": ["P09", "P10", "P34", "P37", "S22"]
+		},
+		"phase03-acp-question-tests": {
+			"path": "Plans/grok-tier1/evidence/03.md#gt1-03-08b-conversational-request-regression-tests",
+			"sourceCommit": "0d20184b019035de1d709bebba71c842739bd6a4",
+			"sourceRevisionScope": "Pre-task HEAD plus the GT1-03-08B test diff identified by SHA-256.",
+			"provenance": "authored-tests",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"scope": "GT1-03-08B authors 76 synthetic cases for actual underscored question methods, absent/guessed capability metadata, immediate cancellation, ordinary answers versus permission authority, stale/replaced/cross-tab identities, typed-ID replay, deadlines, disconnect/write failure and observer isolation. Positive advertised/pending/answer support remains unsupported. Execution/compiler checks remain GT1-03-13; composition, consumers and native qualification remain downstream.",
+			"testPaths": ["src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts"],
+			"testHashesSha256": {
+				"src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts": "5e4f2e69ebf13a7319ea71f22aaa0f186ce3e4e31f86a5fdcd37f39c788e95c3"
+			},
+			"affectedRows": ["P09", "P10", "P34", "P37", "S22"]
 		}
 	},
 	"sourceCatalog": {
@@ -3228,7 +3242,8 @@
 				"phase03AcpPlanTestsEvidenceRef": "phase03-acp-plan-tests",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
-				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable"
+				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
+				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3284,7 +3299,7 @@
 				{
 					"id": "acp-question-negotiation:P09",
 					"code": "unsupported-capability",
-					"missingPrerequisite": "Pinned Grok initialize advertises neither ask-back nor elicitation. GT1-03-08A cancels known wire requests and exposes unavailable event/answer ports only. Positive pending questions/answers require a verified advertised contract; GT1-03-08B/13 must verify negative behavior, GT1-03-09 compose it, phases07/10 retain unavailable status, and phase11 qualify the native route. Permission support is not conversational support.",
+					"missingPrerequisite": "Pinned Grok initialize advertises neither ask-back nor elicitation. GT1-03-08A cancels known wire requests and exposes unavailable event/answer ports only. Positive pending questions/answers require a verified advertised contract; GT1-03-08B authored 76 synthetic negative cases; GT1-03-13 must execute them and compiler checks, GT1-03-09 compose it, phases07/10 retain unavailable status, and phase11 qualify the native route. Permission support is not conversational support.",
 					"affectedRows": ["P09"]
 				}
 			],
@@ -3536,7 +3551,8 @@
 				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
-				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable"
+				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
+				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3586,7 +3602,7 @@
 				{
 					"id": "acp-question-negotiation:P10",
 					"code": "unsupported-capability",
-					"missingPrerequisite": "Pinned Grok initialize advertises neither ask-back nor elicitation. GT1-03-08A cancels known wire requests and exposes unavailable event/answer ports only. Positive pending questions/answers require a verified advertised contract; GT1-03-08B/13 must verify negative behavior, GT1-03-09 compose it, phases07/10 retain unavailable status, and phase11 qualify the native route. Permission support is not conversational support.",
+					"missingPrerequisite": "Pinned Grok initialize advertises neither ask-back nor elicitation. GT1-03-08A cancels known wire requests and exposes unavailable event/answer ports only. Positive pending questions/answers require a verified advertised contract; GT1-03-08B authored 76 synthetic negative cases; GT1-03-13 must execute them and compiler checks, GT1-03-09 compose it, phases07/10 retain unavailable status, and phase11 qualify the native route. Permission support is not conversational support.",
 					"affectedRows": ["P10"]
 				}
 			],
@@ -7069,7 +7085,8 @@
 				"phase03AcpPlanTestsEvidenceRef": "phase03-acp-plan-tests",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
-				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable"
+				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
+				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7119,7 +7136,7 @@
 				{
 					"id": "acp-question-negotiation:P34",
 					"code": "unsupported-capability",
-					"missingPrerequisite": "Pinned Grok initialize advertises neither ask-back nor elicitation. GT1-03-08A cancels known wire requests and exposes unavailable event/answer ports only. Positive pending questions/answers require a verified advertised contract; GT1-03-08B/13 must verify negative behavior, GT1-03-09 compose it, phases07/10 retain unavailable status, and phase11 qualify the native route. Permission support is not conversational support.",
+					"missingPrerequisite": "Pinned Grok initialize advertises neither ask-back nor elicitation. GT1-03-08A cancels known wire requests and exposes unavailable event/answer ports only. Positive pending questions/answers require a verified advertised contract; GT1-03-08B authored 76 synthetic negative cases; GT1-03-13 must execute them and compiler checks, GT1-03-09 compose it, phases07/10 retain unavailable status, and phase11 qualify the native route. Permission support is not conversational support.",
 					"affectedRows": ["P34"]
 				}
 			],
@@ -7643,7 +7660,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase03AcpPlansEvidenceRef": "phase03-acp-plans",
 				"phase03AcpPlanTestsEvidenceRef": "phase03-acp-plan-tests",
-				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable"
+				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
+				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7687,7 +7705,7 @@
 				{
 					"id": "acp-question-negotiation:P37",
 					"code": "unsupported-capability",
-					"missingPrerequisite": "Pinned Grok initialize advertises neither ask-back nor elicitation. GT1-03-08A cancels known wire requests and exposes unavailable event/answer ports only. Positive pending questions/answers require a verified advertised contract; GT1-03-08B/13 must verify negative behavior, GT1-03-09 compose it, phases07/10 retain unavailable status, and phase11 qualify the native route. Permission support is not conversational support.",
+					"missingPrerequisite": "Pinned Grok initialize advertises neither ask-back nor elicitation. GT1-03-08A cancels known wire requests and exposes unavailable event/answer ports only. Positive pending questions/answers require a verified advertised contract; GT1-03-08B authored 76 synthetic negative cases; GT1-03-13 must execute them and compiler checks, GT1-03-09 compose it, phases07/10 retain unavailable status, and phase11 qualify the native route. Permission support is not conversational support.",
 					"affectedRows": ["P37"]
 				}
 			],
@@ -16759,7 +16777,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase03AcpPlansEvidenceRef": "phase03-acp-plans",
 				"phase03AcpPlanTestsEvidenceRef": "phase03-acp-plan-tests",
-				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable"
+				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
+				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16803,7 +16822,7 @@
 				{
 					"id": "acp-question-negotiation:S22",
 					"code": "unsupported-capability",
-					"missingPrerequisite": "Pinned Grok initialize advertises neither ask-back nor elicitation. GT1-03-08A cancels known wire requests and exposes unavailable event/answer ports only. Positive pending questions/answers require a verified advertised contract; GT1-03-08B/13 must verify negative behavior, GT1-03-09 compose it, phases07/10 retain unavailable status, and phase11 qualify the native route. Permission support is not conversational support.",
+					"missingPrerequisite": "Pinned Grok initialize advertises neither ask-back nor elicitation. GT1-03-08A cancels known wire requests and exposes unavailable event/answer ports only. Positive pending questions/answers require a verified advertised contract; GT1-03-08B authored 76 synthetic negative cases; GT1-03-13 must execute them and compiler checks, GT1-03-09 compose it, phases07/10 retain unavailable status, and phase11 qualify the native route. Permission support is not conversational support.",
 					"affectedRows": ["S22"]
 				}
 			]
