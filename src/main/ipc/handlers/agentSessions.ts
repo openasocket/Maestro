@@ -1076,6 +1076,9 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 					);
 					const genericOrigins = originsStore.get('origins', {});
 					for (const [agentId, projectEntries] of Object.entries(genericOrigins)) {
+						// Legacy labels have no account/host ownership. They cannot
+						// identify a Grok conversation, even if a local file exists.
+						if (agentId === 'grok') continue;
 						if (!projectEntries || typeof projectEntries !== 'object') continue;
 						for (const [projectPath, sessions] of Object.entries(
 							projectEntries as Record<
@@ -1135,10 +1138,18 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 					const storages = getAllSessionStorages();
 					const historyEntries = (await historyManager.getAllEntriesPaginated()).entries;
 					for (const entry of historyEntries) {
+						if (
+							entry.nativeSessionBinding?.state === 'bound' &&
+							entry.nativeSessionBinding.provider === 'grok'
+						)
+							continue;
 						if (!entry.sessionName || !entry.agentSessionId || !entry.projectPath) continue;
 						const projectKey = `${entry.projectPath}:${entry.agentSessionId}`;
 						if (seenIdsAfterOrigins.has(projectKey) || seenAcrossAgents.has(projectKey)) continue;
 						for (const storage of storages) {
+							// This fallback guesses ownership from default-account paths;
+							// it must not relabel Grok across accounts or SSH hosts.
+							if (storage.agentId === 'grok') continue;
 							const sessionPath = storage.getSessionPath(entry.projectPath, entry.agentSessionId);
 							if (!sessionPath) continue;
 							try {
@@ -1172,6 +1183,7 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 						allNamedSessions.map((s) => `${s.projectPath}:${s.agentSessionId}`)
 					);
 					for (const entry of await listMirroredStarredSessions()) {
+						if (entry.agentId === 'grok') continue;
 						const key = `${entry.projectPath}:${entry.sessionId}`;
 						if (seenFinal.has(key)) continue;
 						seenFinal.add(key);
@@ -1223,6 +1235,17 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 				const allOrigins = originsStore.get('origins', {});
 				const agentOrigins = allOrigins[agentId] || {};
 				const result = agentOrigins[projectPath] || {};
+				if (agentId === 'grok') {
+					// Names in this legacy index cannot be assigned to a selected
+					// account/host. Leave stored data and unrelated metadata intact.
+					return Object.fromEntries(
+						Object.entries(result).map(([id, info]) => {
+							const metadata = { ...info };
+							delete metadata.sessionName;
+							return [id, metadata];
+						})
+					);
+				}
 				logger.info(
 					`getOrigins(${agentId}, ${projectPath}): found ${Object.keys(result).length} entries`,
 					LOG_CONTEXT
@@ -1242,6 +1265,15 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 				sessionId: string,
 				sessionName: string | null
 			): Promise<void> => {
+				if (agentId === 'grok') {
+					// This API changes a Maestro label, not a provider title. Its
+					// provider/project/native-ID key lacks Grok account/host scope.
+					// Native rename also needs the provider's title lock/index updates;
+					// never replace that transaction with a summary.json write.
+					throw new Error(
+						'Grok history rename is unsupported in Maestro: this request has no account/host ownership, and native title changes have no verified transport. Rename the Maestro tab for a local label, or change the native title in Grok CLI and refresh history.'
+					);
+				}
 				if (!originsStore) {
 					logger.warn('Origins store not available', LOG_CONTEXT);
 					return;

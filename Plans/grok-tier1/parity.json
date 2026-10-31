@@ -2626,6 +2626,31 @@
 			],
 			"testOwner": "GT1-04-08",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-native-fork-rename-refusals": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-08a-native-fork-and-rename-boundaries",
+			"sourceCommit": "293e5598d9903ddb69d4635c51bdcb728be38f10",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/hooks/agent/useForkConversation.ts": "b0f32d28f07915e4048d472e816978da81cefd9430ba9b4a393ea9f9b41b5541",
+				"src/main/ipc/handlers/agentSessions.ts": "e5e7967886d1fb3a08565682a806b9c44db3e56102112a3dd40ee56f094b1ea1"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "REG-SESSION-MUTATION"],
+			"scope": "Refuse Grok native fork before tab creation/spawn, reject unscoped history rename, and exclude ambiguous Grok labels from origins and named-history/mirror projections. Native fork and native title mutation remain unsupported through Maestro.",
+			"limitations": [
+				"Pinned public Grok source has native fork/rename extensions; Maestro has no qualified mutation route or rendered-log to native prompt-index mapping. No source or candidate-binary compliance inferred from static checks.",
+				"GT1-04-08A1 must prevent native-ID-only History writes in both tab rename consumers and surface History-browser refusal. Local labels already persist through Maestro session state; native titles are separate.",
+				"Unscoped starred/origin metadata and unbound legacy History attribution are not qualified by this label-only change. Native fork/title live coverage remains not-run.",
+				"Tests neither authored nor executed in this IMPLEMENT packet; GT1-04-08B/08A1T author, GT1-04-13 executes."
+			],
+			"implementationOwner": "GT1-04-08A",
+			"testOwner": "GT1-04-08B",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6491,7 +6516,8 @@
 					"GT1-04-07F2",
 					"GT1-04-07F3",
 					"GT1-04-07F4",
-					"GT1-04-07F5"
+					"GT1-04-07F5",
+					"GT1-04-08A1"
 				],
 				"test": [
 					"GT1-04-08",
@@ -6515,7 +6541,8 @@
 					"GT1-04-07FT",
 					"GT1-04-07FPT",
 					"GT1-04-07F4T",
-					"GT1-04-07F5T"
+					"GT1-04-07F5T",
+					"GT1-04-08A1T"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -6570,7 +6597,8 @@
 				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests",
 				"phase04RuntimeAdmittedNativeRecordingRef": "phase04-runtime-admitted-native-recording",
 				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests",
-				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests"
+				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests",
+				"phase04NativeForkRenameRefusalsRef": "phase04-native-fork-rename-refusals"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6622,6 +6650,18 @@
 					"code": "verification-and-host-wiring-pending",
 					"missingPrerequisite": "07F1/2/3 extract shared selector/observer/matcher; 07F4 implements admitted receipts and pre-resume validation; 07F5 consumes receipts and fences actual begin/transcript/History mutations through the repository queue. Static review only. 07F5T authored queued-mutation and receipt persistence regressions and updated prerequisite fixtures; GT1-04-13 must execute all continuation suites. Production headless SSH observation remains unavailable; native ACP and live scope qualification remain not-run.",
 					"affectedRows": ["P14"]
+				},
+				{
+					"id": "grok-native-fork-rename-transport-unqualified",
+					"code": "native-mutation-unsupported",
+					"missingPrerequisite": "Version-qualified, account/cwd/host-bound native fork and rename transactions; native prompt-index mapping, busy ownership fencing and returned new-ID receipts. Pinned source operations exist but Maestro cannot safely invoke them. Exact-binary native continuation/title verification remains not-run.",
+					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
+				},
+				{
+					"id": "grok-rename-consumer-isolation-pending",
+					"code": "implementation-pending",
+					"missingPrerequisite": "GT1-04-08A1 must retain local tab labels while preventing native-ID-only History name propagation in useSessionLifecycle/useRemoteIntegration and surfacing unsupported History-browser rename. GT1-04-08A1T/08B author regressions; GT1-04-13 executes.",
+					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
 				}
 			],
 			"phase": "04",
@@ -17068,7 +17108,8 @@
 					"GT1-04-07F2",
 					"GT1-04-07F3",
 					"GT1-04-07F4",
-					"GT1-04-07F5"
+					"GT1-04-07F5",
+					"GT1-04-08A1"
 				],
 				"test": [
 					"GT1-04-08",
@@ -17092,7 +17133,8 @@
 					"GT1-04-07FT",
 					"GT1-04-07FPT",
 					"GT1-04-07F4T",
-					"GT1-04-07F5T"
+					"GT1-04-07F5T",
+					"GT1-04-08A1T"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -17147,7 +17189,8 @@
 				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests",
 				"phase04RuntimeAdmittedNativeRecordingRef": "phase04-runtime-admitted-native-recording",
 				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests",
-				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests"
+				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests",
+				"phase04NativeForkRenameRefusalsRef": "phase04-native-fork-rename-refusals"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17199,6 +17242,18 @@
 					"code": "verification-and-host-wiring-pending",
 					"missingPrerequisite": "07F1/2/3 extract shared selector/observer/matcher; 07F4 implements admitted receipts and pre-resume validation; 07F5 consumes receipts and fences actual begin/transcript/History mutations through the repository queue. Static review only. 07F5T authored queued-mutation and receipt persistence regressions and updated prerequisite fixtures; GT1-04-13 must execute all continuation suites. Production headless SSH observation remains unavailable; native ACP and live scope qualification remain not-run.",
 					"affectedRows": ["REG-SESSION-MUTATION"]
+				},
+				{
+					"id": "grok-native-fork-rename-transport-unqualified",
+					"code": "native-mutation-unsupported",
+					"missingPrerequisite": "Version-qualified, account/cwd/host-bound native fork and rename transactions; native prompt-index mapping, busy ownership fencing and returned new-ID receipts. Pinned source operations exist but Maestro cannot safely invoke them. Exact-binary native continuation/title verification remains not-run.",
+					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
+				},
+				{
+					"id": "grok-rename-consumer-isolation-pending",
+					"code": "implementation-pending",
+					"missingPrerequisite": "GT1-04-08A1 must retain local tab labels while preventing native-ID-only History name propagation in useSessionLifecycle/useRemoteIntegration and surfacing unsupported History-browser rename. GT1-04-08A1T/08B author regressions; GT1-04-13 executes.",
+					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
 				}
 			],
 			"branchAuditRefs": ["B22", "B44"]

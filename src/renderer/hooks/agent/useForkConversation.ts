@@ -10,6 +10,7 @@ import { notifyToast } from '../../stores/notificationStore';
 import { useSessionStore } from '../../stores/sessionStore';
 import { captureException } from '../../utils/sentry';
 import { prepareMaestroSystemPrompt } from '../../utils/spawnHelpers';
+import { resolveTurnProvider } from '../../../shared/maestro-lib/agents/providerSwap';
 
 /**
  * Fork conversation at a log id into a new AI tab.
@@ -31,6 +32,23 @@ export function useForkConversation() {
 		//    and consecutive-entry collapsing in the UI cannot shift the fork point.
 		const rawLogIndex = sourceTab.logs.findIndex((l) => l.id === logId);
 		if (rawLogIndex === -1) return;
+
+		if (session.toolType === 'grok' || resolveTurnProvider(sourceTab, session) === 'grok') {
+			// The path below is a prompt-based context fork. Rendered log indices
+			// cannot identify Grok's native targetPromptIndex or preserve its tool
+			// ancestry. Do not substitute it for an unavailable native mutation.
+			const busy = sourceTab.state === 'busy' || sourceTab.awaitingSessionId;
+			notifyToast({
+				type: 'warning',
+				title: busy ? 'Grok conversation is busy' : 'Grok native fork unavailable',
+				message: busy
+					? 'Wait for the current turn to finish or stop it before forking. Native Grok forks are not yet supported in Maestro.'
+					: 'Maestro cannot yet fork Grok native history at this message. Use Grok CLI to create a native fork, then open that session in Maestro. Copying text into a new prompt would create a separate context conversation.',
+				sessionId: session.id,
+				tabId: sourceTab.id,
+			});
+			return;
+		}
 
 		// AI responses may span multiple raw stdout entries when chunks arrive
 		// more than 500ms apart (see useBatchedSessionUpdates). The UI's
