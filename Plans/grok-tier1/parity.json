@@ -5450,7 +5450,11 @@
 				"src/main/cue/cue-executor.ts",
 				"src/shared/maestro-lib/groupchat/spawn.ts",
 				"src/main/utils/context-groomer.ts",
-				"src/shared/maestro-lib/runtime/background-turns.ts"
+				"src/shared/maestro-lib/runtime/background-turns.ts",
+				"src/renderer/services/queuedPrompt.ts",
+				"src/shared/maestro-lib/turns/prompt.ts",
+				"src/renderer/utils/spawnHelpers.ts",
+				"src/renderer/hooks/remote/useRemoteIntegration.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -5475,7 +5479,9 @@
 					"GT1-02-10D2",
 					"GT1-02-10G1",
 					"GT1-02-10G2",
-					"GT1-02-11C"
+					"GT1-02-11C",
+					"GT1-05-06A1",
+					"GT1-05-06A2"
 				],
 				"test": [
 					"GT1-05-06",
@@ -5497,7 +5503,9 @@
 					"GT1-02-10F1T",
 					"GT1-02-10D2T",
 					"GT1-02-10G1T",
-					"GT1-02-11D"
+					"GT1-02-11D",
+					"GT1-05-06B1",
+					"GT1-05-06B2"
 				],
 				"verification": [
 					"GT1-01-07",
@@ -5516,7 +5524,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Owned ACP JSON prompt-file delivery, host-local materialization/cleanup, consumer handoffs including tab naming, and first-turn system embedding/resume skipping have scoped deterministic evidence. Raw prompt stdin and native append/rules are disabled. Exact-binary text/system behavior, real SSH cleanup, Linux-only skipped shell cases and Windows permissions remain unqualified. Template/command integration remains GT1-05-05/06/06A/06B/13/14; utility retries remain GT1-08-14E/14F/21; native/platform qualification remains phase10/11."
+				"Owned ACP JSON prompt-file delivery, host-local materialization/cleanup, consumer handoffs including tab naming, and first-turn system embedding/resume skipping have scoped deterministic evidence. Raw prompt stdin and native append/rules are disabled. Exact-binary text/system behavior, real SSH cleanup, Linux-only skipped shell cases and Windows permissions remain unqualified. Template/command integration remains GT1-05-05/06/06A/06B/13/14; utility retries remain GT1-08-14E/14F/21; native/platform qualification remains phase10/11.",
+				"GT1-05-06A reuses canonical composer/remote command queue items and single-pass template substitution; remote native/literal Grok slash dispatch and command attachments explicitly refuse. Queue account/cwd/host ownership across enqueue/drain/async preparation, literal dollar arguments, SSH/system context and new-tab classification/acknowledgements remain GT1-05-06A1/A2. GT1-05-06B/B1/B2 author tests; GT1-05-13 executes them. Static checks do not certify dispatch or native behavior. See Plans/grok-tier1/evidence/05.md#gt1-05-06a-custom-command-and-template-dispatch-audit."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22471,11 +22480,14 @@
 				"src/shared/templateVariables.ts",
 				"src/renderer/hooks/remote/useRemoteHandlers.ts",
 				"src/renderer/hooks/input/useInputProcessing.ts",
-				"src/renderer/hooks/remote/useRemoteIntegration.ts"
+				"src/renderer/hooks/remote/useRemoteIntegration.ts",
+				"src/renderer/services/queuedPrompt.ts",
+				"src/shared/maestro-lib/turns/prompt.ts",
+				"src/renderer/utils/spawnHelpers.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-05", "GT1-08-01", "GT1-05-06A"],
-				"test": ["GT1-05-06", "GT1-08-02", "GT1-05-06B"],
+				"implementation": ["GT1-05-05", "GT1-08-01", "GT1-05-06A", "GT1-05-06A1", "GT1-05-06A2"],
+				"test": ["GT1-05-06", "GT1-08-02", "GT1-05-06B", "GT1-05-06B1", "GT1-05-06B2"],
 				"verification": ["GT1-01-07", "GT1-05-13", "GT1-08-07", "GT1-05-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -22485,7 +22497,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok is reached through generic queue, but command collisions, argument expansion, selected tab/account and managed dispatch need proof. GT1-05-05/06 ownership is provisional until GT1-01-07 confirms explicit template-consumer coverage."
+				"Grok is reached through generic queue, but command collisions, argument expansion, selected tab/account and managed dispatch need proof. GT1-05-05/06 ownership is provisional until GT1-01-07 confirms explicit template-consumer coverage.",
+				"GT1-05-06A reuses canonical composer/remote command queue items and single-pass template substitution; remote native/literal Grok slash dispatch and command attachments explicitly refuse. Queue account/cwd/host ownership across enqueue/drain/async preparation, literal dollar arguments, SSH/system context and new-tab classification/acknowledgements remain GT1-05-06A1/A2. GT1-05-06B/B1/B2 author tests; GT1-05-13 executes them. Static checks do not certify dispatch or native behavior. See Plans/grok-tier1/evidence/05.md#gt1-05-06a-custom-command-and-template-dispatch-audit."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22514,7 +22527,7 @@
 				{
 					"id": "gap:S31",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
+					"missingPrerequisite": "GT1-05-06A reuses canonical composer/remote command queue items and single-pass template substitution; remote native/literal Grok slash dispatch and command attachments explicitly refuse. Queue account/cwd/host ownership across enqueue/drain/async preparation, literal dollar arguments, SSH/system context and new-tab classification/acknowledgements remain GT1-05-06A1/A2. GT1-05-06B/B1/B2 author tests; GT1-05-13 executes them. Static checks do not certify dispatch or native behavior. See Plans/grok-tier1/evidence/05.md#gt1-05-06a-custom-command-and-template-dispatch-audit.",
 					"affectedRows": ["S31"]
 				},
 				{
