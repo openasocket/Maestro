@@ -3333,6 +3333,30 @@
 				"Producer handoff and literal substitution only; final queue expansion, ownership, cancellation and managed refusal remain GT1-05-06B1. GT1-05-13 executes all suites; no runtime or semantic typecheck pass claimed.",
 				"Composer macro attachments are omitted at enqueue; GT1-05-06A3/B3 own bounded repair/coverage. Native commands and remote macro attachments remain unsupported."
 			]
+		},
+		"phase05-native-memory-boundary": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-07-native-memory-refusal-and-bound-knowledge-safety",
+			"sourceCommit": "9a7de44e17d8ca19ea59479492712415b0b01815",
+			"sourceRevisionScope": "Pre-task HEAD plus the three source hashes and task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/memory-manager.ts": "045912ef68080c7fd2f710a72a79f8000ffc9805c1c1b57c173784383abbf35e",
+				"src/main/ipc/handlers/memory.ts": "4b49a95fdf87fcc0c9348548fccbad93c38b47cbaa7e329f781171a707f6c3f7",
+				"src/shared/maestro-lib/providers/capabilities.ts": "8c807ecb85f296388263a8f1bd7a1d3efd15c3e26b52bdd68ea3c6a7b709e361"
+			},
+			"provenance": "implementation-and-static-review",
+			"implementation": "implemented",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P19", "S03", "C-supportsProjectMemory"],
+			"testTask": "GT1-05-08",
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"Native Grok memory remains unsupported in Maestro: selected account/workspace/mode binding and exact-binary discovery are unverified.",
+				"Explicit Maestro-bound project knowledge is preserved separately and does not certify native recall.",
+				"Bound-memory writes through symbolic links are explicitly unsupported; tests remain unrun."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -8344,7 +8368,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Without a directory override memory-manager.ts:81 rejects Grok. Rules compatibility must not be mislabeled editable persistent memory. Distinguish Grok native rules/memory from Maestro bound project knowledge; false flag is not universal memory absence."
+				"GT1-05-07 provides a truthful native-memory refusal and preserves explicit Maestro-bound knowledge with configured-host, entry-path and redacted-error guards; native discovery/binding and deterministic/live qualification remain pending."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8353,7 +8377,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05NativeMemoryBoundaryEvidenceRef": "phase05-native-memory-boundary"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16821,7 +16846,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Distinguish Grok native rules/memory from Maestro bound project knowledge; false flag is not universal memory absence."
+				"Distinguish Grok native rules/memory from Maestro bound project knowledge; false flag is not universal memory absence.",
+				"GT1-05-07 provides a truthful native-memory refusal and preserves explicit Maestro-bound knowledge with configured-host, entry-path and redacted-error guards; native discovery/binding and deterministic/live qualification remain pending."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -16830,7 +16856,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05NativeMemoryBoundaryEvidenceRef": "phase05-native-memory-boundary"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19566,7 +19593,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Without a directory override memory-manager.ts:81 rejects Grok. Rules compatibility must not be mislabeled editable persistent memory."
+				"GT1-05-07 provides a truthful native-memory refusal and preserves explicit Maestro-bound knowledge with configured-host, entry-path and redacted-error guards; native discovery/binding and deterministic/live qualification remain pending."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -19575,7 +19602,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05NativeMemoryBoundaryEvidenceRef": "phase05-native-memory-boundary"
 			},
 			"evidenceApplicability": {
 				"static": {

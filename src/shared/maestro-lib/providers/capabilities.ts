@@ -526,7 +526,7 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 		usesJsonLineOutput: true, // Verified: streaming-json is JSONL (one JSON object per line); also gates CLI batch spawning (spawnJsonLineAgent)
 		usesCombinedContextWindow: false, // Conservative default: on-disk signals.json reports a single contextTokensUsed but gauge math is unverified
 		supportsAppendSystemPrompt: false, // Native rules/append aliases remain unqualified; embed once and skip on resume
-		supportsProjectMemory: false, // Conservative default: no project memory mechanism observed
+		supportsProjectMemory: false, // Native legacy/v2 memory exists; selected account/workspace binding is unverified. Rules and translated knowledge do not certify it.
 		supportsAdditionalDirectories: false, // See GROK_DIRECTORY_GRANT_SUPPORT; no qualified native root-grant builder
 	},
 };

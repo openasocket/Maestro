@@ -16,6 +16,7 @@ import {
 	findOrphanMemories,
 } from '../../memory-manager';
 import { logger } from '../../utils/logger';
+import { redactSecrets } from '../../../shared/redactSecrets';
 
 import * as path from 'node:path';
 import * as os from 'node:os';
@@ -44,6 +45,7 @@ export function registerMemoryHandlers(
 		const session = deps?.sessionsStore.get('sessions', []).find((s) => s.id === agentId);
 		if (!session) return undefined;
 		if (
+			session.sessionSshRemoteConfig?.enabled ||
 			session.sshRemoteId ||
 			path.resolve(session.projectRoot || session.cwd) !== path.resolve(projectPath)
 		)
@@ -53,8 +55,10 @@ export function registerMemoryHandlers(
 			await assertTranslationTarget(path.join(managed, 'memory', 'MEMORY.md'), projectPath);
 			return path.join(managed, 'memory');
 		}
+		// Resolve native support by provider, not the selected Maestro agent's ID.
+		// A bound translation directory above does not certify native memory support.
 		if (session.toolType !== 'claude-code')
-			throw new Error('Native project memory is unavailable for this provider');
+			return getMemoryDirectoryPath(projectPath, session.toolType);
 		const config = deps!.agentConfigsStore.get('configs', {})['claude-code'];
 		const detected = await deps!.getAgentDetector()?.getAgent('claude-code');
 		const env = buildAgentEnvironment({
@@ -88,8 +92,9 @@ export function registerMemoryHandlers(
 				);
 				return { success: true, ...result };
 			} catch (error) {
-				logger.error(`Failed to list memory entries: ${error}`, LOG_CONTEXT);
-				return { success: false, error: String(error) };
+				const message = redactSecrets(String(error)).text;
+				logger.error(`Failed to list memory entries: ${message}`, LOG_CONTEXT);
+				return { success: false, error: message };
 			}
 		}
 	);
@@ -107,8 +112,9 @@ export function registerMemoryHandlers(
 				);
 				return { success: true, content };
 			} catch (error) {
-				logger.error(`Failed to read memory ${filename}: ${error}`, LOG_CONTEXT);
-				return { success: false, error: String(error) };
+				const message = redactSecrets(String(error)).text;
+				logger.error(`Failed to read memory: ${message}`, LOG_CONTEXT);
+				return { success: false, error: message };
 			}
 		}
 	);
@@ -133,8 +139,9 @@ export function registerMemoryHandlers(
 				);
 				return { success: true };
 			} catch (error) {
-				logger.error(`Failed to write memory ${filename}: ${error}`, LOG_CONTEXT);
-				return { success: false, error: String(error) };
+				const message = redactSecrets(String(error)).text;
+				logger.error(`Failed to write memory: ${message}`, LOG_CONTEXT);
+				return { success: false, error: message };
 			}
 		}
 	);
@@ -159,8 +166,9 @@ export function registerMemoryHandlers(
 				);
 				return { success: true };
 			} catch (error) {
-				logger.error(`Failed to create memory ${filename}: ${error}`, LOG_CONTEXT);
-				return { success: false, error: String(error) };
+				const message = redactSecrets(String(error)).text;
+				logger.error(`Failed to create memory: ${message}`, LOG_CONTEXT);
+				return { success: false, error: message };
 			}
 		}
 	);
@@ -178,8 +186,9 @@ export function registerMemoryHandlers(
 				);
 				return { success: true };
 			} catch (error) {
-				logger.error(`Failed to delete memory ${filename}: ${error}`, LOG_CONTEXT);
-				return { success: false, error: String(error) };
+				const message = redactSecrets(String(error)).text;
+				logger.error(`Failed to delete memory: ${message}`, LOG_CONTEXT);
+				return { success: false, error: message };
 			}
 		}
 	);
@@ -197,8 +206,9 @@ export function registerMemoryHandlers(
 				);
 				return { success: true, matches };
 			} catch (error) {
-				logger.error(`Failed to search memory: ${error}`, LOG_CONTEXT);
-				return { success: false, error: String(error) };
+				const message = redactSecrets(String(error)).text;
+				logger.error(`Failed to search memory: ${message}`, LOG_CONTEXT);
+				return { success: false, error: message };
 			}
 		}
 	);
@@ -215,8 +225,9 @@ export function registerMemoryHandlers(
 				);
 				return { success: true, ...report };
 			} catch (error) {
-				logger.error(`Failed to find orphan memories: ${error}`, LOG_CONTEXT);
-				return { success: false, error: String(error) };
+				const message = redactSecrets(String(error)).text;
+				logger.error(`Failed to find orphan memories: ${message}`, LOG_CONTEXT);
+				return { success: false, error: message };
 			}
 		}
 	);
@@ -235,8 +246,9 @@ export function registerMemoryHandlers(
 					),
 				};
 			} catch (error) {
-				logger.error(`Failed to resolve memory path: ${error}`, LOG_CONTEXT);
-				return { success: false, error: String(error) };
+				const message = redactSecrets(String(error)).text;
+				logger.error(`Failed to resolve memory path: ${message}`, LOG_CONTEXT);
+				return { success: false, error: message };
 			}
 		}
 	);

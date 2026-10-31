@@ -20,6 +20,7 @@ import {
 	resolveClaudeMemoryPath,
 	analyzeMemoryLinks,
 } from '../shared/maestro-lib/translation/memory';
+import { assertTranslationTarget } from '../shared/maestro-lib/translation/resource-projections';
 
 export interface MemoryEntry {
 	name: string; // filename, e.g. "MEMORY.md" or "user_role.md"
@@ -77,7 +78,13 @@ export function getMemoryDirectoryPath(
 	homeDir?: string,
 	directoryOverride?: string
 ): string {
+	// Explicitly bound translation knowledge is separate from native provider memory.
 	if (directoryOverride) return directoryOverride;
+	if (agentId === 'grok') {
+		throw new Error(
+			'Grok native project memory is not supported in Maestro: the active account, workspace, and memory storage binding have not been verified. Project rules do not establish persistent memory support.'
+		);
+	}
 	if (agentId !== 'claude-code') {
 		throw new Error(`Memory viewer is not supported for agent "${agentId}"`);
 	}
@@ -124,6 +131,8 @@ export async function listMemoryEntries(
 
 	for (const name of mdNames) {
 		try {
+			if (directoryOverride)
+				await assertTranslationTarget(path.join(directoryPath, name), directoryPath);
 			const stat = await fs.stat(path.join(directoryPath, name));
 			// birthtime is not reliable on Linux; fall back to mtime.
 			const created = stat.birthtimeMs && stat.birthtimeMs > 0 ? stat.birthtimeMs : stat.mtimeMs;
@@ -173,6 +182,7 @@ export async function readMemoryEntry(
 ): Promise<string> {
 	assertSafeFilename(filename);
 	const dir = getMemoryDirectoryPath(projectPath, agentId, homeDir, directoryOverride);
+	if (directoryOverride) await assertTranslationTarget(path.join(dir, filename), dir);
 	return fs.readFile(path.join(dir, filename), 'utf8');
 }
 
@@ -187,7 +197,26 @@ export async function writeMemoryEntry(
 	assertSafeFilename(filename);
 	const dir = getMemoryDirectoryPath(projectPath, agentId, homeDir, directoryOverride);
 	await fs.mkdir(dir, { recursive: true });
-	await fs.writeFile(path.join(dir, filename), content, 'utf8');
+	const full = path.join(dir, filename);
+	if (directoryOverride) {
+		// A dangling link has no realpath to validate; never write through a link.
+		try {
+			if ((await fs.lstat(full)).isSymbolicLink())
+				throw new Error('Writing memory through a symbolic link is not supported');
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+		}
+		await assertTranslationTarget(full, dir);
+	}
+	await fs.writeFile(full, content, {
+		encoding: 'utf8',
+		flag: directoryOverride
+			? fs.constants.O_WRONLY |
+				fs.constants.O_CREAT |
+				fs.constants.O_TRUNC |
+				fs.constants.O_NOFOLLOW
+			: 'w',
+	});
 }
 
 /**
@@ -206,6 +235,7 @@ export async function createMemoryEntry(
 	const dir = getMemoryDirectoryPath(projectPath, agentId, homeDir, directoryOverride);
 	await fs.mkdir(dir, { recursive: true });
 	const full = path.join(dir, filename);
+	if (directoryOverride) await assertTranslationTarget(full, dir);
 	try {
 		// wx flag: fail if exists.
 		const handle = await fs.open(full, 'wx');
@@ -235,6 +265,7 @@ export async function deleteMemoryEntry(
 		throw new Error('MEMORY.md is the index and cannot be deleted from the viewer');
 	}
 	const dir = getMemoryDirectoryPath(projectPath, agentId, homeDir, directoryOverride);
+	if (directoryOverride) await assertTranslationTarget(path.join(dir, filename), dir);
 	await fs.unlink(path.join(dir, filename));
 }
 
@@ -260,14 +291,19 @@ export async function searchMemoryEntries(
 	const needle = query.trim().toLowerCase();
 	if (!needle) return entries.map((e) => ({ name: e.name, matchedName: false }));
 
-	const dir = getMemoryDirectoryPath(projectPath, agentId, homeDir, directoryOverride);
 	const matches: MemorySearchMatch[] = [];
 
 	for (const entry of entries) {
 		const matchedName = entry.name.toLowerCase().includes(needle);
 		let snippet: string | undefined;
 		try {
-			const content = await fs.readFile(path.join(dir, entry.name), 'utf8');
+			const content = await readMemoryEntry(
+				projectPath,
+				entry.name,
+				agentId,
+				homeDir,
+				directoryOverride
+			);
 			const line = content
 				.split('\n')
 				.find((l) => l.toLowerCase().includes(needle))
@@ -309,12 +345,11 @@ export async function findOrphanMemories(
 	directoryOverride?: string
 ): Promise<OrphanMemoryReport> {
 	const { entries } = await listMemoryEntries(projectPath, agentId, homeDir, directoryOverride);
-	const dir = getMemoryDirectoryPath(projectPath, agentId, homeDir, directoryOverride);
 	const contents = new Map<string, string>();
 	for (const entry of entries) {
 		let content = '';
 		try {
-			content = await fs.readFile(path.join(dir, entry.name), 'utf8');
+			content = await readMemoryEntry(projectPath, entry.name, agentId, homeDir, directoryOverride);
 		} catch {
 			/* Retain unreadable files as link targets. */
 		}
