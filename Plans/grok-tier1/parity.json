@@ -2843,6 +2843,19 @@
 			"static": "pass",
 			"deterministic": "not-run",
 			"live": "not-run"
+		},
+		"phase04-canonical-account-discovery": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-11d-canonical-account-discovery",
+			"sourceCommit": "fd6dc1808666dfb24b5fbaee030096a231f8ff29",
+			"sourceCommitScope": "Pre-task HEAD plus source hash and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/agents/provider-account-dirs.ts": "e7b244b440b13cf7f87f094252337fadb62cb6816c5e3855ece1375ff936465b"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run"
 		}
 	},
 	"sourceCatalog": {
@@ -6026,7 +6039,8 @@
 				"src/shared/maestro-lib/streaming/usage-totals.ts",
 				"src/shared/maestro-lib/streaming/usage-accumulator.ts",
 				"src/shared/maestro-lib/streaming/turn-outcome.ts",
-				"src/shared/maestro-lib/parsers/parser-factory.ts"
+				"src/shared/maestro-lib/parsers/parser-factory.ts",
+				"src/main/agents/provider-account-dirs.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6119,7 +6133,8 @@
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
 				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
-				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting"
+				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting",
+				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6179,9 +6194,9 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting. GT1-04-11C preserves canonical Cue turn snapshots, exact ticks/models, unknown-cost receipts and observed event provider through persistence; observed Grok or other new receipts never consult native history without recorded account/host scope. Legacy identified non-Grok native attribution remains a compatibility path, not historical scope proof. GT1-04-11D still owns account discovery. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. These consumer changes have static checks only; deterministic and native qualification remain not-run.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run.",
 					"affectedRows": ["P11"],
-					"evidenceRef": "phase04-cue-stream-accounting"
+					"evidenceRef": "phase04-canonical-account-discovery"
 				}
 			],
 			"phase": "03",
@@ -7185,7 +7200,8 @@
 				"src/shared/maestro-lib/streaming/usage-accumulator.ts",
 				"src/shared/maestro-lib/streaming/turn-outcome.ts",
 				"src/shared/maestro-lib/run/turn-capture.ts",
-				"src/shared/maestro-lib/parsers/parser-factory.ts"
+				"src/shared/maestro-lib/parsers/parser-factory.ts",
+				"src/main/agents/provider-account-dirs.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -7248,7 +7264,8 @@
 				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
-				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting"
+				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting",
+				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7286,9 +7303,9 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting. GT1-04-11C preserves canonical Cue turn snapshots, exact ticks/models, unknown-cost receipts and observed event provider through persistence; observed Grok or other new receipts never consult native history without recorded account/host scope. Legacy identified non-Grok native attribution remains a compatibility path, not historical scope proof. GT1-04-11D still owns account discovery. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. These consumer changes have static checks only; deterministic and native qualification remain not-run.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run.",
 					"affectedRows": ["P16"],
-					"evidenceRef": "phase04-cue-stream-accounting"
+					"evidenceRef": "phase04-canonical-account-discovery"
 				}
 			],
 			"phase": "04",
@@ -11197,7 +11214,8 @@
 				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
-				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting"
+				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting",
+				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11242,9 +11260,9 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting. GT1-04-11C preserves canonical Cue turn snapshots, exact ticks/models, unknown-cost receipts and observed event provider through persistence; observed Grok or other new receipts never consult native history without recorded account/host scope. Legacy identified non-Grok native attribution remains a compatibility path, not historical scope proof. GT1-04-11D still owns account discovery. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. These consumer changes have static checks only; deterministic and native qualification remain not-run.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run.",
 					"affectedRows": ["P40"],
-					"evidenceRef": "phase04-cue-stream-accounting"
+					"evidenceRef": "phase04-canonical-account-discovery"
 				}
 			],
 			"phase": "10",
@@ -13536,7 +13554,8 @@
 				"src/shared/maestro-lib/streaming/turn-outcome.ts",
 				"src/shared/maestro-lib/run/turn-capture.ts",
 				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
-				"src/shared/maestro-lib/parsers/parser-factory.ts"
+				"src/shared/maestro-lib/parsers/parser-factory.ts",
+				"src/main/agents/provider-account-dirs.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -13627,7 +13646,8 @@
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
 				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
-				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting"
+				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting",
+				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13687,9 +13707,9 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting. GT1-04-11C preserves canonical Cue turn snapshots, exact ticks/models, unknown-cost receipts and observed event provider through persistence; observed Grok or other new receipts never consult native history without recorded account/host scope. Legacy identified non-Grok native attribution remains a compatibility path, not historical scope proof. GT1-04-11D still owns account discovery. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. These consumer changes have static checks only; deterministic and native qualification remain not-run.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run.",
 					"affectedRows": ["C-supportsCostTracking"],
-					"evidenceRef": "phase04-cue-stream-accounting"
+					"evidenceRef": "phase04-canonical-account-discovery"
 				}
 			],
 			"field": "supportsCostTracking",
@@ -13763,7 +13783,8 @@
 				"src/shared/maestro-lib/streaming/turn-outcome.ts",
 				"src/shared/maestro-lib/run/turn-capture.ts",
 				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
-				"src/shared/maestro-lib/parsers/parser-factory.ts"
+				"src/shared/maestro-lib/parsers/parser-factory.ts",
+				"src/main/agents/provider-account-dirs.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -13854,7 +13875,8 @@
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
 				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
-				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting"
+				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting",
+				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13914,9 +13936,9 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting. GT1-04-11C preserves canonical Cue turn snapshots, exact ticks/models, unknown-cost receipts and observed event provider through persistence; observed Grok or other new receipts never consult native history without recorded account/host scope. Legacy identified non-Grok native attribution remains a compatibility path, not historical scope proof. GT1-04-11D still owns account discovery. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. These consumer changes have static checks only; deterministic and native qualification remain not-run.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run.",
 					"affectedRows": ["C-supportsUsageStats"],
-					"evidenceRef": "phase04-cue-stream-accounting"
+					"evidenceRef": "phase04-canonical-account-discovery"
 				}
 			],
 			"field": "supportsUsageStats",
@@ -17182,7 +17204,8 @@
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
 				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
-				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting"
+				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting",
+				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17242,9 +17265,9 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting. GT1-04-11C preserves canonical Cue turn snapshots, exact ticks/models, unknown-cost receipts and observed event provider through persistence; observed Grok or other new receipts never consult native history without recorded account/host scope. Legacy identified non-Grok native attribution remains a compatibility path, not historical scope proof. GT1-04-11D still owns account discovery. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. These consumer changes have static checks only; deterministic and native qualification remain not-run.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run.",
 					"affectedRows": ["REG-USAGE"],
-					"evidenceRef": "phase04-cue-stream-accounting"
+					"evidenceRef": "phase04-canonical-account-discovery"
 				}
 			],
 			"branchAuditRefs": ["B12", "B32", "B35", "B38", "B42", "B43"]
@@ -20926,7 +20949,8 @@
 				"src/renderer/components/AboutModal.tsx",
 				"src/renderer/components/AchievementShareButton.tsx",
 				"src/main/agents/limitResetEstimator.ts",
-				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts"
+				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts",
+				"src/main/agents/provider-account-dirs.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -20968,7 +20992,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting"
+				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting",
+				"phase04AccountDiscoveryEvidenceRef": "phase04-canonical-account-discovery"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21006,9 +21031,9 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting. GT1-04-11C preserves canonical Cue turn snapshots, exact ticks/models, unknown-cost receipts and observed event provider through persistence; observed Grok or other new receipts never consult native history without recorded account/host scope. Legacy identified non-Grok native attribution remains a compatibility path, not historical scope proof. GT1-04-11D still owns account discovery. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. These consumer changes have static checks only; deterministic and native qualification remain not-run.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run.",
 					"affectedRows": ["S26"],
-					"evidenceRef": "phase04-cue-stream-accounting"
+					"evidenceRef": "phase04-canonical-account-discovery"
 				}
 			],
 			"branchAuditRefs": ["B23", "B32", "B43"]
