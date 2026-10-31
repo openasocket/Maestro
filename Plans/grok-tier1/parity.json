@@ -1663,6 +1663,43 @@
 			"affectedRows": ["P13", "P14", "P15", "C-supportsResume", "REG-SESSION-MUTATION"],
 			"scope": "Inert IPC environment-only races, replaced provider layers, ambiguous default/tilde roots and absolute controls, endpoint epochs and qualifier lifetime, observer failures, final path fences and ownerless receipt handling. No test execution/collection or native compliance claim.",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-quick-chat-ownership": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c2-quick-chat-native-ownership",
+			"sourceCommit": "57e4a1d10bff0fce9e1499b2223042b12c2d7000",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/services/quickChatRouter.ts": "e14814bf25031cb05f5a2d2c30ed807917689316797f366d1083a039663b52bf",
+				"src/renderer/services/quickChatEngine.ts": "7787fe28b2909ad4e62b46067da8daa61495b48602ba540f4ed00567e8fa30be",
+				"src/shared/quickChat.ts": "3f529078fea19c67fee839c8055028c95eb482403b97aa37ce205c0c335dd57f"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"static": "fail",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Pre-existing RequestInit.dispatcher TS2339 in src/main/plugins/plugin-host-handlers.ts:1196; no changed-file diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "Quick Chat History candidates, router mutation fences and recent-chat ownership propagation. Verified scoped reads required; unknown legacy ownership refuses without a replacement conversation. No native launch certification.",
+			"remainingImplementationOwners": [
+				"GT1-04-07C3",
+				"GT1-04-07C4",
+				"GT1-04-07C5",
+				"GT1-04-07D",
+				"GT1-04-07E",
+				"GT1-04-07F"
+			],
+			"testOwners": ["GT1-04-07CQT"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {

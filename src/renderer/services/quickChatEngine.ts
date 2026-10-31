@@ -65,7 +65,12 @@ import { captureException } from '../utils/sentry';
 import { jumpToAgent } from './agentNavigation';
 import { enqueuePromptForTab, removeQueuedItem, sendQueuedItemNow } from './queuedPrompt';
 import { reopenClosedConversation, routeQuickChatMessage } from './quickChatRouter';
-import { resumeSelectionKey, SessionResumeRefusedError } from './resumableSession';
+import {
+	matchesNativeSessionBinding,
+	resumeSelectionKey,
+	SessionResumeRefusedError,
+} from './resumableSession';
+import type { NativeSessionBinding } from '../../shared/maestro-lib/agents/providerSwap';
 import { collectNamingPrompt, requestTabAutoName } from './tabAutoNaming';
 import { getAgentDisplayName } from '../../shared/agentMetadata';
 import { isAgentDormant } from '../../shared/agentVisibility';
@@ -105,6 +110,9 @@ interface Turn {
 	reply: QuickChatMessage[];
 	/** The tab's provider conversation as last read, so a closed tab can be reopened. */
 	agentSessionId: string | null;
+	nativeSessionBinding?: NativeSessionBinding;
+	/** In-memory fence for observing the native ID allocated after this turn starts. */
+	selectionKey?: string;
 	/**
 	 * The host-minted dispatch tickets a send that arrived over a transport carries
 	 * (`maestro-cli quick-chat`, a paired device; see QuickChatCommand.send). Opaque,
@@ -151,6 +159,12 @@ interface Chat {
 	homeTabId: string | null;
 	/** A refused native continuation stays refused until the user chooses another destination. */
 	resumeRefusal: string | null;
+	homeSelectionKey?: string;
+	/** Preserve the selected home when recall refuses, even though no tab was committed. */
+	recalledHome?: Pick<
+		QuickChatRecent,
+		'homeTabId' | 'homeAgentSessionId' | 'homeTabName' | 'homeNativeSessionBinding'
+	>;
 	/**
 	 * Where the user asked the NEXT message to go, overriding `home`. Taken by
 	 * the next send; null means the message follows the chat.
@@ -369,7 +383,7 @@ function setTab(choice: QuickChatTabChoice): string | null {
 		if (!choosableTabs(session).some((t) => t.id === choice.tabId)) {
 			return `No open tab ${choice.tabId} on ${session.name}`;
 		}
-		if (choice.tabId === chat.homeTabId) {
+		if (choice.tabId === chat.homeTabId && !chat.resumeRefusal) {
 			chat.choice = null;
 			return null;
 		}
@@ -410,10 +424,22 @@ function turnView(
 	if (turn.phase !== 'delivered') {
 		return { route: route(turn.phase === 'searching' ? 'searching' : turn.phase), reply: [] };
 	}
-	const tab = findTab(session, turn.tabId);
+	let tab = findTab(session, turn.tabId);
+	if (
+		tab &&
+		session &&
+		((turn.selectionKey !== undefined && resumeSelectionKey(session) !== turn.selectionKey) ||
+			(turn.nativeSessionBinding !== undefined &&
+				!matchesNativeSessionBinding(turn.nativeSessionBinding, tab.nativeSessionBinding)) ||
+			(turn.agentSessionId && turn.agentSessionId !== tab.agentSessionId) ||
+			(session.toolType === 'grok' && !turn.selectionKey && !turn.nativeSessionBinding))
+	)
+		tab = undefined;
 	if (tab) {
 		turn.tabName = pillName(tab, turn.origin);
 		turn.agentSessionId = tab.agentSessionId ?? turn.agentSessionId;
+		if (tab.nativeSessionBinding)
+			turn.nativeSessionBinding = structuredClone(tab.nativeSessionBinding);
 	}
 	if (session?.executionQueue?.some((item) => item.id === turn.queuedItemId)) {
 		// In the queue for one of two reasons. Waiting: it has not run. Or held:
@@ -698,6 +724,23 @@ function deliverToTab(
 	tabId: string,
 	origin: QuickChatRouteOrigin
 ): string | null {
+	const session = findSession(sessionId);
+	const tab = session?.aiTabs.find((t) => t.id === tabId);
+	if (!session || !tab) return fail(turn, 'The selected conversation is no longer open');
+	if (
+		(turn.selectionKey && turn.selectionKey !== resumeSelectionKey(session)) ||
+		(turn.nativeSessionBinding &&
+			!matchesNativeSessionBinding(turn.nativeSessionBinding, tab.nativeSessionBinding)) ||
+		(turn.agentSessionId && turn.agentSessionId !== tab.agentSessionId)
+	) {
+		c.resumeRefusal = 'The selected conversation changed before delivery.';
+		return fail(turn, c.resumeRefusal);
+	}
+	turn.selectionKey = resumeSelectionKey(session);
+	turn.agentSessionId = tab.agentSessionId;
+	turn.nativeSessionBinding = tab.nativeSessionBinding && structuredClone(tab.nativeSessionBinding);
+	c.homeSelectionKey = turn.selectionKey;
+	c.recalledHome = undefined;
 	// Before it runs, so its reasoning is recorded from the first chunk.
 	applyThinking(c, sessionId, tabId, thinkingMode());
 	const item = enqueuePromptForTab({
@@ -821,8 +864,27 @@ async function routeAndDeliver(
 		// the order they were sent, and the chat's tab is decided in that order.
 		homeTabId = home ? await home : null;
 		if (!stillWanted()) return homeTabId;
-		if (choice?.kind === 'new' || choice?.kind === 'tab') c.resumeRefusal = null;
-		else if (c.resumeRefusal) throw new SessionResumeRefusedError(c.resumeRefusal);
+		if (choice?.kind === 'new' || choice?.kind === 'tab') {
+			c.resumeRefusal = null;
+			c.recalledHome = undefined;
+			c.homeSelectionKey = undefined;
+		} else if (c.resumeRefusal) throw new SessionResumeRefusedError(c.resumeRefusal);
+		const previous = [...c.turns].reverse().find((t) => t !== turn && t.tabId === homeTabId);
+		const live = findSession(sessionId);
+		if (
+			!choice &&
+			live &&
+			((c.homeSelectionKey && c.homeSelectionKey !== resumeSelectionKey(live)) ||
+				(previous?.nativeSessionBinding &&
+					!matchesNativeSessionBinding(
+						previous.nativeSessionBinding,
+						findTab(live, homeTabId)?.nativeSessionBinding
+					)))
+		) {
+			throw new SessionResumeRefusedError(
+				'The agent or conversation ownership changed. Choose a new chat or tab explicitly.'
+			);
+		}
 		if (!findSession(sessionId)) {
 			fail(turn, 'The agent is no longer available');
 			return homeTabId;
@@ -844,6 +906,8 @@ async function routeAndDeliver(
 			tabId = choice.tabId;
 		} else if (!choice && homeTabId && isOpen(homeTabId)) {
 			tabId = homeTabId;
+			turn.nativeSessionBinding = previous?.nativeSessionBinding;
+			turn.agentSessionId = previous?.agentSessionId ?? null;
 		} else if (!fresh) {
 			const routed = await routeToTab(c, sessionId, turn);
 			if (!stillWanted()) return homeTabId;
@@ -852,6 +916,9 @@ async function routeAndDeliver(
 		if (!tabId) {
 			// A new tab was asked for, or nothing to continue could be reached.
 			const live = findSession(sessionId);
+			if (live && turn.selectionKey && turn.selectionKey !== resumeSelectionKey(live)) {
+				throw new SessionResumeRefusedError('The agent selection changed before opening a tab.');
+			}
 			tabId = live ? createChatTab(c, live, turn.text) : null;
 			origin = 'new';
 		}
@@ -893,6 +960,7 @@ async function routeToTab(
 	const session = findSession(sessionId);
 	if (!session) return null;
 	const selectionKey = resumeSelectionKey(session);
+	turn.selectionKey = selectionKey;
 	// The routing turn spends the ticket, so the turn lets go of it here: a turn
 	// is routed once, and a spent ticket is nothing to carry.
 	const routingTicket = turn.routingTicket;
@@ -909,24 +977,52 @@ async function routeToTab(
 			'The agent selection changed while finding this conversation.'
 		);
 	}
-	if (target.kind === 'open' && findTab(findSession(sessionId), target.tabId)) {
+	if (turn.phase !== 'searching') return null;
+	if (target.kind === 'open') {
+		const before = findTab(session, target.tabId);
+		const after = findTab(current, target.tabId);
+		if (!after && session.toolType !== 'grok' && !before?.nativeSessionBinding) return null;
+		if (
+			!after ||
+			before?.agentSessionId !== after.agentSessionId ||
+			((before?.nativeSessionBinding || after?.nativeSessionBinding) &&
+				!matchesNativeSessionBinding(before?.nativeSessionBinding, after?.nativeSessionBinding))
+		) {
+			throw new SessionResumeRefusedError(
+				'The selected tab changed while finding this conversation.'
+			);
+		}
+		turn.agentSessionId = before?.agentSessionId ?? null;
+		turn.nativeSessionBinding =
+			before?.nativeSessionBinding && structuredClone(before.nativeSessionBinding);
 		return { tabId: target.tabId, origin: 'open' };
 	}
 	if (target.kind === 'closed') {
-		// Closed routing candidates currently carry only an ID/name. Until they
-		// retain observed scope, a collision cannot become a new conversation.
-		if (session.toolType === 'grok') {
-			throw new SessionResumeRefusedError(
-				'Grok history ownership cannot yet be verified. Choose a new chat explicitly to start over.'
-			);
-		}
-		const tabId = await reopenClosedConversation(sessionId, target);
+		const tabId = await reopenClosedConversation(
+			sessionId,
+			target,
+			() => turn.phase === 'searching'
+		);
 		const afterRead = findSession(sessionId);
 		if (!afterRead || resumeSelectionKey(afterRead) !== selectionKey) {
 			throw new SessionResumeRefusedError(
 				'The agent selection changed while reopening this conversation.'
 			);
 		}
+		if (
+			tabId &&
+			(session.toolType === 'grok' || target.nativeSessionBinding !== undefined) &&
+			!matchesNativeSessionBinding(
+				target.nativeSessionBinding,
+				findTab(afterRead, tabId)?.nativeSessionBinding
+			)
+		) {
+			throw new SessionResumeRefusedError(
+				'The selected tab ownership changed while reopening this conversation.'
+			);
+		}
+		turn.nativeSessionBinding = target.nativeSessionBinding;
+		turn.agentSessionId = tabId ? (findTab(afterRead, tabId)?.agentSessionId ?? null) : null;
 		return tabId ? { tabId, origin: 'reopened' } : null;
 	}
 	return null;
@@ -1089,6 +1185,9 @@ async function moveToNewTab(messageId: string | undefined): Promise<string | nul
 	const live = findSession(session.id);
 	const tabId = live ? createChatTab(chat, live, turn.text) : null;
 	if (!tabId) return fail(turn, 'Could not open a tab on this agent');
+	turn.selectionKey = undefined;
+	turn.nativeSessionBinding = undefined;
+	turn.agentSessionId = null;
 	const error = deliverToTab(chat, turn, session.id, tabId, 'new');
 	// The conversation moves with it: the next message follows it to the new tab.
 	if (!error) {
@@ -1141,6 +1240,7 @@ function buildRecent(c: Chat): QuickChatRecent | null {
 			error: turn.error,
 			tabId: turn.tabId,
 			agentSessionId: turn.agentSessionId,
+			nativeSessionBinding: turn.nativeSessionBinding,
 			tabName: turn.tabName,
 			origin: turn.origin,
 			queuedItemId: turn.queuedItemId,
@@ -1155,9 +1255,11 @@ function buildRecent(c: Chat): QuickChatRecent | null {
 		persistent: isPersistent(c),
 		createdAt: c.createdAt,
 		updatedAt,
-		homeTabId: c.homeTabId,
-		homeAgentSessionId: home?.agentSessionId ?? null,
-		homeTabName: home?.tabName ?? null,
+		homeTabId: c.homeTabId ?? c.recalledHome?.homeTabId ?? null,
+		homeAgentSessionId: home?.agentSessionId ?? c.recalledHome?.homeAgentSessionId ?? null,
+		homeNativeSessionBinding:
+			home?.nativeSessionBinding ?? c.recalledHome?.homeNativeSessionBinding,
+		homeTabName: home?.tabName ?? c.recalledHome?.homeTabName ?? null,
 		ownedTabIds: [...c.ownedTabIds],
 		turns,
 	};
@@ -1202,6 +1304,7 @@ function restoreTurn(turn: QuickChatRecentTurn): Turn {
 		tabName: turn.tabName,
 		reply: turn.reply,
 		agentSessionId: turn.agentSessionId,
+		nativeSessionBinding: turn.nativeSessionBinding && structuredClone(turn.nativeSessionBinding),
 		// Tickets are never persisted (see Turn): a remembered message ran, or was
 		// withdrawn with its ticket, and a recent record carries none either way.
 		dispatchTicket: null,
@@ -1218,25 +1321,48 @@ function restoreTurn(turn: QuickChatRecentTurn): Turn {
 async function restoreHome(sessionId: string, recent: QuickChatRecent): Promise<string | null> {
 	const session = findSession(sessionId);
 	if (!session) return null;
+	const recalled = chat;
 	const selectionKey = resumeSelectionKey(session);
-	// Recent records also lack ownership: even a matching native ID in an open
-	// tab does not prove that it belongs to the remembered account and host.
-	if (session.toolType === 'grok' && (recent.homeTabId || recent.homeAgentSessionId)) {
-		throw new SessionResumeRefusedError(
-			'Grok history ownership cannot yet be verified. Choose a new chat explicitly to start over.'
-		);
-	}
+	const scoped = session.toolType === 'grok' || recent.homeNativeSessionBinding !== undefined;
 	const open =
 		session.aiTabs.find((t) => t.id === recent.homeTabId) ??
 		(recent.homeAgentSessionId
-			? session.aiTabs.find((t) => t.agentSessionId === recent.homeAgentSessionId)
+			? session.aiTabs.find(
+					(t) =>
+						t.agentSessionId === recent.homeAgentSessionId &&
+						(!scoped ||
+							matchesNativeSessionBinding(t.nativeSessionBinding, recent.homeNativeSessionBinding))
+				)
 			: undefined);
 	let tabId = open?.id ?? null;
-	if (!tabId && recent.homeAgentSessionId) {
-		tabId = await reopenClosedConversation(sessionId, {
-			agentSessionId: recent.homeAgentSessionId,
-			name: recent.homeTabName,
-		});
+	if (scoped && (recent.homeTabId || recent.homeAgentSessionId) && !recent.homeAgentSessionId) {
+		throw new SessionResumeRefusedError(
+			'The remembered conversation has no verified native identity.'
+		);
+	}
+	if (
+		scoped &&
+		open &&
+		(open.agentSessionId !== recent.homeAgentSessionId ||
+			!matchesNativeSessionBinding(open.nativeSessionBinding, recent.homeNativeSessionBinding))
+	) {
+		throw new SessionResumeRefusedError('The remembered conversation no longer owns this tab.');
+	}
+	if ((!tabId || scoped) && recent.homeAgentSessionId) {
+		let createdTabId: string | null = null;
+		tabId = await reopenClosedConversation(
+			sessionId,
+			{
+				agentSessionId: recent.homeAgentSessionId,
+				name: recent.homeTabName,
+				ownerAgentId: recent.agentId,
+				nativeSessionBinding: recent.homeNativeSessionBinding,
+			},
+			() => chat === recalled,
+			(id) => {
+				createdTabId = id;
+			}
+		);
 		const current = findSession(sessionId);
 		if (!current || resumeSelectionKey(current) !== selectionKey) {
 			throw new SessionResumeRefusedError(
@@ -1244,29 +1370,51 @@ async function restoreHome(sessionId: string, recent: QuickChatRecent): Promise<
 			);
 		}
 		// Another chat took the window while the conversation was being read.
-		if (!tabId || chat.id !== recent.id) return null;
-		if (recent.homeTabId && recent.ownedTabIds.includes(recent.homeTabId)) {
+		if (!tabId || chat !== recalled) return null;
+		if (
+			scoped &&
+			!matchesNativeSessionBinding(
+				recent.homeNativeSessionBinding,
+				findTab(current, tabId)?.nativeSessionBinding
+			)
+		) {
+			throw new SessionResumeRefusedError(
+				'The remembered conversation ownership changed while reopening.'
+			);
+		}
+		if (
+			recent.homeTabId &&
+			recent.ownedTabIds.includes(recent.homeTabId) &&
+			(createdTabId === tabId || recent.homeTabId === tabId)
+		) {
 			const persistent = isPersistent();
 			chat.ownedTabIds.add(tabId);
 			const reopened = tabId;
-			updateSessionWith(sessionId, (s) => ({
-				...s,
-				aiTabs: s.aiTabs.map((t) =>
-					t.id === reopened
-						? {
-								...t,
-								quickChat: true,
-								hidden: !persistent,
-								saveToHistory: saveToHistoryFor(persistent),
-							}
-						: t
-				),
-			}));
+			if (createdTabId === tabId)
+				updateSessionWith(sessionId, (s) => ({
+					...s,
+					aiTabs: s.aiTabs.map((t) =>
+						t.id === reopened
+							? {
+									...t,
+									quickChat: true,
+									hidden: !persistent,
+									saveToHistory: saveToHistoryFor(persistent),
+								}
+							: t
+					),
+				}));
 		}
 	}
 	if (!tabId) return null;
+	recalled.homeSelectionKey = selectionKey;
 	for (const turn of chat.turns) {
-		if (turn.tabId === recent.homeTabId) turn.tabId = tabId;
+		if (
+			turn.tabId === recent.homeTabId &&
+			(!scoped ||
+				matchesNativeSessionBinding(turn.nativeSessionBinding, recent.homeNativeSessionBinding))
+		)
+			turn.tabId = tabId;
 	}
 	applyThinking(chat, sessionId, tabId, thinkingMode());
 	return tabId;
@@ -1311,8 +1459,13 @@ async function recall(chatId: string): Promise<string | null> {
 	chat.createdAt = recent.createdAt;
 	chat.sessionId = session.id;
 	chat.persistent = recent.persistent;
+	chat.recalledHome = recent;
 	chat.ownedTabIds = new Set(
-		recent.ownedTabIds.filter((id) => session.aiTabs.some((t) => t.id === id))
+		recent.ownedTabIds.filter((id) =>
+			session.aiTabs.some(
+				(t) => t.id === id && session.toolType !== 'grok' && !recent.homeNativeSessionBinding
+			)
+		)
 	);
 	chat.turns = recent.turns.map(restoreTurn);
 	// A message sent while the tab is being reopened waits for it, like any home.
