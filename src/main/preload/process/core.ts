@@ -3,6 +3,7 @@ import { ipcRenderer } from 'electron';
 import type { CallUsage, UsageStats } from '../../../shared/types';
 import type { ParsedQuestion } from '../../permission-relay/types';
 import type { SteeringResultFrame } from '../../../shared/chatSteering';
+import type { NativeSessionLaunch } from '../../process-manager/types';
 
 /**
  * Configuration for spawning a process
@@ -329,11 +330,25 @@ export function createProcessCoreApi() {
 		): Promise<boolean> => ipcRenderer.invoke('permission:respond', requestId, decision),
 
 		/**
-		 * Subscribe to agent session ID events
+		 * Subscribe to agent session ID events. Observed native launch ownership is
+		 * optional; its absence cannot be filled from the current agent settings.
 		 */
-		onSessionId: (callback: (sessionId: string, agentSessionId: string) => void): (() => void) => {
-			const handler = (_: unknown, sessionId: string, agentSessionId: string) =>
-				callback(sessionId, agentSessionId);
+		onSessionId: (
+			callback: (
+				sessionId: string,
+				agentSessionId: string,
+				nativeSessionLaunch?: NativeSessionLaunch
+			) => void
+		): (() => void) => {
+			const handler = (
+				_: unknown,
+				sessionId: string,
+				agentSessionId: string,
+				nativeSessionLaunch?: NativeSessionLaunch
+			) => {
+				if (nativeSessionLaunch) callback(sessionId, agentSessionId, nativeSessionLaunch);
+				else callback(sessionId, agentSessionId);
+			};
 			ipcRenderer.on('process:session-id', handler);
 			return () => ipcRenderer.removeListener('process:session-id', handler);
 		},

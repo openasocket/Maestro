@@ -2219,6 +2219,30 @@
 			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
 			"scope": "28 new parameter-expanded tests: stubbed passwd HOME fallback, native cwd empty-home fallback, HOME/process-cwd alias retargets, explicit zero content opens/reads and mutations, exact/overflow receipt ceilings, and finite transient retries. Fourteen emitted-Python fixture cases retain the independent real Bash controls.",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-native-identity-bridge": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07e-desktop-native-identity-bridge",
+			"sourceCommit": "0a6bb55553a077754045ab5983190565f5aa250c",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/process-listeners/session-id-listener.ts": "5bae5c565fcd16e24d268132db9cf3f0cc1f672d133703cc52c1c9f74d3044c6",
+				"src/main/preload/process/core.ts": "19935baec43e6a7ee1c5b1e6226d9761c3db8f301caa59f420504de23b324b36",
+				"src/renderer/global.d.ts": "83d5f537230bde81733f6fb0508da1a8e2f0bd43e9b9f8f238d851d99e842f6a"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"mainTypeCheck": "pass",
+			"formattingAndLint": "pass",
+			"staticLimitations": "Renderer TypeScript retains the pre-existing RequestInit.dispatcher TS2339; main compiler and scoped ESLint pass. No tests run or collected.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "Three-file bridge packet preserves the captured NativeSessionLaunch through main/preload/declaration with separate observed/requested IDs and exact legacy arity. Consumer still ignores the receipt; durable persistence and current-turn fencing remain GT1-04-07E1. ACP desktop routing is not claimed.",
+			"continuationOwner": "GT1-04-07E1",
+			"testOwners": ["GT1-04-07ET", "GT1-04-07E1T"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6052,7 +6076,10 @@
 				"src/main/ipc/handlers/process/handle-spawn.ts",
 				"src/main/process-manager/ProcessManager.ts",
 				"src/main/process-manager/types.ts",
-				"src/main/utils/remote-fs.ts"
+				"src/main/utils/remote-fs.ts",
+				"src/main/process-listeners/session-id-listener.ts",
+				"src/main/preload/process/core.ts",
+				"src/renderer/global.d.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6067,7 +6094,8 @@
 					"GT1-04-07E",
 					"GT1-04-07F",
 					"GT1-04-07CQT1A",
-					"GT1-04-07D1"
+					"GT1-04-07D1",
+					"GT1-04-07E1"
 				],
 				"test": [
 					"GT1-04-08",
@@ -6084,7 +6112,9 @@
 					"GT1-04-07CUIAT",
 					"GT1-04-07CUIAT1",
 					"GT1-04-07D1T",
-					"GT1-04-07D1T1"
+					"GT1-04-07D1T1",
+					"GT1-04-07ET",
+					"GT1-04-07E1T"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -6122,7 +6152,8 @@
 				"phase04LaunchOwnershipRef": "phase04-launch-ownership",
 				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation",
 				"phase04RemoteLaunchObservationTestsRef": "phase04-remote-launch-observation-tests",
-				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests"
+				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests",
+				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6166,7 +6197,7 @@
 				{
 					"id": "grok-remote-launch-account-unobserved",
 					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E/07F deliver and persist native IDs. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
+					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E now delivers captured launch receipts through the desktop bridge; 07E1/07F still own durable consumer persistence/current-turn fencing, with 07ET/07E1T tests unexecuted. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -11331,7 +11362,10 @@
 				"src/main/ipc/handlers/process/handle-spawn.ts",
 				"src/main/process-manager/ProcessManager.ts",
 				"src/main/process-manager/types.ts",
-				"src/main/utils/remote-fs.ts"
+				"src/main/utils/remote-fs.ts",
+				"src/main/process-listeners/session-id-listener.ts",
+				"src/main/preload/process/core.ts",
+				"src/renderer/global.d.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -11344,7 +11378,8 @@
 					"GT1-04-07E",
 					"GT1-04-07F",
 					"GT1-04-07CQT1A",
-					"GT1-04-07D1"
+					"GT1-04-07D1",
+					"GT1-04-07E1"
 				],
 				"test": [
 					"GT1-04-08",
@@ -11359,7 +11394,9 @@
 					"GT1-04-07CUIAT",
 					"GT1-04-07CUIAT1",
 					"GT1-04-07D1T",
-					"GT1-04-07D1T1"
+					"GT1-04-07D1T1",
+					"GT1-04-07ET",
+					"GT1-04-07E1T"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -11397,7 +11434,8 @@
 				"phase04LaunchOwnershipRef": "phase04-launch-ownership",
 				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation",
 				"phase04RemoteLaunchObservationTestsRef": "phase04-remote-launch-observation-tests",
-				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests"
+				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests",
+				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11441,7 +11479,7 @@
 				{
 					"id": "grok-remote-launch-account-unobserved",
 					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E/07F deliver and persist native IDs. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
+					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E now delivers captured launch receipts through the desktop bridge; 07E1/07F still own durable consumer persistence/current-turn fencing, with 07ET/07E1T tests unexecuted. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -11875,7 +11913,10 @@
 				"src/main/ipc/handlers/process/handle-spawn.ts",
 				"src/main/process-manager/ProcessManager.ts",
 				"src/main/process-manager/types.ts",
-				"src/main/utils/remote-fs.ts"
+				"src/main/utils/remote-fs.ts",
+				"src/main/process-listeners/session-id-listener.ts",
+				"src/main/preload/process/core.ts",
+				"src/renderer/global.d.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -11888,7 +11929,8 @@
 					"GT1-04-07E",
 					"GT1-04-07F",
 					"GT1-04-07CQT1A",
-					"GT1-04-07D1"
+					"GT1-04-07D1",
+					"GT1-04-07E1"
 				],
 				"test": [
 					"GT1-04-08",
@@ -11903,7 +11945,9 @@
 					"GT1-04-07CUIAT",
 					"GT1-04-07CUIAT1",
 					"GT1-04-07D1T",
-					"GT1-04-07D1T1"
+					"GT1-04-07D1T1",
+					"GT1-04-07ET",
+					"GT1-04-07E1T"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
@@ -11941,7 +11985,8 @@
 				"phase04LaunchOwnershipRef": "phase04-launch-ownership",
 				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation",
 				"phase04RemoteLaunchObservationTestsRef": "phase04-remote-launch-observation-tests",
-				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests"
+				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests",
+				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11985,7 +12030,7 @@
 				{
 					"id": "grok-remote-launch-account-unobserved",
 					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E/07F deliver and persist native IDs. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
+					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E now delivers captured launch receipts through the desktop bridge; 07E1/07F still own durable consumer persistence/current-turn fencing, with 07ET/07E1T tests unexecuted. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -16486,7 +16531,10 @@
 				"src/main/ipc/handlers/process/handle-spawn.ts",
 				"src/main/process-manager/ProcessManager.ts",
 				"src/main/process-manager/types.ts",
-				"src/main/utils/remote-fs.ts"
+				"src/main/utils/remote-fs.ts",
+				"src/main/process-listeners/session-id-listener.ts",
+				"src/main/preload/process/core.ts",
+				"src/renderer/global.d.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -16501,7 +16549,8 @@
 					"GT1-04-07E",
 					"GT1-04-07F",
 					"GT1-04-07CQT1A",
-					"GT1-04-07D1"
+					"GT1-04-07D1",
+					"GT1-04-07E1"
 				],
 				"test": [
 					"GT1-04-08",
@@ -16518,7 +16567,9 @@
 					"GT1-04-07CUIAT",
 					"GT1-04-07CUIAT1",
 					"GT1-04-07D1T",
-					"GT1-04-07D1T1"
+					"GT1-04-07D1T1",
+					"GT1-04-07ET",
+					"GT1-04-07E1T"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -16556,7 +16607,8 @@
 				"phase04LaunchOwnershipRef": "phase04-launch-ownership",
 				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation",
 				"phase04RemoteLaunchObservationTestsRef": "phase04-remote-launch-observation-tests",
-				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests"
+				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests",
+				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16600,7 +16652,7 @@
 				{
 					"id": "grok-remote-launch-account-unobserved",
 					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E/07F deliver and persist native IDs. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
+					"missingPrerequisite": "GT1-04-07D1 implements literal remote launch account/cwd observation with directory, environment and endpoint rechecks. GT1-04-07D1T/07D1T1 authored inert and emitted-observer regressions; GT1-04-13 must execute them. GT1-04-08 retains process-generation coverage and 07E now delivers captured launch receipts through the desktop bridge; 07E1/07F still own durable consumer persistence/current-turn fencing, with 07ET/07E1T tests unexecuted. Unqualified endpoints, absent selected roots and native paths not representable without normalization remain unknown; live SSH/binary qualification remains not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],

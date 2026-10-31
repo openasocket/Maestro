@@ -2,6 +2,7 @@ import type {
 	TranslationRequest,
 	TranslationReport,
 } from '../shared/maestro-lib/translation/types';
+import type { NativeSessionLaunch } from '../main/process-manager/types';
 import type {
 	AgentDiscoveryRequest,
 	AgentDiscoveryResult,
@@ -565,7 +566,14 @@ interface MaestroAPI {
 				| { behavior: 'allow'; updatedInput?: Record<string, unknown> }
 				| { behavior: 'deny'; message: string }
 		) => Promise<boolean>;
-		onSessionId: (callback: (sessionId: string, agentSessionId: string) => void) => () => void;
+		/** Native ownership is captured at launch; missing receipts remain unobserved. */
+		onSessionId: (
+			callback: (
+				sessionId: string,
+				agentSessionId: string,
+				nativeSessionLaunch?: NativeSessionLaunch
+			) => void
+		) => () => void;
 		onSlashCommands: (callback: (sessionId: string, slashCommands: string[]) => void) => () => void;
 		/** The later, transcript-observed outcome of a steer that `steer()` reported `delivered`. */
 		onSteeringVerdict: (
