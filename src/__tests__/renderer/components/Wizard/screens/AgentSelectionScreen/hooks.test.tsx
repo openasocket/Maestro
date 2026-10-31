@@ -205,6 +205,183 @@ describe('AgentSelectionScreen hooks', () => {
 		unmount();
 	});
 
+	it.each([false, true])(
+		'keeps detection ownership across refreshes and host round trips (stale rejection=%s)',
+		async (rejectStale) => {
+			const pending: { resolve: (value: AgentConfig[]) => void; reject: (error: Error) => void }[] =
+				[];
+			vi.mocked(window.maestro.agents.detect).mockImplementation(
+				() => new Promise((resolve, reject) => pending.push({ resolve, reject }))
+			);
+			const setAvailableAgents = vi.fn();
+			const setSelectedAgent = vi.fn();
+			const grok = agent({ id: 'grok', name: 'Grok CLI', path: '/selected/grok' });
+			const { result, rerender } = renderHook(
+				({ sshRemoteConfig, selectedAgent }) =>
+					useAgentDetection({
+						sshRemoteConfig,
+						selectedAgent,
+						setAvailableAgents,
+						setSelectedAgent,
+					}),
+				{
+					initialProps: {
+						sshRemoteConfig: undefined as Parameters<
+							typeof useAgentDetection
+						>[0]['sshRemoteConfig'],
+						selectedAgent: null as string | null,
+					},
+				}
+			);
+			rerender({ sshRemoteConfig: undefined, selectedAgent: 'grok' });
+			await act(async () => pending[0].resolve([grok, agent({ id: 'claude-code' })]));
+			expect(setSelectedAgent).not.toHaveBeenCalled();
+			const oldLocalRefresh = result.current.refreshAgentDetection;
+			let first!: Promise<void>;
+			let second!: Promise<void>;
+			act(() => {
+				first = result.current.refreshAgentDetection();
+			});
+			expect(setAvailableAgents).toHaveBeenLastCalledWith([]);
+			expect(result.current.detectedAgents).toContainEqual(grok);
+			act(() => {
+				second = result.current.refreshAgentDetection();
+			});
+			const missing = { ...grok, available: false };
+			await act(async () => {
+				pending[2].resolve([missing]);
+				await second;
+			});
+			setAvailableAgents.mockClear();
+			await act(async () => {
+				if (rejectStale) pending[1].reject(new Error('obsolete detection'));
+				else pending[1].resolve([grok]);
+				await first;
+			});
+			expect(setAvailableAgents).not.toHaveBeenCalled();
+			expect(result.current.detectedAgents).toEqual([missing]);
+			expect(captureException).not.toHaveBeenCalled();
+
+			rerender({ sshRemoteConfig: { enabled: true, remoteId: 'remote-1' }, selectedAgent: 'grok' });
+			expect(result.current.detectedAgents).toEqual([]);
+			expect(setAvailableAgents).toHaveBeenLastCalledWith([]);
+			expect(result.current.isDetecting).toBe(true);
+			expect(window.maestro.agents.detect).toHaveBeenLastCalledWith('remote-1');
+			const oldRemoteRefresh = result.current.refreshAgentDetection;
+			rerender({ sshRemoteConfig: undefined, selectedAgent: 'grok' });
+			expect(window.maestro.agents.detect).toHaveBeenLastCalledWith(undefined);
+			await act(async () => {
+				await oldLocalRefresh();
+				await oldRemoteRefresh();
+			});
+			expect(window.maestro.agents.detect).toHaveBeenCalledTimes(5);
+			await act(async () => pending[4].resolve([grok]));
+			setAvailableAgents.mockClear();
+			await act(async () => pending[3].resolve([agent({ id: 'claude-code' })]));
+			expect(result.current.detectedAgents).toEqual([grok]);
+			expect(result.current.isDetecting).toBe(false);
+			expect(result.current.sshConnectionError).toBeNull();
+			expect(setAvailableAgents).not.toHaveBeenCalled();
+			expect(setSelectedAgent).not.toHaveBeenCalled();
+		}
+	);
+
+	it('lets a manual detection replace pending initial detection without late default selection', async () => {
+		let finishInitial!: (value: AgentConfig[]) => void;
+		const grok = agent({ id: 'grok' });
+		vi.mocked(window.maestro.agents.detect)
+			.mockReturnValueOnce(
+				new Promise((resolve) => {
+					finishInitial = resolve;
+				})
+			)
+			.mockResolvedValue([grok]);
+		const setAvailableAgents = vi.fn();
+		const setSelectedAgent = vi.fn();
+		const { result } = renderHook(() =>
+			useAgentDetection({
+				sshRemoteConfig: undefined,
+				selectedAgent: null,
+				setAvailableAgents,
+				setSelectedAgent,
+			})
+		);
+		await act(async () => result.current.refreshAgentDetection());
+		expect(result.current.detectedAgents).toEqual([grok]);
+		expect(result.current.isDetecting).toBe(false);
+		setAvailableAgents.mockClear();
+		await act(async () => finishInitial([agent({ id: 'claude-code' })]));
+		expect(result.current.detectedAgents).toEqual([grok]);
+		expect(setAvailableAgents).not.toHaveBeenCalled();
+		expect(setSelectedAgent).not.toHaveBeenCalled();
+	});
+
+	it('restores current detection ownership after StrictMode cleanup', async () => {
+		const pending: ((value: AgentConfig[]) => void)[] = [];
+		vi.mocked(window.maestro.agents.detect).mockImplementation(
+			() => new Promise((resolve) => pending.push(resolve))
+		);
+		const setAvailableAgents = vi.fn();
+		const setSelectedAgent = vi.fn();
+		const { result } = renderHook(
+			() =>
+				useAgentDetection({
+					sshRemoteConfig: undefined,
+					selectedAgent: 'grok',
+					setAvailableAgents,
+					setSelectedAgent,
+				}),
+			{
+				wrapper: ({ children }) => <React.StrictMode>{children}</React.StrictMode>,
+			}
+		);
+		expect(pending).toHaveLength(2);
+		setAvailableAgents.mockClear();
+		await act(async () => pending[0]([agent({ id: 'claude-code' })]));
+		expect(result.current.isDetecting).toBe(true);
+		expect(setAvailableAgents).not.toHaveBeenCalled();
+		const grok = agent({ id: 'grok' });
+		await act(async () => pending[1]([grok]));
+		expect(result.current.isDetecting).toBe(false);
+		expect(result.current.detectedAgents).toEqual([grok]);
+		expect(setAvailableAgents).toHaveBeenCalledExactlyOnceWith([grok]);
+		expect(setSelectedAgent).not.toHaveBeenCalled();
+	});
+
+	it.each(['local failure', 'remote failure', 'unresolved SSH'] as const)(
+		'clears detection readiness on %s without a local fallback',
+		async (failure) => {
+			const setAvailableAgents = vi.fn();
+			const setSelectedAgent = vi.fn();
+			vi.mocked(window.maestro.agents.detect).mockRejectedValue(new Error('detection refused'));
+			const { result } = renderHook(() =>
+				useAgentDetection({
+					sshRemoteConfig:
+						failure === 'local failure'
+							? undefined
+							: { enabled: true, remoteId: failure === 'unresolved SSH' ? '' : 'remote-1' },
+					selectedAgent: 'grok',
+					setAvailableAgents,
+					setSelectedAgent,
+				})
+			);
+			await waitFor(() => expect(result.current.isDetecting).toBe(false));
+			expect(result.current.detectedAgents).toEqual([]);
+			expect(setAvailableAgents).toHaveBeenLastCalledWith([]);
+			expect(setSelectedAgent).not.toHaveBeenCalled();
+			if (failure === 'unresolved SSH') {
+				expect(window.maestro.agents.detect).not.toHaveBeenCalled();
+				expect(result.current.sshConnectionError).toBe(
+					'Select an SSH remote before detecting agents.'
+				);
+			} else {
+				expect(window.maestro.agents.detect).toHaveBeenCalledExactlyOnceWith(
+					failure === 'local failure' ? undefined : 'remote-1'
+				);
+			}
+		}
+	);
+
 	it('loads SSH remotes, syncs restored context, and forwards local or remote selections', async () => {
 		const setWizardSessionSshRemoteConfig = vi.fn();
 		vi.mocked(window.maestro.sshRemote.getConfigs).mockResolvedValue({
@@ -760,7 +937,7 @@ describe('AgentSelectionScreen hooks', () => {
 		expect(setWizardCustomArgs).toHaveBeenCalledWith('--flag');
 		expect(setWizardCustomEnvVars).toHaveBeenCalledWith({ NEW: '2' });
 		expect(setWizardCustomEnvVars).toHaveBeenCalledWith({ OLD: '3' });
-		expect(setWizardCustomEnvVars).toHaveBeenCalledWith(undefined);
+		expect(setWizardCustomEnvVars).toHaveBeenCalledWith({});
 		expect(setWizardCustomEnvVars).toHaveBeenCalledWith({ OLD: '1', '': '' });
 		expect(window.maestro.agents.setConfig).toHaveBeenCalledWith('codex', { model: 'gpt-5' });
 		expect(window.maestro.agents.setCustomPath).toHaveBeenCalledWith('codex', '/bin/codex');
@@ -823,6 +1000,46 @@ describe('AgentSelectionScreen hooks', () => {
 				options: ['high'],
 			} as never);
 		});
+
+		it.each([undefined, {}, { GROK_HOME: '/accounts/one' }, { GROK_HOME: '/accounts/two' }] as (
+			| Record<string, string>
+			| undefined
+		)[])(
+			'preserves untouched environment %j and forwards explicit account/path/args edits',
+			async (customEnvVars) => {
+				const original = customEnvVars && { ...customEnvVars };
+				wizardState = { ...wizardState, customEnvVars };
+				args = {
+					...args,
+					customEnvVars: customEnvVars ?? {},
+					sshRemoteConfig: { enabled: true, remoteId: '' },
+				};
+				const { result, rerender } = renderHook(() => useAgentConfigurationPanel(args));
+				await act(async () => result.current.handleOpenConfig('grok'));
+				act(() => result.current.handleCloseConfig());
+				expect(args.setWizardCustomEnvVars).not.toHaveBeenCalled();
+				expect(args.setWizardSessionSshRemoteConfig).toHaveBeenCalledExactlyOnceWith({
+					enabled: true,
+					remoteId: null,
+				});
+				expect(args.showGridView).toHaveBeenCalledWith('grok');
+				act(() => {
+					result.current.setCustomPath('/selected/grok');
+					result.current.setCustomArgs('--profile selected');
+					result.current.handleEnvVarValueChange('GROK_HOME', '/accounts/next');
+				});
+				expect(args.setWizardCustomPath).toHaveBeenCalledExactlyOnceWith('/selected/grok');
+				expect(args.setWizardCustomArgs).toHaveBeenCalledExactlyOnceWith('--profile selected');
+				expect(args.setWizardCustomEnvVars).toHaveBeenLastCalledWith({
+					GROK_HOME: '/accounts/next',
+				});
+				args = { ...args, customEnvVars: { GROK_HOME: '/accounts/next' } };
+				rerender();
+				act(() => result.current.handleEnvVarRemove('GROK_HOME'));
+				expect(args.setWizardCustomEnvVars).toHaveBeenLastCalledWith({});
+				expect(wizardState.customEnvVars).toEqual(original);
+			}
+		);
 
 		it.each([undefined, {}, { GROK_HOME: '' }] as (Record<string, string> | undefined)[])(
 			'preserves raw environment %j and provider-setting clears',
@@ -1049,6 +1266,8 @@ describe('AgentSelectionScreen hooks', () => {
 		it.each([
 			'account',
 			'account reopen',
+			'remote',
+			'cwd',
 			'provider',
 			'close',
 			'reopen',
@@ -1073,6 +1292,12 @@ describe('AgentSelectionScreen hooks', () => {
 				expect(window.maestro.agents.getConfigOptions).not.toHaveBeenCalled();
 				if (change === 'account' || change === 'account reopen') {
 					wizardState = { ...wizardState, customEnvVars: { GROK_HOME: '/accounts/next' } };
+					rerender();
+				} else if (change === 'remote') {
+					args = { ...args, sshRemoteConfig: { enabled: true, remoteId: 'remote-2' } };
+					rerender();
+				} else if (change === 'cwd') {
+					wizardState = { ...wizardState, directoryPath: '/new-project' };
 					rerender();
 				} else if (change === 'provider') {
 					wizardState = { ...wizardState, selectedAgent: 'codex' };

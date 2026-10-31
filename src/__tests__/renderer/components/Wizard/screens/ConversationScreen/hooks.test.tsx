@@ -1,4 +1,8 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
+import React from 'react';
+import { mockTheme } from '../../../../../helpers/mockTheme';
+import { StreamingResponseBubble } from '../../../../../../renderer/components/Wizard/screens/ConversationScreen/components/StreamingResponseBubble';
+import type { ConversationCallbacks } from '../../../../../../renderer/components/Wizard/services/conversationManager';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useConversationAnnouncements } from '../../../../../../renderer/components/Wizard/screens/ConversationScreen/hooks/useConversationAnnouncements';
 import { useConversationAutoContinue } from '../../../../../../renderer/components/Wizard/screens/ConversationScreen/hooks/useConversationAutoContinue';
@@ -105,22 +109,24 @@ function renderSendHook({
 	announce: ReturnType<typeof vi.fn>;
 	scheduleAutoContinue: ReturnType<typeof vi.fn>;
 }> = {}) {
-	const rendered = renderHook(() =>
-		useWizardConversationSend({
-			state,
-			inputValue,
-			showInitialQuestion,
-			initialQuestion: 'Initial question?',
-			refs,
-			setters,
-			addMessage,
-			setConfidenceLevel,
-			setIsReadyToProceed,
-			setConversationLoading,
-			setConversationError,
-			announce,
-			scheduleAutoContinue,
-		})
+	const rendered = renderHook(
+		(currentState: WizardConversationState) =>
+			useWizardConversationSend({
+				state: currentState,
+				inputValue,
+				showInitialQuestion,
+				initialQuestion: 'Initial question?',
+				refs,
+				setters,
+				addMessage,
+				setConfidenceLevel,
+				setIsReadyToProceed,
+				setConversationLoading,
+				setConversationError,
+				announce,
+				scheduleAutoContinue,
+			}),
+		{ initialProps: state }
 	);
 
 	return {
@@ -144,10 +150,17 @@ describe('ConversationScreen hooks', () => {
 		conversationMocks.startConversation.mockResolvedValue('wizard-session');
 		conversationMocks.isConversationActive.mockReturnValue(true);
 		conversationMocks.sendMessage.mockResolvedValue({ success: true });
+		vi.mocked(window.maestro.autorun.listDocs)
+			.mockReset()
+			.mockResolvedValue({ success: true, files: [] });
+		vi.mocked(window.maestro.autorun.readDoc)
+			.mockReset()
+			.mockResolvedValue({ success: true, content: 'Current plan' });
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
+		vi.restoreAllMocks();
 	});
 
 	describe('useConversationAnnouncements', () => {
@@ -264,6 +277,9 @@ describe('ConversationScreen hooks', () => {
 				// The project is the FOLDER, not the agent's name (issue #1225).
 				projectName: 'project',
 				model: undefined,
+				sessionCustomPath: undefined,
+				sessionCustomArgs: undefined,
+				sessionCustomEnvVars: undefined,
 				existingDocs: undefined,
 				sshRemoteConfig: undefined,
 				claudeTokenSource: {
@@ -277,6 +293,139 @@ describe('ConversationScreen hooks', () => {
 			unmount();
 			expect(conversationMocks.endConversation).toHaveBeenCalledTimes(1);
 		});
+
+		it.each([
+			[undefined, undefined],
+			[{}, undefined],
+			[{ GROK_HOME: '/accounts/a', GROK_AUTH_PATH: '/accounts/a/auth' }, undefined],
+			[{ GROK_HOME: '/accounts/b', GROK_AUTH_PATH: '/accounts/b/auth' }, 'remote-b'],
+		] as const)(
+			'hands Grok env %j and host %s through bootstrap and send paths',
+			async (env, remoteId) => {
+				const state = createState({
+					selectedAgent: 'grok',
+					customPath: '/custom/grok',
+					customArgs: '--reasoning-effort high',
+					customEnvVars: env,
+					plannerModel: 'grok-4.3',
+					sessionSshRemoteConfig: remoteId ? { enabled: true, remoteId } : undefined,
+				});
+				const started = vi.fn();
+				renderHook(() =>
+					useConversationBootstrap({
+						state,
+						conversationStarted: false,
+						setConversationStarted: started,
+						setShowInitialQuestion: vi.fn(),
+						initialQuestionAddedRef: { current: false },
+						setConversationError: vi.fn(),
+					})
+				);
+				await waitFor(() => expect(started).toHaveBeenCalledWith(true));
+				expect(conversationMocks.startConversation).toHaveBeenCalledExactlyOnceWith({
+					agentType: 'grok',
+					directoryPath: '/project',
+					projectName: 'project',
+					model: 'grok-4.3',
+					sessionCustomPath: state.customPath,
+					sessionCustomArgs: state.customArgs,
+					sessionCustomEnvVars: env,
+					sshRemoteConfig: state.sessionSshRemoteConfig,
+					existingDocs: undefined,
+					claudeTokenSource: {
+						enableMaestroP: undefined,
+						maestroPMode: undefined,
+						maestroPPath: undefined,
+					},
+				});
+				const expectedConfig = conversationMocks.startConversation.mock.calls[0][0];
+				const history = [
+					{ id: 'old', role: 'assistant' as const, content: 'Prior plan', timestamp: 1 },
+				];
+				const hook = renderSendHook({
+					state: { ...state, conversationHistory: history },
+					showInitialQuestion: false,
+				});
+				for (const mode of ['message', 'survey', 'existing-docs'] as const) {
+					conversationMocks.isConversationActive.mockReturnValue(mode === 'message');
+					vi.mocked(window.maestro.autorun.listDocs).mockResolvedValue({
+						success: true,
+						files: ['plan.md'],
+					});
+					hook.rerender({
+						...state,
+						conversationHistory: history,
+						plannerModel: mode === 'message' ? undefined : 'grok-4.5',
+					});
+					await act(async () => {
+						if (mode === 'message') await hook.result.current.handleSendMessage();
+						else await hook.result.current.sendOpeningMessage(mode);
+					});
+					expect(conversationMocks.startConversation).toHaveBeenLastCalledWith({
+						...expectedConfig,
+						model: mode === 'message' ? undefined : 'grok-4.5',
+						existingDocs:
+							mode === 'existing-docs'
+								? [{ filename: 'plan.md', content: 'Current plan' }]
+								: undefined,
+					});
+					expect(conversationMocks.sendMessage).toHaveBeenLastCalledWith(
+						expect.any(String),
+						history,
+						expect.any(Object)
+					);
+				}
+				expect(conversationMocks.startConversation).toHaveBeenCalledTimes(4);
+			}
+		);
+
+		it.each(['selection', 'unmount'] as const)(
+			'discards bootstrap documents after %s',
+			async (change) => {
+				let resolveDocs!: (value: { success: boolean; files: string[] }) => void;
+				vi.mocked(window.maestro.autorun.listDocs).mockReturnValueOnce(
+					new Promise((resolve) => {
+						resolveDocs = resolve;
+					})
+				);
+				const state = createState({
+					selectedAgent: 'grok',
+					existingDocsChoice: 'continue',
+					customEnvVars: { GROK_HOME: '/accounts/a' },
+				});
+				const controls = {
+					conversationStarted: false,
+					setConversationStarted: vi.fn(),
+					setShowInitialQuestion: vi.fn(),
+					initialQuestionAddedRef: { current: false },
+					setConversationError: vi.fn(),
+				};
+				const hook = renderHook((state) => useConversationBootstrap({ state, ...controls }), {
+					initialProps: state,
+				});
+				if (change === 'unmount') hook.unmount();
+				else {
+					hook.rerender({
+						...state,
+						directoryPath: '/new-project',
+						customEnvVars: { GROK_HOME: '/accounts/b' },
+					});
+					await waitFor(() => expect(controls.setConversationStarted).toHaveBeenCalledWith(true));
+				}
+				await act(async () => resolveDocs({ success: true, files: ['old.md'] }));
+				expect(conversationMocks.startConversation).toHaveBeenCalledTimes(
+					change === 'unmount' ? 0 : 1
+				);
+				if (change === 'selection')
+					expect(conversationMocks.startConversation).toHaveBeenLastCalledWith(
+						expect.objectContaining({
+							directoryPath: '/new-project',
+							sessionCustomEnvVars: { GROK_HOME: '/accounts/b' },
+							existingDocs: undefined,
+						})
+					);
+			}
+		);
 
 		it('resumes existing history without restarting the manager', () => {
 			const initialQuestionAddedRef = { current: false };
@@ -383,6 +532,90 @@ describe('ConversationScreen hooks', () => {
 			expect(hook.setConversationLoading).toHaveBeenLastCalledWith(false);
 			expect(hook.refs.inputRef.current?.focus).toHaveBeenCalled();
 		});
+
+		it.each(['message', 'survey', 'existing-docs'] as const)(
+			'renders owned Grok %s previews and ignores callbacks after provider changes',
+			async (mode) => {
+				let callbacks!: ConversationCallbacks;
+				let finish!: () => void;
+				conversationMocks.sendMessage.mockImplementation((_message, _history, handlers) => {
+					callbacks = handlers;
+					return new Promise((resolve) => {
+						finish = () => resolve({ success: true });
+					});
+				});
+				const state = createState({ selectedAgent: 'grok' });
+				const setters = createSetters();
+				let text = '';
+				const preview = render(
+					<StreamingResponseBubble theme={mockTheme} agentName="grok" streamingText={text} />
+				);
+				vi.mocked(setters.setStreamingText).mockImplementation((value) => {
+					text = typeof value === 'function' ? value(text) : value;
+					preview.rerender(
+						<StreamingResponseBubble theme={mockTheme} agentName="grok" streamingText={text} />
+					);
+				});
+				const hook = renderSendHook({ state, setters, showInitialQuestion: false });
+				let send!: Promise<void>;
+				act(() => {
+					send =
+						mode === 'message'
+							? hook.result.current.handleSendMessage()
+							: hook.result.current.sendOpeningMessage(mode);
+				});
+				await waitFor(() => expect(conversationMocks.sendMessage).toHaveBeenCalledOnce());
+				for (const chunk of [
+					'{"ty',
+					'pe":"thought","data":"private"}\n',
+					'{"type":"text","data":"Hello "}\n',
+					'{"type":"text","data":"world"}\n',
+				]) {
+					act(() => callbacks.onChunk?.(chunk));
+				}
+				expect(screen.getByText('Hello world')).toBeInTheDocument();
+				expect(screen.getByText('🤖 grok')).toBeInTheDocument();
+				expect(preview.container).not.toHaveTextContent('private');
+				expect(hook.setIsReadyToProceed).not.toHaveBeenCalled();
+				hook.rerender({ ...state, selectedAgent: 'claude-code' });
+				expect(conversationMocks.endConversation).toHaveBeenCalledOnce();
+				act(() => {
+					callbacks.onChunk?.('late text');
+					callbacks.onError?.('late error');
+				});
+				expect(preview.container).not.toHaveTextContent(/Hello|late/);
+				expect(hook.setConversationError).not.toHaveBeenCalledWith('late error');
+				await act(async () => {
+					finish();
+					await send;
+				});
+				expect(hook.refs.inputRef.current?.focus).not.toHaveBeenCalled();
+				for (const selectedAgent of ['claude-code', 'grok'] as const) {
+					hook.rerender({ ...state, selectedAgent });
+					act(() => {
+						send = hook.result.current.handleSendMessage();
+					});
+					await waitFor(() =>
+						expect(conversationMocks.sendMessage).toHaveBeenCalledTimes(
+							selectedAgent === 'claude-code' ? 2 : 3
+						)
+					);
+					act(() =>
+						callbacks.onChunk?.(
+							selectedAgent === 'grok'
+								? 'Fresh turn'
+								: '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"text":"Fresh turn"}}}'
+						)
+					);
+					expect(screen.getByText('Fresh turn')).toBeInTheDocument();
+					expect(preview.container).not.toHaveTextContent(/Hello|private|late/);
+					await act(async () => {
+						finish();
+						await send;
+					});
+				}
+			}
+		);
 
 		it('prevents duplicate sends with the immediate guard', async () => {
 			const refs = createRefs();
@@ -519,6 +752,10 @@ describe('ConversationScreen hooks', () => {
 				directoryPath: '/project',
 				projectName: 'project',
 				model: undefined,
+				sessionCustomPath: undefined,
+				sessionCustomArgs: undefined,
+				sessionCustomEnvVars: undefined,
+				existingDocs: undefined,
 				sshRemoteConfig: undefined,
 				claudeTokenSource: {
 					enableMaestroP: undefined,
