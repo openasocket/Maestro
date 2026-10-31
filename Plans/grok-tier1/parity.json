@@ -2356,6 +2356,39 @@
 			"scope": "52 added cases in the existing listener/persistence suites: exact atomic ID/binding writes, colliding accounts/tabs, parking/reload, immutable launch scope after settings changes, malformed/missing/unknown receipts, retained/requested ID refusals, owner/tab replacement, successor/generation fencing, cancellation/end-only allocations and absent IDs. No ACP routing or real native qualification claim.",
 			"testOwner": "GT1-04-07E1T",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-runtime-native-recording-prerequisites": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07f-runtime-native-recording-prerequisites",
+			"sourceCommit": "78f9fd66bd759fc4d53a32d08526daa51ace9544",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/shared/maestro-lib/runtime/turns.ts": "720f0d0b1b72d3a19b4c09a2e91319eba92fab245f12465530bcdf10c7045391",
+				"src/shared/maestro-lib/turns/record-turn.ts": "7607754cda8d3c15ab01490aa071f46242f38d5166339f16fce5a462fdfc199e",
+				"src/shared/maestro-lib/agents/rules.ts": "14025f72631bdcb7610c0cc069bbe21d77e844c178976ced62b9bb02cade259a"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "Recording prerequisites only: atomic live/parked ID/binding writes with expected turn/slot checks; immutable original project attribution; invalid/mismatched observed Grok IDs fail before successful History/journal; genuine early allocations survive cancellation/missing end; unobserved scope stays unknown.",
+			"limitations": [
+				"No admitted native launch receipt or pre-resume scope validation yet.",
+				"Original project attribution is not observed canonical native ownership.",
+				"Full begin/transcript/History incarnation fencing remains pending at actual mutation seams.",
+				"No real ACP runtime routing or native qualification established."
+			],
+			"implementationOwners": [
+				"GT1-04-07F1",
+				"GT1-04-07F2",
+				"GT1-04-07F3",
+				"GT1-04-07F4",
+				"GT1-04-07F5"
+			],
+			"testOwners": ["GT1-04-07FT", "GT1-04-07FPT", "GT1-04-07F4T", "GT1-04-07F5T"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6193,7 +6226,10 @@
 				"src/main/process-listeners/session-id-listener.ts",
 				"src/main/preload/process/core.ts",
 				"src/renderer/global.d.ts",
-				"src/renderer/hooks/agent/internal/useAgentSessionIdListener.ts"
+				"src/renderer/hooks/agent/internal/useAgentSessionIdListener.ts",
+				"src/shared/maestro-lib/runtime/turns.ts",
+				"src/shared/maestro-lib/turns/record-turn.ts",
+				"src/shared/maestro-lib/agents/rules.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6210,7 +6246,12 @@
 					"GT1-04-07CQT1A",
 					"GT1-04-07D1",
 					"GT1-04-07E1",
-					"GT1-04-07E1A"
+					"GT1-04-07E1A",
+					"GT1-04-07F1",
+					"GT1-04-07F2",
+					"GT1-04-07F3",
+					"GT1-04-07F4",
+					"GT1-04-07F5"
 				],
 				"test": [
 					"GT1-04-08",
@@ -6230,7 +6271,11 @@
 					"GT1-04-07D1T1",
 					"GT1-04-07ET",
 					"GT1-04-07E1T",
-					"GT1-04-07E1PT"
+					"GT1-04-07E1PT",
+					"GT1-04-07FT",
+					"GT1-04-07FPT",
+					"GT1-04-07F4T",
+					"GT1-04-07F5T"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -6274,7 +6319,8 @@
 				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence",
 				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests",
 				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests",
-				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests"
+				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests",
+				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6320,6 +6366,12 @@
 					"code": "verification-and-propagation-pending",
 					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET/07E1T have authored host/bridge/lifecycle and renderer/persistence tests; 08 retains broader generation test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
+				},
+				{
+					"id": "runtime-native-launch-and-recording-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT/FPT/F4T/F5T author bounded regressions; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
+					"affectedRows": ["P14"]
 				}
 			],
 			"phase": "04",
@@ -11487,7 +11539,10 @@
 				"src/main/process-listeners/session-id-listener.ts",
 				"src/main/preload/process/core.ts",
 				"src/renderer/global.d.ts",
-				"src/renderer/hooks/agent/internal/useAgentSessionIdListener.ts"
+				"src/renderer/hooks/agent/internal/useAgentSessionIdListener.ts",
+				"src/shared/maestro-lib/runtime/turns.ts",
+				"src/shared/maestro-lib/turns/record-turn.ts",
+				"src/shared/maestro-lib/agents/rules.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -11502,7 +11557,12 @@
 					"GT1-04-07CQT1A",
 					"GT1-04-07D1",
 					"GT1-04-07E1",
-					"GT1-04-07E1A"
+					"GT1-04-07E1A",
+					"GT1-04-07F1",
+					"GT1-04-07F2",
+					"GT1-04-07F3",
+					"GT1-04-07F4",
+					"GT1-04-07F5"
 				],
 				"test": [
 					"GT1-04-08",
@@ -11520,7 +11580,11 @@
 					"GT1-04-07D1T1",
 					"GT1-04-07ET",
 					"GT1-04-07E1T",
-					"GT1-04-07E1PT"
+					"GT1-04-07E1PT",
+					"GT1-04-07FT",
+					"GT1-04-07FPT",
+					"GT1-04-07F4T",
+					"GT1-04-07F5T"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -11564,7 +11628,8 @@
 				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence",
 				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests",
 				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests",
-				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests"
+				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests",
+				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11610,6 +11675,12 @@
 					"code": "verification-and-propagation-pending",
 					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET/07E1T have authored host/bridge/lifecycle and renderer/persistence tests; 08 retains broader generation test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
+				},
+				{
+					"id": "runtime-native-launch-and-recording-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT/FPT/F4T/F5T author bounded regressions; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
+					"affectedRows": ["C-supportsResume"]
 				}
 			],
 			"field": "supportsResume",
@@ -12046,7 +12117,10 @@
 				"src/main/process-listeners/session-id-listener.ts",
 				"src/main/preload/process/core.ts",
 				"src/renderer/global.d.ts",
-				"src/renderer/hooks/agent/internal/useAgentSessionIdListener.ts"
+				"src/renderer/hooks/agent/internal/useAgentSessionIdListener.ts",
+				"src/shared/maestro-lib/runtime/turns.ts",
+				"src/shared/maestro-lib/turns/record-turn.ts",
+				"src/shared/maestro-lib/agents/rules.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -12061,7 +12135,12 @@
 					"GT1-04-07CQT1A",
 					"GT1-04-07D1",
 					"GT1-04-07E1",
-					"GT1-04-07E1A"
+					"GT1-04-07E1A",
+					"GT1-04-07F1",
+					"GT1-04-07F2",
+					"GT1-04-07F3",
+					"GT1-04-07F4",
+					"GT1-04-07F5"
 				],
 				"test": [
 					"GT1-04-08",
@@ -12079,7 +12158,11 @@
 					"GT1-04-07D1T1",
 					"GT1-04-07ET",
 					"GT1-04-07E1T",
-					"GT1-04-07E1PT"
+					"GT1-04-07E1PT",
+					"GT1-04-07FT",
+					"GT1-04-07FPT",
+					"GT1-04-07F4T",
+					"GT1-04-07F5T"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
@@ -12123,7 +12206,8 @@
 				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence",
 				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests",
 				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests",
-				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests"
+				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests",
+				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12169,6 +12253,12 @@
 					"code": "verification-and-propagation-pending",
 					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET/07E1T have authored host/bridge/lifecycle and renderer/persistence tests; 08 retains broader generation test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
+				},
+				{
+					"id": "runtime-native-launch-and-recording-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT/FPT/F4T/F5T author bounded regressions; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
+					"affectedRows": ["C-supportsSessionId"]
 				}
 			],
 			"field": "supportsSessionId",
@@ -16672,7 +16762,10 @@
 				"src/main/process-listeners/session-id-listener.ts",
 				"src/main/preload/process/core.ts",
 				"src/renderer/global.d.ts",
-				"src/renderer/hooks/agent/internal/useAgentSessionIdListener.ts"
+				"src/renderer/hooks/agent/internal/useAgentSessionIdListener.ts",
+				"src/shared/maestro-lib/runtime/turns.ts",
+				"src/shared/maestro-lib/turns/record-turn.ts",
+				"src/shared/maestro-lib/agents/rules.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -16689,7 +16782,12 @@
 					"GT1-04-07CQT1A",
 					"GT1-04-07D1",
 					"GT1-04-07E1",
-					"GT1-04-07E1A"
+					"GT1-04-07E1A",
+					"GT1-04-07F1",
+					"GT1-04-07F2",
+					"GT1-04-07F3",
+					"GT1-04-07F4",
+					"GT1-04-07F5"
 				],
 				"test": [
 					"GT1-04-08",
@@ -16709,7 +16807,11 @@
 					"GT1-04-07D1T1",
 					"GT1-04-07ET",
 					"GT1-04-07E1T",
-					"GT1-04-07E1PT"
+					"GT1-04-07E1PT",
+					"GT1-04-07FT",
+					"GT1-04-07FPT",
+					"GT1-04-07F4T",
+					"GT1-04-07F5T"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -16753,7 +16855,8 @@
 				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence",
 				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests",
 				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests",
-				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests"
+				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests",
+				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16799,6 +16902,12 @@
 					"code": "verification-and-propagation-pending",
 					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET/07E1T have authored host/bridge/lifecycle and renderer/persistence tests; 08 retains broader generation test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
+				},
+				{
+					"id": "runtime-native-launch-and-recording-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT/FPT/F4T/F5T author bounded regressions; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
+					"affectedRows": ["REG-SESSION-MUTATION"]
 				}
 			],
 			"branchAuditRefs": ["B22", "B44"]

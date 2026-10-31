@@ -46,7 +46,7 @@
 import { getClaudeTokenSourceFields, type ClaudeTokenSourceFields } from '../../claudeTokenMode';
 import type { ToolType } from '../../types';
 import type { AgentRepository } from '../agents/repository';
-import { DEFAULT_RULE_CONTEXT, type RuleContext } from '../agents/rules';
+import { DEFAULT_RULE_CONTEXT, type RuleContext, type TabSessionUpdate } from '../agents/rules';
 import type { EventBus } from '../client/event-bus';
 import type {
 	ClientError,
@@ -99,6 +99,7 @@ import {
 	buildUserTranscriptEntry,
 	createTurnRecorder,
 	type TurnRecorder,
+	type RecordedTurn,
 } from '../turns/record-turn';
 import { toTurnAgent, toTurnTab } from '../turns/records';
 import { runAgentTurn, type AgentTurnRun, type RunAgentTurnRefusal } from '../turns/run-agent-turn';
@@ -325,6 +326,13 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		if (!loaded.ok) throw new Error(loaded.message);
 
 		const tab: TurnTab = toTurnTab(tabRecord);
+		const expected: NonNullable<TabSessionUpdate['expected']> = {
+			turnId: item.id,
+			agentSessionId: tab.agentSessionId ?? null,
+			nativeSessionBinding: structuredClone(
+				tabRecord.nativeSessionBinding as TabSessionUpdate['nativeSessionBinding']
+			),
+		};
 		const command = resolveSlashCommand(item.text, loaded.commands, agent.agentCommands);
 		const message: TurnMessage = {
 			text: item.text,
@@ -341,6 +349,11 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		if (!assembled.ok) throw new Error(assembled.message);
 		const turn: AssembledTurn = assembled.turn;
 		const provider = turn.settings.provider;
+		const scope = Object.freeze({
+			projectPath: turn.launch.cwd,
+			isRemote: turn.launch.sshRemoteConfig?.enabled === true,
+			isWorktree: typeof record.parentSessionId === 'string' && record.parentSessionId !== '',
+		});
 
 		// The single-writer check, before the spawn (MRC-08-05): a runtime that lost its data directory
 		// starts nothing (its records would be refused once the process existed); a managed attempt is journaled.
@@ -451,6 +464,7 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			const startedAt = deps.now();
 			const userEntry = buildUserTranscriptEntry(turn.entry, startedAt, ctx);
 			const begun = await repository.beginTurn(agentId, item.tabId, {
+				turnId: item.id,
 				userEntry,
 				provider: provider as ToolType,
 				consumedMergedContext: turn.consumedMergedContext,
@@ -469,6 +483,8 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 				startedAt,
 				managed,
 				admission: admitted.admission,
+				scope,
+				expected,
 			});
 		} catch (error) {
 			run.terminate();
@@ -490,11 +506,13 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		turn: AssembledTurn;
 		run: AgentTurnRun;
 		startedAt: number;
+		scope: RecordedTurn['scope'];
+		expected: NonNullable<TabSessionUpdate['expected']>;
 		managed: ManagedDispatch | undefined;
 		/** The lease the turn was admitted on, for the lifecycle projection. Null when none was minted. */
 		admission: LifecycleAdmissionRef | null;
 	}): Promise<void> {
-		const { agentId, tabId, turn, run, startedAt, managed, admission } = input;
+		const { agentId, tabId, turn, run, startedAt, managed, admission, scope, expected } = input;
 		const provider = turn.settings.provider;
 		const mapper = createTurnEventMapper({
 			agentId: provider,
@@ -503,21 +521,60 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			now: deps.now,
 		});
 		let recordedSession: string | undefined = turn.resumeSessionId;
-		let sessionWrite: Promise<unknown> = Promise.resolve();
+		let observedSession: string | undefined;
+		let identityFailure: string | undefined;
+		let sessionWrite: Promise<void> = Promise.resolve();
 
-		/** Write the provider's session id the moment it is announced: a crash after this still resumes. */
+		/** Preserve an allocated ID even during cancellation; a different ID is never a resume. */
 		const noteSession = (id: string): void => {
+			if (provider === 'grok') {
+				if (identityFailure) return;
+				if (
+					typeof id !== 'string' ||
+					!id.trim() ||
+					/[\x00-\x1f\x7f]/.test(id) ||
+					((turn.resumeSessionId ?? observedSession) !== undefined &&
+						id !== (turn.resumeSessionId ?? observedSession))
+				) {
+					identityFailure =
+						'Grok returned an invalid or different native session ID. The original conversation was retained.';
+					return;
+				}
+				observedSession = id;
+			}
 			if (id === recordedSession) return;
 			recordedSession = id;
-			sessionWrite = sessionWrite.then(() =>
-				repository.recordTabSession(agentId, tabId, provider, { agentSessionId: id })
-			);
+			sessionWrite = sessionWrite
+				.then(async () => {
+					// No launch receipt exists on this runtime route yet. Do not promote an
+					// ID to observed account/host ownership by looking at current settings.
+					const binding = { version: 1, state: 'unknown', reason: 'unobserved' } as const;
+					const result = await repository.recordTabSession(agentId, tabId, provider, {
+						agentSessionId: id,
+						...(provider === 'grok' ? { nativeSessionBinding: binding, expected } : {}),
+					});
+					if (!result.ok) throw new Error(result.error.message);
+					expected.agentSessionId = id;
+					if (provider === 'grok') expected.nativeSessionBinding = binding;
+				})
+				.catch((error) => {
+					if (provider === 'grok') identityFailure ??= errorText(error);
+					logger.warn(`Recording the native session failed: ${errorText(error)}`, LOG_CONTEXT);
+				});
 		};
 
 		try {
 			for await (const parsed of run.events) {
+				// The mapper suppresses a resumed ID's first announcement; validate the raw event.
+				if (provider === 'grok' && parsed.sessionId !== undefined) {
+					noteSession(parsed.sessionId);
+					await sessionWrite;
+				}
 				for (const event of mapper.map(parsed)) {
-					if (event.kind === 'session') noteSession(event.providerSessionId);
+					if (event.kind === 'session') {
+						if (provider !== 'grok') noteSession(event.providerSessionId);
+						if (identityFailure) continue;
+					}
 					emitTurn(agentId, tabId, event);
 				}
 			}
@@ -538,6 +595,27 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 			throw error;
 		}
 		const endedAt = deps.now();
+		if (completed.sessionId !== undefined) noteSession(completed.sessionId);
+		await sessionWrite;
+		if (provider === 'grok' && !identityFailure) {
+			// Also fence a resumed turn whose unchanged ID required no write.
+			const retained = await repository.recordTabSession(agentId, tabId, provider, { expected });
+			if (!retained.ok) identityFailure = retained.error.message;
+		}
+		if (provider === 'grok' && identityFailure) {
+			const error: NonNullable<CompletedTurn['error']> = {
+				type: 'session_not_found',
+				message: identityFailure,
+				recoverable: false,
+				agentId: provider,
+				timestamp: endedAt,
+			};
+			completed = { ...completed, outcome: 'crashed', sessionId: undefined, error };
+			emitTurn(agentId, tabId, { kind: 'error', error });
+		} else if (provider === 'grok' && completed.sessionId === undefined && observedSession) {
+			// Only a genuinely observed early allocation survives an end without an ID.
+			completed = { ...completed, sessionId: observedSession };
+		}
 		if (managed) {
 			try {
 				await managed.journal.markTerminal(managed.runId, managed.attemptId, {
@@ -552,8 +630,6 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		if (completed.sessionId && completed.sessionId !== mapper.sessionId()) {
 			emitTurn(agentId, tabId, { kind: 'session', providerSessionId: completed.sessionId });
 		}
-		if (completed.sessionId) noteSession(completed.sessionId);
-		await sessionWrite.catch(() => undefined);
 
 		try {
 			const recorded = await recorder.recordTurn({
@@ -564,6 +640,7 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 				startedAt,
 				endedAt,
 				userEntryWritten: true,
+				scope,
 				...(managed ? { lineage: lifecycleLineageOf(managed.context) } : {}),
 				admission,
 			});
@@ -574,10 +651,13 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 				);
 			}
 			// The folded usage the tab record carries (`TurnEvent.usage` says clients must not sum).
-			if (completed.usage) {
-				await repository.recordTabSession(agentId, tabId, provider, {
+			if (completed.usage && !identityFailure) {
+				const usage = await repository.recordTabSession(agentId, tabId, provider, {
 					addUsage: completed.usage,
+					...(provider === 'grok' ? { expected } : {}),
 				});
+				if (!usage.ok)
+					logger.warn(`The turn's usage was not written: ${usage.error.message}`, LOG_CONTEXT);
 			}
 		} catch (error) {
 			logger.warn(`Recording the turn failed: ${errorText(error)}`, LOG_CONTEXT);

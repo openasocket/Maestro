@@ -29,6 +29,7 @@
 
 import { formatSessionId } from '../store/tab-display';
 import type { LogEntryRecord } from '../store/transcript';
+import type { NativeSessionBinding } from '../agents/providerSwap';
 import type { AgentRepository } from '../agents/repository';
 import { DEFAULT_RULE_CONTEXT, sshRecordOf, type RuleContext } from '../agents/rules';
 import type { ClientResult } from '../client/types';
@@ -61,6 +62,10 @@ const STDERR_TAIL_CHARS = 500;
 
 /** One finished turn, as the runtime knows it. */
 export interface RecordedTurn {
+	/** Original turn attribution. It is not proof of canonical native ownership. */
+	scope?: Readonly<{ projectPath: string; isRemote: boolean; isWorktree: boolean }>;
+	/** Only the launch observer may bind this; absent/unknown never uses current settings. */
+	nativeSessionBinding?: NativeSessionBinding;
 	agentId: string;
 	tabId: string;
 	/** The turn as `assembleTurn` made it: what was sent and under which settings. */
@@ -254,6 +259,12 @@ export function createTurnRecorder(options: TurnRecorderOptions): TurnRecorder {
 	};
 
 	async function recordTurn(turn: RecordedTurn): Promise<TurnRecordResult> {
+		// Detach attribution before the first writer yields to settings/receipt changes.
+		turn = {
+			...turn,
+			scope: turn.scope && { ...turn.scope },
+			nativeSessionBinding: turn.nativeSessionBinding && structuredClone(turn.nativeSessionBinding),
+		};
 		const agent = options.repository.getAgent(turn.agentId);
 		const tab = options.repository.getTab(turn.agentId, turn.tabId);
 		const missing = !agent
@@ -286,6 +297,12 @@ export function createTurnRecorder(options: TurnRecorderOptions): TurnRecorder {
 		let history: TurnRecordResult['history'];
 		if (!finished) {
 			history = { ok: false, reason: 'not-recorded', message: `The turn ${completed.outcome}.` };
+		} else if (
+			turn.nativeSessionBinding?.state === 'bound' &&
+			(turn.nativeSessionBinding.provider !== provider ||
+				turn.nativeSessionBinding.nativeSessionId !== completed.sessionId)
+		) {
+			history = { ok: false, reason: 'not-recorded', message: 'Native session identity mismatch.' };
 		} else if (tab.saveToHistory === false) {
 			history = { ok: false, reason: 'not-recorded', message: 'The tab does not save to History.' };
 		} else {
@@ -301,7 +318,14 @@ export function createTurnRecorder(options: TurnRecorderOptions): TurnRecorder {
 				...(completed.sessionId ? { agentSessionId: completed.sessionId } : {}),
 				sessionName:
 					tab.name || (completed.sessionId ? formatSessionId(completed.sessionId) : undefined),
-				projectPath: agent.cwd ?? '',
+				projectPath: turn.scope?.projectPath ?? agent.cwd ?? '',
+				...(provider === 'grok'
+					? {
+							nativeSessionBinding: structuredClone(
+								turn.nativeSessionBinding ?? { version: 1, state: 'unknown', reason: 'unobserved' }
+							),
+						}
+					: {}),
 				sessionId: agent.id,
 				tabId: tab.id,
 				...(context !== null ? { contextUsage: context } : {}),
@@ -318,10 +342,12 @@ export function createTurnRecorder(options: TurnRecorderOptions): TurnRecorder {
 			source: 'user',
 			startTime: turn.startedAt,
 			duration: turn.endedAt - turn.startedAt,
-			projectPath: agent.cwd,
+			projectPath: turn.scope?.projectPath ?? agent.cwd,
 			tabId: tab.id,
-			isRemote: sshRecordOf(agent.sessionSshRemoteConfig)?.enabled === true,
-			isWorktree: typeof agent.parentSessionId === 'string' && agent.parentSessionId !== '',
+			isRemote: turn.scope?.isRemote ?? sshRecordOf(agent.sessionSshRemoteConfig)?.enabled === true,
+			isWorktree:
+				turn.scope?.isWorktree ??
+				(typeof agent.parentSessionId === 'string' && agent.parentSessionId !== ''),
 			...usageStatsToTurnFields(completed.usage),
 		});
 
