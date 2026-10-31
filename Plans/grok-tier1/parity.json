@@ -2120,6 +2120,32 @@
 			"scope": "31 new parameter-expanded cases: browser scoped initial/backfill reads and detached receipts, pending list/read/backfill account/host/provider races, fresh-store changes, legacy receipt refusal, partial-source latching, detailed/quick resume; History modal click/keyboard owner/binding forwarding, false/void retention and stale closing fences. Five existing success/forwarding cases adapted. 493 changed test lines.",
 			"remainingCoverageOwner": "GT1-04-07CUIAT1",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-browser-edge-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07cuiat1-browser-edge-test-authoring",
+			"sourceCommit": "8b3fddeed589c082f306f9043a31d6b9609f3477",
+			"sourceCommitScope": "Pre-task HEAD plus test hash and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/components/AgentSessionsBrowser.test.tsx": "be8ad97dfc706df1c32053483c08a616f444f2c1882bb3b36e5dd314abdc6bb8"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Supplemental compiler comparison: eight baseline/current diagnostics, zero new; existing fixture/mock types and RequestInit.dispatcher remain. Two pre-existing ESLint warnings.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "44 new parameter-expanded cases in the existing browser suite: rename during backfill; same-scope selection, Back/Escape and unmount with pending reads; delayed initial focus and backfill scroll callbacks; delayed list focus cancellation; malformed binding/provider/native-ID/source receipt rejection on initial and backfill reads. Positive callback controls and real viewer hooks retained.",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -3776,7 +3802,8 @@
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
-				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests"
+				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
+				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6010,7 +6037,8 @@
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
-				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests"
+				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
+				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6191,7 +6219,8 @@
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
-				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests"
+				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
+				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11266,7 +11295,8 @@
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
-				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests"
+				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
+				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11792,7 +11822,8 @@
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
-				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests"
+				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
+				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16389,7 +16420,8 @@
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
-				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests"
+				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
+				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {

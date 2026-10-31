@@ -3390,6 +3390,10 @@ describe('AgentSessionsBrowser', () => {
 			vi.mocked(window.maestro.agentSessions.read).mockResolvedValue(page);
 		});
 
+		afterEach(() => {
+			vi.restoreAllMocks();
+		});
+
 		it.each(['detail', 'quick'] as const)(
 			'%s verifies scoped pages before forwarding a detached receipt and retaining a refused open',
 			async (entry) => {
@@ -3544,15 +3548,54 @@ describe('AgentSessionsBrowser', () => {
 			it.each(
 				(
 					[
-						['legacy absent receipt', undefined],
-						['legacy unknown receipt', { version: 1, state: 'unknown', reason: 'legacy' }],
-						['changed account', { ...binding, accountRef: 'fixture-account-b' }],
+						['legacy absent receipt', { nativeSessionBinding: undefined }],
+						[
+							'legacy unknown receipt',
+							{ nativeSessionBinding: { version: 1, state: 'unknown', reason: 'legacy' } },
+						],
+						[
+							'changed account',
+							{ nativeSessionBinding: { ...binding, accountRef: 'fixture-account-b' } },
+						],
 						[
 							'changed endpoint',
-							{ ...binding, host: { kind: 'ssh', identity: 'fixture-endpoint-b' } },
+							{
+								nativeSessionBinding: {
+									...binding,
+									host: { kind: 'ssh', identity: 'fixture-endpoint-b' },
+								},
+							},
 						],
-					] satisfies [string, SessionMessagesResult['nativeSessionBinding']][]
-				).filter((_, i) => phase === 'backfill' || i < 2)
+						...[
+							['malformed version', { ...binding, version: 2 }],
+							['empty account', { ...binding, accountRef: '' }],
+							['missing host', { ...binding, host: undefined }],
+							[
+								'invalid host kind',
+								{ ...binding, host: { kind: 'remote', identity: 'fixture-endpoint-a' } },
+							],
+							['empty endpoint', { ...binding, host: { kind: 'ssh', identity: '' } }],
+							['empty cwd', { ...binding, cwd: '' }],
+							['NUL native ID', { ...binding, nativeSessionId: 'native\u0000collision' }],
+							['wrong provider', { ...binding, provider: 'codex' }],
+							['wrong native ID', { ...binding, nativeSessionId: 'native-other' }],
+						].map(
+							([label, nativeSessionBinding]) =>
+								[label, { nativeSessionBinding } as unknown as Partial<SessionMessagesResult>] as [
+									string,
+									Partial<SessionMessagesResult>,
+								]
+						),
+						['missing source', { source: undefined }],
+						['unavailable source', { source: { provider: 'grok', status: 'unavailable' } }],
+						[
+							'wrong source provider',
+							{
+								source: { provider: 'codex', status: 'available' },
+							} as unknown as Partial<SessionMessagesResult>,
+						],
+					] satisfies [string, Partial<SessionMessagesResult>][]
+				).filter(([label]) => phase === 'backfill' || !label.startsWith('changed '))
 			)(
 				`refuses %s on ${phase} without retaining mismatched messages`,
 				async (_label, observed) => {
@@ -3568,7 +3611,7 @@ describe('AgentSessionsBrowser', () => {
 						});
 					vi.mocked(window.maestro.agentSessions.read).mockResolvedValueOnce({
 						...page,
-						nativeSessionBinding: observed,
+						...observed,
 						messages: [createMockMessage({ content: 'Wrong account content' })],
 					});
 					await act(async () => {
@@ -3582,11 +3625,329 @@ describe('AgentSessionsBrowser', () => {
 					);
 					expect(screen.queryByText('Wrong account content')).not.toBeInTheDocument();
 					expect(screen.queryByText('Scoped recent message')).not.toBeInTheDocument();
+					expect(
+						screen.queryByRole('region', { name: 'Session messages' })
+					).not.toBeInTheDocument();
+					expect(screen.queryByRole('status', { name: 'Loading' })).not.toBeInTheDocument();
+					expect(screen.queryByText('Resume')).not.toBeInTheDocument();
 					expect(props.onResumeSession).not.toHaveBeenCalled();
 					expect(props.onClose).not.toHaveBeenCalled();
 				}
 			);
 		}
+
+		it('retains a rename completed while backfill waits in the detail, resume and list', async () => {
+			const onResumeSession = vi.fn().mockResolvedValue(false);
+			const props = createDefaultProps({ activeSession: owner, onResumeSession });
+			await act(async () => {
+				renderWithProvider(<AgentSessionsBrowser {...props} />);
+				await vi.runAllTimersAsync();
+			});
+			await act(async () => {
+				fireEvent.click(screen.getByText(row.firstMessage));
+				await vi.runAllTimersAsync();
+			});
+			let finish!: (value: SessionMessagesResult) => void;
+			vi.mocked(window.maestro.agentSessions.read).mockReturnValueOnce(
+				new Promise((resolve) => {
+					finish = resolve;
+				})
+			);
+			await act(async () => {
+				fireEvent.click(screen.getByText('Load earlier messages...'));
+			});
+			await act(async () => {
+				fireEvent.click(screen.getByTitle('Add session name'));
+			});
+			const input = screen.getByPlaceholderText('Enter session name...');
+			await act(async () => {
+				fireEvent.change(input, { target: { value: 'Retained native name' } });
+			});
+			await act(async () => {
+				fireEvent.keyDown(input, { key: 'Enter' });
+			});
+			expect(window.maestro.agentSessions.setSessionName).toHaveBeenCalledWith(
+				'grok',
+				owner.projectRoot,
+				row.sessionId,
+				'Retained native name'
+			);
+			expect(props.onUpdateTab).toHaveBeenCalledWith(row.sessionId, {
+				name: 'Retained native name',
+			});
+			expect(screen.getByText('Retained native name')).toBeInTheDocument();
+			expect(screen.getByTestId('icon-loader')).toBeInTheDocument();
+			await act(async () => {
+				finish({
+					...page,
+					hasMore: false,
+					messages: [createMockMessage({ uuid: 'older', content: 'Older renamed history' })],
+				});
+			});
+			expect(screen.getByText('Retained native name')).toBeInTheDocument();
+			expect(screen.getByText('Older renamed history')).toBeInTheDocument();
+			await act(async () => {
+				fireEvent.click(screen.getByText('Resume'));
+			});
+			expect(onResumeSession).toHaveBeenCalledTimes(1);
+			expect(onResumeSession.mock.calls[0]).toEqual([
+				row.sessionId,
+				[
+					expect.objectContaining({ text: 'Older renamed history' }),
+					expect.objectContaining({ text: 'Scoped recent message' }),
+				],
+				'Retained native name',
+				false,
+				expect.any(Object),
+				'/remote/project',
+				{ targetSessionId: owner.id, nativeSessionBinding: binding },
+			]);
+			expect(props.onClose).not.toHaveBeenCalled();
+			await act(async () => {
+				fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
+			});
+			expect(screen.getByText('Retained native name')).toBeInTheDocument();
+		});
+
+		for (const phase of ['initial', 'backfill'] as const) {
+			it.each(['back', 'escape', 'reselect', 'unmount'] as const)(
+				'discards a pending ' +
+					phase +
+					' read after %s without clearing newer loading or stealing focus',
+				async (departure) => {
+					const other = createMockClaudeSession({
+						sessionId: 'native-other',
+						firstMessage: 'Another native history',
+					});
+					vi.mocked(window.maestro.agentSessions.listPaginated).mockResolvedValue({
+						sessions: [row, other],
+						hasMore: false,
+						totalCount: 2,
+						nextCursor: null,
+					});
+					const read = vi.mocked(window.maestro.agentSessions.read);
+					let finishOld!: (value: SessionMessagesResult) => void;
+					let finishNew!: (value: SessionMessagesResult) => void;
+					if (phase === 'backfill') read.mockResolvedValueOnce(page);
+					read.mockReturnValueOnce(
+						new Promise((resolve) => {
+							finishOld = resolve;
+						})
+					);
+					const onResumeSession = vi.fn().mockResolvedValue(false);
+					const props = createDefaultProps({ activeSession: owner, onResumeSession });
+					const view = renderWithProvider(<AgentSessionsBrowser {...props} />);
+					await act(async () => {
+						await vi.runAllTimersAsync();
+					});
+					await act(async () => {
+						fireEvent.click(screen.getByText(row.firstMessage));
+						await vi.runAllTimersAsync();
+					});
+					if (phase === 'backfill')
+						await act(async () => {
+							fireEvent.click(screen.getByText('Load earlier messages...'));
+						});
+					await act(async () => {
+						if (departure === 'unmount') view.unmount();
+						else if (departure === 'escape') fireEvent.keyDown(window, { key: 'Escape' });
+						else fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
+						await vi.runAllTimersAsync();
+					});
+					if (departure === 'reselect') {
+						read.mockReturnValueOnce(
+							new Promise((resolve) => {
+								finishNew = resolve;
+							})
+						);
+						await act(async () => {
+							fireEvent.click(screen.getByText(other.firstMessage));
+						});
+						expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument();
+					}
+					const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+					await act(async () => {
+						finishOld({
+							...page,
+							messages: [createMockMessage({ content: 'Obsolete native content' })],
+						});
+						await vi.runAllTimersAsync();
+					});
+					expect(focus).not.toHaveBeenCalled();
+					expect(screen.queryByText('Obsolete native content')).not.toBeInTheDocument();
+					expect(screen.queryByText('Scoped recent message')).not.toBeInTheDocument();
+					expect(onResumeSession).not.toHaveBeenCalled();
+					expect(props.onClose).not.toHaveBeenCalled();
+					if (departure === 'reselect') {
+						expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument();
+						const nextBinding = { ...binding, nativeSessionId: other.sessionId };
+						await act(async () => {
+							finishNew({
+								...page,
+								nativeSessionBinding: nextBinding,
+								hasMore: false,
+								total: 1,
+								messages: [createMockMessage({ content: 'Current native content' })],
+							});
+							await vi.runAllTimersAsync();
+						});
+						expect(screen.queryByRole('status', { name: 'Loading' })).not.toBeInTheDocument();
+						expect(screen.getByText('Current native content')).toBeInTheDocument();
+						await act(async () => {
+							fireEvent.click(screen.getByText('Resume'));
+						});
+						expect(onResumeSession).toHaveBeenCalledTimes(1);
+						expect(onResumeSession.mock.calls[0][0]).toBe(other.sessionId);
+						expect(onResumeSession.mock.calls[0][1]).toEqual([
+							expect.objectContaining({ text: 'Current native content' }),
+						]);
+						expect(onResumeSession.mock.calls[0][6]).toEqual({
+							targetSessionId: owner.id,
+							nativeSessionBinding: nextBinding,
+						});
+					} else {
+						expect(
+							screen.queryByRole('region', { name: 'Session messages' })
+						).not.toBeInTheDocument();
+						expect(screen.queryByRole('status', { name: 'Loading' })).not.toBeInTheDocument();
+					}
+				}
+			);
+		}
+
+		for (const phase of ['initial', 'scroll-backfill'] as const) {
+			it.each(['stay', 'back', 'reselect', 'unmount'] as const)(
+				'fences the ' + phase + ' animation callback after %s',
+				async (departure) => {
+					const other = createMockClaudeSession({
+						sessionId: 'native-other',
+						firstMessage: 'Another native history',
+					});
+					vi.mocked(window.maestro.agentSessions.listPaginated).mockResolvedValue({
+						sessions: [row, other],
+						hasMore: false,
+						totalCount: 2,
+						nextCursor: null,
+					});
+					const read = vi.mocked(window.maestro.agentSessions.read);
+					const props = createDefaultProps({ activeSession: owner });
+					const view = renderWithProvider(<AgentSessionsBrowser {...props} />);
+					await act(async () => {
+						await vi.runAllTimersAsync();
+					});
+					if (phase === 'scroll-backfill') {
+						await act(async () => {
+							fireEvent.click(screen.getByText(row.firstMessage));
+							await vi.runAllTimersAsync();
+						});
+					}
+					const frames: FrameRequestCallback[] = [];
+					vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) =>
+						frames.push(callback)
+					);
+					let finish!: (value: SessionMessagesResult) => void;
+					if (phase === 'initial') {
+						await act(async () => {
+							fireEvent.click(screen.getByText(row.firstMessage));
+						});
+					} else {
+						read.mockReturnValueOnce(
+							new Promise((resolve) => {
+								finish = resolve;
+							})
+						);
+					}
+					const region = screen.getByRole('region', { name: 'Session messages' });
+					let height = 400;
+					Object.defineProperty(region, 'scrollHeight', { configurable: true, get: () => height });
+					if (phase === 'scroll-backfill')
+						await act(async () => {
+							fireEvent.scroll(region);
+						});
+					const staleFrames = frames.splice(0);
+					expect(staleFrames).toHaveLength(1);
+					height = 800;
+					region.scrollTop = 17;
+					await act(async () => {
+						if (departure === 'unmount') view.unmount();
+						else if (departure !== 'stay')
+							fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
+					});
+					let currentRegion: HTMLElement | undefined;
+					if (departure === 'reselect') {
+						read.mockResolvedValueOnce({
+							...page,
+							nativeSessionBinding: { ...binding, nativeSessionId: other.sessionId },
+						});
+						await act(async () => {
+							fireEvent.click(screen.getByText(other.firstMessage));
+						});
+						currentRegion = screen.getByRole('region', { name: 'Session messages' });
+						Object.defineProperty(currentRegion, 'scrollHeight', {
+							configurable: true,
+							value: 900,
+						});
+						currentRegion.scrollTop = 29;
+					}
+					const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+					await act(async () => {
+						staleFrames.forEach((callback) => callback(0));
+					});
+					expect(region.scrollTop).toBe(
+						departure === 'stay' ? (phase === 'initial' ? 800 : 400) : 17
+					);
+					if (departure === 'stay' && phase === 'initial') {
+						expect(focus).toHaveBeenCalledTimes(1);
+						expect(region).toHaveFocus();
+					} else expect(focus).not.toHaveBeenCalled();
+					if (currentRegion) expect(currentRegion.scrollTop).toBe(29);
+					if (phase === 'scroll-backfill')
+						await act(async () => {
+							finish({ ...page, hasMore: false, messages: [] });
+						});
+					expect(props.onResumeSession).not.toHaveBeenCalled();
+					expect(props.onClose).not.toHaveBeenCalled();
+				}
+			);
+		}
+
+		it.each(['stay', 'reselect', 'unmount'] as const)(
+			'fences delayed list focus and scroll after back then %s',
+			async (departure) => {
+				const props = createDefaultProps({ activeSession: owner });
+				const view = renderWithProvider(<AgentSessionsBrowser {...props} />);
+				await act(async () => {
+					await vi.runAllTimersAsync();
+				});
+				await act(async () => {
+					fireEvent.click(screen.getByText(row.firstMessage));
+					await vi.runAllTimersAsync();
+				});
+				await act(async () => {
+					fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
+				});
+				if (departure === 'reselect') {
+					vi.mocked(window.maestro.agentSessions.read).mockReturnValueOnce(new Promise(() => {}));
+					await act(async () => {
+						fireEvent.click(screen.getByText(row.firstMessage));
+					});
+				} else if (departure === 'unmount') view.unmount();
+				const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+				const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockClear();
+				await act(async () => {
+					await vi.advanceTimersByTimeAsync(50);
+				});
+				if (departure === 'stay') {
+					expect(focus).toHaveBeenCalledTimes(1);
+					expect(screen.getByRole('textbox')).toHaveFocus();
+					expect(scroll).toHaveBeenCalledWith({ block: 'nearest', behavior: 'smooth' });
+				} else {
+					expect(focus).not.toHaveBeenCalled();
+					expect(scroll).not.toHaveBeenCalled();
+				}
+				expect(props.onClose).not.toHaveBeenCalled();
+			}
+		);
 
 		it('keeps a partial first page non-resumable after an available backfill', async () => {
 			const props = createDefaultProps({ activeSession: owner });
