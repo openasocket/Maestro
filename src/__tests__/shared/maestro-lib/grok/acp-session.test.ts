@@ -32,9 +32,11 @@ describe('GrokAcpSession lifecycle over fake ACP bytes', () => {
 			write.mock.calls
 				.map(([frame]) => JSON.parse(new TextDecoder().decode(frame)) as AcpCall)
 				.filter((message) => message.method === method);
-		const receive = (message: Record<string, unknown>) =>
+		const receive = (...messages: Record<string, unknown>[]) =>
 			session.feedStdout(
-				new TextEncoder().encode(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n')
+				new TextEncoder().encode(
+					messages.map((message) => JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n').join('')
+				)
 			);
 		const reply = (request: AcpCall, result: unknown) => receive({ id: request.id, result });
 		async function next(method: string, count = 1) {
@@ -506,6 +508,323 @@ describe('GrokAcpSession lifecycle over fake ACP bytes', () => {
 			expect(h.sent('session/set_config_option')).toHaveLength(1);
 		}
 	);
+
+	it.each(['no-contract', 'no-method', 'wrong-version', 'no-version', 'no-marker'] as const)(
+		'withholds model discovery for %s qualification',
+		async (mode) => {
+			const h = harness({
+				extensions:
+					mode === 'no-contract'
+						? undefined
+						: { agentVersion: 'fixture-version', modelsList: mode !== 'no-method' },
+			});
+			const discovery = h.session.discoverModels();
+			h.reply(await h.next('initialize'), {
+				protocolVersion: 1,
+				_meta: {
+					grokShell: mode !== 'no-marker',
+					agentVersion:
+						mode === 'no-version'
+							? undefined
+							: mode === 'wrong-version'
+								? 'other'
+								: 'fixture-version',
+				},
+			});
+			await expect(discovery).resolves.toBeUndefined();
+			expect(h.sent('_x.ai/models/list')).toHaveLength(0);
+			expect(h.sent('session/new')).toHaveLength(0);
+			expect(h.sent('session/prompt')).toHaveLength(0);
+			expect(h.session.error).toBeUndefined();
+		}
+	);
+
+	it.each(
+		['matching', 'model-conflict', 'effort-conflict', 'ambiguous'].flatMap((state) =>
+			[false, true].flatMap((resume) =>
+				[false, true].map((replyFirst) => ({ state, resume, replyFirst }))
+			)
+		)
+	)(
+		'checks $state allocation observations (resume: $resume, reply first: $replyFirst)',
+		async ({ state, resume, replyFirst }) => {
+			const h = harness({
+				model: 'selected',
+				effort: 'high',
+				resumeSessionId: resume ? 'native-1' : undefined,
+			});
+			const turn = h.session.prompt('after allocation').catch((error: unknown) => error);
+			const allocation = await h.allocation();
+			const update = {
+				method: '_x.ai/session_notification',
+				params: {
+					sessionId: 'native-1',
+					update: {
+						sessionUpdate: state === 'ambiguous' ? 'config_option_update' : 'model_changed',
+						model_id: state === 'model-conflict' ? 'foreign' : 'selected',
+						reasoning_effort: state === 'effort-conflict' ? 'low' : 'high',
+					},
+				},
+			};
+			const response = {
+				id: allocation.id,
+				result: {
+					sessionId: 'native-1',
+					models: { currentModelId: 'selected' },
+					configOptions: [
+						{ id: 'reasoning_effort', type: 'select', currentValue: 'high', options: [] },
+					],
+				},
+			};
+			h.receive(...(replyFirst ? [response, update] : [update, response]));
+			if (state === 'matching') {
+				h.reply(await h.next('session/prompt'), { stopReason: 'end_turn' });
+				expect(await turn).toEqual({ stopReason: 'end_turn' });
+			} else {
+				expect(await turn).toMatchObject({
+					reason: 'invalid-response',
+					dispatchMayHaveOccurred: false,
+				});
+				expect(h.sent('session/prompt')).toHaveLength(0);
+				expect(h.terminate).toHaveBeenCalledTimes(1);
+			}
+			expect(h.session.sessionId).toBe('native-1');
+			expect(h.sent('session/set_config_option')).toHaveLength(0);
+		}
+	);
+
+	it.each(
+		['sessions', 'sessionId', 'model', 'effort'].flatMap((field) =>
+			[false, true].map((overflow) => ({ field, overflow }))
+		)
+	)('bounds allocation $field (overflow: $overflow)', async ({ field, overflow }) => {
+		const value = 'x'.repeat(1024 + Number(overflow));
+		const sessionId = field === 'sessionId' ? value : 'native-1';
+		const model = field === 'model' ? value : 'selected';
+		const effort = field === 'effort' ? value : 'high';
+		const h = harness({ model, effort });
+		const turn = h.session.prompt('bounded').catch((error: unknown) => error);
+		const allocation = await h.allocation();
+		const count = field === 'sessions' ? 16 + Number(overflow) : 1;
+		for (let i = 0; i < count; i++)
+			h.receive({
+				method: 'session/update',
+				params: {
+					sessionId: i === 0 ? sessionId : `foreign-${i}`,
+					update: { sessionUpdate: 'model_changed', model_id: model, reasoning_effort: effort },
+				},
+			});
+		h.reply(allocation, {
+			sessionId,
+			models: { currentModelId: model },
+			configOptions: [
+				{ id: 'reasoning_effort', type: 'select', currentValue: effort, options: [] },
+			],
+		});
+		if (overflow) {
+			expect(await turn).toMatchObject({
+				reason: 'invalid-response',
+				dispatchMayHaveOccurred: false,
+			});
+			expect(h.sent('session/prompt')).toHaveLength(0);
+		} else {
+			h.reply(await h.next('session/prompt'), { stopReason: 'end_turn' });
+			expect(await turn).toEqual({ stopReason: 'end_turn' });
+		}
+	});
+
+	const selectableConfig = [
+		{
+			id: 'model',
+			type: 'select',
+			currentValue: 'first',
+			options: [{ value: 'second', name: 'Second' }],
+		},
+		{
+			id: 'reasoning_effort',
+			type: 'select',
+			currentValue: 'low',
+			options: [{ value: 'high', name: 'High' }],
+		},
+	];
+	it.each(
+		['matching', 'conflicting', 'foreign'].flatMap((state) =>
+			[false, true].map((replyFirst) => ({ state, replyFirst }))
+		)
+	)(
+		'checks $state setter notification (reply first: $replyFirst)',
+		async ({ state, replyFirst }) => {
+			const h = harness();
+			await h.ready({ sessionId: 'native-1', configOptions: selectableConfig });
+			const setting = h.session
+				.setConfiguration({ model: 'second' })
+				.catch((error: unknown) => error);
+			const request = await h.next('session/set_config_option');
+			const result = { models: { currentModelId: 'second' }, configOptions: [] };
+			const update = {
+				method: 'session/update',
+				params: {
+					sessionId: state === 'foreign' ? 'foreign-session' : 'native-1',
+					update: {
+						sessionUpdate: 'config_option_update',
+						...result,
+						models: { currentModelId: state === 'matching' ? 'second' : 'conflicting' },
+					},
+				},
+			};
+			const response = { id: request.id, result };
+			h.receive(...(replyFirst ? [response, update] : [update, response]));
+			if (state === 'conflicting') {
+				expect(await setting).toMatchObject({
+					reason: 'invalid-response',
+					dispatchMayHaveOccurred: false,
+				});
+				await expect(h.session.prompt('unsent')).rejects.toBe(h.session.error);
+				expect(h.sent('session/prompt')).toHaveLength(0);
+			} else {
+				await expect(setting).resolves.toBeUndefined();
+				expect(h.session.configuration).toMatchObject({ model: 'second', configOptions: [] });
+				const turn = h.session.prompt('after setter');
+				h.reply(await h.next('session/prompt'), { stopReason: 'end_turn' });
+				await expect(turn).resolves.toEqual({ stopReason: 'end_turn' });
+			}
+		}
+	);
+
+	it('ignores foreign replay and detaches configuration snapshots and allocation results', async () => {
+		const h = harness({ resumeSessionId: 'native-1', model: 'first' });
+		const opening = h.session.open();
+		const allocation = await h.allocation();
+		h.receive({
+			method: 'session/update',
+			params: {
+				sessionId: 'foreign',
+				update: {
+					sessionUpdate: 'config_option_update',
+					configOptions: [],
+					models: { currentModelId: 'foreign' },
+				},
+			},
+		});
+		h.reply(allocation, { configOptions: selectableConfig });
+		const allocated = await opening;
+		const expected = h.session.configuration;
+		const snapshot = h.session.configuration;
+		snapshot.model = 'mutated';
+		snapshot.configOptions[0].currentValue = 'mutated';
+		snapshot.configOptions[0].options[0].name = 'Mutated';
+		snapshot.configOptions.pop();
+		(allocated.configOptions as typeof selectableConfig)[0].options.length = 0;
+		h.receive({
+			method: 'session/update',
+			params: {
+				sessionId: 'foreign',
+				update: {
+					sessionUpdate: 'model_changed',
+					model_id: 'foreign',
+				},
+			},
+		});
+		expect(h.session.configuration).toEqual(expected);
+		const turn = h.session.prompt('owned selection');
+		h.reply(await h.next('session/prompt'), { stopReason: 'end_turn' });
+		await expect(turn).resolves.toEqual({ stopReason: 'end_turn' });
+	});
+
+	it.each(
+		['setter', 'discovery'].flatMap((operation) =>
+			[
+				'pre-aborted',
+				'pending',
+				'reply-first',
+				'process-lost',
+				'idle-timeout',
+				'transport-lost',
+			].map((stage) => ({ operation, stage }))
+		)
+	)(
+		'preserves $operation cancellation/failure at $stage and excludes overlapping work',
+		async ({ operation, stage }) => {
+			const h = harness({ extensions: { agentVersion: 'fixture-version', modelsList: true } });
+			if (operation === 'setter')
+				await h.ready({ sessionId: 'native-1', configOptions: selectableConfig });
+			const controller = new AbortController();
+			const remove = vi.spyOn(controller.signal, 'removeEventListener');
+			if (stage === 'pre-aborted') controller.abort();
+			const operationResult = (
+				operation === 'setter'
+					? h.session.setConfiguration({ effort: 'high' }, controller.signal)
+					: h.session.discoverModels(controller.signal)
+			).catch((error: unknown) => error);
+			if (stage !== 'pre-aborted') {
+				if (operation === 'discovery')
+					h.reply(await h.next('initialize'), {
+						protocolVersion: 1,
+						_meta: { grokShell: true, agentVersion: 'fixture-version' },
+					});
+				const request = await h.next(
+					operation === 'setter' ? 'session/set_config_option' : '_x.ai/models/list'
+				);
+				await expect(h.session.prompt('overlap')).rejects.toMatchObject({ reason: 'busy' });
+				await expect(h.session.discoverModels()).rejects.toMatchObject({ reason: 'busy' });
+				await expect(h.session.processUsage()).rejects.toMatchObject({ reason: 'busy' });
+				if (operation === 'setter')
+					await expect(h.session.setConfiguration({ effort: 'high' })).rejects.toMatchObject({
+						reason: 'busy',
+					});
+				else await expect(h.session.open()).rejects.toMatchObject({ reason: 'busy' });
+				if (stage === 'reply-first')
+					h.reply(
+						request,
+						operation === 'setter'
+							? {
+									configOptions: selectableConfig.map((o) =>
+										o.id === 'reasoning_effort' ? { ...o, currentValue: 'high' } : o
+									),
+								}
+							: { result: { currentModelId: 'first', availableModels: [] } }
+					);
+				if (stage === 'process-lost') h.child.emit('exit');
+				if (stage === 'idle-timeout') await vi.advanceTimersByTimeAsync(100);
+				if (stage === 'transport-lost') h.session.transportLost();
+				const original = h.session.error;
+				controller.abort();
+				h.session.cancel();
+				if (original) expect(await operationResult).toBe(original);
+				h.reply(request, {});
+				await operationResult;
+				expect(h.terminate).toHaveBeenCalledTimes(1);
+				expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+			} else {
+				expect(h.session.isClosed).toBe(false);
+				expect(h.terminate).not.toHaveBeenCalled();
+			}
+			expect(await operationResult).toMatchObject({
+				reason: stage.endsWith('lost') || stage === 'idle-timeout' ? stage : 'cancelled',
+				dispatchMayHaveOccurred: false,
+			});
+			expect(h.sent('session/prompt')).toHaveLength(0);
+			expect(h.sent('session/cancel')).toHaveLength(0);
+			expect(vi.getTimerCount()).toBe(0);
+		}
+	);
+
+	it('excludes discovery and setters during allocation and an active turn', async () => {
+		const h = harness();
+		const turn = h.session.prompt('exclusive');
+		const allocation = await h.allocation();
+		await expect(h.session.discoverModels()).rejects.toMatchObject({ reason: 'busy' });
+		h.reply(allocation, { sessionId: 'native-1', configOptions: selectableConfig });
+		const prompt = await h.next('session/prompt');
+		await expect(h.session.discoverModels()).rejects.toMatchObject({ reason: 'busy' });
+		await expect(h.session.setConfiguration({ effort: 'high' })).rejects.toMatchObject({
+			reason: 'busy',
+		});
+		expect(h.sent('_x.ai/models/list')).toHaveLength(0);
+		expect(h.sent('session/set_config_option')).toHaveLength(0);
+		h.reply(prompt, { stopReason: 'end_turn' });
+		await turn;
+	});
 
 	it.each(['setup', 'turn'] as const)(
 		'enforces silence during %s with stdout/stderr activity and empty chunks',

@@ -1467,6 +1467,108 @@ describe('agent-detector', () => {
 			);
 		});
 
+		it.each(
+			[
+				'agentVersion',
+				'configGeneration',
+				'account',
+				'host',
+				'processGeneration',
+				'sessionId',
+			].flatMap((field) => ['missing', 'empty', 'whitespace'].map((kind) => ({ field, kind })))
+		)('rejects $kind receipt $field even after a cached observation', async ({ field, kind }) => {
+			await detector.discoverGrokOptions(context);
+			const receipt = ['agentVersion', 'configGeneration'].includes(field)
+				? owned
+				: owned.observation;
+			const value = kind === 'missing' ? undefined : kind === 'empty' ? '' : ' \t ';
+			if (kind === 'missing') Reflect.deleteProperty(receipt, field);
+			else Object.assign(receipt, { [field]: value });
+			if (field === 'agentVersion')
+				Object.assign(owned.observation.configuration, { agentVersion: value });
+			if (field === 'configGeneration') delete context.configGeneration;
+			expect(await detector.discoverGrokOptions(context)).toMatchObject({
+				status: 'configured-fallback',
+				options: [context.model],
+				reason: 'discovery-unavailable',
+			});
+			context.model = '';
+			expect(await detector.discoverGrokOptions(context)).toMatchObject({
+				status: 'unavailable',
+				options: [],
+				reason: 'discovery-unavailable',
+			});
+		});
+
+		it.each(['future', 'zero-ttl'] as const)(
+			'rejects a %s observation without probing',
+			async (kind) => {
+				if (kind === 'future') owned.observation.observedAt = 1001;
+				else detector = new AgentDetector(0, { grokAcpObservation: readObservation });
+				expect(await detector.discoverGrokOptions(context)).toMatchObject({
+					status: 'configured-fallback',
+					options: [context.model],
+					reason: 'discovery-unavailable',
+				});
+				expect(readObservation).toHaveBeenCalledOnce();
+			}
+		);
+
+		it('replaces host-mutated catalogs without aliasing earlier model or effort results', async () => {
+			const models = await detector.discoverGrokOptions(context);
+			const efforts = await detector.discoverGrokOptions(context, 'effort');
+			owned.observation.models!.availableModels[0].modelId = 'replacement';
+			owned.observation.configuration.configOptions[0].options[0].value = 'low';
+			const nextModels = await detector.discoverGrokOptions(context);
+			const nextEfforts = await detector.discoverGrokOptions(context, 'effort');
+			expect(models.options).toEqual(['visible-alias', context.model]);
+			expect(efforts.options).toEqual(['max']);
+			expect(nextModels.options).toEqual(['replacement', context.model]);
+			expect(nextEfforts.options).toEqual(['low', 'max']);
+			nextModels.options.push('caller-injected');
+			nextEfforts.options.push('caller-injected');
+			expect(owned.observation.models!.availableModels).toEqual([
+				{ modelId: 'replacement', name: 'Visible' },
+			]);
+			expect(owned.observation.configuration.configOptions[0].options).toEqual([
+				{ value: 'low', name: 'Max' },
+			]);
+		});
+
+		it.each(['cancelled', 'newly-managed'] as const)(
+			'rechecks %s standing after asynchronous executable lookup',
+			async (kind) => {
+				const port = fakeSpawnPort({ standing: 'standalone' });
+				detector = new AgentDetector(undefined, {
+					managedProbe: () => ({ port, actor: { peer: 'host-secret' } }),
+					grokAcpObservation: readObservation,
+				});
+				await detector.discoverGrokOptions(context);
+				readObservation.mockClear();
+				let resolveLookup!: (value: Awaited<ReturnType<typeof pathProber.checkCustomPath>>) => void;
+				vi.mocked(pathProber.checkCustomPath).mockImplementationOnce(
+					() =>
+						new Promise((resolve) => {
+							resolveLookup = resolve;
+						})
+				);
+				const controller = new AbortController();
+				context.signal = controller.signal;
+				const pending = detector.discoverGrokOptions(context);
+				expect(readObservation).not.toHaveBeenCalled();
+				if (kind === 'cancelled') controller.abort();
+				else port.setStanding('managed');
+				resolveLookup({ exists: true, path: context.customPath });
+				expect(await pending).toMatchObject({
+					status: 'configured-fallback',
+					options: [context.model],
+					reason: kind === 'cancelled' ? 'discovery-unavailable' : 'managed-unqualified',
+				});
+				expect(readObservation).not.toHaveBeenCalled();
+				expect(port.asked).toEqual([]);
+			}
+		);
+
 		it.each(['no-generation', 'refresh', 'expired'] as const)(
 			'revalidates the receipt for %s without probing',
 			async (reason) => {
