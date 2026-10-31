@@ -3464,7 +3464,7 @@
 				{
 					"id": "native-parser-followup:P09",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authored native parser regressions for structured terminal failures, repeated capture/accounting, cache/model detail, raw exact tick precision, incomplete streams and tool output guards; execution remains not-run for GT1-03-13. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-12-native-parser-regression-tests. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
 					"affectedRows": ["P09"]
 				}
 			],
@@ -3789,7 +3789,7 @@
 				{
 					"id": "native-parser-followup:P10",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authored native parser regressions for structured terminal failures, repeated capture/accounting, cache/model detail, raw exact tick precision, incomplete streams and tool output guards; execution remains not-run for GT1-03-13. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-12-native-parser-regression-tests. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
 					"affectedRows": ["P10"]
 				},
 				{
@@ -3989,7 +3989,7 @@
 				{
 					"id": "native-parser-followup:P11",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authored native parser regressions for structured terminal failures, repeated capture/accounting, cache/model detail, raw exact tick precision, incomplete streams and tool output guards; execution remains not-run for GT1-03-13. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-12-native-parser-regression-tests. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
 					"affectedRows": ["P11"]
 				}
 			],
@@ -4245,7 +4245,7 @@
 				{
 					"id": "native-parser-followup:P12",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authored native parser regressions for structured terminal failures, repeated capture/accounting, cache/model detail, raw exact tick precision, incomplete streams and tool output guards; execution remains not-run for GT1-03-13. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-12-native-parser-regression-tests. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
 					"affectedRows": ["P12"]
 				},
 				{
@@ -10828,7 +10828,7 @@
 				{
 					"id": "native-parser-followup:C-supportsCostTracking",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authored native parser regressions for structured terminal failures, repeated capture/accounting, cache/model detail, raw exact tick precision, incomplete streams and tool output guards; execution remains not-run for GT1-03-13. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-12-native-parser-regression-tests. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
 					"affectedRows": ["C-supportsCostTracking"]
 				}
 			],
@@ -11007,7 +11007,7 @@
 				{
 					"id": "native-parser-followup:C-supportsUsageStats",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authored native parser regressions for structured terminal failures, repeated capture/accounting, cache/model detail, raw exact tick precision, incomplete streams and tool output guards; execution remains not-run for GT1-03-13. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-12-native-parser-regression-tests. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
 					"affectedRows": ["C-supportsUsageStats"]
 				}
 			],
@@ -11531,7 +11531,7 @@
 				{
 					"id": "native-parser-followup:C-supportsResultMessages",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authored native parser regressions for structured terminal failures, repeated capture/accounting, cache/model detail, raw exact tick precision, incomplete streams and tool output guards; execution remains not-run for GT1-03-13. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-12-native-parser-regression-tests. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
 					"affectedRows": ["C-supportsResultMessages"]
 				}
 			],
@@ -13456,7 +13456,7 @@
 				{
 					"id": "native-parser-followup:REG-PARSER",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authored native parser regressions for structured terminal failures, repeated capture/accounting, cache/model detail, raw exact tick precision, incomplete streams and tool output guards; execution remains not-run for GT1-03-13. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-12-native-parser-regression-tests. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
 					"affectedRows": ["REG-PARSER"]
 				}
 			],
@@ -14196,7 +14196,7 @@
 				{
 					"id": "native-parser-followup:REG-USAGE",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C shares preserveJsonNumberTokens in jsonUtils.ts between ACP and native raw decoding; scoped formatting/lint and static review pass, execution remains not-run. GT1-03-12 authored native parser regressions for structured terminal failures, repeated capture/accounting, cache/model detail, raw exact tick precision, incomplete streams and tool output guards; execution remains not-run for GT1-03-13. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-12-native-parser-regression-tests. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
 					"affectedRows": ["REG-USAGE"]
 				}
 			],
