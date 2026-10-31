@@ -16,6 +16,7 @@ import type {
 import type { BrowserTab } from '../../../../shared/browserPage';
 import {
 	switchTabProvider,
+	updateProviderSlot,
 	type NativeSessionBinding,
 } from '../../../../shared/maestro-lib/agents/providerSwap';
 import { useSessionStore } from '../../../../renderer/stores/sessionStore';
@@ -470,6 +471,71 @@ describe('useDebouncedPersistence', () => {
 				restarted.unmount();
 				expect(window.maestro.fs.readFile).not.toHaveBeenCalled();
 				expect(window.maestro.agentSessions.read).not.toHaveBeenCalled();
+			});
+
+			it('persists late Grok allocations into separate parked slots before reload', async () => {
+				const bindings = [observed, { ...observed, accountRef: 'grok:fixture-account-b' }];
+				const incoming = { agentSessionId: 'codex-native-id', customModel: 'codex-model' };
+				const sessions = bindings.map((_, index) =>
+					makeSession({
+						id: `owner-${index}`,
+						toolType: 'codex',
+						aiTabs: [
+							switchTabProvider(
+								makeTab({
+									id: `tab-${index}`,
+									turnProvider: 'grok',
+									logs: [makeLog(`history-${index}`)],
+									providerSessions: { codex: incoming },
+								}),
+								'grok',
+								'codex'
+							),
+						],
+					})
+				);
+				const setAll = vi.mocked(window.maestro.sessions.setAll);
+				const setMany = vi.mocked(window.maestro.sessions.setMany);
+				const previousAll = setAll.getMockImplementation();
+				const previousMany = setMany.getMockImplementation();
+				const stored = mockPersistedSessions([]);
+				seedSessions(sessions);
+				const hook = renderPersistence(makeInitialLoadRef(true));
+				try {
+					await act(async () => hook.result.current.flushNow(sessions));
+					const allocated = sessions.map((session, index) => ({
+						...session,
+						aiTabs: [
+							updateProviderSlot(session.aiTabs[0], session, 'grok', {
+								agentSessionId: bindings[index].nativeSessionId,
+								nativeSessionBinding: bindings[index],
+							}),
+						],
+					}));
+					act(() => seedSessions(allocated));
+					await act(async () => hook.result.current.flushNow(allocated));
+					expect(setMany).toHaveBeenCalledTimes(1);
+					const reloaded: Session[] = JSON.parse(JSON.stringify(stored()));
+					for (const [index, session] of reloaded.entries()) {
+						const tab = session.aiTabs[0];
+						expect(tab).toMatchObject(incoming);
+						expect(tab.nativeSessionBinding).toBeUndefined();
+						expect(tab.providerSessions?.grok).toEqual({
+							agentSessionId: bindings[index].nativeSessionId,
+							nativeSessionBinding: bindings[index],
+						});
+						const restored = switchTabProvider(tab, 'codex', 'grok');
+						expect(restored.nativeSessionBinding).toEqual(bindings[index]);
+						expect(restored.agentSessionId).toBe(observed.nativeSessionId);
+						expect(restored.logs).toEqual(sessions[index].aiTabs[0].logs);
+						expect(restored.providerSessions?.codex).toMatchObject(incoming);
+						expect(sessions[index].aiTabs[0].providerSessions?.grok?.agentSessionId).toBeNull();
+					}
+				} finally {
+					hook.unmount();
+					setAll.mockImplementation(previousAll!);
+					setMany.mockImplementation(previousMany!);
+				}
 			});
 		});
 
