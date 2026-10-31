@@ -611,6 +611,31 @@
 				"META-03",
 				"REG-DEFINITIONS"
 			]
+		},
+		"phase03-acp-permission-tests": {
+			"path": "Plans/grok-tier1/evidence/03.md#gt1-03-08-acp-permission-regression-tests",
+			"sourceCommit": "c1b01507a571085fb8d7e099c19b8340b655a919",
+			"sourceRevisionScope": "Pre-task HEAD plus the GT1-03-08 test diff identified by SHA-256.",
+			"provenance": "authored-tests",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"scope": "GT1-03-08 authors 44 synthetic approval cases through the real ACP client, existing tableEffects authority helper, fake clocks and shared turn outcome resolver. Covers once-only grants, refusals, missing authority/binding, unsupported options, ownership, concurrent typed IDs, replay, deadlines, cancellation/replacement/disconnect, failed writes, observer/authority faults and bounded pending/history. Execution/compiler checks remain GT1-03-13; composition and managed/native qualification remain downstream.",
+			"testPaths": ["src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts"],
+			"testHashesSha256": {
+				"src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts": "44224104ca045e485ce1080a626293d4a56507a35fd3972afeded2db8afa04db"
+			},
+			"affectedRows": [
+				"P09",
+				"P10",
+				"P33",
+				"P34",
+				"P35",
+				"P36",
+				"C-supportsStandardPermissionMode",
+				"REG-MANAGED-ROUTES",
+				"META-03",
+				"REG-DEFINITIONS"
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -3188,7 +3213,8 @@
 				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
 				"phase03AcpPlansEvidenceRef": "phase03-acp-plans",
 				"phase03AcpPlanTestsEvidenceRef": "phase03-acp-plan-tests",
-				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3238,7 +3264,7 @@
 				{
 					"id": "acp-permission-consumers:P09",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
+					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
 					"affectedRows": ["P09"]
 				}
 			],
@@ -3488,7 +3514,8 @@
 				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
 				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests",
 				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
-				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3532,7 +3559,7 @@
 				{
 					"id": "acp-permission-consumers:P10",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
+					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
 					"affectedRows": ["P10"]
 				}
 			],
@@ -6804,7 +6831,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6842,7 +6870,7 @@
 				{
 					"id": "acp-permission-consumers:P33",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
+					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
 					"affectedRows": ["P33"]
 				}
 			],
@@ -7012,7 +7040,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase03AcpPlansEvidenceRef": "phase03-acp-plans",
 				"phase03AcpPlanTestsEvidenceRef": "phase03-acp-plan-tests",
-				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7056,7 +7085,7 @@
 				{
 					"id": "acp-permission-consumers:P34",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
+					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
 					"affectedRows": ["P34"]
 				}
 			],
@@ -7228,7 +7257,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
-				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7272,7 +7302,7 @@
 				{
 					"id": "acp-permission-consumers:P35",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
+					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
 					"affectedRows": ["P35"]
 				}
 			],
@@ -7455,7 +7485,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
-				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7493,7 +7524,7 @@
 				{
 					"id": "acp-permission-consumers:P36",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
+					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
 					"affectedRows": ["P36"]
 				}
 			],
@@ -9369,7 +9400,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -9407,7 +9439,7 @@
 				{
 					"id": "acp-permission-consumers:C-supportsStandardPermissionMode",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
+					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
 					"affectedRows": ["C-supportsStandardPermissionMode"]
 				}
 			],
@@ -14427,7 +14459,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14465,7 +14498,7 @@
 				{
 					"id": "acp-permission-consumers:REG-MANAGED-ROUTES",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
+					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
 					"affectedRows": ["REG-MANAGED-ROUTES"]
 				}
 			],
@@ -17870,7 +17903,8 @@
 				"evidenceRef": "phase01-audit",
 				"observation": "Claude Plan-Mode, Codex/Antigravity/Grok Read-Only label; actual availability separately gated.",
 				"phase02EvidenceRef": "phase02-reconciliation",
-				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17908,7 +17942,7 @@
 				{
 					"id": "acp-permission-consumers:META-03",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
+					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
 					"affectedRows": ["META-03"]
 				}
 			],
@@ -18726,7 +18760,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
-				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions"
+				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
+				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18776,7 +18811,7 @@
 				{
 					"id": "acp-permission-consumers:REG-DEFINITIONS",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-07 request adapter implemented with scoped effect authority and fail-closed lifecycle; GT1-03-08 must author tests and GT1-03-13 execute them. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10 own consent consumers/policy qualification. No native or managed containment claim.",
+					"missingPrerequisite": "GT1-03-07 request adapter and GT1-03-08 synthetic tests are authored; GT1-03-13 must execute the approval suite and compiler checks. GT1-03-09 must bind exclusive dispatch ownership, synchronous cancellation, connection loss and non-success terminal propagation; phases07/09/10/11 own consent consumers, policy and native qualification. No native or managed containment claim.",
 					"affectedRows": ["REG-DEFINITIONS"]
 				}
 			],
