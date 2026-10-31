@@ -299,8 +299,15 @@ describe('public Grok ACP turn composition', () => {
 		expect(h.onEvent.mock.calls.filter(([e]) => e.terminal)).toHaveLength(1);
 	});
 
-	it('refuses admission without creating a process', () => {
-		const h = fixture();
+	it('refuses admission without creating a process or attempting model discovery', () => {
+		const h = fixture({
+			extensions: { agentVersion: 'fixture-version', modelsList: true },
+			modelDiscovery: {
+				account: 'fixture-account',
+				host: 'fixture-host',
+				agentVersion: 'fixture-version',
+			},
+		});
 		h.admit.mockReturnValue({
 			ok: false,
 			state: 'denied',
@@ -310,7 +317,208 @@ describe('public Grok ACP turn composition', () => {
 		expect(() => h.start()).toThrow('Fixture denial');
 		expect(childProcess.spawn).not.toHaveBeenCalled();
 		expect(h.bound).not.toHaveBeenCalled();
+		expect(h.messages).toEqual([]);
 	});
+
+	it.each(['acknowledged', 'unacknowledged'] as const)(
+		'waits for %s effort through the public port before dispatch',
+		async (result) => {
+			const onConfiguration = vi.fn<NonNullable<GrokAcpTurnHandlers['onConfiguration']>>();
+			const h = fixture({ model: 'fixture-model', effort: 'high' }, { onConfiguration });
+			h.start();
+			const configOptions = [
+				{ id: 'model', type: 'select', currentValue: 'fixture-model' },
+				{
+					id: 'reasoning_effort',
+					type: 'select',
+					currentValue: 'low',
+					options: [{ value: 'high', name: 'High' }],
+				},
+			];
+			const allocation = await h.allocation();
+			expect(allocation.params).toMatchObject({ _meta: { modelId: 'fixture-model' } });
+			h.reply(allocation, { sessionId: 'native-1', configOptions });
+			const set = await h.next('session/set_config_option');
+			expect(set.params).toEqual({
+				sessionId: 'native-1',
+				configId: 'reasoning_effort',
+				value: 'high',
+			});
+			expect(h.calls('session/prompt')).toHaveLength(0);
+			expect(h.run.configuration()).toBeUndefined();
+			expect(onConfiguration).not.toHaveBeenCalled();
+			if (result === 'acknowledged') configOptions[1].currentValue = 'high';
+			h.reply(set, { configOptions });
+			if (result === 'acknowledged') {
+				const prompt = await h.next('session/prompt');
+				expect(h.run.configuration()?.configuration.configOptions[1].currentValue).toBe('high');
+				expect(onConfiguration).toHaveBeenCalledTimes(1);
+				h.reply(prompt, { stopReason: 'end_turn' });
+				expect((await h.finish()).terminal.status).toBe('success');
+			} else {
+				expect((await h.finish()).terminal).toMatchObject({
+					status: 'failed',
+					reason: 'effort-unacknowledged',
+					dispatchState: 'not-dispatched',
+				});
+				expect(h.calls('session/prompt')).toHaveLength(0);
+				expect(onConfiguration).not.toHaveBeenCalled();
+			}
+		}
+	);
+
+	it.each([
+		'not-requested',
+		'no-extensions',
+		'disabled-extension',
+		'account',
+		'host',
+		'qualified-version',
+		'extension-version',
+		'peer-version',
+		'unidentified-peer',
+	])('skips optional discovery with %s qualification', async (mismatch) => {
+		const h = fixture({
+			extensions: { agentVersion: 'fixture-version', modelsList: true },
+			modelDiscovery: {
+				account: 'fixture-account',
+				host: 'fixture-host',
+				agentVersion: 'fixture-version',
+			},
+		});
+		if (mismatch === 'not-requested') h.options.modelDiscovery = undefined;
+		if (mismatch === 'no-extensions') h.options.extensions = undefined;
+		if (mismatch === 'disabled-extension') h.options.extensions!.modelsList = false;
+		if (mismatch === 'account') h.options.modelDiscovery!.account = 'another-account';
+		if (mismatch === 'host') h.options.modelDiscovery!.host = 'another-host';
+		if (mismatch === 'qualified-version')
+			h.options.modelDiscovery!.agentVersion = 'another-version';
+		if (mismatch === 'extension-version') h.options.extensions!.agentVersion = 'another-version';
+		h.start();
+		const prompt = await h.ready({
+			grokShell: mismatch !== 'unidentified-peer',
+			agentVersion: mismatch === 'peer-version' ? 'another-version' : 'fixture-version',
+		});
+		expect(h.calls('_x.ai/models/list')).toHaveLength(0);
+		expect(h.run.configuration()?.models).toBeUndefined();
+		expect(childProcess.spawn).toHaveBeenCalledTimes(1);
+		h.reply(prompt, { stopReason: 'end_turn' });
+		expect((await h.finish()).terminal.status).toBe('success');
+	});
+
+	it.each(['mutate', 'throw', 'reject'] as const)(
+		'retains detached pre-dispatch configuration when an observer chooses to %s',
+		async (behavior) => {
+			let promptCountAtObservation: number | undefined;
+			const onConfiguration = vi.fn<NonNullable<GrokAcpTurnHandlers['onConfiguration']>>(
+				(value) => {
+					promptCountAtObservation = h.calls('session/prompt').length;
+					value.account = 'mutated-account';
+					value.configuration.configOptions[0].options[0].name = 'Mutated';
+					value.models!.availableModels[0].modelId = 'mutated-model';
+					if (behavior === 'throw') throw new Error('Fixture observer failure');
+					if (behavior === 'reject') return Promise.reject(new Error('Fixture observer rejection'));
+				}
+			);
+			const h = fixture(
+				{
+					model: 'fixture-model',
+					extensions: { agentVersion: 'fixture-version', modelsList: true },
+					modelDiscovery: {
+						account: 'fixture-account',
+						host: 'fixture-host',
+						agentVersion: 'fixture-version',
+					},
+				},
+				{ onConfiguration }
+			);
+			h.start();
+			// Admission/async setup cannot read later mutations to the caller's qualification.
+			h.options.modelDiscovery!.account = 'changed-after-start';
+			h.options.extensions!.modelsList = false;
+			expect(h.run.configuration()).toBeUndefined();
+			h.reply(await h.allocation({ grokShell: true, agentVersion: 'fixture-version' }), {
+				sessionId: 'native-1',
+				configOptions: [
+					{
+						id: 'model',
+						type: 'select',
+						currentValue: 'fixture-model',
+						options: [{ value: 'fixture-model', name: 'Fixture' }],
+					},
+				],
+			});
+			const discovery = await h.next('_x.ai/models/list');
+			expect(discovery.params).toEqual({});
+			expect(h.calls('session/prompt')).toHaveLength(0);
+			expect(onConfiguration).not.toHaveBeenCalled();
+			h.reply(discovery, {
+				result: {
+					currentModelId: 'fixture-model',
+					availableModels: [{ modelId: 'fixture-model', name: 'Fixture' }],
+				},
+			});
+			const prompt = await h.next('session/prompt');
+			expect(promptCountAtObservation).toBe(0);
+			expect(onConfiguration).toHaveBeenCalledTimes(1);
+			expect(onConfiguration.mock.calls[0][0].account).toBe('mutated-account');
+			expect(onConfiguration.mock.calls[0][0].models?.availableModels[0].modelId).toBe(
+				'mutated-model'
+			);
+			const retained = h.run.configuration()!;
+			expect(retained).toMatchObject({
+				account: 'fixture-account',
+				host: 'fixture-host',
+				cwd: h.options.cwd,
+				processGeneration: h.options.processGeneration,
+				sessionId: 'native-1',
+				observedAt: expect.any(Number),
+				configuration: {
+					agentVersion: 'fixture-version',
+					model: 'fixture-model',
+					configOptions: [{ options: [{ value: 'fixture-model', name: 'Fixture' }] }],
+				},
+				models: { availableModels: [{ modelId: 'fixture-model', name: 'Fixture' }] },
+			});
+			const callerCopy = h.run.configuration()!;
+			expect(callerCopy).not.toBe(retained);
+			callerCopy.configuration.configOptions[0].options.length = 0;
+			callerCopy.models!.availableModels.length = 0;
+			expect(h.run.configuration()).toEqual(retained);
+			h.reply(prompt, { stopReason: 'end_turn' });
+			expect((await h.finish()).terminal.status).toBe('success');
+			expect(h.run.configuration()).toEqual(retained);
+			expect(childProcess.spawn).toHaveBeenCalledTimes(1);
+			expect(h.calls('_x.ai/models/list')).toHaveLength(1);
+		}
+	);
+
+	it.each(['empty', 'unavailable'] as const)(
+		'retains an %s owned catalog distinctly',
+		async (state) => {
+			const h = fixture({
+				extensions: { agentVersion: 'fixture-version', modelsList: true },
+				modelDiscovery: {
+					account: 'fixture-account',
+					host: 'fixture-host',
+					agentVersion: 'fixture-version',
+				},
+			});
+			h.start();
+			h.reply(await h.allocation({ grokShell: true, agentVersion: 'fixture-version' }), {
+				sessionId: 'native-1',
+			});
+			const models = { currentModelId: 'hidden-model', availableModels: [] };
+			h.reply(
+				await h.next('_x.ai/models/list'),
+				state === 'empty' ? { result: models } : { error: {} }
+			);
+			const prompt = await h.next('session/prompt');
+			expect(h.run.configuration()?.models).toEqual(state === 'empty' ? models : undefined);
+			h.reply(prompt, { stopReason: 'end_turn' });
+			expect((await h.finish()).terminal.status).toBe('success');
+		}
+	);
 
 	it.each(['allow', 'deny'] as const)(
 		'routes tools, plans and %s permission through transmitted native identity',
