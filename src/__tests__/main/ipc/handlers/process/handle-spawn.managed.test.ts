@@ -39,8 +39,28 @@ vi.mock('../../../../../main/coworking/coworking-socket-path', () => ({
 	getBridgeSocketPath: () => '/tmp/maestro-test-coworking.sock',
 }));
 
+// Keep launch/account logic real without initializing the desktop's stores.
+vi.mock('../../../../../main/stores', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../../../../main/stores')>()),
+	getProductionDataPath: () => path.resolve('tmp', 'grok-managed-spawn', 'data'),
+}));
+vi.mock('../../../../../main/utils/remote-fs', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../../../../main/utils/remote-fs')>()),
+	observePathRemote: vi.fn(async () => {
+		throw new Error('Unexpected remote observation without a synthetic fixture');
+	}),
+}));
+
 import * as platform from '../../../../../shared/platformDetection';
 import { resolveAgentAccountRef } from '../../../../../shared/agentAccountDir';
+import type { NativeSessionBinding } from '../../../../../shared/maestro-lib/agents/providerSwap';
+import { installationIdentity } from '../../../../../shared/maestro-lib/managed/host-adapter';
+import type { SshRemoteConfig } from '../../../../../shared/types';
+import { getProductionDataPath } from '../../../../../main/stores';
+import {
+	observePathRemote,
+	type RemoteGrokLaunchIdentity,
+} from '../../../../../main/utils/remote-fs';
 import * as sshPath from '../../../../../shared/maestro-lib/launch/ssh-path';
 import * as sshBuilder from '../../../../../main/utils/ssh-command-builder';
 import * as systemDelivery from '../../../../../main/utils/system-prompt-delivery';
@@ -73,6 +93,14 @@ import {
 const AGENT = '11111111-2222-4333-8444-555555555555';
 const TAB = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const PROCESS = `${AGENT}-ai-${TAB}`;
+// Existing directories supply real local identity without any native account reads.
+const GROK_ACCOUNT = path.resolve('src', '__tests__', 'fixtures');
+
+beforeEach(() => {
+	vi.mocked(observePathRemote)
+		.mockReset()
+		.mockRejectedValue(new Error('Unexpected remote observation without a synthetic fixture'));
+});
 
 function fakeStore(data: Record<string, unknown>) {
 	return {
@@ -174,6 +202,107 @@ function harness(
 		},
 	};
 	return { deps, processManager, spawn, sent, errors };
+}
+
+/** Seed only explicit resume controls; missing-owner tests keep their empty tabs. */
+function seedGrokLaunch(h: Harness, request: SpawnProcessConfig, remote?: SshRemoteConfig) {
+	const account = request.sessionCustomEnvVars?.GROK_HOME;
+	if (!account) throw new Error('Expected an explicit synthetic Grok account');
+	const identity = remote
+		? 'synthetic-grok-installation'
+		: installationIdentity({
+				hostname: os.hostname(),
+				productionDataDir: getProductionDataPath(),
+				mode: 'desktop',
+				pid: process.pid,
+				startedAt: '',
+			}).installationId;
+	if (remote) {
+		const directory = {
+			canonicalPath: request.cwd,
+			kind: 'directory' as const,
+			device: '1',
+			inode: '2',
+		};
+		const receipt: RemoteGrokLaunchIdentity = {
+			launchCwd: { ...directory },
+			processCwd: { ...directory },
+			cwd: { ...directory },
+			account: { ...directory, canonicalPath: account, inode: '3' },
+			inherited: { HOME: '/home/synthetic', GROK_HOME: null },
+			effective: { HOME: '/home/synthetic', GROK_HOME: account },
+		};
+		vi.mocked(observePathRemote).mockImplementation(async (cwd, target, deps, launch) => {
+			expect(cwd).toBe(request.cwd);
+			expect(target).toEqual(remote);
+			expect(deps).toBeUndefined();
+			expect(launch).toMatchObject({ env: { GROK_HOME: account }, nativeCwd: request.cwd });
+			return { success: true, data: structuredClone(receipt) };
+		});
+		h.deps.remoteQualifier = () => ({
+			probe: async () => {
+				throw new Error('Unexpected endpoint probe');
+			},
+			qualify: async () => {
+				throw new Error('Unexpected managed SSH qualification');
+			},
+			qualifyResolved: async (selected) => {
+				expect(selected).toEqual(remote);
+				return {
+					kind: 'remote',
+					remote: selected,
+					endpoint: {
+						contractVersion: '1',
+						installationId: identity,
+						runtimeId: 'synthetic-runtime',
+						processEpoch: 'synthetic-epoch',
+						tenantId: 'fixture',
+						orgId: 'fixture',
+						authorityId: 'fixture',
+						policyRevision: 1,
+						authority: 'registered',
+						routes: [],
+					},
+				};
+			},
+		});
+	}
+	if (!request.agentSessionId) return undefined;
+	const binding: NativeSessionBinding = {
+		version: 1,
+		state: 'bound',
+		provider: 'grok',
+		nativeSessionId: request.agentSessionId,
+		cwd: remote ? request.cwd : realpathSync(request.cwd),
+		accountRef: resolveAgentAccountRef(
+			{
+				toolType: 'grok',
+				sshRemote: !!remote,
+				managedAccountDir: remote ? account : realpathSync(account),
+			},
+			{ homeDir: '' }
+		)!,
+		host: { kind: remote ? 'ssh' : 'local', identity },
+	};
+	h.deps.sessionsStore.set('sessions', [
+		{
+			id: AGENT,
+			name: 'Backend',
+			toolType: 'grok',
+			cwd: request.cwd,
+			customEnvVars: { ...request.sessionCustomEnvVars },
+			sessionSshRemoteConfig: request.sessionSshRemoteConfig,
+			aiTabs: [
+				{
+					id: TAB,
+					turnProvider: 'grok',
+					agentSessionId: request.agentSessionId,
+					nativeSessionBinding: binding,
+				},
+			],
+		},
+	]);
+	return binding;
 }
 
 /**
@@ -714,6 +843,7 @@ describe('process:spawn launch refusal classification', () => {
 
 describe('process:spawn private prompt-file planning (GT1-02-10ET)', () => {
 	isolateAgentEnv();
+	isolateAgentEnv(['GROK_HOME', 'GROK_AUTH', 'GROK_AUTH_PATH']);
 	let h: Harness;
 	let port: FakeSpawnPort;
 	let request: SpawnProcessConfig;
@@ -753,7 +883,12 @@ describe('process:spawn private prompt-file planning (GT1-02-10ET)', () => {
 			imagePromptBuilder: legacyEmbed,
 		});
 		h.deps.settingsStore.set('sshRemotes', [remote]);
-		request = payload({ toolType: 'grok', command: agent.command, args: [...agent.args] });
+		request = payload({
+			toolType: 'grok',
+			command: agent.command,
+			args: [...agent.args],
+			sessionCustomEnvVars: { GROK_HOME: GROK_ACCOUNT },
+		});
 	});
 
 	afterEach(() => vi.restoreAllMocks());
@@ -794,9 +929,13 @@ describe('process:spawn private prompt-file planning (GT1-02-10ET)', () => {
 				prompt,
 				appendSystemPrompt: system,
 				agentSessionId: resume,
+				sessionCustomEnvVars: {
+					GROK_HOME: host === 'remote' ? '/synthetic/selected-account' : GROK_ACCOUNT,
+				},
 				sessionSshRemoteConfig:
 					host === 'remote' ? { enabled: true, remoteId: remote.id } : undefined,
 			};
+			const binding = seedGrokLaunch(h, request, host === 'remote' ? remote : undefined);
 			expect(await handleProcessSpawn(request, h.deps)).toMatchObject({ success: true });
 			expect(plan).toHaveBeenCalledTimes(2);
 			const early = plan.mock.results[0].value;
@@ -819,6 +958,13 @@ describe('process:spawn private prompt-file planning (GT1-02-10ET)', () => {
 			);
 			expect(artifact.owner).toBe(host);
 			const config = spawned(h);
+			if (resume) {
+				expect(config.nativeSessionBinding).toEqual(binding);
+				expect({ ...config.nativeSessionScope, nativeSessionId: config.agentSessionId }).toEqual(
+					binding
+				);
+			}
+			if (host === 'remote') expect(observePathRemote).toHaveBeenCalledTimes(2);
 			expect(config.promptArtifact).toEqual(artifact);
 			expect(config).toMatchObject({
 				prompt: undefined,
@@ -830,7 +976,7 @@ describe('process:spawn private prompt-file planning (GT1-02-10ET)', () => {
 				imagePromptBuilder: undefined,
 			});
 			expect(config).not.toHaveProperty('appendSystemPrompt');
-			expect(final.plan.args.filter((arg) => arg === '--prompt-file')).toHaveLength(1);
+			expect(final.plan.args.filter((arg: string) => arg === '--prompt-file')).toHaveLength(1);
 			expect(final.plan.args.slice(-2)).toEqual(['--prompt-file', artifact.path]);
 			expect(final.plan.args).not.toContain('-p');
 			expect(final.plan.args).toContain('--always-approve');
@@ -1034,6 +1180,7 @@ describe('process:spawn private prompt-file planning (GT1-02-10ET)', () => {
 
 describe('process:spawn Grok directory-grant refusal (GT1-02-11A1T)', () => {
 	isolateAgentEnv();
+	isolateAgentEnv(['GROK_HOME', 'GROK_AUTH', 'GROK_AUTH_PATH']);
 	const definition = getAgentDefinition('grok')!;
 	const remote = {
 		id: 'grant-host',
@@ -1094,7 +1241,9 @@ describe('process:spawn Grok directory-grant refusal (GT1-02-11A1T)', () => {
 						: kind === 'flag-equals'
 							? `--add-dir="${root}"`
 							: undefined,
-				sessionCustomEnvVars: { GROK_HOME: '/synthetic/selected-account' },
+				sessionCustomEnvVars: {
+					GROK_HOME: host === 'remote' ? '/synthetic/selected-account' : GROK_ACCOUNT,
+				},
 				sessionSshRemoteConfig:
 					host === 'remote' ? { enabled: true, remoteId: remote.id } : undefined,
 			});
@@ -1102,6 +1251,7 @@ describe('process:spawn Grok directory-grant refusal (GT1-02-11A1T)', () => {
 			const destination = vi.spyOn(promptDelivery, 'selectPromptFileDestination');
 			const prepareSystem = vi.spyOn(systemDelivery, 'applySystemPromptDelivery');
 			const ssh = vi.spyOn(sshBuilder, 'buildSshCommandWithStdin');
+			seedGrokLaunch(h, request, host === 'remote' ? remote : undefined);
 			const diagnostic = kind.startsWith('flag')
 				? 'Grok CLI has no qualified --add-dir argument for additional-directory grants.'
 				: readonly && kind.endsWith('write')
@@ -1133,6 +1283,7 @@ describe('process:spawn Grok directory-grant refusal (GT1-02-11A1T)', () => {
 				{ sessionId: PROCESS, toolType: 'grok', reason: 'grok-directory-grants-refused' }
 			);
 			expect(h.errors).toEqual([]);
+			expect(observePathRemote).not.toHaveBeenCalled();
 			for (const boundary of [destination, prepareSystem, ssh, h.spawn])
 				expect(boundary).not.toHaveBeenCalled();
 			expect(port.asked).toHaveLength(0);
@@ -1175,25 +1326,36 @@ describe('process:spawn Grok directory-grant refusal (GT1-02-11A1T)', () => {
 				cwd: host === 'remote' ? '/srv/chosen-project' : os.tmpdir(),
 				agentSessionId: resume ? 'native-grant-session' : undefined,
 				sessionAdditionalDirectories: grants,
-				sessionCustomEnvVars: { GROK_HOME: '/synthetic/selected-account' },
+				sessionCustomEnvVars: {
+					GROK_HOME: host === 'remote' ? '/synthetic/selected-account' : GROK_ACCOUNT,
+				},
 				sessionSshRemoteConfig:
 					host === 'remote' ? { enabled: true, remoteId: remote.id } : undefined,
 			});
 			const plan = vi.spyOn(launchPlan, 'buildAgentLaunchPlan');
+			const binding = seedGrokLaunch(h, request, host === 'remote' ? remote : undefined);
 			expect(await handleProcessSpawn(request, h.deps)).toMatchObject({ success: true });
 			expect(plan).toHaveBeenCalledTimes(2);
 			for (const [input] of plan.mock.calls) expect(input.additionalDirectories).toEqual(grants);
 			const result = plan.mock.results[1].value;
 			if (!result.ok) throw new Error('Expected a launch with inert grants');
 			expect(result.plan.cwd).toBe(request.cwd);
-			expect(result.plan.envVars?.GROK_HOME).toBe('/synthetic/selected-account');
+			expect(result.plan.envVars?.GROK_HOME).toBe(request.sessionCustomEnvVars!.GROK_HOME);
 			expect(result.plan.args).not.toContain('--add-dir');
 			expect(result.plan.args.includes('--resume')).toBe(resume);
 			if (resume) expect(result.plan.args).toContain('native-grant-session');
 			expect(result.plan.target).toEqual(
 				host === 'remote' ? { kind: 'remote', remote } : { kind: 'local' }
 			);
-			expect(spawned(h).promptArtifact).toMatchObject({ owner: host });
+			const config = spawned(h);
+			expect(config.promptArtifact).toMatchObject({ owner: host });
+			if (resume) {
+				expect(config.nativeSessionBinding).toEqual(binding);
+				expect({ ...config.nativeSessionScope, nativeSessionId: config.agentSessionId }).toEqual(
+					binding
+				);
+			}
+			if (host === 'remote') expect(observePathRemote).toHaveBeenCalledTimes(2);
 			expect(h.errors).toEqual([]);
 		}
 	);
@@ -1331,11 +1493,16 @@ describe('process:spawn native request correlation (GT1-04-07E1PT)', () => {
 				}),
 				h.deps
 			);
-			if (failure === 'admission') {
-				await expect(run).rejects.toThrow();
+			if (failure === 'ownership') {
+				expect(await run).toMatchObject({
+					success: false,
+					error: expect.stringContaining('no retained native ownership'),
+				});
+			} else {
+				await expect(run).rejects.toThrow('Private prompt-file launch failed.');
 				expect(port.asked).toHaveLength(1);
-				expect(port.authority.live()).toHaveLength(0);
-			} else expect(await run).toMatchObject({ success: false });
+				if (failure === 'admission') expect(port.authority.live()).toHaveLength(0);
+			}
 			if (failure !== 'sink') expect(h.spawn).not.toHaveBeenCalled();
 			else expect(h.spawn).toHaveBeenCalledOnce();
 			if (failure === 'ownership') expect(port.asked).toHaveLength(0);
