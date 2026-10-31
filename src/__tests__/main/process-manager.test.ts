@@ -21,7 +21,7 @@ const { mockExecFile, mockExecFileSync } = vi.hoisted(() => ({
 }));
 
 vi.mock('child_process', async (importOriginal) => {
-	const actual = await importOriginal();
+	const actual = await importOriginal<typeof import('child_process')>();
 	return { ...actual, execFile: mockExecFile, execFileSync: mockExecFileSync };
 });
 
@@ -74,7 +74,6 @@ import {
 	ProcessManager,
 	detectNodeVersionManagerBinPaths,
 	buildUnixBasePath,
-	type UsageStats,
 	type ModelStats,
 	type AgentError,
 } from '../../main/process-manager';
@@ -862,7 +861,7 @@ describe('process-manager.ts', () => {
 		describe('agent-error event emission', () => {
 			it('should be an EventEmitter that supports agent-error events', () => {
 				let emittedError: AgentError | null = null;
-				processManager.on('agent-error', (sessionId: string, error: AgentError) => {
+				processManager.on('agent-error', (_sessionId: string, error: AgentError) => {
 					emittedError = error;
 				});
 
@@ -1688,7 +1687,7 @@ describe('process-manager.ts', () => {
 
 		it('should buffer data events and flush after 50ms', () => {
 			const emittedData: string[] = [];
-			processManager.on('data', (sessionId: string, data: string) => {
+			processManager.on('data', (_sessionId: string, data: string) => {
 				emittedData.push(data);
 			});
 
@@ -1702,7 +1701,7 @@ describe('process-manager.ts', () => {
 
 		it('should flush buffer on kill', () => {
 			const emittedData: string[] = [];
-			processManager.on('data', (sessionId: string, data: string) => {
+			processManager.on('data', (_sessionId: string, data: string) => {
 				emittedData.push(data);
 			});
 
