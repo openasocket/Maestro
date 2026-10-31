@@ -1805,6 +1805,37 @@
 			],
 			"testOwners": ["GT1-04-07CUIT", "GT1-04-07CUIAT", "GT1-04-07C5UT"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-unified-history-scope": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c5u-unified-history-scope-and-completion-forwarding",
+			"sourceCommit": "dfc7df0d27ee3e12d9cbecd05af4f7c718ba040b",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/components/DirectorNotes/UnifiedHistoryTab.tsx": "7d41e05c137e7c5515cead6f89add37026cc33ecab84c787c98bd4a02cb393a8",
+				"src/renderer/components/DirectorNotes/DirectorNotesModal.tsx": "17b7d3a6622fda0b1bc06623e09d71e2fb20d4d376723c652a2caf022a394304",
+				"src/renderer/components/AppStandaloneModals.tsx": "ae7e709ee08596f04a5fd28707de8c1f1394a24144988b1c7d1a0362a2c37e02"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Pre-existing RequestInit.dispatcher TS2339 in src/main/plugins/plugin-host-handlers.ts:1196; no changed-file diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "Unified History exact-entry owner/project/binding forwarding for row, keyboard and detail resume; boolean confirmation and local selection/parked-tab generation predicate through Director Notes and AppStandaloneModals. Outer handler must consume isCurrent before side effects in 07C5UH; end-to-end retention is not yet established.",
+			"remainingImplementationOwners": ["GT1-04-07C5UH", "GT1-04-07D", "GT1-04-07E", "GT1-04-07F"],
+			"testOwners": ["GT1-04-07C5UT"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {

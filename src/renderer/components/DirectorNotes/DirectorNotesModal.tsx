@@ -14,6 +14,7 @@ import { useModalStore, selectModalData, getModalActions } from '../../stores/mo
 import { daysToLookbackHours, formatLookbackSinceDate } from './lookback';
 import { ResizeHandles } from '../ui/ResizeHandles';
 import { usePhoneLayout } from '../../hooks/ui/useViewportBreakpoint';
+import type { UnifiedHistoryTabProps } from './UnifiedHistoryTab';
 
 // Lazy load tab components
 const UnifiedHistoryTab = lazy(() =>
@@ -26,8 +27,8 @@ const AIOverviewTab = lazy(() =>
 interface DirectorNotesModalProps {
 	theme: Theme;
 	onClose: () => void;
-	// Session navigation - jumps to an agent's session tab (closes modal first)
-	onResumeSession?: (sourceSessionId: string, agentSessionId: string, sessionName?: string) => void;
+	// Forward recorded ownership and confirmed success to the outer navigation handler.
+	onResumeSession?: UnifiedHistoryTabProps['onResumeSession'];
 	// File linking props passed through to history detail modal
 	fileTree?: any[];
 	cwd?: string;
@@ -356,6 +357,7 @@ export function DirectorNotesModal({
 								ref={historyTabRef}
 								theme={theme}
 								onResumeSession={onResumeSession}
+								isActive={activeTab === 'history'}
 								fileTree={fileTree}
 								cwd={cwd}
 								projectRoot={projectRoot}
