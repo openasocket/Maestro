@@ -1415,7 +1415,14 @@ describe('GrokSessionStorage - SSH remote', () => {
 			}
 			identities.set(selected, identities.get(account)!);
 			identities.set(`${account}/sessions`, identities.get(pool)!);
-			vi.mocked(remoteFs.observePathRemote).mockImplementation(async (p) =>
+			// Select the ordinary path overload; this fixture does not observe a Grok launch.
+			vi.mocked<
+				(
+					filePath: string,
+					sshRemote: SshRemoteConfig,
+					deps?: remoteFs.RemoteFsDeps
+				) => Promise<remoteFs.RemoteFsResult<remoteFs.RemotePathIdentity>>
+			>(remoteFs.observePathRemote).mockImplementation(async (p) =>
 				identities.has(p)
 					? { success: true, data: { ...identities.get(p)! } }
 					: { success: false, errorCode: 'identity-unavailable', error: 'Path not found' }
