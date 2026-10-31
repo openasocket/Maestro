@@ -466,6 +466,60 @@ describe('reopenClosedConversation', () => {
 			expect(useSessionStore.getState().sessions[0]).toBe(changed);
 		});
 
+		it.each<NativeSessionBinding | undefined>([
+			undefined,
+			{ version: 1, state: 'unknown', reason: 'legacy' },
+		])(
+			'routes unknown history to an honest refusal, preserving its live ID collision: %j',
+			async (binding) => {
+				const retained = tab('retained', {
+					hidden: true,
+					agentSessionId: 's-tax',
+					nativeSessionBinding: nativeBinding,
+					logs: [said('retained history')],
+				});
+				const session = agentWith([buildTab(), retained], { toolType: 'grok' });
+				history([
+					entry('s-tax', 'home office deduction', {
+						sessionId: 'agent',
+						nativeSessionBinding: binding,
+					}),
+				]);
+				const target = await routeQuickChatMessage(session, 'home office deduction', noChat);
+				expect(target).toMatchObject({ kind: 'closed', agentSessionId: 's-tax' });
+				if (target.kind !== 'closed') throw new Error('Expected retained history candidate');
+				const created = vi.fn();
+				await expect(
+					reopenClosedConversation('agent', target, () => true, created)
+				).rejects.toBeInstanceOf(SessionResumeRefusedError);
+				expect(useSessionStore.getState().sessions[0]).toBe(session);
+				expect(window.maestro.agentSessions.read).not.toHaveBeenCalled();
+				expect(created).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each<Partial<Session>>([
+			{ toolType: 'codex' },
+			{ customEnvVars: { GROK_HOME: '/fixture/account-b' } },
+			{ sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-b' } },
+		])('checks selection on fresh updater entry: %j', async (patch) => {
+			const { setSessions, sessions } = useSessionStore.getState();
+			const changed = { ...sessions[0], ...patch };
+			const commit = vi.fn<typeof setSessions>((updater) => {
+				// A selection write can land after the read resolves but before its commit.
+				useSessionStore.setState({ sessions: [changed] });
+				setSessions(updater);
+			});
+			useSessionStore.setState({ setSessions: commit });
+			const created = vi.fn();
+			await expect(
+				reopenClosedConversation('agent', conversation, () => true, created)
+			).rejects.toBeInstanceOf(SessionResumeRefusedError);
+			expect(commit).toHaveBeenCalledTimes(1);
+			expect(useSessionStore.getState().sessions[0]).toBe(changed);
+			expect(created).not.toHaveBeenCalled();
+		});
+
 		it('checks cancellation at commit without creating or claiming a tab', async () => {
 			const current = vi.fn().mockReturnValue(false);
 			const created = vi.fn();
@@ -476,7 +530,7 @@ describe('reopenClosedConversation', () => {
 			expect(useSessionStore.getState().sessions[0]).toBe(before);
 		});
 
-		it.each(['concurrent', 'rebound', 'orphan', 'removed'])(
+		it.each(['concurrent', 'rebound', 'deleted', 'orphan', 'removed'])(
 			'fences %s native tab changes at commit',
 			async (change) => {
 				const retained = tab('retained', {
@@ -484,7 +538,7 @@ describe('reopenClosedConversation', () => {
 					nativeSessionBinding: nativeBinding,
 					logs: [said('retained history')],
 				});
-				if (change === 'rebound')
+				if (change === 'rebound' || change === 'deleted')
 					useSessionStore.getState().updateSession('agent', { aiTabs: [retained] });
 				let resolve!: (value: typeof receipt) => void;
 				const pending = new Promise<typeof receipt>((done) => {
@@ -494,6 +548,8 @@ describe('reopenClosedConversation', () => {
 				const created = vi.fn();
 				const reopening = reopenClosedConversation('agent', conversation, () => true, created);
 				if (change === 'removed') useSessionStore.getState().removeSession('agent');
+				else if (change === 'deleted')
+					useSessionStore.getState().updateSession('agent', { aiTabs: [buildTab()] });
 				else
 					useSessionStore.getState().updateSession(
 						'agent',
@@ -520,6 +576,37 @@ describe('reopenClosedConversation', () => {
 			}
 		);
 	});
+
+	it.each(['claude-code', 'codex'] as const)(
+		'refuses a pending %s reopen after the agent switches to Grok',
+		async (toolType) => {
+			agentWith([buildTab()], { toolType });
+			let resolve!: (value: typeof transcript) => void;
+			vi.mocked(window.maestro.agentSessions.read).mockReturnValue(
+				new Promise((done) => {
+					resolve = done;
+				})
+			);
+			const created = vi.fn();
+			const reopening = reopenClosedConversation(
+				'agent',
+				{
+					agentSessionId: 's-tax',
+					name: 'Tax Questions',
+				},
+				() => true,
+				created
+			);
+			useSessionStore.getState().updateSession('agent', { toolType: 'grok' });
+			const changed = useSessionStore.getState().sessions[0];
+			resolve(transcript);
+			await expect(reopening).rejects.toBeInstanceOf(SessionResumeRefusedError);
+			expect(useSessionStore.getState().sessions[0]).toBe(changed);
+			expect(window.maestro.agentSessions.read).toHaveBeenCalledTimes(1);
+			expect(vi.mocked(window.maestro.agentSessions.read).mock.calls[0][0]).toBe(toolType);
+			expect(created).not.toHaveBeenCalled();
+		}
+	);
 
 	it('does not attempt a foreign native resume for an unresolved migration History entry', async () => {
 		agentWith([buildTab()], {

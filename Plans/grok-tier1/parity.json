@@ -2008,6 +2008,34 @@
 			"scope": "36 new parameter-expanded router/engine cases, 40 scenarios with routing/reopen loops, and two adapted non-Grok tests. Scoped collisions, cache selection, receipt refusal, recorded owner/binding forwarding, mutation fences, failed recall history retention, repeated queued follow-ups, cancellation and explicit recovery.",
 			"continuationOwner": "GT1-04-07CQT1",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-quick-chat-edge-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07cqt1-quick-chat-edge-test-authoring",
+			"sourceCommit": "afaecac0e4ba3949c77f191a388c8877c4c38e02",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/services/quickChatRouter.test.ts": "85b4387e5ea1bca69d7067b91856b95ec1ae31091ef37e1c2bf3e370e6ea54af",
+				"src/__tests__/renderer/services/quickChatEngine.test.ts": "0007ee97a89104590fe1b17e136db5723e29bb4e9b156a4ace63a42f26a5fcd5"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Existing RequestInit.dispatcher TS2339 remains; supplemental compiler-API comparison finds one baseline/current diagnostic and zero new.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "36 new parameter-expanded cases (28 engine, 8 router); real recent JSON parser round trips, scoped recall races, visible home ownership, late native identity/reply retention, sticky refusal and same-home recovery, unknown routed history and fresh-updater fences. Two stale getRecent regressions expose a missing request generation fence by static review; runtime remains not-run.",
+			"repairOwner": "GT1-04-07CQT1A",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -3602,7 +3630,8 @@
 					"GT1-02-03A",
 					"GT1-02-03F",
 					"GT1-02-05C2",
-					"GT1-02-05C2A"
+					"GT1-02-05C2A",
+					"GT1-04-07CQT1A"
 				],
 				"test": [
 					"GT1-02-02",
@@ -3656,7 +3685,8 @@
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
 				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
 				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
-				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests"
+				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
+				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3702,6 +3732,12 @@
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Explicit empty/blank environment and source-label tests pass in 13 across argument resolution, fake-port group-chat routing and renderer consumers. This resolves the narrow empty-record inheritance regression. Actual selected-account exclusion, credential custody and local/SSH launch isolation still require phase09/11 qualification. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
 					"affectedRows": ["P04", "P31"]
+				},
+				{
+					"id": "quick-chat-stale-recent-read",
+					"code": "implementation-repair-pending",
+					"missingPrerequisite": "GT1-04-07CQT1A must fence stale getRecent completion after new chat or newer recall; GT1-04-13 must execute both Quick Chat suites, including the two authored expected-failing regressions. Static review only; runtime not-run.",
+					"affectedRows": ["P04"]
 				}
 			],
 			"phase": "02",
@@ -5835,7 +5871,8 @@
 					"GT1-04-07C",
 					"GT1-04-07D",
 					"GT1-04-07E",
-					"GT1-04-07F"
+					"GT1-04-07F",
+					"GT1-04-07CQT1A"
 				],
 				"test": [
 					"GT1-04-08",
@@ -5876,7 +5913,8 @@
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
 				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
 				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
-				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests"
+				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
+				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5909,6 +5947,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P14"]
+				},
+				{
+					"id": "quick-chat-stale-recent-read",
+					"code": "implementation-repair-pending",
+					"missingPrerequisite": "GT1-04-07CQT1A must fence stale getRecent completion after new chat or newer recall; GT1-04-13 must execute both Quick Chat suites, including the two authored expected-failing regressions. Static review only; runtime not-run.",
 					"affectedRows": ["P14"]
 				}
 			],
@@ -5985,7 +6029,8 @@
 					"GT1-04-11",
 					"GT1-04-05A",
 					"GT1-04-05B",
-					"GT1-04-06E1"
+					"GT1-04-06E1",
+					"GT1-04-07CQT1A"
 				],
 				"test": [
 					"GT1-04-02",
@@ -6043,7 +6088,8 @@
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
 				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
 				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
-				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests"
+				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
+				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6076,6 +6122,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P15"]
+				},
+				{
+					"id": "quick-chat-stale-recent-read",
+					"code": "implementation-repair-pending",
+					"missingPrerequisite": "GT1-04-07CQT1A must fence stale getRecent completion after new chat or newer recall; GT1-04-13 must execute both Quick Chat suites, including the two authored expected-failing regressions. Static review only; runtime not-run.",
 					"affectedRows": ["P15"]
 				}
 			],
@@ -11065,7 +11117,8 @@
 					"GT1-04-07C",
 					"GT1-04-07D",
 					"GT1-04-07E",
-					"GT1-04-07F"
+					"GT1-04-07F",
+					"GT1-04-07CQT1A"
 				],
 				"test": [
 					"GT1-04-08",
@@ -11104,7 +11157,8 @@
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
 				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
 				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
-				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests"
+				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
+				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11137,6 +11191,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["C-supportsResume"]
+				},
+				{
+					"id": "quick-chat-stale-recent-read",
+					"code": "implementation-repair-pending",
+					"missingPrerequisite": "GT1-04-07CQT1A must fence stale getRecent completion after new chat or newer recall; GT1-04-13 must execute both Quick Chat suites, including the two authored expected-failing regressions. Static review only; runtime not-run.",
 					"affectedRows": ["C-supportsResume"]
 				}
 			],
@@ -11577,7 +11637,8 @@
 					"GT1-04-07C",
 					"GT1-04-07D",
 					"GT1-04-07E",
-					"GT1-04-07F"
+					"GT1-04-07F",
+					"GT1-04-07CQT1A"
 				],
 				"test": [
 					"GT1-04-08",
@@ -11616,7 +11677,8 @@
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
 				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
 				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
-				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests"
+				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
+				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11649,6 +11711,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["C-supportsSessionId"]
+				},
+				{
+					"id": "quick-chat-stale-recent-read",
+					"code": "implementation-repair-pending",
+					"missingPrerequisite": "GT1-04-07CQT1A must fence stale getRecent completion after new chat or newer recall; GT1-04-13 must execute both Quick Chat suites, including the two authored expected-failing regressions. Static review only; runtime not-run.",
 					"affectedRows": ["C-supportsSessionId"]
 				}
 			],
@@ -16158,7 +16226,8 @@
 					"GT1-04-07C",
 					"GT1-04-07D",
 					"GT1-04-07E",
-					"GT1-04-07F"
+					"GT1-04-07F",
+					"GT1-04-07CQT1A"
 				],
 				"test": [
 					"GT1-04-08",
@@ -16199,7 +16268,8 @@
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
 				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
 				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
-				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests"
+				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
+				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16232,6 +16302,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["REG-SESSION-MUTATION"]
+				},
+				{
+					"id": "quick-chat-stale-recent-read",
+					"code": "implementation-repair-pending",
+					"missingPrerequisite": "GT1-04-07CQT1A must fence stale getRecent completion after new chat or newer recall; GT1-04-13 must execute both Quick Chat suites, including the two authored expected-failing regressions. Static review only; runtime not-run.",
 					"affectedRows": ["REG-SESSION-MUTATION"]
 				}
 			],
