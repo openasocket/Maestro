@@ -1189,6 +1189,36 @@
 			"writerScenarios": 29,
 			"scope": "Controlled local and SSH native writer races, finite comparisons, interrupted append recovery, account/host isolation, late child totals and no native mutation. Adapted earlier list assertions to partial generation provenance. Tests not run or collected.",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-desktop-native-id-retention": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07-desktop-native-id-retention",
+			"sourceCommit": "51005b925812cdad2f2c5933ff4a949ed2ca207b",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/hooks/agent/internal/useAgentSessionIdListener.ts": "e3677cccdd3641f5f62446e6af2ccee4b303bef9767bd7d2854c5245ec764052",
+				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts": "3a03c076c0e0ece2406c85c7ef15545fe995cb7eacded4bf2a2d2034f4e8a24b"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Pre-existing RequestInit.dispatcher TS2339 in src/main/plugins/plugin-host-handlers.ts:1196; no changed-file diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "Desktop native-ID retention, explicit tab targeting and Grok invalid-resume refusal only. Account/host/generation persistence and History/runtime scope remain explicit continuation tasks. No tests authored, collected or run.",
+			"remainingImplementationOwners": [
+				"GT1-04-07A",
+				"GT1-04-07B",
+				"GT1-04-07C",
+				"GT1-04-07D",
+				"GT1-04-07E",
+				"GT1-04-07F"
+			],
+			"testOwner": "GT1-04-07T",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -4994,8 +5024,19 @@
 				"src/main/index.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-04-07", "GT1-04-08A", "GT1-04-08C", "GT1-04-09"],
-				"test": ["GT1-04-08", "GT1-04-08B", "GT1-04-08D", "GT1-04-10"],
+				"implementation": [
+					"GT1-04-07",
+					"GT1-04-08A",
+					"GT1-04-08C",
+					"GT1-04-09",
+					"GT1-04-07A",
+					"GT1-04-07B",
+					"GT1-04-07C",
+					"GT1-04-07D",
+					"GT1-04-07E",
+					"GT1-04-07F"
+				],
+				"test": ["GT1-04-08", "GT1-04-08B", "GT1-04-08D", "GT1-04-10", "GT1-04-07T"],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -5014,7 +5055,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10183,8 +10225,17 @@
 				"src/shared/maestro-lib/run/session.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-04-07", "GT1-11-14A"],
-				"test": ["GT1-04-08", "GT1-11-14B"],
+				"implementation": [
+					"GT1-04-07",
+					"GT1-11-14A",
+					"GT1-04-07A",
+					"GT1-04-07B",
+					"GT1-04-07C",
+					"GT1-04-07D",
+					"GT1-04-07E",
+					"GT1-04-07F"
+				],
+				"test": ["GT1-04-08", "GT1-11-14B", "GT1-04-07T"],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -10203,7 +10254,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10668,8 +10720,17 @@
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-04-07", "GT1-11-14A"],
-				"test": ["GT1-04-08", "GT1-11-14B"],
+				"implementation": [
+					"GT1-04-07",
+					"GT1-11-14A",
+					"GT1-04-07A",
+					"GT1-04-07B",
+					"GT1-04-07C",
+					"GT1-04-07D",
+					"GT1-04-07E",
+					"GT1-04-07F"
+				],
+				"test": ["GT1-04-08", "GT1-11-14B", "GT1-04-07T"],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -10688,7 +10749,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -15220,8 +15282,19 @@
 				"src/main/index.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-04-07", "GT1-04-08A", "GT1-04-08C", "GT1-04-09"],
-				"test": ["GT1-04-08", "GT1-04-08B", "GT1-04-08D", "GT1-04-10"],
+				"implementation": [
+					"GT1-04-07",
+					"GT1-04-08A",
+					"GT1-04-08C",
+					"GT1-04-09",
+					"GT1-04-07A",
+					"GT1-04-07B",
+					"GT1-04-07C",
+					"GT1-04-07D",
+					"GT1-04-07E",
+					"GT1-04-07F"
+				],
+				"test": ["GT1-04-08", "GT1-04-08B", "GT1-04-08D", "GT1-04-10", "GT1-04-07T"],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -15240,7 +15313,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention"
 			},
 			"evidenceApplicability": {
 				"static": {
