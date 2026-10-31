@@ -1700,6 +1700,43 @@
 			],
 			"testOwners": ["GT1-04-07CQT"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-history-panel-ownership": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c3-history-panel-ownership-forwarding",
+			"sourceCommit": "ef8a7cdf7e63f83ad613f19a32730c6dc37d4b0e",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/hooks/props/useRightPanelProps.ts": "87e761e851475b84059677c1af60e282e9bcc51b24f69c783ad2707421edad87",
+				"src/renderer/components/RightPanel.tsx": "80cb17dccd4e7120febccae117cf91d41bb135f1a72be2bdda1f4e6bd850ef07",
+				"src/renderer/components/HistoryPanel.tsx": "8bea319ecbe14765493c96733accbc955e648f06cc46e5972ac5d2743ac49312"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Pre-existing RequestInit.dispatcher TS2339 in src/main/plugins/plugin-host-handlers.ts:1196; no changed-file diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "History panel callback contracts, selected-record owner/binding forwarding, keyboard and cross-agent activation. Missing recorded owners refuse; legacy non-Grok records with owners retain canonical loader behavior. Standalone leaf forwarding and detail-modal await-before-close remain 07C5.",
+			"remainingImplementationOwners": [
+				"GT1-04-07C4",
+				"GT1-04-07C5",
+				"GT1-04-07D",
+				"GT1-04-07E",
+				"GT1-04-07F"
+			],
+			"testOwners": ["GT1-04-07CUIT", "GT1-04-07CUIAT"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
