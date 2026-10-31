@@ -1980,6 +1980,34 @@
 			],
 			"scope": "66 synthetic canonical hook/loader cases for owner forwarding, complete and legacy binding comparisons, native receipt validation, supplied logs, retained metadata, selection/commit races, latest request wins, deduplication and caller/subscriber mutation admission; synchronous store mocks.",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-quick-chat-native-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07cqt-quick-chat-native-continuation-tests",
+			"sourceCommit": "0c90a86aeb2c12f038bcfec5574f4af2abdaabf3",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/services/quickChatRouter.test.ts": "76379077fad27b3b4360fd3aad80e02623bafb4e140d1ca7add3e567e30475c8",
+				"src/__tests__/renderer/services/quickChatEngine.test.ts": "ff7c96ad304e1144df14044e48854bfac1f436570f0f03b6a4e21d9927bc813c"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Existing RequestInit.dispatcher TS2339 remains; supplemental compiler-API comparison finds one baseline/current diagnostic and zero new.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "36 new parameter-expanded router/engine cases, 40 scenarios with routing/reopen loops, and two adapted non-Grok tests. Scoped collisions, cache selection, receipt refusal, recorded owner/binding forwarding, mutation fences, failed recall history retention, repeated queued follow-ups, cancellation and explicit recovery.",
+			"continuationOwner": "GT1-04-07CQT1",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -3589,7 +3617,9 @@
 					"GT1-02-05C2AT",
 					"GT1-04-07C5UT",
 					"GT1-04-07C5UT1",
-					"GT1-04-07CT"
+					"GT1-04-07CT",
+					"GT1-04-07CQT",
+					"GT1-04-07CQT1"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -3625,7 +3655,8 @@
 				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
 				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
-				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests"
+				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
+				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5814,7 +5845,9 @@
 					"GT1-04-07T",
 					"GT1-04-07C5UT",
 					"GT1-04-07C5UT1",
-					"GT1-04-07CT"
+					"GT1-04-07CT",
+					"GT1-04-07CQT",
+					"GT1-04-07CQT1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -5842,7 +5875,8 @@
 				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
 				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
-				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests"
+				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
+				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5966,7 +6000,9 @@
 					"GT1-04-06C",
 					"GT1-04-07C5UT",
 					"GT1-04-07C5UT1",
-					"GT1-04-07CT"
+					"GT1-04-07CT",
+					"GT1-04-07CQT",
+					"GT1-04-07CQT1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-02-13", "GT1-02-14", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
@@ -6006,7 +6042,8 @@
 				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
 				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
-				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests"
+				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
+				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11036,7 +11073,9 @@
 					"GT1-04-07T",
 					"GT1-04-07C5UT",
 					"GT1-04-07C5UT1",
-					"GT1-04-07CT"
+					"GT1-04-07CT",
+					"GT1-04-07CQT",
+					"GT1-04-07CQT1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -11064,7 +11103,8 @@
 				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
 				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
-				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests"
+				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
+				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11545,7 +11585,9 @@
 					"GT1-04-07T",
 					"GT1-04-07C5UT",
 					"GT1-04-07C5UT1",
-					"GT1-04-07CT"
+					"GT1-04-07CT",
+					"GT1-04-07CQT",
+					"GT1-04-07CQT1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
@@ -11573,7 +11615,8 @@
 				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
 				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
-				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests"
+				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
+				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16125,7 +16168,9 @@
 					"GT1-04-07T",
 					"GT1-04-07C5UT",
 					"GT1-04-07C5UT1",
-					"GT1-04-07CT"
+					"GT1-04-07CT",
+					"GT1-04-07CQT",
+					"GT1-04-07CQT1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -16153,7 +16198,8 @@
 				"phase04NativeSessionBindingTestsRef": "phase04-native-session-binding-tests",
 				"phase04UnifiedHistoryScopeTestsRef": "phase04-unified-history-scope-tests",
 				"phase04OuterResumeAdmissionTestsRef": "phase04-outer-resume-admission-tests",
-				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests"
+				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
+				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests"
 			},
 			"evidenceApplicability": {
 				"static": {

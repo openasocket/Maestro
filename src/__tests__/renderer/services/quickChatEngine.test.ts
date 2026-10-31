@@ -12,7 +12,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createMockAITab, createMockSession } from '../../helpers';
-import { useSessionStore } from '../../../renderer/stores/sessionStore';
+import { useSessionStore, updateSessionWith } from '../../../renderer/stores/sessionStore';
 import { useSettingsStore } from '../../../renderer/stores/settingsStore';
 import { useAgentStore } from '../../../renderer/stores/agentStore';
 import {
@@ -56,6 +56,8 @@ vi.mock('../../../renderer/services/tabAutoNaming', async (original) => ({
 	requestTabAutoName: vi.fn(),
 }));
 import { requestTabAutoName } from '../../../renderer/services/tabAutoNaming';
+import { SessionResumeRefusedError } from '../../../renderer/services/resumableSession';
+import type { NativeSessionBinding } from '../../../shared/maestro-lib/agents/providerSwap';
 
 vi.mock('../../../renderer/utils/sentry', () => ({ captureException: vi.fn() }));
 import { captureException } from '../../../renderer/utils/sentry';
@@ -362,11 +364,11 @@ describe('send', () => {
 		});
 		const { message } = await send('and the deduction?');
 
-		expect(reopenClosedConversation).toHaveBeenCalledWith('b', {
-			kind: 'closed',
-			agentSessionId: 'old-session',
-			name: 'Tax Questions',
-		});
+		expect(reopenClosedConversation).toHaveBeenCalledWith(
+			'b',
+			{ kind: 'closed', agentSessionId: 'old-session', name: 'Tax Questions' },
+			expect.any(Function)
+		);
 		expect(message.route).toMatchObject({
 			status: 'running',
 			origin: 'reopened',
@@ -1513,6 +1515,203 @@ describe('recent chats', () => {
 		...overrides,
 	});
 
+	describe('Grok native continuation', () => {
+		const binding = {
+			version: 1,
+			state: 'bound',
+			provider: 'grok',
+			nativeSessionId: 'conv-a',
+			accountRef: 'fixture-account-a',
+			host: { kind: 'local', identity: 'fixture-host-a' },
+			cwd: '/fixture/project',
+		} as const satisfies NativeSessionBinding;
+
+		beforeEach(() => {
+			updateSessionWith('a', (s) => ({ ...s, toolType: 'grok', cwd: binding.cwd }));
+			setQuickChatSettings({ agentId: 'a' });
+		});
+
+		it('retains refused recall history and scope across queued follow-ups and saving', async () => {
+			const recent = recentOn({
+				homeTabId: 'gone',
+				homeNativeSessionBinding: binding,
+				turns: [{ ...recentOn().turns[0], tabId: 'gone', nativeSessionBinding: binding }],
+			});
+			vi.mocked(window.maestro.quickChat.getRecent).mockResolvedValueOnce(recent);
+			let rejectRead!: (error: Error) => void;
+			vi.mocked(reopenClosedConversation).mockReturnValue(
+				new Promise((_resolve, reject) => {
+					rejectRead = reject;
+				})
+			);
+			const unhandled = vi.fn();
+			process.on('unhandledRejection', unhandled);
+			try {
+				const pending = runQuickChatCommand({ type: 'recall', chatId: recent.id });
+				await vi.waitFor(() => expect(reopenClosedConversation).toHaveBeenCalled());
+				expect(reopenClosedConversation).toHaveBeenCalledWith(
+					'a',
+					{
+						agentSessionId: 'conv-a',
+						name: 'Main',
+						ownerAgentId: 'a',
+						nativeSessionBinding: binding,
+					},
+					expect.any(Function),
+					expect.any(Function)
+				);
+				await runQuickChatCommand({ type: 'send', text: 'queued one' });
+				await runQuickChatCommand({ type: 'send', text: 'queued two' });
+				rejectRead(new SessionResumeRefusedError('Fixture receipt rejected'));
+				expect(await pending).toMatchObject({ ok: false, error: 'Fixture receipt rejected' });
+				await vi.waitFor(() =>
+					expect(
+						sent()
+							.slice(1)
+							.map((m) => m.route?.status)
+					).toEqual(['failed', 'failed'])
+				);
+				expect((await send('later')).message.route?.status).toBe('failed');
+				expect(routeQuickChatMessage).not.toHaveBeenCalled();
+				expect(session('a').aiTabs.map((t) => t.id)).toEqual(['a-main']);
+				expect(session('a').executionQueue).toEqual([]);
+				expect(useAgentStore.getState().processQueuedItem).not.toHaveBeenCalled();
+				await runQuickChatCommand({ type: 'new' });
+				const saved = vi.mocked(window.maestro.quickChat.saveRecent).mock.calls.at(-1)![0];
+				expect(saved).toMatchObject({
+					homeTabId: 'gone',
+					homeAgentSessionId: 'conv-a',
+					homeNativeSessionBinding: binding,
+				});
+				expect(saved.turns[0]).toEqual(recent.turns[0]);
+				await new Promise((resolve) => setTimeout(resolve, 0));
+				expect(unhandled).not.toHaveBeenCalled();
+				expect(captureException).not.toHaveBeenCalled();
+			} finally {
+				process.off('unhandledRejection', unhandled);
+			}
+		});
+
+		it.each(['provider', 'account', 'host', 'cancel'] as const)(
+			'fences %s changes during routing and reopen',
+			async (change) => {
+				for (const stage of ['routing', 'reopen'] as const) {
+					resetQuickChatEngineForTests();
+					updateSessionWith('a', () => agent('a', { toolType: 'grok', cwd: binding.cwd }));
+					const before = session('a');
+					let release!: () => void;
+					const gate = new Promise<void>((resolve) => {
+						release = resolve;
+					});
+					vi.mocked(routeQuickChatMessage)
+						.mockReset()
+						.mockImplementation(async () => {
+							if (stage === 'routing') await gate;
+							return {
+								kind: 'closed',
+								agentSessionId: 'conv-a',
+								name: 'Main',
+								ownerAgentId: 'a',
+								nativeSessionBinding: binding,
+							};
+						});
+					vi.mocked(reopenClosedConversation)
+						.mockReset()
+						.mockImplementation(async () => {
+							await gate;
+							return null;
+						});
+					await runQuickChatCommand({ type: 'send', text: 'continue' });
+					await vi.waitFor(() =>
+						expect(
+							stage === 'routing' ? routeQuickChatMessage : reopenClosedConversation
+						).toHaveBeenCalled()
+					);
+					if (change === 'cancel') await runQuickChatCommand({ type: 'stop' });
+					else
+						updateSessionWith('a', (s) => ({
+							...s,
+							...(change === 'provider'
+								? { toolType: 'codex' as const }
+								: change === 'account'
+									? { customEnvVars: { GROK_HOME: '/fixture/other' } }
+									: { sshRemoteId: 'other-host' }),
+						}));
+					if (stage === 'reopen' && change === 'cancel')
+						expect(vi.mocked(reopenClosedConversation).mock.calls[0][2]?.()).toBe(false);
+					release();
+					await vi.mocked(stage === 'routing' ? routeQuickChatMessage : reopenClosedConversation)
+						.mock.results[0].value;
+					await vi.waitFor(() =>
+						expect(sent()[0].route?.status).toBe(change === 'cancel' ? 'cancelled' : 'failed')
+					);
+					expect(session('a').aiTabs).toEqual(before.aiTabs);
+					expect(session('a').executionQueue).toEqual([]);
+					expect(useAgentStore.getState().processQueuedItem).not.toHaveBeenCalled();
+				}
+			}
+		);
+
+		it.each(['new chat', 'new tab', 'existing tab'] as const)(
+			'recovers from refusal only after explicit %s',
+			async (choice) => {
+				vi.mocked(routeQuickChatMessage).mockRejectedValueOnce(
+					new SessionResumeRefusedError('Scope refused')
+				);
+				expect((await send('continue')).message.route?.status).toBe('failed');
+				expect((await send('again')).message.route?.status).toBe('failed');
+				if (choice === 'new chat') await runQuickChatCommand({ type: 'new' });
+				else
+					await runQuickChatCommand({
+						type: 'setTab',
+						choice: choice === 'new tab' ? { kind: 'new' } : { kind: 'tab', tabId: 'a-main' },
+					});
+				const next = await send('explicit destination');
+				expect(next.message.route?.status).toBe('running');
+				expect(session('a').aiTabs).toHaveLength(choice === 'existing tab' ? 1 : 2);
+				expect(useAgentStore.getState().processQueuedItem).toHaveBeenCalledTimes(1);
+			}
+		);
+
+		it.each(['account', 'host', 'unknown', 'absent'] as const)(
+			'refuses a remembered tab with colliding ID and %s scope',
+			async (scope) => {
+				const other: NativeSessionBinding | undefined =
+					scope === 'absent'
+						? undefined
+						: scope === 'unknown'
+							? { version: 1, state: 'unknown', reason: 'legacy' }
+							: {
+									...binding,
+									...(scope === 'account'
+										? { accountRef: 'other' }
+										: { host: { kind: 'ssh', identity: 'other' } }),
+								};
+				patchTab('a', 'a-main', () => ({
+					agentSessionId: 'conv-a',
+					nativeSessionBinding: other,
+					logs: [{ id: 'foreign', source: 'stdout', timestamp: 2, text: 'another account reply' }],
+				}));
+				const before = session('a').aiTabs;
+				vi.mocked(window.maestro.quickChat.getRecent).mockResolvedValueOnce(
+					recentOn({
+						homeNativeSessionBinding: binding,
+						turns: [{ ...recentOn().turns[0], nativeSessionBinding: binding }],
+					})
+				);
+				const result = await runQuickChatCommand({ type: 'recall', chatId: 'chat-1' });
+				expect(result.ok).toBe(false);
+				expect(result.snapshot.messages.map((m) => m.text)).toEqual([
+					'how is the build',
+					'old copy',
+				]);
+				expect(reopenClosedConversation).not.toHaveBeenCalled();
+				expect(session('a').aiTabs).toBe(before);
+				expect(session('a').executionQueue).toEqual([]);
+			}
+		);
+	});
+
 	it('saves a chat to the list as it leaves the window, with its thread and tab', async () => {
 		const { message } = await send('plan the trip');
 		const tabId = message.route!.tabId!;
@@ -1560,27 +1759,37 @@ describe('recent chats', () => {
 		expect(session('b').aiTabs.some((t) => t.id === tabId)).toBe(false);
 
 		vi.mocked(window.maestro.quickChat.getRecent).mockResolvedValueOnce(saved);
-		vi.mocked(reopenClosedConversation).mockImplementation(async (sessionId) => {
-			addTab(
-				sessionId,
-				createMockAITab({
-					id: 'reopened',
-					agentSessionId: 'conv-1',
-					logs: [
-						{ id: 'u', timestamp: 1, source: 'user', text: 'plan the trip' },
-						{ id: 'o', timestamp: 2, source: 'stdout', text: 'Here is the plan' },
-					] as LogEntry[],
-				})
-			);
-			return 'reopened';
-		});
+		vi.mocked(reopenClosedConversation).mockImplementation(
+			async (sessionId, _target, _canCommit, onCreated) => {
+				addTab(
+					sessionId,
+					createMockAITab({
+						id: 'reopened',
+						agentSessionId: 'conv-1',
+						logs: [
+							{ id: 'u', timestamp: 1, source: 'user', text: 'plan the trip' },
+							{ id: 'o', timestamp: 2, source: 'stdout', text: 'Here is the plan' },
+						] as LogEntry[],
+					})
+				);
+				onCreated?.('reopened');
+				return 'reopened';
+			}
+		);
 		const result = await runQuickChatCommand({ type: 'recall', chatId });
 
 		expect(result.ok).toBe(true);
-		expect(reopenClosedConversation).toHaveBeenCalledWith('b', {
-			agentSessionId: 'conv-1',
-			name: saved.homeTabName,
-		});
+		expect(reopenClosedConversation).toHaveBeenCalledWith(
+			'b',
+			{
+				agentSessionId: 'conv-1',
+				name: saved.homeTabName,
+				ownerAgentId: 'b',
+				nativeSessionBinding: undefined,
+			},
+			expect.any(Function),
+			expect.any(Function)
+		);
 		expect(result.snapshot.chatId).toBe(chatId);
 		expect(result.snapshot.messages.map((m) => m.text)).toEqual([
 			'plan the trip',
