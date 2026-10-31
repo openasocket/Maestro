@@ -2506,6 +2506,31 @@
 			],
 			"testOwner": "GT1-04-07FPT",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-shared-admitted-launch-receipt": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07f4-shared-admitted-launch-receipt",
+			"sourceCommit": "75043fee0782fbf3324fe627d090f3392feb2c04",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/shared/maestro-lib/turns/run-agent-turn.ts": "5f690ad8ceb2e96d788f4a7bfb5260ca76fd937747172bbb214c3a5d3bcc4741",
+				"src/shared/maestro-lib/runtime/turns.ts": "ba398c7f66135c162cc43a0551f402dd7de233b18f8314bc78a47bfe09b13c79",
+				"src/shared/maestro-lib/runtime/index.ts": "d6ff9a327ccf8e184d837a55acd03e1ec01b737c28f3a3f546f30f82356c3bd3"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "Early retained native identity snapshots, final selector/account/cwd/host validation, post-admission rechecks, unused lease/prompt cleanup, and detached immutable actual-process receipts. Production local observation uses real directory ports and canonical installation identity.",
+			"limitations": [
+				"Default shared runtime has no qualified remote directory/endpoint observer; SSH resume explicitly refuses unknown scope. Supplied host ports are a contract, not proof of production SSH wiring or native qualification.",
+				"GT1-04-07F5 consumes receipts for native binding and History persistence and completes incarnation fencing. Current recording retains unknown provenance for new IDs until then.",
+				"Real ACP routing remains unqualified; conservative agent/stdio custom-argv token-pair refusal may also reject option values. Native ACP JSON prompt files remain supported.",
+				"Tests intentionally neither authored, run nor collected; GT1-04-07F4T authors regressions and GT1-04-13 executes. Applicable live qualification remains not-run."
+			],
+			"testOwner": "GT1-04-07F4T",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6445,7 +6470,8 @@
 				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector",
 				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
 				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
-				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests"
+				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests",
+				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11763,7 +11789,8 @@
 				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector",
 				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
 				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
-				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests"
+				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests",
+				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12350,7 +12377,8 @@
 				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector",
 				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
 				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
-				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests"
+				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests",
+				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17007,7 +17035,8 @@
 				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector",
 				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
 				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
-				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests"
+				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests",
+				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt"
 			},
 			"evidenceApplicability": {
 				"static": {

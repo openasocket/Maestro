@@ -16,6 +16,7 @@
  */
 
 import * as fs from 'fs/promises';
+import { realpathSync, statSync } from 'fs';
 
 import { createSleepTracker } from '../../sleepTracking';
 import { createAgentRepository } from '../agents/repository';
@@ -587,6 +588,7 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 		newId: deps.rules?.newId ?? generateUUID,
 	});
 	const journalLoaded = await journal.load({ liveRunIds: registry.liveRunIds() });
+	const grokInstallationId = installation.installationId;
 	const turns = createRuntimeTurns({
 		paths,
 		repository,
@@ -602,7 +604,37 @@ export async function createMaestroRuntime(options: MaestroRuntimeOptions): Prom
 			journal: () => (journalLoaded.ok ? journal : null),
 			newId: deps.rules?.newId ?? generateUUID,
 		},
-		options: { ...options.turns, lifecycle: options.turns?.lifecycle ?? lifecycle },
+		options: {
+			...options.turns,
+			lifecycle: options.turns?.lifecycle ?? lifecycle,
+			grokLaunchScope: options.turns?.grokLaunchScope ?? {
+				local: {
+					homedir: () => os.homedir(),
+					realpath: (directory) => fs.realpath(directory),
+					stat: (directory) => fs.stat(directory),
+					realpathSync: (directory) => {
+						const resolved = realpathSync(directory);
+						return statSync(resolved).isDirectory() ? resolved : '';
+					},
+					isExpectedError: (error) =>
+						['ENOENT', 'ENOTDIR', 'EACCES', 'EPERM', 'EBUSY', 'EISDIR'].includes(
+							(error as NodeJS.ErrnoException | null)?.code ?? ''
+						),
+					installationId: () => grokInstallationId,
+				},
+				// The headless host has no qualified SSH directory observer. Unknown
+				// scope must refuse resume; an SSH config alias is not a host identity.
+				remote: {
+					observe: async () => ({
+						success: false,
+						errorCode: 'unavailable',
+						error: 'This host cannot observe Grok SSH launch ownership.',
+					}),
+					qualify: async () => undefined,
+					isExpectedError: () => false,
+				},
+			},
+		},
 		deps: { probeBinary: deps.probeBinary, ...deps.turns },
 	});
 

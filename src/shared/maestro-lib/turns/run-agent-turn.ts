@@ -27,6 +27,10 @@
  */
 
 import * as os from 'os';
+import { observeGrokLaunchScope, type GrokLaunchScopePorts } from '../../agentAccountDir';
+import { canonicalJson } from '../../canonicalJson';
+import { matchesNativeSessionBinding, type NativeSessionBinding } from '../agents/providerSwap';
+import { grokLaunchArgsProblem } from '../launch/agent-args';
 import { readClaudeTurnBaseline, type ClaudeCostState } from '../../claudeCostTracker';
 import { getClaudeTokenMode, type ClaudeTokenSourceFields } from '../../claudeTokenMode';
 import {
@@ -91,6 +95,8 @@ export type RunAgentTurnRefusal =
 	| 'grok-model-effort-refused'
 	/** Grok cannot honor the configured directory grants. Nothing was started. */
 	| 'grok-directory-grants-refused'
+	/** Native resume ownership or selectors could not be verified. Nothing was started. */
+	| 'grok-native-session-refused'
 	/** The prompt cannot be delivered as requested. Nothing was started. */
 	| 'prompt-delivery-refused'
 	/** The turn carries images without an explicit file route (CH-8). */
@@ -151,6 +157,12 @@ export interface ManagedTurnAuthority {
 }
 
 export interface RunAgentTurnOptions {
+	/** Production host observations, independent of optional process test seams. */
+	grokLaunchScope?: GrokLaunchScopePorts;
+	/** Retained tab ownership, captured before the caller awaits context loading. */
+	retainedNativeSessionBinding?: NativeSessionBinding;
+	/** Recheck the original tab/provider selection across asynchronous admission. */
+	recheckNativeSelection?(): boolean;
 	/** The managed authority this turn runs under. Absent: an unmanaged turn. */
 	managed?: ManagedTurnAuthority;
 	/**
@@ -186,6 +198,11 @@ export interface RunAgentTurnOptions {
 /** The turn as it runs: events as they are parsed, then how it ended. */
 export interface AgentTurnRun {
 	pid: number | undefined;
+	/** Only an actual admitted process carries this; requested IDs are not allocations. */
+	readonly nativeLaunchReceipt?: Readonly<{
+		scope: Awaited<ReturnType<typeof observeGrokLaunchScope>>['scope'];
+		requestedNativeSessionId?: string;
+	}>;
 	/**
 	 * Every event the provider's parser understood, in order. One consumer: events that arrive
 	 * before iteration starts are held, and the stream ends when the turn does.
@@ -343,6 +360,25 @@ export async function runAgentTurn(
 	const launch = turn.launch;
 	const provider = turn.provider;
 	const providerId = provider.id;
+	const requestedNativeSessionId = turn.resumeSessionId;
+	const retainedBinding = structuredClone(options.retainedNativeSessionBinding);
+	// Private comparison only: environment values never leave the launch boundary.
+	const selectionKey = () =>
+		canonicalJson({
+			id: turn.resumeSessionId,
+			cwd: launch.cwd,
+			args: launch.args,
+			command: launch.command,
+			remoteCommand: launch.remoteCommand,
+			ssh: launch.sshRemoteConfig,
+			global: launch.globalShellEnvVars,
+			provider: launch.agentCustomEnvVars,
+			session: launch.sessionCustomEnvVars,
+			binding: options.retainedNativeSessionBinding,
+		});
+	const originalSelection = providerId === 'grok' ? selectionKey() : undefined;
+	const selectionUnchanged = () =>
+		selectionKey() === originalSelection && options.recheckNativeSelection?.() !== false;
 	const sshConfig = launch.sshRemoteConfig;
 	const sshEnabled = sshConfig?.enabled === true;
 	const deps = options.deps ?? {};
@@ -473,12 +509,31 @@ export async function runAgentTurn(
 			planned.error
 		);
 	}
-	const plan = planned.plan;
+	const plan = providerId === 'grok' ? structuredClone(planned.plan) : planned.plan;
+	// The known prompt tail is data, not native selectors (a prompt may itself say --resume).
+	const nativeArgs =
+		'args' in plan.prompt && (plan.target.kind === 'local' || plan.prompt.via === 'file')
+			? plan.args.slice(0, plan.args.length - plan.prompt.args.length)
+			: plan.args;
+	if (providerId === 'grok') {
+		const problem =
+			typeof requestedNativeSessionId !== 'string' && requestedNativeSessionId !== undefined
+				? 'Grok received an invalid retained native session ID.'
+				: nativeArgs.includes('agent') && nativeArgs.includes('stdio')
+					? 'Grok ACP routing is not qualified on this native launch path.'
+					: grokLaunchArgsProblem(nativeArgs, requestedNativeSessionId, plan.cwd);
+		if (problem || !selectionUnchanged())
+			return abandon(
+				'grok-native-session-refused',
+				problem ?? 'The Grok launch selection changed.'
+			);
+	}
 
 	// The process to start.
 	let spec: TurnProcessSpec;
 	let remote: RemoteAgentTarget | undefined;
 	if (plan.target.kind === 'remote' && sshConfig) {
+		const plannedRemote = structuredClone(plan.target.remote);
 		// A remote TUI turn runs maestro-p on the remote host instead of `claude`.
 		const remoteInteractive = claudeDecision
 			? buildRemoteInteractiveSpawn({
@@ -506,12 +561,19 @@ export async function runAgentTurn(
 					querySource: launch.querySource,
 				},
 				sshConfig,
-				options.sshStore ?? { getSshRemotes: () => [] }
+				providerId === 'grok'
+					? { getSshRemotes: () => [structuredClone(plannedRemote)] }
+					: (options.sshStore ?? { getSshRemotes: () => [] })
 			);
 			// The wrapper degrades to a local spawn when it cannot resolve the remote. Taking that
 			// would run the agent here against the remote's path.
 			if (!wrapped.sshRemoteUsed)
 				return abandon('ssh-unresolved', sshUnresolvedRemoteMessage(sshConfig));
+			if (
+				providerId === 'grok' &&
+				canonicalJson(wrapped.sshRemoteUsed) !== canonicalJson(plan.target.remote)
+			)
+				return abandon('grok-native-session-refused', 'The Grok SSH target changed during launch.');
 			// The script records the remote agent's pid, so Stop reaches it and not only the ssh client.
 			const recorded = recordRemoteAgent({
 				command: wrapped.command,
@@ -556,6 +618,55 @@ export async function runAgentTurn(
 		}
 	}
 
+	let nativeObservation: Awaited<ReturnType<typeof observeGrokLaunchScope>> | undefined;
+	const nativeSelectionProblem = (): string | undefined => {
+		if (!selectionUnchanged()) return 'The Grok launch selection changed before spawn.';
+		if (plan.target.kind === 'remote') {
+			const current = resolveSshLaunchTarget(options.sshStore, sshConfig);
+			if (
+				current.kind !== 'remote' ||
+				canonicalJson(current.remote) !== canonicalJson(plan.target.remote)
+			)
+				return 'The Grok SSH endpoint configuration changed before spawn.';
+		}
+		if (
+			requestedNativeSessionId !== undefined &&
+			(nativeObservation?.scope.state !== 'bound' ||
+				!matchesNativeSessionBinding(retainedBinding, {
+					...nativeObservation.scope,
+					nativeSessionId: requestedNativeSessionId,
+				}))
+		)
+			return 'Grok resume ownership is unknown or differs from the selected account, host or directory. The original conversation was retained.';
+		if (
+			nativeObservation?.scope.state === 'bound' &&
+			plan.target.kind === 'local' &&
+			options.grokLaunchScope?.local.installationId() !== nativeObservation.scope.host.identity
+		)
+			return 'The Grok executing installation changed before spawn.';
+		return undefined;
+	};
+	if (providerId === 'grok') {
+		try {
+			nativeObservation = options.grokLaunchScope
+				? await observeGrokLaunchScope(
+						{ cwd: plan.cwd },
+						plan.target.kind === 'remote' ? structuredClone(plan.target.remote) : null,
+						plan.target.kind === 'remote'
+							? { ...plan.target.remote.remoteEnv, ...plan.envVars }
+							: { ...spec.env },
+						[...nativeArgs],
+						options.grokLaunchScope
+					)
+				: { scope: { version: 1, state: 'unknown', reason: 'unobserved' } };
+			const problem = nativeSelectionProblem();
+			if (problem) return abandon('grok-native-session-refused', problem);
+		} catch (error) {
+			if (systemPromptFile) removeTempFiles([systemPromptFile]);
+			throw error;
+		}
+	}
+
 	const claudeResume = readClaudeResumeBaseline({
 		providerId,
 		resumeSessionId: turn.resumeSessionId,
@@ -580,24 +691,49 @@ export async function runAgentTurn(
 		resourceIds: options.managed?.resourceIds ?? [],
 	};
 	let admission: { gate: DispatchAdmission; attribution: typeof attribution } | undefined;
+	let unusedLease: DispatchLease | undefined;
 	if (options.managed) {
-		const managed = options.managed;
-		const admitted = await managed.authority.admit({
-			context: managed.context,
-			snapshot: buildDispatchSnapshot(spec, attribution),
-			policy: managed.policy,
-		});
-		if (admitted.state !== 'admitted')
-			return abandon(`managed-${admitted.state}`, admitted.message);
-		const lease = admitted.lease;
-		managed.onLease?.(lease);
-		admission = { gate: leaseAdmission(managed.authority, lease), attribution };
+		try {
+			const managed = options.managed;
+			const admitted = await managed.authority.admit({
+				context: managed.context,
+				snapshot: buildDispatchSnapshot(spec, attribution),
+				policy: managed.policy,
+			});
+			if (admitted.state !== 'admitted')
+				return abandon(`managed-${admitted.state}`, admitted.message);
+			const lease = admitted.lease;
+			unusedLease = lease;
+			managed.onLease?.(lease);
+			admission = { gate: leaseAdmission(managed.authority, lease), attribution };
+		} catch (error) {
+			unusedLease?.release({ outcome: 'spawn-failed', message: 'Launch admission failed.' });
+			if (systemPromptFile) removeTempFiles([systemPromptFile]);
+			throw error;
+		}
 	}
 
 	const stopGraceMs = options.stopGraceMs ?? INTERACTIVE_STOP_GRACE_MS;
 	const stream = new EventStream<ParsedEvent>();
 	let running: RunningTurn;
+	let spawnAttempted = false;
 	try {
+		if (providerId === 'grok') {
+			// Local observation stays synchronous right up to spawn. Remote checks must
+			// finish before the final synchronous selection check.
+			const checked = nativeObservation?.recheck?.();
+			const stable = typeof checked === 'boolean' ? checked : await checked;
+			const problem =
+				nativeSelectionProblem() ??
+				(stable === false
+					? 'The Grok account or working directory changed before spawn.'
+					: undefined);
+			if (problem) {
+				unusedLease?.release({ outcome: 'spawn-failed', message: problem });
+				return abandon('grok-native-session-refused', problem);
+			}
+		}
+		spawnAttempted = true;
 		running = runTurn(
 			spec,
 			{
@@ -610,7 +746,13 @@ export async function runAgentTurn(
 			},
 			{ onEvent: (event) => stream.push(event) }
 		);
+		unusedLease = undefined; // startTurn owns binding and release from here.
 	} catch (error) {
+		unusedLease?.release({ outcome: 'spawn-failed', message: 'The process was not started.' });
+		if (!spawnAttempted) {
+			if (systemPromptFile) removeTempFiles([systemPromptFile]);
+			throw error;
+		}
 		if (error instanceof DispatchRefusedError) {
 			return abandon(`managed-${error.state}`, error.message);
 		}
@@ -637,17 +779,29 @@ export async function runAgentTurn(
 		noteEffortRefusal(providerId, completed);
 		return completed;
 	});
+	const scope = nativeObservation && structuredClone(nativeObservation.scope);
+	if (scope?.state === 'bound') Object.freeze(scope.host);
+	const nativeLaunchReceipt =
+		scope &&
+		typeof running.handle.pid === 'number' &&
+		Number.isSafeInteger(running.handle.pid) &&
+		running.handle.pid > 0
+			? Object.freeze({ scope: Object.freeze(scope), requestedNativeSessionId })
+			: undefined;
 
-	return {
-		ok: true,
-		run: {
-			pid: running.handle.pid,
-			events: stream,
-			result,
-			interrupt: stops.interrupt,
-			terminate: stops.terminate,
-			terminateNow: stops.terminateNow,
-			stopRequested: () => running.handle.stopRequested(),
-		},
+	const run: AgentTurnRun = {
+		pid: running.handle.pid,
+		events: stream,
+		result,
+		interrupt: stops.interrupt,
+		terminate: stops.terminate,
+		terminateNow: stops.terminateNow,
+		stopRequested: () => running.handle.stopRequested(),
 	};
+	if (nativeLaunchReceipt)
+		Object.defineProperty(run, 'nativeLaunchReceipt', {
+			value: nativeLaunchReceipt,
+			enumerable: true,
+		});
+	return { ok: true, run };
 }

@@ -44,6 +44,8 @@
  */
 
 import { getClaudeTokenSourceFields, type ClaudeTokenSourceFields } from '../../claudeTokenMode';
+import type { GrokLaunchScopePorts } from '../../agentAccountDir';
+import { canonicalJson } from '../../canonicalJson';
 import type { ToolType } from '../../types';
 import type { AgentRepository } from '../agents/repository';
 import { DEFAULT_RULE_CONTEXT, type RuleContext, type TabSessionUpdate } from '../agents/rules';
@@ -113,6 +115,8 @@ const LOG_CONTEXT = '[RuntimeTurns]';
 
 /** What the host passes the runtime so it can run turns. Every field is optional. */
 export interface RuntimeTurnOptions {
+	/** Host directory/endpoint observations; composed by the production runtime. */
+	grokLaunchScope?: GrokLaunchScopePorts;
 	/**
 	 * The host's `better-sqlite3` loader (the CLI's `loadBetterSqlite3`). Absent: a turn records no
 	 * usage row, and says so once in the log.
@@ -313,6 +317,46 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 
 		const agent = toTurnAgent(record);
 		if (!agent) throw new Error('The agent has no working directory to run in.');
+		const tab: TurnTab = toTurnTab(tabRecord);
+		const expected: NonNullable<TabSessionUpdate['expected']> = {
+			turnId: item.id,
+			agentSessionId: tab.agentSessionId ?? null,
+			nativeSessionBinding: structuredClone(tabRecord.nativeSessionBinding),
+		};
+		const isWorktree = typeof record.parentSessionId === 'string' && record.parentSessionId !== '';
+		// Do not let the generic record reader turn a malformed resume into a new session.
+		if (
+			agent.toolType === 'grok' &&
+			tabRecord.agentSessionId != null &&
+			(typeof tabRecord.agentSessionId !== 'string' || tabRecord.agentSessionId === '')
+		) {
+			throw new TurnStartRefusal(
+				'grok-native-session-refused',
+				'The retained Grok native session ID is invalid.'
+			);
+		}
+		const nativeSelectionKey = () => {
+			const current = repository.getAgent(agentId);
+			const currentTab = repository.getTab(agentId, item.tabId);
+			return canonicalJson({
+				agent: current && {
+					provider: current.toolType,
+					cwd: current.cwd,
+					projectRoot: current.projectRoot,
+					fullPath: current.fullPath,
+					ssh: current.sessionSshRemoteConfig,
+					env: current.customEnvVars,
+					args: current.customArgs,
+					path: current.customPath,
+				},
+				tab: currentTab && {
+					...toTurnTab(currentTab),
+					nativeSessionBinding: currentTab.nativeSessionBinding,
+					rawId: currentTab.agentSessionId,
+				},
+			});
+		};
+		const selectionKey = agent.toolType === 'grok' ? nativeSelectionKey() : undefined;
 
 		const loaded = await loadTurnContext(agent, {
 			paths,
@@ -325,14 +369,11 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		});
 		if (!loaded.ok) throw new Error(loaded.message);
 
-		const tab: TurnTab = toTurnTab(tabRecord);
-		const expected: NonNullable<TabSessionUpdate['expected']> = {
-			turnId: item.id,
-			agentSessionId: tab.agentSessionId ?? null,
-			nativeSessionBinding: structuredClone(
-				tabRecord.nativeSessionBinding as TabSessionUpdate['nativeSessionBinding']
-			),
-		};
+		if (agent.toolType === 'grok' && nativeSelectionKey() !== selectionKey)
+			throw new TurnStartRefusal(
+				'grok-native-session-refused',
+				'The Grok tab or launch selection changed while loading context.'
+			);
 		const command = resolveSlashCommand(item.text, loaded.commands, agent.agentCommands);
 		const message: TurnMessage = {
 			text: item.text,
@@ -352,7 +393,7 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		const scope = Object.freeze({
 			projectPath: turn.launch.cwd,
 			isRemote: turn.launch.sshRemoteConfig?.enabled === true,
-			isWorktree: typeof record.parentSessionId === 'string' && record.parentSessionId !== '',
+			isWorktree,
 		});
 
 		// The single-writer check, before the spawn (MRC-08-05): a runtime that lost its data directory
@@ -379,6 +420,11 @@ export function createRuntimeTurns(options: RuntimeTurnsOptions): RuntimeTurns {
 		};
 		const started = await deps.runAgentTurn(turn, {
 			sessionId: `${agentId}-ai-${item.tabId}`,
+			grokLaunchScope: host.grokLaunchScope,
+			retainedNativeSessionBinding: expected.nativeSessionBinding,
+			...(provider === 'grok'
+				? { recheckNativeSelection: () => nativeSelectionKey() === selectionKey }
+				: {}),
 			sshStore,
 			claudeTokenSource: getClaudeTokenSourceFields(record as ClaudeTokenSourceFields),
 			maestroPBinPath: host.maestroPBinPath ?? null,
