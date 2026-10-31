@@ -1768,6 +1768,43 @@
 			"remainingImplementationOwners": ["GT1-04-07C5", "GT1-04-07D", "GT1-04-07E", "GT1-04-07F"],
 			"testOwners": ["GT1-04-07CUIT", "GT1-04-07CUIAT"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-leaf-resume-ownership": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c5-leaf-resume-scope-and-confirmed-closing",
+			"sourceCommit": "f889b44639fb6884d5f47049af91bdcb837d0565",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/components/History/HistoryEntryItem.tsx": "fa2f3edf9b150ac644d94a2a0fc21e7bd2129d783fd1bdd119ba5cd8eaaa3bd8",
+				"src/renderer/components/HistoryDetailModal.tsx": "3bb3deaa18ea2e7132f1473855b88b24b8b005cb1b7a69e8bf30353e6d3ab50d",
+				"src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsResume.ts": "b662eb04161dcce9248bf08f0588bbd83e7269dbc2536e13fe126b76e0333167"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Pre-existing RequestInit.dispatcher TS2339 in src/main/plugins/plugin-host-handlers.ts:1196; no changed-file diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "History row/modal and browser detailed/quick resume forward recorded owner and cloned native binding. Modal/browser close only after confirmed true and retain selection on refusal or stale completion. Unified Director Notes callback chain remains pending in bounded continuations.",
+			"remainingImplementationOwners": [
+				"GT1-04-07C5U",
+				"GT1-04-07C5UH",
+				"GT1-04-07D",
+				"GT1-04-07E",
+				"GT1-04-07F"
+			],
+			"testOwners": ["GT1-04-07CUIT", "GT1-04-07CUIAT", "GT1-04-07C5UT"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
