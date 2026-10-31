@@ -20,9 +20,14 @@
  * also be invoked by the live one.
  */
 
-import { describe, it, expect } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import ts from 'typescript';
+import { canonicalJson } from '../../../../shared/canonicalJson';
+import type { ManagedSshEndpointRef } from '../../../../shared/maestro-lib/managed/types';
+import type { AgentSessionsHandlerDependencies } from '../../../../main/ipc/handlers/agentSessions';
+import type { IpcBootstrapDependencies } from '../../../../main/ipc/bootstrap/types';
 
 const SRC = path.resolve(__dirname, '../../../../main/ipc');
 const HANDLERS_INDEX = path.join(SRC, 'handlers/index.ts');
@@ -72,5 +77,204 @@ describe('IPC handler wiring parity', () => {
 
 	it('wires the Context Timeline handlers into the live bootstrap path', () => {
 		expect(invokedRegistrars(BOOTSTRAP_INDEX)).toContain('registerContextTimelineHandlers');
+	});
+});
+
+describe('Grok history qualifier bootstrap wiring (GT1-04-07C1RT)', () => {
+	let historyDeps: AgentSessionsHandlerDependencies;
+	let getEnterpriseService: ReturnType<typeof vi.fn>;
+	let qualifyResolved: ReturnType<typeof vi.fn>;
+	let qualifyHistoryEndpoint: () => Promise<string | undefined>;
+	const remote = {
+		id: 'configured-alias',
+		name: 'Fixture SSH',
+		host: 'fixture.invalid',
+		port: 22,
+		username: 'fixture',
+		enabled: true,
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		getEnterpriseService = vi.fn().mockReturnValue(null);
+		qualifyResolved = vi.fn();
+		// Execute the complete live bootstrap with inert imports. This follows the
+		// source-execution pattern in plugin-host-deps-wiring.test.ts without
+		// loading Electron, initializing stores or starting background services.
+		const source = readFileSync(BOOTSTRAP_INDEX, 'utf-8');
+		const ast = ts.createSourceFile(BOOTSTRAP_INDEX, source, ts.ScriptTarget.ES2022, true);
+		const modules: Record<string, Record<string, ReturnType<typeof vi.fn>>> = {};
+		for (const statement of ast.statements) {
+			if (!ts.isImportDeclaration(statement) || statement.importClause?.isTypeOnly) continue;
+			const bindings = statement.importClause?.namedBindings;
+			if (!bindings || !ts.isNamedImports(bindings)) {
+				throw new Error('Update the inert bootstrap fixture for the new import shape.');
+			}
+			const moduleName = (statement.moduleSpecifier as ts.StringLiteral).text;
+			modules[moduleName] = Object.fromEntries(
+				bindings.elements
+					.filter((element) => !element.isTypeOnly)
+					.map((element) => [(element.propertyName ?? element.name).text, vi.fn()])
+			);
+		}
+		const handlers = modules['../handlers'];
+		handlers.registerPersistenceHandlers.mockReturnValue({ noteSessionActivated: vi.fn() });
+		const exports: { setupIpcHandlers?: (deps: IpcBootstrapDependencies) => void } = {};
+		const compiled = ts.transpileModule(source, {
+			compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+		}).outputText;
+		new Function('require', 'exports', compiled)((name: string) => {
+			if (!Object.hasOwn(modules, name)) throw new Error(`Unexpected bootstrap import: ${name}`);
+			return modules[name];
+		}, exports);
+		const deps = {
+			getEnterpriseService,
+			getMainWindow: vi.fn().mockReturnValue(null),
+			getInteractiveReplayController: vi.fn().mockReturnValue(null),
+			getPianolaSupervisor: vi.fn().mockReturnValue(null),
+			getPluginManager: vi.fn().mockReturnValue(null),
+			getPluginAuthStore: vi.fn().mockReturnValue(null),
+			setNoteSessionActivated: vi.fn(),
+			windowRegistry: { onChange: vi.fn() },
+			agentSessionOriginsStore: { get: vi.fn(), set: vi.fn() },
+		} as unknown as IpcBootstrapDependencies;
+		expect(exports.setupIpcHandlers).toBeTypeOf('function');
+		exports.setupIpcHandlers!(deps);
+		expect(handlers.registerAgentSessionsHandlers).toHaveBeenCalledExactlyOnceWith({
+			getMainWindow: deps.getMainWindow,
+			agentSessionOriginsStore: deps.agentSessionOriginsStore,
+			remoteQualifier: expect.any(Function),
+		});
+		expect(getEnterpriseService).not.toHaveBeenCalled();
+		expect(
+			modules['../../storage'].initializeSessionStorages.mock.invocationCallOrder[0]
+		).toBeLessThan(handlers.registerAgentSessionsHandlers.mock.invocationCallOrder[0]);
+		historyDeps = handlers.registerAgentSessionsHandlers.mock.calls[0][0];
+
+		// Execute only the production endpoint selector with the getter supplied by
+		// bootstrap. The full retained-binding/read race matrix belongs to 07C1T.
+		const historyPath = path.join(SRC, 'handlers/agentSessions.ts');
+		const historyAst = ts.createSourceFile(
+			historyPath,
+			readFileSync(historyPath, 'utf-8'),
+			ts.ScriptTarget.ES2022,
+			true
+		);
+		const observer = historyAst.statements.find(
+			(node) => ts.isFunctionDeclaration(node) && node.name?.text === 'observeGrokHistoryScope'
+		);
+		expect(observer).toBeDefined();
+		const selectors: ts.ArrowFunction[] = [];
+		const visit = (node: ts.Node): void => {
+			if (
+				ts.isVariableDeclaration(node) &&
+				ts.isIdentifier(node.name) &&
+				node.name.text === 'qualify' &&
+				node.initializer &&
+				ts.isArrowFunction(node.initializer)
+			) {
+				selectors.push(node.initializer);
+			}
+			ts.forEachChild(node, visit);
+		};
+		visit(observer!);
+		expect(selectors).toHaveLength(1);
+		const selector = ts.transpileModule(`const qualify = ${selectors[0].getText(historyAst)};`, {
+			compilerOptions: { target: ts.ScriptTarget.ES2022 },
+		}).outputText;
+		qualifyHistoryEndpoint = new Function(
+			'remoteQualifier',
+			'remote',
+			'canonicalJson',
+			'structuredClone',
+			`${selector}\nreturn qualify;`
+		)(historyDeps.remoteQualifier, remote, canonicalJson, structuredClone);
+	});
+
+	it('reads a service initialized after handler registration and drops it when unavailable', () => {
+		expect(historyDeps.remoteQualifier!()).toBeNull();
+		const qualifier = { qualifyResolved };
+		getEnterpriseService.mockReturnValue({ remote: qualifier });
+		expect(historyDeps.remoteQualifier!()).toBe(qualifier);
+		getEnterpriseService.mockReturnValue(null);
+		expect(historyDeps.remoteQualifier!()).toBeNull();
+		getEnterpriseService.mockReturnValue({});
+		expect(historyDeps.remoteQualifier!()).toBeNull();
+		expect(qualifyResolved).not.toHaveBeenCalled();
+	});
+
+	it('uses a replacement qualifier without registering handlers again', async () => {
+		const previous = { qualifyResolved };
+		getEnterpriseService.mockReturnValue({ remote: previous });
+		expect(historyDeps.remoteQualifier!()).toBe(previous);
+		const replacement = { qualifyResolved: vi.fn().mockResolvedValue({ kind: 'local' }) };
+		getEnterpriseService.mockReturnValue({ remote: replacement });
+		await expect(qualifyHistoryEndpoint()).resolves.toBeUndefined();
+		expect(replacement.qualifyResolved).toHaveBeenCalledExactlyOnceWith(remote);
+		expect(qualifyResolved).not.toHaveBeenCalled();
+	});
+
+	it('keeps the executing installation identity stable across runtime epochs', async () => {
+		getEnterpriseService.mockReturnValue({ remote: { qualifyResolved } });
+		for (const processEpoch of ['process-before', 'process-after']) {
+			qualifyResolved.mockResolvedValue({
+				kind: 'remote',
+				remote: structuredClone(remote),
+				endpoint: {
+					installationId: 'executing-installation',
+					runtimeId: `runtime-${processEpoch}`,
+					processEpoch,
+					authorityId: 'fixture-authority',
+					policyRevision: 1,
+				} satisfies ManagedSshEndpointRef,
+			});
+			await expect(qualifyHistoryEndpoint()).resolves.toBe('executing-installation');
+		}
+		expect(qualifyResolved).toHaveBeenCalledTimes(2);
+		for (const [observedRemote] of qualifyResolved.mock.calls) {
+			expect(observedRemote).toEqual(remote);
+			expect(observedRemote).not.toBe(remote);
+		}
+	});
+
+	it.each([
+		['missing service', null],
+		['missing qualifier', {}],
+	])(
+		'leaves %s unqualified without substituting the local installation',
+		async (_label, service) => {
+			getEnterpriseService.mockReturnValue(service);
+			await expect(qualifyHistoryEndpoint()).resolves.toBeUndefined();
+			expect(qualifyResolved).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each([
+		['unavailable', { kind: 'unresolved', reason: 'remote-endpoint-unqualified' }],
+		['local', { kind: 'local' }],
+		['unattested', { kind: 'remote', remote }],
+		['empty identity', { kind: 'remote', remote, endpoint: { installationId: ' ' } }],
+		['control identity', { kind: 'remote', remote, endpoint: { installationId: 'bad\nidentity' } }],
+		['epoch only', { kind: 'remote', remote, endpoint: { processEpoch: 'process-only' } }],
+		[
+			'different target',
+			{
+				kind: 'remote',
+				remote: { ...remote, host: 'other.invalid' },
+				endpoint: { installationId: 'other-installation' },
+			},
+		],
+	])('rejects a %s endpoint returned through bootstrap', async (_label, target) => {
+		getEnterpriseService.mockReturnValue({ remote: { qualifyResolved } });
+		qualifyResolved.mockResolvedValue(target);
+		await expect(qualifyHistoryEndpoint()).resolves.toBeUndefined();
+		expect(qualifyResolved).toHaveBeenCalledExactlyOnceWith(remote);
+	});
+
+	it('preserves an unexpected qualifier failure for the handler error boundary', async () => {
+		getEnterpriseService.mockReturnValue({ remote: { qualifyResolved } });
+		const failure = new Error('inert qualifier failure');
+		qualifyResolved.mockRejectedValue(failure);
+		await expect(qualifyHistoryEndpoint()).rejects.toBe(failure);
 	});
 });

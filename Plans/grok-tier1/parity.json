@@ -1597,6 +1597,27 @@
 				"GT1-04-07F"
 			],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-history-qualifier-bootstrap-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c1rt-history-qualifier-bootstrap-tests",
+			"sourceCommit": "da51fcec08adeac689274183eb995ad19fae2c31",
+			"sourceCommitScope": "Pre-task HEAD plus test hash and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/ipc/bootstrap/handler-wiring.test.ts": "fe5b6c377d482de6c7145d423debef830d266e752008ef510378cf0a2bb67fa1"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"authoredCases": 13,
+			"static": "pass",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"scopedTypeCheck": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P13", "P14", "P15", "C-supportsResume", "REG-SESSION-MUTATION"],
+			"scope": "Complete bootstrap source with inert imports and its captured qualifier getter; extracted actual endpoint selector checks stable installation identity, epoch exclusion and unavailable/unqualified responses. Conditional remote-git suites unchanged; reuse existing remote-fs observer tests. No test collection/execution or full-handler admission proof.",
+			"remainingTestOwners": ["GT1-04-07C1T"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
