@@ -149,8 +149,8 @@ export function AgentCreationDialog({
 		return isOpen && selectedAgent === 'grok' && expandedAgent === 'grok'
 			? {
 					kind: 'draft',
-					cwd: workingDirectory,
-					customPath: customAgentPaths.grok || undefined,
+					cwd: workingDirectory.trim(),
+					customPath: customAgentPaths.grok?.trim() || undefined,
 					customEnvVars: customAgentEnvVars.grok,
 					model: agentConfigs.grok?.model,
 					effort: readEffortFromConfig(agentConfigs.grok),
@@ -342,8 +342,16 @@ export function AgentCreationDialog({
 	);
 
 	// Handle create
+	const canCreate =
+		isOpen &&
+		!ac.isDetecting &&
+		!refreshingAgent &&
+		!isCreating &&
+		!!sessionName.trim() &&
+		!!workingDirectory.trim() &&
+		ac.detectedAgents.some((agent) => agent.id === selectedAgent && symphonyAgentFilter(agent));
 	const handleCreate = useCallback(async () => {
-		if (!selectedAgent || !sessionName.trim()) return;
+		if (!canCreate || !selectedAgent) return;
 
 		setIsCreating(true);
 		setError(null);
@@ -352,11 +360,11 @@ export function AgentCreationDialog({
 			const result = await onCreateAgent({
 				agentType: selectedAgent,
 				sessionName: sessionName.trim(),
-				workingDirectory,
+				workingDirectory: workingDirectory.trim(),
 				repo,
 				issue,
-				customPath: customAgentPaths[selectedAgent] || undefined,
-				customArgs: customAgentArgs[selectedAgent] || undefined,
+				customPath: customAgentPaths[selectedAgent]?.trim() || undefined,
+				customArgs: customAgentArgs[selectedAgent]?.trim() || undefined,
 				customEnvVars: customAgentEnvVars[selectedAgent] || undefined,
 				agentConfig: agentConfigs[selectedAgent] || undefined,
 				enableMaestroP:
@@ -379,6 +387,7 @@ export function AgentCreationDialog({
 			setIsCreating(false);
 		}
 	}, [
+		canCreate,
 		selectedAgent,
 		sessionName,
 		workingDirectory,
@@ -607,18 +616,10 @@ export function AgentCreationDialog({
 														onEnvVarRemove={(key) => {
 															const currentVars = { ...customAgentEnvVars[agent.id] };
 															delete currentVars[key];
-															if (Object.keys(currentVars).length > 0) {
-																setCustomAgentEnvVars((prev) => ({
-																	...prev,
-																	[agent.id]: currentVars,
-																}));
-															} else {
-																setCustomAgentEnvVars((prev) => {
-																	const newVars = { ...prev };
-																	delete newVars[agent.id];
-																	return newVars;
-																});
-															}
+															setCustomAgentEnvVars((prev) => ({
+																...prev,
+																[agent.id]: currentVars,
+															}));
 														}}
 														onEnvVarAdd={() => {
 															setCustomAgentEnvVars((prev) => ({
@@ -706,6 +707,7 @@ export function AgentCreationDialog({
 					{/* Session name */}
 					<div>
 						<label
+							htmlFor="symphony-session-name"
 							className="block text-sm font-medium mb-2"
 							style={{ color: theme.colors.textMain }}
 						>
@@ -713,6 +715,7 @@ export function AgentCreationDialog({
 							Session Name
 						</label>
 						<input
+							id="symphony-session-name"
 							type="text"
 							value={sessionName}
 							onChange={(e) => setSessionName(e.target.value)}
@@ -725,6 +728,7 @@ export function AgentCreationDialog({
 					{/* Working directory (editable with folder browser) */}
 					<div>
 						<label
+							htmlFor="symphony-working-directory"
 							className="block text-sm font-medium mb-2"
 							style={{ color: theme.colors.textMain }}
 						>
@@ -733,6 +737,7 @@ export function AgentCreationDialog({
 						</label>
 						<div className="flex gap-2">
 							<input
+								id="symphony-working-directory"
 								type="text"
 								value={workingDirectory}
 								onChange={(e) => {
@@ -783,9 +788,7 @@ export function AgentCreationDialog({
 					</button>
 					<button
 						onClick={handleCreate}
-						disabled={
-							!selectedAgent || !sessionName.trim() || isCreating || ac.detectedAgents.length === 0
-						}
+						disabled={!canCreate}
 						className="px-4 py-2 rounded font-semibold text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
 						style={{ backgroundColor: theme.colors.accent, color: theme.colors.accentForeground }}
 					>

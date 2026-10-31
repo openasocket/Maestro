@@ -3071,9 +3071,32 @@
 			"affectedRows": ["P04", "P17", "S29"],
 			"verificationTask": "GT1-05-13",
 			"limitations": [
-				"Fourteen authored cases await execution together with GT1-05-02B’s three worktree suites; no behavior or type-check pass is claimed.",
+				"Fourteen authored cases await execution together with GT1-05-02B\u2019s three worktree suites; no behavior or type-check pass is claimed.",
 				"The real shared runner uses a fake provider process and synthetic in-process authority; SSH wrapping and directory observation are fixture ports, not live host or policy qualification.",
 				"Production ACP routing remains phase07; Auto Run ownership remains phase08; exact-binary and platform qualification remains phase11."
+			]
+		},
+		"phase05-custom-duplicate-creation": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-02c-custom-and-duplicate-creation",
+			"sourceCommit": "49c86f363994fe61ddd4206c22c45b5058aad8ea",
+			"sourceRevisionScope": "Pre-task HEAD plus the two source hashes and task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/components/NewInstanceModal/NewInstanceModal.tsx": "529962ae6931062f9392983cdd625286ad772be7e1eb060b71521f922bda9e5c",
+				"src/renderer/components/AgentCreationDialog.tsx": "75ecc5b7b9b37809ba3c46cf6097fbbfe2cd9cbde0dea3a212b93f741dc25658"
+			},
+			"provenance": "implementation-and-static-review",
+			"implementation": "implemented",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P04", "P17", "S30", "META-01"],
+			"testTask": "GT1-05-02D",
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"GT1-05-02C1 owns permission handoff through the callback and real creation consumer; GT1-05-02D1 owns its consumer tests.",
+				"Custom-path drafts are not executable certification; canonical launch validation/admission and native identity await behavioral/live evidence.",
+				"Symphony selection stays phase08; production ACP stays phase07; no capability or beta promotion."
 			]
 		}
 	},
@@ -4739,7 +4762,8 @@
 				"phase05ControlsEvidenceRef": "phase05-controls",
 				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
 				"phase05WorktreeTestsEvidenceRef": "phase05-worktree-tests",
-				"phase05WorktreeLaunchTestsEvidenceRef": "phase05-worktree-launch-tests"
+				"phase05WorktreeLaunchTestsEvidenceRef": "phase05-worktree-launch-tests",
+				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7661,7 +7685,8 @@
 					"GT1-10-01",
 					"GT1-05-02A",
 					"GT1-05-02C",
-					"GT1-05-02E1"
+					"GT1-05-02E1",
+					"GT1-05-02C1"
 				],
 				"test": [
 					"GT1-05-02",
@@ -7670,7 +7695,8 @@
 					"GT1-05-02B",
 					"GT1-05-02D",
 					"GT1-05-02E",
-					"GT1-05-02B1"
+					"GT1-05-02B1",
+					"GT1-05-02D1"
 				],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-01-07", "GT1-10-05"],
 				"live": ["GT1-11-11"],
@@ -7697,7 +7723,8 @@
 				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair",
 				"phase05WorktreeConfigurationEvidenceRef": "phase05-worktree-configuration",
 				"phase05WorktreeTestsEvidenceRef": "phase05-worktree-tests",
-				"phase05WorktreeLaunchTestsEvidenceRef": "phase05-worktree-launch-tests"
+				"phase05WorktreeLaunchTestsEvidenceRef": "phase05-worktree-launch-tests",
+				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7726,6 +7753,12 @@
 					"missingPrerequisite": "GT1-05-02E1 queues provider identity and restores focus after the grid commits. Static checks pass; GT1-05-13 must execute the existing GT1-05-02E real-screen regression. No behavioral run performed.",
 					"affectedRows": ["P17"],
 					"evidenceRef": "phase05-config-focus-repair"
+				},
+				{
+					"id": "duplicate-permission-handoff:P17",
+					"code": "implementation-pending",
+					"missingPrerequisite": "GT1-05-02C1 must thread selected-tab permission into the fresh initial tab; GT1-05-02D/D1 and GT1-05-13 must prove creation behavior.",
+					"affectedRows": ["P17"]
 				}
 			],
 			"phase": "05",
@@ -21741,8 +21774,8 @@
 				"src/main/services/symphony-runner.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-01", "GT1-10-01", "GT1-05-02C"],
-				"test": ["GT1-05-02", "GT1-10-02", "GT1-05-02D"],
+				"implementation": ["GT1-05-01", "GT1-10-01", "GT1-05-02C", "GT1-05-02C1"],
+				"test": ["GT1-05-02", "GT1-10-02", "GT1-05-02D", "GT1-05-02D1"],
 				"verification": ["GT1-01-07", "GT1-05-13", "GT1-10-05", "GT1-05-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -21761,7 +21794,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21794,6 +21828,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["S30"]
+				},
+				{
+					"id": "duplicate-permission-handoff:S30",
+					"code": "implementation-pending",
+					"missingPrerequisite": "GT1-05-02C1 must thread selected-tab permission into the fresh initial tab; GT1-05-02D/D1 and GT1-05-13 must prove creation behavior.",
 					"affectedRows": ["S30"]
 				}
 			],
@@ -22008,7 +22048,8 @@
 				"phase05ControlsEvidenceRef": "phase05-controls",
 				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
 				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests",
-				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair"
+				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair",
+				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation"
 			},
 			"evidenceApplicability": {
 				"static": {

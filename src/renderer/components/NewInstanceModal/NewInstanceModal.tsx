@@ -47,6 +47,7 @@ export function NewInstanceModal({
 	presetWorkingDir,
 }: NewInstanceModalProps) {
 	const [agents, setAgents] = useState<AgentConfig[]>([]);
+	const [detectedSshRemoteId, setDetectedSshRemoteId] = useState<string | null>();
 	const [selectedAgent, setSelectedAgent] = useState('');
 	const [expandedAgent, setExpandedAgent] = useState<string | null>(null);
 	const [showAllProviders, setShowAllProviders] = useState(false);
@@ -204,6 +205,7 @@ export function NewInstanceModal({
 			setReadyDraftSource(undefined);
 		}
 		setLoading(true);
+		setRefreshingAgent(null);
 		setSshConnectionError(null);
 		try {
 			const detectedAgents = await window.maestro.agents.detect(selectedSshRemoteId);
@@ -232,6 +234,7 @@ export function NewInstanceModal({
 			}
 
 			setAgents(detectedAgents);
+			setDetectedSshRemoteId(selectedSshRemoteId ?? null);
 			// A host change refreshes availability, not the user's draft selections.
 			if (redetect) return;
 
@@ -260,7 +263,7 @@ export function NewInstanceModal({
 			for (const agent of detectedAgents) {
 				const config = await window.maestro.agents.getConfig(agent.id);
 				if (sequence !== agentLoadSequence.current) return;
-				configs[agent.id] = config;
+				configs[agent.id] = { ...config };
 
 				// Extract per-agent settings from the loaded config
 				// Local detection validates and recovers rotating binary paths. SSH paths
@@ -272,30 +275,26 @@ export function NewInstanceModal({
 				if (config.customArgs) {
 					args[agent.id] = config.customArgs;
 				}
-				if (config.customEnvVars && Object.keys(config.customEnvVars).length > 0) {
-					envVars[agent.id] = config.customEnvVars;
+				if (config.customEnvVars) {
+					envVars[agent.id] = { ...config.customEnvVars };
 				}
 			}
 
 			// If duplicating, merge source session config values into loaded configs
 			if (source) {
 				const sourceConfig: Record<string, any> = { ...configs[source.toolType] };
-				if (source.customModel) {
-					sourceConfig.model = source.customModel;
-				}
+				// Preserve inheritance, not a snapshot of today's provider defaults.
+				sourceConfig.model = source.customModel ?? '';
 				if (source.customContextWindow) {
 					sourceConfig.contextWindow = source.customContextWindow;
 				}
 				if (source.customProviderPath) {
 					sourceConfig.providerPath = source.customProviderPath;
 				}
-				if (source.customEffort) {
-					// Agents use either `effort` (Claude Code) or `reasoningEffort` (Codex,
-					// Copilot-CLI, Factory Droid). Pick whichever key the source agent
-					// actually defines so the value round-trips through the modal.
-					const sourceAgent = detectedAgents.find((a: AgentConfig) => a.id === source.toolType);
-					sourceConfig[getEffortConfigKey(sourceAgent)] = source.customEffort;
-				}
+				const sourceAgent = detectedAgents.find((a: AgentConfig) => a.id === source.toolType);
+				delete sourceConfig.effort;
+				delete sourceConfig.reasoningEffort;
+				sourceConfig[getEffortConfigKey(sourceAgent)] = source.customEffort ?? '';
 				configs[source.toolType] = sourceConfig;
 			}
 
@@ -342,10 +341,15 @@ export function NewInstanceModal({
 					...prev,
 					[source.toolType]: source.customArgs || '',
 				}));
-				setCustomAgentEnvVars((prev) => ({
-					...prev,
-					[source.toolType]: source.customEnvVars || {},
-				}));
+				setCustomAgentEnvVars((prev) => {
+					const next = { ...prev };
+					if (source.customEnvVars === undefined) {
+						delete next[source.toolType];
+					} else {
+						next[source.toolType] = { ...source.customEnvVars };
+					}
+					return next;
+				});
 				// Mirror the source agent's EXPLICIT Adaptive Mode choice so a duplicate
 				// inherits it. When the source never configured a token source, leave the
 				// entry unset so the duplicate falls through to the same default path as a
@@ -474,21 +478,27 @@ export function NewInstanceModal({
 		}
 	}, [workingDir, isInitializingRepo, expandTilde, effectiveSshRemoteId]);
 
-	const handleRefreshAgent = React.useCallback(async (agentId: string) => {
-		setRefreshingAgent(agentId);
-		setDebugInfo(null);
-		try {
-			const result = await window.maestro.agents.refresh(agentId);
-			setAgents(result.agents);
-			if (result.debugInfo && !result.debugInfo.available) {
-				setDebugInfo(result.debugInfo);
+	const handleRefreshAgent = React.useCallback(
+		async (agentId: string) => {
+			const sequence = ++agentLoadSequence.current;
+			setRefreshingAgent(agentId);
+			setDebugInfo(null);
+			try {
+				const result = await window.maestro.agents.refresh(agentId, effectiveSshRemoteId);
+				if (sequence !== agentLoadSequence.current) return;
+				setAgents(result.agents);
+				setDetectedSshRemoteId(effectiveSshRemoteId ?? null);
+				if (result.debugInfo && !result.debugInfo.available) {
+					setDebugInfo(result.debugInfo);
+				}
+			} catch (error) {
+				logger.error('Failed to refresh agent:', undefined, error);
+			} finally {
+				if (sequence === agentLoadSequence.current) setRefreshingAgent(null);
 			}
-		} catch (error) {
-			logger.error('Failed to refresh agent:', undefined, error);
-		} finally {
-			setRefreshingAgent(null);
-		}
-	}, []);
+		},
+		[effectiveSshRemoteId]
+	);
 
 	const [grokRefresh, setGrokRefresh] = useState(0);
 	const grokRequest = useMemo<AgentDiscoveryRequest | undefined>(() => {
@@ -509,10 +519,8 @@ export function NewInstanceModal({
 				kind: 'draft',
 				cwd,
 				customPath: customAgentPaths.grok?.trim() || undefined,
-				// Match onCreate: empty maps inherit provider settings; blank values remain unsets.
-				customEnvVars: Object.keys(customAgentEnvVars.grok ?? {}).length
-					? customAgentEnvVars.grok
-					: undefined,
+				// Match onCreate: absence inherits, an empty map replaces provider env.
+				customEnvVars: customAgentEnvVars.grok,
 				model: agentConfigs.grok?.model?.trim() || undefined,
 				effort: readEffortFromConfig(agentConfigs.grok),
 				sshRemoteId: ssh?.enabled ? ssh.remoteId || undefined : undefined,
@@ -616,7 +624,54 @@ export function NewInstanceModal({
 		[agents, dynamicOptions]
 	);
 
+	// Check if form is valid for submission
+	const isFormValid = useMemo(() => {
+		const hasWarningThatNeedsAck = validation.warning && !directoryWarningAcknowledged;
+		const agent = agents.find((a) => a.id === selectedAgent);
+		// An explicit custom path permits saving a draft; the canonical launch
+		// path must still validate that executable before it can run.
+		const hasCustomPath = customAgentPaths[selectedAgent]?.trim();
+		const isAgentUsable = agent?.available || !!hasCustomPath;
+		// Remote path validation is informational only - don't block creation
+		// Users may want to set up agent for a remote before the path exists
+		return (
+			isOpen &&
+			!loading &&
+			!refreshingAgent &&
+			!sshConnectionError &&
+			readyDraftSource === (sourceSession?.id ?? null) &&
+			detectedSshRemoteId === (effectiveSshRemoteId ?? null) &&
+			selectedAgent &&
+			SUPPORTED_AGENTS.includes(selectedAgent) &&
+			agent &&
+			!agent.hidden &&
+			isAgentUsable &&
+			workingDir.trim() &&
+			instanceName.trim() &&
+			validation.valid &&
+			!hasWarningThatNeedsAck
+		);
+	}, [
+		isOpen,
+		loading,
+		refreshingAgent,
+		sshConnectionError,
+		readyDraftSource,
+		sourceSession?.id,
+		detectedSshRemoteId,
+		effectiveSshRemoteId,
+		selectedAgent,
+		agents,
+		workingDir,
+		instanceName,
+		validation.valid,
+		validation.warning,
+		directoryWarningAcknowledged,
+		customAgentPaths,
+	]);
+
 	const handleCreate = React.useCallback(() => {
+		if (!isFormValid) return;
 		const name = instanceName.trim();
 		if (!name) return; // Name is required
 
@@ -643,10 +698,7 @@ export function NewInstanceModal({
 		// Get per-agent config values
 		const agentCustomPath = customAgentPaths[selectedAgent]?.trim() || undefined;
 		const agentCustomArgs = customAgentArgs[selectedAgent]?.trim() || undefined;
-		const agentCustomEnvVars =
-			customAgentEnvVars[selectedAgent] && Object.keys(customAgentEnvVars[selectedAgent]).length > 0
-				? customAgentEnvVars[selectedAgent]
-				: undefined;
+		const agentCustomEnvVars = customAgentEnvVars[selectedAgent];
 		// Get model from agent config - this will become per-session
 		const agentCustomModel = agentConfigs[selectedAgent]?.model?.trim() || undefined;
 		// Get contextWindow and providerPath from agent config
@@ -743,7 +795,11 @@ export function NewInstanceModal({
 		// Reset per-agent config for selected agent
 		setCustomAgentPaths((prev) => ({ ...prev, [selectedAgent]: '' }));
 		setCustomAgentArgs((prev) => ({ ...prev, [selectedAgent]: '' }));
-		setCustomAgentEnvVars((prev) => ({ ...prev, [selectedAgent]: {} }));
+		setCustomAgentEnvVars((prev) => {
+			const next = { ...prev };
+			delete next[selectedAgent];
+			return next;
+		});
 		// Clear the explicit override (rather than forcing false) so the agent's
 		// default (on for Claude Code) applies again on the next open.
 		setEnableMaestroPByAgent((prev) => {
@@ -775,6 +831,7 @@ export function NewInstanceModal({
 			return newConfigs;
 		});
 	}, [
+		isFormValid,
 		instanceName,
 		selectedAgent,
 		workingDir,
@@ -800,36 +857,6 @@ export function NewInstanceModal({
 		retryTokenByAgent,
 		codexAutoResetByAgent,
 		codexTransportByAgent,
-	]);
-
-	// Check if form is valid for submission
-	const isFormValid = useMemo(() => {
-		const hasWarningThatNeedsAck = validation.warning && !directoryWarningAcknowledged;
-		const agent = agents.find((a) => a.id === selectedAgent);
-		// Agent is considered available if:
-		// 1. It was auto-detected (agent.available), OR
-		// 2. User specified a custom path for it
-		const hasCustomPath = customAgentPaths[selectedAgent]?.trim();
-		const isAgentUsable = agent?.available || !!hasCustomPath;
-		// Remote path validation is informational only - don't block creation
-		// Users may want to set up agent for a remote before the path exists
-		return (
-			selectedAgent &&
-			isAgentUsable &&
-			workingDir.trim() &&
-			instanceName.trim() &&
-			validation.valid &&
-			!hasWarningThatNeedsAck
-		);
-	}, [
-		selectedAgent,
-		agents,
-		workingDir,
-		instanceName,
-		validation.valid,
-		validation.warning,
-		directoryWarningAcknowledged,
-		customAgentPaths,
 	]);
 
 	// Handle keyboard shortcuts via window listener (Modal stops propagation on its backdrop)
@@ -1132,18 +1159,7 @@ export function NewInstanceModal({
 					onEnvVarRemove={(agentId, key) => {
 						const currentVars = { ...customAgentEnvVars[agentId] };
 						delete currentVars[key];
-						if (Object.keys(currentVars).length > 0) {
-							setCustomAgentEnvVars((prev) => ({
-								...prev,
-								[agentId]: currentVars,
-							}));
-						} else {
-							setCustomAgentEnvVars((prev) => {
-								const newVars = { ...prev };
-								delete newVars[agentId];
-								return newVars;
-							});
-						}
+						setCustomAgentEnvVars((prev) => ({ ...prev, [agentId]: currentVars }));
 					}}
 					onEnvVarAdd={(agentId) => {
 						setCustomAgentEnvVars((prev) => ({
@@ -1160,14 +1176,8 @@ export function NewInstanceModal({
 							},
 						}));
 					}}
-					onConfigBlur={(agentId, key, value) => {
-						const updatedConfig = {
-							...(agentConfigs[agentId] || {}),
-							[key]: value,
-						};
-						void window.maestro.agents.setConfig(agentId, updatedConfig).catch((error) => {
-							logger.error(`Failed to persist config for ${agentId}:`, undefined, error);
-						});
+					onConfigBlur={() => {
+						// Draft edits belong to onCreate, never the provider's shared defaults.
 					}}
 					onRefreshModels={(agentId) => loadModelsForAgent(agentId, true)}
 					onTransferPendingSshConfig={(agentId) => {
