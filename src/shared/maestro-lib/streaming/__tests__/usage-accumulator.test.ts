@@ -26,7 +26,7 @@ import {
 	UsageProvenanceTracker,
 } from '../usage-accumulator';
 import { CodexOutputParser } from '../../parsers/codex-output-parser';
-import type { UsageAccounting, UsageStats } from '../../../types';
+import type { UsageAccounting, UsageCost, UsageStats } from '../../../types';
 import { parsedUsageToStats } from '../usage-totals';
 
 function usage(overrides: Partial<UsageStats> = {}, fact?: Partial<UsageAccounting>): UsageStats {
@@ -101,11 +101,11 @@ describe('Grok scoped usage reconciliation', () => {
 			status: 'partial',
 			costUsdTicks: '9007199254740993',
 		});
-		for (const status of ['partial', 'exact'] as const) {
-			const weaker = usage(
-				{ inputTokens: 13 },
-				{ cost: { status, costUsdTicks: '9007199254740992' } }
-			);
+		for (const cost of [
+			{ status: 'partial', costUsdTicks: '9007199254740992' },
+			{ status: 'exact', costUsdTicks: '9007199254740992' },
+		] satisfies UsageCost[]) {
+			const weaker = usage({ inputTokens: 13 }, { cost });
 			expect(acc.accumulate(weaker)?.accounting?.cost).toMatchObject({
 				status: 'partial',
 				costUsdTicks: '9007199254740993',

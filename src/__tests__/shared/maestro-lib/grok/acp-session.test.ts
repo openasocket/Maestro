@@ -237,6 +237,245 @@ describe('GrokAcpSession lifecycle over fake ACP bytes', () => {
 		expect(h.sent('session/new')).toHaveLength(1);
 	});
 
+	it.each(
+		['none', 'model', 'effort', 'model-and-effort'].flatMap((selection) =>
+			(selection === 'none' ? [true] : [false, true]).flatMap((resume) =>
+				[false, true].map((replyFirst) => ({ selection, resume, replyFirst }))
+			)
+		)
+	)(
+		'reuses cancelled allocation with acknowledged $selection (resume: $resume, reply first: $replyFirst)',
+		async ({ selection, resume, replyFirst }) => {
+			const h = harness({
+				model: selection.includes('model') ? 'first' : undefined,
+				effort: selection.includes('effort') ? 'high' : undefined,
+				resumeSessionId: resume ? 'native-1' : undefined,
+			});
+			const controller = new AbortController();
+			const remove = vi.spyOn(controller.signal, 'removeEventListener');
+			const success = vi.fn();
+			const failure = vi.fn();
+			const cancelled = h.session
+				.prompt('never dispatch', controller.signal)
+				.then(success, failure);
+			const opening = h.session.open();
+			const allocation = await h.allocation();
+			const response = {
+				...(resume ? {} : { sessionId: 'native-1' }),
+				...(selection === 'none' ? {} : { models: { currentModelId: 'first' } }),
+				configOptions: selection.includes('effort')
+					? [{ id: 'reasoning_effort', type: 'select', currentValue: 'high' }]
+					: [],
+			};
+			if (replyFirst) h.reply(allocation, response);
+			controller.abort();
+			h.session.cancel();
+			await expect(h.session.prompt('overlap')).rejects.toMatchObject({ reason: 'busy' });
+			if (!replyFirst) {
+				await vi.advanceTimersByTimeAsync(39);
+				expect(failure).not.toHaveBeenCalled();
+				h.reply(allocation, response);
+			}
+			await cancelled;
+			await expect(opening).resolves.toMatchObject(response);
+			expect(h.session.open()).toBe(opening);
+			expect(success).not.toHaveBeenCalled();
+			expect(failure).toHaveBeenCalledExactlyOnceWith(
+				expect.objectContaining({ reason: 'cancelled', dispatchMayHaveOccurred: false })
+			);
+			expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+			expect(h.session.sessionId).toBe('native-1');
+			expect(h.session.isClosed).toBe(false);
+			expect(h.session.error).toBeUndefined();
+			expect(h.session.promptDispatched).toBe(false);
+			expect(h.sent('session/set_config_option')).toHaveLength(0);
+			expect(h.sent('session/cancel')).toHaveLength(0);
+			expect(vi.getTimerCount()).toBe(0);
+			// Stale allocation replies and elapsed budgets cannot replay the cancelled text.
+			h.reply(allocation, response);
+			await vi.advanceTimersByTimeAsync(500);
+			expect(h.sent('session/prompt')).toHaveLength(0);
+			expect(h.terminate).not.toHaveBeenCalled();
+			const next = h.session.prompt('explicit next turn');
+			const request = await h.next('session/prompt');
+			expect(request.params).toEqual({
+				sessionId: 'native-1',
+				prompt: [{ type: 'text', text: 'explicit next turn' }],
+			});
+			h.receive({ method: 'session/update', params: { sessionId: 'native-1' } });
+			expect(h.onNotification.mock.lastCall?.[1]).toEqual({ replay: false, turn: 2 });
+			h.reply(request, { stopReason: 'end_turn' });
+			await expect(next).resolves.toEqual({ stopReason: 'end_turn' });
+			expect(h.sent('initialize')).toHaveLength(1);
+			expect(h.sent('session/new')).toHaveLength(resume ? 0 : 1);
+			expect(h.sent('session/load')).toHaveLength(resume ? 1 : 0);
+			expect(h.sent('session/prompt')).toHaveLength(1);
+			expect(h.terminate).not.toHaveBeenCalled();
+			expect(vi.getTimerCount()).toBe(0);
+		}
+	);
+
+	it('keeps the native claim after allocation cancellation until the owning pipes close', async () => {
+		const h = harness();
+		const cancelled = h.session.prompt('unsent').catch((error: unknown) => error);
+		const allocation = await h.allocation();
+		h.session.cancel();
+		h.reply(allocation, { sessionId: 'native-1' });
+		expect(await cancelled).toMatchObject({ reason: 'cancelled', dispatchMayHaveOccurred: false });
+		const duplicate = harness({ resumeSessionId: 'native-1' });
+		const blocked = duplicate.session.prompt('different owner').catch((error: unknown) => error);
+		duplicate.reply(await duplicate.next('initialize'), {
+			protocolVersion: 1,
+			agentCapabilities: { loadSession: true },
+		});
+		expect(await blocked).toMatchObject({ reason: 'busy', dispatchMayHaveOccurred: false });
+		expect(duplicate.sent('session/load')).toHaveLength(0);
+		expect(duplicate.sent('session/prompt')).toHaveLength(0);
+		expect(h.terminate).not.toHaveBeenCalled();
+		expect(h.sent('session/prompt')).toHaveLength(0);
+		h.session.close();
+		h.child.emit('close');
+		const replacement = harness({ resumeSessionId: 'native-1' });
+		await replacement.ready({});
+		expect(replacement.session.sessionId).toBe('native-1');
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it.each(
+		[
+			'model-missing',
+			'model-refused',
+			'effort-missing',
+			'effort-refused',
+			'conflicting-observation',
+		].flatMap((state) => [false, true].map((resume) => ({ state, resume })))
+	)(
+		'keeps $state allocation fatal after cancellation (resume: $resume)',
+		async ({ state, resume }) => {
+			const h = harness({
+				model: 'first',
+				effort: 'high',
+				resumeSessionId: resume ? 'native-1' : undefined,
+			});
+			const failed = h.session.prompt('unsent').catch((error: unknown) => error);
+			const allocation = await h.allocation();
+			h.session.cancel();
+			if (state === 'conflicting-observation')
+				h.receive({
+					method: 'session/update',
+					params: {
+						sessionId: 'native-1',
+						update: { sessionUpdate: 'model_changed', model_id: 'other' },
+					},
+				});
+			h.reply(allocation, {
+				...(resume ? {} : { sessionId: 'native-1' }),
+				models:
+					state === 'model-missing'
+						? undefined
+						: { currentModelId: state === 'model-refused' ? 'other' : 'first' },
+				configOptions:
+					state === 'effort-missing'
+						? []
+						: [
+								{
+									id: 'reasoning_effort',
+									type: 'select',
+									currentValue: state === 'effort-refused' ? 'low' : 'high',
+									options: [{ value: 'high', name: 'High' }],
+								},
+							],
+			});
+			expect(await failed).toMatchObject({
+				reason:
+					state === 'conflicting-observation'
+						? 'invalid-response'
+						: state.startsWith('model')
+							? 'model-unacknowledged'
+							: 'effort-unacknowledged',
+				dispatchMayHaveOccurred: false,
+			});
+			expect(await failed).toBe(h.session.error);
+			expect(h.session.sessionId).toBe('native-1');
+			expect(h.session.isClosed).toBe(true);
+			await expect(h.session.open()).rejects.toBe(h.session.error);
+			await expect(h.session.prompt('no replay')).rejects.toBe(h.session.error);
+			expect(h.sent('initialize')).toHaveLength(1);
+			expect(h.sent('session/new')).toHaveLength(resume ? 0 : 1);
+			expect(h.sent('session/load')).toHaveLength(resume ? 1 : 0);
+			expect(h.sent('session/set_config_option')).toHaveLength(0);
+			expect(h.sent('session/prompt')).toHaveLength(0);
+			expect(h.sent('session/cancel')).toHaveLength(0);
+			expect(h.terminate).toHaveBeenCalledTimes(1);
+			expect(vi.getTimerCount()).toBe(0);
+		}
+	);
+
+	it.each(
+		['pending-success', 'reply-first', 'refused', 'unresolved'].flatMap((state) =>
+			[false, true].map((resume) => ({ state, resume }))
+		)
+	)(
+		'cannot reuse cancelled allocation with $state in-flight configuration (resume: $resume)',
+		async ({ state, resume }) => {
+			const h = harness({
+				model: 'first',
+				effort: 'high',
+				resumeSessionId: resume ? 'native-1' : undefined,
+			});
+			const controller = new AbortController();
+			const remove = vi.spyOn(controller.signal, 'removeEventListener');
+			const failed = h.session.prompt('unsent', controller.signal).catch((error: unknown) => error);
+			h.reply(await h.allocation(), {
+				...(resume ? {} : { sessionId: 'native-1' }),
+				configOptions: selectableConfig,
+			});
+			const config = await h.next('session/set_config_option');
+			expect(config.params).toEqual({
+				sessionId: 'native-1',
+				configId: 'reasoning_effort',
+				value: 'high',
+			});
+			const acknowledgement = {
+				configOptions: selectableConfig.map((option) =>
+					option.id === 'reasoning_effort' ? { ...option, currentValue: 'high' } : option
+				),
+			};
+			if (state === 'reply-first') h.reply(config, acknowledgement);
+			controller.abort();
+			if (state === 'pending-success') h.reply(config, acknowledgement);
+			if (state === 'refused')
+				h.receive({ id: config.id, error: { code: -32602, message: 'refused' } });
+			if (state === 'unresolved') await vi.advanceTimersByTimeAsync(40);
+			expect(await failed).toMatchObject({
+				reason:
+					state === 'unresolved'
+						? 'cancel-timeout'
+						: state === 'refused'
+							? 'config-unsupported'
+							: 'cancelled',
+				dispatchMayHaveOccurred: false,
+			});
+			expect(await failed).toBe(h.session.error);
+			expect(h.session.sessionId).toBe('native-1');
+			expect(h.session.isClosed).toBe(true);
+			expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+			h.reply(config, acknowledgement);
+			await vi.advanceTimersByTimeAsync(500);
+			await expect(h.session.open()).rejects.toBe(h.session.error);
+			await expect(h.session.prompt('no automatic retry')).rejects.toBe(h.session.error);
+			expect(h.session.configuration).toMatchObject({ model: undefined, configOptions: [] });
+			expect(h.sent('initialize')).toHaveLength(1);
+			expect(h.sent('session/new')).toHaveLength(resume ? 0 : 1);
+			expect(h.sent('session/load')).toHaveLength(resume ? 1 : 0);
+			expect(h.sent('session/set_config_option')).toHaveLength(1);
+			expect(h.sent('session/prompt')).toHaveLength(0);
+			expect(h.sent('session/cancel')).toHaveLength(0);
+			expect(h.terminate).toHaveBeenCalledTimes(1);
+			expect(vi.getTimerCount()).toBe(0);
+		}
+	);
+
 	it.each(['end_turn', 'cancelled'])(
 		'waits for the original %s reply after cancellation and never reports success',
 		async (stopReason) => {

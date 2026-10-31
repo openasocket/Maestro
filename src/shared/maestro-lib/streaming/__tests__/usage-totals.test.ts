@@ -6,7 +6,7 @@ import {
 	replaceUsageStats,
 	subtractUsageStats,
 } from '../usage-totals';
-import type { UsageAccounting, UsageStats } from '../../../types';
+import type { UsageAccounting, UsageCost, UsageStats } from '../../../types';
 
 function usage(overrides: Partial<UsageStats> = {}): UsageStats {
 	return {
@@ -236,10 +236,18 @@ describe('Grok scoped usage totals', () => {
 		['exact', 'partial', 'unknown'],
 		['exact', 'unknown', 'unknown'],
 	] as const)('differences %s cost against %s baseline as %s', (now, prior, expected) => {
-		const priorCost =
-			prior === 'unknown' ? { status: prior } : { status: prior, costUsdTicks: '9007199254740993' };
-		const currentCost =
-			now === 'unknown' ? { status: now } : { status: now, costUsdTicks: '9007199254741004' };
+		const priorCost: UsageCost =
+			prior === 'unknown'
+				? { status: 'unknown' }
+				: prior === 'exact'
+					? { status: 'exact', costUsdTicks: '9007199254740993' }
+					: { status: 'partial', costUsdTicks: '9007199254740993' };
+		const currentCost: UsageCost =
+			now === 'unknown'
+				? { status: 'unknown' }
+				: now === 'exact'
+					? { status: 'exact', costUsdTicks: '9007199254741004' }
+					: { status: 'partial', costUsdTicks: '9007199254741004' };
 		const model = {
 			model: 'grok-a',
 			inputTokens: 100,
