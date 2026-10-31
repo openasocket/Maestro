@@ -26,6 +26,7 @@ import {
 	type SnapshotUpdatedPayload,
 } from '../../shared/agentCapabilities';
 import type { UsageSnapshot } from '../agents/claude-mode-selector';
+import type { GrokCommandDiscoveryResult } from '../agents/grok-skills';
 import type { CodexUsageSnapshot } from '../stores/codexUsageStore';
 import type {
 	CodexResetCreditConsumeResult,
@@ -93,6 +94,36 @@ export function createAgentsApi() {
 		return typeof request === 'string'
 			? ipcRenderer.invoke('agents:getConfigOptions', request, optionKey, forceRefresh)
 			: ipcRenderer.invoke('agents:getConfigOptions', request, optionKey);
+	}
+	function discoverSlashCommands(
+		request: AgentDiscoveryRequest
+	): Promise<GrokCommandDiscoveryResult | null>;
+	function discoverSlashCommands(
+		agentId: string,
+		cwd: string,
+		customPath?: string,
+		sshRemoteId?: string,
+		customEnvVars?: Record<string, string>
+	): Promise<{ name: string; prompt?: string; description?: string }[] | null>;
+	function discoverSlashCommands(
+		request: string | AgentDiscoveryRequest,
+		cwd?: string,
+		customPath?: string,
+		sshRemoteId?: string,
+		customEnvVars?: Record<string, string>
+	): Promise<
+		GrokCommandDiscoveryResult | { name: string; prompt?: string; description?: string }[] | null
+	> {
+		return typeof request === 'string'
+			? ipcRenderer.invoke(
+					'agents:discoverSlashCommands',
+					request,
+					cwd,
+					customPath,
+					sshRemoteId,
+					...(customEnvVars === undefined ? [] : [customEnvVars])
+				)
+			: ipcRenderer.invoke('agents:discoverSlashCommands', request);
 	}
 	return {
 		translateProvider: (request: TranslationRequest): Promise<TranslationReport> =>
@@ -238,24 +269,13 @@ export function createAgentsApi() {
 
 		/**
 		 * Discover available slash commands for an agent.
-		 * Returns names, optional expanded prompts or skill invocations, and descriptions.
-		 * customEnvVars selects the Codex profile used by this session.
+		 * Object requests return Grok's native catalog with origin and route binding,
+		 * or null for other providers. Dispatch must revalidate the binding; CLI
+		 * subcommands and TUI-only actions are not ordinary chat commands.
+		 * Positional calls retain legacy prompts/descriptions (Grok returns null).
+		 * Positional customEnvVars selects the Codex profile used by this session.
 		 */
-		discoverSlashCommands: (
-			agentId: string,
-			cwd: string,
-			customPath?: string,
-			sshRemoteId?: string,
-			customEnvVars?: Record<string, string>
-		): Promise<{ name: string; prompt?: string; description?: string }[] | null> =>
-			ipcRenderer.invoke(
-				'agents:discoverSlashCommands',
-				agentId,
-				cwd,
-				customPath,
-				sshRemoteId,
-				...(customEnvVars === undefined ? [] : [customEnvVars])
-			),
+		discoverSlashCommands,
 
 		/**
 		 * Get the persisted capability snapshot for an agent in a given

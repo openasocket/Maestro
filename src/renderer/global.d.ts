@@ -4,6 +4,7 @@ import type {
 } from '../shared/maestro-lib/translation/types';
 import type { NativeSessionLaunch } from '../main/process-manager/types';
 import type { ProcessSpawnAttempt } from '../main/preload/process/core';
+import type { GrokCommandDiscoveryResult } from '../main/agents/grok-skills';
 import type {
 	AgentDiscoveryRequest,
 	AgentDiscoveryResult,
@@ -2095,13 +2096,17 @@ interface MaestroAPI {
 			(request: AgentDiscoveryRequest, optionKey: string): Promise<AgentDiscoveryResult>;
 			(agentId: string, optionKey: string, forceRefresh?: boolean): Promise<string[]>;
 		};
-		discoverSlashCommands: (
-			agentId: string,
-			cwd: string,
-			customPath?: string,
-			sshRemoteId?: string,
-			customEnvVars?: Record<string, string>
-		) => Promise<{ name: string; prompt?: string; description?: string }[] | null>;
+		/** Grok catalogs retain native binding for dispatch revalidation; legacy Grok calls return null. */
+		discoverSlashCommands: {
+			(request: AgentDiscoveryRequest): Promise<GrokCommandDiscoveryResult | null>;
+			(
+				agentId: string,
+				cwd: string,
+				customPath?: string,
+				sshRemoteId?: string,
+				customEnvVars?: Record<string, string>
+			): Promise<{ name: string; prompt?: string; description?: string }[] | null>;
+		};
 
 		// Capability snapshots - persisted per-agent readiness + version info.
 		getSnapshot: (

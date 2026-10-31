@@ -7891,7 +7891,9 @@
 				"src/renderer/hooks/input/useInputProcessing.ts",
 				"src/main/agents/grok-skills.ts",
 				"src/shared/maestro-lib/grok/acp-session.ts",
-				"src/shared/maestro-lib/grok/acp-turn.ts"
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/main/preload/agents.ts",
+				"src/renderer/global.d.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -7912,7 +7914,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B still owns public API exposure and GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
+				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B exposes the canonical request/result via preload and renderer overloads; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -7976,6 +7978,22 @@
 					"deterministic": "not-run",
 					"live": "not-run",
 					"binding": "Live portable commands() observation with native catalogRevision; host launch/liveness/configGeneration receipt remains GT1-07-02."
+				},
+				"apiExposure": {
+					"task": "GT1-05-03B",
+					"sourceBase": "854396476489f9db706a1d0e78b19b8df9c5eb2e",
+					"implementation": "implemented",
+					"static": "fail",
+					"checks": {
+						"format": "pass",
+						"eslint": "pass",
+						"mainTypes": "pass",
+						"rendererTypes": "fail"
+					},
+					"staticLimitation": "Renderer check reports only the pre-existing plugin-host-handlers.ts:1196 RequestInit.dispatcher TS2339; no discovery API diagnostic.",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"contract": "AgentDiscoveryRequest object overload preserves GrokCommandDiscoveryResult or null for other providers; positional API and legacy Grok null are unchanged. Native kind/scope and complete binding remain typed; no dispatch enabled."
 				}
 			}
 		},
@@ -13688,7 +13706,9 @@
 				"src/main/ipc/handlers/agents.ts",
 				"src/main/agents/grok-skills.ts",
 				"src/shared/maestro-lib/grok/acp-session.ts",
-				"src/shared/maestro-lib/grok/acp-turn.ts"
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/main/preload/agents.ts",
+				"src/renderer/global.d.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -13709,7 +13729,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B still owns public API exposure and GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
+				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B exposes the canonical request/result via preload and renderer overloads; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -13787,6 +13807,22 @@
 					"deterministic": "not-run",
 					"live": "not-run",
 					"binding": "Live portable commands() observation with native catalogRevision; host launch/liveness/configGeneration receipt remains GT1-07-02."
+				},
+				"apiExposure": {
+					"task": "GT1-05-03B",
+					"sourceBase": "854396476489f9db706a1d0e78b19b8df9c5eb2e",
+					"implementation": "implemented",
+					"static": "fail",
+					"checks": {
+						"format": "pass",
+						"eslint": "pass",
+						"mainTypes": "pass",
+						"rendererTypes": "fail"
+					},
+					"staticLimitation": "Renderer check reports only the pre-existing plugin-host-handlers.ts:1196 RequestInit.dispatcher TS2339; no discovery API diagnostic.",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"contract": "AgentDiscoveryRequest object overload preserves GrokCommandDiscoveryResult or null for other providers; positional API and legacy Grok null are unchanged. Native kind/scope and complete binding remain typed; no dispatch enabled."
 				}
 			}
 		},
@@ -18923,7 +18959,9 @@
 				"src/renderer/hooks/input/useInputProcessing.ts",
 				"src/main/agents/grok-skills.ts",
 				"src/shared/maestro-lib/grok/acp-session.ts",
-				"src/shared/maestro-lib/grok/acp-turn.ts"
+				"src/shared/maestro-lib/grok/acp-turn.ts",
+				"src/main/preload/agents.ts",
+				"src/renderer/global.d.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-03", "GT1-05-05", "GT1-05-03A", "GT1-05-03B", "GT1-07-02"],
@@ -18937,7 +18975,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B still owns public API exposure and GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
+				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B exposes the canonical request/result via preload and renderer overloads; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -18999,6 +19037,22 @@
 					"deterministic": "not-run",
 					"live": "not-run",
 					"binding": "Live portable commands() observation with native catalogRevision; host launch/liveness/configGeneration receipt remains GT1-07-02."
+				},
+				"apiExposure": {
+					"task": "GT1-05-03B",
+					"sourceBase": "854396476489f9db706a1d0e78b19b8df9c5eb2e",
+					"implementation": "implemented",
+					"static": "fail",
+					"checks": {
+						"format": "pass",
+						"eslint": "pass",
+						"mainTypes": "pass",
+						"rendererTypes": "fail"
+					},
+					"staticLimitation": "Renderer check reports only the pre-existing plugin-host-handlers.ts:1196 RequestInit.dispatcher TS2339; no discovery API diagnostic.",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"contract": "AgentDiscoveryRequest object overload preserves GrokCommandDiscoveryResult or null for other providers; positional API and legacy Grok null are unchanged. Native kind/scope and complete binding remain typed; no dispatch enabled."
 				}
 			}
 		},
