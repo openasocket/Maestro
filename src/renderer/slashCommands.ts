@@ -9,9 +9,17 @@ import { logger } from './utils/logger';
 export interface SlashCommand {
 	command: string;
 	description: string;
+	prompt?: string;
 	terminalOnly?: boolean; // Only show this command in terminal mode
 	aiOnly?: boolean; // Only show this command in AI mode
 	agentTypes?: ToolType[]; // Only show for specific agent types (if undefined, show for all)
+	/** Advisory native metadata never supplies a prompt or grants invocation. */
+	nativeCommand?: {
+		provider: 'grok';
+		metadata: GrokCommandDiscoveryResult['commands'][number];
+		binding: NonNullable<GrokCommandDiscoveryResult['binding']>;
+	};
+	selectable?: false;
 }
 
 // Built-in Maestro slash commands
@@ -35,32 +43,71 @@ export const slashCommands: SlashCommand[] = [
 	},
 ];
 
-/**
- * Explain a native Grok command refusal using the selected host's current catalog.
- * Advertisements contain no expandable prompt and authorize no ordinary chat send.
- * Until the admitted ACP sink accepts/revalidates their binding, even an advertised
- * command is unavailable. Never cache these receipts in Session.agentCommands.
- */
-export async function getGrokSlashCommandRefusal(
+/** Narrow discovery inputs: no streamed logs, draft text or persisted command bodies. */
+export function getGrokCommandScope(session: Session | null | undefined) {
+	if (session?.toolType !== 'grok') return null;
+	const tab = session.aiTabs.find((candidate) => candidate.id === session.activeTabId);
+	return {
+		sessionId: session.id,
+		tabId: tab?.id,
+		nativeSessionId: tab?.agentSessionId,
+		nativeSessionBinding: tab?.nativeSessionBinding,
+		cwd: session.cwd,
+		projectRoot: session.projectRoot,
+		customPath: session.customPath,
+		customArgs: session.customArgs,
+		customEnvVars: session.customEnvVars,
+		model: tab?.customModel || session.customModel,
+		effort: tab?.customEffort || session.customEffort,
+		sshRemoteId: session.sshRemoteId,
+		sshRemote: session.sshRemote,
+		sshConfig: session.sessionSshRemoteConfig,
+		pid: session.aiPid,
+		state: tab?.state,
+	};
+}
+
+/** IPC metadata is bounded and checked before any completion render dereferences it. */
+function hasValidGrokCommandCatalog(commands: GrokCommandDiscoveryResult['commands']): boolean {
+	return (
+		Array.isArray(commands) &&
+		commands.length <= 256 &&
+		Array.from(commands).every(
+			(command) =>
+				command &&
+				typeof command.name === 'string' &&
+				command.name.length > 0 &&
+				command.name.length <= 128 &&
+				typeof command.description === 'string' &&
+				command.description.length <= 4096 &&
+				['skill', 'native-command', 'workflow'].includes(command.kind) &&
+				(command.scope === undefined ||
+					['local', 'repo', 'user', 'server', 'bundled', 'plugin'].includes(command.scope)) &&
+				(command.argumentHint === undefined ||
+					(typeof command.argumentHint === 'string' && command.argumentHint.length <= 1024))
+		)
+	);
+}
+
+/** One bounded read for completion and dispatch refusal; never starts a probe. */
+export async function readGrokCommandDiscovery(
 	session: Session,
 	tab: AITab | undefined,
-	input: string
-): Promise<string> {
+	signal?: AbortSignal
+): Promise<GrokCommandDiscoveryResult | null> {
+	if (signal?.aborted) return { status: 'unavailable', commands: [], reason: 'canceled' };
 	if (isSessionRemote(session)) {
-		return 'Grok native slash commands are unavailable for SSH agents. No command was sent.';
+		return { status: 'unavailable', commands: [], reason: 'remote-unqualified' };
 	}
-	// The current discovery API resolves the stored active tab. Never use that
-	// catalog for a background queued tab or a fresh, unbound conversation.
+	// Main resolves the stored active tab. Never borrow its catalog for a queued tab.
 	if (!tab?.agentSessionId || tab.id !== session.activeTabId) {
-		return 'Grok native slash commands require discovery for this conversation. No command was sent.';
+		return { status: 'unavailable', commands: [], reason: 'missing-context' };
 	}
-
-	let result: GrokCommandDiscoveryResult | null;
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	let cancel: (() => void) | undefined;
 	try {
-		// A disconnected browser bridge can leave an IPC promise pending. Bound
-		// this advisory read so a refusal cannot strand the queue in busy state.
-		result = await Promise.race([
+		// A disconnected browser bridge can leave an IPC promise pending.
+		const result = await Promise.race([
 			window.maestro.agents.discoverSlashCommands({
 				providerId: 'grok',
 				context: {
@@ -72,14 +119,109 @@ export async function getGrokSlashCommandRefusal(
 			}),
 			new Promise<null>((resolve) => {
 				timer = setTimeout(() => resolve(null), 3_000);
+				cancel = () => resolve(null);
+				signal?.addEventListener('abort', cancel, { once: true });
 			}),
 		]);
+		if (result?.status === 'discovered' && !hasValidGrokCommandCatalog(result.commands)) {
+			return { status: 'unavailable', commands: [], reason: 'invalid-catalog' };
+		}
+		return result;
+	} finally {
+		clearTimeout(timer);
+		if (cancel) signal?.removeEventListener('abort', cancel);
+	}
+}
+
+export function hasCurrentGrokCommandBinding(
+	result: GrokCommandDiscoveryResult,
+	nativeSessionId: string | null | undefined
+): boolean {
+	const binding = result.binding;
+	return !!(
+		result.status === 'discovered' &&
+		binding?.route === 'grok-acp' &&
+		binding.sessionId === nativeSessionId &&
+		binding.processGeneration &&
+		binding.configGeneration &&
+		binding.agentVersion &&
+		Number.isSafeInteger(binding.catalogRevision) &&
+		binding.catalogRevision >= 0 &&
+		Number.isFinite(binding.observedAt) &&
+		binding.observedAt <= Date.now() &&
+		Date.now() - binding.observedAt < 30_000
+	);
+}
+
+/** Preserve exact server names/provenance, but keep every native candidate unselectable. */
+export function grokCommandCompletions(result: GrokCommandDiscoveryResult | null): SlashCommand[] {
+	if (
+		result?.status !== 'discovered' ||
+		!result.binding ||
+		!hasValidGrokCommandCatalog(result.commands)
+	)
+		return [];
+	const binding = result.binding;
+	return result.commands.map((command) => ({
+		command: `/${command.name}`,
+		description: command.description,
+		aiOnly: true,
+		nativeCommand: { provider: 'grok', metadata: command, binding },
+		selectable: false,
+	}));
+}
+
+/** Existing completion order: Maestro, custom/bundled macros, then provider entries. */
+export function assembleSlashCommandCompletions({
+	toolType,
+	supportsProviderCommands,
+	customCommands,
+	agentCommands,
+	grokDiscovery,
+}: {
+	toolType?: ToolType;
+	supportsProviderCommands: boolean;
+	customCommands: NonNullable<Session['agentCommands']>;
+	agentCommands: Session['agentCommands'];
+	grokDiscovery: GrokCommandDiscoveryResult | null;
+}): SlashCommand[] {
+	const candidates: SlashCommand[] = [
+		...slashCommands.filter(
+			(cmd) => !cmd.agentTypes || (toolType && cmd.agentTypes.includes(toolType))
+		),
+		...customCommands.map((cmd) => ({
+			command: cmd.command,
+			description: cmd.description,
+			prompt: cmd.prompt,
+			aiOnly: true,
+		})),
+		...(toolType !== 'grok' && supportsProviderCommands
+			? (agentCommands ?? []).map((cmd) => ({
+					command: cmd.command,
+					description: cmd.description,
+					aiOnly: true,
+				}))
+			: []),
+		...(toolType === 'grok' ? grokCommandCompletions(grokDiscovery) : []),
+	];
+	// Native advertisements have no admitted invocation path yet. Keep them out
+	// of keyboard/mouse completion, regardless of capability flags or name collisions.
+	return candidates.filter((command) => command.selectable !== false);
+}
+
+/** Advertisements authorize no ordinary chat send, even for known native commands. */
+export async function getGrokSlashCommandRefusal(
+	session: Session,
+	tab: AITab | undefined,
+	input: string
+): Promise<string> {
+	let result: GrokCommandDiscoveryResult | null;
+	try {
+		result = await readGrokCommandDiscovery(session, tab);
 	} catch {
 		// Do not expose rejected IPC payloads, account details or command arguments.
 		logger.error('[GrokSlashCommands] Selected command discovery failed');
 		return 'Grok command discovery failed. No command was sent.';
-	} finally {
-		clearTimeout(timer);
 	}
 
 	if (result?.status !== 'discovered') {
@@ -92,6 +234,8 @@ export async function getGrokSlashCommandRefusal(
 				return 'The selected Grok executable is unavailable for command discovery. No command was sent.';
 			case 'canceled':
 				return 'Grok command discovery was canceled. No command was sent.';
+			case 'missing-context':
+				return 'Grok native slash commands require discovery for this conversation. No command was sent.';
 			case 'invalid-catalog':
 				return 'Grok returned an invalid command catalog. No command was sent.';
 			default:
@@ -99,19 +243,7 @@ export async function getGrokSlashCommandRefusal(
 		}
 	}
 
-	const binding = result.binding;
-	if (
-		binding?.route !== 'grok-acp' ||
-		binding.sessionId !== tab.agentSessionId ||
-		!binding.processGeneration ||
-		!binding.configGeneration ||
-		!binding.agentVersion ||
-		!Number.isSafeInteger(binding.catalogRevision) ||
-		binding.catalogRevision < 0 ||
-		!Number.isFinite(binding.observedAt) ||
-		binding.observedAt > Date.now() ||
-		Date.now() - binding.observedAt >= 30_000
-	) {
+	if (!hasCurrentGrokCommandBinding(result, tab?.agentSessionId)) {
 		return 'Grok command discovery is stale or belongs to another conversation. No command was sent.';
 	}
 	if (!Array.isArray(result.commands)) {

@@ -3205,6 +3205,27 @@
 				"Preload request/result forwarding coverage authored only; no test execution or semantic type checking. GT1-05-13 must run this suite and both GT1-05-04 discovery/IPC suites.",
 				"Synthetic IPC responses do not qualify host context acceptance, native catalogs, executable liveness or route dispatch. GT1-07-02 capture and GT1-05-05/06 dispatch remain pending."
 			]
+		},
+		"phase05-slash-completion": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-05a-ephemeral-grok-discovery-and-completion-plumbing",
+			"sourceCommit": "4c528b913d48800b0a9d797f6ca1b6263b8d98e7",
+			"sourceRevisionScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/slashCommands.ts": "c40527704a7a564d908438f0b6e5e6d0d777dd92971628fc8f36dbaaabf804ae",
+				"src/renderer/hooks/wizard/useWizardHandlers.ts": "9504e070631c0895559356dce4b57d31c45611f17317c0de74a26c54a60b1a8f",
+				"src/renderer/App.tsx": "a9bf6505d3bfd935c7339fa200f66abd4222b9b7e79fdf135a00de8cfb477190"
+			},
+			"provenance": "implementation-and-static-review",
+			"static": "fail",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P18", "S02", "C-supportsSlashCommands"],
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"Renderer TypeScript retains the known baseline RequestInit.dispatcher error.",
+				"Native discovery/invocation depends on GT1-07-02; selectable entries and capability remain disabled."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -7946,7 +7967,7 @@
 					"GT1-07-02",
 					"GT1-05-05A"
 				],
-				"test": ["GT1-05-04", "GT1-05-06", "GT1-08-02", "GT1-05-04A"],
+				"test": ["GT1-05-04", "GT1-05-06", "GT1-08-02", "GT1-05-04A", "GT1-05-06C"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-01-07", "GT1-08-07", "GT1-11-11B"],
 				"live": ["GT1-11-11", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -7957,7 +7978,8 @@
 			},
 			"limitations": [
 				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B exposes the canonical request/result via preload and renderer overloads; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements.",
-				"GT1-05-05 implements only scoped slash refusals in the composer/queue and excludes stale provider prompt bodies. Native autocomplete remains GT1-05-05A; admitted invocation with a fresh catalog on each new ACP process remains GT1-07-02. No native skill expansion, TUI action, CLI subcommand or headless command execution is certified."
+				"GT1-05-05 implements only scoped slash refusals in the composer/queue and excludes stale provider prompt bodies. GT1-05-05A adds ephemeral discovery and completion metadata with no selectable native entries; admitted invocation with a fresh catalog on each new ACP process remains GT1-07-02. No native skill expansion, TUI action, CLI subcommand or headless command execution is certified.",
+				"GT1-05-05A refreshes advisory discovery on selected context, settings, focus and completion changes, with a finite receipt lifetime. Main-only revisions still require fresh admitted-sink validation; no native command is selectable or executed. GT1-05-06C/13 own completion regression coverage/execution."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8068,6 +8090,29 @@
 					"src/renderer/slashCommands.ts": "08b601420d1214d32a93b764d17060a817d1a1fe1357581ae23ad3183ce025af",
 					"src/renderer/hooks/input/useInputProcessing.ts": "6fcf5b151c65bdef3bf105798f7f08a83f609bb8e1f390b325979f4fb25d3ca3",
 					"src/renderer/stores/agentStore.ts": "3be99327319381269300c646412d5722a3b674dc3af8af4d1e614875387deb02"
+				}
+			},
+			"phase05SlashCompletion": {
+				"task": "GT1-05-05A",
+				"sourceBase": "4c528b913d48800b0a9d797f6ca1b6263b8d98e7",
+				"evidence": "Plans/grok-tier1/evidence/05.md#gt1-05-05a-ephemeral-grok-discovery-and-completion-plumbing",
+				"scope": "Ephemeral selected-tab discovery with bounded reads and stale/expiry guards; canonical completion assembly retains metadata but excludes all native Grok entries.",
+				"implementation": "implemented",
+				"static": "fail",
+				"checks": {
+					"format": "pass",
+					"eslint": "pass",
+					"rendererTypes": "fail"
+				},
+				"staticLimitation": "Only the existing plugin-host-handlers.ts:1196 RequestInit.dispatcher TS2339 remains in renderer TypeScript.",
+				"deterministic": "not-run",
+				"live": "not-run",
+				"nativeDispatch": "unsupported",
+				"remainingOwners": ["GT1-05-06", "GT1-05-06C", "GT1-05-13", "GT1-07-02", "GT1-07-04"],
+				"sourceHashes": {
+					"src/renderer/slashCommands.ts": "c40527704a7a564d908438f0b6e5e6d0d777dd92971628fc8f36dbaaabf804ae",
+					"src/renderer/hooks/wizard/useWizardHandlers.ts": "9504e070631c0895559356dce4b57d31c45611f17317c0de74a26c54a60b1a8f",
+					"src/renderer/App.tsx": "a9bf6505d3bfd935c7339fa200f66abd4222b9b7e79fdf135a00de8cfb477190"
 				}
 			}
 		},
@@ -13797,7 +13842,7 @@
 					"GT1-07-02",
 					"GT1-05-05A"
 				],
-				"test": ["GT1-05-04", "GT1-05-06", "GT1-11-14B", "GT1-05-04A"],
+				"test": ["GT1-05-04", "GT1-05-06", "GT1-11-14B", "GT1-05-04A", "GT1-05-06C"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-14C", "GT1-11-11B"],
 				"live": ["GT1-11-11", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -13808,7 +13853,8 @@
 			},
 			"limitations": [
 				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B exposes the canonical request/result via preload and renderer overloads; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements.",
-				"GT1-05-05 implements only scoped slash refusals in the composer/queue and excludes stale provider prompt bodies. Native autocomplete remains GT1-05-05A; admitted invocation with a fresh catalog on each new ACP process remains GT1-07-02. No native skill expansion, TUI action, CLI subcommand or headless command execution is certified."
+				"GT1-05-05 implements only scoped slash refusals in the composer/queue and excludes stale provider prompt bodies. GT1-05-05A adds ephemeral discovery and completion metadata with no selectable native entries; admitted invocation with a fresh catalog on each new ACP process remains GT1-07-02. No native skill expansion, TUI action, CLI subcommand or headless command execution is certified.",
+				"GT1-05-05A refreshes advisory discovery on selected context, settings, focus and completion changes, with a finite receipt lifetime. Main-only revisions still require fresh admitted-sink validation; no native command is selectable or executed. GT1-05-06C/13 own completion regression coverage/execution."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -13933,6 +13979,29 @@
 					"src/renderer/slashCommands.ts": "08b601420d1214d32a93b764d17060a817d1a1fe1357581ae23ad3183ce025af",
 					"src/renderer/hooks/input/useInputProcessing.ts": "6fcf5b151c65bdef3bf105798f7f08a83f609bb8e1f390b325979f4fb25d3ca3",
 					"src/renderer/stores/agentStore.ts": "3be99327319381269300c646412d5722a3b674dc3af8af4d1e614875387deb02"
+				}
+			},
+			"phase05SlashCompletion": {
+				"task": "GT1-05-05A",
+				"sourceBase": "4c528b913d48800b0a9d797f6ca1b6263b8d98e7",
+				"evidence": "Plans/grok-tier1/evidence/05.md#gt1-05-05a-ephemeral-grok-discovery-and-completion-plumbing",
+				"scope": "Ephemeral selected-tab discovery with bounded reads and stale/expiry guards; canonical completion assembly retains metadata but excludes all native Grok entries.",
+				"implementation": "implemented",
+				"static": "fail",
+				"checks": {
+					"format": "pass",
+					"eslint": "pass",
+					"rendererTypes": "fail"
+				},
+				"staticLimitation": "Only the existing plugin-host-handlers.ts:1196 RequestInit.dispatcher TS2339 remains in renderer TypeScript.",
+				"deterministic": "not-run",
+				"live": "not-run",
+				"nativeDispatch": "unsupported",
+				"remainingOwners": ["GT1-05-06", "GT1-05-06C", "GT1-05-13", "GT1-07-02", "GT1-07-04"],
+				"sourceHashes": {
+					"src/renderer/slashCommands.ts": "c40527704a7a564d908438f0b6e5e6d0d777dd92971628fc8f36dbaaabf804ae",
+					"src/renderer/hooks/wizard/useWizardHandlers.ts": "9504e070631c0895559356dce4b57d31c45611f17317c0de74a26c54a60b1a8f",
+					"src/renderer/App.tsx": "a9bf6505d3bfd935c7339fa200f66abd4222b9b7e79fdf135a00de8cfb477190"
 				}
 			}
 		},
@@ -19083,7 +19152,7 @@
 					"GT1-07-02",
 					"GT1-05-05A"
 				],
-				"test": ["GT1-05-04", "GT1-05-06", "GT1-05-04A"],
+				"test": ["GT1-05-04", "GT1-05-06", "GT1-05-04A", "GT1-05-06C"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-11B"],
 				"live": ["GT1-11-11", "GT1-11-12", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -19094,7 +19163,8 @@
 			},
 			"limitations": [
 				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B exposes the canonical request/result via preload and renderer overloads; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements.",
-				"GT1-05-05 implements only scoped slash refusals in the composer/queue and excludes stale provider prompt bodies. Native autocomplete remains GT1-05-05A; admitted invocation with a fresh catalog on each new ACP process remains GT1-07-02. No native skill expansion, TUI action, CLI subcommand or headless command execution is certified."
+				"GT1-05-05 implements only scoped slash refusals in the composer/queue and excludes stale provider prompt bodies. GT1-05-05A adds ephemeral discovery and completion metadata with no selectable native entries; admitted invocation with a fresh catalog on each new ACP process remains GT1-07-02. No native skill expansion, TUI action, CLI subcommand or headless command execution is certified.",
+				"GT1-05-05A refreshes advisory discovery on selected context, settings, focus and completion changes, with a finite receipt lifetime. Main-only revisions still require fresh admitted-sink validation; no native command is selectable or executed. GT1-05-06C/13 own completion regression coverage/execution."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -19203,6 +19273,29 @@
 					"src/renderer/slashCommands.ts": "08b601420d1214d32a93b764d17060a817d1a1fe1357581ae23ad3183ce025af",
 					"src/renderer/hooks/input/useInputProcessing.ts": "6fcf5b151c65bdef3bf105798f7f08a83f609bb8e1f390b325979f4fb25d3ca3",
 					"src/renderer/stores/agentStore.ts": "3be99327319381269300c646412d5722a3b674dc3af8af4d1e614875387deb02"
+				}
+			},
+			"phase05SlashCompletion": {
+				"task": "GT1-05-05A",
+				"sourceBase": "4c528b913d48800b0a9d797f6ca1b6263b8d98e7",
+				"evidence": "Plans/grok-tier1/evidence/05.md#gt1-05-05a-ephemeral-grok-discovery-and-completion-plumbing",
+				"scope": "Ephemeral selected-tab discovery with bounded reads and stale/expiry guards; canonical completion assembly retains metadata but excludes all native Grok entries.",
+				"implementation": "implemented",
+				"static": "fail",
+				"checks": {
+					"format": "pass",
+					"eslint": "pass",
+					"rendererTypes": "fail"
+				},
+				"staticLimitation": "Only the existing plugin-host-handlers.ts:1196 RequestInit.dispatcher TS2339 remains in renderer TypeScript.",
+				"deterministic": "not-run",
+				"live": "not-run",
+				"nativeDispatch": "unsupported",
+				"remainingOwners": ["GT1-05-06", "GT1-05-06C", "GT1-05-13", "GT1-07-02", "GT1-07-04"],
+				"sourceHashes": {
+					"src/renderer/slashCommands.ts": "c40527704a7a564d908438f0b6e5e6d0d777dd92971628fc8f36dbaaabf804ae",
+					"src/renderer/hooks/wizard/useWizardHandlers.ts": "9504e070631c0895559356dce4b57d31c45611f17317c0de74a26c54a60b1a8f",
+					"src/renderer/App.tsx": "a9bf6505d3bfd935c7339fa200f66abd4222b9b7e79fdf135a00de8cfb477190"
 				}
 			}
 		},
