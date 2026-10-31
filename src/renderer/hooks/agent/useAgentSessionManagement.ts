@@ -118,6 +118,12 @@ export interface UseAgentSessionManagementReturn {
  * Optional behavior overrides for {@link UseAgentSessionManagementReturn.handleResumeSession}.
  */
 export interface ResumeSessionOptions {
+	/**
+	 * Caller admission, checked before loading and at each mutation boundary.
+	 * The final updater check receives the exact proposed session so callers can
+	 * recognize this resume's own focus commit. Do not mutate it or the store.
+	 */
+	canResume?: (nextSession?: Session) => boolean;
 	/** Immutable ownership of the selected history record, when observed. */
 	nativeSessionBinding?: NativeSessionBinding;
 	/**
@@ -301,6 +307,7 @@ export function useAgentSessionManagement(
 			opts?: ResumeSessionOptions
 		): Promise<boolean> => {
 			const requestId = ++resumeRequestId.current;
+			if (opts?.canResume?.() === false) return false;
 			// Resolve the agent to resume into. When a targetSessionId is provided
 			// (cross-agent jump, e.g. starred sessions), read it fresh from the store
 			// by id. Otherwise fall back to the current active session, also resolved
@@ -312,11 +319,12 @@ export function useAgentSessionManagement(
 			// Need a session for tab management
 			if (!targetSession) return false;
 			const selectionKey = resumeSelectionKey(targetSession);
-			const selectionIsCurrent = (session: Session) =>
+			const selectionIsCurrent = (session: Session, nextSession?: Session) =>
 				resumeRequestId.current === requestId &&
 				resumeSelectionKey(session) === selectionKey &&
 				(!!opts?.targetSessionId ||
-					useSessionStore.getState().activeSessionId === targetSession.id);
+					useSessionStore.getState().activeSessionId === targetSession.id) &&
+				opts?.canResume?.(nextSession) !== false;
 			const scoped = targetSession.toolType === 'grok' || opts?.nativeSessionBinding !== undefined;
 			const matchesTab = (tab: Session['aiTabs'][number], binding = opts?.nativeSessionBinding) =>
 				tab.agentSessionId === agentSessionId &&
@@ -350,6 +358,7 @@ export function useAgentSessionManagement(
 			const existingTab = targetSession.aiTabs?.find((tab) => matchesTab(tab));
 
 			try {
+				if (!selectionIsCurrent(targetSession)) return false;
 				// The transcript read, the synopsis stripping, and the name / starred /
 				// context lookup are shared with every other way a conversation is
 				// reopened (see loadResumableSession).
@@ -365,6 +374,13 @@ export function useAgentSessionManagement(
 					starred,
 					usageStats,
 				});
+
+				const current = selectSessionById(targetSession.id)(useSessionStore.getState());
+				if (!current || !selectionIsCurrent(current)) {
+					throw new SessionResumeRefusedError(
+						'The agent selection changed while loading history. Try again.'
+					);
+				}
 
 				if (!resumable) {
 					// No messages came back: the session is empty or has aged out / been
@@ -382,12 +398,6 @@ export function useAgentSessionManagement(
 					origin,
 					nativeSessionBinding,
 				} = resumable;
-				const current = selectSessionById(targetSession.id)(useSessionStore.getState());
-				if (!current || !selectionIsCurrent(current)) {
-					throw new SessionResumeRefusedError(
-						'The agent selection changed while loading history. Try again.'
-					);
-				}
 
 				// Update the session and switch to AI mode
 				// IMPORTANT: Use functional update to get fresh session state and avoid race conditions
@@ -415,7 +425,6 @@ export function useAgentSessionManagement(
 						// If a tab already exists for this session, repopulate (if needed) and
 						// focus it instead of creating a duplicate.
 						if (freshExistingTab) {
-							resumed = true;
 							const updatedTabs = s.aiTabs.map((tab) => {
 								if (tab.id !== freshExistingTab.id) return tab;
 								// Already-loaded tabs own newer metadata than History's snapshot.
@@ -429,7 +438,13 @@ export function useAgentSessionManagement(
 									origin: origin ?? tab.origin,
 								};
 							});
-							return focusAiTabInSession({ ...s, aiTabs: updatedTabs }, freshExistingTab.id);
+							const nextSession = focusAiTabInSession(
+								{ ...s, aiTabs: updatedTabs },
+								freshExistingTab.id
+							);
+							if (!selectionIsCurrent(s, nextSession)) return s;
+							resumed = true;
+							return nextSession;
 						}
 
 						// Create tab from the CURRENT session state (not stale closure value)
@@ -445,8 +460,7 @@ export function useAgentSessionManagement(
 						});
 						if (!result) return s;
 
-						resumed = true;
-						return {
+						const nextSession = {
 							...result.session,
 							aiTabs: result.session.aiTabs.map((tab) =>
 								tab.id === result.tab.id && nativeSessionBinding
@@ -454,9 +468,15 @@ export function useAgentSessionManagement(
 									: tab
 							),
 						};
+						if (!selectionIsCurrent(s, nextSession)) return s;
+						resumed = true;
+						return nextSession;
 					})
 				);
-				if (!resumed) {
+				// Store subscribers can navigate or rebind synchronously during commit.
+				// Keep their newer selection; never roll back a committed tab.
+				const committed = selectSessionById(targetSession.id)(useSessionStore.getState());
+				if (!resumed || !committed || !selectionIsCurrent(committed)) {
 					throw new SessionResumeRefusedError(
 						'The selected conversation changed while loading history. Try again.'
 					);

@@ -1866,6 +1866,36 @@
 			"remainingImplementationOwners": ["GT1-04-07C5UH1", "GT1-04-07D", "GT1-04-07E", "GT1-04-07F"],
 			"testOwners": ["GT1-04-07CT", "GT1-04-07C5UT"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-unified-history-mutation-fence": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c5uh1-canonical-resume-mutation-fence",
+			"sourceCommit": "e25ba0c2788bd9850ebaf6a24e325db5c405ef2d",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/hooks/agent/useAgentSessionManagement.ts": "df12e8adf5ec7a699699c1e707960c1df0255ec427757dccdf327d22d689dd01",
+				"src/renderer/hooks/modal/useModalHandlers.ts": "c955525e117a1a8dbd543fce182ece86765a90eff271c952410dfe2a503154fa"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Pre-existing RequestInit.dispatcher TS2339 in src/main/plugins/plugin-host-handlers.ts:1196; no changed-file diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "Optional canonical caller admission before loading, after loading, inside synchronous updater and before history-selector writes. Unified History composes request/owner/scope/modal/group-chat checks with owner and visible-agent tab/pane navigation; exact proposed Session identity admits only the resume focus commit. No second loader, rollback or provider promotion.",
+			"remainingImplementationOwners": ["GT1-04-07D", "GT1-04-07E", "GT1-04-07F"],
+			"testOwners": ["GT1-04-07CT", "GT1-04-07C5UT"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {

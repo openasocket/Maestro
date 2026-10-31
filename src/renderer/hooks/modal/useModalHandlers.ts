@@ -34,7 +34,7 @@ import { useFeedbackDraftStore } from '../../stores/feedbackDraftStore';
 import { useQuitWhenIdleStore } from '../../stores/quitWhenIdleStore';
 import { useAgentErrorRecovery } from '../agent/useAgentErrorRecovery';
 import { aiTabFocusFields } from '../../utils/tabHelpers';
-import { resolveActiveTabRef, resolveTabRefRenameValue } from '../../utils/panelLayout';
+import { resolveActiveTabRef, resolveTabRefRenameValue, sameTabRef } from '../../utils/panelLayout';
 import { CONDUCTOR_BADGES } from '../../constants/conductorBadges';
 import { gitService } from '../../services/git';
 import { cueService } from '../../services/cue';
@@ -1053,9 +1053,34 @@ export function useModalHandlers(
 			const ownerKey = resumeSelectionKey(owner);
 			const initialGroupChatId = useGroupChatStore.getState().activeGroupChatId;
 			let invalidated = false;
-			const selectionIsCurrent = () => {
+			let expectedOwner = owner;
+			let expectedActive = selectSessionById(state.activeSessionId)(state);
+			let expectedCommit: Session | undefined;
+			const navigationMatches = (current: Session | undefined, expected: Session | undefined) => {
+				if (!current || !expected) return current === expected;
+				const currentTab = resolveActiveTabRef(current);
+				const expectedTab = resolveActiveTabRef(expected);
+				return (
+					current.inputMode === expected.inputMode &&
+					current.activeGroupId === expected.activeGroupId &&
+					current.tabGroups?.find((group) => group.id === current.activeGroupId)?.focusedPaneId ===
+						expected.tabGroups?.find((group) => group.id === expected.activeGroupId)
+							?.focusedPaneId &&
+					(currentTab && expectedTab
+						? sameTabRef(currentTab, expectedTab)
+						: currentTab === expectedTab)
+				);
+			};
+			const selectionIsCurrent = (nextSession?: Session) => {
 				const currentState = useSessionStore.getState();
 				const currentOwner = selectSessionById(sourceSessionId)(currentState);
+				// Only this exact admitted updater result may move the focus baseline.
+				// Other navigation, including away-and-back, remains invalidating.
+				if (expectedCommit && currentOwner === expectedCommit) {
+					expectedOwner = expectedCommit;
+					if (expectedActive?.id === sourceSessionId) expectedActive = expectedCommit;
+					expectedCommit = undefined;
+				}
 				return (
 					!invalidated &&
 					directorNotesResumeRequestRef.current === request &&
@@ -1064,7 +1089,13 @@ export function useModalHandlers(
 					useGroupChatStore.getState().activeGroupChatId === initialGroupChatId &&
 					useModalStore.getState().isOpen('directorNotes') &&
 					!!currentOwner &&
-					resumeSelectionKey(currentOwner) === ownerKey
+					resumeSelectionKey(currentOwner) === ownerKey &&
+					navigationMatches(currentOwner, expectedOwner) &&
+					navigationMatches(
+						selectSessionById(state.activeSessionId)(currentState),
+						expectedActive
+					) &&
+					opts?.canResume?.(nextSession) !== false
 				);
 			};
 			// Latch transitions synchronously so navigating away and back cannot
@@ -1090,7 +1121,14 @@ export function useModalHandlers(
 					undefined,
 					undefined,
 					projectPath,
-					scope
+					{
+						...scope,
+						canResume: (nextSession) => {
+							if (!selectionIsCurrent(nextSession)) return false;
+							if (nextSession) expectedCommit = nextSession;
+							return true;
+						},
+					}
 				);
 				if (resumed !== true || !selectionIsCurrent()) return false;
 
