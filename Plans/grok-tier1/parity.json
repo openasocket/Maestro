@@ -3009,6 +3009,29 @@
 			"live": "not-run",
 			"affectedRows": ["P17", "S01", "S05", "META-01"],
 			"verificationTask": "GT1-05-13"
+		},
+		"phase05-worktree-configuration": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-02a-general-worktree-configuration",
+			"sourceCommit": "0339d7ce531448c7f971f725b11ef1ca6d4e390b",
+			"sourceRevisionScope": "Pre-task HEAD plus the two source hashes and task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/hooks/worktree/useWorktreeHandlers.ts": "b3a8fdef35e1b41e3bd65ccfcc98315b14c255ec223793016b61363a4cc7a961",
+				"src/renderer/utils/worktreeSession.ts": "1ebbda50eff8c290d76b068c0cb36ef5c5d4b682e6886871bfc98ba2ef6a9a05"
+			},
+			"provenance": "implementation-and-static-review",
+			"implementation": "implemented",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P17", "S29"],
+			"testTask": "GT1-05-02B",
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"Auto Run target ownership remains phase08 work.",
+				"Production ACP selection/refusal remains phase07 work; custom route arguments are preserved, not certified.",
+				"Missing/custom binary and admitted launch behavior await consumer tests."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -7617,7 +7640,8 @@
 				"phase05ControlsEvidenceRef": "phase05-controls",
 				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
 				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests",
-				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair"
+				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair",
+				"phase05WorktreeConfigurationEvidenceRef": "phase05-worktree-configuration"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21574,7 +21598,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05WorktreeConfigurationEvidenceRef": "phase05-worktree-configuration"
 			},
 			"evidenceApplicability": {
 				"static": {
