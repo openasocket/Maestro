@@ -1422,6 +1422,42 @@
 			],
 			"testOwners": ["GT1-04-07C1ST", "GT1-04-07C1RT", "GT1-04-07C1T", "GT1-04-07CT"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-local-native-source-observation": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c1s-local-native-source-observation",
+			"sourceCommit": "d383460e4f7353873f3477ef544dd1a9f2292025",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/storage/grok-session-storage.ts": "771ddc5a86f620aa4b17a93dda67c646b22c157b1287d4db117f5f63c8b0cff6"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"mainTypeCheck": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P13", "P14", "P15", "C-supportsResume", "REG-SESSION-MUTATION"],
+			"scope": "Local scoped native-source observation: exact canonical account/cwd and unique native ID, pinned physical directory/file identities, pre-content descriptor checks and post-read rechecks, independent receipt/content availability, preserved unbound legacy browsing. Scoped SSH remains unavailable until physical source and endpoint observation are connected.",
+			"limitations": [
+				"Uninspectable encoded cwd candidates conservatively refuse uniqueness proof.",
+				"Unsafe or unavailable filesystem device/inode identity remains unobserved.",
+				"No deterministic or native qualification executed."
+			],
+			"remainingImplementationOwners": [
+				"GT1-04-07C1SR",
+				"GT1-04-07C1R",
+				"GT1-04-07C2",
+				"GT1-04-07C3",
+				"GT1-04-07C4",
+				"GT1-04-07C5",
+				"GT1-04-07D",
+				"GT1-04-07E",
+				"GT1-04-07F"
+			],
+			"testOwners": ["GT1-04-07C1ST", "GT1-04-07C1SRT", "GT1-04-07C1RT", "GT1-04-07C1T"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
