@@ -1,0 +1,635 @@
+{
+	"schemaVersion": 1,
+	"taskId": "GT1-03-13E",
+	"recordedAt": "2026-10-31T06:18:26.768335+00:00",
+	"sourceCommit": "decd95bb278fbd4d1e393b73df71ef6c5dbc37ae",
+	"sourceTree": "de9c3178d5d883a5c091966d30338fd6f21bfe86",
+	"executionRoot": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+	"branch": "auto-run-feature/grok-cli-integration",
+	"baseObservation": {
+		"ref": "feature/mega-maestro-v1.1.0-rc",
+		"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
+		"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+		"aheadBehind": [179, 10],
+		"baseIsAncestorOfSource": false,
+		"sourceIsAncestorOfBase": false
+	},
+	"environment": {
+		"platform": "darwin",
+		"architecture": "arm64",
+		"node": "v26.13.0",
+		"npm": "11.20.0",
+		"vitest": "4.1.11",
+		"typescript": "6.0.3",
+		"esbuild": "0.28.1",
+		"transport": "Synthetic ACP byte streams and fake processes; shared runner executes repository fake-agent.mjs locally. No native Grok calls."
+	},
+	"protocolReference": {
+		"sourceCommit": "2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8",
+		"npmCandidate": "@xai-official/grok@1.0.70",
+		"acpWireVersion": 1,
+		"protocolCrate": "0.10.4",
+		"schemaVersion": "0.11.4",
+		"binaryCorrespondence": "not-run"
+	},
+	"previousVerification": {
+		"path": "Plans/grok-tier1/evidence/03-verification.json",
+		"sha256": "50bd5c81622d8670423d26053c9208d8a315fd6882178960c5ba1b35e14abc3d",
+		"taskId": "GT1-03-13",
+		"sourceCommit": "3e5d0d73c2b9b9c973f858d3b1eff6f7ebdd92c8",
+		"status": "fail"
+	},
+	"inputsSha256": {
+		"Plans/grok-tier1/parity.json": "8e9f5c37894c2646e9ca9b61796980a517870f17471b910c979276c14c960e18",
+		"Plans/grok-tier1/run-state.json": "7b1502912e0b36dd91d3797660e2f1ff1426f2fd486fcac89f8c94b043a5a064",
+		"package-lock.json": "0b6b52f5ae6660b8cf2ca74cf9c7992e9630b08ce685c8413040caa305ecb747",
+		"package.json": "c6c1e45b7ba259420616990f408c70d9c07cd4226b9a8283197dd5944ba8b93b",
+		"scripts/build-maestro-lib-run.mjs": "2d6bc52c41c64028c9ad4fa808e57515571b570f2d805ec975e17e91404cbf83",
+		"scripts/build-maestro-lib.mjs": "b6a15ff57fd215ab3628a52cab2f95ac3024c01ccfddd75b7f6264fbb5ed9854",
+		"src/__tests__/fixtures/fake-agent.mjs": "80f7d7aaf5f60ecc7f2eca1f9df5891dcf804a5149e84edb341074426fd05a75",
+		"src/__tests__/main/agents/capability-snapshot.test.ts": "48171d7dd5a22a01ca25e9c9af0bfcb5ab1f9bac7e8b5f6d7b0a49e22210281a",
+		"src/__tests__/main/agents/detector.test.ts": "3317876705e37d1d8535608ff566fcd747275a005734373fa83ec9ca940710c8",
+		"src/__tests__/main/codex-app-server/server-requests.test.ts": "d87404d06478c6b4e00ff18135553a556c71506fa0f2797046b5bc5aeb6ad8b6",
+		"src/__tests__/main/ipc/handlers/agents.test.ts": "c7c0c68bac9fcf9bba0a2689d44b4cc4664e051cdf30d514c5c1cbbe7db878de",
+		"src/__tests__/main/parsers/agent-output-parser.test.ts": "bfcd30942c7ef1f968dc189e3b2ff0f21fa1af76ff6a8e3c95a4bb4b1385cecd",
+		"src/__tests__/main/parsers/claude-output-parser.test.ts": "f22d92ba7365acc67eb851fe71fd092b0218956cdaefb24950ff2fbb4638a6bc",
+		"src/__tests__/main/parsers/codex-output-parser.test.ts": "83bcb31846d42f1c04a6c25a5124728b0285059cfeb4dabd42c3ce6008afa750",
+		"src/__tests__/main/parsers/error-patterns.test.ts": "111aa70c43b43d154e52667e98ec06f71df493b73de061afa93f57e9b1a0ed34",
+		"src/__tests__/main/parsers/grok-output-parser.test.ts": "e0f4a2fc0892dd84ec899d4ca449fae00da49a9708c9507a9a14f33cc44b1399",
+		"src/__tests__/renderer/hooks/agent/useAutoResumeCoordinator.test.ts": "ce95ef499bc3adc7ba3f9ac00f571df6f882c3c7c6f9b126fc7ec79ef9f5e8d6",
+		"src/__tests__/renderer/stores/autoRunResumeStore.test.ts": "88a7163ee2ae61c019e39e77fa56ceb1208201defdd10100bfd314cd281d6454",
+		"src/__tests__/shared/maestro-lib/grok/acp-client.test.ts": "61d472226d0163a54342b99c9fc256bf47d63d2d2eb8ebb5a8bf2ab7e214b785",
+		"src/__tests__/shared/maestro-lib/grok/acp-events.test.ts": "0b7a555268633f2277445a187b802b9869a99dd847fcb8c0d630ed6ba7b65736",
+		"src/__tests__/shared/maestro-lib/grok/acp-protocol.test.ts": "533a217f19465b9cb12b343eada2830e91098c0c18a3d591e2aca745999aef44",
+		"src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts": "5e4f2e69ebf13a7319ea71f22aaa0f186ce3e4e31f86a5fdcd37f39c788e95c3",
+		"src/__tests__/shared/maestro-lib/grok/acp-session.test.ts": "388fcda2397f6e0741dabf0bb9ba551e9138178a186eaf77976d738c04223382",
+		"src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts": "d5de1098f63a2af47098c80c71c44b413214fa4f9f0da186ab8d3f7080d7a611",
+		"src/__tests__/shared/maestro-lib/protocol/rpc-requests.test.ts": "4b52bc0ece8fadad2b966e9ee059ca8f517f711d5612c079f76518036838b37b",
+		"src/__tests__/shared/maestro-lib/run/fakeAgent.ts": "9d9fec399acecc7fc9c8a088021531455140fce4c549fbe08e747e4cf8bf77cd",
+		"src/__tests__/shared/maestro-lib/run/start-turn.test.ts": "36d3d6a334a883a39f0b0bff52af206c9de65344faac14921daeb0f9615a3a8a",
+		"src/__tests__/shared/maestro-lib/run/turn-capture.test.ts": "ec9bfb203e7631b50f7ae6254d48764ea857712510e436096f6f30dabd43abb9",
+		"src/__tests__/shared/maestro-lib/translation-contract.test.ts": "297249e3865203c73c298c5c7ccb7baaa6c332c8f802555add54c2b11bf941da",
+		"src/__tests__/shared/modelPricing.test.ts": "67fbb027ba9e3101dc9ec8dcc5bb1a7864adb0dd617847f3a4411b6b674629d0",
+		"src/__tests__/shared/retryClassification.test.ts": "ad5afe9f500adcd21526a98af644c2a42b1f1cec358f4d29af75a0a33f76d254",
+		"src/main/agents/detector.ts": "b47fcb78fefd939c0a9aa23b9e719ce5937b5d11e28fadd0ca148904b4b56da0",
+		"src/main/ipc/handlers/agents.ts": "38b71543f6fe47347ec7dfb8f6aca6ec2f47af366e2c4fb08635eaf5dc6afc90",
+		"src/main/plugins/plugin-host-handlers.ts": "81ff275887037b6ec7596ebc68821661db52f739d1ba91f06eae9b774a026986",
+		"src/renderer/hooks/agent/useAutoResumeCoordinator.ts": "63618297ac437207c77ac9878bf0395bb63ecf87936279a1d61316c97c85369b",
+		"src/renderer/stores/autoRunResumeStore.ts": "3a34b78efd0990e17537a5131d656d3b318a5739566cea3c828d337a5c4357e9",
+		"src/shared/agentErrorPatterns.ts": "cc8cb8c7961e217232f4962ac73c2fc3ba3608d9df95e555a5f6c06c2ed4b950",
+		"src/shared/jsonUtils.ts": "74eb6148d4860d36a8fb230d9109e39863478ed4f1a58d17c3b07bcd62c38b05",
+		"src/shared/maestro-lib/codex/rpc-client.ts": "4cd0bc92d1c7927c36224c1e8302f342ab14ccc659691200ce2008bc1cc8e6d0",
+		"src/shared/maestro-lib/grok/acp-client.ts": "c98fe3439135fc53474c7b676000d6b29e762cc8bb9a464e0453715a4eaef48e",
+		"src/shared/maestro-lib/grok/acp-events.ts": "f6a6a1da1c70eaef01929b56b83cc81ac826fb224713ba53435c96c5827c8b57",
+		"src/shared/maestro-lib/grok/acp-protocol.ts": "c3fe4845e7b214574c47159eb2a0b21f3816d0bfc7106c23df5c1a2eefb027c6",
+		"src/shared/maestro-lib/grok/acp-requests.ts": "3e9d7d489298d7d2a7364d5db22fe4c0968ed04dbc0a80b519a26244701a7bec",
+		"src/shared/maestro-lib/grok/acp-session.ts": "04e228350abc8e6247792d83e5b89fa9a65a9bdc18bcce1bc130d7c3e2356ae6",
+		"src/shared/maestro-lib/grok/acp-turn.ts": "2d6844db521710282b3025202f9e78c5ce3228ffe150a9a34e52b063bbdaeca5",
+		"src/shared/maestro-lib/index.ts": "916f8b81e82cf1eb02f6380fb3610ba6de94c90ad7c22b3b504c85adfdd6c434",
+		"src/shared/maestro-lib/parsers/agent-output-parser.ts": "b2b620e948b9869ae78d137915bc84fb63f97f64943bbb77eb79bd9b556ea186",
+		"src/shared/maestro-lib/parsers/grok-output-parser.ts": "ffb42d363ef432f61db6b730663532e4b38cd5f6d8964ed4453f0de2f0b577b5",
+		"src/shared/maestro-lib/protocol/rpc-requests.ts": "960ed948e90e3c23dae32310bdd16831bb7fad280ab5e75137827947e23310c3",
+		"src/shared/maestro-lib/run/start-turn.ts": "c39dc9e663f86bbda14d55bd8dc057e6058d1d86316880bd8207169f7ce0a99a",
+		"src/shared/maestro-lib/run/turn-capture.ts": "aa30a15800bfdc384a4262649861e5abb8b47c3125437cc3611234d99500fab1",
+		"src/shared/maestro-lib/streaming/__tests__/turn-outcome.test.ts": "9d82c770505d5eac2e06c40bc9485d8855701992a951fea47638a843758e9aed",
+		"src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts": "881d85abf80429fb0b196e61ecc47b2a7ecee2459da31d0fa766a5991dda6ea2",
+		"src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts": "81a15d023d6d1186d7ac708208c76766b303a7a3a4b15102c733d06270d2d442",
+		"src/shared/maestro-lib/streaming/turn-outcome.ts": "4d7edd2520f01c3740f734634b59b90ce69e8d15bdc05cf881d8b4a1bfb22d7c",
+		"src/shared/maestro-lib/streaming/usage-accumulator.ts": "d8e2a1ac83b6c2af742206f88e39ed07c5402fe05a59d08caf75343277fbd32e",
+		"src/shared/maestro-lib/streaming/usage-totals.ts": "ef201b0f49c4897fbbbc4a07c0c00f34276262ab65452306983b051eb13a1852",
+		"src/shared/retryClassification.ts": "5e0a30d015fa0baad35747b900b25934534687c7b8591dd4ffa15330998d4a1c",
+		"src/shared/types.ts": "8a77aafe2f6b755a1561d313bd8f91e71d60697b7a41683d4ad90f195df19634",
+		"tsconfig.cli.json": "31213859259324304c3449b67dc48519c21fa94e0c3dcfd4e53ca593b587ed95",
+		"tsconfig.json": "5fbb896a59400b042cee9627f1e5987fa4db5c3a94d1f278a8e54ceb894b9c00",
+		"tsconfig.lint.json": "ea576d76e80ddf428e64e16d6495bcb2b5cd6bd1b1eb578116bd78decb22c083",
+		"tsconfig.main.json": "1a4b54a2a4613cb1c27771632697cd0f5ef130a5ea24659b461492e978f5d745",
+		"vitest.config.mts": "c72dbc05459559b23dce670db0f17c064dfdf026d46d3c0d2ea4777af654ac77"
+	},
+	"inputsChangedSincePreviousVerification": [
+		"src/__tests__/shared/maestro-lib/grok/acp-session.test.ts",
+		"src/shared/maestro-lib/grok/acp-events.ts",
+		"src/shared/maestro-lib/grok/acp-protocol.ts",
+		"src/shared/maestro-lib/grok/acp-session.ts",
+		"src/shared/maestro-lib/parsers/grok-output-parser.ts",
+		"src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts",
+		"src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts",
+		"src/shared/maestro-lib/streaming/usage-accumulator.ts",
+		"src/shared/maestro-lib/streaming/usage-totals.ts"
+	],
+	"runner": {
+		"path": "tmp/grok-tier1-phase03-verify/run-check.py",
+		"sha256": "9a041904c2dd2fe73222bf8d93c05093c1e04199de3abb3c7881274eae47f29c",
+		"unchangedFromPreviousVerification": true,
+		"invocation": ["python3", "tmp/grok-tier1-phase03-verify/run-check.py", "phase13e"],
+		"scopePath": "tmp/grok-tier1-phase03-verify/phase13e-scope.json",
+		"scopeSha256": "d3e67884237cbd4d0d21adcc1d3cf348d006f8496cfec51c733765fd4c0daa7a",
+		"wrapperExitIsNotChildExit": true
+	},
+	"buildRunner": {
+		"path": "tmp/grok-tier1-phase03-verify/build-checks-13e/run.py",
+		"sha256": "33a218a28f3e16e4280fdf99497a633e830f972840df48f78a2453644abbffbe",
+		"invocation": ["python3", "tmp/grok-tier1-phase03-verify/build-checks-13e/run.py"],
+		"reusedFrom": "tmp/grok-tier1-phase03-verify/build-checks/run.py",
+		"reusedFromSha256": "d2175e6e5bea20aca4c720eebd698a97eba1a93fdc94d7464fd72b19dad85841",
+		"changes": "Only task ID, receipt directory and checkout-local library output directory changed; commands, deadlines, environment and receipt logic retained.",
+		"wrapperExitIsNotChildExit": true
+	},
+	"checks": [
+		{
+			"id": "phase13e",
+			"sourceCommit": "decd95bb278fbd4d1e393b73df71ef6c5dbc37ae",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/main/agents/capability-snapshot.test.ts",
+				"src/__tests__/main/agents/detector.test.ts",
+				"src/__tests__/main/codex-app-server/server-requests.test.ts",
+				"src/__tests__/main/ipc/handlers/agents.test.ts",
+				"src/__tests__/main/parsers/agent-output-parser.test.ts",
+				"src/__tests__/main/parsers/error-patterns.test.ts",
+				"src/__tests__/main/parsers/grok-output-parser.test.ts",
+				"src/__tests__/renderer/hooks/agent/useAutoResumeCoordinator.test.ts",
+				"src/__tests__/renderer/stores/autoRunResumeStore.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-client.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-events.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-protocol.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-session.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts",
+				"src/__tests__/shared/maestro-lib/protocol/rpc-requests.test.ts",
+				"src/__tests__/shared/maestro-lib/run/start-turn.test.ts",
+				"src/__tests__/shared/maestro-lib/run/turn-capture.test.ts",
+				"src/__tests__/shared/maestro-lib/translation-contract.test.ts",
+				"src/__tests__/shared/retryClassification.test.ts",
+				"src/shared/maestro-lib/streaming/__tests__/turn-outcome.test.ts",
+				"src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts",
+				"src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts",
+				"src/__tests__/main/parsers/claude-output-parser.test.ts",
+				"src/__tests__/main/parsers/codex-output-parser.test.ts",
+				"src/__tests__/shared/modelPricing.test.ts",
+				"--maxWorkers=2",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/phase13e/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-10-31T06:16:08.647018+00:00",
+			"finishedAt": "2026-10-31T06:16:15.614906+00:00",
+			"durationSeconds": 6.968,
+			"exitCode": 0,
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/phase13e/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/phase13e/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/phase13e/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/phase13e/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/phase13e/xdg-data"
+			},
+			"homeAndCodexHomeUnchanged": true,
+			"socketPrevalidation": {
+				"pathTemplate": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/fake-endpoint-XXXXXX/runtime.sock",
+				"bytes": 101,
+				"maxBytes": 103
+			},
+			"log": "tmp/grok-tier1-phase03-verify/phase13e/output.log",
+			"output.logSha256": "dd6197a637a6a2e1b3c9b7ac89c257adae18c597b726e5d128e5c9a69af373fb",
+			"results.jsonSha256": "0aaa3e38e22f950a870ec1785147bc1b8b67c58aa5d40006d59f3ddcdd3417f6",
+			"status": "pass",
+			"rawReceiptPath": "tmp/grok-tier1-phase03-verify/phase13e/receipt.json",
+			"rawReceiptSha256": "bfe580f16775313281187cfe7c4d876248bd186516d1f2ac01695e32098c5bfd",
+			"suites": [
+				{
+					"file": "src/__tests__/renderer/stores/autoRunResumeStore.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 41
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/agent/useAutoResumeCoordinator.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 72
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/modelPricing.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 29
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/retryClassification.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 129
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/agents/capability-snapshot.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 17
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/agents/detector.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 148
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/codex-app-server/server-requests.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 20
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/parsers/agent-output-parser.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 38
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/parsers/claude-output-parser.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 116
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/parsers/codex-output-parser.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 200
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/parsers/error-patterns.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 256
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/parsers/grok-output-parser.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 123
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/translation-contract.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 4
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/ipc/handlers/agents.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 135
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-client.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 31
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-events.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 140
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-protocol.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 51
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 120
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-session.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 147
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 89
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/protocol/rpc-requests.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 7
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/run/start-turn.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 81,
+						"skipped": 1
+					},
+					"failures": [],
+					"skipped": [
+						"applyWindowsShellRules starts a .cmd shim under a path with spaces and delivers the prompt intact"
+					]
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/run/turn-capture.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 29
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/shared/maestro-lib/streaming/__tests__/turn-outcome.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 52
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 35
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 21
+					},
+					"failures": [],
+					"skipped": []
+				}
+			],
+			"credentialIsolation": "Inherited provider/credential environment stripped; values were not recorded. HOME and CODEX_HOME unchanged.",
+			"fileCounts": {
+				"passed": 26,
+				"failed": 0,
+				"total": 26
+			},
+			"assertionCounts": {
+				"passed": 2131,
+				"failed": 0,
+				"skipped": 1,
+				"todo": 0,
+				"total": 2132
+			},
+			"suiteSetupErrors": [],
+			"reportedUnhandledErrors": 0,
+			"unhandledErrorObservation": "No Vitest unhandled-error/rejection report in the complete log; JSON reporter has no separate unhandled-errors field."
+		},
+		{
+			"name": "lint",
+			"command": ["npm", "run", "lint"],
+			"startedAt": "2026-10-31T06:16:10.669701+00:00",
+			"elapsedSeconds": 68.861,
+			"exitCode": 2,
+			"logPath": "tmp/grok-tier1-phase03-verify/build-checks-13e/lint.log",
+			"logSha256": "e5bb5e6a2d1a35e8e846e9eaabfca1ed1ec257e2e7a3919a6509f43f23c94fad",
+			"diagnosticLines": [
+				"src/main/plugins/plugin-host-handlers.ts(1196,76): error TS2339: Property 'dispatcher' does not exist on type 'RequestInit'."
+			],
+			"status": "fail",
+			"diagnosticCount": 1
+		},
+		{
+			"name": "main-types",
+			"command": [
+				"node",
+				"node_modules/typescript/bin/tsc",
+				"-p",
+				"tsconfig.main.json",
+				"--noEmit"
+			],
+			"startedAt": "2026-10-31T06:17:19.533397+00:00",
+			"elapsedSeconds": 21.603,
+			"exitCode": 0,
+			"logPath": "tmp/grok-tier1-phase03-verify/build-checks-13e/main-types.log",
+			"logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			"diagnosticLines": [],
+			"status": "pass",
+			"diagnosticCount": 0
+		},
+		{
+			"name": "cli-types",
+			"command": ["node", "node_modules/typescript/bin/tsc", "-p", "tsconfig.cli.json", "--noEmit"],
+			"startedAt": "2026-10-31T06:17:41.138264+00:00",
+			"elapsedSeconds": 15.448,
+			"exitCode": 0,
+			"logPath": "tmp/grok-tier1-phase03-verify/build-checks-13e/cli-types.log",
+			"logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			"diagnosticLines": [],
+			"status": "pass",
+			"diagnosticCount": 0
+		},
+		{
+			"name": "library-build",
+			"command": [
+				"npm",
+				"run",
+				"build:maestro-lib",
+				"--",
+				"--out-dir",
+				"/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/maestro-lib-13e"
+			],
+			"startedAt": "2026-10-31T06:17:56.587425+00:00",
+			"elapsedSeconds": 7.134,
+			"exitCode": 0,
+			"logPath": "tmp/grok-tier1-phase03-verify/build-checks-13e/library-build.log",
+			"logSha256": "007ae7680e50a65ee23756c911cff4cab99450b6ae0470157e87b16d4a89273c",
+			"diagnosticLines": [],
+			"status": "pass",
+			"diagnosticCount": 0
+		},
+		{
+			"name": "runner-build",
+			"command": ["npm", "run", "build:maestro-lib-run"],
+			"startedAt": "2026-10-31T06:18:03.723102+00:00",
+			"elapsedSeconds": 0.719,
+			"exitCode": 0,
+			"logPath": "tmp/grok-tier1-phase03-verify/build-checks-13e/runner-build.log",
+			"logSha256": "0a24b8234b572e7f4bcd8e8004a7145fa3bd2407774ffa2c63c0d66abdc7a501",
+			"diagnosticLines": [],
+			"status": "pass",
+			"diagnosticCount": 0
+		}
+	],
+	"buildReceipt": {
+		"path": "tmp/grok-tier1-phase03-verify/build-checks-13e/receipt.json",
+		"sha256": "58cb4762188a8e1aedc0fe0d339648f344a28214f1196cdb85143c2babcca8a1",
+		"environment": {
+			"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/build-checks-13e/temp",
+			"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/build-checks-13e/temp",
+			"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/build-checks-13e/temp",
+			"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/build-checks-13e/npm-cache",
+			"npm_config_update_notifier": "false",
+			"NODE_DISABLE_COMPILE_CACHE": "1",
+			"NO_COLOR": "1"
+		},
+		"versions": {
+			"node": {
+				"command": ["node", "--version"],
+				"exitCode": 0,
+				"output": "v26.13.0"
+			},
+			"npm": {
+				"command": ["npm", "--version"],
+				"exitCode": 0,
+				"output": "11.20.0"
+			},
+			"typescript": {
+				"command": ["node", "node_modules/typescript/bin/tsc", "--version"],
+				"exitCode": 0,
+				"output": "Version 6.0.3"
+			},
+			"esbuild": {
+				"command": ["node", "-p", "require(\"esbuild/package.json\").version"],
+				"exitCode": 0,
+				"output": "0.28.1"
+			}
+		}
+	},
+	"uniqueDiagnostics": [
+		"src/main/plugins/plugin-host-handlers.ts(1196,76): error TS2339: Property 'dispatcher' does not exist on type 'RequestInit'."
+	],
+	"uniqueDiagnosticCount": 1,
+	"phase03DiagnosticCount": 0,
+	"baselineDiagnostic": {
+		"file": "src/main/plugins/plugin-host-handlers.ts",
+		"line": 1196,
+		"code": "TS2339",
+		"sourceSha256": "81ff275887037b6ec7596ebc68821661db52f739d1ba91f06eae9b774a026986",
+		"ownerTask": "GT1-12-03",
+		"status": "fail"
+	},
+	"completedRepairTasks": ["GT1-03-13A", "GT1-03-13B", "GT1-03-13C", "GT1-03-13D"],
+	"newPhase03RepairTasks": [],
+	"overallStatus": "fail",
+	"phase03DeterministicStatus": "pass",
+	"live": {
+		"status": "not-run",
+		"providerCalls": 0,
+		"budgetUsd": 0
+	},
+	"imagesAnalyzed": 0,
+	"limitations": [
+		"Repository validation remains fail for the unchanged RequestInit.dispatcher diagnostic, owned by GT1-12-03; this is not a waiver.",
+		"Windows cmd.exe case skipped on macOS; Windows/Linux/SSH/native qualification remains not-run.",
+		"Library declaration and bundle passes do not qualify native Grok behavior or managed-route containment.",
+		"Parity reconciliation belongs to GT1-03-14; parity and prior failed evidence are unchanged.",
+		"Full logs, JSON reports and harnesses remain in ignored checkout-local scratch; commands, hashes, counts and diagnostics are retained here.",
+		"No full-repository test, ESLint or validate:push pass is claimed. Grok promotion remains withheld."
+	],
+	"generatedArtifactsSha256": {
+		"dist/cli/maestro-lib-run.js": "edbe72094e5f8c413846f0865628de4734b5bfcc3dd503333b212140d50c87ec",
+		"dist/cli/maestro-lib-run.js.map": "95e5d7a5d895d1ad9c90b3fa3b089f29b37c928ad2d1290f6ad81286978e83af",
+		"tmp/grok-tier1-phase03-verify/maestro-lib-13e/README.md": "f238eb9f8b69ab2a4e7173d310aad9183a5e32d15c63a6aae667525f0199719d",
+		"tmp/grok-tier1-phase03-verify/maestro-lib-13e/index.d.ts": "b74a2430c659e8bda6f00155a1932874cf7ac0f2039e8f9f242cfa70cf1e75ea",
+		"tmp/grok-tier1-phase03-verify/maestro-lib-13e/index.js": "53532143f704ee33e54c902cb79ac7b23e7011be19e70cc7f0c982be2ac65eab",
+		"tmp/grok-tier1-phase03-verify/maestro-lib-13e/index.js.map": "7738e6392e0e02a645f22b01ebbffe861f8521539d690b09b71265683e5243e6",
+		"tmp/grok-tier1-phase03-verify/maestro-lib-13e/package.json": "f8d5c8c2bdcac18cfd9cef1e5e82b3b0efc7bf99fbe0dae1d58799831276417c",
+		"tmp/grok-tier1-phase03-verify/maestro-lib-13e/provenance.json": "573313d81a5ecff1da82188251061b01cc172f570ef5a098ae464d71751aa1c8",
+		"tmp/grok-tier1-phase03-verify/maestro-lib-13e/types/shared/maestro-lib/grok/acp-client.d.ts": "03a9c35bbd166c8416eb47f05fd82d0baa225a8547be513a3fbf7e1a8b15bb06",
+		"tmp/grok-tier1-phase03-verify/maestro-lib-13e/types/shared/maestro-lib/grok/acp-events.d.ts": "b4caf314e4114f347f30cfb26226c672756f3334b503534f28e1739327b73e43",
+		"tmp/grok-tier1-phase03-verify/maestro-lib-13e/types/shared/maestro-lib/grok/acp-protocol.d.ts": "2d3e43d31f86bd4d42a9175b428bf396595a997326007b021b4eb8c8d409877f",
+		"tmp/grok-tier1-phase03-verify/maestro-lib-13e/types/shared/maestro-lib/grok/acp-requests.d.ts": "8b8432f21adc0aaf862ff23fd801ea6b3b6763b219380c95211db79d2845dd6e",
+		"tmp/grok-tier1-phase03-verify/maestro-lib-13e/types/shared/maestro-lib/grok/acp-session.d.ts": "051eab7035975b0065ea7e4a098ec3e9e4a08349f23daa6be7b28014bdf5a3fd",
+		"tmp/grok-tier1-phase03-verify/maestro-lib-13e/types/shared/maestro-lib/grok/acp-turn.d.ts": "ed3317cdc003abea8de775d61ba15ee399396b653da68095b5e5a3bca91fe47b",
+		"tmp/grok-tier1-phase03-verify/maestro-lib-13e/types/shared/maestro-lib/protocol/rpc-requests.d.ts": "771a79459982e8c435aa78c82599d70f5eaa691095752b28a1b642bbd18ebbda"
+	},
+	"libraryProvenance": {
+		"formatVersion": 1,
+		"name": "maestro-lib",
+		"version": "0.32.0",
+		"maestroAppVersion": "1.1.0-RC",
+		"maestroManagedContract": "maestro-managed/1",
+		"sourceRevision": "decd95bb278fbd4d1e393b73df71ef6c5dbc37ae",
+		"sourceDirty": false,
+		"inputFiles": 330,
+		"inputSha256": "95f32570f37f1e7c41eeba7064855eaad35c74d25e676dd2724a29718d28629d",
+		"tooling": {
+			"node": "26.13.0"
+		}
+	}
+}
