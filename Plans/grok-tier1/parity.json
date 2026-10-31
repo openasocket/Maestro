@@ -2602,6 +2602,30 @@
 			],
 			"testOwner": "GT1-04-07F5T",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-native-resume-integration-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-08-native-resume-integration-tests",
+			"sourceCommit": "0974752f2975ab4811613dc3f0355aadd0f5bc49",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/ipc/handlers/process.test.ts": "50089d000447f97fc383a29c412434a61b5ecd7368200525b9f18c7d4d573425",
+				"src/__tests__/main/process-manager.test.ts": "83443a5c2023052e48cad14564761d8e4261d0c6f99071cba9e5ab1f8b243dae",
+				"src/__tests__/shared/maestro-lib/turns/record-turn.test.ts": "6a3a956be0c93556b8a3a6386f4728c9d290a35e7ac4112b986a99924ca5a5f4"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "18 new parameter-expanded cases and two strengthened existing cases: native end-only stdout/exit IDs, cancellation drainage and next resume, stale predecessor completion, account/host/cwd refusals, rehydrated IPC ownership, explicit remote account delivery, and retained transcripts/History/usage after failed or interrupted recording.",
+			"limitations": [
+				"Tests authored only; GT1-04-13 owns execution. Existing ACP allocation/cancellation adapter and persistence cases are reused, not new live proof.",
+				"TypeScript and extended ESLint comparisons add no diagnostics; existing baseline diagnostics prevent clean global checks.",
+				"No real provider, account or SSH access. Production desktop ACP routing and native/live qualification remain pending."
+			],
+			"testOwner": "GT1-04-08",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6545,7 +6569,8 @@
 				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt",
 				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests",
 				"phase04RuntimeAdmittedNativeRecordingRef": "phase04-runtime-admitted-native-recording",
-				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests"
+				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests",
+				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11867,7 +11892,8 @@
 				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt",
 				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests",
 				"phase04RuntimeAdmittedNativeRecordingRef": "phase04-runtime-admitted-native-recording",
-				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests"
+				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests",
+				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12458,7 +12484,8 @@
 				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt",
 				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests",
 				"phase04RuntimeAdmittedNativeRecordingRef": "phase04-runtime-admitted-native-recording",
-				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests"
+				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests",
+				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17119,7 +17146,8 @@
 				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt",
 				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests",
 				"phase04RuntimeAdmittedNativeRecordingRef": "phase04-runtime-admitted-native-recording",
-				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests"
+				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests",
+				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests"
 			},
 			"evidenceApplicability": {
 				"static": {

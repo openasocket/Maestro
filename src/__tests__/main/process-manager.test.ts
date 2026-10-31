@@ -82,6 +82,10 @@ import type { ManagedProcess, ProcessConfig } from '../../main/process-manager/t
 import { nextSpawnGeneration } from '../../main/process-manager/generation';
 import { buildSpawnRequestSnapshot } from '../../main/process-manager/ProcessManager';
 import { fakeSpawnPort } from '../helpers/managedSpawnPort';
+import { GrokOutputParser } from '../../main/parsers/grok-output-parser';
+import { StdoutHandler } from '../../main/process-manager/handlers/StdoutHandler';
+import { ExitHandler } from '../../main/process-manager/handlers/ExitHandler';
+import { DataBufferManager } from '../../main/process-manager/handlers/DataBufferManager';
 
 describe('process-manager.ts', () => {
 	describe('aggregateModelUsage', () => {
@@ -665,6 +669,153 @@ describe('process-manager.ts', () => {
 					else expect(processManager.admissionOf(request.sessionId)).toBeNull();
 					if (!['spawn-failed', 'no-process'].includes(failure))
 						expect(spawn).not.toHaveBeenCalled();
+				}
+			);
+
+			it.each([
+				['stdout', false],
+				['exit flush', false],
+				['stdout', true],
+				['exit flush', true],
+			] as const)(
+				'resumes the end-only ID from %s after interrupted=%s',
+				async (route, interrupted) => {
+					delete request.agentSessionId;
+					delete request.nativeSessionBinding;
+					request.args = [];
+					await processManager.spawnAdmitted(request, { peer: 'in-process' });
+					const proc = processManager.get(request.sessionId)!;
+					Object.assign(proc, {
+						isStreamJsonMode: true,
+						isBatchMode: true,
+						outputParser: new GrokOutputParser(),
+						interrupted,
+					});
+					const bufferManager = new DataBufferManager(processes, processManager);
+					const deps = { processes, emitter: processManager, bufferManager };
+					const stdout = new StdoutHandler(deps);
+					const onId = vi.fn((id: string, nativeId: string) => ({
+						nativeId,
+						launch: processManager.nativeSessionLaunchOf(id),
+					}));
+					processManager.on('session-id', onId);
+					const onError = vi.fn();
+					processManager.on('agent-error', onError);
+					stdout.handleData(request.sessionId, '{"type":"text","data":"partial answer"}\n');
+					expect(onId).not.toHaveBeenCalled();
+					const end = JSON.stringify({
+						type: 'end',
+						stopReason: interrupted ? 'cancelled' : 'EndTurn',
+						sessionId: 'native-new',
+					});
+					stdout.handleData(request.sessionId, end + (route === 'stdout' ? '\n' : ''));
+					if (route === 'exit flush') {
+						expect(onId).not.toHaveBeenCalled();
+						if (interrupted) processManager.kill(request.sessionId);
+					}
+					await new ExitHandler(deps).handleExit(request.sessionId, interrupted ? 130 : 0, proc);
+					expect(onId).toHaveBeenCalledExactlyOnceWith(request.sessionId, 'native-new');
+					expect(onError).not.toHaveBeenCalled();
+					const observed = onId.mock.results[0].value;
+					expect(observed.launch).toMatchObject({
+						scope: request.nativeSessionScope,
+						tabId: request.tabId,
+						processGeneration: proc.spawnGeneration,
+						nativeSessionRequestId: 'attempt_1-A',
+					});
+					expect(processManager.nativeSessionLaunchOf(request.sessionId)).toBeUndefined();
+					if (observed.launch?.scope.state !== 'bound') throw new Error('Missing captured scope');
+					request.agentSessionId = observed.nativeId;
+					request.nativeSessionBinding = {
+						...observed.launch.scope,
+						nativeSessionId: observed.nativeId,
+					};
+					request.args = ['--resume', observed.nativeId];
+					request.nativeSessionRequestId = 'next_attempt';
+					expect(await processManager.spawnAdmitted(request, { peer: 'in-process' })).toMatchObject(
+						{ success: true }
+					);
+					expect(spawn.mock.lastCall![0]).toMatchObject({
+						args: ['--resume', 'native-new'],
+						customEnvVars: { GROK_HOME: path.join(process.cwd(), 'fixture-account') },
+						nativeSessionScope: observed.launch.scope,
+					});
+				}
+			);
+
+			it('discards a predecessor end after a successor takes the same process key', async () => {
+				await processManager.spawnAdmitted(request, { peer: 'in-process' });
+				const predecessor = processManager.get(request.sessionId)!;
+				Object.assign(predecessor, {
+					isStreamJsonMode: true,
+					outputParser: new GrokOutputParser(),
+					jsonBuffer: '{"type":"end","stopReason":"EndTurn","sessionId":"stale-native"}',
+				});
+				processManager.kill(request.sessionId);
+				request.nativeSessionRequestId = 'successor';
+				await processManager.spawnAdmitted(request, { peer: 'in-process' });
+				const successor = processManager.get(request.sessionId)!;
+				const receipt = processManager.nativeSessionLaunchOf(request.sessionId);
+				const onId = vi.fn();
+				const onExit = vi.fn();
+				const onParsed = vi.fn();
+				processManager.on('session-id', onId).on('exit', onExit).on('parsed-event', onParsed);
+				const bufferManager = new DataBufferManager(processes, processManager);
+				await new ExitHandler({ processes, emitter: processManager, bufferManager }).handleExit(
+					request.sessionId,
+					0,
+					predecessor
+				);
+				expect(onId).not.toHaveBeenCalled();
+				expect(onExit).not.toHaveBeenCalled();
+				expect(onParsed).not.toHaveBeenCalled();
+				expect(processManager.get(request.sessionId)).toBe(successor);
+				expect(processManager.nativeSessionLaunchOf(request.sessionId)).toBe(receipt);
+				expect(receipt?.nativeSessionRequestId).toBe('successor');
+				expect(successor.agentSessionId).toBeUndefined();
+			});
+
+			it.each(['account', 'host', 'cwd', 'unchanged'] as const)(
+				'checks %s ownership before native resume',
+				async (changed) => {
+					if (request.nativeSessionScope?.state !== 'bound')
+						throw new Error('Missing fixture scope');
+					const scope = {
+						...request.nativeSessionScope,
+						cwd: '/remote/project',
+						host: { kind: 'ssh' as const, identity: 'endpoint-original' },
+					};
+					request.nativeSessionBinding = {
+						...structuredClone(scope),
+						nativeSessionId: 'native-requested',
+					};
+					const retainedBinding = structuredClone(request.nativeSessionBinding);
+					request.nativeSessionScope = scope;
+					request.sshRemoteId = 'unchanged-alias';
+					request.cwd = '/remote/project';
+					request.command = 'ssh';
+					request.args = ['unchanged-alias', 'grok --resume native-requested'];
+					if (changed === 'account') scope.accountRef = 'grok:other-account';
+					if (changed === 'host') scope.host.identity = 'endpoint-replaced';
+					if (changed === 'cwd') scope.cwd = '/remote/other-project';
+					const onError = vi.fn();
+					processManager.on('agent-error', onError);
+					const result = await processManager.spawnAdmitted(request, { peer: 'in-process' });
+					if (changed === 'unchanged') {
+						expect(result.success).toBe(true);
+						expect(spawn).toHaveBeenCalledOnce();
+						expect(onError).not.toHaveBeenCalled();
+						return;
+					}
+					expect(result.success).toBe(false);
+					expect(spawn).not.toHaveBeenCalled();
+					expect(onError).toHaveBeenCalledWith(
+						request.sessionId,
+						expect.objectContaining({ type: 'session_not_found', recoverable: false })
+					);
+					expect(request.nativeSessionBinding).toEqual(retainedBinding);
+					expect(request.agentSessionId).toBe('native-requested');
+					expect(processManager.nativeSessionLaunchOf(request.sessionId)).toBeUndefined();
 				}
 			);
 

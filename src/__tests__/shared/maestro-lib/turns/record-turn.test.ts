@@ -414,33 +414,140 @@ describe('turn records', () => {
 		});
 	});
 
-	it.each(['different-native', undefined])(
-		'refuses successful History for a mismatched end ID (%s)',
-		async (sessionId) => {
-			const { recorder: records } = await recorder();
-			const result = await records.recordTurn(
-				turn({
-					assembled: { entry: { text: 'hi' }, settings: { provider: 'grok' } },
-					completed: { ...turn().completed, sessionId },
-					nativeSessionBinding: {
-						version: 1,
-						state: 'bound',
-						provider: 'grok',
-						nativeSessionId: 'original-native',
-						accountRef: 'grok-account:original',
-						host: { kind: 'local', identity: 'original-host' },
-						cwd: '/original/project',
-					},
-				})
+	it.each([
+		['completed', 'different-native', 'Native session identity mismatch.'],
+		['completed', undefined, 'Native session identity mismatch.'],
+		['crashed', undefined, 'The turn crashed.'],
+		['interrupted', 'original-native', 'The turn interrupted.'],
+	] as const)(
+		'retains Grok History and resume scope after %s with terminal ID %s',
+		async (outcome, sessionId, message) => {
+			const binding = {
+				version: 1 as const,
+				state: 'bound' as const,
+				provider: 'grok' as const,
+				nativeSessionId: 'original-native',
+				accountRef: 'grok-account:original',
+				host: { kind: 'ssh' as const, identity: 'original-endpoint' },
+				cwd: '/original/project',
+			};
+			seed(
+				{ toolType: 'grok' },
+				{
+					agentSessionId: binding.nativeSessionId,
+					nativeSessionBinding: binding,
+					usageStats: USAGE,
+				}
 			);
-			expect(result.history).toEqual({
-				ok: false,
-				reason: 'not-recorded',
-				message: 'Native session identity mismatch.',
+			const { recorder: records, repository } = await recorder();
+			const original = turn({
+				assembled: { entry: { text: 'original request' }, settings: { provider: 'grok' } },
+				completed: { ...turn().completed, sessionId: binding.nativeSessionId },
+				nativeSessionBinding: binding,
+				scope: { projectPath: binding.cwd, isRemote: true, isWorktree: false },
 			});
-			expect(fs.existsSync(path.join(paths.historyDir, 'a1.jsonl'))).toBe(false);
+			expect((await records.recordTurn(original)).history.ok).toBe(true);
+			const historyFile = path.join(paths.historyDir, 'a1.jsonl');
+			const historyBefore = fs.readFileSync(historyFile, 'utf-8');
+			const logsBefore = structuredClone(repository.getTab('a1', 't1')!.logs);
+			const statsBefore = structuredClone(statsEvents);
+			const result = await records.recordTurn({
+				...original,
+				assembled: { entry: { text: 'resume request' }, settings: { provider: 'grok' } },
+				completed: {
+					...original.completed,
+					outcome,
+					sessionId,
+					answerText: 'Partial resume output',
+					exit: {
+						...CLEAN_EXIT,
+						interrupted: outcome === 'interrupted',
+						exitCode: outcome === 'crashed' ? 1 : 0,
+					},
+				},
+			});
+			expect(result.history).toEqual({ ok: false, reason: 'not-recorded', message });
+			expect(result.transcript.ok).toBe(true);
+			expect(fs.readFileSync(historyFile, 'utf-8')).toBe(historyBefore);
+			expect(statsEvents.slice(0, statsBefore.length)).toEqual(statsBefore);
+			// Partial output/spend is retained, but cannot rewrite the resumable identity or prior usage.
+			expect(statsEvents).toHaveLength(statsBefore.length + 1);
+			const { repository: reloaded } = await recorder();
+			const tab = reloaded.getTab('a1', 't1')!;
+			expect(tab).toMatchObject({
+				agentSessionId: binding.nativeSessionId,
+				nativeSessionBinding: binding,
+				usageStats: USAGE,
+			});
+			expect(tab.logs?.slice(0, logsBefore!.length)).toEqual(logsBefore);
+			expect(transcriptOf(tab).some((entry) => entry.text === 'Partial resume output')).toBe(true);
+			const [history] = await new HistoryManager().getEntries('a1');
+			expect(history).toMatchObject({ nativeSessionBinding: binding, usageStats: USAGE });
 		}
 	);
+
+	it('keeps colliding Grok native IDs scoped to each tab and account through History reload', async () => {
+		const tabs = ['t1', 't2'].map((id) => ({
+			id,
+			name: id,
+			logs: [],
+			agentSessionId: 'colliding-native',
+			nativeSessionBinding: {
+				version: 1 as const,
+				state: 'bound' as const,
+				provider: 'grok' as const,
+				nativeSessionId: 'colliding-native',
+				accountRef: `grok-account:${id}`,
+				host: { kind: 'ssh' as const, identity: `endpoint-${id}` },
+				cwd: `/remote/${id}`,
+			},
+		}));
+		seed({ toolType: 'grok', aiTabs: tabs, activeTabId: 't2' });
+		const { recorder: records } = await recorder();
+		const results = await Promise.all(
+			tabs.map((tab) =>
+				records.recordTurn(
+					turn({
+						tabId: tab.id,
+						assembled: { entry: { text: `request-${tab.id}` }, settings: { provider: 'grok' } },
+						completed: {
+							...turn().completed,
+							sessionId: tab.agentSessionId,
+							answerText: `answer-${tab.id}`,
+						},
+						nativeSessionBinding: tab.nativeSessionBinding,
+						scope: { projectPath: tab.nativeSessionBinding.cwd, isRemote: true, isWorktree: false },
+					})
+				)
+			)
+		);
+		expect(results.every((result) => result.history.ok && result.transcript.ok)).toBe(true);
+		const histories = await new HistoryManager().getEntries('a1');
+		expect(histories).toHaveLength(2);
+		const { repository: reloaded } = await recorder();
+		for (const tab of tabs) {
+			expect(histories.find((entry) => entry.tabId === tab.id)).toMatchObject({
+				agentSessionId: 'colliding-native',
+				nativeSessionBinding: tab.nativeSessionBinding,
+				projectPath: tab.nativeSessionBinding.cwd,
+				fullResponse: `answer-${tab.id}`,
+			});
+			const stored = reloaded.getTab('a1', tab.id)!;
+			expect(stored.nativeSessionBinding).toEqual(tab.nativeSessionBinding);
+			expect(stored.agentSessionId).toBe('colliding-native');
+			expect(transcriptOf(stored).map((entry) => entry.text)).toEqual([
+				`request-${tab.id}`,
+				`answer-${tab.id}`,
+			]);
+			expect(statsEvents.filter((entry) => entry.tabId === tab.id)).toEqual([
+				expect.objectContaining({
+					agentType: 'grok',
+					projectPath: tab.nativeSessionBinding.cwd,
+					isRemote: true,
+				}),
+			]);
+		}
+	});
 
 	it('records a USER history entry the desktop reads, built from the answer', async () => {
 		const { recorder: records } = await recorder();

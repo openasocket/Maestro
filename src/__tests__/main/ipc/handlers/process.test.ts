@@ -19,6 +19,7 @@ import { applyAgentConfigOverrides } from '../../../../shared/maestro-lib/launch
 import { buildCallerIdentityEnv } from '../../../../shared/agentDelegation';
 import { resolveAgentAccountRef } from '../../../../shared/agentAccountDir';
 import type { SshRemoteConfig } from '../../../../shared/types';
+import type { ProviderSwitchTab } from '../../../../shared/maestro-lib/agents/providerSwap';
 import type {
 	ProcessConfig,
 	ProcessSpawnOptions,
@@ -5032,6 +5033,126 @@ describe('process IPC handlers', () => {
 				);
 			}
 		);
+
+		describe('retained native resume ownership (GT1-04-08)', () => {
+			let stored: Array<{
+				id: string;
+				toolType: string;
+				cwd: string;
+				aiTabs: Array<ProviderSwitchTab & { id: string; logs: string[] }>;
+			}>;
+			const resume = (tabId = 'tab1', account = '/remote/account') =>
+				handlers.get('process:spawn')!(
+					{},
+					{
+						sessionId: `session-1-ai-${tabId}`,
+						toolType: 'grok',
+						command: 'grok',
+						cwd: '/remote/project',
+						args: ['--cwd', '/remote/project', '--resume', 'native-collision'],
+						agentSessionId: 'native-collision',
+						sessionCustomEnvVars: { GROK_HOME: account },
+						sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+					}
+				);
+
+			beforeEach(() => {
+				stored = [
+					{
+						id: 'session-1',
+						toolType: 'grok',
+						cwd: '/remote/project',
+						aiTabs: ['tab1', 'tab2'].map((id, index) => ({
+							id,
+							agentSessionId: 'native-collision',
+							turnProvider: 'grok',
+							logs: [`Retained conversation ${id}`],
+							nativeSessionBinding: {
+								version: 1,
+								state: 'bound',
+								provider: 'grok',
+								nativeSessionId: 'native-collision',
+								cwd: '/remote/project',
+								accountRef: resolveAgentAccountRef(
+									{
+										toolType: 'grok',
+										sshRemote: true,
+										managedAccountDir: index === 0 ? '/remote/account' : '/remote/other',
+									},
+									{ homeDir: '' }
+								)!,
+								host: { kind: 'ssh', identity: 'remote-installation' },
+							},
+						})),
+					},
+				];
+				mockSessionsStore.get.mockImplementation((key, fallback) =>
+					key === 'sessions' ? stored : fallback
+				);
+			});
+
+			it('resumes each rehydrated tab with its own account and the same native ID and host', async () => {
+				stored = JSON.parse(JSON.stringify(stored));
+				handlers.clear();
+				registerProcessHandlers(deps);
+				const original = structuredClone(stored);
+				for (const [index, tab] of stored[0].aiTabs.entries()) {
+					const account = index === 0 ? '/remote/account' : '/remote/other';
+					receipt.account.canonicalPath = account;
+					receipt.inherited.GROK_HOME = receipt.effective.GROK_HOME = account;
+					expect(await resume(tab.id, account)).toMatchObject({ success: true, pid: 777 });
+					const spawned = mockProcessManager.spawn.mock.lastCall![0] as ProcessConfig;
+					expect(spawned).toMatchObject({
+						sessionId: `session-1-ai-${tab.id}`,
+						agentSessionId: 'native-collision',
+						sshRemoteId: 'remote-1',
+						nativeSessionBinding: tab.nativeSessionBinding,
+					});
+					expect({
+						...spawned.nativeSessionScope,
+						nativeSessionId: spawned.agentSessionId,
+					}).toEqual(tab.nativeSessionBinding);
+					expect(spawned.sshStdinScript).toContain(`export GROK_HOME='${account}'`);
+					expect(spawned.customEnvVars).toBeUndefined();
+					expect(spawned.sshStdinScript).toContain("'--resume' 'native-collision'");
+				}
+				expect(stored).toEqual(original);
+				expect(mockSessionsStore.set).not.toHaveBeenCalled();
+			});
+
+			it.each(['missing binding', 'different provider', 'different native ID', 'missing tab'])(
+				'refuses %s without borrowing a colliding tab or erasing retained history',
+				async (change) => {
+					const tab = stored[0].aiTabs[0];
+					if (change === 'missing binding') delete tab.nativeSessionBinding;
+					if (change === 'different provider') tab.turnProvider = 'codex';
+					if (change === 'different native ID') tab.agentSessionId = 'other-native';
+					const original = structuredClone(stored);
+					expect(await resume(change === 'missing tab' ? 'absent' : 'tab1')).toMatchObject({
+						success: false,
+						error: expect.stringContaining('no retained native ownership'),
+					});
+					expect(mockProcessManager.spawnAdmitted).not.toHaveBeenCalled();
+					expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+					expect(stored).toEqual(original);
+					expect(mockSessionsStore.set).not.toHaveBeenCalled();
+				}
+			);
+
+			it('refuses a rebound endpoint during resume admission and retains both conversations', async () => {
+				const original = structuredClone(stored);
+				duringAdmission = () => {
+					endpoint = 'replacement-installation';
+				};
+				expect(await resume()).toMatchObject({
+					success: false,
+					error: expect.stringContaining('changed before spawn'),
+				});
+				expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+				expect(stored).toEqual(original);
+				expect(mockSessionsStore.set).not.toHaveBeenCalled();
+			});
+		});
 
 		it.each(['launchCwd', 'processCwd', 'cwd', 'account', 'inherited', 'effective'] as const)(
 			'refuses changed %s evidence at admission without starting any process',
