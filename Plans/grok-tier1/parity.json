@@ -2312,6 +2312,28 @@
 			"scope": "40 authored host correlation regressions in two existing suites: immutable preparation/admission capture, validation bounds, exact argv/env/admission independence, native scope/ID separation, failure and cancellation/drain receipt behavior. Synthetic SSH scope is not endpoint qualification; simulated observed IDs are not ACP/parser/renderer persistence proof.",
 			"testOwner": "GT1-04-07E1PT",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-native-identity-bridge-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07et-native-identity-bridge-regression-tests",
+			"sourceCommit": "321a93cf3cd3789424fb5ea93ace2418f53c1551",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/process-listeners/__tests__/session-id-listener.test.ts": "21250fea059dbc781b96542b52988e89eeb2673fbfd2e7d592edc16fd16c329c",
+				"src/__tests__/main/preload/process/core.test.ts": "548f4143ecb6367e41f2736167b60809fe09f572eebcc4d678f22b3007cc7e84"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"newTypeDiagnostics": 0,
+			"staticLimitations": "Scoped TypeScript retains the existing RequestInit.dispatcher TS2339; baseline comparison recorded in evidence. Tests neither run nor collected.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "21 authored cases in the existing listener/preload suites: exact bound/unknown/absent launch receipts, separate requested and observed IDs, synchronous group-chat capture, cleanup, synchronous AI attempt snapshots, token collisions, mutation/reentrancy/failure handling and terminal/cancellation controls. No renderer generation-fence, ACP routing or real native qualification claim.",
+			"testOwner": "GT1-04-07ET",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6228,7 +6250,8 @@
 				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge",
 				"phase04NativeRequestCorrelationRef": "phase04-native-request-correlation",
 				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence",
-				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests"
+				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests",
+				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6272,7 +6295,7 @@
 				{
 					"id": "grok-remote-launch-account-unobserved",
 					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET/07E1T/08 retain host/lifecycle/consumer test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
+					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET have authored host/bridge/lifecycle tests; 07E1T/08 retain consumer/generation test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -11516,7 +11539,8 @@
 				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge",
 				"phase04NativeRequestCorrelationRef": "phase04-native-request-correlation",
 				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence",
-				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests"
+				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests",
+				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11560,7 +11584,7 @@
 				{
 					"id": "grok-remote-launch-account-unobserved",
 					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET/07E1T/08 retain host/lifecycle/consumer test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
+					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET have authored host/bridge/lifecycle tests; 07E1T/08 retain consumer/generation test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -12073,7 +12097,8 @@
 				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge",
 				"phase04NativeRequestCorrelationRef": "phase04-native-request-correlation",
 				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence",
-				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests"
+				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests",
+				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12117,7 +12142,7 @@
 				{
 					"id": "grok-remote-launch-account-unobserved",
 					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET/07E1T/08 retain host/lifecycle/consumer test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
+					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET have authored host/bridge/lifecycle tests; 07E1T/08 retain consumer/generation test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -16701,7 +16726,8 @@
 				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge",
 				"phase04NativeRequestCorrelationRef": "phase04-native-request-correlation",
 				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence",
-				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests"
+				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests",
+				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16745,7 +16771,7 @@
 				{
 					"id": "grok-remote-launch-account-unobserved",
 					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET/07E1T/08 retain host/lifecycle/consumer test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
+					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET have authored host/bridge/lifecycle tests; 07E1T/08 retain consumer/generation test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
 					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
