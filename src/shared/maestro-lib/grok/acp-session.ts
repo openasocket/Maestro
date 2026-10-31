@@ -88,7 +88,9 @@ export class GrokAcpSessionError extends Error {
 		/** Only the transport's fixed, payload-free errors may be retained as a cause. */
 		cause?: GrokAcpRequestError | GrokAcpTransportError
 	) {
-		super(`Grok ACP session: ${reason}`, { cause });
+		super(`Grok ACP session: ${reason}`);
+		// Preserve Error options' non-enumerable cause without requiring ES2022.
+		Object.defineProperty(this, 'cause', { value: cause, writable: true, configurable: true });
 		this.name = 'GrokAcpSessionError';
 	}
 }
@@ -472,7 +474,7 @@ export class GrokAcpSession {
 					this.usageUnavailable = true;
 					return;
 				}
-				if (Object.hasOwn(response, 'result')) {
+				if (Object.prototype.hasOwnProperty.call(response, 'result')) {
 					if (response.result == null) return;
 					response = this.record(response.result);
 					if (response.error != null) {

@@ -66,11 +66,11 @@ export function parseAcpMessage(line: string): AcpMessage {
 		throw new GrokAcpTransportError('malformed-frame');
 	}
 	if (object(value) && value.jsonrpc === '2.0') {
-		const hasId = Object.hasOwn(value, 'id');
+		const hasId = Object.prototype.hasOwnProperty.call(value, 'id');
 		const validId = typeof value.id === 'string' || Number.isSafeInteger(value.id);
-		const hasResult = Object.hasOwn(value, 'result');
-		const hasError = Object.hasOwn(value, 'error');
-		if (Object.hasOwn(value, 'method')) {
+		const hasResult = Object.prototype.hasOwnProperty.call(value, 'result');
+		const hasError = Object.prototype.hasOwnProperty.call(value, 'error');
+		if (Object.prototype.hasOwnProperty.call(value, 'method')) {
 			if (
 				typeof value.method === 'string' &&
 				(!hasId || validId) &&
@@ -79,7 +79,12 @@ export function parseAcpMessage(line: string): AcpMessage {
 				(value.params === undefined || object(value.params) || Array.isArray(value.params))
 			)
 				return value as unknown as AcpCall;
-		} else if (hasId && validId && hasResult !== hasError && !Object.hasOwn(value, 'params')) {
+		} else if (
+			hasId &&
+			validId &&
+			hasResult !== hasError &&
+			!Object.prototype.hasOwnProperty.call(value, 'params')
+		) {
 			if (
 				!hasError ||
 				(object(value.error) &&

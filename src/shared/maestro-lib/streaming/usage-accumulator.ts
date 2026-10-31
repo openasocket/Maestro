@@ -578,7 +578,11 @@ export function priceUsageEstimate(
 	>,
 	model: string | null | undefined
 ): UsagePriceEstimate | undefined {
-	if (model && /grok/i.test(model) && !Object.hasOwn(MODEL_PRICING, normalizeModelId(model)))
+	if (
+		model &&
+		/grok/i.test(model) &&
+		!Object.prototype.hasOwnProperty.call(MODEL_PRICING, normalizeModelId(model))
+	)
 		return undefined;
 	const pricing = resolveModelPricing(model);
 	return {
@@ -598,7 +602,11 @@ export function priceUsageEstimate(
 
 /** The cache convention of the rate table a model resolves to; `unknown` with no model to resolve. */
 export function cacheReadCountingFor(model: string | null | undefined): CacheReadCounting {
-	if (!model || (/grok/i.test(model) && !Object.hasOwn(MODEL_PRICING, normalizeModelId(model))))
+	if (
+		!model ||
+		(/grok/i.test(model) &&
+			!Object.prototype.hasOwnProperty.call(MODEL_PRICING, normalizeModelId(model)))
+	)
 		return 'unknown';
 	return resolveModelPricing(model).CACHE_READ_SUBSET_OF_INPUT ? 'inside-input' : 'beside-input';
 }
@@ -733,7 +741,7 @@ export function describeUsageProvenance(
 	if (
 		!effectiveModel ||
 		(/grok/i.test(effectiveModel) &&
-			!Object.hasOwn(MODEL_PRICING, normalizeModelId(effectiveModel)))
+			!Object.prototype.hasOwnProperty.call(MODEL_PRICING, normalizeModelId(effectiveModel)))
 	)
 		return base;
 	const priced = priceUsageEstimate(
