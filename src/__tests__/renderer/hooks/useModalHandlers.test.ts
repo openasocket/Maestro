@@ -2156,8 +2156,18 @@ describe('useModalHandlers', () => {
 						],
 					}));
 				}
-				getModalActions().setAgentSessionsOpen(true);
-				getModalActions().setActiveAgentSessionId('kept-history');
+				// Retain history data without opening a destination that closes Director Notes.
+				useModalStore.setState((state) => ({
+					modals: new Map(state.modals).set('agentSessions', {
+						open: false,
+						data: { activeAgentSessionId: 'kept-history' },
+					}),
+				}));
+				expect(useModalStore.getState().isOpen('directorNotes')).toBe(true);
+				expect(useModalStore.getState().isOpen('agentSessions')).toBe(false);
+				expect(useModalStore.getState().getData('agentSessions')?.activeAgentSessionId).toBe(
+					'kept-history'
+				);
 			});
 
 			// Compare all retained tab/log/history data as well as the visible selection.
@@ -2194,6 +2204,7 @@ describe('useModalHandlers', () => {
 						isCurrent
 					);
 				});
+				expect(resume).toHaveBeenCalledTimes(1);
 				const canResume = resume.mock.calls[0][6]!.canResume!;
 				expect(canResume()).toBe(true);
 				return { ...hook, resume, pending, canResume, settle };
