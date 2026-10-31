@@ -40,6 +40,7 @@ import { getAgentDisplayName } from '../../../shared/agentMetadata';
 import { providerProfileKey, providerProfileLabel } from '../../../shared/providerProfiles';
 import { normalizeModelId } from '../../../shared/modelPricing';
 import { canonicalJson } from '../../../shared/canonicalJson';
+import { mergeUsageCost, usageCostUsd } from '../../../shared/maestro-lib/streaming/usage-totals';
 import { summarizeTokenSpeed, type TokenSpeedSource } from '../../../shared/tokenSpeed';
 import {
 	getTokenUsageCache,
@@ -163,9 +164,8 @@ function sumModels(byModel: ModelTokenUsage[]): {
 
 /**
  * Turn one `AgentSessionInfo` into a {@link SessionTokenBreakdown}. When the
- * storage supplied a per-model split we trust it (and its per-model cost);
- * otherwise we fall back to a single unknown-model bucket built from the session
- * totals, pricing it from the rate table so cost is never silently dropped.
+ * native accounting exists, lifetime totals remain authoritative even when model
+ * detail is partial. Legacy providers retain their existing model projections.
  */
 function toBreakdown(
 	agentType: string,
@@ -180,7 +180,36 @@ function toBreakdown(
 	const timestampMs = Date.parse(info.modifiedAt || info.timestamp) || 0;
 
 	let byModel: ModelTokenUsage[];
-	if (info.byModel && info.byModel.length > 0) {
+	if (info.accounting?.models?.length) {
+		byModel = info.accounting.models.map((detail) => ({
+			model: detail.model,
+			rawModel: detail.model,
+			accounting: structuredClone(detail),
+			inputTokens: detail.inputTokens ?? 0,
+			outputTokens: detail.outputTokens ?? 0,
+			cacheReadTokens: detail.cacheReadInputTokens ?? 0,
+			cacheCreationTokens: detail.cacheCreationInputTokens ?? 0,
+			costUsd: usageCostUsd(detail.cost) ?? 0,
+			costEstimated: detail.cost.status === 'estimated',
+		}));
+	} else if (info.accounting) {
+		// No model attribution: retain the lifetime amount in an unknown bucket.
+		byModel = [
+			{
+				model: '',
+				inputTokens: info.inputTokens,
+				outputTokens: info.outputTokens,
+				cacheReadTokens: info.cacheReadTokens,
+				cacheCreationTokens: info.cacheCreationTokens,
+				costUsd: usageCostUsd(info.accounting.cost) ?? 0,
+				costEstimated: info.accounting.cost.status === 'estimated',
+				accounting: {
+					completeness: info.accounting.completeness,
+					cost: structuredClone(info.accounting.cost),
+				},
+			},
+		];
+	} else if (info.byModel && info.byModel.length > 0) {
 		byModel = info.byModel;
 	} else if (
 		info.inputTokens ||
@@ -206,7 +235,16 @@ function toBreakdown(
 		byModel = [];
 	}
 
-	const totals = sumModels(byModel);
+	const totals = info.accounting
+		? {
+				inputTokens: info.inputTokens,
+				outputTokens: info.outputTokens,
+				cacheReadTokens: info.cacheReadTokens,
+				cacheCreationTokens: info.cacheCreationTokens,
+				costUsd: usageCostUsd(info.accounting.cost) ?? 0,
+				costEstimated: info.accounting.cost.status === 'estimated',
+			}
+		: sumModels(byModel);
 	return {
 		sessionId: info.sessionId,
 		agentType,
@@ -215,6 +253,16 @@ function toBreakdown(
 		timestampMs,
 		origin: info.origin,
 		byModel,
+		...(info.accounting
+			? {
+					accounting: {
+						...structuredClone(info.accounting),
+						scopeId:
+							info.accounting.scopeId ??
+							canonicalJson([agentType, accountKey, info.projectPath, info.sessionId]),
+					},
+				}
+			: {}),
 		inputTokens: totals.inputTokens,
 		outputTokens: totals.outputTokens,
 		cacheReadTokens: totals.cacheReadTokens,
@@ -323,14 +371,42 @@ function emptyTotals(): TokenUsageTotals {
 	};
 }
 
-/** Add a per-model bucket into a running totals object (session count added separately). */
-function addModelToTotals(t: TokenUsageTotals, m: ModelTokenUsage): void {
+/** Add independent session totals or model detail, preserving cost evidence. */
+function addUsageToTotals(
+	t: TokenUsageTotals,
+	m: Omit<ModelTokenUsage, 'model'>,
+	accountingByTotals: Map<TokenUsageTotals, NonNullable<TokenUsageTotals['accounting']>>
+): void {
+	// Track each legacy contribution before canonical evidence arrives, so mixed
+	// reported/estimated subtotals do not depend on provider enumeration order.
+	// Convert reported decimals through the canonical tick merger before summing.
+	const previous = accountingByTotals.get(t);
+	const next = m.accounting ?? {
+		completeness: 'unknown' as const,
+		cost:
+			m.costUsd > 0 && !m.costEstimated
+				? mergeUsageCost(
+						{ status: 'exact', costUsdTicks: '0' },
+						{ status: 'partial', costUsd: m.costUsd }
+					)
+				: { status: 'unknown' as const },
+	};
+	const accounting: NonNullable<TokenUsageTotals['accounting']> = {
+		completeness:
+			!previous || previous.completeness === next.completeness ? next.completeness : 'partial',
+		cost: previous ? mergeUsageCost(previous.cost, next.cost) : structuredClone(next.cost),
+	};
+	accountingByTotals.set(t, accounting);
+	// Legacy-only displays keep their historical numeric/estimate contract.
+	if (t.accounting || m.accounting) t.accounting = accounting;
 	t.inputTokens += m.inputTokens;
 	t.outputTokens += m.outputTokens;
 	t.cacheReadTokens += m.cacheReadTokens;
 	t.cacheCreationTokens += m.cacheCreationTokens;
-	t.costUsd += m.costUsd;
-	if (m.costEstimated && m.costUsd > 0) t.costEstimated = true;
+	t.costUsd = t.accounting ? (usageCostUsd(t.accounting.cost) ?? 0) : t.costUsd + m.costUsd;
+	t.costEstimated = t.accounting
+		? t.accounting.cost.status === 'estimated'
+		: t.costEstimated || (m.costEstimated && m.costUsd > 0);
 }
 
 /** Round a timestamp down to the start of its day/week/month (local time). */
@@ -367,6 +443,10 @@ function aggregate(all: SessionTokenBreakdown[], query: TokenUsageQuery): TokenU
 	const untilMs = query.untilMs ?? Infinity;
 
 	const totals = emptyTotals();
+	const accountingByTotals = new Map<
+		TokenUsageTotals,
+		NonNullable<TokenUsageTotals['accounting']>
+	>();
 	const byAgent = new Map<string, { total: TokenUsageTotals; label: string }>();
 	const byModel = new Map<string, { total: TokenUsageTotals; label: string }>();
 	const byProject = new Map<string, { total: TokenUsageTotals; label: string }>();
@@ -399,14 +479,22 @@ function aggregate(all: SessionTokenBreakdown[], query: TokenUsageQuery): TokenU
 						? 'partial'
 						: 'full';
 		}
-		if (s.byModel.length === 0) continue;
+		if (s.byModel.length === 0 && !s.accounting) continue;
 
-		// Session counts are bumped once per session; token/cost per model below.
-		totals.sessionCount++;
-		group(byAgent, s.agentType, getAgentDisplayName(s.agentType)).total.sessionCount++;
-		group(byProject, s.projectPath, projectLabel(s.projectPath)).total.sessionCount++;
+		// Native lifetime totals are independent of model/child attribution; legacy
+		// model contributions retain their separate reported/estimated amounts.
+		const contributions = s.accounting ? [s] : s.byModel;
 		const account = accountGroup(s.agentType, s.accountKey);
-		group(byAccount, account.key, account.label).total.sessionCount++;
+		for (const total of [
+			totals,
+			group(byAgent, s.agentType, getAgentDisplayName(s.agentType)).total,
+			group(byProject, s.projectPath, projectLabel(s.projectPath)).total,
+			group(byAccount, account.key, account.label).total,
+		]) {
+			for (const contribution of contributions)
+				addUsageToTotals(total, contribution, accountingByTotals);
+			total.sessionCount++;
+		}
 
 		let tb: TokenUsageTimeBucket | undefined;
 		if (s.timestampMs > 0) {
@@ -416,16 +504,19 @@ function aggregate(all: SessionTokenBreakdown[], query: TokenUsageQuery): TokenU
 				tb = { startMs: bStart, ...emptyTotals() };
 				timeline.set(bStart, tb);
 			}
+			for (const contribution of contributions)
+				addUsageToTotals(tb, contribution, accountingByTotals);
 			tb.sessionCount++;
 		}
 
+		const seenModels = new Set<string>();
 		for (const m of s.byModel) {
-			addModelToTotals(totals, m);
-			addModelToTotals(group(byAgent, s.agentType, getAgentDisplayName(s.agentType)).total, m);
-			addModelToTotals(group(byModel, m.model || 'unknown', modelLabel(m.model)).total, m);
-			addModelToTotals(group(byProject, s.projectPath, projectLabel(s.projectPath)).total, m);
-			addModelToTotals(group(byAccount, account.key, account.label).total, m);
-			if (tb) addModelToTotals(tb, m);
+			const key =
+				m.rawModel !== undefined ? canonicalJson([s.agentType, m.rawModel]) : m.model || 'unknown';
+			const total = group(byModel, key, m.rawModel || modelLabel(m.model)).total;
+			addUsageToTotals(total, m, accountingByTotals);
+			if (!seenModels.has(key)) total.sessionCount++;
+			seenModels.add(key);
 		}
 	}
 
