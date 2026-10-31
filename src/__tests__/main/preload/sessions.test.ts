@@ -13,6 +13,8 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest';
+import type { SessionMessagesResult } from '../../../main/agents/session-storage';
+import type { NativeSessionBinding } from '../../../shared/maestro-lib/agents/providerSwap';
 
 // Mock electron ipcRenderer
 const mockInvoke = vi.fn();
@@ -279,28 +281,52 @@ describe('Sessions Preload API', () => {
 				}
 			);
 
-			it.each(['partial', 'unavailable'] as const)(
-				'preserves %s source provenance and explicit account read options',
-				async (status) => {
-					const result = {
+			it.each([
+				['local', 'available'],
+				['ssh', 'available'],
+				['local', 'partial'],
+				['ssh', 'partial'],
+				['local', 'unavailable'],
+				['ssh', 'unavailable'],
+			] as const)(
+				'forwards typed retained ownership and preserves %s %s receipts',
+				async (kind, status) => {
+					const binding: NativeSessionBinding = {
+						version: 1,
+						state: 'bound',
+						provider: 'grok',
+						nativeSessionId: 'native-collision',
+						accountRef: 'grok:observed-account',
+						host: { kind, identity: `${kind}-installation` },
+						cwd: '/canonical/project',
+					};
+					const result: SessionMessagesResult = {
 						messages: [],
 						total: 0,
 						hasMore: false,
-						source: { provider: 'grok', status, reason: 'invalid-encoding' },
+						nativeSessionBinding: status === 'unavailable' ? undefined : binding,
+						source: { provider: 'grok', status, reason: 'fixture-provenance' },
 					};
-					const options = { configDir: '~/selected account', includeNativeRecords: true };
+					const options: NonNullable<Parameters<typeof api.read>[3]> = {
+						ownerAgentId: 'grok-owner',
+						nativeSessionBinding: binding,
+						includeNativeRecords: true,
+						offset: 3,
+						limit: 10,
+					};
+					const sshRemoteId = kind === 'ssh' ? 'ssh-config-alias' : undefined;
 					mockInvoke.mockResolvedValue(result);
 
-					await expect(api.read('grok', '/project', 'native-id', options, 'ssh-1')).resolves.toBe(
-						result
-					);
+					await expect(
+						api.read('grok', binding.cwd, binding.nativeSessionId, options, sshRemoteId)
+					).resolves.toBe(result);
 					expect(mockInvoke).toHaveBeenCalledExactlyOnceWith(
 						'agentSessions:read',
 						'grok',
-						'/project',
-						'native-id',
+						binding.cwd,
+						binding.nativeSessionId,
 						options,
-						'ssh-1'
+						sshRemoteId
 					);
 				}
 			);

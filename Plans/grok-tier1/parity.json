@@ -1618,6 +1618,30 @@
 			"scope": "Complete bootstrap source with inert imports and its captured qualifier getter; extracted actual endpoint selector checks stable installation identity, epoch exclusion and unavailable/unqualified responses. Conditional remote-git suites unchanged; reuse existing remote-fs observer tests. No test collection/execution or full-handler admission proof.",
 			"remainingTestOwners": ["GT1-04-07C1T"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-history-receipt-boundary-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c1t-native-history-receipt-boundary-tests",
+			"sourceCommit": "fed8d9c4b34bea43a716c059ea412aacd0fe23d1",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/ipc/handlers/agentSessions.test.ts": "ad0586793b477795f020f2c77abcf1e86a09ef0068ab1cb80f4a7487510d2814",
+				"src/__tests__/main/preload/sessions.test.ts": "2b240c8de0589ee8de842baaf53617592788fea044ee388f5548a5f8555837c0"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"authoredCases": 69,
+			"authoredCaseScope": "63 new handler cases and six expanded preload cases replacing two; existing five-API selection matrix adapted.",
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"scopedTypeCheck": "fail",
+			"staticBlocker": "Unchanged plugin-host-handlers.ts(1196,76) RequestInit.dispatcher TS2339; no new suite diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P13", "P14", "P15", "C-supportsResume", "REG-SESSION-MUTATION"],
+			"scope": "Inert local/SSH observed receipts and retained binding checks through actual IPC handlers, canonical scope, collision and read races, no mirror restoration; typed preload provenance forwarding. No test execution/collection or native compliance claim.",
+			"remainingTestOwners": ["GT1-04-07C1T1"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {

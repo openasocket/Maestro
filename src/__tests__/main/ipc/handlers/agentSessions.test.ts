@@ -24,11 +24,31 @@ import { promises as realFs } from 'fs';
 import { getLiveSessions, getSshRemoteById } from '../../../../main/stores';
 import * as mirrors from '../../../../main/storage/starred-transcript-mirror';
 import { createMockSession } from '../../../helpers/mockSession';
+import { observePathRemote } from '../../../../main/utils/remote-fs';
+import { resolveAgentAccountRef } from '../../../../shared/agentAccountDir';
+import { installationIdentity } from '../../../../shared/maestro-lib/managed/host-adapter';
+import type { RemoteEndpointQualifier } from '../../../../main/enterprise/remote';
+import type { SshRemoteEndpointIdentity } from '../../../../shared/maestro-lib/launch/ssh-remote-resolver';
+import type { NativeSessionBinding } from '../../../../shared/maestro-lib/agents/providerSwap';
 
 const accountStores = vi.hoisted(() => ({
 	provider: {} as Record<string, string>,
 	global: {} as Record<string, string>,
 }));
+
+// Inert observer identity; no endpoint connection or provider account is opened.
+const endpoint: SshRemoteEndpointIdentity = {
+	contractVersion: '1',
+	installationId: 'remote-installation',
+	runtimeId: 'runtime',
+	processEpoch: 'epoch',
+	tenantId: 'fixture',
+	orgId: 'fixture',
+	authorityId: 'fixture',
+	policyRevision: 1,
+	authority: 'registered',
+	routes: [],
+};
 
 // Mock electron's ipcMain
 vi.mock('electron', () => ({
@@ -49,7 +69,13 @@ vi.mock('../../../../main/agents', () => ({
 vi.mock('../../../../main/stores', () => ({
 	getSshRemoteById: vi.fn().mockReturnValue(undefined),
 	getLiveSessions: vi.fn().mockReturnValue([]),
+	getProductionDataPath: () => path.resolve('tmp/grok-history-ipc/data'),
+	getAgentConfigsStore: () => ({
+		get: () => ({ grok: { customEnvVars: accountStores.provider } }),
+	}),
+	getSettingsStore: () => ({ get: () => accountStores.global }),
 }));
+vi.mock('../../../../main/utils/remote-fs', () => ({ observePathRemote: vi.fn() }));
 vi.mock('../../../../main/stores/instances', () => ({ isInitialized: () => true }));
 vi.mock('../../../../main/stores/getters', () => ({
 	getAgentConfigsStore: () => ({
@@ -91,6 +117,7 @@ describe('agentSessions IPC handlers', () => {
 		vi.clearAllMocks();
 		vi.mocked(getLiveSessions).mockReset().mockReturnValue([]);
 		vi.mocked(getSshRemoteById).mockReset().mockReturnValue(undefined);
+		vi.mocked(observePathRemote).mockReset();
 		accountStores.provider = {};
 		accountStores.global = {};
 
@@ -462,17 +489,53 @@ describe('agentSessions IPC handlers', () => {
 				...(options ? [{ ...options, ownerAgentId }, sshRemoteId] : [sshRemoteId, ownerAgentId])
 			);
 
-		const expectScope = (configDir?: string, target?: ReturnType<typeof getSshRemoteById>) =>
+		const expectedOptions = (configDir?: string, ssh = false) => ({
+			...options,
+			configDir:
+				api === 'read' && ssh ? (configDir ?? '~/.grok').replace('~', '/fixture-home') : configDir,
+			...(api === 'read'
+				? { nativeSessionBinding: expect.objectContaining({ state: 'bound' }) }
+				: {}),
+		});
+		const expectScope = (configDir?: string, target?: ReturnType<typeof getSshRemoteById>) => {
+			if (api === 'read' && target && !configDir && accountStores.global.GROK_HOME !== undefined) {
+				expect(storage[method]).not.toHaveBeenCalled();
+				return;
+			}
 			expect(storage[method]).toHaveBeenCalledExactlyOnceWith(
 				'/project',
 				...args,
-				...(options ? [{ ...options, configDir }, target] : [target, configDir])
+				...(options ? [expectedOptions(configDir, !!target), target] : [target, configDir])
 			);
+		};
 
 		beforeEach(() => {
 			vi.spyOn(os, 'homedir').mockReturnValue(home);
 			vi.stubEnv('GROK_HOME', path.join(home, 'process-account'));
 			owner = { ...createMockSession({ id: 'owner', toolType: 'grok' }) };
+			if (api === 'read') {
+				owner.projectRoot = '/project';
+				vi.spyOn(realFs, 'realpath').mockImplementation(async (value) => String(value));
+				vi.mocked(observePathRemote).mockImplementation(async (value) => ({
+					success: true,
+					data: {
+						canonicalPath: value.replace('~', '/fixture-home'),
+						device: '1',
+						inode: value,
+						kind: 'directory',
+					},
+				}));
+				registerAgentSessionsHandlers({
+					getMainWindow: () => null,
+					remoteQualifier: () => ({
+						qualifyResolved: async (remote) => ({
+							kind: 'remote',
+							remote,
+							endpoint,
+						}),
+					}),
+				});
+			}
 			vi.mocked(getLiveSessions).mockImplementation(() => [owner]);
 			vi.mocked(getSshRemoteById).mockImplementation((id) =>
 				id === remote.id ? remote : undefined
@@ -529,11 +592,18 @@ describe('agentSessions IPC handlers', () => {
 									? `${configDir}/native-collision`
 									: [row];
 					storage[method].mockReturnValueOnce(result);
-					expect(await invoke(selected.id, target?.id)).toBe(result);
+					expect(await invoke(selected.id, target?.id)).toEqual(
+						api === 'read'
+							? {
+									...(result as object),
+									nativeSessionBinding: { version: 1, state: 'unknown', reason: 'unobserved' },
+								}
+							: result
+					);
 					expect(storage[method]).toHaveBeenLastCalledWith(
 						'/project',
 						...args,
-						...(options ? [{ ...options, configDir }, target] : [target, configDir])
+						...(options ? [expectedOptions(configDir, !!target), target] : [target, configDir])
 					);
 				}
 				expect(storage[method]).toHaveBeenCalledTimes(2);
@@ -570,8 +640,15 @@ describe('agentSessions IPC handlers', () => {
 				owner.customEnvVars = custom === undefined ? {} : { GROK_HOME: custom };
 				owner.sessionSshRemoteConfig = { enabled: true, remoteId: remote.id };
 				accountStores.global.GROK_HOME = '~/local-global';
-				await invoke();
+				const result = await invoke();
 				const configDir = custom?.trim() || undefined;
+				if (api === 'read' && !configDir)
+					expect(result).toMatchObject({
+						source: {
+							status: 'unavailable',
+							reason: 'history-remote-account-environment-unresolved',
+						},
+					});
 				expectScope(configDir, remote);
 			}
 		);
@@ -584,7 +661,12 @@ describe('agentSessions IPC handlers', () => {
 				api === 'getPath'
 					? null
 					: api === 'read'
-						? { messages: [], total: 0, hasMore: false }
+						? {
+								messages: [],
+								total: 0,
+								hasMore: false,
+								nativeSessionBinding: { version: 1, state: 'unknown', reason: 'unobserved' },
+							}
 						: api === 'listPaginated'
 							? { sessions: [], totalCount: 0, hasMore: false, nextCursor: null }
 							: []
@@ -670,7 +752,10 @@ describe('agentSessions IPC handlers', () => {
 				const options = { offset: 0, limit: 7, includeNativeRecords: true, configDir };
 				expect(
 					await handlers.get('agentSessions:read')!({}, 'grok', '/project', 'native', options)
-				).toBe(result);
+				).toEqual({
+					...result,
+					nativeSessionBinding: { version: 1, state: 'unknown', reason: 'legacy' },
+				});
 				expect(storage.readSessionMessages).toHaveBeenCalledExactlyOnceWith(
 					'/project',
 					'native',
@@ -706,6 +791,353 @@ describe('agentSessions IPC handlers', () => {
 			expect(storage.readSessionMessages).not.toHaveBeenCalled();
 			expect(mirrors.restoreStarredTranscript).not.toHaveBeenCalled();
 		});
+	});
+
+	describe.each([false, true])('Grok observed history receipt (SSH=%s)', (ssh) => {
+		const root = path.resolve('tmp/grok-history-ipc');
+		const cwd = ssh ? '/physical/work 账户' : path.join(root, 'physical-work');
+		const account = ssh ? '/physical/account 账户' : path.join(root, 'physical-account');
+		const selected = ssh ? "~/account's 账户" : path.join(root, 'account-alias');
+		const project = ssh ? '~/work alias' : path.join(root, 'work-alias');
+		const remote = {
+			id: 'remote-a',
+			name: 'A',
+			host: 'a.invalid',
+			port: 22,
+			username: 'fixture',
+			privateKeyPath: '',
+			enabled: true,
+		};
+		let owner: ReturnType<typeof getLiveSessions>[number];
+		let binding: Extract<NativeSessionBinding, { state: 'bound' }>;
+		let result: agentSessionStorage.SessionMessagesResult;
+		let read: ReturnType<typeof vi.fn>;
+		let qualify: ReturnType<typeof vi.fn<RemoteEndpointQualifier['qualifyResolved']>>;
+		const invoke = (nativeSessionBinding?: unknown) =>
+			handlers.get('agentSessions:read')!({}, 'grok', project, 'native-collision', {
+				ownerAgentId: 'owner',
+				offset: 2,
+				limit: 3,
+				includeNativeRecords: true,
+				nativeSessionBinding,
+			});
+
+		beforeEach(() => {
+			vi.spyOn(os, 'homedir').mockReturnValue(root);
+			vi.spyOn(os, 'hostname').mockReturnValue('fixture-host');
+			vi.stubEnv('GROK_HOME', path.join(root, 'unselected-process-account'));
+			owner = {
+				...createMockSession({
+					id: 'owner',
+					toolType: 'grok',
+					cwd: project,
+					projectRoot: project,
+					customEnvVars: { GROK_HOME: selected },
+				}),
+				sessionSshRemoteConfig: ssh ? { enabled: true, remoteId: remote.id } : undefined,
+			};
+			vi.mocked(getLiveSessions).mockImplementation(() => [owner]);
+			vi.mocked(getSshRemoteById).mockReturnValue(remote);
+			vi.spyOn(realFs, 'realpath').mockImplementation(async (value) => {
+				if (ssh) throw new Error('Remote history touched local filesystem');
+				if (value === selected) return account;
+				if (value === project) return cwd;
+				throw new Error('Unexpected local path');
+			});
+			vi.mocked(observePathRemote).mockImplementation(async (value) => ({
+				success: true,
+				data: {
+					canonicalPath: value === selected ? account : cwd,
+					device: '1',
+					inode: value === selected ? '2' : '3',
+					kind: 'directory',
+				},
+			}));
+			qualify = vi
+				.fn<RemoteEndpointQualifier['qualifyResolved']>()
+				.mockImplementation(async (remote) => ({ kind: 'remote', remote, endpoint }));
+			registerAgentSessionsHandlers({
+				getMainWindow: () => null,
+				remoteQualifier: () => ({ qualifyResolved: qualify }),
+			});
+			binding = {
+				version: 1,
+				state: 'bound',
+				provider: 'grok',
+				nativeSessionId: 'native-collision',
+				cwd,
+				accountRef: resolveAgentAccountRef(
+					{ toolType: 'grok', managedAccountDir: account, sshRemote: ssh },
+					{ homeDir: root }
+				)!,
+				host: {
+					kind: ssh ? 'ssh' : 'local',
+					identity: ssh
+						? 'remote-installation'
+						: installationIdentity({
+								hostname: 'fixture-host',
+								productionDataDir: path.join(root, 'data'),
+								mode: 'desktop',
+								pid: 1,
+								startedAt: 'old',
+							}).installationId,
+				},
+			};
+			result = {
+				messages: [
+					{ type: 'user', content: 'fixture', uuid: '1', timestamp: '2026-10-31T00:00:00Z' },
+				],
+				total: 6,
+				hasMore: true,
+				source: { provider: 'grok', status: 'available' },
+				nativeSessionBinding: structuredClone(binding),
+			};
+			read = vi.fn().mockImplementation(async () => result);
+			vi.mocked(agentSessionStorage.getSessionStorage).mockReturnValue({
+				readSessionMessages: read,
+			} as unknown as agentSessionStorage.AgentSessionStorage);
+		});
+
+		afterEach(() => {
+			for (const mirror of Object.values(mirrors)) expect(mirror).not.toHaveBeenCalled();
+			if (ssh) expect(realFs.realpath).not.toHaveBeenCalled();
+			else {
+				expect(observePathRemote).not.toHaveBeenCalled();
+				expect(qualify).not.toHaveBeenCalled();
+			}
+		});
+
+		it.each([false, true])(
+			'returns independently confirmed canonical scope (retained=%s)',
+			async (retained) => {
+				expect(await invoke(retained ? binding : undefined)).toEqual(result);
+				expect(read).toHaveBeenCalledExactlyOnceWith(
+					cwd,
+					'native-collision',
+					{
+						offset: 2,
+						limit: 3,
+						includeNativeRecords: true,
+						configDir: account,
+						nativeSessionBinding: binding,
+					},
+					ssh ? remote : undefined
+				);
+				expect(read.mock.calls[0][2].nativeSessionBinding).not.toBe(binding);
+				if (ssh) {
+					expect(vi.mocked(observePathRemote).mock.calls.map(([value]) => value)).toEqual([
+						project,
+						project,
+						selected,
+						project,
+						project,
+						selected,
+					]);
+					expect(qualify).toHaveBeenCalledTimes(4);
+				}
+			}
+		);
+
+		it.each([
+			'provider',
+			'nativeSessionId',
+			'accountRef',
+			'cwd',
+			'host identity',
+			'host kind',
+			'missing account',
+			'extra field',
+		])(
+			'rejects colliding %s in retained scope before storage and in adapter receipts after storage',
+			async (field) => {
+				const mismatch = {
+					...binding,
+					...(field === 'host identity'
+						? { host: { ...binding.host, identity: 'other-installation' } }
+						: field === 'host kind'
+							? { host: { ...binding.host, kind: ssh ? 'local' : 'ssh' } }
+							: field === 'missing account'
+								? { accountRef: undefined }
+								: { [field]: 'other' }),
+				} as NativeSessionBinding;
+				await expect(invoke(mismatch)).rejects.toThrow(/ownership/);
+				expect(read).not.toHaveBeenCalled();
+				result.nativeSessionBinding = mismatch;
+				await expect(invoke(binding)).rejects.toThrow(/native transcript does not match/);
+				expect(read).toHaveBeenCalledTimes(1);
+			}
+		);
+
+		it.each([
+			null,
+			{},
+			false,
+			{ version: 2, state: 'bound' },
+			{ version: 1, state: 'unknown', reason: 'legacy' },
+		])('refuses malformed/unknown retained ownership %j before observation', async (retained) => {
+			await expect(invoke(retained)).rejects.toThrow(/ownership is unknown/);
+			expect(read).not.toHaveBeenCalled();
+			expect(realFs.realpath).not.toHaveBeenCalled();
+			expect(observePathRemote).not.toHaveBeenCalled();
+		});
+
+		it.each(['available', 'partial', 'unavailable'] as const)(
+			'preserves %s provenance independently of receipt presence',
+			async (status) => {
+				result.source = {
+					provider: 'grok',
+					status,
+					...(status === 'available' ? {} : { reason: 'fixture-source-loss' }),
+				};
+				for (const receipt of [
+					binding,
+					undefined,
+					{ version: 1, state: 'unknown', reason: 'legacy' } as const,
+				]) {
+					result.nativeSessionBinding = receipt;
+					expect(await invoke(binding)).toEqual({
+						...result,
+						nativeSessionBinding:
+							receipt === binding
+								? binding
+								: { version: 1, state: 'unknown', reason: 'unobserved' },
+					});
+				}
+			}
+		);
+
+		it.each([
+			'owner removed',
+			'provider',
+			'cwd',
+			'environment',
+			'provider account',
+			'global account',
+			'path replacement',
+			'installation',
+		])('rejects %s changes while adapter read is pending', async (change) => {
+			read.mockImplementationOnce(async () => {
+				if (change === 'owner removed') vi.mocked(getLiveSessions).mockReturnValue([]);
+				if (change === 'provider') owner.toolType = 'codex';
+				if (change === 'cwd') owner.cwd = `${project}-other`;
+				if (change === 'environment') owner.customEnvVars = { GROK_HOME: `${selected}-other` };
+				if (change === 'provider account' || change === 'global account') {
+					owner.customEnvVars = undefined;
+					accountStores[change === 'provider account' ? 'provider' : 'global'].GROK_HOME =
+						`${selected}-other`;
+				}
+				if (change === 'path replacement') {
+					if (ssh)
+						vi.mocked(observePathRemote).mockImplementation(async (value) => ({
+							success: true,
+							data: {
+								canonicalPath: value === selected ? account : cwd,
+								device: '1',
+								inode: 'replacement',
+								kind: 'directory',
+							},
+						}));
+					else vi.mocked(realFs.realpath).mockResolvedValue(`${cwd}-replacement`);
+				}
+				if (change === 'installation') {
+					if (ssh)
+						qualify.mockResolvedValue({
+							kind: 'remote',
+							remote,
+							endpoint: { ...endpoint, installationId: 'replacement' },
+						});
+					else vi.mocked(os.hostname).mockReturnValue('replacement');
+				}
+				return result;
+			});
+			await expect(invoke(binding)).rejects.toThrow(/owner|changed/);
+			expect(read).toHaveBeenCalledTimes(1);
+		});
+
+		it('rechecks owner selection after path observation before content I/O', async () => {
+			if (ssh)
+				vi.mocked(observePathRemote).mockImplementationOnce(async () => {
+					owner.customArgs = '--changed';
+					return {
+						success: true,
+						data: { canonicalPath: cwd, device: '1', inode: '3', kind: 'directory' },
+					};
+				});
+			else
+				vi.mocked(realFs.realpath).mockImplementationOnce(async () => {
+					owner.customArgs = '--changed';
+					return cwd;
+				});
+			await expect(invoke(binding)).rejects.toThrow(/settings changed/);
+			expect(read).not.toHaveBeenCalled();
+		});
+
+		it('does not let an adapter mutate the captured binding to authorize another account', async () => {
+			read.mockImplementationOnce(async (_cwd, _id, options) => {
+				options.nativeSessionBinding.accountRef = 'other-account';
+				return { ...result, nativeSessionBinding: options.nativeSessionBinding };
+			});
+			await expect(invoke(binding)).rejects.toThrow(/native transcript does not match/);
+			expect(binding.accountRef).not.toBe('other-account');
+		});
+
+		it('returns unavailable ownership when physical roots cannot be observed', async () => {
+			if (ssh)
+				vi.mocked(observePathRemote).mockResolvedValue({
+					success: false,
+					errorCode: 'identity-unavailable',
+					error: 'missing',
+				});
+			else
+				vi.mocked(realFs.realpath).mockRejectedValue(
+					Object.assign(new Error('missing'), { code: 'ENOENT' })
+				);
+			expect(await invoke(binding)).toMatchObject({
+				messages: [],
+				total: 0,
+				hasMore: false,
+				nativeSessionBinding: { state: 'unknown' },
+				source: { status: 'unavailable' },
+			});
+			expect(read).not.toHaveBeenCalled();
+		});
+
+		if (ssh) {
+			it.each([
+				'unqualified',
+				'endpoint changes',
+				'relative path',
+				'file path',
+				'owner cwd mismatch',
+			])('refuses %s before storage', async (failure) => {
+				if (failure === 'unqualified') qualify.mockResolvedValue({ kind: 'remote', remote });
+				if (failure === 'endpoint changes')
+					qualify.mockResolvedValueOnce({
+						kind: 'remote',
+						remote,
+						endpoint: { ...endpoint, installationId: 'old' },
+					});
+				if (failure === 'relative path') owner.customEnvVars = { GROK_HOME: 'relative' };
+				if (failure === 'file path')
+					vi.mocked(observePathRemote).mockResolvedValue({
+						success: true,
+						data: { canonicalPath: cwd, device: '1', inode: '3', kind: 'file' },
+					});
+				if (failure === 'owner cwd mismatch')
+					vi.mocked(observePathRemote).mockResolvedValueOnce({
+						success: true,
+						data: { canonicalPath: '/another-project', device: '1', inode: '4', kind: 'directory' },
+					});
+				if (failure === 'owner cwd mismatch')
+					await expect(invoke()).rejects.toThrow(/project does not match/);
+				else
+					expect(await invoke()).toMatchObject({
+						source: { status: 'unavailable' },
+						nativeSessionBinding: { state: 'unknown' },
+					});
+				expect(read).not.toHaveBeenCalled();
+			});
+		}
 	});
 
 	describe('agentSessions:deleteMessagePair', () => {
