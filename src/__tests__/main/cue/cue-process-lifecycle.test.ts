@@ -15,7 +15,7 @@ import { GrokOutputParser } from '../../../shared/maestro-lib/parsers/grok-outpu
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
 // Mock parsers - default returns null (no parser)
-const mockGetOutputParser = vi.fn(() => null as any);
+const mockGetOutputParser = vi.fn((..._args: unknown[]) => null as any);
 vi.mock('../../../main/parsers', () => ({
 	getOutputParser: (...args: unknown[]) => mockGetOutputParser(...args),
 	createOutputParser: (...args: unknown[]) => mockGetOutputParser(...args),
@@ -60,7 +60,7 @@ class MockChildProcess extends EventEmitter {
 	stderr = new EventEmitter();
 	killed = false;
 
-	kill(signal?: string) {
+	kill(_signal?: string) {
 		this.killed = true;
 		return true;
 	}
@@ -73,7 +73,7 @@ class MockChildProcess extends EventEmitter {
 }
 
 let mockChild: MockChildProcess;
-const mockSpawn = vi.fn(() => {
+const mockSpawn = vi.fn((..._args: unknown[]) => {
 	mockChild = new MockChildProcess();
 	return mockChild as unknown as ChildProcess;
 });
