@@ -14,7 +14,10 @@
 
 import { FALLBACK_CONTEXT_WINDOW } from '../../shared/agentConstants';
 import { canonicalJson } from '../../shared/canonicalJson';
-import type { NativeSessionBinding } from '../../shared/maestro-lib/agents/providerSwap';
+import {
+	matchesNativeSessionBinding,
+	type NativeSessionBinding,
+} from '../../shared/maestro-lib/agents/providerSwap';
 import type { LogEntry, Session, ToolType, UsageStats } from '../types';
 import { isSessionIdLabel } from '../utils/tabHelpers';
 import {
@@ -24,6 +27,8 @@ import {
 	type TranscriptMessage,
 } from '../utils/transcriptMessages';
 import { logger } from '../utils/logger';
+
+export { matchesNativeSessionBinding } from '../../shared/maestro-lib/agents/providerSwap';
 
 export interface LoadResumableSessionOptions {
 	/** Maestro owner whose selected account/host the main process must resolve. */
@@ -62,31 +67,6 @@ export class SessionResumeRefusedError extends Error {
 		super(message);
 		this.name = 'SessionResumeRefusedError';
 	}
-}
-
-/** Compare observed ownership, including account/endpoint, rather than a native ID alone. */
-export function matchesNativeSessionBinding(
-	left: NativeSessionBinding | undefined,
-	right: NativeSessionBinding | undefined
-): boolean {
-	for (const binding of [left, right]) {
-		if (
-			binding?.state !== 'bound' ||
-			binding.version !== 1 ||
-			!['local', 'ssh'].includes(binding.host?.kind) ||
-			![
-				binding.provider,
-				binding.nativeSessionId,
-				binding.accountRef,
-				binding.host?.identity,
-				binding.cwd,
-			].every(
-				(value) => typeof value === 'string' && value.trim().length > 0 && !value.includes('\0')
-			)
-		)
-			return false;
-	}
-	return canonicalJson(left) === canonicalJson(right);
 }
 
 /** An in-memory selection fence, not an account identity. Never log or persist it. */

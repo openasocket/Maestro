@@ -31,6 +31,7 @@
  */
 
 import { getAgentDisplayName } from '../../agentMetadata';
+import { canonicalJson } from '../../canonicalJson';
 import type { ToolType, UsageStats } from '../../types';
 import { switchTabProvider } from '../translation/session';
 
@@ -73,6 +74,31 @@ export type NativeSessionBinding =
 			/** Canonical cwd on that host, never expanded using another host's home. */
 			readonly cwd: string;
 	  };
+
+/** Compare observed ownership, including account/endpoint, rather than a native ID alone. */
+export function matchesNativeSessionBinding(
+	left: NativeSessionBinding | undefined,
+	right: NativeSessionBinding | undefined
+): boolean {
+	for (const binding of [left, right]) {
+		if (
+			binding?.state !== 'bound' ||
+			binding.version !== 1 ||
+			!['local', 'ssh'].includes(binding.host?.kind) ||
+			![
+				binding.provider,
+				binding.nativeSessionId,
+				binding.accountRef,
+				binding.host?.identity,
+				binding.cwd,
+			].every(
+				(value) => typeof value === 'string' && value.trim().length > 0 && !value.includes('\0')
+			)
+		)
+			return false;
+	}
+	return canonicalJson(left) === canonicalJson(right);
+}
 
 /**
  * A tab's parked state for one provider it is not currently using.

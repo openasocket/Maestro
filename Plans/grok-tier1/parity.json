@@ -2459,6 +2459,30 @@
 			"implementationOwner": "GT1-04-07F2",
 			"testOwner": "GT1-04-07FPT",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-shared-native-session-matcher": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07f3-shared-native-session-matcher",
+			"sourceCommit": "f269821c0853762297030a48a0f393610e012998",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/shared/maestro-lib/agents/providerSwap.ts": "1ccf594b1200c53b9f5d12a19114cee63ad4fa2bf8117cee60177897f3359f08",
+				"src/renderer/services/resumableSession.ts": "45c11f30e4db0cbb8c4aa673f9e65382a92ed1ce9ce26b900c0066532c80b5de"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "Exact extraction of matchesNativeSessionBinding into shared providerSwap with a direct renderer compatibility re-export; preserve malformed/unknown rejection and canonical complete binding comparison.",
+			"limitations": [
+				"Shared runtime admission and native launch receipts remain GT1-04-07F4; this extraction does not qualify native resume.",
+				"Full renderer TypeScript check retains the documented unrelated RequestInit.dispatcher baseline error; main/CLI TypeScript and scoped ESLint/format/static extraction checks pass."
+			],
+			"implementationOwner": "GT1-04-07F3",
+			"testOwner": "GT1-04-07FPT",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6301,7 +6325,8 @@
 				"src/shared/maestro-lib/turns/record-turn.ts",
 				"src/shared/maestro-lib/agents/rules.ts",
 				"src/shared/maestro-lib/launch/agent-args.ts",
-				"src/shared/agentAccountDir.ts"
+				"src/shared/agentAccountDir.ts",
+				"src/shared/maestro-lib/agents/providerSwap.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6395,7 +6420,8 @@
 				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites",
 				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests",
 				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector",
-				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope"
+				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
+				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11619,7 +11645,9 @@
 				"src/shared/maestro-lib/turns/record-turn.ts",
 				"src/shared/maestro-lib/agents/rules.ts",
 				"src/shared/maestro-lib/launch/agent-args.ts",
-				"src/shared/agentAccountDir.ts"
+				"src/shared/agentAccountDir.ts",
+				"src/shared/maestro-lib/agents/providerSwap.ts",
+				"src/renderer/services/resumableSession.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -11709,7 +11737,8 @@
 				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites",
 				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests",
 				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector",
-				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope"
+				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
+				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12202,7 +12231,9 @@
 				"src/shared/maestro-lib/turns/record-turn.ts",
 				"src/shared/maestro-lib/agents/rules.ts",
 				"src/shared/maestro-lib/launch/agent-args.ts",
-				"src/shared/agentAccountDir.ts"
+				"src/shared/agentAccountDir.ts",
+				"src/shared/maestro-lib/agents/providerSwap.ts",
+				"src/renderer/services/resumableSession.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -12292,7 +12323,8 @@
 				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites",
 				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests",
 				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector",
-				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope"
+				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
+				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16852,7 +16884,8 @@
 				"src/shared/maestro-lib/turns/record-turn.ts",
 				"src/shared/maestro-lib/agents/rules.ts",
 				"src/shared/maestro-lib/launch/agent-args.ts",
-				"src/shared/agentAccountDir.ts"
+				"src/shared/agentAccountDir.ts",
+				"src/shared/maestro-lib/agents/providerSwap.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -16946,7 +16979,8 @@
 				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites",
 				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests",
 				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector",
-				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope"
+				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
+				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher"
 			},
 			"evidenceApplicability": {
 				"static": {
