@@ -448,6 +448,47 @@ describe('remote-fs', () => {
 			expect(deps.execSsh).toHaveBeenCalledTimes(1);
 		});
 
+		it.each([
+			{ account: { ...identity, kind: 'file' } },
+			{ cwd: identity },
+			{ effective: { HOME: null } },
+			{ inherited: { HOME: null, GROK_HOME: 7 } },
+			{ effective: { HOME: 'x'.repeat(16385), GROK_HOME: null } },
+			{ inherited: { HOME: null, GROK_HOME: 'bad\nroot' } },
+			{ extra: 'not-a-receipt' },
+		])('rejects malformed launch ownership field %#', async (patch) => {
+			const directory = { ...identity, kind: 'directory' };
+			const stdout = JSON.stringify({
+				launchCwd: directory,
+				processCwd: directory,
+				cwd: directory,
+				account: directory,
+				inherited: { HOME: null, GROK_HOME: null },
+				effective: { HOME: null, GROK_HOME: null },
+				...patch,
+			});
+			const deps = createMockDeps({ stdout, stderr: '', exitCode: 0 });
+			expect(await observePathRemote('/alias', baseConfig, deps, { env: {} })).toMatchObject({
+				success: false,
+				errorCode: 'identity-unavailable',
+			});
+			expect(deps.execSsh).toHaveBeenCalledTimes(1);
+		});
+
+		it.each(['HOME', 'GROK_HOME', 'nativeCwd'])('rejects invalid %s before SSH', async (key) => {
+			for (const value of ['bad\nroot', 'bad\0root', 'x'.repeat(16385)]) {
+				const deps = createMockDeps({ stdout: '', stderr: '', exitCode: 0 });
+				const options =
+					key === 'nativeCwd' ? { env: {}, nativeCwd: value } : { env: { [key]: value } };
+				expect(await observePathRemote('/alias', baseConfig, deps, options)).toMatchObject({
+					success: false,
+					errorCode: 'identity-unavailable',
+				});
+				expect(deps.execSsh).not.toHaveBeenCalled();
+				expect(deps.buildSshArgs).not.toHaveBeenCalled();
+			}
+		});
+
 		it.each(['', '/bad\npath', '/bad\0path', 'a'.repeat(16385)])(
 			'rejects invalid observer path %# before SSH',
 			async (filePath) => {
@@ -470,15 +511,17 @@ describe('remote-fs', () => {
 		] as const)(
 			'preserves observer/read refusal %s without a receipt or content',
 			async (exitCode, stderr, errorCode) => {
-				for (const operation of ['observe', 'read']) {
+				for (const operation of ['observe', 'launch', 'read']) {
 					const deps = createMockDeps({ stdout: 'untrusted bytes', stderr, exitCode });
 					const result =
 						operation === 'observe'
 							? await observePathRemote('/alias', baseConfig, deps)
-							: await readFileRemote('/alias', baseConfig, deps, {
-									maxBytes: 8,
-									expectedIdentity: identity,
-								});
+							: operation === 'launch'
+								? await observePathRemote('/alias', baseConfig, deps, { env: {} })
+								: await readFileRemote('/alias', baseConfig, deps, {
+										maxBytes: 8,
+										expectedIdentity: identity,
+									});
 					expect(result).toEqual({ success: false, errorCode, error: stderr });
 					expect(deps.execSsh).toHaveBeenCalledTimes(1);
 				}
@@ -576,7 +619,7 @@ describe('remote-fs', () => {
 			expect(commands[1]).toContain(' "$HOME/parent\'s 雪" ');
 		});
 
-		it.each(['observePath', 'readFile'])(
+		it.each(['observePath', 'observeGrokLaunch', 'readFile'])(
 			'admits %s before SSH discovery and refuses without retries',
 			async (operation) => {
 				vi.mocked(resolveSshPath).mockClear();
@@ -601,10 +644,12 @@ describe('remote-fs', () => {
 				const result =
 					operation === 'observePath'
 						? await observePathRemote('/alias', baseConfig, deps)
-						: await readFileRemote('/alias', baseConfig, deps, {
-								maxBytes: 8,
-								expectedIdentity: identity,
-							});
+						: operation === 'observeGrokLaunch'
+							? await observePathRemote('/alias', baseConfig, deps, { env: {} })
+							: await readFileRemote('/alias', baseConfig, deps, {
+									maxBytes: 8,
+									expectedIdentity: identity,
+								});
 				expect(result).toEqual({
 					success: false,
 					errorCode: 'identity-unavailable',
@@ -622,23 +667,33 @@ describe('remote-fs', () => {
 			}
 		);
 
-		it.each(['observe', 'read'])('bounds the default %s SSH timeout', async (operation) => {
-			vi.mocked(execFileNoThrow).mockResolvedValueOnce({
-				stdout: '',
-				stderr: 'unavailable',
-				exitCode: 70,
-			});
-			if (operation === 'observe') await observePathRemote('/alias', baseConfig);
-			else
-				await readFileRemote('/alias', baseConfig, undefined, {
-					maxBytes: 1,
-					expectedIdentity: identity,
+		it.each(['observe', 'launch', 'read'])(
+			'bounds the default %s SSH timeout',
+			async (operation) => {
+				vi.mocked(execFileNoThrow).mockResolvedValueOnce({
+					stdout: '',
+					stderr: 'unavailable',
+					exitCode: 70,
 				});
-			expect(execFileNoThrow).toHaveBeenCalledExactlyOnceWith('ssh', expect.any(Array), undefined, {
-				timeout: 30000,
-				input: undefined,
-			});
-		});
+				if (operation === 'observe') await observePathRemote('/alias', baseConfig);
+				else if (operation === 'launch')
+					await observePathRemote('/alias', baseConfig, undefined, { env: {} });
+				else
+					await readFileRemote('/alias', baseConfig, undefined, {
+						maxBytes: 1,
+						expectedIdentity: identity,
+					});
+				expect(execFileNoThrow).toHaveBeenCalledExactlyOnceWith(
+					'ssh',
+					expect.any(Array),
+					undefined,
+					{
+						timeout: 30000,
+						input: undefined,
+					}
+				);
+			}
+		);
 	});
 
 	// This transport executes the emitted program; response-only mocks above do not.
@@ -790,6 +845,132 @@ finally:
 				expect(audit).toMatchObject({ live: 0, alarm: 25, writes: [] });
 				expect(audit.closed).toBe(audit.opened);
 			}
+		});
+
+		describe('Grok launch environment through the emitted bash wrapper', () => {
+			let inherited: NodeJS.ProcessEnv;
+			beforeEach(() => {
+				inherited = { PATH: process.env.PATH, HOME: root, GROK_HOME: account };
+				for (const dir of [
+					'.grok',
+					'  ',
+					'~/literal',
+					"account 雪's",
+					'alternate/.grok',
+					'workspace/step/step',
+				])
+					fs.mkdirSync(path.join(root, dir), { recursive: true });
+				vi.mocked(deps.execSsh).mockImplementation(async (_ssh, args) => {
+					const command = args.at(-1)!;
+					expect(command).toMatch(/^\/bin\/bash --norc --noprofile -c /);
+					expect(command).not.toContain('secret-must-not-travel');
+					const result = spawnSync('/bin/bash', ['--norc', '--noprofile', '-c', command], {
+						env: inherited,
+						cwd: root,
+						encoding: 'utf8',
+						timeout: 3000,
+						maxBuffer: 128 * 1024,
+					});
+					expect(result.error).toBeUndefined();
+					expect(result.signal).toBeNull();
+					return { stdout: result.stdout, stderr: result.stderr, exitCode: result.status! };
+				});
+			});
+
+			it.each([
+				['inherited', undefined, 'account-a'],
+				['empty', '', '.grok'],
+				['whitespace', '  ', '  '],
+				['relative', 'account-b', 'account-b'],
+				['literal tilde', '~/literal', '~/literal'],
+				['quoted Unicode', "account 雪's", "account 雪's"],
+			])(
+				'observes %s GROK_HOME without rewriting its native meaning',
+				async (_label, value, suffix) => {
+					const result = await observePathRemote(root, baseConfig, deps, {
+						env: { GROK_HOME: value, GROK_AUTH: 'secret-must-not-travel' },
+					});
+					expect(result).toMatchObject({
+						success: true,
+						data: {
+							account: { canonicalPath: path.join(root, suffix!), kind: 'directory' },
+							inherited: { HOME: root, GROK_HOME: account },
+							effective: { HOME: root, GROK_HOME: value ?? account },
+						},
+					});
+					expect(deps.execSsh).toHaveBeenCalledTimes(1);
+				}
+			);
+
+			it.each([undefined, ''])(
+				'uses exported HOME after shell cd when GROK_HOME is %j',
+				async (value) => {
+					delete inherited.GROK_HOME;
+					const result = await observePathRemote('~/workspace', baseConfig, deps, {
+						env: { HOME: path.join(root, 'alternate'), GROK_HOME: value },
+					});
+					expect(result).toMatchObject({
+						success: true,
+						data: {
+							launchCwd: { canonicalPath: path.join(root, 'workspace') },
+							cwd: { canonicalPath: path.join(root, 'workspace') },
+							account: { canonicalPath: path.join(root, 'alternate/.grok') },
+							inherited: { HOME: root, GROK_HOME: null },
+							effective: { HOME: path.join(root, 'alternate'), GROK_HOME: value ?? null },
+						},
+					});
+				}
+			);
+
+			it('resolves relative account from native process cwd and repeats native cwd for the session', async () => {
+				const result = await observePathRemote('~/workspace', baseConfig, deps, {
+					env: { GROK_HOME: '../../account-b' },
+					nativeCwd: 'step',
+				});
+				expect(result).toMatchObject({
+					success: true,
+					data: {
+						launchCwd: { canonicalPath: path.join(root, 'workspace') },
+						processCwd: { canonicalPath: path.join(root, 'workspace/step') },
+						cwd: { canonicalPath: path.join(root, 'workspace/step/step') },
+						account: { canonicalPath: path.join(root, 'account-b') },
+					},
+				});
+			});
+
+			it('honors explicit account even with unavailable HOME and an absolute native cwd', async () => {
+				const result = await observePathRemote(root, baseConfig, deps, {
+					env: { HOME: '/absent-fixture-home', GROK_HOME: account },
+					nativeCwd: path.join(root, 'workspace'),
+				});
+				expect(result).toMatchObject({
+					success: true,
+					data: {
+						account: { canonicalPath: path.join(root, 'account-a') },
+						processCwd: { canonicalPath: path.join(root, 'workspace') },
+						cwd: { canonicalPath: path.join(root, 'workspace') },
+					},
+				});
+			});
+
+			it.each([
+				{ env: { GROK_HOME: 'missing-account' } },
+				{ env: { GROK_HOME: 'transcript' } },
+				{ env: { GROK_HOME: '', HOME: '~/missing-home' } },
+				{ env: {}, nativeCwd: '~/workspace' },
+				{ env: {}, nativeCwd: '' },
+			])(
+				'refuses absent/non-directory literal paths without creation or fallback %#',
+				async (options) => {
+					const before = fs.readdirSync(root, { recursive: true }).sort();
+					expect(await observePathRemote(root, baseConfig, deps, options)).toMatchObject({
+						success: false,
+						errorCode: 'identity-unavailable',
+					});
+					expect(fs.readdirSync(root, { recursive: true }).sort()).toEqual(before);
+					expect(deps.execSsh).toHaveBeenCalledTimes(1);
+				}
+			);
 		});
 
 		it('observes canonical account, sessions and transcript aliases without reading or writing', async () => {

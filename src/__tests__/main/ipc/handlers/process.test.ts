@@ -13,6 +13,17 @@
 
 import { trackHeadlessAgentActivity } from '../../../../main/utils/headless-agent-activity';
 import * as os from 'os';
+import * as fsp from 'fs/promises';
+import { observePathRemote, type RemoteGrokLaunchIdentity } from '../../../../main/utils/remote-fs';
+import { applyAgentConfigOverrides } from '../../../../shared/maestro-lib/launch/agent-args';
+import { buildCallerIdentityEnv } from '../../../../shared/agentDelegation';
+import { resolveAgentAccountRef } from '../../../../shared/agentAccountDir';
+import type { SshRemoteConfig } from '../../../../shared/types';
+import type {
+	ProcessConfig,
+	ProcessSpawnOptions,
+	SpawnResult,
+} from '../../../../main/process-manager/types';
 import * as path from 'path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ipcMain } from 'electron';
@@ -267,7 +278,15 @@ vi.mock('../../../../main/agents/omp-model-catalog', async () => {
 // Mock fs/promises so the new temp-file tests can assert on writeFile/unlink
 // without touching the real filesystem. Other tests in this file don't use
 // fs/promises, so the module-level mock is safe.
+vi.mock('../../../../main/utils/remote-fs', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../../../main/utils/remote-fs')>()),
+	observePathRemote: vi.fn(),
+}));
+
 vi.mock('fs/promises', () => ({
+	realpath: vi.fn(),
+	stat: vi.fn(),
+	readFile: vi.fn(),
 	writeFile: vi.fn().mockResolvedValue(undefined),
 	unlink: vi.fn().mockResolvedValue(undefined),
 }));
@@ -4828,6 +4847,249 @@ describe('process IPC handlers', () => {
 	 * runs anywhere; a qualified remote's attestation rides the config to the
 	 * sink. A standalone host never asks.
 	 */
+	describe('Grok remote launch observation (GT1-04-07D1T)', () => {
+		let remote: SshRemoteConfig;
+		let globalEnv: Record<string, string>;
+		let providerEnv: Record<string, string>;
+		let receipt: RemoteGrokLaunchIdentity;
+		let endpoint: string;
+		let duringAdmission: () => void;
+		let previousOverrides: typeof applyAgentConfigOverrides | undefined;
+		const qualifyResolved = vi.fn();
+		const launch = (cwd = '/remote/project', sessionCustomEnvVars?: Record<string, string>) =>
+			handlers.get('process:spawn')!(
+				{},
+				{
+					sessionId: 'session-1-ai-tab1',
+					toolType: 'grok',
+					command: 'grok',
+					cwd,
+					args: ['--cwd', cwd],
+					sessionCustomEnvVars,
+					sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+				}
+			);
+
+		beforeEach(() => {
+			remote = {
+				id: 'remote-1',
+				name: 'Fixture',
+				host: 'fixture.invalid',
+				port: 22,
+				username: 'fixture',
+				privateKeyPath: '',
+				enabled: true,
+				remoteEnv: {},
+			};
+			globalEnv = {};
+			providerEnv = {};
+			endpoint = 'remote-installation';
+			duringAdmission = () => {};
+			const directory = {
+				canonicalPath: '/remote/project',
+				kind: 'directory' as const,
+				device: '1',
+				inode: '2',
+			};
+			receipt = {
+				launchCwd: { ...directory },
+				processCwd: { ...directory },
+				cwd: { ...directory },
+				account: { ...directory, canonicalPath: '/remote/account', inode: '3' },
+				inherited: { HOME: '/remote/home', GROK_HOME: '/remote/account' },
+				effective: { HOME: '/remote/home', GROK_HOME: '/remote/account' },
+			};
+			vi.mocked(observePathRemote)
+				.mockReset()
+				.mockImplementation(async () => ({ success: true, data: structuredClone(receipt) }));
+			qualifyResolved.mockReset().mockImplementation(async (selected) => ({
+				kind: 'remote',
+				remote: selected,
+				endpoint: { installationId: endpoint, processEpoch: 'ignored-epoch' },
+			}));
+			deps.remoteQualifier = () => ({ qualifyResolved }) as never;
+			mockSettingsStore.get.mockImplementation((key, fallback) =>
+				key === 'sshRemotes' ? [remote] : key === 'shellEnvVars' ? globalEnv : fallback
+			);
+			mockAgentConfigsStore.get.mockReturnValue({ grok: { customEnvVars: providerEnv } });
+			mockAgentDetector.getAgent.mockResolvedValue({
+				id: 'grok',
+				binaryName: 'grok',
+				requiresPty: false,
+			});
+			previousOverrides = vi.mocked(applyAgentConfigOverrides).getMockImplementation();
+			vi.mocked(applyAgentConfigOverrides).mockImplementation((_agent, args) => ({
+				args,
+				modelSource: 'default',
+				customArgsSource: 'none',
+				customEnvSource: 'none',
+				effectiveCustomEnvVars: undefined,
+			}));
+			// Exercise the handler's admission callback; ProcessManager's lease/generation matrix is GT1-04-08.
+			mockProcessManager.spawnAdmitted.mockImplementation(
+				async (config: ProcessConfig, _actor: unknown, options: ProcessSpawnOptions) => {
+					duringAdmission();
+					const error = await options.beforeSpawn?.();
+					return error
+						? { success: false, pid: 0, error }
+						: (mockProcessManager.spawn as (config: ProcessConfig) => SpawnResult)(config);
+				}
+			);
+			mockProcessManager.spawn.mockReturnValue({ success: true, pid: 777 });
+		});
+
+		afterEach(() => {
+			if (previousOverrides)
+				vi.mocked(applyAgentConfigOverrides).mockImplementation(previousOverrides);
+			vi.mocked(observePathRemote).mockReset();
+			expect(fsp.realpath).not.toHaveBeenCalled();
+			expect(fsp.stat).not.toHaveBeenCalled();
+			expect(fsp.readFile).not.toHaveBeenCalled();
+			expect(fsp.writeFile).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			['inherited', {}, {}, {}, undefined, {}],
+			['remote blank', { GROK_HOME: '' }, {}, {}, undefined, { GROK_HOME: '' }],
+			[
+				'global wins',
+				{ GROK_HOME: '/remote' },
+				{ GROK_HOME: '/global' },
+				{},
+				undefined,
+				{ GROK_HOME: '/global' },
+			],
+			[
+				'provider wins',
+				{ GROK_HOME: '/remote' },
+				{ GROK_HOME: '/global' },
+				{ GROK_HOME: '/provider' },
+				undefined,
+				{ GROK_HOME: '/provider' },
+			],
+			[
+				'session replaces provider',
+				{},
+				{},
+				{ GROK_HOME: '/provider' },
+				{ HOME: '/session' },
+				{ HOME: '/session' },
+			],
+			['empty session replaces provider', {}, {}, { GROK_HOME: '/provider' }, {}, {}],
+			[
+				'literal tilde and HOME',
+				{},
+				{},
+				{},
+				{ GROK_HOME: '~/account', HOME: '/exported' },
+				{ GROK_HOME: '~/account', HOME: '/exported' },
+			],
+			[
+				'relative and blank HOME',
+				{},
+				{},
+				{},
+				{ GROK_HOME: '../account', HOME: '' },
+				{ GROK_HOME: '../account', HOME: '' },
+			],
+			['whitespace remains literal', {}, {}, {}, { GROK_HOME: ' ' }, { GROK_HOME: ' ' }],
+		] as const)(
+			'observes the actual %s launch environment',
+			async (_label, ssh, global, provider, session, expected) => {
+				Object.assign(remote.remoteEnv!, ssh);
+				Object.assign(globalEnv, global);
+				Object.assign(providerEnv, provider);
+				expect(await launch('relative', session)).toEqual({ success: true, pid: 777 });
+				expect(observePathRemote).toHaveBeenCalledTimes(2);
+				for (const call of vi.mocked(observePathRemote).mock.calls) {
+					expect(call).toEqual([
+						'relative',
+						remote,
+						undefined,
+						{
+							env: { ...expected, ...buildCallerIdentityEnv('session-1', undefined) },
+							nativeCwd: 'relative',
+						},
+					]);
+				}
+				expect(qualifyResolved).toHaveBeenCalledTimes(4);
+				expect(mockProcessManager.spawn).toHaveBeenCalledWith(
+					expect.objectContaining({
+						command: 'ssh',
+						sshRemoteId: remote.id,
+						nativeSessionScope: {
+							version: 1,
+							state: 'bound',
+							provider: 'grok',
+							cwd: '/remote/project',
+							accountRef: resolveAgentAccountRef(
+								{ toolType: 'grok', sshRemote: true, managedAccountDir: '/remote/account' },
+								{ homeDir: '' }
+							),
+							host: { kind: 'ssh', identity: 'remote-installation' },
+						},
+					})
+				);
+			}
+		);
+
+		it.each(['launchCwd', 'processCwd', 'cwd', 'account', 'inherited', 'effective'] as const)(
+			'refuses changed %s evidence at admission without starting any process',
+			async (field) => {
+				duringAdmission = () => {
+					if (field === 'inherited' || field === 'effective') receipt[field].HOME = '/rebound-home';
+					else receipt[field].inode = 'replaced';
+				};
+				expect(await launch()).toMatchObject({
+					success: false,
+					error: expect.stringContaining('changed before spawn'),
+				});
+				expect(observePathRemote).toHaveBeenCalledTimes(2);
+				expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each(['missing root', 'timeout', 'endpoint', 'global env', 'provider env', 'remote env'])(
+			'refuses %s changing during admission',
+			async (change) => {
+				duringAdmission = () => {
+					if (change === 'endpoint') endpoint = 'replacement-installation';
+					else if (change === 'global env') globalEnv.HOME = '/changed';
+					else if (change === 'provider env') providerEnv.GROK_HOME = '/changed';
+					else if (change === 'remote env') remote.remoteEnv!.HOME = '/changed';
+					else
+						vi.mocked(observePathRemote).mockResolvedValue({
+							success: false,
+							errorCode: 'identity-unavailable',
+							error: change,
+						});
+				};
+				expect(await launch()).toMatchObject({
+					success: false,
+					error: expect.stringContaining('changed'),
+				});
+				expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each(['endpoint', 'settings'])(
+			'rechecks %s after the final asynchronous observation',
+			async (change) => {
+				let samples = 0;
+				vi.mocked(observePathRemote).mockImplementation(async () => {
+					if (++samples === 2) {
+						if (change === 'endpoint') endpoint = 'replacement-installation';
+						else globalEnv.HOME = '/changed';
+					}
+					return { success: true, data: structuredClone(receipt) };
+				});
+				expect(await launch()).toMatchObject({ success: false });
+				expect(samples).toBe(2);
+				expect(mockProcessManager.spawn).not.toHaveBeenCalled();
+			}
+		);
+	});
+
 	describe('managed SSH spawn qualified by the remote (MRC-08-04B)', () => {
 		const remote = {
 			id: 'remote-1',

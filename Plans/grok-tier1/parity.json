@@ -2181,6 +2181,25 @@
 			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
 			"scope": "Bounded remote login HOME/GROK_HOME observation plus literal selected exports; distinct shell/process/headless cwd interpretation; canonical account and directory identities rechecked around endpoint qualification and admission. No account contents or credentials read.",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-remote-launch-observation-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07d1t-remote-launch-observation-tests",
+			"sourceCommit": "51903b19ceb953175539f3715792216d14f6f186",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/ipc/handlers/process.test.ts": "76800bb002f68629e5a5b68817438618aaa4b65f73153bde1ddde96c8189706f",
+				"src/__tests__/main/utils/remote-fs.test.ts": "b37696770f899955a27cff0d2b1cfd0e3aa6b526daa5093196a46cc130d4c493"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"staticLimitations": "No added TypeScript/ESLint diagnostics; scoped compiler retains ten baseline errors and full process-file ESLint retains one baseline error and warning.",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "50 new parameter-expanded cases and five extended failures: remote environment precedence, literal path/cwd semantics, bounded receipt validation, admission races, no local fallback. Deeper emitted-observer fallback/alias/read auditing remains GT1-04-07D1T1.",
+			"verificationOwner": "GT1-04-13",
+			"continuationOwner": "GT1-04-07D1T1"
 		}
 	},
 	"sourceCatalog": {
@@ -6045,7 +6064,8 @@
 					"GT1-04-07CUIT",
 					"GT1-04-07CUIAT",
 					"GT1-04-07CUIAT1",
-					"GT1-04-07D1T"
+					"GT1-04-07D1T",
+					"GT1-04-07D1T1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -6081,7 +6101,8 @@
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
 				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
 				"phase04LaunchOwnershipRef": "phase04-launch-ownership",
-				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation"
+				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation",
+				"phase04RemoteLaunchObservationTestsRef": "phase04-remote-launch-observation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11317,7 +11338,8 @@
 					"GT1-04-07CUIT",
 					"GT1-04-07CUIAT",
 					"GT1-04-07CUIAT1",
-					"GT1-04-07D1T"
+					"GT1-04-07D1T",
+					"GT1-04-07D1T1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -11353,7 +11375,8 @@
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
 				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
 				"phase04LaunchOwnershipRef": "phase04-launch-ownership",
-				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation"
+				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation",
+				"phase04RemoteLaunchObservationTestsRef": "phase04-remote-launch-observation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11858,7 +11881,8 @@
 					"GT1-04-07CUIT",
 					"GT1-04-07CUIAT",
 					"GT1-04-07CUIAT1",
-					"GT1-04-07D1T"
+					"GT1-04-07D1T",
+					"GT1-04-07D1T1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
@@ -11894,7 +11918,8 @@
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
 				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
 				"phase04LaunchOwnershipRef": "phase04-launch-ownership",
-				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation"
+				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation",
+				"phase04RemoteLaunchObservationTestsRef": "phase04-remote-launch-observation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16470,7 +16495,8 @@
 					"GT1-04-07CUIT",
 					"GT1-04-07CUIAT",
 					"GT1-04-07CUIAT1",
-					"GT1-04-07D1T"
+					"GT1-04-07D1T",
+					"GT1-04-07D1T1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -16506,7 +16532,8 @@
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
 				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
 				"phase04LaunchOwnershipRef": "phase04-launch-ownership",
-				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation"
+				"phase04RemoteLaunchAccountObservationRef": "phase04-remote-launch-account-observation",
+				"phase04RemoteLaunchObservationTestsRef": "phase04-remote-launch-observation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
