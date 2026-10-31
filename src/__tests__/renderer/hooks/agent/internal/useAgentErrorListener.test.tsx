@@ -5,6 +5,7 @@ import { useSessionStore } from '../../../../../renderer/stores/sessionStore';
 import { useModalStore } from '../../../../../renderer/stores/modalStore';
 import { createMockSession } from '../../../../helpers/mockSession';
 import { createMockAITab } from '../../../../helpers/mockTab';
+import { DEFAULT_BATCH_STATE } from '../../../../../renderer/hooks/batch/batchReducer';
 import {
 	useRetryStore,
 	noteDispatch,
@@ -306,6 +307,185 @@ describe('useAgentErrorListener', () => {
 		const entry = useModalStore.getState().modals.get('agentError');
 		expect(entry?.open ?? false).toBe(false);
 	});
+
+	it.each(['grok', undefined])(
+		'preserves a failed Grok resume and shows its error (event provider: %s)',
+		(agentId) => {
+			const tab = createMockAITab({
+				id: 'grok-tab',
+				agentSessionId: 'grok-native-id',
+				turnProvider: 'grok',
+				logs: [{ id: 'user-log', timestamp: 1, source: 'user', text: 'continue my work' }],
+				usageStats: {
+					inputTokens: 31,
+					outputTokens: 7,
+					cacheReadInputTokens: 9,
+					cacheCreationInputTokens: 0,
+					totalCostUsd: 0.25,
+					contextWindow: 200000,
+				},
+			});
+			const activeTab = createMockAITab({ id: 'active-tab', agentSessionId: 'other-native-id' });
+			const session = createMockSession({
+				id: 'grok-agent',
+				toolType: 'grok',
+				agentSessionId: 'grok-native-id',
+				aiTabs: [tab, activeTab],
+				activeTabId: activeTab.id,
+				contextUsage: 37,
+			});
+			useSessionStore.setState({ sessions: [session] });
+			seedSnapshot(session.id, tab.id);
+			const deps = makeDeps();
+			const error = {
+				...baseError,
+				agentId,
+				type: 'session_not_found',
+				message: 'Grok session missing',
+			};
+			renderHook(() => useAgentErrorListener(deps));
+
+			handler!('grok-agent-ai-grok-tab', error);
+
+			const updated = useSessionStore.getState().sessions[0];
+			expect(updated).toMatchObject({
+				toolType: 'grok',
+				agentSessionId: 'grok-native-id',
+				contextUsage: 37,
+				state: 'error',
+				agentErrorPaused: true,
+				agentErrorTabId: tab.id,
+				agentError: error,
+			});
+			expect(updated.aiTabs[0].agentSessionId).toBe(tab.agentSessionId);
+			expect(updated.aiTabs[0].usageStats).toEqual(tab.usageStats);
+			expect(updated.aiTabs[0].logs.slice(0, -1)).toEqual(tab.logs);
+			expect(updated.aiTabs[0].logs.at(-1)).toMatchObject({
+				source: 'error',
+				text: error.message,
+				agentError: error,
+			});
+			expect(updated.aiTabs[0].logs.at(-1)?.recoveryAction).toBeUndefined();
+			expect(updated.aiTabs[0].agentError).toMatchObject(error);
+			expect(updated.aiTabs[1]).toEqual(activeTab);
+			expect(deps.batchedUpdater.updateContextUsage).not.toHaveBeenCalled();
+			expect(useRetryStore.getState().retries).toEqual({});
+			expect(useModalStore.getState().modals.get('agentError')).toMatchObject({
+				open: true,
+				data: { sessionId: session.id },
+			});
+		}
+	);
+
+	it.each([
+		{
+			target: 'grok-agent-ai-grok-tab',
+			agentId: 'grok',
+			turnProvider: 'grok' as const,
+			append: true,
+		},
+		{
+			target: 'grok-agent-ai-grok-tab',
+			agentId: undefined,
+			turnProvider: 'grok' as const,
+			append: true,
+		},
+		{
+			target: 'grok-agent-ai-grok-tab',
+			agentId: 'grok',
+			turnProvider: 'codex' as const,
+			append: true,
+		},
+		{
+			target: 'grok-agent-ai-closed-tab',
+			agentId: 'grok',
+			turnProvider: 'grok' as const,
+			append: false,
+		},
+		{
+			target: 'grok-agent-batch-1700000000000',
+			agentId: 'grok',
+			turnProvider: 'grok' as const,
+			append: false,
+		},
+	])(
+		'isolates late Grok errors after a provider switch: %j',
+		({ target, agentId, turnProvider, append }) => {
+			const tab = createMockAITab({
+				id: 'grok-tab',
+				agentSessionId: 'codex-native-id',
+				turnProvider,
+				logs: [{ id: 'retained-log', timestamp: 1, source: 'user', text: 'retained history' }],
+				providerSessions: { grok: { agentSessionId: 'grok-native-id', customModel: 'grok-model' } },
+			});
+			const activeTab = createMockAITab({
+				id: 'active-tab',
+				agentSessionId: 'active-codex-id',
+				state: 'busy',
+			});
+			const session = createMockSession({
+				id: 'grok-agent',
+				toolType: 'codex',
+				state: 'busy',
+				contextUsage: 43,
+				agentSessionId: 'codex-native-id',
+				aiTabs: [tab, activeTab],
+				activeTabId: activeTab.id,
+			});
+			useSessionStore.setState({ sessions: [session] });
+			const pause = vi.fn();
+			const addHistory = vi.fn();
+			const getBatch = vi.fn(() => ({
+				...DEFAULT_BATCH_STATE,
+				isRunning: true,
+				errorPaused: false,
+				documents: ['plan.md'],
+				currentDocumentIndex: 0,
+			}));
+			const deps = {
+				...makeDeps(),
+				getBatchStateRef: { current: getBatch },
+				pauseBatchOnErrorRef: { current: pause },
+				addHistoryEntryRef: { current: addHistory },
+			};
+			deps.activeHiddenToolRef.current.set('grok-agent:grok-tab', { toolName: 'Read' });
+			const retryBefore = useRetryStore.getState();
+			const toastsBefore = useNotificationStore.getState().toasts;
+			const error = {
+				...baseError,
+				agentId,
+				type: 'session_not_found',
+				message: 'Old Grok resume failed',
+			};
+			renderHook(() => useAgentErrorListener(deps));
+
+			handler!(target, error);
+
+			const updated = useSessionStore.getState().sessions[0];
+			expect({ ...updated, aiTabs: session.aiTabs }).toEqual(session);
+			expect(updated.aiTabs[1]).toEqual(activeTab);
+			expect({ ...updated.aiTabs[0], logs: tab.logs }).toEqual(tab);
+			expect(updated.aiTabs[0].logs.slice(0, tab.logs.length)).toEqual(tab.logs);
+			expect(updated.aiTabs[0].logs).toHaveLength(tab.logs.length + Number(append));
+			if (append) {
+				expect(updated.aiTabs[0].logs.at(-1)).toMatchObject({
+					source: 'error',
+					text: error.message,
+					agentError: error,
+				});
+				expect(updated.aiTabs[0].logs.at(-1)?.recoveryAction).toBeUndefined();
+			}
+			expect(deps.batchedUpdater.flushNow).toHaveBeenCalledTimes(Number(append));
+			expect(deps.batchedUpdater.updateContextUsage).not.toHaveBeenCalled();
+			expect(deps.activeHiddenToolRef.current.has('grok-agent:grok-tab')).toBe(true);
+			expect(getBatch).not.toHaveBeenCalled();
+			expect(pause).not.toHaveBeenCalled();
+			expect(addHistory).not.toHaveBeenCalled();
+			expect(useRetryStore.getState()).toBe(retryBefore);
+			expect(useNotificationStore.getState().toasts).toBe(toastsBefore);
+			expect(useModalStore.getState().modals.get('agentError')?.open ?? false).toBe(false);
+		}
+	);
 
 	it('stamps recoveryAction with the last user prompt on session_not_found', () => {
 		const userLog = {
@@ -639,7 +819,7 @@ describe('useAgentErrorListener', () => {
 	// the failure itself must leave no mark: no error frame, no ERR badge, no
 	// modal, no outage card. The compaction pill is the whole record.
 	it('masks a context-limit error behind a compaction pill', () => {
-		registerContextCompactionSpawner(vi.fn(() => new Promise(() => {})));
+		registerContextCompactionSpawner(vi.fn(() => new Promise<{ success: boolean }>(() => {})));
 		const tab = createMockAITab({ id: 'tab-1', agentSessionId: 'claude-abc' });
 		const session = createMockSession({
 			id: 'sess-1',

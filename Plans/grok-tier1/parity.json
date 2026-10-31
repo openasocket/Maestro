@@ -1219,6 +1219,27 @@
 			],
 			"testOwner": "GT1-04-07T",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-desktop-native-id-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07t-desktop-native-id-safety-tests",
+			"sourceCommit": "999d230984c4e265b03358a85f0d41ebdc341489",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/hooks/agent/internal/useAgentSessionIdListener.test.tsx": "420e86520c97e98be9873d213a960b3985701ba46f742a0deccf7e383a7fe0c3",
+				"src/__tests__/renderer/hooks/agent/internal/useAgentErrorListener.test.tsx": "f09072179ff2f74cfcce7345b23878fe7803901456002e926987bef7b6eccdcd"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"authoredCases": 22,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Pre-existing RequestInit.dispatcher TS2339 in src/main/plugins/plugin-host-handlers.ts:1196; no changed-file diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "Renderer event fixtures only: observed IDs, explicit tab ownership, retained resume evidence, provider parking and late-error isolation. No tests run or collected; no ACP desktop or immutable account/host/generation proof.",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -5056,7 +5077,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention"
+				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
+				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10255,7 +10277,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention"
+				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
+				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10750,7 +10773,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention"
+				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
+				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -15314,7 +15338,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention"
+				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
+				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
