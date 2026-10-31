@@ -1914,6 +1914,85 @@ describe('useWizardHandlers', () => {
 	// ========================================================================
 	// handleWizardCommand
 	// ========================================================================
+	describe('Grok wizard configuration handoff', () => {
+		beforeEach(() => vi.useFakeTimers());
+		afterEach(() => vi.useRealTimers());
+
+		it.each([
+			['current', 'tab', false, 'grok-4.5', 'low'],
+			['current', 'tab-model', true, 'grok-4.5', 'high'],
+			['current', 'tab-effort', false, 'grok-composer-2.5', 'low'],
+			['current', 'agent', true, 'grok-composer-2.5', 'high'],
+			['current', 'provider', false, undefined, undefined],
+			['new', 'agent', false, 'grok-composer-2.5', 'high'],
+			['new', 'provider', true, undefined, undefined],
+		] as const)(
+			'forwards %s tab / %s configuration (SSH: %s)',
+			async (target, source, remote, model, effort) => {
+				const selected = createMockTab({
+					id: 'selected-tab',
+					customModel:
+						source === 'tab' || source === 'tab-model' || target === 'new' ? 'grok-4.5' : undefined,
+					customEffort:
+						source === 'tab' || source === 'tab-effort' || target === 'new' ? 'low' : undefined,
+				});
+				const neighbor = createMockTab({ id: 'neighbor-tab', customEffort: 'minimal' });
+				const session = createMockSession({
+					toolType: 'grok',
+					aiTabs: [neighbor, selected],
+					activeTabId: selected.id,
+					projectRoot: remote ? '/remote/project' : '/local/project',
+					autoRunFolderPath: '/playbooks',
+					customPath: '/tools/grok',
+					customArgs: '--verbose',
+					customEnvVars: { GROK_HOME: remote ? '/accounts/b' : '/accounts/a' },
+					customModel: source === 'provider' ? undefined : 'grok-composer-2.5',
+					customEffort: source === 'provider' ? undefined : 'high',
+					sessionSshRemoteConfig: remote ? { enabled: true, remoteId: 'remote-b' } : undefined,
+				});
+				useSessionStore.setState({ sessions: [session], activeSessionId: session.id });
+				const deps = createMockDeps();
+				const { result } = renderHook(() => useWizardHandlers(deps));
+
+				await act(async () => {
+					if (target === 'new') result.current.handleLaunchWizardTab();
+					else result.current.handleWizardCommand('');
+					await vi.advanceTimersByTimeAsync(0);
+				});
+
+				const updated = useSessionStore.getState().sessions[0];
+				const wizardTab = updated.aiTabs.find((tab) => tab.id === updated.activeTabId)!;
+				expect(deps.inlineWizardContext.startWizard).toHaveBeenCalledExactlyOnceWith(
+					undefined,
+					expect.objectContaining({ readOnlyMode: false }),
+					session.projectRoot,
+					'grok',
+					session.name,
+					wizardTab.id,
+					session.id,
+					session.autoRunFolderPath,
+					session.sessionSshRemoteConfig,
+					'default',
+					expect.objectContaining({
+						customPath: session.customPath,
+						customArgs: session.customArgs,
+						customEnvVars: session.customEnvVars,
+						customModel: model,
+						customEffort: effort,
+					})
+				);
+				expect(updated.aiTabs.find((tab) => tab.id === neighbor.id)).toEqual(neighbor);
+				if (target === 'new') {
+					expect(wizardTab.id).not.toBe(selected.id);
+					expect(wizardTab.agentSessionId).toBeNull();
+					expect(updated.aiTabs.find((tab) => tab.id === selected.id)).toEqual(selected);
+				} else {
+					expect(wizardTab.id).toBe(selected.id);
+				}
+			}
+		);
+	});
+
 	describe('handleWizardCommand', () => {
 		it('starts inline wizard with args on current tab', () => {
 			const session = createMockSession();
