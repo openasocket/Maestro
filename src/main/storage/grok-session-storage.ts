@@ -191,6 +191,8 @@ export function parseGrokUsageFile(content: string | null) {
 		cacheCreationCounting: 'beside-input',
 		completeness: totals.completeness,
 		cost: totals.cost,
+		// Only finished children fold into this ledger. Persisted usage has no
+		// running-child inventory, so even stable files cannot prove all are done.
 		childInclusion: 'completed',
 		childCompleteness: 'unknown',
 		callCount: totals.callCount,
@@ -818,10 +820,8 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		if (cwd === null || !isSafeGrokPathSegment(sessionId)) return null;
 		const sessionDir = this.joinPath(sshConfig, sessionsDir, cwdFolder, sessionId);
 		try {
-			const summaryRead = await this.readSessionFile(
-				this.joinPath(sshConfig, sessionDir, 'summary.json'),
-				sshConfig
-			);
+			const snapshot = await this.readSessionSnapshot(sessionDir, sshConfig);
+			const { summaryRead, transcriptRead, usageRead } = snapshot;
 			const summaryContent = summaryRead.content;
 			const nativeMetadata: NonNullable<AgentSessionInfo['nativeMetadata']> = {
 				provider: 'grok',
@@ -855,7 +855,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 			}
 			const summary = nativeMetadata.summary ?? {};
 
-			const transcript = await this.readTranscript(sessionDir, sshConfig);
+			const transcript = await this.readTranscript(sessionDir, sshConfig, false, transcriptRead);
 			nativeMetadata.sources!['chat_history.jsonl'] = transcript.source;
 			const parsed = transcript.parsed;
 			if (!parsed) return null;
@@ -884,14 +884,10 @@ export class GrokSessionStorage extends BaseSessionStorage {
 					? Math.max(0, Math.floor((modifiedMs - createdMs) / 1000))
 					: 0;
 			const preview = parsed.firstUserMessage || parsed.firstAssistantMessage || title;
-			const usageRead = await this.readSessionFile(
-				this.joinPath(sshConfig, sessionDir, 'usage.json'),
-				sshConfig
-			);
 			let usage: ReturnType<typeof parseGrokUsageFile> = null;
 			try {
 				// A changing ledger cannot supply authoritative totals, even if its
-				// sampled text happens to parse. Cross-file generations are separate.
+				// sampled text happens to parse. Cross-file uncertainty is applied below.
 				if (usageRead.source.status === 'available') usage = parseGrokUsageFile(usageRead.content);
 			} catch (error) {
 				if (!(error instanceof RangeError)) throw error;
@@ -904,6 +900,27 @@ export class GrokSessionStorage extends BaseSessionStorage {
 				usageRead.source.reason ??= 'invalid-usage';
 			}
 			nativeMetadata.sources!['usage.json'] = usageRead.source;
+			// Grok commits each file separately, with no shared commit marker. Even
+			// two identical samples cannot bind usage or summary to this transcript.
+			// Preserve stronger per-file failure reasons while disclosing that limit
+			// on every otherwise available member of this combined observation.
+			for (const source of Object.values(nativeMetadata.sources!)) {
+				if (source.status === 'available') {
+					source.status = 'partial';
+					source.reason = snapshot.reason;
+				}
+			}
+			if (usage) {
+				for (const detail of [usage.accounting, ...(usage.accounting.models ?? [])]) {
+					if (detail.completeness === 'complete') detail.completeness = 'partial';
+					if (detail.cost.status === 'exact') {
+						detail.cost = { ...detail.cost, status: 'partial', reason: snapshot.reason };
+					}
+				}
+				// This legacy split cannot represent uncertain model accounting. Raw
+				// model identities, buckets and tick strings remain in accounting.models.
+				usage.byModel = [];
+			}
 
 			return {
 				// Search/read must address the directory we validated, even when a
@@ -1106,20 +1123,82 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		};
 	}
 
-	/** Read and normalize one bounded transcript; rejection is never an empty success. */
-	private async readTranscript(
-		sessionDir: string,
-		sshConfig?: SshRemoteConfig,
-		includeNativeRecords = false
-	): Promise<{
-		parsed: ParsedGrokChatHistory | null;
-		source: NonNullable<SessionMessagesResult['source']>;
-	}> {
-		const read = await this.readSessionFile(
+	/**
+	 * Sample the three native files, then compare exactly one bounded reread of
+	 * each. No idle polling, writer locks or cache: observations are confined to
+	 * this account directory and SSH target. Comparing content also detects
+	 * equal-size remote rewrites inside statRemote's one-second timestamp window.
+	 */
+	private async readSessionSnapshot(sessionDir: string, sshConfig?: SshRemoteConfig) {
+		const summaryRead = await this.readSessionFile(
+			this.joinPath(sshConfig, sessionDir, 'summary.json'),
+			sshConfig
+		);
+		const transcriptRead = await this.readSessionFile(
 			this.joinPath(sshConfig, sessionDir, 'chat_history.jsonl'),
 			sshConfig,
 			MAX_SESSION_FILE_SIZE
 		);
+		const usageRead = await this.readSessionFile(
+			this.joinPath(sshConfig, sessionDir, 'usage.json'),
+			sshConfig
+		);
+		let reason = 'cross-file-generation-unverified';
+		for (const [name, original] of [
+			['summary.json', summaryRead],
+			['chat_history.jsonl', transcriptRead],
+			['usage.json', usageRead],
+		] as const) {
+			if (
+				!(await this.isSessionFileSampleStable(
+					this.joinPath(sshConfig, sessionDir, name),
+					original,
+					sshConfig
+				))
+			) {
+				reason = 'changed-or-unavailable-during-snapshot';
+			}
+		}
+		return { summaryRead, transcriptRead, usageRead, reason };
+	}
+
+	/** Compare bounded samples without treating matching stats as matching bytes. */
+	private async isSessionFileSampleStable(
+		filePath: string,
+		original: Awaited<ReturnType<GrokSessionStorage['readSessionFile']>>,
+		sshConfig?: SshRemoteConfig
+	): Promise<boolean> {
+		const recheck = await this.readSessionFile(filePath, sshConfig, original.source.maxBytes);
+		return (
+			original.source.status === 'available' &&
+			recheck.source.status === 'available' &&
+			original.content === recheck.content &&
+			original.generation === recheck.generation
+		);
+	}
+
+	/** Read and normalize one bounded transcript; rejection is never an empty success. */
+	private async readTranscript(
+		sessionDir: string,
+		sshConfig?: SshRemoteConfig,
+		includeNativeRecords = false,
+		read?: Awaited<ReturnType<GrokSessionStorage['readSessionFile']>>
+	): Promise<{
+		parsed: ParsedGrokChatHistory | null;
+		source: NonNullable<SessionMessagesResult['source']>;
+	}> {
+		if (!read) {
+			const filePath = this.joinPath(sshConfig, sessionDir, 'chat_history.jsonl');
+			read = await this.readSessionFile(filePath, sshConfig, MAX_SESSION_FILE_SIZE);
+			if (
+				sshConfig &&
+				read.source.status === 'available' &&
+				!(await this.isSessionFileSampleStable(filePath, read, sshConfig))
+			) {
+				read.source.status = 'partial';
+				read.source.reason = 'changed-or-unavailable-during-read';
+			}
+		}
 		if (read.content === null) return { parsed: null, source: read.source };
 		// Byte limits alone still permit millions of tiny rows. Count physical
 		// lines without allocating split arrays, before the shared parser does so.
@@ -1162,6 +1241,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 	): Promise<{
 		content: string | null;
 		source: NonNullable<SessionMessagesResult['source']>;
+		generation?: string;
 	}> {
 		const source: NonNullable<SessionMessagesResult['source']> = {
 			provider: 'grok',
@@ -1177,6 +1257,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		};
 		try {
 			let content: string;
+			let generation: string;
 			if (sshConfig) {
 				const before = await statRemote(filePath, sshConfig);
 				if (!before.success || !before.data) {
@@ -1189,6 +1270,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 					return unavailable('unreadable');
 				}
 				source.sizeBytes = before.data.size;
+				generation = `${before.data.size}:${before.data.mtime}`;
 				if (before.data.isDirectory) return unavailable('not-a-file');
 				if (!Number.isSafeInteger(before.data.size) || before.data.size < 0)
 					return unavailable('invalid-size');
@@ -1237,6 +1319,9 @@ export class GrokSessionStorage extends BaseSessionStorage {
 				// regular file is replaced with a FIFO between stat and open.
 				const before = await fs.stat(filePath);
 				source.sizeBytes = before.size;
+				generation = [before.dev, before.ino, before.size, before.mtimeMs, before.ctimeMs].join(
+					':'
+				);
 				if (!before.isFile()) return unavailable('not-a-file');
 				if (before.size > maxBytes) return unavailable('too-large');
 				const handle = await fs.open(filePath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
@@ -1265,21 +1350,48 @@ export class GrokSessionStorage extends BaseSessionStorage {
 					if (
 						opened.size !== after.size ||
 						opened.mtimeMs !== after.mtimeMs ||
+						opened.ctimeMs !== after.ctimeMs ||
 						opened.size !== total ||
 						!validUtf8 ||
 						before.ino !== opened.ino ||
+						before.dev !== opened.dev ||
 						before.size !== opened.size ||
-						before.mtimeMs !== opened.mtimeMs
+						before.mtimeMs !== opened.mtimeMs ||
+						before.ctimeMs !== opened.ctimeMs
 					) {
 						source.status = 'partial';
 						source.reason = 'changed-during-read';
+					}
+					// Atomic rename leaves the old open descriptor unchanged. Recheck
+					// the pathname too, without touching the provider's writer lock.
+					try {
+						const current = await fs.stat(filePath);
+						if (current.size > maxBytes) return unavailable('too-large');
+						if (
+							!current.isFile() ||
+							current.dev !== after.dev ||
+							current.ino !== after.ino ||
+							current.size !== after.size ||
+							current.mtimeMs !== after.mtimeMs ||
+							current.ctimeMs !== after.ctimeMs
+						) {
+							source.status = 'partial';
+							source.reason ??= 'changed-during-read';
+						}
+					} catch (error) {
+						if (error instanceof RangeError) throw error;
+						if (!isExpectedSessionReadError(error)) {
+							captureException(error, { operation: 'grokStorage:statSessionFile', filePath });
+						}
+						source.status = 'partial';
+						source.reason ??= 'post-read-stat-unavailable';
 					}
 				} finally {
 					await handle.close();
 				}
 			}
 			if (!source.reason) source.status = 'available';
-			return { content, source };
+			return { content, source, generation };
 		} catch (error) {
 			if (error instanceof RangeError) return unavailable('too-large');
 			if (!isExpectedSessionReadError(error)) {
