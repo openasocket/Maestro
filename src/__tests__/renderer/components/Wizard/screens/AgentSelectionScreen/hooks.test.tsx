@@ -1,7 +1,19 @@
 import React from 'react';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import {
+	act,
+	fireEvent,
+	render,
+	renderHook,
+	screen,
+	waitFor,
+	within,
+} from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentDiscoveryResult } from '../../../../../../shared/types';
+import { getAgentCapabilities } from '../../../../../../shared/maestro-lib/providers/capabilities';
+import { PICKABLE_AGENT_IDS } from '../../../../../../shared/agentMetadata';
+import { mockTheme } from '../../../../../helpers/mockTheme';
+import { AgentSelectionScreen } from '../../../../../../renderer/components/Wizard/screens/AgentSelectionScreen/AgentSelectionScreen';
 import {
 	useWizard,
 	type WizardState,
@@ -392,6 +404,100 @@ describe('AgentSelectionScreen hooks', () => {
 		rerender({ isNameFieldFocused: true, focusedTileIndex: 0 });
 		act(() => result.current({ key: 'Tab', shiftKey: true, preventDefault } as any));
 		expect(setFocusedTileIndex).toHaveBeenCalledWith(1);
+	});
+
+	it('traverses Grok and unavailable neighbors, preserves the default, and restores focus after configuration', async () => {
+		const detectedAgents = AGENT_TILES.map((tile) =>
+			agent({
+				id: tile.id,
+				name: tile.name,
+				available: tile.id === 'claude-code' || tile.id === 'grok',
+				capabilities: getAgentCapabilities(tile.id),
+			})
+		);
+		vi.mocked(window.maestro.agents.detect).mockResolvedValue(detectedAgents);
+		const setSelectedAgent = vi.fn((selectedAgent: WizardState['selectedAgent']) => {
+			wizardState = { ...wizardState, selectedAgent };
+		});
+		const context = {
+			setSelectedAgent,
+			setAvailableAgents: vi.fn(),
+			setAgentName: vi.fn(),
+			setCustomPath: vi.fn(),
+			setCustomArgs: vi.fn(),
+			setCustomEnvVars: vi.fn(),
+			setEnableMaestroP: vi.fn(),
+			setMaestroPMode: vi.fn(),
+			setMaestroPPath: vi.fn(),
+			setCodexTransport: vi.fn(),
+			setSessionSshRemoteConfig: vi.fn(),
+			nextStep: vi.fn(),
+			canProceedToNext: () => false,
+		};
+		vi.mocked(useWizard).mockImplementation(
+			() => ({ ...context, state: wizardState }) as ReturnType<typeof useWizard>
+		);
+		const view = render(<AgentSelectionScreen theme={mockTheme} />);
+		const claude = await screen.findByRole('button', { name: 'Claude Code' });
+		expect(setSelectedAgent).toHaveBeenCalledExactlyOnceWith('claude-code');
+		expect(claude).toHaveFocus();
+		const tiles = screen
+			.getAllByRole('button')
+			.filter((button) =>
+				AGENT_TILES.some((tile) => button.getAttribute('aria-label')?.startsWith(tile.name))
+			);
+		expect(tiles.map((button) => button.getAttribute('aria-label'))).toEqual(
+			PICKABLE_AGENT_IDS.map((id) => {
+				const detected = detectedAgents.find((entry) => entry.id === id)!;
+				return `${detected.name}${detected.available ? '' : ' (not installed)'}`;
+			})
+		);
+		const grokIndex = AGENT_TILES.findIndex((tile) => tile.id === 'grok');
+		const claudeIndex = AGENT_TILES.findIndex((tile) => tile.id === 'claude-code');
+		setSelectedAgent.mockClear();
+		for (let index = claudeIndex + 1; index <= grokIndex; index++) {
+			fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
+			if (index < grokIndex) {
+				expect(tiles[index]).toBeDisabled();
+				fireEvent.keyDown(document.activeElement!, { key: 'Enter' });
+				expect(setSelectedAgent).not.toHaveBeenCalled();
+			}
+		}
+		const grok = screen.getByRole('button', { name: 'Grok CLI' });
+		expect(grok).toHaveFocus();
+		fireEvent.keyDown(grok, { key: ' ' });
+		expect(setSelectedAgent).toHaveBeenCalledExactlyOnceWith('grok');
+		view.rerender(<AgentSelectionScreen theme={mockTheme} />);
+		expect(grok).toHaveAttribute('aria-pressed', 'true');
+		setSelectedAgent.mockClear();
+		fireEvent.keyDown(grok, { key: 'ArrowRight' });
+		expect(tiles[grokIndex + 1]).toBeDisabled();
+		fireEvent.keyDown(document.activeElement!, { key: ' ' });
+		expect(setSelectedAgent).not.toHaveBeenCalled();
+		fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' });
+		expect(grok).toHaveFocus();
+		fireEvent.keyDown(grok, { key: 'Tab' });
+		expect(document.activeElement?.tagName).toBe('INPUT');
+		fireEvent.keyDown(document.activeElement!, { key: 'Tab', shiftKey: true });
+		expect(grok).toHaveFocus();
+		expect(context.nextStep).not.toHaveBeenCalled();
+
+		vi.useFakeTimers();
+		await act(async () => {
+			fireEvent.keyDown(within(grok).getByRole('button', { name: 'Customize agent settings' }), {
+				key: 'Enter',
+			});
+		});
+		await act(async () => vi.advanceTimersByTimeAsync(150));
+		expect(screen.getByRole('heading', { name: 'Configure Grok CLI' })).toBeInTheDocument();
+		expect(grok).not.toBeInTheDocument();
+		fireEvent.click(screen.getByRole('button', { name: 'Done' }));
+		await act(async () => vi.advanceTimersByTimeAsync(150));
+		const restoredGrok = screen.getByRole('button', { name: 'Grok CLI' });
+		expect(restoredGrok).toHaveFocus();
+		setSelectedAgent.mockClear();
+		fireEvent.keyDown(document.activeElement!, { key: ' ' });
+		expect(setSelectedAgent).toHaveBeenCalledExactlyOnceWith('grok');
 	});
 
 	it('navigates the filtered strip, not the full provider registry', () => {

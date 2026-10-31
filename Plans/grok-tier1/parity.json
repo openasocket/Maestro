@@ -2980,6 +2980,18 @@
 			"affectedRows": ["P04", "P17", "S01", "META-01", "META-03", "META-04", "META-06"],
 			"continuationTasks": ["GT1-05-02E"],
 			"verificationTask": "GT1-05-13"
+		},
+		"phase05-interaction-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-02e-permission-and-keyboard-interaction-tests",
+			"sourceCommit": "48107949d6360dfa1e55a97dadd2ccaa059bb57b",
+			"sourceRevisionScope": "Pre-task HEAD plus GT1-05-02E authored tests and hashes; no tests executed",
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P17", "S01", "S05", "META-01", "META-03"],
+			"repairTasks": ["GT1-05-02E1"],
+			"verificationTask": "GT1-05-13"
 		}
 	},
 	"sourceCatalog": {
@@ -7557,8 +7569,15 @@
 				"src/main/services/symphony-runner.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-01", "GT1-05-11", "GT1-10-01", "GT1-05-02A", "GT1-05-02C"],
-				"test": ["GT1-05-02", "GT1-05-12", "GT1-10-02", "GT1-05-02B", "GT1-05-02D"],
+				"implementation": [
+					"GT1-05-01",
+					"GT1-05-11",
+					"GT1-10-01",
+					"GT1-05-02A",
+					"GT1-05-02C",
+					"GT1-05-02E1"
+				],
+				"test": ["GT1-05-02", "GT1-05-12", "GT1-10-02", "GT1-05-02B", "GT1-05-02D", "GT1-05-02E"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-01-07", "GT1-10-05"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -7579,7 +7598,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase05ControlsEvidenceRef": "phase05-controls",
-				"phase05ControlTestsEvidenceRef": "phase05-control-tests"
+				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
+				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7601,6 +7621,13 @@
 					"code": "implementation-or-evidence-pending",
 					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
 					"affectedRows": ["P17"]
+				},
+				{
+					"id": "wizard-config-focus-before-remount:P17",
+					"code": "source-reviewed-focus-restoration-gap",
+					"missingPrerequisite": "GT1-05-02E1 must focus the current provider tile after grid remount; GT1-05-13 runs the GT1-05-02E regression. No behavioral run performed.",
+					"affectedRows": ["P17"],
+					"evidenceRef": "phase05-interaction-tests"
 				}
 			],
 			"phase": "05",
@@ -18541,8 +18568,8 @@
 				"src/__tests__/renderer/components/NewInstanceModal/AgentPickerGrid.test.tsx"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-01"],
-				"test": ["GT1-05-02"],
+				"implementation": ["GT1-05-01", "GT1-05-02E1"],
+				"test": ["GT1-05-02", "GT1-05-02E"],
 				"verification": ["GT1-05-13", "GT1-05-14"],
 				"live": [],
 				"finalAcceptance": ["GT1-12-06"]
@@ -18563,7 +18590,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase05ControlsEvidenceRef": "phase05-controls",
-				"phase05ControlTestsEvidenceRef": "phase05-control-tests"
+				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
+				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18585,6 +18613,13 @@
 					"code": "implementation-or-evidence-pending",
 					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
 					"affectedRows": ["S01"]
+				},
+				{
+					"id": "wizard-config-focus-before-remount:S01",
+					"code": "source-reviewed-focus-restoration-gap",
+					"missingPrerequisite": "GT1-05-02E1 must focus the current provider tile after grid remount; GT1-05-13 runs the GT1-05-02E regression. No behavioral run performed.",
+					"affectedRows": ["S01"],
+					"evidenceRef": "phase05-interaction-tests"
 				}
 			],
 			"branchAuditRefs": ["B06", "B14", "B15", "B18", "B29"]
@@ -18923,8 +18958,8 @@
 				"src/renderer/services/inlineWizardDocumentGeneration.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-11"],
-				"test": ["GT1-05-12"],
+				"implementation": ["GT1-05-11", "GT1-05-02E1"],
+				"test": ["GT1-05-12", "GT1-05-02E"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-11D"],
 				"live": ["GT1-11-11", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -18943,7 +18978,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18977,6 +19013,13 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S05"]
+				},
+				{
+					"id": "wizard-config-focus-before-remount:S05",
+					"code": "source-reviewed-focus-restoration-gap",
+					"missingPrerequisite": "GT1-05-02E1 must focus the current provider tile after grid remount; GT1-05-13 runs the GT1-05-02E regression. No behavioral run performed.",
+					"affectedRows": ["S05"],
+					"evidenceRef": "phase05-interaction-tests"
 				}
 			],
 			"branchAuditRefs": ["B15", "B27"]
@@ -21820,9 +21863,18 @@
 					"GT1-05-01",
 					"GT1-05-11",
 					"GT1-10-01",
-					"GT1-05-02C"
+					"GT1-05-02C",
+					"GT1-05-02E1"
 				],
-				"test": ["GT1-11-02", "GT1-11-14B", "GT1-05-02", "GT1-05-12", "GT1-10-02", "GT1-05-02D"],
+				"test": [
+					"GT1-11-02",
+					"GT1-11-14B",
+					"GT1-05-02",
+					"GT1-05-12",
+					"GT1-10-02",
+					"GT1-05-02D",
+					"GT1-05-02E"
+				],
 				"verification": [
 					"GT1-01-07",
 					"GT1-11-03",
@@ -21851,7 +21903,8 @@
 				"evidenceRef": "phase01-audit",
 				"observation": "All four providers have names and alphabetical picker metadata. Grok existing ID retained.",
 				"phase05ControlsEvidenceRef": "phase05-controls",
-				"phase05ControlTestsEvidenceRef": "phase05-control-tests"
+				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
+				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21873,6 +21926,13 @@
 					"code": "implementation-or-evidence-pending",
 					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
 					"affectedRows": ["META-01"]
+				},
+				{
+					"id": "wizard-config-focus-before-remount:META-01",
+					"code": "source-reviewed-focus-restoration-gap",
+					"missingPrerequisite": "GT1-05-02E1 must focus the current provider tile after grid remount; GT1-05-13 runs the GT1-05-02E regression. No behavioral run performed.",
+					"affectedRows": ["META-01"],
+					"evidenceRef": "phase05-interaction-tests"
 				}
 			],
 			"symbols": ["AGENT_DISPLAY_NAMES", "AGENT_PICKER_META", "PICKABLE_AGENT_IDS"],
@@ -21956,7 +22016,8 @@
 					"GT1-09-08",
 					"GT1-09-10",
 					"GT1-09-12",
-					"GT1-02-11B"
+					"GT1-02-11B",
+					"GT1-05-02E"
 				],
 				"verification": [
 					"GT1-05-13",
@@ -22001,7 +22062,8 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase05ControlsEvidenceRef": "phase05-controls",
-				"phase05ControlTestsEvidenceRef": "phase05-control-tests"
+				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
+				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
