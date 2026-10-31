@@ -575,6 +575,19 @@
 				"src/shared/maestro-lib/grok/acp-events.ts": "e9bb3956a66d48cc06f35230dc663acc5c683ad7e42f73a195a61c44798b218d",
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts": "b2b620e948b9869ae78d137915bc84fb63f97f64943bbb77eb79bd9b556ea186"
 			}
+		},
+		"phase03-acp-plan-tests": {
+			"path": "Plans/grok-tier1/evidence/03.md#gt1-03-06b-acp-plan-regression-tests",
+			"sourceCommit": "110b75accfd9e9fded07de40cc785d1a270c6929",
+			"provenance": "authored-tests",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"scope": "GT1-03-06B authors 42 synthetic plan cases in the existing ACP event suite through the real capture/mapper. Replacements, status preservation, identity/ownership, duplicate/late events, settlement immutability and malformed/bounded snapshots are covered. Execution/compiler checks remain GT1-03-13; original dispatch routing and desktop/other consumers remain downstream. No native or route qualification claim.",
+			"testPaths": ["src/__tests__/shared/maestro-lib/grok/acp-events.test.ts"],
+			"testHashesSha256": {
+				"src/__tests__/shared/maestro-lib/grok/acp-events.test.ts": "0b7a555268633f2277445a187b802b9869a99dd847fcb8c0d630ed6ba7b65736"
+			},
+			"affectedRows": ["P09", "P34", "P37", "S22"]
 		}
 	},
 	"sourceCatalog": {
@@ -3149,7 +3162,8 @@
 				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
 				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests",
 				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
-				"phase03AcpPlansEvidenceRef": "phase03-acp-plans"
+				"phase03AcpPlansEvidenceRef": "phase03-acp-plans",
+				"phase03AcpPlanTestsEvidenceRef": "phase03-acp-plan-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3193,7 +3207,7 @@
 				{
 					"id": "acp-plan-consumers:P09",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-06A plan snapshots implemented, unverified. GT1-03-06B authors fixtures and GT1-03-13 executes them. GT1-03-09 must bind original dispatch context and confirmed promptId, not receive-time active turn; phases07/10 must preserve empty replacement, cancelled and unsupported states through consumers. Remaining permission/ask-back and native qualification owners are unchanged.",
+					"missingPrerequisite": "GT1-03-06A plan snapshots implemented, unverified. GT1-03-06B authored 42 synthetic plan cases; GT1-03-13 must execute them and compiler checks. GT1-03-09 must bind original dispatch context and confirmed promptId, not receive-time active turn; phases07/10 must preserve empty replacement, cancelled and unsupported states through consumers. Remaining permission/ask-back and native qualification owners are unchanged.",
 					"affectedRows": ["P09"]
 				}
 			],
@@ -6948,7 +6962,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase03AcpPlansEvidenceRef": "phase03-acp-plans"
+				"phase03AcpPlansEvidenceRef": "phase03-acp-plans",
+				"phase03AcpPlanTestsEvidenceRef": "phase03-acp-plan-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6986,7 +7001,7 @@
 				{
 					"id": "acp-plan-consumers:P34",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-06A plan snapshots implemented, unverified. GT1-03-06B authors fixtures and GT1-03-13 executes them. GT1-03-09 must bind original dispatch context and confirmed promptId, not receive-time active turn; phases07/10 must preserve empty replacement, cancelled and unsupported states through consumers. Remaining permission/ask-back and native qualification owners are unchanged.",
+					"missingPrerequisite": "GT1-03-06A plan snapshots implemented, unverified. GT1-03-06B authored 42 synthetic plan cases; GT1-03-13 must execute them and compiler checks. GT1-03-09 must bind original dispatch context and confirmed promptId, not receive-time active turn; phases07/10 must preserve empty replacement, cancelled and unsupported states through consumers. Remaining permission/ask-back and native qualification owners are unchanged.",
 					"affectedRows": ["P34"]
 				}
 			],
@@ -7489,7 +7504,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase03AcpPlansEvidenceRef": "phase03-acp-plans"
+				"phase03AcpPlansEvidenceRef": "phase03-acp-plans",
+				"phase03AcpPlanTestsEvidenceRef": "phase03-acp-plan-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7527,7 +7543,7 @@
 				{
 					"id": "acp-plan-consumers:P37",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-06A plan snapshots implemented, unverified. GT1-03-06B authors fixtures and GT1-03-13 executes them. GT1-03-09 must bind original dispatch context and confirmed promptId, not receive-time active turn; phases07/10 must preserve empty replacement, cancelled and unsupported states through consumers. Remaining permission/ask-back and native qualification owners are unchanged.",
+					"missingPrerequisite": "GT1-03-06A plan snapshots implemented, unverified. GT1-03-06B authored 42 synthetic plan cases; GT1-03-13 must execute them and compiler checks. GT1-03-09 must bind original dispatch context and confirmed promptId, not receive-time active turn; phases07/10 must preserve empty replacement, cancelled and unsupported states through consumers. Remaining permission/ask-back and native qualification owners are unchanged.",
 					"affectedRows": ["P37"]
 				}
 			],
@@ -16578,7 +16594,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase03AcpPlansEvidenceRef": "phase03-acp-plans"
+				"phase03AcpPlansEvidenceRef": "phase03-acp-plans",
+				"phase03AcpPlanTestsEvidenceRef": "phase03-acp-plan-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16616,7 +16633,7 @@
 				{
 					"id": "acp-plan-consumers:S22",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-03-06A plan snapshots implemented, unverified. GT1-03-06B authors fixtures and GT1-03-13 executes them. GT1-03-09 must bind original dispatch context and confirmed promptId, not receive-time active turn; phases07/10 must preserve empty replacement, cancelled and unsupported states through consumers. Remaining permission/ask-back and native qualification owners are unchanged.",
+					"missingPrerequisite": "GT1-03-06A plan snapshots implemented, unverified. GT1-03-06B authored 42 synthetic plan cases; GT1-03-13 must execute them and compiler checks. GT1-03-09 must bind original dispatch context and confirmed promptId, not receive-time active turn; phases07/10 must preserve empty replacement, cancelled and unsupported states through consumers. Remaining permission/ask-back and native qualification owners are unchanged.",
 					"affectedRows": ["S22"]
 				}
 			]

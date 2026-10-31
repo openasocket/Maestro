@@ -4,7 +4,10 @@ import {
 	type GrokAcpEventOptions,
 } from '../../../../shared/maestro-lib/grok/acp-events';
 import { AcpFrameDecoder, type AcpCall } from '../../../../shared/maestro-lib/grok/acp-protocol';
-import type { ParsedEvent } from '../../../../shared/maestro-lib/parsers/agent-output-parser';
+import type {
+	ParsedEvent,
+	ParsedPlanState,
+} from '../../../../shared/maestro-lib/parsers/agent-output-parser';
 import { GrokOutputParser } from '../../../../shared/maestro-lib/parsers/grok-output-parser';
 import { TurnCapture } from '../../../../shared/maestro-lib/run/turn-capture';
 import { resolveTurnOutcome } from '../../../../shared/maestro-lib/streaming/turn-outcome';
@@ -81,6 +84,489 @@ function fixture(options: GrokAcpEventOptions = identity) {
 			}),
 	};
 }
+
+describe('Grok ACP plan snapshots', () => {
+	function planMessage(entries: unknown, meta?: Record<string, unknown>): AcpCall {
+		const message = notification({ sessionUpdate: 'plan', entries }, 'session/update');
+		return { ...message, params: { ...message.params, _meta: meta } };
+	}
+
+	it('delivers an ordered initial plan through the real mapper without inventing entry IDs', () => {
+		const options = {
+			...identity,
+			scopeId: 'account@host',
+			processGeneration: 'gen',
+			requestId: 0,
+		};
+		const f = fixture(options);
+		const entries = [
+			{ content: 'Inspect', status: 'in_progress', priority: 'high' },
+			{ content: 'Inspect', status: 'pending', priority: 'low' },
+		];
+		f.wire(JSON.stringify(planMessage(entries, { promptId: 'prompt', eventId: 'initial' })));
+		const plans = f.output.filter((e) => e.kind === 'tool');
+		expect(plans).toHaveLength(1);
+		expect(plans[0]).toMatchObject({
+			tool: {
+				id: expect.stringMatching(/^grok-plan:/),
+				name: 'update_plan',
+				status: 'completed', // Publishing a snapshot does not complete its items.
+				detail: {
+					input: {
+						plan: [
+							{ step: 'Inspect', status: 'in_progress', priority: 'high' },
+							{ step: 'Inspect', status: 'pending', priority: 'low' },
+						],
+					},
+					planUpdate: {
+						reporting: 'snapshot',
+						revision: 1,
+						providerSessionId: options.sessionId,
+						turnId: options.turnId,
+						scopeId: options.scopeId,
+						processGeneration: options.processGeneration,
+						requestId: 0,
+						promptId: 'prompt',
+						eventId: 'initial',
+					},
+				},
+			},
+		});
+		expect(plans[0].tool.detail).toEqual(f.events[0].toolState);
+		const state = plans[0].tool.detail as ParsedPlanState;
+		expect(state.input.plan.map((entry) => entry.id)).toEqual([undefined, undefined]);
+		expect(f.capture.answerText).toBeUndefined();
+		expect(f.capture.resultMessageSeen).toBe(false);
+	});
+
+	it.each([
+		['pending', undefined, 'pending'],
+		['in_progress', undefined, 'in_progress'],
+		['completed', undefined, 'completed'],
+		['completed', true, 'cancelled'],
+		['completed', 'true', 'completed'],
+		['failed', undefined, 'unsupported'],
+		['skipped', undefined, 'unsupported'],
+		['future_status', undefined, 'unsupported'],
+		[undefined, undefined, 'unsupported'],
+		[null, undefined, 'unsupported'],
+	] as const)(
+		'preserves status %s with cancellation marker %s as %s',
+		(status, cancelled, expected) => {
+			const f = fixture();
+			const providerMeta = { cancelled, extension: { reason: 'reported' } };
+			f.accept(
+				f.adapter.notification(
+					planMessage([
+						{
+							id: 'native-item',
+							content: 'Work',
+							status,
+							priority: 'future_priority',
+							_meta: providerMeta,
+						},
+					]),
+					context
+				)
+			);
+			expect(f.output.filter((e) => e.kind === 'tool')).toMatchObject([
+				{
+					tool: {
+						detail: {
+							input: {
+								plan: [
+									{
+										id: 'native-item',
+										step: 'Work',
+										status: expected,
+										providerStatus: status,
+										priority: 'future_priority',
+										providerMeta,
+									},
+								],
+							},
+						},
+					},
+				},
+			]);
+		}
+	);
+
+	it('replaces, reorders and clears plans while retaining supplied identities and old snapshots', () => {
+		const f = fixture();
+		const snapshots = [
+			[
+				{ id: 'a', content: 'A', status: 'pending' },
+				{ id: 'b', content: 'B', status: 'pending' },
+			],
+			[
+				{ id: 'b', content: 'B revised', status: 'in_progress' },
+				{ id: 'a', content: 'A', status: 'completed' },
+			],
+			[{ id: 'b', content: 'B revised', status: 'completed' }],
+			[],
+		];
+		for (const entries of snapshots)
+			f.accept(f.adapter.notification(planMessage(entries), context));
+		const plans = f.output.filter((e) => e.kind === 'tool');
+		expect(plans).toHaveLength(4);
+		expect(new Set(plans.map((e) => e.tool.id)).size).toBe(1);
+		const states = plans.map((e) => e.tool.detail as ParsedPlanState);
+		expect(states.map((s) => s.planUpdate.revision)).toEqual([1, 2, 3, 4]);
+		expect(states.map((s) => s.planUpdate.reporting)).toEqual(Array(4).fill('snapshot'));
+		expect(
+			states.map((s) => s.input.plan.map(({ id, step, status }) => ({ id, step, status })))
+		).toEqual([
+			[
+				{ id: 'a', step: 'A', status: 'pending' },
+				{ id: 'b', step: 'B', status: 'pending' },
+			],
+			[
+				{ id: 'b', step: 'B revised', status: 'in_progress' },
+				{ id: 'a', step: 'A', status: 'completed' },
+			],
+			[{ id: 'b', step: 'B revised', status: 'completed' }],
+			[],
+		]);
+	});
+
+	it('deduplicates event IDs across intervening snapshots and canonical metadata order', () => {
+		const f = fixture();
+		const a = [{ content: 'A', status: 'pending', _meta: { one: 1, two: 2 } }];
+		const b = [{ content: 'B', status: 'in_progress' }];
+		f.accept(f.adapter.notification(planMessage(a, { eventId: 'a' }), context));
+		expect(
+			f.accept(
+				f.adapter.notification(
+					planMessage([{ content: 'A', status: 'pending', _meta: { two: 2, one: 1 } }], {
+						eventId: 'equal-a',
+					}),
+					context
+				)
+			)
+		).toEqual([]);
+		f.accept(f.adapter.notification(planMessage(b, { eventId: 'b' }), context));
+		for (const eventId of ['a', 'equal-a']) {
+			expect(f.accept(f.adapter.notification(planMessage(a, { eventId }), context))).toEqual([]);
+		}
+		const plans = f.output.filter((e) => e.kind === 'tool');
+		expect(plans).toHaveLength(2);
+		expect(plans[1].tool.detail).toMatchObject({
+			input: { plan: [{ step: 'B', status: 'in_progress' }] },
+			planUpdate: { revision: 2, eventId: 'b' },
+		});
+	});
+
+	it('suppresses consecutive idless duplicates but permits a later reported reversal', () => {
+		const f = fixture({ ...identity, promptId: undefined });
+		const a = [{ content: 'A', status: 'pending' }];
+		const b = [{ content: 'A', status: 'in_progress' }];
+		for (const entries of [a, a, b, a])
+			f.accept(f.adapter.notification(planMessage(entries), context));
+		const states = f.output
+			.filter((e) => e.kind === 'tool')
+			.map((e) => e.tool.detail as ParsedPlanState);
+		expect(states.map((s) => s.planUpdate.revision)).toEqual([1, 2, 3]);
+		expect(states.map((s) => s.input.plan[0].status)).toEqual([
+			'pending',
+			'in_progress',
+			'pending',
+		]);
+		expect(
+			states.every((s) => s.planUpdate.promptId === undefined && s.planUpdate.eventId === undefined)
+		).toBe(true);
+	});
+
+	it('keeps interleaved tab captures isolated and rejects a late plan routed with its original turn', () => {
+		const a = fixture();
+		const other = { ...identity, turnId: 'other-capture', promptId: 'other-prompt' };
+		const b = fixture(other);
+		const otherContext = { replay: false, turnId: other.turnId };
+		const messageA = planMessage([{ content: 'Tab A', status: 'pending' }], {
+			promptId: 'prompt',
+			eventId: 'same-id',
+		});
+		const messageB = planMessage([{ content: 'Tab B', status: 'in_progress' }], {
+			promptId: other.promptId,
+			eventId: 'same-id',
+		});
+		a.accept(a.adapter.notification(messageA, context));
+		b.accept(b.adapter.notification(messageB, otherContext));
+		expect(b.accept(b.adapter.notification(messageA, context))).toEqual([]);
+		expect(a.accept(a.adapter.notification(messageB, otherContext))).toEqual([]);
+		// Even an incorrectly rebound context cannot admit a foreign confirmed prompt.
+		b.accept(b.adapter.notification(messageA, otherContext));
+		const updateA = planMessage([{ content: 'Tab A', status: 'completed' }], {
+			promptId: 'prompt',
+			eventId: 'a2',
+		});
+		a.accept(a.adapter.notification(updateA, context));
+		a.accept(a.adapter.settle({ stopReason: 'end_turn' }));
+		expect(a.accept(a.adapter.notification(messageA, context))).toEqual([]);
+		expect(b.accept(b.adapter.notification(updateA, context))).toEqual([]);
+		const plansA = a.output.filter((e) => e.kind === 'tool');
+		const plansB = b.output.filter((e) => e.kind === 'tool');
+		expect(plansA).toHaveLength(2);
+		expect(plansB).toHaveLength(1);
+		expect(plansA[0].tool.id).not.toBe(plansB[0].tool.id);
+		expect(plansA[1].tool.detail).toMatchObject({
+			planUpdate: { turnId: identity.turnId, revision: 2 },
+		});
+		expect(plansB[0].tool.detail).toMatchObject({
+			input: { plan: [{ step: 'Tab B', status: 'in_progress' }] },
+			planUpdate: { turnId: other.turnId, promptId: other.promptId, revision: 1 },
+		});
+	});
+
+	it.each(['sessionId', 'turnId', 'scopeId', 'processGeneration'] as const)(
+		'scopes the display identity independently by %s',
+		(key) => {
+			const owner = { ...identity, scopeId: 'account@host', processGeneration: 'generation' };
+			const ids = [owner, { ...owner, [key]: 'different' }].map((options) => {
+				const f = fixture(options);
+				const message = planMessage([{ content: 'Same text', status: 'pending' }]);
+				message.params = { ...message.params, sessionId: options.sessionId };
+				f.accept(f.adapter.notification(message, { replay: false, turnId: options.turnId }));
+				const plans = f.output.filter((e) => e.kind === 'tool');
+				expect(plans).toHaveLength(1);
+				expect(plans[0].tool.detail).toMatchObject({
+					planUpdate: {
+						providerSessionId: options.sessionId,
+						turnId: options.turnId,
+						scopeId: options.scopeId,
+						processGeneration: options.processGeneration,
+					},
+				});
+				return plans[0].tool.id;
+			});
+			expect(ids[0]).not.toBe(ids[1]);
+		}
+	);
+
+	it.each([
+		'foreign-prompt',
+		'unbound-prompt',
+		'wire-replay',
+		'context-replay',
+		'request',
+		'missing-session',
+		'foreign-session',
+		'foreign-turn',
+	])('prevents %s plans from replacing the owned snapshot', (kind) => {
+		const f = fixture({ ...identity, promptId: kind === 'unbound-prompt' ? undefined : 'prompt' });
+		const entries = [{ content: 'Owned', status: 'pending' }];
+		f.accept(f.adapter.notification(planMessage(entries), context));
+		const message = planMessage([{ content: 'Foreign', status: 'completed' }], {
+			promptId: kind === 'foreign-prompt' ? 'foreign' : 'prompt',
+			eventId: 'reusable',
+			isReplay: kind === 'wire-replay',
+		});
+		if (kind === 'request') message.id = 0;
+		if (kind === 'missing-session') message.params = { ...message.params, sessionId: undefined };
+		if (kind === 'foreign-session') message.params = { ...message.params, sessionId: 'other' };
+		f.accept(
+			f.adapter.notification(message, {
+				replay: kind === 'context-replay',
+				turnId: kind === 'foreign-turn' ? 'other' : context.turnId,
+			})
+		);
+		expect(f.output.filter((e) => e.kind === 'tool')).toHaveLength(1);
+		f.accept(
+			f.adapter.notification(
+				planMessage([{ content: 'Owned', status: 'in_progress' }], { eventId: 'reusable' }),
+				context
+			)
+		);
+		const plans = f.output.filter((e) => e.kind === 'tool');
+		expect(plans).toHaveLength(2);
+		expect(plans[1].tool.detail).toMatchObject({
+			input: { plan: [{ step: 'Owned', status: 'in_progress' }] },
+			planUpdate: { revision: 2 },
+		});
+	});
+
+	it.each([
+		['success', undefined],
+		['cancelled', { status: 'cancelled', origin: 'user' }],
+		['timeout', { status: 'timeout', kind: 'idle' }],
+		['disconnect', { status: 'failed', kind: 'transport' }],
+	] as const)(
+		'never completes plan items on final prose, tool success or %s settlement',
+		(_kind, failure) => {
+			const f = fixture();
+			f.accept(
+				f.adapter.notification(
+					planMessage([
+						{ content: 'Still pending', status: 'pending' },
+						{ content: 'Still working', status: 'in_progress' },
+					]),
+					context
+				)
+			);
+			const before = structuredClone(f.output.filter((e) => e.kind === 'tool'));
+			f.send(
+				{
+					sessionUpdate: 'tool_call_update',
+					toolCallId: 'shell',
+					title: 'Bash',
+					status: 'completed',
+				},
+				'session/update'
+			);
+			f.send(
+				{
+					sessionUpdate: 'agent_message_chunk',
+					content: { type: 'text', text: 'Everything is complete.' },
+				},
+				'session/update'
+			);
+			f.send({
+				sessionUpdate: 'turn_completed',
+				prompt_id: 'prompt',
+				agent_result: 'Everything is complete.',
+				stop_reason: 'end_turn',
+			});
+			f.accept(f.adapter.settle({ stopReason: 'end_turn' }, failure));
+			expect(f.adapter.terminal?.status).toBe(failure?.status ?? 'success');
+			expect(
+				f.accept(
+					f.adapter.notification(planMessage([{ content: 'Late', status: 'completed' }]), context)
+				)
+			).toEqual([]);
+			expect(f.adapter.settle({ stopReason: 'end_turn' })).toEqual([]);
+			expect(f.output.filter((e) => e.kind === 'tool' && e.tool.name === 'update_plan')).toEqual(
+				before
+			);
+			expect((before[0].tool.detail as ParsedPlanState).input.plan.map((p) => p.status)).toEqual([
+				'pending',
+				'in_progress',
+			]);
+			expect(f.capture.answerText).toBe('Everything is complete.');
+			expect(f.output.filter((e) => e.kind === 'text')).toEqual([
+				{ kind: 'text', text: 'Everything is complete.' },
+			]);
+			expect(f.events.filter((e) => e.terminal)).toHaveLength(1);
+		}
+	);
+
+	it.each([
+		{ entries: undefined },
+		{ entries: {} },
+		{ entries: [null] },
+		{ entries: [{ content: '  ' }] },
+		{ entries: [{ content: 3 }] },
+		{ entries: [{ content: 'Valid', status: 'pending' }, { status: 'completed' }] },
+	])(
+		'retains malformed snapshot %# without filtering entries or consuming the event ID',
+		({ entries }) => {
+			const f = fixture();
+			const valid = [{ content: 'Owned', status: 'pending' }];
+			f.accept(f.adapter.notification(planMessage(valid), context));
+			const message = planMessage(entries, { eventId: 'retry' });
+			expect(f.accept(f.adapter.notification(message, context))).toEqual([
+				{ type: 'system', sessionId: identity.sessionId, raw: message },
+			]);
+			expect(f.output.filter((e) => e.kind === 'tool')).toHaveLength(1);
+			f.accept(f.adapter.notification(planMessage([], { eventId: 'retry' }), context));
+			expect(f.output.filter((e) => e.kind === 'tool')[1].tool.detail).toMatchObject({
+				input: { plan: [] },
+				planUpdate: { revision: 2, eventId: 'retry' },
+			});
+		}
+	);
+
+	it('leaves unadvertised delta updates opaque without replacing a full plan', () => {
+		const f = fixture();
+		f.accept(
+			f.adapter.notification(planMessage([{ content: 'Owned', status: 'pending' }]), context)
+		);
+		const delta = notification({ sessionUpdate: 'plan_delta', entries: [] }, 'session/update');
+		expect(f.accept(f.adapter.notification(delta, context))).toEqual([
+			{ type: 'system', sessionId: identity.sessionId, raw: delta },
+		]);
+		expect(f.output.filter((e) => e.kind === 'tool')).toHaveLength(1);
+	});
+
+	it('bounds entry counts and event ID length without changing the prior plan or revision', () => {
+		const f = fixture();
+		const entries = Array.from({ length: 4096 }, (_, i) => ({
+			content: `Step ${i}`,
+			status: 'pending',
+		}));
+		f.accept(f.adapter.notification(planMessage(entries, { eventId: 'x'.repeat(1024) }), context));
+		for (const message of [
+			planMessage([...entries, { content: 'Overflow', status: 'completed' }], { eventId: 'retry' }),
+			planMessage([], { eventId: 'x'.repeat(1025) }),
+		]) {
+			expect(f.accept(f.adapter.notification(message, context))[0]).toMatchObject({
+				type: 'system',
+				raw: message,
+			});
+		}
+		expect(f.output.filter((e) => e.kind === 'tool')).toHaveLength(1);
+		f.accept(f.adapter.notification(planMessage([], { eventId: 'retry' }), context));
+		const plans = f.output.filter((e) => e.kind === 'tool');
+		expect((plans[0].tool.detail as ParsedPlanState).input.plan).toHaveLength(4096);
+		expect(plans[1].tool.detail).toMatchObject({
+			input: { plan: [] },
+			planUpdate: { revision: 2 },
+		});
+	});
+
+	it('retains the event-ID bound even for suppressed equal snapshots', () => {
+		const f = fixture();
+		for (let i = 0; i < 4096; i++) {
+			f.accept(
+				f.adapter.notification(
+					planMessage([{ content: 'Owned', status: 'pending' }], { eventId: `event-${i}` }),
+					context
+				)
+			);
+		}
+		const overflow = planMessage([], { eventId: 'overflow' });
+		expect(f.accept(f.adapter.notification(overflow, context))[0]).toMatchObject({
+			type: 'system',
+			raw: overflow,
+		});
+		expect(
+			f.accept(f.adapter.notification(planMessage([], { eventId: 'event-0' }), context))
+		).toEqual([]);
+		expect(f.output.filter((e) => e.kind === 'tool')).toHaveLength(1);
+		f.accept(f.adapter.notification(planMessage([]), context));
+		expect(f.output.filter((e) => e.kind === 'tool')[1].tool.detail).toMatchObject({
+			planUpdate: { revision: 2 },
+		});
+	});
+
+	it.each(['overflowing-number', 'deep-metadata'])(
+		'keeps %s opaque and permits a corrected retry',
+		(kind) => {
+			const f = fixture();
+			f.accept(
+				f.adapter.notification(planMessage([{ content: 'Owned', status: 'pending' }]), context)
+			);
+			let extension: unknown = Infinity; // JSON.parse of a legal 1e400 wire token.
+			if (kind === 'deep-metadata') {
+				extension = {};
+				for (let i = 0; i < 20000; i++) extension = { nested: extension };
+			}
+			const message = planMessage(
+				[{ content: 'Invalid', status: 'completed', _meta: { extension } }],
+				{ eventId: 'retry' }
+			);
+			const rejected = f.accept(f.adapter.notification(message, context));
+			expect(rejected).toHaveLength(1);
+			expect(rejected[0].type).toBe('system');
+			expect(rejected[0].raw).toBe(message);
+			expect(f.output.filter((e) => e.kind === 'tool')).toHaveLength(1);
+			f.accept(f.adapter.notification(planMessage([], { eventId: 'retry' }), context));
+			expect(f.output.filter((e) => e.kind === 'tool')[1].tool.detail).toMatchObject({
+				input: { plan: [] },
+				planUpdate: { revision: 2, eventId: 'retry' },
+			});
+		}
+	);
+});
 
 describe('Grok ACP event fixtures', () => {
 	it('keeps interleaved thought/answer order and emits one answer and one settlement', () => {
