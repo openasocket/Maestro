@@ -26,7 +26,7 @@ import type {
 	SpawnResult,
 } from '../../../../main/process-manager/types';
 import * as path from 'path';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, assert, vi, beforeEach, afterEach } from 'vitest';
 import { ipcMain } from 'electron';
 import {
 	registerProcessHandlers,
@@ -86,18 +86,22 @@ vi.mock('../../../../shared/maestro-lib/launch/path-prober', () => ({
 }));
 
 // Keep real Grok launch validation while mocking the argument builders.
-vi.mock('../../../../shared/maestro-lib/launch/agent-args', async (importOriginal) => ({
-	...(await importOriginal<typeof import('../../../../shared/maestro-lib/launch/agent-args')>()),
-	buildAgentArgs: vi.fn((agent, opts) => opts.baseArgs || []),
-	applyAgentConfigOverrides: vi.fn((agent, args, opts) => ({
-		args,
-		modelSource: 'none' as const,
-		customArgsSource: 'none' as const,
-		customEnvSource: 'none' as const,
-		effectiveCustomEnvVars: undefined,
-	})),
-	getContextWindowValue: vi.fn(() => 0),
-}));
+vi.mock('../../../../shared/maestro-lib/launch/agent-args', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('../../../../shared/maestro-lib/launch/agent-args')>();
+	return {
+		...actual,
+		buildAgentArgs: vi.fn<typeof actual.buildAgentArgs>((_agent, opts) => opts.baseArgs || []),
+		applyAgentConfigOverrides: vi.fn<typeof actual.applyAgentConfigOverrides>((_agent, args) => ({
+			args,
+			modelSource: 'default',
+			customArgsSource: 'none',
+			customEnvSource: 'none',
+			effectiveCustomEnvVars: undefined,
+		})),
+		getContextWindowValue: vi.fn(() => 0),
+	};
+});
 
 // Mock node-pty (required for process-manager but not directly used in these tests)
 vi.mock('node-pty', () => ({
@@ -335,9 +339,9 @@ vi.mock('../../../../main/prompt-manager', () => ({
 }));
 
 describe('process IPC handlers', () => {
-	let handlers: Map<string, Function>;
+	let handlers: Map<string, (...args: any[]) => any>;
 	let mockProcessManager: {
-		spawn: ReturnType<typeof vi.fn>;
+		spawn: ReturnType<typeof vi.fn<(config: ProcessConfig) => SpawnResult>>;
 		write: ReturnType<typeof vi.fn>;
 		interrupt: ReturnType<typeof vi.fn>;
 		kill: ReturnType<typeof vi.fn>;
@@ -379,7 +383,7 @@ describe('process IPC handlers', () => {
 
 		// Create mock process manager
 		mockProcessManager = {
-			spawn: vi.fn(),
+			spawn: vi.fn<(config: ProcessConfig) => SpawnResult>(),
 			write: vi.fn(),
 			interrupt: vi.fn(),
 			kill: vi.fn(),
@@ -391,7 +395,9 @@ describe('process IPC handlers', () => {
 			// A standalone host: the admitted spawn is the plain spawn, and the
 			// terminal tab request is admitted as built (see ProcessManager).
 			admitSpawn: vi.fn().mockResolvedValue({ state: 'standalone' }),
-			spawnAdmitted: vi.fn((config: unknown) => Promise.resolve(mockProcessManager.spawn(config))),
+			spawnAdmitted: vi.fn((config: ProcessConfig) =>
+				Promise.resolve(mockProcessManager.spawn(config))
+			),
 			terminalTabConfig: vi.fn((config: unknown) => config),
 			// Standalone: no admission is bound to any process.
 			admissionOf: vi.fn().mockReturnValue(null),
@@ -823,6 +829,8 @@ describe('process IPC handlers', () => {
 					requestId: expect.any(String),
 					attemptId: expect.any(String),
 				});
+				assert.isDefined(spawned.dispatchedAs);
+				assert.isDefined(spawned.customEnvVars);
 				const stamped = JSON.parse(spawned.customEnvVars[MANAGED_DELEGATION_ENV_VAR]);
 				expect(stamped).toMatchObject({
 					identity: {
@@ -1604,7 +1612,7 @@ describe('process IPC handlers', () => {
 					if (originalResourcesDescriptor) {
 						Object.defineProperty(process, 'resourcesPath', originalResourcesDescriptor);
 					} else {
-						delete (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+						Reflect.deleteProperty(process, 'resourcesPath');
 					}
 				}
 			});
@@ -2647,10 +2655,8 @@ describe('process IPC handlers', () => {
 		it('should throw error when process manager is not available', async () => {
 			// Create deps with null process manager
 			const nullDeps: ProcessHandlerDependencies = {
+				...deps,
 				getProcessManager: () => null,
-				getAgentDetector: () => mockAgentDetector as any,
-				agentConfigsStore: mockAgentConfigsStore as any,
-				settingsStore: mockSettingsStore as any,
 			};
 
 			// Re-register handlers with null process manager
@@ -2665,10 +2671,8 @@ describe('process IPC handlers', () => {
 		it('should throw error when agent detector is not available for spawn', async () => {
 			// Create deps with null agent detector
 			const nullDeps: ProcessHandlerDependencies = {
-				getProcessManager: () => mockProcessManager as any,
+				...deps,
 				getAgentDetector: () => null,
-				agentConfigsStore: mockAgentConfigsStore as any,
-				settingsStore: mockSettingsStore as any,
 			};
 
 			// Re-register handlers with null agent detector
@@ -3270,7 +3274,7 @@ describe('process IPC handlers', () => {
 			const { applyAgentConfigOverrides } = await import('../../../../main/utils/agent-args');
 			vi.mocked(applyAgentConfigOverrides).mockReturnValue({
 				args: ['--print'],
-				modelSource: 'none',
+				modelSource: 'default',
 				customArgsSource: 'none',
 				customEnvSource: 'session',
 				effectiveCustomEnvVars: { CUSTOM_API_KEY: 'secret123' },
@@ -3905,7 +3909,7 @@ describe('process IPC handlers', () => {
 			const { applyAgentConfigOverrides } = await import('../../../../main/utils/agent-args');
 			vi.mocked(applyAgentConfigOverrides).mockReturnValue({
 				args: ['--print'],
-				modelSource: 'none',
+				modelSource: 'default',
 				customArgsSource: 'none',
 				customEnvSource: 'session',
 				effectiveCustomEnvVars: {
@@ -4932,9 +4936,7 @@ describe('process IPC handlers', () => {
 				async (config: ProcessConfig, _actor: unknown, options: ProcessSpawnOptions) => {
 					duringAdmission();
 					const error = await options.beforeSpawn?.();
-					return error
-						? { success: false, pid: 0, error }
-						: (mockProcessManager.spawn as (config: ProcessConfig) => SpawnResult)(config);
+					return error ? { success: false, pid: 0, error } : mockProcessManager.spawn(config);
 				}
 			);
 			mockProcessManager.spawn.mockReturnValue({ success: true, pid: 777 });
