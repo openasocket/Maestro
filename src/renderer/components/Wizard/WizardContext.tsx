@@ -10,6 +10,7 @@ import {
 import type { AdditionalDirectory, ToolType, AgentConfig } from '../../types';
 import { captureException } from '../../utils/sentry';
 import type { CodexTransport } from '../../../shared/codexTransport';
+import { getAgentPickerMeta } from '../../../shared/agentMetadata';
 import { STEP_INDEX, INDEX_TO_STEP, WIZARD_TOTAL_STEPS } from './WizardContext/constants';
 import { generateMessageId } from './WizardContext/messageIds';
 import {
@@ -99,7 +100,16 @@ export function WizardProvider({ children }: WizardProviderProps) {
 			// when the user leaves it blank, so requiring one here would only
 			// block someone who has nothing to say yet.
 			case 'agent-selection':
-				return state.selectedAgent !== null;
+				// Opening configuration can select an unavailable provider. A custom
+				// path must pass detection before this wizard starts discovery work.
+				return (
+					state.selectedAgent !== null &&
+					getAgentPickerMeta(state.selectedAgent) !== null &&
+					(!state.sessionSshRemoteConfig?.enabled || !!state.sessionSshRemoteConfig.remoteId) &&
+					state.availableAgents.some(
+						(agent) => agent.id === state.selectedAgent && agent.available && !agent.hidden
+					)
+				);
 			case 'directory-selection':
 				return state.directoryPath.trim() !== '' && state.directoryError === null;
 			case 'conversation':
@@ -112,6 +122,8 @@ export function WizardProvider({ children }: WizardProviderProps) {
 	}, [
 		state.currentStep,
 		state.selectedAgent,
+		state.availableAgents,
+		state.sessionSshRemoteConfig,
 		state.directoryPath,
 		state.directoryError,
 		state.isReadyToProceed,
