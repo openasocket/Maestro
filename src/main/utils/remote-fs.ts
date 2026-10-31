@@ -10,6 +10,7 @@
  */
 
 import { spawn } from 'child_process';
+import { isUtf8 } from 'node:buffer';
 import { SshRemoteConfig } from '../../shared/types';
 import { execFileNoThrow, ExecResult } from './execFile';
 import { shellEscape, shellEscapeRemotePath } from './shell-escape';
@@ -53,8 +54,8 @@ export interface RemoteFsResult<T> {
 	data?: T;
 	/** Error message (if success is false) */
 	error?: string;
-	/** A bounded read rejected content exceeding its byte budget. */
-	errorCode?: 'too-large';
+	/** A bounded read rejected content exceeding its byte budget or invalid UTF-8. */
+	errorCode?: 'too-large' | 'invalid-encoding';
 }
 
 /**
@@ -613,7 +614,8 @@ export async function bulkStatFileInSubdirsRemote(
  * Read file contents from a remote host via SSH.
  *
  * Executes `cat` on the remote, or a bounded `head` when maxBytes is supplied.
- * A bounded read rejects overflow rather than returning a truncated success.
+ * A bounded read transports original bytes as base64 and rejects overflow or
+ * invalid UTF-8 rather than returning a truncated or lossy success.
  *
  * @param filePath Path to the file on the remote host
  * @param sshRemote SSH remote configuration
@@ -632,7 +634,8 @@ export async function readFileRemote(
 	options?: { maxBytes?: number }
 ): Promise<RemoteFsResult<string>> {
 	const maxBytes = options?.maxBytes;
-	// Leave room for the overflow sentinel below execFileNoThrow's 100 MiB cap.
+	// Raw byte budgets are below execFileNoThrow's 100 MiB cap. Base64 expansion
+	// can hit that transport cap sooner; max-buffer failures also reject the read.
 	if (
 		maxBytes !== undefined &&
 		(!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes >= 100 * 1024 * 1024)
@@ -643,10 +646,14 @@ export async function readFileRemote(
 	// The remote byte ceiling also holds when a file grows after the caller's stat.
 	// Redirection keeps leading dashes out of head's option parsing. The regular
 	// file check avoids waiting on a provider path replaced with a pipe/device.
+	// Base64 preserves bytes across the text-only exec transport. Encode head's
+	// exit status after a newline too: a plain pipeline would hide read failures
+	// behind a successful base64 exit. The trailer adds at most four bytes.
 	const remoteCommand =
 		maxBytes === undefined
 			? `cat ${escapedPath}`
-			: `if test -f ${escapedPath}; then head -c ${maxBytes + 1} < ${escapedPath}; ` +
+			: `if test -f ${escapedPath}; then { head -c ${maxBytes + 1} < ${escapedPath}; ` +
+				`printf '\\n%s' "$?"; } | base64; ` +
 				`else echo 'File not found or not a regular file' >&2; exit 1; fi`;
 
 	const result = await execRemoteCommand(
@@ -655,20 +662,51 @@ export async function readFileRemote(
 		read('readFile', filePath),
 		deps
 	);
+	let exitCode = result.exitCode;
 
-	if (
-		maxBytes !== undefined &&
-		(result.exitCode === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ||
-			(result.exitCode === 0 && Buffer.byteLength(result.stdout, 'utf8') > maxBytes))
-	) {
-		return {
+	if (maxBytes !== undefined) {
+		const tooLarge: RemoteFsResult<string> = {
 			success: false,
 			error: `File exceeds the ${maxBytes} byte read limit: ${filePath}`,
 			errorCode: 'too-large',
 		};
+		if (result.exitCode === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') return tooLarge;
+		if (result.exitCode === 0) {
+			// GNU base64 wraps lines; BSD base64 does not. Bound decoded allocation
+			// before Buffer.from, including the sentinel and exit-status trailer.
+			const encoded = result.stdout.replace(/[\r\n]/g, '');
+			if (encoded.length > 4 * Math.ceil((maxBytes + 1 + 4) / 3)) return tooLarge;
+			if (encoded.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/.test(encoded)) {
+				return { success: false, error: `Invalid base64 file response: ${filePath}` };
+			}
+			const framed = Buffer.from(encoded, 'base64');
+			const separator = framed.lastIndexOf(0x0a);
+			if (separator < 0 || framed.length - separator > 4) {
+				return { success: false, error: `Missing remote file read status: ${filePath}` };
+			}
+			const status = framed.subarray(separator + 1).toString('utf8');
+			if (!/^(0|[1-9][0-9]{0,2})$/.test(status) || Number(status) > 255) {
+				return { success: false, error: `Missing remote file read status: ${filePath}` };
+			}
+			if (status !== '0') {
+				// Reuse the existing missing/permission/read error mapping below.
+				exitCode = Number(status);
+			} else {
+				const bytes = framed.subarray(0, separator);
+				if (bytes.length > maxBytes) return tooLarge;
+				if (!isUtf8(bytes)) {
+					return {
+						success: false,
+						error: `File is not valid UTF-8: ${filePath}`,
+						errorCode: 'invalid-encoding',
+					};
+				}
+				return { success: true, data: bytes.toString('utf8') };
+			}
+		}
 	}
 
-	if (result.exitCode !== 0) {
+	if (exitCode !== 0) {
 		const error = result.stderr || `Failed to read file: ${filePath}`;
 		return {
 			success: false,

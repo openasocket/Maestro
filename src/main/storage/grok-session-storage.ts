@@ -20,6 +20,7 @@
 import path from 'path';
 import os from 'os';
 import fs from 'fs/promises';
+import { isUtf8 } from 'node:buffer';
 import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
 import { readFileRemote, readDirRemote, statRemote } from '../utils/remote-fs';
@@ -1195,6 +1196,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 				const read = await readFileRemote(filePath, sshConfig, undefined, { maxBytes });
 				if (!read.success || read.data === undefined) {
 					if (read.errorCode === 'too-large') return unavailable('too-large');
+					if (read.errorCode === 'invalid-encoding') return unavailable('invalid-encoding');
 					if (!isExpectedRemoteError(read.error)) {
 						captureException(new Error(read.error || 'readFileRemote failed'), {
 							operation: 'grokStorage:readSessionFile',
@@ -1254,13 +1256,17 @@ export class GrokSessionStorage extends BaseSessionStorage {
 					}
 					const after = await handle.stat();
 					if (after.size > maxBytes) return unavailable('too-large');
-					content = Buffer.concat(chunks, total).toString('utf8');
+					const bytes = Buffer.concat(chunks, total);
+					// Validate the original bytes together so split multibyte characters
+					// remain valid. Lossy decoding can preserve byte length (F0 90 80).
+					const validUtf8 = isUtf8(bytes);
+					content = bytes.toString('utf8');
 					source.sizeBytes = total;
 					if (
 						opened.size !== after.size ||
 						opened.mtimeMs !== after.mtimeMs ||
 						opened.size !== total ||
-						Buffer.byteLength(content, 'utf8') !== total ||
+						!validUtf8 ||
 						before.ino !== opened.ino ||
 						before.size !== opened.size ||
 						before.mtimeMs !== opened.mtimeMs
