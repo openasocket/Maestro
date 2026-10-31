@@ -32,7 +32,7 @@ import { useModalHandlers } from '../../../renderer/hooks/modal/useModalHandlers
 import { useModalStore, getModalActions } from '../../../renderer/stores/modalStore';
 import { useAuthOutageStore } from '../../../renderer/stores/authOutageStore';
 import { useCenterFlashStore } from '../../../renderer/stores/centerFlashStore';
-import { useSessionStore } from '../../../renderer/stores/sessionStore';
+import { useSessionStore, updateSessionWith } from '../../../renderer/stores/sessionStore';
 import { useSettingsStore } from '../../../renderer/stores/settingsStore';
 import { useGroupChatStore } from '../../../renderer/stores/groupChatStore';
 import { useAgentStore } from '../../../renderer/stores/agentStore';
@@ -41,6 +41,20 @@ import { gitService } from '../../../renderer/services/git';
 import type { Session, AITab } from '../../../renderer/types';
 import { createMockAITab as createBaseMockAITab, createMockFileTab } from '../../helpers/mockTab';
 import { createMockSession } from '../../helpers/mockSession';
+import { resetStores } from '../../helpers/resetStores';
+import {
+	aiTabFocusFields,
+	fileTabFocusFields,
+	browserTabFocusFields,
+	terminalTabFocusFields,
+	focusAiTabInSession,
+} from '../../../renderer/utils/tabHelpers';
+import {
+	createGroupFromTabRefs,
+	findLeafByTabRef,
+	focusPaneInSession,
+	resolveActiveTabRef,
+} from '../../../renderer/utils/panelLayout';
 
 // ============================================================================
 // Helpers
@@ -2011,6 +2025,7 @@ describe('useModalHandlers', () => {
 
 	describe('handleDirectorNotesResumeSession', () => {
 		beforeEach(() => {
+			resetStores(useSessionStore, useGroupChatStore, useModalStore);
 			getModalActions().setDirectorNotesOpen(true);
 			useSessionStore.setState({
 				sessions: ['session-1', 'session-2'].map((id) =>
@@ -2115,6 +2130,442 @@ describe('useModalHandlers', () => {
 			});
 
 			expect(useModalStore.getState().isOpen('directorNotes')).toBe(true);
+		});
+
+		describe('pending admission and navigation', () => {
+			beforeEach(() => {
+				for (const session of useSessionStore.getState().sessions) {
+					updateSessionWith(session.id, (owner) => ({
+						...owner,
+						aiTabs: [
+							createMockAITab({
+								id: 'tab-1',
+								logs: [{ id: 'kept', source: 'user', text: 'Retained', timestamp: 1 }],
+							}),
+							createMockAITab({ id: 'tab-2', agentSessionId: 'native' }),
+						],
+						filePreviewTabs: [createMockFileTab()],
+						tabGroups: [
+							createGroupFromTabRefs(
+								[
+									{ type: 'ai', id: 'tab-1' },
+									{ type: 'ai', id: 'tab-2' },
+								],
+								'Retained group'
+							),
+						],
+					}));
+				}
+				getModalActions().setAgentSessionsOpen(true);
+				getModalActions().setActiveAgentSessionId('kept-history');
+			});
+
+			// Compare all retained tab/log/history data as well as the visible selection.
+			const view = () => ({
+				sessions: structuredClone(useSessionStore.getState().sessions),
+				active: useSessionStore.getState().activeSessionId,
+				history: useModalStore.getState().getData('agentSessions')?.activeAgentSessionId,
+				groupChat: useGroupChatStore.getState().activeGroupChatId,
+				directorNotes: useModalStore.getState().isOpen('directorNotes'),
+			});
+
+			function pendingResume(
+				opts?: Parameters<UseAgentSessionManagementReturn['handleResumeSession']>[6],
+				isCurrent?: () => boolean
+			) {
+				let settle!: (value: boolean) => void;
+				const resume = vi.fn<UseAgentSessionManagementReturn['handleResumeSession']>(
+					() =>
+						new Promise<boolean>((resolve) => {
+							settle = resolve;
+						})
+				);
+				const hook = renderHook(() =>
+					useModalHandlers(createInputRef(), createTerminalOutputRef(), { current: resume })
+				);
+				let pending!: Promise<boolean>;
+				act(() => {
+					pending = hook.result.current.handleDirectorNotesResumeSession(
+						'session-1',
+						'native',
+						'Recorded',
+						undefined,
+						opts,
+						isCurrent
+					);
+				});
+				const canResume = resume.mock.calls[0][6]!.canResume!;
+				expect(canResume()).toBe(true);
+				return { ...hook, resume, pending, canResume, settle };
+			}
+
+			it.each([
+				'empty owner',
+				'missing owner',
+				'empty native ID',
+				'conflicting target',
+				'stale caller',
+				'caller refusal',
+				'closed modal',
+			])('refuses %s before dispatch or mutation', async (reason) => {
+				if (reason === 'closed modal') getModalActions().setDirectorNotesOpen(false);
+				const resume = vi
+					.fn<UseAgentSessionManagementReturn['handleResumeSession']>()
+					.mockResolvedValue(true);
+				const { result } = renderHook(() =>
+					useModalHandlers(createInputRef(), createTerminalOutputRef(), { current: resume })
+				);
+				const retained = view();
+				await act(async () => {
+					expect(
+						await result.current.handleDirectorNotesResumeSession(
+							reason === 'empty owner' ? '' : reason === 'missing owner' ? 'absent' : 'session-1',
+							reason === 'empty native ID' ? '' : 'native',
+							undefined,
+							undefined,
+							{
+								targetSessionId: reason === 'conflicting target' ? 'session-2' : undefined,
+								canResume: () => reason !== 'caller refusal',
+							},
+							() => reason !== 'stale caller'
+						)
+					).toBe(false);
+				});
+				expect(resume).not.toHaveBeenCalled();
+				expect(view()).toEqual(retained);
+			});
+
+			it.each([
+				['provider', { toolType: 'codex' }],
+				['account', { customEnvVars: { GROK_HOME: '/fixture/other-account' } }],
+				['environment', { customEnvVars: { FIXTURE: 'changed' } }],
+				['SSH ID', { sshRemoteId: 'other-remote' }],
+				['SSH config', { sessionSshRemoteConfig: { enabled: true, remoteId: 'other-remote' } }],
+				['cwd', { cwd: '/other-project' }],
+				['project root', { projectRoot: '/other-project' }],
+				['remote cwd', { remoteCwd: '/other-remote-project' }],
+				['binary', { customPath: '/fixture/grok' }],
+				['arguments', { customArgs: '--fixture' }],
+			] satisfies [string, Partial<Session>][])(
+				'rejects pending owner %s changes before committing a candidate',
+				async (_name, patch) => {
+					const { canResume, pending, settle } = pendingResume();
+					act(() => updateSessionWith('session-1', (owner) => ({ ...owner, ...patch })));
+					const retained = view();
+					expect(
+						canResume(focusAiTabInSession(useSessionStore.getState().sessions[0], 'tab-2'))
+					).toBe(false);
+					await act(async () => {
+						settle(true);
+						expect(await pending).toBe(false);
+					});
+					expect(view()).toEqual(retained);
+				}
+			);
+
+			it.each(['removed', 'rebound and restored'])(
+				'rejects a pending owner that is %s',
+				async (change) => {
+					const original = useSessionStore.getState().sessions[0];
+					const { canResume, pending, settle } = pendingResume();
+					act(() => {
+						useSessionStore.setState({ sessions: useSessionStore.getState().sessions.slice(1) });
+						if (change === 'rebound and restored') {
+							useSessionStore
+								.getState()
+								.setSessions((sessions) => [{ ...original, toolType: 'codex' }, ...sessions]);
+							updateSessionWith(original.id, () => original);
+						}
+					});
+					const retained = view();
+					expect(canResume(original)).toBe(false);
+					await act(async () => {
+						settle(true);
+						expect(await pending).toBe(false);
+					});
+					expect(view()).toEqual(retained);
+				}
+			);
+
+			it.each(['owner', 'visible agent'] as const)(
+				'fences %s tab/pane navigation, including away-and-back',
+				async (target) => {
+					// Separate requests keep every navigation mode independently observable.
+					for (const kind of ['ai', 'file', 'browser', 'terminal', 'group', 'pane'] as const) {
+						for (const returnBack of [false, true]) {
+							const id = target === 'owner' ? 'session-1' : 'session-2';
+							if (target === 'owner') useSessionStore.setState({ activeSessionId: id });
+							const initial = useSessionStore.getState().sessions.find((s) => s.id === id)!;
+							const group = initial.tabGroups[0];
+							let baseline = {
+								...initial,
+								...aiTabFocusFields('tab-1'),
+								activeGroupId: kind === 'pane' ? group.id : null,
+							};
+							if (kind === 'pane')
+								baseline = focusPaneInSession(
+									baseline,
+									group.id,
+									findLeafByTabRef(group.layout, { type: 'ai', id: 'tab-1' })!.id
+								);
+							act(() => updateSessionWith(id, () => baseline));
+							const { canResume, pending, settle, unmount } = pendingResume();
+							const patches = {
+								ai: aiTabFocusFields('tab-2'),
+								file: fileTabFocusFields('file-tab-1'),
+								browser: browserTabFocusFields('browser-1'),
+								terminal: terminalTabFocusFields('terminal-1'),
+								group: { activeGroupId: group.id },
+							};
+							const next =
+								kind === 'pane'
+									? focusPaneInSession(
+											baseline,
+											group.id,
+											findLeafByTabRef(group.layout, { type: 'ai', id: 'tab-2' })!.id
+										)
+									: { ...baseline, ...patches[kind] };
+							act(() => {
+								updateSessionWith(id, () => next);
+								if (returnBack) updateSessionWith(id, () => baseline);
+							});
+							const retained = view();
+							expect(
+								canResume(useSessionStore.getState().sessions[0]),
+								`${kind}, return=${returnBack}`
+							).toBe(false);
+							await act(async () => {
+								settle(true);
+								expect(await pending).toBe(false);
+							});
+							expect(view()).toEqual(retained);
+							unmount();
+						}
+					}
+				}
+			);
+
+			it.each(['agent', 'Group Chat', 'modal', 'caller', 'predicate', 'unmount'])(
+				'rejects late true after %s invalidation without overwriting newer history',
+				async (kind) => {
+					let current = true;
+					const caller = vi.fn(() => current);
+					const { canResume, pending, settle, unmount } = pendingResume(
+						kind === 'predicate' ? { canResume: caller } : undefined,
+						kind === 'caller' ? caller : undefined
+					);
+					act(() => {
+						if (kind === 'agent') {
+							useSessionStore.setState({ activeSessionId: 'session-1' });
+							useSessionStore.setState({ activeSessionId: 'session-2' });
+						} else if (kind === 'Group Chat') {
+							useGroupChatStore.setState({ activeGroupChatId: 'gc-2' });
+							useGroupChatStore.setState({ activeGroupChatId: 'gc-1' });
+						} else if (kind === 'modal') {
+							getModalActions().setDirectorNotesOpen(false);
+							getModalActions().setDirectorNotesOpen(true);
+						} else if (kind === 'unmount') unmount();
+						else current = false;
+						getModalActions().setActiveAgentSessionId('newer-history');
+						updateSessionWith('session-1', (owner) => ({
+							...owner,
+							aiTabs: [
+								...owner.aiTabs,
+								createMockAITab({
+									id: 'newer-tab',
+									logs: [
+										{ id: 'newer-log', source: 'user', text: 'Newer conversation', timestamp: 2 },
+									],
+								}),
+							],
+						}));
+					});
+					const retained = view();
+					expect(canResume()).toBe(false);
+					expect(canResume(useSessionStore.getState().sessions[0])).toBe(false);
+					await act(async () => {
+						settle(true);
+						expect(await pending).toBe(false);
+					});
+					expect(view()).toEqual(retained);
+				}
+			);
+
+			it('composes caller admission for the exact proposed focus object', async () => {
+				const owner = useSessionStore.getState().sessions[0];
+				const candidate = focusAiTabInSession(owner, 'tab-2');
+				const caller = vi.fn((next?: Session) => next !== candidate);
+				const { canResume, pending, settle } = pendingResume({ canResume: caller });
+				const retained = view();
+				expect(canResume(candidate)).toBe(false);
+				expect(caller).toHaveBeenLastCalledWith(candidate);
+				await act(async () => {
+					settle(false);
+					expect(await pending).toBe(false);
+				});
+				expect(view()).toEqual(retained);
+			});
+
+			it('leaves unknown native scope absent for canonical refusal', async () => {
+				const { resume, pending, settle } = pendingResume();
+				const retained = view();
+				expect(resume.mock.calls[0][5]).toBeUndefined();
+				expect(resume.mock.calls[0][6]).toEqual({
+					targetSessionId: 'session-1',
+					nativeSessionBinding: undefined,
+					canResume: expect.any(Function),
+				});
+				await act(async () => {
+					settle(false);
+					expect(await pending).toBe(false);
+				});
+				expect(view()).toEqual(retained);
+			});
+
+			it.each(['grok', 'claude-code'] as const)(
+				'accepts exact existing/tiled %s focus and ordinary metadata updates',
+				async (toolType) => {
+					for (const tiled of [false, true]) {
+						getModalActions().setDirectorNotesOpen(true);
+						useGroupChatStore.setState({ activeGroupChatId: 'gc-1' });
+						useSessionStore.setState({ activeSessionId: 'session-1' });
+						updateSessionWith('session-1', (owner) => ({
+							...owner,
+							...fileTabFocusFields('file-tab-1'),
+							toolType,
+							tabGroups: tiled
+								? [
+										createGroupFromTabRefs(
+											[
+												{ type: 'ai', id: 'tab-1' },
+												{ type: 'ai', id: 'tab-2' },
+											],
+											'Resume group'
+										),
+									]
+								: [],
+						}));
+						const { canResume, pending, settle, unmount } = pendingResume();
+						const next = focusAiTabInSession(useSessionStore.getState().sessions[0], 'tab-2');
+						expect(resolveActiveTabRef(next)).toEqual({ type: 'ai', id: 'tab-2' });
+						expect(!!next.activeGroupId).toBe(tiled);
+						expect(canResume(next)).toBe(true);
+						act(() => updateSessionWith('session-1', () => next));
+						expect(canResume()).toBe(true);
+						act(() =>
+							updateSessionWith('session-1', (owner) => ({
+								...owner,
+								name: 'Renamed while loading',
+								contextUsage: 42,
+							}))
+						);
+						expect(canResume()).toBe(true);
+						await act(async () => {
+							settle(true);
+							expect(await pending).toBe(true);
+						});
+						expect(useSessionStore.getState().sessions[0]).toEqual({
+							...next,
+							name: 'Renamed while loading',
+							contextUsage: 42,
+						});
+						expect(useGroupChatStore.getState().activeGroupChatId).toBeNull();
+						expect(useModalStore.getState().isOpen('directorNotes')).toBe(false);
+						unmount();
+					}
+				}
+			);
+
+			it('rejects a different object committing the admitted focus', async () => {
+				const { canResume, pending, settle } = pendingResume();
+				const next = focusAiTabInSession(useSessionStore.getState().sessions[0], 'tab-2');
+				expect(canResume(next)).toBe(true);
+				act(() => updateSessionWith('session-1', () => ({ ...next })));
+				const retained = view();
+				expect(canResume()).toBe(false);
+				await act(async () => {
+					settle(true);
+					expect(await pending).toBe(false);
+				});
+				expect(view()).toEqual(retained);
+			});
+
+			it.each(['settle', 'success', 'reject', 'replace', 'unmount'])(
+				'cleans synchronous subscriptions after %s',
+				async (kind) => {
+					const { resume, result, pending, settle, canResume, unmount } = pendingResume();
+					// React's subscriptions are already attached. Track only the next request.
+					const subscriptions = [useSessionStore, useGroupChatStore, useModalStore].map((store) => {
+						const original = store.subscribe;
+						const releases: ReturnType<typeof vi.fn>[] = [];
+						vi.spyOn(store, 'subscribe').mockImplementation(
+							(listener: Parameters<typeof store.subscribe>[0]) => {
+								const unsubscribe = original(listener as never);
+								const release = vi.fn(unsubscribe);
+								releases.push(release);
+								return release;
+							}
+						);
+						return releases;
+					});
+					let finish!: (value: boolean) => void;
+					let fail!: (error: Error) => void;
+					resume.mockImplementationOnce(
+						() =>
+							new Promise<boolean>((resolve, reject) => {
+								finish = resolve;
+								fail = reject;
+							})
+					);
+					let second!: Promise<boolean>;
+					act(() => {
+						second = result.current.handleDirectorNotesResumeSession('session-1', 'new-native');
+					});
+					const secondGuard = resume.mock.calls[1][6]!.canResume!;
+					expect(canResume(useSessionStore.getState().sessions[0])).toBe(false);
+					expect(secondGuard()).toBe(true);
+					const retained = view();
+					await act(async () => {
+						settle(true);
+						expect(await pending).toBe(false);
+					});
+					expect(view()).toEqual(retained);
+					for (const releases of subscriptions) {
+						expect(releases).toHaveLength(1);
+						expect(releases[0]).not.toHaveBeenCalled();
+					}
+					expect(secondGuard()).toBe(true);
+					if (kind === 'replace') {
+						resume.mockResolvedValueOnce(false);
+						await act(async () => {
+							expect(
+								await result.current.handleDirectorNotesResumeSession('session-1', 'latest-native')
+							).toBe(false);
+						});
+					} else if (kind === 'unmount') unmount();
+					if (kind === 'replace' || kind === 'unmount') {
+						expect(secondGuard()).toBe(false);
+						for (const releases of subscriptions) expect(releases[0]).toHaveBeenCalled();
+					}
+					await act(async () => {
+						if (kind === 'reject') {
+							const assertion = expect(second).rejects.toThrow('inert refusal');
+							fail(new Error('inert refusal'));
+							await assertion;
+						} else {
+							finish(kind !== 'settle');
+							expect(await second).toBe(kind === 'success');
+						}
+					});
+					for (const releases of subscriptions)
+						for (const release of releases) expect(release).toHaveBeenCalled();
+					expect(view()).toEqual(
+						kind === 'success'
+							? { ...retained, active: 'session-1', groupChat: null, directorNotes: false }
+							: retained
+					);
+				}
+			);
 		});
 
 		it.each(['grok', 'claude-code'] as const)(
