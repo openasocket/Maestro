@@ -5003,7 +5003,11 @@ describe('process IPC handlers', () => {
 				Object.assign(remote.remoteEnv!, ssh);
 				Object.assign(globalEnv, global);
 				Object.assign(providerEnv, provider);
-				expect(await launch('relative', session)).toEqual({ success: true, pid: 777 });
+				expect(await launch('relative', session)).toEqual({
+					success: true,
+					pid: 777,
+					sshRemote: { id: 'remote-1', name: 'Fixture', host: 'fixture.invalid' },
+				});
 				expect(observePathRemote).toHaveBeenCalledTimes(2);
 				for (const call of vi.mocked(observePathRemote).mock.calls) {
 					expect(call).toEqual([
@@ -5147,10 +5151,9 @@ describe('process IPC handlers', () => {
 				duringAdmission = () => {
 					endpoint = 'replacement-installation';
 				};
-				expect(await resume()).toMatchObject({
-					success: false,
-					error: expect.stringContaining('changed before spawn'),
-				});
+				await expect(resume()).rejects.toThrow(
+					'Grok account, cwd or endpoint changed before spawn. Nothing was started.'
+				);
 				expect(mockProcessManager.spawn).not.toHaveBeenCalled();
 				expect(stored).toEqual(original);
 				expect(mockSessionsStore.set).not.toHaveBeenCalled();
@@ -5164,10 +5167,9 @@ describe('process IPC handlers', () => {
 					if (field === 'inherited' || field === 'effective') receipt[field].HOME = '/rebound-home';
 					else receipt[field].inode = 'replaced';
 				};
-				expect(await launch()).toMatchObject({
-					success: false,
-					error: expect.stringContaining('changed before spawn'),
-				});
+				await expect(launch()).rejects.toThrow(
+					'Grok account, cwd or endpoint changed before spawn. Nothing was started.'
+				);
 				expect(observePathRemote).toHaveBeenCalledTimes(2);
 				expect(mockProcessManager.spawn).not.toHaveBeenCalled();
 			}
@@ -5188,10 +5190,11 @@ describe('process IPC handlers', () => {
 							error: change,
 						});
 				};
-				expect(await launch()).toMatchObject({
-					success: false,
-					error: expect.stringContaining('changed'),
-				});
+				await expect(launch()).rejects.toThrow(
+					change === 'global env' || change === 'provider env' || change === 'remote env'
+						? 'Grok launch ownership changed during preparation. Retry with the intended account, host and tab.'
+						: 'Grok account, cwd or endpoint changed before spawn. Nothing was started.'
+				);
 				expect(mockProcessManager.spawn).not.toHaveBeenCalled();
 			}
 		);
@@ -5207,7 +5210,11 @@ describe('process IPC handlers', () => {
 					}
 					return { success: true, data: structuredClone(receipt) };
 				});
-				expect(await launch()).toMatchObject({ success: false });
+				await expect(launch()).rejects.toThrow(
+					change === 'endpoint'
+						? 'Grok account, cwd or endpoint changed before spawn. Nothing was started.'
+						: 'Grok launch ownership changed during preparation. Retry with the intended account, host and tab.'
+				);
 				expect(samples).toBe(2);
 				expect(mockProcessManager.spawn).not.toHaveBeenCalled();
 			}
