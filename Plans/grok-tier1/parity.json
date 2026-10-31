@@ -1541,6 +1541,26 @@
 				"Python 3 with POSIX descriptor/alarm support is required; unavailable platforms explicitly skip fixture scenarios."
 			],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-local-native-source-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c1st-local-native-source-tests",
+			"sourceCommit": "1f0f662a924626d30725c71eb843b6b0e8f4a526",
+			"sourceCommitScope": "Pre-task HEAD plus test hash and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/storage/grok-session-storage.test.ts": "7f71513bfc6b3ddb72413651f1ca4c961afe2cc2740188e121f2e77060043525"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"authoredCases": 53,
+			"static": "pass",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"scopedTypeCheck": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P13", "P14", "P15", "C-supportsResume", "REG-SESSION-MUTATION"],
+			"scope": "Canonical local account/cwd observations, colliding accounts and descendant IDs, binding/alias/root refusals before content I/O, path and descriptor races, independent ownership/provenance, unbound legacy reads and mutation guards. Reuses virtual local filesystem; no tests run or collected.",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {

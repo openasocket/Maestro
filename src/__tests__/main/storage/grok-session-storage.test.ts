@@ -38,6 +38,8 @@ vi.mock('fs/promises', async () => ({
 		readFile: vi.fn(),
 		readdir: vi.fn(),
 		stat: vi.fn(),
+		lstat: vi.fn(),
+		realpath: vi.fn(),
 		writeFile: vi.fn(),
 		appendFile: vi.fn(),
 		rename: vi.fn(),
@@ -62,6 +64,7 @@ import { REMOTE_SESSION_READ_CONCURRENCY } from '../../../main/utils/concurrency
 import type { SshRemoteConfig } from '../../../shared/types';
 import { isolateAgentEnv } from '../../helpers/agentEnvIsolation';
 import { resolveAgentAccountRef } from '../../../shared/agentAccountDir';
+import type { SessionReadOptions } from '../../../main/agents/session-storage';
 
 isolateAgentEnv(['GROK_HOME']);
 
@@ -196,8 +199,9 @@ function mockLocalFs(
 		sizeOverrides?: Record<string, number>;
 		bytesOverrides?: Record<string, Buffer>;
 		onOpen?: (handle: Awaited<ReturnType<typeof fs.open>>, filePath: string) => void;
+		directories?: string[];
 	} = {}
-): void {
+) {
 	// dir path -> child name -> isFile
 	const children = new Map<string, Map<string, boolean>>();
 	for (const filePath of Object.keys(files)) {
@@ -219,6 +223,23 @@ function mockLocalFs(
 		}
 	}
 
+	const aliases = new Map<string, string>();
+	const identities = new Map(
+		[...children.keys(), ...Object.keys(files), ...(options.directories ?? [])].map((p) => [
+			p,
+			{ dev: 1, ino: 1, directory: !(p in files) },
+		])
+	);
+	vi.mocked(fs.realpath).mockImplementation(async (p) => {
+		const physical = aliases.get(String(p)) ?? String(p);
+		if (!identities.has(physical)) throw enoent(physical);
+		return physical;
+	});
+	vi.mocked(fs.lstat).mockImplementation(async (p) => {
+		if (aliases.has(String(p))) return { isSymbolicLink: () => true } as never;
+		return fs.stat(p);
+	});
+
 	const enoent = (p: string) =>
 		Object.assign(new Error(`ENOENT: no such file or directory, ${p}`), { code: 'ENOENT' });
 
@@ -229,20 +250,24 @@ function mockLocalFs(
 			name,
 			isDirectory: () => !isFile,
 			isFile: () => isFile,
+			isSymbolicLink: () => aliases.has(path.join(String(dirPath), name)),
 		})) as never;
 	});
 
 	vi.mocked(fs.stat).mockImplementation(async (filePath) => {
 		const p = String(filePath);
-		if (!(p in files)) throw enoent(p);
+		const identity = identities.get(p);
+		if (!identity) throw enoent(p);
 		return {
 			size:
-				options.sizeOverrides?.[p] ?? Buffer.byteLength(options.bytesOverrides?.[p] ?? files[p]),
+				options.sizeOverrides?.[p] ??
+				Buffer.byteLength(options.bytesOverrides?.[p] ?? files[p] ?? ''),
 			mtimeMs: 1_752_082_000_000,
 			ctimeMs: 1_752_082_000_000,
-			dev: 1,
-			ino: 1,
-			isFile: () => true,
+			dev: identity.dev,
+			ino: identity.ino,
+			isFile: () => !identity.directory,
+			isDirectory: () => identity.directory,
 		} as never;
 	});
 
@@ -267,6 +292,7 @@ function mockLocalFs(
 		if (!(p in files)) throw enoent(p);
 		return files[p] as never;
 	});
+	return { children, aliases, identities };
 }
 
 // ============================================================================
@@ -474,6 +500,442 @@ describe('GrokSessionStorage - selected account scope', () => {
 			expect(captureException).not.toHaveBeenCalled();
 		}
 	);
+});
+
+describe('GrokSessionStorage - native local source ownership', () => {
+	const root = path.resolve('src', '__tests__', 'fixtures', 'grok-ownership');
+	const account = path.join(root, 'alpha');
+	const otherAccount = path.join(root, 'beta');
+	const cwd = path.join(root, 'project');
+	const child = path.join(cwd, 'child');
+	const binding = {
+		version: 1,
+		state: 'bound',
+		provider: 'grok',
+		nativeSessionId: SESSION_ID,
+		accountRef: resolveAgentAccountRef(
+			{ toolType: 'grok', managedAccountDir: account },
+			{ homeDir: os.homedir() }
+		)!,
+		cwd,
+		host: { kind: 'local', identity: 'fixture-local-installation' },
+	} as const;
+
+	function scopedLocal(pool = path.join(account, 'sessions')) {
+		const files = {
+			...sessionFiles(cwd, SESSION_ID, summaryJson(SESSION_ID, cwd), chatHistoryJsonl(), pool),
+			...sessionFiles(child, SESSION_ID, '{}', '{"type":"user","content":"child only"}', pool),
+			...sessionFiles(
+				cwd,
+				SESSION_ID,
+				'{}',
+				'{"type":"user","content":"beta only"}',
+				path.join(otherAccount, 'sessions')
+			),
+		};
+		const handles: Awaited<ReturnType<typeof fs.open>>[] = [];
+		const fixture = mockLocalFs(files, {
+			directories: [account, cwd, child],
+			onOpen: (handle) => handles.push(handle),
+		});
+		let ino = 1;
+		for (const identity of fixture.identities.values()) identity.ino = ino++;
+		fixture.aliases.set(path.join(account, 'sessions'), pool);
+		const folder = path.join(pool, encodeURIComponent(cwd));
+		const session = path.join(folder, SESSION_ID);
+		const file = path.join(session, 'chat_history.jsonl');
+		return {
+			...fixture,
+			files,
+			handles,
+			pool,
+			folder,
+			session,
+			file,
+			read: (options: SessionReadOptions = {}, project = cwd) =>
+				new GrokSessionStorage(account).readSessionMessages(project, SESSION_ID, {
+					nativeSessionBinding: binding,
+					...options,
+				}),
+		};
+	}
+
+	beforeEach(() => vi.clearAllMocks());
+	afterEach(() => {
+		for (const mutation of [fs.writeFile, fs.appendFile, fs.rename, fs.unlink, fs.mkdir]) {
+			expect(mutation).not.toHaveBeenCalled();
+		}
+		expect(execFileNoThrow).not.toHaveBeenCalled();
+		expect(remoteFs.readFileRemote).not.toHaveBeenCalled();
+		expect(remoteFs.observePathRemote).not.toHaveBeenCalled();
+		vi.restoreAllMocks();
+	});
+
+	it.each([false, true])(
+		'returns the pinned canonical source through aliases, shared pool=%s',
+		async (shared) => {
+			const f = scopedLocal(shared ? path.join(root, 'shared', 'sessions') : undefined);
+			const selected = path.join(root, "selected space's α");
+			const project = path.join(root, 'project alias');
+			const target = path.join(f.session, 'transcript-target');
+			f.aliases.set(selected, account);
+			f.aliases.set(project, cwd);
+			f.aliases.set(f.file, target);
+			f.identities.set(target, { ...f.identities.get(f.file)! });
+			f.files[target] = f.files[f.file];
+			const before = { ...f.files };
+			const result = await f.read({ configDir: selected }, project);
+			expect(result.nativeSessionBinding).toEqual(binding);
+			expect(result.nativeSessionBinding).not.toBe(binding);
+			expect(
+				result.nativeSessionBinding?.state === 'bound' && result.nativeSessionBinding.host
+			).not.toBe(binding.host);
+			expect(result.source?.status).toBe('available');
+			expect(result.messages).toHaveLength(3);
+			expect(result.messages.some((message) => message.toolUse)).toBe(true);
+			expect(fs.open).toHaveBeenCalledExactlyOnceWith(
+				target,
+				fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | fs.constants.O_NOFOLLOW
+			);
+			expect(f.handles[0].close).toHaveBeenCalledOnce();
+			expect(fs.readFile).not.toHaveBeenCalled();
+			expect(f.files).toEqual(before);
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it('keeps colliding IDs bound to the selected account and exact cwd', async () => {
+		const f = scopedLocal();
+		const betaBinding = {
+			...binding,
+			accountRef: resolveAgentAccountRef(
+				{ toolType: 'grok', managedAccountDir: otherAccount },
+				{ homeDir: os.homedir() }
+			)!,
+		};
+		const [alpha, beta] = await Promise.all([
+			f.read(),
+			f.read({ configDir: otherAccount, nativeSessionBinding: betaBinding }),
+		]);
+		expect(alpha.nativeSessionBinding).toEqual(binding);
+		expect(alpha.messages).toHaveLength(3);
+		expect(beta.nativeSessionBinding).toEqual(betaBinding);
+		expect(beta.messages.map((m) => m.content)).toEqual(['beta only']);
+		expect(fs.open).toHaveBeenCalledTimes(2);
+		expect(vi.mocked(fs.open).mock.calls.map(([p]) => p)).not.toContain(
+			path.join(f.pool, encodeURIComponent(child), SESSION_ID, 'chat_history.jsonl')
+		);
+	});
+
+	it('never substitutes a descendant when the exact native session is absent', async () => {
+		const f = scopedLocal();
+		f.identities.delete(f.session);
+		const result = await f.read();
+		expect(result.source?.reason).toBe('session-not-found');
+		expect(result.nativeSessionBinding).toBeUndefined();
+		expect(result.messages).toEqual([]);
+		expect(fs.open).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		{ version: 2 },
+		{ state: 'unknown' },
+		{ provider: 'codex' },
+		{ nativeSessionId: '../escape' },
+		{ nativeSessionId: 'other-native-id' },
+		{ accountRef: '' },
+		{ accountRef: 'bad\0ref' },
+		{ cwd: 'relative' },
+		{ cwd: '' },
+		{ host: null },
+		{ host: { kind: 'ssh', identity: 'remote' } },
+		{ host: { kind: 'local', identity: ' \t ' } },
+	])('refuses malformed or unknown binding %j before source I/O', async (patch) => {
+		const f = scopedLocal();
+		const result = await f.read({
+			nativeSessionBinding: { ...binding, ...patch } as SessionReadOptions['nativeSessionBinding'],
+		});
+		expect(result.source?.reason).toBe('native-source-binding-invalid');
+		expect(result.nativeSessionBinding).toBeUndefined();
+		expect(result.messages).toEqual([]);
+		expect(fs.realpath).not.toHaveBeenCalled();
+		expect(fs.open).not.toHaveBeenCalled();
+		expect(fs.readFile).not.toHaveBeenCalled();
+	});
+
+	it.each(['account', 'cwd', 'implicit-account'] as const)(
+		'refuses %s mismatch before transcript content I/O',
+		async (mismatch) => {
+			const f = scopedLocal();
+			const result =
+				mismatch === 'implicit-account'
+					? await new GrokSessionStorage().readSessionMessages(cwd, SESSION_ID, {
+							nativeSessionBinding: binding,
+						})
+					: await f.read(
+							mismatch === 'account' ? { configDir: otherAccount } : {},
+							mismatch === 'cwd' ? child : cwd
+						);
+			expect(result.source?.reason).toBe(
+				mismatch === 'implicit-account'
+					? 'native-source-binding-invalid'
+					: 'native-source-scope-mismatch'
+			);
+			expect(result.nativeSessionBinding).toBeUndefined();
+			expect(result.messages).toEqual([]);
+			expect(fs.open).not.toHaveBeenCalled();
+			expect(fs.readFile).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['account', 'folder', 'session', 'session-name', 'transcript'] as const)(
+		'refuses a %s alias to a foreign source before content I/O',
+		async (part) => {
+			const f = scopedLocal();
+			const requested = {
+				account,
+				folder: f.folder,
+				session: f.session,
+				'session-name': f.session,
+				transcript: f.file,
+			}[part];
+			const physical =
+				part === 'account'
+					? otherAccount
+					: part === 'session-name'
+						? path.join(f.folder, 'different-native-id')
+						: path.join(root, 'outside', path.basename(requested));
+			f.aliases.set(requested, physical);
+			f.identities.set(physical, { ...f.identities.get(requested)! });
+			const result = await f.read();
+			expect(result.source?.reason).toBe('native-source-scope-mismatch');
+			expect(result.nativeSessionBinding).toBeUndefined();
+			expect(result.messages).toEqual([]);
+			expect(fs.open).not.toHaveBeenCalled();
+			expect(fs.readFile).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['directory', 'dangling', 'file'] as const)(
+		'refuses an ambiguous cwd alias with a %s duplicate',
+		async (kind) => {
+			const f = scopedLocal();
+			const projectAlias = path.join(root, 'alias');
+			const folder = path.join(f.pool, encodeURIComponent(projectAlias));
+			const duplicate = path.join(folder, SESSION_ID);
+			f.aliases.set(projectAlias, cwd);
+			f.children.get(f.pool)!.set(path.basename(folder), false);
+			if (kind === 'dangling') f.aliases.set(duplicate, path.join(root, 'missing'));
+			else f.identities.set(duplicate, { dev: 1, ino: 900, directory: kind === 'directory' });
+			const result = await f.read();
+			expect(result.source?.reason).toBe('native-source-ambiguous');
+			expect(result.nativeSessionBinding).toBeUndefined();
+			expect(result.messages).toEqual([]);
+			expect(fs.open).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['account', 'cwd', 'pool', 'session', 'file'] as const)(
+		'rejects missing and non-directory/non-file %s paths',
+		async (part) => {
+			for (const missing of [true, false]) {
+				const f = scopedLocal();
+				const p = { account, cwd, pool: f.pool, session: f.session, file: f.file }[part];
+				if (missing) f.identities.delete(p);
+				else f.identities.get(p)!.directory = part === 'file';
+				const result = await f.read();
+				expect(result.source?.status).toBe('unavailable');
+				expect(result.nativeSessionBinding).toBeUndefined();
+				expect(result.messages).toEqual([]);
+				expect(fs.open).not.toHaveBeenCalled();
+				expect(captureException).not.toHaveBeenCalled();
+			}
+		}
+	);
+
+	it.each(['EACCES', 'ELOOP', 'ENOTDIR'])(
+		'refuses failed path observation %s without fallback',
+		async (code) => {
+			const f = scopedLocal();
+			vi.mocked(fs.realpath).mockRejectedValueOnce(Object.assign(new Error(code), { code }));
+			const result = await f.read();
+			expect(result.source?.reason).toBe('native-source-unobserved');
+			expect(result.nativeSessionBinding).toBeUndefined();
+			expect(fs.open).not.toHaveBeenCalled();
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['dev', 'ino'] as const)('rejects an unrepresentable observed %s', async (field) => {
+		const f = scopedLocal();
+		f.identities.get(account)![field] = Number.MAX_SAFE_INTEGER + 1;
+		const result = await f.read();
+		expect(result.source?.status).toBe('unavailable');
+		expect(result.nativeSessionBinding).toBeUndefined();
+		expect(fs.open).not.toHaveBeenCalled();
+	});
+
+	it('refuses when an unrelated cwd cannot be observed to establish uniqueness', async () => {
+		const f = scopedLocal();
+		const realpath = vi.mocked(fs.realpath).getMockImplementation()!;
+		vi.mocked(fs.realpath).mockImplementation(async (...args) => {
+			if (args[0] === child) throw Object.assign(new Error('denied'), { code: 'EACCES' });
+			return realpath(...args);
+		});
+		const result = await f.read();
+		expect(result.source?.reason).toBe('native-source-unobserved');
+		expect(result.nativeSessionBinding).toBeUndefined();
+		expect(result.messages).toEqual([]);
+		expect(fs.open).not.toHaveBeenCalled();
+		expect(captureException).not.toHaveBeenCalled();
+	});
+
+	it.each(['account', 'cwd', 'pool', 'folder', 'session', 'file'] as const)(
+		'discards a replaced %s at open and after content read',
+		async (part) => {
+			for (const stage of ['open', 'read'] as const) {
+				vi.clearAllMocks();
+				const f = scopedLocal();
+				const p = {
+					account,
+					cwd,
+					pool: f.pool,
+					folder: f.folder,
+					session: f.session,
+					file: f.file,
+				}[part];
+				const open = vi.mocked(fs.open).getMockImplementation()!;
+				vi.mocked(fs.open).mockImplementation(async (...args) => {
+					const handle = await open(...args);
+					if (stage === 'open') f.identities.get(p)!.ino++;
+					else {
+						const read = vi.mocked(handle.read).getMockImplementation()!;
+						vi.mocked(handle.read).mockImplementation(async (...readArgs) => {
+							f.identities.get(p)!.ino++;
+							return read(...readArgs);
+						});
+					}
+					return handle;
+				});
+				const result = await f.read();
+				expect(result.source?.reason).toBe('native-source-changed');
+				expect(result.nativeSessionBinding).toBeUndefined();
+				expect(result.messages).toEqual([]);
+				expect(fs.open).toHaveBeenCalledOnce();
+				if (stage === 'open') expect(f.handles[0].read).not.toHaveBeenCalled();
+				else expect(f.handles[0].read).toHaveBeenCalled();
+				expect(f.handles[0].close).toHaveBeenCalledOnce();
+			}
+		}
+	);
+
+	it.each(['before-open', 'after-close'] as const)(
+		'rejects a renamed physical path %s even with unchanged device/inode',
+		async (stage) => {
+			const f = scopedLocal();
+			const renamed = path.join(root, 'renamed-account');
+			f.identities.set(renamed, { ...f.identities.get(account)! });
+			if (stage === 'before-open') {
+				const realpath = vi.mocked(fs.realpath).getMockImplementation()!;
+				let observations = 0;
+				vi.mocked(fs.realpath).mockImplementation(async (...args) => {
+					if (args[0] === account && ++observations === 2) f.aliases.set(account, renamed);
+					return realpath(...args);
+				});
+			} else {
+				const open = vi.mocked(fs.open).getMockImplementation()!;
+				vi.mocked(fs.open).mockImplementation(async (...args) => {
+					const handle = await open(...args);
+					vi.mocked(handle.close).mockImplementation(async () => {
+						f.aliases.set(account, renamed);
+					});
+					return handle;
+				});
+			}
+			const result = await f.read();
+			expect(result.source?.reason).toBe('native-source-changed');
+			expect(result.nativeSessionBinding).toBeUndefined();
+			expect(result.messages).toEqual([]);
+			expect(fs.open).toHaveBeenCalledTimes(stage === 'before-open' ? 0 : 1);
+			if (stage === 'after-close') expect(f.handles[0].close).toHaveBeenCalledOnce();
+		}
+	);
+
+	it.each(['dev', 'ino'] as const)(
+		'checks opened descriptor %s before reading bytes',
+		async (field) => {
+			const f = scopedLocal();
+			const open = vi.mocked(fs.open).getMockImplementation()!;
+			vi.mocked(fs.open).mockImplementation(async (...args) => {
+				const handle = await open(...args);
+				vi.mocked(handle.stat).mockResolvedValue({ ...(await fs.stat(f.file)), [field]: 9999 });
+				return handle;
+			});
+			const result = await f.read();
+			expect(result.source?.reason).toBe('native-source-changed');
+			expect(result.nativeSessionBinding).toBeUndefined();
+			expect(result.messages).toEqual([]);
+			expect(f.handles[0].read).not.toHaveBeenCalled();
+			expect(f.handles[0].close).toHaveBeenCalledOnce();
+		}
+	);
+
+	it.each(['malformed', 'oversized', 'unreadable', 'append'] as const)(
+		'keeps ownership separate from %s content provenance',
+		async (kind) => {
+			const f = scopedLocal();
+			if (kind === 'malformed') f.files[f.file] += '\n{"type":';
+			if (kind === 'unreadable')
+				vi.mocked(fs.open).mockRejectedValueOnce(
+					Object.assign(new Error('denied'), { code: 'EACCES' })
+				);
+			if (kind === 'oversized') {
+				const stat = vi.mocked(fs.stat).getMockImplementation()!;
+				vi.mocked(fs.stat).mockImplementation(async (...args) => {
+					const result = await stat(...args);
+					if (args[0] === f.file) result.size = 64 * 1024 * 1024 + 1;
+					return result;
+				});
+			}
+			if (kind === 'append') {
+				const open = vi.mocked(fs.open).getMockImplementation()!;
+				vi.mocked(fs.open).mockImplementation(async (...args) => {
+					const handle = await open(...args);
+					const initial = await fs.stat(f.file);
+					vi.mocked(handle.stat)
+						.mockResolvedValueOnce(initial)
+						.mockResolvedValue({ ...initial, size: initial.size + 1 });
+					return handle;
+				});
+			}
+			const result = await f.read();
+			expect(result.nativeSessionBinding).toEqual(binding);
+			expect(result.source?.status).toBe(
+				kind === 'malformed' || kind === 'append' ? 'partial' : 'unavailable'
+			);
+			expect(result.source?.reason).toBe(
+				{
+					malformed: 'malformed-records',
+					oversized: 'too-large',
+					unreadable: 'unreadable',
+					append: 'changed-during-read',
+				}[kind]
+			);
+			expect(result.messages).toHaveLength(kind === 'malformed' || kind === 'append' ? 3 : 0);
+			if (kind === 'oversized') expect(fs.open).not.toHaveBeenCalled();
+			for (const handle of f.handles) expect(handle.close).toHaveBeenCalledOnce();
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it('keeps a successful legacy read unbound without physical ownership observations', async () => {
+		const f = scopedLocal();
+		const result = await f.read({ nativeSessionBinding: undefined });
+		expect(result.messages).toHaveLength(3);
+		expect(result.nativeSessionBinding).toBeUndefined();
+		expect(fs.realpath).not.toHaveBeenCalled();
+		expect(fs.lstat).not.toHaveBeenCalled();
+	});
 });
 
 describe('GrokSessionStorage - local listing', () => {
