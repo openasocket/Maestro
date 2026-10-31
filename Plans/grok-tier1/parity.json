@@ -2651,6 +2651,32 @@
 			"implementationOwner": "GT1-04-08A",
 			"testOwner": "GT1-04-08B",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-grok-rename-consumers": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-08a1-grok-rename-consumer-isolation",
+			"sourceCommit": "6dfd93ed8a2fd85df5c0ced5c3ddf4bce86c99a9",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/hooks/session/useSessionLifecycle.ts": "7e451e2eee65d00e27d15846adf63f261592196e0ceca31a34c19bcd483e7a9f",
+				"src/renderer/hooks/remote/useRemoteIntegration.ts": "f88936aceae30fbf0afa438809f7e3ec820d332145881e9d8a77034e1766066f",
+				"src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsRename.ts": "0b4036b23a82f87b9843fa743d2d1cfeae2ba02c90b1e9b5e3d13cbb0cf3e874"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "REG-SESSION-MUTATION"],
+			"scope": "Desktop and remote Grok tab labels persist locally without unscoped origins or native-ID-only History writes, including retained Grok turn ownership. History-browser native rename shows an actionable unsupported notice before any row/tab mutation and keeps editing state.",
+			"limitations": [
+				"Native Grok title changes remain unsupported through Maestro; local tab labels are not native titles or globally propagated History labels.",
+				"Existing tab serialization/restoration was inspected statically; reload, account/host collisions and non-Grok controls await GT1-04-08A1T/GT1-04-13.",
+				"Renderer/shared TypeScript retains the documented baseline RequestInit.dispatcher error; no unrelated source repair or acceptance waiver.",
+				"No tests authored, run or collected; native files, user accounts, SSH and provider binaries were not accessed."
+			],
+			"implementationOwner": "GT1-04-08A1",
+			"testOwner": "GT1-04-08A1T",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6494,7 +6520,10 @@
 				"src/shared/maestro-lib/agents/rules.ts",
 				"src/shared/maestro-lib/launch/agent-args.ts",
 				"src/shared/agentAccountDir.ts",
-				"src/shared/maestro-lib/agents/providerSwap.ts"
+				"src/shared/maestro-lib/agents/providerSwap.ts",
+				"src/renderer/hooks/session/useSessionLifecycle.ts",
+				"src/renderer/hooks/remote/useRemoteIntegration.ts",
+				"src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsRename.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6598,7 +6627,8 @@
 				"phase04RuntimeAdmittedNativeRecordingRef": "phase04-runtime-admitted-native-recording",
 				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests",
 				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests",
-				"phase04NativeForkRenameRefusalsRef": "phase04-native-fork-rename-refusals"
+				"phase04NativeForkRenameRefusalsRef": "phase04-native-fork-rename-refusals",
+				"phase04GrokRenameConsumersRef": "phase04-grok-rename-consumers"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6659,8 +6689,8 @@
 				},
 				{
 					"id": "grok-rename-consumer-isolation-pending",
-					"code": "implementation-pending",
-					"missingPrerequisite": "GT1-04-08A1 must retain local tab labels while preventing native-ID-only History name propagation in useSessionLifecycle/useRemoteIntegration and surfacing unsupported History-browser rename. GT1-04-08A1T/08B author regressions; GT1-04-13 executes.",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-04-08A1 implements local-only Grok tab labels and visible unsupported History-browser rename, including retained Grok turn ownership. GT1-04-08A1T must author reload, colliding account/host IDs, unchanged native/history bindings, refusal and non-Grok regressions; GT1-04-13 must execute them. Static review only; native title mutation remains unsupported.",
 					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -17086,7 +17116,10 @@
 				"src/shared/maestro-lib/agents/rules.ts",
 				"src/shared/maestro-lib/launch/agent-args.ts",
 				"src/shared/agentAccountDir.ts",
-				"src/shared/maestro-lib/agents/providerSwap.ts"
+				"src/shared/maestro-lib/agents/providerSwap.ts",
+				"src/renderer/hooks/session/useSessionLifecycle.ts",
+				"src/renderer/hooks/remote/useRemoteIntegration.ts",
+				"src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsRename.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -17190,7 +17223,8 @@
 				"phase04RuntimeAdmittedNativeRecordingRef": "phase04-runtime-admitted-native-recording",
 				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests",
 				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests",
-				"phase04NativeForkRenameRefusalsRef": "phase04-native-fork-rename-refusals"
+				"phase04NativeForkRenameRefusalsRef": "phase04-native-fork-rename-refusals",
+				"phase04GrokRenameConsumersRef": "phase04-grok-rename-consumers"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17251,8 +17285,8 @@
 				},
 				{
 					"id": "grok-rename-consumer-isolation-pending",
-					"code": "implementation-pending",
-					"missingPrerequisite": "GT1-04-08A1 must retain local tab labels while preventing native-ID-only History name propagation in useSessionLifecycle/useRemoteIntegration and surfacing unsupported History-browser rename. GT1-04-08A1T/08B author regressions; GT1-04-13 executes.",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-04-08A1 implements local-only Grok tab labels and visible unsupported History-browser rename, including retained Grok turn ownership. GT1-04-08A1T must author reload, colliding account/host IDs, unchanged native/history bindings, refusal and non-Grok regressions; GT1-04-13 must execute them. Static review only; native title mutation remains unsupported.",
 					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
 				}
 			],

@@ -40,6 +40,7 @@ import type { SteeringCommandResult } from '../../../shared/autoRunSteeringComma
 import { recordAgentDelegation } from '../../services/agentDelegation';
 import { requestFileTreeRefresh } from '../../utils/fileTreeRefresh';
 import { persistTabStarred } from '../../utils/starredSessions';
+import { resolveTurnProvider } from '../../../shared/maestro-lib/agents/providerSwap';
 import { formatLogsForClipboard } from '../../utils/contextExtractor';
 import { messagesToLogEntries } from '../../components/AgentSessionsBrowser/utils/messagesToLogEntries';
 import type { SessionMessage } from '../agent/useSessionViewer';
@@ -983,7 +984,12 @@ export function useRemoteIntegration(deps: UseRemoteIntegrationDeps): UseRemoteI
 					const tab = session.aiTabs.find((t) => t.id === tabId);
 					if (!tab) return { success: false, error: `Tab not found: ${tabId}` };
 
-					if (tab.agentSessionId) {
+					const isGrokTab =
+						session.toolType === 'grok' || resolveTurnProvider(tab, session) === 'grok';
+					// Keep Grok's label in the persisted Maestro tab, including turns
+					// retained after a provider switch. These metadata/History APIs
+					// cannot scope a native ID to its account and host or rename its title.
+					if (tab.agentSessionId && !isGrokTab) {
 						const agentId = session.toolType || 'claude-code';
 						if (agentId === 'claude-code') {
 							await window.maestro.claude.updateSessionName(
