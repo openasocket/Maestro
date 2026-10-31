@@ -327,6 +327,7 @@ export function setupIpcHandlers(deps: IpcBootstrapDependencies): void {
 	registerAgentSessionsHandlers({
 		getMainWindow: deps.getMainWindow,
 		agentSessionOriginsStore: deps.agentSessionOriginsStore,
+		remoteQualifier: () => deps.getEnterpriseService()?.remote ?? null,
 	});
 
 	// Register Group Chat handlers

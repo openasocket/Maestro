@@ -1561,6 +1561,42 @@
 			"affectedRows": ["P13", "P14", "P15", "C-supportsResume", "REG-SESSION-MUTATION"],
 			"scope": "Canonical local account/cwd observations, colliding accounts and descendant IDs, binding/alias/root refusals before content I/O, path and descriptor races, independent ownership/provenance, unbound legacy reads and mutation guards. Reuses virtual local filesystem; no tests run or collected.",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-remote-history-endpoint-observation": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c1r-remote-history-endpoint-observation",
+			"sourceCommit": "6d89e651262c031f7f6e8b5ed66249fe75845482",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/ipc/handlers/agentSessions.ts": "22d7c34ec7544fce9bb9564287da20c9168e98d70312ffc955f596159e59a1a5",
+				"src/main/ipc/bootstrap/index.ts": "dd249e29b17cd28be5d78167e09fb54a6388a06308bb80e58839d3b61c22c7eb"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"static": "pass",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"scopedTypeCheck": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P13", "P14", "P15", "C-supportsResume", "REG-SESSION-MUTATION"],
+			"scope": "Bootstrap qualifier forwarding, stable executing installation identity, existing admitted/bounded physical path observer, selected account and cwd fences around adapter I/O, independent native-source receipt and environment ambiguity refusals.",
+			"limitations": [
+				"Unmanaged endpoints lack an existing standalone installation observer and remain unavailable.",
+				"Relative roots and environment-dependent default/tilde accounts remain unavailable pending launch reconciliation.",
+				"Read provenance does not establish launch permission or native/live SSH compliance."
+			],
+			"remainingTestOwners": ["GT1-04-07C1RT", "GT1-04-07C1T"],
+			"remainingImplementationOwners": [
+				"GT1-04-07C2",
+				"GT1-04-07C3",
+				"GT1-04-07C4",
+				"GT1-04-07C5",
+				"GT1-04-07D",
+				"GT1-04-07E",
+				"GT1-04-07F"
+			],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {

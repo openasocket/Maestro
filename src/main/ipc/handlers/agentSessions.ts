@@ -23,7 +23,14 @@ import { logger } from '../../utils/logger';
 import { withIpcErrorLogging } from '../../utils/ipcHandler';
 import { createSafeSend } from '../../utils/safe-send';
 import { getSessionStorage, hasSessionStorage, getAllSessionStorages } from '../../agents';
-import { getLiveSessions, getSshRemoteById, getProductionDataPath } from '../../stores';
+import {
+	getLiveSessions,
+	getSshRemoteById,
+	getProductionDataPath,
+	getSettingsStore,
+	getAgentConfigsStore,
+} from '../../stores';
+import { isInitialized } from '../../stores/instances';
 import { calculateModelCost } from '../../utils/pricing';
 import {
 	computeClaudeUsageWithSubagents,
@@ -76,6 +83,10 @@ import { resolveAgentAccountRef } from '../../../shared/agentAccountDir';
 import { canonicalJson } from '../../../shared/canonicalJson';
 import { installationIdentity } from '../../../shared/maestro-lib/managed/host-adapter';
 import type { NativeSessionBinding } from '../../../shared/maestro-lib/agents/providerSwap';
+import type { RemoteEndpointQualifier } from '../../enterprise/remote';
+import { observePathRemote, type RemotePathIdentity } from '../../utils/remote-fs';
+import { isExpectedRemoteError } from '../../storage/remote-error-utils';
+import { resolveAgentEnvironment } from '../../../shared/agentEnvironment';
 
 // Re-export for backwards compatibility
 export type { GlobalAgentStats, ProviderStats };
@@ -113,6 +124,7 @@ export interface AgentSessionOriginsData {
 export interface AgentSessionsHandlerDependencies {
 	getMainWindow: () => BrowserWindow | null;
 	agentSessionOriginsStore?: Store<AgentSessionOriginsData>;
+	remoteQualifier?: () => Pick<RemoteEndpointQualifier, 'qualifyResolved'> | null;
 }
 
 /** Resolve the selected owner before any native read or transcript restoration. */
@@ -125,6 +137,7 @@ function resolveHistoryScope(
 	sshConfig?: SshRemoteConfig;
 	configDir?: string;
 	ownerProjectPath?: string;
+	remoteAccountEnv?: Record<string, string>;
 	selectionKey: string;
 } {
 	for (const [name, value] of [
@@ -205,10 +218,30 @@ function resolveHistoryScope(
 			? owner.remoteCwd || sessionSshConfig?.workingDirOverride || owner.projectRoot
 			: owner.projectRoot
 		: undefined;
+	// Capture only account-affecting remote launch configuration, without ever
+	// reading the desktop's process.env or expanding a remote home locally.
+	const remoteAccountEnv =
+		agentId === 'grok' && sshConfig && owner
+			? Object.fromEntries(
+					resolveAgentEnvironment({
+						global: {
+							...sshConfig.remoteEnv,
+							...(isInitialized() ? getSettingsStore().get('shellEnvVars', {}) : {}),
+						},
+						agent: isInitialized()
+							? getAgentConfigsStore().get('configs', {}).grok?.customEnvVars
+							: undefined,
+						session: owner.customEnvVars,
+					})
+						.filter(({ key }) => key === 'HOME' || key === 'GROK_HOME')
+						.map(({ key, value }) => [key, value])
+				)
+			: undefined;
 	return {
 		sshConfig,
 		configDir,
 		ownerProjectPath,
+		remoteAccountEnv,
 		// Capture values, not references to mutable store objects. This fence is
 		// private to this read; it may contain env values and must never be logged.
 		selectionKey: canonicalJson({
@@ -225,21 +258,116 @@ function resolveHistoryScope(
 			},
 			sshConfig,
 			configDir,
+			remoteAccountEnv,
 		}),
 	};
 }
 
-/** Capture a local read's physical scope. This is not yet a native-source receipt:
+/** Capture a read's physical scope. This is not yet a native-source receipt:
  * the adapter must confirm which transcript it actually opened, then we recheck.
  * SSH needs an observed endpoint and remote canonical paths; a config is not one.
  */
 async function observeGrokHistoryScope(
 	scope: ReturnType<typeof resolveHistoryScope>,
 	projectPath: string,
-	sessionId: string
-): Promise<{ binding: NativeSessionBinding; configDir?: string }> {
+	sessionId: string,
+	remoteQualifier?: AgentSessionsHandlerDependencies['remoteQualifier']
+): Promise<{
+	binding: NativeSessionBinding;
+	configDir?: string;
+	/** Private read fence, never persisted in the durable binding. */
+	remotePaths?: RemotePathIdentity[];
+	unavailableReason?: string;
+}> {
 	if (scope.sshConfig) {
-		return { binding: { version: 1, state: 'unknown', reason: 'unobserved' } };
+		const remote = scope.sshConfig;
+		const unavailable = (reason: string) => ({
+			binding: { version: 1, state: 'unknown', reason: 'unobserved' } as const,
+			unavailableReason: reason,
+		});
+		// remote-fs observes the login environment. The selected-account resolver
+		// does not fold every launch env layer into its default, so do not attest an ambiguous
+		// default/tilde root until launch account resolution reconciles overrides.
+		if (
+			(scope.configDir === undefined && scope.remoteAccountEnv?.GROK_HOME !== undefined) ||
+			((scope.configDir === undefined || scope.configDir.startsWith('~')) &&
+				scope.remoteAccountEnv?.HOME !== undefined)
+		) {
+			return unavailable('history-remote-account-environment-unresolved');
+		}
+		const qualify = async () => {
+			const target = await remoteQualifier?.()?.qualifyResolved(structuredClone(remote));
+			if (
+				target?.kind !== 'remote' ||
+				canonicalJson(target.remote) !== canonicalJson(remote) ||
+				typeof target.endpoint?.installationId !== 'string' ||
+				!target.endpoint.installationId.trim() ||
+				/[\x00-\x1f\x7f]/.test(target.endpoint.installationId)
+			) {
+				return undefined;
+			}
+			// A runtime restart must not relabel the installation's native history.
+			return target.endpoint.installationId;
+		};
+		const identity = await qualify();
+		// The existing qualifier has no standalone endpoint identity contract.
+		// An SSH alias/hostname or this desktop's identity cannot fill that gap.
+		if (!identity) return unavailable('history-remote-endpoint-unqualified');
+		const paths = [projectPath, scope.ownerProjectPath, scope.configDir ?? '~/.grok'];
+		if (
+			!paths.every(
+				(value): value is string =>
+					typeof value === 'string' &&
+					(path.posix.isAbsolute(value) || value === '~' || value.startsWith('~/'))
+			)
+		) {
+			return unavailable('history-remote-path-unresolved');
+		}
+		// Reuse the storage observer: remote access admission, escaped tilde,
+		// bounded SSH/Python execution and physical directory identity. The
+		// generic worktree resolver has no equivalent timeout/admission contract.
+		const observations = await Promise.all(paths.map((value) => observePathRemote(value, remote)));
+		const remotePaths: RemotePathIdentity[] = [];
+		let pathUnavailable = false;
+		for (const observed of observations) {
+			if (!observed.success || !observed.data) {
+				if (!observed.errorCode && !isExpectedRemoteError(observed.error)) {
+					throw new Error(observed.error || 'Remote history path observation failed.');
+				}
+				pathUnavailable = true;
+				continue;
+			}
+			if (observed.data.kind !== 'directory') {
+				pathUnavailable = true;
+			}
+			remotePaths.push(observed.data);
+		}
+		if (pathUnavailable) return unavailable('history-remote-path-unavailable');
+		const [cwd, ownerCwd, account] = remotePaths;
+		if (canonicalJson(cwd) !== canonicalJson(ownerCwd)) {
+			throw new Error('History project does not match its owner.');
+		}
+		if ((await qualify()) !== identity) {
+			return unavailable('history-remote-endpoint-changed');
+		}
+		const accountRef = resolveAgentAccountRef(
+			{ toolType: 'grok', sshRemote: true, managedAccountDir: account.canonicalPath },
+			{ homeDir: '' }
+		);
+		if (!accountRef) return unavailable('history-remote-account-unavailable');
+		return {
+			configDir: account.canonicalPath,
+			remotePaths,
+			binding: {
+				version: 1,
+				state: 'bound',
+				provider: 'grok',
+				nativeSessionId: sessionId,
+				accountRef,
+				cwd: cwd.canonicalPath,
+				host: { kind: 'ssh', identity },
+			},
+		};
 	}
 	if (
 		!scope.configDir ||
@@ -671,7 +799,12 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 					}
 				};
 				if (agentId === 'grok' && options?.ownerAgentId !== undefined) {
-					observed = await observeGrokHistoryScope(scope, projectPath, sessionId);
+					observed = await observeGrokHistoryScope(
+						scope,
+						projectPath,
+						sessionId,
+						deps?.remoteQualifier
+					);
 					assertCurrentSelection();
 					if (observed.binding.state !== 'bound') {
 						return {
@@ -682,7 +815,7 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 							source: {
 								provider: 'grok',
 								status: 'unavailable',
-								reason: 'history-scope-unobserved',
+								reason: observed.unavailableReason ?? 'history-scope-unobserved',
 							},
 						};
 					}
@@ -725,7 +858,12 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 				);
 				if (observed) {
 					assertCurrentSelection();
-					const rechecked = await observeGrokHistoryScope(scope, projectPath, sessionId);
+					const rechecked = await observeGrokHistoryScope(
+						scope,
+						projectPath,
+						sessionId,
+						deps?.remoteQualifier
+					);
 					assertCurrentSelection();
 					if (canonicalJson(rechecked) !== canonicalJson(observed)) {
 						throw new Error('History account, host or cwd changed during the read.');
