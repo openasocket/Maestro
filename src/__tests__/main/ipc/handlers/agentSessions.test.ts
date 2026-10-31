@@ -10,6 +10,8 @@ import { ipcMain } from 'electron';
 import {
 	registerAgentSessionsHandlers,
 	isExpectedSessionReadError,
+	type AgentSessionOriginsData,
+	type AgentSessionsHandlerDependencies,
 } from '../../../../main/ipc/handlers/agentSessions';
 import * as agentSessionStorage from '../../../../main/agents';
 import {
@@ -24,6 +26,8 @@ import { promises as realFs } from 'fs';
 import { getLiveSessions, getSshRemoteById } from '../../../../main/stores';
 import * as mirrors from '../../../../main/storage/starred-transcript-mirror';
 import { createMockSession } from '../../../helpers/mockSession';
+import { getHistoryManager } from '../../../../main/history-manager';
+import { logger } from '../../../../main/utils/logger';
 import { observePathRemote } from '../../../../main/utils/remote-fs';
 import { resolveAgentAccountRef } from '../../../../shared/agentAccountDir';
 import { installationIdentity } from '../../../../shared/maestro-lib/managed/host-adapter';
@@ -99,6 +103,8 @@ vi.mock('../../../../main/utils/statsCache', async (importOriginal) => ({
 	saveGlobalStatsCache: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('../../../../main/history-manager', () => ({ getHistoryManager: vi.fn() }));
+
 // Mock the logger
 vi.mock('../../../../main/utils/logger', () => ({
 	logger: {
@@ -153,6 +159,255 @@ describe('agentSessions IPC handlers', () => {
 			for (const channel of expectedChannels) {
 				expect(handlers.has(channel)).toBe(true);
 			}
+		});
+	});
+
+	describe('Grok native title and unscoped label boundaries', () => {
+		const project = path.resolve('tmp/grok-history-ipc/project');
+		let persisted: string;
+		let store: { get: ReturnType<typeof vi.fn>; set: ReturnType<typeof vi.fn> };
+		let deps: AgentSessionsHandlerDependencies;
+
+		beforeEach(() => {
+			persisted = JSON.stringify({
+				grok: {
+					[project]: { collision: { sessionName: 'Legacy name', starred: true, origin: 'user' } },
+				},
+				codex: {
+					[project]: { collision: { sessionName: 'Codex label', starred: true, origin: 'auto' } },
+				},
+			});
+			store = {
+				get: vi.fn(() => JSON.parse(persisted) as AgentSessionOriginsData['origins']),
+				set: vi.fn((_key: string, value: AgentSessionOriginsData['origins']) => {
+					persisted = JSON.stringify(value);
+				}),
+			};
+			deps = {
+				getMainWindow: () => null,
+				agentSessionOriginsStore:
+					store as unknown as AgentSessionsHandlerDependencies['agentSessionOriginsStore'],
+			};
+			registerAgentSessionsHandlers(deps);
+		});
+
+		it.each([
+			{ ssh: false, state: 'idle' as const },
+			{ ssh: false, state: 'busy' as const },
+			{ ssh: true, state: 'idle' as const },
+			{ ssh: true, state: 'busy' as const },
+		])(
+			'refuses rename/reset across colliding accounts (SSH=$ssh, state=$state)',
+			async ({ ssh, state }) => {
+				const owners = ['a', 'b'].map((suffix) =>
+					createMockSession({
+						id: `owner-${suffix}`,
+						toolType: 'grok',
+						state,
+						cwd: project,
+						customEnvVars: { GROK_HOME: ssh ? `~/account-${suffix}` : path.join(project, suffix) },
+						sessionSshRemoteConfig: ssh
+							? { enabled: true, remoteId: `remote-${suffix}` }
+							: undefined,
+						agentSessionId: 'collision',
+					})
+				);
+				vi.mocked(getLiveSessions).mockReturnValue(owners);
+				const before = persisted;
+				for (const name of ['Renamed', null, '']) {
+					await expect(
+						handlers.get('agentSessions:setSessionName')!({}, 'grok', project, 'collision', name)
+					).rejects.toThrow(
+						/unsupported.*account\/host.*native title.*Rename the Maestro tab.*Grok CLI.*refresh history/
+					);
+				}
+				expect(persisted).toBe(before);
+				expect(store.get).not.toHaveBeenCalled();
+				expect(store.set).not.toHaveBeenCalled();
+				expect(agentSessionStorage.getSessionStorage).not.toHaveBeenCalled();
+				expect(getSshRemoteById).not.toHaveBeenCalled();
+				expect(observePathRemote).not.toHaveBeenCalled();
+				for (const mirror of Object.values(mirrors)) expect(mirror).not.toHaveBeenCalled();
+				expect(logger.info).not.toHaveBeenCalledWith(
+					expect.stringContaining('Set session name'),
+					expect.anything()
+				);
+			}
+		);
+
+		it.each(['Renamed', null])('rejects %s even when the origins store is absent', async (name) => {
+			registerAgentSessionsHandlers();
+			await expect(
+				handlers.get('agentSessions:setSessionName')!({}, 'grok', project, 'collision', name)
+			).rejects.toThrow(/Grok history rename is unsupported/);
+			expect(store.set).not.toHaveBeenCalled();
+			expect(logger.warn).not.toHaveBeenCalledWith(
+				'Origins store not available',
+				expect.anything()
+			);
+		});
+
+		it('suppresses ambiguous names after reload without erasing stars, origins or saved bytes', async () => {
+			const before = persisted;
+			for (let reload = 0; reload < 2; reload++) {
+				registerAgentSessionsHandlers(deps);
+				expect(await handlers.get('agentSessions:getOrigins')!({}, 'grok', project)).toEqual({
+					collision: { starred: true, origin: 'user' },
+				});
+				expect(await handlers.get('agentSessions:getOrigins')!({}, 'codex', project)).toEqual({
+					collision: { sessionName: 'Codex label', starred: true, origin: 'auto' },
+				});
+			}
+			expect(persisted).toBe(before);
+			expect(store.set).not.toHaveBeenCalled();
+		});
+
+		it.each(['claude-code', 'codex'])(
+			'persists and resets a %s Maestro label across handler reload',
+			async (provider) => {
+				await handlers.get('agentSessions:setSessionName')!(
+					{},
+					provider,
+					project,
+					'collision',
+					'Local label'
+				);
+				registerAgentSessionsHandlers(deps);
+				expect(
+					(await handlers.get('agentSessions:getOrigins')!({}, provider, project)).collision
+						.sessionName
+				).toBe('Local label');
+				await handlers.get('agentSessions:setSessionName')!(
+					{},
+					provider,
+					project,
+					'collision',
+					null
+				);
+				registerAgentSessionsHandlers(deps);
+				const origins = await handlers.get('agentSessions:getOrigins')!({}, provider, project);
+				expect(origins.collision?.sessionName).toBeUndefined();
+				if (provider === 'codex')
+					expect(origins.collision).toEqual({ starred: true, origin: 'auto' });
+				expect(store.set).toHaveBeenCalledTimes(2);
+			}
+		);
+
+		it('rejects a failed label write without logging successful native or metadata rename', async () => {
+			const before = persisted;
+			const error = new Error('Origins write failed');
+			store.set.mockImplementationOnce(() => {
+				throw error;
+			});
+			await expect(
+				handlers.get('agentSessions:setSessionName')!(
+					{},
+					'codex',
+					project,
+					'collision',
+					'Lost label'
+				)
+			).rejects.toBe(error);
+			expect(persisted).toBe(before);
+			expect(logger.info).not.toHaveBeenCalledWith(
+				expect.stringContaining('Set session name'),
+				expect.anything()
+			);
+			expect(logger.error).toHaveBeenCalledWith(
+				'setSessionName error',
+				expect.anything(),
+				expect.objectContaining({ message: error.message })
+			);
+		});
+
+		it('excludes Grok from origins, default-account History and mirror label fallbacks', async () => {
+			const grokPath = vi.fn().mockReturnValue(path.join(project, 'grok-native'));
+			const codexPath = vi.fn().mockReturnValue(path.join(project, 'codex-native'));
+			const storages = [
+				{ agentId: 'grok', getSessionPath: grokPath },
+				{ agentId: 'codex', getSessionPath: codexPath },
+			];
+			vi.mocked(agentSessionStorage.getAllSessionStorages)
+				.mockReturnValueOnce(storages as unknown as agentSessionStorage.AgentSessionStorage[])
+				.mockReturnValueOnce(storages as unknown as agentSessionStorage.AgentSessionStorage[]);
+			vi.mocked(agentSessionStorage.getSessionStorage).mockReturnValueOnce(
+				storages[1] as unknown as agentSessionStorage.AgentSessionStorage
+			);
+			vi.spyOn(realFs, 'stat').mockResolvedValue({ mtime: new Date(1000) } as Awaited<
+				ReturnType<typeof realFs.stat>
+			>);
+			const binding: NativeSessionBinding = {
+				version: 1,
+				state: 'bound',
+				provider: 'grok',
+				nativeSessionId: 'bound-collision',
+				cwd: project,
+				accountRef: resolveAgentAccountRef(
+					{ toolType: 'grok', managedAccountDir: path.join(project, 'account-a') },
+					{ homeDir: project }
+				)!,
+				host: { kind: 'local', identity: 'fixture-installation' },
+			};
+			const entries = [
+				{
+					agentSessionId: 'bound-collision',
+					projectPath: project,
+					sessionName: 'Retained Grok name',
+					nativeSessionBinding: binding,
+				},
+				{ agentSessionId: 'unbound', projectPath: project, sessionName: 'Legacy history name' },
+			];
+			vi.mocked(getHistoryManager).mockReturnValueOnce({
+				getAllEntriesPaginated: vi.fn().mockResolvedValue({ entries }),
+			} as unknown as ReturnType<typeof getHistoryManager>);
+			vi.mocked(mirrors.listMirroredStarredSessions).mockResolvedValueOnce([
+				{
+					agentId: 'grok',
+					sessionId: 'mirror-collision',
+					projectPath: project,
+					sessionName: 'Grok mirror',
+					mirroredAtMs: 1000,
+					sourceMtimeMs: 1000,
+				},
+				{
+					agentId: 'codex',
+					sessionId: 'mirror-collision',
+					projectPath: project,
+					sessionName: 'Codex mirror',
+					mirroredAtMs: 1000,
+					sourceMtimeMs: 1000,
+				},
+			]);
+			const before = persisted;
+			expect(await handlers.get('agentSessions:getAllNamedSessions')!({})).toEqual([
+				{
+					agentId: 'codex',
+					agentSessionId: 'collision',
+					projectPath: project,
+					sessionName: 'Codex label',
+					starred: true,
+				},
+				{
+					agentId: 'codex',
+					agentSessionId: 'unbound',
+					projectPath: project,
+					sessionName: 'Legacy history name',
+					lastActivityAt: 1000,
+				},
+				{
+					agentId: 'codex',
+					agentSessionId: 'mirror-collision',
+					projectPath: project,
+					sessionName: 'Codex mirror',
+					starred: true,
+					lastActivityAt: 1000,
+				},
+			]);
+			expect(grokPath).not.toHaveBeenCalled();
+			expect(codexPath).not.toHaveBeenCalledWith(project, 'bound-collision');
+			expect(agentSessionStorage.getSessionStorage).not.toHaveBeenCalledWith('grok');
+			expect(persisted).toBe(before);
+			expect(store.set).not.toHaveBeenCalled();
 		});
 	});
 

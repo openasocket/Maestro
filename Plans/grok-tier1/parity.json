@@ -2701,6 +2701,29 @@
 			],
 			"testOwner": "GT1-04-08A1T",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-native-fork-rename-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-08b-fork-and-rename-regression-tests",
+			"sourceCommit": "8116fab7ab30e44e824d88315ef8ca316ec7c7bc",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/hooks/useForkConversation.test.ts": "dabc6124baa5f6890f7d633100efc16002d287c0145d55cda542b34e3d4aca6b",
+				"src/__tests__/main/ipc/handlers/agentSessions.test.ts": "9857c7b9e0d8a667ba5e24391f4fde1b1adba55d06095928e841b28bfad1980f"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "REG-SESSION-MUTATION"],
+			"scope": "20 new parameter-expanded cases and one strengthened failure assertion across two existing suites: Grok native-fork and rename/reset refusal, retained turn ownership, busy/pending identity, account/host collisions, branch-point context selection and fresh pending identity without resume, source preservation, origins persistence/reload, all named-session fallbacks, and non-Grok success/error controls.",
+			"limitations": [
+				"Tests neither run nor collected; GT1-04-13 owns execution. No successful native child allocation or native title transaction is claimed.",
+				"Static comparisons add no diagnostics; 15 pre-existing TypeScript errors remain. Configured and extended scoped ESLint pass.",
+				"Fixtures use inert stores, providers and filesystem spies. No native files, real accounts, SSH or provider binary access. Native fork/rename remain unsupported; Grok remains beta."
+			],
+			"testOwner": "GT1-04-08B",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6653,7 +6676,8 @@
 				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests",
 				"phase04NativeForkRenameRefusalsRef": "phase04-native-fork-rename-refusals",
 				"phase04GrokRenameConsumersRef": "phase04-grok-rename-consumers",
-				"phase04GrokRenameConsumerTestsRef": "phase04-grok-rename-consumer-tests"
+				"phase04GrokRenameConsumerTestsRef": "phase04-grok-rename-consumer-tests",
+				"phase04NativeForkRenameTestsRef": "phase04-native-fork-rename-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17250,7 +17274,8 @@
 				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests",
 				"phase04NativeForkRenameRefusalsRef": "phase04-native-fork-rename-refusals",
 				"phase04GrokRenameConsumersRef": "phase04-grok-rename-consumers",
-				"phase04GrokRenameConsumerTestsRef": "phase04-grok-rename-consumer-tests"
+				"phase04GrokRenameConsumerTestsRef": "phase04-grok-rename-consumer-tests",
+				"phase04NativeForkRenameTestsRef": "phase04-native-fork-rename-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
