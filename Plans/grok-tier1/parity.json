@@ -3379,6 +3379,28 @@
 				"Native account/workspace/storage binding remains unverified and supportsProjectMemory remains false. Bound Maestro knowledge is not native recall certification.",
 				"Managed cases establish native refusal while authority is installed, not a new memory-specific policy enforcement boundary."
 			]
+		},
+		"phase05-inline-wizard-contracts": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-09-inline-wizard-prompt-and-completion-contracts",
+			"sourceCommit": "addd3668be69059e08c0d663df863f5babc18dfe",
+			"sourceRevisionScope": "Pre-task HEAD plus production hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/utils/grokWizard.ts": "84fdf19760142b8d7a3d9ab1f86afaf11d15aa2d9fd743b725007e26b48b2507",
+				"src/renderer/services/inlineWizardConversation.ts": "f28cde45f2d0f9cbefa6fe1f418980ad80fc75ff44b2b160c71bfef19d436c4c",
+				"src/renderer/services/inlineWizardDocumentGeneration.ts": "819fc9146205886015ef7619f81ea974b86486852758c8a4748c97cf5cfa9ad2"
+			},
+			"provenance": "implementation-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P20", "S04", "C-supportsWizard"],
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"Caller model/effort and AbortController handoff remain GT1-05-09A/09B; GT1-05-10/10A author tests and GT1-05-13 executes them.",
+				"Continuation uses complete history replay; ephemeral wizard native resume has no persisted ownership binding and is not certified.",
+				"Read-only intent, bounded turns and native stream semantics use existing canonical contracts; actual selected binary/platform compliance remains unqualified."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -8498,8 +8520,8 @@
 				"src/main/process-manager/ProcessManager.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-09", "GT1-05-11", "GT1-08-14"],
-				"test": ["GT1-05-10", "GT1-05-12", "GT1-08-15"],
+				"implementation": ["GT1-05-09", "GT1-05-11", "GT1-08-14", "GT1-05-09A", "GT1-05-09B"],
+				"test": ["GT1-05-10", "GT1-05-12", "GT1-08-15", "GT1-05-10A"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-08-21", "GT1-11-11D"],
 				"live": ["GT1-11-11", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -8509,7 +8531,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok helper extracts text-only deltas and adds always-approve/max-turns=8/no-subagents; comments admit residual writes. Version-gated restrictions and cancellation/final-output validation remain required. Grok has a dedicated shared discovery-args branch and text extraction. Account/model, unavailable binary, resume and error handling need consumer evidence. disableTools only appends agent.noToolsArgs when present (context-groomer.ts:379); Grok lacks them and is left unchanged. Must refuse required no-tools rather than imply enforcement; preserve account/SSH locality. Existing Grok wizard adapter needs malformed/partial JSON, tool failures, reset/resume and read-only utility coverage."
+				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. Selected-tab model/effort and generation cancellation caller wiring remain GT1-05-09A/09B; tests are not run and native continuation remains unqualified."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8518,7 +8540,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05InlineWizardContractsEvidenceRef": "phase05-inline-wizard-contracts"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8552,6 +8575,13 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["P20"]
+				},
+				{
+					"id": "grok-inline-wizard-callers:P20",
+					"code": "caller-handoff-and-verification-pending",
+					"missingPrerequisite": "GT1-05-09A/09B caller handoffs, GT1-05-10/10A regressions, GT1-05-13 execution and exact-version live qualification. Ephemeral wizard continuation remains history replay without native ownership certification.",
+					"affectedRows": ["P20"],
+					"evidenceRef": "phase05-inline-wizard-contracts"
 				}
 			],
 			"phase": "05",
@@ -16249,8 +16279,8 @@
 				"src/renderer/hooks/batch/inlineWizard/conversationActions.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-09", "GT1-05-11", "GT1-11-14A"],
-				"test": ["GT1-05-10", "GT1-05-12", "GT1-11-14B"],
+				"implementation": ["GT1-05-09", "GT1-05-11", "GT1-11-14A", "GT1-05-09A", "GT1-05-09B"],
+				"test": ["GT1-05-10", "GT1-05-12", "GT1-11-14B", "GT1-05-10A"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-14C", "GT1-11-11D"],
 				"live": ["GT1-11-11", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -16260,7 +16290,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Existing Grok wizard adapter needs malformed/partial JSON, tool failures, reset/resume and read-only utility coverage."
+				"Existing Grok wizard adapter needs malformed/partial JSON, tool failures, reset/resume and read-only utility coverage.",
+				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. Selected-tab model/effort and generation cancellation caller wiring remain GT1-05-09A/09B; tests are not run and native continuation remains unqualified."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -16269,7 +16300,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05InlineWizardContractsEvidenceRef": "phase05-inline-wizard-contracts"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16303,6 +16335,13 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["C-supportsWizard"]
+				},
+				{
+					"id": "grok-inline-wizard-callers:C-supportsWizard",
+					"code": "caller-handoff-and-verification-pending",
+					"missingPrerequisite": "GT1-05-09A/09B caller handoffs, GT1-05-10/10A regressions, GT1-05-13 execution and exact-version live qualification. Ephemeral wizard continuation remains history replay without native ownership certification.",
+					"affectedRows": ["C-supportsWizard"],
+					"evidenceRef": "phase05-inline-wizard-contracts"
 				}
 			],
 			"field": "supportsWizard",
@@ -19705,8 +19744,8 @@
 				"src/renderer/components/Wizard/services/conversationManager.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-09"],
-				"test": ["GT1-05-10"],
+				"implementation": ["GT1-05-09", "GT1-05-09A", "GT1-05-09B"],
+				"test": ["GT1-05-10", "GT1-05-10A"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-11D"],
 				"live": ["GT1-11-11", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -19716,7 +19755,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok helper extracts text-only deltas and adds always-approve/max-turns=8/no-subagents; comments admit residual writes. Version-gated restrictions and cancellation/final-output validation remain required."
+				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. Selected-tab model/effort and generation cancellation caller wiring remain GT1-05-09A/09B; tests are not run and native continuation remains unqualified."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -19725,7 +19764,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05InlineWizardContractsEvidenceRef": "phase05-inline-wizard-contracts"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19759,6 +19799,13 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S04"]
+				},
+				{
+					"id": "grok-inline-wizard-callers:S04",
+					"code": "caller-handoff-and-verification-pending",
+					"missingPrerequisite": "GT1-05-09A/09B caller handoffs, GT1-05-10/10A regressions, GT1-05-13 execution and exact-version live qualification. Ephemeral wizard continuation remains history replay without native ownership certification.",
+					"affectedRows": ["S04"],
+					"evidenceRef": "phase05-inline-wizard-contracts"
 				}
 			],
 			"branchAuditRefs": ["B27"]
