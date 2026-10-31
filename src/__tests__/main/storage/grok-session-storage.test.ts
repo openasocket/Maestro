@@ -19,6 +19,17 @@ vi.mock('../../../main/utils/remote-fs', () => ({
 	statRemote: vi.fn(),
 }));
 
+// The command-boundary cases use real remote-fs with an inert SSH transport.
+vi.mock('../../../main/ssh-remote-manager', () => ({
+	holdRemoteAccess: vi.fn().mockResolvedValue(null),
+	remoteAccessRefusal: vi.fn(),
+	sshRemoteManager: { buildSshArgs: vi.fn() },
+}));
+vi.mock('../../../main/utils/cliDetection', () => ({
+	resolveSshPath: vi.fn().mockResolvedValue('ssh-fixture'),
+}));
+vi.mock('../../../main/utils/execFile', () => ({ execFileNoThrow: vi.fn() }));
+
 vi.mock('fs/promises', () => ({
 	default: {
 		readFile: vi.fn(),
@@ -37,6 +48,9 @@ import fs from 'fs/promises';
 import { GrokSessionStorage } from '../../../main/storage/grok-session-storage';
 import * as remoteFs from '../../../main/utils/remote-fs';
 import { captureException } from '../../../main/utils/sentry';
+import { logger } from '../../../main/utils/logger';
+import { execFileNoThrow } from '../../../main/utils/execFile';
+import { REMOTE_SESSION_READ_CONCURRENCY } from '../../../main/utils/concurrency';
 import type { SshRemoteConfig } from '../../../shared/types';
 import { isolateAgentEnv } from '../../helpers/agentEnvIsolation';
 
@@ -153,12 +167,13 @@ function sessionFiles(
 	sessionId: string,
 	summary: string,
 	chatHistory: string,
-	sessionsDir = SESSIONS_DIR
+	sessionsDir = SESSIONS_DIR,
+	join = path.join
 ): Record<string, string> {
-	const dir = path.join(sessionsDir, encodeURIComponent(cwd), sessionId);
+	const dir = join(sessionsDir, encodeURIComponent(cwd), sessionId);
 	return {
-		[path.join(dir, 'summary.json')]: summary,
-		[path.join(dir, 'chat_history.jsonl')]: chatHistory,
+		[join(dir, 'summary.json')]: summary,
+		[join(dir, 'chat_history.jsonl')]: chatHistory,
 	};
 }
 
@@ -553,8 +568,14 @@ describe('GrokSessionStorage - local listing', () => {
 		expect(session.byModel).toBeUndefined();
 	});
 
-	it('matches sessions recorded under /private/var when the project path uses /var (and vice versa)', async () => {
-		const recordedCwd = '/private/var/folders/T/grok-test';
+	it.each([
+		['/private/var/grok-test', '/var/grok-test'],
+		['/private/tmp/grok-test', '/tmp/grok-test'],
+		['/private/etc/grok-test', '/etc/grok-test'],
+		['/var/grok-test', '/private/var/grok-test'],
+		['/tmp/grok-test', '/private/tmp/grok-test'],
+		['/etc/grok-test', '/private/etc/grok-test'],
+	])('matches local recorded cwd %s through alias %s', async (recordedCwd, projectPath) => {
 		mockLocalFs(
 			sessionFiles(
 				recordedCwd,
@@ -565,7 +586,7 @@ describe('GrokSessionStorage - local listing', () => {
 		);
 
 		const storage = new GrokSessionStorage();
-		const sessions = await storage.listSessions('/var/folders/T/grok-test');
+		const sessions = await storage.listSessions(projectPath);
 
 		expect(sessions).toHaveLength(1);
 		expect(sessions[0].sessionId).toBe(SESSION_ID);
@@ -774,41 +795,379 @@ describe('GrokSessionStorage - reading messages', () => {
 describe('GrokSessionStorage - SSH remote', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
+		vi.mocked(remoteFs.readDirRemote).mockReset();
+		vi.mocked(remoteFs.readFileRemote).mockReset();
+		vi.mocked(remoteFs.statRemote).mockReset();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+		expect(fs.readdir).not.toHaveBeenCalled();
+		expect(fs.readFile).not.toHaveBeenCalled();
+		expect(fs.stat).not.toHaveBeenCalled();
+		expect(execFileNoThrow).not.toHaveBeenCalled();
 	});
 
 	const encodedProject = encodeURIComponent(PROJECT);
 
-	/** Wire the remote mocks to serve one session under the project's cwd folder. */
-	function mockRemoteSession(): void {
+	/** Exact fake remote paths: unknown accounts/files cannot borrow fixture content. */
+	function mockRemoteSession({ accountDir = '~/.grok', cwd = PROJECT, ids = [SESSION_ID] } = {}) {
+		const sessionsDir = path.posix.join(accountDir, 'sessions');
+		const cwdDir = path.posix.join(sessionsDir, encodeURIComponent(cwd));
+		const directories = new Map<string, remoteFs.RemoteDirEntry[]>([
+			[sessionsDir, [{ name: encodeURIComponent(cwd), isDirectory: true, isSymlink: false }]],
+			[cwdDir, ids.map((name) => ({ name, isDirectory: true, isSymlink: false }))],
+		]);
+		const files: Record<string, string> = Object.assign(
+			{},
+			...ids.map((id) =>
+				sessionFiles(
+					cwd,
+					id,
+					summaryJson(id, cwd),
+					chatHistoryJsonl(),
+					sessionsDir,
+					path.posix.join
+				)
+			)
+		);
 		vi.mocked(remoteFs.readDirRemote).mockImplementation(async (dirPath: string) => {
-			if (dirPath === '~/.grok/sessions') {
-				return {
-					success: true,
-					data: [{ name: encodedProject, isDirectory: true, isSymlink: false }],
-				};
-			}
-			if (dirPath === `~/.grok/sessions/${encodedProject}`) {
-				return {
-					success: true,
-					data: [{ name: SESSION_ID, isDirectory: true, isSymlink: false }],
-				};
-			}
+			if (directories.has(dirPath)) return { success: true, data: directories.get(dirPath) };
 			return { success: false, error: 'Directory not found or not accessible' };
 		});
-		vi.mocked(remoteFs.statRemote).mockResolvedValue({
-			success: true,
-			data: { size: 2048, isDirectory: false, mtime: 1_752_082_000_000 },
+		vi.mocked(remoteFs.statRemote).mockImplementation(async (filePath) => {
+			if (!(filePath in files)) return { success: false, error: 'No such file' };
+			return {
+				success: true,
+				data: {
+					size: Buffer.byteLength(files[filePath]),
+					isDirectory: false,
+					mtime: 1_752_082_000_000,
+				},
+			};
 		});
 		vi.mocked(remoteFs.readFileRemote).mockImplementation(async (filePath: string) => {
-			if (filePath.endsWith('/summary.json')) {
-				return { success: true, data: summaryJson(SESSION_ID, PROJECT) };
-			}
-			if (filePath.endsWith('/chat_history.jsonl')) {
-				return { success: true, data: chatHistoryJsonl() };
-			}
+			if (filePath in files) return { success: true, data: files[filePath] };
 			return { success: false, error: 'No such file' };
 		});
+		return { sessionsDir, cwdDir, directories, files };
 	}
+
+	it.each([undefined, '', ' \t ', '/srv/Grok accounts/研究', "~/O'Brien/研究", '~'])(
+		'keeps all remote operations scoped to account %j, ignoring the local environment',
+		async (accountDir) => {
+			process.env.GROK_HOME = path.resolve('src/__tests__/fixtures/grok-accounts/local-decoy');
+			const cwd = "/remote/研究/O'Brien project";
+			const root = accountDir?.trim() || '~/.grok';
+			const { sessionsDir, cwdDir } = mockRemoteSession({ accountDir: root, cwd });
+			const storage = new GrokSessionStorage();
+			const sessions = await storage.listSessions(cwd, sshConfig, accountDir);
+			expect(sessions).toEqual([
+				expect.objectContaining({ sessionId: SESSION_ID, projectPath: cwd }),
+			]);
+			expect(
+				await storage.listSessionsPaginated(cwd, { configDir: accountDir }, sshConfig)
+			).toMatchObject({ sessions, totalCount: 1 });
+			expect(
+				await storage.readSessionMessages(cwd, SESSION_ID, { configDir: accountDir }, sshConfig)
+			).toMatchObject({ total: 3 });
+			expect(
+				await storage.searchSessions(cwd, 'Created', 'assistant', sshConfig, accountDir)
+			).toEqual([expect.objectContaining({ sessionId: SESSION_ID, matchType: 'assistant' })]);
+			expect(storage.getSessionPath(cwd, SESSION_ID, sshConfig, accountDir)).toBe(
+				path.posix.join(cwdDir, SESSION_ID, 'chat_history.jsonl')
+			);
+			for (const [file, config] of [
+				...vi.mocked(remoteFs.readDirRemote).mock.calls,
+				...vi.mocked(remoteFs.readFileRemote).mock.calls,
+				...vi.mocked(remoteFs.statRemote).mock.calls,
+			]) {
+				expect(file === sessionsDir || file.startsWith(sessionsDir + '/')).toBe(true);
+				expect(config).toBe(sshConfig);
+			}
+		}
+	);
+
+	it('does not fall back to available default history when the chosen remote account is absent', async () => {
+		mockRemoteSession();
+		const storage = new GrokSessionStorage('~/missing account');
+		expect(await storage.listSessions(PROJECT, sshConfig)).toEqual([]);
+		expect(await storage.readSessionMessages(PROJECT, SESSION_ID, undefined, sshConfig)).toEqual({
+			messages: [],
+			total: 0,
+			hasMore: false,
+		});
+		expect(await storage.searchSessions(PROJECT, 'Created', 'all', sshConfig)).toEqual([]);
+		expect(remoteFs.readFileRemote).not.toHaveBeenCalled();
+		expect(remoteFs.statRemote).not.toHaveBeenCalled();
+		for (const [dir] of vi.mocked(remoteFs.readDirRemote).mock.calls) {
+			expect(dir).toBe('~/missing account/sessions');
+		}
+		expect(captureException).not.toHaveBeenCalled();
+	});
+
+	it('rejects malformed cwd folders before joins, retaining lowercase encoded slashes and descendants', async () => {
+		const cwd = '/remote/project/sub';
+		const fixture = mockRemoteSession({ cwd });
+		const valid = encodeURIComponent(cwd).replace(/%2F/g, '%2f');
+		fixture.directories.set(
+			path.posix.join(fixture.sessionsDir, valid),
+			fixture.directories.get(fixture.cwdDir)!
+		);
+		for (const [file, content] of Object.entries(fixture.files)) {
+			fixture.files[file.replace(encodeURIComponent(cwd), valid)] = content;
+		}
+		const rejected = [
+			'',
+			'.',
+			'..',
+			'raw/slash',
+			'raw\\slash',
+			'\0',
+			'%',
+			'%2',
+			'%GG',
+			'%C0%AF',
+			'%ED%A0%80',
+			'%2Fremote%2Fproject%2F..%2Foutside',
+			'%2Fremote%2Fproject%2F.%2Fsub',
+			'%2Fremote%2Fproject%5C..%5Coutside',
+			'%2Fremote%2Fproject%00',
+			encodeURIComponent('/remote/project-sibling'),
+		];
+		fixture.directories.set(
+			fixture.sessionsDir,
+			[...rejected, valid].map((name) => ({
+				name,
+				isDirectory: true,
+				isSymlink: false,
+			}))
+		);
+		const storage = new GrokSessionStorage();
+		expect(await storage.listSessions('/remote/project/', sshConfig)).toEqual([
+			expect.objectContaining({ sessionId: SESSION_ID, projectPath: cwd }),
+		]);
+		expect(
+			await storage.readSessionMessages('/remote/project', SESSION_ID, undefined, sshConfig)
+		).toMatchObject({ total: 3 });
+		for (const [dir] of vi.mocked(remoteFs.readDirRemote).mock.calls) {
+			expect([fixture.sessionsDir, path.posix.join(fixture.sessionsDir, valid)]).toContain(dir);
+		}
+		for (const [file] of [
+			...vi.mocked(remoteFs.readFileRemote).mock.calls,
+			...vi.mocked(remoteFs.statRemote).mock.calls,
+		]) {
+			expect(file.startsWith(path.posix.join(fixture.sessionsDir, valid, SESSION_ID) + '/')).toBe(
+				true
+			);
+		}
+		expect(captureException).not.toHaveBeenCalled();
+	});
+
+	it('filters traversal entries but retains opaque IDs and directory identity when summaries disagree', async () => {
+		const ids = ['not-a-uuid', 'native..id', '%2F..%2Fopaque'];
+		const fixture = mockRemoteSession({ ids });
+		fixture.directories.get(fixture.cwdDir)!.push(
+			...['', '.', '..', '../outside', 'nested/id', 'nested\\id', 'bad\0id'].map((name) => ({
+				name,
+				isDirectory: true,
+				isSymlink: false,
+			}))
+		);
+		for (const id of ids)
+			fixture.files[path.posix.join(fixture.cwdDir, id, 'summary.json')] = summaryJson(
+				'../redirected',
+				OTHER_PROJECT
+			);
+		const storage = new GrokSessionStorage();
+		expect(await storage.listSessions(PROJECT, sshConfig)).toEqual(
+			ids.map((sessionId) => expect.objectContaining({ sessionId, projectPath: PROJECT }))
+		);
+		expect(
+			(await storage.searchSessions(PROJECT, 'Created', 'assistant', sshConfig)).map(
+				(s) => s.sessionId
+			)
+		).toEqual(ids);
+		for (const id of ids) {
+			expect(await storage.readSessionMessages(PROJECT, id, undefined, sshConfig)).toMatchObject({
+				total: 3,
+			});
+			expect(storage.getSessionPath(PROJECT, id, sshConfig)).toBe(
+				path.posix.join(fixture.cwdDir, id, 'chat_history.jsonl')
+			);
+		}
+		for (const [file] of [
+			...vi.mocked(remoteFs.readFileRemote).mock.calls,
+			...vi.mocked(remoteFs.statRemote).mock.calls,
+		]) {
+			expect(
+				Object.keys(fixture.files).includes(file) ||
+					ids.some((id) => file === path.posix.join(fixture.cwdDir, id, 'usage.json'))
+			).toBe(true);
+		}
+	});
+
+	it.each(['/var/project', '/tmp/project', '/etc/project'])(
+		'keeps remote %s distinct from /private while accepting POSIX root descendants',
+		async (cwd) => {
+			mockRemoteSession({ cwd: `/private${cwd}` });
+			const storage = new GrokSessionStorage();
+			expect(await storage.listSessions(cwd, sshConfig)).toEqual([]);
+			expect(remoteFs.readFileRemote).not.toHaveBeenCalled();
+			expect(await storage.listSessions(`/private${cwd}/`, sshConfig)).toHaveLength(1);
+			expect(await storage.listSessions('/', sshConfig)).toHaveLength(1);
+		}
+	);
+
+	it('follows remote directory symlinks but ignores file and unresolved symlinks', async () => {
+		const { directories } = mockRemoteSession();
+		for (const entries of directories.values()) {
+			entries[0].isSymlink = true;
+			entries.push({ name: 'unresolved-link', isDirectory: false, isSymlink: true });
+		}
+		const storage = new GrokSessionStorage();
+		expect(await storage.listSessions(PROJECT, sshConfig)).toHaveLength(1);
+		expect(
+			await storage.readSessionMessages(PROJECT, SESSION_ID, undefined, sshConfig)
+		).toMatchObject({ total: 3 });
+		for (const [file] of vi.mocked(remoteFs.readDirRemote).mock.calls)
+			expect(file).not.toContain('unresolved-link');
+	});
+
+	it.each(['readDirRemote', 'statRemote', 'readFileRemote'] as const)(
+		'classifies expected misses and disconnects at %s without local fallback',
+		async (method) => {
+			for (const error of ['No such file', 'Permission denied', 'ssh connection reset by peer']) {
+				vi.clearAllMocks();
+				mockRemoteSession();
+				vi.mocked(remoteFs[method]).mockResolvedValue({ success: false, error });
+				expect(await new GrokSessionStorage().listSessions(PROJECT, sshConfig)).toEqual([]);
+				if (error.includes('connection reset')) {
+					const operation = {
+						readDirRemote: 'listCwdFolders',
+						statRemote: 'statSessionFile',
+						readFileRemote: 'readSessionFile',
+					}[method];
+					expect(captureException).toHaveBeenCalledExactlyOnceWith(
+						expect.objectContaining({ message: error }),
+						expect.objectContaining({ operation: `grokStorage:${operation}` })
+					);
+					expect(logger.warn).toHaveBeenCalledWith(
+						expect.stringContaining(error),
+						'[GrokSessionStorage]'
+					);
+				} else expect(captureException).not.toHaveBeenCalled();
+				expect(fs.readdir).not.toHaveBeenCalled();
+				expect(fs.readFile).not.toHaveBeenCalled();
+				expect(fs.stat).not.toHaveBeenCalled();
+				expect(execFileNoThrow).not.toHaveBeenCalled();
+			}
+		}
+	);
+
+	it('bounds concurrent remote reads and drains every session without dropping results', async () => {
+		vi.useFakeTimers();
+		const ids = Array.from(
+			{ length: REMOTE_SESSION_READ_CONCURRENCY * 3 + 1 },
+			(_, i) => `native-${i}`
+		);
+		mockRemoteSession({ ids });
+		const read = vi.mocked(remoteFs.readFileRemote).getMockImplementation()!;
+		let active = 0;
+		let peak = 0;
+		vi.mocked(remoteFs.readFileRemote).mockImplementation(async (...args) => {
+			active++;
+			peak = Math.max(peak, active);
+			try {
+				await new Promise((resolve) => setTimeout(resolve, 1));
+				return await read(...args);
+			} finally {
+				active--;
+			}
+		});
+		const result = new GrokSessionStorage().listSessions(PROJECT, sshConfig);
+		await vi.runAllTimersAsync();
+		expect((await result).map((s) => s.sessionId)).toEqual(ids);
+		expect(peak).toBeGreaterThan(1);
+		expect(peak).toBeLessThanOrEqual(REMOTE_SESSION_READ_CONCURRENCY);
+		expect(active).toBe(0);
+		expect(remoteFs.statRemote).toHaveBeenCalledTimes(ids.length);
+		expect(remoteFs.readFileRemote).toHaveBeenCalledTimes(ids.length * 3);
+	});
+
+	it.each([
+		[
+			"/srv/O'Brien/研究 $cash;$(probe)",
+			"'/srv/O'\\''Brien/研究 $cash;$(probe)'",
+			'native $(probe);id',
+		],
+		[
+			"~/O'Brien/研究 $cash;$(probe)",
+			'"$HOME/O\'Brien/研究 \\$cash;\\$(probe)"',
+			'native \\$(probe);id',
+		],
+	])(
+		'quotes every path passed to the real remote-fs transport for %s',
+		async (accountDir, escapedRoot, escapedId) => {
+			const actual = await vi.importActual<typeof remoteFs>('../../../main/utils/remote-fs');
+			const id = 'native $(probe);id';
+			const cwd = '/remote/研究 project';
+			const encoded = encodeURIComponent(cwd);
+			// These shell tokens are independently specified, never produced by the escaper under test.
+			const commands = new Map<string, string | undefined>();
+			for (const [suffix, stdout] of [
+				['sessions', `${encoded}/\n__SYMDIR__\n`],
+				[`sessions/${encoded}`, `${id}@\n__SYMDIR__\n${id}\n`],
+				[`sessions/${encoded}/${escapedId}/summary.json`, summaryJson(id, cwd)],
+				[`sessions/${encoded}/${escapedId}/chat_history.jsonl`, chatHistoryJsonl()],
+				[`sessions/${encoded}/${escapedId}/usage.json`, undefined],
+			] as const) {
+				const token = `${escapedRoot.slice(0, -1)}/${suffix}${escapedRoot.slice(-1)}`;
+				if (!suffix.includes(escapedId)) {
+					commands.set(
+						`ls -1AF --color=never ${token} 2>/dev/null || echo "__LS_ERROR__"; echo "__SYMDIR__"; find ${token} -mindepth 1 -maxdepth 1 -type l -exec test -d {} \\; -exec basename {} \\; 2>/dev/null`,
+						stdout
+					);
+				} else {
+					commands.set(`cat ${token}`, stdout);
+					if (suffix.endsWith('chat_history.jsonl'))
+						commands.set(
+							`stat --printf='%s\\n%F\\n%Y' ${token} 2>/dev/null || stat -f $'%z\\n%HT\\n%m' ${token}`,
+							'2048\nregular file\n1752082000'
+						);
+				}
+			}
+			const deps: remoteFs.RemoteFsDeps = {
+				buildSshArgs: () => ['fixture@host'],
+				execSsh: vi.fn(async (binary, args) => {
+					expect(binary).toBe('ssh-fixture');
+					expect(args).toHaveLength(2);
+					expect(args[0]).toBe('fixture@host');
+					expect(commands.has(args[1])).toBe(true);
+					const stdout = commands.get(args[1]);
+					return {
+						stdout: stdout ?? '',
+						stderr: stdout === undefined ? 'No such file' : '',
+						exitCode: stdout === undefined ? 1 : 0,
+					};
+				}),
+			};
+			vi.mocked(remoteFs.readDirRemote).mockImplementation((file, config) =>
+				actual.readDirRemote(file, config, deps)
+			);
+			vi.mocked(remoteFs.readFileRemote).mockImplementation((file, config) =>
+				actual.readFileRemote(file, config, deps)
+			);
+			vi.mocked(remoteFs.statRemote).mockImplementation((file, config) =>
+				actual.statRemote(file, config, deps)
+			);
+			expect(await new GrokSessionStorage(accountDir).listSessions(cwd, sshConfig)).toEqual([
+				expect.objectContaining({ sessionId: id, projectPath: cwd, messageCount: 3 }),
+			]);
+			expect(deps.execSsh).toHaveBeenCalledTimes(6);
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
 
 	it('lists and reads sessions on a remote host via remote-fs', async () => {
 		mockRemoteSession();
@@ -983,15 +1342,38 @@ describe('GrokSessionStorage - misc contract', () => {
 		});
 	});
 
-	it('getSessionPath rejects path-traversal and non-UUID sessionIds', () => {
-		const storage = new GrokSessionStorage();
+	it.each(['', '.', '..', '../other-project', 'foo/bar', 'foo\\bar', 'bad\0id'])(
+		'rejects unsafe session ID %j before any local or remote filesystem access',
+		async (id) => {
+			const storage = new GrokSessionStorage();
+			for (const config of [undefined, sshConfig]) {
+				expect(storage.getSessionPath(PROJECT, id, config)).toBeNull();
+				expect(await storage.readSessionMessages(PROJECT, id, undefined, config)).toEqual({
+					messages: [],
+					total: 0,
+					hasMore: false,
+				});
+			}
+			for (const operation of [
+				fs.readdir,
+				fs.readFile,
+				fs.stat,
+				remoteFs.readDirRemote,
+				remoteFs.readFileRemote,
+				remoteFs.statRemote,
+			])
+				expect(operation).not.toHaveBeenCalled();
+		}
+	);
 
-		expect(storage.getSessionPath(PROJECT, '../other-project')).toBeNull();
-		expect(storage.getSessionPath(PROJECT, 'foo/bar')).toBeNull();
-		expect(storage.getSessionPath(PROJECT, 'foo\\bar')).toBeNull();
-		expect(storage.getSessionPath(PROJECT, 'not-a-uuid')).toBeNull();
-		expect(storage.getSessionPath(PROJECT, '')).toBeNull();
-	});
+	it.each(['/project/../other', '/project/./child', '/project\0', '/project/\ud800'])(
+		'refuses malformed project path guesses: %j',
+		(cwd) => {
+			for (const config of [undefined, sshConfig]) {
+				expect(new GrokSessionStorage().getSessionPath(cwd, SESSION_ID, config)).toBeNull();
+			}
+		}
+	);
 
 	it('getSessionPath honors GROK_HOME for the local sessions root', () => {
 		const accountDir = path.resolve('src', '__tests__', 'fixtures', 'grok-accounts', 'custom');
