@@ -5,6 +5,7 @@ import type {
 import type { NativeSessionLaunch } from '../main/process-manager/types';
 import type { ProcessSpawnAttempt } from '../main/preload/process/core';
 import type { GrokCommandDiscoveryResult } from '../main/agents/grok-skills';
+import type { GrokSpawnSelectionFingerprint } from '../shared/grokSpawnSelection';
 import type {
 	AgentDiscoveryRequest,
 	AgentDiscoveryResult,
@@ -74,6 +75,10 @@ interface ProcessConfig {
 	images?: string[];
 	// Agent-specific spawn options (used to build args via agent config)
 	agentSessionId?: string;
+	/** Ephemeral enqueue configuration check, never a native binding or admission.
+	 *  Omitted for unguarded turns; null means guarded but evidence unavailable.
+	 *  A guarded request must refuse missing/stale evidence before preparation. */
+	expectedGrokSpawnSelection?: GrokSpawnSelectionFingerprint | null;
 	readOnlyMode?: boolean;
 	modelId?: string;
 	yoloMode?: boolean;

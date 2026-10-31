@@ -3,6 +3,7 @@ import type { CodexTransport } from '../../../../shared/codexTransport';
 import type { AutoRunSpawnLineage } from '../../../../shared/maestro-lib/autorun/attribution';
 import type { ManagedDelegationContext } from '../../../../shared/maestro-lib/managed/delegation';
 import type { NativeSessionLaunch } from '../../../process-manager/types';
+import type { GrokSpawnSelectionFingerprint } from '../../../../shared/grokSpawnSelection';
 
 /**
  * IPC payload for `process:spawn`.
@@ -25,6 +26,10 @@ export interface SpawnProcessConfig {
 	agentSessionId?: string; // For session resume
 	/** Caller correlation only; does not supply a native ID, scope or admission. */
 	nativeSessionRequestId?: NativeSessionLaunch['nativeSessionRequestId'];
+	/** Ephemeral enqueue configuration check, never a native binding or admission.
+	 *  Omitted for unguarded turns; null means guarded but evidence unavailable.
+	 *  A guarded request must refuse missing/stale evidence before preparation. */
+	expectedGrokSpawnSelection?: GrokSpawnSelectionFingerprint | null;
 	readOnlyMode?: boolean; // For read-only/plan mode
 	modelId?: string; // For model selection
 	yoloMode?: boolean; // For YOLO/full-access mode (bypasses confirmations)
