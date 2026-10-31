@@ -1737,6 +1737,37 @@
 			],
 			"testOwners": ["GT1-04-07CUIT", "GT1-04-07CUIAT"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-browser-ownership": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c4-browser-ownership-and-observed-receipts",
+			"sourceCommit": "5c65cf6839e71d353207f178e8bd5d12257e82bd",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/hooks/agent/useSessionViewer.ts": "3545fb2954ca39a20e1cf78d57e3c4a26d0765994fe2d8eea4ead7ca7f8df58a",
+				"src/renderer/components/AgentSessionsBrowser/AgentSessionsBrowser.tsx": "e5d176667cda1c9812192aa3e2dd0e860e4a674e66d57246fa1ce2081727e672",
+				"src/renderer/components/AgentSessionsBrowser/types.ts": "384f1de0c03f2f94aa9f0d8497a71dc4ad0d92c52559c77939893e52f9dcacc1"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Pre-existing RequestInit.dispatcher TS2339 in src/main/plugins/plugin-host-handlers.ts:1196; no changed-file diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "Browser scoped transcript pages, observed ownership, request/selection invalidation and resume callback scope. Grok quick resume reads first; partial or unavailable history cannot authorize continuation. Leaf await-before-close remains 07C5. External settings/physical endpoint changes are checked by main on the next scoped read/resume, not by a new renderer subscription.",
+			"remainingImplementationOwners": ["GT1-04-07C5", "GT1-04-07D", "GT1-04-07E", "GT1-04-07F"],
+			"testOwners": ["GT1-04-07CUIT", "GT1-04-07CUIAT"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
