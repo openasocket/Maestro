@@ -2751,6 +2751,31 @@
 			"implementationOwner": "GT1-04-08C",
 			"testOwner": "GT1-04-08D",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-grok-history-mutation-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-08d-grok-history-mutation-regression-tests",
+			"sourceCommit": "bde3bbd2dff2993aa1d00d7c9a0b27aed865f079",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/hooks/tabs/internal/useScrollLogHandlers.test.ts": "a5e145877e7b18a2c1d5b22508fd1a3dec7152bc5986c8e1ca4efe37a84c1a9d",
+				"src/__tests__/main/ipc/handlers/agentSessions.test.ts": "e404d8a138ca1cce7adc741dd8e887e3b6f97bf7d49f6112e25573541b4302c4",
+				"src/__tests__/main/storage/grok-session-storage.test.ts": "c1ec019b352118899c9747c3b623e6a98dadab026146cbb8480dcdf38cc5cda3"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "REG-SESSION-MUTATION"],
+			"scope": "32 additional parameter-expanded cases across the three existing renderer, IPC and storage suites: visible synchronous Grok history refusal, busy/allocation/retained/parked ownership, account/host collisions, malformed IDs, missing/failing adapters, concurrent scope and native writer generation changes, reload and non-Grok/local command-card controls. No UI success, Claude IPC, default-account fallback or native file mutation.",
+			"limitations": [
+				"Tests neither run nor collected; GT1-04-13 owns execution. No successful native deletion/editing transaction is claimed.",
+				"Static comparison adds no diagnostics; 20 pre-existing TypeScript diagnostics remain (14 remote observer overload fixtures, 5 ES2020 replaceAll library errors and RequestInit.dispatcher). Scoped ESLint and formatting pass.",
+				"Grok refusal starts no native mutation and offers no mutation cancellation API. Busy state and successor generations are preserved; native transaction cancellation remains unqualified.",
+				"Virtual files and mocked IPC only; no native files, real accounts, SSH or provider binary access. Native deletion/editing remain unsupported; Grok remains beta."
+			],
+			"testOwner": "GT1-04-08D",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6706,7 +6731,8 @@
 				"phase04GrokRenameConsumersRef": "phase04-grok-rename-consumers",
 				"phase04GrokRenameConsumerTestsRef": "phase04-grok-rename-consumer-tests",
 				"phase04NativeForkRenameTestsRef": "phase04-native-fork-rename-tests",
-				"phase04GrokHistoryMutationRefusalsRef": "phase04-grok-history-mutation-refusals"
+				"phase04GrokHistoryMutationRefusalsRef": "phase04-grok-history-mutation-refusals",
+				"phase04GrokHistoryMutationTestsRef": "phase04-grok-history-mutation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17312,7 +17338,8 @@
 				"phase04GrokRenameConsumersRef": "phase04-grok-rename-consumers",
 				"phase04GrokRenameConsumerTestsRef": "phase04-grok-rename-consumer-tests",
 				"phase04NativeForkRenameTestsRef": "phase04-native-fork-rename-tests",
-				"phase04GrokHistoryMutationRefusalsRef": "phase04-grok-history-mutation-refusals"
+				"phase04GrokHistoryMutationRefusalsRef": "phase04-grok-history-mutation-refusals",
+				"phase04GrokHistoryMutationTestsRef": "phase04-grok-history-mutation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {

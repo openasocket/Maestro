@@ -44,6 +44,7 @@ vi.mock('fs/promises', async () => ({
 		appendFile: vi.fn(),
 		rename: vi.fn(),
 		unlink: vi.fn(),
+		rm: vi.fn(),
 		mkdir: vi.fn(),
 	},
 }));
@@ -2460,12 +2461,111 @@ describe('GrokSessionStorage - misc contract', () => {
 		vi.clearAllMocks();
 	});
 
-	it('reports message-pair deletion as unsupported', async () => {
-		const storage = new GrokSessionStorage();
-		const result = await storage.deleteMessagePair(PROJECT, SESSION_ID, 'grok-msg-0');
+	describe('native history mutation refusal', () => {
+		afterEach(() => {
+			for (const mutation of [fs.writeFile, fs.appendFile, fs.rename, fs.unlink, fs.rm, fs.mkdir])
+				expect(mutation).not.toHaveBeenCalled();
+			for (const operation of Object.values(remoteFs)) expect(operation).not.toHaveBeenCalled();
+			expect(execFileNoThrow).not.toHaveBeenCalled();
+			vi.restoreAllMocks();
+		});
 
-		expect(result.success).toBe(false);
-		expect(result.error).toContain('not supported');
+		it.each([undefined, sshConfig, { ...sshConfig, host: 'replacement-host', port: 2222 }])(
+			'refuses colliding account IDs before any file or host access: %j',
+			async (remote) => {
+				for (const account of ['alpha', 'beta']) {
+					const root = remote
+						? `~/fixture accounts/${account}`
+						: path.resolve('src/__tests__/fixtures/grok-accounts', account);
+					const storage = new GrokSessionStorage(root);
+					const result = await storage.deleteMessagePair(
+						PROJECT,
+						SESSION_ID,
+						'grok-line-3',
+						'same fallback text in both accounts',
+						remote
+					);
+					expect(result).toEqual({
+						success: false,
+						error: expect.stringContaining('not supported'),
+					});
+					expect(result.error).toContain('verified native transaction');
+					expect(result.error).toContain('History is unchanged');
+				}
+				for (const operation of Object.values(fs))
+					if (vi.isMockFunction(operation)) expect(operation).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each(['', '..', '../other-account', 'nested/id', 'nested\\id', '%2F..%2F', '\0'])(
+			'refuses malformed identifiers without parsing fallback content: %j',
+			async (id) => {
+				const storage = new GrokSessionStorage();
+				const result = await storage.deleteMessagePair(
+					PROJECT,
+					id,
+					id,
+					'{"type":"user","content":"delete matching text"}',
+					sshConfig
+				);
+				expect(result).toEqual({ success: false, error: expect.stringContaining('not supported') });
+				for (const operation of Object.values(fs))
+					if (vi.isMockFunction(operation)) expect(operation).not.toHaveBeenCalled();
+			}
+		);
+
+		it('preserves a concurrent writer generation and both accounts when reloaded after refusal', async () => {
+			const roots = ['alpha', 'beta'].map((name) =>
+				path.resolve('src/__tests__/fixtures/grok-accounts', name)
+			);
+			const files: Record<string, string> = {};
+			for (const root of roots) {
+				const dir = path.join(root, 'sessions', encodeURIComponent(PROJECT), SESSION_ID);
+				Object.assign(
+					files,
+					sessionFiles(
+						PROJECT,
+						SESSION_ID,
+						summaryJson(SESSION_ID, PROJECT),
+						chatHistoryJsonl(),
+						path.join(root, 'sessions')
+					)
+				);
+				files[path.join(dir, 'usage.json')] = '{"session":{"inputTokens":8,"outputTokens":3}}';
+				files[path.join(dir, 'events.jsonl')] = '{"event":"native-writer-owned"}\n';
+				files[path.join(root, 'session_search.sqlite')] = 'opaque native index fixture';
+			}
+			const fixture = mockLocalFs(files);
+			const storage = new GrokSessionStorage(roots[0]);
+			const before = await storage.readSessionMessages(PROJECT, SESSION_ID);
+			vi.clearAllMocks();
+			const pending = storage.deleteMessagePair(PROJECT, SESSION_ID, before.messages[0].uuid!);
+			// The native writer replaces its transcript before the caller observes refusal.
+			const transcript = path.join(
+				roots[0],
+				'sessions',
+				encodeURIComponent(PROJECT),
+				SESSION_ID,
+				'chat_history.jsonl'
+			);
+			files[transcript] += '\n{"type":"user","content":"writer successor"}';
+			fixture.identities.get(transcript)!.ino++;
+			const successor = { ...files };
+			expect(await pending).toMatchObject({
+				success: false,
+				error: expect.stringContaining('unchanged'),
+			});
+			for (const operation of Object.values(fs))
+				if (vi.isMockFunction(operation)) expect(operation).not.toHaveBeenCalled();
+			const reloaded = new GrokSessionStorage(roots[0]);
+			const after = await reloaded.readSessionMessages(PROJECT, SESSION_ID);
+			expect(after.messages.slice(0, -1)).toEqual(before.messages);
+			expect(after.messages.at(-1)?.content).toBe('writer successor');
+			expect(
+				(await new GrokSessionStorage(roots[1]).readSessionMessages(PROJECT, SESSION_ID)).messages
+			).toEqual(before.messages);
+			expect(files).toEqual(successor);
+		});
 	});
 
 	it('getSessionPath returns the encoded-cwd transcript path guess', async () => {

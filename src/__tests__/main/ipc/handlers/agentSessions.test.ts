@@ -1777,6 +1777,113 @@ describe('agentSessions IPC handlers', () => {
 	});
 
 	describe('agentSessions:deleteMessagePair', () => {
+		it.each([
+			{ ssh: false, state: 'idle' as const },
+			{ ssh: false, state: 'busy' as const },
+			{ ssh: true, state: 'idle' as const },
+			{ ssh: true, state: 'busy' as const },
+		])(
+			'refuses unscoped Grok deletion before any adapter (SSH=$ssh, state=$state)',
+			async ({ ssh, state }) => {
+				const project = path.resolve('tmp/grok-history-ipc/project');
+				const owners = ['a', 'b'].map((suffix) =>
+					createMockSession({
+						id: `owner-${suffix}`,
+						toolType: 'grok',
+						state,
+						cwd: project,
+						agentSessionId: 'collision',
+						customEnvVars: { GROK_HOME: ssh ? `~/account-${suffix}` : path.join(project, suffix) },
+						sessionSshRemoteConfig: ssh
+							? { enabled: true, remoteId: `remote-${suffix}` }
+							: undefined,
+					})
+				);
+				vi.mocked(getLiveSessions).mockReturnValue(owners);
+				const deleteMessagePair = vi.fn().mockRejectedValue(new Error('Native writer failed'));
+				vi.mocked(agentSessionStorage.getSessionStorage).mockReturnValue({
+					agentId: 'claude-code',
+					deleteMessagePair,
+				} as unknown as agentSessionStorage.AgentSessionStorage);
+				const before = JSON.stringify(owners);
+				const result = await handlers.get('agentSessions:deleteMessagePair')!(
+					{},
+					'grok',
+					project,
+					'collision',
+					'message-1',
+					'matching text in both accounts'
+				);
+				expect(result).toEqual({
+					success: false,
+					error: expect.stringMatching(
+						/not supported.*account\/host.*verified transport.*History is unchanged/
+					),
+				});
+				expect(JSON.stringify(owners)).toBe(before);
+				expect(agentSessionStorage.getSessionStorage).not.toHaveBeenCalled();
+				expect(deleteMessagePair).not.toHaveBeenCalled();
+				expect(getLiveSessions).not.toHaveBeenCalled();
+				expect(getSshRemoteById).not.toHaveBeenCalled();
+				expect(observePathRemote).not.toHaveBeenCalled();
+				for (const mirror of Object.values(mirrors)) expect(mirror).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each(['', '../other-account', '/absolute', 'id/child', 'bad\u0000id', '%2e%2e'])(
+			'refuses empty or path-like Grok identity %j without a storage fallback',
+			async (id) => {
+				vi.mocked(agentSessionStorage.getSessionStorage).mockReturnValue(null);
+				const result = await handlers.get('agentSessions:deleteMessagePair')!(
+					{},
+					'grok',
+					'../outside',
+					id,
+					id,
+					'fallback content'
+				);
+				expect(result).toEqual({
+					success: false,
+					error: expect.stringContaining('History is unchanged'),
+				});
+				expect(agentSessionStorage.getSessionStorage).not.toHaveBeenCalled();
+				expect(logger.warn).not.toHaveBeenCalled();
+			}
+		);
+
+		it('retains refusal across concurrent scope replacement and handler reload', async () => {
+			accountStores.provider = { GROK_HOME: '/fixture/account-a' };
+			const args = [{}, 'grok', '/fixture/project', 'collision', 'message-1'];
+			const pending = handlers.get('agentSessions:deleteMessagePair')!(...args);
+			// Replace the current owner under another account/host while the caller
+			// awaits the result. Current state cannot authorize the old unscoped ID.
+			accountStores.provider = { GROK_HOME: '/fixture/account-b' };
+			vi.mocked(getLiveSessions).mockReturnValue([
+				createMockSession({
+					id: 'successor',
+					toolType: 'grok',
+					state: 'busy',
+					agentSessionId: 'collision',
+					sessionSshRemoteConfig: { enabled: true, remoteId: 'replacement-host' },
+				}),
+			]);
+			registerAgentSessionsHandlers();
+			const results = await Promise.all([
+				pending,
+				handlers.get('agentSessions:deleteMessagePair')!(...args),
+			]);
+			for (const result of results) {
+				expect(result).toEqual({
+					success: false,
+					error: expect.stringContaining('History is unchanged'),
+				});
+			}
+			expect(agentSessionStorage.getSessionStorage).not.toHaveBeenCalled();
+			expect(getLiveSessions).not.toHaveBeenCalled();
+			expect(getSshRemoteById).not.toHaveBeenCalled();
+			expect(observePathRemote).not.toHaveBeenCalled();
+		});
+
 		it('should delete message pair from storage', async () => {
 			const mockStorage = {
 				agentId: 'claude-code',
