@@ -2992,6 +2992,23 @@
 			"affectedRows": ["P17", "S01", "S05", "META-01", "META-03"],
 			"repairTasks": ["GT1-05-02E1"],
 			"verificationTask": "GT1-05-13"
+		},
+		"phase05-config-focus-repair": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-02e1-configuration-close-focus-repair",
+			"sourceCommit": "670051c859a89403f6d660ed48333dbb2a4e1948",
+			"sourceRevisionScope": "Pre-task HEAD plus the two source hashes and task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/components/Wizard/screens/AgentSelectionScreen/AgentSelectionScreen.tsx": "c14fd0756f0aa740a1a9d402fa8c8dcd9ea746709e10e49c86b7f3a08180af55",
+				"src/renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useAgentSelectionFocus.ts": "06258c7bfd7d9aaa1534cd1e83f98e0cfdc6307ba767367fc78b96021ead0e01"
+			},
+			"provenance": "implementation-and-static-review",
+			"implementation": "implemented",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P17", "S01", "S05", "META-01"],
+			"verificationTask": "GT1-05-13"
 		}
 	},
 	"sourceCatalog": {
@@ -7599,7 +7616,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase05ControlsEvidenceRef": "phase05-controls",
 				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
-				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests"
+				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests",
+				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7624,10 +7642,10 @@
 				},
 				{
 					"id": "wizard-config-focus-before-remount:P17",
-					"code": "source-reviewed-focus-restoration-gap",
-					"missingPrerequisite": "GT1-05-02E1 must focus the current provider tile after grid remount; GT1-05-13 runs the GT1-05-02E regression. No behavioral run performed.",
+					"code": "focus-repair-awaiting-regression",
+					"missingPrerequisite": "GT1-05-02E1 queues provider identity and restores focus after the grid commits. Static checks pass; GT1-05-13 must execute the existing GT1-05-02E real-screen regression. No behavioral run performed.",
 					"affectedRows": ["P17"],
-					"evidenceRef": "phase05-interaction-tests"
+					"evidenceRef": "phase05-config-focus-repair"
 				}
 			],
 			"phase": "05",
@@ -18591,7 +18609,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase05ControlsEvidenceRef": "phase05-controls",
 				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
-				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests"
+				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests",
+				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18616,10 +18635,10 @@
 				},
 				{
 					"id": "wizard-config-focus-before-remount:S01",
-					"code": "source-reviewed-focus-restoration-gap",
-					"missingPrerequisite": "GT1-05-02E1 must focus the current provider tile after grid remount; GT1-05-13 runs the GT1-05-02E regression. No behavioral run performed.",
+					"code": "focus-repair-awaiting-regression",
+					"missingPrerequisite": "GT1-05-02E1 queues provider identity and restores focus after the grid commits. Static checks pass; GT1-05-13 must execute the existing GT1-05-02E real-screen regression. No behavioral run performed.",
 					"affectedRows": ["S01"],
-					"evidenceRef": "phase05-interaction-tests"
+					"evidenceRef": "phase05-config-focus-repair"
 				}
 			],
 			"branchAuditRefs": ["B06", "B14", "B15", "B18", "B29"]
@@ -18979,7 +18998,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests"
+				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests",
+				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19016,10 +19036,10 @@
 				},
 				{
 					"id": "wizard-config-focus-before-remount:S05",
-					"code": "source-reviewed-focus-restoration-gap",
-					"missingPrerequisite": "GT1-05-02E1 must focus the current provider tile after grid remount; GT1-05-13 runs the GT1-05-02E regression. No behavioral run performed.",
+					"code": "focus-repair-awaiting-regression",
+					"missingPrerequisite": "GT1-05-02E1 queues provider identity and restores focus after the grid commits. Static checks pass; GT1-05-13 must execute the existing GT1-05-02E real-screen regression. No behavioral run performed.",
 					"affectedRows": ["S05"],
-					"evidenceRef": "phase05-interaction-tests"
+					"evidenceRef": "phase05-config-focus-repair"
 				}
 			],
 			"branchAuditRefs": ["B15", "B27"]
@@ -21904,7 +21924,8 @@
 				"observation": "All four providers have names and alphabetical picker metadata. Grok existing ID retained.",
 				"phase05ControlsEvidenceRef": "phase05-controls",
 				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
-				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests"
+				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests",
+				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21929,10 +21950,10 @@
 				},
 				{
 					"id": "wizard-config-focus-before-remount:META-01",
-					"code": "source-reviewed-focus-restoration-gap",
-					"missingPrerequisite": "GT1-05-02E1 must focus the current provider tile after grid remount; GT1-05-13 runs the GT1-05-02E regression. No behavioral run performed.",
+					"code": "focus-repair-awaiting-regression",
+					"missingPrerequisite": "GT1-05-02E1 queues provider identity and restores focus after the grid commits. Static checks pass; GT1-05-13 must execute the existing GT1-05-02E real-screen regression. No behavioral run performed.",
 					"affectedRows": ["META-01"],
-					"evidenceRef": "phase05-interaction-tests"
+					"evidenceRef": "phase05-config-focus-repair"
 				}
 			],
 			"symbols": ["AGENT_DISPLAY_NAMES", "AGENT_PICKER_META", "PICKABLE_AGENT_IDS"],
