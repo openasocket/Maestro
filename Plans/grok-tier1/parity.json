@@ -3627,6 +3627,29 @@
 				"A compact JSON object beginning with an ambiguous key such as message is buffered until its first record is complete; the prompted confidence/ready/projectName-leading schema streams before completion. Unknown typed leading objects are treated conservatively as envelopes.",
 				"GT1-05-12/12A own utility and caller regression authoring; GT1-05-13 owns execution. Manager completion remains authoritative. Native qualification, capability and beta promotion remain withheld."
 			]
+		},
+		"phase05-onboarding-discovery-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-12-onboarding-discovery-regression-authoring",
+			"sourceCommit": "5c0860757d36ddcf58f7cbbbda684e93a0281b67",
+			"sourceRevisionScope": "Pre-task HEAD plus test hashes in the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/components/Wizard/services/conversationManager.test.ts": "44cd697e4f061e2cf6bcb9cb98948ac7dc7b56b8b35033b4261a1bfcc480ef12",
+				"src/__tests__/renderer/components/Wizard/WizardContext.test.tsx": "b85b77222db17d6dac096037da5f4a14a7e6bb379396b74e192ba6e21e6249b1",
+				"src/__tests__/renderer/components/Wizard/screens/ConversationScreen/utils.test.ts": "abaa2841950edd7a4cda0905e0bfde73f990770bbbc8f379263e3d754fe96ed8"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P20", "S05", "C-supportsWizard"],
+			"verificationTask": "GT1-05-13",
+			"repairTask": "GT1-05-12C",
+			"limitations": [
+				"58 additional cases authored in three existing suites; tests were not run or collected. Formatting, no-dashes lint, syntax and whitespace checks passed.",
+				"Static review found that Grok discovery can settle success before launch acceptance. The defensive early-exit/refused-receipt regression requires GT1-05-12C before verification; this is not a reproduced policy bypass.",
+				"GT1-05-12A/12B retain caller and generation coverage. GT1-05-02E registry/logo/keyboard/focus coverage is reused. Native exact-version qualification and beta/capability promotion remain withheld."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -8810,7 +8833,8 @@
 				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff",
 				"phase05OnboardingReadinessEvidenceRef": "phase05-onboarding-account-host-readiness",
 				"phase05OnboardingGenerationEvidenceRef": "phase05-onboarding-generation-contract",
-				"phase05OnboardingPreviewEvidenceRef": "phase05-onboarding-streaming-preview"
+				"phase05OnboardingPreviewEvidenceRef": "phase05-onboarding-streaming-preview",
+				"phase05OnboardingTestsEvidenceRef": "phase05-onboarding-discovery-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8855,9 +8879,9 @@
 				{
 					"id": "grok-onboarding-callers:P20",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-11A/B/C/D selected configuration, account/host readiness, generation and streaming preview are implemented with static checks only. Author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
+					"missingPrerequisite": "GT1-05-12 readiness, discovery and preview tests are authored, not run. GT1-05-12C must repair launch acceptance ordering exposed by static review; GT1-05-12A/12B own remaining caller/generation coverage, GT1-05-13 execution. Native exact-version qualification remains separate.",
 					"affectedRows": ["P20"],
-					"evidenceRef": "phase05-onboarding-streaming-preview"
+					"evidenceRef": "phase05-onboarding-discovery-tests"
 				}
 			],
 			"phase": "05",
@@ -16621,7 +16645,8 @@
 				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff",
 				"phase05OnboardingReadinessEvidenceRef": "phase05-onboarding-account-host-readiness",
 				"phase05OnboardingGenerationEvidenceRef": "phase05-onboarding-generation-contract",
-				"phase05OnboardingPreviewEvidenceRef": "phase05-onboarding-streaming-preview"
+				"phase05OnboardingPreviewEvidenceRef": "phase05-onboarding-streaming-preview",
+				"phase05OnboardingTestsEvidenceRef": "phase05-onboarding-discovery-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16666,9 +16691,9 @@
 				{
 					"id": "grok-onboarding-callers:C-supportsWizard",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-11A/B/C/D selected configuration, account/host readiness, generation and streaming preview are implemented with static checks only. Author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
+					"missingPrerequisite": "GT1-05-12 readiness, discovery and preview tests are authored, not run. GT1-05-12C must repair launch acceptance ordering exposed by static review; GT1-05-12A/12B own remaining caller/generation coverage, GT1-05-13 execution. Native exact-version qualification remains separate.",
 					"affectedRows": ["C-supportsWizard"],
-					"evidenceRef": "phase05-onboarding-streaming-preview"
+					"evidenceRef": "phase05-onboarding-discovery-tests"
 				}
 			],
 			"field": "supportsWizard",
@@ -20233,7 +20258,8 @@
 				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff",
 				"phase05OnboardingReadinessEvidenceRef": "phase05-onboarding-account-host-readiness",
 				"phase05OnboardingGenerationEvidenceRef": "phase05-onboarding-generation-contract",
-				"phase05OnboardingPreviewEvidenceRef": "phase05-onboarding-streaming-preview"
+				"phase05OnboardingPreviewEvidenceRef": "phase05-onboarding-streaming-preview",
+				"phase05OnboardingTestsEvidenceRef": "phase05-onboarding-discovery-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20278,9 +20304,9 @@
 				{
 					"id": "grok-onboarding-callers:S05",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-11A/B/C/D selected configuration, account/host readiness, generation and streaming preview are implemented with static checks only. Author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
+					"missingPrerequisite": "GT1-05-12 readiness, discovery and preview tests are authored, not run. GT1-05-12C must repair launch acceptance ordering exposed by static review; GT1-05-12A/12B own remaining caller/generation coverage, GT1-05-13 execution. Native exact-version qualification remains separate.",
 					"affectedRows": ["S05"],
-					"evidenceRef": "phase05-onboarding-streaming-preview"
+					"evidenceRef": "phase05-onboarding-discovery-tests"
 				}
 			],
 			"branchAuditRefs": ["B15", "B27"]
