@@ -3,28 +3,21 @@ import { canonicalJson } from '../../shared/canonicalJson';
 import { redactSecrets } from '../../shared/redactSecrets';
 import { stripAnsiCodes } from '../../shared/stringUtils';
 import { buildAgentEnvironment } from '../../shared/maestro-lib/launch/env';
+import type { GrokAcpCommandObservation } from '../../shared/maestro-lib/grok/acp-turn';
 import type { TurnProcessSpec } from '../../shared/maestro-lib/run/start-turn';
 import { captureException } from '../utils/sentry';
 import type { ModelDiscoveryContext } from './detector';
 import type { ProviderProbeManaged } from './provider-probe';
 
 /** A receipt from the owner of an already admitted ACP process, never from IPC. */
-export interface GrokCommandObservation {
+export interface GrokCommandObservation extends GrokAcpCommandObservation {
 	launch: Pick<TurnProcessSpec, 'command' | 'env' | 'cwd'>;
 	/** The owner must verify local liveness; an SSH receipt cannot satisfy this read. */
 	target: 'local';
-	protocolVersion: number;
-	agentVersion: string;
-	account: string;
-	host: string;
-	sessionId: string;
-	processGeneration: string;
+	/** Host-owned auth/endpoint/project revision; never replaced by catalogRevision. */
 	configGeneration: string;
 	/** Requested settings, distinct from the provider's resolved/default model and effort. */
 	selection: Pick<ModelDiscoveryContext, 'customPath' | 'model' | 'effort'>;
-	observedAt: number;
-	/** The current session's available_commands_update.availableCommands. */
-	commands: unknown;
 }
 
 export type GrokCommandObservationReader = (
@@ -62,6 +55,7 @@ export interface GrokCommandDiscoveryResult {
 		sessionId: string;
 		processGeneration: string;
 		configGeneration: string;
+		catalogRevision: number;
 		agentVersion: string;
 		observedAt: number;
 	};
@@ -129,6 +123,7 @@ export async function discoverGrokSlashCommands(
 		if (
 			observed.target !== 'local' ||
 			observed.protocolVersion !== 1 ||
+			observed.cwd !== context.cwd ||
 			canonicalJson(observed.launch) !== canonicalJson(launch) ||
 			observed.sessionId !== sessionId ||
 			canonicalJson(observed.selection) !==
@@ -153,6 +148,8 @@ export async function discoverGrokSlashCommands(
 			) ||
 			(context.configGeneration !== undefined &&
 				context.configGeneration !== observed.configGeneration) ||
+			!Number.isSafeInteger(observed.catalogRevision) ||
+			observed.catalogRevision < 0 ||
 			!Number.isFinite(observed.observedAt) ||
 			observed.observedAt > Date.now() ||
 			Date.now() - observed.observedAt >= 30_000
@@ -226,6 +223,7 @@ export async function discoverGrokSlashCommands(
 				sessionId,
 				processGeneration: observed.processGeneration,
 				configGeneration: observed.configGeneration,
+				catalogRevision: observed.catalogRevision,
 				agentVersion: observed.agentVersion,
 				observedAt: observed.observedAt,
 			},

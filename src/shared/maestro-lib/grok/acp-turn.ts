@@ -25,6 +25,7 @@ import {
 import {
 	GrokAcpSession,
 	GrokAcpSessionError,
+	type GrokAcpCommandCatalog,
 	type GrokAcpModelState,
 	type GrokAcpSessionOptions,
 } from './acp-session';
@@ -69,6 +70,11 @@ export interface GrokAcpConfigurationObservation extends Pick<
 	models?: GrokAcpModelState;
 }
 
+/** Process-bound native advertisement. Hosts add their launch and config receipts. */
+export interface GrokAcpCommandObservation extends GrokAcpCommandCatalog {
+	readonly processGeneration: string;
+}
+
 export interface GrokAcpTurnHandlers extends Pick<TurnHandlers, 'onStarted' | 'onEvent'> {
 	/** Observation only: mutation/failure cannot affect the turn or its retained snapshot. */
 	onConfiguration?: (observation: GrokAcpConfigurationObservation) => void;
@@ -83,6 +89,10 @@ export interface GrokAcpRunningTurn extends Omit<RunningTurn, 'completed'> {
 	/** Cancel the prompt before escalating through the session's bounded grace period. */
 	cancel(): void;
 	configuration: () => GrokAcpConfigurationObservation | undefined;
+	/** Live read only; snapshots never authorize a later process or headless fallback. */
+	commands: () => GrokAcpCommandObservation | undefined;
+	/** Withhold host receipts during reload; invalidate before/after, then await a fresh update. */
+	invalidateCommands: () => void;
 	questionSupport: GrokAcpRequestAdapter['questionSupport'];
 	answerQuestion: GrokAcpRequestAdapter['answerQuestion'];
 }
@@ -432,6 +442,12 @@ export function startGrokAcpTurn(
 		cancel,
 		answerSoFar: () => capture?.answerText,
 		configuration: () => configuration && structuredClone(configuration),
+		commands: () => {
+			if (settled || controller.signal.aborted || failure) return;
+			const catalog = session?.commands;
+			return catalog && { ...catalog, processGeneration: options.processGeneration };
+		},
+		invalidateCommands: () => session?.invalidateCommands(),
 		questionSupport: requests.questionSupport,
 		answerQuestion: requests.answerQuestion.bind(requests),
 	};

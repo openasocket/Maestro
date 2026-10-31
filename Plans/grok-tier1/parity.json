@@ -7889,7 +7889,9 @@
 				"src/renderer/App.tsx",
 				"src/renderer/hooks/wizard/useWizardHandlers.ts",
 				"src/renderer/hooks/input/useInputProcessing.ts",
-				"src/main/agents/grok-skills.ts"
+				"src/main/agents/grok-skills.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -7910,7 +7912,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A/B retain native capture and public API exposure; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
+				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B still owns public API exposure and GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -7965,7 +7967,16 @@
 				"scope": "bounded advertisement consumer and selected-agent IPC only",
 				"deterministic": "not-run",
 				"live": "not-run",
-				"productionDiscovery": "unavailable"
+				"productionDiscovery": "unavailable",
+				"nativeCapture": {
+					"task": "GT1-05-03A",
+					"sourceBase": "95571b9243566d307528d8ac71687de06cabb386",
+					"implementation": "implemented",
+					"static": "pass",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"binding": "Live portable commands() observation with native catalogRevision; host launch/liveness/configGeneration receipt remains GT1-07-02."
+				}
 			}
 		},
 		{
@@ -13675,7 +13686,9 @@
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/renderer/App.tsx",
 				"src/main/ipc/handlers/agents.ts",
-				"src/main/agents/grok-skills.ts"
+				"src/main/agents/grok-skills.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -13696,7 +13709,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A/B retain native capture and public API exposure; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
+				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B still owns public API exposure and GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -13765,7 +13778,16 @@
 				"scope": "bounded advertisement consumer and selected-agent IPC only",
 				"deterministic": "not-run",
 				"live": "not-run",
-				"productionDiscovery": "unavailable"
+				"productionDiscovery": "unavailable",
+				"nativeCapture": {
+					"task": "GT1-05-03A",
+					"sourceBase": "95571b9243566d307528d8ac71687de06cabb386",
+					"implementation": "implemented",
+					"static": "pass",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"binding": "Live portable commands() observation with native catalogRevision; host launch/liveness/configGeneration receipt remains GT1-07-02."
+				}
 			}
 		},
 		{
@@ -18899,7 +18921,9 @@
 				"src/renderer/slashCommands.ts",
 				"src/renderer/hooks/wizard/useWizardHandlers.ts",
 				"src/renderer/hooks/input/useInputProcessing.ts",
-				"src/main/agents/grok-skills.ts"
+				"src/main/agents/grok-skills.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-03", "GT1-05-05", "GT1-05-03A", "GT1-05-03B", "GT1-07-02"],
@@ -18913,7 +18937,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A/B retain native capture and public API exposure; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
+				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B still owns public API exposure and GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -18966,7 +18990,16 @@
 				"scope": "bounded advertisement consumer and selected-agent IPC only",
 				"deterministic": "not-run",
 				"live": "not-run",
-				"productionDiscovery": "unavailable"
+				"productionDiscovery": "unavailable",
+				"nativeCapture": {
+					"task": "GT1-05-03A",
+					"sourceBase": "95571b9243566d307528d8ac71687de06cabb386",
+					"implementation": "implemented",
+					"static": "pass",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"binding": "Live portable commands() observation with native catalogRevision; host launch/liveness/configGeneration receipt remains GT1-07-02."
+				}
 			}
 		},
 		{

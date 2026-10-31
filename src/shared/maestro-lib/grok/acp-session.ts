@@ -61,6 +61,21 @@ export interface GrokAcpConfigOption {
 	options: { value: string; name: string }[];
 }
 
+/** Raw native metadata, detached from the process. Only a live getter establishes freshness. */
+export interface GrokAcpCommandCatalog {
+	readonly protocolVersion: number;
+	readonly agentVersion: string;
+	readonly account: string;
+	readonly host: string;
+	readonly cwd: string;
+	readonly sessionId: string;
+	readonly observedAt: number;
+	/** Native catalog invalidation/update sequence, distinct from host config generations. */
+	readonly catalogRevision: number;
+	readonly selection: Readonly<Pick<GrokAcpSessionOptions, 'model' | 'effort'>>;
+	readonly commands: readonly unknown[];
+}
+
 /** Lifecycle facts only; protocol terminal/usage normalization belongs to the event adapter. */
 export class GrokAcpSessionError extends Error {
 	constructor(
@@ -123,12 +138,16 @@ export class GrokAcpSession {
 	private modelsUnavailable = false;
 	private extensionsMatched = false;
 	private agentVersion?: string;
+	private protocolVersion?: number;
 	private lastPromptDispatched = false;
 	private configOptions: GrokAcpConfigOption[] = [];
 	private effectiveModel?: string;
 	private selectedModel?: string;
 	private selectedEffort?: string;
 	private configRevision = 0;
+	private catalogRevision = 0;
+	// One pending/current catalog, never an account-wide or per-session cache.
+	private commandCatalog?: { sessionId: string; serialized: string; observedAt: number };
 	private readonly unboundConfigSessions = new Map<
 		string,
 		{ model?: string; effort?: string; ambiguous?: true }
@@ -167,7 +186,7 @@ export class GrokAcpSession {
 			requestTimeoutMs: options.requestTimeoutMs,
 			maxFrameBytes: options.maxFrameBytes,
 			onNotification: (message) => {
-				this.observeConfiguration(message);
+				this.observeSessionUpdate(message);
 				this.options.onNotification?.(message, {
 					replay: this.replay,
 					turn: this.dispatched ? this.turn : null,
@@ -209,6 +228,47 @@ export class GrokAcpSession {
 			model: this.effectiveModel,
 			configOptions: this.configOptions,
 		});
+	}
+
+	/** Missing/stale is undefined; an advertised empty array is authoritative. No RPC. */
+	get commands(): GrokAcpCommandCatalog | undefined {
+		const catalog = this.commandCatalog;
+		if (
+			!catalog ||
+			catalog.sessionId !== this.nativeId ||
+			!this.claim ||
+			!this.openingDone ||
+			this.querying ||
+			this.failure ||
+			this.cancelled ||
+			this.options.child.exitCode !== null ||
+			this.options.child.signalCode !== null ||
+			(this.selectedModel !== undefined && this.effectiveModel !== this.selectedModel) ||
+			(this.selectedEffort !== undefined &&
+				this.configOptions.find(({ id }) => id === 'reasoning_effort')?.currentValue !==
+					this.selectedEffort) ||
+			this.protocolVersion === undefined ||
+			!this.agentVersion
+		)
+			return;
+		return {
+			protocolVersion: this.protocolVersion,
+			agentVersion: this.agentVersion,
+			account: this.options.account,
+			host: this.options.host,
+			cwd: this.options.cwd,
+			sessionId: catalog.sessionId,
+			observedAt: catalog.observedAt,
+			catalogRevision: this.catalogRevision,
+			selection: { model: this.selectedModel, effort: this.selectedEffort },
+			commands: JSON.parse(catalog.serialized),
+		};
+	}
+
+	/** Hosts withhold receipts during reload, and invalidate before and after it (or replace us). */
+	invalidateCommands(): void {
+		this.commandCatalog = undefined;
+		this.catalogRevision += 1;
 	}
 
 	feedStdout(chunk: Uint8Array): void {
@@ -303,6 +363,7 @@ export class GrokAcpSession {
 				})
 				.finally(() => {
 					this.unboundConfigSessions.clear();
+					if (this.commandCatalog?.sessionId !== this.nativeId) this.invalidateCommands();
 					this.openingDone = true;
 					this.replay = false;
 					this.watchdog?.disarm();
@@ -351,8 +412,11 @@ export class GrokAcpSession {
 			);
 			this.checkOpen();
 			const response = this.record(value);
-			if (this.cancelled || response.stopReason === 'cancelled')
+			if (this.cancelled || response.stopReason === 'cancelled') {
+				this.cancelled = true;
+				this.invalidateCommands();
 				throw new GrokAcpSessionError('cancelled', true, response);
+			}
 			if (typeof response.stopReason !== 'string' || !response.stopReason)
 				throw new GrokAcpSessionError('invalid-response', true);
 			return response;
@@ -433,6 +497,8 @@ export class GrokAcpSession {
 				throw new GrokAcpSessionError('invalid-options');
 		if (!this.nativeId || !this.claim) throw new GrokAcpSessionError('missing-session-id');
 		await this.withQuery(async () => {
+			// Requested selection changes also invalidate inherited/default intent.
+			if (model !== undefined || effort !== undefined) this.invalidateCommands();
 			if (model !== undefined) {
 				if (model !== this.effectiveModel) this.selectedEffort = undefined;
 				await this.applyConfig('model', model);
@@ -497,12 +563,14 @@ export class GrokAcpSession {
 
 	/** Wait for the original prompt response; the notification has no response of its own. */
 	cancel(): void {
+		this.invalidateCommands();
 		if (this.querying) {
 			this.fail('cancelled');
 			return;
 		}
-		if (!this.active || this.cancelled || this.failure) return;
+		if (this.cancelled || this.failure) return;
 		this.cancelled = true;
+		if (!this.active) return;
 		// Give allocation a bounded chance to return its ID; it must never dispatch the prompt.
 		this.cancelWatchdog = createIdleWatchdog({
 			idleMs: this.options.cancelGraceMs ?? BACKGROUND_STOP_GRACE_MS,
@@ -532,6 +600,7 @@ export class GrokAcpSession {
 	private async initialize(): Promise<AcpInitialization> {
 		const initialized = await this.client.initialize();
 		this.checkOpen();
+		this.protocolVersion = initialized.protocolVersion;
 		this.agentVersion =
 			initialized._meta?.grokShell === true && typeof initialized._meta.agentVersion === 'string'
 				? initialized._meta.agentVersion
@@ -636,6 +705,7 @@ export class GrokAcpSession {
 			(id === 'reasoning_effort' && before === undefined)
 		)
 			throw new GrokAcpSessionError('config-unsupported');
+		this.invalidateCommands();
 		// The response replaces all options. An in-flight model switch exposes no stale effort menu.
 		if (id === 'model') {
 			this.configOptions = [];
@@ -673,8 +743,11 @@ export class GrokAcpSession {
 			if (this.configOptions.find(({ id }) => id === 'reasoning_effort')?.currentValue !== value)
 				throw new GrokAcpSessionError('effort-unacknowledged');
 		}
+		// An advertisement received during this write may still describe the old config.
+		// Require a subsequent update rather than relabeling interim data with new intent.
+		this.invalidateCommands();
 	}
-	private observeConfiguration(message: AcpCall): void {
+	private observeSessionUpdate(message: AcpCall): void {
 		if (this.failure || message.id !== undefined) return;
 		if (message.method !== 'session/update' && message.method !== '_x.ai/session_notification')
 			return;
@@ -684,10 +757,15 @@ export class GrokAcpSession {
 		if (!update || typeof update !== 'object' || Array.isArray(update)) return;
 		const data = update as Record<string, unknown>;
 		const sessionId = params.sessionId;
+		if (data.sessionUpdate === 'available_commands_update') {
+			this.observeCommands(sessionId, data.availableCommands);
+			return;
+		}
 		if (data.sessionUpdate !== 'model_changed' && data.sessionUpdate !== 'config_option_update')
 			return;
 		if (!this.nativeId || this.replay) {
 			if (!this.opening || this.openingDone) return;
+			if (this.commandCatalog?.sessionId === sessionId) this.invalidateCommands();
 			// Bounded scalar observations only; never retain replay payloads or credentials.
 			if (
 				sessionId.length > 1024 ||
@@ -717,6 +795,7 @@ export class GrokAcpSession {
 			return;
 		}
 		if (sessionId !== this.nativeId) return;
+		this.invalidateCommands();
 		try {
 			this.configRevision += 1;
 			if (data.sessionUpdate === 'model_changed') {
@@ -733,6 +812,31 @@ export class GrokAcpSession {
 			}
 			throw error;
 		}
+	}
+	private observeCommands(sessionId: string, commands: unknown): void {
+		if (this.cancelled || !this.opening) return;
+		const expected = this.nativeId ?? this.options.resumeSessionId;
+		if (expected !== undefined && sessionId !== expected) return;
+		// A malformed replacement must not leave the old advertisement available.
+		this.invalidateCommands();
+		if (
+			!sessionId.trim() ||
+			sessionId.length > 1024 ||
+			!Array.isArray(commands) ||
+			commands.length > 256
+		)
+			return;
+		let serialized: string;
+		try {
+			// Wire JSON is retained verbatim in meaning, including native origin metadata.
+			// Bound this single retained catalog independently of the larger frame ceiling.
+			serialized = JSON.stringify(commands);
+		} catch (error) {
+			if (error instanceof RangeError) return; // Excessively nested native JSON.
+			throw error;
+		}
+		if (Buffer.byteLength(serialized, 'utf8') > 1024 * 1024) return;
+		this.commandCatalog = { sessionId, serialized, observedAt: Date.now() };
 	}
 	private claimSession(id: string): void {
 		const key = canonicalJson([this.options.account, this.options.host, id]);
@@ -751,6 +855,7 @@ export class GrokAcpSession {
 	}
 	private fail(reason: GrokAcpSessionError['reason'], cause?: unknown): void {
 		if (this.failure) return;
+		this.invalidateCommands();
 		this.configOptions = [];
 		this.effectiveModel = undefined;
 		this.failure = new GrokAcpSessionError(
