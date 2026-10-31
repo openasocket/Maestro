@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
 	readDirRemote,
 	readFileRemote,
@@ -20,6 +20,17 @@ import {
 } from '../../../main/utils/remote-fs';
 import type { SshRemoteConfig } from '../../../shared/types';
 import type { ExecResult } from '../../../main/utils/execFile';
+import { execFileNoThrow } from '../../../main/utils/execFile';
+
+// All transports are injected; even SSH discovery must stay off the real host.
+vi.mock('../../../main/utils/cliDetection', () => ({
+	resolveSshPath: vi.fn().mockResolvedValue('ssh'),
+}));
+vi.mock('../../../main/utils/execFile', () => ({
+	execFileNoThrow: vi.fn(() => {
+		throw new Error('Unexpected real transport in remote-fs tests');
+	}),
+}));
 
 describe('remote-fs', () => {
 	// Base SSH config for testing
@@ -347,6 +358,332 @@ describe('remote-fs', () => {
 	});
 
 	describe('readFileRemote', () => {
+		afterEach(() => {
+			vi.useRealTimers();
+			vi.restoreAllMocks();
+			try {
+				expect(execFileNoThrow).not.toHaveBeenCalled();
+			} finally {
+				vi.clearAllMocks();
+			}
+		});
+
+		it.each([undefined, {}, { maxBytes: undefined }])(
+			'keeps legacy commands and raw output when the budget is absent: %j',
+			async (options) => {
+				const stdout = 'not base64: \uFFFD\0\n0\n';
+				const deps = createMockDeps({ stdout, stderr: '', exitCode: 0 });
+				expect(await readFileRemote('~/project/file.txt', baseConfig, deps, options)).toEqual({
+					success: true,
+					data: stdout,
+				});
+				expect(vi.mocked(deps.execSsh).mock.calls[0][1].slice(-1)).toEqual([
+					'cat "$HOME/project/file.txt"',
+				]);
+				expect(deps.execSsh).toHaveBeenCalledTimes(1);
+			}
+		);
+
+		it.each([0, -1, 0.5, NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER, 104857600, 104857601])(
+			'rejects invalid byte budget %s before transport or argument construction',
+			async (maxBytes) => {
+				const deps = createMockDeps({ stdout: '', stderr: '', exitCode: 0 });
+				await expect(readFileRemote('/file', baseConfig, deps, { maxBytes })).rejects.toThrow(
+					RangeError
+				);
+				expect(deps.execSsh).not.toHaveBeenCalled();
+				expect(deps.buildSshArgs).not.toHaveBeenCalled();
+			}
+		);
+
+		it.each([
+			['', 1],
+			['a', 1],
+			['abc', 3],
+			['abc', 4],
+			['é', 2],
+			['雪', 3],
+			['😀', 4],
+			['\uFFFD', 3],
+			['\uFEFF\0\r\n0\n255\n', 14],
+			['a'.repeat(65535) + '😀', 65539],
+			['small', 104857599],
+		] as const)('round-trips bounded UTF-8 case %#', async (content, maxBytes) => {
+			const deps = createMockDeps({
+				stdout: Buffer.from(content + '\n0').toString('base64'),
+				stderr: '',
+				exitCode: 0,
+			});
+			expect(await readFileRemote('/file', baseConfig, deps, { maxBytes })).toEqual({
+				success: true,
+				data: content,
+			});
+			expect(deps.execSsh).toHaveBeenCalledTimes(1);
+		});
+
+		it.each(['\n', '\r\n'])(
+			'accepts base64 line wrapping %j across Unicode bytes',
+			async (newline) => {
+				const content = 'x'.repeat(56) + '😀雪\uFFFD\n0\n';
+				const encoded = Buffer.from(content + '\n0').toString('base64');
+				const deps = createMockDeps({
+					stdout: encoded.match(/.{1,76}/g)!.join(newline) + newline,
+					stderr: '',
+					exitCode: 0,
+				});
+				expect(
+					await readFileRemote('/file', baseConfig, deps, { maxBytes: Buffer.byteLength(content) })
+				).toEqual({ success: true, data: content });
+			}
+		);
+
+		it.each([
+			[0xf0, 0x90, 0x80], // Same byte count after lossy decoding: must inspect original bytes.
+			[0x80],
+			[0xc0, 0xaf],
+			[0xed, 0xa0, 0x80],
+			[0xf4, 0x90, 0x80, 0x80],
+			[0xe2, 0x82],
+		])('rejects malformed UTF-8 case %# without returning replacement text', async (...bytes) => {
+			const deps = createMockDeps({
+				stdout: Buffer.from([...bytes, 0x0a, 0x30]).toString('base64'),
+				stderr: '',
+				exitCode: 0,
+			});
+			expect(await readFileRemote('/file', baseConfig, deps, { maxBytes: bytes.length })).toEqual({
+				success: false,
+				error: 'File is not valid UTF-8: /file',
+				errorCode: 'invalid-encoding',
+			});
+		});
+
+		it.each([
+			{ bytes: Buffer.from('abcd'), maxBytes: 3 },
+			// The sentinel cuts through an emoji; overflow takes precedence over encoding.
+			{ bytes: Buffer.from([0x61, 0xf0, 0x9f]), maxBytes: 2 },
+			// An oversized peer response is rejected before decoding its allocation.
+			{ bytes: Buffer.alloc(1024, 0x61), maxBytes: 3 },
+		])('rejects sentinel or transport overflow case %#', async ({ bytes, maxBytes }) => {
+			const deps = createMockDeps({
+				stdout: Buffer.concat([bytes, Buffer.from('\n0')]).toString('base64'),
+				stderr: '',
+				exitCode: 0,
+			});
+			expect(await readFileRemote('/file', baseConfig, deps, { maxBytes })).toEqual({
+				success: false,
+				error: `File exceeds the ${maxBytes} byte read limit: /file`,
+				errorCode: 'too-large',
+			});
+		});
+
+		it('keeps a growing remote file bounded to one sentinel without rereading', async () => {
+			const deps = createMockDeps({ stdout: '', stderr: '', exitCode: 0 });
+			const grownFile = Buffer.alloc(1024 * 1024, 0x61);
+			vi.mocked(deps.execSsh).mockImplementation(async (_ssh, args) => {
+				const command = args[args.length - 1];
+				expect(command).toContain("head -c 5 < '/file'");
+				const requested = Number(command.match(/head -c (\d+) </)![1]);
+				return {
+					stdout: Buffer.concat([grownFile.subarray(0, requested), Buffer.from('\n0')]).toString(
+						'base64'
+					),
+					stderr: '',
+					exitCode: 0,
+				};
+			});
+			expect(await readFileRemote('/file', baseConfig, deps, { maxBytes: 4 })).toMatchObject({
+				success: false,
+				errorCode: 'too-large',
+			});
+			expect(deps.execSsh).toHaveBeenCalledTimes(1);
+		});
+
+		it.each(['!', 'YQ=', 'YQ===', '=YQ=', 'Y Q=', 'YQ-_', 'YQ==\t'])(
+			'rejects malformed base64 %j',
+			async (stdout) => {
+				const deps = createMockDeps({ stdout, stderr: '', exitCode: 0 });
+				expect(await readFileRemote('/file', baseConfig, deps, { maxBytes: 16 })).toEqual({
+					success: false,
+					error: 'Invalid base64 file response: /file',
+				});
+			}
+		);
+
+		it.each([
+			'',
+			'body',
+			'body\n',
+			'body\n00',
+			'body\n-1',
+			'body\n256',
+			'body\n1000',
+			'body\nx',
+			'body\n0\n',
+			'body\n0\r',
+		])('rejects missing or malformed head status %j', async (frame) => {
+			const deps = createMockDeps({
+				stdout: Buffer.from(frame).toString('base64'),
+				stderr: '',
+				exitCode: 0,
+			});
+			expect(await readFileRemote('/file', baseConfig, deps, { maxBytes: 16 })).toEqual({
+				success: false,
+				error: 'Missing remote file read status: /file',
+			});
+		});
+
+		it.each([
+			['~', '"$HOME"'],
+			['~/account 雪/file', '"$HOME/account 雪/file"'],
+			['~/a "quote"/$value', '"$HOME/a \\"quote\\"/\\$value"'],
+			['$HOME/account space/file', '"$HOME/account space/file"'],
+			["/account's/file", "'/account'\\''s/file'"],
+			['-n', "'-n'"],
+			['/space dir/$value;$(whoami)`id`\nfile', "'/space dir/$value;$(whoami)`id`\nfile'"],
+		])(
+			'guards and escapes remote path %j before bounded redirection',
+			async (filePath, escaped) => {
+				const deps = createMockDeps({ stdout: 'eAow', stderr: '', exitCode: 0 });
+				// Fixed wire fixture is x + newline + status 0, independent of command assembly.
+				expect(await readFileRemote(filePath, baseConfig, deps, { maxBytes: 1 })).toEqual({
+					success: true,
+					data: 'x',
+				});
+				expect(vi.mocked(deps.execSsh).mock.calls[0]).toEqual([
+					'ssh',
+					[
+						'-i',
+						'/home/user/.ssh/id_ed25519',
+						'-o',
+						'BatchMode=yes',
+						'-p',
+						'22',
+						'testuser@dev.example.com',
+						`if test -f ${escaped}; then { head -c 2 < ${escaped}; printf '\\n%s' "$?"; } | base64; else echo 'File not found or not a regular file' >&2; exit 1; fi`,
+					],
+					undefined,
+				]);
+				expect(deps.buildSshArgs).toHaveBeenCalledWith(baseConfig);
+			}
+		);
+
+		it.each(['directory', 'fifo', 'device', 'missing', 'dangling-symlink'])(
+			'discloses a rejected %s path with no partial content',
+			async (kind) => {
+				const deps = createMockDeps({
+					stdout: '',
+					stderr: 'File not found or not a regular file\n',
+					exitCode: 1,
+				});
+				expect(
+					await readFileRemote(`/fixture/${kind}`, baseConfig, deps, { maxBytes: 16 })
+				).toEqual({
+					success: false,
+					error: 'File not found or not a regular file\n',
+				});
+				expect(deps.execSsh).toHaveBeenCalledTimes(1);
+			}
+		);
+
+		it.each([
+			['head: No such file or directory', 'File not found: /file'],
+			['head: Permission denied', 'Permission denied: /file'],
+			['head: Is a directory', 'Path is a directory: /file'],
+			['head: Input/output error', 'head: Input/output error'],
+			['', 'Failed to read file: /file'],
+		])(
+			'preserves read failure %j even after partial bytes and successful base64',
+			async (stderr, error) => {
+				for (const status of [1, 255]) {
+					const deps = createMockDeps({
+						stdout: Buffer.from(`partial\n${status}`).toString('base64'),
+						stderr,
+						exitCode: 0,
+					});
+					expect(await readFileRemote('/file', baseConfig, deps, { maxBytes: 16 })).toEqual({
+						success: false,
+						error,
+					});
+					expect(deps.execSsh).toHaveBeenCalledTimes(1);
+				}
+			}
+		);
+
+		it.each([
+			[1, 'head: Permission denied', 'Permission denied: /file'],
+			[1, 'head: No such file or directory', 'File not found: /file'],
+			[127, 'base64: command not found', 'base64: command not found'],
+			[255, 'Permission denied (publickey).', 'Permission denied: /file'],
+		] as const)('does not decode stdout on outer exit %s: %s', async (exitCode, stderr, error) => {
+			const deps = createMockDeps({ stdout: 'eAow', stderr, exitCode });
+			expect(await readFileRemote('/file', baseConfig, deps, { maxBytes: 16 })).toEqual({
+				success: false,
+				error,
+			});
+			expect(deps.execSsh).toHaveBeenCalledTimes(1);
+		});
+
+		it.each([undefined, { maxBytes: 16 }])(
+			'classifies max-buffer failure only for bounded reads: %j',
+			async (options) => {
+				const deps = createMockDeps({
+					stdout: 'eAow',
+					stderr: 'stdout maxBuffer length exceeded',
+					exitCode: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER',
+				});
+				expect(await readFileRemote('/file', baseConfig, deps, options)).toEqual(
+					options
+						? {
+								success: false,
+								error: 'File exceeds the 16 byte read limit: /file',
+								errorCode: 'too-large',
+							}
+						: { success: false, error: 'stdout maxBuffer length exceeded' }
+				);
+				expect(deps.execSsh).toHaveBeenCalledTimes(1);
+			}
+		);
+
+		it.each([true, false])(
+			'bounds disconnect retries and discards failed output (recovers: %s)',
+			async (recovers) => {
+				vi.useFakeTimers();
+				const deps = createMockDeps({
+					stdout: 'cGFydGlhbAow',
+					stderr: 'Connection reset by peer',
+					exitCode: 255,
+				});
+				vi.mocked(deps.buildSshArgs).mockImplementation(() => ['testuser@dev.example.com']);
+				if (recovers)
+					vi.mocked(deps.execSsh)
+						.mockResolvedValueOnce({
+							stdout: 'cGFydGlhbAow',
+							stderr: 'Connection reset by peer',
+							exitCode: 255,
+						})
+						.mockResolvedValue({ stdout: 'eAow', stderr: '', exitCode: 0 });
+				const pending = readFileRemote('/file', baseConfig, deps, { maxBytes: 16 });
+				await vi.runAllTimersAsync();
+				expect(await pending).toEqual(
+					recovers
+						? { success: true, data: 'x' }
+						: { success: false, error: 'Connection reset by peer' }
+				);
+				expect(deps.execSsh).toHaveBeenCalledTimes(recovers ? 2 : 4);
+				const calls = vi.mocked(deps.execSsh).mock.calls;
+				for (const call of calls) expect(call).toEqual(calls[0]);
+				expect(vi.getTimerCount()).toBe(0);
+			}
+		);
+
+		it('propagates unexpected transport exceptions without falling back to a real read', async () => {
+			const fault = new Error('inert transport fault');
+			const deps = createMockDeps({ stdout: '', stderr: '', exitCode: 0 });
+			vi.mocked(deps.execSsh).mockRejectedValue(fault);
+			await expect(readFileRemote('/file', baseConfig, deps, { maxBytes: 16 })).rejects.toBe(fault);
+			expect(deps.execSsh).toHaveBeenCalledTimes(1);
+		});
+
 		it('returns file contents successfully', async () => {
 			const deps = createMockDeps({
 				stdout: '# README\n\nThis is my project.\n',
