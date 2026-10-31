@@ -3071,7 +3071,7 @@
 			"affectedRows": ["P04", "P17", "S29"],
 			"verificationTask": "GT1-05-13",
 			"limitations": [
-				"Fourteen authored cases await execution together with GT1-05-02B\u2019s three worktree suites; no behavior or type-check pass is claimed.",
+				"Fourteen authored cases await execution together with GT1-05-02B’s three worktree suites; no behavior or type-check pass is claimed.",
 				"The real shared runner uses a fake provider process and synthetic in-process authority; SSH wrapping and directory observation are fixture ports, not live host or policy qualification.",
 				"Production ACP routing remains phase07; Auto Run ownership remains phase08; exact-binary and platform qualification remains phase11."
 			]
@@ -3533,6 +3533,30 @@
 				"GT1-05-11 repairs onboarding discovery completion/ownership, selected-config service fields, readiness and metadata labels in three existing files; behavioral tests are deferred.",
 				"GT1-05-11A/B/C/D retain caller configuration, empty-env/current-host detection, generation handoff and normalized streaming preview fixes. GT1-05-12/12A/12B author coverage; GT1-05-13 runs it.",
 				"No capability/beta promotion or exact-version/native-resume qualification."
+			]
+		},
+		"phase05-onboarding-configuration-handoff": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-11a-onboarding-configuration-handoff",
+			"sourceCommit": "edbc645c52de135fa443f588cd5575355ab6dbc4",
+			"sourceRevisionScope": "Pre-task HEAD plus source hashes in the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/components/Wizard/screens/ConversationScreen/types.ts": "2d7da90c1d71064eed78c4794f6fc6f66d8c16c3d095bf17b9dc1c650df76c55",
+				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useConversationBootstrap.ts": "87da459c29fae1f8402126ef8805e34981b70f9d49c06ca4875643298b82249c",
+				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useWizardConversationSend.ts": "fe3c3691fad8611b94e18a45e492a0ddc45370470145095608eacd78d55c0df3"
+			},
+			"provenance": "implementation-and-static-review",
+			"static": "pass",
+			"typecheck": "fail",
+			"typecheckLimitation": "Renderer TypeScript retains only the existing RequestInit.dispatcher diagnostic in plugin-host-handlers.ts(1196,76).",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P20", "S05", "C-supportsWizard"],
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"GT1-05-11A forwards selected configuration at bootstrap and before every send, preserves full history and existing documents, and invalidates stale asynchronous reads and callbacks. Settings changes interrupt pending responses with an explicit message.",
+				"GT1-05-12A owns caller tests; GT1-05-13 executes them. GT1-05-11B/C/D still own selected-host readiness, generation handoff and streaming preview.",
+				"No native resume, provider invocation, live qualification, capability or beta promotion."
 			]
 		}
 	},
@@ -8657,7 +8681,10 @@
 				"src/renderer/hooks/batch/inlineWizard/generationActions.ts",
 				"src/renderer/hooks/batch/inlineWizard/lifecycleActions.ts",
 				"src/renderer/components/Wizard/WizardContext.tsx",
-				"src/renderer/components/Wizard/screens/ConversationScreen/utils/providerName.ts"
+				"src/renderer/components/Wizard/screens/ConversationScreen/utils/providerName.ts",
+				"src/renderer/components/Wizard/screens/ConversationScreen/types.ts",
+				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useConversationBootstrap.ts",
+				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useWizardConversationSend.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -8706,7 +8733,8 @@
 				"phase05InlineWizardServiceTestsEvidenceRef": "phase05-inline-wizard-service-tests",
 				"phase05GenerationCancellationTestsEvidenceRef": "phase05-generation-cancellation-tests",
 				"phase05InlineWizardCallerTestsEvidenceRef": "phase05-inline-wizard-caller-tests",
-				"phase05OnboardingDiscoveryEvidenceRef": "phase05-onboarding-discovery-contract"
+				"phase05OnboardingDiscoveryEvidenceRef": "phase05-onboarding-discovery-contract",
+				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8751,9 +8779,9 @@
 				{
 					"id": "grok-onboarding-callers:P20",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "Complete GT1-05-11A/B/C/D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
+					"missingPrerequisite": "GT1-05-11A selected conversation configuration and stale-read ownership are implemented with static checks only. Complete GT1-05-11B/C/D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
 					"affectedRows": ["P20"],
-					"evidenceRef": "phase05-onboarding-discovery-contract"
+					"evidenceRef": "phase05-onboarding-configuration-handoff"
 				}
 			],
 			"phase": "05",
@@ -16456,7 +16484,10 @@
 				"src/renderer/hooks/batch/inlineWizard/lifecycleActions.ts",
 				"src/renderer/components/Wizard/services/conversationManager.ts",
 				"src/renderer/components/Wizard/WizardContext.tsx",
-				"src/renderer/components/Wizard/screens/ConversationScreen/utils/providerName.ts"
+				"src/renderer/components/Wizard/screens/ConversationScreen/utils/providerName.ts",
+				"src/renderer/components/Wizard/screens/ConversationScreen/types.ts",
+				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useConversationBootstrap.ts",
+				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useWizardConversationSend.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -16506,7 +16537,8 @@
 				"phase05InlineWizardServiceTestsEvidenceRef": "phase05-inline-wizard-service-tests",
 				"phase05GenerationCancellationTestsEvidenceRef": "phase05-generation-cancellation-tests",
 				"phase05InlineWizardCallerTestsEvidenceRef": "phase05-inline-wizard-caller-tests",
-				"phase05OnboardingDiscoveryEvidenceRef": "phase05-onboarding-discovery-contract"
+				"phase05OnboardingDiscoveryEvidenceRef": "phase05-onboarding-discovery-contract",
+				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16551,9 +16583,9 @@
 				{
 					"id": "grok-onboarding-callers:C-supportsWizard",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "Complete GT1-05-11A/B/C/D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
+					"missingPrerequisite": "GT1-05-11A selected conversation configuration and stale-read ownership are implemented with static checks only. Complete GT1-05-11B/C/D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
 					"affectedRows": ["C-supportsWizard"],
-					"evidenceRef": "phase05-onboarding-discovery-contract"
+					"evidenceRef": "phase05-onboarding-configuration-handoff"
 				}
 			],
 			"field": "supportsWizard",
@@ -20073,7 +20105,10 @@
 				"src/renderer/components/Wizard/screens/ConversationScreen/utils/providerName.ts",
 				"src/renderer/services/inlineWizardConversation.ts",
 				"src/renderer/services/inlineWizardDocumentGeneration.ts",
-				"src/renderer/components/Wizard/WizardContext.tsx"
+				"src/renderer/components/Wizard/WizardContext.tsx",
+				"src/renderer/components/Wizard/screens/ConversationScreen/types.ts",
+				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useConversationBootstrap.ts",
+				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useWizardConversationSend.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -20107,7 +20142,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests",
 				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair",
-				"phase05OnboardingDiscoveryEvidenceRef": "phase05-onboarding-discovery-contract"
+				"phase05OnboardingDiscoveryEvidenceRef": "phase05-onboarding-discovery-contract",
+				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20152,9 +20188,9 @@
 				{
 					"id": "grok-onboarding-callers:S05",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "Complete GT1-05-11A/B/C/D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
+					"missingPrerequisite": "GT1-05-11A selected conversation configuration and stale-read ownership are implemented with static checks only. Complete GT1-05-11B/C/D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
 					"affectedRows": ["S05"],
-					"evidenceRef": "phase05-onboarding-discovery-contract"
+					"evidenceRef": "phase05-onboarding-configuration-handoff"
 				}
 			],
 			"branchAuditRefs": ["B15", "B27"]

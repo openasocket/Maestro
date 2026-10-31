@@ -1,4 +1,4 @@
-import { useCallback, type MutableRefObject } from 'react';
+import { useCallback, useLayoutEffect, useRef, type MutableRefObject } from 'react';
 import {
 	conversationManager,
 	createAssistantMessage,
@@ -100,6 +100,7 @@ function createSendCallbacks({
 	announce,
 	scheduleAutoContinue,
 	markErrorHandled,
+	isCurrentRequest,
 }: {
 	mode: 'message' | 'continue';
 	setters: SendStateSetters;
@@ -111,6 +112,7 @@ function createSendCallbacks({
 	announce: (message: string) => void;
 	scheduleAutoContinue: (message: string) => void;
 	markErrorHandled?: () => void;
+	isCurrentRequest: () => boolean;
 }): ConversationCallbacks {
 	return {
 		onSending: () => {
@@ -120,15 +122,19 @@ function createSendCallbacks({
 			// Agent is responding.
 		},
 		onChunk: (chunk) => {
+			if (!isCurrentRequest()) return;
 			appendStreamingChunk(chunk, setters.setStreamingText);
 		},
 		onThinkingChunk: (content) => {
+			if (!isCurrentRequest()) return;
 			handleThinkingChunk(content, refs.showThinkingRef, setters.setThinkingContent);
 		},
 		onToolExecution: (toolEvent) => {
+			if (!isCurrentRequest()) return;
 			handleToolExecution(toolEvent, refs.showThinkingRef, setters.setToolExecutions);
 		},
 		onComplete: (sendResult) => {
+			if (!isCurrentRequest()) return;
 			setters.setStreamingText('');
 			setters.setThinkingContent('');
 			setters.setToolExecutions([]);
@@ -188,6 +194,7 @@ function createSendCallbacks({
 			}
 		},
 		onError: (error) => {
+			if (!isCurrentRequest()) return;
 			markErrorHandled?.();
 			logger.error('Conversation error:', undefined, error);
 			setConversationError(error);
@@ -243,12 +250,56 @@ export function useWizardConversationSend({
 	handleSendMessage: () => Promise<void>;
 	sendOpeningMessage: (kind: WizardOpeningKind) => Promise<void>;
 } {
+	const requestIdRef = useRef(0);
+	const interruptedRequestRef = useRef(false);
+
+	// Invalidate pending reads and callbacks as soon as a new selection commits.
+	// History/loading updates are intentionally not part of this lifetime.
+	useLayoutEffect(() => {
+		if (interruptedRequestRef.current) {
+			interruptedRequestRef.current = false;
+			setConversationError(
+				'Conversation settings changed. Send a message to continue with the updated settings.'
+			);
+		}
+		return () => {
+			requestIdRef.current += 1;
+			if (refs.isSendingRef.current) {
+				interruptedRequestRef.current = true;
+				refs.isSendingRef.current = false;
+				setConversationLoading(false);
+				setters.setStreamingText('');
+				setters.setThinkingContent('');
+				setters.setToolExecutions([]);
+				void conversationManager.endConversation();
+			}
+		};
+	}, [
+		state.selectedAgent,
+		state.directoryPath,
+		state.plannerModel,
+		state.customPath,
+		state.customArgs,
+		state.customEnvVars,
+		state.existingDocsChoice,
+		state.sessionSshRemoteConfig,
+		state.enableMaestroP,
+		state.maestroPMode,
+		state.maestroPPath,
+		refs,
+		setters,
+		setConversationLoading,
+		setConversationError,
+	]);
+
 	const handleSendMessage = useCallback(async () => {
 		const trimmedInput = inputValue.trim();
 		if (!trimmedInput || state.isConversationLoading || refs.isSendingRef.current) {
 			return;
 		}
 
+		const requestId = ++requestIdRef.current;
+		const isCurrentRequest = () => requestIdRef.current === requestId;
 		refs.isSendingRef.current = true;
 
 		if (trimmedInput !== AUTO_CONTINUE_MESSAGE) {
@@ -276,21 +327,32 @@ export function useWizardConversationSend({
 		announce('Message sent. AI assistant is thinking...');
 
 		try {
-			if (!conversationManager.isConversationActive()) {
-				if (!state.selectedAgent) {
-					setConversationError('No agent selected. Please go back and select an agent.');
-					setConversationLoading(false);
-					return;
-				}
-				await conversationManager.startConversation({
-					agentType: state.selectedAgent,
-					directoryPath: state.directoryPath,
-					projectName: projectNameFromPath(state.directoryPath),
-					model: state.plannerModel,
-					sshRemoteConfig: state.sessionSshRemoteConfig,
-					claudeTokenSource: getClaudeTokenSourceFields(state),
-				});
+			if (!state.selectedAgent) {
+				setConversationError('No agent selected. Please go back and select an agent.');
+				return;
 			}
+
+			const existingDocs = await fetchExistingDocsForWizard(
+				state.directoryPath,
+				state.existingDocsChoice
+			);
+			if (!isCurrentRequest()) return;
+
+			// Each turn replays full history, so refresh even an active manager's
+			// launch configuration without claiming native provider continuation.
+			await conversationManager.startConversation({
+				agentType: state.selectedAgent,
+				directoryPath: state.directoryPath,
+				projectName: projectNameFromPath(state.directoryPath),
+				model: state.plannerModel,
+				sessionCustomPath: state.customPath,
+				sessionCustomArgs: state.customArgs,
+				sessionCustomEnvVars: state.customEnvVars,
+				existingDocs: existingDocs.length > 0 ? existingDocs : undefined,
+				sshRemoteConfig: state.sessionSshRemoteConfig,
+				claudeTokenSource: getClaudeTokenSourceFields(state),
+			});
+			if (!isCurrentRequest()) return;
 
 			let handledByOnError = false;
 			const result = await conversationManager.sendMessage(
@@ -298,6 +360,7 @@ export function useWizardConversationSend({
 				state.conversationHistory,
 				createSendCallbacks({
 					mode: 'message',
+					isCurrentRequest,
 					setters,
 					refs,
 					addMessage,
@@ -312,15 +375,21 @@ export function useWizardConversationSend({
 				})
 			);
 
-			applySendFailure(result, setConversationError, setters, handledByOnError);
+			if (isCurrentRequest()) {
+				applySendFailure(result, setConversationError, setters, handledByOnError);
+			}
 		} catch (error) {
+			if (!isCurrentRequest()) return;
 			const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
 			setConversationError(errorMessage);
 			setters.setErrorRetryCount((prev) => prev + 1);
 		} finally {
-			setConversationLoading(false);
-			refs.isSendingRef.current = false;
-			refs.inputRef.current?.focus();
+			if (isCurrentRequest()) {
+				requestIdRef.current += 1;
+				setConversationLoading(false);
+				refs.isSendingRef.current = false;
+				refs.inputRef.current?.focus();
+			}
 		}
 	}, [
 		inputValue,
@@ -329,6 +398,14 @@ export function useWizardConversationSend({
 		state.conversationHistory,
 		state.selectedAgent,
 		state.directoryPath,
+		state.plannerModel,
+		state.customPath,
+		state.customArgs,
+		state.customEnvVars,
+		state.existingDocsChoice,
+		state.enableMaestroP,
+		state.maestroPMode,
+		state.maestroPPath,
 		state.sessionSshRemoteConfig,
 		refs,
 		setters,
@@ -348,6 +425,8 @@ export function useWizardConversationSend({
 				return;
 			}
 
+			const requestId = ++requestIdRef.current;
+			const isCurrentRequest = () => requestIdRef.current === requestId;
 			refs.isSendingRef.current = true;
 
 			setConversationError(null);
@@ -364,35 +443,38 @@ export function useWizardConversationSend({
 			);
 
 			try {
-				if (!conversationManager.isConversationActive()) {
-					if (!state.selectedAgent) {
-						setConversationError('No agent selected. Please go back and select an agent.');
-						setConversationLoading(false);
-						return;
-					}
-
-					const existingDocs =
-						kind === 'existing-docs'
-							? await fetchExistingDocsForWizard(state.directoryPath, 'continue')
-							: [];
-
-					await conversationManager.startConversation({
-						agentType: state.selectedAgent,
-						directoryPath: state.directoryPath,
-						projectName: projectNameFromPath(state.directoryPath),
-						model: state.plannerModel,
-						existingDocs: existingDocs.length > 0 ? existingDocs : undefined,
-						sshRemoteConfig: state.sessionSshRemoteConfig,
-						claudeTokenSource: getClaudeTokenSourceFields(state),
-					});
+				if (!state.selectedAgent) {
+					setConversationError('No agent selected. Please go back and select an agent.');
+					return;
 				}
+
+				const existingDocs = await fetchExistingDocsForWizard(
+					state.directoryPath,
+					kind === 'existing-docs' ? 'continue' : state.existingDocsChoice
+				);
+				if (!isCurrentRequest()) return;
+
+				await conversationManager.startConversation({
+					agentType: state.selectedAgent,
+					directoryPath: state.directoryPath,
+					projectName: projectNameFromPath(state.directoryPath),
+					model: state.plannerModel,
+					sessionCustomPath: state.customPath,
+					sessionCustomArgs: state.customArgs,
+					sessionCustomEnvVars: state.customEnvVars,
+					existingDocs: existingDocs.length > 0 ? existingDocs : undefined,
+					sshRemoteConfig: state.sessionSshRemoteConfig,
+					claudeTokenSource: getClaudeTokenSourceFields(state),
+				});
+				if (!isCurrentRequest()) return;
 
 				let handledByOnError = false;
 				const result = await conversationManager.sendMessage(
 					continueMessage,
-					[],
+					state.conversationHistory,
 					createSendCallbacks({
 						mode: 'continue',
+						isCurrentRequest,
 						setters,
 						refs,
 						addMessage,
@@ -407,21 +489,36 @@ export function useWizardConversationSend({
 					})
 				);
 
-				applySendFailure(result, setConversationError, setters, handledByOnError);
+				if (isCurrentRequest()) {
+					applySendFailure(result, setConversationError, setters, handledByOnError);
+				}
 			} catch (error) {
+				if (!isCurrentRequest()) return;
 				const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
 				setConversationError(errorMessage);
 				setters.setErrorRetryCount((prev) => prev + 1);
 			} finally {
-				setConversationLoading(false);
-				refs.isSendingRef.current = false;
-				refs.inputRef.current?.focus();
+				if (isCurrentRequest()) {
+					requestIdRef.current += 1;
+					setConversationLoading(false);
+					refs.isSendingRef.current = false;
+					refs.inputRef.current?.focus();
+				}
 			}
 		},
 		[
 			state.isConversationLoading,
+			state.conversationHistory,
 			state.selectedAgent,
 			state.directoryPath,
+			state.plannerModel,
+			state.customPath,
+			state.customArgs,
+			state.customEnvVars,
+			state.existingDocsChoice,
+			state.enableMaestroP,
+			state.maestroPMode,
+			state.maestroPPath,
 			state.sessionSshRemoteConfig,
 			refs,
 			setters,
