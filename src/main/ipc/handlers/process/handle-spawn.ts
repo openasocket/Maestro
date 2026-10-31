@@ -77,8 +77,8 @@ import { buildChildProcessEnv } from '../../../process-manager/utils/envBuilder'
 import { awaitSynopsisWriters } from '../../../process-manager/utils/synopsisWriterGate';
 import { probeClaudeSlashCommandsCached } from '../../../agents/claude-slash-command-probe';
 import { providerProbeManaged } from '../../../agents/provider-probe';
-import { buildExpandedEnv, expandTilde } from '../../../../shared/pathUtils';
-import { resolveAgentAccountDir, resolveAgentAccountRef } from '../../../../shared/agentAccountDir';
+import { buildExpandedEnv } from '../../../../shared/pathUtils';
+import { observeGrokLaunchScope as observeSharedGrokLaunchScope } from '../../../../shared/agentAccountDir';
 import { installationIdentity } from '../../../../shared/maestro-lib/managed/host-adapter';
 import type {
 	NativeSessionBinding,
@@ -1741,111 +1741,28 @@ async function observeGrokLaunchScope(
 	args: readonly string[],
 	deps: Pick<SpawnHandlerDependencies, 'remoteQualifier'>
 ): Promise<{ scope: NativeSessionLaunchScope; recheck?: () => boolean | Promise<boolean> }> {
-	const unknown = { scope: { version: 1, state: 'unknown', reason: 'unobserved' } } as const;
-	let recheck: (() => boolean | Promise<boolean>) | undefined;
-	let cwd: string;
-	let account: string;
-	let identity: string;
-	if (remote) {
-		// The selectors have already passed grokLaunchArgsProblem. Observe the
-		// native argument separately from the shell cd: relative/tilde CLI values
-		// are literal and can select a different directory after that first cd.
-		const cwdIndex = args.findIndex((arg) => arg === '--cwd' || arg.startsWith('--cwd='));
-		const nativeCwd =
-			cwdIndex < 0
-				? undefined
-				: args[cwdIndex] === '--cwd'
-					? args[cwdIndex + 1]
-					: args[cwdIndex].slice('--cwd='.length);
-		const observe = () => observePathRemote(config.cwd, remote, undefined, { env, nativeCwd });
-		const qualify = async () => {
-			const target = await deps.remoteQualifier?.()?.qualifyResolved(structuredClone(remote));
-			return target?.kind === 'remote' && canonicalJson(target.remote) === canonicalJson(remote)
-				? target.endpoint?.installationId
-				: undefined;
-		};
-		const endpoint = await qualify();
-		if (!endpoint || !endpoint.trim() || /[\x00-\x1f\x7f]/.test(endpoint)) return unknown;
-		const observed = await observe();
-		if (!observed.success || !observed.data) {
-			if (!observed.errorCode && !isExpectedRemoteError(observed.error))
-				throw new Error(observed.error || 'Grok launch path observation failed.');
-			return unknown;
-		}
-		if ((await qualify()) !== endpoint) return unknown;
-		cwd = observed.data.cwd.canonicalPath;
-		account = observed.data.account.canonicalPath;
-		// The shared binding/account wire normalizes these spellings. Do not label
-		// a literal native directory as a different account to make it representable.
-		if (cwd !== cwd.trim() || account !== account.trim() || /\\/.test(cwd + account))
-			return unknown;
-		identity = endpoint;
-		recheck = async () => {
-			if ((await qualify()) !== endpoint) return false;
-			const next = await observe();
-			if (!next.success && !next.errorCode && !isExpectedRemoteError(next.error))
-				throw new Error(next.error || 'Grok launch path observation failed.');
-			if ((await qualify()) !== endpoint) return false;
-			return next.success && canonicalJson(next.data) === canonicalJson(observed.data);
-		};
-	} else {
-		const homeDir = (isWindows() ? env.USERPROFILE : env.HOME) || os.homedir();
-		// Resolve a relative provider root in the CHILD's cwd, not the desktop's.
-		if (!path.isAbsolute(config.cwd)) return unknown;
-		const launchCwd = path.resolve(expandTilde(config.cwd));
-		const rawAccount = env.GROK_HOME;
-		const nativeHome = isWindows() ? env.USERPROFILE : env.HOME;
-		if (!rawAccount && nativeHome !== undefined && !path.isAbsolute(nativeHome)) return unknown;
-		if (rawAccount !== undefined && rawAccount !== rawAccount.trim()) return unknown;
-		const accountDir = resolveAgentAccountDir(
-			{
-				toolType: 'grok',
-				customEnvVars: !rawAccount ? {} : { GROK_HOME: path.resolve(launchCwd, rawAccount) },
-			},
-			{ homeDir, env: {} }
-		);
-		if (!accountDir) return unknown;
-		try {
-			[cwd, account] = await Promise.all([fsp.realpath(launchCwd), fsp.realpath(accountDir)]);
-			const stats = await Promise.all([fsp.stat(cwd), fsp.stat(account)]);
-			if (!stats.every((stat) => stat.isDirectory())) return unknown;
-		} catch (error) {
-			if (!isExpectedSessionReadError(error)) throw error;
-			return unknown;
-		}
-		recheck = () => {
-			try {
-				return realpathSync(launchCwd) === cwd && realpathSync(accountDir) === account;
-			} catch (error) {
-				if (!isExpectedSessionReadError(error)) throw error;
-				return false;
-			}
-		};
-		identity = installationIdentity({
-			hostname: os.hostname(),
-			productionDataDir: getProductionDataPath(),
-			mode: 'desktop',
-			pid: process.pid,
-			startedAt: '',
-		}).installationId;
-	}
-	const accountRef = resolveAgentAccountRef(
-		{ toolType: 'grok', sshRemote: !!remote, managedAccountDir: account },
-		{ homeDir: '' }
-	);
-	return accountRef
-		? {
-				recheck,
-				scope: Object.freeze({
-					version: 1,
-					state: 'bound',
-					provider: 'grok',
-					accountRef,
-					cwd,
-					host: Object.freeze({ kind: remote ? 'ssh' : 'local', identity }),
-				}),
-			}
-		: unknown;
+	return observeSharedGrokLaunchScope(config, remote, env, args, {
+		local: {
+			homedir: () => os.homedir(),
+			realpath: (directory) => fsp.realpath(directory),
+			stat: (directory) => fsp.stat(directory),
+			realpathSync: (directory) => realpathSync(directory),
+			isExpectedError: isExpectedSessionReadError,
+			installationId: () =>
+				installationIdentity({
+					hostname: os.hostname(),
+					productionDataDir: getProductionDataPath(),
+					mode: 'desktop',
+					pid: process.pid,
+					startedAt: '',
+				}).installationId,
+		},
+		remote: {
+			observe: (cwd, target, launch) => observePathRemote(cwd, target, undefined, launch),
+			qualify: async (target) => deps.remoteQualifier?.()?.qualifyResolved(target),
+			isExpectedError: isExpectedRemoteError,
+		},
+	});
 }
 
 function spawnTabId(config: Pick<SpawnProcessConfig, 'sessionId' | 'tabId'>): string | undefined {

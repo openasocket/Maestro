@@ -6,12 +6,17 @@
  * session only from the config dir it was started with, so listing another
  * account's pool offers sessions the agent cannot open.
  *
- * Pure and store-free, so the main process and the CLI resolve it the same way;
+ * Store-free, so the main process and the CLI resolve it the same way;
  * each caller reads its own stores and passes the layers in. Uses Node's `path`,
  * so it is for main and CLI only, never the renderer.
  */
 
 import path from 'path';
+import { canonicalJson } from './canonicalJson';
+import type { NativeSessionBinding } from './maestro-lib/agents/providerSwap';
+import type { SshLaunchTarget } from './maestro-lib/launch/ssh-remote-resolver';
+import { isWindows } from './platformDetection';
+import type { SshRemoteConfig } from './types';
 import { isBlankEnvValue } from './agentEnvironment';
 import { managedAccountRef } from './maestro-lib/managed/credentials';
 import { expandTilde } from './pathUtils';
@@ -96,4 +101,155 @@ export function resolveAgentAccountRef(
 ): string | null {
 	const dir = resolveAgentAccountDir(agent, layers);
 	return dir === undefined ? null : managedAccountRef(agent.toolType, dir);
+}
+
+/** Host-owned observations; none may read credentials or historical content. */
+export interface GrokLaunchScopePorts {
+	local: {
+		homedir(): string;
+		realpath(directory: string): Promise<string>;
+		stat(directory: string): Promise<{ isDirectory(): boolean }>;
+		/** Kept synchronous to preserve the admission-to-spawn recheck boundary. */
+		realpathSync(directory: string): string;
+		isExpectedError(error: unknown): boolean;
+		/** Stable executing installation, never a process/runtime epoch or config alias. */
+		installationId(): string;
+	};
+	remote: {
+		/**
+		 * Return the complete validated directory observation, including its path
+		 * and environment evidence. Rechecks compare the entire receipt, not just
+		 * the canonical paths named by this minimal structural port.
+		 */
+		observe(
+			cwd: string,
+			remote: SshRemoteConfig,
+			launch: { env: NodeJS.ProcessEnv; nativeCwd?: string }
+		): Promise<{
+			success: boolean;
+			data?: { cwd: { canonicalPath: string }; account: { canonicalPath: string } };
+			error?: string;
+			errorCode?: string;
+		}>;
+		qualify(remote: SshRemoteConfig): Promise<SshLaunchTarget | undefined>;
+		isExpectedError(error?: string): boolean;
+	};
+}
+
+/** Observe directories only; never open account credentials or historical output. */
+export async function observeGrokLaunchScope(
+	config: { cwd: string },
+	remote: SshRemoteConfig | null,
+	env: NodeJS.ProcessEnv,
+	args: readonly string[],
+	ports: GrokLaunchScopePorts
+) {
+	const unknown: {
+		scope: Extract<NativeSessionBinding, { state: 'unknown' }>;
+		recheck?: never;
+	} = { scope: { version: 1, state: 'unknown', reason: 'unobserved' } };
+	let recheck: (() => boolean | Promise<boolean>) | undefined;
+	let cwd: string;
+	let account: string;
+	let identity: string;
+	if (remote) {
+		// The selectors have already passed grokLaunchArgsProblem. Observe the
+		// native argument separately from the shell cd: relative/tilde CLI values
+		// are literal and can select a different directory after that first cd.
+		const cwdIndex = args.findIndex((arg) => arg === '--cwd' || arg.startsWith('--cwd='));
+		const nativeCwd =
+			cwdIndex < 0
+				? undefined
+				: args[cwdIndex] === '--cwd'
+					? args[cwdIndex + 1]
+					: args[cwdIndex].slice('--cwd='.length);
+		const observe = () => ports.remote.observe(config.cwd, remote, { env, nativeCwd });
+		const qualify = async () => {
+			const target = await ports.remote.qualify(structuredClone(remote));
+			return target?.kind === 'remote' && canonicalJson(target.remote) === canonicalJson(remote)
+				? target.endpoint?.installationId
+				: undefined;
+		};
+		const endpoint = await qualify();
+		if (!endpoint || !endpoint.trim() || /[\x00-\x1f\x7f]/.test(endpoint)) return unknown;
+		const observed = await observe();
+		if (!observed.success || !observed.data) {
+			if (!observed.errorCode && !ports.remote.isExpectedError(observed.error))
+				throw new Error(observed.error || 'Grok launch path observation failed.');
+			return unknown;
+		}
+		if ((await qualify()) !== endpoint) return unknown;
+		cwd = observed.data.cwd.canonicalPath;
+		account = observed.data.account.canonicalPath;
+		// The shared binding/account wire normalizes these spellings. Do not label
+		// a literal native directory as a different account to make it representable.
+		if (cwd !== cwd.trim() || account !== account.trim() || /\\/.test(cwd + account))
+			return unknown;
+		identity = endpoint;
+		recheck = async () => {
+			if ((await qualify()) !== endpoint) return false;
+			const next = await observe();
+			if (!next.success && !next.errorCode && !ports.remote.isExpectedError(next.error))
+				throw new Error(next.error || 'Grok launch path observation failed.');
+			if ((await qualify()) !== endpoint) return false;
+			return next.success && canonicalJson(next.data) === canonicalJson(observed.data);
+		};
+	} else {
+		const homeDir = (isWindows() ? env.USERPROFILE : env.HOME) || ports.local.homedir();
+		// Resolve a relative provider root in the CHILD's cwd, not the desktop's.
+		if (!path.isAbsolute(config.cwd)) return unknown;
+		const launchCwd = path.resolve(expandTilde(config.cwd));
+		const rawAccount = env.GROK_HOME;
+		const nativeHome = isWindows() ? env.USERPROFILE : env.HOME;
+		if (!rawAccount && nativeHome !== undefined && !path.isAbsolute(nativeHome)) return unknown;
+		if (rawAccount !== undefined && rawAccount !== rawAccount.trim()) return unknown;
+		const accountDir = resolveAgentAccountDir(
+			{
+				toolType: 'grok',
+				customEnvVars: !rawAccount ? {} : { GROK_HOME: path.resolve(launchCwd, rawAccount) },
+			},
+			{ homeDir, env: {} }
+		);
+		if (!accountDir) return unknown;
+		try {
+			[cwd, account] = await Promise.all([
+				ports.local.realpath(launchCwd),
+				ports.local.realpath(accountDir),
+			]);
+			const stats = await Promise.all([ports.local.stat(cwd), ports.local.stat(account)]);
+			if (!stats.every((stat) => stat.isDirectory())) return unknown;
+		} catch (error) {
+			if (!ports.local.isExpectedError(error)) throw error;
+			return unknown;
+		}
+		recheck = () => {
+			try {
+				return (
+					ports.local.realpathSync(launchCwd) === cwd &&
+					ports.local.realpathSync(accountDir) === account
+				);
+			} catch (error) {
+				if (!ports.local.isExpectedError(error)) throw error;
+				return false;
+			}
+		};
+		identity = ports.local.installationId();
+	}
+	const accountRef = resolveAgentAccountRef(
+		{ toolType: 'grok', sshRemote: !!remote, managedAccountDir: account },
+		{ homeDir: '' }
+	);
+	return accountRef
+		? {
+				recheck,
+				scope: Object.freeze({
+					version: 1 as const,
+					state: 'bound' as const,
+					provider: 'grok' as const,
+					accountRef,
+					cwd,
+					host: Object.freeze({ kind: remote ? ('ssh' as const) : ('local' as const), identity }),
+				}),
+			}
+		: unknown;
 }
