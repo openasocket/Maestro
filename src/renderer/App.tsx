@@ -1014,7 +1014,7 @@ function MaestroConsoleInner() {
 	>(null);
 	// Ref for handleResumeSession - bridges ordering gap between useModalHandlers and useAgentSessionManagement
 	const handleResumeSessionRef = useRef<
-		((agentSessionId: string, providedMessages?: undefined, sessionName?: string) => void) | null
+		ReturnType<typeof useAgentSessionManagement>['handleResumeSession'] | null
 	>(null);
 
 	// Note: thinkingChunkBufferRef and thinkingChunkRafIdRef moved into useAgentListeners hook

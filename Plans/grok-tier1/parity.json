@@ -1836,6 +1836,36 @@
 			"remainingImplementationOwners": ["GT1-04-07C5UH", "GT1-04-07D", "GT1-04-07E", "GT1-04-07F"],
 			"testOwners": ["GT1-04-07C5UT"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-unified-history-admission": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c5uh-unified-history-resume-admission",
+			"sourceCommit": "506d88432aefcdea293889cadb4c256e3dbc98cf",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/hooks/modal/useModalHandlers.ts": "1ddf39cf7073eb3841b82d10c04dc5a9afbaf7da7487c977c3e6f780c323d64f",
+				"src/renderer/App.tsx": "b2b3bfba81c77cc370daf3a9c94f8cde3352aaed4268c921982b4cefa052133c"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Pre-existing RequestInit.dispatcher TS2339 in src/main/plugins/plugin-host-handlers.ts:1196; no changed-file diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "Two-file outer admission: full canonical resume signature, targeted recorded owner/project/cloned native binding, confirmed boolean before Director Notes close, agent activation or Group Chat clearing. Request/current/navigation/owner fences reject stale outer completion. Canonical tab/history-selector mutation and same-owner tab/panel navigation remain explicitly pending in GT1-04-07C5UH1.",
+			"remainingImplementationOwners": ["GT1-04-07C5UH1", "GT1-04-07D", "GT1-04-07E", "GT1-04-07F"],
+			"testOwners": ["GT1-04-07CT", "GT1-04-07C5UT"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
