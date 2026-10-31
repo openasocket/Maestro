@@ -922,7 +922,17 @@ describe('GrokSessionStorage - native local source ownership', () => {
 					append: 'changed-during-read',
 				}[kind]
 			);
-			expect(result.messages).toHaveLength(kind === 'malformed' || kind === 'append' ? 3 : 0);
+			expect(result.messages).toHaveLength(kind === 'malformed' ? 4 : kind === 'append' ? 3 : 0);
+			if (kind === 'malformed') {
+				expect(result.messages.map((message) => message.native?.line)).toEqual([4, 6, 8, 9]);
+				expect(result.messages[3]).toMatchObject({
+					type: 'unknown',
+					role: 'unknown',
+					content: '[Unreadable Grok transcript record retained for export]',
+					uuid: 'grok-line-9',
+					native: { provider: 'grok', line: 9, issues: ['malformed-record'] },
+				});
+			}
 			if (kind === 'oversized') expect(fs.open).not.toHaveBeenCalled();
 			for (const handle of f.handles) expect(handle.close).toHaveBeenCalledOnce();
 			expect(captureException).not.toHaveBeenCalled();
@@ -1439,7 +1449,15 @@ describe('GrokSessionStorage - SSH remote', () => {
 				f.identities.set(target, f.identities.get(f.file)!);
 				f.files[target] = f.files[f.file];
 				const result = await f.read();
-				expect(result.messages).toHaveLength(3);
+				expect(result.messages).toHaveLength(8);
+				expect(result.messages).toMatchObject(
+					chatHistoryJsonl()
+						.split('\n')
+						.map((raw, index) => ({
+							uuid: `grok-line-${index + 1}`,
+							native: { provider: 'grok', line: index + 1, raw },
+						}))
+				);
 				expect(result.nativeSessionBinding).toEqual(binding);
 				expect(result.source?.status).toBe('available');
 				expect(remoteFs.readFileRemote).toHaveBeenCalledWith(
@@ -1735,7 +1753,17 @@ describe('GrokSessionStorage - SSH remote', () => {
 			const result = await f.read();
 			expect(result.nativeSessionBinding).toEqual(proven ? binding : undefined);
 			expect(result.source?.status).toBe(scenario === 'partial' ? 'partial' : 'unavailable');
-			expect(result.messages).toHaveLength(scenario === 'partial' ? 3 : 0);
+			expect(result.messages).toHaveLength(scenario === 'partial' ? 8 : 0);
+			if (scenario === 'partial') {
+				expect(result.messages).toMatchObject(
+					chatHistoryJsonl()
+						.split('\n')
+						.map((raw, index) => ({
+							uuid: `grok-line-${index + 1}`,
+							native: { provider: 'grok', line: index + 1, raw },
+						}))
+				);
+			}
 		});
 	});
 

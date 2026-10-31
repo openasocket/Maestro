@@ -1306,7 +1306,10 @@ finally:
 				});
 				expect(result).toMatchObject({ success, observedIdentity: expected, contentChanged: grow });
 				if (success) expect(result.data).toBe(content + (grow ? 'yz' : ''));
-				else expect(result).toMatchObject({ errorCode: 'too-large', data: undefined });
+				else {
+					expect(result.errorCode).toBe('too-large');
+					expect(result.data).toBeUndefined();
+				}
 				const audit = audits.at(-1)!;
 				expect(audit).toMatchObject({ bytes, reads, opened: 1, closed: 1 });
 				expect(bytes).toBeLessThanOrEqual(cap + 1);
