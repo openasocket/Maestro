@@ -134,7 +134,7 @@ export function tableEffects(
 export function fakeAdmission(
 	overrides: Partial<ProcessSpawnAdmission> = {}
 ): ProcessSpawnAdmission {
-	return Object.freeze({
+	return Object.freeze<ProcessSpawnAdmission>({
 		leaseId: 'lease-test',
 		authorityId: 'test-authority',
 		requestDigest: 'a'.repeat(64),
