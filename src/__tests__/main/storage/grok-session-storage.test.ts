@@ -38,6 +38,9 @@ import { GrokSessionStorage } from '../../../main/storage/grok-session-storage';
 import * as remoteFs from '../../../main/utils/remote-fs';
 import { captureException } from '../../../main/utils/sentry';
 import type { SshRemoteConfig } from '../../../shared/types';
+import { isolateAgentEnv } from '../../helpers/agentEnvIsolation';
+
+isolateAgentEnv(['GROK_HOME']);
 
 // ============================================================================
 // Fixtures
@@ -149,9 +152,10 @@ function sessionFiles(
 	cwd: string,
 	sessionId: string,
 	summary: string,
-	chatHistory: string
+	chatHistory: string,
+	sessionsDir = SESSIONS_DIR
 ): Record<string, string> {
-	const dir = path.join(SESSIONS_DIR, encodeURIComponent(cwd), sessionId);
+	const dir = path.join(sessionsDir, encodeURIComponent(cwd), sessionId);
 	return {
 		[path.join(dir, 'summary.json')]: summary,
 		[path.join(dir, 'chat_history.jsonl')]: chatHistory,
@@ -219,6 +223,202 @@ function mockLocalFs(
 // ============================================================================
 // Tests
 // ============================================================================
+
+describe('GrokSessionStorage - selected account scope', () => {
+	const accounts = {
+		default: path.dirname(SESSIONS_DIR),
+		alpha: path.resolve('src', '__tests__', 'fixtures', 'grok-accounts', 'alpha'),
+		beta: path.resolve('src', '__tests__', 'fixtures', 'grok-accounts', 'beta'),
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		const files: Record<string, string> = {};
+		for (const [label, root] of Object.entries(accounts)) {
+			// Same cwd and native ID in every account. The unique search text is
+			// after the initial exchange, so metadata alone cannot satisfy it.
+			const history = [
+				chatHistoryJsonl(),
+				JSON.stringify({ type: 'user', content: `${label} follow-up request` }),
+				JSON.stringify({ type: 'assistant', content: `${label} transcript-only answer` }),
+			].join('\n');
+			Object.assign(
+				files,
+				sessionFiles(
+					PROJECT,
+					SESSION_ID,
+					summaryJson(SESSION_ID, PROJECT, { session_summary: `${label} account title` }),
+					history,
+					path.join(root, 'sessions')
+				)
+			);
+		}
+		mockLocalFs(files);
+	});
+
+	it.each([
+		['provider default', undefined, undefined, undefined, 'default'],
+		['empty ambient account', '', undefined, undefined, 'default'],
+		['whitespace ambient account', ' \t ', undefined, undefined, 'default'],
+		['ambient account', accounts.beta, undefined, undefined, 'beta'],
+		['explicit alpha account', accounts.beta, undefined, accounts.alpha, 'alpha'],
+		['explicit beta account', accounts.alpha, undefined, accounts.beta, 'beta'],
+		['constructor account', accounts.beta, accounts.alpha, undefined, 'alpha'],
+		['empty constructor account', accounts.beta, '', undefined, 'default'],
+		['whitespace constructor account', accounts.beta, ' \t ', undefined, 'default'],
+		['explicit override of constructor', accounts.alpha, accounts.alpha, accounts.beta, 'beta'],
+		['explicit default account', accounts.beta, accounts.alpha, accounts.default, 'default'],
+		['empty selection', accounts.beta, accounts.alpha, '', 'default'],
+		['whitespace selection', accounts.beta, accounts.alpha, ' \t\n ', 'default'],
+	] as const)(
+		'keeps list, read, search and path consistent for %s',
+		async (_name, hostRoot, boundRoot, selectedRoot, label) => {
+			if (hostRoot !== undefined) process.env.GROK_HOME = hostRoot;
+			const storage = new GrokSessionStorage(boundRoot);
+			const sessionsDir = path.join(accounts[label], 'sessions');
+			const transcriptPath = path.join(
+				sessionsDir,
+				encodeURIComponent(PROJECT),
+				SESSION_ID,
+				'chat_history.jsonl'
+			);
+
+			const sessions = await storage.listSessions(PROJECT, undefined, selectedRoot);
+			expect(sessions).toEqual([
+				expect.objectContaining({
+					sessionId: SESSION_ID,
+					sessionName: `${label} account title`,
+					messageCount: 5,
+				}),
+			]);
+			expect(
+				await storage.listSessionsPaginated(PROJECT, { configDir: selectedRoot, limit: 1 })
+			).toEqual({ sessions, totalCount: 1, hasMore: false, nextCursor: null });
+			expect(
+				await storage.readSessionMessages(PROJECT, SESSION_ID, {
+					configDir: selectedRoot,
+					limit: 2,
+				})
+			).toMatchObject({
+				messages: [
+					{ role: 'user', content: `${label} follow-up request` },
+					{ role: 'assistant', content: `${label} transcript-only answer` },
+				],
+				total: 5,
+				hasMore: true,
+			});
+			expect(storage.getSessionPath(PROJECT, SESSION_ID, undefined, selectedRoot)).toBe(
+				transcriptPath
+			);
+
+			for (const [mode, text] of [
+				['title', 'account title'],
+				['user', 'follow-up request'],
+				['assistant', 'transcript-only answer'],
+				['all', 'transcript-only answer'],
+			] as const) {
+				const results = await storage.searchSessions(
+					PROJECT,
+					`${label} ${text}`,
+					mode,
+					undefined,
+					selectedRoot
+				);
+				expect(results).toEqual([
+					expect.objectContaining({ sessionId: SESSION_ID, matchPreview: `${label} ${text}` }),
+				]);
+			}
+			for (const other of Object.keys(accounts).filter((name) => name !== label)) {
+				expect(
+					await storage.searchSessions(PROJECT, `${other} `, 'all', undefined, selectedRoot)
+				).toEqual([]);
+			}
+
+			expect(vi.mocked(fs.readFile).mock.calls.map(([file]) => String(file))).toContain(
+				transcriptPath
+			);
+			for (const [file] of [
+				...vi.mocked(fs.readdir).mock.calls,
+				...vi.mocked(fs.stat).mock.calls,
+				...vi.mocked(fs.readFile).mock.calls,
+			]) {
+				expect(
+					String(file) === sessionsDir || String(file).startsWith(sessionsDir + path.sep)
+				).toBe(true);
+			}
+			expect(remoteFs.readDirRemote).not.toHaveBeenCalled();
+			expect(remoteFs.readFileRemote).not.toHaveBeenCalled();
+			expect(remoteFs.statRemote).not.toHaveBeenCalled();
+		}
+	);
+
+	it('isolates concurrent same-ID searches without changing the instance account', async () => {
+		process.env.GROK_HOME = accounts.beta;
+		const storage = new GrokSessionStorage(accounts.default);
+		const results = await Promise.all(
+			[accounts.alpha, accounts.beta, undefined].map((root) =>
+				storage.searchSessions(PROJECT, 'transcript-only', 'assistant', undefined, root)
+			)
+		);
+		expect(results).toEqual(
+			['alpha', 'beta', 'default'].map((label) => [
+				{
+					sessionId: SESSION_ID,
+					matchType: 'assistant',
+					matchPreview: `${label} transcript-only answer`,
+					matchCount: 1,
+				},
+			])
+		);
+		expect((await storage.listSessions(PROJECT))[0].sessionName).toBe('default account title');
+	});
+
+	it.each(['per-call', 'constructor'] as const)(
+		'returns empty results for a missing %s account without reading available accounts',
+		async (scope) => {
+			process.env.GROK_HOME = accounts.beta;
+			const missingRoot = path.join(path.dirname(accounts.alpha), 'missing');
+			const storage = new GrokSessionStorage(
+				scope === 'constructor' ? missingRoot : accounts.alpha
+			);
+			const selectedRoot = scope === 'per-call' ? missingRoot : undefined;
+
+			expect(await storage.listSessions(PROJECT, undefined, selectedRoot)).toEqual([]);
+			expect(await storage.listSessionsPaginated(PROJECT, { configDir: selectedRoot })).toEqual({
+				sessions: [],
+				totalCount: 0,
+				hasMore: false,
+				nextCursor: null,
+			});
+			expect(
+				await storage.readSessionMessages(PROJECT, SESSION_ID, { configDir: selectedRoot })
+			).toEqual({ messages: [], total: 0, hasMore: false });
+			expect(
+				await storage.searchSessions(PROJECT, 'account title', 'title', undefined, selectedRoot)
+			).toEqual([]);
+			expect(
+				await storage.searchSessions(PROJECT, 'transcript-only', 'all', undefined, selectedRoot)
+			).toEqual([]);
+			// Path lookup is a synchronous guess, not proof that this account exists.
+			expect(storage.getSessionPath(PROJECT, SESSION_ID, undefined, selectedRoot)).toBe(
+				path.join(
+					missingRoot,
+					'sessions',
+					encodeURIComponent(PROJECT),
+					SESSION_ID,
+					'chat_history.jsonl'
+				)
+			);
+			expect(fs.readdir).toHaveBeenCalled();
+			for (const [dir] of vi.mocked(fs.readdir).mock.calls) {
+				expect(dir).toBe(path.join(missingRoot, 'sessions'));
+			}
+			expect(fs.readFile).not.toHaveBeenCalled();
+			expect(fs.stat).not.toHaveBeenCalled();
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+});
 
 describe('GrokSessionStorage - local listing', () => {
 	beforeEach(() => {
@@ -794,25 +994,17 @@ describe('GrokSessionStorage - misc contract', () => {
 	});
 
 	it('getSessionPath honors GROK_HOME for the local sessions root', () => {
-		const prev = process.env.GROK_HOME;
-		process.env.GROK_HOME = '/custom/grok-home';
-		try {
-			const storage = new GrokSessionStorage();
-			expect(storage.getSessionPath(PROJECT, SESSION_ID)).toBe(
-				path.join(
-					'/custom/grok-home',
-					'sessions',
-					encodeURIComponent(PROJECT),
-					SESSION_ID,
-					'chat_history.jsonl'
-				)
-			);
-		} finally {
-			if (prev === undefined) {
-				delete process.env.GROK_HOME;
-			} else {
-				process.env.GROK_HOME = prev;
-			}
-		}
+		const accountDir = path.resolve('src', '__tests__', 'fixtures', 'grok-accounts', 'custom');
+		process.env.GROK_HOME = accountDir;
+		const storage = new GrokSessionStorage();
+		expect(storage.getSessionPath(PROJECT, SESSION_ID)).toBe(
+			path.join(
+				accountDir,
+				'sessions',
+				encodeURIComponent(PROJECT),
+				SESSION_ID,
+				'chat_history.jsonl'
+			)
+		);
 	});
 });

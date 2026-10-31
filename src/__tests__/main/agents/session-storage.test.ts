@@ -16,7 +16,7 @@ import {
 	getAllSessionStorages,
 	clearStorageRegistry,
 } from '../../../main/agents';
-import type { ToolType } from '../../../shared/types';
+import type { SshRemoteConfig, ToolType } from '../../../shared/types';
 
 vi.mock('os', async () => {
 	// Use dynamic require to get the real os module as a plain object,
@@ -195,6 +195,54 @@ describe('agent-session-storage', () => {
 			const sessionPath = storage.getSessionPath('/test/project', 'session-123');
 			expect(sessionPath).toBe('/mock/path/session-123.jsonl');
 		});
+
+		it.each([
+			{ name: 'local', sshConfig: undefined },
+			{
+				name: 'SSH',
+				sshConfig: {
+					id: 'storage-contract-remote',
+					name: 'Storage contract remote',
+					host: 'storage.example.test',
+					port: 22,
+					username: 'fixture',
+					privateKeyPath: '~/.ssh/storage-contract-key',
+					enabled: true,
+				} satisfies SshRemoteConfig,
+			},
+		])(
+			'keeps account options compatible with legacy $name storage implementations',
+			async ({ sshConfig }) => {
+				// Keep this implementation's original signatures: optional account support
+				// must not require changes to providers that have no account-specific store.
+				const legacy: AgentSessionStorage = storage;
+				const projectPath = path.resolve('storage-contract-project');
+				const accountDir = path.resolve('.maestro', 'scratch', 'storage-contract-account');
+
+				expect(await legacy.listSessions(projectPath, sshConfig, accountDir)).toEqual([]);
+				expect(
+					await legacy.listSessionsPaginated(
+						projectPath,
+						{ cursor: 'session-previous', limit: 10, configDir: accountDir },
+						sshConfig
+					)
+				).toEqual({ sessions: [], hasMore: false, totalCount: 0, nextCursor: null });
+				expect(
+					await legacy.readSessionMessages(
+						projectPath,
+						'session-123',
+						{ offset: 1, limit: 10, configDir: accountDir },
+						sshConfig
+					)
+				).toEqual({ messages: [], total: 0, hasMore: false });
+				expect(
+					await legacy.searchSessions(projectPath, 'query', 'all', sshConfig, accountDir)
+				).toEqual([]);
+				expect(legacy.getSessionPath(projectPath, 'session-123', sshConfig, accountDir)).toBe(
+					'/mock/path/session-123.jsonl'
+				);
+			}
+		);
 
 		it('should implement deleteMessagePair', async () => {
 			const result = await storage.deleteMessagePair('/test/project', 'session-123', 'uuid-456');
