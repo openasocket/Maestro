@@ -44,6 +44,40 @@ function isValidToolType(id: string): id is ToolType {
 	return isValidAgentId(id);
 }
 
+/** A reported plan item, using the existing update_plan input shape. */
+export interface ParsedPlanEntry {
+	/** Only a provider-supplied identity; position and wording are not identities. */
+	id?: string;
+	step: string;
+	status: 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'unsupported';
+	providerStatus?: unknown;
+	priority?: string;
+	providerMeta?: Record<string, unknown>;
+}
+
+/**
+ * Plan snapshots travel through toolState and the existing tool-event consumer
+ * port. The update operation is complete; that says nothing about its items.
+ * Consumers replace the ordered list only within this owner's capture, and
+ * must not turn unsupported/cancelled items into completed work.
+ */
+export interface ParsedPlanState {
+	status: 'completed';
+	input: { plan: ParsedPlanEntry[] };
+	planUpdate: {
+		reporting: 'snapshot';
+		/** Monotonic arrival order within this capture, not a provider revision. */
+		revision: number;
+		providerSessionId: string;
+		turnId: string;
+		scopeId?: string;
+		processGeneration?: string;
+		requestId?: string | number;
+		promptId?: string;
+		eventId?: string;
+	};
+}
+
 /**
  * Normalized parsed event from agent output.
  * All agent-specific formats are transformed into this common structure.

@@ -1,10 +1,11 @@
 import type { UsageAccounting, UsageBreakdown, UsageCost } from '../../types';
+import { canonicalJson } from '../../canonicalJson';
 import {
 	cleanToolOutputText,
 	compactToolOutput,
 	MAX_PERSISTED_TOOL_OUTPUT_CHARS,
 } from '../../toolOutput';
-import type { ParsedEvent } from '../parsers/agent-output-parser';
+import type { ParsedEvent, ParsedPlanEntry, ParsedPlanState } from '../parsers/agent-output-parser';
 import { parsedUsageToStats, usageCostUsd } from '../streaming/usage-totals';
 import type { TurnTerminal } from '../streaming/turn-outcome';
 import type { AcpCall } from './acp-protocol';
@@ -50,6 +51,9 @@ export class GrokAcpEventAdapter {
 	private durable?: Record<string, unknown>;
 	private durableMeta?: Record<string, unknown>;
 	private settlement?: TurnTerminal;
+	private readonly planEventIds = new Set<string>();
+	private planFingerprint?: string;
+	private planRevision = 0;
 
 	constructor(options: GrokAcpEventOptions) {
 		if (!options.sessionId?.trim() || !options.turnId?.trim())
@@ -86,6 +90,8 @@ export class GrokAcpEventAdapter {
 				case 'tool_call':
 				case 'tool_call_update':
 					return [this.tool(update, event)];
+				case 'plan':
+					return this.plan(update, record(params?._meta), event);
 				case 'available_commands_update':
 					if (Array.isArray(update.availableCommands))
 						event.slashCommands = update.availableCommands.flatMap((value) => {
@@ -94,7 +100,7 @@ export class GrokAcpEventAdapter {
 						});
 					return [event];
 				default:
-					// Plans, session status/config and nontext content remain intact for their owners.
+					// Session status/config and nontext content remain intact for their owners.
 					return [event];
 			}
 		}
@@ -257,7 +263,95 @@ export class GrokAcpEventAdapter {
 		this.response = undefined;
 		this.durable = undefined;
 		this.durableMeta = undefined;
+		this.planEventIds.clear();
+		this.planFingerprint = undefined;
 		return events;
+	}
+
+	private plan(
+		update: Record<string, unknown>,
+		meta: Record<string, unknown> | undefined,
+		event: ParsedEvent
+	): ParsedEvent[] {
+		// The transport owns unstamped notifications via the immutable turn context.
+		// A supplied native prompt identity must also be proven, never rebound to
+		// whichever tab/turn happens to be active when this notification arrives.
+		if (meta?.isReplay === true) return [];
+		if (meta?.promptId !== undefined && meta.promptId !== this.options.promptId) return [event];
+		const eventId = text(meta?.eventId);
+		if (eventId && eventId.length > 1024) return [event];
+		if (eventId && this.planEventIds.has(eventId)) return [];
+		if (eventId && this.planEventIds.size >= 4096) return [event];
+		if (!Array.isArray(update.entries) || update.entries.length > 4096) return [event];
+		const entries: ParsedPlanEntry[] = [];
+		for (const value of update.entries) {
+			const entry = record(value);
+			// Never publish a filtered partial snapshot that misrepresents progress.
+			if (!entry || typeof entry.content !== 'string' || !entry.content.trim()) return [event];
+			const providerMeta = record(entry._meta);
+			const status: ParsedPlanEntry['status'] =
+				providerMeta?.cancelled === true
+					? 'cancelled'
+					: entry.status === 'pending' ||
+						  entry.status === 'in_progress' ||
+						  entry.status === 'completed'
+						? entry.status
+						: 'unsupported';
+			entries.push({
+				// Schema 0.11.4 has no entry IDs. Retain an extension's supplied ID,
+				// but do not use it to invent delta semantics or cross-snapshot matches.
+				id: text(entry.id),
+				step: entry.content,
+				status,
+				providerStatus: entry.status,
+				priority: text(entry.priority),
+				providerMeta,
+			});
+		}
+		let fingerprint: string;
+		try {
+			fingerprint = canonicalJson(entries);
+		} catch (error) {
+			// Unknown metadata can contain overflowing JSON numbers or excessive
+			// nesting. Preserve it as an opaque event without changing plan state.
+			if (error instanceof TypeError || error instanceof RangeError) return [event];
+			throw error;
+		}
+		if (eventId) this.planEventIds.add(eventId);
+		if (fingerprint === this.planFingerprint) return [];
+		this.planFingerprint = fingerprint;
+		// ACP plan updates replace the whole list, including an empty list. There
+		// is no advertised plan delta; unknown update kinds stay opaque above.
+		const state: ParsedPlanState = {
+			status: 'completed',
+			input: { plan: entries },
+			planUpdate: {
+				reporting: 'snapshot',
+				revision: ++this.planRevision,
+				providerSessionId: this.options.sessionId,
+				turnId: this.options.turnId,
+				scopeId: this.options.scopeId,
+				processGeneration: this.options.processGeneration,
+				requestId: this.options.requestId,
+				promptId: this.options.promptId,
+				eventId,
+			},
+		};
+		return [
+			{
+				...event,
+				type: 'tool_use',
+				toolName: 'update_plan',
+				// A synthetic display ID, not a provider tool or plan-entry identity.
+				toolCallId: `grok-plan:${canonicalJson({
+					scopeId: this.options.scopeId,
+					sessionId: this.options.sessionId,
+					processGeneration: this.options.processGeneration,
+					turnId: this.options.turnId,
+				})}`,
+				toolState: state,
+			},
+		];
 	}
 
 	private stop(reason: string | undefined): TurnTerminal {
