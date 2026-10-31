@@ -85,8 +85,9 @@ vi.mock('../../../../shared/maestro-lib/launch/path-prober', () => ({
 	checkCustomPath: vi.fn(async (customPath: string) => ({ exists: true, path: customPath })),
 }));
 
-// Mock the agent-args utilities
-vi.mock('../../../../shared/maestro-lib/launch/agent-args', () => ({
+// Keep real Grok launch validation while mocking the argument builders.
+vi.mock('../../../../shared/maestro-lib/launch/agent-args', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../../../shared/maestro-lib/launch/agent-args')>()),
 	buildAgentArgs: vi.fn((agent, opts) => opts.baseArgs || []),
 	applyAgentConfigOverrides: vi.fn((agent, args, opts) => ({
 		args,
@@ -5313,7 +5314,8 @@ describe('process IPC handlers', () => {
 					sshRemoteHost: 'dev.example.com',
 					sshRemoteEndpoint: identity,
 				}),
-				{ peer: 'in-process' }
+				{ peer: 'in-process' },
+				{ beforeSpawn: undefined }
 			);
 			expect(tabOutput()).toEqual([]);
 		});
