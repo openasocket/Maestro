@@ -2804,6 +2804,30 @@
 			"testOwner": "GT1-04-10",
 			"verificationOwner": "GT1-04-13",
 			"consumerOwner": "GT1-06-01"
+		},
+		"phase04-grok-context-export-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-10-grok-context-export-regression-tests",
+			"sourceCommit": "9af90d953ef6e6093a74849918c18d7c1767b526",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/utils/contextExtractor.test.ts": "6c56f1a9de633d64054810ba6fbb55d5891248b328232e241675b737df628d8b",
+				"src/__tests__/main/ipc/handlers/context-groom.test.ts": "22663042e1dddf1366cc4b304fea7515953dfef06e61eeee38bea1ea931d6630"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "P21", "C-supportsContextExport"],
+			"scope": "33 parameter-expanded cases in the existing context extractor and context IPC suites. Scoped account/host forwarding and refusal, chronological role/tool/image provenance, redaction, visibility and source/pagination omissions, legacy controls and unsupported native translation directions.",
+			"limitations": [
+				"Tests neither executed nor collected; GT1-04-13 owns execution.",
+				"Fixtures mock the history API; storage and owned IPC isolation coverage remains in the existing agentSessions and Grok storage suites. No installed account, remote host or native provider was accessed.",
+				"UI/CLI consumer wiring remains GT1-06-01. Native resume and migration remain separate, unqualified contracts."
+			],
+			"testOwner": "GT1-04-10",
+			"verificationOwner": "GT1-04-13",
+			"consumerOwner": "GT1-06-01"
 		}
 	},
 	"sourceCatalog": {
@@ -6761,7 +6785,8 @@
 				"phase04NativeForkRenameTestsRef": "phase04-native-fork-rename-tests",
 				"phase04GrokHistoryMutationRefusalsRef": "phase04-grok-history-mutation-refusals",
 				"phase04GrokHistoryMutationTestsRef": "phase04-grok-history-mutation-tests",
-				"phase04ContextExportEvidenceRef": "phase04-grok-context-export"
+				"phase04ContextExportEvidenceRef": "phase04-grok-context-export",
+				"phase04ContextExportTestsEvidenceRef": "phase04-grok-context-export-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6835,7 +6860,7 @@
 				{
 					"id": "grok-context-export-consumers-and-verification-pending",
 					"code": "verification-and-consumer-wiring-pending",
-					"missingPrerequisite": "GT1-04-09 implements scoped stored-context normalization and truthful bounded/visibility omissions. GT1-04-10/13 must author/execute regressions; GT1-06-01 owns UI/CLI consumer wiring. Backend-only raw evidence remains explicitly omitted. Context export alone does not certify native translation or resume.",
+					"missingPrerequisite": "GT1-04-09 implements scoped stored-context normalization and truthful bounded/visibility omissions. GT1-04-10 authored 33 regression cases; GT1-04-13 must execute them. GT1-06-01 owns UI/CLI consumer wiring. Backend-only raw evidence remains explicitly omitted. Context export alone does not certify native translation or resume.",
 					"affectedRows": ["P14"],
 					"evidenceRef": "phase04-grok-context-export"
 				}
@@ -7843,7 +7868,8 @@
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
 				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
-				"phase04ContextExportEvidenceRef": "phase04-grok-context-export"
+				"phase04ContextExportEvidenceRef": "phase04-grok-context-export",
+				"phase04ContextExportTestsEvidenceRef": "phase04-grok-context-export-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7881,7 +7907,7 @@
 				{
 					"id": "grok-context-export-consumers-and-verification-pending",
 					"code": "verification-and-consumer-wiring-pending",
-					"missingPrerequisite": "GT1-04-09 implements scoped stored-context normalization and truthful bounded/visibility omissions. GT1-04-10/13 must author/execute regressions; GT1-06-01 owns UI/CLI consumer wiring. Backend-only raw evidence remains explicitly omitted. Context export alone does not certify native translation or resume.",
+					"missingPrerequisite": "GT1-04-09 implements scoped stored-context normalization and truthful bounded/visibility omissions. GT1-04-10 authored 33 regression cases; GT1-04-13 must execute them. GT1-06-01 owns UI/CLI consumer wiring. Backend-only raw evidence remains explicitly omitted. Context export alone does not certify native translation or resume.",
 					"affectedRows": ["P21"],
 					"evidenceRef": "phase04-grok-context-export"
 				}
@@ -15087,7 +15113,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04ContextExportEvidenceRef": "phase04-grok-context-export"
+				"phase04ContextExportEvidenceRef": "phase04-grok-context-export",
+				"phase04ContextExportTestsEvidenceRef": "phase04-grok-context-export-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -15125,7 +15152,7 @@
 				{
 					"id": "grok-context-export-consumers-and-verification-pending",
 					"code": "verification-and-consumer-wiring-pending",
-					"missingPrerequisite": "GT1-04-09 implements scoped stored-context normalization and truthful bounded/visibility omissions. GT1-04-10/13 must author/execute regressions; GT1-06-01 owns UI/CLI consumer wiring. Backend-only raw evidence remains explicitly omitted. Context export alone does not certify native translation or resume.",
+					"missingPrerequisite": "GT1-04-09 implements scoped stored-context normalization and truthful bounded/visibility omissions. GT1-04-10 authored 33 regression cases; GT1-04-13 must execute them. GT1-06-01 owns UI/CLI consumer wiring. Backend-only raw evidence remains explicitly omitted. Context export alone does not certify native translation or resume.",
 					"affectedRows": ["C-supportsContextExport"],
 					"evidenceRef": "phase04-grok-context-export"
 				}

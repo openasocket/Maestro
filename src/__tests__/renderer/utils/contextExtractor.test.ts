@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import {
 	extractTabContext,
+	extractStoredSessionContext,
 	formatLogsForGrooming,
 	formatLogsForClipboard,
 	hasThinkingEntries,
@@ -15,6 +16,9 @@ import type { AITab, LogEntry, Session } from '../../../renderer/types';
 import type { ContextSource } from '../../../renderer/types/contextMerge';
 import { createMockAITab } from '../../helpers/mockTab';
 import { createMockSession as baseCreateMockSession } from '../../helpers/mockSession';
+import type { SessionMessagesResult } from '../../../main/agents/session-storage';
+import type { NativeSessionBinding } from '../../../shared/maestro-lib/agents/providerSwap';
+import { getDeclaredTranslationDirection } from '../../../shared/maestro-lib/translation/support';
 
 // Thin wrapper: context extraction tests assert against the default id
 // 'session-123', so preserve that default via the shared factory.
@@ -51,6 +55,408 @@ function createMockLog(overrides: Partial<LogEntry> = {}): LogEntry {
 		...overrides,
 	};
 }
+
+describe('extractStoredSessionContext: Grok export', () => {
+	let binding: Extract<NativeSessionBinding, { state: 'bound' }>;
+	let result: SessionMessagesResult;
+	let options: NonNullable<Parameters<typeof extractStoredSessionContext>[3]>;
+
+	beforeEach(() => {
+		binding = {
+			version: 1,
+			state: 'bound',
+			provider: 'grok',
+			nativeSessionId: 'native-shared',
+			accountRef: 'account-a',
+			host: { kind: 'local', identity: 'fixture-machine' },
+			cwd: '/fixture/project',
+		};
+		options = { ownerAgentId: 'owner-a', nativeSessionBinding: binding };
+		result = {
+			nativeSessionBinding: binding,
+			source: { provider: 'grok', status: 'available' },
+			messages: [
+				{
+					type: 'user',
+					role: 'user',
+					content: 'Selected account content',
+					timestamp: '',
+					uuid: 'native-line-1',
+					native: { provider: 'grok', line: 1 },
+				},
+			],
+			total: 1,
+			hasMore: false,
+		};
+		mockAgentSessionsRead.mockReset().mockResolvedValue(result);
+	});
+
+	it.each(['local', 'ssh'] as const)(
+		'exports only the selected %s account with a colliding native ID',
+		async (kind) => {
+			const selected = { ...binding, host: { kind, identity: `fixture-${kind}` } };
+			const other = { ...selected, accountRef: 'account-b' };
+			mockAgentSessionsRead.mockImplementation(async (_provider, _cwd, _id, readOptions) => ({
+				...result,
+				nativeSessionBinding: readOptions.ownerAgentId === 'owner-a' ? selected : other,
+				messages: [{ ...result.messages[0], content: `${readOptions.ownerAgentId} content` }],
+			}));
+			for (const [ownerAgentId, nativeSessionBinding] of [
+				['owner-a', selected],
+				['owner-b', other],
+			] as const) {
+				const sshRemoteId = kind === 'ssh' ? 'fixture-remote' : undefined;
+				const context = await extractStoredSessionContext(
+					'grok',
+					binding.cwd,
+					binding.nativeSessionId,
+					{
+						ownerAgentId,
+						nativeSessionBinding,
+						sshRemoteId,
+					}
+				);
+				expect(mockAgentSessionsRead).toHaveBeenLastCalledWith(
+					'grok',
+					binding.cwd,
+					'native-shared',
+					{
+						ownerAgentId,
+						nativeSessionBinding,
+						includeNativeRecords: true,
+						offset: 0,
+						limit: 1000,
+					},
+					sshRemoteId
+				);
+				expect(context).toMatchObject({
+					type: 'session',
+					sessionId: ownerAgentId,
+					agentSessionId: 'native-shared',
+					projectRoot: binding.cwd,
+					agentType: 'grok',
+				});
+				expect(context!.logs[1].text).toContain(`${ownerAgentId} content`);
+				expect(context!.logs[1].text).not.toContain(
+					`${ownerAgentId === 'owner-a' ? 'owner-b' : 'owner-a'} content`
+				);
+				expect(context!.logs[0].text).toContain(nativeSessionBinding.accountRef);
+			}
+			expect(mockAgentSessionsRead).toHaveBeenCalledTimes(2);
+		}
+	);
+
+	it.each([undefined, '', '  '])(
+		'refuses missing/blank owner %j before reading',
+		async (ownerAgentId) => {
+			await expect(
+				extractStoredSessionContext('grok', binding.cwd, 'native-shared', { ownerAgentId })
+			).rejects.toThrow('Select the owning Grok agent');
+			expect(mockAgentSessionsRead).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['missing', 'unknown', 'account', 'host', 'cwd', 'native ID', 'provider'])(
+		'refuses nonempty content with %s ownership mismatch',
+		async (mismatch) => {
+			if (mismatch === 'missing') result.nativeSessionBinding = undefined;
+			else if (mismatch === 'unknown')
+				result.nativeSessionBinding = { version: 1, state: 'unknown', reason: 'unobserved' };
+			else
+				result.nativeSessionBinding = {
+					...binding,
+					...(mismatch === 'account' ? { accountRef: 'account-b' } : {}),
+					...(mismatch === 'host'
+						? { host: { kind: 'ssh' as const, identity: 'different-host' } }
+						: {}),
+					...(mismatch === 'cwd' ? { cwd: '/other/project' } : {}),
+					...(mismatch === 'native ID' ? { nativeSessionId: 'other-native' } : {}),
+					...(mismatch === 'provider' ? { provider: 'codex' as const } : {}),
+				};
+			await expect(
+				extractStoredSessionContext('grok', binding.cwd, 'native-shared', options)
+			).rejects.toThrow('ownership is unverified');
+			expect(mockAgentSessionsRead).toHaveBeenCalledTimes(1);
+		}
+	);
+
+	it('accepts host-observed ownership without a retained binding', async () => {
+		const context = await extractStoredSessionContext('grok', binding.cwd, 'native-shared', {
+			ownerAgentId: 'owner-a',
+		});
+		expect(context!.logs[1].text).toContain('Selected account content');
+		expect(context!.logs[0].text).toContain('account-a');
+	});
+
+	it.each(['missing', 'rejected'])(
+		'propagates a %s read without falling back to another account',
+		async (failure) => {
+			if (failure === 'missing') mockAgentSessionsRead.mockResolvedValue(null);
+			else mockAgentSessionsRead.mockRejectedValue(new Error('Selected account unavailable'));
+			await expect(
+				extractStoredSessionContext('grok', binding.cwd, 'native-shared', options)
+			).rejects.toThrow(
+				failure === 'missing' ? 'could not be read' : 'Selected account unavailable'
+			);
+			expect(mockAgentSessionsRead).toHaveBeenCalledTimes(1);
+		}
+	);
+
+	it('preserves ordered, redacted tool/image evidence and unknown rows through both formatters', async () => {
+		// Same inert sentinel as the canonical redaction suite, never a credential.
+		const secret = 'sk-ABCDEFGHIJKLMNOP1234';
+		const historicalFile = `\`\`\`ts:/fixture/removed.ts\n${'historical line\n'.repeat(20)}\`\`\``;
+		result.source = { provider: 'grok', status: 'partial', reason: `truncated ${secret}` };
+		result.nativeSessionBinding = { ...binding, accountRef: `fixture-${secret}` };
+		options.nativeSessionBinding = result.nativeSessionBinding;
+		result.messages = [
+			{
+				...result.messages[0],
+				content: `Question ${secret}`,
+				timestamp: '2026-10-31T12:00:00Z',
+				imageReferences: [`/fixture/${secret}.png`],
+				images: ['data:image/png;base64,SHOULD_NOT_LOAD'],
+			},
+			{
+				type: 'backend_tool_call',
+				role: 'assistant',
+				uuid: 'call-line-2',
+				timestamp: '',
+				content: '',
+				toolUse: [
+					{
+						id: 'call-7',
+						name: 'read_file',
+						arguments: { path: '/fixture/removed.ts', credential: secret },
+					},
+				],
+				native: { provider: 'grok', line: 2, raw: 'PRIVATE_BACKEND_PAYLOAD' },
+			},
+			{
+				type: 'tool_result',
+				role: 'tool',
+				uuid: 'result-line-3',
+				timestamp: '',
+				content: historicalFile,
+				toolCallId: 'call-7',
+				images: ['/fixture/legacy.png'],
+				native: { provider: 'grok', line: 3 },
+			},
+			{
+				type: 'assistant',
+				role: 'assistant',
+				uuid: 'answer-line-4',
+				timestamp: '2026-10-30T12:00:00Z',
+				content: 'Answer',
+				native: {
+					provider: 'grok',
+					line: 4,
+					raw: '{"reasoning_content":"PRIVATE_LEGACY_REASONING"}',
+				},
+			},
+			{
+				type: 'future_record',
+				uuid: 'unknown-line-5',
+				timestamp: '',
+				content: '',
+				native: {
+					provider: 'grok',
+					line: 5,
+					raw: 'PRIVATE_UNKNOWN_PAYLOAD',
+					issues: ['unknown-record-type'],
+				},
+			},
+		];
+		result.total = 5;
+		const original = structuredClone(result);
+		const context = await extractStoredSessionContext(
+			'grok',
+			binding.cwd,
+			'native-shared',
+			options
+		);
+		const logs = context!.logs;
+		expect(logs.slice(1).map(({ id, source }) => [id, source])).toEqual([
+			['native-line-1', 'user'],
+			['call-line-2', 'tool'],
+			['result-line-3', 'tool'],
+			['answer-line-4', 'ai'],
+			['unknown-line-5', 'stdout'],
+		]);
+		expect(logs[1].timestamp).toBe(Date.parse('2026-10-31T12:00:00Z'));
+		expect(logs[4].timestamp).toBe(Date.parse('2026-10-30T12:00:00Z'));
+		for (const index of [0, 2, 3, 5]) expect(logs[index].timestamp).toBeNaN();
+		for (const log of logs)
+			expect(Object.keys(log).sort()).toEqual(['id', 'source', 'text', 'timestamp']);
+		expect(result).toEqual(original);
+		const projection = logs.map((log) => log.text).join('\n');
+		for (const text of [projection, formatLogsForClipboard(logs), formatLogsForGrooming(logs)]) {
+			expect(text).toContain('not lossless native migration or a resumable session');
+			expect(text).toContain('Raw native payloads and opaque reasoning are omitted');
+			expect(text).toContain('Missing content:');
+			expect(text).toContain('Historical tool calls:');
+			expect(text).toContain('"id":"call-7"');
+			expect(text).toContain('Tool result for call: call-7');
+			expect(text).toContain(historicalFile);
+			expect(text).not.toContain('content available on disk');
+			expect(text).toContain('Image references (not loaded; image content not interpreted):');
+			expect(text).toContain('/fixture/[REDACTED_API_KEY].png');
+			expect(text).toContain('/fixture/legacy.png');
+			expect(text).toContain('source line 5; timestamp unknown');
+			expect(text).toContain('Source issues: unknown-record-type');
+			expect(text).toContain('[No normalized text; original content may be unavailable or opaque]');
+			expect(text).toContain('"reason":"truncated [REDACTED_API_KEY]"');
+			expect(text).toContain('"accountRef":"fixture-[REDACTED_API_KEY]"');
+			expect(text).toContain('"credential":"[REDACTED_API_KEY]"');
+			for (const omitted of [
+				secret,
+				'PRIVATE_BACKEND_PAYLOAD',
+				'PRIVATE_LEGACY_REASONING',
+				'PRIVATE_UNKNOWN_PAYLOAD',
+				'SHOULD_NOT_LOAD',
+			])
+				expect(text).not.toContain(omitted);
+			const lines = [...text.matchAll(/source line (\d+)/g)].map((match) => Number(match[1]));
+			expect(lines).toEqual([1, 2, 3, 4, 5]);
+		}
+		// Formatters independently redact text added after extraction as well.
+		logs[1].text += ` late ${secret}`;
+		for (const text of [formatLogsForClipboard(logs), formatLogsForGrooming(logs)]) {
+			expect(text).toContain('late [REDACTED_API_KEY]');
+			expect(text).not.toContain(secret);
+		}
+	});
+
+	it.each([false, true])(
+		'applies reasoning visibility at export and clipboard (includeThinking=%s)',
+		async (includeThinking) => {
+			result.messages = [
+				{
+					...result.messages[0],
+					type: 'reasoning',
+					role: 'assistant',
+					content: 'VISIBLE_REASONING',
+					native: { provider: 'grok', line: 1, raw: 'OPAQUE_REASONING' },
+				},
+			];
+			const context = await extractStoredSessionContext('grok', binding.cwd, 'native-shared', {
+				...options,
+				includeThinking,
+			});
+			const logs = context!.logs;
+			expect(logs[1].source).toBe(includeThinking ? 'thinking' : 'system');
+			expect(formatLogsForClipboard(logs)).not.toContain('VISIBLE_REASONING');
+			for (const text of [
+				logs[1].text,
+				formatLogsForGrooming(logs),
+				formatLogsForClipboard(logs, { includeThinking: true }),
+			]) {
+				expect(text.includes('VISIBLE_REASONING')).toBe(includeThinking);
+				expect(text).not.toContain('OPAQUE_REASONING');
+				if (!includeThinking)
+					expect(text).toContain('Reasoning text omitted by export visibility policy');
+			}
+		}
+	);
+
+	it.each([
+		undefined,
+		{ provider: 'grok', status: 'unavailable', reason: 'oversized' },
+		{ provider: 'grok', status: 'partial', reason: 'truncated' },
+	] satisfies SessionMessagesResult['source'][])(
+		'discloses empty incomplete source %j',
+		async (source) => {
+			Object.assign(result, { source, messages: [], total: 0 });
+			const context = await extractStoredSessionContext(
+				'grok',
+				binding.cwd,
+				'native-shared',
+				options
+			);
+			expect(context!.logs).toHaveLength(1);
+			for (const text of [
+				formatLogsForClipboard(context!.logs),
+				formatLogsForGrooming(context!.logs),
+			]) {
+				expect(text).toContain('Missing content:');
+				expect(text).toContain(source?.reason ?? 'source-status-unobserved');
+				expect(text).not.toContain('The observed transcript contains no records');
+			}
+		}
+	);
+
+	it.each([true, false])(
+		'describes an available empty source truthfully (observed=%s)',
+		async (observed) => {
+			Object.assign(result, {
+				messages: [],
+				total: 0,
+				nativeSessionBinding: observed ? binding : undefined,
+			});
+			const context = await extractStoredSessionContext(
+				'grok',
+				binding.cwd,
+				'native-shared',
+				options
+			);
+			const text = formatLogsForClipboard(context!.logs);
+			expect(text.includes('The observed transcript contains no records')).toBe(observed);
+			if (!observed)
+				expect(text).toContain('Ownership: unverified; no transcript content exported');
+		}
+	);
+
+	it.each([
+		{ total: 1001, hasMore: false },
+		{ total: 1, hasMore: true },
+	])('discloses pagination %j without stitching generations', async (page) => {
+		Object.assign(result, page);
+		const context = await extractStoredSessionContext(
+			'grok',
+			binding.cwd,
+			'native-shared',
+			options
+		);
+		for (const text of [
+			formatLogsForClipboard(context!.logs),
+			formatLogsForGrooming(context!.logs),
+		]) {
+			expect(text).toContain(
+				`Partial export: the latest 1 of ${page.total} normalized records are included; earlier content is omitted.`
+			);
+		}
+		expect(mockAgentSessionsRead).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		['grok', 'codex'],
+		['codex', 'grok'],
+		['grok', 'claude-code'],
+		['claude-code', 'grok'],
+	])('does not enable native migration %s -> %s after export', async (source, destination) => {
+		expect(getDeclaredTranslationDirection(source, destination)).toBeUndefined();
+		const context = await extractStoredSessionContext(
+			'grok',
+			binding.cwd,
+			'native-shared',
+			options
+		);
+		expect(context!.logs[1].text).toContain('Selected account content');
+		expect(getDeclaredTranslationDirection(source, destination)).toBeUndefined();
+		expect(context).not.toHaveProperty('nativeSessionBinding');
+	});
+
+	it('preserves the non-Grok three-argument read and dialogue projection', async () => {
+		const context = await extractStoredSessionContext('claude-code', binding.cwd, 'legacy-native');
+		expect(mockAgentSessionsRead).toHaveBeenCalledWith('claude-code', binding.cwd, 'legacy-native');
+		expect(context).toMatchObject({
+			sessionId: '',
+			name: 'Selected account content',
+			logs: [{ id: 'native-line-1', source: 'user', text: 'Selected account content' }],
+		});
+		expect(formatLogsForClipboard(context!.logs)).toBe('USER:\nSelected account content');
+	});
+});
 
 describe('extractTabContext', () => {
 	it('should extract context from a tab with all fields populated', () => {
