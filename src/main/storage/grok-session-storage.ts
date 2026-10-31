@@ -38,7 +38,13 @@ import type {
 	SessionSearchMode,
 	SessionSearchResult,
 } from '../agents';
-import type { ToolType, SshRemoteConfig } from '../../shared/types';
+import type {
+	ToolType,
+	SshRemoteConfig,
+	UsageAccounting,
+	UsageBreakdown,
+	UsageCost,
+} from '../../shared/types';
 import { resolveAgentAccountDir } from '../../shared/agentAccountDir';
 import { isMacOS } from '../../shared/platformDetection';
 import { BaseSessionStorage } from './base-session-storage';
@@ -50,6 +56,8 @@ import { normalizeModelId } from '../../shared/modelPricing';
 import { parseNativeLines } from '../../shared/maestro-lib/translation/native-records';
 import { compactToolOutput } from '../../shared/toolOutput';
 import { isInlineImageDataUrl } from './session-image-store';
+import { parseJsonWithBom, preserveJsonNumberTokens } from '../../shared/jsonUtils';
+import { usageCostUsd } from '../../shared/maestro-lib/streaming/usage-totals';
 
 const LOG_CONTEXT = '[GrokSessionStorage]';
 const MAX_SESSION_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
@@ -72,80 +80,146 @@ function isSafeGrokPathSegment(name: string): boolean {
 	);
 }
 
-/** Shape of summary.json (the fields this storage consumes). */
-interface GrokSessionSummary {
-	session_summary?: string;
-	generated_title?: string;
-	created_at?: string;
-	updated_at?: string;
-	git_root_dir?: string;
-}
-
-/** Token totals as `usage.json` records them, per session and per model. */
-interface GrokUsageTotals {
-	/** INCLUDES cached reads, unlike the stream's `input_tokens`. */
-	inputTokens?: number;
-	outputTokens?: number;
-	cachedReadTokens?: number;
-	cacheCreationTokens?: number;
-	/** USD x 1e10 (verified: 207651600 ticks == total_cost_usd 0.02076516). */
-	costUsdTicks?: number;
-}
-
-/** Shape of usage.json (grok 1.x; absent on 0.x sessions). */
-interface GrokUsageFile {
-	session?: GrokUsageTotals & { modelUsage?: Record<string, GrokUsageTotals> };
-}
-
-const COST_TICKS_PER_USD = 1e10;
-
-const nonNegative = (value: unknown): number =>
-	typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
-
 /**
- * Session tokens in Maestro's convention: `inputTokens` EXCLUDES cache reads,
- * the way the live stream reports them, so the dashboard's `input + cacheRead`
- * does not count cached tokens twice.
+ * Normalize one native lifetime ledger row, never a sum of its turn/model detail.
+ * Native input includes both cache buckets; reasoning is a subset of output.
+ * Missing or unsafe counts remain absent in the accounting view.
  */
-function toSessionTokens(totals: GrokUsageTotals) {
-	const cacheReadTokens = nonNegative(totals.cachedReadTokens);
-	const cacheCreationTokens = nonNegative(totals.cacheCreationTokens);
+function toSessionTokens(value: unknown, parent?: UsageBreakdown): UsageBreakdown {
+	const row =
+		value && typeof value === 'object' && !Array.isArray(value)
+			? (value as Record<string, unknown>)
+			: {};
+	const count = (value: unknown): number | undefined =>
+		typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+	const input = count(row.inputTokens);
+	const outputTokens = count(row.outputTokens);
+	const cacheReadInputTokens = count(row.cachedReadTokens);
+	const cacheCreationInputTokens = count(row.cacheCreationTokens);
+	const reasoningTokens = count(row.reasoningTokens);
+	const inputTokens =
+		input !== undefined &&
+		cacheReadInputTokens !== undefined &&
+		cacheCreationInputTokens !== undefined &&
+		input >= cacheReadInputTokens + cacheCreationInputTokens
+			? input - cacheReadInputTokens - cacheCreationInputTokens
+			: undefined;
+	const counts = [inputTokens, outputTokens, cacheReadInputTokens, cacheCreationInputTokens];
+	const complete =
+		counts.every((value) => value !== undefined) &&
+		(row.reasoningTokens === undefined ||
+			(reasoningTokens !== undefined &&
+				outputTokens !== undefined &&
+				reasoningTokens <= outputTokens)) &&
+		(row.totalTokens === undefined ||
+			(count(row.totalTokens) !== undefined &&
+				input !== undefined &&
+				outputTokens !== undefined &&
+				Number.isSafeInteger(input + outputTokens) &&
+				row.totalTokens === input + outputTokens)) &&
+		(row.usageIsIncomplete === undefined || row.usageIsIncomplete === false) &&
+		(parent === undefined || parent.completeness === 'complete');
+	const completeness = complete
+		? 'complete'
+		: counts.some((value) => value !== undefined)
+			? 'partial'
+			: 'unknown';
+	// Preserve canonical i64 ticks BEFORE JSON.parse rounds them. Explicit stored
+	// zero is evidence; an absent cost is never inferred to be free or estimated.
+	const ticks =
+		typeof row.costUsdTicks === 'string' &&
+		/^(0|[1-9][0-9]{0,18})$/.test(row.costUsdTicks) &&
+		BigInt(row.costUsdTicks) <= 9223372036854775807n
+			? row.costUsdTicks
+			: undefined;
+	const costPartial =
+		(row.costIsPartial !== undefined && row.costIsPartial !== false) ||
+		parent?.cost.status === 'partial';
+	const cost: UsageCost =
+		ticks !== undefined
+			? complete && !costPartial
+				? { status: 'exact', costUsdTicks: ticks }
+				: { status: 'partial', costUsdTicks: ticks }
+			: costPartial || row.usageIsIncomplete === true
+				? { status: 'partial' }
+				: { status: 'unknown' };
 	return {
-		inputTokens: Math.max(
-			0,
-			nonNegative(totals.inputTokens) - cacheReadTokens - cacheCreationTokens
-		),
-		outputTokens: nonNegative(totals.outputTokens),
-		cacheReadTokens,
-		cacheCreationTokens,
-		// Undefined, not 0, when the file names no cost: a provider that reports
-		// tokens but no cost (a grok-compatible custom binary) must read as unknown, not free.
-		costUsd:
-			typeof totals.costUsdTicks === 'number'
-				? nonNegative(totals.costUsdTicks) / COST_TICKS_PER_USD
-				: undefined,
+		inputTokens,
+		outputTokens,
+		cacheReadInputTokens,
+		cacheCreationInputTokens,
+		reasoningTokens,
+		callCount: count(row.modelCalls),
+		completeness,
+		cost,
 	};
 }
 
 /** Session totals plus a per-model split from usage.json, or null if unreadable. */
-export function parseGrokUsageFile(
-	content: string | null
-): (ReturnType<typeof toSessionTokens> & { byModel: ModelTokenUsage[] }) | null {
+export function parseGrokUsageFile(content: string | null) {
 	if (!content) return null;
-	let parsed: GrokUsageFile;
+	let parsed: unknown;
 	try {
-		parsed = JSON.parse(content) as GrokUsageFile;
-	} catch {
-		return null;
+		parsed = parseJsonWithBom(preserveJsonNumberTokens(content, 'costUsdTicks'));
+	} catch (error) {
+		if (error instanceof SyntaxError) return null;
+		throw error;
 	}
-	if (!parsed.session || typeof parsed.session !== 'object') return null;
-	const byModel = Object.entries(parsed.session.modelUsage ?? {}).map(([model, totals]) => ({
-		model: normalizeModelId(model),
-		...toSessionTokens(totals),
-		costUsd: toSessionTokens(totals).costUsd ?? 0,
-		costEstimated: typeof totals.costUsdTicks !== 'number',
-	}));
-	return { ...toSessionTokens(parsed.session), byModel };
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+	const session = (parsed as Record<string, unknown>).session;
+	if (!session || typeof session !== 'object' || Array.isArray(session)) return null;
+	const row = session as Record<string, unknown>;
+	const totals = toSessionTokens(row);
+	const models =
+		row.modelUsage && typeof row.modelUsage === 'object' && !Array.isArray(row.modelUsage)
+			? Object.entries(row.modelUsage).map(([model, value]) => ({
+					model,
+					...toSessionTokens(value, totals),
+				}))
+			: undefined;
+	const accounting: UsageAccounting = {
+		// This is the CLI runtime's persisted ledger, not provider billing authority.
+		source: 'runtime-stream',
+		route: 'native-history',
+		scope: 'native-session',
+		reporting: 'snapshot',
+		cacheReadCounting: 'beside-input',
+		cacheCreationCounting: 'beside-input',
+		completeness: totals.completeness,
+		cost: totals.cost,
+		childInclusion: 'completed',
+		childCompleteness: 'unknown',
+		callCount: totals.callCount,
+		models,
+	};
+	// The legacy dashboard type cannot express an unknown/partial model cost. Do
+	// not publish an incomplete subset as a full split; all detail survives above.
+	const byModel: ModelTokenUsage[] = [];
+	if (
+		models?.every((model) => model.completeness === 'complete' && model.cost.status === 'exact')
+	) {
+		for (const model of models) {
+			byModel.push({
+				model: normalizeModelId(model.model),
+				inputTokens: model.inputTokens!,
+				outputTokens: model.outputTokens!,
+				cacheReadTokens: model.cacheReadInputTokens!,
+				cacheCreationTokens: model.cacheCreationInputTokens!,
+				costUsd: usageCostUsd(model.cost)!,
+				costEstimated: false,
+			});
+		}
+	}
+	return {
+		inputTokens: totals.inputTokens ?? 0,
+		outputTokens: totals.outputTokens ?? 0,
+		reasoningTokens: totals.reasoningTokens,
+		cacheReadTokens: totals.cacheReadInputTokens ?? 0,
+		cacheCreationTokens: totals.cacheCreationInputTokens ?? 0,
+		costUsd: usageCostUsd(totals.cost),
+		byModel,
+		accounting,
+	};
 }
 
 /** A tool call entry on an assistant transcript record. */
@@ -680,7 +754,12 @@ export class GrokSessionStorage extends BaseSessionStorage {
 
 		return sessions
 			.filter((session): session is AgentSessionInfo => session !== null)
-			.sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
+			.sort((a, b) => {
+				const left = Date.parse(a.modifiedAt);
+				const right = Date.parse(b.modifiedAt);
+				if (!Number.isFinite(left)) return Number.isFinite(right) ? 1 : 0;
+				return Number.isFinite(right) ? right - left : -1;
+			});
 	}
 
 	async listSessionsPaginated(
@@ -723,15 +802,24 @@ export class GrokSessionStorage extends BaseSessionStorage {
 				this.joinPath(sshConfig, sessionDir, 'summary.json'),
 				sshConfig
 			);
-			if (!summaryContent) return null;
-
-			let summary: GrokSessionSummary;
-			try {
-				summary = JSON.parse(summaryContent) as GrokSessionSummary;
-			} catch {
-				logger.debug(`Skipping Grok session ${sessionId} with malformed summary.json`, LOG_CONTEXT);
-				return null;
+			const nativeMetadata: NonNullable<AgentSessionInfo['nativeMetadata']> = {
+				provider: 'grok',
+				summaryStatus: 'unavailable',
+			};
+			if (summaryContent?.trim()) {
+				nativeMetadata.summaryStatus = 'invalid';
+				try {
+					const value: unknown = parseJsonWithBom(summaryContent);
+					if (value && typeof value === 'object' && !Array.isArray(value)) {
+						nativeMetadata.summary = value as Record<string, unknown>;
+						nativeMetadata.summaryStatus = 'available';
+					}
+				} catch (error) {
+					if (!(error instanceof SyntaxError)) throw error;
+					logger.debug(`Grok session ${sessionId} has malformed summary.json`, LOG_CONTEXT);
+				}
 			}
+			const summary = nativeMetadata.summary ?? {};
 
 			const transcript = await this.readTranscript(sessionDir, sshConfig);
 			if (!transcript) return null;
@@ -746,10 +834,15 @@ export class GrokSessionStorage extends BaseSessionStorage {
 				return null;
 			}
 
-			const title = summary.session_summary || summary.generated_title || '';
-			const fileMtime = new Date(transcript.mtimeMs).toISOString();
-			const timestamp = summary.created_at || fileMtime;
-			const modifiedAt = summary.updated_at || fileMtime;
+			const title = (
+				[summary.generated_title, summary.session_summary].find(
+					(value): value is string => typeof value === 'string' && value.trim().length > 0
+				) ?? ''
+			).trim();
+			// File mtime can be a copy/restore time. It cannot establish native dates.
+			const [timestamp, modifiedAt] = [summary.created_at, summary.updated_at].map((value) =>
+				typeof value === 'string' && Number.isFinite(Date.parse(value)) ? value : ''
+			);
 			const createdMs = Date.parse(timestamp);
 			const modifiedMs = Date.parse(modifiedAt);
 			const durationSeconds =
@@ -771,14 +864,33 @@ export class GrokSessionStorage extends BaseSessionStorage {
 				firstMessage: preview.slice(0, FIRST_MESSAGE_PREVIEW_LENGTH),
 				messageCount: parsed.messages.length,
 				sizeBytes: transcript.size,
-				// The transcript carries no token counts; grok 1.x keeps the session
-				// totals in usage.json beside it. A 0.x session has none: zeros.
+				nativeMetadata,
+				// Required numeric fields retain compatibility; accounting explicitly
+				// marks absent legacy ledgers unknown, never a measured zero.
 				inputTokens: usage?.inputTokens ?? 0,
 				outputTokens: usage?.outputTokens ?? 0,
+				...(usage?.reasoningTokens !== undefined ? { reasoningTokens: usage.reasoningTokens } : {}),
 				cacheReadTokens: usage?.cacheReadTokens ?? 0,
 				cacheCreationTokens: usage?.cacheCreationTokens ?? 0,
 				...(usage?.costUsd !== undefined ? { costUsd: usage.costUsd } : {}),
 				...(usage?.byModel.length ? { byModel: usage.byModel } : {}),
+				accounting: {
+					...(usage?.accounting ?? {
+						source: 'none',
+						route: 'native-history',
+						scope: 'native-session',
+						reporting: 'snapshot',
+						cacheReadCounting: 'beside-input',
+						cacheCreationCounting: 'beside-input',
+						completeness: 'unknown',
+						cost: { status: 'unknown', reason: 'Native usage unavailable' },
+						childInclusion: 'unknown',
+						childCompleteness: 'unknown',
+					}),
+					// Forks can inherit an older usage.sessionId; only the directory
+					// identifies the session whose lifetime snapshot was read.
+					providerSessionId: sessionId,
+				},
 				durationSeconds,
 				sessionName: title || undefined,
 			};

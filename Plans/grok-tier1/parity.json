@@ -897,6 +897,32 @@
 			"live": "not-run",
 			"affectedRows": ["P13", "P15", "P21", "C-supportsSessionStorage", "REG-STORAGE", "S06"],
 			"scope": "Current/legacy transcript normalization and opt-in native evidence only. Summary/usage and bounded reads/pagination are explicit GT1-04-05A/05B continuations; GT1-04-06 authors tests and GT1-04-13 runs them. Export consumers remain GT1-04-09. No full-row, native resume or migration qualification."
+		},
+		"phase04-native-summary-usage": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-05a-native-summary-and-lifetime-usage",
+			"sourceCommit": "aaa946de247af5b2adadcb832f73f2149809d00e",
+			"sourceCommitScope": "Pre-task HEAD plus the source hashes and task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/storage/grok-session-storage.ts": "edea653517a230321b4b441faef4d9a724c2953774fbb828eea39151fce5a844",
+				"src/main/agents/session-storage.ts": "924c7dc9fa3a726e60b654cb4e582806db89cdfd4ff4dda0e8ee8526513ea154"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"implementation": "implemented",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P11",
+				"P13",
+				"P15",
+				"C-supportsSessionStorage",
+				"C-supportsCostTracking",
+				"C-supportsUsageStats",
+				"REG-STORAGE",
+				"REG-USAGE"
+			],
+			"scope": "GT1-04-05A summary recovery, native title/metadata, unknown dates and lifetime usage normalization only. Exact tick costs, raw model IDs and unknown/partial model detail use existing UsageAccounting. GT1-04-06 authors tests; GT1-04-13 executes them. Bounded reads, generation consistency and accounting consumers retain their existing owners. No full-row or native qualification."
 		}
 	},
 	"sourceCatalog": {
@@ -4121,7 +4147,8 @@
 				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4564,7 +4591,8 @@
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
 				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
-				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization"
+				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4816,7 +4844,8 @@
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
 				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
-				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization"
+				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10907,7 +10936,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
-				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization"
+				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11077,7 +11107,8 @@
 				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11269,7 +11300,8 @@
 				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13900,7 +13932,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
 				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
-				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization"
+				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14536,7 +14569,8 @@
 				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
 			},
 			"evidenceApplicability": {
 				"static": {

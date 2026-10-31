@@ -14,7 +14,7 @@
  * ```
  */
 
-import type { ToolType, SshRemoteConfig } from '../../shared/types';
+import type { ToolType, SshRemoteConfig, UsageAccounting } from '../../shared/types';
 import type { ModelTokenUsage } from '../../shared/tokenUsage';
 import type { TokenSpeedBucket } from '../../shared/tokenSpeed';
 import { isValidAgentId } from '../../shared/agentIds';
@@ -71,8 +71,22 @@ export interface AgentSessionInfo {
 	sizeBytes: number;
 	/** Cost in USD - optional, only provided by agents that support cost tracking */
 	costUsd?: number;
+	/** Native lifetime accounting, including unknown/partial amounts and raw model IDs.
+	 * Numeric legacy fields are display projections; these snapshots are not turn deltas.
+	 */
+	accounting?: UsageAccounting;
+	/** Opaque provider metadata, including schema/fork ancestry. Never use it to
+	 * redirect reads or execute historical actions; exporters must redact it.
+	 */
+	nativeMetadata?: {
+		provider: string;
+		summaryStatus: 'available' | 'unavailable' | 'invalid';
+		summary?: Record<string, unknown>;
+	};
 	inputTokens: number;
 	outputTokens: number;
+	/** Known reasoning tokens are a subset of output, never additional spend. */
+	reasoningTokens?: number;
 	cacheReadTokens: number;
 	cacheCreationTokens: number;
 	/**
