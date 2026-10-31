@@ -1642,6 +1642,27 @@
 			"scope": "Inert local/SSH observed receipts and retained binding checks through actual IPC handlers, canonical scope, collision and read races, no mirror restoration; typed preload provenance forwarding. No test execution/collection or native compliance claim.",
 			"remainingTestOwners": ["GT1-04-07C1T1"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-history-environment-observer-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c1t1-history-environment-and-observer-edge-tests",
+			"sourceCommit": "8102c3ec6bd5237894d1b97acd468759902ce71c",
+			"sourceCommitScope": "Pre-task HEAD plus test hash and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/ipc/handlers/agentSessions.test.ts": "9fde12924a21f0428503281236889cf00848a39973b9c79c0a60c5724d812ceb"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"authoredCases": 72,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"scopedTypeCheck": "fail",
+			"staticBlocker": "Unchanged plugin-host-handlers.ts(1196,76) RequestInit.dispatcher TS2339; no new suite diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P13", "P14", "P15", "C-supportsResume", "REG-SESSION-MUTATION"],
+			"scope": "Inert IPC environment-only races, replaced provider layers, ambiguous default/tilde roots and absolute controls, endpoint epochs and qualifier lifetime, observer failures, final path fences and ownerless receipt handling. No test execution/collection or native compliance claim.",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
