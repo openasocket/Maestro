@@ -2596,7 +2596,13 @@
 				{
 					"id": "grok-recovery-guidance-unverified",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Conditional StdoutHandler, renderer recovery and Wizard guidance tests pass in 13, including local/SSH identity and no unconditional non-login remedy. Canonical stderr/exit bank messages still need GT1-03-11A/11B/13/14; actual selected credentials and login recovery remain unqualified. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
+					"missingPrerequisite": "Canonical Grok bank remedies are now neutral under GT1-03-11A; credential-aware login consumers remain unchanged. GT1-03-11B/13 must verify the new bank and retry contracts. Actual selected credentials and login recovery remain unqualified under phase11. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
+					"affectedRows": ["P05"]
+				},
+				{
+					"id": "grok-safe-replay:P05",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11B/13 verify it. Separate limit and blanket Auto Run resume bypasses require GT1-03-11A1/11A1T/13; phase07/10 must propagate settled host facts and verify all consumers. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
 					"affectedRows": ["P05"]
 				}
 			],
@@ -3652,7 +3658,8 @@
 					"GT1-03-05C1",
 					"GT1-03-05E",
 					"GT1-03-09A",
-					"GT1-03-11C"
+					"GT1-03-11C",
+					"GT1-03-11A1"
 				],
 				"test": [
 					"GT1-03-02",
@@ -3672,7 +3679,8 @@
 					"GT1-07-03C",
 					"GT1-07-04D",
 					"GT1-03-05D",
-					"GT1-03-06C"
+					"GT1-03-06C",
+					"GT1-03-11A1T"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -3782,6 +3790,12 @@
 					"id": "native-parser-followup:P10",
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C must share the existing lossless tick lexer and wire native raw decoding. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"affectedRows": ["P10"]
+				},
+				{
+					"id": "grok-safe-replay:P10",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11B/13 verify it. Separate limit and blanket Auto Run resume bypasses require GT1-03-11A1/11A1T/13; phase07/10 must propagate settled host facts and verify all consumers. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
 					"affectedRows": ["P10"]
 				}
 			],
@@ -4127,7 +4141,8 @@
 					"GT1-03-05C1",
 					"GT1-03-05E",
 					"GT1-03-09A",
-					"GT1-03-11C"
+					"GT1-03-11C",
+					"GT1-03-11A1"
 				],
 				"test": [
 					"GT1-03-02",
@@ -4140,7 +4155,8 @@
 					"GT1-03-05B",
 					"GT1-03-11B",
 					"GT1-03-05D",
-					"GT1-03-06C"
+					"GT1-03-06C",
+					"GT1-03-11A1T"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -4230,6 +4246,12 @@
 					"id": "native-parser-followup:P12",
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "GT1-03-11 adds native structured outcomes and terminal usage/provenance snapshots; static checks only. GT1-03-11C must share the existing lossless tick lexer and wire native raw decoding. GT1-03-12 authors native regressions and GT1-03-13 executes them. Phase07/10 must preserve raw native ticks before desktop eager JSON parsing, distinguish malformed stdout from stderr, carry terminal facts through consumers and identify empty native streams without failing ACP/bridge callers. Native version/platform/policy qualification remains not-run.",
+					"affectedRows": ["P12"]
+				},
+				{
+					"id": "grok-safe-replay:P12",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11B/13 verify it. Separate limit and blanket Auto Run resume bypasses require GT1-03-11A1/11A1T/13; phase07/10 must propagate settled host facts and verify all consumers. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
 					"affectedRows": ["P12"]
 				}
 			],
@@ -13793,7 +13815,13 @@
 				{
 					"id": "grok-recovery-guidance-unverified",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Conditional StdoutHandler, renderer recovery and Wizard guidance tests pass in 13, including local/SSH identity and no unconditional non-login remedy. Canonical stderr/exit bank messages still need GT1-03-11A/11B/13/14; actual selected credentials and login recovery remain unqualified. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
+					"missingPrerequisite": "Canonical Grok bank remedies are now neutral under GT1-03-11A; credential-aware login consumers remain unchanged. GT1-03-11B/13 must verify the new bank and retry contracts. Actual selected credentials and login recovery remain unqualified under phase11. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
+					"affectedRows": ["REG-AUTH"]
+				},
+				{
+					"id": "grok-safe-replay:REG-AUTH",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11B/13 verify it. Separate limit and blanket Auto Run resume bypasses require GT1-03-11A1/11A1T/13; phase07/10 must propagate settled host facts and verify all consumers. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
 					"affectedRows": ["REG-AUTH"]
 				}
 			],
@@ -14828,8 +14856,8 @@
 				"src/shared/maestro-lib/parsers/antigravity-output-parser.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-02-03", "GT1-03-11", "GT1-03-11A"],
-				"test": ["GT1-02-04", "GT1-03-12", "GT1-03-11B"],
+				"implementation": ["GT1-02-03", "GT1-03-11", "GT1-03-11A", "GT1-03-11A1"],
+				"test": ["GT1-02-04", "GT1-03-12", "GT1-03-11B", "GT1-03-11A1T"],
 				"verification": ["GT1-02-13", "GT1-03-13", "GT1-11-11", "GT1-03-14", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -14882,6 +14910,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["REG-ERRORS"]
+				},
+				{
+					"id": "grok-safe-replay:REG-ERRORS",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11B/13 verify it. Separate limit and blanket Auto Run resume bypasses require GT1-03-11A1/11A1T/13; phase07/10 must propagate settled host facts and verify all consumers. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
 					"affectedRows": ["REG-ERRORS"]
 				}
 			]
@@ -18782,7 +18816,13 @@
 				{
 					"id": "grok-recovery-guidance-unverified",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Conditional StdoutHandler, renderer recovery and Wizard guidance tests pass in 13, including local/SSH identity and no unconditional non-login remedy. Canonical stderr/exit bank messages still need GT1-03-11A/11B/13/14; actual selected credentials and login recovery remain unqualified. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
+					"missingPrerequisite": "Canonical Grok bank remedies are now neutral under GT1-03-11A; credential-aware login consumers remain unchanged. GT1-03-11B/13 must verify the new bank and retry contracts. Actual selected credentials and login recovery remain unqualified under phase11. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
+					"affectedRows": ["META-05"]
+				},
+				{
+					"id": "grok-safe-replay:META-05",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11B/13 verify it. Separate limit and blanket Auto Run resume bypasses require GT1-03-11A1/11A1T/13; phase07/10 must propagate settled host facts and verify all consumers. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
 					"affectedRows": ["META-05"]
 				}
 			],
