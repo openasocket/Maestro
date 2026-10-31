@@ -10,6 +10,7 @@ import { EventEmitter } from 'events';
 import type { ChildProcess } from 'child_process';
 import type { SpawnSpec } from '../../../main/cue/cue-spawn-builder';
 import { ClaudeOutputParser } from '../../../shared/maestro-lib/parsers/claude-output-parser';
+import { GrokOutputParser } from '../../../shared/maestro-lib/parsers/grok-output-parser';
 
 // ─── Mocks ───────────────────────────────────────────────────────────────────
 
@@ -843,9 +844,7 @@ describe('cue-process-lifecycle', () => {
 				expect(result.stdout).toBe('command not found: something\n');
 			});
 
-			// `null` rather than `undefined` at this layer: the streaming capture
-			// starts null and `cue-executor` maps it to undefined on the way out.
-			it('leaves usage unset when the provider reports none', async () => {
+			it('records unknown Claude usage when the provider reports none', async () => {
 				mockGetOutputParser.mockReturnValue(resultParser());
 
 				const resultPromise = runProcess('run-1', createSpec(), createOptions());
@@ -854,7 +853,7 @@ describe('cue-process-lifecycle', () => {
 				mockChild.stdout.emit('data', JSON.stringify({ type: 'result', result: 'done' }));
 				mockChild.emit('close', 0, null);
 
-				expect((await resultPromise).usage).toBeNull();
+				expect((await resultPromise).usage?.accounting?.cost.status).toBe('unknown');
 			});
 
 			it('fails a signal kill even when the agent had streamed an answer', async () => {
@@ -1063,7 +1062,7 @@ describe('cue-process-lifecycle', () => {
 				expect(result.providerSessionId).toBe('sess-2');
 			});
 
-			it('returns null providerSessionId/usage when no parser is registered', async () => {
+			it('retains unknown provider provenance when no parser is registered', async () => {
 				mockGetOutputParser.mockReturnValue(null);
 
 				const resultPromise = runProcess('run-1', createSpec(), createOptions());
@@ -1074,7 +1073,8 @@ describe('cue-process-lifecycle', () => {
 				const result = await resultPromise;
 
 				expect(result.providerSessionId).toBeNull();
-				expect(result.usage).toBeNull();
+				expect(result.usage?.accounting?.providerId).toBe('claude-code');
+				expect(result.usage?.accounting?.cost.status).toBe('unknown');
 			});
 
 			it('passes through per-turn usage unmodified for a non-combined-context provider', async () => {
@@ -1133,6 +1133,188 @@ describe('cue-process-lifecycle', () => {
 				// 300. Keeping only the newest delta would report 200 and lose
 				// the first event; taking the raw value would double-count.
 				expect(result.usage).toMatchObject({ inputTokens: 300 });
+			});
+		});
+
+		describe('Grok Cue accounting receipts', () => {
+			afterEach(() => mockGetOutputParser.mockReturnValue(null));
+
+			const model = {
+				inputTokens: 50,
+				outputTokens: 20,
+				cacheReadInputTokens: 10,
+				cacheCreationInputTokens: 5,
+				modelCalls: 1,
+			};
+			const terminal = {
+				type: 'end',
+				stopReason: 'end_turn',
+				sessionId: 'native-shared',
+				requestId: 'new',
+				usage: {
+					input_tokens: 100,
+					output_tokens: 40,
+					cache_read_input_tokens: 20,
+					cache_creation_input_tokens: 10,
+					reasoning_tokens: 5,
+					total_tokens: 170,
+				},
+				total_cost_usd_ticks: '9007199254740993',
+				modelUsage: {
+					'grok/raw-a': { ...model, costUSD: 0.01 },
+					'grok/raw-b': model,
+				},
+			};
+
+			it.each([false, true])(
+				'preserves new/resumed terminal receipts with missing ID=%s',
+				async (missingId) => {
+					for (const requestId of ['new', 'resumed']) {
+						mockGetOutputParser.mockReturnValue(new GrokOutputParser());
+						const spec = createSpec({
+							command: 'grok',
+							args: requestId === 'new' ? [] : ['--resume', 'native-shared'],
+						});
+						const pending = runProcess(requestId, spec, createOptions({ toolType: 'grok' }));
+						await vi.advanceTimersByTimeAsync(0);
+						const end = JSON.stringify({
+							...terminal,
+							requestId,
+							sessionId: missingId ? undefined : terminal.sessionId,
+						});
+						// Per-call occupancy and repeated finals cannot add the turn twice.
+						mockChild.stdout.emit(
+							'data',
+							JSON.stringify({ type: 'usage', usage: terminal.usage }) + '\n' + end + '\n' + end
+						);
+						mockChild.emit('close', 0);
+						const result = await pending;
+						expect(result.status).toBe('completed');
+						expect(result.providerSessionId).toBe(missingId ? null : 'native-shared');
+						const receipt = JSON.parse(JSON.stringify(result.usage));
+						expect(receipt).toMatchObject({
+							inputTokens: 100,
+							outputTokens: 40,
+							cacheReadInputTokens: 20,
+							cacheCreationInputTokens: 10,
+							reasoningTokens: 5,
+							accounting: {
+								providerId: 'grok',
+								source: 'runtime-stream',
+								route: 'native-headless',
+								scope: 'turn',
+								final: true,
+								requestId,
+								cacheReadCounting: 'beside-input',
+								cacheCreationCounting: 'beside-input',
+								completeness: 'complete',
+								cost: { status: 'exact', costUsdTicks: '9007199254740993' },
+							},
+						});
+						expect(receipt.accounting.models).toMatchObject([
+							{ model: 'grok/raw-a', inputTokens: 50, cost: { status: 'exact', costUsd: 0.01 } },
+							{ model: 'grok/raw-b', cacheCreationInputTokens: 5, cost: { status: 'unknown' } },
+						]);
+					}
+				}
+			);
+
+			it.each(['native-session', 'process-session', 'child'] as const)(
+				'never adds %s snapshots to a turn',
+				async (scope) => {
+					const event = new GrokOutputParser().parseJsonObject(terminal)!;
+					mockGetOutputParser.mockReturnValue({
+						parseJsonLine: JSON.parse,
+						extractUsage: (parsed: typeof event) => parsed.usage ?? null,
+					});
+					const pending = runProcess('scoped', createSpec(), createOptions({ toolType: 'grok' }));
+					await vi.advanceTimersByTimeAsync(0);
+					const lifetime = structuredClone(event);
+					lifetime.usage!.inputTokens = 9000000;
+					lifetime.usage!.accounting!.scope = scope;
+					mockChild.stdout.emit(
+						'data',
+						[lifetime, event, lifetime].map((row) => JSON.stringify(row)).join('\n') + '\n'
+					);
+					mockChild.emit('close', 0);
+					const receipt = (await pending).usage;
+					expect(receipt?.inputTokens).toBe(100);
+					expect(receipt?.accounting?.scope).toBe('turn');
+				}
+			);
+
+			it.each([
+				['cancelled', { cost_is_partial: true }, 'partial'],
+				['error', { total_cost_usd_ticks: undefined }, 'unknown'],
+			] as const)(
+				'retains %s spend without complete cost',
+				async (stopReason, changes, costStatus) => {
+					mockGetOutputParser.mockReturnValue(new GrokOutputParser());
+					const pending = runProcess('fail', createSpec(), createOptions({ toolType: 'grok' }));
+					await vi.advanceTimersByTimeAsync(0);
+					mockChild.stdout.emit(
+						'data',
+						JSON.stringify({ ...terminal, ...changes, stopReason }) + '\n'
+					);
+					mockChild.emit('close', 1);
+					const result = await pending;
+					expect(result.status).toBe('failed');
+					expect(result.usage).toMatchObject({
+						inputTokens: 100,
+						cacheReadInputTokens: 20,
+						accounting: { providerId: 'grok', cost: { status: costStatus } },
+					});
+				}
+			);
+
+			it.each([
+				'prelaunch-stop',
+				'spawn-throw',
+				'spawn-error',
+				'completed',
+				'failed',
+				'stopped',
+				'timeout',
+			] as const)('emits an unknown provider receipt without usage/ID on %s', async (ending) => {
+				mockGetOutputParser.mockReturnValue(new GrokOutputParser());
+				const controller = new AbortController();
+				if (ending === 'prelaunch-stop') controller.abort();
+				if (ending === 'spawn-throw')
+					mockSpawn.mockImplementationOnce(() => {
+						throw new Error('synthetic spawn failure');
+					});
+				const pending = runProcess(
+					'no-usage',
+					createSpec(),
+					createOptions({ toolType: 'grok', signal: controller.signal })
+				);
+				await vi.advanceTimersByTimeAsync(0);
+				if (ending === 'spawn-error') mockChild.emit('error', new Error('synthetic ENOENT'));
+				else if (ending !== 'prelaunch-stop' && ending !== 'spawn-throw') {
+					if (ending === 'stopped') stopProcess('no-usage');
+					if (ending === 'timeout') await vi.advanceTimersByTimeAsync(30000);
+					if (ending === 'completed')
+						mockChild.stdout.emit('data', '{"type":"end","stopReason":"end_turn"}\n');
+					mockChild.emit('close', ending === 'completed' ? 0 : 1);
+				}
+				const result = await pending;
+				expect(result.status).toBe(
+					ending === 'prelaunch-stop' ? 'stopped' : ending.startsWith('spawn-') ? 'failed' : ending
+				);
+				expect(result.providerSessionId).toBeNull();
+				expect(result.usage).toMatchObject({
+					inputTokens: 0,
+					outputTokens: 0,
+					totalCostUsd: 0,
+					accounting: {
+						providerId: 'grok',
+						source: 'none',
+						scope: 'turn',
+						reporting: 'snapshot',
+						completeness: 'unknown',
+						cost: { status: 'unknown' },
+					},
+				});
 			});
 		});
 
