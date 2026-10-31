@@ -2912,6 +2912,51 @@
 			"static": "pass",
 			"deterministic": "not-run",
 			"live": "not-run"
+		},
+		"phase04-reconciliation": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-14-phase-04-reconciliation",
+			"sourceCommit": "25b1a35a3baa63531397804d4dcab61ebf7fa2e8",
+			"provenance": "source-and-recorded-receipt-reconciliation",
+			"acceptanceRun": false,
+			"status": "pass",
+			"affectedRows": [
+				"C-supportsContextExport",
+				"C-supportsContextMerge",
+				"C-supportsCostTracking",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"C-supportsSessionStorage",
+				"C-supportsUsageStats",
+				"P04",
+				"P11",
+				"P13",
+				"P14",
+				"P15",
+				"P16",
+				"P21",
+				"P22",
+				"P23",
+				"P24",
+				"P40",
+				"REG-PROFILE",
+				"REG-SESSION-MUTATION",
+				"REG-STORAGE",
+				"REG-TRANSLATION",
+				"REG-USAGE",
+				"S06",
+				"S07",
+				"S26"
+			],
+			"scope": "Current scoped outcomes and remaining blockers; all 134 whole-row statuses, applicability, required scope and historical catalog entries are preserved."
+		},
+		"phase04-selected-verification": {
+			"path": "Plans/grok-tier1/evidence/04-process-reverification.json",
+			"sha256": "5c052e18944a715e238c122d172166c43dcc4d1e20c26143522be6e95c31cfe0",
+			"sourceCommit": "4ddd8ce6f907c55dd65ba52a58ef80ce4c4a8869",
+			"provenance": "deterministic-fixture-verification-with-hash-validated-carry-forward",
+			"acceptanceRun": false,
+			"status": "pass",
+			"scope": "54 files / 4557 passed; 182 process tests at 4ddd8ce6f plus 4375 historical passes at fcc5b3fbb. Original failing batch exits remain historical facts. No new execution or live qualification in GT1-04-14."
 		}
 	},
 	"sourceCatalog": {
@@ -4546,7 +4591,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Canonical Grok GROK_HOME roots, environment precedence/blank unsets, managed binding dominance and host separation are implemented and exercised with synthetic accounts. Root grouping is not billing proof: fallback/inline/gateway/deployment/independent auth-file identities remain withheld. Selected-root storage and usage wiring remain GT1-04-01/02/11/12/13; actual managed binding/custody and native account isolation remain phase09/11 work."
+				"Canonical Grok account roots and environment precedence, explicit blank default selection and host separation have deterministic coverage. Phase04 selected-root history/usage wiring and discovery tests pass. Root grouping is not billing proof; fallback/inline/gateway/deployment/independent auth identities remain withheld. Current managed account-path wiring/custody and live account isolation remain phase09/11 work."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -4569,7 +4614,9 @@
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
-				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests"
+				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4615,12 +4662,6 @@
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Explicit empty/blank environment and source-label tests pass in 13 across argument resolution, fake-port group-chat routing and renderer consumers. This resolves the narrow empty-record inheritance regression. Actual selected-account exclusion, credential custody and local/SSH launch isolation still require phase09/11 qualification. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
 					"affectedRows": ["P04", "P31"]
-				},
-				{
-					"id": "quick-chat-stale-recent-read",
-					"code": "verification-pending",
-					"missingPrerequisite": "GT1-04-07CQT1A implemented the request/current-chat fence around getRecent. GT1-04-13 must execute both Quick Chat suites, including the two unchanged stale-read regressions. Static review only; runtime not-run.",
-					"affectedRows": ["P04"]
 				}
 			],
 			"phase": "02",
@@ -6159,7 +6200,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Shared native/ACP normalization preserves exact decimal ticks, unknown/partial cost, per-model scopes, separate cache buckets and exactly-once final replacement in GT1-03-13E fixtures. Unknown Grok models do not inherit unrelated prices in this shared path. Disk readers, collectors declaring full coverage, selected-account lifetime/child reconciliation and persistence/UI propagation still need phase04/07/10 integration and phase11 native evidence. Both accessors classify Grok full coverage unconditionally. Reconcile partial/unknown cost, cache, child totals, profiles and rate-limit accounting against normalized evidence. Exact tick precision, partial/unreported cost and stream/final/disk reconciliation still require qualification. Shared native uncached-input and ACP full-input buckets, cache/model scopes and child non-additivity pass GT1-03-13E fixtures; persistence, UI, native lifetime reconciliation and real-provider agreement remain unqualified. Grok uses false conservatively; ACP/native accounting needs verified semantics and agreement with static set."
+				"Phase03/04 fixtures preserve exact decimal ticks, unknown/partial cost, per-model identity, separate cache buckets and once-only turn/session totals. Phase04 selected-account disk reads, accessors, dashboard, CLI/export and Cue consumers pass deterministic regressions. Unknown Grok models never borrow unrelated prices. Real billing, running-child completeness, live/disk agreement and broader ACP/SSH consumer propagation remain phase07/10/11 qualification; managed account-path wiring remains phase09.",
+				"Context occupancy and native/ACP input semantics remain distinct; declared capability semantics still require native agreement."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -6194,7 +6236,9 @@
 				"phase04UsageAccessorTestsEvidenceRef": "phase04-usage-accessor-tests",
 				"phase04CueAccountingTestsEvidenceRef": "phase04-cue-accounting-tests",
 				"phase04DashboardAccountTestsEvidenceRef": "phase04-dashboard-account-tests",
-				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests"
+				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6253,10 +6297,10 @@
 				},
 				{
 					"id": "grok-usage-consumer-continuations-pending",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run. GT1-04-12 authored 18 accessor cases and migrated Cue pair-key assertions; static checks pass, but tests were neither run nor collected. All execution remains owned by GT1-04-13. GT1-04-12A authored 30 Cue query/lifecycle cases, including event/native isolation, observed provider swaps and exact/unknown receipt provenance. Static checks add no diagnostics; execution remains GT1-04-13 not-run. GT1-04-12B authored 30 dashboard/account-discovery cases covering canonical cost display, raw identities, absent throughput and account-layer/pool isolation. Static checks add no diagnostics; tests were neither run nor collected and execution remains GT1-04-13 not-run. GT1-04-12C authored 28 CLI/export cases covering canonical spend states, account/model identity, cache buckets, exact ticks and missing usage. Static checks add no diagnostics; tests were neither run nor collected and GT1-04-13 owns execution.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
 					"affectedRows": ["P11"],
-					"evidenceRef": "phase04-canonical-account-discovery"
+					"evidenceRef": "phase04-reconciliation"
 				}
 			],
 			"phase": "03",
@@ -6643,7 +6687,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GrokSessionStorage is registered and already reads summary/chat_history/usage using bounded concurrency, size guards and partial-line tolerance. Its public methods omit account inputs; getSessionsDir uses process GROK_HOME locally and literal ~/.grok/sessions remotely. IPC listPaginated resolves owner account but the missing profile/storage plumbing discards it. Other read/search/path/mutation consumers need matching identity propagation. Grok absent from profile registry despite GROK_HOME storage support. resolveAgentAccountDir returns undefined; account enumerator returns []; token collector does one default-account pass. Multiple Grok accounts and same-ID local/remote sessions cannot be attributed by the shared account machinery. Grok account-root and remote native history semantics, concurrent writes and partial snapshots remain unqualified."
+				"Phase04 implements selected-account local/SSH list/read/search/path consistency, bounded current/legacy transcript normalization and observed scoped read receipts. Explicit account absence never falls back; observed account/cwd/native-ID/host mismatches refuse. Cross-file summary/transcript/usage views remain partial without a shared native generation. Deterministic adapter/IPC tests pass; actual Grok versions, OS tuples, SSH hosts/reconnects and native continuation remain not-run. Unbound browsing is not observed resume authority."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -6666,7 +6710,9 @@
 				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests",
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
-				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests"
+				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6839,7 +6885,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok late end.sessionId is handled, including failed terminal lines in StdoutHandler; no ACP early-session path exists yet. Grok deleteMessagePair refuses because transcript edits invalidate usage/events/search indexes. Native fork/rename/delete must be qualified separately from shared prompt-based fork and Maestro-visible naming. Native identity/account persistence, interrupted turns and exact supported-version continuation still need verification. Grok ID currently appears at terminal end; early ACP IDs and late-event ownership need coverage."
+				"Phase04 native binding, launch/request ownership, late-ID delivery, persistence, renderer reopen and runtime recording fixtures pass. Unknown or changed provider/account/cwd/host/generation refuses before continuation or mutation. Native fork/title change/delete/message edit remain unsupported through Maestro, with tested refusals; shared text copying and local tab labels are separate. Production ACP wiring, headless SSH observation, real restart/continuation and exact-binary qualification remain pending. Scoped context export is tested but UI/CLI wiring belongs to GT1-06-01."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -6891,7 +6937,9 @@
 				"phase04GrokHistoryMutationRefusalsRef": "phase04-grok-history-mutation-refusals",
 				"phase04GrokHistoryMutationTestsRef": "phase04-grok-history-mutation-tests",
 				"phase04ContextExportEvidenceRef": "phase04-grok-context-export",
-				"phase04ContextExportTestsEvidenceRef": "phase04-grok-context-export-tests"
+				"phase04ContextExportTestsEvidenceRef": "phase04-grok-context-export-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6927,22 +6975,23 @@
 					"affectedRows": ["P14"]
 				},
 				{
-					"id": "quick-chat-stale-recent-read",
-					"code": "verification-pending",
-					"missingPrerequisite": "GT1-04-07CQT1A implemented the request/current-chat fence around getRecent. GT1-04-13 must execute both Quick Chat suites, including the two unchanged stale-read regressions. Static review only; runtime not-run.",
-					"affectedRows": ["P14"]
-				},
-				{
 					"id": "grok-remote-launch-account-unobserved",
-					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET/07E1T have authored host/bridge/lifecycle and renderer/persistence tests; 08 retains broader generation test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
-					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Desktop selected remote launch observation, admission rechecks and request/native-ID propagation now pass the selected phase04 fixture suites. Actual SSH endpoint/credential/reconnect behavior and production ACP routing still need phase07/10/11 qualification; no configured alias or mock endpoint certifies a live host.",
+					"affectedRows": [
+						"P14",
+						"C-supportsResume",
+						"C-supportsSessionId",
+						"REG-SESSION-MUTATION"
+					],
+					"evidenceRef": "phase04-reconciliation"
 				},
 				{
 					"id": "runtime-native-launch-and-recording-pending",
-					"code": "verification-and-host-wiring-pending",
-					"missingPrerequisite": "07F1/2/3 extract shared selector/observer/matcher; 07F4 implements admitted receipts and pre-resume validation; 07F5 consumes receipts and fences actual begin/transcript/History mutations through the repository queue. Static review only. 07F5T authored queued-mutation and receipt persistence regressions and updated prerequisite fixtures; GT1-04-13 must execute all continuation suites. Production headless SSH observation remains unavailable; native ACP and live scope qualification remain not-run.",
-					"affectedRows": ["P14"]
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Shared launch receipts, pre-resume validation, queued begin/record mutation fences and persistence now pass the selected phase04 suites. Production headless SSH observation remains unavailable; native ACP host wiring and real restart/continuation remain phase07/10/11 obligations.",
+					"affectedRows": ["P14"],
+					"evidenceRef": "phase04-reconciliation"
 				},
 				{
 					"id": "grok-native-fork-rename-transport-unqualified",
@@ -6951,23 +7000,18 @@
 					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
 				},
 				{
-					"id": "grok-rename-consumer-isolation-pending",
-					"code": "verification-pending",
-					"missingPrerequisite": "GT1-04-08A1 implements local-only Grok labels and visible unsupported History rename; GT1-04-08A1T authors serializer/startup reload, retained ownership, account/host collisions, preserved bindings, refusal and non-Grok controls. GT1-04-13 must execute the three suites. Static checks add no diagnostics; native title mutation remains unsupported.",
-					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
-				},
-				{
 					"id": "grok-native-delete-edit-transport-unqualified",
 					"code": "native-mutation-unsupported",
-					"missingPrerequisite": "Version-qualified account/cwd/host-bound native mutation transaction, native prompt mapping and active-writer/generation fencing. GT1-04-08C preserves history and refuses unsafe UI/IPC mutations; GT1-04-08D/13 must author/execute refusal and isolation regressions. Pinned whole-session delete and rewind cannot substitute for arbitrary message-pair edits. Native compliance remains not-run.",
-					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
+					"missingPrerequisite": "Native delete and message-pair edit remain unsupported through Maestro. Phase04 refusal/no-write consumer regressions pass; neither direct transcript rewrites nor fixture refusals qualify a native mutation transport.",
+					"affectedRows": ["P14", "REG-SESSION-MUTATION"],
+					"evidenceRef": "phase04-reconciliation"
 				},
 				{
 					"id": "grok-context-export-consumers-and-verification-pending",
-					"code": "verification-and-consumer-wiring-pending",
-					"missingPrerequisite": "GT1-04-09 implements scoped stored-context normalization and truthful bounded/visibility omissions. GT1-04-10 authored 33 regression cases; GT1-04-13 must execute them. GT1-06-01 owns UI/CLI consumer wiring. Backend-only raw evidence remains explicitly omitted. Context export alone does not certify native translation or resume.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Scoped stored-context normalization, redaction and explicit omissions pass phase04 deterministic tests. Neither stored-context retrieval entry currently has a production UI caller; GT1-06-01 owns UI/CLI export and merge wiring. Native resume, live consumption, token budgeting and directional migration need separate proof.",
 					"affectedRows": ["P14"],
-					"evidenceRef": "phase04-grok-context-export"
+					"evidenceRef": "phase04-reconciliation"
 				}
 			],
 			"phase": "04",
@@ -7075,7 +7119,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GrokSessionStorage is registered and already reads summary/chat_history/usage using bounded concurrency, size guards and partial-line tolerance. Its public methods omit account inputs; getSessionsDir uses process GROK_HOME locally and literal ~/.grok/sessions remotely. IPC listPaginated resolves owner account but the missing profile/storage plumbing discards it. Other read/search/path/mutation consumers need matching identity propagation. Grok absent from profile registry despite GROK_HOME storage support. resolveAgentAccountDir returns undefined; account enumerator returns []; token collector does one default-account pass. Multiple Grok accounts and same-ID local/remote sessions cannot be attributed by the shared account machinery. Grok account-root and remote native history semantics, concurrent writes and partial snapshots remain unqualified."
+				"Phase04 implements selected-account local/SSH list/read/search/path consistency, bounded current/legacy transcript normalization and observed scoped read receipts. Explicit account absence never falls back; observed account/cwd/native-ID/host mismatches refuse. Cross-file summary/transcript/usage views remain partial without a shared native generation. Deterministic adapter/IPC tests pass; actual Grok versions, OS tuples, SSH hosts/reconnects and native continuation remain not-run. Unbound browsing is not observed resume authority."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -7110,7 +7154,9 @@
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
-				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests"
+				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7143,12 +7189,6 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
-					"affectedRows": ["P15"]
-				},
-				{
-					"id": "quick-chat-stale-recent-read",
-					"code": "verification-pending",
-					"missingPrerequisite": "GT1-04-07CQT1A implemented the request/current-chat fence around getRecent. GT1-04-13 must execute both Quick Chat suites, including the two unchanged stale-read regressions. Static review only; runtime not-run.",
 					"affectedRows": ["P15"]
 				}
 			],
@@ -7311,7 +7351,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Shared native/ACP normalization preserves exact decimal ticks, unknown/partial cost, per-model scopes, separate cache buckets and exactly-once final replacement in GT1-03-13E fixtures. Unknown Grok models do not inherit unrelated prices in this shared path. Disk readers, collectors declaring full coverage, selected-account lifetime/child reconciliation and persistence/UI propagation still need phase04/07/10 integration and phase11 native evidence. ACP normalizes reported child lineage; native/history child identity and real consumer propagation still require phase04/07/10/11 work. Task prose cannot substitute for native IDs or proven usage inclusion. Shared ACP lineage and scoped usage fixtures preserve reported children without fabricating per-child detail. Native child lifecycle/history reconciliation remains unqualified. Renderer groupSubagentToolLogs adopts metadata.parentToolUseId under tool-{id}; one level only, orphans/deeper descendants stay flat. Grok normalization must feed this existing contract or extend it deliberately. Both accessors classify Grok full coverage unconditionally. Reconcile partial/unknown cost, cache, child totals, profiles and rate-limit accounting against normalized evidence."
+				"Phase03/04 fixtures preserve exact decimal ticks, unknown/partial cost, per-model identity, separate cache buckets and once-only turn/session totals. Phase04 selected-account disk reads, accessors, dashboard, CLI/export and Cue consumers pass deterministic regressions. Unknown Grok models never borrow unrelated prices. Real billing, running-child completeness, live/disk agreement and broader ACP/SSH consumer propagation remain phase07/10/11 qualification; managed account-path wiring remains phase09.",
+				"Completed children already folded into lifetime totals are not added again. Native child lifecycle/completeness remains unknown without provider proof. Display grouping still supports one parentToolUseId level; deeper/orphan children remain flat and this phase does not qualify their orchestration."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -7329,7 +7370,9 @@
 				"phase04UsageAccessorTestsEvidenceRef": "phase04-usage-accessor-tests",
 				"phase04CueAccountingTestsEvidenceRef": "phase04-cue-accounting-tests",
 				"phase04DashboardAccountTestsEvidenceRef": "phase04-dashboard-account-tests",
-				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests"
+				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7366,10 +7409,10 @@
 				},
 				{
 					"id": "grok-usage-consumer-continuations-pending",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run. GT1-04-12 authored 18 accessor cases and migrated Cue pair-key assertions; static checks pass, but tests were neither run nor collected. All execution remains owned by GT1-04-13. GT1-04-12A authored 30 Cue query/lifecycle cases, including event/native isolation, observed provider swaps and exact/unknown receipt provenance. Static checks add no diagnostics; execution remains GT1-04-13 not-run. GT1-04-12B authored 30 dashboard/account-discovery cases covering canonical cost display, raw identities, absent throughput and account-layer/pool isolation. Static checks add no diagnostics; tests were neither run nor collected and execution remains GT1-04-13 not-run. GT1-04-12C authored 28 CLI/export cases covering canonical spend states, account/model identity, cache buckets, exact ticks and missing usage. Static checks add no diagnostics; tests were neither run nor collected and GT1-04-13 owns execution.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
 					"affectedRows": ["P16"],
-					"evidenceRef": "phase04-canonical-account-discovery"
+					"evidenceRef": "phase04-reconciliation"
 				}
 			],
 			"phase": "04",
@@ -7974,7 +8017,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok has neither native adapter nor declared directions. Host import/root logic contains Claude/Codex-specific branches (including account env selection), so adding registry rows alone is insufficient. Existing History reader/context export is not reversible native translation. Every direction and supported version needs explicit limits and destination resume evidence. Grok supportsContextMerge=false hides merge actions; native transcript export is not proof of validated merge/handoff. Grok false excludes merge; implement validated budgeted transfer before enabling, independently from native translation. Prove Grok role/tool/image/provenance preservation through export and budgeting rather than infer from stored messages."
+				"Phase04 scoped Grok context extraction and inert redacted role/tool/image provenance pass deterministic checks. Export returns at most 1000 normalized records, discloses omitted/raw/opaque content and never claims a native archive. UI/CLI export callers and validated budgeted merge/handoff remain GT1-06-01; supportsContextMerge remains false. Native migration is a separate unsupported registry outcome owned by phase06."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -7995,7 +8038,9 @@
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
 				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
 				"phase04ContextExportEvidenceRef": "phase04-grok-context-export",
-				"phase04ContextExportTestsEvidenceRef": "phase04-grok-context-export-tests"
+				"phase04ContextExportTestsEvidenceRef": "phase04-grok-context-export-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8032,10 +8077,10 @@
 				},
 				{
 					"id": "grok-context-export-consumers-and-verification-pending",
-					"code": "verification-and-consumer-wiring-pending",
-					"missingPrerequisite": "GT1-04-09 implements scoped stored-context normalization and truthful bounded/visibility omissions. GT1-04-10 authored 33 regression cases; GT1-04-13 must execute them. GT1-06-01 owns UI/CLI consumer wiring. Backend-only raw evidence remains explicitly omitted. Context export alone does not certify native translation or resume.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Scoped stored-context normalization, redaction and explicit omissions pass phase04 deterministic tests. Neither stored-context retrieval entry currently has a production UI caller; GT1-06-01 owns UI/CLI export and merge wiring. Native resume, live consumption, token budgeting and directional migration need separate proof.",
 					"affectedRows": ["P21"],
-					"evidenceRef": "phase04-grok-context-export"
+					"evidenceRef": "phase04-reconciliation"
 				}
 			],
 			"phase": "06",
@@ -8126,7 +8171,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04EvidenceRef": "phase04-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8254,7 +8300,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04EvidenceRef": "phase04-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8373,7 +8420,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04EvidenceRef": "phase04-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11262,7 +11310,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok absent from profile registry despite GROK_HOME storage support. resolveAgentAccountDir returns undefined; account enumerator returns []; token collector does one default-account pass. Multiple Grok accounts and same-ID local/remote sessions cannot be attributed by the shared account machinery. Shared native/ACP normalization preserves exact decimal ticks, unknown/partial cost, per-model scopes, separate cache buckets and exactly-once final replacement in GT1-03-13E fixtures. Unknown Grok models do not inherit unrelated prices in this shared path. Disk readers, collectors declaring full coverage, selected-account lifetime/child reconciliation and persistence/UI propagation still need phase04/07/10 integration and phase11 native evidence. Grok quota is absent. Contract permits native quota unavailability, but requires truthful unavailable/unknown display and no invented unlimited/zero balances; absence is not cost-budget correctness. No endpoint or quota probe was run. Canonical native/ACP errors and conservative retry guards pass GT1-03-13E fixtures. Automatic replay requires settled host-owned failed/provider/not-dispatched facts. Native terminal propagation and all real consumer paths remain phase07/08/10 work; real-provider error/recovery qualification remains phase11. Both accessors classify Grok full coverage unconditionally. Reconcile partial/unknown cost, cache, child totals, profiles and rate-limit accounting against normalized evidence. Grok has no quota provider/view entry; native quota absence may remain unavailable, but unknown cannot mean zero/unlimited or certify budget enforcement. startTurn comments explicitly say buffering is unlimited absent options. Grok burst streams, listener cleanup, persistence privacy and cancellation require bounded workload evidence. Exact tick precision, partial/unreported cost and stream/final/disk reconciliation still require qualification. Shared native uncached-input and ACP full-input buckets, cache/model scopes and child non-additivity pass GT1-03-13E fixtures; persistence, UI, native lifetime reconciliation and real-provider agreement remain unqualified. Grok uses false conservatively; ACP/native accounting needs verified semantics and agreement with static set."
+				"Phase03/04 fixtures preserve exact decimal ticks, unknown/partial cost, per-model identity, separate cache buckets and once-only turn/session totals. Phase04 selected-account disk reads, accessors, dashboard, CLI/export and Cue consumers pass deterministic regressions. Unknown Grok models never borrow unrelated prices. Real billing, running-child completeness, live/disk agreement and broader ACP/SSH consumer propagation remain phase07/10/11 qualification; managed account-path wiring remains phase09.",
+				"Quota has no Grok provider/view entry; absent quota stays unknown, never zero/unlimited or budget certification. Conservative error/retry fixtures do not prove all real consumer recovery paths. Broader streaming burst/memory bounds, listener cleanup, persistence privacy and cancellation workload evidence remain with later phases."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -11283,7 +11332,9 @@
 				"phase04UsageAccessorTestsEvidenceRef": "phase04-usage-accessor-tests",
 				"phase04CueAccountingTestsEvidenceRef": "phase04-cue-accounting-tests",
 				"phase04DashboardAccountTestsEvidenceRef": "phase04-dashboard-account-tests",
-				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests"
+				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11327,10 +11378,10 @@
 				},
 				{
 					"id": "grok-usage-consumer-continuations-pending",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run. GT1-04-12 authored 18 accessor cases and migrated Cue pair-key assertions; static checks pass, but tests were neither run nor collected. All execution remains owned by GT1-04-13. GT1-04-12A authored 30 Cue query/lifecycle cases, including event/native isolation, observed provider swaps and exact/unknown receipt provenance. Static checks add no diagnostics; execution remains GT1-04-13 not-run. GT1-04-12B authored 30 dashboard/account-discovery cases covering canonical cost display, raw identities, absent throughput and account-layer/pool isolation. Static checks add no diagnostics; tests were neither run nor collected and execution remains GT1-04-13 not-run. GT1-04-12C authored 28 CLI/export cases covering canonical spend states, account/model identity, cache buckets, exact ticks and missing usage. Static checks add no diagnostics; tests were neither run nor collected and GT1-04-13 owns execution.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
 					"affectedRows": ["P40"],
-					"evidenceRef": "phase04-canonical-account-discovery"
+					"evidenceRef": "phase04-reconciliation"
 				}
 			],
 			"phase": "10",
@@ -12245,7 +12296,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Native identity/account persistence, interrupted turns and exact supported-version continuation still need verification."
+				"Native binding persistence, interrupted-turn recording, admission and stale completion fixtures pass phase04. Real restart and exact native continuation remain not-run; production ACP wiring and headless SSH observation remain pending."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12289,7 +12340,9 @@
 				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests",
 				"phase04RuntimeAdmittedNativeRecordingRef": "phase04-runtime-admitted-native-recording",
 				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests",
-				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests"
+				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12325,22 +12378,23 @@
 					"affectedRows": ["C-supportsResume"]
 				},
 				{
-					"id": "quick-chat-stale-recent-read",
-					"code": "verification-pending",
-					"missingPrerequisite": "GT1-04-07CQT1A implemented the request/current-chat fence around getRecent. GT1-04-13 must execute both Quick Chat suites, including the two unchanged stale-read regressions. Static review only; runtime not-run.",
-					"affectedRows": ["C-supportsResume"]
-				},
-				{
 					"id": "grok-remote-launch-account-unobserved",
-					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET/07E1T have authored host/bridge/lifecycle and renderer/persistence tests; 08 retains broader generation test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
-					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Desktop selected remote launch observation, admission rechecks and request/native-ID propagation now pass the selected phase04 fixture suites. Actual SSH endpoint/credential/reconnect behavior and production ACP routing still need phase07/10/11 qualification; no configured alias or mock endpoint certifies a live host.",
+					"affectedRows": [
+						"P14",
+						"C-supportsResume",
+						"C-supportsSessionId",
+						"REG-SESSION-MUTATION"
+					],
+					"evidenceRef": "phase04-reconciliation"
 				},
 				{
 					"id": "runtime-native-launch-and-recording-pending",
-					"code": "verification-and-host-wiring-pending",
-					"missingPrerequisite": "07F1/2/3 extract shared selector/observer/matcher; 07F4 implements admitted receipts and pre-resume validation; 07F5 consumes receipts and fences actual begin/transcript/History mutations through the repository queue. Static review only. 07F5T authored queued-mutation and receipt persistence regressions and updated prerequisite fixtures; GT1-04-13 must execute all continuation suites. Production headless SSH observation remains unavailable; native ACP and live scope qualification remain not-run.",
-					"affectedRows": ["C-supportsResume"]
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Shared launch receipts, pre-resume validation, queued begin/record mutation fences and persistence now pass the selected phase04 suites. Production headless SSH observation remains unavailable; native ACP host wiring and real restart/continuation remain phase07/10/11 obligations.",
+					"affectedRows": ["C-supportsResume"],
+					"evidenceRef": "phase04-reconciliation"
 				}
 			],
 			"field": "supportsResume",
@@ -12837,7 +12891,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok ID currently appears at terminal end; early ACP IDs and late-event ownership need coverage."
+				"Native terminal IDs and correlated late-event persistence pass phase04 consumer fixtures. Shared ACP allocation behavior is fixture-tested in phase03; production ACP host wiring and real early/late-ID behavior still require qualification."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12881,7 +12935,9 @@
 				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests",
 				"phase04RuntimeAdmittedNativeRecordingRef": "phase04-runtime-admitted-native-recording",
 				"phase04RuntimeAdmittedNativeRecordingTestsRef": "phase04-runtime-admitted-native-recording-tests",
-				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests"
+				"phase04NativeResumeIntegrationTestsRef": "phase04-native-resume-integration-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12917,22 +12973,23 @@
 					"affectedRows": ["C-supportsSessionId"]
 				},
 				{
-					"id": "quick-chat-stale-recent-read",
-					"code": "verification-pending",
-					"missingPrerequisite": "GT1-04-07CQT1A implemented the request/current-chat fence around getRecent. GT1-04-13 must execute both Quick Chat suites, including the two unchanged stale-read regressions. Static review only; runtime not-run.",
-					"affectedRows": ["C-supportsSessionId"]
-				},
-				{
 					"id": "grok-remote-launch-account-unobserved",
-					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET/07E1T have authored host/bridge/lifecycle and renderer/persistence tests; 08 retains broader generation test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
-					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Desktop selected remote launch observation, admission rechecks and request/native-ID propagation now pass the selected phase04 fixture suites. Actual SSH endpoint/credential/reconnect behavior and production ACP routing still need phase07/10/11 qualification; no configured alias or mock endpoint certifies a live host.",
+					"affectedRows": [
+						"P14",
+						"C-supportsResume",
+						"C-supportsSessionId",
+						"REG-SESSION-MUTATION"
+					],
+					"evidenceRef": "phase04-reconciliation"
 				},
 				{
 					"id": "runtime-native-launch-and-recording-pending",
-					"code": "verification-and-host-wiring-pending",
-					"missingPrerequisite": "07F1/2/3 extract shared selector/observer/matcher; 07F4 implements admitted receipts and pre-resume validation; 07F5 consumes receipts and fences actual begin/transcript/History mutations through the repository queue. Static review only. 07F5T authored queued-mutation and receipt persistence regressions and updated prerequisite fixtures; GT1-04-13 must execute all continuation suites. Production headless SSH observation remains unavailable; native ACP and live scope qualification remain not-run.",
-					"affectedRows": ["C-supportsSessionId"]
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Shared launch receipts, pre-resume validation, queued begin/record mutation fences and persistence now pass the selected phase04 suites. Production headless SSH observation remains unavailable; native ACP host wiring and real restart/continuation remain phase07/10/11 obligations.",
+					"affectedRows": ["C-supportsSessionId"],
+					"evidenceRef": "phase04-reconciliation"
 				}
 			],
 			"field": "supportsSessionId",
@@ -13494,7 +13551,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok account-root and remote native history semantics, concurrent writes and partial snapshots remain unqualified."
+				"Selected-account local/remote history, bounded partial snapshots and observed source receipts pass phase04 fixtures. No common cross-file generation is established. Real binary/OS/host behavior and native continuation remain not-run."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -13515,7 +13572,9 @@
 				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests",
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
-				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests"
+				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13684,7 +13743,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Exact tick precision, partial/unreported cost and stream/final/disk reconciliation still require qualification."
+				"Exact tick precision, partial/unreported cost and stream/final/disk reconciliation still require qualification.",
+				"Current phase04 evidence: selected account discovery, lifetime/child accounting, dashboard, CLI/export and Cue consumers pass deterministic regression checks; historical phase03 limitations above are superseded only for these tested boundaries. Live billing/child completeness, managed account paths and broader route qualification remain pending."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -13719,7 +13779,9 @@
 				"phase04UsageAccessorTestsEvidenceRef": "phase04-usage-accessor-tests",
 				"phase04CueAccountingTestsEvidenceRef": "phase04-cue-accounting-tests",
 				"phase04DashboardAccountTestsEvidenceRef": "phase04-dashboard-account-tests",
-				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests"
+				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13778,10 +13840,10 @@
 				},
 				{
 					"id": "grok-usage-consumer-continuations-pending",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run. GT1-04-12 authored 18 accessor cases and migrated Cue pair-key assertions; static checks pass, but tests were neither run nor collected. All execution remains owned by GT1-04-13. GT1-04-12A authored 30 Cue query/lifecycle cases, including event/native isolation, observed provider swaps and exact/unknown receipt provenance. Static checks add no diagnostics; execution remains GT1-04-13 not-run. GT1-04-12B authored 30 dashboard/account-discovery cases covering canonical cost display, raw identities, absent throughput and account-layer/pool isolation. Static checks add no diagnostics; tests were neither run nor collected and execution remains GT1-04-13 not-run. GT1-04-12C authored 28 CLI/export cases covering canonical spend states, account/model identity, cache buckets, exact ticks and missing usage. Static checks add no diagnostics; tests were neither run nor collected and GT1-04-13 owns execution.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
 					"affectedRows": ["C-supportsCostTracking"],
-					"evidenceRef": "phase04-canonical-account-discovery"
+					"evidenceRef": "phase04-reconciliation"
 				}
 			],
 			"field": "supportsCostTracking",
@@ -13917,7 +13979,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Shared native uncached-input and ACP full-input buckets, cache/model scopes and child non-additivity pass GT1-03-13E fixtures; persistence, UI, native lifetime reconciliation and real-provider agreement remain unqualified."
+				"Shared native uncached-input and ACP full-input buckets, cache/model scopes and child non-additivity pass GT1-03-13E fixtures; persistence, UI, native lifetime reconciliation and real-provider agreement remain unqualified.",
+				"Current phase04 evidence: selected account discovery, lifetime/child accounting, dashboard, CLI/export and Cue consumers pass deterministic regression checks; historical phase03 limitations above are superseded only for these tested boundaries. Live billing/child completeness, managed account paths and broader route qualification remain pending."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -13952,7 +14015,9 @@
 				"phase04UsageAccessorTestsEvidenceRef": "phase04-usage-accessor-tests",
 				"phase04CueAccountingTestsEvidenceRef": "phase04-cue-accounting-tests",
 				"phase04DashboardAccountTestsEvidenceRef": "phase04-dashboard-account-tests",
-				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests"
+				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14011,10 +14076,10 @@
 				},
 				{
 					"id": "grok-usage-consumer-continuations-pending",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run. GT1-04-12 authored 18 accessor cases and migrated Cue pair-key assertions; static checks pass, but tests were neither run nor collected. All execution remains owned by GT1-04-13. GT1-04-12A authored 30 Cue query/lifecycle cases, including event/native isolation, observed provider swaps and exact/unknown receipt provenance. Static checks add no diagnostics; execution remains GT1-04-13 not-run. GT1-04-12B authored 30 dashboard/account-discovery cases covering canonical cost display, raw identities, absent throughput and account-layer/pool isolation. Static checks add no diagnostics; tests were neither run nor collected and execution remains GT1-04-13 not-run. GT1-04-12C authored 28 CLI/export cases covering canonical spend states, account/model identity, cache buckets, exact ticks and missing usage. Static checks add no diagnostics; tests were neither run nor collected and GT1-04-13 owns execution.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
 					"affectedRows": ["C-supportsUsageStats"],
-					"evidenceRef": "phase04-canonical-account-discovery"
+					"evidenceRef": "phase04-reconciliation"
 				}
 			],
 			"field": "supportsUsageStats",
@@ -15188,7 +15253,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04EvidenceRef": "phase04-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -15297,7 +15363,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Prove Grok role/tool/image/provenance preservation through export and budgeting rather than infer from stored messages."
+				"The scoped stored-context extraction boundary passes phase04 fixtures, including source ownership, tool linkage, missing images, redaction and truncation notices. It has no production UI caller; GT1-06-01 owns UI/CLI wiring and budgeted transfer. No native resume or migration qualification follows."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -15308,7 +15374,9 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase04ContextExportEvidenceRef": "phase04-grok-context-export",
-				"phase04ContextExportTestsEvidenceRef": "phase04-grok-context-export-tests"
+				"phase04ContextExportTestsEvidenceRef": "phase04-grok-context-export-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -15345,10 +15413,10 @@
 				},
 				{
 					"id": "grok-context-export-consumers-and-verification-pending",
-					"code": "verification-and-consumer-wiring-pending",
-					"missingPrerequisite": "GT1-04-09 implements scoped stored-context normalization and truthful bounded/visibility omissions. GT1-04-10 authored 33 regression cases; GT1-04-13 must execute them. GT1-06-01 owns UI/CLI consumer wiring. Backend-only raw evidence remains explicitly omitted. Context export alone does not certify native translation or resume.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Scoped stored-context normalization, redaction and explicit omissions pass phase04 deterministic tests. Neither stored-context retrieval entry currently has a production UI caller; GT1-06-01 owns UI/CLI export and merge wiring. Native resume, live consumption, token budgeting and directional migration need separate proof.",
 					"affectedRows": ["C-supportsContextExport"],
-					"evidenceRef": "phase04-grok-context-export"
+					"evidenceRef": "phase04-reconciliation"
 				}
 			],
 			"field": "supportsContextExport",
@@ -16597,7 +16665,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GrokSessionStorage is registered and already reads summary/chat_history/usage using bounded concurrency, size guards and partial-line tolerance. Its public methods omit account inputs; getSessionsDir uses process GROK_HOME locally and literal ~/.grok/sessions remotely. IPC listPaginated resolves owner account but the missing profile/storage plumbing discards it. Other read/search/path/mutation consumers need matching identity propagation."
+				"Phase04 implements selected-account local/SSH list/read/search/path consistency, bounded current/legacy transcript normalization and observed scoped read receipts. Explicit account absence never falls back; observed account/cwd/native-ID/host mismatches refuse. Cross-file summary/transcript/usage views remain partial without a shared native generation. Deterministic adapter/IPC tests pass; actual Grok versions, OS tuples, SSH hosts/reconnects and native continuation remain not-run. Unbound browsing is not observed resume authority."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -16619,7 +16687,9 @@
 				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests",
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
-				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests"
+				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16728,7 +16798,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Canonical Grok GROK_HOME roots, environment precedence/blank unsets, managed binding dominance and host separation are implemented and exercised with synthetic accounts. Root grouping is not billing proof: fallback/inline/gateway/deployment/independent auth-file identities remain withheld. Selected-root storage and usage wiring remain GT1-04-01/02/11/12/13; actual managed binding/custody and native account isolation remain phase09/11 work."
+				"Canonical Grok account roots and environment precedence, explicit blank default selection and host separation have deterministic coverage. Phase04 selected-root history/usage wiring and discovery tests pass. Root grouping is not billing proof; fallback/inline/gateway/deployment/independent auth identities remain withheld. Current managed account-path wiring/custody and live account isolation remain phase09/11 work."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -16739,7 +16809,9 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
-				"phase04AccountScopeEvidenceRef": "phase04-account-storage"
+				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17250,7 +17322,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Shared native/ACP normalization preserves exact decimal ticks, unknown/partial cost, per-model scopes, separate cache buckets and exactly-once final replacement in GT1-03-13E fixtures. Unknown Grok models do not inherit unrelated prices in this shared path. Disk readers, collectors declaring full coverage, selected-account lifetime/child reconciliation and persistence/UI propagation still need phase04/07/10 integration and phase11 native evidence."
+				"Phase03/04 fixtures preserve exact decimal ticks, unknown/partial cost, per-model identity, separate cache buckets and once-only turn/session totals. Phase04 selected-account disk reads, accessors, dashboard, CLI/export and Cue consumers pass deterministic regressions. Unknown Grok models never borrow unrelated prices. Real billing, running-child completeness, live/disk agreement and broader ACP/SSH consumer propagation remain phase07/10/11 qualification; managed account-path wiring remains phase09."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -17285,7 +17357,9 @@
 				"phase04UsageAccessorTestsEvidenceRef": "phase04-usage-accessor-tests",
 				"phase04CueAccountingTestsEvidenceRef": "phase04-cue-accounting-tests",
 				"phase04DashboardAccountTestsEvidenceRef": "phase04-dashboard-account-tests",
-				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests"
+				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17344,10 +17418,10 @@
 				},
 				{
 					"id": "grok-usage-consumer-continuations-pending",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run. GT1-04-12 authored 18 accessor cases and migrated Cue pair-key assertions; static checks pass, but tests were neither run nor collected. All execution remains owned by GT1-04-13. GT1-04-12A authored 30 Cue query/lifecycle cases, including event/native isolation, observed provider swaps and exact/unknown receipt provenance. Static checks add no diagnostics; execution remains GT1-04-13 not-run. GT1-04-12B authored 30 dashboard/account-discovery cases covering canonical cost display, raw identities, absent throughput and account-layer/pool isolation. Static checks add no diagnostics; tests were neither run nor collected and execution remains GT1-04-13 not-run. GT1-04-12C authored 28 CLI/export cases covering canonical spend states, account/model identity, cache buckets, exact ticks and missing usage. Static checks add no diagnostics; tests were neither run nor collected and GT1-04-13 owns execution.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
 					"affectedRows": ["REG-USAGE"],
-					"evidenceRef": "phase04-canonical-account-discovery"
+					"evidenceRef": "phase04-reconciliation"
 				}
 			],
 			"branchAuditRefs": ["B12", "B32", "B35", "B38", "B42", "B43"]
@@ -17582,7 +17656,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok late end.sessionId is handled, including failed terminal lines in StdoutHandler; no ACP early-session path exists yet. Grok deleteMessagePair refuses because transcript edits invalidate usage/events/search indexes. Native fork/rename/delete must be qualified separately from shared prompt-based fork and Maestro-visible naming."
+				"Phase04 native binding, launch/request ownership, late-ID delivery, persistence, renderer reopen and runtime recording fixtures pass. Unknown or changed provider/account/cwd/host/generation refuses before continuation or mutation. Native fork/title change/delete/message edit remain unsupported through Maestro, with tested refusals; shared text copying and local tab labels are separate. Production ACP wiring, headless SSH observation, real restart/continuation and exact-binary qualification remain pending. Scoped context export is tested but UI/CLI wiring belongs to GT1-06-01."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -17632,7 +17706,9 @@
 				"phase04GrokRenameConsumerTestsRef": "phase04-grok-rename-consumer-tests",
 				"phase04NativeForkRenameTestsRef": "phase04-native-fork-rename-tests",
 				"phase04GrokHistoryMutationRefusalsRef": "phase04-grok-history-mutation-refusals",
-				"phase04GrokHistoryMutationTestsRef": "phase04-grok-history-mutation-tests"
+				"phase04GrokHistoryMutationTestsRef": "phase04-grok-history-mutation-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17668,22 +17744,23 @@
 					"affectedRows": ["REG-SESSION-MUTATION"]
 				},
 				{
-					"id": "quick-chat-stale-recent-read",
-					"code": "verification-pending",
-					"missingPrerequisite": "GT1-04-07CQT1A implemented the request/current-chat fence around getRecent. GT1-04-13 must execute both Quick Chat suites, including the two unchanged stale-read regressions. Static review only; runtime not-run.",
-					"affectedRows": ["REG-SESSION-MUTATION"]
-				},
-				{
 					"id": "grok-remote-launch-account-unobserved",
-					"code": "verification-and-propagation-pending",
-					"missingPrerequisite": "GT1-04-07D1 implements remote launch account/cwd observation, 07E forwards captured host receipts, 07E1 echoes immutable request tokens, and 07E1A implements the desktop current-attempt/incarnation fence and atomic ID/binding persistence. GT1-04-07D1T/07D1T1 have authored observation regressions; 07E1PT/07ET/07E1T have authored host/bridge/lifecycle and renderer/persistence tests; 08 retains broader generation test authoring and GT1-04-13 owns execution. Runtime and History propagation remain GT1-04-07F. Unknown accounts/endpoints and missing lifecycle receipts stay unobserved; live SSH/native binary qualification and standalone ACP desktop routing remain not-run.",
-					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Desktop selected remote launch observation, admission rechecks and request/native-ID propagation now pass the selected phase04 fixture suites. Actual SSH endpoint/credential/reconnect behavior and production ACP routing still need phase07/10/11 qualification; no configured alias or mock endpoint certifies a live host.",
+					"affectedRows": [
+						"P14",
+						"C-supportsResume",
+						"C-supportsSessionId",
+						"REG-SESSION-MUTATION"
+					],
+					"evidenceRef": "phase04-reconciliation"
 				},
 				{
 					"id": "runtime-native-launch-and-recording-pending",
-					"code": "verification-and-host-wiring-pending",
-					"missingPrerequisite": "07F1/2/3 extract shared selector/observer/matcher; 07F4 implements admitted receipts and pre-resume validation; 07F5 consumes receipts and fences actual begin/transcript/History mutations through the repository queue. Static review only. 07F5T authored queued-mutation and receipt persistence regressions and updated prerequisite fixtures; GT1-04-13 must execute all continuation suites. Production headless SSH observation remains unavailable; native ACP and live scope qualification remain not-run.",
-					"affectedRows": ["REG-SESSION-MUTATION"]
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Shared launch receipts, pre-resume validation, queued begin/record mutation fences and persistence now pass the selected phase04 suites. Production headless SSH observation remains unavailable; native ACP host wiring and real restart/continuation remain phase07/10/11 obligations.",
+					"affectedRows": ["REG-SESSION-MUTATION"],
+					"evidenceRef": "phase04-reconciliation"
 				},
 				{
 					"id": "grok-native-fork-rename-transport-unqualified",
@@ -17692,16 +17769,11 @@
 					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
 				},
 				{
-					"id": "grok-rename-consumer-isolation-pending",
-					"code": "verification-pending",
-					"missingPrerequisite": "GT1-04-08A1 implements local-only Grok labels and visible unsupported History rename; GT1-04-08A1T authors serializer/startup reload, retained ownership, account/host collisions, preserved bindings, refusal and non-Grok controls. GT1-04-13 must execute the three suites. Static checks add no diagnostics; native title mutation remains unsupported.",
-					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
-				},
-				{
 					"id": "grok-native-delete-edit-transport-unqualified",
 					"code": "native-mutation-unsupported",
-					"missingPrerequisite": "Version-qualified account/cwd/host-bound native mutation transaction, native prompt mapping and active-writer/generation fencing. GT1-04-08C preserves history and refuses unsafe UI/IPC mutations; GT1-04-08D/13 must author/execute refusal and isolation regressions. Pinned whole-session delete and rewind cannot substitute for arbitrary message-pair edits. Native compliance remains not-run.",
-					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
+					"missingPrerequisite": "Native delete and message-pair edit remain unsupported through Maestro. Phase04 refusal/no-write consumer regressions pass; neither direct transcript rewrites nor fixture refusals qualify a native mutation transport.",
+					"affectedRows": ["P14", "REG-SESSION-MUTATION"],
+					"evidenceRef": "phase04-reconciliation"
 				}
 			],
 			"branchAuditRefs": ["B22", "B44"]
@@ -17783,7 +17855,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04EvidenceRef": "phase04-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18960,7 +19033,9 @@
 				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests",
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
-				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests"
+				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19067,7 +19142,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04EvidenceRef": "phase04-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21062,7 +21138,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Both accessors classify Grok full coverage unconditionally. Reconcile partial/unknown cost, cache, child totals, profiles and rate-limit accounting against normalized evidence."
+				"Phase04 accessors now retain partial/unknown completeness instead of declaring Grok full coverage unconditionally. Reconcile partial/unknown cost, cache, child totals, profiles and rate-limit accounting against normalized evidence.",
+				"Current phase04 evidence: selected account discovery, lifetime/child accounting, dashboard, CLI/export and Cue consumers pass deterministic regression checks; historical phase03 limitations above are superseded only for these tested boundaries. Live billing/child completeness, managed account paths and broader route qualification remain pending."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -21077,7 +21154,9 @@
 				"phase04UsageAccessorTestsEvidenceRef": "phase04-usage-accessor-tests",
 				"phase04CueAccountingTestsEvidenceRef": "phase04-cue-accounting-tests",
 				"phase04DashboardAccountTestsEvidenceRef": "phase04-dashboard-account-tests",
-				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests"
+				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests",
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21114,10 +21193,10 @@
 				},
 				{
 					"id": "grok-usage-consumer-continuations-pending",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting; 11C preserves canonical Cue snapshots and observed provider identity without unowned native fallback. GT1-04-11D uses canonical account resolution for local configured agents and provider defaults, including global settings, blank-unset and tilde semantics while retaining independent pools, missing roots and real sessions-subtree dedupe. No managed-account path is exposed at the discovery boundary; current managed wiring and qualification remain phase09 work, never inferred from opaque historical references. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. Consumer changes have static checks only; deterministic and native qualification remain not-run. GT1-04-12 authored 18 accessor cases and migrated Cue pair-key assertions; static checks pass, but tests were neither run nor collected. All execution remains owned by GT1-04-13. GT1-04-12A authored 30 Cue query/lifecycle cases, including event/native isolation, observed provider swaps and exact/unknown receipt provenance. Static checks add no diagnostics; execution remains GT1-04-13 not-run. GT1-04-12B authored 30 dashboard/account-discovery cases covering canonical cost display, raw identities, absent throughput and account-layer/pool isolation. Static checks add no diagnostics; tests were neither run nor collected and execution remains GT1-04-13 not-run. GT1-04-12C authored 28 CLI/export cases covering canonical spend states, account/model identity, cache buckets, exact ticks and missing usage. Static checks add no diagnostics; tests were neither run nor collected and GT1-04-13 owns execution.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
 					"affectedRows": ["S26"],
-					"evidenceRef": "phase04-canonical-account-discovery"
+					"evidenceRef": "phase04-reconciliation"
 				}
 			],
 			"branchAuditRefs": ["B23", "B32", "B43"]
@@ -26950,6 +27029,232 @@
 			"diffExitCode": 0,
 			"independentReview": "pass",
 			"reviewScope": "Independent current-source/public-port and receipt/ledger reviews; corrected extension gates, handle methods, host-owned recording and pre-task parity hash scope. No remaining substantive findings."
+		}
+	},
+	"phase04Reconciliation": {
+		"taskId": "GT1-04-14",
+		"recordedAt": "2026-10-31",
+		"sourceCommit": "25b1a35a3baa63531397804d4dcab61ebf7fa2e8",
+		"evidenceRef": "phase04-reconciliation",
+		"baseObservation": {
+			"ref": "feature/mega-maestro-v1.1.0-rc",
+			"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
+			"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+			"aheadBehind": [287, 10],
+			"baseIsAncestorOfSource": false,
+			"sourceIsAncestorOfBase": false
+		},
+		"artifactReconciliation": "pass",
+		"phase04Deterministic": "pass",
+		"nativeQualification": "not-run",
+		"productAcceptance": "not-run",
+		"repositoryValidation": "not-run",
+		"scope": "Only evidence/04.md and parity.json changed. Existing whole-row acceptance statuses and applicability remain unchanged. Historical task-time catalogs are immutable; this reconciliation supersedes their pending test narratives only within the selected executed suites. No new tests, compilers or provider calls. The protected manifest compares 7083 unchanged files plus saved pre-task parity bytes; reconciliation intentionally updates parity.",
+		"schema": {
+			"publicSourceCommit": "2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8",
+			"monorepoCommit": "559751fdcec02d413e4c57c8832ab275e4f44980",
+			"npmCandidate": "@xai-official/grok@1.0.70",
+			"chatFormatVersions": {
+				"0": "Legacy ChatRequestMessage; absent summary version defaults to 0 upstream.",
+				"1": "Current ConversationItem; pinned CHAT_FORMAT_VERSION=1."
+			},
+			"usageSchema": "SessionUsageFile pinned by source; no independent numeric schema version. Optional metadata comes from summary fields, not an assumed metadata.json.",
+			"acpSchemaVersion": "0.11.4",
+			"acpWireVersion": 1,
+			"acpIsTranscriptVersion": false,
+			"binarySha256": null,
+			"supportedRange": null,
+			"binarySourceCorrespondence": "not-run"
+		},
+		"identityGuarantees": [
+			"resolveAgentAccountDir/resolveAgentAccountRef select roots; nonblank explicit selections never fall back when absent. Explicit blank cancels lower layers and intentionally selects the provider default. Host GROK_HOME cannot redirect a selected remote account.",
+			"Observed native bindings carry provider/native ID, account reference, canonical cwd and host; desktop installation identity or qualified remote endpoint identity is required. A configured SSH alias alone is not a host receipt.",
+			"Exact cwd and unique native source are observed before/after reads using canonical paths and descriptor device/inode identity. Changed, ambiguous or escaped sources discard content/receipt; valid ownership does not imply complete content.",
+			"Request/turn/process attempt correlation and repository-queued rechecks fence late events, account/provider/host changes and persisted native IDs. Unbound legacy histories have no fabricated ownership.",
+			"Remote observers require POSIX Python3 descriptor APIs and finite timeouts; absent support refuses. Headless runtime SSH observation remains unavailable, production ACP host routing pending. History may still refuse unresolved default/tilde HOME/GROK_HOME environments; launch observation does not remove that guard. Unmanaged/unobserved endpoints refuse.",
+			"No common native write epoch exists: cross-file summary/transcript/usage results remain partial cross-file-generation-unverified even when bounded samples match. Lifetime totals never re-add turns or folded completed children; running-child completeness remains unknown."
+		],
+		"outcomes": [
+			{
+				"id": "native-history",
+				"outcome": "Native history",
+				"status": "pass",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["P13", "REG-STORAGE", "C-supportsSessionStorage"],
+				"scope": "Selected-account bounded current/legacy reads, malformed source provenance, pagination and observed source identity pass storage/IPC fixtures; no real binary/OS qualification."
+			},
+			{
+				"id": "native-search",
+				"outcome": "Native history search",
+				"status": "pass",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["P13", "P15"],
+				"scope": "Selected-account title/user/assistant search, colliding IDs and concurrent scope isolation pass. Search projection is not a native archive or resume receipt."
+			},
+			{
+				"id": "native-resume",
+				"outcome": "Native resume",
+				"status": "not-run",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["P14", "P15", "C-supportsResume", "C-supportsSessionId"],
+				"scope": "Binding, admission, stale attempt refusal, persistence and late-ID fixture behavior pass; actual restart/continuation, production ACP and headless SSH observation remain unqualified."
+			},
+			{
+				"id": "context-export",
+				"outcome": "Context export",
+				"status": "not-run",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["P21", "C-supportsContextExport", "S06"],
+				"scope": "Scoped extraction/formatting boundary passes. No production UI caller; GT1-06-01 owns UI/CLI wiring and budgeted transfer. Omitted records/raw/opaque reasoning are explicit."
+			},
+			{
+				"id": "context-merge",
+				"outcome": "Context merge",
+				"status": "not-run",
+				"deterministic": "not-run",
+				"live": "not-run",
+				"affectedRows": ["P21", "C-supportsContextMerge", "S06"],
+				"scope": "supportsContextMerge=false; phase06 owns validated budgeted merge/handoff. Export fixtures do not prove merge."
+			},
+			{
+				"id": "cross-provider-migration",
+				"outcome": "Cross-provider native migration",
+				"status": "unsupported",
+				"deterministic": "not-run",
+				"live": "not-run",
+				"affectedRows": ["P22", "P23", "P24", "REG-TRANSLATION", "S07"],
+				"scope": "No Grok adapter or declared direction. Grok to/from Claude and Codex remain unsupported by the current registry; phase06 owns staging, recovery, resource discovery and destination continuation proof."
+			},
+			{
+				"id": "native-mutation",
+				"outcome": "Native fork/title/delete/message edit",
+				"status": "unsupported",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["P14", "REG-SESSION-MUTATION"],
+				"scope": "Maestro refusal and no-write/label-isolation tests pass. Pinned upstream fork/rename exists; no qualified Maestro mutation route. Local tab labels and prompt context copies do not establish native mutation."
+			},
+			{
+				"id": "lifetime-accounting",
+				"outcome": "Native lifetime and child accounting",
+				"status": "not-run",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["P11", "P16", "P40", "REG-USAGE", "S26"],
+				"scope": "Exact ticks, unknown/partial cost, raw model identity and session totals once pass fixtures. Completed children are already folded into lifetime totals; running-child completeness and real billing remain unknown."
+			}
+		],
+		"receipts": [
+			{
+				"path": "Plans/grok-tier1/evidence/04-verification.json",
+				"sha256": "8a2b0906a3e3f8f61e9e128b6808423e1b533410a5c5d7e00d335966e0100480",
+				"sourceCommit": "37ec549a27becad1870ad9e4a53138b5de8fcdfd",
+				"status": "fail"
+			},
+			{
+				"path": "Plans/grok-tier1/evidence/04-reverification.json",
+				"sha256": "416332532a600c55dc6a531287918d3a8416513e6a0b59696d168da93a346583",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"status": "fail"
+			},
+			{
+				"path": "Plans/grok-tier1/evidence/04-process-reverification.json",
+				"sha256": "5c052e18944a715e238c122d172166c43dcc4d1e20c26143522be6e95c31cfe0",
+				"sourceCommit": "4ddd8ce6f907c55dd65ba52a58ef80ce4c4a8869",
+				"status": "pass"
+			}
+		],
+		"latestScopedResult": {
+			"receipt": "Plans/grok-tier1/evidence/04-process-reverification.json",
+			"combinedFiles": 54,
+			"passedTests": 4557,
+			"failedTests": 0,
+			"skippedTests": 0,
+			"filteredTests": 0,
+			"collectionFailedFiles": 0,
+			"freshExecution": {
+				"sourceCommit": "4ddd8ce6f907c55dd65ba52a58ef80ce4c4a8869",
+				"files": 1,
+				"passedTests": 182,
+				"childExitCode": 0
+			},
+			"carriedExecution": {
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"files": 53,
+				"passedTests": 4375,
+				"batchChildExits": {
+					"storage": 0,
+					"backend": 1,
+					"renderer": 0,
+					"interface": 0
+				}
+			},
+			"inputHashesRef": "Plans/grok-tier1/evidence/04-process-reverification.json#inputHashesSha256",
+			"currentInputHashesMatched": 140,
+			"fixtureHashesMatched": 16,
+			"protectedFilesMatched": 7084,
+			"rawArtifactsMatched": 15,
+			"protectedManifestScope": "7083 unchanged current files plus saved pre-task parity bytes; parity is intentionally updated by this reconciliation."
+		},
+		"remainingOwners": {
+			"contextExportMerge": "GT1-06-01",
+			"nativeTranslation": "GROK-TIER1-06",
+			"productionAcp": "GROK-TIER1-07",
+			"managedAccountsAndEffects": "GROK-TIER1-09",
+			"sshAndHeadlessHosts": "GROK-TIER1-10",
+			"exactBinaryLiveQualification": "GROK-TIER1-11",
+			"repositoryValidation": "GT1-12-03",
+			"finalAcceptance": "GT1-12-06"
+		},
+		"liveBoundary": {
+			"status": "not-run",
+			"providerCalls": 0,
+			"budgetUsd": 0,
+			"authorizedEndpoints": [],
+			"authorizedSshTargets": [],
+			"required": "Explicit disposable accounts and endpoints, exact binary/hash/version, positive finite spend/call/time bounds and native route/OS/restart/SSH evidence. No installed account reads or credentials used."
+		},
+		"promotion": {
+			"grokRemainsBeta": true,
+			"capabilityChanges": false,
+			"wholeRowStatusChanges": false,
+			"applicabilityChanges": false
+		},
+		"imagesAnalyzed": 0,
+		"artifactChecks": {
+			"status": "pass",
+			"sourceCommit": "25b1a35a3baa63531397804d4dcab61ebf7fa2e8",
+			"environment": "macOS arm64; Python3 and installed pinned Node/npm tools; offline artifact checks only; npm cache under tmp/grok-tier1-phase04-reconcile/npm-cache; HOME/CODEX_HOME unchanged",
+			"command": ["python3", "tmp/grok-tier1-phase04-reconcile/check-artifacts.py"],
+			"scriptSha256": "c055fbcd3040dfde9585d41430f675d1ba767048d0a75fb56e3587e57522071f",
+			"reuses": "GT1-04-13L receipt checker raw child/report/count/hash assertions; task-specific artifact assertions only, no new product test suite",
+			"exitCode": 0,
+			"assertion": "134 whole-row acceptance statuses/applicability and historical catalogs preserved; 140 current inputs, 16 fixtures, 7083 current manifest files plus pre-task parity, 15 raw artifacts and five native schema files match. Eight distinct scoped outcomes, unknown binary range/hash, current merge/translation/beta gates, no export UI caller and two-file diff validated.",
+			"formatCommand": [
+				"node",
+				"node_modules/prettier/bin/prettier.cjs",
+				"--check",
+				"Plans/grok-tier1/evidence/04.md",
+				"Plans/grok-tier1/parity.json"
+			],
+			"formatExitCode": 0,
+			"docsCommand": ["npm", "run", "docs:verify"],
+			"docsEnvironmentOverrides": {
+				"npm_config_cache": "$PWD/tmp/grok-tier1-phase04-reconcile/npm-cache"
+			},
+			"docsExitCode": 0,
+			"docsAssertedPaths": 1183,
+			"docsIndexEntries": 392,
+			"docsFullEntries": 392,
+			"docsFindings": 0,
+			"diffCommand": ["git", "diff", "--check"],
+			"diffExitCode": 0,
+			"independentReview": "pass",
+			"reviewScope": "Independent source/parity and receipt applicability reviews; corrected explicit blank root semantics and replaced stale limitations. No remaining substantive findings."
 		}
 	}
 }
