@@ -139,6 +139,8 @@ export interface SessionListOptions {
 export interface SessionReadOptions {
 	offset?: number;
 	limit?: number;
+	/** Selected account home, with the same meaning as SessionListOptions.configDir. */
+	configDir?: string;
 }
 
 /**
@@ -229,13 +231,15 @@ export interface AgentSessionStorage {
 	 * @param query - The search query
 	 * @param searchMode - Where to search (title, user messages, assistant, or all)
 	 * @param sshConfig - Optional SSH config for remote access
+	 * @param accountDir - Optional account config/home root, as in listSessions
 	 * @returns Array of matching sessions with match info
 	 */
 	searchSessions(
 		projectPath: string,
 		query: string,
 		searchMode: SessionSearchMode,
-		sshConfig?: SshRemoteConfig
+		sshConfig?: SshRemoteConfig,
+		accountDir?: string
 	): Promise<SessionSearchResult[]>;
 
 	/**
@@ -244,12 +248,14 @@ export interface AgentSessionStorage {
 	 * @param projectPath - The project directory path
 	 * @param sessionId - The session identifier
 	 * @param sshConfig - Optional SSH config for remote access
+	 * @param accountDir - Optional account config/home root, as in listSessions
 	 * @returns The file path or null if not applicable
 	 */
 	getSessionPath(
 		projectPath: string,
 		sessionId: string,
-		sshConfig?: SshRemoteConfig
+		sshConfig?: SshRemoteConfig,
+		accountDir?: string
 	): string | null;
 
 	/**

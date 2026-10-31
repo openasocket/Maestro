@@ -847,6 +847,23 @@
 				"S34"
 			],
 			"scope": "Artifact reconciliation only; row-wide acceptance statuses, applicability and live boundaries preserved. Historical catalog entries retain their original task-time statuses; this reference supplies current scoped evidence."
+		},
+		"phase04-account-storage": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-01-selected-account-storage",
+			"sourceCommit": "3e6eb98b1973afbf7e50b89ab99943dc42dd89ff",
+			"sourceCommitScope": "Pre-task HEAD plus the source hashes in this entry and the task commit containing it.",
+			"sourceHashesSha256": {
+				"src/main/storage/grok-session-storage.ts": "574e94e1fab5a7cd7520fcccc989beb9235d39c832a7cdd329daf60c39f82511",
+				"src/main/agents/session-storage.ts": "a7d7e6b742132dc9e7a4d2d87e3b427d3e53621bbcfce31989ff84ad94d57e03"
+			},
+			"provenance": "implementation-and-static-diff-review",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"implementation": "implemented",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P04", "P13", "P15", "REG-STORAGE", "REG-PROFILE"],
+			"scope": "GT1-04-01 adapter account scoping only. Tests and execution remain GT1-04-02/13; remote hardening and actual consumers remain with their existing owners. No full-row acceptance or native qualification."
 		}
 	},
 	"sourceCatalog": {
@@ -2482,7 +2499,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase04AccountScopeEvidenceRef": "phase04-account-storage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4506,7 +4524,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase04AccountScopeEvidenceRef": "phase04-account-storage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4753,7 +4772,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase04AccountScopeEvidenceRef": "phase04-account-storage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13806,7 +13826,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04AccountScopeEvidenceRef": "phase04-account-storage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13925,7 +13946,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase04AccountScopeEvidenceRef": "phase04-account-storage"
 			},
 			"evidenceApplicability": {
 				"static": {

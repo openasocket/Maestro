@@ -33,8 +33,13 @@ import type {
 	SessionMessagesResult,
 	SessionReadOptions,
 	SessionMessage,
+	SessionListOptions,
+	PaginatedSessionsResult,
+	SessionSearchMode,
+	SessionSearchResult,
 } from '../agents';
 import type { ToolType, SshRemoteConfig } from '../../shared/types';
+import { resolveAgentAccountDir } from '../../shared/agentAccountDir';
 import { isMacOS } from '../../shared/platformDetection';
 import { BaseSessionStorage } from './base-session-storage';
 import type { SearchableMessage } from './base-session-storage';
@@ -45,21 +50,6 @@ import { normalizeModelId } from '../../shared/modelPricing';
 const LOG_CONTEXT = '[GrokSessionStorage]';
 const MAX_SESSION_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
 const FIRST_MESSAGE_PREVIEW_LENGTH = 200;
-
-/**
- * Resolve the local Grok config home. Honors `GROK_HOME` the same way Codex
- * honors `CODEX_HOME`, so History / model discovery match a relocated CLI home.
- */
-function getLocalGrokHome(): string {
-	const fromEnv = process.env.GROK_HOME?.trim();
-	if (fromEnv) return fromEnv;
-	return path.join(os.homedir(), '.grok');
-}
-
-/** Resolve the local Grok sessions directory. */
-function getLocalGrokSessionsDir(): string {
-	return path.join(getLocalGrokHome(), 'sessions');
-}
 
 /**
  * Reject path-traversal session IDs before joining under the project cwd folder.
@@ -403,9 +393,31 @@ function parseChatHistory(content: string): ParsedGrokChatHistory {
 export class GrokSessionStorage extends BaseSessionStorage {
 	readonly agentId: ToolType = 'grok';
 
+	/** Immutable account scope lets inherited search reuse the same root for every read. */
+	constructor(private readonly accountDir?: string) {
+		super();
+	}
+
+	private getAccountDir(sshConfig?: SshRemoteConfig, accountDir = this.accountDir): string {
+		return (
+			resolveAgentAccountDir(
+				{
+					toolType: this.agentId,
+					sshRemote: Boolean(sshConfig),
+					customEnvVars: accountDir !== undefined ? { GROK_HOME: accountDir } : undefined,
+				},
+				{
+					homeDir: sshConfig ? '' : os.homedir(),
+					// Explicit blanks select the provider default, never the host's account.
+					env: !sshConfig && accountDir === undefined ? process.env : undefined,
+				}
+			) ?? '~/.grok'
+		);
+	}
+
 	/** Resolve the sessions base directory (local or remote POSIX tilde form). */
-	private getSessionsDir(sshConfig?: SshRemoteConfig): string {
-		return sshConfig ? '~/.grok/sessions' : getLocalGrokSessionsDir();
+	private getSessionsDir(sshConfig?: SshRemoteConfig, accountDir = this.accountDir): string {
+		return this.joinPath(sshConfig, this.getAccountDir(sshConfig, accountDir), 'sessions');
 	}
 
 	/** Join path segments with the separator style matching local vs remote access. */
@@ -462,10 +474,11 @@ export class GrokSessionStorage extends BaseSessionStorage {
 	 */
 	private async listMatchingCwdFolders(
 		projectPath: string,
+		sessionsDir: string,
 		sshConfig?: SshRemoteConfig
 	): Promise<string[]> {
 		const folders = await this.listSubdirectories(
-			this.getSessionsDir(sshConfig),
+			sessionsDir,
 			sshConfig,
 			'grokStorage:listCwdFolders'
 		);
@@ -476,9 +489,13 @@ export class GrokSessionStorage extends BaseSessionStorage {
 	}
 
 	/** List session UUID directories inside a cwd folder (skips prompt_history.jsonl, a file). */
-	private async listSessionIds(cwdFolder: string, sshConfig?: SshRemoteConfig): Promise<string[]> {
+	private async listSessionIds(
+		cwdFolder: string,
+		sessionsDir: string,
+		sshConfig?: SshRemoteConfig
+	): Promise<string[]> {
 		return this.listSubdirectories(
-			this.joinPath(sshConfig, this.getSessionsDir(sshConfig), cwdFolder),
+			this.joinPath(sshConfig, sessionsDir, cwdFolder),
 			sshConfig,
 			'grokStorage:listSessionIds'
 		);
@@ -487,13 +504,15 @@ export class GrokSessionStorage extends BaseSessionStorage {
 	/** List all Grok sessions matching the given project path, newest first. */
 	async listSessions(
 		projectPath: string,
-		sshConfig?: SshRemoteConfig
+		sshConfig?: SshRemoteConfig,
+		accountDir?: string
 	): Promise<AgentSessionInfo[]> {
-		const cwdFolders = await this.listMatchingCwdFolders(projectPath, sshConfig);
+		const sessionsDir = this.getSessionsDir(sshConfig, accountDir);
+		const cwdFolders = await this.listMatchingCwdFolders(projectPath, sessionsDir, sshConfig);
 
 		const sessionRefs: Array<{ cwdFolder: string; sessionId: string }> = [];
 		for (const cwdFolder of cwdFolders) {
-			const sessionIds = await this.listSessionIds(cwdFolder, sshConfig);
+			const sessionIds = await this.listSessionIds(cwdFolder, sessionsDir, sshConfig);
 			for (const sessionId of sessionIds) {
 				sessionRefs.push({ cwdFolder, sessionId });
 			}
@@ -505,7 +524,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		const sessions = await mapWithConcurrency(
 			sessionRefs,
 			sshConfig ? REMOTE_SESSION_READ_CONCURRENCY : LOCAL_SESSION_READ_CONCURRENCY,
-			(ref) => this.loadSessionInfo(ref.cwdFolder, ref.sessionId, sshConfig)
+			(ref) => this.loadSessionInfo(ref.cwdFolder, ref.sessionId, sessionsDir, sshConfig)
 		);
 
 		return sessions
@@ -513,18 +532,39 @@ export class GrokSessionStorage extends BaseSessionStorage {
 			.sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
 	}
 
+	async listSessionsPaginated(
+		projectPath: string,
+		options?: SessionListOptions,
+		sshConfig?: SshRemoteConfig
+	): Promise<PaginatedSessionsResult> {
+		const sessions = await this.listSessions(projectPath, sshConfig, options?.configDir);
+		return BaseSessionStorage.paginateSessions(sessions, options);
+	}
+
+	async searchSessions(
+		projectPath: string,
+		query: string,
+		searchMode: SessionSearchMode,
+		sshConfig?: SshRemoteConfig,
+		accountDir?: string
+	): Promise<SessionSearchResult[]> {
+		if (accountDir !== undefined) {
+			// Base search has no account argument. Bind one immutable reader so
+			// metadata and messages agree without mutating the registered storage.
+			const scoped = new GrokSessionStorage(this.getAccountDir(sshConfig, accountDir));
+			return scoped.searchSessions(projectPath, query, searchMode, sshConfig);
+		}
+		return super.searchSessions(projectPath, query, searchMode, sshConfig);
+	}
+
 	/** Load metadata and transcript-derived info for a single session. */
 	private async loadSessionInfo(
 		cwdFolder: string,
 		sessionId: string,
+		sessionsDir: string,
 		sshConfig?: SshRemoteConfig
 	): Promise<AgentSessionInfo | null> {
-		const sessionDir = this.joinPath(
-			sshConfig,
-			this.getSessionsDir(sshConfig),
-			cwdFolder,
-			sessionId
-		);
+		const sessionDir = this.joinPath(sshConfig, sessionsDir, cwdFolder, sessionId);
 		try {
 			const summaryContent = await this.readSessionFile(
 				this.joinPath(sshConfig, sessionDir, 'summary.json'),
@@ -609,13 +649,14 @@ export class GrokSessionStorage extends BaseSessionStorage {
 	private async findSessionDir(
 		projectPath: string,
 		sessionId: string,
+		sessionsDir: string,
 		sshConfig?: SshRemoteConfig
 	): Promise<string | null> {
-		const cwdFolders = await this.listMatchingCwdFolders(projectPath, sshConfig);
+		const cwdFolders = await this.listMatchingCwdFolders(projectPath, sessionsDir, sshConfig);
 		for (const cwdFolder of cwdFolders) {
-			const sessionIds = await this.listSessionIds(cwdFolder, sshConfig);
+			const sessionIds = await this.listSessionIds(cwdFolder, sessionsDir, sshConfig);
 			if (sessionIds.includes(sessionId)) {
-				return this.joinPath(sshConfig, this.getSessionsDir(sshConfig), cwdFolder, sessionId);
+				return this.joinPath(sshConfig, sessionsDir, cwdFolder, sessionId);
 			}
 		}
 		return null;
@@ -628,7 +669,12 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		options?: SessionReadOptions,
 		sshConfig?: SshRemoteConfig
 	): Promise<SessionMessagesResult> {
-		const sessionDir = await this.findSessionDir(projectPath, sessionId, sshConfig);
+		const sessionDir = await this.findSessionDir(
+			projectPath,
+			sessionId,
+			this.getSessionsDir(sshConfig, options?.configDir),
+			sshConfig
+		);
 		if (!sessionDir) {
 			logger.warn(`Grok session not found for project: ${sessionId}`, LOG_CONTEXT);
 			return { messages: [], total: 0, hasMore: false };
@@ -649,7 +695,12 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		projectPath: string,
 		sshConfig?: SshRemoteConfig
 	): Promise<SearchableMessage[]> {
-		const sessionDir = await this.findSessionDir(projectPath, sessionId, sshConfig);
+		const sessionDir = await this.findSessionDir(
+			projectPath,
+			sessionId,
+			this.getSessionsDir(sshConfig),
+			sshConfig
+		);
 		if (!sessionDir) return [];
 
 		const transcript = await this.readTranscript(sessionDir, sshConfig);
@@ -676,7 +727,8 @@ export class GrokSessionStorage extends BaseSessionStorage {
 	getSessionPath(
 		projectPath: string,
 		sessionId: string,
-		sshConfig?: SshRemoteConfig
+		sshConfig?: SshRemoteConfig,
+		accountDir?: string
 	): string | null {
 		if (!isSafeGrokSessionId(sessionId)) {
 			return null;
@@ -684,7 +736,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		const encoded = encodeURIComponent(toGrokRecordedCwd(projectPath, Boolean(sshConfig)));
 		return this.joinPath(
 			sshConfig,
-			this.getSessionsDir(sshConfig),
+			this.getSessionsDir(sshConfig, accountDir),
 			encoded,
 			sessionId,
 			'chat_history.jsonl'
