@@ -38,6 +38,16 @@ export interface SessionMessage {
 	timestamp: string;
 	uuid: string;
 	toolUse?: unknown;
+	/** Provider source-line provenance. The native view supplies raw text without
+	 * its newline delimiter; derived messages may reference the same line without
+	 * repeating raw bytes. This is not a whole-file archive. Exporters must redact
+	 * before disclosure; this is evidence, never executable input.
+	 */
+	native?: { provider: string; line: number; raw?: string; issues?: string[] };
+	/** Native tool-result linkage (never inferred from the tool name). */
+	toolCallId?: string;
+	/** References retained without fetching URLs or opening provider-owned paths. */
+	imageReferences?: string[];
 	/**
 	 * Base64 data URLs for any image content blocks attached to the message
 	 * (e.g. user-pasted screenshots). Reconstructed from the transcript so a
@@ -137,6 +147,11 @@ export interface SessionListOptions {
  * Options for reading session messages
  */
 export interface SessionReadOptions {
+	/** Request ordered context, reasoning and tool-result rows from supporting adapters.
+	 * Display readers may otherwise fold tool results and omit context-only rows.
+	 * This view supports context export, not certified native migration.
+	 */
+	includeNativeRecords?: boolean;
 	offset?: number;
 	limit?: number;
 	/** Selected account home, with the same meaning as SessionListOptions.configDir. */

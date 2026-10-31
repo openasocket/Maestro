@@ -47,6 +47,9 @@ import { isExpectedRemoteError } from './remote-error-utils';
 import { isExpectedSessionReadError } from '../utils/session-read-errors';
 import type { ModelTokenUsage } from '../../shared/tokenUsage';
 import { normalizeModelId } from '../../shared/modelPricing';
+import { parseNativeLines } from '../../shared/maestro-lib/translation/native-records';
+import { compactToolOutput } from '../../shared/toolOutput';
+import { isInlineImageDataUrl } from './session-image-store';
 
 const LOG_CONTEXT = '[GrokSessionStorage]';
 const MAX_SESSION_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
@@ -151,21 +154,31 @@ interface GrokToolCall {
 	name?: string;
 	/** JSON-encoded argument string. */
 	arguments?: string;
+	/** Legacy Chat Completions layout. */
+	function?: { name?: string; arguments?: string };
 }
 
 /** One line of chat_history.jsonl. */
 interface GrokChatRecord {
 	type?: string;
+	role?: string;
 	/** String for system/assistant/tool_result records; `{type:'text',text}` block array for user records. */
 	content?: unknown;
 	/** Present on injected-context user records (e.g. project_instructions, system_reminder). */
 	synthetic_reason?: string;
 	tool_calls?: GrokToolCall[];
 	tool_call_id?: string;
+	images?: unknown;
+	summary?: unknown;
+	reasoning?: { text?: string };
+	reasoning_content?: string;
+	raw_output?: unknown[];
 }
 
 /** Tool use entry shape used when building SessionMessage.toolUse arrays. */
 interface GrokToolUseEntry {
+	id?: string;
+	resultSource?: SessionMessage['native'];
 	tool?: string;
 	args?: unknown;
 	state: {
@@ -182,7 +195,7 @@ interface ParsedGrokChatHistory {
 }
 
 /** Extract plain text from a user record's content block array. */
-function extractUserText(content: unknown): string {
+function extractUserText(content: unknown, separator = ' '): string {
 	if (typeof content === 'string') return content;
 	if (!Array.isArray(content)) return '';
 	return content
@@ -192,7 +205,7 @@ function extractUserText(content: unknown): string {
 				: ''
 		)
 		.filter((text) => text.trim())
-		.join(' ');
+		.join(separator);
 }
 
 /**
@@ -202,6 +215,12 @@ function extractUserText(content: unknown): string {
  * `<user_info>` tags instead.
  */
 function isSyntheticUserRecord(record: GrokChatRecord, text: string): boolean {
+	if (
+		['human', 'interjection', 'parent_human_message', 'direct_bash'].includes(
+			record.synthetic_reason ?? ''
+		)
+	)
+		return false;
 	if (record.synthetic_reason) return true;
 	return text.trim().startsWith('<user_info>');
 }
@@ -267,122 +286,242 @@ function matchesProject(cwd: string, projectPath: string, isRemote: boolean): bo
 function buildToolUse(toolCalls?: GrokToolCall[]): GrokToolUseEntry[] | undefined {
 	if (!toolCalls?.length) return undefined;
 	const entries = toolCalls
-		.filter((call) => call.name)
+		.filter((call) => call && typeof call === 'object')
 		.map((call) => {
+			const fields = call.function ?? call;
+			const args = typeof fields.arguments === 'string' ? fields.arguments : undefined;
 			let input: unknown;
 			try {
-				input = JSON.parse(call.arguments || '{}');
+				input = JSON.parse(args || '{}');
 			} catch {
-				input = call.arguments;
+				input = args;
 			}
 			return {
-				tool: call.name,
+				id: typeof call.id === 'string' && call.id ? call.id : undefined,
+				tool: typeof fields.name === 'string' ? fields.name : undefined,
 				// Raw JSON string on purpose - see JSDoc above.
-				args: call.arguments,
-				state: { status: 'running', input },
+				args,
+				state: { status: 'unknown', input },
 			};
 		});
 	return entries.length > 0 ? entries : undefined;
 }
 
+/** Extract native image references without opening paths or fetching URLs. */
+function extractImageReferences(content: unknown): string[] {
+	if (!Array.isArray(content)) return [];
+	return content.flatMap((block) => {
+		if (!block || typeof block !== 'object') return [];
+		const url =
+			block.type === 'image'
+				? block.url
+				: block.type === 'image_url'
+					? block.image_url?.url
+					: undefined;
+		return typeof url === 'string' ? [url] : [];
+	});
+}
+
 /**
- * Parse chat_history.jsonl content into display messages.
- *
- * Transcript records carry no timestamps, so `timestamp` is left empty (the
- * sibling storages tolerate this). `tool_result` records are merged into the
- * preceding assistant record's tool entry by call id; system and reasoning
- * records are skipped.
+ * Parse both native ConversationItem and legacy Chat Completions rows. Physical
+ * line identities survive pagination and appended records; they are not resume IDs.
+ * The export view retains every nonblank source row, including malformed JSON.
+ * The display view folds results into badges and hides context/reasoning rows.
  */
-function parseChatHistory(content: string): ParsedGrokChatHistory {
+function parseChatHistory(content: string, includeNativeRecords = false): ParsedGrokChatHistory {
 	const messages: SessionMessage[] = [];
+	const hidden = new Set<SessionMessage>();
 	let firstUserMessage = '';
 	let firstAssistantMessage = '';
-	let messageIndex = 0;
-	// Maps a tool call id to the message/tool entry awaiting its tool_result.
-	const pendingToolCalls = new Map<string, { messageIndex: number; entryIndex: number }>();
+	const calls = new Map<string, Array<{ call: GrokToolUseEntry; message: SessionMessage }>>();
+	const results = new Map<string, SessionMessage[]>();
 
-	for (const line of content.split(/\r?\n/)) {
-		if (!line.trim()) continue;
-
-		let record: GrokChatRecord;
-		try {
-			record = JSON.parse(line) as GrokChatRecord;
-		} catch {
-			// Grok appends while running, so a live session can have a partial final line.
-			continue;
-		}
-
-		if (record.type === 'user') {
-			const rawText = extractUserText(record.content);
-			if (isSyntheticUserRecord(record, rawText)) continue;
-			const text = stripUserQueryWrapper(rawText);
-			if (!text.trim()) continue;
-			firstUserMessage ||= text;
-			messages.push({
-				type: 'user',
-				role: 'user',
-				content: text,
-				timestamp: '',
-				uuid: `grok-msg-${messageIndex++}`,
-			});
-			continue;
-		}
-
-		if (record.type === 'assistant') {
-			const text = typeof record.content === 'string' ? record.content : '';
-			const toolUse = buildToolUse(record.tool_calls);
-			if (!text.trim() && !toolUse) continue;
-			if (text.trim()) firstAssistantMessage ||= text;
-			if (toolUse) {
-				let entryIndex = 0;
-				for (const call of record.tool_calls || []) {
-					if (!call.name) continue;
-					if (call.id) {
-						pendingToolCalls.set(call.id, { messageIndex: messages.length, entryIndex });
-					}
-					entryIndex++;
-				}
+	const lines = parseNativeLines(content);
+	const backendIds = new Set<string>(
+		lines.flatMap(({ entry }) =>
+			entry?.type === 'backend_tool_call' && typeof entry.kind?.id === 'string'
+				? [entry.kind.id]
+				: []
+		)
+	);
+	for (const { line, index, entry, malformed } of lines) {
+		const record = (entry ?? {}) as GrokChatRecord;
+		const kind = record.type ?? record.role;
+		const native: NonNullable<SessionMessage['native']> = {
+			provider: 'grok',
+			line: index + 1,
+			...(includeNativeRecords ? { raw: line } : {}),
+		};
+		const message: SessionMessage = {
+			type: kind ?? 'unknown',
+			role: kind ?? 'unknown',
+			content: extractUserText(record.content),
+			timestamp: '',
+			uuid: `grok-line-${index + 1}`,
+			native,
+		};
+		// Native rows have no timestamps. Keep unknown metadata in raw evidence,
+		// rather than manufacturing a clock or attempting to decrypt reasoning.
+		if (malformed) {
+			message.type = message.role = 'unknown';
+			message.content = '[Unreadable Grok transcript record retained for export]';
+			native.issues = ['malformed-record'];
+		} else if (kind === 'user') {
+			const synthetic = isSyntheticUserRecord(record, message.content);
+			message.imageReferences = extractImageReferences(record.content);
+			message.images = message.imageReferences.filter(isInlineImageDataUrl);
+			if (synthetic) hidden.add(message);
+			else {
+				message.content = stripUserQueryWrapper(message.content);
+				firstUserMessage ||= message.content;
 			}
-			messages.push({
-				type: 'assistant',
-				role: 'assistant',
-				content: text,
-				timestamp: '',
-				uuid: `grok-msg-${messageIndex++}`,
-				toolUse,
-			});
-			continue;
-		}
-
-		if (record.type === 'tool_result') {
-			const output = typeof record.content === 'string' ? record.content : '';
-			const callId = record.tool_call_id;
-			const target = callId ? pendingToolCalls.get(callId) : undefined;
-			if (target && callId) {
-				const entries = messages[target.messageIndex].toolUse as GrokToolUseEntry[];
-				const entry = entries[target.entryIndex];
-				entries[target.entryIndex] = {
-					...entry,
-					state: { ...entry.state, status: 'completed', output },
-				};
-				pendingToolCalls.delete(callId);
-			} else if (output.trim()) {
-				// No matching tool call - surface the result as a standalone message.
-				messages.push({
-					type: 'assistant',
-					role: 'assistant',
-					content: output,
-					timestamp: '',
-					uuid: `grok-msg-${messageIndex++}`,
+		} else if (kind === 'assistant') {
+			const toolUse = buildToolUse(
+				Array.isArray(record.tool_calls) ? record.tool_calls : undefined
+			);
+			message.toolUse = toolUse;
+			for (const call of toolUse ?? []) {
+				if (call.id) {
+					const siblings = calls.get(call.id) ?? [];
+					siblings.push({ call, message });
+					calls.set(call.id, siblings);
+				} else native.issues = [...(native.issues ?? []), 'missing-tool-call-id'];
+			}
+			firstAssistantMessage ||= message.content;
+			// Native upgrades place legacy reasoning/backend items before their
+			// assistant. Preserve that order, with deterministic source-line suffixes.
+			const legacy = Array.isArray(record.raw_output)
+				? record.raw_output.filter((item): item is Record<string, unknown> =>
+						Boolean(
+							item &&
+							typeof item === 'object' &&
+							[
+								'reasoning',
+								'web_search_call',
+								'custom_tool_call',
+								'code_interpreter_call',
+							].includes((item as { type: string }).type)
+						)
+					)
+				: [];
+			if (
+				!Array.isArray(record.raw_output) &&
+				(record.reasoning || typeof record.reasoning_content === 'string')
+			) {
+				legacy.push({
+					type: 'reasoning',
+					content: record.reasoning?.text ?? record.reasoning_content ?? '',
 				});
 			}
-			continue;
+			for (const [part, item] of legacy.entries()) {
+				if (item.type !== 'reasoning' && typeof item.id === 'string') {
+					if (backendIds.has(item.id)) continue;
+					backendIds.add(item.id);
+				}
+				const sibling: SessionMessage = {
+					type: item.type === 'reasoning' ? 'reasoning' : 'backend_tool_call',
+					role: 'assistant',
+					content: [extractUserText(item.summary, '\n'), extractUserText(item.content, '\n')]
+						.filter(Boolean)
+						.join('\n'),
+					timestamp: '',
+					uuid: `${message.uuid}-legacy-${part}`,
+					// The original assistant owns raw bytes; this is a projection of that row.
+					native: { provider: native.provider, line: native.line },
+				};
+				messages.push(sibling);
+				hidden.add(sibling);
+			}
+		} else if (kind === 'tool_result' || kind === 'tool') {
+			message.type = 'tool_result';
+			message.role = 'tool';
+			message.imageReferences = [
+				...extractImageReferences(record.content),
+				...extractImageReferences(record.images),
+			];
+			message.images = message.imageReferences.filter(isInlineImageDataUrl);
+			message.toolCallId =
+				typeof record.tool_call_id === 'string' ? record.tool_call_id : undefined;
+			if (message.toolCallId) {
+				const siblings = results.get(message.toolCallId) ?? [];
+				siblings.push(message);
+				results.set(message.toolCallId, siblings);
+			} else native.issues = ['missing-tool-call-id'];
+		} else if (kind === 'reasoning') {
+			message.role = 'assistant';
+			message.content = [
+				extractUserText(record.summary, '\n'),
+				extractUserText(record.content, '\n'),
+			]
+				.filter(Boolean)
+				.join('\n');
+			hidden.add(message);
+		} else if (kind === 'system' || kind === 'backend_tool_call') {
+			message.role = kind === 'system' ? 'system' : 'assistant';
+			hidden.add(message);
+		} else {
+			message.type = message.role = 'unknown';
+			message.content = '[Unknown Grok transcript record retained for export]';
+			native.issues = ['unknown-record'];
 		}
-
-		// `system` and `reasoning` records carry no user-visible conversation content.
+		if (
+			(kind === 'user' || kind === 'assistant') &&
+			!message.content.trim() &&
+			!(message.toolUse as GrokToolUseEntry[] | undefined)?.length &&
+			!message.imageReferences?.length
+		) {
+			hidden.add(message);
+		}
+		messages.push(message);
 	}
 
-	return { messages, firstUserMessage, firstAssistantMessage };
+	// Pair only unambiguous IDs, never by arrival adjacency or tool name. Keep
+	// every result in the native view even when the display badge folds it in.
+	for (const entries of calls.values()) {
+		if (entries.length > 1) {
+			for (const { message } of entries) {
+				message.native!.issues = [...(message.native!.issues ?? []), 'duplicate-tool-call-id'];
+			}
+		}
+	}
+	for (const [id, rows] of results) {
+		const entries = calls.get(id);
+		const row = rows[0];
+		const target = entries?.[0];
+		const callMessage = target?.message;
+		if (
+			entries?.length === 1 &&
+			target &&
+			rows.length === 1 &&
+			callMessage?.native &&
+			row.native &&
+			callMessage.native.line < row.native.line
+		) {
+			target.call.state = {
+				...target.call.state,
+				status: 'completed',
+				...(includeNativeRecords
+					? {}
+					: { output: compactToolOutput(row.content).output as string }),
+			};
+			target.call.resultSource = { provider: row.native.provider, line: row.native.line };
+			if (!includeNativeRecords) {
+				callMessage.imageReferences = [
+					...(callMessage.imageReferences ?? []),
+					...(row.imageReferences ?? []),
+				];
+				callMessage.images = [...(callMessage.images ?? []), ...(row.images ?? [])];
+			}
+			hidden.add(row);
+		} else {
+			for (const result of rows) result.native!.issues = ['ambiguous-or-missing-tool-call'];
+		}
+	}
+	return {
+		messages: includeNativeRecords ? messages : messages.filter((message) => !hidden.has(message)),
+		firstUserMessage,
+		firstAssistantMessage,
+	};
 }
 
 /**
@@ -701,7 +840,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 			return { messages: [], total: 0, hasMore: false };
 		}
 
-		const { messages } = parseChatHistory(transcript.content);
+		const { messages } = parseChatHistory(transcript.content, options?.includeNativeRecords);
 		return BaseSessionStorage.applyMessagePagination(messages, options);
 	}
 

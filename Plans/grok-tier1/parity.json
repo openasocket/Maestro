@@ -880,6 +880,23 @@
 			"live": "not-run",
 			"affectedRows": ["P13", "P15", "C-supportsSessionStorage", "REG-STORAGE"],
 			"scope": "GT1-04-03 path validation and remote project/account separation only; existing remote helpers/concurrency retained. GT1-04-04 owns tests including replacement of the obsolete UUID-only assertion, GT1-04-13 owns execution. No full-row acceptance, symlink containment, native remote-host or resume/translation qualification."
+		},
+		"phase04-native-transcript-normalization": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-05-native-transcript-normalization",
+			"sourceCommit": "8672b91ab30c4be1c1f62542c042127b7f0527e0",
+			"sourceCommitScope": "Pre-task HEAD plus the source hashes and task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/storage/grok-session-storage.ts": "dc6c70ee0a2b4df14d3ddb2cbc099f9a0c3c0766b41ed97072652a6dc01d0691",
+				"src/main/agents/session-storage.ts": "bcdf21661a22e6a33c688b468af74e884e050ad148690598fd025c5abad4917f"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"implementation": "implemented",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P13", "P15", "P21", "C-supportsSessionStorage", "REG-STORAGE", "S06"],
+			"scope": "Current/legacy transcript normalization and opt-in native evidence only. Summary/usage and bounded reads/pagination are explicit GT1-04-05A/05B continuations; GT1-04-06 authors tests and GT1-04-13 runs them. Export consumers remain GT1-04-09. No full-row, native resume or migration qualification."
 		}
 	},
 	"sourceCatalog": {
@@ -4052,7 +4069,9 @@
 					"GT1-03-05C1",
 					"GT1-03-05E",
 					"GT1-03-09A",
-					"GT1-03-11C"
+					"GT1-03-11C",
+					"GT1-04-05A",
+					"GT1-04-05B"
 				],
 				"test": [
 					"GT1-03-06",
@@ -4518,7 +4537,9 @@
 					"GT1-04-05",
 					"GT1-04-06A",
 					"GT1-02-01",
-					"GT1-04-11"
+					"GT1-04-11",
+					"GT1-04-05A",
+					"GT1-04-05B"
 				],
 				"test": ["GT1-04-02", "GT1-04-04", "GT1-04-06", "GT1-04-06B", "GT1-02-02", "GT1-04-12"],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-02-13", "GT1-02-14"],
@@ -4542,7 +4563,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
-				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths"
+				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
+				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4767,7 +4789,9 @@
 					"GT1-04-05",
 					"GT1-04-06A",
 					"GT1-02-01",
-					"GT1-04-11"
+					"GT1-04-11",
+					"GT1-04-05A",
+					"GT1-04-05B"
 				],
 				"test": ["GT1-04-02", "GT1-04-04", "GT1-04-06", "GT1-04-06B", "GT1-02-02", "GT1-04-12"],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-02-13", "GT1-02-14", "GT1-11-11A"],
@@ -4791,7 +4815,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
-				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths"
+				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
+				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4947,7 +4972,9 @@
 					"GT1-04-06A",
 					"GT1-07-08",
 					"GT1-07-09",
-					"GT1-03-05C"
+					"GT1-03-05C",
+					"GT1-04-05A",
+					"GT1-04-05B"
 				],
 				"test": [
 					"GT1-03-06",
@@ -5622,7 +5649,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6303,7 +6331,14 @@
 				"src/renderer/components/TerminalOutput/components/ToolBadge.tsx"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-04-05", "GT1-04-06A", "GT1-07-08", "GT1-07-09"],
+				"implementation": [
+					"GT1-04-05",
+					"GT1-04-06A",
+					"GT1-07-08",
+					"GT1-07-09",
+					"GT1-04-05A",
+					"GT1-04-05B"
+				],
 				"test": ["GT1-04-06", "GT1-04-06B", "GT1-07-10"],
 				"verification": ["GT1-04-13", "GT1-07-11"],
 				"live": ["GT1-11-11"],
@@ -8825,7 +8860,9 @@
 					"GT1-10-09C",
 					"GT1-10-09D",
 					"GT1-10-09E",
-					"GT1-03-09A"
+					"GT1-03-09A",
+					"GT1-04-05A",
+					"GT1-04-05B"
 				],
 				"test": [
 					"GT1-02-02",
@@ -10841,7 +10878,14 @@
 				"src/renderer/components/MainPanel/MainPanel.tsx"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-04-01", "GT1-04-03", "GT1-04-05", "GT1-11-14A"],
+				"implementation": [
+					"GT1-04-01",
+					"GT1-04-03",
+					"GT1-04-05",
+					"GT1-11-14A",
+					"GT1-04-05A",
+					"GT1-04-05B"
+				],
 				"test": ["GT1-04-02", "GT1-04-04", "GT1-04-06", "GT1-11-14B"],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
@@ -10862,7 +10906,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths"
+				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
+				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13825,7 +13870,14 @@
 				"src/main/index.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-04-01", "GT1-04-03", "GT1-04-05", "GT1-04-06A"],
+				"implementation": [
+					"GT1-04-01",
+					"GT1-04-03",
+					"GT1-04-05",
+					"GT1-04-06A",
+					"GT1-04-05A",
+					"GT1-04-05B"
+				],
 				"test": ["GT1-04-02", "GT1-04-04", "GT1-04-06", "GT1-04-06B"],
 				"verification": ["GT1-04-13", "GT1-04-14"],
 				"live": ["GT1-11-11"],
@@ -13847,7 +13899,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
-				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths"
+				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
+				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14432,7 +14485,9 @@
 					"GT1-03-05C1",
 					"GT1-03-05E",
 					"GT1-03-09A",
-					"GT1-03-11C"
+					"GT1-03-11C",
+					"GT1-04-05A",
+					"GT1-04-05B"
 				],
 				"test": [
 					"GT1-03-06",
@@ -14580,7 +14635,14 @@
 				"src/shared/claudeSessionUsage.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-04-05", "GT1-04-06A", "GT1-07-08", "GT1-07-09"],
+				"implementation": [
+					"GT1-04-05",
+					"GT1-04-06A",
+					"GT1-07-08",
+					"GT1-07-09",
+					"GT1-04-05A",
+					"GT1-04-05B"
+				],
 				"test": ["GT1-04-06", "GT1-04-06B", "GT1-07-10"],
 				"verification": ["GT1-04-13", "GT1-07-11"],
 				"live": ["GT1-11-11"],
@@ -15984,7 +16046,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19113,7 +19176,9 @@
 					"GT1-02-03B",
 					"GT1-02-03H",
 					"GT1-02-03C",
-					"GT1-03-11A"
+					"GT1-03-11A",
+					"GT1-04-05A",
+					"GT1-04-05B"
 				],
 				"test": [
 					"GT1-02-02",
@@ -19292,7 +19357,9 @@
 					"GT1-10-10",
 					"GT1-02-03",
 					"GT1-03-10A",
-					"GT1-03-09A"
+					"GT1-03-09A",
+					"GT1-04-05A",
+					"GT1-04-05B"
 				],
 				"test": [
 					"GT1-02-06",
@@ -19464,7 +19531,9 @@
 					"GT1-10-08",
 					"GT1-10-10",
 					"GT1-02-03",
-					"GT1-03-09A"
+					"GT1-03-09A",
+					"GT1-04-05A",
+					"GT1-04-05B"
 				],
 				"test": [
 					"GT1-08-02",
