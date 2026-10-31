@@ -6,6 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { webcrypto } from 'node:crypto';
 import { logger } from '../../../renderer/utils/logger';
 import { renderHook, act } from '@testing-library/react';
 import { useAgentStore } from '../../../renderer/stores/agentStore';
@@ -16,6 +17,14 @@ import { createMockSession as baseCreateMockSession } from '../../helpers/mockSe
 import { dispatchCrossAgentMentionsForMessage } from '../../../renderer/services/crossAgentMentions';
 import { resetStores } from '../../helpers';
 import { requestTabAutoNameForMessage } from '../../../renderer/services/tabAutoNaming';
+import { useSettingsStore } from '../../../renderer/stores/settingsStore';
+import {
+	buildQueuedMessageItem,
+	getQueuedCommandSpawnSelection,
+} from '../../../renderer/services/queuedPrompt';
+import { applyQueuedItemDispatch } from '../../../renderer/utils/executionQueue';
+import { gitService } from '../../../renderer/services/git';
+import { substituteTemplateVariables } from '../../../renderer/utils/templateVariables';
 
 // ============================================================================
 // Helpers
@@ -1944,11 +1953,40 @@ describe('agentStore', () => {
 		});
 
 		describe('Grok queued slash refusal (GT1-05-06)', () => {
+			const getConfig = vi.fn();
+			const remoteConfig = {
+				id: 'remote-grok',
+				enabled: true,
+				host: 'fixture.invalid',
+				name: 'Fixture',
+				port: 22,
+				username: 'fixture',
+				privateKeyPath: '',
+			};
 			beforeEach(() => {
+				resetStores(useSettingsStore);
+				vi.stubGlobal('crypto', webcrypto);
+				getConfig.mockReset().mockResolvedValue({ customEnvVars: { GROK_HOME: '/inherited' } });
+				window.maestro.agents.getConfig = getConfig;
+				Object.assign(window.maestro, {
+					settings: { get: vi.fn().mockResolvedValue({}) },
+					sshRemote: {
+						getConfigs: vi.fn().mockResolvedValue({ success: true, configs: [remoteConfig] }),
+					},
+				});
+				vi.mocked(gitService.getStatus)
+					.mockReset()
+					.mockResolvedValue({ branch: 'main', files: [] });
+				mockGetActiveProcesses.mockReset().mockResolvedValue([]);
+				mockDiscoverSlashCommands.mockReset().mockResolvedValue(null);
 				window.maestro.process.getActiveProcesses = mockGetActiveProcesses;
 				window.maestro.agents.discoverSlashCommands = mockDiscoverSlashCommands;
 			});
 			afterEach(() => {
+				vi.unstubAllGlobals();
+				Reflect.deleteProperty(window.maestro.agents, 'getConfig');
+				Reflect.deleteProperty(window.maestro, 'settings');
+				Reflect.deleteProperty(window.maestro, 'sshRemote');
 				Reflect.deleteProperty(window.maestro.process, 'getActiveProcesses');
 				Reflect.deleteProperty(window.maestro.agents, 'discoverSlashCommands');
 			});
@@ -2038,23 +2076,52 @@ describe('agentStore', () => {
 				}
 			);
 
-			it.each([false, true])(
-				'expands a custom collision once through the selected spawn (managed refusal=%s)',
-				async (denied) => {
+			it.each([
+				{ outcome: 'accepted', remote: false },
+				{ outcome: 'thrown', remote: false },
+				{ outcome: 'returned', remote: false },
+				{ outcome: 'accepted', remote: true },
+				{ outcome: 'thrown', remote: true },
+				{ outcome: 'returned', remote: true },
+			])(
+				'expands a custom collision once ($outcome, remote=$remote)',
+				async ({ outcome, remote }) => {
+					const denied = outcome !== 'accepted';
+					const live = outcome === 'returned';
 					const session = createMockSession({
 						toolType: 'grok',
 						cwd: '/selected/project',
 						customPath: '/selected/bin/grok',
 						customEnvVars: { GROK_HOME: '/selected/account' },
+						isGitRepo: true,
+						sshRemoteId: 'previous-host',
+						remoteCwd: '/previous/terminal',
+						sessionSshRemoteConfig: remote
+							? { enabled: true, remoteId: remoteConfig.id }
+							: undefined,
+						pendingAICommandForSynopsis: '/existing',
 						agentCommands: [
 							{ command: '/review', description: 'Foreign', prompt: 'OTHER PROVIDER BODY' },
 						],
 					});
 					session.aiTabs[0] = {
 						...session.aiTabs[0],
-						agentSessionId: 'grok-native',
+						agentSessionId: remote ? null : 'grok-native',
+						nativeSessionBinding: remote
+							? undefined
+							: {
+									version: 1,
+									state: 'bound',
+									provider: 'grok',
+									nativeSessionId: 'grok-native',
+									accountRef: 'fixture-account',
+									host: { kind: 'local', identity: 'fixture-host' },
+									cwd: session.cwd,
+								},
 						permissionMode: 'readonly',
 						readOnlyMode: true,
+						customModel: 'grok-selected',
+						customEffort: 'high',
 					};
 					const sibling = { ...session.aiTabs[0], id: 'other-tab', agentSessionId: 'other-native' };
 					session.aiTabs.push(sibling);
@@ -2063,15 +2130,24 @@ describe('agentStore', () => {
 					mockGetAgent.mockResolvedValueOnce(
 						createMockAgentConfig({ id: 'grok', command: 'grok', args: [] })
 					);
-					const item = createQueuedItem({
-						type: 'command',
-						command: '/review',
-						text: undefined,
-						commandArgs: 'selected changes',
-						turnSettings: { model: 'grok-selected', effort: 'high' },
+					const argumentsText = "selected $& $$ $` $' $ARGUMENTS";
+					const item = buildQueuedMessageItem({
+						session,
+						tab: session.aiTabs[0],
+						slashCommand: true,
+						text: `/review ${argumentsText}`,
+						images: ['data:image/png;base64,Zmlyc3Q=', 'data:image/png;base64,c2Vjb25k'],
 						delegation: { contractVersion: '1.0', traceId: 'selected-trace' } as never,
 						dispatchTicket: 'selected-ticket',
 					});
+					const expectedGrokSpawnSelection = await getQueuedCommandSpawnSelection(session.id, item);
+					expect(expectedGrokSpawnSelection).toMatch(/^grok-spawn-selection-v1:[a-f0-9]{64}$/);
+					const tail = createQueuedItem({ id: 'tail', tabId: sibling.id });
+					session.executionQueue = [item, tail];
+					useSessionStore.getState().setSessions([applyQueuedItemDispatch(session, item)]);
+					// A later picker change must not rewrite the settings frozen by the real builder.
+					useSessionStore.getState().sessions[0].aiTabs[0].customModel = 'later-model';
+					useSessionStore.getState().sessions[0].aiTabs[0].customEffort = 'low';
 					const deps = {
 						...defaultDeps,
 						customAICommands: [
@@ -2083,9 +2159,18 @@ describe('agentStore', () => {
 							},
 						],
 					};
-					if (denied) mockSpawn.mockRejectedValueOnce(new Error('Managed policy denied this turn'));
+					mockGetActiveProcesses.mockResolvedValue(
+						live ? [{ sessionId: 'session-1-ai-default-tab', isTerminal: false }] : []
+					);
+					if (outcome === 'thrown')
+						mockSpawn.mockRejectedValueOnce(new Error('Managed policy denied this turn'));
+					if (outcome === 'returned')
+						mockSpawn.mockResolvedValueOnce({
+							success: false,
+							error: 'Managed policy denied this turn',
+						});
 
-					const dispatched = useAgentStore.getState().processQueuedItem('session-1', item, deps);
+					const dispatched = useAgentStore.getState().processQueuedItem(session.id, item, deps);
 					if (denied) await expect(dispatched).rejects.toThrow('Managed policy denied this turn');
 					else expect(await dispatched).toBe(true);
 
@@ -2095,19 +2180,32 @@ describe('agentStore', () => {
 							sessionId: 'session-1-ai-default-tab',
 							toolType: 'grok',
 							command: 'grok',
-							prompt: 'Review selected changes',
+							prompt: `Review ${argumentsText}`,
+							images: item.images,
 							cwd: '/selected/project',
-							agentSessionId: 'grok-native',
+							agentSessionId: remote ? undefined : 'grok-native',
 							sessionCustomPath: '/selected/bin/grok',
 							sessionCustomEnvVars: { GROK_HOME: '/selected/account' },
 							sessionCustomModel: 'grok-selected',
 							sessionCustomEffort: 'high',
 							permissionMode: 'readonly',
 							readOnlyMode: true,
+							sessionSshRemoteConfig: session.sessionSshRemoteConfig,
+							expectedGrokSpawnSelection,
 							delegation: item.delegation,
 							dispatchTicket: item.dispatchTicket,
 						})
 					);
+					expect(gitService.getStatus).toHaveBeenNthCalledWith(
+						1,
+						session.cwd,
+						remote ? remoteConfig.id : undefined
+					);
+					expect(
+						vi
+							.mocked(substituteTemplateVariables)
+							.mock.calls.filter(([text]) => text.startsWith('Review '))
+					).toHaveLength(1);
 					expect(mockGetAgent).toHaveBeenCalledWith('grok');
 					expect(mockDiscoverSlashCommands).not.toHaveBeenCalled();
 					const updated = useSessionStore.getState().sessions[0];
@@ -2118,10 +2216,141 @@ describe('agentStore', () => {
 							source: denied ? 'error' : 'user',
 							text: denied
 								? expect.stringContaining('Managed policy denied this turn')
-								: 'Review selected changes',
+								: `Review ${argumentsText}`,
+							...(!denied && { images: item.images }),
 						}),
 					]);
-					expect(updated.executionQueue).toEqual(denied ? [{ ...item, paused: true }] : []);
+					expect(updated.aiTabs[0].state).toBe(denied && !live ? 'idle' : 'busy');
+					expect(updated.pendingAICommandForSynopsis).toBe(denied ? '/existing' : '/review');
+					expect(updated.executionQueue).toEqual(
+						denied ? [{ ...item, paused: true }, tail] : [tail]
+					);
+				}
+			);
+
+			it.each(
+				(['before drain', 'during preparation'] as const).flatMap((stage) =>
+					(
+						[
+							'account',
+							'cwd',
+							'host',
+							'native',
+							'provider',
+							'inherited',
+							'global env',
+							'endpoint',
+							'cancel',
+						] as const
+					).flatMap((change) => [false, true].map((live) => ({ stage, change, live })))
+				)
+			)(
+				'handles $change $stage without substituting ownership (live=$live)',
+				async ({ stage, change, live }) => {
+					mockGetAgent.mockResolvedValue(
+						createMockAgentConfig({ id: 'grok', command: 'grok', args: [] })
+					);
+					const session = createMockSession({
+						toolType: 'grok',
+						isGitRepo: true,
+						pendingAICommandForSynopsis: '/previous',
+						sessionSshRemoteConfig: { enabled: true, remoteId: remoteConfig.id },
+					});
+					const sibling = { ...session.aiTabs[0], id: 'other-tab' };
+					session.aiTabs.push(sibling);
+					session.activeTabId = sibling.id;
+					useSessionStore.getState().setSessions([session]);
+					const item = buildQueuedMessageItem({
+						session,
+						tab: session.aiTabs[0],
+						slashCommand: true,
+						text: '/review raw $&',
+						images: ['data:image/png;base64,aW1hZ2U='],
+					});
+					expect(await getQueuedCommandSpawnSelection(session.id, item)).not.toBeNull();
+					const tail = createQueuedItem({ id: 'tail', tabId: sibling.id });
+					session.executionQueue = [item, tail];
+					useSessionStore.getState().setSessions([applyQueuedItemDispatch(session, item)]);
+					mockGetActiveProcesses.mockResolvedValue(
+						live ? [{ sessionId: 'session-1-ai-default-tab', isTerminal: false }] : []
+					);
+					let cancelled = false;
+					const changeSelection = () => {
+						const current = useSessionStore.getState().sessions[0];
+						if (change === 'account')
+							useSessionStore
+								.getState()
+								.updateSession(session.id, { customEnvVars: { GROK_HOME: '/other/account' } });
+						if (change === 'cwd')
+							useSessionStore.getState().updateSession(session.id, { cwd: '/other/project' });
+						if (change === 'host')
+							useSessionStore.getState().updateSession(session.id, {
+								sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-other' },
+							});
+						if (change === 'native')
+							useSessionStore.getState().updateSession(session.id, {
+								aiTabs: current.aiTabs.map((tab) =>
+									tab.id === item.tabId ? { ...tab, agentSessionId: 'other-native' } : tab
+								),
+							});
+						if (change === 'provider')
+							useSessionStore.getState().updateSession(session.id, { toolType: 'codex' });
+						if (change === 'inherited')
+							getConfig.mockResolvedValue({ customEnvVars: { GROK_HOME: '/other/inherited' } });
+						if (change === 'global env')
+							vi.mocked(window.maestro.settings.get).mockResolvedValue({
+								GROK_HOME: '/other/global',
+							});
+						if (change === 'endpoint')
+							vi.mocked(window.maestro.sshRemote.getConfigs).mockResolvedValue({
+								success: true,
+								configs: [{ ...remoteConfig, host: 'other.invalid' }],
+							});
+						if (change === 'cancel') cancelled = true;
+					};
+					if (stage === 'before drain') changeSelection();
+					else
+						vi.mocked(gitService.getStatus).mockImplementationOnce(async () => {
+							changeSelection();
+							return { branch: 'main', files: [] };
+						});
+					expect(
+						await useAgentStore.getState().processQueuedItem(session.id, item, {
+							...defaultDeps,
+							isCancelled: () => cancelled,
+							customAICommands: [
+								{
+									id: 'review',
+									command: '/review',
+									description: 'Review',
+									prompt: 'Review $ARGUMENTS',
+								},
+							],
+						})
+					).toBe(false);
+					const updated = useSessionStore.getState().sessions[0];
+					expect(mockSpawn).not.toHaveBeenCalled();
+					expect(gitService.getStatus).toHaveBeenCalledTimes(
+						stage === 'during preparation' ? 2 : 0
+					);
+					expect(updated.executionQueue).toEqual(
+						cancelled ? [tail] : [{ ...item, paused: true }, tail]
+					);
+					expect(updated.aiTabs[0].state).toBe(live ? 'busy' : 'idle');
+					expect(updated.aiTabs[1]).toEqual(sibling);
+					expect(updated.pendingAICommandForSynopsis).toBe('/previous');
+					expect(updated.aiTabs[0].logs).toEqual(
+						cancelled
+							? []
+							: [
+									expect.objectContaining({
+										source: 'error',
+										text: expect.stringContaining('Queued Grok command'),
+									}),
+								]
+					);
+					expect(mockDiscoverSlashCommands).not.toHaveBeenCalled();
+					expect(dispatchCrossAgentMentionsForMessage).not.toHaveBeenCalled();
 				}
 			);
 		});
