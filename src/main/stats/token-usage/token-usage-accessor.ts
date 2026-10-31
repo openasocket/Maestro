@@ -39,6 +39,7 @@ import {
 import { getAgentDisplayName } from '../../../shared/agentMetadata';
 import { providerProfileKey, providerProfileLabel } from '../../../shared/providerProfiles';
 import { normalizeModelId } from '../../../shared/modelPricing';
+import { canonicalJson } from '../../../shared/canonicalJson';
 import { summarizeTokenSpeed, type TokenSpeedSource } from '../../../shared/tokenSpeed';
 import {
 	getTokenUsageCache,
@@ -171,7 +172,11 @@ function toBreakdown(
 	info: AgentSessionInfo,
 	accountKey: string = DEFAULT_ACCOUNT_KEY
 ): SessionTokenBreakdown {
-	const coverage: TokenCoverage = COVERAGE_BY_AGENT[agentType] ?? 'unsupported';
+	const coverage: TokenCoverage =
+		agentType === 'grok' &&
+		(info.accounting?.completeness !== 'complete' || info.accounting.cost.status !== 'exact')
+			? 'partial'
+			: (COVERAGE_BY_AGENT[agentType] ?? 'unsupported');
 	const timestampMs = Date.parse(info.modifiedAt || info.timestamp) || 0;
 
 	let byModel: ModelTokenUsage[];
@@ -253,12 +258,21 @@ async function collectBreakdowns(cache: TokenUsageCache): Promise<SessionTokenBr
 					continue;
 				}
 				for (const info of sessions) {
-					// Key by account too: the same sessionId can't collide across
-					// accounts, but this keeps cache entries unambiguous.
-					const key = tokenCacheKey(`${agentType}@${accountKey}`, info.sessionId);
+					// Grok IDs are scoped to account/cwd, and aliased project queries
+					// can return the same native directory more than once.
+					const key = tokenCacheKey(
+						agentType === 'grok'
+							? canonicalJson([agentType, accountKey, info.projectPath])
+							: `${agentType}@${accountKey}`,
+						info.sessionId
+					);
+					if (agentType === 'grok' && liveKeys.has(key)) continue;
 					liveKeys.add(key);
 					const fingerprint = sessionFingerprint(info.modifiedAt, info.sizeBytes);
-					let breakdown = cache.get(key, fingerprint);
+					// A Grok usage.json update need not change the transcript size or
+					// summary timestamp. Storage already sampled all native files;
+					// never replace that observation with a stale single-file cache.
+					let breakdown = agentType === 'grok' ? undefined : cache.get(key, fingerprint);
 					if (!breakdown) {
 						breakdown = toBreakdown(agentType, info, accountKey);
 						cache.set(key, fingerprint, breakdown);
@@ -376,6 +390,15 @@ function aggregate(all: SessionTokenBreakdown[], query: TokenUsageQuery): TokenU
 
 	for (const s of all) {
 		if (s.timestampMs < sinceMs || s.timestampMs > untilMs) continue;
+		if (s.byModel.length > 0 || s.agentType === 'grok') {
+			const previous = coverageByAgent[s.agentType];
+			coverageByAgent[s.agentType] =
+				previous === 'unsupported' || s.coverage === 'unsupported'
+					? 'unsupported'
+					: previous === 'partial' || s.coverage === 'partial'
+						? 'partial'
+						: 'full';
+		}
 		if (s.byModel.length === 0) continue;
 
 		// Session counts are bumped once per session; token/cost per model below.
@@ -385,15 +408,16 @@ function aggregate(all: SessionTokenBreakdown[], query: TokenUsageQuery): TokenU
 		const account = accountGroup(s.agentType, s.accountKey);
 		group(byAccount, account.key, account.label).total.sessionCount++;
 
-		const bStart = bucketStart(s.timestampMs || Date.now(), granularity);
-		let tb = timeline.get(bStart);
-		if (!tb) {
-			tb = { startMs: bStart, ...emptyTotals() };
-			timeline.set(bStart, tb);
+		let tb: TokenUsageTimeBucket | undefined;
+		if (s.timestampMs > 0) {
+			const bStart = bucketStart(s.timestampMs, granularity);
+			tb = timeline.get(bStart);
+			if (!tb) {
+				tb = { startMs: bStart, ...emptyTotals() };
+				timeline.set(bStart, tb);
+			}
+			tb.sessionCount++;
 		}
-		tb.sessionCount++;
-
-		coverageByAgent[s.agentType] = COVERAGE_BY_AGENT[s.agentType] ?? 'unsupported';
 
 		for (const m of s.byModel) {
 			addModelToTotals(totals, m);
@@ -401,7 +425,7 @@ function aggregate(all: SessionTokenBreakdown[], query: TokenUsageQuery): TokenU
 			addModelToTotals(group(byModel, m.model || 'unknown', modelLabel(m.model)).total, m);
 			addModelToTotals(group(byProject, s.projectPath, projectLabel(s.projectPath)).total, m);
 			addModelToTotals(group(byAccount, account.key, account.label).total, m);
-			addModelToTotals(tb, m);
+			if (tb) addModelToTotals(tb, m);
 		}
 	}
 
@@ -449,6 +473,16 @@ function buildSeries(all: SessionTokenBreakdown[], sinceMs: number, untilMs: num
 		bySource: { user: 0, auto: 0 },
 	};
 
+	// This legacy series is keyed by native ID alone. Do not credit another
+	// account/provider's tokens to a tab when its native ID collides.
+	const owners = new Map<string, string>();
+	const ambiguous = new Set<string>();
+	for (const s of all) {
+		const owner = canonicalJson([s.agentType, s.accountKey, s.projectPath]);
+		if (owners.has(s.sessionId) && owners.get(s.sessionId) !== owner) ambiguous.add(s.sessionId);
+		owners.set(s.sessionId, owner);
+	}
+
 	for (const s of all) {
 		if (s.timestampMs < sinceMs || s.timestampMs > untilMs) continue;
 		const tokens = s.inputTokens + s.outputTokens + s.cacheReadTokens + s.cacheCreationTokens;
@@ -468,12 +502,14 @@ function buildSeries(all: SessionTokenBreakdown[], sinceMs: number, untilMs: num
 			}
 			bump(agentDays, day, tokens);
 
-			let sessionDays = series.bySessionByDay[s.sessionId];
-			if (!sessionDays) {
-				sessionDays = {};
-				series.bySessionByDay[s.sessionId] = sessionDays;
+			if (!ambiguous.has(s.sessionId)) {
+				let sessionDays = series.bySessionByDay[s.sessionId];
+				if (!sessionDays) {
+					sessionDays = {};
+					series.bySessionByDay[s.sessionId] = sessionDays;
+				}
+				bump(sessionDays, day, tokens);
 			}
-			bump(sessionDays, day, tokens);
 		}
 
 		if (s.origin === 'user' || s.origin === 'auto') {

@@ -6031,7 +6031,11 @@
 					"GT1-04-05A",
 					"GT1-04-05B",
 					"GT1-04-06E1",
-					"GT1-04-06A"
+					"GT1-04-06A",
+					"GT1-04-11A",
+					"GT1-04-11B",
+					"GT1-04-11C",
+					"GT1-04-11D"
 				],
 				"test": [
 					"GT1-03-06",
@@ -6048,7 +6052,10 @@
 					"GT1-04-06E",
 					"GT1-04-06E2",
 					"GT1-04-06C",
-					"GT1-04-06B"
+					"GT1-04-06B",
+					"GT1-04-12A",
+					"GT1-04-12B",
+					"GT1-04-12C"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -6152,6 +6159,13 @@
 					"missingPrerequisite": "Native terminal, partial usage, exact ticks, cache/model detail and failed-tool fixtures pass GT1-03-13E. Phase07/10 must bypass eager native JSON coercion, propagate structured terminal through runTurn/recorders/UI, distinguish malformed stdout from stderr and identify empty native streams without failing ACP/bridge callers. Native/platform/policy qualification remains not-run.",
 					"affectedRows": ["P11"],
 					"evidenceRef": "phase03-reconciliation"
+				},
+				{
+					"id": "grok-usage-consumer-continuations-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-04-11 repairs native cache/coverage and Cue owner/turn boundaries. Dashboard cost/model representation, CLI/export, Cue stream accounting and observed provider provenance, and account discovery require GT1-04-11A/11B/11C/11D; GT1-04-12/12A/12B/12C author and 04-13 executes regressions. Cue native history has no recorded account/host receipt and stays unavailable; no live qualification is claimed.",
+					"affectedRows": ["P11"],
+					"evidenceRef": "Plans/grok-tier1/evidence/04.md#gt1-04-11-usage-accounting-boundaries"
 				}
 			],
 			"phase": "03",
@@ -7169,7 +7183,11 @@
 					"GT1-07-09",
 					"GT1-03-05C",
 					"GT1-04-05A",
-					"GT1-04-05B"
+					"GT1-04-05B",
+					"GT1-04-11A",
+					"GT1-04-11B",
+					"GT1-04-11C",
+					"GT1-04-11D"
 				],
 				"test": [
 					"GT1-03-06",
@@ -7179,7 +7197,10 @@
 					"GT1-10-09",
 					"GT1-04-06B",
 					"GT1-07-10",
-					"GT1-03-05D"
+					"GT1-03-05D",
+					"GT1-04-12A",
+					"GT1-04-12B",
+					"GT1-04-12C"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -7244,6 +7265,13 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["P16"]
+				},
+				{
+					"id": "grok-usage-consumer-continuations-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-04-11 repairs native cache/coverage and Cue owner/turn boundaries. Dashboard cost/model representation, CLI/export, Cue stream accounting and observed provider provenance, and account discovery require GT1-04-11A/11B/11C/11D; GT1-04-12/12A/12B/12C author and 04-13 executes regressions. Cue native history has no recorded account/host receipt and stays unavailable; no live qualification is claimed.",
+					"affectedRows": ["P16"],
+					"evidenceRef": "Plans/grok-tier1/evidence/04.md#gt1-04-11-usage-accounting-boundaries"
 				}
 			],
 			"phase": "04",
@@ -11088,7 +11116,11 @@
 					"GT1-10-09E",
 					"GT1-03-09A",
 					"GT1-04-05A",
-					"GT1-04-05B"
+					"GT1-04-05B",
+					"GT1-04-11A",
+					"GT1-04-11B",
+					"GT1-04-11C",
+					"GT1-04-11D"
 				],
 				"test": [
 					"GT1-02-02",
@@ -11106,7 +11138,10 @@
 					"GT1-10-09F",
 					"GT1-10-09G",
 					"GT1-10-11A",
-					"GT1-03-10"
+					"GT1-03-10",
+					"GT1-04-12A",
+					"GT1-04-12B",
+					"GT1-04-12C"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -11185,6 +11220,13 @@
 					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
 					"affectedRows": ["P40"],
 					"evidenceRef": "phase03-reconciliation"
+				},
+				{
+					"id": "grok-usage-consumer-continuations-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-04-11 repairs native cache/coverage and Cue owner/turn boundaries. Dashboard cost/model representation, CLI/export, Cue stream accounting and observed provider provenance, and account discovery require GT1-04-11A/11B/11C/11D; GT1-04-12/12A/12B/12C author and 04-13 executes regressions. Cue native history has no recorded account/host receipt and stays unavailable; no live qualification is claimed.",
+					"affectedRows": ["P40"],
+					"evidenceRef": "Plans/grok-tier1/evidence/04.md#gt1-04-11-usage-accounting-boundaries"
 				}
 			],
 			"phase": "10",
@@ -13493,7 +13535,12 @@
 					"GT1-03-09A",
 					"GT1-03-11C",
 					"GT1-04-06E1",
-					"GT1-04-06A"
+					"GT1-04-06A",
+					"GT1-04-11",
+					"GT1-04-11A",
+					"GT1-04-11B",
+					"GT1-04-11C",
+					"GT1-04-11D"
 				],
 				"test": [
 					"GT1-03-06",
@@ -13509,7 +13556,11 @@
 					"GT1-04-06E",
 					"GT1-04-06E2",
 					"GT1-04-06C",
-					"GT1-04-06B"
+					"GT1-04-06B",
+					"GT1-04-12",
+					"GT1-04-12A",
+					"GT1-04-12B",
+					"GT1-04-12C"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -13517,7 +13568,8 @@
 					"GT1-11-14C",
 					"GT1-03-14",
 					"GT1-07-11",
-					"GT1-11-11F"
+					"GT1-11-11F",
+					"GT1-04-13"
 				],
 				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -13612,6 +13664,13 @@
 					"missingPrerequisite": "Native terminal, partial usage, exact ticks, cache/model detail and failed-tool fixtures pass GT1-03-13E. Phase07/10 must bypass eager native JSON coercion, propagate structured terminal through runTurn/recorders/UI, distinguish malformed stdout from stderr and identify empty native streams without failing ACP/bridge callers. Native/platform/policy qualification remains not-run.",
 					"affectedRows": ["C-supportsCostTracking"],
 					"evidenceRef": "phase03-reconciliation"
+				},
+				{
+					"id": "grok-usage-consumer-continuations-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-04-11 repairs native cache/coverage and Cue owner/turn boundaries. Dashboard cost/model representation, CLI/export, Cue stream accounting and observed provider provenance, and account discovery require GT1-04-11A/11B/11C/11D; GT1-04-12/12A/12B/12C author and 04-13 executes regressions. Cue native history has no recorded account/host receipt and stays unavailable; no live qualification is claimed.",
+					"affectedRows": ["C-supportsCostTracking"],
+					"evidenceRef": "Plans/grok-tier1/evidence/04.md#gt1-04-11-usage-accounting-boundaries"
 				}
 			],
 			"field": "supportsCostTracking",
@@ -13702,7 +13761,12 @@
 					"GT1-03-09A",
 					"GT1-03-11C",
 					"GT1-04-06E1",
-					"GT1-04-06A"
+					"GT1-04-06A",
+					"GT1-04-11",
+					"GT1-04-11A",
+					"GT1-04-11B",
+					"GT1-04-11C",
+					"GT1-04-11D"
 				],
 				"test": [
 					"GT1-03-06",
@@ -13718,7 +13782,11 @@
 					"GT1-04-06E",
 					"GT1-04-06E2",
 					"GT1-04-06C",
-					"GT1-04-06B"
+					"GT1-04-06B",
+					"GT1-04-12",
+					"GT1-04-12A",
+					"GT1-04-12B",
+					"GT1-04-12C"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -13726,7 +13794,8 @@
 					"GT1-11-14C",
 					"GT1-03-14",
 					"GT1-07-11",
-					"GT1-11-11F"
+					"GT1-11-11F",
+					"GT1-04-13"
 				],
 				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -13821,6 +13890,13 @@
 					"missingPrerequisite": "Native terminal, partial usage, exact ticks, cache/model detail and failed-tool fixtures pass GT1-03-13E. Phase07/10 must bypass eager native JSON coercion, propagate structured terminal through runTurn/recorders/UI, distinguish malformed stdout from stderr and identify empty native streams without failing ACP/bridge callers. Native/platform/policy qualification remains not-run.",
 					"affectedRows": ["C-supportsUsageStats"],
 					"evidenceRef": "phase03-reconciliation"
+				},
+				{
+					"id": "grok-usage-consumer-continuations-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-04-11 repairs native cache/coverage and Cue owner/turn boundaries. Dashboard cost/model representation, CLI/export, Cue stream accounting and observed provider provenance, and account discovery require GT1-04-11A/11B/11C/11D; GT1-04-12/12A/12B/12C author and 04-13 executes regressions. Cue native history has no recorded account/host receipt and stays unavailable; no live qualification is claimed.",
+					"affectedRows": ["C-supportsUsageStats"],
+					"evidenceRef": "Plans/grok-tier1/evidence/04.md#gt1-04-11-usage-accounting-boundaries"
 				}
 			],
 			"field": "supportsUsageStats",
@@ -17014,7 +17090,11 @@
 					"GT1-04-05A",
 					"GT1-04-05B",
 					"GT1-04-06E1",
-					"GT1-04-06A"
+					"GT1-04-06A",
+					"GT1-04-11A",
+					"GT1-04-11B",
+					"GT1-04-11C",
+					"GT1-04-11D"
 				],
 				"test": [
 					"GT1-03-06",
@@ -17031,7 +17111,10 @@
 					"GT1-04-06E",
 					"GT1-04-06E2",
 					"GT1-04-06C",
-					"GT1-04-06B"
+					"GT1-04-06B",
+					"GT1-04-12A",
+					"GT1-04-12B",
+					"GT1-04-12C"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -17134,6 +17217,13 @@
 					"missingPrerequisite": "Native terminal, partial usage, exact ticks, cache/model detail and failed-tool fixtures pass GT1-03-13E. Phase07/10 must bypass eager native JSON coercion, propagate structured terminal through runTurn/recorders/UI, distinguish malformed stdout from stderr and identify empty native streams without failing ACP/bridge callers. Native/platform/policy qualification remains not-run.",
 					"affectedRows": ["REG-USAGE"],
 					"evidenceRef": "phase03-reconciliation"
+				},
+				{
+					"id": "grok-usage-consumer-continuations-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-04-11 repairs native cache/coverage and Cue owner/turn boundaries. Dashboard cost/model representation, CLI/export, Cue stream accounting and observed provider provenance, and account discovery require GT1-04-11A/11B/11C/11D; GT1-04-12/12A/12B/12C author and 04-13 executes regressions. Cue native history has no recorded account/host receipt and stays unavailable; no live qualification is claimed.",
+					"affectedRows": ["REG-USAGE"],
+					"evidenceRef": "Plans/grok-tier1/evidence/04.md#gt1-04-11-usage-accounting-boundaries"
 				}
 			],
 			"branchAuditRefs": ["B12", "B32", "B35", "B38", "B42", "B43"]
@@ -20818,9 +20908,27 @@
 				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-10-08", "GT1-10-09C", "GT1-10-09D", "GT1-10-09E"],
-				"test": ["GT1-10-09", "GT1-10-09F", "GT1-10-09G"],
-				"verification": ["GT1-10-12", "GT1-10-16", "GT1-11-11F"],
+				"implementation": [
+					"GT1-10-08",
+					"GT1-10-09C",
+					"GT1-10-09D",
+					"GT1-10-09E",
+					"GT1-04-11",
+					"GT1-04-11A",
+					"GT1-04-11B",
+					"GT1-04-11C",
+					"GT1-04-11D"
+				],
+				"test": [
+					"GT1-10-09",
+					"GT1-10-09F",
+					"GT1-10-09G",
+					"GT1-04-12",
+					"GT1-04-12A",
+					"GT1-04-12B",
+					"GT1-04-12C"
+				],
+				"verification": ["GT1-10-12", "GT1-10-16", "GT1-11-11F", "GT1-04-13"],
 				"live": ["GT1-11-11", "GT1-11-11F"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -20872,6 +20980,13 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S26"]
+				},
+				{
+					"id": "grok-usage-consumer-continuations-pending",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-04-11 repairs native cache/coverage and Cue owner/turn boundaries. Dashboard cost/model representation, CLI/export, Cue stream accounting and observed provider provenance, and account discovery require GT1-04-11A/11B/11C/11D; GT1-04-12/12A/12B/12C author and 04-13 executes regressions. Cue native history has no recorded account/host receipt and stays unavailable; no live qualification is claimed.",
+					"affectedRows": ["S26"],
+					"evidenceRef": "Plans/grok-tier1/evidence/04.md#gt1-04-11-usage-accounting-boundaries"
 				}
 			],
 			"branchAuditRefs": ["B23", "B32", "B43"]
