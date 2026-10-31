@@ -185,7 +185,11 @@ function sessionFiles(
  */
 function mockLocalFs(
 	files: Record<string, string>,
-	options: { sizeOverrides?: Record<string, number> } = {}
+	options: {
+		sizeOverrides?: Record<string, number>;
+		bytesOverrides?: Record<string, Buffer>;
+		onOpen?: (handle: Awaited<ReturnType<typeof fs.open>>, filePath: string) => void;
+	} = {}
 ): void {
 	// dir path -> child name -> isFile
 	const children = new Map<string, Map<string, boolean>>();
@@ -225,7 +229,8 @@ function mockLocalFs(
 		const p = String(filePath);
 		if (!(p in files)) throw enoent(p);
 		return {
-			size: options.sizeOverrides?.[p] ?? Buffer.byteLength(files[p]),
+			size:
+				options.sizeOverrides?.[p] ?? Buffer.byteLength(options.bytesOverrides?.[p] ?? files[p]),
 			mtimeMs: 1_752_082_000_000,
 			ino: 1,
 			isFile: () => true,
@@ -235,15 +240,17 @@ function mockLocalFs(
 	vi.mocked(fs.open).mockImplementation(async (filePath) => {
 		const p = String(filePath);
 		if (!(p in files)) throw enoent(p);
-		const bytes = Buffer.from(files[p]);
-		return {
+		const bytes = options.bytesOverrides?.[p] ?? Buffer.from(files[p]);
+		const handle = {
 			stat: vi.fn(() => fs.stat(p)),
 			read: vi.fn(async (buffer: Buffer, offset: number, length: number, position: number) => ({
 				bytesRead: bytes.copy(buffer, offset, position, Math.min(position + length, bytes.length)),
 				buffer,
 			})),
 			close: vi.fn().mockResolvedValue(undefined),
-		} as never;
+		};
+		options.onOpen?.(handle as never, p);
+		return handle as never;
 	});
 
 	vi.mocked(fs.readFile).mockImplementation(async (filePath) => {
@@ -889,6 +896,111 @@ describe('GrokSessionStorage - SSH remote', () => {
 		return { sessionsDir, cwdDir, directories, files };
 	}
 
+	it.each([
+		['summary.json', 0],
+		['summary.json', 1],
+		['usage.json', 0],
+		['usage.json', 1],
+	] as const)('bounds remote %s at the metadata byte cap plus %s', async (name, overflow) => {
+		const { cwdDir, files } = mockRemoteSession();
+		const file = path.posix.join(cwdDir, SESSION_ID, name);
+		const maxBytes = 1024 * 1024;
+		const content = name === 'summary.json' ? files[file] : '{"session":{"inputTokens":1}}';
+		files[file] = content.padEnd(maxBytes + overflow, ' ');
+		const [session] = await new GrokSessionStorage().listSessions(PROJECT, sshConfig);
+		expect(session.nativeMetadata?.sources?.[name]).toMatchObject({
+			status: overflow ? 'unavailable' : 'available',
+			sizeBytes: maxBytes + overflow,
+			maxBytes,
+		});
+		if (overflow) {
+			expect(session.nativeMetadata?.sources?.[name]?.reason).toBe('too-large');
+			expect(vi.mocked(remoteFs.readFileRemote).mock.calls.map(([p]) => p)).not.toContain(file);
+			if (name === 'usage.json') expect(session.accounting?.cost.status).toBe('unknown');
+		} else {
+			expect(remoteFs.readFileRemote).toHaveBeenCalledWith(file, sshConfig, undefined, {
+				maxBytes,
+			});
+		}
+		expect(captureException).not.toHaveBeenCalled();
+	});
+
+	it('accepts a remote transcript exactly at the byte cap', async () => {
+		const { cwdDir, files } = mockRemoteSession();
+		const file = path.posix.join(cwdDir, SESSION_ID, 'chat_history.jsonl');
+		const maxBytes = 64 * 1024 * 1024;
+		files[file] = '{"type":"user","content":"at cap"}'.padEnd(maxBytes, ' ');
+		const result = await new GrokSessionStorage().readSessionMessages(
+			PROJECT,
+			SESSION_ID,
+			undefined,
+			sshConfig
+		);
+		expect(result).toMatchObject({
+			total: 1,
+			messages: [{ content: 'at cap' }],
+			source: { status: 'available', sizeBytes: maxBytes, maxBytes },
+		});
+		expect(remoteFs.readFileRemote).toHaveBeenCalledWith(file, sshConfig, undefined, { maxBytes });
+		expect(captureException).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		['empty', 'available', undefined, 0],
+		['unreadable', 'unavailable', 'unreadable', 0],
+		['missing-post-stat', 'partial', 'post-read-stat-unavailable', 3],
+		['disconnect-post-stat', 'partial', 'post-read-stat-unavailable', 3],
+		['helper-overflow', 'unavailable', 'too-large', 0],
+		['output-overflow', 'unavailable', 'too-large', 0],
+		['post-stat-overflow', 'unavailable', 'too-large', 0],
+	] as const)('preserves remote source provenance for %s', async (mode, status, reason, total) => {
+		const { cwdDir, files } = mockRemoteSession();
+		const file = path.posix.join(cwdDir, SESSION_ID, 'chat_history.jsonl');
+		const maxBytes = 64 * 1024 * 1024;
+		if (mode === 'empty') files[file] = '';
+		const stat = vi.mocked(remoteFs.statRemote).getMockImplementation()!;
+		let stats = 0;
+		vi.mocked(remoteFs.statRemote).mockImplementation(async (...args) => {
+			const result = await stat(...args);
+			if (args[0] === file && ++stats === 2) {
+				if (mode === 'missing-post-stat' || mode === 'disconnect-post-stat') {
+					return {
+						success: false,
+						error: mode === 'missing-post-stat' ? 'No such file' : 'ssh connection reset',
+					};
+				}
+				if (mode === 'post-stat-overflow') result.data!.size = maxBytes + 20;
+			}
+			return result;
+		});
+		const read = vi.mocked(remoteFs.readFileRemote).getMockImplementation()!;
+		vi.mocked(remoteFs.readFileRemote).mockImplementation(async (...args) => {
+			if (args[0] === file) {
+				if (mode === 'unreadable') return { success: false, error: 'Permission denied' };
+				if (mode === 'helper-overflow')
+					return { success: false, errorCode: 'too-large' as const, error: 'read limit' };
+				if (mode === 'output-overflow') return { success: true, data: ' '.repeat(maxBytes + 20) };
+			}
+			return read(...args);
+		});
+		const result = await new GrokSessionStorage().readSessionMessages(
+			PROJECT,
+			SESSION_ID,
+			undefined,
+			sshConfig
+		);
+		expect(result).toMatchObject({ total, source: { status, maxBytes } });
+		expect(result.source?.reason).toBe(reason);
+		if (total === 0) expect(result).toMatchObject({ messages: [], hasMore: false });
+		expect(remoteFs.readFileRemote).toHaveBeenCalledWith(file, sshConfig, undefined, { maxBytes });
+		if (mode === 'disconnect-post-stat') {
+			expect(captureException).toHaveBeenCalledWith(
+				expect.objectContaining({ message: 'ssh connection reset' }),
+				{ operation: 'grokStorage:statSessionFile', filePath: file }
+			);
+		} else expect(captureException).not.toHaveBeenCalled();
+	});
+
 	it.each([undefined, '', ' \t ', '/srv/Grok accounts/研究', "~/O'Brien/研究", '~'])(
 		'keeps all remote operations scoped to account %j, ignoring the local environment',
 		async (accountDir) => {
@@ -1442,6 +1554,361 @@ describe('GrokSessionStorage - misc contract', () => {
 			)
 		);
 	});
+});
+
+describe('GrokSessionStorage - bounded local reads', () => {
+	const account = path.resolve('src/__tests__/fixtures/grok-accounts/bounded');
+	const sessionsDir = path.join(account, 'sessions');
+	const sessionDir = path.join(sessionsDir, encodeURIComponent(PROJECT), SESSION_ID);
+	const transcript = path.join(sessionDir, 'chat_history.jsonl');
+	const transcriptCap = 64 * 1024 * 1024;
+	const metadataCap = 1024 * 1024;
+	let files: Record<string, string>;
+	let storage: GrokSessionStorage;
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		files = sessionFiles(PROJECT, SESSION_ID, '{}', chatHistoryJsonl(), sessionsDir);
+		files[path.join(sessionDir, 'usage.json')] = '{"session":{}}';
+		mockLocalFs(files);
+		storage = new GrokSessionStorage(account);
+	});
+	afterEach(async () => {
+		for (const [file] of [
+			...vi.mocked(fs.readdir).mock.calls,
+			...vi.mocked(fs.stat).mock.calls,
+			...vi.mocked(fs.open).mock.calls,
+		])
+			expect(String(file).startsWith(sessionsDir + path.sep) || file === sessionsDir).toBe(true);
+		const opened = await Promise.allSettled(vi.mocked(fs.open).mock.results.map((r) => r.value));
+		for (const result of opened)
+			if (result.status === 'fulfilled')
+				expect(result.value.close).toHaveBeenCalledExactlyOnceWith();
+		expect(fs.readFile).not.toHaveBeenCalled();
+		expect(remoteFs.readFileRemote).not.toHaveBeenCalled();
+		expect(execFileNoThrow).not.toHaveBeenCalled();
+		vi.restoreAllMocks();
+	});
+
+	it.each(['chat_history.jsonl', 'summary.json', 'usage.json'])(
+		'accepts exactly the byte cap for %s, including multibyte text',
+		async (name) => {
+			const cap = name === 'chat_history.jsonl' ? transcriptCap : metadataCap;
+			const file = path.join(sessionDir, name);
+			const text =
+				name === 'chat_history.jsonl'
+					? '{"type":"user","content":"é"}'
+					: name === 'summary.json'
+						? '{"generated_title":"é"}'
+						: '{"session":{},"note":"é"}';
+			files[file] = text + ' '.repeat(cap - Buffer.byteLength(text));
+			const [session] = await storage.listSessions(PROJECT);
+			expect(session.nativeMetadata?.sources?.[name]).toEqual({
+				provider: 'grok',
+				status: 'available',
+				sizeBytes: cap,
+				maxBytes: cap,
+			});
+			expect(session.messageCount).toBe(name === 'chat_history.jsonl' ? 1 : 3);
+			if (name === 'summary.json') expect(session.sessionName).toBe('é');
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['summary.json', 'usage.json'])(
+		'rejects oversized %s before opening it',
+		async (name) => {
+			const file = path.join(sessionDir, name);
+			mockLocalFs(files, { sizeOverrides: { [file]: metadataCap + 1 } });
+			const [session] = await storage.listSessions(PROJECT);
+			expect(session.messageCount).toBe(3);
+			expect(session.nativeMetadata?.sources?.[name]).toMatchObject({
+				status: 'unavailable',
+				reason: 'too-large',
+				maxBytes: metadataCap,
+			});
+			expect(vi.mocked(fs.open).mock.calls.map(([opened]) => opened)).not.toContain(file);
+			if (name === 'usage.json') {
+				expect(session.accounting).toMatchObject({ source: 'none', cost: { status: 'unknown' } });
+				expect(session.costUsd).toBeUndefined();
+			}
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['before-open', 'opened'] as const)('rejects a special file at %s', async (stage) => {
+		const stat = { size: 0, isFile: () => false };
+		mockLocalFs(files, {
+			onOpen: (handle) => vi.mocked(handle.stat).mockResolvedValueOnce(stat as never),
+		});
+		if (stage === 'before-open') vi.mocked(fs.stat).mockResolvedValueOnce(stat as never);
+		expect(await storage.readSessionMessages(PROJECT, SESSION_ID)).toMatchObject({
+			messages: [],
+			total: 0,
+			hasMore: false,
+			source: { status: 'unavailable', reason: 'not-a-file' },
+		});
+		expect(fs.open).toHaveBeenCalledTimes(stage === 'before-open' ? 0 : 1);
+		if (stage === 'opened') {
+			const handle = await vi.mocked(fs.open).mock.results[0].value;
+			expect(handle.read).not.toHaveBeenCalled();
+			expect(fs.open).toHaveBeenCalledWith(
+				transcript,
+				fs.constants.O_RDONLY | fs.constants.O_NONBLOCK
+			);
+		}
+		expect(captureException).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		'opened-over-cap',
+		'sentinel',
+		'after-read-over-cap',
+		'changed-at-open',
+		'changed-after-read',
+	] as const)('discloses growth at %s and closes its descriptor', async (stage) => {
+		const initial = await fs.stat(transcript);
+		let readBytes = 0;
+		mockLocalFs(files, {
+			onOpen: (handle) => {
+				const changed = {
+					...initial,
+					size: stage.includes('over-cap') ? transcriptCap + 1 : initial.size + 1,
+				};
+				vi.mocked(handle.stat)
+					.mockResolvedValueOnce(
+						(stage === 'opened-over-cap' || stage === 'changed-at-open'
+							? changed
+							: initial) as never
+					)
+					.mockResolvedValueOnce(
+						(stage === 'after-read-over-cap' || stage === 'changed-after-read'
+							? changed
+							: initial) as never
+					);
+				if (stage === 'sentinel')
+					vi.mocked(handle.read).mockImplementation(async (...args: unknown[]) => {
+						const [buffer, , length] = args as [Buffer, number, number];
+						readBytes += length;
+						return { bytesRead: length, buffer };
+					});
+			},
+		});
+		const result = await storage.readSessionMessages(PROJECT, SESSION_ID, {
+			includeNativeRecords: true,
+		});
+		const rejected = stage.includes('over-cap') || stage === 'sentinel';
+		expect(result.source).toMatchObject({
+			status: rejected ? 'unavailable' : 'partial',
+			reason: rejected ? 'too-large' : 'changed-during-read',
+		});
+		expect(result.messages).toHaveLength(rejected ? 0 : 8);
+		const handle = await vi.mocked(fs.open).mock.results[0].value;
+		if (stage === 'opened-over-cap') expect(handle.read).not.toHaveBeenCalled();
+		if (stage === 'sentinel') {
+			expect(readBytes).toBe(transcriptCap + 1);
+			expect(handle.read).toHaveBeenLastCalledWith(expect.any(Buffer), 0, 1, transcriptCap);
+			expect(handle.stat).toHaveBeenCalledTimes(1);
+		}
+		expect(captureException).not.toHaveBeenCalled();
+	});
+
+	it.each(['stat', 'open', 'descriptor-stat', 'read', 'close'] as const)(
+		'classifies RangeError, expected filesystem errors and EMFILE at %s',
+		async (stage) => {
+			for (const code of [
+				'RangeError',
+				'ENOENT',
+				'EACCES',
+				'EPERM',
+				'ENOTDIR',
+				'EISDIR',
+				'EBUSY',
+				'EMFILE',
+			]) {
+				vi.clearAllMocks();
+				const error =
+					code === 'RangeError'
+						? new RangeError('bounded fixture')
+						: Object.assign(new Error(code), { code });
+				mockLocalFs(files, {
+					onOpen: (handle) => {
+						if (stage === 'descriptor-stat') vi.mocked(handle.stat).mockRejectedValueOnce(error);
+						if (stage === 'read') vi.mocked(handle.read).mockRejectedValueOnce(error);
+						if (stage === 'close') vi.mocked(handle.close).mockRejectedValueOnce(error);
+					},
+				});
+				if (stage === 'stat') vi.mocked(fs.stat).mockRejectedValueOnce(error);
+				if (stage === 'open') vi.mocked(fs.open).mockRejectedValueOnce(error);
+				expect(await storage.readSessionMessages(PROJECT, SESSION_ID)).toMatchObject({
+					messages: [],
+					total: 0,
+					hasMore: false,
+					source: {
+						status: 'unavailable',
+						reason: code === 'RangeError' ? 'too-large' : 'unreadable',
+					},
+				});
+				expect(captureException).toHaveBeenCalledTimes(code === 'EMFILE' ? 1 : 0);
+				if (code === 'EMFILE')
+					expect(captureException).toHaveBeenCalledWith(error, {
+						operation: 'grokStorage:readSessionFile',
+						filePath: transcript,
+					});
+				if (stage !== 'stat' && stage !== 'open') {
+					const handle = await vi.mocked(fs.open).mock.results[0].value;
+					expect(handle.close).toHaveBeenCalledExactlyOnceWith();
+				}
+			}
+		}
+	);
+
+	it.each([{ invalid: [0xff] }, { invalid: [0xf0, 0x90, 0x80] }])(
+		'marks invalid UTF-8 $invalid as partial while preserving the readable record',
+		async ({ invalid }) => {
+			const bytes = Buffer.concat([
+				Buffer.from('{"type":"user","content":"'),
+				Buffer.from(invalid),
+				Buffer.from('"}'),
+			]);
+			mockLocalFs(files, { bytesOverrides: { [transcript]: bytes } });
+			const result = await storage.readSessionMessages(PROJECT, SESSION_ID, {
+				includeNativeRecords: true,
+			});
+			expect(result).toMatchObject({
+				total: 1,
+				messages: [
+					{ uuid: 'grok-line-1', content: '\ufffd', native: { raw: bytes.toString('utf8') } },
+				],
+				source: { status: 'partial', reason: 'changed-during-read', sizeBytes: bytes.length },
+			});
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['replacement-character', 'split-multibyte'])('accepts valid UTF-8 %s', async (mode) => {
+		const prefix = '{"type":"user","content":"';
+		const text =
+			mode === 'replacement-character'
+				? '\ufffd'
+				: 'x'.repeat(64 * 1024 - Buffer.byteLength(prefix) - 1) + 'é';
+		files[transcript] = prefix + text + '"}';
+		const result = await storage.readSessionMessages(PROJECT, SESSION_ID);
+		expect(result.source?.status).toBe('available');
+		expect(result.source?.reason).toBeUndefined();
+		expect(result.messages).toHaveLength(1);
+		expect(result.messages[0].content).toBe(text);
+		expect(captureException).not.toHaveBeenCalled();
+	});
+
+	it.each([false, true])(
+		'distinguishes empty from unreadable transcripts (unreadable=%s)',
+		async (unreadable) => {
+			files[transcript] = '';
+			if (unreadable)
+				vi.mocked(fs.open).mockRejectedValueOnce(
+					Object.assign(new Error('denied'), { code: 'EACCES' })
+				);
+			expect(
+				await storage.readSessionMessages(PROJECT, SESSION_ID, { includeNativeRecords: true })
+			).toEqual({
+				messages: [],
+				total: 0,
+				hasMore: false,
+				source: {
+					provider: 'grok',
+					status: unreadable ? 'unavailable' : 'available',
+					...(unreadable ? { reason: 'unreadable' } : {}),
+					sizeBytes: 0,
+					maxBytes: transcriptCap,
+				},
+			});
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each([
+		['raw_output', 99_999, 1, true],
+		['raw_output', 100_000, 1, false],
+		['tool_calls', 100_000, 1, false],
+		['raw_output', 50_000, 2, false],
+	] as const)(
+		'bounds %s projection count %s across %s rows',
+		async (field, count, rows, accepted) => {
+			files[transcript] = Array.from({ length: rows }, () =>
+				JSON.stringify({
+					type: 'assistant',
+					content: 'retained',
+					[field]: Array(count).fill(null),
+				})
+			).join('\n');
+			const result = await storage.readSessionMessages(PROJECT, SESSION_ID, {
+				includeNativeRecords: true,
+			});
+			expect(result.messages).toHaveLength(accepted ? 1 : 0);
+			expect(result.source).toMatchObject(
+				accepted ? { status: 'available' } : { status: 'unavailable', reason: 'too-large' }
+			);
+			if (accepted)
+				expect(result.messages[0]).toMatchObject({
+					uuid: 'grok-line-1',
+					native: { raw: files[transcript] },
+				});
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each([
+		[undefined, 100, 20],
+		[NaN, 100, 20],
+		[Infinity, 100, 20],
+		[-Infinity, 100, 20],
+		[-2, 1, 1],
+		[0, 1, 1],
+		[2.9, 2, 2],
+		[1000, 1000, 1000],
+		[5000, 1000, 1000],
+	] as const)(
+		'clamps list/message limit %s with more than 1000 results',
+		async (limit, listCount, messageCount) => {
+			const rows = Array.from({ length: 1001 }, (_, i) =>
+				JSON.stringify({ type: 'user', content: 'row ' + i })
+			);
+			files[transcript] = rows.join('\n');
+			const [session] = await storage.listSessions(PROJECT);
+			// Pagination owns slicing; listing/root discovery already has dedicated fixtures.
+			vi.spyOn(storage, 'listSessions').mockResolvedValue(
+				Array.from({ length: 1001 }, (_, i) => ({ ...session, sessionId: 'page-' + i }))
+			);
+			const page = await storage.listSessionsPaginated(PROJECT, { limit });
+			expect(page).toMatchObject({ totalCount: 1001, hasMore: true });
+			expect(page.sessions).toHaveLength(listCount);
+			expect(page.nextCursor).toBe(page.sessions.at(-1)?.sessionId);
+			const next = await storage.listSessionsPaginated(PROJECT, {
+				limit,
+				cursor: page.nextCursor!,
+			});
+			expect(next.sessions[0].sessionId).not.toBe(page.nextCursor);
+			expect(new Set([...page.sessions, ...next.sessions].map((s) => s.sessionId)).size).toBe(
+				page.sessions.length + next.sessions.length
+			);
+			const messages = await storage.readSessionMessages(PROJECT, SESSION_ID, { limit });
+			expect(messages).toMatchObject({
+				total: 1001,
+				hasMore: true,
+				source: { status: 'available' },
+			});
+			expect(messages.messages).toHaveLength(messageCount);
+			expect(messages.messages[0].uuid).toBe('grok-line-' + (1002 - messageCount));
+			expect(messages.messages.at(-1)?.uuid).toBe('grok-line-1001');
+			const rest = await storage.readSessionMessages(PROJECT, SESSION_ID, {
+				limit: 5000,
+				offset: messageCount,
+			});
+			expect(rest).toMatchObject({ hasMore: false, total: 1001 });
+			expect(rest.messages.at(-1)?.uuid).toBe('grok-line-' + (1001 - messageCount));
+		}
+	);
 });
 
 describe('GrokSessionStorage - native normalization regressions', () => {

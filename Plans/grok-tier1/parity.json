@@ -1004,6 +1004,40 @@
 				"S06"
 			],
 			"scope": "55 parameter-expanded cases for ambiguous tool linkage, legacy reasoning/backend precedence, inert user attachments, scalar/empty/unknown raw ownership, malformed/unsafe accounting and all-or-none model splits. GT1-04-13 executes; no acceptance status or native qualification is promoted."
+		},
+		"phase04-bounded-read-edge-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-06e-bounded-storage-read-edge-tests",
+			"sourceCommit": "2affa373dfeb9eb3d90ff6d1581d34edfcf10f15",
+			"sourceCommitScope": "Pre-task HEAD plus the test hash and task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/storage/grok-session-storage.test.ts": "a1b0ef15af5c2118874034b756cfb66139d930ea65864464cbf566d33f29daa1"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P11",
+				"P13",
+				"P15",
+				"P21",
+				"C-supportsSessionStorage",
+				"C-supportsCostTracking",
+				"C-supportsUsageStats",
+				"REG-STORAGE",
+				"REG-USAGE",
+				"S06"
+			],
+			"scope": "48 parameter-expanded tests, including 40 injected filesystem-error scenarios across five stages, for bounded local/SSH reads, byte caps/growth/cleanup, source provenance, UTF-8, projection budgets and pagination. No tests collected or executed; GT1-04-13 owns execution.",
+			"knownGap": {
+				"code": "equal-length-invalid-utf8-reported-available",
+				"status": "unresolved",
+				"finding": "Static source tracing shows F0 90 80 becomes one three-byte U+FFFD without changing decoded byte length; stable file metadata then leaves corrupt text available. The new local regression is expected to fail until repaired. Remote text decoding also loses original bytes.",
+				"implementationOwner": "GT1-04-06E1",
+				"remoteTestOwner": "GT1-04-06C",
+				"verificationOwner": "GT1-04-13"
+			}
 		}
 	},
 	"sourceCatalog": {
@@ -4178,7 +4212,8 @@
 					"GT1-03-09A",
 					"GT1-03-11C",
 					"GT1-04-05A",
-					"GT1-04-05B"
+					"GT1-04-05B",
+					"GT1-04-06E1"
 				],
 				"test": [
 					"GT1-03-06",
@@ -4234,7 +4269,8 @@
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
 				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
-				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests"
+				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
+				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4652,7 +4688,8 @@
 					"GT1-02-01",
 					"GT1-04-11",
 					"GT1-04-05A",
-					"GT1-04-05B"
+					"GT1-04-05B",
+					"GT1-04-06E1"
 				],
 				"test": [
 					"GT1-04-02",
@@ -4690,7 +4727,8 @@
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
 				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
-				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests"
+				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
+				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4917,7 +4955,8 @@
 					"GT1-02-01",
 					"GT1-04-11",
 					"GT1-04-05A",
-					"GT1-04-05B"
+					"GT1-04-05B",
+					"GT1-04-06E1"
 				],
 				"test": [
 					"GT1-04-02",
@@ -4955,7 +4994,8 @@
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
 				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
-				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests"
+				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
+				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5767,7 +5807,8 @@
 					"GT1-06-07",
 					"GT1-06-10",
 					"GT1-06-01",
-					"GT1-04-09"
+					"GT1-04-09",
+					"GT1-04-06E1"
 				],
 				"test": [
 					"GT1-06-08",
@@ -5800,7 +5841,8 @@
 				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
 				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
-				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests"
+				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
+				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11034,7 +11076,8 @@
 					"GT1-04-05",
 					"GT1-11-14A",
 					"GT1-04-05A",
-					"GT1-04-05B"
+					"GT1-04-05B",
+					"GT1-04-06E1"
 				],
 				"test": ["GT1-04-02", "GT1-04-04", "GT1-04-06", "GT1-11-14B", "GT1-04-06D", "GT1-04-06E"],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
@@ -11061,7 +11104,8 @@
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
 				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
-				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests"
+				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
+				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11183,7 +11227,8 @@
 					"GT1-03-05C1",
 					"GT1-03-05E",
 					"GT1-03-09A",
-					"GT1-03-11C"
+					"GT1-03-11C",
+					"GT1-04-06E1"
 				],
 				"test": [
 					"GT1-03-06",
@@ -11237,7 +11282,8 @@
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
 				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
-				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests"
+				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
+				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11381,7 +11427,8 @@
 					"GT1-03-05C1",
 					"GT1-03-05E",
 					"GT1-03-09A",
-					"GT1-03-11C"
+					"GT1-03-11C",
+					"GT1-04-06E1"
 				],
 				"test": [
 					"GT1-03-06",
@@ -11435,7 +11482,8 @@
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
 				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
-				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests"
+				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
+				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14042,7 +14090,8 @@
 					"GT1-04-05",
 					"GT1-04-06A",
 					"GT1-04-05A",
-					"GT1-04-05B"
+					"GT1-04-05B",
+					"GT1-04-06E1"
 				],
 				"test": ["GT1-04-02", "GT1-04-04", "GT1-04-06", "GT1-04-06B", "GT1-04-06D", "GT1-04-06E"],
 				"verification": ["GT1-04-13", "GT1-04-14"],
@@ -14070,7 +14119,8 @@
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
 				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
-				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests"
+				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
+				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14657,7 +14707,8 @@
 					"GT1-03-09A",
 					"GT1-03-11C",
 					"GT1-04-05A",
-					"GT1-04-05B"
+					"GT1-04-05B",
+					"GT1-04-06E1"
 				],
 				"test": [
 					"GT1-03-06",
@@ -14712,7 +14763,8 @@
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
 				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
-				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests"
+				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
+				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16202,7 +16254,7 @@
 				"src/__tests__/renderer/components/NewInstanceModal/AgentPickerGrid.test.tsx"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-06-01", "GT1-04-09"],
+				"implementation": ["GT1-06-01", "GT1-04-09", "GT1-04-06E1"],
 				"test": ["GT1-06-02", "GT1-04-10", "GT1-04-06D", "GT1-04-06E"],
 				"verification": ["GT1-06-12", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -16226,7 +16278,8 @@
 				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
 				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
 				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests",
-				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests"
+				"phase04NativeHistoryEdgeTestsEvidenceRef": "phase04-native-history-edge-tests",
+				"phase04BoundedReadEdgeTestsEvidenceRef": "phase04-bounded-read-edge-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
