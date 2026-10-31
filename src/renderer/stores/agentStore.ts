@@ -75,6 +75,7 @@ import { getGrokSlashCommandRefusal } from '../slashCommands';
 import {
 	getQueuedCommandScopeRefusal,
 	getQueuedCommandSelectionRefusal,
+	getQueuedCommandSpawnSelection,
 } from '../services/queuedPrompt';
 import { getSessionSshRemoteId } from '../utils/sessionHelpers';
 
@@ -746,6 +747,9 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 					// Preparation yields to settings/tab changes and Stop. Validate before
 					// recording a command that may never be admitted.
 					if (scopedCommand && (await refuseChangedCommand())) return false;
+					const expectedGrokSpawnSelection = scopedCommand
+						? await getQueuedCommandSpawnSelection(sessionId, item)
+						: undefined;
 					if (deps.isCancelled?.()) {
 						await settleUnsentCommand();
 						return false;
@@ -803,6 +807,8 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 						),
 						images: hasImages ? item.images : undefined,
 						appendSystemPrompt: appendSystemPromptForCommand,
+						// Main checks enqueue-time configuration before its own preparation.
+						...(scopedCommand && { expectedGrokSpawnSelection }),
 						agentSessionId: tabAgentSessionId ?? undefined,
 						readOnlyMode: isReadOnly,
 						permissionMode: effectivePermissionMode,

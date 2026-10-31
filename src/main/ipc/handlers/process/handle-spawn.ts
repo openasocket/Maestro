@@ -52,6 +52,8 @@ import {
 	type DispatchedSpawnIds,
 } from '../../../process-manager/types';
 import { canonicalJson } from '../../../../shared/canonicalJson';
+import { fingerprintGrokSpawnSelection } from '../../../../shared/grokSpawnSelection';
+import { sha256Hex } from '../../../../shared/maestro-lib/managed/authority';
 import { generateUUID } from '../../../../shared/uuid';
 import { QUERY_USER_ENV_VAR } from '../../../../shared/webLogin';
 import { getActingUser } from '../../../web-server/auth/acting-user';
@@ -99,7 +101,10 @@ import type { ClaudeSpawnEnvLayers } from '../../../agents/claudeSpawnCore';
 import { applyLocalInteractiveSpawnDecision } from './apply-local-interactive-spawn';
 import { persistClaudeInteractiveMode } from './persist-claude-interactive-mode';
 import { wrapSpawnForSsh } from './wrap-spawn-for-ssh';
-import { createSshRemoteStoreAdapter } from '../../../utils/ssh-remote-resolver';
+import {
+	createSshRemoteStoreAdapter,
+	resolveSshLaunchTarget,
+} from '../../../utils/ssh-remote-resolver';
 import { sshUnresolvedRemoteMessage } from '../../../utils/ssh-spawn-wrapper';
 import {
 	unqualifiedSshLaunchTarget,
@@ -193,6 +198,40 @@ async function handleProcessSpawnImpl(
 	// IPC records are mutable while discovery/admission awaits. Retain this turn's
 	// request, not references that a later settings or tab change can relabel.
 	if (config.toolType === 'grok') config = structuredClone(config);
+	// A queued command carries its enqueue-time configuration, including on a
+	// fresh tab with no native binding. Check main's stores before discovery or
+	// preparation; renderer equality cannot close the IPC handoff race.
+	const grokSelectionProblem = () => {
+		if (
+			config.toolType !== 'grok' ||
+			!Object.prototype.hasOwnProperty.call(config, 'expectedGrokSpawnSelection')
+		)
+			return undefined;
+		const refusal =
+			'Queued Grok command configuration is unavailable or changed. Requeue it with the intended settings.';
+		const expected = config.expectedGrokSpawnSelection;
+		if (typeof expected !== 'string' || !/^grok-spawn-selection-v1:[a-f0-9]{64}$/.test(expected))
+			return refusal;
+		const target = resolveSshLaunchTarget(
+			createSshRemoteStoreAdapter(settingsStore),
+			config.sessionSshRemoteConfig
+		);
+		if (target.kind === 'unresolved') return refusal;
+		const actual = fingerprintGrokSpawnSelection(
+			{
+				providerConfig: agentConfigsStore.get('configs', {}).grok || {},
+				shellEnvVars: settingsStore.get('shellEnvVars', {}),
+				sshRemote: target.kind === 'remote' ? target.remote : null,
+			},
+			sha256Hex
+		);
+		return expected === actual ? undefined : refusal;
+	};
+	const entrySelectionProblem = grokSelectionProblem();
+	if (entrySelectionProblem) {
+		reportSpawnRefusal(deps, config.sessionId, entrySelectionProblem);
+		return { success: false, pid: 0, error: entrySelectionProblem };
+	}
 	const grokOwner =
 		config.toolType === 'grok' ? grokSpawnOwner(config, deps.sessionsStore) : undefined;
 	const retainedBinding = grokOwner?.binding;
@@ -226,6 +265,11 @@ async function handleProcessSpawnImpl(
 
 	// Get agent definition to access config options and argument builders
 	const agent = await agentDetector.getAgent(config.toolType);
+	const discoverySelectionProblem = grokSelectionProblem();
+	if (discoverySelectionProblem) {
+		reportSpawnRefusal(deps, config.sessionId, discoverySelectionProblem);
+		return { success: false, pid: 0, error: discoverySelectionProblem };
+	}
 	proofCleanup.privatePrompt = !!agent?.promptFile;
 	if (
 		agent?.promptFile &&
@@ -258,6 +302,11 @@ async function handleProcessSpawnImpl(
 				fallbackPath: agent?.path || config.command,
 			});
 		}
+	}
+	const pathSelectionProblem = grokSelectionProblem();
+	if (pathSelectionProblem) {
+		reportSpawnRefusal(deps, config.sessionId, pathSelectionProblem);
+		return { success: false, pid: 0, error: pathSelectionProblem };
 	}
 	// Use INFO level on Windows for better visibility in logs
 
@@ -323,6 +372,11 @@ async function handleProcessSpawnImpl(
 		settingsStore,
 		envLayers: claudeEnvLayers,
 	});
+	const contextSelectionProblem = grokSelectionProblem();
+	if (contextSelectionProblem) {
+		reportSpawnRefusal(deps, config.sessionId, contextSelectionProblem);
+		return { success: false, pid: 0, error: contextSelectionProblem };
+	}
 	const {
 		baseSessionId,
 		claudeResolvedMode,
@@ -598,6 +652,11 @@ async function handleProcessSpawnImpl(
 		}
 		sshRemoteEndpoint = qualified.endpoint;
 		qualifiedRemoteId = qualified.remoteId;
+	}
+	const preparationSelectionProblem = grokSelectionProblem();
+	if (preparationSelectionProblem) {
+		reportSpawnRefusal(deps, config.sessionId, preparationSelectionProblem);
+		return { success: false, pid: 0, error: preparationSelectionProblem };
 	}
 	if (configResolution.customEnvSource !== 'none' && effectiveCustomEnvVars) {
 		logger.debug(
@@ -1319,6 +1378,12 @@ async function handleProcessSpawnImpl(
 		}
 	}
 
+	const observationSelectionProblem = grokSelectionProblem();
+	if (observationSelectionProblem) {
+		proofCleanup.release?.();
+		reportSpawnRefusal(deps, config.sessionId, observationSelectionProblem);
+		return { success: false, pid: 0, error: observationSelectionProblem };
+	}
 	const grokLaunchEnv =
 		config.toolType === 'grok'
 			? sshRemoteUsed
@@ -1334,6 +1399,8 @@ async function handleProcessSpawnImpl(
 		config.toolType === 'grok'
 			? () => {
 					const selectionProblem = () => {
+						const expectedSelectionProblem = grokSelectionProblem();
+						if (expectedSelectionProblem) return expectedSelectionProblem;
 						const current = grokSpawnOwner(config, deps.sessionsStore);
 						if (
 							current.key !== grokOwner?.key ||
@@ -1386,7 +1453,11 @@ async function handleProcessSpawnImpl(
 	// branch: a managed host spawns nothing without an admission, a standalone
 	// host spawns as before. The ticket was spent there; strip it so the
 	// process never sees it.
-	const { dispatchTicket: _claimedTicket, ...spawnConfig } = config;
+	const {
+		dispatchTicket: _claimedTicket,
+		expectedGrokSpawnSelection: _checkedGrokSelection,
+		...spawnConfig
+	} = config;
 	if (promptArtifact) delete spawnConfig.appendSystemPrompt;
 	const result = await processManager.spawnAdmitted(
 		{

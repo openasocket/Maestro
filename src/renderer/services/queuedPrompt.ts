@@ -40,12 +40,20 @@ import { resolveTabPermissionMode } from '../../shared/agentMetadata';
 import { resumeSelectionKey, matchesNativeSessionBinding } from './resumableSession';
 import { useSettingsStore } from '../stores/settingsStore';
 import { getSessionSshRemoteId } from '../utils/sessionHelpers';
+import {
+	fingerprintGrokSpawnSelection,
+	type GrokSpawnSelectionFingerprint,
+} from '../../shared/grokSpawnSelection';
 
 // Identity survives queue/retry object spreads, but not persistence or cloning.
 // Sensitive selection keys and IPC snapshots never become part of the queue.
 const commandScopes = new WeakMap<
 	NonNullable<QueuedItem['commandScope']>,
-	{ itemId: string; selection: string; configuration: Promise<string | null> }
+	{
+		itemId: string;
+		selection: string;
+		configuration: Promise<GrokSpawnSelectionFingerprint | null>;
+	}
 >();
 
 function commandSelectionKey(session: Session, tab: AITab): string {
@@ -60,7 +68,9 @@ function commandSelectionKey(session: Session, tab: AITab): string {
 }
 
 /** Read configuration only, with a deadline for a disconnected desktop bridge. */
-async function readCommandConfiguration(session: Session): Promise<string | null> {
+async function readCommandConfiguration(
+	session: Session
+): Promise<GrokSpawnSelectionFingerprint | null> {
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	try {
 		// Match the launch resolver: configured SSH selects the next turn;
@@ -78,12 +88,17 @@ async function readCommandConfiguration(session: Session): Promise<string | null
 			]).then(([config, shellEnvVars, remotes]) => {
 				const remote = remotes?.configs?.find((entry) => entry.id === remoteId);
 				if (!config || (remoteId && (!remotes?.success || !remote?.enabled))) return null;
-				return canonicalJson({
-					customPath: config.customPath,
-					customArgs: config.customArgs,
-					customEnvVars: config.customEnvVars,
-					shellEnvVars,
-					remote,
+				const globalEnv = shellEnvVars ?? {};
+				if (
+					typeof globalEnv !== 'object' ||
+					Array.isArray(globalEnv) ||
+					Object.values(globalEnv).some((value) => typeof value !== 'string')
+				)
+					return null;
+				return fingerprintGrokSpawnSelection({
+					providerConfig: config,
+					shellEnvVars: globalEnv as Record<string, string>,
+					sshRemote: remote ?? null,
 				});
 			}),
 			new Promise<null>((resolve) => {
@@ -147,6 +162,20 @@ export async function getQueuedCommandScopeRefusal(
 		return 'Queued Grok command configuration is unavailable or changed. Requeue it with the intended settings.';
 	}
 	return getQueuedCommandSelectionRefusal(sessionId, item);
+}
+
+/** Forward the original receipt to main, never a freshly read replacement. */
+export async function getQueuedCommandSpawnSelection(
+	sessionId: string,
+	item: QueuedItem
+): Promise<GrokSpawnSelectionFingerprint | null> {
+	if (
+		item.type !== 'command' ||
+		!item.commandScope ||
+		getQueuedCommandSelectionRefusal(sessionId, item)
+	)
+		return null;
+	return commandScopes.get(item.commandScope)?.configuration ?? null;
 }
 
 /** What to queue, and where. */
