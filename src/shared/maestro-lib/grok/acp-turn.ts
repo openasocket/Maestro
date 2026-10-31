@@ -1,5 +1,6 @@
 import { canonicalJson } from '../../canonicalJson';
 import type { UsageStats } from '../../types';
+import { generateUUID } from '../../uuid';
 import { guardTurn } from '../control/turn-guard';
 import { GrokOutputParser } from '../parsers/grok-output-parser';
 import type { ParsedEvent } from '../parsers/agent-output-parser';
@@ -11,8 +12,9 @@ import {
 	type TurnHandlers,
 	type TurnProcessSpec,
 } from '../run/start-turn';
-import { TurnCapture, type TurnCaptureOptions } from '../run/turn-capture';
+import { TurnCapture } from '../run/turn-capture';
 import { resolveTurnOutcome, type TurnTerminal } from '../streaming/turn-outcome';
+import { parsedUsageToStats } from '../streaming/usage-totals';
 import { GrokAcpEventAdapter } from './acp-events';
 import { GrokAcpTransportError } from './acp-protocol';
 import {
@@ -36,6 +38,7 @@ export interface GrokAcpTurnOptions
 			| 'cancelGraceMs'
 			| 'requestTimeoutMs'
 			| 'maxFrameBytes'
+			| 'extensions'
 		>,
 		Pick<StartTurnOptions, 'admission' | 'stopGraceMs' | 'signal'> {
 	/** Unique host dispatch and process identities, never substituted for native IDs. */
@@ -44,8 +47,6 @@ export interface GrokAcpTurnOptions
 	/** Already assembled system/user text. This port does not accept attachments or effort. */
 	prompt: string;
 	permission?: Pick<GrokAcpPermissionTurn, 'authority' | 'binding'>;
-	/** Explicitly observed before dispatch, normalized and bound to this process/session. */
-	processSessionBaseline?: TurnCaptureOptions['processSessionBaseline'];
 }
 
 export interface GrokAcpTurnHandlers extends Pick<TurnHandlers, 'onStarted' | 'onEvent'> {
@@ -91,8 +92,7 @@ export function startGrokAcpTurn(
 				actor: { ...options.permission.binding.actor },
 			},
 		},
-		processSessionBaseline:
-			options.processSessionBaseline && structuredClone(options.processSessionBaseline),
+		extensions: options.extensions && { ...options.extensions },
 	};
 	const controller = new AbortController();
 	let session: GrokAcpSession | undefined;
@@ -100,6 +100,7 @@ export function startGrokAcpTurn(
 	let capture: TurnCapture | undefined;
 	let endRequests: (() => void) | undefined;
 	let promptStarted = false;
+	let promptSettled = false;
 	let settled = false;
 	let internalStop = false;
 	let signalling = false;
@@ -108,7 +109,8 @@ export function startGrokAcpTurn(
 	const parser = new GrokOutputParser();
 	const fault = (): void => {
 		if (settled) return;
-		failure ??= { status: 'failed', kind: 'transport', reason: 'acp-transport-fault' };
+		if (!session?.error && !promptSettled)
+			failure ??= { status: 'failed', kind: 'transport', reason: 'acp-transport-fault' };
 		requests.close();
 		session?.transportLost();
 	};
@@ -151,7 +153,8 @@ export function startGrokAcpTurn(
 	};
 	const cancel = (): void => {
 		if (settled || controller.signal.aborted) return;
-		failure ??= { status: 'cancelled', origin: 'user', reason: 'host-cancelled' };
+		if (!session?.error && !promptSettled)
+			failure ??= { status: 'cancelled', origin: 'user', reason: 'host-cancelled' };
 		controller.abort();
 		if (promptStarted) session?.cancel();
 		else session?.close();
@@ -164,10 +167,11 @@ export function startGrokAcpTurn(
 			onStdinError: fault,
 			onStopRequested: (by) => {
 				if (internalStop || settled) return;
-				failure ??=
-					by === 'authority'
-						? { status: 'refused', origin: 'admission', reason: 'lease-revoked' }
-						: { status: 'cancelled', origin: 'host', reason: 'process-stopped' };
+				if (!session?.error && !promptSettled)
+					failure ??=
+						by === 'authority'
+							? { status: 'refused', origin: 'admission', reason: 'lease-revoked' }
+							: { status: 'cancelled', origin: 'host', reason: 'process-stopped' };
 				signalling = true;
 				try {
 					controller.abort();
@@ -190,6 +194,7 @@ export function startGrokAcpTurn(
 
 	const completed = (async (): GrokAcpRunningTurn['completed'] => {
 		let response: Record<string, unknown> | undefined;
+		let promptError: unknown;
 		try {
 			session = new GrokAcpSession({
 				...options,
@@ -221,35 +226,72 @@ export function startGrokAcpTurn(
 			await session.open();
 			if (failure || controller.signal.aborted) throw new GrokAcpSessionError('cancelled');
 			const sessionId = session.sessionId!;
+			// A distinct native ID is useful only when actually sent on a qualified route.
+			const promptId = session.supportsPromptId ? generateUUID() : undefined;
 			const scopeId = canonicalJson([options.account, options.host]);
 			const identity = {
 				sessionId,
 				turnId: options.turnId,
 				scopeId,
 				processGeneration: options.processGeneration,
+				promptId,
 			};
 			events = new GrokAcpEventAdapter(identity);
+			// Allocation and the native-session claim precede this observation. The
+			// first nonzero ledger is a baseline, never evidence of a zero starting bill.
+			const initialUsage = await session.processUsage(controller.signal);
+			const initialEvents = initialUsage === undefined ? [] : events.processUsage(initialUsage);
+			const baseline = initialEvents[0]?.usage;
 			capture = new TurnCapture('grok', parser, {
 				classifyInBandErrors: false,
 				usageIdentity: { ...identity, route: 'acp', providerSessionId: sessionId },
-				processSessionBaseline: options.processSessionBaseline,
+				processSessionBaseline:
+					baseline?.accounting?.completeness === 'complete'
+						? parsedUsageToStats(baseline)
+						: undefined,
 			});
+			// Incomplete baseline observations remain separate, non-additive facts.
+			for (const event of initialEvents) emit(event);
+			if (failure || controller.signal.aborted) throw new GrokAcpSessionError('cancelled');
 			endRequests = requests.beginTurn({
 				...options.permission,
 				sessionId,
 				turnId: options.turnId,
+				promptId,
 				signal: controller.signal,
 			});
 			emit({ type: 'init', sessionId });
 			if (failure || controller.signal.aborted) throw new GrokAcpSessionError('cancelled');
 			promptStarted = true;
-			response = await session.prompt(options.prompt, controller.signal);
-		} catch (error) {
-			if (error instanceof GrokAcpSessionError) response = error.response;
+			try {
+				response = await session.prompt(options.prompt, controller.signal, promptId);
+			} catch (error) {
+				promptError = error;
+				if (error instanceof GrokAcpSessionError) response = error.response;
+			}
+			promptSettled = response !== undefined;
+			endRequests();
+			endRequests = undefined;
+			// Request after the prompt response, never concurrently with the prompt.
+			// The shared accumulator replaces this provisional total with final usage once.
+			if (response && !controller.signal.aborted && !session.isClosed) {
+				try {
+					const usage = await session.processUsage(controller.signal);
+					if (usage !== undefined) for (const event of events.processUsage(usage)) emit(event);
+				} catch (error) {
+					// Optional accounting cannot rewrite the received protocol outcome. Owned
+					// cleanup still runs and partial usage remains; unexpected faults propagate.
+					if (!(error instanceof GrokAcpSessionError)) throw error;
+				}
+			}
+			if (promptError) throw promptError;
+		} catch (caught) {
+			const error = promptError ?? session?.error ?? caught;
+			if (error instanceof GrokAcpSessionError) response = error.response ?? response;
 			const reason = error instanceof GrokAcpSessionError ? error.reason : 'transport-lost';
 			// Provider cancellation is a protocol outcome: preserve its metadata and any
 			// preceding permission refusal/timeout instead of relabeling it as a host stop.
-			if (reason !== 'cancelled' || !response || controller.signal.aborted)
+			if (reason !== 'cancelled' || !response || (controller.signal.aborted && !promptSettled))
 				failure ??= {
 					...(reason === 'idle-timeout'
 						? ({ status: 'timeout', kind: 'idle' } as const)
@@ -268,16 +310,15 @@ export function startGrokAcpTurn(
 									} as const)),
 					reason,
 					dispatchState:
-						error instanceof GrokAcpSessionError && error.dispatchMayHaveOccurred
+						session?.promptDispatched ||
+						(error instanceof GrokAcpSessionError && error.dispatchMayHaveOccurred)
 							? 'unknown'
-							: promptStarted
-								? 'unknown'
-								: 'not-dispatched',
+							: 'not-dispatched',
 				};
 		} finally {
 			endRequests?.();
 			if (failure && failure.dispatchState === undefined)
-				failure.dispatchState = promptStarted ? 'unknown' : 'not-dispatched';
+				failure.dispatchState = session?.promptDispatched ? 'unknown' : 'not-dispatched';
 			if (events)
 				for (const event of events.settle(response, failure ?? requestFailure)) emit(event);
 			else

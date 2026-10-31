@@ -29,6 +29,12 @@ export interface GrokAcpSessionOptions extends Pick<
 	/** Explicit hard ceiling per prompt, separate from the silence budget. */
 	maxTurnMs: number;
 	cancelGraceMs?: number;
+	/**
+	 * Host-admitted, exact-version extension contract for this account/host/process.
+	 * The pinned peer advertises no exhaustive method list. Source knowledge alone
+	 * does not enable these options; the host owns qualification and discovery admission.
+	 */
+	extensions?: { agentVersion: string; promptId?: boolean; sessionUsage?: boolean };
 	/** SSH owners supply their existing guarded terminate operation. */
 	terminate?: () => void;
 	onNotification?: (message: AcpCall, context: { replay: boolean; turn: number | null }) => void;
@@ -50,6 +56,7 @@ export class GrokAcpSessionError extends Error {
 			| 'invalid-response'
 			| 'missing-session-id'
 			| 'load-unsupported'
+			| 'prompt-id-unsupported'
 			| 'model-unacknowledged'
 			| 'cwd-mismatch',
 		readonly dispatchMayHaveOccurred = false,
@@ -85,9 +92,16 @@ export class GrokAcpSession {
 	private cancelled = false;
 	private replay = false;
 	private turn = 0;
+	private queryingUsage = false;
+	private usageUnavailable = false;
+	private extensionsMatched = false;
+	private lastPromptDispatched = false;
 
 	constructor(options: GrokAcpSessionOptions) {
-		this.options = Object.freeze({ ...options });
+		this.options = Object.freeze({
+			...options,
+			extensions: options.extensions && Object.freeze({ ...options.extensions }),
+		});
 		for (const value of [
 			options.idleTimeoutMs,
 			options.maxTurnMs,
@@ -102,6 +116,7 @@ export class GrokAcpSession {
 			options.host,
 			options.model,
 			options.resumeSessionId,
+			options.extensions?.agentVersion,
 		]) {
 			if (value !== undefined && (typeof value !== 'string' || !value.trim()))
 				throw new GrokAcpSessionError('invalid-options');
@@ -131,6 +146,16 @@ export class GrokAcpSession {
 	get isClosed(): boolean {
 		return this.failure !== undefined;
 	}
+	/** The first owned failure survives later cancellation and transport-close callbacks. */
+	get error(): GrokAcpSessionError | undefined {
+		return this.failure;
+	}
+	get promptDispatched(): boolean {
+		return this.lastPromptDispatched;
+	}
+	get supportsPromptId(): boolean {
+		return this.extensionsMatched && this.options.extensions?.promptId === true;
+	}
 
 	feedStdout(chunk: Uint8Array): void {
 		if (chunk.byteLength) this.watchdog?.touch();
@@ -155,6 +180,10 @@ export class GrokAcpSession {
 					if (this.active && this.cancelled) throw new GrokAcpSessionError('cancelled');
 					const initialized = await this.client.initialize();
 					this.checkOpen();
+					this.extensionsMatched =
+						!!this.options.extensions?.agentVersion &&
+						initialized._meta?.grokShell === true &&
+						initialized._meta.agentVersion === this.options.extensions.agentVersion;
 					if (this.active && this.cancelled) throw new GrokAcpSessionError('cancelled');
 					const { cwd, model, resumeSessionId } = this.options;
 					if (resumeSessionId) {
@@ -209,13 +238,20 @@ export class GrokAcpSession {
 	}
 
 	/** Raw prompt response; a correlated response alone does not mean successful work. */
-	async prompt(text: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+	async prompt(
+		text: string,
+		signal?: AbortSignal,
+		promptId?: string
+	): Promise<Record<string, unknown>> {
 		this.checkOpen();
-		if (this.active) throw new GrokAcpSessionError('busy');
+		if (this.active || this.queryingUsage) throw new GrokAcpSessionError('busy');
+		if (promptId !== undefined && (typeof promptId !== 'string' || !promptId.trim()))
+			throw new GrokAcpSessionError('invalid-options');
 		if (signal?.aborted) throw new GrokAcpSessionError('cancelled');
 		this.active = true;
 		this.cancelled = false;
 		this.dispatched = false;
+		this.lastPromptDispatched = false;
 		this.turn += 1;
 		const onAbort = (): void => this.cancel();
 		signal?.addEventListener('abort', onAbort, { once: true });
@@ -223,14 +259,18 @@ export class GrokAcpSession {
 			await this.open();
 			this.checkOpen();
 			if (this.cancelled) throw new GrokAcpSessionError('cancelled');
+			if (promptId !== undefined && !this.supportsPromptId)
+				throw new GrokAcpSessionError('prompt-id-unsupported');
 			this.armWatchdog(this.options.maxTurnMs);
 			// Set before writing: a writer can deliver notifications/cancellation synchronously.
 			this.dispatched = true;
+			this.lastPromptDispatched = true;
 			const value = await this.client.request(
 				'session/prompt',
 				{
 					sessionId: this.nativeId,
 					prompt: [{ type: 'text', text }],
+					...(promptId === undefined ? {} : { _meta: { promptId } }),
 				},
 				{ timeoutMs: this.options.maxTurnMs }
 			);
@@ -262,8 +302,78 @@ export class GrokAcpSession {
 		}
 	}
 
+	/**
+	 * Correlated optional process ledger, only between prompts under our native claim.
+	 * Never poll during a turn: a sample could predate already delivered response usage.
+	 * Absence/provider errors mean unknown usage; pipe/deadline failures end this owner.
+	 */
+	async processUsage(signal?: AbortSignal): Promise<Record<string, unknown> | undefined> {
+		this.checkOpen();
+		if (this.active || this.queryingUsage) throw new GrokAcpSessionError('busy');
+		if (signal?.aborted) throw new GrokAcpSessionError('cancelled');
+		if (!this.nativeId || !this.claim) throw new GrokAcpSessionError('missing-session-id');
+		if (
+			!this.extensionsMatched ||
+			this.options.extensions?.sessionUsage !== true ||
+			this.usageUnavailable
+		)
+			return;
+		this.queryingUsage = true;
+		const onAbort = (): void => this.fail('cancelled');
+		signal?.addEventListener('abort', onAbort, { once: true });
+		try {
+			this.checkOpen();
+			if (signal?.aborted) throw new GrokAcpSessionError('cancelled');
+			this.armWatchdog();
+			const value = await this.client.request('_x.ai/session/usage', { sessionId: this.nativeId });
+			this.checkOpen();
+			if (value == null) return;
+			let response = this.record(value);
+			// The pinned usage handler returns {usage} directly; other extension adapters
+			// wrap {result, error}. A nested error (including string codes) always wins.
+			if (response.error != null) {
+				this.usageUnavailable = true;
+				return;
+			}
+			if (Object.hasOwn(response, 'result')) {
+				if (response.result == null) return;
+				response = this.record(response.result);
+				if (response.error != null) {
+					this.usageUnavailable = true;
+					return;
+				}
+			}
+			if (response.sessionId !== undefined && response.sessionId !== this.nativeId)
+				throw new GrokAcpSessionError('invalid-response', this.lastPromptDispatched);
+			return response;
+		} catch (error) {
+			if (this.failure) throw this.failure;
+			if (error instanceof GrokAcpRequestError) {
+				this.usageUnavailable = true;
+				return;
+			}
+			this.fail(
+				error instanceof GrokAcpSessionError
+					? error.reason
+					: error instanceof GrokAcpTransportError && error.reason === 'timeout'
+						? 'turn-timeout'
+						: 'transport-lost',
+				error
+			);
+			throw this.failure;
+		} finally {
+			signal?.removeEventListener('abort', onAbort);
+			this.watchdog?.disarm();
+			this.queryingUsage = false;
+		}
+	}
+
 	/** Wait for the original prompt response; the notification has no response of its own. */
 	cancel(): void {
+		if (this.queryingUsage) {
+			this.fail('cancelled');
+			return;
+		}
 		if (!this.active || this.cancelled || this.failure) return;
 		this.cancelled = true;
 		// Give allocation a bounded chance to return its ID; it must never dispatch the prompt.
@@ -310,7 +420,7 @@ export class GrokAcpSession {
 		if (effective !== requested) throw new GrokAcpSessionError('model-unacknowledged');
 	}
 	private claimSession(id: string): void {
-		const key = canonicalJson([this.options.account, this.options.host, this.options.cwd, id]);
+		const key = canonicalJson([this.options.account, this.options.host, id]);
 		if (residentSessions.has(key)) throw new GrokAcpSessionError('busy');
 		residentSessions.add(key);
 		this.claim = key;
@@ -328,7 +438,7 @@ export class GrokAcpSession {
 		if (this.failure) return;
 		this.failure = new GrokAcpSessionError(
 			reason,
-			this.dispatched,
+			this.lastPromptDispatched,
 			undefined,
 			cause instanceof GrokAcpRequestError || cause instanceof GrokAcpTransportError
 				? cause

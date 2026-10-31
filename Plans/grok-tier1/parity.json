@@ -697,6 +697,48 @@
 				"META-07",
 				"REG-DEFINITIONS"
 			]
+		},
+		"phase03-acp-prompt-usage": {
+			"path": "Plans/grok-tier1/evidence/03.md#gt1-03-09a-native-prompt-binding-and-process-usage",
+			"sourceCommit": "a45183c287e3c57cf8270ceb2b5c9cb67406dc48",
+			"sourceRevisionScope": "Pre-task HEAD plus GT1-03-09A diff identified by source SHA-256.",
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"implementationScope": "Host-qualified native prompt binding and process-usage collection only. No native or managed route enablement.",
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P09",
+				"P10",
+				"P11",
+				"P12",
+				"P29",
+				"P33",
+				"P34",
+				"P35",
+				"P36",
+				"P38",
+				"P40",
+				"C-supportsCostTracking",
+				"C-supportsUsageStats",
+				"C-supportsBatchMode",
+				"C-requiresPromptToStart",
+				"C-usesJsonLineOutput",
+				"REG-PARSER",
+				"REG-USAGE",
+				"REG-MANAGED-ROUTES",
+				"S28",
+				"META-03",
+				"META-06",
+				"META-07",
+				"REG-DEFINITIONS"
+			],
+			"sourceHashesSha256": {
+				"src/shared/maestro-lib/grok/acp-session.ts": "07e39de00fa0463afe96a35e6e2f5e89e772720773f603d948d8ee00d5495d1d",
+				"src/shared/maestro-lib/grok/acp-turn.ts": "5a41eaaeb04c33b26ce8daa6d1d67ec30c0def3e5fcf676d3f898a832def290c"
+			}
 		}
 	},
 	"sourceCatalog": {
@@ -3197,7 +3239,8 @@
 				"src/shared/maestro-lib/grok/acp-protocol.ts",
 				"src/shared/maestro-lib/grok/acp-requests.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3281,7 +3324,8 @@
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
 				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
 				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3301,7 +3345,7 @@
 				{
 					"id": "gap:P09",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09A now provides the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options; composed coverage and verification remain GT1-03-10/13. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["P09"]
 				},
 				{
@@ -3343,7 +3387,7 @@
 				{
 					"id": "acp-turn-consumers:P09",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P09"]
 				}
 			],
@@ -3510,7 +3554,8 @@
 				"src/shared/maestro-lib/grok/acp-protocol.ts",
 				"src/shared/maestro-lib/grok/acp-requests.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3600,7 +3645,8 @@
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
 				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
 				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3620,7 +3666,7 @@
 				{
 					"id": "gap:P10",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09A now provides the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options; composed coverage and verification remain GT1-03-10/13. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["P10"]
 				},
 				{
@@ -3656,7 +3702,7 @@
 				{
 					"id": "acp-turn-consumers:P10",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P10"]
 				}
 			],
@@ -3734,7 +3780,9 @@
 				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts",
 				"src/shared/maestro-lib/grok/acp-events.ts",
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
-				"src/shared/maestro-lib/grok/acp-protocol.ts"
+				"src/shared/maestro-lib/grok/acp-protocol.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3748,7 +3796,8 @@
 					"GT1-03-05A",
 					"GT1-03-05C",
 					"GT1-03-05C1",
-					"GT1-03-05E"
+					"GT1-03-05E",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-03-06",
@@ -3759,7 +3808,8 @@
 					"GT1-07-04",
 					"GT1-03-05B",
 					"GT1-03-05D",
-					"GT1-03-06C"
+					"GT1-03-06C",
+					"GT1-03-10"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -3794,7 +3844,8 @@
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
 				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
 				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests",
-				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests"
+				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3814,7 +3865,7 @@
 				{
 					"id": "gap:P11",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09A now provides the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options; composed coverage and verification remain GT1-03-10/13. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["P11"]
 				},
 				{
@@ -3834,6 +3885,12 @@
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C authors expanded terminal/ownership/model-cost and unbaselined-process cases (not executed); GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["P11"]
+				},
+				{
+					"id": "acp-turn-consumers:P11",
+					"code": "implementation-and-verification-pending",
+					"affectedRows": ["P11"],
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted."
 				}
 			],
 			"phase": "03",
@@ -3967,7 +4024,8 @@
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
 				"src/shared/maestro-lib/grok/acp-protocol.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -4033,7 +4091,8 @@
 				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
 				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests",
 				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4053,7 +4112,7 @@
 				{
 					"id": "gap:P12",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09A now provides the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options; composed coverage and verification remain GT1-03-10/13. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["P12"]
 				},
 				{
@@ -4077,7 +4136,7 @@
 				{
 					"id": "acp-turn-consumers:P12",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P12"]
 				}
 			],
@@ -6257,7 +6316,8 @@
 				"src/cli/services/autorun-cli-deps.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
 				"src/shared/maestro-lib/run/start-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6321,7 +6381,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6365,7 +6426,7 @@
 				{
 					"id": "acp-turn-consumers:P29",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P29"]
 				}
 			],
@@ -6898,7 +6959,8 @@
 				"src/main/pianola/pianola-supervisor.ts",
 				"src/shared/maestro-lib/grok/acp-requests.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6954,7 +7016,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6998,7 +7061,7 @@
 				{
 					"id": "acp-turn-consumers:P33",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P33"]
 				}
 			],
@@ -7107,7 +7170,8 @@
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
 				"src/shared/maestro-lib/grok/acp-requests.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -7175,7 +7239,8 @@
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
 				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
 				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7231,7 +7296,7 @@
 				{
 					"id": "acp-turn-consumers:P34",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P34"]
 				}
 			],
@@ -7336,7 +7401,8 @@
 				"src/shared/maestro-lib/launch/launch-plan.ts",
 				"src/shared/maestro-lib/grok/acp-requests.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -7408,7 +7474,8 @@
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7458,7 +7525,7 @@
 				{
 					"id": "acp-turn-consumers:P35",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P35"]
 				}
 			],
@@ -7578,7 +7645,8 @@
 				"src/main/cross-agent/consult-runner.ts",
 				"src/shared/maestro-lib/grok/acp-requests.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -7646,7 +7714,8 @@
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7690,7 +7759,7 @@
 				{
 					"id": "acp-turn-consumers:P36",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P36"]
 				}
 			],
@@ -7943,7 +8012,8 @@
 				"src/cli/commands/list-sessions.ts",
 				"src/__tests__/cli/commands/list-sessions.test.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -7988,7 +8058,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8026,7 +8097,7 @@
 				{
 					"id": "acp-turn-consumers:P38",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P38"]
 				}
 			],
@@ -8380,7 +8451,8 @@
 				"src/main/agents/limitResetEstimator.ts",
 				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -8451,7 +8523,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8489,7 +8562,7 @@
 				{
 					"id": "acp-turn-consumers:P40",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["P40"]
 				}
 			],
@@ -10521,7 +10594,9 @@
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
 				"src/shared/maestro-lib/grok/acp-events.ts",
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
-				"src/shared/maestro-lib/grok/acp-protocol.ts"
+				"src/shared/maestro-lib/grok/acp-protocol.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -10534,7 +10609,8 @@
 					"GT1-03-05A",
 					"GT1-03-05C",
 					"GT1-03-05C1",
-					"GT1-03-05E"
+					"GT1-03-05E",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-03-06",
@@ -10544,7 +10620,8 @@
 					"GT1-07-04",
 					"GT1-03-05B",
 					"GT1-03-05D",
-					"GT1-03-06C"
+					"GT1-03-06C",
+					"GT1-03-10"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -10578,7 +10655,8 @@
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
 				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
 				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests",
-				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests"
+				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10598,7 +10676,7 @@
 				{
 					"id": "gap:C-supportsCostTracking",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09A now provides the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options; composed coverage and verification remain GT1-03-10/13. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["C-supportsCostTracking"]
 				},
 				{
@@ -10618,6 +10696,12 @@
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C authors expanded terminal/ownership/model-cost and unbaselined-process cases (not executed); GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["C-supportsCostTracking"]
+				},
+				{
+					"id": "acp-turn-consumers:C-supportsCostTracking",
+					"code": "implementation-and-verification-pending",
+					"affectedRows": ["C-supportsCostTracking"],
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted."
 				}
 			],
 			"field": "supportsCostTracking",
@@ -10682,7 +10766,9 @@
 				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
 				"src/shared/maestro-lib/grok/acp-events.ts",
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
-				"src/shared/maestro-lib/grok/acp-protocol.ts"
+				"src/shared/maestro-lib/grok/acp-protocol.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -10695,7 +10781,8 @@
 					"GT1-03-05A",
 					"GT1-03-05C",
 					"GT1-03-05C1",
-					"GT1-03-05E"
+					"GT1-03-05E",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-03-06",
@@ -10705,7 +10792,8 @@
 					"GT1-07-04",
 					"GT1-03-05B",
 					"GT1-03-05D",
-					"GT1-03-06C"
+					"GT1-03-06C",
+					"GT1-03-10"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -10739,7 +10827,8 @@
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
 				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
 				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests",
-				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests"
+				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10759,7 +10848,7 @@
 				{
 					"id": "gap:C-supportsUsageStats",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09A now provides the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options; composed coverage and verification remain GT1-03-10/13. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["C-supportsUsageStats"]
 				},
 				{
@@ -10779,6 +10868,12 @@
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C authors expanded terminal/ownership/model-cost and unbaselined-process cases (not executed); GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["C-supportsUsageStats"]
+				},
+				{
+					"id": "acp-turn-consumers:C-supportsUsageStats",
+					"code": "implementation-and-verification-pending",
+					"affectedRows": ["C-supportsUsageStats"],
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted."
 				}
 			],
 			"field": "supportsUsageStats",
@@ -10843,7 +10938,8 @@
 				"src/shared/maestro-lib/turns/assemble.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
 				"src/shared/maestro-lib/run/start-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-03-09", "GT1-08-05", "GT1-10-01", "GT1-11-14A", "GT1-03-09A"],
@@ -10867,7 +10963,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10905,7 +11002,7 @@
 				{
 					"id": "acp-turn-consumers:C-supportsBatchMode",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["C-supportsBatchMode"]
 				}
 			],
@@ -10966,7 +11063,8 @@
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
 				"src/shared/maestro-lib/run/start-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-03-09", "GT1-08-05", "GT1-10-01", "GT1-11-14A", "GT1-03-09A"],
@@ -10990,7 +11088,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11028,7 +11127,7 @@
 				{
 					"id": "acp-turn-consumers:C-requiresPromptToStart",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["C-requiresPromptToStart"]
 				}
 			],
@@ -12369,7 +12468,8 @@
 				"src/cli/services/agent-spawner.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
 				"src/shared/maestro-lib/run/start-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-03-09", "GT1-08-05", "GT1-10-01", "GT1-11-14A", "GT1-03-09A"],
@@ -12391,7 +12491,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12429,7 +12530,7 @@
 				{
 					"id": "acp-turn-consumers:C-usesJsonLineOutput",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["C-usesJsonLineOutput"]
 				}
 			],
@@ -13107,7 +13208,8 @@
 				"src/shared/maestro-lib/grok/acp-protocol.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
 				"src/shared/maestro-lib/run/start-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -13160,7 +13262,8 @@
 				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
 				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests",
 				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13180,7 +13283,7 @@
 				{
 					"id": "gap:REG-PARSER",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09A now provides the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options; composed coverage and verification remain GT1-03-10/13. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["REG-PARSER"]
 				},
 				{
@@ -13204,7 +13307,7 @@
 				{
 					"id": "acp-turn-consumers:REG-PARSER",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["REG-PARSER"]
 				}
 			],
@@ -13810,7 +13913,9 @@
 				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts",
 				"src/shared/maestro-lib/grok/acp-events.ts",
 				"src/shared/maestro-lib/parsers/agent-output-parser.ts",
-				"src/shared/maestro-lib/grok/acp-protocol.ts"
+				"src/shared/maestro-lib/grok/acp-protocol.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts",
+				"src/shared/maestro-lib/grok/acp-turn.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -13824,7 +13929,8 @@
 					"GT1-03-05A",
 					"GT1-03-05C",
 					"GT1-03-05C1",
-					"GT1-03-05E"
+					"GT1-03-05E",
+					"GT1-03-09A"
 				],
 				"test": [
 					"GT1-03-06",
@@ -13835,7 +13941,8 @@
 					"GT1-07-04",
 					"GT1-03-05B",
 					"GT1-03-05D",
-					"GT1-03-06C"
+					"GT1-03-06C",
+					"GT1-03-10"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -13869,7 +13976,8 @@
 				"phase03AcpEventsEvidenceRef": "phase03-acp-events",
 				"phase03AcpWireTicksEvidenceRef": "phase03-acp-wire-ticks",
 				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests",
-				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests"
+				"phase03AcpEventContinuationTestsEvidenceRef": "phase03-acp-event-continuation-tests",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13889,7 +13997,7 @@
 				{
 					"id": "gap:REG-USAGE",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09 must provide the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C/C1 shared scoped reconciliation are implemented but unverified. GT1-03-09A now provides the explicit, exclusive pre-dispatch process baseline and causal aggregate ordering through TurnCapture options; composed coverage and verification remain GT1-03-10/13. GT1-03-05D consumer tests are authored, not run. Complete remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c1-scoped-usage-reconciliation.",
 					"affectedRows": ["REG-USAGE"]
 				},
 				{
@@ -13909,6 +14017,12 @@
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-03-05E preserves raw costUsdTicks number lexemes. GT1-03-06 authors raw byte-frame, exact model/capture ticks, explicit zero and invalid-cost regression fixtures (not executed). GT1-03-06C authors expanded terminal/ownership/model-cost and unbaselined-process cases (not executed); GT1-03-13 owns execution/compiler checks. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["REG-USAGE"]
+				},
+				{
+					"id": "acp-turn-consumers:REG-USAGE",
+					"code": "implementation-and-verification-pending",
+					"affectedRows": ["REG-USAGE"],
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted."
 				}
 			],
 			"branchAuditRefs": ["B12", "B32", "B35", "B38", "B42", "B43"]
@@ -14661,7 +14775,8 @@
 				"src/main/utils/context-groomer.ts",
 				"src/shared/maestro-lib/grok/acp-requests.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -14704,7 +14819,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14748,7 +14864,7 @@
 				{
 					"id": "acp-turn-consumers:REG-MANAGED-ROUTES",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["REG-MANAGED-ROUTES"]
 				}
 			],
@@ -17569,7 +17685,8 @@
 				"src/shared/maestro-lib/parsers/grok-output-parser.ts",
 				"src/main/process-manager/handlers/StdoutHandler.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-03-09", "GT1-03-09A"],
@@ -17593,7 +17710,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17631,7 +17749,7 @@
 				{
 					"id": "acp-turn-consumers:S28",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["S28"]
 				}
 			],
@@ -18104,7 +18222,8 @@
 				"src/shared/maestro-lib/grok/acp-requests.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
 				"src/shared/maestro-lib/run/start-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -18177,7 +18296,8 @@
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18221,7 +18341,7 @@
 				{
 					"id": "acp-turn-consumers:META-03",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["META-03"]
 				}
 			],
@@ -18553,7 +18673,8 @@
 				"src/main/provider-translation-service.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
 				"src/shared/maestro-lib/run/start-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -18636,7 +18757,8 @@
 				"evidenceRef": "phase01-audit",
 				"observation": "Grok default context is 0/unknown; provider/host-only snapshot windows are ignored for Grok without selected model/account provenance. Positive per-agent/provider overrides remain supported. Group-chat unknown/accumulated observations preserve costs; native window propagation remains GT1-07-02/04/11.",
 				"phase02EvidenceRef": "phase02-reconciliation",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18674,7 +18796,7 @@
 				{
 					"id": "acp-turn-consumers:META-06",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["META-06"]
 				}
 			],
@@ -18722,7 +18844,8 @@
 				"src/shared/maestro-lib/runtime/turns.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
 				"src/shared/maestro-lib/run/start-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -18800,7 +18923,8 @@
 				"evidenceRef": "phase01-audit",
 				"observation": "1M threshold and Claude [1m] marker; adaptive mode defaults off for every provider; resilience defaults true unless explicitly disabled.",
 				"phase02EvidenceRef": "phase02-reconciliation",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18838,7 +18962,7 @@
 				{
 					"id": "acp-turn-consumers:META-07",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["META-07"]
 				}
 			],
@@ -18916,7 +19040,8 @@
 				"src/shared/maestro-lib/launch/launch-plan.ts",
 				"src/shared/maestro-lib/grok/acp-requests.ts",
 				"src/shared/maestro-lib/grok/acp-turn.ts",
-				"src/shared/maestro-lib/index.ts"
+				"src/shared/maestro-lib/index.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -19066,7 +19191,8 @@
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
-				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition"
+				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19122,7 +19248,7 @@
 				{
 					"id": "acp-turn-consumers:REG-DEFINITIONS",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-03-09 composes the local ACP port through startTurn with raw bytes, original-turn request ownership, structured settlement and canonical cleanup. GT1-03-09A must add native prompt binding and qualified correlated process-usage baselines; GT1-03-10 authors composed regressions and GT1-03-13 runs tests/compiler checks. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
+					"missingPrerequisite": "GT1-03-09/09A implement local ACP composition, transmitted version-qualified native prompt identity and correlated process-usage baselines under exclusive allocation. GT1-03-10 must author composed regressions; GT1-03-13 must execute tests/compiler checks. Host-qualified extension support defaults absent. Routes, remote stop ownership, recorder/UI propagation and managed/native qualification remain with later owners. No required acceptance status is promoted.",
 					"affectedRows": ["REG-DEFINITIONS"]
 				}
 			],
