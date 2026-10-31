@@ -192,6 +192,8 @@ function newChat(): Chat {
 
 /** The chat in the window. Module state: there is one Quick Chat per app window. */
 let chat: Chat = newChat();
+/** A newer recall supersedes a pending recent-record read, even before it replaces the chat. */
+let recallGeneration = 0;
 
 /**
  * Chats the user moved on from while their work was still in motion. Each
@@ -202,6 +204,7 @@ const endedChats = new Set<Chat>();
 /** Reset module state. Tests only. */
 export function resetQuickChatEngineForTests(): void {
 	chat = newChat();
+	recallGeneration = 0;
 	endedChats.clear();
 	lastPushed = '';
 	if (recentTimer) clearTimeout(recentTimer);
@@ -1437,6 +1440,8 @@ function adoptAgent(sessionId: string): void {
  * messages still being routed or answered carry on in the window.
  */
 async function recall(chatId: string): Promise<string | null> {
+	const generation = ++recallGeneration;
+	const currentChat = chat;
 	if (chatId === chat.id) return null;
 	const live = [...endedChats].find((c) => c.id === chatId);
 	const liveSession = live && findSession(live.sessionId);
@@ -1448,6 +1453,8 @@ async function recall(chatId: string): Promise<string | null> {
 		return null;
 	}
 	const recent = await window.maestro.quickChat.getRecent(chatId);
+	// New chat / agent changes replace the chat; another recall may still be reading.
+	if (chat !== currentChat || generation !== recallGeneration) return null;
 	if (!recent) return 'That chat is no longer in the recent chats list';
 	const session = findSession(recent.agentId);
 	if (!session || !canChat(session)) {
