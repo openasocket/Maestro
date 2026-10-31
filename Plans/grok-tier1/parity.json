@@ -2724,6 +2724,33 @@
 			],
 			"testOwner": "GT1-04-08B",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-grok-history-mutation-refusals": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-08c-grok-history-mutation-refusals",
+			"sourceCommit": "736b29b8339060f7415b581418ee755eff54dfa6",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/hooks/tabs/internal/useScrollLogHandlers.ts": "c7915911e23e5b9caf68fc73e89b30362c79aee6cfec6aea03b258226a7d388a",
+				"src/main/ipc/handlers/agentSessions.ts": "de20afbe6aa80739132abf180921bd295a1e12d15e41b860d3c9a208d9b5b6e5",
+				"src/main/storage/grok-session-storage.ts": "ae0f74c25b2ff42255cfb1a9c99d56d9983a0837ec821193fe4363b8c01718f8"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "REG-SESSION-MUTATION"],
+			"scope": "Grok message deletion refuses visibly and synchronously before Claude IPC or optimistic log/command-history changes, including retained latest turns and parked Grok sessions after subsequent turns on another provider. Generic mutation IPC refuses before storage lookup because it cannot identify account/host ownership. Native adapter remains inert; local-only shell-command cards retain existing deletion.",
+			"limitations": [
+				"Whole-session deletion and conversation/file rewind exist in pinned native source but lack a qualified account/host/generation-bound Maestro mutation transport. Rewind truncates later prompts and defaults to file rollback; it is not arbitrary message-pair editing.",
+				"Native history deletion/editing remain unsupported through Maestro. No native file/index mutation or new mutation API was added, and no required outcome is certified.",
+				"Tests neither authored, run nor collected under IMPLEMENT/TEST/VERIFY separation. GT1-04-08D authors regressions; GT1-04-13 executes them.",
+				"Renderer/shared TypeScript retains the documented baseline RequestInit.dispatcher error. No real accounts, SSH endpoints, provider processes or paid calls were used.",
+				"Mixed-provider tabs retaining a Grok slot also refuse deletion of newer non-Grok rows because rendered logs lack per-row native ownership. No separate native message-edit or whole-session-delete consumer exists in the inspected surface."
+			],
+			"implementationOwner": "GT1-04-08C",
+			"testOwner": "GT1-04-08D",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6570,7 +6597,8 @@
 				"src/shared/maestro-lib/agents/providerSwap.ts",
 				"src/renderer/hooks/session/useSessionLifecycle.ts",
 				"src/renderer/hooks/remote/useRemoteIntegration.ts",
-				"src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsRename.ts"
+				"src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsRename.ts",
+				"src/renderer/hooks/tabs/internal/useScrollLogHandlers.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6677,7 +6705,8 @@
 				"phase04NativeForkRenameRefusalsRef": "phase04-native-fork-rename-refusals",
 				"phase04GrokRenameConsumersRef": "phase04-grok-rename-consumers",
 				"phase04GrokRenameConsumerTestsRef": "phase04-grok-rename-consumer-tests",
-				"phase04NativeForkRenameTestsRef": "phase04-native-fork-rename-tests"
+				"phase04NativeForkRenameTestsRef": "phase04-native-fork-rename-tests",
+				"phase04GrokHistoryMutationRefusalsRef": "phase04-grok-history-mutation-refusals"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6740,6 +6769,12 @@
 					"id": "grok-rename-consumer-isolation-pending",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-04-08A1 implements local-only Grok labels and visible unsupported History rename; GT1-04-08A1T authors serializer/startup reload, retained ownership, account/host collisions, preserved bindings, refusal and non-Grok controls. GT1-04-13 must execute the three suites. Static checks add no diagnostics; native title mutation remains unsupported.",
+					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
+				},
+				{
+					"id": "grok-native-delete-edit-transport-unqualified",
+					"code": "native-mutation-unsupported",
+					"missingPrerequisite": "Version-qualified account/cwd/host-bound native mutation transaction, native prompt mapping and active-writer/generation fencing. GT1-04-08C preserves history and refuses unsafe UI/IPC mutations; GT1-04-08D/13 must author/execute refusal and isolation regressions. Pinned whole-session delete and rewind cannot substitute for arbitrary message-pair edits. Native compliance remains not-run.",
 					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
 				}
 			],
@@ -17168,7 +17203,8 @@
 				"src/shared/maestro-lib/agents/providerSwap.ts",
 				"src/renderer/hooks/session/useSessionLifecycle.ts",
 				"src/renderer/hooks/remote/useRemoteIntegration.ts",
-				"src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsRename.ts"
+				"src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsRename.ts",
+				"src/renderer/hooks/tabs/internal/useScrollLogHandlers.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -17275,7 +17311,8 @@
 				"phase04NativeForkRenameRefusalsRef": "phase04-native-fork-rename-refusals",
 				"phase04GrokRenameConsumersRef": "phase04-grok-rename-consumers",
 				"phase04GrokRenameConsumerTestsRef": "phase04-grok-rename-consumer-tests",
-				"phase04NativeForkRenameTestsRef": "phase04-native-fork-rename-tests"
+				"phase04NativeForkRenameTestsRef": "phase04-native-fork-rename-tests",
+				"phase04GrokHistoryMutationRefusalsRef": "phase04-grok-history-mutation-refusals"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17338,6 +17375,12 @@
 					"id": "grok-rename-consumer-isolation-pending",
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-04-08A1 implements local-only Grok labels and visible unsupported History rename; GT1-04-08A1T authors serializer/startup reload, retained ownership, account/host collisions, preserved bindings, refusal and non-Grok controls. GT1-04-13 must execute the three suites. Static checks add no diagnostics; native title mutation remains unsupported.",
+					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
+				},
+				{
+					"id": "grok-native-delete-edit-transport-unqualified",
+					"code": "native-mutation-unsupported",
+					"missingPrerequisite": "Version-qualified account/cwd/host-bound native mutation transaction, native prompt mapping and active-writer/generation fencing. GT1-04-08C preserves history and refuses unsafe UI/IPC mutations; GT1-04-08D/13 must author/execute refusal and isolation regressions. Pinned whole-session delete and rewind cannot substitute for arbitrary message-pair edits. Native compliance remains not-run.",
 					"affectedRows": ["P14", "REG-SESSION-MUTATION"]
 				}
 			],

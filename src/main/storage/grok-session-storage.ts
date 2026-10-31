@@ -1414,6 +1414,8 @@ export class GrokSessionStorage extends BaseSessionStorage {
 	 * Delete a message pair. Not supported for Grok sessions: editing
 	 * chat_history.jsonl would desync summary.json counts, events.jsonl, and
 	 * the sqlite FTS index the live Grok leader process maintains.
+	 * Native whole-session deletion and prompt-index rewind are not pair edits;
+	 * neither has a qualified, account/host-bound Maestro mutation transport.
 	 */
 	async deleteMessagePair(
 		_projectPath: string,
@@ -1424,7 +1426,8 @@ export class GrokSessionStorage extends BaseSessionStorage {
 	): Promise<{ success: boolean; error?: string; linesRemoved?: number }> {
 		return {
 			success: false,
-			error: 'Deleting Grok session history is not supported.',
+			error:
+				'Deleting or editing Grok session history is not supported in Maestro. A verified native transaction is required to keep its transcript and indexes consistent. History is unchanged.',
 		};
 	}
 

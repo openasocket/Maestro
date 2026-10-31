@@ -975,6 +975,16 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 				userMessageUuid: string,
 				fallbackContent?: string
 			): Promise<{ success: boolean; error?: string; linesRemoved?: number }> => {
+				if (agentId === 'grok') {
+					// This legacy mutation request has no account/host ownership or
+					// native generation receipt. Never infer either from a native ID,
+					// cwd or fallback text, or substitute a partial JSONL rewrite.
+					return {
+						success: false,
+						error:
+							'Grok history deletion and editing are not supported in Maestro: this request has no account/host ownership, and native mutations have no verified transport. History is unchanged.',
+					};
+				}
 				const storage = getSessionStorage(agentId);
 				if (!storage) {
 					logger.warn(`No session storage available for agent: ${agentId}`, LOG_CONTEXT);
