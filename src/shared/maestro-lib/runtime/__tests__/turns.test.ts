@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	CAPTURED_RECORDINGS,
@@ -22,6 +22,7 @@ import {
 	fakeTurnFromRecording,
 	writeFakeTurn,
 } from '../../../../__tests__/shared/maestro-lib/run/fakeAgent';
+import * as repositories from '../../agents/repository';
 import { DEFAULT_TAB_DEFAULTS } from '../../agents/rules';
 import type { ClientResult, ManagedApi, TurnEvent } from '../../client/types';
 import {
@@ -217,6 +218,7 @@ describe('runtime turns', () => {
 		};
 	});
 	afterEach(async () => {
+		vi.restoreAllMocks();
 		for (const runtime of open) await runtime.connection.close();
 		fs.rmSync(dir, { recursive: true, force: true });
 		fs.rmSync(work, { recursive: true, force: true });
@@ -500,11 +502,12 @@ describe('runtime turns', () => {
 
 		async function startManaged(
 			authority: HostAuthority | null = managedAuthority(),
-			extra: Partial<RuntimeDeps> = {}
+			extra: Partial<RuntimeDeps> = {},
+			agent = seedAgent()
 		) {
 			fs.writeFileSync(
 				path.join(dir, 'maestro-sessions.json'),
-				JSON.stringify({ sessions: [seedAgent()], activeSessionId: 'a1' }, null, '\t')
+				JSON.stringify({ sessions: [agent], activeSessionId: 'a1' }, null, '\t')
 			);
 			const started = await createMaestroRuntime({
 				dataDir: dir,
@@ -623,6 +626,242 @@ describe('runtime turns', () => {
 				value: { items: [{ runId }], nextCursor: null },
 			});
 		});
+
+		it.each([
+			{ name: 'new allocation', early: ['native-new'], end: 'native-new' },
+			{
+				name: 'settings change during turn',
+				early: ['native-new'],
+				end: 'native-new',
+				mutate: true,
+			},
+			{ name: 'end-only allocation', early: [], end: 'native-new' },
+			{ name: 'allocation without terminal ID', early: ['native-new'], end: undefined },
+			{ name: 'cancelled allocation', early: ['native-new'], end: undefined, cancel: true },
+			{ name: 'raw same-ID resume', resume: 'original', early: ['original'], end: undefined },
+			{ name: 'unobserved resume', resume: 'original', early: [], end: undefined },
+			{ name: 'unobserved new turn', early: [], end: undefined },
+			{
+				name: 'rejected allocation write',
+				early: ['native-new'],
+				end: undefined,
+				refused: true,
+				writeRefused: 'allocation',
+			},
+			{
+				name: 'rejected same-ID check',
+				resume: 'original',
+				early: ['original'],
+				end: undefined,
+				refused: true,
+				writeRefused: 'check',
+			},
+			{ name: 'invalid early ID', early: ['\u0000bad'], end: undefined, refused: true },
+			{ name: 'blank early ID', early: ['   '], end: undefined, refused: true },
+			{ name: 'empty end ID', early: [], end: '', refused: true },
+			{ name: 'invalid end ID', early: [], end: 'bad\nend', refused: true },
+			{
+				name: 'replaced early ID',
+				resume: 'original',
+				early: ['replacement'],
+				end: 'original',
+				refused: true,
+			},
+			{
+				name: 'replaced end ID',
+				resume: 'original',
+				early: ['original'],
+				end: 'replacement',
+				refused: true,
+			},
+			{
+				name: 'conflicting allocation',
+				early: ['native-new', 'replacement'],
+				end: 'replacement',
+				refused: true,
+			},
+		])(
+			'records Grok identity honestly: $name',
+			async ({ resume, early, end, cancel, refused, writeRefused, mutate }) => {
+				// Exercise the real repository/journal/recorder around controlled parsed ID observations.
+				// The existing inert child still supplies the actual process, admission and cancellation.
+				hold = cancel === true;
+				recordings.grok = writeFakeTurn(work, {
+					chunks: ['{"type":"text","data":"answer"}\n', '{"type":"end","stopReason":"EndTurn"}\n'],
+					close: { code: 0, signal: null },
+				});
+				let changeScope: () => void = () => undefined;
+				const run: RuntimeDeps['turns']['runAgentTurn'] = async (assembled, options) => {
+					expect(assembled.resumeSessionId).toBe(resume);
+					const started = await fakeProvider(assembled, options);
+					if (!started.ok) return started;
+					return {
+						ok: true,
+						run: {
+							...started.run,
+							events: (async function* () {
+								for (const sessionId of early) yield { type: 'system' as const, sessionId };
+								if (mutate) {
+									value(await runtime.agents.update('a1', { provider: 'codex' }));
+									changeScope();
+								}
+								for await (const event of started.run.events) yield event;
+							})(),
+							result: started.run.result.then((completed) => ({
+								...completed,
+								sessionId: end,
+								usage: {
+									inputTokens: 7,
+									outputTokens: 3,
+									cacheReadInputTokens: 0,
+									cacheCreationInputTokens: 0,
+									totalCostUsd: 0.01,
+									contextWindow: 200_000,
+								},
+							})),
+						},
+					};
+				};
+				if (writeRefused || mutate) {
+					const create = repositories.createAgentRepository;
+					vi.spyOn(repositories, 'createAgentRepository').mockImplementationOnce((options) => {
+						const repository = create(options);
+						// A foreign settings snapshot can arrive outside the public busy edit guard.
+						const get = repository.getAgent.bind(repository);
+						changeScope = () => {
+							vi.spyOn(repository, 'getAgent').mockImplementation((id) => {
+								const agent = get(id);
+								return (
+									agent && {
+										...agent,
+										cwd: path.join(work, 'changed'),
+										parentSessionId: 'changed-parent',
+										sessionSshRemoteConfig: { enabled: true, remoteId: 'changed-host' },
+									}
+								);
+							});
+						};
+						const record = repository.recordTabSession.bind(repository);
+						vi.spyOn(repository, 'recordTabSession').mockImplementation((...args) => {
+							const update = args[3];
+							if (
+								writeRefused === 'allocation'
+									? !!update.agentSessionId
+									: writeRefused === 'check' && !update.agentSessionId && !update.addUsage
+							) {
+								return Promise.resolve({
+									ok: false,
+									error: {
+										code: 'rejected',
+										method: 'turns.send',
+										message: 'Native ownership changed.',
+									},
+								});
+							}
+							return record(...args);
+						});
+						return repository;
+					});
+				}
+				const binding = { version: 1, state: 'unknown', reason: 'unobserved' };
+				const runtime = await startManaged(
+					managedAuthority(),
+					{ turns: { runAgentTurn: run } },
+					seedAgent({
+						toolType: 'grok',
+						aiTabs: [
+							{
+								id: 't1',
+								agentSessionId: resume ?? null,
+								name: null,
+								logs: [],
+								...(resume ? { nativeSessionBinding: binding } : {}),
+							},
+						],
+					})
+				);
+				const turn = watch(runtime);
+				const result = value(
+					await managedOf(runtime).submit(
+						envelope(runtime, {
+							...submission('identity recording'),
+							providerId: 'grok',
+						})
+					)
+				);
+				expect(result.status).toBe('ok');
+				if (cancel) {
+					await turn.saw('session');
+					// Allocation is persisted before its event becomes visible, even if Stop follows it.
+					expect(await tabOf(runtime)).toMatchObject({
+						agentSessionId: 'native-new',
+						nativeSessionBinding: binding,
+					});
+					value(await runtime.turns.interrupt('a1', 't1'));
+				}
+				await turn.outcome();
+				const retained =
+					resume ??
+					(writeRefused
+						? null
+						: early[0] === 'native-new'
+							? 'native-new'
+							: !refused
+								? end
+								: null) ??
+					null;
+				const observed = refused ? undefined : (end ?? early[0]);
+				const current = await tabOf(runtime);
+				const tab = mutate
+					? (current.providerSessions as Record<string, typeof current>).grok
+					: current;
+				expect(tab.agentSessionId).toBe(retained);
+				expect(current.runtimeTurnId).toEqual(expect.any(String));
+				if (retained) expect(tab.nativeSessionBinding).toEqual(binding);
+				else expect(tab.nativeSessionBinding).toBeUndefined();
+				expect(turn.outcomes()).toEqual([
+					refused ? 'crashed' : cancel ? 'interrupted' : 'completed',
+				]);
+				const sessionIds = turn.events.flatMap((event) =>
+					event.kind === 'session' ? [event.providerSessionId] : []
+				);
+				expect(sessionIds).toEqual(
+					!resume && !writeRefused && early[0] === 'native-new'
+						? ['native-new']
+						: !refused && end
+							? [end]
+							: []
+				);
+				const history = readHistory(runtime.paths, 'a1');
+				if (refused || cancel) expect(history.status).toBe('missing');
+				else {
+					if (history.status !== 'ok') throw new Error(`history ${history.status}`);
+					expect(history.entries).toHaveLength(1);
+					expect(history.entries[0].projectPath).toBe(work);
+					expect(history.entries[0].agentSessionId).toBe(observed);
+					expect(history.entries[0].nativeSessionBinding).toEqual(binding);
+				}
+				expect(journalRuns()[0]).toMatchObject({
+					state: refused ? 'failed' : cancel ? 'cancelled' : 'completed',
+					providerSessionId: observed ?? null,
+					attempts: [
+						expect.objectContaining({
+							phase: 'terminal',
+							outcome: refused ? 'failed' : cancel ? 'cancelled' : 'completed',
+						}),
+					],
+				});
+				if (refused) {
+					expect(tab.usageStats).toBeUndefined();
+					expect(turn.events).toContainEqual(
+						expect.objectContaining({
+							kind: 'error',
+							error: expect.objectContaining({ type: 'session_not_found', recoverable: false }),
+						})
+					);
+				} else expect(tab.usageStats).toMatchObject({ inputTokens: 7, outputTokens: 3 });
+			}
+		);
 
 		it('denies with zero effect: no process, no transcript, no queue item, a failed attempt in the journal', async () => {
 			const runtime = await startManaged(

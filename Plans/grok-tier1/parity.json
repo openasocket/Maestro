@@ -2389,6 +2389,29 @@
 			],
 			"testOwners": ["GT1-04-07FT", "GT1-04-07FPT", "GT1-04-07F4T", "GT1-04-07F5T"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-runtime-native-recording-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07ft-runtime-native-recording-regression-tests",
+			"sourceCommit": "7f928541bb9cfdb8d75409ed3e1d3b78a231b494",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/shared/maestro-lib/runtime/__tests__/turns.test.ts": "7e214a44b50c62cb4b6dd25abfc71742f6131a73598ca3f79033b0c77f7c0b7e",
+				"src/__tests__/shared/maestro-lib/turns/record-turn.test.ts": "c5347ddd8cbb81c503ea4d02e12f7e3feeccef5e3ecfb9dca2a9adffce570833",
+				"src/shared/maestro-lib/agents/__tests__/rules.test.ts": "b2887776977bdcbce24d8ad0e77d023927b5395d1530221dd3e31817760752db"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"newTypeDiagnostics": 0,
+			"staticLimitations": "Static TypeScript comparison repairs two existing recorder fixture diagnostics and retains the existing RequestInit.dispatcher TS2339. Tests neither run nor collected.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "32 added parameter-expanded cases across the existing runtime, recorder and rules suites: original scope after provider/settings changes, detached live/parked ID/binding writes, expected turn/ID/binding checks, unknown provenance, raw same-ID resume observations, invalid/conflicting early/end IDs, refused persistence, History/journal/usage exclusion, cancellation and absent-ID honesty. Two beginTurnRecord cases adapted for optional turnId.",
+			"testOwner": "GT1-04-07FT",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6320,7 +6343,8 @@
 				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests",
 				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests",
 				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests",
-				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites"
+				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites",
+				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6370,7 +6394,7 @@
 				{
 					"id": "runtime-native-launch-and-recording-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT/FPT/F4T/F5T author bounded regressions; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
+					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT has authored recording prerequisite regressions; FPT/F4T/F5T own continuation tests; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
 					"affectedRows": ["P14"]
 				}
 			],
@@ -11629,7 +11653,8 @@
 				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests",
 				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests",
 				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests",
-				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites"
+				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites",
+				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11679,7 +11704,7 @@
 				{
 					"id": "runtime-native-launch-and-recording-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT/FPT/F4T/F5T author bounded regressions; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
+					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT has authored recording prerequisite regressions; FPT/F4T/F5T own continuation tests; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
 					"affectedRows": ["C-supportsResume"]
 				}
 			],
@@ -12207,7 +12232,8 @@
 				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests",
 				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests",
 				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests",
-				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites"
+				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites",
+				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12257,7 +12283,7 @@
 				{
 					"id": "runtime-native-launch-and-recording-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT/FPT/F4T/F5T author bounded regressions; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
+					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT has authored recording prerequisite regressions; FPT/F4T/F5T own continuation tests; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
 					"affectedRows": ["C-supportsSessionId"]
 				}
 			],
@@ -16856,7 +16882,8 @@
 				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests",
 				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests",
 				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests",
-				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites"
+				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites",
+				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16906,7 +16933,7 @@
 				{
 					"id": "runtime-native-launch-and-recording-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT/FPT/F4T/F5T author bounded regressions; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
+					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT has authored recording prerequisite regressions; FPT/F4T/F5T own continuation tests; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
 					"affectedRows": ["REG-SESSION-MUTATION"]
 				}
 			],

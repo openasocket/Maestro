@@ -40,6 +40,7 @@ import {
 	type RecordedTurn,
 } from '../../../../shared/maestro-lib/turns/record-turn';
 import type { StatsRecorder } from '../../../../shared/maestro-lib/turns/stats';
+import type { TurnExit } from '../../../../shared/maestro-lib/run/start-turn';
 import type { QueryEvent } from '../../../../shared/stats-types';
 
 const confText = (doc: unknown) => JSON.stringify(doc, null, '\t');
@@ -58,7 +59,7 @@ const USAGE = {
 	contextWindow: 200_000,
 };
 
-const CLEAN_EXIT = {
+const CLEAN_EXIT: TurnExit = {
 	exitCode: 0,
 	signal: null,
 	interrupted: false,
@@ -151,6 +152,9 @@ describe('turn records', () => {
 		paths = resolveMaestroPaths({ env: { MAESTRO_USER_DATA: userData } });
 		statsEvents = [];
 		statsRecorder = {
+			startAutoRun: vi.fn<StatsRecorder['startAutoRun']>(),
+			recordAutoTask: vi.fn<StatsRecorder['recordAutoTask']>(),
+			endAutoRun: vi.fn<StatsRecorder['endAutoRun']>(),
 			recordQuery: async (event) => {
 				statsEvents.push(event);
 				return { ok: true, id: 'stat-1' };
@@ -190,6 +194,112 @@ describe('turn records', () => {
 		);
 		expect(statsEvents[0]?.agentType).toBe('codex');
 	});
+
+	it.each([false, true])(
+		'detaches original Grok scope and binding before recording (remote/worktree=%s)',
+		async (remote) => {
+			const scope = { projectPath: '/original/project', isRemote: remote, isWorktree: remote };
+			const binding = {
+				version: 1 as const,
+				state: 'bound' as const,
+				provider: 'grok' as const,
+				nativeSessionId: turn().completed.sessionId!,
+				accountRef: 'grok-account:original',
+				host: { kind: remote ? ('ssh' as const) : ('local' as const), identity: 'original-host' },
+				cwd: scope.projectPath,
+			};
+			const originalBinding = structuredClone(binding);
+			seed({
+				toolType: 'codex',
+				cwd: '/changed/project',
+				parentSessionId: remote ? '' : 'parent',
+				sessionSshRemoteConfig: { enabled: !remote, remoteId: 'changed-host' },
+			});
+			const { recorder: records, repository } = await recorder();
+			const append = repository.appendTranscript.bind(repository);
+			vi.spyOn(repository, 'appendTranscript').mockImplementationOnce(async (...args) => {
+				scope.projectPath = '/mutated/project';
+				scope.isRemote = !remote;
+				scope.isWorktree = !remote;
+				binding.host.identity = 'mutated-host';
+				binding.nativeSessionId = 'mutated-native';
+				return append(...args);
+			});
+			const result = await records.recordTurn(
+				turn({
+					scope,
+					nativeSessionBinding: binding,
+					assembled: {
+						entry: { text: 'hi' },
+						settings: { provider: 'grok', model: 'original-model' },
+					},
+				})
+			);
+			expect(result.history).toMatchObject({ ok: true });
+			const [entry] = await new HistoryManager().getEntries('a1');
+			expect(entry).toMatchObject({
+				projectPath: '/original/project',
+				nativeSessionBinding: originalBinding,
+			});
+			expect(statsEvents[0]).toMatchObject({
+				agentType: 'grok',
+				projectPath: '/original/project',
+				isRemote: remote,
+				isWorktree: remote,
+			});
+			expect(transcriptOf(repository.getTab('a1', 't1')!).at(-1)).toMatchObject({
+				turnModel: 'original-model',
+			});
+		}
+	);
+
+	it('records unobserved Grok provenance without borrowing the current account or host', async () => {
+		seed({
+			toolType: 'grok',
+			customEnvVars: { GROK_HOME: '/new/account' },
+			sessionSshRemoteConfig: { enabled: true, remoteId: 'new-host' },
+		});
+		const { recorder: records } = await recorder();
+		await records.recordTurn(
+			turn({
+				assembled: { entry: { text: 'hi' }, settings: { provider: 'grok' } },
+			})
+		);
+		const [entry] = await new HistoryManager().getEntries('a1');
+		expect(entry.nativeSessionBinding).toEqual({
+			version: 1,
+			state: 'unknown',
+			reason: 'unobserved',
+		});
+	});
+
+	it.each(['different-native', undefined])(
+		'refuses successful History for a mismatched end ID (%s)',
+		async (sessionId) => {
+			const { recorder: records } = await recorder();
+			const result = await records.recordTurn(
+				turn({
+					assembled: { entry: { text: 'hi' }, settings: { provider: 'grok' } },
+					completed: { ...turn().completed, sessionId },
+					nativeSessionBinding: {
+						version: 1,
+						state: 'bound',
+						provider: 'grok',
+						nativeSessionId: 'original-native',
+						accountRef: 'grok-account:original',
+						host: { kind: 'local', identity: 'original-host' },
+						cwd: '/original/project',
+					},
+				})
+			);
+			expect(result.history).toEqual({
+				ok: false,
+				reason: 'not-recorded',
+				message: 'Native session identity mismatch.',
+			});
+			expect(fs.existsSync(path.join(paths.historyDir, 'a1.jsonl'))).toBe(false);
+		}
+	);
 
 	it('records a USER history entry the desktop reads, built from the answer', async () => {
 		const { recorder: records } = await recorder();
@@ -446,14 +556,14 @@ describe('turn records', () => {
 		const ctx = context();
 
 		it('words an unclassified crash from the exit facts', () => {
-			const crash = (exit: Partial<typeof CLEAN_EXIT> & { spawnError?: Error }) =>
+			const crash = (exit: Partial<TurnExit>) =>
 				buildTurnTranscript(
 					turn({
 						completed: {
 							...turn().completed,
 							outcome: 'crashed',
 							answerText: undefined,
-							exit: { ...CLEAN_EXIT, ...exit } as never,
+							exit: { ...CLEAN_EXIT, ...exit },
 						},
 					}),
 					ctx
@@ -461,7 +571,7 @@ describe('turn records', () => {
 			expect(crash({ exitCode: 2, stderrText: 'boom\n' })).toBe(
 				'The agent exited with code 2.\nboom'
 			);
-			expect(crash({ exitCode: null, signal: 'SIGKILL' as never })).toBe(
+			expect(crash({ exitCode: null, signal: 'SIGKILL' })).toBe(
 				'The agent was stopped by SIGKILL.'
 			);
 			expect(crash({ spawnError: new Error('ENOENT') })).toBe(
