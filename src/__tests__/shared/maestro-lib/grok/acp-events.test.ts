@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { GrokAcpEventAdapter } from '../../../../shared/maestro-lib/grok/acp-events';
+import {
+	GrokAcpEventAdapter,
+	type GrokAcpEventOptions,
+} from '../../../../shared/maestro-lib/grok/acp-events';
 import { AcpFrameDecoder, type AcpCall } from '../../../../shared/maestro-lib/grok/acp-protocol';
 import type { ParsedEvent } from '../../../../shared/maestro-lib/parsers/agent-output-parser';
 import { GrokOutputParser } from '../../../../shared/maestro-lib/parsers/grok-output-parser';
 import { TurnCapture } from '../../../../shared/maestro-lib/run/turn-capture';
+import { resolveTurnOutcome } from '../../../../shared/maestro-lib/streaming/turn-outcome';
 import { createTurnEventMapper } from '../../../../shared/maestro-lib/turns/turn-events';
 
 // Synthetic fixtures follow pinned ACP schema 0.11.4, not native streaming-json.
@@ -26,10 +30,11 @@ const promptUsage = {
 function notification(update: Record<string, unknown>, method = '_x.ai/session/update'): AcpCall {
 	return { jsonrpc: '2.0', method, params: { sessionId: identity.sessionId, update } };
 }
-function fixture() {
-	const adapter = new GrokAcpEventAdapter(identity);
+function fixture(options: GrokAcpEventOptions = identity) {
+	const adapter = new GrokAcpEventAdapter(options);
 	// Only the existing normalized-field extractors are used; no native/Claude decoding.
-	const capture = new TurnCapture('grok', new GrokOutputParser(), { classifyInBandErrors: false });
+	const parser = new GrokOutputParser();
+	const capture = new TurnCapture('grok', parser, { classifyInBandErrors: false });
 	const mapper = createTurnEventMapper({ agentId: 'grok', now: () => 1 });
 	const events: ParsedEvent[] = [];
 	const output: ReturnType<typeof mapper.map> = [];
@@ -47,6 +52,22 @@ function fixture() {
 		events,
 		output,
 		accept,
+		outcome: () =>
+			resolveTurnOutcome(
+				{
+					exitCode: 0,
+					signal: null,
+					interrupted: false,
+					stderrText: '',
+					stdoutText: '',
+					explicitError: capture.inBandError,
+					capturedAnswerText: capture.answerText,
+					resultMessageSeen: capture.resultMessageSeen,
+					terminal: adapter.terminal,
+				},
+				parser,
+				{ providerId: 'grok', sessionId: options.sessionId }
+			),
 		send: (update: Record<string, unknown>, method?: string) =>
 			accept(adapter.notification(notification(update, method), context)),
 		wire: (line: string) =>
@@ -384,4 +405,407 @@ describe('Grok ACP event fixtures', () => {
 			accounting: { completeness: 'partial', cost: { status: 'unknown' } },
 		});
 	});
+
+	it.each([
+		['end_turn', { status: 'success' }, 'completed'],
+		['cancelled', { status: 'cancelled', origin: 'provider' }, 'interrupted'],
+		['refusal', { status: 'refused', origin: 'provider' }, 'crashed'],
+		['max_tokens', { status: 'incomplete', kind: 'limit' }, 'crashed'],
+		['max_turn_requests', { status: 'incomplete', kind: 'limit' }, 'crashed'],
+		['error', { status: 'failed', kind: 'provider' }, 'crashed'],
+		['future_stop', { status: 'incomplete', kind: 'unknown-stop-reason' }, 'crashed'],
+		[undefined, { status: 'incomplete', kind: 'missing-terminal' }, 'crashed'],
+		['', { status: 'incomplete', kind: 'missing-terminal' }, 'crashed'],
+	] as const)(
+		'resolves stop %s once despite exit zero and useful text',
+		(stopReason, terminal, outcome) => {
+			const f = fixture();
+			f.send(
+				{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'partial' } },
+				'session/update'
+			);
+			f.accept(f.adapter.settle({ stopReason }));
+			expect(f.adapter.terminal).toEqual({
+				...terminal,
+				dispatchState: 'dispatched',
+				...(stopReason ? { providerStopReason: stopReason } : {}),
+			});
+			expect(f.outcome()).toEqual({ outcome, terminal: f.adapter.terminal });
+			expect(f.capture.answerText).toBe('partial');
+			expect(f.output.filter((e) => e.kind === 'text')).toEqual([
+				{ kind: 'text', text: 'partial' },
+			]);
+			expect(f.capture.resultMessageSeen).toBe(terminal.status === 'success');
+			expect(f.adapter.settle({ stopReason: 'end_turn' })).toEqual([]);
+			expect(f.events.filter((e) => e.terminal)).toHaveLength(1);
+		}
+	);
+
+	describe.each(['prompt', 'durable'] as const)('%s terminal metadata', (source) => {
+		it.each([
+			[{ cancellationCategory: 'HookDenied' }, { status: 'refused', origin: 'provider' }],
+			[{ cancellationCategory: 'PermissionRejected' }, { status: 'refused', origin: 'provider' }],
+			[
+				{ cancellationCategory: 'PermissionCancelled' },
+				{ status: 'cancelled', origin: 'provider' },
+			],
+			[{ cancellationCategory: 'MidTurnAbort' }, { status: 'cancelled', origin: 'provider' }],
+			[{ cancellationCategory: 'max_turns_reached' }, { status: 'incomplete', kind: 'limit' }],
+			[{ cancellationCategory: 'action_stationarity' }, { status: 'incomplete', kind: 'limit' }],
+			[{ cancellationCategory: 'future' }, { status: 'incomplete', kind: 'unknown-stop-reason' }],
+			[{ structuredOutputError: 'invalid' }, { status: 'failed', kind: 'provider' }],
+			[{ structuredOutputError: {} }, { status: 'failed', kind: 'provider' }],
+			[
+				{ completionKind: 'removedFromQueue' },
+				{ status: 'cancelled', origin: 'provider', dispatchState: 'not-dispatched' },
+			],
+		] as const)('overrides end_turn without losing durable output %#', (metadata, terminal) => {
+			const f = fixture();
+			const message = notification({
+				sessionUpdate: 'turn_completed',
+				prompt_id: identity.promptId,
+				agent_result: 'saved partial',
+				stop_reason: 'end_turn',
+				usage: promptUsage,
+			});
+			if (source === 'durable') message.params = { ...message.params, _meta: metadata };
+			f.accept(f.adapter.notification(message, context));
+			f.accept(
+				f.adapter.settle({ stopReason: 'end_turn', _meta: source === 'prompt' ? metadata : {} })
+			);
+			expect(f.adapter.terminal).toEqual({
+				dispatchState: 'dispatched',
+				...terminal,
+				providerStopReason: 'end_turn',
+			});
+			expect(f.outcome()).toEqual({
+				outcome: terminal.status === 'cancelled' ? 'interrupted' : 'crashed',
+				terminal: f.adapter.terminal,
+			});
+			expect(f.capture.answerText).toBe('saved partial');
+			expect(f.output.filter((e) => e.kind === 'text')).toEqual([
+				{ kind: 'text', text: 'saved partial' },
+			]);
+			expect(f.capture.usage?.accounting?.cost).toEqual({ status: 'unknown' });
+			expect(f.capture.resultMessageSeen).toBe(false);
+			expect(f.adapter.settle({ stopReason: 'end_turn' })).toEqual([]);
+			expect(f.events.filter((e) => e.terminal)).toHaveLength(1);
+		});
+	});
+
+	it.each([
+		[{ stop_reason: 'cancelled' }, { status: 'cancelled', origin: 'provider' }],
+		[{ stop_reason: 'refusal' }, { status: 'refused', origin: 'provider' }],
+		[{ stop_reason: 'max_tokens' }, { status: 'incomplete', kind: 'limit' }],
+		[{ stop_reason: 'max_turn_requests' }, { status: 'incomplete', kind: 'limit' }],
+		[{ stop_reason: 'error' }, { status: 'failed', kind: 'provider' }],
+		[{ stop_reason: 'future' }, { status: 'incomplete', kind: 'unknown-stop-reason' }],
+		[
+			{ error_kind: 'max_tokens_truncation' },
+			{ status: 'incomplete', kind: 'limit', reason: 'max_tokens_truncation' },
+		],
+		[
+			{ error_kind: 'upstream_failure' },
+			{ status: 'failed', kind: 'provider', reason: 'upstream_failure' },
+		],
+	] as const)(
+		'preserves durable non-success over a successful prompt reply %#',
+		(fields, terminal) => {
+			const f = fixture();
+			f.send({
+				sessionUpdate: 'turn_completed',
+				prompt_id: identity.promptId,
+				stop_reason: 'end_turn',
+				agent_result: 'partial',
+				...fields,
+			});
+			expect(f.adapter.terminal).toBeUndefined();
+			f.accept(f.adapter.settle({ stopReason: 'end_turn' }));
+			expect(f.adapter.terminal).toMatchObject({ ...terminal, providerStopReason: 'end_turn' });
+			expect(f.outcome()).toEqual({
+				outcome: terminal.status === 'cancelled' ? 'interrupted' : 'crashed',
+				terminal: f.adapter.terminal,
+			});
+			expect(f.capture.answerText).toBe('partial');
+			expect(f.capture.resultMessageSeen).toBe(false);
+			expect(f.events.filter((e) => e.terminal)).toHaveLength(1);
+		}
+	);
+
+	describe.each([false, true])('with trusted durable usage: %s', (durable) => {
+		it.each([{ sessionId: 'foreign-session' }, { promptId: 'foreign-prompt' }])(
+			'rejects mismatched prompt metadata %# without importing its usage',
+			(metadata) => {
+				const f = fixture();
+				f.send(
+					{
+						sessionUpdate: 'agent_message_chunk',
+						content: { type: 'text', text: 'owned partial' },
+					},
+					'session/update'
+				);
+				if (durable)
+					f.send({
+						sessionUpdate: 'turn_completed',
+						prompt_id: identity.promptId,
+						usage: promptUsage,
+					});
+				f.accept(
+					f.adapter.settle({
+						stopReason: 'end_turn',
+						_meta: {
+							...metadata,
+							usage: { ...promptUsage, inputTokens: 9999, costUsdTicks: '99' },
+						},
+					})
+				);
+				expect(f.outcome()).toMatchObject({
+					outcome: 'crashed',
+					terminal: { status: 'failed', kind: 'protocol' },
+				});
+				expect(f.capture.answerText).toBe('owned partial');
+				expect(f.capture.resultMessageSeen).toBe(false);
+				if (durable)
+					expect(f.capture.usage).toMatchObject({
+						inputTokens: 100,
+						accounting: { cost: { status: 'unknown' } },
+					});
+				else expect(f.capture.usage).toBeUndefined();
+				expect(f.events.filter((e) => e.terminal)).toHaveLength(1);
+			}
+		);
+	});
+
+	it.each(['numeric-request', 'string-request', 'replay', 'foreign-turn', 'foreign-session'])(
+		'rejects %s before it can alter text, tools, usage or durable state',
+		(kind) => {
+			const f = fixture();
+			for (const [method, update] of [
+				[
+					'session/update',
+					{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'foreign' } },
+				],
+				['session/update', { sessionUpdate: 'tool_call', toolCallId: 'tool', title: 'Bash' }],
+				['_x.ai/session/update', { sessionUpdate: 'turn_usage', usage: responseUsage }],
+				[
+					'_x.ai/session/update',
+					{
+						sessionUpdate: 'turn_completed',
+						prompt_id: identity.promptId,
+						agent_result: 'foreign',
+						stop_reason: 'refusal',
+						usage: promptUsage,
+					},
+				],
+			] as const) {
+				const message = notification(update, method);
+				if (kind === 'numeric-request') message.id = 0;
+				if (kind === 'string-request') message.id = 'request';
+				if (kind === 'foreign-session') message.params = { ...message.params, sessionId: 'other' };
+				expect(
+					f.accept(
+						f.adapter.notification(message, {
+							replay: kind === 'replay',
+							turnId: kind === 'foreign-turn' ? 'other' : identity.turnId,
+						})
+					)
+				).toEqual([]);
+			}
+			expect(f.events).toEqual([]);
+			expect(f.output).toEqual([]);
+			expect(f.capture.usage).toBeUndefined();
+			f.send({
+				sessionUpdate: 'turn_completed',
+				prompt_id: identity.promptId,
+				agent_result: 'owned',
+				usage: promptUsage,
+			});
+			f.accept(f.adapter.settle({ stopReason: 'end_turn' }));
+			expect(f.outcome().outcome).toBe('completed');
+			expect(f.output.filter((e) => e.kind === 'text')).toEqual([{ kind: 'text', text: 'owned' }]);
+			expect(f.capture.usage?.inputTokens).toBe(100);
+			expect(f.events.filter((e) => e.terminal)).toHaveLength(1);
+		}
+	);
+
+	it.each(['unbound', 'foreign-prompt', 'missing-prompt', 'missing-session'])(
+		'keeps %s durable notifications opaque',
+		(kind) => {
+			const f = fixture({
+				...identity,
+				promptId: kind === 'unbound' ? undefined : identity.promptId,
+			});
+			const update = {
+				sessionUpdate: 'turn_completed',
+				prompt_id:
+					kind === 'missing-prompt'
+						? undefined
+						: kind === 'foreign-prompt'
+							? 'other'
+							: identity.promptId,
+				agent_result: 'unowned',
+				stop_reason: 'refusal',
+				usage: promptUsage,
+			};
+			const message = notification(update);
+			if (kind === 'missing-session') message.params = { update };
+			expect(f.accept(f.adapter.notification(message, context))).toEqual([
+				{ type: 'system', sessionId: identity.sessionId, raw: message },
+			]);
+			f.accept(f.adapter.settle({ stopReason: 'end_turn' }));
+			expect(f.outcome().outcome).toBe('completed');
+			expect(f.capture.answerText).toBeUndefined();
+			expect(f.capture.usage).toBeUndefined();
+			expect(f.output.filter((e) => e.kind === 'text')).toEqual([]);
+			expect(f.events.filter((e) => e.terminal)).toHaveLength(1);
+		}
+	);
+
+	it.each([
+		[{}, { status: 'unknown' }, 'complete'],
+		[{ costUsdTicks: '-1' }, { status: 'unknown' }, 'complete'],
+		[{ costUsdTicks: '1e3' }, { status: 'unknown' }, 'complete'],
+		[{ costUsdTicks: null }, { status: 'unknown' }, 'complete'],
+		[
+			{ costUsdTicks: '9', costIsPartial: true },
+			{ status: 'partial', costUsdTicks: '9' },
+			'complete',
+		],
+		[
+			{ costUsdTicks: '9', costIsPartial: 'invalid' },
+			{ status: 'partial', costUsdTicks: '9' },
+			'partial',
+		],
+		[{ costIsPartial: true }, { status: 'partial' }, 'complete'],
+	] as const)(
+		'keeps model cost provenance separate from exact parent cost %#',
+		(fields, cost, completeness) => {
+			const f = fixture();
+			f.accept(
+				f.adapter.settle({
+					stopReason: 'end_turn',
+					_meta: {
+						usage: {
+							...promptUsage,
+							costUsdTicks: '20',
+							modelUsage: {
+								'grok-a': { ...promptUsage, ...fields },
+								'grok-b': { ...promptUsage, costUsdTicks: '7' },
+							},
+						},
+					},
+				})
+			);
+			expect(f.capture.usage).toMatchObject({
+				inputTokens: 100,
+				outputTokens: 10,
+				accounting: {
+					cost: { status: 'exact', costUsdTicks: '20' },
+					models: [
+						{
+							model: 'grok-a',
+							inputTokens: 100,
+							cacheReadInputTokens: 20,
+							cacheCreationInputTokens: 10,
+							cost,
+							completeness,
+						},
+						{ model: 'grok-b', cost: { status: 'exact', costUsdTicks: '7' } },
+					],
+				},
+			});
+		}
+	);
+
+	it.each([{}, { inputTokens: -1, outputTokens: 0 }, { inputTokens: 1 }])(
+		'keeps malformed model counts unknown without erasing valid sibling usage %#',
+		(row) => {
+			const f = fixture();
+			f.accept(
+				f.adapter.settle({
+					stopReason: 'end_turn',
+					_meta: {
+						usage: {
+							...promptUsage,
+							modelUsage: {
+								'grok-bad': { ...row, costUsdTicks: '999' },
+								'grok-null': null,
+								'grok-good': { ...promptUsage, costUsdTicks: '7' },
+							},
+						},
+					},
+				})
+			);
+			expect(f.capture.usage?.accounting?.models).toEqual([
+				{ model: 'grok-bad', completeness: 'unknown', cost: { status: 'unknown' } },
+				expect.objectContaining({
+					model: 'grok-good',
+					inputTokens: 100,
+					cost: { status: 'exact', costUsdTicks: '7' },
+				}),
+			]);
+			expect(f.capture.usage?.accounting?.cost).toEqual({ status: 'unknown' });
+			expect(f.capture.usage?.inputTokens).toBe(100);
+		}
+	);
+
+	it('carries partial parent cost into otherwise exact model rows', () => {
+		const f = fixture();
+		f.accept(
+			f.adapter.settle({
+				stopReason: 'end_turn',
+				_meta: {
+					usage: {
+						...promptUsage,
+						costUsdTicks: '20',
+						costIsPartial: true,
+						modelUsage: { 'grok-a': { ...promptUsage, costUsdTicks: '9' } },
+					},
+				},
+			})
+		);
+		expect(f.capture.usage?.accounting).toMatchObject({
+			cost: { status: 'partial', costUsdTicks: '20' },
+			models: [{ model: 'grok-a', cost: { status: 'partial', costUsdTicks: '9' } }],
+		});
+	});
+
+	it.each([false, true])(
+		'keeps unbaselined process spend separate with final usage: %s',
+		(final) => {
+			const f = fixture();
+			const usage = { ...promptUsage, inputTokens: 1030, costUsdTicks: '90' };
+			f.accept(f.adapter.processUsage({ usage }));
+			expect(f.capture.usage).toBeUndefined();
+			f.send({ sessionUpdate: 'response_completed', message_id: 'r', usage: responseUsage });
+			f.accept(f.adapter.processUsage({ usage: { ...usage, inputTokens: 2030 } }));
+			expect(f.capture.usage).toMatchObject({
+				inputTokens: 100,
+				outputTokens: 10,
+				accounting: { cost: { status: 'unknown' } },
+			});
+			expect(
+				f.capture.usageReports.filter((report) => report.accounting?.scope === 'process-session')
+			).toMatchObject([
+				{
+					inputTokens: 2000,
+					accounting: { scope: 'process-session', cost: { status: 'exact', costUsdTicks: '90' } },
+				},
+			]);
+			f.accept(
+				final
+					? f.adapter.settle({ stopReason: 'end_turn', _meta: { usage: promptUsage } })
+					: f.adapter.settle(undefined, { status: 'failed', kind: 'transport' })
+			);
+			expect(f.capture.usage).toMatchObject({
+				inputTokens: 100,
+				outputTokens: 10,
+				accounting: { completeness: final ? 'complete' : 'partial', cost: { status: 'unknown' } },
+			});
+			expect(
+				f.capture.usageReports.filter((report) => report.accounting?.scope === 'process-session')
+			).toHaveLength(1);
+			expect(f.events.filter((e) => e.terminal)).toHaveLength(1);
+		}
+	);
 });
