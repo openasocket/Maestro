@@ -408,6 +408,8 @@ export interface UsageBreakdown extends Partial<
  */
 export interface UsageAccounting {
 	source: UsageSourceKind;
+	/** Provider selected by the executing host, independent of later agent/provider swaps. */
+	providerId?: string;
 	/** Producer protocol route (for example native-headless or acp), not policy qualification. */
 	route?: string;
 	scope: 'response' | 'turn' | 'process-session' | 'native-session' | 'child';

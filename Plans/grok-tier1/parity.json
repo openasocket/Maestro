@@ -2828,6 +2828,21 @@
 			"testOwner": "GT1-04-10",
 			"verificationOwner": "GT1-04-13",
 			"consumerOwner": "GT1-06-01"
+		},
+		"phase04-cue-stream-accounting": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-11c-cue-stream-accounting-and-provider-identity",
+			"sourceCommit": "478e69ac3b38ea90d5bdda5a54c2d2d415ce0b7a",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/cue/cue-process-lifecycle.ts": "6c84c51d26ddad588f3cfc7ac748afdb088abff2b0883a4f195f52f4354d511e",
+				"src/shared/types.ts": "99b917ba732695bd108f00b117e4174784abfaba8336f358b4417d80b101ea7a",
+				"src/main/cue/stats/cue-stats-query.ts": "94c667ad3f06c2f7d0ebf07f5f3ef406a5fcfee0af27501fb92ae93953038413"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run"
 		}
 	},
 	"sourceCatalog": {
@@ -6103,7 +6118,8 @@
 				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests",
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
-				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests"
+				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
+				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6163,9 +6179,9 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11 repairs native cache/coverage and Cue owner/turn boundaries; GT1-04-11A preserves canonical dashboard cost evidence, raw model detail and authoritative native lifetime totals. GT1-04-11B carries this evidence into CLI summaries and CSV exports while retaining complete JSON accounting. Cue stream accounting and observed provider provenance, and account discovery still require GT1-04-11C/11D; GT1-04-12/12A/12B/12C author and 04-13 executes regressions. Dashboard and CLI/export changes have static checks only; no deterministic or live qualification is claimed. Cue native history remains unavailable without recorded account/host scope. See Plans/grok-tier1/evidence/04.md#gt1-04-11b-cli-and-export-accounting.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting. GT1-04-11C preserves canonical Cue turn snapshots, exact ticks/models, unknown-cost receipts and observed event provider through persistence; observed Grok or other new receipts never consult native history without recorded account/host scope. Legacy identified non-Grok native attribution remains a compatibility path, not historical scope proof. GT1-04-11D still owns account discovery. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. These consumer changes have static checks only; deterministic and native qualification remain not-run.",
 					"affectedRows": ["P11"],
-					"evidenceRef": "Plans/grok-tier1/evidence/04.md#gt1-04-11-usage-accounting-boundaries"
+					"evidenceRef": "phase04-cue-stream-accounting"
 				}
 			],
 			"phase": "03",
@@ -7231,7 +7247,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase03AcpEventTestsEvidenceRef": "phase03-acp-event-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7269,9 +7286,9 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11 repairs native cache/coverage and Cue owner/turn boundaries; GT1-04-11A preserves canonical dashboard cost evidence, raw model detail and authoritative native lifetime totals. GT1-04-11B carries this evidence into CLI summaries and CSV exports while retaining complete JSON accounting. Cue stream accounting and observed provider provenance, and account discovery still require GT1-04-11C/11D; GT1-04-12/12A/12B/12C author and 04-13 executes regressions. Dashboard and CLI/export changes have static checks only; no deterministic or live qualification is claimed. Cue native history remains unavailable without recorded account/host scope. See Plans/grok-tier1/evidence/04.md#gt1-04-11b-cli-and-export-accounting.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting. GT1-04-11C preserves canonical Cue turn snapshots, exact ticks/models, unknown-cost receipts and observed event provider through persistence; observed Grok or other new receipts never consult native history without recorded account/host scope. Legacy identified non-Grok native attribution remains a compatibility path, not historical scope proof. GT1-04-11D still owns account discovery. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. These consumer changes have static checks only; deterministic and native qualification remain not-run.",
 					"affectedRows": ["P16"],
-					"evidenceRef": "Plans/grok-tier1/evidence/04.md#gt1-04-11-usage-accounting-boundaries"
+					"evidenceRef": "phase04-cue-stream-accounting"
 				}
 			],
 			"phase": "04",
@@ -11179,7 +11196,8 @@
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11224,9 +11242,9 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11 repairs native cache/coverage and Cue owner/turn boundaries; GT1-04-11A preserves canonical dashboard cost evidence, raw model detail and authoritative native lifetime totals. GT1-04-11B carries this evidence into CLI summaries and CSV exports while retaining complete JSON accounting. Cue stream accounting and observed provider provenance, and account discovery still require GT1-04-11C/11D; GT1-04-12/12A/12B/12C author and 04-13 executes regressions. Dashboard and CLI/export changes have static checks only; no deterministic or live qualification is claimed. Cue native history remains unavailable without recorded account/host scope. See Plans/grok-tier1/evidence/04.md#gt1-04-11b-cli-and-export-accounting.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting. GT1-04-11C preserves canonical Cue turn snapshots, exact ticks/models, unknown-cost receipts and observed event provider through persistence; observed Grok or other new receipts never consult native history without recorded account/host scope. Legacy identified non-Grok native attribution remains a compatibility path, not historical scope proof. GT1-04-11D still owns account discovery. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. These consumer changes have static checks only; deterministic and native qualification remain not-run.",
 					"affectedRows": ["P40"],
-					"evidenceRef": "Plans/grok-tier1/evidence/04.md#gt1-04-11-usage-accounting-boundaries"
+					"evidenceRef": "phase04-cue-stream-accounting"
 				}
 			],
 			"phase": "10",
@@ -13608,7 +13626,8 @@
 				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests",
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
-				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests"
+				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
+				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13668,9 +13687,9 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11 repairs native cache/coverage and Cue owner/turn boundaries; GT1-04-11A preserves canonical dashboard cost evidence, raw model detail and authoritative native lifetime totals. GT1-04-11B carries this evidence into CLI summaries and CSV exports while retaining complete JSON accounting. Cue stream accounting and observed provider provenance, and account discovery still require GT1-04-11C/11D; GT1-04-12/12A/12B/12C author and 04-13 executes regressions. Dashboard and CLI/export changes have static checks only; no deterministic or live qualification is claimed. Cue native history remains unavailable without recorded account/host scope. See Plans/grok-tier1/evidence/04.md#gt1-04-11b-cli-and-export-accounting.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting. GT1-04-11C preserves canonical Cue turn snapshots, exact ticks/models, unknown-cost receipts and observed event provider through persistence; observed Grok or other new receipts never consult native history without recorded account/host scope. Legacy identified non-Grok native attribution remains a compatibility path, not historical scope proof. GT1-04-11D still owns account discovery. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. These consumer changes have static checks only; deterministic and native qualification remain not-run.",
 					"affectedRows": ["C-supportsCostTracking"],
-					"evidenceRef": "Plans/grok-tier1/evidence/04.md#gt1-04-11-usage-accounting-boundaries"
+					"evidenceRef": "phase04-cue-stream-accounting"
 				}
 			],
 			"field": "supportsCostTracking",
@@ -13834,7 +13853,8 @@
 				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests",
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
-				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests"
+				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
+				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13894,9 +13914,9 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11 repairs native cache/coverage and Cue owner/turn boundaries; GT1-04-11A preserves canonical dashboard cost evidence, raw model detail and authoritative native lifetime totals. GT1-04-11B carries this evidence into CLI summaries and CSV exports while retaining complete JSON accounting. Cue stream accounting and observed provider provenance, and account discovery still require GT1-04-11C/11D; GT1-04-12/12A/12B/12C author and 04-13 executes regressions. Dashboard and CLI/export changes have static checks only; no deterministic or live qualification is claimed. Cue native history remains unavailable without recorded account/host scope. See Plans/grok-tier1/evidence/04.md#gt1-04-11b-cli-and-export-accounting.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting. GT1-04-11C preserves canonical Cue turn snapshots, exact ticks/models, unknown-cost receipts and observed event provider through persistence; observed Grok or other new receipts never consult native history without recorded account/host scope. Legacy identified non-Grok native attribution remains a compatibility path, not historical scope proof. GT1-04-11D still owns account discovery. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. These consumer changes have static checks only; deterministic and native qualification remain not-run.",
 					"affectedRows": ["C-supportsUsageStats"],
-					"evidenceRef": "Plans/grok-tier1/evidence/04.md#gt1-04-11-usage-accounting-boundaries"
+					"evidenceRef": "phase04-cue-stream-accounting"
 				}
 			],
 			"field": "supportsUsageStats",
@@ -17161,7 +17181,8 @@
 				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests",
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
-				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests"
+				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
+				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17221,9 +17242,9 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11 repairs native cache/coverage and Cue owner/turn boundaries; GT1-04-11A preserves canonical dashboard cost evidence, raw model detail and authoritative native lifetime totals. GT1-04-11B carries this evidence into CLI summaries and CSV exports while retaining complete JSON accounting. Cue stream accounting and observed provider provenance, and account discovery still require GT1-04-11C/11D; GT1-04-12/12A/12B/12C author and 04-13 executes regressions. Dashboard and CLI/export changes have static checks only; no deterministic or live qualification is claimed. Cue native history remains unavailable without recorded account/host scope. See Plans/grok-tier1/evidence/04.md#gt1-04-11b-cli-and-export-accounting.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting. GT1-04-11C preserves canonical Cue turn snapshots, exact ticks/models, unknown-cost receipts and observed event provider through persistence; observed Grok or other new receipts never consult native history without recorded account/host scope. Legacy identified non-Grok native attribution remains a compatibility path, not historical scope proof. GT1-04-11D still owns account discovery. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. These consumer changes have static checks only; deterministic and native qualification remain not-run.",
 					"affectedRows": ["REG-USAGE"],
-					"evidenceRef": "Plans/grok-tier1/evidence/04.md#gt1-04-11-usage-accounting-boundaries"
+					"evidenceRef": "phase04-cue-stream-accounting"
 				}
 			],
 			"branchAuditRefs": ["B12", "B32", "B35", "B38", "B42", "B43"]
@@ -20946,7 +20967,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04CueStreamAccountingEvidenceRef": "phase04-cue-stream-accounting"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20984,9 +21006,9 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "GT1-04-11 repairs native cache/coverage and Cue owner/turn boundaries; GT1-04-11A preserves canonical dashboard cost evidence, raw model detail and authoritative native lifetime totals. GT1-04-11B carries this evidence into CLI summaries and CSV exports while retaining complete JSON accounting. Cue stream accounting and observed provider provenance, and account discovery still require GT1-04-11C/11D; GT1-04-12/12A/12B/12C author and 04-13 executes regressions. Dashboard and CLI/export changes have static checks only; no deterministic or live qualification is claimed. Cue native history remains unavailable without recorded account/host scope. See Plans/grok-tier1/evidence/04.md#gt1-04-11b-cli-and-export-accounting.",
+					"missingPrerequisite": "GT1-04-11/11A/11B retain native/cache/owner boundaries and dashboard/CLI/export accounting. GT1-04-11C preserves canonical Cue turn snapshots, exact ticks/models, unknown-cost receipts and observed event provider through persistence; observed Grok or other new receipts never consult native history without recorded account/host scope. Legacy identified non-Grok native attribution remains a compatibility path, not historical scope proof. GT1-04-11D still owns account discovery. GT1-04-12/12A/12B/12C author regressions and 04-13 executes them. These consumer changes have static checks only; deterministic and native qualification remain not-run.",
 					"affectedRows": ["S26"],
-					"evidenceRef": "Plans/grok-tier1/evidence/04.md#gt1-04-11-usage-accounting-boundaries"
+					"evidenceRef": "phase04-cue-stream-accounting"
 				}
 			],
 			"branchAuditRefs": ["B23", "B32", "B43"]

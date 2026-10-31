@@ -24,7 +24,11 @@ import { stripAnsiCodes } from '../../shared/stringUtils';
 import { resolveTurnOutcome } from '../../shared/maestro-lib/streaming/turn-outcome';
 import { cueStatusForTurn } from './cue-turn-status';
 import { UsageAccumulator } from '../../shared/maestro-lib/streaming/usage-accumulator';
-import { addUsageStats, replaceUsageStats } from '../../shared/maestro-lib/streaming/usage-totals';
+import {
+	addUsageStats,
+	parsedUsageToStats,
+	replaceUsageStats,
+} from '../../shared/maestro-lib/streaming/usage-totals';
 import { FALLBACK_CONTEXT_WINDOW } from '../../shared/agentConstants';
 import {
 	stopProcess as runStopLadder,
@@ -105,7 +109,7 @@ export interface ProcessRunResult {
 	status: CueRunStatus;
 	/** Provider session id parsed from stdout as it streamed. Null for command/shell runs (no parser) or output that never carried one. */
 	providerSessionId: string | null;
-	/** Usage delta-normalized from the stdout stream. See `CueRunResult.usage`. Null when the run produced no usage events or has no output parser. */
+	/** Captured turn usage, or an unknown/provider receipt when no usage arrived. Null for command/shell runs. */
 	usage: UsageStats | null;
 	/**
 	 * Set when a managed host refused the launch: no process was started, and
@@ -186,29 +190,23 @@ const activeProcesses = new Map<string, CueActiveProcess>();
 // ─── Internal Helpers ─────────��──────────────────────────────────────────────
 
 /**
- * Convert a parser's raw `extractUsage()` shape into `UsageStats`. A scoped
- * port of `StdoutHandler.buildUsageStats` - Cue has no per-process omp model
- * catalog to resolve against (that catalog only primes for interactive
- * sessions), so a model-dependent window falls back to the static per-agent
- * default rather than a runtime-resolved one. Every other field maps 1:1.
+ * Keep canonical accounting and the host-selected provider through persistence.
+ * An absent report uses compatibility zeros with explicitly unknown provenance;
+ * it is never seeded into the accumulator as a measured observation.
  */
 function toCueUsageStats(
-	usage: NonNullable<ReturnType<AgentOutputParser['extractUsage']>>
+	providerId: string,
+	usage?: NonNullable<ReturnType<AgentOutputParser['extractUsage']>>
 ): UsageStats {
-	const stats: UsageStats = {
-		inputTokens: usage.inputTokens,
-		outputTokens: usage.outputTokens,
-		cacheReadInputTokens: usage.cacheReadTokens || 0,
-		cacheCreationInputTokens: usage.cacheCreationTokens || 0,
-		totalCostUsd: usage.costUsd || 0,
-		absoluteUsage: usage.absoluteUsage,
-		contextWindow: usage.contextWindow || FALLBACK_CONTEXT_WINDOW,
-		reasoningTokens: usage.reasoningTokens,
+	const stats = parsedUsageToStats(usage ?? { inputTokens: 0, outputTokens: 0 });
+	stats.contextWindow ||= FALLBACK_CONTEXT_WINDOW;
+	stats.accounting = {
+		...stats.accounting!,
+		providerId,
+		...(!usage
+			? { source: 'none' as const, scope: 'turn' as const, reporting: 'snapshot' as const }
+			: {}),
 	};
-	if (usage.contextWindowReported && (usage.contextWindow || 0) > 0) {
-		stats.contextWindowResolved = true;
-	}
-	if (usage.model) stats.contextWindowModel = usage.model;
 	return stats;
 }
 
@@ -232,6 +230,7 @@ class CueRunStreamCapture {
 	/** This run's own parser instance (see the constructor). */
 	readonly parser: AgentOutputParser | null;
 	private readonly usageAccumulator: UsageAccumulator | undefined;
+	private readonly scopedUsage = new UsageAccumulator({ attachesAbsoluteUsage: false });
 	private readonly usageLastWriteWins: boolean;
 	private readonly resultParts: string[] = [];
 	private readonly assistantTextByMessage = new Map<string, string>();
@@ -253,7 +252,7 @@ class CueRunStreamCapture {
 	 */
 	inBandError: AgentError | undefined;
 
-	constructor(toolType: string) {
+	constructor(private readonly toolType: string) {
 		// A fresh instance per run, never the shared registry parser: parsers keep
 		// per-stream state (Codex's context window and usage baseline, Claude's
 		// last-call occupancy), and concurrent Cue runs of one provider would
@@ -322,7 +321,13 @@ class CueRunStreamCapture {
 
 		const rawUsage = parser.extractUsage?.(event);
 		if (rawUsage) {
-			const stats = toCueUsageStats(rawUsage);
+			const stats = toCueUsageStats(this.toolType, rawUsage);
+			if (rawUsage.accounting) {
+				// Turn snapshots replace covered response spend. Native lifetime and
+				// child reports cannot become this run's usage without scoped proof.
+				this.usage = this.scopedUsage.accumulate(stats) ?? this.usage;
+				return;
+			}
 			// `normalize` returns the DELTA for this event, so the deltas are
 			// summed. Keeping only the newest would report one step of a run.
 			this.usage = this.usageLastWriteWins
@@ -509,7 +514,7 @@ export async function runProcess(
 		exitCode: null,
 		status: 'stopped',
 		providerSessionId: null,
-		usage: null,
+		usage: toCueUsageStats(toolType),
 	});
 	// A stopped run never starts a process (see cue-launch-cancel.ts). Checked
 	// again after the managed admission below, which is the one await before
@@ -601,7 +606,7 @@ export async function runProcess(
 			exitCode: null,
 			status: 'failed',
 			providerSessionId: null,
-			usage: null,
+			usage: toCueUsageStats(toolType),
 			managed: { state, code },
 		};
 	};
@@ -695,7 +700,7 @@ export async function runProcess(
 			exitCode: null,
 			status: 'failed',
 			providerSessionId: null,
-			usage: null,
+			usage: toCueUsageStats(toolType),
 		};
 	}
 	if (promptArtifact?.owner === 'remote') {
@@ -768,7 +773,7 @@ export async function runProcess(
 			exitCode,
 			status,
 			providerSessionId: capture.providerSessionId,
-			usage: capture.usage,
+			usage: capture.usage ?? toCueUsageStats(toolType),
 		};
 	};
 
