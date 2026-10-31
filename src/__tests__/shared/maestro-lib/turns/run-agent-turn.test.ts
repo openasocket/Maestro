@@ -77,6 +77,9 @@ import {
 } from '../../../main/process-manager/recordings/captured';
 import { FAKE_AGENT_PATH, fakeTurnFromRecording, writeFakeTurn } from '../run/fakeAgent';
 import { makeAgent, makeContext, makeTab } from './fixtures';
+import { createMockSession } from '../../../helpers/mockSession';
+import { createMockAITab } from '../../../helpers/mockTab';
+import { buildWorktreeSession } from '../../../../renderer/utils/worktreeSession';
 
 let scratch: { dir: string; cleanup: () => void };
 
@@ -148,6 +151,39 @@ function outFile(name: string): string {
 
 function optionsFor(overrides: Partial<RunAgentTurnOptions> = {}): RunAgentTurnOptions {
 	return { sessionId: 'agent-1-ai-tab-1', stopGraceMs: 200, ...overrides };
+}
+
+function verifiedContext() {
+	const context = createContextVerifier({
+		verifierId: 'scope-test',
+		peer: 'in-process',
+		now: () => 0,
+		accept: () => [],
+	}).verify(
+		inProcessContext({
+			installation: {
+				installationId: 'fixture-installation',
+				runtimeId: 'runtime',
+				processEpoch: 'epoch',
+			},
+			actor: { kind: 'service', id: 'fixture' },
+			delegation: { chain: [], grantRef: null },
+			identity: {
+				requestId: 'q',
+				idempotencyKey: 'k',
+				attemptId: 'a',
+				runId: null,
+				rootRunId: null,
+				parentRunId: null,
+			},
+			policyRevision: 1,
+			workflow: null,
+			traceId: 'trace',
+			requestedCapabilities: ['runs.submit'],
+		})
+	);
+	if (!context.ok) throw new Error(context.problems.join());
+	return context.context;
 }
 
 async function start(turn: AssembledTurn, overrides: Partial<RunAgentTurnOptions> = {}) {
@@ -1206,6 +1242,257 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 	});
 });
 
+describe.each(['local', 'SSH'] as const)('runAgentTurn: Grok worktree child on %s', (host) => {
+	beforeEach(() => {
+		// The local planner reads process.env; deps.env controls only the SSH client.
+		// Capture fixture environment without copying the runner's credentials.
+		vi.stubGlobal('process', {
+			...process,
+			env: {
+				PATH: process.env.PATH,
+				SystemRoot: process.env.SystemRoot,
+				HOME: process.env.HOME,
+				CODEX_HOME: process.env.CODEX_HOME,
+			},
+		});
+	});
+	afterEach(() => {
+		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
+	});
+
+	it.each([
+		{ account: 'a', permission: 'readonly', refusal: null },
+		{ account: 'b', permission: 'full', refusal: null },
+		{ account: 'a', permission: 'readonly', refusal: 'route' },
+		{ account: 'b', permission: 'full', refusal: 'managed' },
+	] as const)(
+		'launches or refuses account $account, $permission, refusal=$refusal through admission',
+		async ({ account, permission, refusal }) => {
+			const remote: SshRemoteConfig = {
+				id: 'worktree-host',
+				name: 'Worktree host',
+				host: 'worktree.example.test',
+				port: 22,
+				username: 'dev',
+				privateKeyPath: '~/.ssh/id_ed25519',
+				enabled: true,
+			};
+			const cwd = host === 'SSH' ? '/remote/worktree' : outFile('worktree');
+			if (host === 'local') fs.mkdirSync(cwd);
+			const accountRoot =
+				host === 'SSH' ? `/accounts/${account}` : path.join(scratch.dir, `account ${account}`);
+			const selectedBinary = host === 'SSH' ? '/opt/Grok CLI/grok' : process.execPath;
+			const argvOut = outFile('worktree-argv');
+			const envOut = outFile('worktree-env');
+			const stdinOut = outFile('worktree-stdin');
+			const nativeId = `fresh-worktree-${account}`;
+			const fixtureEnv = {
+				FAKE_AGENT_RECORDING: writeFakeTurn(scratch.dir, {
+					chunks: [
+						JSON.stringify({ type: 'text', data: 'Child answer' }) + '\n',
+						JSON.stringify({ type: 'end', stopReason: 'EndTurn', sessionId: nativeId }) + '\n',
+					],
+					close: { code: 0, signal: null },
+				}),
+				FAKE_AGENT_ARGV_OUT: argvOut,
+				FAKE_AGENT_ENV_OUT: envOut,
+				FAKE_AGENT_STDIN_OUT: stdinOut,
+			};
+			const selected = createMockAITab({
+				id: 'selected',
+				agentSessionId: `parent-native-${account}`,
+				permissionMode: permission,
+				...(account === 'a' ? { customModel: 'grok-4.5', customEffort: 'high' } : {}),
+			});
+			const parent = createMockSession({
+				toolType: 'grok',
+				cwd: host === 'SSH' ? '/remote/parent' : scratch.dir,
+				customPath: selectedBinary,
+				customArgs: refusal === 'route' ? 'agent stdio' : undefined,
+				customEnvVars: { ...fixtureEnv, GROK_HOME: accountRoot, GROK_AUTH_PATH: '' },
+				customModel: 'grok-composer-2.5-fast',
+				customEffort: 'low',
+				agentSessionId: 'legacy-parent-native',
+				aiTabs: [createMockAITab({ id: 'other', customModel: 'wrong-model' }), selected],
+				activeTabId: selected.id,
+				sessionSshRemoteConfig:
+					host === 'SSH'
+						? { enabled: true, remoteId: remote.id, workingDirOverride: '/remote/parent' }
+						: undefined,
+			});
+			const original = structuredClone(parent);
+			const child = buildWorktreeSession({
+				parentSession: parent,
+				path: cwd,
+				name: 'Grok child',
+				defaultSaveToHistory: true,
+				defaultShowThinking: 'off',
+			});
+			const tab = child.aiTabs[0];
+			const assembled = assembleTurn(
+				child,
+				tab,
+				{ text: 'Work in this child.' },
+				makeContext('grok', { command: selectedBinary })
+			);
+			if (!assembled.ok) throw new Error(assembled.message);
+			const turn = assembled.turn;
+			// Only the local executable harness needs a script prefix. Remote configuration
+			// reaches the real planner unchanged; the injected SSH client runs the fake agent.
+			if (host === 'local') turn.launch.args.unshift(FAKE_AGENT_PATH);
+			turn.launch.promptFileDestination =
+				host === 'local'
+					? { owner: 'local', path: outFile('worktree-prompt') + '.json' }
+					: newRemotePromptFileDestination(remote.id, 'acp-json');
+			const scope = grokScopeFixture(cwd, accountRoot, host === 'SSH' ? remote : undefined);
+			scope.ports.remote.observe.mockResolvedValue({
+				success: true,
+				data: { cwd: { canonicalPath: cwd }, account: { canonicalPath: accountRoot } },
+			});
+			const wrap = vi.fn<NonNullable<RunAgentTurnDeps['wrapSpawnWithSsh']>>(async () => ({
+				command: process.execPath,
+				args: [FAKE_AGENT_PATH, 'dev@worktree.example.test', ...SSH_STDIN_REMOTE_SHELL],
+				cwd: scratch.dir,
+				sshStdinScript: 'synthetic worktree transfer',
+				sshRemoteUsed: remote,
+			}));
+			const authority = createLocalHostAuthority({
+				authorityId: 'worktree-test',
+				decide: () =>
+					refusal === 'managed'
+						? { decision: 'deny', reason: 'Worktree launch denied', policyRevision: 1 }
+						: { decision: 'allow', policyRevision: 1 },
+				now: () => 0,
+				newId: () => 'worktree-lease',
+			});
+			const admit = vi.spyOn(authority, 'admit');
+			const check = vi.spyOn(authority, 'check');
+			const onLease = vi.fn<NonNullable<NonNullable<RunAgentTurnOptions['managed']>['onLease']>>();
+			const runTurn = vi.spyOn(runToCompletion, 'runTurn');
+			const accountRef = managedAccountRef('grok', accountRoot);
+			const started = await runAgentTurn(
+				turn,
+				optionsFor({
+					sessionId: `${child.id}-ai-${tab.id}`,
+					standing: 'enrolled',
+					grokLaunchScope: scope.ports,
+					sshStore: { getSshRemotes: () => [remote] },
+					deps: { env: host === 'SSH' ? fixtureEnv : {}, wrapSpawnWithSsh: wrap },
+					managed: {
+						authority,
+						context: verifiedContext(),
+						policy: { sources: [], policyRevision: 1 },
+						account: accountRef,
+						onLease,
+					},
+				})
+			);
+
+			expect(turn.settings).toEqual({
+				provider: 'grok',
+				model: account === 'a' ? 'grok-4.5' : 'grok-composer-2.5-fast',
+				effort: account === 'a' ? 'high' : 'low',
+			});
+			expect(turn.permissionMode).toBe(permission);
+			expect(turn.resumeSessionId).toBeUndefined();
+			expect(turn.launch.args).not.toContain('--resume');
+			expect(tab.agentSessionId).toBeNull();
+			expect(parent).toEqual(original);
+			if (refusal) {
+				expect(started).toMatchObject({
+					ok: false,
+					reason: refusal === 'route' ? 'grok-native-session-refused' : 'managed-denied',
+					message:
+						refusal === 'route'
+							? 'Grok ACP routing is not qualified on this native launch path.'
+							: 'Worktree launch denied',
+				});
+				expect(started).not.toHaveProperty('run');
+				expect(runTurn).not.toHaveBeenCalled();
+				expect(onLease).not.toHaveBeenCalled();
+				expect(check).not.toHaveBeenCalled();
+				for (const file of [argvOut, envOut, stdinOut]) expect(fs.existsSync(file)).toBe(false);
+			} else {
+				if (!started.ok) throw new Error(started.message);
+				const lease = onLease.mock.calls[0][0];
+				expect(lease.state()).toBe('bound');
+				expect(lease.pid()).toBe(started.run.pid);
+				// Local prompt materialization and the actual spawn both check the lease.
+				expect(check.mock.calls).toEqual(
+					Array.from({ length: host === 'local' ? 2 : 1 }, () => [lease, lease.snapshotDigest])
+				);
+				expect(runTurn).toHaveBeenCalledOnce();
+				const result = await started.run.result;
+				expect(result).toMatchObject({
+					outcome: 'completed',
+					answerText: 'Child answer',
+					sessionId: nativeId,
+				});
+				expect(result.sessionId).not.toBe(selected.agentSessionId);
+				expect(lease.ended()).toMatchObject({
+					state: 'released',
+					release: { outcome: 'exited', exitCode: 0 },
+				});
+				expect(started.run.nativeLaunchReceipt).toEqual({
+					scope: {
+						version: 1,
+						state: 'bound',
+						provider: 'grok',
+						cwd,
+						accountRef,
+						host: { kind: host === 'SSH' ? 'ssh' : 'local', identity: 'fixture-installation' },
+					},
+					requestedNativeSessionId: undefined,
+				});
+				const argv = JSON.parse(fs.readFileSync(argvOut, 'utf8')) as string[];
+				const providerArgs = host === 'local' ? argv : wrap.mock.calls[0][0].args;
+				expect(providerArgs).toEqual(
+					expect.arrayContaining([
+						'-m',
+						turn.settings.model,
+						'--reasoning-effort',
+						turn.settings.effort,
+					])
+				);
+				if (permission === 'readonly') {
+					expect(providerArgs).toEqual(
+						expect.arrayContaining(['--permission-mode', 'plan', '--deny', 'Bash(*)'])
+					);
+					expect(providerArgs).not.toContain('--always-approve');
+				} else expect(providerArgs).toContain('--always-approve');
+				if (host === 'local') {
+					expect(JSON.parse(fs.readFileSync(envOut, 'utf8'))).toMatchObject({
+						GROK_HOME: accountRoot,
+					});
+					expect(runTurn.mock.calls[0][0].cwd).toBe(cwd);
+				} else {
+					expect(argv).toEqual(['dev@worktree.example.test', ...SSH_STDIN_REMOTE_SHELL]);
+					expect(fs.readFileSync(stdinOut, 'utf8')).toContain('synthetic worktree transfer');
+					expect(wrap.mock.calls[0][0]).toMatchObject({
+						command: selectedBinary,
+						cwd,
+						customEnvVars: { GROK_HOME: accountRoot },
+					});
+					expect(wrap.mock.calls[0][1]).toEqual(child.sessionSshRemoteConfig);
+				}
+				expect(parent).toEqual(original);
+			}
+			expect(authority.live()).toEqual([]);
+			expect(admit).toHaveBeenCalledTimes(refusal === 'route' ? 0 : 1);
+			expect(wrap).toHaveBeenCalledTimes(host === 'SSH' && refusal !== 'route' ? 1 : 0);
+			if (refusal !== 'route')
+				expect(admit.mock.calls[0][0].snapshot).toMatchObject({
+					provider: 'grok',
+					model: turn.settings.model,
+					operation: 'start',
+					account: accountRef,
+					target: host === 'SSH' ? { kind: 'ssh', remoteId: remote.id } : { kind: 'local' },
+				});
+		}
+	);
+});
+
 describe.each(['local', 'SSH'] as const)('runAgentTurn: Grok native ownership on %s', (host) => {
 	let turn: AssembledTurn;
 	let options: RunAgentTurnOptions;
@@ -1322,39 +1609,11 @@ describe.each(['local', 'SSH'] as const)('runAgentTurn: Grok native ownership on
 			now: () => 0,
 			newId: () => 'scope-lease',
 		});
-		const context = createContextVerifier({
-			verifierId: 'scope-test',
-			peer: 'in-process',
-			now: () => 0,
-			accept: () => [],
-		}).verify(
-			inProcessContext({
-				installation: {
-					installationId: 'fixture-installation',
-					runtimeId: 'runtime',
-					processEpoch: 'epoch',
-				},
-				actor: { kind: 'service', id: 'fixture' },
-				delegation: { chain: [], grantRef: null },
-				identity: {
-					requestId: 'q',
-					idempotencyKey: 'k',
-					attemptId: 'a',
-					runId: null,
-					rootRunId: null,
-					parentRunId: null,
-				},
-				policyRevision: 1,
-				workflow: null,
-				traceId: 'trace',
-				requestedCapabilities: ['runs.submit'],
-			})
-		);
-		if (!context.ok) throw new Error(context.problems.join());
+
 		const released = vi.fn();
 		options.managed = {
 			authority,
-			context: context.context,
+			context: verifiedContext(),
 			policy: { sources: [], policyRevision: 1 },
 			onLease: (lease) => {
 				const release = lease.release.bind(lease);
