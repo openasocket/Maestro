@@ -3468,6 +3468,26 @@
 				"GT1-05-10B owns generation preparation/read/save/pending-spawn cancellation and timeout coverage; GT1-05-10A owns hook/caller coverage.",
 				"Exact-version live qualification and bound native resume remain unverified."
 			]
+		},
+		"phase05-generation-cancellation-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-10b-generation-cancellation-regression-tests",
+			"sourceCommit": "3b9d4fb87d8c7a4b6d326aff90967cfbda33268b",
+			"sourceRevisionScope": "Pre-task HEAD plus authored test hash in the task commit containing this entry.",
+			"testHashesSha256": {
+				"src/__tests__/renderer/services/inlineWizardDocumentGeneration.test.ts": "c88e8a31bd53acb2176bfe3adadffb55d38e4f2ae1ec814230994a81824bb852"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P20", "S04", "C-supportsWizard"],
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"GT1-05-10B authors 16 cancellation and inactivity cases in the existing generation suite; tests remain unrun.",
+				"GT1-05-10A retains hook/caller regression authoring; GT1-05-13 must execute the complete phase suites.",
+				"Exact-version live qualification and bound native resume remain unverified."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -8616,7 +8636,8 @@
 				"phase05InlineWizardContractsEvidenceRef": "phase05-inline-wizard-contracts",
 				"phase05InlineWizardSelectionHandoffEvidenceRef": "phase05-inline-wizard-selection-handoff",
 				"phase05InlineWizardGenerationHandoffEvidenceRef": "phase05-inline-wizard-generation-handoff",
-				"phase05InlineWizardServiceTestsEvidenceRef": "phase05-inline-wizard-service-tests"
+				"phase05InlineWizardServiceTestsEvidenceRef": "phase05-inline-wizard-service-tests",
+				"phase05GenerationCancellationTestsEvidenceRef": "phase05-generation-cancellation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8654,9 +8675,9 @@
 				{
 					"id": "grok-inline-wizard-callers:P20",
 					"code": "caller-verification-pending",
-					"missingPrerequisite": "GT1-05-10 service regressions authored, not run. GT1-05-10B cancellation-race and GT1-05-10A caller regressions, GT1-05-13 execution and exact-version live qualification remain. Ephemeral wizard continuation is history replay without native ownership certification.",
+					"missingPrerequisite": "GT1-05-10 service and GT1-05-10B generation cancellation regressions authored, not run. GT1-05-10A caller regressions, GT1-05-13 execution and exact-version live qualification remain. Ephemeral wizard continuation is history replay without native ownership certification.",
 					"affectedRows": ["P20"],
-					"evidenceRef": "phase05-inline-wizard-service-tests"
+					"evidenceRef": "phase05-generation-cancellation-tests"
 				}
 			],
 			"phase": "05",
@@ -16384,7 +16405,8 @@
 				"phase05InlineWizardContractsEvidenceRef": "phase05-inline-wizard-contracts",
 				"phase05InlineWizardSelectionHandoffEvidenceRef": "phase05-inline-wizard-selection-handoff",
 				"phase05InlineWizardGenerationHandoffEvidenceRef": "phase05-inline-wizard-generation-handoff",
-				"phase05InlineWizardServiceTestsEvidenceRef": "phase05-inline-wizard-service-tests"
+				"phase05InlineWizardServiceTestsEvidenceRef": "phase05-inline-wizard-service-tests",
+				"phase05GenerationCancellationTestsEvidenceRef": "phase05-generation-cancellation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16422,9 +16444,9 @@
 				{
 					"id": "grok-inline-wizard-callers:C-supportsWizard",
 					"code": "caller-verification-pending",
-					"missingPrerequisite": "GT1-05-10 service regressions authored, not run. GT1-05-10B cancellation-race and GT1-05-10A caller regressions, GT1-05-13 execution and exact-version live qualification remain. Ephemeral wizard continuation is history replay without native ownership certification.",
+					"missingPrerequisite": "GT1-05-10 service and GT1-05-10B generation cancellation regressions authored, not run. GT1-05-10A caller regressions, GT1-05-13 execution and exact-version live qualification remain. Ephemeral wizard continuation is history replay without native ownership certification.",
 					"affectedRows": ["C-supportsWizard"],
-					"evidenceRef": "phase05-inline-wizard-service-tests"
+					"evidenceRef": "phase05-generation-cancellation-tests"
 				}
 			],
 			"field": "supportsWizard",
@@ -19857,7 +19879,8 @@
 				"phase05InlineWizardContractsEvidenceRef": "phase05-inline-wizard-contracts",
 				"phase05InlineWizardSelectionHandoffEvidenceRef": "phase05-inline-wizard-selection-handoff",
 				"phase05InlineWizardGenerationHandoffEvidenceRef": "phase05-inline-wizard-generation-handoff",
-				"phase05InlineWizardServiceTestsEvidenceRef": "phase05-inline-wizard-service-tests"
+				"phase05InlineWizardServiceTestsEvidenceRef": "phase05-inline-wizard-service-tests",
+				"phase05GenerationCancellationTestsEvidenceRef": "phase05-generation-cancellation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19895,9 +19918,9 @@
 				{
 					"id": "grok-inline-wizard-callers:S04",
 					"code": "caller-verification-pending",
-					"missingPrerequisite": "GT1-05-10 service regressions authored, not run. GT1-05-10B cancellation-race and GT1-05-10A caller regressions, GT1-05-13 execution and exact-version live qualification remain. Ephemeral wizard continuation is history replay without native ownership certification.",
+					"missingPrerequisite": "GT1-05-10 service and GT1-05-10B generation cancellation regressions authored, not run. GT1-05-10A caller regressions, GT1-05-13 execution and exact-version live qualification remain. Ephemeral wizard continuation is history replay without native ownership certification.",
 					"affectedRows": ["S04"],
-					"evidenceRef": "phase05-inline-wizard-service-tests"
+					"evidenceRef": "phase05-generation-cancellation-tests"
 				}
 			],
 			"branchAuditRefs": ["B27"]

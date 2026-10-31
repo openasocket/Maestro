@@ -4,7 +4,7 @@
  * These tests verify the document parsing and iterate mode functionality.
  */
 
-import { describe, it, expect, vi, beforeAll, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import {
 	generateInlineDocuments,
 	parseGeneratedDocuments,
@@ -822,6 +822,7 @@ CONTENT:
 		let onDocumentComplete: ReturnType<typeof vi.fn>;
 		let onError: ReturnType<typeof vi.fn>;
 		let removeListener: ReturnType<typeof vi.fn>;
+		let config: DocumentGenerationConfig;
 
 		beforeEach(() => {
 			onComplete = vi.fn();
@@ -830,40 +831,58 @@ CONTENT:
 			removeListener = vi.fn();
 			window.maestro.agents.get = vi
 				.fn()
-				.mockResolvedValue({ id: 'grok', available: true, command: 'grok', args: [] });
+				.mockImplementation(async (id: string) => ({ id, available: true, command: id, args: [] }));
 			Object.assign(window.maestro.process, {
 				spawn: vi.fn().mockResolvedValue({ pid: 123, success: true }),
-				onData: vi.fn(() => removeListener),
-				onExit: vi.fn(() => removeListener),
-				onAgentError: vi.fn(() => removeListener),
+				onData: vi.fn(() => vi.fn(removeListener)),
+				onExit: vi.fn(() => vi.fn(removeListener)),
+				onAgentError: vi.fn(() => vi.fn(removeListener)),
 				kill: vi.fn().mockResolvedValue(true),
 			});
 			Object.assign(window.maestro.autorun, {
 				listDocs: vi.fn().mockResolvedValue({ success: true, files: [], tree: [] }),
 				watchFolder: vi.fn().mockResolvedValue({ success: true }),
 				unwatchFolder: vi.fn().mockResolvedValue({ success: true }),
-				onFileChanged: vi.fn(() => removeListener),
+				onFileChanged: vi.fn(() => vi.fn(removeListener)),
 				writeDoc: vi.fn().mockResolvedValue({ success: true }),
 			});
 		});
 
-		async function start(signal?: AbortSignal) {
-			const pending = generateInlineDocuments({
+		beforeEach(() => {
+			window.maestro.playbooks.create = vi.fn().mockResolvedValue({
+				success: true,
+				playbook: { id: 'playbook-1', name: 'Plan' },
+			});
+			config = {
 				agentType: 'grok',
 				directoryPath: '/project',
 				projectName: 'Plan',
 				conversationHistory: [],
 				mode: 'new',
 				autoRunFolderPath: '/playbooks',
-				signal,
-				callbacks: { onComplete, onDocumentComplete, onError },
-			});
-			await vi.waitFor(() => expect(window.maestro.process.spawn).toHaveBeenCalledOnce());
+				sessionId: 'owner-agent',
+				callbacks: {
+					onStart: vi.fn(),
+					onProgress: vi.fn(),
+					onChunk: vi.fn(),
+					onComplete,
+					onDocumentComplete,
+					onError,
+				},
+			};
+		});
+
+		async function start(signal?: AbortSignal) {
+			const pending = generateInlineDocuments({ ...config, signal });
+			if (vi.isFakeTimers()) await vi.advanceTimersByTimeAsync(0);
+			else await vi.waitFor(() => expect(window.maestro.process.spawn).toHaveBeenCalledOnce());
+			expect(window.maestro.process.spawn).toHaveBeenCalledOnce();
 			return {
 				pending,
 				id: vi.mocked(window.maestro.process.spawn).mock.calls[0][0].sessionId,
 				data: vi.mocked(window.maestro.process.onData).mock.calls[0][0],
 				exit: vi.mocked(window.maestro.process.onExit).mock.calls[0][0],
+				folder: vi.mocked(window.maestro.autorun.watchFolder).mock.calls[0][0],
 			};
 		}
 
@@ -1044,5 +1063,281 @@ CONTENT:
 				}
 			}
 		);
+		describe('cancellation and inactivity boundaries', () => {
+			beforeEach(() => {
+				vi.useFakeTimers();
+			});
+
+			afterEach(() => {
+				vi.clearAllTimers();
+				vi.useRealTimers();
+				vi.restoreAllMocks();
+			});
+
+			it.each(['grok', 'claude-code', 'codex'] as const)(
+				'refuses a pre-aborted %s generation before preparation',
+				async (agentType) => {
+					const controller = new AbortController();
+					controller.abort();
+					expect(
+						await generateInlineDocuments({ ...config, agentType, signal: controller.signal })
+					).toEqual({ success: false, error: 'Document generation was cancelled.' });
+					for (const callback of Object.values(config.callbacks!))
+						expect(callback).not.toHaveBeenCalled();
+					for (const operation of [
+						window.maestro.agents.get,
+						window.maestro.autorun.listDocs,
+						window.maestro.process.spawn,
+						window.maestro.process.kill,
+						window.maestro.process.onData,
+						window.maestro.process.onExit,
+						window.maestro.process.onAgentError,
+						window.maestro.autorun.watchFolder,
+						window.maestro.autorun.writeDoc,
+						window.maestro.playbooks.create,
+					])
+						expect(operation).not.toHaveBeenCalled();
+					expect(vi.getTimerCount()).toBe(0);
+				}
+			);
+
+			it.each(['grok', 'claude-code', 'codex'] as const)(
+				'does not launch %s when cancelled during provider lookup',
+				async (agentType) => {
+					const preparation =
+						Promise.withResolvers<Awaited<ReturnType<typeof window.maestro.agents.get>>>();
+					vi.mocked(window.maestro.agents.get).mockReturnValueOnce(preparation.promise);
+					const controller = new AbortController();
+					const pending = generateInlineDocuments({
+						...config,
+						agentType,
+						signal: controller.signal,
+					});
+					await vi.advanceTimersByTimeAsync(0);
+					expect(window.maestro.agents.get).toHaveBeenCalledExactlyOnceWith(agentType);
+					controller.abort();
+					preparation.resolve({
+						id: agentType,
+						name: agentType,
+						available: true,
+						command: agentType,
+						args: [],
+					});
+					expect(await pending).toMatchObject({
+						success: false,
+						error: 'Document generation was cancelled.',
+					});
+					expect(window.maestro.process.spawn).not.toHaveBeenCalled();
+					expect(window.maestro.autorun.watchFolder).not.toHaveBeenCalled();
+					expect(window.maestro.process.onData).not.toHaveBeenCalled();
+					expect(window.maestro.process.onExit).not.toHaveBeenCalled();
+					expect(window.maestro.autorun.writeDoc).not.toHaveBeenCalled();
+					expect(window.maestro.playbooks.create).not.toHaveBeenCalled();
+					expect(onComplete).not.toHaveBeenCalled();
+					expect(onDocumentComplete).not.toHaveBeenCalled();
+					expect(onError).toHaveBeenCalledOnce();
+					expect(window.maestro.process.kill).toHaveBeenCalledExactlyOnceWith(
+						expect.stringMatching(/^inline-wizard-gen-/)
+					);
+					expect(vi.getTimerCount()).toBe(0);
+				}
+			);
+
+			it.each(['final disk read', 'final emitter sweep'])(
+				'discards documents when aborted during the %s',
+				async (boundary) => {
+					const read = Promise.withResolvers<{ success: boolean; content: string }>();
+					const sweep = Promise.withResolvers<string>();
+					const controller = new AbortController();
+					const { pending, id, data, exit } = await start(controller.signal);
+					vi.mocked(window.maestro.autorun.listDocs).mockResolvedValue({
+						success: true,
+						files: ['Phase-01-Setup'],
+					});
+					window.maestro.autorun.readDoc = vi
+						.fn()
+						.mockReturnValue(
+							boundary === 'final disk read'
+								? read.promise
+								: Promise.resolve({ success: true, content: '- [ ] Build it' })
+						);
+					window.maestro.fs.readFile = vi.fn().mockReturnValue(sweep.promise);
+					exit(id, 0);
+					await vi.advanceTimersByTimeAsync(0);
+					expect(window.maestro.autorun.readDoc).toHaveBeenCalledOnce();
+					if (boundary === 'final emitter sweep')
+						expect(window.maestro.fs.readFile).toHaveBeenCalledOnce();
+					controller.abort();
+					read.resolve({ success: true, content: '- [ ] Build it' });
+					sweep.resolve('- [ ] Build it');
+					expect(await pending).toMatchObject({ success: false, error: expect.any(String) });
+					data(id, document);
+					exit(id, 0);
+					expect(window.maestro.autorun.writeDoc).not.toHaveBeenCalled();
+					expect(window.maestro.playbooks.create).not.toHaveBeenCalled();
+					expect(onComplete).not.toHaveBeenCalled();
+					expect(onDocumentComplete).not.toHaveBeenCalled();
+					expect(onError).toHaveBeenCalledOnce();
+					// The process already exited before cancellation reached disk I/O.
+					expect(window.maestro.process.kill).not.toHaveBeenCalled();
+					expect(removeListener).toHaveBeenCalledTimes(4);
+					expect(vi.getTimerCount()).toBe(0);
+				}
+			);
+
+			it.each(['grok', 'claude-code', 'codex'] as const)(
+				'stops %s after an in-flight write without saving the next document',
+				async (agentType) => {
+					config.agentType = agentType;
+					const write = Promise.withResolvers<{ success: boolean }>();
+					vi.mocked(window.maestro.autorun.writeDoc).mockReturnValueOnce(write.promise);
+					const controller = new AbortController();
+					const { pending, id, data, exit, folder } = await start(controller.signal);
+					data(id, document + '\n' + document.replace('Phase-01-Setup.md', 'Phase-02-Build.md'));
+					exit(id, 0);
+					await vi.advanceTimersByTimeAsync(0);
+					expect(window.maestro.autorun.writeDoc).toHaveBeenCalledExactlyOnceWith(
+						folder,
+						'Phase-01-Setup.md',
+						'- [ ] Build it',
+						undefined
+					);
+					controller.abort();
+					// An already-started write may land; cancellation prevents the next one.
+					write.resolve({ success: true });
+					expect(await pending).toMatchObject({ success: false, error: expect.any(String) });
+					expect(window.maestro.autorun.writeDoc).toHaveBeenCalledOnce();
+					expect(window.maestro.playbooks.create).not.toHaveBeenCalled();
+					expect(onComplete).not.toHaveBeenCalled();
+					expect(onDocumentComplete).not.toHaveBeenCalled();
+					expect(onError).toHaveBeenCalledOnce();
+					expect(window.maestro.process.kill).not.toHaveBeenCalled();
+					expect(vi.getTimerCount()).toBe(0);
+				}
+			);
+
+			it.each(['abort', 'timeout'])(
+				'stops only the owned process when a pending spawn resolves after %s',
+				async (reason) => {
+					const spawn =
+						Promise.withResolvers<Awaited<ReturnType<typeof window.maestro.process.spawn>>>();
+					vi.mocked(window.maestro.process.spawn).mockReturnValueOnce(spawn.promise);
+					const controller = new AbortController();
+					const removeAbort = vi.spyOn(controller.signal, 'removeEventListener');
+					const { pending, id, data, exit, folder } = await start(controller.signal);
+					const settled = vi.fn();
+					void pending.then(settled);
+					data('unrelated-process', document);
+					exit('unrelated-process', 0);
+					if (reason === 'abort') controller.abort();
+					else {
+						await vi.advanceTimersByTimeAsync(20 * 60_000 - 1);
+						expect(settled).not.toHaveBeenCalled();
+						expect(window.maestro.process.kill).not.toHaveBeenCalled();
+						await vi.advanceTimersByTimeAsync(1);
+					}
+					expect(await pending).toMatchObject({
+						success: false,
+						error:
+							reason === 'abort'
+								? 'Document generation was cancelled.'
+								: expect.stringContaining('20 minutes'),
+					});
+					expect(window.maestro.process.kill).toHaveBeenCalledExactlyOnceWith(id);
+					for (const registration of [
+						window.maestro.process.onData,
+						window.maestro.process.onExit,
+						window.maestro.process.onAgentError,
+						window.maestro.autorun.onFileChanged,
+					])
+						expect(vi.mocked(registration).mock.results[0].value).toHaveBeenCalledOnce();
+					expect(removeAbort).toHaveBeenCalledWith('abort', expect.any(Function));
+					expect(window.maestro.autorun.unwatchFolder).toHaveBeenCalledExactlyOnceWith(folder);
+					expect(vi.getTimerCount()).toBe(0);
+					spawn.resolve({ pid: 123, success: true });
+					await vi.advanceTimersByTimeAsync(0);
+					expect(vi.mocked(window.maestro.process.kill).mock.calls).toEqual([[id], [id]]);
+					data(id, document);
+					exit(id, 0);
+					const polls = vi.mocked(window.maestro.autorun.listDocs).mock.calls.length;
+					await vi.advanceTimersByTimeAsync(20 * 60_000);
+					expect(window.maestro.autorun.listDocs).toHaveBeenCalledTimes(polls);
+					expect(vi.getTimerCount()).toBe(0);
+					expect(settled).toHaveBeenCalledOnce();
+					expect(config.callbacks!.onChunk).not.toHaveBeenCalled();
+					expect(window.maestro.autorun.writeDoc).not.toHaveBeenCalled();
+					expect(window.maestro.playbooks.create).not.toHaveBeenCalled();
+					expect(onComplete).not.toHaveBeenCalled();
+					expect(onDocumentComplete).not.toHaveBeenCalled();
+					expect(onError).toHaveBeenCalledOnce();
+				}
+			);
+
+			it('unwatches a folder whose watcher setup resolves after cancellation', async () => {
+				const watch = Promise.withResolvers<{ success: boolean }>();
+				vi.mocked(window.maestro.autorun.watchFolder).mockReturnValueOnce(watch.promise);
+				const controller = new AbortController();
+				const { pending, id, folder } = await start(controller.signal);
+				controller.abort();
+				expect(await pending).toMatchObject({ success: false });
+				expect(window.maestro.autorun.unwatchFolder).toHaveBeenCalledExactlyOnceWith(folder);
+				watch.resolve({ success: true });
+				await vi.advanceTimersByTimeAsync(0);
+				expect(vi.mocked(window.maestro.autorun.unwatchFolder).mock.calls).toEqual([
+					[folder],
+					[folder],
+				]);
+				expect(window.maestro.autorun.onFileChanged).not.toHaveBeenCalled();
+				expect(window.maestro.process.kill).toHaveBeenCalledExactlyOnceWith(id);
+				expect(removeListener).toHaveBeenCalledTimes(3);
+				expect(vi.getTimerCount()).toBe(0);
+				expect(window.maestro.autorun.writeDoc).not.toHaveBeenCalled();
+				expect(window.maestro.playbooks.create).not.toHaveBeenCalled();
+				expect(onComplete).not.toHaveBeenCalled();
+				expect(onDocumentComplete).not.toHaveBeenCalled();
+			});
+
+			it.each(['process output', 'folder activity'])(
+				'resets the 20-minute inactivity window only for owned %s',
+				async (activity) => {
+					window.maestro.fs.readFile = vi.fn().mockResolvedValue('- [ ] Preview');
+					const { pending, id, data, exit, folder } = await start();
+					const changed = vi.mocked(window.maestro.autorun.onFileChanged).mock.calls[0][0];
+					await vi.advanceTimersByTimeAsync(19 * 60_000);
+					if (activity === 'process output') data(id, 'Working...');
+					else changed({ folderPath: folder, filename: 'Phase-01-Setup.md', eventType: 'change' });
+					await vi.advanceTimersByTimeAsync(19 * 60_000);
+					expect(window.maestro.process.kill).not.toHaveBeenCalled();
+					expect(onError).not.toHaveBeenCalled();
+					data('unrelated-process', 'Still working');
+					changed({
+						folderPath: '/another-playbook',
+						filename: 'Phase-02.md',
+						eventType: 'change',
+					});
+					await vi.advanceTimersByTimeAsync(60_000 - 1);
+					expect(window.maestro.process.kill).not.toHaveBeenCalled();
+					await vi.advanceTimersByTimeAsync(1);
+					expect(await pending).toMatchObject({
+						success: false,
+						error: expect.stringContaining('20 minutes of inactivity'),
+					});
+					expect(window.maestro.process.kill).toHaveBeenCalledExactlyOnceWith(id);
+					expect(removeListener).toHaveBeenCalledTimes(4);
+					expect(window.maestro.autorun.unwatchFolder).toHaveBeenCalledExactlyOnceWith(folder);
+					data(id, document);
+					exit(id, 0);
+					expect(config.callbacks!.onChunk).toHaveBeenCalledTimes(
+						activity === 'process output' ? 1 : 0
+					);
+					expect(window.maestro.autorun.writeDoc).not.toHaveBeenCalled();
+					expect(window.maestro.playbooks.create).not.toHaveBeenCalled();
+					expect(onComplete).not.toHaveBeenCalled();
+					expect(onDocumentComplete).not.toHaveBeenCalled();
+					expect(onError).toHaveBeenCalledOnce();
+					expect(vi.getTimerCount()).toBe(0);
+				}
+			);
+		});
 	});
 });
