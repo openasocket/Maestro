@@ -1,0 +1,596 @@
+{
+	"schemaVersion": 1,
+	"taskId": "GT1-03-13",
+	"recordedAt": "2026-10-31T05:56:47.043822+00:00",
+	"sourceCommit": "3e5d0d73c2b9b9c973f858d3b1eff6f7ebdd92c8",
+	"sourceTree": "8b76911d2133dea49b97d9697b6ccd564ac584bd",
+	"executionRoot": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+	"branch": "auto-run-feature/grok-cli-integration",
+	"baseObservation": {
+		"ref": "feature/mega-maestro-v1.1.0-rc",
+		"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
+		"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+		"aheadBehind": [174, 10],
+		"baseIsAncestorOfSource": false,
+		"sourceIsAncestorOfBase": false
+	},
+	"environment": {
+		"platform": "darwin",
+		"architecture": "arm64",
+		"node": "v26.13.0",
+		"npm": "11.20.0",
+		"vitest": "4.1.11",
+		"typescript": "6.0.3",
+		"esbuild": "0.28.1",
+		"transport": "Synthetic ACP byte streams and fake processes; shared runner executes repository fake-agent.mjs locally. No native Grok calls."
+	},
+	"protocolReference": {
+		"sourceCommit": "2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8",
+		"npmCandidate": "@xai-official/grok@1.0.70",
+		"acpWireVersion": 1,
+		"protocolCrate": "0.10.4",
+		"schemaVersion": "0.11.4",
+		"binaryCorrespondence": "not-run"
+	},
+	"inputsSha256": {
+		"Plans/grok-tier1/parity.json": "8e9f5c37894c2646e9ca9b61796980a517870f17471b910c979276c14c960e18",
+		"Plans/grok-tier1/run-state.json": "7b1502912e0b36dd91d3797660e2f1ff1426f2fd486fcac89f8c94b043a5a064",
+		"package-lock.json": "0b6b52f5ae6660b8cf2ca74cf9c7992e9630b08ce685c8413040caa305ecb747",
+		"package.json": "c6c1e45b7ba259420616990f408c70d9c07cd4226b9a8283197dd5944ba8b93b",
+		"scripts/build-maestro-lib-run.mjs": "2d6bc52c41c64028c9ad4fa808e57515571b570f2d805ec975e17e91404cbf83",
+		"scripts/build-maestro-lib.mjs": "b6a15ff57fd215ab3628a52cab2f95ac3024c01ccfddd75b7f6264fbb5ed9854",
+		"src/__tests__/fixtures/fake-agent.mjs": "80f7d7aaf5f60ecc7f2eca1f9df5891dcf804a5149e84edb341074426fd05a75",
+		"src/__tests__/main/agents/capability-snapshot.test.ts": "48171d7dd5a22a01ca25e9c9af0bfcb5ab1f9bac7e8b5f6d7b0a49e22210281a",
+		"src/__tests__/main/agents/detector.test.ts": "3317876705e37d1d8535608ff566fcd747275a005734373fa83ec9ca940710c8",
+		"src/__tests__/main/codex-app-server/server-requests.test.ts": "d87404d06478c6b4e00ff18135553a556c71506fa0f2797046b5bc5aeb6ad8b6",
+		"src/__tests__/main/ipc/handlers/agents.test.ts": "c7c0c68bac9fcf9bba0a2689d44b4cc4664e051cdf30d514c5c1cbbe7db878de",
+		"src/__tests__/main/parsers/agent-output-parser.test.ts": "bfcd30942c7ef1f968dc189e3b2ff0f21fa1af76ff6a8e3c95a4bb4b1385cecd",
+		"src/__tests__/main/parsers/claude-output-parser.test.ts": "f22d92ba7365acc67eb851fe71fd092b0218956cdaefb24950ff2fbb4638a6bc",
+		"src/__tests__/main/parsers/codex-output-parser.test.ts": "83bcb31846d42f1c04a6c25a5124728b0285059cfeb4dabd42c3ce6008afa750",
+		"src/__tests__/main/parsers/error-patterns.test.ts": "111aa70c43b43d154e52667e98ec06f71df493b73de061afa93f57e9b1a0ed34",
+		"src/__tests__/main/parsers/grok-output-parser.test.ts": "e0f4a2fc0892dd84ec899d4ca449fae00da49a9708c9507a9a14f33cc44b1399",
+		"src/__tests__/renderer/hooks/agent/useAutoResumeCoordinator.test.ts": "ce95ef499bc3adc7ba3f9ac00f571df6f882c3c7c6f9b126fc7ec79ef9f5e8d6",
+		"src/__tests__/renderer/stores/autoRunResumeStore.test.ts": "88a7163ee2ae61c019e39e77fa56ceb1208201defdd10100bfd314cd281d6454",
+		"src/__tests__/shared/maestro-lib/grok/acp-client.test.ts": "61d472226d0163a54342b99c9fc256bf47d63d2d2eb8ebb5a8bf2ab7e214b785",
+		"src/__tests__/shared/maestro-lib/grok/acp-events.test.ts": "0b7a555268633f2277445a187b802b9869a99dd847fcb8c0d630ed6ba7b65736",
+		"src/__tests__/shared/maestro-lib/grok/acp-protocol.test.ts": "533a217f19465b9cb12b343eada2830e91098c0c18a3d591e2aca745999aef44",
+		"src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts": "5e4f2e69ebf13a7319ea71f22aaa0f186ce3e4e31f86a5fdcd37f39c788e95c3",
+		"src/__tests__/shared/maestro-lib/grok/acp-session.test.ts": "f2634a8e9df5377a6db92acc30bb93e8f795626afd9de91946b40a955a479d76",
+		"src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts": "d5de1098f63a2af47098c80c71c44b413214fa4f9f0da186ab8d3f7080d7a611",
+		"src/__tests__/shared/maestro-lib/protocol/rpc-requests.test.ts": "4b52bc0ece8fadad2b966e9ee059ca8f517f711d5612c079f76518036838b37b",
+		"src/__tests__/shared/maestro-lib/run/fakeAgent.ts": "9d9fec399acecc7fc9c8a088021531455140fce4c549fbe08e747e4cf8bf77cd",
+		"src/__tests__/shared/maestro-lib/run/start-turn.test.ts": "36d3d6a334a883a39f0b0bff52af206c9de65344faac14921daeb0f9615a3a8a",
+		"src/__tests__/shared/maestro-lib/run/turn-capture.test.ts": "ec9bfb203e7631b50f7ae6254d48764ea857712510e436096f6f30dabd43abb9",
+		"src/__tests__/shared/maestro-lib/translation-contract.test.ts": "297249e3865203c73c298c5c7ccb7baaa6c332c8f802555add54c2b11bf941da",
+		"src/__tests__/shared/modelPricing.test.ts": "67fbb027ba9e3101dc9ec8dcc5bb1a7864adb0dd617847f3a4411b6b674629d0",
+		"src/__tests__/shared/retryClassification.test.ts": "ad5afe9f500adcd21526a98af644c2a42b1f1cec358f4d29af75a0a33f76d254",
+		"src/main/agents/detector.ts": "b47fcb78fefd939c0a9aa23b9e719ce5937b5d11e28fadd0ca148904b4b56da0",
+		"src/main/ipc/handlers/agents.ts": "38b71543f6fe47347ec7dfb8f6aca6ec2f47af366e2c4fb08635eaf5dc6afc90",
+		"src/main/plugins/plugin-host-handlers.ts": "81ff275887037b6ec7596ebc68821661db52f739d1ba91f06eae9b774a026986",
+		"src/renderer/hooks/agent/useAutoResumeCoordinator.ts": "63618297ac437207c77ac9878bf0395bb63ecf87936279a1d61316c97c85369b",
+		"src/renderer/stores/autoRunResumeStore.ts": "3a34b78efd0990e17537a5131d656d3b318a5739566cea3c828d337a5c4357e9",
+		"src/shared/agentErrorPatterns.ts": "cc8cb8c7961e217232f4962ac73c2fc3ba3608d9df95e555a5f6c06c2ed4b950",
+		"src/shared/jsonUtils.ts": "74eb6148d4860d36a8fb230d9109e39863478ed4f1a58d17c3b07bcd62c38b05",
+		"src/shared/maestro-lib/codex/rpc-client.ts": "4cd0bc92d1c7927c36224c1e8302f342ab14ccc659691200ce2008bc1cc8e6d0",
+		"src/shared/maestro-lib/grok/acp-client.ts": "c98fe3439135fc53474c7b676000d6b29e762cc8bb9a464e0453715a4eaef48e",
+		"src/shared/maestro-lib/grok/acp-events.ts": "e9bb3956a66d48cc06f35230dc663acc5c683ad7e42f73a195a61c44798b218d",
+		"src/shared/maestro-lib/grok/acp-protocol.ts": "51a707ba2c9f8056fc46c89f0795b5f8e5b04bff23427bd2e56cbaa2f1607312",
+		"src/shared/maestro-lib/grok/acp-requests.ts": "3e9d7d489298d7d2a7364d5db22fe4c0968ed04dbc0a80b519a26244701a7bec",
+		"src/shared/maestro-lib/grok/acp-session.ts": "659458ff11edaca2213922d0173388ec7bd8100b70be2bef703a4a941bf4fa77",
+		"src/shared/maestro-lib/grok/acp-turn.ts": "2d6844db521710282b3025202f9e78c5ce3228ffe150a9a34e52b063bbdaeca5",
+		"src/shared/maestro-lib/index.ts": "916f8b81e82cf1eb02f6380fb3610ba6de94c90ad7c22b3b504c85adfdd6c434",
+		"src/shared/maestro-lib/parsers/agent-output-parser.ts": "b2b620e948b9869ae78d137915bc84fb63f97f64943bbb77eb79bd9b556ea186",
+		"src/shared/maestro-lib/parsers/grok-output-parser.ts": "d3ff72fd1ca64913e5e22a78fad2058edd4b886a6c46f4e4594ce4a71d8ed3c3",
+		"src/shared/maestro-lib/protocol/rpc-requests.ts": "960ed948e90e3c23dae32310bdd16831bb7fad280ab5e75137827947e23310c3",
+		"src/shared/maestro-lib/run/start-turn.ts": "c39dc9e663f86bbda14d55bd8dc057e6058d1d86316880bd8207169f7ce0a99a",
+		"src/shared/maestro-lib/run/turn-capture.ts": "aa30a15800bfdc384a4262649861e5abb8b47c3125437cc3611234d99500fab1",
+		"src/shared/maestro-lib/streaming/__tests__/turn-outcome.test.ts": "9d82c770505d5eac2e06c40bc9485d8855701992a951fea47638a843758e9aed",
+		"src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts": "58315e33fa9b1aea17ff7dcc94ce722cdb5c652e379bd8c00ec68bc78a50fb3a",
+		"src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts": "fe3c7651d4a5539e2ebd009c262201b306dc8ca17933c2d7cca0086443e597d6",
+		"src/shared/maestro-lib/streaming/turn-outcome.ts": "4d7edd2520f01c3740f734634b59b90ce69e8d15bdc05cf881d8b4a1bfb22d7c",
+		"src/shared/maestro-lib/streaming/usage-accumulator.ts": "f5da74a28542fbef8f6d473b5e7237f9b88ed9b286ff9f78d9aa41aeff190882",
+		"src/shared/maestro-lib/streaming/usage-totals.ts": "4eaedd8c6a3b0531822d9c07421e98381d1dcf4c0d8178c2c2424ca7ac0edf11",
+		"src/shared/retryClassification.ts": "5e0a30d015fa0baad35747b900b25934534687c7b8591dd4ffa15330998d4a1c",
+		"src/shared/types.ts": "8a77aafe2f6b755a1561d313bd8f91e71d60697b7a41683d4ad90f195df19634",
+		"tsconfig.cli.json": "31213859259324304c3449b67dc48519c21fa94e0c3dcfd4e53ca593b587ed95",
+		"tsconfig.json": "5fbb896a59400b042cee9627f1e5987fa4db5c3a94d1f278a8e54ceb894b9c00",
+		"tsconfig.lint.json": "ea576d76e80ddf428e64e16d6495bcb2b5cd6bd1b1eb578116bd78decb22c083",
+		"tsconfig.main.json": "1a4b54a2a4613cb1c27771632697cd0f5ef130a5ea24659b461492e978f5d745",
+		"vitest.config.mts": "c72dbc05459559b23dce670db0f17c064dfdf026d46d3c0d2ea4777af654ac77"
+	},
+	"runner": {
+		"path": "tmp/grok-tier1-phase03-verify/run-check.py",
+		"sha256": "9a041904c2dd2fe73222bf8d93c05093c1e04199de3abb3c7881274eae47f29c",
+		"reusedFrom": "tmp/grok-tier1-phase02-13q/run-check.py",
+		"changes": "Only scratch-directory path changed; command, environment isolation, socket prevalidation and receipt logic retained.",
+		"wrapperExitIsNotChildExit": true
+	},
+	"checks": [
+		{
+			"id": "phase",
+			"sourceCommit": "3e5d0d73c2b9b9c973f858d3b1eff6f7ebdd92c8",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/main/agents/capability-snapshot.test.ts",
+				"src/__tests__/main/agents/detector.test.ts",
+				"src/__tests__/main/codex-app-server/server-requests.test.ts",
+				"src/__tests__/main/ipc/handlers/agents.test.ts",
+				"src/__tests__/main/parsers/agent-output-parser.test.ts",
+				"src/__tests__/main/parsers/error-patterns.test.ts",
+				"src/__tests__/main/parsers/grok-output-parser.test.ts",
+				"src/__tests__/renderer/hooks/agent/useAutoResumeCoordinator.test.ts",
+				"src/__tests__/renderer/stores/autoRunResumeStore.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-client.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-events.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-protocol.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-session.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts",
+				"src/__tests__/shared/maestro-lib/protocol/rpc-requests.test.ts",
+				"src/__tests__/shared/maestro-lib/run/start-turn.test.ts",
+				"src/__tests__/shared/maestro-lib/run/turn-capture.test.ts",
+				"src/__tests__/shared/maestro-lib/translation-contract.test.ts",
+				"src/__tests__/shared/retryClassification.test.ts",
+				"src/shared/maestro-lib/streaming/__tests__/turn-outcome.test.ts",
+				"src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts",
+				"src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts",
+				"src/__tests__/main/parsers/claude-output-parser.test.ts",
+				"src/__tests__/main/parsers/codex-output-parser.test.ts",
+				"src/__tests__/shared/modelPricing.test.ts",
+				"--maxWorkers=2",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/phase/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-10-31T05:53:45.180941+00:00",
+			"finishedAt": "2026-10-31T05:53:53.147999+00:00",
+			"durationSeconds": 7.967,
+			"exitCode": 1,
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/phase/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/phase/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/phase/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/phase/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/phase/xdg-data"
+			},
+			"homeAndCodexHomeUnchanged": true,
+			"socketPrevalidation": {
+				"pathTemplate": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/fake-endpoint-XXXXXX/runtime.sock",
+				"bytes": 101,
+				"maxBytes": 103
+			},
+			"log": "tmp/grok-tier1-phase03-verify/phase/output.log",
+			"output.logSha256": "e5be08373abb0eb9e9847e63ae312833874b57228bf6f5e12de17ac4154660f5",
+			"results.jsonSha256": "d13b83895d53012e273f9177b2026bd7ee2ae42bad47cd864554e91d8ead0bdd",
+			"status": "fail",
+			"rawReceiptPath": "tmp/grok-tier1-phase03-verify/phase/receipt.json",
+			"rawReceiptSha256": "685795a4123fd39dad927610382515ae7b2f171a23c30d6cc82f295c7a2608cf",
+			"suites": [
+				{
+					"file": "src/__tests__/renderer/stores/autoRunResumeStore.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 41
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/agent/useAutoResumeCoordinator.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 72
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/modelPricing.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 29
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/retryClassification.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 129
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/agents/capability-snapshot.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 17
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/agents/detector.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 148
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/codex-app-server/server-requests.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 20
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/parsers/agent-output-parser.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 38
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/parsers/claude-output-parser.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 116
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/parsers/codex-output-parser.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 200
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/parsers/error-patterns.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 256
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/parsers/grok-output-parser.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 123
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/translation-contract.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 4
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/main/ipc/handlers/agents.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 135
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-client.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 31
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-events.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 140
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-protocol.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 51
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 120
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-session.test.ts",
+					"status": "fail",
+					"assertionCounts": {
+						"passed": 113,
+						"failed": 1
+					},
+					"failures": [
+						{
+							"name": "GrokAcpSession lifecycle over fake ACP bytes retains allocation after cancellation without dispatch, then accepts an explicit next turn",
+							"messages": [
+								"AssertionError: expected true to be false // Object.is equality\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/shared/maestro-lib/grok/acp-session.test.ts:231:30\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+							]
+						}
+					],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 89
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/protocol/rpc-requests.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 7
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/run/start-turn.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 81,
+						"skipped": 1
+					},
+					"failures": [],
+					"skipped": [
+						"applyWindowsShellRules starts a .cmd shim under a path with spaces and delivers the prompt intact"
+					]
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/run/turn-capture.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 29
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/shared/maestro-lib/streaming/__tests__/turn-outcome.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 52
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 35
+					},
+					"failures": [],
+					"skipped": []
+				},
+				{
+					"file": "src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts",
+					"status": "pass",
+					"assertionCounts": {
+						"passed": 21
+					},
+					"failures": [],
+					"skipped": []
+				}
+			],
+			"fileCounts": {
+				"passed": 25,
+				"failed": 1,
+				"total": 26
+			},
+			"assertionCounts": {
+				"passed": 2097,
+				"failed": 1,
+				"skipped": 1,
+				"total": 2099
+			},
+			"reportedUnhandledErrors": 0,
+			"unhandledErrorObservation": "No Vitest unhandled-error/rejection report in the complete log; JSON reporter has no separate unhandled-errors field.",
+			"credentialIsolation": "Inherited provider/credential environment stripped; values were not recorded. HOME and CODEX_HOME unchanged."
+		},
+		{
+			"name": "lint",
+			"command": ["npm", "run", "lint"],
+			"startedAt": "2026-10-31T05:53:45.073069+00:00",
+			"elapsedSeconds": 22.945,
+			"exitCode": 2,
+			"logPath": "tmp/grok-tier1-phase03-verify/build-checks/lint.log",
+			"logSha256": "43a4c387d477d089d1dea7098623687059907f392e9dd518536a00522b172e1c",
+			"status": "fail",
+			"diagnosticCount": 21
+		},
+		{
+			"name": "main-types",
+			"command": [
+				"node",
+				"node_modules/typescript/bin/tsc",
+				"-p",
+				"tsconfig.main.json",
+				"--noEmit"
+			],
+			"startedAt": "2026-10-31T05:54:08.018961+00:00",
+			"elapsedSeconds": 6.152,
+			"exitCode": 2,
+			"logPath": "tmp/grok-tier1-phase03-verify/build-checks/main-types.log",
+			"logSha256": "56ff587068601f3d987099cb4c7a1a56e38286def88f009a6075e27560056682",
+			"status": "fail",
+			"diagnosticCount": 11
+		},
+		{
+			"name": "cli-types",
+			"command": ["node", "node_modules/typescript/bin/tsc", "-p", "tsconfig.cli.json", "--noEmit"],
+			"startedAt": "2026-10-31T05:54:14.171281+00:00",
+			"elapsedSeconds": 5.147,
+			"exitCode": 2,
+			"logPath": "tmp/grok-tier1-phase03-verify/build-checks/cli-types.log",
+			"logSha256": "61e9257d711529d7984de6c757b1b8103ccc0fe005fbd9e3b105117232bf9d53",
+			"status": "fail",
+			"diagnosticCount": 21
+		},
+		{
+			"name": "library-build",
+			"command": [
+				"npm",
+				"run",
+				"build:maestro-lib",
+				"--",
+				"--out-dir",
+				"/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/maestro-lib"
+			],
+			"startedAt": "2026-10-31T05:54:19.318570+00:00",
+			"elapsedSeconds": 2.431,
+			"exitCode": 1,
+			"logPath": "tmp/grok-tier1-phase03-verify/build-checks/library-build.log",
+			"logSha256": "94032e511dd9782ff25403015d72ae4f1025d97a75b96e4b6da1d518f614e132",
+			"status": "fail",
+			"diagnosticCount": 15
+		},
+		{
+			"name": "runner-build",
+			"command": ["npm", "run", "build:maestro-lib-run"],
+			"startedAt": "2026-10-31T05:54:21.750438+00:00",
+			"elapsedSeconds": 0.314,
+			"exitCode": 0,
+			"logPath": "tmp/grok-tier1-phase03-verify/build-checks/runner-build.log",
+			"logSha256": "0a24b8234b572e7f4bcd8e8004a7145fa3bd2407774ffa2c63c0d66abdc7a501",
+			"status": "pass",
+			"diagnosticCount": 0
+		}
+	],
+	"buildReceipt": {
+		"path": "tmp/grok-tier1-phase03-verify/build-checks/receipt.json",
+		"sha256": "b26549e293480133dbb078e2c6170508e327e6d0c99e904b823ef460e04677c2",
+		"environment": {
+			"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/build-checks/temp",
+			"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/build-checks/temp",
+			"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/build-checks/temp",
+			"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase03-verify/build-checks/npm-cache",
+			"npm_config_update_notifier": "false",
+			"NODE_DISABLE_COMPILE_CACHE": "1",
+			"NO_COLOR": "1"
+		},
+		"versions": {
+			"node": {
+				"command": ["node", "--version"],
+				"exitCode": 0,
+				"output": "v26.13.0"
+			},
+			"npm": {
+				"command": ["npm", "--version"],
+				"exitCode": 0,
+				"output": "11.20.0"
+			},
+			"typescript": {
+				"command": ["node", "node_modules/typescript/bin/tsc", "--version"],
+				"exitCode": 0,
+				"output": "Version 6.0.3"
+			},
+			"esbuild": {
+				"command": ["node", "-p", "require(\"esbuild/package.json\").version"],
+				"exitCode": 0,
+				"output": "0.28.1"
+			}
+		}
+	},
+	"uniqueDiagnostics": [
+		"src/main/plugins/plugin-host-handlers.ts(1196,76): error TS2339: Property 'dispatcher' does not exist on type 'RequestInit'.",
+		"src/shared/maestro-lib/grok/acp-events.ts(45,14): error TS2749: 'TextDecoder' refers to a value, but is being used as a type here. Did you mean 'typeof TextDecoder'?",
+		"src/shared/maestro-lib/grok/acp-events.ts(503,9): error TS2322: Type '{ status: \"partial\" | \"exact\"; costUsdTicks: string; } | { status: \"partial\"; } | { status: \"unknown\"; }' is not assignable to type 'UsageCost'.",
+		"src/shared/maestro-lib/grok/acp-protocol.ts(69,24): error TS2550: Property 'hasOwn' does not exist on type 'ObjectConstructor'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.",
+		"src/shared/maestro-lib/grok/acp-protocol.ts(71,28): error TS2550: Property 'hasOwn' does not exist on type 'ObjectConstructor'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.",
+		"src/shared/maestro-lib/grok/acp-protocol.ts(72,27): error TS2550: Property 'hasOwn' does not exist on type 'ObjectConstructor'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.",
+		"src/shared/maestro-lib/grok/acp-protocol.ts(73,14): error TS2550: Property 'hasOwn' does not exist on type 'ObjectConstructor'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.",
+		"src/shared/maestro-lib/grok/acp-protocol.ts(82,68): error TS2550: Property 'hasOwn' does not exist on type 'ObjectConstructor'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.",
+		"src/shared/maestro-lib/grok/acp-session.ts(475,16): error TS2550: Property 'hasOwn' does not exist on type 'ObjectConstructor'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.",
+		"src/shared/maestro-lib/grok/acp-session.ts(91,40): error TS2554: Expected 0-1 arguments, but got 2.",
+		"src/shared/maestro-lib/parsers/grok-output-parser.ts(483,9): error TS2322: Type '{ status: \"partial\" | \"exact\"; costUsdTicks: string; costUsd?: undefined; } | { status: \"partial\" | \"exact\"; costUsd: number; costUsdTicks?: undefined; } | { status: \"partial\"; } | { status: \"unknown\"; }' is not assignable to type 'UsageCost'.",
+		"src/shared/maestro-lib/parsers/grok-output-parser.ts(562,7): error TS2322: Type '{ status: \"unknown\"; } | { status: \"partial\" | \"exact\"; costUsd: number; }' is not assignable to type 'UsageCost'.",
+		"src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts(107,7): error TS2322: Type '{ status: \"partial\" | \"exact\"; costUsdTicks: string; }' is not assignable to type 'UsageCost | undefined'.",
+		"src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts(256,5): error TS2322: Type '{ status: \"unknown\"; costUsdTicks?: undefined; } | { status: \"partial\" | \"exact\"; costUsdTicks: string; }' is not assignable to type 'UsageCost'.",
+		"src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts(257,14): error TS2322: Type '{ model: string; inputTokens: number; completeness: \"unknown\" | \"complete\" | \"partial\"; cost: { status: \"unknown\"; costUsdTicks?: undefined; } | { status: \"partial\" | \"exact\"; costUsdTicks: string; }; }' is not assignable to type 'UsageBreakdown & { model: string; }'.",
+		"src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts(267,5): error TS2322: Type '{ status: \"unknown\"; costUsdTicks?: undefined; } | { status: \"partial\" | \"exact\"; costUsdTicks: string; }' is not assignable to type 'UsageCost'.",
+		"src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts(269,36): error TS2322: Type '{ status: \"unknown\"; costUsdTicks?: undefined; } | { status: \"partial\" | \"exact\"; costUsdTicks: string; }' is not assignable to type 'UsageCost'.",
+		"src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts(270,6): error TS2322: Type '{ model: string; inputTokens: number; completeness: \"unknown\" | \"complete\" | \"partial\"; cost: { status: \"unknown\"; costUsdTicks?: undefined; } | { status: \"partial\" | \"exact\"; costUsdTicks: string; }; }' is not assignable to type 'UsageBreakdown & { model: string; }'.",
+		"src/shared/maestro-lib/streaming/usage-accumulator.ts(581,46): error TS2550: Property 'hasOwn' does not exist on type 'ObjectConstructor'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.",
+		"src/shared/maestro-lib/streaming/usage-accumulator.ts(601,48): error TS2550: Property 'hasOwn' does not exist on type 'ObjectConstructor'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.",
+		"src/shared/maestro-lib/streaming/usage-accumulator.ts(736,12): error TS2550: Property 'hasOwn' does not exist on type 'ObjectConstructor'. Do you need to change your target library? Try changing the 'lib' compiler option to 'es2022' or later.",
+		"src/shared/maestro-lib/streaming/usage-totals.ts(530,2): error TS2322: Type '{ costUsdTicks?: string | undefined; costUsd: number; status: \"partial\" | \"exact\"; }' is not assignable to type 'UsageCost'."
+	],
+	"uniqueDiagnosticCount": 22,
+	"phase03DiagnosticCount": 21,
+	"baselineDiagnostic": {
+		"file": "src/main/plugins/plugin-host-handlers.ts",
+		"line": 1196,
+		"code": "TS2339",
+		"sourceSha256": "81ff275887037b6ec7596ebc68821661db52f739d1ba91f06eae9b774a026986",
+		"ownerTask": "GT1-12-03",
+		"status": "fail"
+	},
+	"repairTasks": ["GT1-03-13A", "GT1-03-13B", "GT1-03-13C", "GT1-03-13D", "GT1-03-13E"],
+	"overallStatus": "fail",
+	"live": {
+		"status": "not-run",
+		"providerCalls": 0,
+		"budgetUsd": 0
+	},
+	"imagesAnalyzed": 0,
+	"limitations": [
+		"Verification completed with failures; no production or test edits were authorized in this task.",
+		"Windows cmd.exe case skipped on macOS; Windows/Linux/SSH/native qualification remains not-run.",
+		"Runner bundle pass is not library declaration, provider protocol or managed-route qualification.",
+		"Parity reconciliation belongs to GT1-03-14; parity statuses are unchanged.",
+		"Full logs, reporter JSON and harness remain in ignored checkout-local scratch; hashes, commands, counts and decisive diagnostics are retained here.",
+		"No full-repository ESLint, test or validate:push pass is claimed."
+	],
+	"generatedArtifactsSha256": {
+		"dist/cli/maestro-lib-run.js": "ce6850cd33d38626a5073f78eb1172f31221796ac7f3bf8bc719a80bfad95480"
+	}
+}
