@@ -864,6 +864,22 @@
 			"live": "not-run",
 			"affectedRows": ["P04", "P13", "P15", "REG-STORAGE", "REG-PROFILE"],
 			"scope": "GT1-04-01 adapter account scoping only. Tests and execution remain GT1-04-02/13; remote hardening and actual consumers remain with their existing owners. No full-row acceptance or native qualification."
+		},
+		"phase04-remote-history-paths": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-03-remote-history-path-hardening",
+			"sourceCommit": "b41a1df3dac30f693f8bf260c9c47c3b21a9e54b",
+			"sourceCommitScope": "Pre-task HEAD plus the source hash in this entry and the task commit containing it.",
+			"sourceHashesSha256": {
+				"src/main/storage/grok-session-storage.ts": "38601ad07bd50a081a93c093520ba1a2046ac93fb178fd0ee12d0c4f1bd82d01"
+			},
+			"provenance": "implementation-and-static-diff-review",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"implementation": "implemented",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P13", "P15", "C-supportsSessionStorage", "REG-STORAGE"],
+			"scope": "GT1-04-03 path validation and remote project/account separation only; existing remote helpers/concurrency retained. GT1-04-04 owns tests including replacement of the obsolete UUID-only assertion, GT1-04-13 owns execution. No full-row acceptance, symlink containment, native remote-host or resume/translation qualification."
 		}
 	},
 	"sourceCatalog": {
@@ -4525,7 +4541,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
-				"phase04AccountScopeEvidenceRef": "phase04-account-storage"
+				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
+				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4773,7 +4790,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
-				"phase04AccountScopeEvidenceRef": "phase04-account-storage"
+				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
+				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10843,7 +10861,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13827,7 +13846,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04AccountScopeEvidenceRef": "phase04-account-storage"
+				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
+				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths"
 			},
 			"evidenceApplicability": {
 				"static": {

@@ -44,6 +44,7 @@ import { isMacOS } from '../../shared/platformDetection';
 import { BaseSessionStorage } from './base-session-storage';
 import type { SearchableMessage } from './base-session-storage';
 import { isExpectedRemoteError } from './remote-error-utils';
+import { isExpectedSessionReadError } from '../utils/session-read-errors';
 import type { ModelTokenUsage } from '../../shared/tokenUsage';
 import { normalizeModelId } from '../../shared/modelPricing';
 
@@ -52,27 +53,24 @@ const MAX_SESSION_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
 const FIRST_MESSAGE_PREVIEW_LENGTH = 200;
 
 /**
- * Reject path-traversal session IDs before joining under the project cwd folder.
- * Grok session dirs are UUID-shaped; path separators and ".." must never land
- * in getSessionPath (star-mirror / open-path consumers trust this join).
+ * Native IDs are opaque directory names, not necessarily UUIDs. Validate each
+ * untrusted path component before joining it; never decode or sanitize an ID
+ * into a different session's name. Encoded cwd folders use this check too.
  */
-function isSafeGrokSessionId(sessionId: string): boolean {
-	if (!sessionId || typeof sessionId !== 'string') return false;
-	if (sessionId.includes('..') || sessionId.includes('/') || sessionId.includes('\\')) {
-		return false;
-	}
-	// Allow UUID forms (v4/v7 and similar) used by Grok session dirs.
-	return /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(
-		sessionId
+function isSafeGrokPathSegment(name: string): boolean {
+	return (
+		typeof name === 'string' &&
+		name.length > 0 &&
+		name !== '.' &&
+		name !== '..' &&
+		!name.includes('/') &&
+		!name.includes('\\') &&
+		!name.includes('\0')
 	);
 }
 
 /** Shape of summary.json (the fields this storage consumes). */
 interface GrokSessionSummary {
-	info?: {
-		id?: string;
-		cwd?: string;
-	};
 	session_summary?: string;
 	generated_title?: string;
 	created_at?: string;
@@ -220,15 +218,17 @@ function stripUserQueryWrapper(text: string): string {
 }
 
 /**
- * Normalize a path for comparison: strip trailing slashes and fold the macOS
+ * Normalize a path for comparison: strip trailing slashes and fold the local macOS
  * `/private` symlink prefix (`/private/var` == `/var`, `/private/tmp` ==
  * `/tmp`) since Grok records the realpath'd cwd while Maestro may pass the
  * symlinked form.
  */
-function normalizePathForComparison(value: string): string {
+function normalizePathForComparison(value: string, isRemote: boolean): string {
 	let normalized = value.replace(/\/+$/, '');
 	if (!normalized) normalized = '/';
-	return normalized.replace(/^\/private(\/(?:var|tmp|etc))(\/|$)/, '$1$2');
+	// The remote may have distinct /var and /private/var directories. Do not
+	// infer its aliases from the desktop's filesystem or operating system.
+	return isRemote ? normalized : normalized.replace(/^\/private(\/(?:var|tmp|etc))(\/|$)/, '$1$2');
 }
 
 /**
@@ -248,10 +248,13 @@ function toGrokRecordedCwd(projectPath: string, isRemote: boolean): string {
 }
 
 /** Check whether a session cwd belongs to the given project (exact match or subdirectory). */
-function matchesProject(cwd: string, projectPath: string): boolean {
-	const normalizedCwd = normalizePathForComparison(cwd);
-	const normalizedProject = normalizePathForComparison(projectPath);
-	return normalizedCwd === normalizedProject || normalizedCwd.startsWith(`${normalizedProject}/`);
+function matchesProject(cwd: string, projectPath: string, isRemote: boolean): boolean {
+	const normalizedCwd = normalizePathForComparison(cwd, isRemote);
+	const normalizedProject = normalizePathForComparison(projectPath, isRemote);
+	return (
+		normalizedCwd === normalizedProject ||
+		normalizedCwd.startsWith(normalizedProject === '/' ? '/' : `${normalizedProject}/`)
+	);
 }
 
 /**
@@ -427,10 +430,18 @@ export class GrokSessionStorage extends BaseSessionStorage {
 
 	/** Decode a percent-encoded cwd folder name. Returns null for malformed encodings. */
 	private decodeCwdFolder(name: string): string | null {
+		if (!isSafeGrokPathSegment(name)) return null;
 		try {
-			return decodeURIComponent(name);
-		} catch {
-			return null;
+			const decoded = decodeURIComponent(name);
+			// Native cwd folders encode realpaths. Dot components would let
+			// /project/../other pass the project-prefix filter as a descendant.
+			if (decoded.includes('\0') || /(?:^|[/\\])\.{1,2}(?:[/\\]|$)/.test(decoded)) {
+				return null;
+			}
+			return decoded;
+		} catch (error) {
+			if (error instanceof URIError) return null;
+			throw error;
 		}
 	}
 
@@ -459,8 +470,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 			const entries = await fs.readdir(dirPath, { withFileTypes: true });
 			return entries.filter((entry) => entry.isDirectory()).map((entry) => entry.name);
 		} catch (error) {
-			const code = (error as NodeJS.ErrnoException)?.code;
-			if (code !== 'ENOENT' && code !== 'EACCES' && code !== 'EPERM') {
+			if (!isExpectedSessionReadError(error)) {
 				captureException(error, { operation, dirPath });
 			}
 			return [];
@@ -484,21 +494,23 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		);
 		return folders.filter((name) => {
 			const decoded = this.decodeCwdFolder(name);
-			return decoded !== null && matchesProject(decoded, projectPath);
+			return decoded !== null && matchesProject(decoded, projectPath, Boolean(sshConfig));
 		});
 	}
 
-	/** List session UUID directories inside a cwd folder (skips prompt_history.jsonl, a file). */
+	/** List safe native session directories (skips prompt_history.jsonl, a file). */
 	private async listSessionIds(
 		cwdFolder: string,
 		sessionsDir: string,
 		sshConfig?: SshRemoteConfig
 	): Promise<string[]> {
-		return this.listSubdirectories(
+		if (this.decodeCwdFolder(cwdFolder) === null) return [];
+		const sessionIds = await this.listSubdirectories(
 			this.joinPath(sshConfig, sessionsDir, cwdFolder),
 			sshConfig,
 			'grokStorage:listSessionIds'
 		);
+		return sessionIds.filter(isSafeGrokPathSegment);
 	}
 
 	/** List all Grok sessions matching the given project path, newest first. */
@@ -564,6 +576,8 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		sessionsDir: string,
 		sshConfig?: SshRemoteConfig
 	): Promise<AgentSessionInfo | null> {
+		const cwd = this.decodeCwdFolder(cwdFolder);
+		if (cwd === null || !isSafeGrokPathSegment(sessionId)) return null;
 		const sessionDir = this.joinPath(sshConfig, sessionsDir, cwdFolder, sessionId);
 		try {
 			const summaryContent = await this.readSessionFile(
@@ -609,8 +623,10 @@ export class GrokSessionStorage extends BaseSessionStorage {
 			);
 
 			return {
-				sessionId: summary.info?.id || sessionId,
-				projectPath: summary.info?.cwd || this.decodeCwdFolder(cwdFolder) || '',
+				// Search/read must address the directory we validated, even when a
+				// stale or malformed summary names another session or project.
+				sessionId,
+				projectPath: cwd,
 				timestamp,
 				modifiedAt,
 				firstMessage: preview.slice(0, FIRST_MESSAGE_PREVIEW_LENGTH),
@@ -628,9 +644,8 @@ export class GrokSessionStorage extends BaseSessionStorage {
 				sessionName: title || undefined,
 			};
 		} catch (error) {
-			const code = (error as NodeJS.ErrnoException)?.code;
-			if (code === 'ENOENT' || code === 'EACCES' || code === 'EPERM') {
-				logger.debug(`Expected failure loading Grok session ${sessionId}: ${code}`, LOG_CONTEXT);
+			if (isExpectedSessionReadError(error)) {
+				logger.debug(`Expected failure loading Grok session ${sessionId}`, LOG_CONTEXT, { error });
 			} else {
 				logger.warn(`Unexpected failure loading Grok session ${sessionId}`, LOG_CONTEXT, {
 					error,
@@ -652,6 +667,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		sessionsDir: string,
 		sshConfig?: SshRemoteConfig
 	): Promise<string | null> {
+		if (!isSafeGrokPathSegment(sessionId)) return null;
 		const cwdFolders = await this.listMatchingCwdFolders(projectPath, sessionsDir, sshConfig);
 		for (const cwdFolder of cwdFolders) {
 			const sessionIds = await this.listSessionIds(cwdFolder, sessionsDir, sshConfig);
@@ -730,10 +746,17 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		sshConfig?: SshRemoteConfig,
 		accountDir?: string
 	): string | null {
-		if (!isSafeGrokSessionId(sessionId)) {
+		if (!isSafeGrokPathSegment(sessionId)) {
 			return null;
 		}
-		const encoded = encodeURIComponent(toGrokRecordedCwd(projectPath, Boolean(sshConfig)));
+		let encoded: string;
+		try {
+			encoded = encodeURIComponent(toGrokRecordedCwd(projectPath, Boolean(sshConfig)));
+		} catch (error) {
+			if (error instanceof URIError) return null;
+			throw error;
+		}
+		if (this.decodeCwdFolder(encoded) === null) return null;
 		return this.joinPath(
 			sshConfig,
 			this.getSessionsDir(sshConfig, accountDir),
@@ -807,8 +830,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 			const stat = await fs.stat(filePath);
 			return { size: stat.size, mtimeMs: stat.mtimeMs };
 		} catch (error) {
-			const code = (error as NodeJS.ErrnoException)?.code;
-			if (code !== 'ENOENT' && code !== 'EACCES' && code !== 'EPERM') {
+			if (!isExpectedSessionReadError(error)) {
 				captureException(error, { operation: 'grokStorage:statSessionFile', filePath });
 			}
 			return null;
@@ -836,8 +858,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		try {
 			return await fs.readFile(filePath, 'utf8');
 		} catch (error) {
-			const code = (error as NodeJS.ErrnoException)?.code;
-			if (code !== 'ENOENT' && code !== 'EACCES' && code !== 'EPERM') {
+			if (!isExpectedSessionReadError(error)) {
 				captureException(error, { operation: 'grokStorage:readSessionFile', filePath });
 			}
 			return null;
