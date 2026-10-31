@@ -3098,6 +3098,30 @@
 				"Custom-path drafts are not executable certification; canonical launch validation/admission and native identity await behavioral/live evidence.",
 				"Symphony selection stays phase08; production ACP stays phase07; no capability or beta promotion."
 			]
+		},
+		"phase05-duplicate-permissions": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-02c1-duplicate-permission-handoff",
+			"sourceCommit": "135f39aaefedaf9e43de864ceb023f585333a46b",
+			"sourceRevisionScope": "Pre-task HEAD plus the three source hashes and task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/components/NewInstanceModal/types.ts": "4a908335b4e016a7094e9dd361ff12108b3c47d0f01dc632aba54a438e351c99",
+				"src/renderer/components/NewInstanceModal/NewInstanceModal.tsx": "145fcfa66908012bfb4affb1f034e8d446e7a23b3cf99560a3abd0d99401a658",
+				"src/renderer/hooks/session/useSessionCrud.ts": "d4e2a5d8657c0cd046c053b549fb50c18e4b3c92c1f96829d0ac078a0953a2f6"
+			},
+			"provenance": "implementation-and-static-review",
+			"implementation": "implemented",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P17", "S30"],
+			"testTasks": ["GT1-05-02D", "GT1-05-02D1"],
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"Permission handoff and capability refusal await component and real creation-consumer tests; no executed behavior or semantic type-check pass is claimed.",
+				"Fresh records are idle drafts with no native binding; canonical launch admission and native permission enforcement are not certified here.",
+				"Grok Standard and production ACP remain unavailable; no capability or beta promotion."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -7724,7 +7748,8 @@
 				"phase05WorktreeConfigurationEvidenceRef": "phase05-worktree-configuration",
 				"phase05WorktreeTestsEvidenceRef": "phase05-worktree-tests",
 				"phase05WorktreeLaunchTestsEvidenceRef": "phase05-worktree-launch-tests",
-				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation"
+				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation",
+				"phase05DuplicatePermissionsEvidenceRef": "phase05-duplicate-permissions"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21795,7 +21820,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation"
+				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation",
+				"phase05DuplicatePermissionsEvidenceRef": "phase05-duplicate-permissions"
 			},
 			"evidenceApplicability": {
 				"static": {

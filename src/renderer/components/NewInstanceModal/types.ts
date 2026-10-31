@@ -1,5 +1,12 @@
 import type React from 'react';
-import type { AdditionalDirectory, AgentConfig, Session, ToolType, Theme } from '../../types';
+import type {
+	AdditionalDirectory,
+	AgentConfig,
+	AITab,
+	Session,
+	ToolType,
+	Theme,
+} from '../../types';
 import { PICKABLE_AGENT_IDS } from '../../../shared/agentMetadata';
 import type { CodexTransport } from '../../../shared/codexTransport';
 
@@ -63,7 +70,9 @@ export interface NewInstanceModalProps {
 		/** Codex only: spend a reset credit automatically on quota exhaustion. Defaults off. */
 		codexAutoResetOnExhaustion?: boolean,
 		/** Codex only: which transport chat turns use. `undefined` means `exec`. */
-		codexTransport?: CodexTransport
+		codexTransport?: CodexTransport,
+		/** Permission mode for the fresh initial tab; omitted for ordinary new agents. */
+		permissionMode?: AITab['permissionMode']
 	) => void;
 	theme: Theme;
 	existingSessions: Session[];

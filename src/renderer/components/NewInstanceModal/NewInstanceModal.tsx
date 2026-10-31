@@ -35,6 +35,7 @@ import { getEffortConfigKey, readEffortFromConfig } from '../../utils/agentEffor
 import { gitService } from '../../services/git';
 import { withBlankEnvVarRow } from '../../../shared/envVarCatalog';
 import { useAgentModelEffortOptions } from '../../hooks/agent/useAgentModelEffortOptions';
+import { resolveTabPermissionMode } from '../../../shared/agentMetadata';
 
 export function NewInstanceModal({
 	isOpen,
@@ -759,6 +760,13 @@ export function NewInstanceModal({
 		const agentMaestroPMode = agentEnableMaestroP
 			? (maestroPModeByAgent[selectedAgent] ?? 'dynamic')
 			: undefined;
+		// Copy the source tab's effective choice, including legacy read-only state.
+		// The creation consumer refuses unsupported modes for the selected provider.
+		const permissionMode = sourceSession
+			? resolveTabPermissionMode(
+					sourceSession.aiTabs?.find((tab) => tab.id === sourceSession.activeTabId)
+				)
+			: undefined;
 
 		onCreate(
 			selectedAgent,
@@ -782,7 +790,8 @@ export function NewInstanceModal({
 			retryTokenByAgent[selectedAgent] ?? true,
 			normalizeAdditionalDirectories(additionalDirectories, homeDir),
 			codexAutoResetByAgent[selectedAgent] ?? false,
-			codexTransportByAgent[selectedAgent] ?? 'exec'
+			codexTransportByAgent[selectedAgent] ?? 'exec',
+			permissionMode
 		);
 		onClose();
 
@@ -857,6 +866,7 @@ export function NewInstanceModal({
 		retryTokenByAgent,
 		codexAutoResetByAgent,
 		codexTransportByAgent,
+		sourceSession,
 	]);
 
 	// Handle keyboard shortcuts via window listener (Modal stops propagation on its backdrop)
