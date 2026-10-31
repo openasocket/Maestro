@@ -52,6 +52,40 @@ export interface GrokAcpPermissionSettlement {
 	terminal?: TurnTerminal;
 }
 
+/** Pinned ACP extensions use an underscore on the wire (ACP crate 0.10.4). */
+export type GrokAcpQuestionMethod = '_x.ai/ask_user_question' | '_x.ai/mcp/elicit';
+
+export interface GrokAcpQuestionIdentity {
+	/** Connection/account/host/session/turn/method/typed-request correlation, not a provider ID. */
+	questionId: string;
+	requestId: AcpRequestId;
+	sessionId: string | null;
+	turnId: string | null;
+	processGeneration: string;
+}
+
+export interface GrokAcpQuestionSettlement extends Omit<GrokAcpPermissionSettlement, 'decision'> {
+	kind: 'question';
+	decision?: never;
+	method: GrokAcpQuestionMethod;
+	identity: GrokAcpQuestionIdentity;
+}
+
+/**
+ * Consumer port for phases 07/10. Pending carries the original prompt/options/schema
+ * without interpreting it as a permission. The pinned peer advertises no question
+ * capability, so this adapter currently emits ONLY settled events, never pending.
+ */
+export type GrokAcpQuestionEvent =
+	| {
+			state: 'pending';
+			identity: GrokAcpQuestionIdentity;
+			method: GrokAcpQuestionMethod;
+			request: AcpCall['params'];
+			deadlineAt: number;
+	  }
+	| { state: 'settled'; settlement: GrokAcpQuestionSettlement };
+
 export interface GrokAcpRequestOptions {
 	/** One adapter per admitted process/connection. These references are never credentials. */
 	account: string;
@@ -59,13 +93,15 @@ export interface GrokAcpRequestOptions {
 	cwd: string;
 	processGeneration: string;
 	timeoutMs?: number;
-	onSettlement: (settlement: GrokAcpPermissionSettlement) => void;
+	/** Common terminal channel: an unavailable question also prevents successful completion. */
+	onSettlement: (settlement: GrokAcpPermissionSettlement | GrokAcpQuestionSettlement) => void;
+	onQuestion?: (event: GrokAcpQuestionEvent) => void;
 	/** Must close the transport/owned process without throwing; diagnostics contain no payload. */
 	onFault: (error: GrokAcpTransportError) => void;
 }
 
 type PermissionOwner = Readonly<GrokAcpPermissionTurn> & { detach: () => void };
-interface PendingPermission {
+interface PendingRequest {
 	id: AcpRequestId;
 	owner?: PermissionOwner;
 	sessionId: string | null;
@@ -74,19 +110,25 @@ interface PendingPermission {
 	watchdog?: IdleWatchdog;
 	allow?: string;
 	deny?: string;
+	questionMethod?: GrokAcpQuestionMethod;
 }
 
 /**
- * Incoming permission lifetime only. No tool execution, policy classification or implicit grant.
+ * Incoming request lifetime only. No tool execution, policy classification or implicit grant.
  * Register requestHandlers once; beginTurn immediately before dispatch, end it on settlement,
  * and close on pipe/process loss. An untagged request belongs only to the exclusive active turn.
  */
 export class GrokAcpRequestAdapter {
 	readonly requestHandlers: NonNullable<GrokAcpClientOptions['requestHandlers']>;
+	/** Source-known methods are not a negotiated feature. Never infer this from permissions. */
+	readonly questionSupport = Object.freeze({
+		status: 'unsupported' as const,
+		reason: 'not-advertised' as const,
+	});
 	private readonly options: Readonly<GrokAcpRequestOptions>;
 	private readonly timeoutMs: number;
 	private readonly seen = new Set<AcpRequestId>();
-	private readonly pending = new Map<AcpRequestId, PendingPermission>();
+	private readonly pending = new Map<AcpRequestId, PendingRequest>();
 	private owner?: PermissionOwner;
 	private closed = false;
 	private draining = false;
@@ -108,7 +150,21 @@ export class GrokAcpRequestAdapter {
 			)
 		)
 			throw new TypeError('Grok ACP permission identity is required');
-		this.requestHandlers = new Map([['session/request_permission', this.request]]);
+		this.requestHandlers = new Map([
+			['session/request_permission', this.request],
+			['_x.ai/ask_user_question', this.request],
+			['_x.ai/mcp/elicit', this.request],
+		]);
+	}
+
+	/**
+	 * Correlated answer operation for interactive consumers. There can be no pending
+	 * question without a verified advertised contract, so every answer is unavailable.
+	 * This includes stale/foreign identities and permission IDs: no wire write, authority
+	 * call or fabricated accepted answer. Future negotiation must preserve that separation.
+	 */
+	answerQuestion(_identity: GrokAcpQuestionIdentity, _answer: unknown): 'unavailable' {
+		return 'unavailable';
 	}
 
 	/** End the previous turn first. The returned end operation cannot invalidate a later turn. */
@@ -165,7 +221,15 @@ export class GrokAcpRequestAdapter {
 
 	private readonly request = (request: AcpCall, respond: (answer: AcpAnswer) => boolean): void => {
 		// Notifications, even with permission-shaped data, have no authority channel.
-		if (request.id === undefined || request.method !== 'session/request_permission' || this.closed)
+		const questionMethod =
+			request.method === '_x.ai/ask_user_question' || request.method === '_x.ai/mcp/elicit'
+				? request.method
+				: undefined;
+		if (
+			request.id === undefined ||
+			(request.method !== 'session/request_permission' && !questionMethod) ||
+			this.closed
+		)
 			return;
 		const id = request.id;
 		// Bound tombstones for this connection; never evict one and allow request replay.
@@ -184,12 +248,13 @@ export class GrokAcpRequestAdapter {
 		const validParams = params !== null && typeof params === 'object' && !Array.isArray(params);
 		const sessionId = validParams && typeof params.sessionId === 'string' ? params.sessionId : null;
 		const owner = this.owner;
-		const pending: PendingPermission = {
+		const pending: PendingRequest = {
 			id,
 			owner,
 			sessionId,
 			respond,
 			controller: new AbortController(),
+			questionMethod,
 		};
 		this.pending.set(id, pending);
 		if (!owner || owner.signal.aborted || sessionId !== owner.sessionId) {
@@ -214,6 +279,13 @@ export class GrokAcpRequestAdapter {
 		) {
 			pending.owner = undefined;
 			this.settle(pending, 'stale-request');
+			return;
+		}
+		if (questionMethod) {
+			// The pinned initialize response has no ask-back/elicitation capability. Both
+			// recognized reverse methods have explicit cancellation outcomes. Never show a
+			// question, parse a schema, open a URL or wait for an absent UI in this state.
+			this.settle(pending, 'unavailable');
 			return;
 		}
 		const tool = params.toolCall;
@@ -321,7 +393,7 @@ export class GrokAcpRequestAdapter {
 	};
 
 	private settle(
-		pending: PendingPermission,
+		pending: PendingRequest,
 		reason: PermissionReason,
 		decision?: ManagedEffectDecision['decision']
 	): void {
@@ -339,10 +411,14 @@ export class GrokAcpRequestAdapter {
 		if (!this.closed) {
 			try {
 				responseWritten = pending.respond({
-					result: {
-						outcome:
-							optionId === undefined ? { outcome: 'cancelled' } : { outcome: 'selected', optionId },
-					},
+					result: pending.questionMethod
+						? { outcome: pending.questionMethod === '_x.ai/mcp/elicit' ? 'cancel' : 'cancelled' }
+						: {
+								outcome:
+									optionId === undefined
+										? { outcome: 'cancelled' }
+										: { outcome: 'selected', optionId },
+							},
 				});
 			} catch {
 				writeFailed = true;
@@ -354,21 +430,50 @@ export class GrokAcpRequestAdapter {
 		else if (reason === 'timeout') terminal = { status: 'timeout', kind: 'deadline' };
 		else if (reason === 'cancelled' || reason === 'turn-ended')
 			terminal = { status: 'cancelled', origin: 'host' };
+		else if (pending.questionMethod) terminal = { status: 'cancelled', origin: 'host' };
 		else if (reason !== 'allowed') terminal = { status: 'refused', origin: 'effect' };
 		try {
-			this.options.onSettlement({
+			const settlement: Omit<GrokAcpPermissionSettlement, 'decision'> = {
 				requestId: pending.id,
 				sessionId: pending.sessionId,
 				turnId: pending.owner?.turnId ?? null,
 				reason,
-				decision,
 				responseWritten,
 				terminal: terminal && {
 					...terminal,
-					reason: `permission-${reason}`,
+					reason: `${pending.questionMethod ? 'user-input' : 'permission'}-${reason}`,
 					dispatchState: 'dispatched',
 				},
-			});
+			};
+			if (pending.questionMethod) {
+				const question: GrokAcpQuestionSettlement = {
+					...settlement,
+					kind: 'question',
+					method: pending.questionMethod,
+					identity: {
+						questionId: canonicalJson([
+							this.options.account,
+							this.options.host,
+							this.options.processGeneration,
+							pending.sessionId,
+							settlement.turnId,
+							pending.questionMethod,
+							pending.id,
+						]),
+						requestId: pending.id,
+						sessionId: pending.sessionId,
+						turnId: settlement.turnId,
+						processGeneration: this.options.processGeneration,
+					},
+				};
+				// Observers must not rewrite one another's original request/turn identity.
+				const event: GrokAcpQuestionEvent = {
+					state: 'settled',
+					settlement: structuredClone(question),
+				};
+				this.options.onSettlement(question);
+				this.options.onQuestion?.(event);
+			} else this.options.onSettlement({ ...settlement, decision });
 		} catch {
 			// Observer failures are reported without exposing request/authority payloads.
 			this.fault('handler-failed');
