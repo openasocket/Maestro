@@ -103,6 +103,15 @@ export interface ParsedEvent {
 	 */
 	parentToolUseId?: string;
 
+	/** Reported provider lineage when a child session has no parent tool-call ID. */
+	sessionRelation?: {
+		parentSessionId?: string;
+		parentTurnId?: string;
+		childSessionId?: string;
+		subagentId?: string;
+		attemptId?: string;
+	};
+
 	/**
 	 * Token usage statistics (for 'usage' type)
 	 */

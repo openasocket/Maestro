@@ -460,6 +460,29 @@
 				"REG-PARSER",
 				"REG-USAGE"
 			]
+		},
+		"phase03-acp-events": {
+			"path": "Plans/grok-tier1/evidence/03.md#gt1-03-05-acp-event-normalization",
+			"sourceCommit": "f3b664c80c4c50147394c9ea0ac48694a4500ddd",
+			"provenance": "source-review",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"scope": "GT1-03-05 implements the isolated ACP event adapter and optional ParsedEvent session lineage. GT1-03-05E owns lossless wire ticks, GT1-03-06 tests, GT1-03-09 composition and GT1-03-13 execution. No runtime or native qualification claim.",
+			"affectedRows": [
+				"P09",
+				"P10",
+				"P11",
+				"P12",
+				"C-supportsCostTracking",
+				"C-supportsUsageStats",
+				"C-supportsResultMessages",
+				"REG-PARSER",
+				"REG-USAGE"
+			],
+			"sourcePaths": [
+				"src/shared/maestro-lib/grok/acp-events.ts",
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -2954,7 +2977,9 @@
 				"src/main/codex-app-server/invocation.ts",
 				"src/shared/maestro-lib/codex/server-requests.ts",
 				"src/shared/types.ts",
-				"src/renderer/components/MainPanel/MainPanelContent.tsx"
+				"src/renderer/components/MainPanel/MainPanelContent.tsx",
+				"src/shared/maestro-lib/grok/acp-events.ts",
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -2976,7 +3001,8 @@
 					"GT1-03-05A",
 					"GT1-07-03A",
 					"GT1-03-05C",
-					"GT1-03-05C1"
+					"GT1-03-05C1",
+					"GT1-03-05E"
 				],
 				"test": [
 					"GT1-03-02",
@@ -3024,7 +3050,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
-				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3057,6 +3084,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P09"]
+				},
+				{
+					"id": "acp-wire-tick-precision:P09",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["P09"]
 				}
 			],
@@ -3217,7 +3250,9 @@
 				"src/main/agents/limitResetEstimator.ts",
 				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts",
 				"src/main/stats/token-usage/token-usage-accessor.ts",
-				"src/main/cue/stats/cue-token-accessor.ts"
+				"src/main/cue/stats/cue-token-accessor.ts",
+				"src/shared/maestro-lib/grok/acp-events.ts",
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3240,7 +3275,8 @@
 					"GT1-07-03A",
 					"GT1-07-04C",
 					"GT1-03-05C",
-					"GT1-03-05C1"
+					"GT1-03-05C1",
+					"GT1-03-05E"
 				],
 				"test": [
 					"GT1-03-02",
@@ -3295,7 +3331,8 @@
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
-				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3328,6 +3365,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P10"]
+				},
+				{
+					"id": "acp-wire-tick-precision:P10",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["P10"]
 				}
 			],
@@ -3402,7 +3445,9 @@
 				"src/main/cue/cue-process-lifecycle.ts",
 				"src/main/process-manager/handlers/StdoutHandler.ts",
 				"src/main/agents/limitResetEstimator.ts",
-				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts"
+				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts",
+				"src/shared/maestro-lib/grok/acp-events.ts",
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3415,7 +3460,8 @@
 					"GT1-07-03",
 					"GT1-03-05A",
 					"GT1-03-05C",
-					"GT1-03-05C1"
+					"GT1-03-05C1",
+					"GT1-03-05E"
 				],
 				"test": [
 					"GT1-03-06",
@@ -3456,7 +3502,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
-				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3489,6 +3536,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P11"]
+				},
+				{
+					"id": "acp-wire-tick-precision:P11",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["P11"]
 				}
 			],
@@ -3618,7 +3671,9 @@
 				"src/renderer/components/TerminalOutput/components/LogItem.tsx",
 				"src/renderer/services/codexFollowup.ts",
 				"src/main/group-chat/spawnGroupChatAgent.ts",
-				"src/main/group-chat/output-parser.ts"
+				"src/main/group-chat/output-parser.ts",
+				"src/shared/maestro-lib/grok/acp-events.ts",
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -3631,7 +3686,8 @@
 					"GT1-03-05A",
 					"GT1-03-11A",
 					"GT1-03-05C",
-					"GT1-03-05C1"
+					"GT1-03-05C1",
+					"GT1-03-05E"
 				],
 				"test": [
 					"GT1-03-02",
@@ -3676,7 +3732,8 @@
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
-				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3709,6 +3766,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P12"]
+				},
+				{
+					"id": "acp-wire-tick-precision:P12",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["P12"]
 				}
 			],
@@ -9994,7 +10057,9 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/components/MainPanel/MainPanelHeader.tsx"
+				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
+				"src/shared/maestro-lib/grok/acp-events.ts",
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -10006,7 +10071,8 @@
 					"GT1-07-03",
 					"GT1-03-05A",
 					"GT1-03-05C",
-					"GT1-03-05C1"
+					"GT1-03-05C1",
+					"GT1-03-05E"
 				],
 				"test": [
 					"GT1-03-06",
@@ -10045,7 +10111,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
-				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10078,6 +10145,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["C-supportsCostTracking"]
+				},
+				{
+					"id": "acp-wire-tick-precision:C-supportsCostTracking",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["C-supportsCostTracking"]
 				}
 			],
@@ -10140,7 +10213,9 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/components/MainPanel/MainPanelHeader.tsx"
+				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
+				"src/shared/maestro-lib/grok/acp-events.ts",
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -10152,7 +10227,8 @@
 					"GT1-07-03",
 					"GT1-03-05A",
 					"GT1-03-05C",
-					"GT1-03-05C1"
+					"GT1-03-05C1",
+					"GT1-03-05E"
 				],
 				"test": [
 					"GT1-03-06",
@@ -10191,7 +10267,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
-				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10224,6 +10301,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["C-supportsUsageStats"]
+				},
+				{
+					"id": "acp-wire-tick-precision:C-supportsUsageStats",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["C-supportsUsageStats"]
 				}
 			],
@@ -10632,7 +10715,9 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/main/process-manager/handlers/StdoutHandler.ts"
+				"src/main/process-manager/handlers/StdoutHandler.ts",
+				"src/shared/maestro-lib/grok/acp-events.ts",
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -10641,7 +10726,8 @@
 					"GT1-11-14A",
 					"GT1-03-05A",
 					"GT1-03-05C",
-					"GT1-03-05C1"
+					"GT1-03-05C1",
+					"GT1-03-05E"
 				],
 				"test": ["GT1-03-06", "GT1-03-12", "GT1-11-14B", "GT1-03-05B", "GT1-03-05D"],
 				"verification": ["GT1-03-13", "GT1-03-14", "GT1-11-14C"],
@@ -10665,7 +10751,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
-				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10698,6 +10785,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["C-supportsResultMessages"]
+				},
+				{
+					"id": "acp-wire-tick-precision:C-supportsResultMessages",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["C-supportsResultMessages"]
 				}
 			],
@@ -12497,7 +12590,9 @@
 				"src/main/parsers/grok-output-parser.ts",
 				"src/main/process-manager/handlers/StdoutHandler.ts",
 				"src/shared/maestro-lib/runtime/providers.ts",
-				"src/cli/services/agent-spawner.ts"
+				"src/cli/services/agent-spawner.ts",
+				"src/shared/maestro-lib/grok/acp-events.ts",
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -12509,7 +12604,8 @@
 					"GT1-03-01A",
 					"GT1-03-05A",
 					"GT1-03-05C",
-					"GT1-03-05C1"
+					"GT1-03-05C1",
+					"GT1-03-05E"
 				],
 				"test": [
 					"GT1-03-02",
@@ -12542,7 +12638,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
-				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12575,6 +12672,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["REG-PARSER"]
+				},
+				{
+					"id": "acp-wire-tick-precision:REG-PARSER",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["REG-PARSER"]
 				}
 			],
@@ -13177,7 +13280,9 @@
 				"src/main/cue/cue-process-lifecycle.ts",
 				"src/main/process-manager/handlers/StdoutHandler.ts",
 				"src/main/agents/limitResetEstimator.ts",
-				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts"
+				"src/renderer/hooks/agent/internal/useAgentErrorListener.ts",
+				"src/shared/maestro-lib/grok/acp-events.ts",
+				"src/shared/maestro-lib/parsers/agent-output-parser.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -13190,7 +13295,8 @@
 					"GT1-07-03",
 					"GT1-03-05A",
 					"GT1-03-05C",
-					"GT1-03-05C1"
+					"GT1-03-05C1",
+					"GT1-03-05E"
 				],
 				"test": [
 					"GT1-03-06",
@@ -13230,7 +13336,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract",
 				"phase03TerminalAccountingTestsEvidenceRef": "phase03-terminal-accounting-tests",
-				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests"
+				"phase03UsageReconciliationTestsEvidenceRef": "phase03-usage-reconciliation-tests",
+				"phase03AcpEventsEvidenceRef": "phase03-acp-events"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13263,6 +13370,12 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["REG-USAGE"]
+				},
+				{
+					"id": "acp-wire-tick-precision:REG-USAGE",
+					"code": "implementation-or-evidence-pending",
+					"missingPrerequisite": "GT1-03-05 rejects unsafe numeric ticks, but the ACP decoder currently loses original integer digits in JSON.parse. GT1-03-05E must preserve wire tick tokens before GT1-03-06 fixture coverage and GT1-03-13 verification. Composition, terminal/lineage propagation, baseline ownership and native qualification remain downstream.",
 					"affectedRows": ["REG-USAGE"]
 				}
 			],
