@@ -5,6 +5,7 @@
 export { AGENT_IDS, isValidAgentId } from './agentIds';
 export type { AgentId } from './agentIds';
 import type { CodexTransport } from './codexTransport';
+import type { CacheReadCounting, UsageSourceKind } from './maestro-lib/streaming/usage-accumulator';
 
 /**
  * Union type of all valid agent IDs.
@@ -354,13 +355,111 @@ export interface SessionInfo {
 	sessionSshRemoteConfig?: AgentSshRemoteConfig;
 }
 
+/**
+ * A reported USD amount. Tick strings are canonical nonnegative decimal integers
+ * at 10^10 ticks/USD, validated BEFORE numeric coercion. Never reconstruct them
+ * from an unsafe JS number. `costUsd` is a display approximation when ticks exist.
+ * Strings keep exact amounts JSON-safe across IPC, persistence and web clients.
+ */
+export type UsageCostAmount =
+	| { costUsd: number; costUsdTicks?: string }
+	| { costUsd?: number; costUsdTicks: string };
+
+/**
+ * Completeness of a cost observation, independent of managed UsageProvenance.
+ * Exact runtime ticks still have source `runtime-stream`, not provider billing
+ * authority. An exact zero requires explicit complete provider cost evidence.
+ */
+export type UsageCost =
+	| { status: 'unknown'; reason?: string }
+	| ({ status: 'exact' } & UsageCostAmount)
+	| { status: 'partial'; costUsd?: number; costUsdTicks?: string; reason?: string }
+	| {
+			status: 'estimated';
+			costUsd: number;
+			model: string;
+			pricingRevision: string;
+			completeness: 'complete' | 'partial' | 'unknown';
+	  };
+
+/** Model/child detail uses the same disjoint buckets as the shared totals. */
+export interface UsageBreakdown extends Partial<
+	Pick<
+		UsageStats,
+		| 'inputTokens'
+		| 'outputTokens'
+		| 'cacheReadInputTokens'
+		| 'cacheCreationInputTokens'
+		| 'reasoningTokens'
+	>
+> {
+	model?: string;
+	callCount?: number;
+	mainAgentRounds?: number;
+	completeness: 'complete' | 'partial' | 'unknown';
+	cost: UsageCost;
+}
+
+/**
+ * Accounting facts carried unchanged at the parsed/shared usage boundary.
+ * Optional on legacy events; absence means unspecified, never complete/free.
+ * Context occupancy stays in `absoluteUsage`, separate from all spend scopes.
+ */
+export interface UsageAccounting {
+	source: UsageSourceKind;
+	/** Producer protocol route (for example native-headless or acp), not policy qualification. */
+	route?: string;
+	scope: 'response' | 'turn' | 'process-session' | 'native-session' | 'child';
+	/** A snapshot replaces its scope's prior observations; it is not another delta. */
+	reporting: 'delta' | 'snapshot';
+	/** Opaque account/host scope; native session IDs alone need not be globally unique. */
+	scopeId?: string;
+	providerSessionId?: string;
+	/** Process-session totals reset on a new process, including after resume. */
+	processGeneration?: string;
+	turnId?: string;
+	requestId?: string | number;
+	responseId?: string;
+	/** Final for this scope only. Final does not imply complete usage or success. */
+	final?: boolean;
+	/**
+	 * Describe the accompanying top-level input bucket. Native uncached input uses
+	 * beside-input for both; raw ACP full input uses inside-input for both. After
+	 * normalization both become beside-input. Never subtract a cache bucket twice.
+	 */
+	cacheReadCounting: CacheReadCounting;
+	cacheCreationCounting: CacheReadCounting;
+	completeness: 'complete' | 'partial' | 'unknown';
+	cost: UsageCost;
+	/** An optional estimate must not overwrite a known partial reported ledger. */
+	estimatedCost?: Extract<UsageCost, { status: 'estimated' }>;
+	/** Whether the parent's totals already include completed or still-running children. */
+	childInclusion: 'excluded' | 'completed' | 'all' | 'unknown';
+	childCompleteness: 'complete' | 'partial' | 'unknown';
+	callCount?: number;
+	mainAgentRounds?: number;
+	/** Detail of the same totals, not additional amounts to sum into them. */
+	models?: Array<UsageBreakdown & { model: string }>;
+	children?: Array<
+		UsageBreakdown & {
+			providerSessionId?: string;
+			parentToolUseId?: string;
+			status: 'running' | 'completed' | 'cancelled' | 'failed' | 'unknown';
+			includedInParent: boolean | 'unknown';
+			models?: Array<UsageBreakdown & { model: string }>;
+		}
+	>;
+}
+
 // Usage statistics from AI agent CLI (Claude Code, Codex, etc.)
 export interface UsageStats {
 	inputTokens: number;
 	outputTokens: number;
 	cacheReadInputTokens: number;
 	cacheCreationInputTokens: number;
+	/** Legacy numeric projection; consult accounting.cost before treating zero as free. */
 	totalCostUsd: number;
+	accounting?: UsageAccounting;
 	contextWindow: number;
 	/**
 	 * True when `contextWindow` is an authoritative, runtime-resolved value (the

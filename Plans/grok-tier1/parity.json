@@ -370,6 +370,25 @@
 				"META-07",
 				"REG-DEFINITIONS"
 			]
+		},
+		"phase03-terminal-accounting-contract": {
+			"path": "Plans/grok-tier1/evidence/03.md#gt1-03-05a-shared-terminal-and-accounting-contract",
+			"sourceCommit": "567178030ab65cb02572392790dabf963ade5102",
+			"provenance": "source-review",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"scope": "GT1-03-05A shared types and resolver implemented; downstream adapters/consumers, tests, builds and native qualification remain pending.",
+			"affectedRows": [
+				"P09",
+				"P10",
+				"P11",
+				"P12",
+				"C-supportsCostTracking",
+				"C-supportsUsageStats",
+				"C-supportsResultMessages",
+				"REG-PARSER",
+				"REG-USAGE"
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -2928,7 +2947,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -2948,7 +2968,7 @@
 				{
 					"id": "gap:P09",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
+					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented. Complete GT1-03-05B/C/D tests and consumer propagation, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata alone does not complete this outcome.",
 					"affectedRows": ["P09"]
 				},
 				{
@@ -3193,7 +3213,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3213,7 +3234,7 @@
 				{
 					"id": "gap:P10",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
+					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented. Complete GT1-03-05B/C/D tests and consumer propagation, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata alone does not complete this outcome.",
 					"affectedRows": ["P10"]
 				},
 				{
@@ -3350,7 +3371,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3370,7 +3392,7 @@
 				{
 					"id": "gap:P11",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
+					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented. Complete GT1-03-05B/C/D tests and consumer propagation, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata alone does not complete this outcome.",
 					"affectedRows": ["P11"]
 				},
 				{
@@ -3564,7 +3586,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3584,7 +3607,7 @@
 				{
 					"id": "gap:P12",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
+					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented. Complete GT1-03-05B/C/D tests and consumer propagation, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata alone does not complete this outcome.",
 					"affectedRows": ["P12"]
 				},
 				{
@@ -9929,7 +9952,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -9949,7 +9973,7 @@
 				{
 					"id": "gap:C-supportsCostTracking",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
+					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented. Complete GT1-03-05B/C/D tests and consumer propagation, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata alone does not complete this outcome.",
 					"affectedRows": ["C-supportsCostTracking"]
 				},
 				{
@@ -10071,7 +10095,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10091,7 +10116,7 @@
 				{
 					"id": "gap:C-supportsUsageStats",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
+					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented. Complete GT1-03-05B/C/D tests and consumer propagation, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata alone does not complete this outcome.",
 					"affectedRows": ["C-supportsUsageStats"]
 				},
 				{
@@ -10535,7 +10560,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10555,7 +10581,7 @@
 				{
 					"id": "gap:C-supportsResultMessages",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
+					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented. Complete GT1-03-05B/C/D tests and consumer propagation, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata alone does not complete this outcome.",
 					"affectedRows": ["C-supportsResultMessages"]
 				},
 				{
@@ -12406,7 +12432,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12426,7 +12453,7 @@
 				{
 					"id": "gap:REG-PARSER",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
+					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented. Complete GT1-03-05B/C/D tests and consumer propagation, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata alone does not complete this outcome.",
 					"affectedRows": ["REG-PARSER"]
 				},
 				{
@@ -13090,7 +13117,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase03TerminalAccountingEvidenceRef": "phase03-terminal-accounting-contract"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13110,7 +13138,7 @@
 				{
 					"id": "gap:REG-USAGE",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
+					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented. Complete GT1-03-05B/C/D tests and consumer propagation, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata alone does not complete this outcome.",
 					"affectedRows": ["REG-USAGE"]
 				},
 				{

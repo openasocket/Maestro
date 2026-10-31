@@ -26,9 +26,10 @@
  * ```
  */
 
-import type { ToolType, AgentError, CallUsage } from '../../types';
+import type { ToolType, AgentError, CallUsage, UsageStats } from '../../types';
 import { isValidAgentId } from '../../agentIds';
 import type { ClaudeCostState } from '../../claudeCostTracker';
+import type { TurnTerminal } from '../streaming/turn-outcome';
 
 // Re-export error types for convenience
 export type { AgentError, AgentErrorType } from '../../types';
@@ -64,6 +65,13 @@ export interface ParsedEvent {
 	 * Session ID for conversation continuity (if available)
 	 */
 	sessionId?: string;
+
+	/**
+	 * Structured settlement, when supplied by the protocol/lifecycle adapter.
+	 * A terminal envelope is not necessarily success; partial output and usage
+	 * remain useful on refusal, cancellation, timeout and incomplete turns.
+	 */
+	terminal?: TurnTerminal;
 
 	/**
 	 * Text content (for 'text', 'result', 'error' types)
@@ -124,6 +132,8 @@ export interface ParsedEvent {
 		 */
 		model?: string;
 		costUsd?: number;
+		/** Exact cost, completeness and report scope before legacy numeric defaults. */
+		accounting?: UsageStats['accounting'];
 		/**
 		 * Reasoning/thinking tokens (separate from outputTokens)
 		 * Some models like OpenAI o3/o4-mini report reasoning tokens separately.
@@ -140,13 +150,7 @@ export interface ParsedEvent {
 		 * physically sent to the model. Copied straight onto `UsageStats.absoluteUsage`
 		 * by StdoutHandler.buildUsageStats.
 		 */
-		absoluteUsage?: {
-			inputTokens: number;
-			outputTokens: number;
-			cacheReadInputTokens: number;
-			cacheCreationInputTokens: number;
-			reasoningTokens: number;
-		};
+		absoluteUsage?: UsageStats['absoluteUsage'];
 	};
 
 	/**
