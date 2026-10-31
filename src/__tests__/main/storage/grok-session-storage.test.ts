@@ -1619,6 +1619,261 @@ describe('GrokSessionStorage - native normalization regressions', () => {
 		}
 	);
 
+	it.each([
+		[
+			['call', 'call', 'result'],
+			['duplicate-tool-call-id', 'duplicate-tool-call-id', 'ambiguous-or-missing-tool-call'],
+		],
+		[
+			['call', 'result', 'result'],
+			[undefined, 'ambiguous-or-missing-tool-call', 'ambiguous-or-missing-tool-call'],
+		],
+		[
+			['result', 'call'],
+			['ambiguous-or-missing-tool-call', undefined],
+		],
+		[['result'], ['ambiguous-or-missing-tool-call']],
+		[['call'], [undefined]],
+		[
+			['missingCall', 'result'],
+			['missing-tool-call-id', 'ambiguous-or-missing-tool-call'],
+		],
+		[
+			['call', 'missingResult'],
+			[undefined, 'missing-tool-call-id'],
+		],
+	] as const)('retains unresolved tool linkage for %j', async (order, issues) => {
+		const call = { id: 'call', name: 'shell', arguments: '{"command":"do-not-run"}' };
+		const records = {
+			call: { type: 'assistant', tool_calls: [call] },
+			missingCall: { type: 'assistant', tool_calls: [{ ...call, id: '' }] },
+			result: { type: 'tool_result', tool_call_id: 'call', content: 'historical output' },
+			missingResult: { type: 'tool_result', content: 'unlinked output' },
+		};
+		const rows = order.map((kind) => JSON.stringify(records[kind]));
+		mockLocalFs(sessionFiles(PROJECT, SESSION_ID, '{}', rows.join('\n')));
+		const storage = new GrokSessionStorage();
+		for (const includeNativeRecords of [false, true]) {
+			const { messages } = await storage.readSessionMessages(PROJECT, SESSION_ID, {
+				includeNativeRecords,
+			});
+			expect(messages).toHaveLength(rows.length);
+			messages.forEach((message, i) => {
+				expect(message.uuid).toBe(`grok-line-${i + 1}`);
+				expect(message.native?.issues).toEqual(issues[i] ? [issues[i]] : undefined);
+				expect(message.native?.raw).toBe(includeNativeRecords ? rows[i] : undefined);
+				if (order[i] === 'call' || order[i] === 'missingCall') {
+					expect(Array.isArray(message.toolUse)).toBe(true);
+					expect(message.toolUse).toHaveLength(1);
+				}
+				for (const tool of Array.isArray(message.toolUse) ? message.toolUse : []) {
+					expect(tool).toMatchObject({ state: { status: 'unknown' } });
+					expect(tool).not.toHaveProperty('resultSource');
+					expect(tool).not.toHaveProperty('state.output');
+				}
+			});
+		}
+		expect(execFileNoThrow).not.toHaveBeenCalled();
+	});
+
+	it('pairs parallel calls by ID when identical tool names finish in reverse order', async () => {
+		const rows = [
+			{
+				type: 'assistant',
+				tool_calls: ['a', 'b'].map((id) => ({ id, name: 'shell', arguments: '{}' })),
+			},
+			{ type: 'tool_result', tool_call_id: 'b', content: 'second call output' },
+			{ type: 'tool_result', tool_call_id: 'a', content: 'first call output' },
+		].map((row) => JSON.stringify(row));
+		mockLocalFs(sessionFiles(PROJECT, SESSION_ID, '{}', rows.join('\n')));
+		const storage = new GrokSessionStorage();
+		const display = await storage.readSessionMessages(PROJECT, SESSION_ID);
+		expect(display.messages).toHaveLength(1);
+		expect(display.messages[0].toolUse).toEqual([
+			expect.objectContaining({
+				id: 'a',
+				resultSource: { provider: 'grok', line: 3 },
+				state: { status: 'completed', input: {}, output: 'first call output' },
+			}),
+			expect.objectContaining({
+				id: 'b',
+				resultSource: { provider: 'grok', line: 2 },
+				state: { status: 'completed', input: {}, output: 'second call output' },
+			}),
+		]);
+		const native = await storage.readSessionMessages(PROJECT, SESSION_ID, {
+			includeNativeRecords: true,
+		});
+		expect(native.messages.map((message) => message.native?.raw)).toEqual(rows);
+		const tools = native.messages[0].toolUse;
+		expect(Array.isArray(tools)).toBe(true);
+		expect(tools).toHaveLength(2);
+		for (const tool of Array.isArray(tools) ? tools : [])
+			expect(tool).not.toHaveProperty('state.output');
+		expect(execFileNoThrow).not.toHaveBeenCalled();
+	});
+
+	it.each([
+		[{ reasoning_content: 'fallback' }, ['fallback']],
+		[{ reasoning: { text: 'preferred' }, reasoning_content: 'fallback' }, ['preferred']],
+		[{ reasoning: { text: '' }, reasoning_content: 'fallback' }, ['']],
+		[{ reasoning: {}, reasoning_content: 'fallback' }, ['fallback']],
+		[{ raw_output: [], reasoning: { text: 'ignored' }, reasoning_content: 'ignored' }, []],
+		[
+			{
+				raw_output: [{ type: 'future', content: 'retained only in raw' }],
+				reasoning_content: 'ignored',
+			},
+			[],
+		],
+		[
+			{
+				raw_output: [
+					{ type: 'reasoning', summary: [{ text: 'summary' }], content: [{ text: 'detail' }] },
+				],
+				reasoning: { text: 'ignored' },
+				reasoning_content: 'ignored',
+			},
+			['summary\ndetail'],
+		],
+	] as const)('honors native legacy reasoning precedence for %j', async (fields, contents) => {
+		const raw = JSON.stringify({ role: 'assistant', content: 'answer', ...fields });
+		mockLocalFs(sessionFiles(PROJECT, SESSION_ID, '{}', raw));
+		const storage = new GrokSessionStorage();
+		const native = await storage.readSessionMessages(PROJECT, SESSION_ID, {
+			includeNativeRecords: true,
+		});
+		expect(native.messages.map((message) => message.content)).toEqual([...contents, 'answer']);
+		for (const [i, projection] of native.messages.slice(0, -1).entries()) {
+			expect(projection).toMatchObject({
+				type: 'reasoning',
+				role: 'assistant',
+				uuid: `grok-line-1-legacy-${i}`,
+				native: { provider: 'grok', line: 1 },
+			});
+			expect(projection.native?.raw).toBeUndefined();
+		}
+		expect(
+			native.messages
+				.filter((message) => message.native?.raw !== undefined)
+				.map((message) => message.native?.raw)
+		).toEqual([raw]);
+		const display = await storage.readSessionMessages(PROJECT, SESSION_ID);
+		expect(display.messages).toHaveLength(1);
+		expect(display.messages[0]).toMatchObject({ content: 'answer', uuid: 'grok-line-1' });
+		expect(display.messages[0].native?.raw).toBeUndefined();
+	});
+
+	it('deduplicates legacy backend IDs against later native rows without losing raw evidence', async () => {
+		const rawOutput = [
+			{ type: 'web_search_call', id: 'native-id', status: 'completed' },
+			{ type: 'custom_tool_call', id: 'legacy-id', status: 'completed' },
+			{ type: 'custom_tool_call', id: 'legacy-id', status: 'completed' },
+			{ type: 'code_interpreter_call', id: 'code-id', status: 'completed' },
+		];
+		const rows = [
+			{ role: 'assistant', content: 'first', raw_output: rawOutput },
+			{ type: 'backend_tool_call', kind: rawOutput[0] },
+			{ role: 'assistant', content: 'second', raw_output: [rawOutput[1]] },
+		].map((row) => JSON.stringify(row));
+		mockLocalFs(sessionFiles(PROJECT, SESSION_ID, '{}', rows.join('\n')));
+		const native = await new GrokSessionStorage().readSessionMessages(PROJECT, SESSION_ID, {
+			includeNativeRecords: true,
+		});
+		expect(native.messages.map((message) => message.uuid)).toEqual([
+			'grok-line-1-legacy-1',
+			'grok-line-1-legacy-3',
+			'grok-line-1',
+			'grok-line-2',
+			'grok-line-3',
+		]);
+		expect(native.messages.filter((message) => message.type === 'backend_tool_call')).toHaveLength(
+			3
+		);
+		expect(
+			native.messages
+				.filter((message) => message.native?.raw !== undefined)
+				.map((message) => message.native?.raw)
+		).toEqual(rows);
+		expect(native.messages.slice(0, 2).map((message) => message.native)).toEqual([
+			{ provider: 'grok', line: 1 },
+			{ provider: 'grok', line: 1 },
+		]);
+		expect(execFileNoThrow).not.toHaveBeenCalled();
+	});
+
+	it.each(['current', 'legacy'] as const)(
+		'keeps image-only %s user attachments visible and inert',
+		async (layout) => {
+			const references = [
+				'data:image/png;base64,aGVsbG8=',
+				'https://example.invalid/image.png',
+				path.join(PROJECT, 'unopened.png'),
+			];
+			const raw = JSON.stringify({
+				[layout === 'current' ? 'type' : 'role']: 'user',
+				content: references.map((url) =>
+					layout === 'current' ? { type: 'image', url } : { type: 'image_url', image_url: { url } }
+				),
+			});
+			const files = sessionFiles(PROJECT, SESSION_ID, '{}', raw);
+			mockLocalFs(files);
+			for (const includeNativeRecords of [false, true]) {
+				const { messages } = await new GrokSessionStorage().readSessionMessages(
+					PROJECT,
+					SESSION_ID,
+					{ includeNativeRecords }
+				);
+				expect(messages).toHaveLength(1);
+				expect(messages[0]).toMatchObject({
+					type: 'user',
+					content: '',
+					images: [references[0]],
+					imageReferences: references,
+				});
+				expect(messages[0].native?.raw).toBe(includeNativeRecords ? raw : undefined);
+			}
+			expect(vi.mocked(fs.open).mock.calls.every(([file]) => String(file) in files)).toBe(true);
+			expect(fs.readFile).not.toHaveBeenCalled();
+			expect(execFileNoThrow).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each([
+		['null', 'malformed-record', true],
+		['42', 'malformed-record', true],
+		['false', 'malformed-record', true],
+		['"scalar"', 'malformed-record', true],
+		['[]', 'malformed-record', true],
+		['{}', 'unknown-record', true],
+		['{"type":"future","payload":{"keep":true}}', 'unknown-record', true],
+		['{"type":"user","content":[]}', undefined, false],
+		['{"type":"assistant","content":""}', undefined, false],
+		['{"type":"reasoning","encrypted_content":"opaque-fixture"}', undefined, false],
+	] as const)(
+		'retains non-displayable or unknown source %s exactly once',
+		async (raw, issue, visible) => {
+			mockLocalFs(sessionFiles(PROJECT, SESSION_ID, '{}', `\n  ${raw}  \n\n`));
+			const storage = new GrokSessionStorage();
+			const native = await storage.readSessionMessages(PROJECT, SESSION_ID, {
+				includeNativeRecords: true,
+			});
+			expect(native.messages).toHaveLength(1);
+			expect(native.messages[0]).toMatchObject({
+				uuid: 'grok-line-2',
+				timestamp: '',
+				native: { line: 2, raw: `  ${raw}  ` },
+			});
+			expect(native.messages[0].native?.issues).toEqual(issue ? [issue] : undefined);
+			expect(native.source?.status).toBe(issue === 'malformed-record' ? 'partial' : 'available');
+			if (!visible) expect(native.messages[0].content).toBe('');
+			const display = await storage.readSessionMessages(PROJECT, SESSION_ID);
+			expect(display.messages).toHaveLength(visible ? 1 : 0);
+			expect(display.messages.every((message) => message.native?.raw === undefined)).toBe(true);
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
 	it('reconciles phase 03 first/resumed turn totals without adding turn or child detail again', async () => {
 		// Same ledger and expected turn delta as acp-turn.test.ts, qualified process accounting.
 		const baseline = {
@@ -1743,6 +1998,193 @@ describe('GrokSessionStorage - native normalization regressions', () => {
 			if (kind === 'bad-model') expect(usage.accounting.models?.[0].inputTokens).toBeUndefined();
 		}
 	);
+
+	it.each([
+		undefined,
+		'',
+		' ',
+		'{broken',
+		'null',
+		'[]',
+		'{}',
+		'{"session":null}',
+		'{"session":[]}',
+		'{"session":42}',
+	])('keeps absent or malformed usage %j unknown without hiding history', async (content) => {
+		expect(parseGrokUsageFile(content ?? null)).toBeNull();
+		const files = sessionFiles(PROJECT, SESSION_ID, '{}', chatHistoryJsonl());
+		if (content !== undefined)
+			files[path.join(SESSIONS_DIR, encodeURIComponent(PROJECT), SESSION_ID, 'usage.json')] =
+				content;
+		mockLocalFs(files);
+		const [session] = await new GrokSessionStorage().listSessions(PROJECT);
+		expect(session).toMatchObject({
+			messageCount: 3,
+			accounting: {
+				source: 'none',
+				completeness: 'unknown',
+				cost: { status: 'unknown' },
+				providerSessionId: SESSION_ID,
+			},
+		});
+		expect(session.costUsd).toBeUndefined();
+		expect(session.byModel).toBeUndefined();
+		expect(session.nativeMetadata?.sources?.['usage.json']).toMatchObject(
+			content === undefined
+				? { status: 'unavailable' }
+				: { status: 'partial', reason: 'invalid-usage' }
+		);
+		expect(captureException).not.toHaveBeenCalled();
+	});
+
+	it('distinguishes an empty runtime ledger from measured zero usage', () => {
+		const empty = parseGrokUsageFile('{"session":{}}')!;
+		expect(empty.accounting).toMatchObject({
+			source: 'runtime-stream',
+			completeness: 'unknown',
+			cost: { status: 'unknown' },
+		});
+		expect(empty.costUsd).toBeUndefined();
+		expect(empty.byModel).toEqual([]);
+		expect(empty.accounting.models).toBeUndefined();
+		const zero = parseGrokUsageFile(
+			'{"session":{"inputTokens":0,"outputTokens":0,"cachedReadTokens":0,"cacheCreationTokens":0,"costUsdTicks":0}}'
+		)!;
+		expect(zero.accounting).toMatchObject({
+			completeness: 'complete',
+			cost: { status: 'exact', costUsdTicks: '0' },
+		});
+		expect(zero.costUsd).toBe(0);
+	});
+
+	it.each([
+		['inputTokens', -1, 'inputTokens', undefined],
+		['inputTokens', Number.MAX_SAFE_INTEGER + 1, 'inputTokens', undefined],
+		['outputTokens', 1.5, 'outputTokens', undefined],
+		['outputTokens', '20', 'outputTokens', undefined],
+		['cachedReadTokens', null, 'cacheReadInputTokens', undefined],
+		['cacheCreationTokens', -1, 'cacheCreationInputTokens', undefined],
+		['cachedReadTokens', 101, 'inputTokens', undefined],
+		['reasoningTokens', Number.MAX_SAFE_INTEGER + 1, 'reasoningTokens', undefined],
+		['reasoningTokens', 21, 'reasoningTokens', 21],
+		['totalTokens', 119, 'inputTokens', 60],
+		['totalTokens', '120', 'inputTokens', 60],
+	] as const)(
+		'does not certify invalid %s=%j as complete usage',
+		(field, value, countKey, expected) => {
+			// Phase 03 qualified-process baseline, with one deliberately invalid observation.
+			const ledger = {
+				inputTokens: 100,
+				outputTokens: 20,
+				cachedReadTokens: 30,
+				cacheCreationTokens: 10,
+				reasoningTokens: 5,
+				costUsdTicks: '9007199254740993',
+				[field]: value,
+			};
+			const usage = parseGrokUsageFile(
+				JSON.stringify({ session: { ...ledger, modelUsage: { 'raw-model': ledger } } })
+			)!;
+			expect(usage.accounting).toMatchObject({
+				completeness: 'partial',
+				cost: { status: 'partial', costUsdTicks: '9007199254740993' },
+			});
+			expect(usage.accounting.models?.[0]).toMatchObject({
+				model: 'raw-model',
+				completeness: 'partial',
+				cost: { status: 'partial', costUsdTicks: '9007199254740993' },
+			});
+			expect(usage.accounting.models?.[0]?.[countKey]).toBe(expected);
+			expect(usage.byModel).toEqual([]);
+		}
+	);
+
+	it.each(['unknown', 'incomplete', 'partial', 'complete'] as const)(
+		'publishes a model split only when every model is complete with known cost: %s',
+		(kind) => {
+			const model = {
+				inputTokens: 60,
+				outputTokens: 30,
+				cachedReadTokens: 10,
+				cacheCreationTokens: 5,
+				reasoningTokens: 5,
+				costUsdTicks: 13,
+			};
+			const second = {
+				...model,
+				...(kind === 'unknown' ? { costUsdTicks: undefined } : {}),
+				...(kind === 'incomplete' ? { usageIsIncomplete: true } : {}),
+				...(kind === 'partial' ? { costIsPartial: true } : {}),
+			};
+			const usage = parseGrokUsageFile(
+				JSON.stringify({
+					session: {
+						...model,
+						inputTokens: 120,
+						outputTokens: 60,
+						cachedReadTokens: 20,
+						cacheCreationTokens: 10,
+						reasoningTokens: 10,
+						modelUsage: {
+							'raw-zero-model': { ...model, costUsdTicks: 0 },
+							'raw-second-model': second,
+						},
+					},
+				})
+			)!;
+			expect(usage.accounting.cost).toEqual({ status: 'exact', costUsdTicks: '13' });
+			expect(usage.accounting.models).toEqual([
+				expect.objectContaining({
+					model: 'raw-zero-model',
+					inputTokens: 45,
+					completeness: 'complete',
+					cost: { status: 'exact', costUsdTicks: '0' },
+				}),
+				expect.objectContaining({
+					model: 'raw-second-model',
+					inputTokens: 45,
+					completeness: kind === 'incomplete' ? 'partial' : 'complete',
+					cost:
+						kind === 'unknown'
+							? { status: 'unknown' }
+							: { status: kind === 'complete' ? 'exact' : 'partial', costUsdTicks: '13' },
+				}),
+			]);
+			if (kind === 'complete')
+				expect(usage.byModel.map((row) => row.costUsd)).toEqual([0, 13 / 1e10]);
+			else expect(usage.byModel).toEqual([]);
+		}
+	);
+
+	it('keeps missing model counts unknown and rejects unsafe call counts', () => {
+		const model = {
+			inputTokens: 100,
+			outputTokens: 20,
+			cachedReadTokens: 30,
+			cacheCreationTokens: 10,
+			modelCalls: Number.MAX_SAFE_INTEGER + 1,
+			costUsdTicks: 0,
+		};
+		const usage = parseGrokUsageFile(
+			JSON.stringify({
+				session: { ...model, modelUsage: { known: model, 'missing-counts': { costUsdTicks: 0 } } },
+			})
+		)!;
+		expect(usage.accounting.callCount).toBeUndefined();
+		expect(usage.accounting.models?.[0]?.callCount).toBeUndefined();
+		expect(usage.accounting.models?.[1]).toMatchObject({
+			completeness: 'unknown',
+			cost: { status: 'partial', costUsdTicks: '0' },
+		});
+		for (const key of [
+			'inputTokens',
+			'outputTokens',
+			'cacheReadInputTokens',
+			'cacheCreationInputTokens',
+		] as const)
+			expect(usage.accounting.models?.[1]?.[key]).toBeUndefined();
+		expect(usage.byModel).toEqual([]);
+	});
 
 	it('keeps source IDs stable through pagination, blank lines and appended turns', async () => {
 		const rows = [
