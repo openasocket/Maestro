@@ -2554,6 +2554,30 @@
 			],
 			"testOwner": "GT1-04-07F4T",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-runtime-admitted-native-recording": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07f5-runtime-admitted-native-recording",
+			"sourceCommit": "90b965a20ad74e0959e9d5a806dc4d779b60ccad",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/shared/maestro-lib/agents/repository.ts": "b8dac281720bdcdf3d46501b13db33348141a9ed07710fed593e82408e5bae34",
+				"src/shared/maestro-lib/runtime/turns.ts": "f60f76b1f9c4b3af7b95cbc2a93eb11fb4b75087d0dd698efabbce18459df4c3",
+				"src/shared/maestro-lib/turns/record-turn.ts": "7337dc245a942be3c6f96eaf7457cf875d8fddf10d307daf307ee839f8a303cf"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "Receipt-derived atomic native ID/binding persistence for observed early and end-only allocations, canonical launch scope in History/stats, incarnation and parked-slot guards before begin and all queued records, repository queue held across History/stats writer awaits, refused ownership reported as failure.",
+			"limitations": [
+				"GT1-04-07F5T authors regressions and updates prior unknown-binding/check-only fixtures; GT1-04-13 executes. No tests authored, run or collected here.",
+				"Static pass is scoped: main/CLI TypeScript and scoped ESLint/formatting. Broad TypeScript retains the existing RequestInit.dispatcher diagnostic.",
+				"Production shared runtime SSH observation remains unavailable; injected host ports and static review do not qualify real native resume or ACP routing. Live authorization remains disabled."
+			],
+			"testOwner": "GT1-04-07F5T",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6495,7 +6519,8 @@
 				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
 				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests",
 				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt",
-				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests"
+				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests",
+				"phase04RuntimeAdmittedNativeRecordingRef": "phase04-runtime-admitted-native-recording"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6544,8 +6569,8 @@
 				},
 				{
 					"id": "runtime-native-launch-and-recording-pending",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT has authored recording prerequisite regressions; FPT/F4T/F5T own continuation tests; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
+					"code": "verification-and-host-wiring-pending",
+					"missingPrerequisite": "07F1/2/3 extract shared selector/observer/matcher; 07F4 implements admitted receipts and pre-resume validation; 07F5 consumes receipts and fences actual begin/transcript/History mutations through the repository queue. Static review only. 07F5T must author queued-mutation and receipt persistence regressions and update prerequisite fixtures; GT1-04-13 executes all continuation suites. Production headless SSH observation remains unavailable; native ACP and live scope qualification remain not-run.",
 					"affectedRows": ["P14"]
 				}
 			],
@@ -11815,7 +11840,8 @@
 				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
 				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests",
 				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt",
-				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests"
+				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests",
+				"phase04RuntimeAdmittedNativeRecordingRef": "phase04-runtime-admitted-native-recording"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11864,8 +11890,8 @@
 				},
 				{
 					"id": "runtime-native-launch-and-recording-pending",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT has authored recording prerequisite regressions; FPT/F4T/F5T own continuation tests; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
+					"code": "verification-and-host-wiring-pending",
+					"missingPrerequisite": "07F1/2/3 extract shared selector/observer/matcher; 07F4 implements admitted receipts and pre-resume validation; 07F5 consumes receipts and fences actual begin/transcript/History mutations through the repository queue. Static review only. 07F5T must author queued-mutation and receipt persistence regressions and update prerequisite fixtures; GT1-04-13 executes all continuation suites. Production headless SSH observation remains unavailable; native ACP and live scope qualification remain not-run.",
 					"affectedRows": ["C-supportsResume"]
 				}
 			],
@@ -12404,7 +12430,8 @@
 				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
 				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests",
 				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt",
-				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests"
+				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests",
+				"phase04RuntimeAdmittedNativeRecordingRef": "phase04-runtime-admitted-native-recording"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12453,8 +12480,8 @@
 				},
 				{
 					"id": "runtime-native-launch-and-recording-pending",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT has authored recording prerequisite regressions; FPT/F4T/F5T own continuation tests; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
+					"code": "verification-and-host-wiring-pending",
+					"missingPrerequisite": "07F1/2/3 extract shared selector/observer/matcher; 07F4 implements admitted receipts and pre-resume validation; 07F5 consumes receipts and fences actual begin/transcript/History mutations through the repository queue. Static review only. 07F5T must author queued-mutation and receipt persistence regressions and update prerequisite fixtures; GT1-04-13 executes all continuation suites. Production headless SSH observation remains unavailable; native ACP and live scope qualification remain not-run.",
 					"affectedRows": ["C-supportsSessionId"]
 				}
 			],
@@ -17063,7 +17090,8 @@
 				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
 				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests",
 				"phase04SharedAdmittedLaunchReceiptRef": "phase04-shared-admitted-launch-receipt",
-				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests"
+				"phase04SharedAdmittedLaunchReceiptTestsRef": "phase04-shared-admitted-launch-receipt-tests",
+				"phase04RuntimeAdmittedNativeRecordingRef": "phase04-runtime-admitted-native-recording"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17112,8 +17140,8 @@
 				},
 				{
 					"id": "runtime-native-launch-and-recording-pending",
-					"code": "implementation-and-verification-pending",
-					"missingPrerequisite": "07F implements recording prerequisites only. 07F1/2/3 extract existing selector/observer/matcher; 07F4 wires admitted launch receipt and pre-resume validation; 07F5 consumes receipt and fences actual begin/transcript/History mutations. 07FT has authored recording prerequisite regressions; FPT/F4T/F5T own continuation tests; GT1-04-13 executes. Native ACP and live scope qualification remain not-run.",
+					"code": "verification-and-host-wiring-pending",
+					"missingPrerequisite": "07F1/2/3 extract shared selector/observer/matcher; 07F4 implements admitted receipts and pre-resume validation; 07F5 consumes receipts and fences actual begin/transcript/History mutations through the repository queue. Static review only. 07F5T must author queued-mutation and receipt persistence regressions and update prerequisite fixtures; GT1-04-13 executes all continuation suites. Production headless SSH observation remains unavailable; native ACP and live scope qualification remain not-run.",
 					"affectedRows": ["REG-SESSION-MUTATION"]
 				}
 			],

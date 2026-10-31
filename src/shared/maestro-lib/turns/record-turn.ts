@@ -29,8 +29,9 @@
 
 import { formatSessionId } from '../store/tab-display';
 import type { LogEntryRecord } from '../store/transcript';
+import type { AgentRecord, AITabRecord } from '../store/records';
 import type { NativeSessionBinding } from '../agents/providerSwap';
-import type { AgentRepository } from '../agents/repository';
+import type { AgentRepository, TabWriteGuard } from '../agents/repository';
 import { DEFAULT_RULE_CONTEXT, sshRecordOf, type RuleContext } from '../agents/rules';
 import type { ClientResult } from '../client/types';
 import {
@@ -62,6 +63,8 @@ const STDERR_TAIL_CHARS = 500;
 
 /** One finished turn, as the runtime knows it. */
 export interface RecordedTurn {
+	/** Original tab incarnation and turn/slot ownership, checked within each mutation queue. */
+	writeGuard?: TabWriteGuard;
 	/** Original turn attribution. It is not proof of canonical native ownership. */
 	scope?: Readonly<{ projectPath: string; isRemote: boolean; isWorktree: boolean }>;
 	/** Only the launch observer may bind this; absent/unknown never uses current settings. */
@@ -99,7 +102,8 @@ export interface TurnRecordResult {
 
 export interface TurnRecorderOptions {
 	paths: Pick<MaestroPaths, 'historyDir' | 'statsFile' | 'settingsFile'>;
-	repository: Pick<AgentRepository, 'getAgent' | 'getTab' | 'appendTranscript'>;
+	repository: Pick<AgentRepository, 'getAgent' | 'getTab' | 'appendTranscript'> &
+		Partial<Pick<AgentRepository, 'withTabWriteGuard'>>;
 	/** The host's `better-sqlite3` loader (the CLI's `loadBetterSqlite3`). It throws when the module cannot load. */
 	loadSqlite: () => StatsConnectionConstructor;
 	/** Is this process still the data directory's writer? Asked before the History and usage writes. */
@@ -274,7 +278,10 @@ export function createTurnRecorder(options: TurnRecorderOptions): TurnRecorder {
 				: undefined;
 		if (!agent || !tab) {
 			const message = missing ?? 'Nothing to record against.';
-			project(turn, 'not recorded: the agent or tab is gone');
+			project(
+				turn.writeGuard ? { ...turn, completed: { ...turn.completed, outcome: 'crashed' } } : turn,
+				'not recorded: the agent or tab is gone'
+			);
 			return {
 				transcript: { ok: false, error: { code: 'not-found', message, method: 'tabs.update' } },
 				history: { ok: false, reason: 'not-recorded', message },
@@ -285,9 +292,44 @@ export function createTurnRecorder(options: TurnRecorderOptions): TurnRecorder {
 		const transcript = await options.repository.appendTranscript(
 			turn.agentId,
 			turn.tabId,
-			buildTurnTranscript(turn, ctx)
+			buildTurnTranscript(turn, ctx),
+			...(turn.writeGuard ? [turn.writeGuard] : [])
 		);
 
+		// Reserve the repository mutation queue across the writers' own queues and
+		// filesystem awaits. A prior CAS alone leaves a replacement race here.
+		if (turn.writeGuard) {
+			const guarded =
+				transcript.ok && options.repository.withTabWriteGuard
+					? await options.repository.withTabWriteGuard(turn.writeGuard, () =>
+							recordOther(turn, transcript, agent, tab)
+						)
+					: { ok: false as const, error: { message: 'The original turn could not be recorded.' } };
+			if (!guarded.ok) {
+				const message = guarded.error.message;
+				project({ ...turn, completed: { ...turn.completed, outcome: 'crashed' } }, message);
+				return {
+					transcript: transcript.ok
+						? { ok: false, error: { code: 'rejected', message, method: 'tabs.update' } }
+						: transcript,
+					history: { ok: false, reason: 'not-recorded', message },
+					stats: { ok: false, reason: 'failed', message },
+				};
+			}
+			project(turn);
+			return guarded.value;
+		}
+		const result = await recordOther(turn, transcript, agent, tab);
+		project(turn);
+		return result;
+	}
+
+	async function recordOther(
+		turn: RecordedTurn,
+		transcript: ClientResult<void>,
+		agent: AgentRecord,
+		tab: AITabRecord
+	): Promise<TurnRecordResult> {
 		const { completed } = turn;
 		// The provider the turn ran under, frozen at send: the agent may have swapped since.
 		const provider = turn.assembled.settings.provider;
@@ -302,9 +344,17 @@ export function createTurnRecorder(options: TurnRecorderOptions): TurnRecorder {
 			(turn.nativeSessionBinding.provider !== provider ||
 				turn.nativeSessionBinding.nativeSessionId !== completed.sessionId)
 		) {
-			history = { ok: false, reason: 'not-recorded', message: 'Native session identity mismatch.' };
+			history = {
+				ok: false,
+				reason: 'not-recorded',
+				message: 'Native session identity mismatch.',
+			};
 		} else if (tab.saveToHistory === false) {
-			history = { ok: false, reason: 'not-recorded', message: 'The tab does not save to History.' };
+			history = {
+				ok: false,
+				reason: 'not-recorded',
+				message: 'The tab does not save to History.',
+			};
 		} else {
 			const context = completed.usage
 				? estimateContextUsage(completed.usage, provider as ToolType)
@@ -322,7 +372,11 @@ export function createTurnRecorder(options: TurnRecorderOptions): TurnRecorder {
 				...(provider === 'grok'
 					? {
 							nativeSessionBinding: structuredClone(
-								turn.nativeSessionBinding ?? { version: 1, state: 'unknown', reason: 'unobserved' }
+								turn.nativeSessionBinding ?? {
+									version: 1,
+									state: 'unknown',
+									reason: 'unobserved',
+								}
 							),
 						}
 					: {}),
@@ -351,7 +405,6 @@ export function createTurnRecorder(options: TurnRecorderOptions): TurnRecorder {
 			...usageStatsToTurnFields(completed.usage),
 		});
 
-		project(turn);
 		return { transcript, history, stats };
 	}
 
