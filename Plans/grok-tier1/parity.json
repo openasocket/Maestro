@@ -952,6 +952,32 @@
 				"S06"
 			],
 			"scope": "GT1-04-05B bounded local/SSH reads, explicit per-source availability and bounded shared pagination. Tests GT1-04-06/06C; execution GT1-04-13. Cross-file generations and export consumers retain their owners. No native or whole-row qualification."
+		},
+		"phase04-native-history-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-06-native-history-regression-tests",
+			"sourceCommit": "c0d90e9891bc53874475e6c8a22241d03b8e17ba",
+			"sourceCommitScope": "Pre-task HEAD plus the test hash and task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/storage/grok-session-storage.test.ts": "49368f7f8432fecc49746fe8ec6f10af005b31183562ecbc8e835428a09b92eb"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P11",
+				"P13",
+				"P15",
+				"P21",
+				"C-supportsSessionStorage",
+				"C-supportsCostTracking",
+				"C-supportsUsageStats",
+				"REG-STORAGE",
+				"REG-USAGE",
+				"S06"
+			],
+			"scope": "32 parameter-expanded native transcript, summary, usage, pagination and oversized-source cases plus existing harness repairs. GT1-04-06D/06E own remaining normalization and bounded-read edge cases; GT1-04-13 executes. No acceptance status or native qualification is promoted."
 		}
 	},
 	"sourceCatalog": {
@@ -4138,7 +4164,9 @@
 					"GT1-03-05B",
 					"GT1-03-05D",
 					"GT1-03-06C",
-					"GT1-03-10"
+					"GT1-03-10",
+					"GT1-04-06D",
+					"GT1-04-06E"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -4178,7 +4206,8 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
-				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
+				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4598,7 +4627,16 @@
 					"GT1-04-05A",
 					"GT1-04-05B"
 				],
-				"test": ["GT1-04-02", "GT1-04-04", "GT1-04-06", "GT1-04-06B", "GT1-02-02", "GT1-04-12"],
+				"test": [
+					"GT1-04-02",
+					"GT1-04-04",
+					"GT1-04-06",
+					"GT1-04-06B",
+					"GT1-02-02",
+					"GT1-04-12",
+					"GT1-04-06D",
+					"GT1-04-06E"
+				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-02-13", "GT1-02-14"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -4623,7 +4661,8 @@
 				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
 				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
-				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
+				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4852,7 +4891,16 @@
 					"GT1-04-05A",
 					"GT1-04-05B"
 				],
-				"test": ["GT1-04-02", "GT1-04-04", "GT1-04-06", "GT1-04-06B", "GT1-02-02", "GT1-04-12"],
+				"test": [
+					"GT1-04-02",
+					"GT1-04-04",
+					"GT1-04-06",
+					"GT1-04-06B",
+					"GT1-02-02",
+					"GT1-04-12",
+					"GT1-04-06D",
+					"GT1-04-06E"
+				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-02-13", "GT1-02-14", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -4877,7 +4925,8 @@
 				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
 				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
-				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
+				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5691,7 +5740,15 @@
 					"GT1-06-01",
 					"GT1-04-09"
 				],
-				"test": ["GT1-06-08", "GT1-06-09", "GT1-06-11", "GT1-06-02", "GT1-04-10"],
+				"test": [
+					"GT1-06-08",
+					"GT1-06-09",
+					"GT1-06-11",
+					"GT1-06-02",
+					"GT1-04-10",
+					"GT1-04-06D",
+					"GT1-04-06E"
+				],
 				"verification": ["GT1-06-12", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -5712,7 +5769,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
-				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
+				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10948,7 +11006,7 @@
 					"GT1-04-05A",
 					"GT1-04-05B"
 				],
-				"test": ["GT1-04-02", "GT1-04-04", "GT1-04-06", "GT1-11-14B"],
+				"test": ["GT1-04-02", "GT1-04-04", "GT1-04-06", "GT1-11-14B", "GT1-04-06D", "GT1-04-06E"],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -10971,7 +11029,8 @@
 				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
 				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
-				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
+				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11104,7 +11163,9 @@
 					"GT1-03-05B",
 					"GT1-03-05D",
 					"GT1-03-06C",
-					"GT1-03-10"
+					"GT1-03-10",
+					"GT1-04-06D",
+					"GT1-04-06E"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -11143,7 +11204,8 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
-				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
+				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11298,7 +11360,9 @@
 					"GT1-03-05B",
 					"GT1-03-05D",
 					"GT1-03-06C",
-					"GT1-03-10"
+					"GT1-03-10",
+					"GT1-04-06D",
+					"GT1-04-06E"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -11337,7 +11401,8 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
-				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
+				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13946,7 +14011,7 @@
 					"GT1-04-05A",
 					"GT1-04-05B"
 				],
-				"test": ["GT1-04-02", "GT1-04-04", "GT1-04-06", "GT1-04-06B"],
+				"test": ["GT1-04-02", "GT1-04-04", "GT1-04-06", "GT1-04-06B", "GT1-04-06D", "GT1-04-06E"],
 				"verification": ["GT1-04-13", "GT1-04-14"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -13970,7 +14035,8 @@
 				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
 				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
-				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
+				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14569,7 +14635,9 @@
 					"GT1-03-05B",
 					"GT1-03-05D",
 					"GT1-03-06C",
-					"GT1-03-10"
+					"GT1-03-10",
+					"GT1-04-06D",
+					"GT1-04-06E"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -14608,7 +14676,8 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
-				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
+				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16099,7 +16168,7 @@
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-06-01", "GT1-04-09"],
-				"test": ["GT1-06-02", "GT1-04-10"],
+				"test": ["GT1-06-02", "GT1-04-10", "GT1-04-06D", "GT1-04-06E"],
 				"verification": ["GT1-06-12", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -16120,7 +16189,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
-				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads",
+				"phase04NativeHistoryTestsEvidenceRef": "phase04-native-history-tests"
 			},
 			"evidenceApplicability": {
 				"static": {

@@ -30,8 +30,10 @@ vi.mock('../../../main/utils/cliDetection', () => ({
 }));
 vi.mock('../../../main/utils/execFile', () => ({ execFileNoThrow: vi.fn() }));
 
-vi.mock('fs/promises', () => ({
+vi.mock('fs/promises', async () => ({
 	default: {
+		constants: (await vi.importActual<typeof import('fs/promises')>('fs/promises')).constants,
+		open: vi.fn(),
 		readFile: vi.fn(),
 		readdir: vi.fn(),
 		stat: vi.fn(),
@@ -45,7 +47,7 @@ vi.mock('fs/promises', () => ({
 import path from 'path';
 import os from 'os';
 import fs from 'fs/promises';
-import { GrokSessionStorage } from '../../../main/storage/grok-session-storage';
+import { GrokSessionStorage, parseGrokUsageFile } from '../../../main/storage/grok-session-storage';
 import * as remoteFs from '../../../main/utils/remote-fs';
 import { captureException } from '../../../main/utils/sentry';
 import { logger } from '../../../main/utils/logger';
@@ -225,6 +227,22 @@ function mockLocalFs(
 		return {
 			size: options.sizeOverrides?.[p] ?? Buffer.byteLength(files[p]),
 			mtimeMs: 1_752_082_000_000,
+			ino: 1,
+			isFile: () => true,
+		} as never;
+	});
+
+	vi.mocked(fs.open).mockImplementation(async (filePath) => {
+		const p = String(filePath);
+		if (!(p in files)) throw enoent(p);
+		const bytes = Buffer.from(files[p]);
+		return {
+			stat: vi.fn(() => fs.stat(p)),
+			read: vi.fn(async (buffer: Buffer, offset: number, length: number, position: number) => ({
+				bytesRead: bytes.copy(buffer, offset, position, Math.min(position + length, bytes.length)),
+				buffer,
+			})),
+			close: vi.fn().mockResolvedValue(undefined),
 		} as never;
 	});
 
@@ -262,7 +280,10 @@ describe('GrokSessionStorage - selected account scope', () => {
 				sessionFiles(
 					PROJECT,
 					SESSION_ID,
-					summaryJson(SESSION_ID, PROJECT, { session_summary: `${label} account title` }),
+					summaryJson(SESSION_ID, PROJECT, {
+						session_summary: `${label} account title`,
+						generated_title: `${label} account title`,
+					}),
 					history,
 					path.join(root, 'sessions')
 				)
@@ -349,13 +370,11 @@ describe('GrokSessionStorage - selected account scope', () => {
 				).toEqual([]);
 			}
 
-			expect(vi.mocked(fs.readFile).mock.calls.map(([file]) => String(file))).toContain(
-				transcriptPath
-			);
+			expect(vi.mocked(fs.open).mock.calls.map(([file]) => String(file))).toContain(transcriptPath);
 			for (const [file] of [
 				...vi.mocked(fs.readdir).mock.calls,
 				...vi.mocked(fs.stat).mock.calls,
-				...vi.mocked(fs.readFile).mock.calls,
+				...vi.mocked(fs.open).mock.calls,
 			]) {
 				expect(
 					String(file) === sessionsDir || String(file).startsWith(sessionsDir + path.sep)
@@ -407,7 +426,12 @@ describe('GrokSessionStorage - selected account scope', () => {
 			});
 			expect(
 				await storage.readSessionMessages(PROJECT, SESSION_ID, { configDir: selectedRoot })
-			).toEqual({ messages: [], total: 0, hasMore: false });
+			).toMatchObject({
+				messages: [],
+				total: 0,
+				hasMore: false,
+				source: { provider: 'grok', status: 'unavailable', reason: 'session-not-found' },
+			});
 			expect(
 				await storage.searchSessions(PROJECT, 'account title', 'title', undefined, selectedRoot)
 			).toEqual([]);
@@ -428,6 +452,7 @@ describe('GrokSessionStorage - selected account scope', () => {
 			for (const [dir] of vi.mocked(fs.readdir).mock.calls) {
 				expect(dir).toBe(path.join(missingRoot, 'sessions'));
 			}
+			expect(fs.open).not.toHaveBeenCalled();
 			expect(fs.readFile).not.toHaveBeenCalled();
 			expect(fs.stat).not.toHaveBeenCalled();
 			expect(captureException).not.toHaveBeenCalled();
@@ -460,7 +485,7 @@ describe('GrokSessionStorage - local listing', () => {
 		expect(sessions[0].projectPath).toBe(PROJECT);
 		// Project filtering happens on folder names - the foreign session's
 		// files must never be opened.
-		const readPaths = vi.mocked(fs.readFile).mock.calls.map((c) => String(c[0]));
+		const readPaths = vi.mocked(fs.open).mock.calls.map((c) => String(c[0]));
 		expect(readPaths.some((p) => p.includes(encodeURIComponent(OTHER_PROJECT)))).toBe(false);
 	});
 
@@ -627,7 +652,7 @@ describe('GrokSessionStorage - local listing', () => {
 		expect(sessions).toEqual([]);
 	});
 
-	it('skips a session with malformed summary.json without throwing, keeping good sessions', async () => {
+	it('keeps usable transcripts with malformed summaries after dated sessions', async () => {
 		const goodId = '019f0000-aaaa-7000-8000-000000000003';
 		mockLocalFs({
 			...sessionFiles(PROJECT, SESSION_ID, 'not valid json {', chatHistoryJsonl()),
@@ -637,7 +662,8 @@ describe('GrokSessionStorage - local listing', () => {
 		const storage = new GrokSessionStorage();
 		const sessions = await storage.listSessions(PROJECT);
 
-		expect(sessions.map((s) => s.sessionId)).toEqual([goodId]);
+		expect(sessions.map((s) => s.sessionId)).toEqual([goodId, SESSION_ID]);
+		expect(sessions[1].nativeMetadata).toMatchObject({ summaryStatus: 'invalid' });
 	});
 
 	it('tolerates malformed transcript lines (live-write partial line) without throwing', async () => {
@@ -649,7 +675,11 @@ describe('GrokSessionStorage - local listing', () => {
 		const sessions = await storage.listSessions(PROJECT);
 
 		expect(sessions).toHaveLength(1);
-		expect(sessions[0].messageCount).toBe(3);
+		expect(sessions[0].messageCount).toBe(4);
+		expect(sessions[0].nativeMetadata?.sources?.['chat_history.jsonl']).toMatchObject({
+			status: 'partial',
+			reason: 'malformed-records',
+		});
 	});
 
 	it('sorts sessions newest-first by modifiedAt', async () => {
@@ -676,7 +706,7 @@ describe('GrokSessionStorage - local listing', () => {
 		expect(sessions.map((s) => s.sessionId)).toEqual([newerId, olderId]);
 	});
 
-	it('skips sessions whose transcript exceeds the 100MB read budget without reading it', async () => {
+	it('skips sessions whose transcript exceeds the 64 MiB read budget without reading it', async () => {
 		const files = sessionFiles(
 			PROJECT,
 			SESSION_ID,
@@ -690,7 +720,7 @@ describe('GrokSessionStorage - local listing', () => {
 		const sessions = await storage.listSessions(PROJECT);
 
 		expect(sessions).toEqual([]);
-		const readPaths = vi.mocked(fs.readFile).mock.calls.map((c) => String(c[0]));
+		const readPaths = vi.mocked(fs.open).mock.calls.map((c) => String(c[0]));
 		expect(readPaths).not.toContain(transcriptPath);
 	});
 });
@@ -773,7 +803,12 @@ describe('GrokSessionStorage - reading messages', () => {
 		const storage = new GrokSessionStorage();
 		const result = await storage.readSessionMessages(PROJECT, SESSION_ID);
 
-		expect(result).toEqual({ messages: [], total: 0, hasMore: false });
+		expect(result).toMatchObject({
+			messages: [],
+			total: 0,
+			hasMore: false,
+			source: { provider: 'grok', status: 'unavailable', reason: 'session-not-found' },
+		});
 	});
 
 	it('paginates from the end of the transcript', async () => {
@@ -803,6 +838,7 @@ describe('GrokSessionStorage - SSH remote', () => {
 	afterEach(() => {
 		vi.useRealTimers();
 		expect(fs.readdir).not.toHaveBeenCalled();
+		expect(fs.open).not.toHaveBeenCalled();
 		expect(fs.readFile).not.toHaveBeenCalled();
 		expect(fs.stat).not.toHaveBeenCalled();
 		expect(execFileNoThrow).not.toHaveBeenCalled();
@@ -896,6 +932,7 @@ describe('GrokSessionStorage - SSH remote', () => {
 			messages: [],
 			total: 0,
 			hasMore: false,
+			source: { provider: 'grok', status: 'unavailable', reason: 'session-not-found' },
 		});
 		expect(await storage.searchSessions(PROJECT, 'Created', 'all', sshConfig)).toEqual([]);
 		expect(remoteFs.readFileRemote).not.toHaveBeenCalled();
@@ -1048,16 +1085,19 @@ describe('GrokSessionStorage - SSH remote', () => {
 						statRemote: 'statSessionFile',
 						readFileRemote: 'readSessionFile',
 					}[method];
-					expect(captureException).toHaveBeenCalledExactlyOnceWith(
+					expect(captureException).toHaveBeenCalledWith(
 						expect.objectContaining({ message: error }),
 						expect.objectContaining({ operation: `grokStorage:${operation}` })
 					);
-					expect(logger.warn).toHaveBeenCalledWith(
-						expect.stringContaining(error),
-						'[GrokSessionStorage]'
-					);
+					if (method === 'readDirRemote') {
+						expect(logger.warn).toHaveBeenCalledWith(
+							expect.stringContaining(error),
+							'[GrokSessionStorage]'
+						);
+					}
 				} else expect(captureException).not.toHaveBeenCalled();
 				expect(fs.readdir).not.toHaveBeenCalled();
+				expect(fs.open).not.toHaveBeenCalled();
 				expect(fs.readFile).not.toHaveBeenCalled();
 				expect(fs.stat).not.toHaveBeenCalled();
 				expect(execFileNoThrow).not.toHaveBeenCalled();
@@ -1091,8 +1131,8 @@ describe('GrokSessionStorage - SSH remote', () => {
 		expect(peak).toBeGreaterThan(1);
 		expect(peak).toBeLessThanOrEqual(REMOTE_SESSION_READ_CONCURRENCY);
 		expect(active).toBe(0);
-		expect(remoteFs.statRemote).toHaveBeenCalledTimes(ids.length);
-		expect(remoteFs.readFileRemote).toHaveBeenCalledTimes(ids.length * 3);
+		expect(remoteFs.statRemote).toHaveBeenCalledTimes(ids.length * 5);
+		expect(remoteFs.readFileRemote).toHaveBeenCalledTimes(ids.length * 2);
 	});
 
 	it.each([
@@ -1129,12 +1169,18 @@ describe('GrokSessionStorage - SSH remote', () => {
 						stdout
 					);
 				} else {
-					commands.set(`cat ${token}`, stdout);
-					if (suffix.endsWith('chat_history.jsonl'))
-						commands.set(
-							`stat --printf='%s\\n%F\\n%Y' ${token} 2>/dev/null || stat -f $'%z\\n%HT\\n%m' ${token}`,
-							'2048\nregular file\n1752082000'
-						);
+					const maxBytes = suffix.endsWith('chat_history.jsonl') ? 64 * 1024 * 1024 : 1024 * 1024;
+					commands.set(
+						`if test -f ${token}; then head -c ${maxBytes + 1} < ${token}; ` +
+							`else echo 'File not found or not a regular file' >&2; exit 1; fi`,
+						stdout
+					);
+					commands.set(
+						`stat --printf='%s\\n%F\\n%Y' ${token} 2>/dev/null || stat -f $'%z\\n%HT\\n%m' ${token}`,
+						stdout === undefined
+							? undefined
+							: `${Buffer.byteLength(stdout)}\nregular file\n1752082000`
+					);
 				}
 			}
 			const deps: remoteFs.RemoteFsDeps = {
@@ -1155,8 +1201,8 @@ describe('GrokSessionStorage - SSH remote', () => {
 			vi.mocked(remoteFs.readDirRemote).mockImplementation((file, config) =>
 				actual.readDirRemote(file, config, deps)
 			);
-			vi.mocked(remoteFs.readFileRemote).mockImplementation((file, config) =>
-				actual.readFileRemote(file, config, deps)
+			vi.mocked(remoteFs.readFileRemote).mockImplementation((file, config, _deps, options) =>
+				actual.readFileRemote(file, config, deps, options)
 			);
 			vi.mocked(remoteFs.statRemote).mockImplementation((file, config) =>
 				actual.statRemote(file, config, deps)
@@ -1164,7 +1210,7 @@ describe('GrokSessionStorage - SSH remote', () => {
 			expect(await new GrokSessionStorage(accountDir).listSessions(cwd, sshConfig)).toEqual([
 				expect.objectContaining({ sessionId: id, projectPath: cwd, messageCount: 3 }),
 			]);
-			expect(deps.execSsh).toHaveBeenCalledTimes(6);
+			expect(deps.execSsh).toHaveBeenCalledTimes(9);
 			expect(captureException).not.toHaveBeenCalled();
 		}
 	);
@@ -1232,7 +1278,12 @@ describe('GrokSessionStorage - SSH remote', () => {
 		const storage = new GrokSessionStorage();
 		const result = await storage.readSessionMessages(PROJECT, SESSION_ID, undefined, sshConfig);
 
-		expect(result).toEqual({ messages: [], total: 0, hasMore: false });
+		expect(result).toMatchObject({
+			messages: [],
+			total: 0,
+			hasMore: false,
+			source: { provider: 'grok', status: 'unavailable', reason: 'unreadable' },
+		});
 		expect(vi.mocked(captureException)).toHaveBeenCalledWith(
 			expect.objectContaining({ message: expect.stringContaining('connection reset') }),
 			expect.objectContaining({ operation: 'grokStorage:statSessionFile' })
@@ -1352,11 +1403,13 @@ describe('GrokSessionStorage - misc contract', () => {
 					messages: [],
 					total: 0,
 					hasMore: false,
+					source: { provider: 'grok', status: 'unavailable', reason: 'session-not-found' },
 				});
 			}
 			for (const operation of [
 				fs.readdir,
 				fs.readFile,
+				fs.open,
 				fs.stat,
 				remoteFs.readDirRemote,
 				remoteFs.readFileRemote,
@@ -1389,4 +1442,384 @@ describe('GrokSessionStorage - misc contract', () => {
 			)
 		);
 	});
+});
+
+describe('GrokSessionStorage - native normalization regressions', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Unexpected historical fetch')));
+	});
+	afterEach(() => {
+		expect(fetch).not.toHaveBeenCalled();
+		vi.unstubAllGlobals();
+	});
+
+	it.each([undefined, '', '  ', '{broken', 'null', '[]'])(
+		'reads a usable transcript with summary %j and keeps dates unknown',
+		async (summary) => {
+			const files = sessionFiles(PROJECT, SESSION_ID, summary ?? '', chatHistoryJsonl());
+			if (summary === undefined)
+				delete files[
+					path.join(SESSIONS_DIR, encodeURIComponent(PROJECT), SESSION_ID, 'summary.json')
+				];
+			mockLocalFs(files);
+			const [session] = await new GrokSessionStorage().listSessions(PROJECT);
+			expect(session).toMatchObject({
+				sessionId: SESSION_ID,
+				messageCount: 3,
+				timestamp: '',
+				modifiedAt: '',
+				durationSeconds: 0,
+			});
+			expect(session.nativeMetadata?.summaryStatus).toBe(
+				summary?.trim() ? 'invalid' : 'unavailable'
+			);
+			expect(session.accounting).toMatchObject({
+				completeness: 'unknown',
+				cost: { status: 'unknown' },
+			});
+			expect(session.costUsd).toBeUndefined();
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each([
+		['  Native title  ', 'Native title'],
+		[' \t ', 'Fallback title'],
+	])('preserves native metadata and title precedence for %j', async (generated_title, title) => {
+		const metadata = {
+			generated_title,
+			session_summary: 'Fallback title',
+			created_at: 'invalid',
+			updated_at: null,
+			parent_session_id: 'parent',
+			chat_format_version: 1,
+			fork_parent_prompt_id: 'branch-point',
+		};
+		mockLocalFs(
+			sessionFiles(
+				PROJECT,
+				SESSION_ID,
+				summaryJson(SESSION_ID, PROJECT, metadata),
+				chatHistoryJsonl()
+			)
+		);
+		const [session] = await new GrokSessionStorage().listSessions(PROJECT);
+		expect(session).toMatchObject({
+			sessionName: title,
+			timestamp: '',
+			modifiedAt: '',
+			nativeMetadata: { summary: metadata, summaryStatus: 'available' },
+		});
+	});
+
+	it.each(['current', 'legacy'] as const)(
+		'preserves ordered %s records, tool linkage and inert image references',
+		async (layout) => {
+			const image = 'data:image/png;base64,aGVsbG8=';
+			const reference = 'https://example.invalid/fixture.png';
+			const call =
+				layout === 'current'
+					? { id: 'call', name: 'read', arguments: '{"path":"fixture.png"}' }
+					: { id: 'call', function: { name: 'read', arguments: '{"path":"fixture.png"}' } };
+			const discriminator = layout === 'current' ? 'type' : 'role';
+			const rows = [
+				{ type: 'system', content: 'system evidence' },
+				{
+					type: 'user',
+					synthetic_reason: 'project_instructions',
+					content: [{ type: 'text', text: 'hidden context' }],
+				},
+				...['human', 'interjection', 'parent_human_message', 'direct_bash'].map(
+					(synthetic_reason) => ({
+						[discriminator]: 'user',
+						synthetic_reason,
+						content: [{ type: 'text', text: `<user_query>${synthetic_reason}</user_query>` }],
+					})
+				),
+				{
+					type: 'reasoning',
+					summary: [{ text: 'summary one' }, { text: 'summary two' }],
+					content: [{ text: 'detail one' }, { text: 'detail two' }],
+					encrypted_content: 'opaque-fixture',
+				},
+				{ [discriminator]: 'assistant', content: '', tool_calls: [call] },
+				{
+					[discriminator]: layout === 'current' ? 'tool_result' : 'tool',
+					tool_call_id: 'call',
+					content:
+						layout === 'current'
+							? 'image result'
+							: [
+									{ type: 'text', text: 'image result' },
+									{ type: 'image_url', image_url: { url: reference } },
+								],
+					images: [
+						...(layout === 'current' ? [{ type: 'image', url: reference }] : []),
+						{ type: 'image', url: image },
+						{ type: 'image', url: '/fixture/not-to-read.png' },
+					],
+				},
+				{ [discriminator]: 'assistant', content: 'final answer' },
+				{ type: 'future-record', payload: { retained: true } },
+				{ [discriminator]: 'assistant', content: '' },
+			].map((row) => JSON.stringify(row));
+			rows.push('{"type":"assistant","content":"interrupted');
+			mockLocalFs(sessionFiles(PROJECT, SESSION_ID, '{}', rows.join('\n')));
+			const storage = new GrokSessionStorage();
+			const native = await storage.readSessionMessages(PROJECT, SESSION_ID, {
+				includeNativeRecords: true,
+				limit: 100,
+			});
+			const display = await storage.readSessionMessages(PROJECT, SESSION_ID, { limit: 100 });
+			expect(native.messages.map((message) => message.native?.raw)).toEqual(rows);
+			expect(native.messages.map((message) => message.uuid)).toEqual(
+				rows.map((_, i) => `grok-line-${i + 1}`)
+			);
+			expect(native.messages.every((message) => message.timestamp === '')).toBe(true);
+			expect(native.source).toMatchObject({ status: 'partial', reason: 'malformed-records' });
+			expect(native.messages[6]).toMatchObject({
+				type: 'reasoning',
+				role: 'assistant',
+				content: 'summary one\nsummary two\ndetail one\ndetail two',
+			});
+			expect(native.messages[7].toolUse).toEqual([
+				expect.objectContaining({
+					id: 'call',
+					args: '{"path":"fixture.png"}',
+					resultSource: { provider: 'grok', line: 9 },
+					state: { status: 'completed', input: { path: 'fixture.png' } },
+				}),
+			]);
+			expect(native.messages[7].images).toBeUndefined();
+			expect(native.messages[8]).toMatchObject({
+				role: 'tool',
+				toolCallId: 'call',
+				images: [image],
+				imageReferences: [reference, image, '/fixture/not-to-read.png'],
+			});
+			expect(native.messages[10].native?.issues).toEqual(['unknown-record']);
+			expect(native.messages[12].native?.issues).toEqual(['malformed-record']);
+			expect(display.messages.map((message) => message.uuid)).toEqual(
+				[3, 4, 5, 6, 8, 10, 11, 13].map((line) => `grok-line-${line}`)
+			);
+			expect(display.messages.every((message) => message.native?.raw === undefined)).toBe(true);
+			expect(display.messages[4]).toMatchObject({
+				images: [image],
+				toolUse: [{ state: { status: 'completed', output: 'image result' } }],
+			});
+			expect(await storage.searchSessions(PROJECT, 'hidden context', 'all')).toEqual([]);
+			expect(await storage.searchSessions(PROJECT, 'summary one', 'all')).toEqual([]);
+			expect(await storage.searchSessions(PROJECT, 'final answer', 'assistant')).toEqual([
+				expect.objectContaining({ sessionId: SESSION_ID, matchCount: 1 }),
+			]);
+			expect(fs.open).not.toHaveBeenCalledWith('/fixture/not-to-read.png', expect.anything());
+			expect(fs.readFile).not.toHaveBeenCalled();
+			expect(execFileNoThrow).not.toHaveBeenCalled();
+		}
+	);
+
+	it('reconciles phase 03 first/resumed turn totals without adding turn or child detail again', async () => {
+		// Same ledger and expected turn delta as acp-turn.test.ts, qualified process accounting.
+		const baseline = {
+			inputTokens: 100,
+			outputTokens: 20,
+			cachedReadTokens: 30,
+			cacheCreationTokens: 10,
+			reasoningTokens: 5,
+			costUsdTicks: '9007199254740993',
+		};
+		const resumed = {
+			inputTokens: 60,
+			outputTokens: 30,
+			cachedReadTokens: 10,
+			cacheCreationTokens: 5,
+			reasoningTokens: 5,
+			costUsdTicks: '13',
+		};
+		const session = {
+			inputTokens: 160,
+			outputTokens: 50,
+			cachedReadTokens: 40,
+			cacheCreationTokens: 15,
+			reasoningTokens: 10,
+			costUsdTicks: '9007199254741006',
+			modelUsage: { 'grok-fixture': baseline, 'unknown-model-raw': resumed },
+		};
+		const usage = JSON.stringify({
+			sessionId: 'inherited-parent',
+			session,
+			turns: [
+				{ turnNumber: 1, endedAt: '2026-10-30T12:00:00Z', usage: baseline },
+				{ turnNumber: 2, endedAt: '2026-10-30T12:01:00Z', usage: resumed },
+			],
+		}).replace(/"costUsdTicks":"(\d+)"/g, '"costUsdTicks":$1');
+		const files = sessionFiles(PROJECT, SESSION_ID, '{}', chatHistoryJsonl());
+		files[path.join(SESSIONS_DIR, encodeURIComponent(PROJECT), SESSION_ID, 'usage.json')] = usage;
+		mockLocalFs(files);
+		const [actual] = await new GrokSessionStorage().listSessions(PROJECT);
+		expect(actual).toMatchObject({
+			inputTokens: 60 + 45,
+			outputTokens: 20 + 30,
+			cacheReadTokens: 30 + 10,
+			cacheCreationTokens: 10 + 5,
+			reasoningTokens: 5 + 5,
+			accounting: {
+				scope: 'native-session',
+				reporting: 'snapshot',
+				providerSessionId: SESSION_ID,
+				completeness: 'complete',
+				childInclusion: 'completed',
+				childCompleteness: 'unknown',
+				cost: { status: 'exact', costUsdTicks: '9007199254741006' },
+			},
+		});
+		expect(actual.accounting?.models).toEqual([
+			expect.objectContaining({
+				model: 'grok-fixture',
+				inputTokens: 60,
+				reasoningTokens: 5,
+				cost: { status: 'exact', costUsdTicks: '9007199254740993' },
+			}),
+			expect.objectContaining({
+				model: 'unknown-model-raw',
+				inputTokens: 45,
+				reasoningTokens: 5,
+				cost: { status: 'exact', costUsdTicks: '13' },
+			}),
+		]);
+		expect(actual.byModel?.map((model) => model.inputTokens)).toEqual([60, 45]);
+		expect(actual.costUsd).toBeCloseTo(Number(9007199254741006n) / 1e10, 8);
+	});
+
+	it.each([
+		'0',
+		'9007199254740993',
+		'9223372036854775807',
+		'-1',
+		'1.5',
+		'1e3',
+		'9223372036854775808',
+		'null',
+	])('preserves valid i64 ticks and rejects unsupported cost lexeme %s', (ticks) => {
+		const usage = parseGrokUsageFile(
+			`{"session":{"inputTokens":10,"outputTokens":2,"cachedReadTokens":3,"cacheCreationTokens":1,"costUsdTicks":${ticks}}}`
+		)!;
+		const known = ['0', '9007199254740993', '9223372036854775807'].includes(ticks);
+		expect(usage.accounting.cost).toEqual(
+			known ? { status: 'exact', costUsdTicks: ticks } : { status: 'unknown' }
+		);
+		if (known) expect(usage.costUsd).toBe(Number(ticks) / 1e10);
+		else expect(usage.costUsd).toBeUndefined();
+	});
+
+	it.each(['missing-cost', 'partial-cost', 'incomplete', 'bad-model'])(
+		'keeps %s model detail without fabricating a complete numeric split',
+		(kind) => {
+			const model = {
+				inputTokens: 10,
+				outputTokens: 2,
+				cachedReadTokens: 3,
+				cacheCreationTokens: 1,
+				costUsdTicks: 5,
+			};
+			const session = {
+				...model,
+				...(kind === 'partial-cost' ? { costIsPartial: true } : {}),
+				...(kind === 'incomplete' ? { usageIsIncomplete: true } : {}),
+				modelUsage: {
+					'raw-unknown-model':
+						kind === 'bad-model'
+							? null
+							: { ...model, ...(kind === 'missing-cost' ? { costUsdTicks: undefined } : {}) },
+				},
+			};
+			const usage = parseGrokUsageFile(JSON.stringify({ session }))!;
+			expect(usage.byModel).toEqual([]);
+			expect(usage.accounting.models?.[0]).toMatchObject({
+				model: 'raw-unknown-model',
+				cost: { status: kind === 'partial-cost' || kind === 'incomplete' ? 'partial' : 'unknown' },
+			});
+			if (kind === 'bad-model') expect(usage.accounting.models?.[0].inputTokens).toBeUndefined();
+		}
+	);
+
+	it('keeps source IDs stable through pagination, blank lines and appended turns', async () => {
+		const rows = [
+			'{"type":"user","content":"first"}',
+			'',
+			'{"type":"assistant","content":"second"}',
+			'{"type":"user","content":"third"}',
+		];
+		const files = sessionFiles(PROJECT, SESSION_ID, '{}', rows.join('\n'));
+		mockLocalFs(files);
+		const storage = new GrokSessionStorage();
+		const last = await storage.readSessionMessages(PROJECT, SESSION_ID, { limit: 2 });
+		expect(last).toMatchObject({
+			total: 3,
+			hasMore: true,
+			messages: [{ uuid: 'grok-line-3' }, { uuid: 'grok-line-4' }],
+		});
+		expect(
+			await storage.readSessionMessages(PROJECT, SESSION_ID, { limit: 2, offset: 2 })
+		).toMatchObject({ hasMore: false, messages: [{ uuid: 'grok-line-1' }] });
+		files[path.join(SESSIONS_DIR, encodeURIComponent(PROJECT), SESSION_ID, 'chat_history.jsonl')] +=
+			'\n{"type":"assistant","content":"fourth"}';
+		expect(
+			await storage.readSessionMessages(PROJECT, SESSION_ID, { limit: 2, offset: 1 })
+		).toMatchObject({ total: 4, messages: last.messages });
+		expect(await storage.searchSessions(PROJECT, 'fourth', 'assistant')).toEqual([
+			expect.objectContaining({ sessionId: SESSION_ID, matchCount: 1 }),
+		]);
+	});
+
+	it.each([
+		[-3, -2, 1],
+		[NaN, NaN, 3],
+		[Infinity, -Infinity, 3],
+		[2.9, 1.9, 2],
+		[5000, 0, 3],
+		[1, 9999, 0],
+	])('bounds pagination limit %s and offset %s', async (limit, offset, count) => {
+		mockLocalFs(sessionFiles(PROJECT, SESSION_ID, '{}', chatHistoryJsonl()));
+		const result = await new GrokSessionStorage().readSessionMessages(PROJECT, SESSION_ID, {
+			limit,
+			offset,
+		});
+		expect(result.total).toBe(3);
+		expect(result.messages).toHaveLength(count);
+		expect(result.source?.status).toBe('available');
+	});
+
+	it.each([
+		['too-large', 'small fixture', 64 * 1024 * 1024 + 1],
+		['too-many-lines', '\n'.repeat(100_000), undefined],
+	] as const)(
+		'reports rejected %s transcripts explicitly instead of complete empty history',
+		async (reason, content, size) => {
+			const files = sessionFiles(PROJECT, SESSION_ID, '{}', content);
+			const transcript = path.join(
+				SESSIONS_DIR,
+				encodeURIComponent(PROJECT),
+				SESSION_ID,
+				'chat_history.jsonl'
+			);
+			mockLocalFs(files, {
+				sizeOverrides: size === undefined ? undefined : { [transcript]: size },
+			});
+			expect(
+				await new GrokSessionStorage().readSessionMessages(PROJECT, SESSION_ID, {
+					includeNativeRecords: true,
+				})
+			).toMatchObject({
+				messages: [],
+				total: 0,
+				hasMore: false,
+				source: { status: 'unavailable', reason },
+			});
+			if (size)
+				expect(vi.mocked(fs.open).mock.calls.map(([file]) => file)).not.toContain(transcript);
+			expect(captureException).not.toHaveBeenCalled();
+		}
+	);
 });
