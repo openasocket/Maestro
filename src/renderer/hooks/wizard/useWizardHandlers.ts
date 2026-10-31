@@ -26,6 +26,7 @@ import {
 	readGrokCommandDiscovery,
 } from '../../slashCommands';
 import { useEventListener } from '../utils/useEventListener';
+import { resolveModelEffort } from '../agent/useAgentModelEffortOptions';
 import type {
 	ToolType,
 	LogEntry,
@@ -967,6 +968,11 @@ export function useWizardHandlers(deps: UseWizardHandlersDeps): UseWizardHandler
 			};
 
 			const currentConductorProfile = useSettingsStore.getState().conductorProfile;
+			// Capture this tab's overrides; the shared launch path resolves provider defaults.
+			const { model, effort } = resolveModelEffort(activeTab, currentSession, {
+				defaultModel: '',
+				defaultEffort: '',
+			});
 
 			startInlineWizard(
 				args || undefined,
@@ -983,7 +989,8 @@ export function useWizardHandlers(deps: UseWizardHandlersDeps): UseWizardHandler
 					customPath: currentSession.customPath,
 					customArgs: currentSession.customArgs,
 					customEnvVars: currentSession.customEnvVars,
-					customModel: currentSession.customModel,
+					customModel: model || undefined,
+					customEffort: effort || undefined,
 					claudeTokenSource: getClaudeTokenSourceFields(currentSession),
 				}
 			);
@@ -1059,6 +1066,11 @@ export function useWizardHandlers(deps: UseWizardHandlersDeps): UseWizardHandler
 
 		const currentConductorProfile = useSettingsStore.getState().conductorProfile;
 		const addLogToTab = useSessionStore.getState().addLogToTab;
+		// The new tab inherits the agent configuration, not the previous tab's overrides.
+		const { model, effort } = resolveModelEffort(newTab, currentSession, {
+			defaultModel: '',
+			defaultEffort: '',
+		});
 
 		setTimeout(() => {
 			startInlineWizard(
@@ -1076,7 +1088,8 @@ export function useWizardHandlers(deps: UseWizardHandlersDeps): UseWizardHandler
 					customPath: currentSession.customPath,
 					customArgs: currentSession.customArgs,
 					customEnvVars: currentSession.customEnvVars,
-					customModel: currentSession.customModel,
+					customModel: model || undefined,
+					customEffort: effort || undefined,
 					claudeTokenSource: getClaudeTokenSourceFields(currentSession),
 				}
 			);

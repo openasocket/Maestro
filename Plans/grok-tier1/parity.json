@@ -3401,6 +3401,28 @@
 				"Continuation uses complete history replay; ephemeral wizard native resume has no persisted ownership binding and is not certified.",
 				"Read-only intent, bounded turns and native stream semantics use existing canonical contracts; actual selected binary/platform compliance remains unqualified."
 			]
+		},
+		"phase05-inline-wizard-selection-handoff": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-09a-selected-tab-model-and-effort-handoff",
+			"sourceCommit": "4c9d89a983bb561f0d55eac7185b271a58ba1d58",
+			"sourceRevisionScope": "Pre-task HEAD plus production hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/hooks/batch/inlineWizard/types.ts": "dc27a86550355e4207a30822e2f0fd6a210ffc8643af36608af8a56d700d036f",
+				"src/renderer/hooks/batch/inlineWizard/conversationActions.ts": "9ec5d5176a993b3c56e18a00e888b6665a8d770ea4ef7235c2cfe7bf825dc8f7",
+				"src/renderer/hooks/wizard/useWizardHandlers.ts": "c08aa893f8a0297180d6bf65a1698aaba361e1c9cbbeb473b92df8e47821c1e4"
+			},
+			"provenance": "implementation-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P20", "S04", "C-supportsWizard"],
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"GT1-05-09A captures selected-tab or fresh-tab inherited model/effort and forwards effort through all three existing conversation constructors. Provider defaults still resolve downstream.",
+				"GT1-05-09B still owns generation effort and cancellation; GT1-05-10A authors caller regressions and GT1-05-13 executes them.",
+				"Full history replay remains unchanged; unbound native resume and exact-version live qualification remain unverified."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -8517,7 +8539,9 @@
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
 				"src/renderer/hooks/batch/inlineWizard/conversationActions.ts",
-				"src/main/process-manager/ProcessManager.ts"
+				"src/main/process-manager/ProcessManager.ts",
+				"src/renderer/hooks/batch/inlineWizard/types.ts",
+				"src/renderer/hooks/wizard/useWizardHandlers.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-09", "GT1-05-11", "GT1-08-14", "GT1-05-09A", "GT1-05-09B"],
@@ -8531,7 +8555,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. Selected-tab model/effort and generation cancellation caller wiring remain GT1-05-09A/09B; tests are not run and native continuation remains unqualified."
+				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. GT1-05-09A implements selected-tab model/effort capture and conversation handoff. Generation effort/cancellation remain GT1-05-09B; tests are not run and native continuation remains unqualified."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8541,7 +8565,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase05InlineWizardContractsEvidenceRef": "phase05-inline-wizard-contracts"
+				"phase05InlineWizardContractsEvidenceRef": "phase05-inline-wizard-contracts",
+				"phase05InlineWizardSelectionHandoffEvidenceRef": "phase05-inline-wizard-selection-handoff"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8579,9 +8604,9 @@
 				{
 					"id": "grok-inline-wizard-callers:P20",
 					"code": "caller-handoff-and-verification-pending",
-					"missingPrerequisite": "GT1-05-09A/09B caller handoffs, GT1-05-10/10A regressions, GT1-05-13 execution and exact-version live qualification. Ephemeral wizard continuation remains history replay without native ownership certification.",
+					"missingPrerequisite": "GT1-05-09B generation effort/cancellation handoff, GT1-05-10/10A regressions, GT1-05-13 execution and exact-version live qualification. GT1-05-09A conversation handoff is implemented; ephemeral wizard continuation remains history replay without native ownership certification.",
 					"affectedRows": ["P20"],
-					"evidenceRef": "phase05-inline-wizard-contracts"
+					"evidenceRef": "phase05-inline-wizard-selection-handoff"
 				}
 			],
 			"phase": "05",
@@ -16276,7 +16301,9 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/hooks/batch/inlineWizard/conversationActions.ts"
+				"src/renderer/hooks/batch/inlineWizard/conversationActions.ts",
+				"src/renderer/hooks/batch/inlineWizard/types.ts",
+				"src/renderer/hooks/wizard/useWizardHandlers.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-09", "GT1-05-11", "GT1-11-14A", "GT1-05-09A", "GT1-05-09B"],
@@ -16291,7 +16318,7 @@
 			},
 			"limitations": [
 				"Existing Grok wizard adapter needs malformed/partial JSON, tool failures, reset/resume and read-only utility coverage.",
-				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. Selected-tab model/effort and generation cancellation caller wiring remain GT1-05-09A/09B; tests are not run and native continuation remains unqualified."
+				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. GT1-05-09A implements selected-tab model/effort capture and conversation handoff. Generation effort/cancellation remain GT1-05-09B; tests are not run and native continuation remains unqualified."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -16301,7 +16328,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase05InlineWizardContractsEvidenceRef": "phase05-inline-wizard-contracts"
+				"phase05InlineWizardContractsEvidenceRef": "phase05-inline-wizard-contracts",
+				"phase05InlineWizardSelectionHandoffEvidenceRef": "phase05-inline-wizard-selection-handoff"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16339,9 +16367,9 @@
 				{
 					"id": "grok-inline-wizard-callers:C-supportsWizard",
 					"code": "caller-handoff-and-verification-pending",
-					"missingPrerequisite": "GT1-05-09A/09B caller handoffs, GT1-05-10/10A regressions, GT1-05-13 execution and exact-version live qualification. Ephemeral wizard continuation remains history replay without native ownership certification.",
+					"missingPrerequisite": "GT1-05-09B generation effort/cancellation handoff, GT1-05-10/10A regressions, GT1-05-13 execution and exact-version live qualification. GT1-05-09A conversation handoff is implemented; ephemeral wizard continuation remains history replay without native ownership certification.",
 					"affectedRows": ["C-supportsWizard"],
-					"evidenceRef": "phase05-inline-wizard-contracts"
+					"evidenceRef": "phase05-inline-wizard-selection-handoff"
 				}
 			],
 			"field": "supportsWizard",
@@ -19741,7 +19769,10 @@
 				"src/renderer/utils/grokWizard.ts",
 				"src/renderer/services/inlineWizardConversation.ts",
 				"src/renderer/services/inlineWizardDocumentGeneration.ts",
-				"src/renderer/components/Wizard/services/conversationManager.ts"
+				"src/renderer/components/Wizard/services/conversationManager.ts",
+				"src/renderer/hooks/batch/inlineWizard/types.ts",
+				"src/renderer/hooks/batch/inlineWizard/conversationActions.ts",
+				"src/renderer/hooks/wizard/useWizardHandlers.ts"
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-09", "GT1-05-09A", "GT1-05-09B"],
@@ -19755,7 +19786,7 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. Selected-tab model/effort and generation cancellation caller wiring remain GT1-05-09A/09B; tests are not run and native continuation remains unqualified."
+				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. GT1-05-09A implements selected-tab model/effort capture and conversation handoff. Generation effort/cancellation remain GT1-05-09B; tests are not run and native continuation remains unqualified."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -19765,7 +19796,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase05InlineWizardContractsEvidenceRef": "phase05-inline-wizard-contracts"
+				"phase05InlineWizardContractsEvidenceRef": "phase05-inline-wizard-contracts",
+				"phase05InlineWizardSelectionHandoffEvidenceRef": "phase05-inline-wizard-selection-handoff"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19803,9 +19835,9 @@
 				{
 					"id": "grok-inline-wizard-callers:S04",
 					"code": "caller-handoff-and-verification-pending",
-					"missingPrerequisite": "GT1-05-09A/09B caller handoffs, GT1-05-10/10A regressions, GT1-05-13 execution and exact-version live qualification. Ephemeral wizard continuation remains history replay without native ownership certification.",
+					"missingPrerequisite": "GT1-05-09B generation effort/cancellation handoff, GT1-05-10/10A regressions, GT1-05-13 execution and exact-version live qualification. GT1-05-09A conversation handoff is implemented; ephemeral wizard continuation remains history replay without native ownership certification.",
 					"affectedRows": ["S04"],
-					"evidenceRef": "phase05-inline-wizard-contracts"
+					"evidenceRef": "phase05-inline-wizard-selection-handoff"
 				}
 			],
 			"branchAuditRefs": ["B27"]
