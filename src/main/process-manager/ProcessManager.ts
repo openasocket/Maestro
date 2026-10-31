@@ -1,9 +1,13 @@
 // src/main/process-manager/ProcessManager.ts
 
 import { EventEmitter } from 'events';
+import { canonicalJson } from '../../shared/canonicalJson';
+import { currentSpawnGeneration } from './generation';
+import { grokLaunchArgsProblem } from './types';
 import { randomBytes, randomUUID } from 'crypto';
 import type {
 	ProcessConfig,
+	NativeSessionLaunch,
 	ManagedProcess,
 	ProcessSteeringCredentials,
 	SpawnResult,
@@ -340,6 +344,7 @@ function modelFromArgs(args: readonly string[]): string | null {
  */
 export class ProcessManager extends EventEmitter {
 	private processes: Map<string, ManagedProcess> = new Map();
+	private readonly nativeSessionLaunches = new Map<string, NativeSessionLaunch>();
 	private bufferManager: DataBufferManager;
 	private ptySpawner: PtySpawner;
 	private childProcessSpawner: ChildProcessSpawner;
@@ -379,6 +384,7 @@ export class ProcessManager extends EventEmitter {
 		// the map and leaves the newer lease alone.
 		this.on('exit', (sessionId: string, code: number, signal?: number) => {
 			if (this.processes.has(sessionId)) return;
+			this.nativeSessionLaunches.delete(sessionId);
 			this.releaseLease(sessionId, {
 				outcome: 'exited',
 				exitCode: code,
@@ -479,6 +485,36 @@ export class ProcessManager extends EventEmitter {
 			};
 		}
 		const lease = admitted.lease;
+		const grokArgsProblem =
+			config.toolType === 'grok' && !config.sshRemoteId
+				? grokLaunchArgsProblem(config.args, config.agentSessionId, config.cwd)
+				: undefined;
+		if (
+			grokArgsProblem ||
+			(config.toolType === 'grok' &&
+				(config.agentSessionId || argsResumeSession(config.args)) &&
+				(!config.agentSessionId ||
+					config.nativeSessionScope?.state !== 'bound' ||
+					canonicalJson(config.nativeSessionBinding ?? null) !==
+						canonicalJson({
+							...config.nativeSessionScope,
+							nativeSessionId: config.agentSessionId,
+						})))
+		) {
+			const message =
+				grokArgsProblem ??
+				'Grok resume ownership is unknown or changed. Restore the original account and host before resuming.';
+			lease?.release({ outcome: 'spawn-failed', message });
+			this.emit('agent-error', config.sessionId, {
+				type: 'session_not_found',
+				message,
+				recoverable: false,
+				agentId: 'grok',
+				sessionId: config.sessionId,
+				timestamp: Date.now(),
+			} satisfies AgentError);
+			return { pid: -1, success: false, error: message };
+		}
 		// Only the child-process sink owns prompt files. Refuse before attaching,
 		// replacing an existing process or selecting a transport that drops them.
 		if (
@@ -757,6 +793,24 @@ export class ProcessManager extends EventEmitter {
 		});
 
 		if (result.success) {
+			const proc = this.processes.get(config.sessionId);
+			if (config.toolType === 'grok' && proc?.spawnGeneration !== undefined) {
+				const scope =
+					config.nativeSessionScope ??
+					({ version: 1, state: 'unknown', reason: 'unobserved' } as const);
+				const captured = Object.freeze({
+					scope: Object.freeze(
+						scope.state === 'bound'
+							? { ...scope, host: Object.freeze({ ...scope.host }) }
+							: { ...scope }
+					),
+					processGeneration: proc.spawnGeneration,
+					tabId: config.tabId,
+					requestedNativeSessionId: config.agentSessionId,
+				});
+				proc.nativeSessionLaunch = captured;
+				this.nativeSessionLaunches.set(config.sessionId, captured);
+			}
 			// The spawner registered the record synchronously; the token lives
 			// with the process it was minted for and leaves with it on exit.
 			if (steering) {
@@ -983,6 +1037,24 @@ export class ProcessManager extends EventEmitter {
 		actor: ProcessSpawnActor,
 		options: ProcessSpawnOptions = {}
 	): Promise<SpawnResult> {
+		if (config.toolType === 'grok') {
+			const scope = config.nativeSessionScope;
+			config = {
+				...config,
+				args: [...config.args],
+				customEnvVars: config.customEnvVars && { ...config.customEnvVars },
+				shellEnvVars: config.shellEnvVars && { ...config.shellEnvVars },
+				nativeSessionBinding:
+					config.nativeSessionBinding && structuredClone(config.nativeSessionBinding),
+				nativeSessionScope:
+					scope &&
+					Object.freeze(
+						scope.state === 'bound'
+							? { ...scope, host: Object.freeze({ ...scope.host }) }
+							: { ...scope }
+					),
+			};
+		}
 		const { signal } = options;
 		const cancelled = {
 			pid: -1,
@@ -999,15 +1071,31 @@ export class ProcessManager extends EventEmitter {
 		}
 		// Admission can yield even on a standalone host. Cancellation takes
 		// precedence over every decision, before any artifact or child exists.
-		if (signal?.aborted) {
+		let ownershipRefusal: string | undefined;
+		try {
+			const verdict =
+				!signal?.aborted && (admitted.state === 'standalone' || admitted.state === 'admitted')
+					? options.beforeSpawn?.()
+					: undefined;
+			ownershipRefusal = typeof verdict === 'object' ? await verdict : verdict;
+		} catch (error) {
+			if (admitted.state === 'admitted') {
+				this.admissionLeases
+					.get(admitted.admission)
+					?.release({ outcome: 'spawn-failed', message: 'Launch ownership check failed.' });
+				this.admissionLeases.delete(admitted.admission);
+			}
+			throw error;
+		}
+		if (signal?.aborted || ownershipRefusal) {
 			if (admitted.state === 'admitted') {
 				// This lease has not reached withLease/boundLeases. Its admission
 				// owner releases it once, without touching an already-running reader.
 				const lease = this.admissionLeases.get(admitted.admission);
 				this.admissionLeases.delete(admitted.admission);
-				lease?.release({ outcome: 'spawn-failed', message: cancelled.error });
+				lease?.release({ outcome: 'spawn-failed', message: ownershipRefusal ?? cancelled.error });
 			}
-			return cancelled;
+			return ownershipRefusal ? { pid: -1, success: false, error: ownershipRefusal } : cancelled;
 		}
 		if (admitted.state === 'standalone') return this.spawn(config);
 		if (admitted.state === 'admitted') {
@@ -1664,9 +1752,15 @@ export class ProcessManager extends EventEmitter {
 		return Array.from(this.processes.values());
 	}
 
-	/**
-	 * Get a specific process
-	 */
+	/** Read synchronously in the session-ID listener, before exit clears the receipt.
+	 * A killed process can still deliver its final unterminated line; a superseded
+	 * generation can never borrow the successor's ownership. */
+	nativeSessionLaunchOf(sessionId: string): NativeSessionLaunch | undefined {
+		const launch = this.nativeSessionLaunches.get(sessionId);
+		return launch?.processGeneration === currentSpawnGeneration(sessionId) ? launch : undefined;
+	}
+
+	/** Get a specific live process. */
 	get(sessionId: string): ManagedProcess | undefined {
 		return this.processes.get(sessionId);
 	}

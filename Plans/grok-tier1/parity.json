@@ -2146,6 +2146,24 @@
 			],
 			"scope": "44 new parameter-expanded cases in the existing browser suite: rename during backfill; same-scope selection, Back/Escape and unmount with pending reads; delayed initial focus and backfill scroll callbacks; delayed list focus cancellation; malformed binding/provider/native-ID/source receipt rejection on initial and backfill reads. Positive callback controls and real viewer hooks retained.",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-launch-ownership": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07d-desktop-launch-ownership",
+			"sourceCommit": "cd8b4181542553f91fa7d0195c24be91d7516249",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/ipc/handlers/process/handle-spawn.ts": "83d6d67375872f0a0fa1c175037b61998c2b6d29c36bb70f5e58977bc364d686",
+				"src/main/process-manager/ProcessManager.ts": "f72f8243733b66ca8ca6c17a4f458bbd999f59a5d6f9b553b6d4e35d5d716a37",
+				"src/main/process-manager/types.ts": "d89b6e958593060277a4e99702cf12a11a7c632b753cf038ea58a373897a522e"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "Immutable launch account/cwd/qualified endpoint capture; exact persisted-tab and native CLI selector admission; configuration, physical path and endpoint rechecks; generation-scoped scope retained through final output after kill. Remote inherited/default/relative scope remains unknown pending 07D1.",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -5975,7 +5993,10 @@
 				"src/renderer/hooks/agent/useSessionPagination.ts",
 				"src/renderer/services/resumableSession.ts",
 				"src/main/storage/index.ts",
-				"src/main/index.ts"
+				"src/main/index.ts",
+				"src/main/ipc/handlers/process/handle-spawn.ts",
+				"src/main/process-manager/ProcessManager.ts",
+				"src/main/process-manager/types.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -5989,7 +6010,8 @@
 					"GT1-04-07D",
 					"GT1-04-07E",
 					"GT1-04-07F",
-					"GT1-04-07CQT1A"
+					"GT1-04-07CQT1A",
+					"GT1-04-07D1"
 				],
 				"test": [
 					"GT1-04-08",
@@ -6004,7 +6026,8 @@
 					"GT1-04-07CQT1",
 					"GT1-04-07CUIT",
 					"GT1-04-07CUIAT",
-					"GT1-04-07CUIAT1"
+					"GT1-04-07CUIAT1",
+					"GT1-04-07D1T"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -6038,7 +6061,8 @@
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
-				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests"
+				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
+				"phase04LaunchOwnershipRef": "phase04-launch-ownership"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6078,6 +6102,12 @@
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-04-07CQT1A implemented the request/current-chat fence around getRecent. GT1-04-13 must execute both Quick Chat suites, including the two unchanged stale-read regressions. Static review only; runtime not-run.",
 					"affectedRows": ["P14"]
+				},
+				{
+					"id": "grok-remote-launch-account-unobserved",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-04-07D captures local and explicit absolute qualified SSH launch scope and refuses unknown/mismatched resumes. GT1-04-07D1 must prove remote inherited/default/relative account environment and native cwd interpretation; 07E/07F deliver and persist IDs; 07D1T/08 author tests and 13 executes them. Unqualified standalone endpoints remain unknown.",
+					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
 			"phase": "04",
@@ -11237,7 +11267,10 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/shared/maestro-lib/run/session.ts"
+				"src/shared/maestro-lib/run/session.ts",
+				"src/main/ipc/handlers/process/handle-spawn.ts",
+				"src/main/process-manager/ProcessManager.ts",
+				"src/main/process-manager/types.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -11249,7 +11282,8 @@
 					"GT1-04-07D",
 					"GT1-04-07E",
 					"GT1-04-07F",
-					"GT1-04-07CQT1A"
+					"GT1-04-07CQT1A",
+					"GT1-04-07D1"
 				],
 				"test": [
 					"GT1-04-08",
@@ -11262,7 +11296,8 @@
 					"GT1-04-07CQT1",
 					"GT1-04-07CUIT",
 					"GT1-04-07CUIAT",
-					"GT1-04-07CUIAT1"
+					"GT1-04-07CUIAT1",
+					"GT1-04-07D1T"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -11296,7 +11331,8 @@
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
-				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests"
+				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
+				"phase04LaunchOwnershipRef": "phase04-launch-ownership"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11336,6 +11372,12 @@
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-04-07CQT1A implemented the request/current-chat fence around getRecent. GT1-04-13 must execute both Quick Chat suites, including the two unchanged stale-read regressions. Static review only; runtime not-run.",
 					"affectedRows": ["C-supportsResume"]
+				},
+				{
+					"id": "grok-remote-launch-account-unobserved",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-04-07D captures local and explicit absolute qualified SSH launch scope and refuses unknown/mismatched resumes. GT1-04-07D1 must prove remote inherited/default/relative account environment and native cwd interpretation; 07E/07F deliver and persist IDs; 07D1T/08 author tests and 13 executes them. Unqualified standalone endpoints remain unknown.",
+					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
 			"field": "supportsResume",
@@ -11764,7 +11806,10 @@
 			"sourcePaths": [
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/renderer/components/MainPanel/MainPanelHeader.tsx"
+				"src/renderer/components/MainPanel/MainPanelHeader.tsx",
+				"src/main/ipc/handlers/process/handle-spawn.ts",
+				"src/main/process-manager/ProcessManager.ts",
+				"src/main/process-manager/types.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -11776,7 +11821,8 @@
 					"GT1-04-07D",
 					"GT1-04-07E",
 					"GT1-04-07F",
-					"GT1-04-07CQT1A"
+					"GT1-04-07CQT1A",
+					"GT1-04-07D1"
 				],
 				"test": [
 					"GT1-04-08",
@@ -11789,7 +11835,8 @@
 					"GT1-04-07CQT1",
 					"GT1-04-07CUIT",
 					"GT1-04-07CUIAT",
-					"GT1-04-07CUIAT1"
+					"GT1-04-07CUIAT1",
+					"GT1-04-07D1T"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
@@ -11823,7 +11870,8 @@
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
-				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests"
+				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
+				"phase04LaunchOwnershipRef": "phase04-launch-ownership"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11863,6 +11911,12 @@
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-04-07CQT1A implemented the request/current-chat fence around getRecent. GT1-04-13 must execute both Quick Chat suites, including the two unchanged stale-read regressions. Static review only; runtime not-run.",
 					"affectedRows": ["C-supportsSessionId"]
+				},
+				{
+					"id": "grok-remote-launch-account-unobserved",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-04-07D captures local and explicit absolute qualified SSH launch scope and refuses unknown/mismatched resumes. GT1-04-07D1 must prove remote inherited/default/relative account environment and native cwd interpretation; 07E/07F deliver and persist IDs; 07D1T/08 author tests and 13 executes them. Unqualified standalone endpoints remain unknown.",
+					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
 			"field": "supportsSessionId",
@@ -16358,7 +16412,10 @@
 				"src/renderer/hooks/agent/useSessionPagination.ts",
 				"src/renderer/services/resumableSession.ts",
 				"src/main/storage/index.ts",
-				"src/main/index.ts"
+				"src/main/index.ts",
+				"src/main/ipc/handlers/process/handle-spawn.ts",
+				"src/main/process-manager/ProcessManager.ts",
+				"src/main/process-manager/types.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -16372,7 +16429,8 @@
 					"GT1-04-07D",
 					"GT1-04-07E",
 					"GT1-04-07F",
-					"GT1-04-07CQT1A"
+					"GT1-04-07CQT1A",
+					"GT1-04-07D1"
 				],
 				"test": [
 					"GT1-04-08",
@@ -16387,7 +16445,8 @@
 					"GT1-04-07CQT1",
 					"GT1-04-07CUIT",
 					"GT1-04-07CUIAT",
-					"GT1-04-07CUIAT1"
+					"GT1-04-07CUIAT1",
+					"GT1-04-07D1T"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -16421,7 +16480,8 @@
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
 				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
-				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests"
+				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
+				"phase04LaunchOwnershipRef": "phase04-launch-ownership"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16461,6 +16521,12 @@
 					"code": "verification-pending",
 					"missingPrerequisite": "GT1-04-07CQT1A implemented the request/current-chat fence around getRecent. GT1-04-13 must execute both Quick Chat suites, including the two unchanged stale-read regressions. Static review only; runtime not-run.",
 					"affectedRows": ["REG-SESSION-MUTATION"]
+				},
+				{
+					"id": "grok-remote-launch-account-unobserved",
+					"code": "implementation-and-verification-pending",
+					"missingPrerequisite": "GT1-04-07D captures local and explicit absolute qualified SSH launch scope and refuses unknown/mismatched resumes. GT1-04-07D1 must prove remote inherited/default/relative account environment and native cwd interpretation; 07E/07F deliver and persist IDs; 07D1T/08 author tests and 13 executes them. Unqualified standalone endpoints remain unknown.",
+					"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"]
 				}
 			],
 			"branchAuditRefs": ["B22", "B44"]

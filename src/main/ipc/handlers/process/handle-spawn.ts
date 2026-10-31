@@ -3,6 +3,7 @@ import { app, BrowserWindow } from 'electron';
 import Store from 'electron-store';
 import * as os from 'os';
 import * as fsp from 'fs/promises';
+import { realpathSync } from 'fs';
 import * as path from 'path';
 import { ProcessManager } from '../../../process-manager';
 import { AgentDetector } from '../../../agents';
@@ -23,8 +24,11 @@ import {
 	MCP_CONFIG_BY_AGENT,
 } from '../../../../shared/plugins/mcp-agent-config';
 import type { InteractiveReplayController } from '../../../agents/claude-interactive-replay';
-import type { ProcessConfig as ProcessSpawnConfig } from '../../../process-manager/types';
-import type { AgentConfigsData } from '../../../stores/types';
+import type {
+	NativeSessionLaunchScope,
+	ProcessConfig as ProcessSpawnConfig,
+} from '../../../process-manager/types';
+import type { AgentConfigsData, StoredSession } from '../../../stores/types';
 import { logger } from '../../../utils/logger';
 import { isWindows } from '../../../../shared/platformDetection';
 import {
@@ -41,6 +45,7 @@ import {
 } from '../../../../shared/maestro-lib/managed/delegation';
 import { dispatchedChildContext } from '../../../process-manager/ProcessManager';
 import {
+	grokLaunchArgsProblem,
 	managedPermissionModeRefusal,
 	requestedPermissionMode,
 	spawnOriginOf,
@@ -72,13 +77,23 @@ import { buildChildProcessEnv } from '../../../process-manager/utils/envBuilder'
 import { awaitSynopsisWriters } from '../../../process-manager/utils/synopsisWriterGate';
 import { probeClaudeSlashCommandsCached } from '../../../agents/claude-slash-command-probe';
 import { providerProbeManaged } from '../../../agents/provider-probe';
-import { buildExpandedEnv } from '../../../../shared/pathUtils';
+import { buildExpandedEnv, expandTilde } from '../../../../shared/pathUtils';
+import { resolveAgentAccountDir, resolveAgentAccountRef } from '../../../../shared/agentAccountDir';
+import { installationIdentity } from '../../../../shared/maestro-lib/managed/host-adapter';
+import type {
+	NativeSessionBinding,
+	ProviderSwitchTab,
+} from '../../../../shared/maestro-lib/agents/providerSwap';
+import { getProductionDataPath } from '../../../stores';
+import { observePathRemote } from '../../../utils/remote-fs';
+import { isExpectedSessionReadError } from '../../../utils/session-read-errors';
+import { isExpectedRemoteError } from '../../../storage/remote-error-utils';
 import type { SshRemoteConfig } from '../../../../shared/types';
 import { powerManager } from '../../../power-manager';
 import { MaestroSettings } from '../persistence';
 import { getDefaultShell } from '../../../stores/defaults';
 import { sanitizeClaudeTranscriptBeforeApiResume } from './claude-transcript-sanitize';
-import { resolveClaudeSpawnContext } from './resolve-claude-spawn-context';
+import { findOwningSessionRecord, resolveClaudeSpawnContext } from './resolve-claude-spawn-context';
 import { resolveCodexSpawnTransport } from './resolve-codex-spawn-transport';
 import type { ClaudeSpawnEnvLayers } from '../../../agents/claudeSpawnCore';
 import { applyLocalInteractiveSpawnDecision } from './apply-local-interactive-spawn';
@@ -175,6 +190,18 @@ async function handleProcessSpawnImpl(
 		safeSend,
 	} = deps;
 
+	// IPC records are mutable while discovery/admission awaits. Retain this turn's
+	// request, not references that a later settings or tab change can relabel.
+	if (config.toolType === 'grok') config = structuredClone(config);
+	const grokOwner =
+		config.toolType === 'grok' ? grokSpawnOwner(config, deps.sessionsStore) : undefined;
+	const retainedBinding = grokOwner?.binding;
+	if (config.toolType === 'grok' && config.agentSessionId && !retainedBinding) {
+		const error =
+			'Grok resume has no retained native ownership. Reopen it from scoped native history.';
+		reportSpawnRefusal(deps, config.sessionId, error);
+		return { success: false, pid: 0, error };
+	}
 	const processManager = requireProcessManager(getProcessManager);
 	const agentDetector = requireDependency(getAgentDetector, 'Agent detector');
 	const migrationAgentId = config.sessionId.replace(/-ai(?:-.+)?$/, '');
@@ -279,8 +306,11 @@ async function handleProcessSpawnImpl(
 	// and the API-resume sanitizer) must see the same env the child will, and
 	// both layers are applied again at spawn further down.
 	const allConfigs = agentConfigsStore.get('configs', {});
-	const agentConfigValues = allConfigs[config.toolType] || {};
-	const globalShellEnvVars = settingsStore.get('shellEnvVars', {}) as Record<string, string>;
+	const agentConfigValues = structuredClone(allConfigs[config.toolType] || {});
+	const globalShellEnvVars = structuredClone(settingsStore.get('shellEnvVars', {})) as Record<
+		string,
+		string
+	>;
 	const claudeEnvLayers: ClaudeSpawnEnvLayers = {
 		agentDefaultEnvVars: agent?.defaultEnvVars,
 		globalShellEnvVars,
@@ -436,6 +466,7 @@ async function handleProcessSpawnImpl(
 	let plannedFile: Extract<PromptDelivery, { via: 'file' }> | undefined;
 	let plannedTarget: string | undefined;
 	let promptRemote: SshRemoteConfig | undefined;
+	let grokLaunchRemote: SshRemoteConfig | undefined;
 	let copilotPreamble: string | undefined;
 	if (agent?.id === 'copilot-cli') {
 		try {
@@ -526,6 +557,9 @@ async function handleProcessSpawnImpl(
 			}
 			reportSpawnRefusal(deps, config.sessionId, planResult.error);
 			return { success: false, pid: 0 };
+		}
+		if (config.toolType === 'grok' && planResult.plan.target.kind === 'remote') {
+			grokLaunchRemote = structuredClone(planResult.plan.target.remote);
 		}
 		effectiveCustomEnvVars = planResult.plan.envVars;
 		launchPermission = planResult.plan.permission;
@@ -1081,6 +1115,13 @@ async function handleProcessSpawnImpl(
 		});
 	}
 
+	if (config.toolType === 'grok') {
+		const error = grokLaunchArgsProblem(finalArgs, config.agentSessionId, config.cwd);
+		if (error) {
+			reportSpawnRefusal(deps, config.sessionId, error);
+			return { success: false, pid: 0, error };
+		}
+	}
 	const sshWrap = await wrapSpawnForSsh({
 		config,
 		agent,
@@ -1092,7 +1133,7 @@ async function handleProcessSpawnImpl(
 		effectiveCustomEnvVars,
 		effectivePrompt: promptArtifact ? undefined : effectivePrompt,
 		promptArtifact,
-		resolvedRemote: promptRemote,
+		resolvedRemote: grokLaunchRemote ?? promptRemote,
 		globalShellEnvVars,
 		useShell,
 		shellToUse,
@@ -1278,6 +1319,69 @@ async function handleProcessSpawnImpl(
 		}
 	}
 
+	const grokLaunchEnv =
+		config.toolType === 'grok'
+			? sshRemoteUsed
+				? { ...sshRemoteUsed.remoteEnv, ...globalShellEnvVars, ...effectiveCustomEnvVars }
+				: buildChildProcessEnv(customEnvVarsToPass, !!agentSessionId, globalShellEnvVars)
+			: undefined;
+	const nativeObservation =
+		config.toolType === 'grok'
+			? await observeGrokLaunchScope(config, sshRemoteUsed, grokLaunchEnv!, deps)
+			: undefined;
+	const nativeSessionScope = nativeObservation?.scope;
+	const beforeSpawn =
+		config.toolType === 'grok'
+			? () => {
+					const selectionProblem = () => {
+						const current = grokSpawnOwner(config, deps.sessionsStore);
+						if (
+							current.key !== grokOwner?.key ||
+							canonicalJson(agentConfigsStore.get('configs', {}).grok || {}) !==
+								canonicalJson(agentConfigValues) ||
+							canonicalJson(settingsStore.get('shellEnvVars', {})) !==
+								canonicalJson(globalShellEnvVars) ||
+							(sshRemoteUsed &&
+								canonicalJson(
+									createSshRemoteStoreAdapter(settingsStore)
+										.getSshRemotes()
+										.find((remote) => remote.id === sshRemoteUsed.id) ?? null
+								) !== canonicalJson(sshRemoteUsed))
+						)
+							return 'Grok launch ownership changed during preparation. Retry with the intended account, host and tab.';
+						if (
+							sshRemoteEndpoint &&
+							nativeSessionScope?.state === 'bound' &&
+							nativeSessionScope.host.identity !== sshRemoteEndpoint.installationId
+						)
+							return 'Grok SSH endpoint changed after managed qualification. Nothing was started.';
+						if (!sshRemoteUsed) {
+							const env = buildChildProcessEnv(
+								customEnvVarsToPass,
+								!!agentSessionId,
+								globalShellEnvVars
+							);
+							if (
+								['GROK_HOME', 'HOME', 'USERPROFILE'].some(
+									(key) => env[key] !== grokLaunchEnv?.[key]
+								)
+							)
+								return 'Grok account environment changed before spawn. Nothing was started.';
+						}
+						return undefined;
+					};
+					const selectionRefusal = selectionProblem();
+					if (selectionRefusal) return selectionRefusal;
+					const checked = nativeObservation?.recheck?.();
+					const error = 'Grok account, cwd or endpoint changed before spawn. Nothing was started.';
+					return typeof checked === 'object'
+						? checked.then((valid) => (valid ? selectionProblem() : error))
+						: checked === false
+							? error
+							: undefined;
+				}
+			: undefined;
+
 	// Admitted for the actor resolved above (before the launch plan) before any
 	// branch: a managed host spawns nothing without an admission, a standalone
 	// host spawns as before. The ticket was spent there; strip it so the
@@ -1344,11 +1448,17 @@ async function handleProcessSpawnImpl(
 			extraPathDirs: localAgentBinDir ? [localAgentBinDir] : undefined,
 			// Host-authoritative (see above): overrides whatever the caller sent.
 			codexTransport,
+			// Never trust ownership fields supplied in an untyped IPC payload.
+			nativeSessionScope,
+			nativeSessionBinding: retainedBinding,
+			tabId: spawnTabId(config),
 			// SSH app-server launch, when this Codex turn wants app-server.
 			codexAppServerSsh: sshWrap.codexAppServerSsh,
 		},
-		actor
+		actor,
+		{ beforeSpawn }
 	);
+	if (!result.success && result.error) reportSpawnRefusal(deps, config.sessionId, result.error);
 	if (!result.success && pluginRunToken) exitListener.current?.(config.sessionId);
 	if (result.success) proofCleanup.release = undefined;
 
@@ -1578,6 +1688,171 @@ export {
  * desktop turn spawns under. A ticket issued for a named tab is claimed
  * against this; a `-ai` process with no tab half claims as tab-less.
  */
+/** Exact persisted owner/tab, never another tab with the same native ID. */
+function grokSpawnOwner(
+	config: SpawnProcessConfig,
+	store: SpawnHandlerDependencies['sessionsStore']
+) {
+	const owner = findOwningSessionRecord(
+		store.get('sessions', []) as StoredSession[],
+		config.sessionId,
+		config.sessionId.replace(REGEX_AI_SUFFIX, '')
+	);
+	const tabs = (Array.isArray(owner?.aiTabs) ? owner.aiTabs : []) as Array<
+		ProviderSwitchTab & { id: string }
+	>;
+	const tab = tabs.find((candidate) => candidate?.id === spawnTabId(config));
+	const binding: NativeSessionBinding | undefined =
+		owner?.toolType === 'grok' &&
+		(!tab?.turnProvider || tab.turnProvider === 'grok') &&
+		tab?.agentSessionId === config.agentSessionId
+			? tab?.nativeSessionBinding
+			: undefined;
+	return {
+		binding: binding && structuredClone(binding),
+		// Private mutation fence. Never persist or log environment values.
+		key: canonicalJson({
+			owner: owner && {
+				id: owner.id,
+				provider: owner.toolType,
+				cwd: owner.cwd,
+				projectRoot: owner.projectRoot,
+				ssh: owner.sessionSshRemoteConfig,
+				remoteCwd: owner.remoteCwd,
+				env: owner.customEnvVars,
+				customPath: owner.customPath,
+				customArgs: owner.customArgs,
+			},
+			tab: tab && {
+				id: tab.id,
+				provider: tab.turnProvider,
+				idOnProvider: tab.agentSessionId,
+				binding: tab.nativeSessionBinding,
+			},
+		}),
+	};
+}
+
+/** Observe directories only; never open account credentials or historical output. */
+async function observeGrokLaunchScope(
+	config: SpawnProcessConfig,
+	remote: SshRemoteConfig | null,
+	env: NodeJS.ProcessEnv,
+	deps: Pick<SpawnHandlerDependencies, 'remoteQualifier'>
+): Promise<{ scope: NativeSessionLaunchScope; recheck?: () => boolean | Promise<boolean> }> {
+	const unknown = { scope: { version: 1, state: 'unknown', reason: 'unobserved' } } as const;
+	let recheck: (() => boolean | Promise<boolean>) | undefined;
+	let cwd: string;
+	let account: string;
+	let identity: string;
+	if (remote) {
+		if (!path.posix.isAbsolute(config.cwd)) return unknown;
+		// SSH exports literal values after cd. The directory observer runs in the
+		// login environment, so it cannot prove inherited/default or tilde roots.
+		const accountDir = resolveAgentAccountDir(
+			{ toolType: 'grok', sshRemote: true, customEnvVars: { GROK_HOME: env.GROK_HOME ?? '' } },
+			{ homeDir: '' }
+		);
+		if (!accountDir || accountDir !== env.GROK_HOME || !path.posix.isAbsolute(accountDir))
+			return unknown;
+		const qualify = async () => {
+			const target = await deps.remoteQualifier?.()?.qualifyResolved(structuredClone(remote));
+			return target?.kind === 'remote' && canonicalJson(target.remote) === canonicalJson(remote)
+				? target.endpoint?.installationId
+				: undefined;
+		};
+		const endpoint = await qualify();
+		if (!endpoint || !endpoint.trim() || /[\x00-\x1f\x7f]/.test(endpoint)) return unknown;
+		const paths = await Promise.all(
+			[config.cwd, accountDir].map((value) => observePathRemote(value, remote))
+		);
+		for (const observed of paths) {
+			if (!observed.success || !observed.data) {
+				if (!observed.errorCode && !isExpectedRemoteError(observed.error))
+					throw new Error(observed.error || 'Grok launch path observation failed.');
+				return unknown;
+			}
+			if (observed.data.kind !== 'directory') return unknown;
+		}
+		if ((await qualify()) !== endpoint) return unknown;
+		cwd = paths[0].data!.canonicalPath;
+		account = paths[1].data!.canonicalPath;
+		identity = endpoint;
+		recheck = async () => {
+			if ((await qualify()) !== endpoint) return false;
+			const next = await Promise.all(
+				[config.cwd, accountDir].map((value) => observePathRemote(value, remote))
+			);
+			for (const observed of next) {
+				if (!observed.success && !observed.errorCode && !isExpectedRemoteError(observed.error))
+					throw new Error(observed.error || 'Grok launch path observation failed.');
+			}
+			if ((await qualify()) !== endpoint) return false;
+			return next.every(
+				(observed, index) =>
+					observed.success && canonicalJson(observed.data) === canonicalJson(paths[index].data)
+			);
+		};
+	} else {
+		const homeDir = (isWindows() ? env.USERPROFILE : env.HOME) || os.homedir();
+		// Resolve a relative provider root in the CHILD's cwd, not the desktop's.
+		if (!path.isAbsolute(config.cwd)) return unknown;
+		const launchCwd = path.resolve(expandTilde(config.cwd));
+		const rawAccount = env.GROK_HOME;
+		const nativeHome = isWindows() ? env.USERPROFILE : env.HOME;
+		if (!rawAccount && nativeHome !== undefined && !path.isAbsolute(nativeHome)) return unknown;
+		if (rawAccount !== undefined && rawAccount !== rawAccount.trim()) return unknown;
+		const accountDir = resolveAgentAccountDir(
+			{
+				toolType: 'grok',
+				customEnvVars: !rawAccount ? {} : { GROK_HOME: path.resolve(launchCwd, rawAccount) },
+			},
+			{ homeDir, env: {} }
+		);
+		if (!accountDir) return unknown;
+		try {
+			[cwd, account] = await Promise.all([fsp.realpath(launchCwd), fsp.realpath(accountDir)]);
+			const stats = await Promise.all([fsp.stat(cwd), fsp.stat(account)]);
+			if (!stats.every((stat) => stat.isDirectory())) return unknown;
+		} catch (error) {
+			if (!isExpectedSessionReadError(error)) throw error;
+			return unknown;
+		}
+		recheck = () => {
+			try {
+				return realpathSync(launchCwd) === cwd && realpathSync(accountDir) === account;
+			} catch (error) {
+				if (!isExpectedSessionReadError(error)) throw error;
+				return false;
+			}
+		};
+		identity = installationIdentity({
+			hostname: os.hostname(),
+			productionDataDir: getProductionDataPath(),
+			mode: 'desktop',
+			pid: process.pid,
+			startedAt: '',
+		}).installationId;
+	}
+	const accountRef = resolveAgentAccountRef(
+		{ toolType: 'grok', sshRemote: !!remote, managedAccountDir: account },
+		{ homeDir: '' }
+	);
+	return accountRef
+		? {
+				recheck,
+				scope: Object.freeze({
+					version: 1,
+					state: 'bound',
+					provider: 'grok',
+					accountRef,
+					cwd,
+					host: Object.freeze({ kind: remote ? 'ssh' : 'local', identity }),
+				}),
+			}
+		: unknown;
+}
+
 function spawnTabId(config: Pick<SpawnProcessConfig, 'sessionId' | 'tabId'>): string | undefined {
 	if (config.tabId) return config.tabId;
 	const match = /-ai-(.+)$/.exec(config.sessionId);

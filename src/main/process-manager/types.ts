@@ -8,6 +8,7 @@ import type { TurnOutcome } from '../../shared/maestro-lib/streaming/turn-outcom
 import type { CodexTransport } from '../../shared/codexTransport';
 import type { CodexAppServerSshLaunch } from '../codex-app-server/ssh-launch';
 import type { CodexAppServerProcessHandle } from '../codex-app-server/protocol';
+import type { NativeSessionBinding } from '../../shared/maestro-lib/agents/providerSwap';
 import type { SshRemoteEndpointIdentity } from '../../shared/maestro-lib/launch/ssh-remote-resolver';
 import type {
 	ContextVerification,
@@ -441,6 +442,8 @@ export type ProcessSpawnAdmissionOutcome =
 
 /** Internal controls for `spawnAdmitted`, separate from the captured launch request. */
 export interface ProcessSpawnOptions {
+	/** Host-owned final ownership fence, after asynchronous managed admission. */
+	beforeSpawn?: () => string | undefined | Promise<string | undefined>;
 	/**
 	 * Cancel before spawn, including while admission is pending. Never serialized
 	 * or included in managed content digests. Once started, the caller retains
@@ -470,6 +473,67 @@ export interface SdkProcessController {
 /**
  * Configuration for spawning a new process
  */
+/** Grok native selectors must describe the retained request before SSH hides argv.
+ * Implicit continuation, injected IDs and forks cannot inherit its ownership. */
+export function grokLaunchArgsProblem(
+	args: readonly string[],
+	nativeId?: string,
+	cwd?: string
+): string | undefined {
+	const resumes: string[] = [];
+	const directories: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (
+			[
+				'--continue',
+				'-c',
+				'--fork-session',
+				'--session-id',
+				'--worktree',
+				'-w',
+				'-r',
+				'--',
+			].includes(arg) ||
+			['--continue=', '--fork-session=', '--session-id=', '--worktree=', '-r', '-w', '-c'].some(
+				(prefix) => arg.startsWith(prefix)
+			)
+		) {
+			return 'Grok implicit continuation, fork or workspace selectors cannot supply native launch ownership.';
+		}
+		for (const [flag, values] of [
+			['--resume', resumes],
+			['--cwd', directories],
+		] as const) {
+			if (arg === flag) values.push(args[++i] ?? '');
+			else if (arg.startsWith(flag + '=')) values.push(arg.slice(flag.length + 1));
+		}
+	}
+	if (
+		resumes.length !== (nativeId ? 1 : 0) ||
+		(nativeId && resumes[0] !== nativeId) ||
+		(nativeId !== undefined && (!nativeId.trim() || /[\x00-\x1f\x7f]/.test(nativeId))) ||
+		directories.length > 1 ||
+		(directories.length === 1 && directories[0] !== cwd)
+	) {
+		return 'Grok resume or working-directory arguments do not match the retained launch request.';
+	}
+	return undefined;
+}
+
+/** Observed launch ownership before a provider has allocated its native ID. */
+export type NativeSessionLaunchScope =
+	| Extract<NativeSessionBinding, { state: 'unknown' }>
+	| Omit<Extract<NativeSessionBinding, { state: 'bound' }>, 'nativeSessionId'>;
+
+/** Kept through stream drainage, including after kill removes the live process. */
+export interface NativeSessionLaunch {
+	readonly scope: NativeSessionLaunchScope;
+	readonly processGeneration: number;
+	readonly tabId?: string;
+	readonly requestedNativeSessionId?: string;
+}
+
 export interface ProcessConfig {
 	sessionId: string;
 	toolType: string;
@@ -566,6 +630,10 @@ export interface ProcessConfig {
 	 *  never runs and the renderer falls back to streamed commentary instead
 	 *  of the authoritative final answer / context window snapshot. */
 	agentSessionId?: string;
+	/** Host-observed scope, never accepted from an IPC payload. */
+	nativeSessionScope?: NativeSessionLaunchScope;
+	/** Retained owner/tab binding that a Grok resume must match. */
+	nativeSessionBinding?: NativeSessionBinding;
 	/** Resolved Codex transport for this turn (`resolveCodexTransport`). Set by
 	 *  the desktop spawn handler from the persisted agent record; anything other
 	 *  than `'app-server'` (including absent) means `codex exec`. A preference:
@@ -715,6 +783,7 @@ export interface ManagedProcess {
 	 *  the session even after that newer spawn has removed its own map entry.
 	 *  See `process-manager/generation.ts`. */
 	spawnGeneration?: number;
+	nativeSessionLaunch?: NativeSessionLaunch;
 	/** The admission this process was spawned under on a managed host. Absent
 	 *  for a standalone spawn, and for a process that predates the enrollment
 	 *  (an unqualified process a managed sink must not drive). */
