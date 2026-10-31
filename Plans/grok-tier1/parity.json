@@ -3247,6 +3247,27 @@
 				"Tests are authored only; no runtime or semantic type-check pass. GT1-05-13 must execute both suites and GT1-05-06C completion coverage.",
 				"Native Grok invocation remains unsupported. Mocked managed spawn rejection proves no host enforcement; existing template-variable mock remains, with full template/remote coverage owned by GT1-05-06B."
 			]
+		},
+		"phase05-slash-completion-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-06c-selected-grok-discovery-and-completion-tests",
+			"sourceCommit": "d469987b2a25be62f603b94a0d8a254094fa8223",
+			"sourceRevisionScope": "Pre-task HEAD plus authored test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/hooks/useWizardHandlers.test.ts": "15a9e61be1dbf8399423de8aad7a8d394eb65a5004e47d6955eca8d08e1d4f2c",
+				"src/__tests__/renderer/hooks/useInputHandlers.test.ts": "612aa55f86ccc5497d1c5cea80ed76f280327a61cf9b0c4333eb742df756ae17"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P18", "S02", "C-supportsSlashCommands"],
+			"authoredCases": 46,
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"Tests authored only; no runtime or semantic type-check pass. GT1-05-06C1 owns remaining other-provider compatibility and malformed IPC read coverage before GT1-05-13.",
+				"Synthetic discovery does not authorize native invocation. Capabilities, beta status and native qualification remain unchanged."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -7988,7 +8009,7 @@
 					"GT1-07-02",
 					"GT1-05-05A"
 				],
-				"test": ["GT1-05-04", "GT1-05-06", "GT1-08-02", "GT1-05-04A", "GT1-05-06C"],
+				"test": ["GT1-05-04", "GT1-05-06", "GT1-08-02", "GT1-05-04A", "GT1-05-06C", "GT1-05-06C1"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-01-07", "GT1-08-07", "GT1-11-11B"],
 				"live": ["GT1-11-11", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -8137,11 +8158,21 @@
 				"deterministic": "not-run",
 				"live": "not-run",
 				"nativeDispatch": "unsupported",
-				"remainingOwners": ["GT1-05-06", "GT1-05-06C", "GT1-05-13", "GT1-07-02", "GT1-07-04"],
+				"remainingOwners": ["GT1-05-06C1", "GT1-05-13", "GT1-07-02", "GT1-07-04"],
 				"sourceHashes": {
 					"src/renderer/slashCommands.ts": "c40527704a7a564d908438f0b6e5e6d0d777dd92971628fc8f36dbaaabf804ae",
 					"src/renderer/hooks/wizard/useWizardHandlers.ts": "9504e070631c0895559356dce4b57d31c45611f17317c0de74a26c54a60b1a8f",
 					"src/renderer/App.tsx": "a9bf6505d3bfd935c7339fa200f66abd4222b9b7e79fdf135a00de8cfb477190"
+				},
+				"testAuthoring": {
+					"task": "GT1-05-06C",
+					"evidenceRef": "phase05-slash-completion-tests",
+					"static": "pass",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"verificationTask": "GT1-05-13",
+					"remainingOwner": "GT1-05-06C1",
+					"scope": "Grok selected-context lifecycle, advisory metadata and real keyboard completion; bounded continuation owns other-provider isolation and malformed IPC read assertions."
 				}
 			}
 		},
@@ -13871,7 +13902,7 @@
 					"GT1-07-02",
 					"GT1-05-05A"
 				],
-				"test": ["GT1-05-04", "GT1-05-06", "GT1-11-14B", "GT1-05-04A", "GT1-05-06C"],
+				"test": ["GT1-05-04", "GT1-05-06", "GT1-11-14B", "GT1-05-04A", "GT1-05-06C", "GT1-05-06C1"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-14C", "GT1-11-11B"],
 				"live": ["GT1-11-11", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -14034,11 +14065,21 @@
 				"deterministic": "not-run",
 				"live": "not-run",
 				"nativeDispatch": "unsupported",
-				"remainingOwners": ["GT1-05-06", "GT1-05-06C", "GT1-05-13", "GT1-07-02", "GT1-07-04"],
+				"remainingOwners": ["GT1-05-06C1", "GT1-05-13", "GT1-07-02", "GT1-07-04"],
 				"sourceHashes": {
 					"src/renderer/slashCommands.ts": "c40527704a7a564d908438f0b6e5e6d0d777dd92971628fc8f36dbaaabf804ae",
 					"src/renderer/hooks/wizard/useWizardHandlers.ts": "9504e070631c0895559356dce4b57d31c45611f17317c0de74a26c54a60b1a8f",
 					"src/renderer/App.tsx": "a9bf6505d3bfd935c7339fa200f66abd4222b9b7e79fdf135a00de8cfb477190"
+				},
+				"testAuthoring": {
+					"task": "GT1-05-06C",
+					"evidenceRef": "phase05-slash-completion-tests",
+					"static": "pass",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"verificationTask": "GT1-05-13",
+					"remainingOwner": "GT1-05-06C1",
+					"scope": "Grok selected-context lifecycle, advisory metadata and real keyboard completion; bounded continuation owns other-provider isolation and malformed IPC read assertions."
 				}
 			}
 		},
@@ -19189,7 +19230,7 @@
 					"GT1-07-02",
 					"GT1-05-05A"
 				],
-				"test": ["GT1-05-04", "GT1-05-06", "GT1-05-04A", "GT1-05-06C"],
+				"test": ["GT1-05-04", "GT1-05-06", "GT1-05-04A", "GT1-05-06C", "GT1-05-06C1"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-11B"],
 				"live": ["GT1-11-11", "GT1-11-12", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -19336,11 +19377,21 @@
 				"deterministic": "not-run",
 				"live": "not-run",
 				"nativeDispatch": "unsupported",
-				"remainingOwners": ["GT1-05-06", "GT1-05-06C", "GT1-05-13", "GT1-07-02", "GT1-07-04"],
+				"remainingOwners": ["GT1-05-06C1", "GT1-05-13", "GT1-07-02", "GT1-07-04"],
 				"sourceHashes": {
 					"src/renderer/slashCommands.ts": "c40527704a7a564d908438f0b6e5e6d0d777dd92971628fc8f36dbaaabf804ae",
 					"src/renderer/hooks/wizard/useWizardHandlers.ts": "9504e070631c0895559356dce4b57d31c45611f17317c0de74a26c54a60b1a8f",
 					"src/renderer/App.tsx": "a9bf6505d3bfd935c7339fa200f66abd4222b9b7e79fdf135a00de8cfb477190"
+				},
+				"testAuthoring": {
+					"task": "GT1-05-06C",
+					"evidenceRef": "phase05-slash-completion-tests",
+					"static": "pass",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"verificationTask": "GT1-05-13",
+					"remainingOwner": "GT1-05-06C1",
+					"scope": "Grok selected-context lifecycle, advisory metadata and real keyboard completion; bounded continuation owns other-provider isolation and malformed IPC read assertions."
 				}
 			}
 		},

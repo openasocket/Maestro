@@ -82,6 +82,10 @@ import { parseSynopsis } from '../../../shared/synopsis';
 import type { Session, AITab } from '../../../renderer/types';
 import { createMockAITab } from '../../helpers/mockTab';
 import { createMockSession as baseCreateMockSession } from '../../helpers/mockSession';
+import { resetStores } from '../../helpers/resetStores';
+import { makeGrokCommandObservation } from '../../fixtures/grok-command-observation';
+import type { GrokCommandDiscoveryResult } from '../../../main/agents/grok-skills';
+import { resolve } from 'path';
 
 // ============================================================================
 // Test Helpers
@@ -301,6 +305,323 @@ describe('useWizardHandlers', () => {
 	// ========================================================================
 	// Slash command discovery effect
 	// ========================================================================
+	describe('ephemeral Grok command discovery', () => {
+		let session: Session;
+		let receipt: GrokCommandDiscoveryResult;
+		const discover = vi.fn();
+		const unsubscribe = vi.fn();
+		let externalChange: () => void;
+		const unavailable: GrokCommandDiscoveryResult = {
+			status: 'unavailable',
+			commands: [],
+			reason: 'observation-unavailable',
+		};
+
+		const mountDiscovery = async () => {
+			const hook = renderHook(() => useWizardHandlers(createMockDeps()));
+			await act(async () => {});
+			return hook;
+		};
+
+		beforeEach(() => {
+			resetStores(useSessionStore, useSettingsStore, useModalStore, useUIStore);
+			vi.useFakeTimers();
+			vi.setSystemTime(new Date('2026-10-31T12:00:00Z'));
+			session = createMockSession({
+				toolType: 'grok',
+				cwd: resolve('project-a'),
+				projectRoot: resolve('project-a'),
+				customEnvVars: { GROK_HOME: resolve('account-a') },
+				customModel: 'grok-4.5',
+				customEffort: 'high',
+			});
+			const observed = makeGrokCommandObservation({
+				cwd: session.cwd,
+				sessionId: session.aiTabs[0].agentSessionId!,
+				environment: { surface: 'cli', sessionCustomEnvVars: session.customEnvVars },
+			});
+			receipt = {
+				status: 'discovered',
+				commands: [
+					{
+						...(observed.commands[0] as { name: string; description: string }),
+						kind: 'skill',
+						scope: 'repo',
+						argumentHint: '<file>',
+					},
+				],
+				binding: {
+					route: 'grok-acp',
+					sessionId: observed.sessionId,
+					processGeneration: observed.processGeneration,
+					configGeneration: observed.configGeneration,
+					catalogRevision: observed.catalogRevision,
+					agentVersion: observed.agentVersion,
+					observedAt: observed.observedAt,
+				},
+			};
+			discover.mockReset().mockResolvedValue(receipt);
+			window.maestro.agents.discoverSlashCommands = discover;
+			window.maestro.settings = {
+				onExternalChange: vi.fn((callback: () => void) => {
+					externalChange = callback;
+					return unsubscribe;
+				}),
+			} as unknown as typeof window.maestro.settings;
+			useSessionStore.setState({ sessions: [session], activeSessionId: session.id });
+		});
+
+		afterEach(() => {
+			cleanup();
+			vi.useRealTimers();
+			resetStores(useSessionStore, useSettingsStore, useModalStore, useUIStore);
+		});
+
+		it.each([
+			'cwd',
+			'account',
+			'empty env',
+			'inherited env',
+			'executable',
+			'arguments',
+			'model',
+			'effort',
+			'shell env',
+			'external change',
+			'completion open',
+			'focus',
+		])('refreshes selected discovery on %s', async (trigger) => {
+			const patches: Record<string, Partial<Session>> = {
+				cwd: { cwd: resolve('project-b') },
+				account: { customEnvVars: { GROK_HOME: resolve('account-b') } },
+				'empty env': { customEnvVars: {} },
+				'inherited env': { customEnvVars: undefined },
+				executable: { customPath: resolve('bin-b', 'grok') },
+				arguments: { customArgs: '--fixture' },
+				model: { customModel: 'grok-composer-2.5-fast' },
+				effort: { customEffort: 'low' },
+			};
+			const deps = createMockDeps({ slashCommandOpen: false });
+			const { result, rerender } = renderHook((props) => useWizardHandlers(props), {
+				initialProps: deps,
+			});
+			await act(async () => {});
+			expect(result.current.grokCommandDiscovery).toEqual(receipt);
+			let reply!: (value: GrokCommandDiscoveryResult) => void;
+			discover.mockReturnValueOnce(
+				new Promise((ok) => {
+					reply = ok;
+				})
+			);
+			act(() => {
+				if (patches[trigger])
+					useSessionStore.getState().updateSession(session.id, patches[trigger]);
+				if (trigger === 'shell env')
+					useSettingsStore.setState({ shellEnvVars: { GROK_HOME: resolve('account-b') } });
+				if (trigger === 'external change') externalChange();
+				if (trigger === 'completion open') rerender({ ...deps, slashCommandOpen: true });
+				if (trigger === 'focus') window.dispatchEvent(new Event('focus'));
+			});
+			expect(result.current.grokCommandDiscovery).toBeNull();
+			expect(discover).toHaveBeenLastCalledWith({
+				providerId: 'grok',
+				context: {
+					kind: 'agent',
+					sessionId: session.id,
+					model: patches[trigger]?.customModel ?? session.customModel,
+					effort: patches[trigger]?.customEffort ?? session.customEffort,
+				},
+			});
+			await act(async () => reply(receipt));
+			expect(result.current.grokCommandDiscovery).toEqual(receipt);
+			expect(discover).toHaveBeenCalledTimes(2);
+			expect(useSessionStore.getState().sessions).toEqual([{ ...session, ...patches[trigger] }]);
+		});
+
+		it.each(['agent', 'tab', 'native ID', 'tab model/effort'])(
+			'discards out-of-order replies after changing %s',
+			async (change) => {
+				const replies: ((value: GrokCommandDiscoveryResult) => void)[] = [];
+				discover.mockImplementation(() => new Promise((ok) => replies.push(ok)));
+				const { result } = renderHook(() => useWizardHandlers(createMockDeps()));
+				const tab = { ...session.aiTabs[0] };
+				if (change === 'tab') tab.id = 'tab-b';
+				if (change === 'native ID') tab.agentSessionId = 'native-b';
+				if (change === 'tab model/effort') {
+					tab.customModel = 'grok-composer-2.5-fast';
+					tab.customEffort = 'low';
+				}
+				const next = {
+					...session,
+					id: change === 'agent' ? 'agent-b' : session.id,
+					aiTabs: [tab],
+					activeTabId: tab.id,
+				};
+				act(() =>
+					useSessionStore.setState({
+						sessions: [session, next].filter((s, i) => i === 1 || s.id !== next.id),
+						activeSessionId: next.id,
+					})
+				);
+				expect(result.current.grokCommandDiscovery).toBeNull();
+				expect(discover).toHaveBeenLastCalledWith({
+					providerId: 'grok',
+					context: {
+						kind: 'agent',
+						sessionId: next.id,
+						model: tab.customModel || next.customModel,
+						effort: tab.customEffort || next.customEffort,
+					},
+				});
+				const current = {
+					...receipt,
+					binding: { ...receipt.binding!, sessionId: tab.agentSessionId!, catalogRevision: 2 },
+				};
+				await act(async () => replies[1](current));
+				await act(async () => replies[0](receipt));
+				expect(result.current.grokCommandDiscovery).toEqual(current);
+				expect(
+					useSessionStore.getState().sessions.every((s) => s.agentCommands === undefined)
+				).toBe(true);
+			}
+		);
+
+		it.each(['settings', 'editAgent'] as const)(
+			'withholds discovery while %s is open and refreshes on close',
+			async (modal) => {
+				const { result } = await mountDiscovery();
+				act(() => useModalStore.getState().openModal(modal));
+				expect(result.current.grokCommandDiscovery).toBeNull();
+				await act(async () => externalChange());
+				expect(discover).toHaveBeenCalledOnce();
+				await act(async () => useModalStore.getState().closeModal(modal));
+				expect(discover).toHaveBeenCalledTimes(2);
+				expect(result.current.grokCommandDiscovery).toEqual(receipt);
+			}
+		);
+
+		it('does not refresh for streamed logs and expires once without polling', async () => {
+			const { result } = await mountDiscovery();
+			await act(async () =>
+				useSessionStore.getState().updateSession(session.id, {
+					aiTabs: [
+						{
+							...session.aiTabs[0],
+							logs: [{ id: 'delta', timestamp: Date.now(), source: 'ai', text: 'chunk' }],
+						},
+					],
+				})
+			);
+			await act(async () => vi.advanceTimersByTimeAsync(29_999));
+			expect(result.current.grokCommandDiscovery).toEqual(receipt);
+			await act(async () => vi.advanceTimersByTimeAsync(1));
+			expect(result.current.grokCommandDiscovery).toEqual(unavailable);
+			expect(discover).toHaveBeenCalledOnce();
+		});
+
+		it.each(['resolve', 'reject'])(
+			'bounds disconnected discovery at three seconds and ignores late %s',
+			async (outcome) => {
+				let reply!: (value: GrokCommandDiscoveryResult) => void;
+				let reject!: (error: Error) => void;
+				discover.mockReturnValue(
+					new Promise((ok, fail) => {
+						reply = ok;
+						reject = fail;
+					})
+				);
+				const { result } = renderHook(() => useWizardHandlers(createMockDeps()));
+				await act(async () => vi.advanceTimersByTimeAsync(2_999));
+				expect(result.current.grokCommandDiscovery).toBeNull();
+				await act(async () => vi.advanceTimersByTimeAsync(1));
+				const expired = result.current.grokCommandDiscovery;
+				expect(expired).toEqual(unavailable);
+				await act(async () =>
+					outcome === 'resolve' ? reply(receipt) : reject(new Error('late disconnect'))
+				);
+				expect(result.current.grokCommandDiscovery).toBe(expired);
+				expect(vi.getTimerCount()).toBe(0);
+			}
+		);
+
+		it.each(['pending', 'published'])(
+			'cancels %s discovery and removes subscriptions on unmount',
+			async (state) => {
+				let reply!: (value: GrokCommandDiscoveryResult) => void;
+				if (state === 'pending')
+					discover.mockReturnValue(
+						new Promise((ok) => {
+							reply = ok;
+						})
+					);
+				const { result, unmount } = await mountDiscovery();
+				const previous = result.current.grokCommandDiscovery;
+				unmount();
+				await act(async () => {
+					if (state === 'pending') reply(receipt);
+				});
+				window.dispatchEvent(new Event('focus'));
+				expect(unsubscribe).toHaveBeenCalledOnce();
+				expect(vi.getTimerCount()).toBe(0);
+				expect(discover).toHaveBeenCalledOnce();
+				expect(result.current.grokCommandDiscovery).toBe(previous);
+			}
+		);
+
+		it.each([
+			'empty',
+			'missing-context',
+			'remote-unqualified',
+			'managed-unqualified',
+			'executable-unavailable',
+			'observation-unavailable',
+			'invalid-catalog',
+			'canceled',
+			'unbound',
+			'foreign',
+			'expired',
+		])('preserves or rejects %s discovery without persistence', async (kind) => {
+			let response: GrokCommandDiscoveryResult = {
+				...unavailable,
+				reason: kind as GrokCommandDiscoveryResult['reason'],
+			};
+			let expected = response;
+			if (kind === 'empty') expected = response = { ...receipt, commands: [] };
+			if (['unbound', 'foreign', 'expired'].includes(kind)) {
+				const binding = { ...receipt.binding! };
+				if (kind === 'foreign') binding.sessionId = 'foreign';
+				if (kind === 'expired') binding.observedAt -= 30_000;
+				response = { ...receipt, binding: kind === 'unbound' ? undefined : binding };
+				expected = unavailable;
+			}
+			discover.mockResolvedValue(response);
+			const { result } = await mountDiscovery();
+			expect(result.current.grokCommandDiscovery).toEqual(expected);
+			expect(useSessionStore.getState().sessions).toEqual([session]);
+		});
+
+		it.each(['sshRemoteId', 'sessionSshRemoteConfig', 'missing native ID'])(
+			'withholds local discovery for %s and refreshes when local context returns',
+			async (scope) => {
+				const { result } = await mountDiscovery();
+				const patch: Partial<Session> =
+					scope === 'sshRemoteId'
+						? { sshRemoteId: 'ssh-b' }
+						: scope === 'sessionSshRemoteConfig'
+							? { sessionSshRemoteConfig: { enabled: true, remoteId: 'ssh-b' } }
+							: { aiTabs: [{ ...session.aiTabs[0], agentSessionId: null }] };
+				await act(async () => useSessionStore.getState().updateSession(session.id, patch));
+				expect(result.current.grokCommandDiscovery?.reason).toBe(
+					scope === 'missing native ID' ? 'missing-context' : 'remote-unqualified'
+				);
+				expect(discover).toHaveBeenCalledOnce();
+				await act(async () => useSessionStore.setState({ sessions: [session] }));
+				expect(result.current.grokCommandDiscovery).toEqual(receipt);
+				expect(discover).toHaveBeenCalledTimes(2);
+			}
+		);
+	});
+
 	describe('slash command discovery effect', () => {
 		it('refreshes Codex commands when global environment settings change', async () => {
 			const session = createMockSession({ toolType: 'codex' });
