@@ -1,0 +1,1467 @@
+{
+	"schemaVersion": 1,
+	"taskId": "GT1-04-13L",
+	"recordedAt": "2026-10-31T18:53:11.835491+00:00",
+	"sourceCommit": "4ddd8ce6f907c55dd65ba52a58ef80ce4c4a8869",
+	"executionRoot": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+	"branch": "auto-run-feature/grok-cli-integration",
+	"baseObservation": {
+		"ref": "feature/mega-maestro-v1.1.0-rc",
+		"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
+		"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+		"aheadBehind": [286, 10]
+	},
+	"status": "pass",
+	"taskStatus": "complete",
+	"evidenceKind": "deterministic-fixture-verification",
+	"previousReceipts": [
+		{
+			"path": "Plans/grok-tier1/evidence/04-verification.json",
+			"sha256": "8a2b0906a3e3f8f61e9e128b6808423e1b533410a5c5d7e00d335966e0100480",
+			"unchanged": true
+		},
+		{
+			"path": "Plans/grok-tier1/evidence/04-reverification.json",
+			"sha256": "416332532a600c55dc6a531287918d3a8416513e6a0b59696d168da93a346583",
+			"unchanged": true
+		}
+	],
+	"environment": {
+		"os": "darwin",
+		"arch": "arm64",
+		"node": "v26.13.0",
+		"npm": "11.20.0",
+		"vitest": "4.1.11",
+		"project": "node (default repository selection)",
+		"workers": 2,
+		"transport": "Mock process manager, native path observations and SSH command builder; no provider or remote process"
+	},
+	"checks": [
+		{
+			"id": "process",
+			"sourceCommit": "4ddd8ce6f907c55dd65ba52a58ef80ce4c4a8869",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/main/ipc/handlers/process.test.ts",
+				"--maxWorkers=2",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase04-process-reverify/process/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-10-31T18:52:11.963029+00:00",
+			"finishedAt": "2026-10-31T18:52:15.800656+00:00",
+			"durationSeconds": 3.837,
+			"exitCode": 0,
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase04-process-reverify/process/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase04-process-reverify/process/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase04-process-reverify/process/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase04-process-reverify/process/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase04-process-reverify/process/xdg-data"
+			},
+			"removedEnvironmentKeyNames": [
+				"CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+				"CODEX_CI",
+				"CODEX_SESSION_ID",
+				"CODEX_THREAD_ID",
+				"CODEX_TOOL_CALL_ID",
+				"CODEX_VERSION",
+				"MAESTRO_CALLER_AGENT_ID",
+				"MAESTRO_QUERY_SOURCE",
+				"MAESTRO_USER_DATA",
+				"OPENAI_API_KEY",
+				"OPENROUTER_API_KEY"
+			],
+			"homeAndCodexHomeUnchanged": true,
+			"socketPrevalidation": {
+				"pathTemplate": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/fake-endpoint-XXXXXX/runtime.sock",
+				"bytes": 101,
+				"maxBytes": 103
+			},
+			"log": "tmp/grok-tier1-phase04-process-reverify/process/output.log",
+			"output.logSha256": "c50731d4b11bfbb3d7029e23c19b2c979c3357f5955c337b5f6923559ff3ed4a",
+			"results.jsonSha256": "b4b78dd5b75b52c9d1893e905ae317933c1f0dac290efc039fbc490639e88f8a",
+			"receiptPath": "tmp/grok-tier1-phase04-process-reverify/process/receipt.json",
+			"receiptSha256": "6bf24912c72015d25f947216f31cadecf4e69a73665b5ec0da66fe57bdd2831d",
+			"counts": {
+				"numTotalTests": 182,
+				"numPassedTests": 182,
+				"numFailedTests": 0,
+				"numPendingTests": 0,
+				"numTodoTests": 0
+			},
+			"files": [
+				{
+					"path": "src/__tests__/main/ipc/handlers/process.test.ts",
+					"sha256": "8a9d92145a4e148803c562cfc90a39a0801a5d48077689ac7998291857d057c6",
+					"status": "passed",
+					"counts": {
+						"passed": 182,
+						"failed": 0,
+						"skipped": 0,
+						"pending": 0,
+						"todo": 0
+					},
+					"collectionError": null,
+					"failures": [],
+					"skipped": []
+				}
+			],
+			"fileCounts": {
+				"passed": 1,
+				"failed": 0
+			}
+		}
+	],
+	"freshCounts": {
+		"selectedFiles": 1,
+		"passedFiles": 1,
+		"failedFiles": 0,
+		"totalTests": 182,
+		"passedTests": 182,
+		"failedTests": 0,
+		"skippedTests": 0,
+		"pendingTests": 0,
+		"todoTests": 0,
+		"filteredTests": 0,
+		"collectionFailedFiles": 0
+	},
+	"repairClosure": {
+		"previousFailedTests": 24,
+		"nowPassedTests": 24,
+		"same182TestNames": true,
+		"testNameFilters": [],
+		"retries": 0,
+		"passedPreviouslyFailingTests": [
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) observes the actual inherited launch environment",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) observes the actual remote blank launch environment",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) observes the actual global wins launch environment",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) observes the actual provider wins launch environment",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) observes the actual session replaces provider launch environment",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) observes the actual empty session replaces provider launch environment",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) observes the actual literal tilde and HOME launch environment",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) observes the actual relative and blank HOME launch environment",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) observes the actual whitespace remains literal launch environment",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) retained native resume ownership (GT1-04-08) refuses a rebound endpoint during resume admission and retains both conversations",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) refuses changed launchCwd evidence at admission without starting any process",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) refuses changed processCwd evidence at admission without starting any process",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) refuses changed cwd evidence at admission without starting any process",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) refuses changed account evidence at admission without starting any process",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) refuses changed inherited evidence at admission without starting any process",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) refuses changed effective evidence at admission without starting any process",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) refuses missing root changing during admission",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) refuses timeout changing during admission",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) refuses endpoint changing during admission",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) refuses global env changing during admission",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) refuses provider env changing during admission",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) refuses remote env changing during admission",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) rechecks endpoint after the final asynchronous observation",
+			"process IPC handlers Grok remote launch observation (GT1-04-07D1T) rechecks settings after the final asynchronous observation"
+		],
+		"assertionScope": "Complete cases executed, including exact environment/scope, observation/qualification counts, no-spawn, unchanged histories/store, and no local filesystem use assertions."
+	},
+	"carryForward": {
+		"status": "pass",
+		"sourceReceipt": "Plans/grok-tier1/evidence/04-reverification.json",
+		"sourceReceiptSha256": "416332532a600c55dc6a531287918d3a8416513e6a0b59696d168da93a346583",
+		"executionSourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+		"validatedAgainstCommit": "4ddd8ce6f907c55dd65ba52a58ef80ce4c4a8869",
+		"previousBatchChildExits": {
+			"storage": 0,
+			"backend": 1,
+			"renderer": 0,
+			"interface": 0
+		},
+		"counts": {
+			"selectedFiles": 53,
+			"passedFiles": 53,
+			"failedFiles": 0,
+			"totalTests": 4375,
+			"passedTests": 4375,
+			"failedTests": 0,
+			"skippedTests": 0,
+			"pendingTests": 0,
+			"todoTests": 0,
+			"filteredTests": 0,
+			"collectionFailedFiles": 0
+		},
+		"files": [
+			{
+				"path": "src/__tests__/main/agents/provider-account-dirs.test.ts",
+				"sha256": "8a7b36620bb78937403f4e98aa04f5ec54426086f848f7bb73fc37d57083d0e5",
+				"status": "passed",
+				"counts": {
+					"passed": 93,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "storage",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/main/storage/claude-session-storage.test.ts",
+				"sha256": "799638168122032e4d0b984fe25b488e7f9da460c10668ae318ab1643a469d0f",
+				"status": "passed",
+				"counts": {
+					"passed": 52,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "storage",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/main/storage/codex-session-storage-messages.test.ts",
+				"sha256": "22dddfad02ab4b55bbad4d0ff190d76ee748d3f479d9fe3169e9361ba9589a9a",
+				"status": "passed",
+				"counts": {
+					"passed": 17,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "storage",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/main/storage/grok-session-storage.test.ts",
+				"sha256": "92fdb4973afba4abd3e8187224c93269eb6dc12f391e91295fbf00ef3ced6bf9",
+				"status": "passed",
+				"counts": {
+					"passed": 338,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "storage",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/main/utils/remote-fs.test.ts",
+				"sha256": "d4918f6d8d1f4afde7ebe684e4e9bd685389c841690cf1cf61a1093400215d96",
+				"status": "passed",
+				"counts": {
+					"passed": 305,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "storage",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/main/utils/remote-git.managed.test.ts",
+				"sha256": "540729c7b6e5073e32c2ae157024816fb6d6b38a93121f6eefeec63e82378beb",
+				"status": "passed",
+				"counts": {
+					"passed": 95,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "storage",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/main/utils/remote-git.test.ts",
+				"sha256": "5baddc71ab8693e52db5e72c969d95dc50d972f57e33b1cb0299e469a18fb83d",
+				"status": "passed",
+				"counts": {
+					"passed": 109,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "storage",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/main/process-manager.test.ts",
+				"sha256": "90dcad5e01ebc4477ce7eb3ad7b5fd58c24c0e56117d9dd4fdedeff2a49d472b",
+				"status": "passed",
+				"counts": {
+					"passed": 99,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/cli/commands/stats.test.ts",
+				"sha256": "dd315e4083fe4590e3c6238245b1fd0e2e522d55724a9b25fde6dc7c28da03ae",
+				"status": "passed",
+				"counts": {
+					"passed": 16,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/main/cue/cue-process-lifecycle.test.ts",
+				"sha256": "6bd2f29c3131456e772a2281f67cabe45667f53860537f5ebfbdcd73cb7d8baf",
+				"status": "passed",
+				"counts": {
+					"passed": 79,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/main/cue/cue-stats-query.test.ts",
+				"sha256": "f4d64870e838e03df1d43e0a8a9894fc15a7961b0df96117f98588d7a3dbd6b5",
+				"status": "passed",
+				"counts": {
+					"passed": 39,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/main/cue/cue-token-accessor.test.ts",
+				"sha256": "7873ce9a19e05b8950c05c24cf72a25b49acde6f524be45f8a57fcd0e01b5297",
+				"status": "passed",
+				"counts": {
+					"passed": 24,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/main/preload/sessions.test.ts",
+				"sha256": "2b240c8de0589ee8de842baaf53617592788fea044ee388f5548a5f8555837c0",
+				"status": "passed",
+				"counts": {
+					"passed": 35,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/main/stats/usage-export.test.ts",
+				"sha256": "3fca5987272ad49a5dea7a520fb1fbda6ce185ac4521751a0d822187ba9a1721",
+				"status": "passed",
+				"counts": {
+					"passed": 23,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/main/utils/agent-args.test.ts",
+				"sha256": "bf24e388c0b886a1e2a1bd4f629ccf65ee49f9a42029f97d374dea7ef92fcd76",
+				"status": "passed",
+				"counts": {
+					"passed": 239,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/shared/maestro-lib/translation-session.test.ts",
+				"sha256": "60a31209e828feab08e465d242d898958c44ffc84da93508beeb3d128087b46b",
+				"status": "passed",
+				"counts": {
+					"passed": 34,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/main/process-listeners/__tests__/session-id-listener.test.ts",
+				"sha256": "21250fea059dbc781b96542b52988e89eeb2673fbfd2e7d592edc16fd16c329c",
+				"status": "passed",
+				"counts": {
+					"passed": 15,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/main/ipc/bootstrap/handler-wiring.test.ts",
+				"sha256": "fe5b6c377d482de6c7145d423debef830d266e752008ef510378cf0a2bb67fa1",
+				"status": "passed",
+				"counts": {
+					"passed": 15,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/main/preload/process/core.test.ts",
+				"sha256": "548f4143ecb6367e41f2736167b60809fe09f572eebcc4d678f22b3007cc7e84",
+				"status": "passed",
+				"counts": {
+					"passed": 37,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/main/ipc/handlers/agentSessions.test.ts",
+				"sha256": "e404d8a138ca1cce7adc741dd8e887e3b6f97bf7d49f6112e25573541b4302c4",
+				"status": "passed",
+				"counts": {
+					"passed": 410,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/main/ipc/handlers/context-groom.test.ts",
+				"sha256": "22663042e1dddf1366cc4b304fea7515953dfef06e61eeee38bea1ea931d6630",
+				"status": "passed",
+				"counts": {
+					"passed": 5,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/main/stats/token-usage/token-usage-accessor.test.ts",
+				"sha256": "d5dba2f7b7a7f5f7443cbb225f76d3f5e63450672b4015aaa5c05a3a06171504",
+				"status": "passed",
+				"counts": {
+					"passed": 40,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/shared/maestro-lib/agents/providerSwap.test.ts",
+				"sha256": "23ed2491674db5183809b3e5c6ba171df9a8efb6651ec396fda1251b9637994f",
+				"status": "passed",
+				"counts": {
+					"passed": 76,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/shared/maestro-lib/turns/record-turn.test.ts",
+				"sha256": "6a3a956be0c93556b8a3a6386f4728c9d290a35e7ac4112b986a99924ca5a5f4",
+				"status": "passed",
+				"counts": {
+					"passed": 31,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts",
+				"sha256": "633a2880fc34f328e6de852b190dff52c91d0f7d88a7ac9446a874907e60f0f7",
+				"status": "passed",
+				"counts": {
+					"passed": 132,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/shared/maestro-lib/agents/__tests__/repository.test.ts",
+				"sha256": "ba3415db042b31aa1f9a4903a34ad913a3df315be7a7ebdf6a653db224f58d76",
+				"status": "passed",
+				"counts": {
+					"passed": 73,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/shared/maestro-lib/agents/__tests__/rules.test.ts",
+				"sha256": "b2887776977bdcbce24d8ad0e77d023927b5395d1530221dd3e31817760752db",
+				"status": "passed",
+				"counts": {
+					"passed": 67,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/shared/maestro-lib/runtime/__tests__/turns.test.ts",
+				"sha256": "d921f6f5fe768202734ff08d92e960e80187b2612085f864a6738f32914c7503",
+				"status": "passed",
+				"counts": {
+					"passed": 61,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts",
+				"sha256": "5bf60dd945669a14c92f0ec8f8db9ad0d631cbb62fc48ae588790968be339829",
+				"status": "passed",
+				"counts": {
+					"passed": 90,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "backend",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 1
+			},
+			{
+				"path": "src/__tests__/renderer/components/AgentSessionsBrowser.test.tsx",
+				"sha256": "4b14f15cd6fa77a2fcac2df7d7a185de04889f527f4a24e2e038d08db0f99c10",
+				"status": "passed",
+				"counts": {
+					"passed": 160,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/components/HistoryDetailModal.test.tsx",
+				"sha256": "dcd374e526df78a02de7f788d65bba5bc0886a58c9d7909b45ccbffd2e29ccc3",
+				"status": "passed",
+				"counts": {
+					"passed": 115,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/components/HistoryPanel.test.tsx",
+				"sha256": "1d09b7c4ed7f3370d1122edfdcff915a88405d8a1c3df551b93e9d8d15801521",
+				"status": "passed",
+				"counts": {
+					"passed": 97,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/services/quickChatEngine.test.ts",
+				"sha256": "0007ee97a89104590fe1b17e136db5723e29bb4e9b156a4ace63a42f26a5fcd5",
+				"status": "passed",
+				"counts": {
+					"passed": 146,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/services/quickChatRouter.test.ts",
+				"sha256": "85b4387e5ea1bca69d7067b91856b95ec1ae31091ef37e1c2bf3e370e6ea54af",
+				"status": "passed",
+				"counts": {
+					"passed": 55,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/services/resumableSession.relay.test.ts",
+				"sha256": "0f46b5236f387bb02ab0379f11ca0be5d2c4934d4dae3ca094c67a21b374178b",
+				"status": "passed",
+				"counts": {
+					"passed": 39,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/hooks/useAgentSessionManagement.test.ts",
+				"sha256": "160e4dc20b316da9f180dbf508a0a4c025787fcb5736601709a4b99c1d80b755",
+				"status": "passed",
+				"counts": {
+					"passed": 28,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/hooks/useForkConversation.test.ts",
+				"sha256": "dabc6124baa5f6890f7d633100efc16002d287c0145d55cda542b34e3d4aca6b",
+				"status": "passed",
+				"counts": {
+					"passed": 19,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/hooks/useModalHandlers.test.ts",
+				"sha256": "a3b19453d79b1410a21765eaa6eb259143a9a740930fe0210b96566666b5cd54",
+				"status": "passed",
+				"counts": {
+					"passed": 148,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/hooks/useRemoteIntegration.test.ts",
+				"sha256": "263a7c99b9312c15240f457231bc353d6aa4db6b60a9a153459b02bc62a2a977",
+				"status": "passed",
+				"counts": {
+					"passed": 139,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/hooks/useSessionLifecycle.test.ts",
+				"sha256": "cf85d03ff777646f617ef9b65fd4a36b64a595193e04c18bbe39844199cc8e0f",
+				"status": "passed",
+				"counts": {
+					"passed": 89,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/utils/contextExtractor.test.ts",
+				"sha256": "6c56f1a9de633d64054810ba6fbb55d5891248b328232e241675b737df628d8b",
+				"status": "passed",
+				"counts": {
+					"passed": 72,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/components/DirectorNotes/DirectorNotesModal.test.tsx",
+				"sha256": "9b5c7e286260ef01a6911d0d22c458d0d477c72c24c7ccbac9592ee517752b67",
+				"status": "passed",
+				"counts": {
+					"passed": 38,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/components/DirectorNotes/UnifiedHistoryTab.test.tsx",
+				"sha256": "806c86803c26324e6e9214796e1fa24c26d695b9b890ddf513417ec2140f8dfa",
+				"status": "passed",
+				"counts": {
+					"passed": 57,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/components/History/HistoryEntryItem.test.tsx",
+				"sha256": "20ffd76894f9dfb07a46756d6fad0c0a090bd5917ae8da3235c9bd517880d9bf",
+				"status": "passed",
+				"counts": {
+					"passed": 55,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/components/UsageDashboard/TokenStatsLegend.test.tsx",
+				"sha256": "c241c2cd3ba2a8c8968992d837b5d6dd68db939a6d93d1767d064ae201e3c19b",
+				"status": "passed",
+				"counts": {
+					"passed": 16,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/hooks/agent/useAgentSessionManagement.test.tsx",
+				"sha256": "c55e29519ed66026579c9d6617aa948c2aa5996b6561fdfe8bae6cb30bc7ca07",
+				"status": "passed",
+				"counts": {
+					"passed": 41,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/hooks/utils/useDebouncedPersistence.test.ts",
+				"sha256": "a84ff54356f3cb81787d6eb188891635899678b361d6114db4c592d51a6eebd1",
+				"status": "passed",
+				"counts": {
+					"passed": 114,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsRename.test.ts",
+				"sha256": "725972a9e0533702a28a144248c2e4d14283aeaa3f124ef2867dd984a23c9396",
+				"status": "passed",
+				"counts": {
+					"passed": 21,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsResume.test.ts",
+				"sha256": "72d474de9114e54438587867c84b6d25d52924afc6183a4fdfd6bc7fa312bcfb",
+				"status": "passed",
+				"counts": {
+					"passed": 32,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/hooks/agent/internal/useAgentErrorListener.test.tsx",
+				"sha256": "f09072179ff2f74cfcce7345b23878fe7803901456002e926987bef7b6eccdcd",
+				"status": "passed",
+				"counts": {
+					"passed": 38,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/hooks/agent/internal/useAgentSessionIdListener.test.tsx",
+				"sha256": "ff267d54cdb17051ebcf48f11f49bfdc60ad82e41e3dc2b9efd45e5ff799a0a9",
+				"status": "passed",
+				"counts": {
+					"passed": 72,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/renderer/hooks/tabs/internal/useScrollLogHandlers.test.ts",
+				"sha256": "a5e145877e7b18a2c1d5b22508fd1a3dec7152bc5986c8e1ca4efe37a84c1a9d",
+				"status": "passed",
+				"counts": {
+					"passed": 19,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "renderer",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			},
+			{
+				"path": "src/__tests__/main/agents/session-storage.test.ts",
+				"sha256": "7fd9db0f09bf5034ea2e1a53550bd22d00de7016291c8718cbb30e7489a00b8e",
+				"status": "passed",
+				"counts": {
+					"passed": 116,
+					"failed": 0,
+					"skipped": 0,
+					"pending": 0,
+					"todo": 0
+				},
+				"collectionError": null,
+				"failures": [],
+				"skipped": [],
+				"batchId": "interface",
+				"sourceCommit": "fcc5b3fbbaeedacafbfcb5019eb7ab7b7331e362",
+				"batchChildExitCode": 0
+			}
+		],
+		"inputComparison": {
+			"checked": 140,
+			"unchanged": 139,
+			"changed": [
+				{
+					"path": "src/__tests__/main/ipc/handlers/process.test.ts",
+					"before": "894b477ecab45c546bb7a8d9bf30668748ccb0ecd3eae580e9cc9db98715584b",
+					"after": "8a9d92145a4e148803c562cfc90a39a0801a5d48077689ac7998291857d057c6"
+				}
+			],
+			"fixtureHelpersChecked": 16,
+			"fixtureHelpersUnchanged": true
+		},
+		"protectedManifestComparison": {
+			"path": "tmp/grok-tier1-phase04-reverify/before-source-hashes.json",
+			"sha256": "82c3e565c970f899979539a6b81bc27b2c08910e277c6db39468fa8ae6756501",
+			"checked": 7084,
+			"unchanged": 7083,
+			"changedPaths": ["src/__tests__/main/ipc/handlers/process.test.ts"]
+		},
+		"historicalRawArtifacts": [
+			{
+				"path": "tmp/grok-tier1-phase04-reverify/storage/output.log",
+				"sha256": "9b673088f6d409d0bec7ddc118afe2ae6d22f944205bf58d76564d26db50bddb"
+			},
+			{
+				"path": "tmp/grok-tier1-phase04-reverify/storage/results.json",
+				"sha256": "a2680879ce7d8eea06af9bbbb3f748cba31d1cd9f1a8f9337dea1673f8721063"
+			},
+			{
+				"path": "tmp/grok-tier1-phase04-reverify/storage/receipt.json",
+				"sha256": "8782df337e240b976e56e3706719d167f92b8fc7896b419e030a811362fad3a2"
+			},
+			{
+				"path": "tmp/grok-tier1-phase04-reverify/backend/output.log",
+				"sha256": "d7068fdb2cf3ae94453fca376df839b22ca9e63d0a08775182c05044aa8c919e"
+			},
+			{
+				"path": "tmp/grok-tier1-phase04-reverify/backend/results.json",
+				"sha256": "2f9e4b7fc38847a105ece64af94034a71ffabd0030a6832c33445859e5ea72e2"
+			},
+			{
+				"path": "tmp/grok-tier1-phase04-reverify/backend/receipt.json",
+				"sha256": "7e82b899ef47b93d1b3c9ca23948f2e0f9268cba225f9544e0842f31502e6638"
+			},
+			{
+				"path": "tmp/grok-tier1-phase04-reverify/renderer/output.log",
+				"sha256": "94b73ec8a4610f80572ef32d0814294a2d4538c4a2b5a03abb259cc7324af349"
+			},
+			{
+				"path": "tmp/grok-tier1-phase04-reverify/renderer/results.json",
+				"sha256": "c86a267494537dc50c78ef6045b4027772444a1bb65ce464360660b769594fbc"
+			},
+			{
+				"path": "tmp/grok-tier1-phase04-reverify/renderer/receipt.json",
+				"sha256": "0e5c51cf5ed47106c458d44cdc15f0e734bbab470ea94473e1bead3527ecb339"
+			},
+			{
+				"path": "tmp/grok-tier1-phase04-reverify/interface/output.log",
+				"sha256": "0798cf2cfd494d482f35eec740194ed88e72f603727dbc6dc579cc28a7935347"
+			},
+			{
+				"path": "tmp/grok-tier1-phase04-reverify/interface/results.json",
+				"sha256": "7761abe2457406b20eb2a3602ef51f718ac27b1791c8cf75f5a16264a5f45bd3"
+			},
+			{
+				"path": "tmp/grok-tier1-phase04-reverify/interface/receipt.json",
+				"sha256": "b67f44a738c7ef8856af72f81d0334db7130d452ef5255c8857de70c9d01863d"
+			}
+		],
+		"additionalSuitesRequiringRerun": [],
+		"independentReview": "pass",
+		"reason": "The sole changed source input is the process test itself; no production, config or fixture inputs changed and no other suite imports it. Backend batch exit 1 is preserved; only its 22 passing files are carried forward."
+	},
+	"combinedCounts": {
+		"selectedFiles": 54,
+		"passedFiles": 54,
+		"failedFiles": 0,
+		"totalTests": 4557,
+		"passedTests": 4557,
+		"failedTests": 0,
+		"skippedTests": 0,
+		"pendingTests": 0,
+		"todoTests": 0,
+		"filteredTests": 0,
+		"collectionFailedFiles": 0
+	},
+	"matrixIntegrity": {
+		"same54FilesAsPreviousReceipt": true,
+		"noDuplicateFiles": true,
+		"selectedEqualsReported": true,
+		"scope": "One freshly executed file plus 53 hash-validated historical passing files; not a fresh 54-file execution."
+	},
+	"inputHashesSha256": {
+		"package-lock.json": "0b6b52f5ae6660b8cf2ca74cf9c7992e9630b08ce685c8413040caa305ecb747",
+		"package.json": "c6c1e45b7ba259420616990f408c70d9c07cd4226b9a8283197dd5944ba8b93b",
+		"src/__tests__/cli/commands/stats.test.ts": "dd315e4083fe4590e3c6238245b1fd0e2e522d55724a9b25fde6dc7c28da03ae",
+		"src/__tests__/fixtures/fake-agent.mjs": "80f7d7aaf5f60ecc7f2eca1f9df5891dcf804a5149e84edb341074426fd05a75",
+		"src/__tests__/helpers/agentEnvIsolation.ts": "8f5b0d159e45fb4e6dd9cc84d615eac10ef8891748aa712ff4adef619d2c4837",
+		"src/__tests__/main/agents/provider-account-dirs.test.ts": "8a7b36620bb78937403f4e98aa04f5ec54426086f848f7bb73fc37d57083d0e5",
+		"src/__tests__/main/agents/session-storage.test.ts": "7fd9db0f09bf5034ea2e1a53550bd22d00de7016291c8718cbb30e7489a00b8e",
+		"src/__tests__/main/cue/cue-process-lifecycle.test.ts": "6bd2f29c3131456e772a2281f67cabe45667f53860537f5ebfbdcd73cb7d8baf",
+		"src/__tests__/main/cue/cue-stats-query.test.ts": "f4d64870e838e03df1d43e0a8a9894fc15a7961b0df96117f98588d7a3dbd6b5",
+		"src/__tests__/main/cue/cue-token-accessor.test.ts": "7873ce9a19e05b8950c05c24cf72a25b49acde6f524be45f8a57fcd0e01b5297",
+		"src/__tests__/main/ipc/bootstrap/handler-wiring.test.ts": "fe5b6c377d482de6c7145d423debef830d266e752008ef510378cf0a2bb67fa1",
+		"src/__tests__/main/ipc/handlers/agentSessions.test.ts": "e404d8a138ca1cce7adc741dd8e887e3b6f97bf7d49f6112e25573541b4302c4",
+		"src/__tests__/main/ipc/handlers/context-groom.test.ts": "22663042e1dddf1366cc4b304fea7515953dfef06e61eeee38bea1ea931d6630",
+		"src/__tests__/main/ipc/handlers/process.test.ts": "8a9d92145a4e148803c562cfc90a39a0801a5d48077689ac7998291857d057c6",
+		"src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts": "5bf60dd945669a14c92f0ec8f8db9ad0d631cbb62fc48ae588790968be339829",
+		"src/__tests__/main/preload/process/core.test.ts": "548f4143ecb6367e41f2736167b60809fe09f572eebcc4d678f22b3007cc7e84",
+		"src/__tests__/main/preload/sessions.test.ts": "2b240c8de0589ee8de842baaf53617592788fea044ee388f5548a5f8555837c0",
+		"src/__tests__/main/process-manager.test.ts": "90dcad5e01ebc4477ce7eb3ad7b5fd58c24c0e56117d9dd4fdedeff2a49d472b",
+		"src/__tests__/main/process-manager/recordings/captured.ts": "c6c39d2836c3724a0d519fe612c4bae89368d4ae8964ac420700685f0427f543",
+		"src/__tests__/main/process-manager/recordings/captured/claude-code-normal.json": "4ec132bab48284b4df99b17d156efda73f30abbcf1a69b6faf9558236d82551a",
+		"src/__tests__/main/process-manager/recordings/captured/claude-code-resumed.json": "fcce5b1500ed25d3f03e0a1d0d7e9bad0602bf28e8dc351218b9ca1b0e5413ac",
+		"src/__tests__/main/process-manager/recordings/captured/claude-code-stopped-sigint.json": "d2107f6fb171e429a92340e30c3321c665a977d960c7398ce1de08b23e685668",
+		"src/__tests__/main/process-manager/recordings/captured/claude-code-stopped-sigterm.json": "ee932366afe8db5a3d0cf658077303bdd6904f424a3872d95a733ca61ae65ab8",
+		"src/__tests__/main/process-manager/recordings/captured/opencode-normal.json": "211448ca9e3eb5e7fd99b05e9201a595aaf38dc5ec0af3f948cd6a984b7a9eb1",
+		"src/__tests__/main/process-manager/recordings/captured/opencode-resumed.json": "c220067e5fc5ba9643096e499a5b95c8c43bc345c339a70123cb6e160370a402",
+		"src/__tests__/main/process-manager/recordings/captured/opencode-stopped-sigint.json": "360df0acf3ff35bf248e025619563e23487deb298b5a4a73d288561fe2910394",
+		"src/__tests__/main/process-manager/recordings/captured/opencode-stopped-sigterm.json": "5b3738ca202d75db56f0332692d1185530a0deb307500c0987e64fd7efbcdec4",
+		"src/__tests__/main/process-manager/recordings/documented.ts": "0a574ec2a8265d2bd6dac6465a4efbc7331047250ee8cbcaafe37d58cdee036c",
+		"src/__tests__/main/process-manager/recordings/fixtures.ts": "f86462969eb7052fdcc6feabaac457464f54eb9befcccd7fc9564872230259b9",
+		"src/__tests__/main/stats/token-usage/token-usage-accessor.test.ts": "d5dba2f7b7a7f5f7443cbb225f76d3f5e63450672b4015aaa5c05a3a06171504",
+		"src/__tests__/main/stats/usage-export.test.ts": "3fca5987272ad49a5dea7a520fb1fbda6ce185ac4521751a0d822187ba9a1721",
+		"src/__tests__/main/storage/claude-session-storage.test.ts": "799638168122032e4d0b984fe25b488e7f9da460c10668ae318ab1643a469d0f",
+		"src/__tests__/main/storage/codex-session-storage-messages.test.ts": "22dddfad02ab4b55bbad4d0ff190d76ee748d3f479d9fe3169e9361ba9589a9a",
+		"src/__tests__/main/storage/grok-session-storage.test.ts": "92fdb4973afba4abd3e8187224c93269eb6dc12f391e91295fbf00ef3ced6bf9",
+		"src/__tests__/main/utils/agent-args.test.ts": "bf24e388c0b886a1e2a1bd4f629ccf65ee49f9a42029f97d374dea7ef92fcd76",
+		"src/__tests__/main/utils/remote-fs.test.ts": "d4918f6d8d1f4afde7ebe684e4e9bd685389c841690cf1cf61a1093400215d96",
+		"src/__tests__/main/utils/remote-git.managed.test.ts": "540729c7b6e5073e32c2ae157024816fb6d6b38a93121f6eefeec63e82378beb",
+		"src/__tests__/main/utils/remote-git.test.ts": "5baddc71ab8693e52db5e72c969d95dc50d972f57e33b1cb0299e469a18fb83d",
+		"src/__tests__/renderer/components/AgentSessionsBrowser.test.tsx": "4b14f15cd6fa77a2fcac2df7d7a185de04889f527f4a24e2e038d08db0f99c10",
+		"src/__tests__/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsRename.test.ts": "725972a9e0533702a28a144248c2e4d14283aeaa3f124ef2867dd984a23c9396",
+		"src/__tests__/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsResume.test.ts": "72d474de9114e54438587867c84b6d25d52924afc6183a4fdfd6bc7fa312bcfb",
+		"src/__tests__/renderer/components/DirectorNotes/DirectorNotesModal.test.tsx": "9b5c7e286260ef01a6911d0d22c458d0d477c72c24c7ccbac9592ee517752b67",
+		"src/__tests__/renderer/components/DirectorNotes/UnifiedHistoryTab.test.tsx": "806c86803c26324e6e9214796e1fa24c26d695b9b890ddf513417ec2140f8dfa",
+		"src/__tests__/renderer/components/History/HistoryEntryItem.test.tsx": "20ffd76894f9dfb07a46756d6fad0c0a090bd5917ae8da3235c9bd517880d9bf",
+		"src/__tests__/renderer/components/HistoryDetailModal.test.tsx": "dcd374e526df78a02de7f788d65bba5bc0886a58c9d7909b45ccbffd2e29ccc3",
+		"src/__tests__/renderer/components/HistoryPanel.test.tsx": "1d09b7c4ed7f3370d1122edfdcff915a88405d8a1c3df551b93e9d8d15801521",
+		"src/__tests__/renderer/components/UsageDashboard/TokenStatsLegend.test.tsx": "c241c2cd3ba2a8c8968992d837b5d6dd68db939a6d93d1767d064ae201e3c19b",
+		"src/__tests__/renderer/hooks/agent/internal/useAgentErrorListener.test.tsx": "f09072179ff2f74cfcce7345b23878fe7803901456002e926987bef7b6eccdcd",
+		"src/__tests__/renderer/hooks/agent/internal/useAgentSessionIdListener.test.tsx": "ff267d54cdb17051ebcf48f11f49bfdc60ad82e41e3dc2b9efd45e5ff799a0a9",
+		"src/__tests__/renderer/hooks/agent/useAgentSessionManagement.test.tsx": "c55e29519ed66026579c9d6617aa948c2aa5996b6561fdfe8bae6cb30bc7ca07",
+		"src/__tests__/renderer/hooks/tabs/internal/useScrollLogHandlers.test.ts": "a5e145877e7b18a2c1d5b22508fd1a3dec7152bc5986c8e1ca4efe37a84c1a9d",
+		"src/__tests__/renderer/hooks/useAgentSessionManagement.test.ts": "160e4dc20b316da9f180dbf508a0a4c025787fcb5736601709a4b99c1d80b755",
+		"src/__tests__/renderer/hooks/useForkConversation.test.ts": "dabc6124baa5f6890f7d633100efc16002d287c0145d55cda542b34e3d4aca6b",
+		"src/__tests__/renderer/hooks/useModalHandlers.test.ts": "a3b19453d79b1410a21765eaa6eb259143a9a740930fe0210b96566666b5cd54",
+		"src/__tests__/renderer/hooks/useRemoteIntegration.test.ts": "263a7c99b9312c15240f457231bc353d6aa4db6b60a9a153459b02bc62a2a977",
+		"src/__tests__/renderer/hooks/useSessionLifecycle.test.ts": "cf85d03ff777646f617ef9b65fd4a36b64a595193e04c18bbe39844199cc8e0f",
+		"src/__tests__/renderer/hooks/utils/useDebouncedPersistence.test.ts": "a84ff54356f3cb81787d6eb188891635899678b361d6114db4c592d51a6eebd1",
+		"src/__tests__/renderer/services/quickChatEngine.test.ts": "0007ee97a89104590fe1b17e136db5723e29bb4e9b156a4ace63a42f26a5fcd5",
+		"src/__tests__/renderer/services/quickChatRouter.test.ts": "85b4387e5ea1bca69d7067b91856b95ec1ae31091ef37e1c2bf3e370e6ea54af",
+		"src/__tests__/renderer/services/resumableSession.relay.test.ts": "0f46b5236f387bb02ab0379f11ca0be5d2c4934d4dae3ca094c67a21b374178b",
+		"src/__tests__/renderer/utils/contextExtractor.test.ts": "6c56f1a9de633d64054810ba6fbb55d5891248b328232e241675b737df628d8b",
+		"src/__tests__/setup.ts": "767c53aeb8cebd32a6297c2b1245e83af7ecb465a166ca61f0a85d4165bae3ed",
+		"src/__tests__/shared/maestro-lib/agents/providerSwap.test.ts": "23ed2491674db5183809b3e5c6ba171df9a8efb6651ec396fda1251b9637994f",
+		"src/__tests__/shared/maestro-lib/run/fakeAgent.ts": "9d9fec399acecc7fc9c8a088021531455140fce4c549fbe08e747e4cf8bf77cd",
+		"src/__tests__/shared/maestro-lib/translation-session.test.ts": "60a31209e828feab08e465d242d898958c44ffc84da93508beeb3d128087b46b",
+		"src/__tests__/shared/maestro-lib/turns/fixtures.ts": "2200a84113280c6b20a0db22cc35fc1b8a06312ae53794edec66472c213635a4",
+		"src/__tests__/shared/maestro-lib/turns/record-turn.test.ts": "6a3a956be0c93556b8a3a6386f4728c9d290a35e7ac4112b986a99924ca5a5f4",
+		"src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts": "633a2880fc34f328e6de852b190dff52c91d0f7d88a7ac9446a874907e60f0f7",
+		"src/cli/commands/stats.ts": "cec880207d2394fa02bcd7407b481e963026bda997424e548edbc370b37f35c1",
+		"src/main/agents/provider-account-dirs.ts": "e7b244b440b13cf7f87f094252337fadb62cb6816c5e3855ece1375ff936465b",
+		"src/main/agents/session-storage.ts": "e1bc51deb3668a65b244f8e3eec70aca475fc42744c171c920920fbbf0d546bf",
+		"src/main/cue/cue-process-lifecycle.ts": "6c84c51d26ddad588f3cfc7ac748afdb088abff2b0883a4f195f52f4354d511e",
+		"src/main/cue/stats/cue-stats-query.ts": "94c667ad3f06c2f7d0ebf07f5f3ef406a5fcfee0af27501fb92ae93953038413",
+		"src/main/cue/stats/cue-token-accessor.ts": "5449a268ff630b4a20f2ea8d58e19b48ab36d9d4800a38c5a617a45d8fb03416",
+		"src/main/ipc/bootstrap/index.ts": "dd249e29b17cd28be5d78167e09fb54a6388a06308bb80e58839d3b61c22c7eb",
+		"src/main/ipc/handlers/agentSessions.ts": "de20afbe6aa80739132abf180921bd295a1e12d15e41b860d3c9a208d9b5b6e5",
+		"src/main/ipc/handlers/context.ts": "305d52827daa379118733224fdd02439ee58664af41fda0c41431e02402f3500",
+		"src/main/ipc/handlers/process/handle-spawn.ts": "2a393a3667026cb53b985818393d1f3b3ada8d787632c0ea9ab036883bbee604",
+		"src/main/plugins/plugin-host-handlers.ts": "81ff275887037b6ec7596ebc68821661db52f739d1ba91f06eae9b774a026986",
+		"src/main/preload/process/core.ts": "c060ed7ba7b6e53756c2e5f1a6c96f96cd80fe0788e5819c0c895b9d2b9a3363",
+		"src/main/preload/sessions.ts": "70f6985d2d6b3e9beec3f7a8e7177dba2f0aa7be6f95bb5278ac0c9830e289cc",
+		"src/main/process-listeners/__tests__/session-id-listener.test.ts": "21250fea059dbc781b96542b52988e89eeb2673fbfd2e7d592edc16fd16c329c",
+		"src/main/process-listeners/session-id-listener.ts": "5bae5c565fcd16e24d268132db9cf3f0cc1f672d133703cc52c1c9f74d3044c6",
+		"src/main/process-manager/ProcessManager.ts": "46fcfb30524021337ed8e6a7a9fe4b3383241b322fe1796c188f8841034dd875",
+		"src/main/process-manager/handlers/StdoutHandler.ts": "4f3de13c9910fae28b1ea24f9c2ed9cac719344d52d45b3fd2059097e716e60a",
+		"src/main/process-manager/types.ts": "3cd71306f004c4a139ee4caeb23dca32b2610e51d8166883011701884bdec574",
+		"src/main/stats/token-usage/token-usage-accessor.ts": "3cf341e9a38af16cb44543461b72058de1c89bbc2ee64119d2c07dd5e617d4a1",
+		"src/main/stats/usage-export.ts": "6fbb673cb75a6b976b73eeec190a19fc8a453a8ffa52ff15c6fc0bb156089869",
+		"src/main/storage/grok-session-storage.ts": "ae0f74c25b2ff42255cfb1a9c99d56d9983a0837ec821193fe4363b8c01718f8",
+		"src/main/utils/remote-fs.ts": "4980ea2a95a2db119da38f02be01bb180ec552e427370c5fb57af734a552e0b0",
+		"src/main/utils/remote-git.ts": "54bf28e17a252c2d13653347ae6fc3e575fcfe5141c361e811707b6cf65b3435",
+		"src/renderer/App.tsx": "b2b3bfba81c77cc370daf3a9c94f8cde3352aaed4268c921982b4cefa052133c",
+		"src/renderer/components/AgentSessionsBrowser/AgentSessionsBrowser.tsx": "e5d176667cda1c9812192aa3e2dd0e860e4a674e66d57246fa1ce2081727e672",
+		"src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsRename.ts": "0b4036b23a82f87b9843fa743d2d1cfeae2ba02c90b1e9b5e3d13cbb0cf3e874",
+		"src/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsResume.ts": "b662eb04161dcce9248bf08f0588bbd83e7269dbc2536e13fe126b76e0333167",
+		"src/renderer/components/AgentSessionsBrowser/types.ts": "384f1de0c03f2f94aa9f0d8497a71dc4ad0d92c52559c77939893e52f9dcacc1",
+		"src/renderer/components/AppStandaloneModals.tsx": "ae7e709ee08596f04a5fd28707de8c1f1394a24144988b1c7d1a0362a2c37e02",
+		"src/renderer/components/DirectorNotes/DirectorNotesModal.tsx": "17b7d3a6622fda0b1bc06623e09d71e2fb20d4d376723c652a2caf022a394304",
+		"src/renderer/components/DirectorNotes/UnifiedHistoryTab.tsx": "7d41e05c137e7c5515cead6f89add37026cc33ecab84c787c98bd4a02cb393a8",
+		"src/renderer/components/History/HistoryEntryItem.tsx": "fa2f3edf9b150ac644d94a2a0fc21e7bd2129d783fd1bdd119ba5cd8eaaa3bd8",
+		"src/renderer/components/HistoryDetailModal.tsx": "3bb3deaa18ea2e7132f1473855b88b24b8b005cb1b7a69e8bf30353e6d3ab50d",
+		"src/renderer/components/HistoryPanel.tsx": "8bea319ecbe14765493c96733accbc955e648f06cc46e5972ac5d2743ac49312",
+		"src/renderer/components/RightPanel.tsx": "80cb17dccd4e7120febccae117cf91d41bb135f1a72be2bdda1f4e6bd850ef07",
+		"src/renderer/components/UsageDashboard/TokenStats.tsx": "66f44056ced983b3c28aea0c20f8096bd7f577ec006cfff09cdb1c5a1b871679",
+		"src/renderer/global.d.ts": "29da9449ffcb1b4d0c1bd6fb8e37c8253a0ef413fcf8a5cc0c8a9d96ed3aa8af",
+		"src/renderer/hooks/agent/internal/useAgentErrorListener.ts": "3a03c076c0e0ece2406c85c7ef15545fe995cb7eacded4bf2a2d2034f4e8a24b",
+		"src/renderer/hooks/agent/internal/useAgentSessionIdListener.ts": "4fe8372d2aa27021efea5eefd9cbebdcdcf58d3355264a2b12e251c474a6bf85",
+		"src/renderer/hooks/agent/useAgentSessionManagement.ts": "df12e8adf5ec7a699699c1e707960c1df0255ec427757dccdf327d22d689dd01",
+		"src/renderer/hooks/agent/useForkConversation.ts": "b0f32d28f07915e4048d472e816978da81cefd9430ba9b4a393ea9f9b41b5541",
+		"src/renderer/hooks/agent/useSessionViewer.ts": "3545fb2954ca39a20e1cf78d57e3c4a26d0765994fe2d8eea4ead7ca7f8df58a",
+		"src/renderer/hooks/modal/useModalHandlers.ts": "c955525e117a1a8dbd543fce182ece86765a90eff271c952410dfe2a503154fa",
+		"src/renderer/hooks/props/useRightPanelProps.ts": "87e761e851475b84059677c1af60e282e9bcc51b24f69c783ad2707421edad87",
+		"src/renderer/hooks/remote/useRemoteIntegration.ts": "f88936aceae30fbf0afa438809f7e3ec820d332145881e9d8a77034e1766066f",
+		"src/renderer/hooks/session/useSessionLifecycle.ts": "7e451e2eee65d00e27d15846adf63f261592196e0ceca31a34c19bcd483e7a9f",
+		"src/renderer/hooks/tabs/internal/useScrollLogHandlers.ts": "c7915911e23e5b9caf68fc73e89b30362c79aee6cfec6aea03b258226a7d388a",
+		"src/renderer/services/quickChatEngine.ts": "f186e6d20848601020ab39362d7858aa1626a99c03a91e641c1d5a4df504e0c9",
+		"src/renderer/services/quickChatRouter.ts": "e14814bf25031cb05f5a2d2c30ed807917689316797f366d1083a039663b52bf",
+		"src/renderer/services/resumableSession.ts": "45c11f30e4db0cbb8c4aa673f9e65382a92ed1ce9ce26b900c0066532c80b5de",
+		"src/renderer/types/index.ts": "b775fba77575144e3c5e71b03be6d25b75c87585a775e2f68006debbcc7dae92",
+		"src/renderer/utils/contextExtractor.ts": "3fb1a748a9a26773c18780ae4326814bedded9d6d6b89451db688e14b57bee33",
+		"src/shared/agentAccountDir.ts": "164bd04b49fcc87ac2f86cde39c2f19cd557b97945eb3d9307ec54c310ee32a5",
+		"src/shared/maestro-lib/agents/__tests__/repository.test.ts": "ba3415db042b31aa1f9a4903a34ad913a3df315be7a7ebdf6a653db224f58d76",
+		"src/shared/maestro-lib/agents/__tests__/rules.test.ts": "b2887776977bdcbce24d8ad0e77d023927b5395d1530221dd3e31817760752db",
+		"src/shared/maestro-lib/agents/providerSwap.ts": "1ccf594b1200c53b9f5d12a19114cee63ad4fa2bf8117cee60177897f3359f08",
+		"src/shared/maestro-lib/agents/repository.ts": "b8dac281720bdcdf3d46501b13db33348141a9ed07710fed593e82408e5bae34",
+		"src/shared/maestro-lib/agents/rules.ts": "14025f72631bdcb7610c0cc069bbe21d77e844c178976ced62b9bb02cade259a",
+		"src/shared/maestro-lib/grok/acp-session.ts": "04e228350abc8e6247792d83e5b89fa9a65a9bdc18bcce1bc130d7c3e2356ae6",
+		"src/shared/maestro-lib/launch/agent-args.ts": "bcd9ebce1b0e194905ea65041061bd4ec160f8e120ccd2cf10f13429c3873a1c",
+		"src/shared/maestro-lib/runtime/__tests__/turns.test.ts": "d921f6f5fe768202734ff08d92e960e80187b2612085f864a6738f32914c7503",
+		"src/shared/maestro-lib/runtime/index.ts": "d6ff9a327ccf8e184d837a55acd03e1ec01b737c28f3a3f546f30f82356c3bd3",
+		"src/shared/maestro-lib/runtime/turns.ts": "f60f76b1f9c4b3af7b95cbc2a93eb11fb4b75087d0dd698efabbce18459df4c3",
+		"src/shared/maestro-lib/store/records.ts": "afab1205e6e7887e9101dfca2700ac2606cfb15b4affd360a2ebf76d412a2dd0",
+		"src/shared/maestro-lib/translation/session.ts": "693f30017077b8a679e152b5eac3fa4c74c784105415fc6e90241fbe4aa30dfd",
+		"src/shared/maestro-lib/turns/assemble.ts": "7b7257ef13c86a880f7cec85c0fdfaa536e4732ecca1690bac4ab044dd3cb71a",
+		"src/shared/maestro-lib/turns/record-turn.ts": "7337dc245a942be3c6f96eaf7457cf875d8fddf10d307daf307ee839f8a303cf",
+		"src/shared/maestro-lib/turns/run-agent-turn.ts": "5f690ad8ceb2e96d788f4a7bfb5260ca76fd937747172bbb214c3a5d3bcc4741",
+		"src/shared/quickChat.ts": "3f529078fea19c67fee839c8055028c95eb482403b97aa37ce205c0c335dd57f",
+		"src/shared/tokenUsage.ts": "ef42db68ed70a7b95c2c634955f34c54ed2793568f8d588d2a1eb945062166ff",
+		"src/shared/types.ts": "99b917ba732695bd108f00b117e4174784abfaba8336f358b4417d80b101ea7a",
+		"vitest.config.mts": "c72dbc05459559b23dce670db0f17c064dfdf026d46d3c0d2ea4777af654ac77"
+	},
+	"fixtureHashesSha256": {
+		"src/__tests__/fixtures/fake-agent.mjs": "80f7d7aaf5f60ecc7f2eca1f9df5891dcf804a5149e84edb341074426fd05a75",
+		"src/__tests__/helpers/agentEnvIsolation.ts": "8f5b0d159e45fb4e6dd9cc84d615eac10ef8891748aa712ff4adef619d2c4837",
+		"src/__tests__/main/process-manager/recordings/captured.ts": "c6c39d2836c3724a0d519fe612c4bae89368d4ae8964ac420700685f0427f543",
+		"src/__tests__/main/process-manager/recordings/captured/claude-code-normal.json": "4ec132bab48284b4df99b17d156efda73f30abbcf1a69b6faf9558236d82551a",
+		"src/__tests__/main/process-manager/recordings/captured/claude-code-resumed.json": "fcce5b1500ed25d3f03e0a1d0d7e9bad0602bf28e8dc351218b9ca1b0e5413ac",
+		"src/__tests__/main/process-manager/recordings/captured/claude-code-stopped-sigint.json": "d2107f6fb171e429a92340e30c3321c665a977d960c7398ce1de08b23e685668",
+		"src/__tests__/main/process-manager/recordings/captured/claude-code-stopped-sigterm.json": "ee932366afe8db5a3d0cf658077303bdd6904f424a3872d95a733ca61ae65ab8",
+		"src/__tests__/main/process-manager/recordings/captured/opencode-normal.json": "211448ca9e3eb5e7fd99b05e9201a595aaf38dc5ec0af3f948cd6a984b7a9eb1",
+		"src/__tests__/main/process-manager/recordings/captured/opencode-resumed.json": "c220067e5fc5ba9643096e499a5b95c8c43bc345c339a70123cb6e160370a402",
+		"src/__tests__/main/process-manager/recordings/captured/opencode-stopped-sigint.json": "360df0acf3ff35bf248e025619563e23487deb298b5a4a73d288561fe2910394",
+		"src/__tests__/main/process-manager/recordings/captured/opencode-stopped-sigterm.json": "5b3738ca202d75db56f0332692d1185530a0deb307500c0987e64fd7efbcdec4",
+		"src/__tests__/main/process-manager/recordings/documented.ts": "0a574ec2a8265d2bd6dac6465a4efbc7331047250ee8cbcaafe37d58cdee036c",
+		"src/__tests__/main/process-manager/recordings/fixtures.ts": "f86462969eb7052fdcc6feabaac457464f54eb9befcccd7fc9564872230259b9",
+		"src/__tests__/setup.ts": "767c53aeb8cebd32a6297c2b1245e83af7ecb465a166ca61f0a85d4165bae3ed",
+		"src/__tests__/shared/maestro-lib/run/fakeAgent.ts": "9d9fec399acecc7fc9c8a088021531455140fce4c549fbe08e747e4cf8bf77cd",
+		"src/__tests__/shared/maestro-lib/turns/fixtures.ts": "2200a84113280c6b20a0db22cc35fc1b8a06312ae53794edec66472c213635a4"
+	},
+	"fixtureScope": "Inline Grok/native/remote fixtures are covered by their test-file hashes; external captured recordings, fake agent and helper hashes are listed separately. No installed account content was used.",
+	"runner": {
+		"path": "tmp/grok-tier1-phase04-process-reverify/run-check.py",
+		"sha256": "2159e19dbc09b116cc52996f7e2e38e14eef6f59ed705f28f98d2dd835d1f3ca",
+		"reusedFrom": {
+			"path": "tmp/grok-tier1-phase04-reverify/run-check.py",
+			"sha256": "f14c799ea9c5fc17b7100b2554ba122da7fa238e92568dfbc29af9fe6c507b09",
+			"reusedFrom": {
+				"path": "tmp/grok-tier1-phase04-verify/run-check.py",
+				"sha256": "b1a87d11cd079890c451ca35156922ad3431312e235a37949e682ed5f8096792",
+				"reusedFrom": "tmp/grok-tier1-phase03-verify/run-check.py",
+				"note": "Wrapper exit can be zero for failed children; each recorded child exitCode is authoritative."
+			},
+			"changes": "New output root and removed shared-interface name filter only.",
+			"note": "Wrapper exit can be zero for failed children; recorded child exitCode is authoritative."
+		},
+		"changes": "Output root only; single-file scope selected through the existing JSON scope mechanism. Credential stripping and isolation remain unchanged.",
+		"invocation": ["python3", "tmp/grok-tier1-phase04-process-reverify/run-check.py", "process"],
+		"note": "Wrapper exit is not authoritative; the npm test child exited 0."
+	},
+	"sourceIntegrity": {
+		"protectedFiles": 7084,
+		"manifestPath": "tmp/grok-tier1-phase04-process-reverify/before-source-hashes.json",
+		"manifestSha256": "0d13defcee51080af921c95cfc2238fdce16992e3c7e1492eb81efa743865a2b",
+		"changedFilesDuringVerification": [],
+		"parityUnchanged": true,
+		"paritySha256": "65ba8fbd4a9b81aa3a72f041fab939bdd3a9131e670471ba53a2996f50300194",
+		"priorMarkdownSha256": "670421fa777f58e0c838aeff77d97fc748c0a1fd96d61318a25432ce99b0eda1"
+	},
+	"remainingFailures": [],
+	"repairTasks": [],
+	"limits": [
+		"Only the selected deterministic matrix passes; no repository-wide lint/build/full-test pass is claimed.",
+		"Historical passing results retain their original source revision and child exits. Both failed receipts remain unchanged.",
+		"Live Grok binary, restart/native continuation and actual SSH host qualification remain not-run; simulated native IDs and mocked endpoints are not live certification.",
+		"Native history, native resume, context export, context merge and cross-provider native translation remain separate contracts; parity reconciliation belongs to GT1-04-14.",
+		"Vite config-loader compatibility warnings remain visible in the raw log."
+	],
+	"imagesAnalyzed": 0,
+	"liveCalls": 0,
+	"parityUpdated": false,
+	"nextTask": "GT1-04-14",
+	"artifactValidation": {
+		"status": "pass",
+		"checkerPath": "tmp/grok-tier1-phase04-process-reverify/check-artifacts.py",
+		"checkerSha256": "6258eff5f5350d69977e94fc14094594b54f02f4f04344c902c0a74e4ebc47fd",
+		"command": ["python3", "tmp/grok-tier1-phase04-process-reverify/check-artifacts.py"],
+		"exitCode": 0,
+		"formatCommand": [
+			"node",
+			"node_modules/prettier/bin/prettier.cjs",
+			"--check",
+			"Plans/grok-tier1/evidence/04.md",
+			"Plans/grok-tier1/evidence/04-process-reverification.json"
+		],
+		"formatExitCode": 0,
+		"diffCheckCommand": ["git", "diff", "--check"],
+		"diffCheckExitCode": 0,
+		"independentReview": "pass",
+		"note": "Independent raw-result/hash review confirms the focused pass and historical carry-forward; no live certification."
+	}
+}
