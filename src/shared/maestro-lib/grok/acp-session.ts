@@ -282,11 +282,13 @@ export class GrokAcpSession {
 					)
 						throw new GrokAcpSessionError('invalid-response');
 					this.replay = false;
-					if (this.active && this.cancelled) throw new GrokAcpSessionError('cancelled');
 					// A successful create may have silently retained the default. Never accept it.
 					if (model && this.effectiveModel !== model)
 						throw new GrokAcpSessionError('model-unacknowledged');
-					if (this.selectedEffort !== undefined)
+					// A cancelled prompt can retain this opening only with acknowledged selections.
+					// Do not send new configuration writes; prompt() rejects the cancelled turn
+					// after the validated opening resolves for later explicit turns.
+					if (this.selectedEffort !== undefined && !(this.active && this.cancelled))
 						await this.applyConfig('reasoning_effort', this.selectedEffort);
 					this.checkSelection();
 					return { ...response, configOptions: this.configuration.configOptions };
