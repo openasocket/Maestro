@@ -739,6 +739,33 @@
 				"src/shared/maestro-lib/grok/acp-session.ts": "07e39de00fa0463afe96a35e6e2f5e89e772720773f603d948d8ee00d5495d1d",
 				"src/shared/maestro-lib/grok/acp-turn.ts": "5a41eaaeb04c33b26ce8daa6d1d67ec30c0def3e5fcf676d3f898a832def290c"
 			}
+		},
+		"phase03-acp-composed-tests": {
+			"path": "Plans/grok-tier1/evidence/03.md#gt1-03-10-composed-transport-contract-tests",
+			"sourceCommit": "1fde6bb6ab0f32d5cd16721355d848cf77108b00",
+			"sourceRevisionScope": "Pre-task HEAD plus the GT1-03-10 authored-test diff identified by SHA-256.",
+			"provenance": "authored-tests",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"scope": "15 synthetic public-port cases: new/resumed turns, raw Unicode, admission before spawn, cleanup/release after close, native prompt-bound tools/plans/permissions, cancellation/disconnect/revocation/termination, partial answers, late replies, process/UTF-8/idle failures and unavailable questions. Extended accounting and lifecycle handoffs remain GT1-03-10C/10D; execution/compiler checks remain GT1-03-13. No native or managed containment qualification.",
+			"testPaths": ["src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts"],
+			"testHashesSha256": {
+				"src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts": "f28a98f68dcaae02cea9336a96b1576429f81e09015b5281cd0baf986e43e995"
+			},
+			"affectedRows": [
+				"P09",
+				"P10",
+				"P29",
+				"P34",
+				"P35",
+				"P36",
+				"P38",
+				"P40",
+				"META-03",
+				"META-06",
+				"META-07"
+			],
+			"continuationTasks": ["GT1-03-10C", "GT1-03-10D"]
 		}
 	},
 	"sourceCatalog": {
@@ -3325,7 +3352,8 @@
 				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
 				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests",
 				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
-				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
+				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -3646,7 +3674,8 @@
 				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
 				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests",
 				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
-				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
+				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6382,7 +6411,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
-				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
+				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7240,7 +7270,8 @@
 				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
 				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests",
 				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
-				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
+				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7475,7 +7506,8 @@
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
 				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
-				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
+				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7715,7 +7747,8 @@
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
 				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
-				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
+				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8059,7 +8092,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
-				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
+				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8524,7 +8558,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
-				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
+				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18297,7 +18332,8 @@
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
 				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
-				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
+				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18758,7 +18794,8 @@
 				"observation": "Grok default context is 0/unknown; provider/host-only snapshot windows are ignored for Grok without selected model/account provenance. Positive per-agent/provider overrides remain supported. Group-chat unknown/accumulated observations preserve costs; native window propagation remains GT1-07-02/04/11.",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
-				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
+				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18924,7 +18961,8 @@
 				"observation": "1M threshold and Claude [1m] marker; adaptive mode defaults off for every provider; resilience defaults true unless explicitly disabled.",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
-				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage"
+				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
+				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
