@@ -12,6 +12,7 @@
  */
 
 import fs from 'fs';
+import fsp from 'fs/promises';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SshRemoteConfig } from '../../../shared/types';
@@ -110,6 +111,213 @@ describe('getProviderAccountDirs', () => {
 		});
 
 		expect(dirs.sort()).toEqual([personal, work].sort());
+	});
+
+	it.each([
+		['session', 'session', 'provider', 'global', 'process', ['session', 'provider', 'process']],
+		['provider', undefined, 'provider', 'global', 'process', ['provider', 'process']],
+		['global', undefined, undefined, 'global', 'process', ['global', 'process']],
+		['process', undefined, undefined, undefined, 'process', ['process']],
+		['default', undefined, undefined, undefined, undefined, []],
+		[
+			'empty session record',
+			{},
+			'provider',
+			'global',
+			'process',
+			['global', 'provider', 'process'],
+		],
+		[
+			'unrelated session record',
+			{ OTHER: 'value' },
+			'provider',
+			'global',
+			'process',
+			['global', 'provider', 'process'],
+		],
+	] as const)(
+		'discovers the canonical Grok %s selection and independent pools',
+		async (_name, custom, provider, global, host, expected) => {
+			const roots = Object.fromEntries(
+				['session', 'provider', 'global', 'process'].map((name) => [
+					name,
+					makeAccountDir(homeDir, path.join('accounts 雪', name), 'sessions'),
+				])
+			);
+			const defaultRoot = makeAccountDir(homeDir, '.grok', 'sessions');
+			const options: AgentAccountDirOptions = {
+				homeDir,
+				sessions: [
+					{
+						id: 'selected',
+						toolType: 'grok',
+						customEnvVars:
+							typeof custom === 'string' ? { GROK_HOME: ` ~/accounts 雪/${custom} ` } : custom,
+					},
+				],
+				agentLevelEnvVars: provider ? { GROK_HOME: ` ~/accounts 雪/${provider} ` } : {},
+				globalShellEnvVars: global ? { GROK_HOME: ` ~/accounts 雪/${global} ` } : {},
+				env: host ? { GROK_HOME: ` ~/accounts 雪/${host} ` } : {},
+			};
+
+			expect(await getProviderAccountDirs('grok', options)).toEqual([
+				...expected.map((name) => roots[name]),
+				defaultRoot,
+			]);
+			expect(resolveAgentAccountDir('selected', options)).toBe(
+				expected.length ? roots[expected[0]] : defaultRoot
+			);
+		}
+	);
+
+	it.each(['provider', 'global', 'process', 'default'] as const)(
+		'discovers the Grok %s default without any configured agents',
+		async (layer) => {
+			const selected = makeAccountDir(outsideHome, 'grok-default-selection', 'sessions');
+			const implicit = makeAccountDir(homeDir, '.grok', 'sessions');
+			const dirs = await getProviderAccountDirs('grok', {
+				homeDir,
+				sessions: [],
+				agentLevelEnvVars: layer === 'provider' ? { GROK_HOME: selected } : {},
+				globalShellEnvVars: layer === 'global' ? { GROK_HOME: selected } : {},
+				env: layer === 'process' ? { GROK_HOME: selected } : {},
+			});
+
+			expect(dirs).toEqual(layer === 'default' ? [implicit] : [selected, implicit]);
+		}
+	);
+
+	it.each(['session', 'provider', 'global', 'process'] as const)(
+		'discovers a blank Grok %s override as default without reviving lower selections',
+		async (layer) => {
+			const provider = makeAccountDir(outsideHome, 'provider', 'sessions');
+			const global = makeAccountDir(outsideHome, 'global', 'sessions');
+			const host = makeAccountDir(outsideHome, 'host', 'sessions');
+			const implicit = makeAccountDir(homeDir, '.grok', 'sessions');
+			for (const blank of ['', ' \t\n', '\u00a0']) {
+				const options: AgentAccountDirOptions = {
+					homeDir,
+					sessions: [
+						{
+							id: 'selected',
+							toolType: 'grok',
+							customEnvVars: layer === 'session' ? { GROK_HOME: blank } : undefined,
+						},
+					],
+					agentLevelEnvVars:
+						layer === 'session'
+							? { GROK_HOME: provider }
+							: layer === 'provider'
+								? { GROK_HOME: blank }
+								: {},
+					globalShellEnvVars:
+						layer === 'process' ? {} : { GROK_HOME: layer === 'global' ? blank : global },
+					env: { GROK_HOME: layer === 'process' ? blank : host },
+				};
+
+				expect(resolveAgentAccountDir('selected', options)).toBe(implicit);
+				// Provider/process pools remain independent native accounts, not
+				// fallbacks that replace the selected agent's blank override.
+				expect(await getProviderAccountDirs('grok', options)).toEqual(
+					layer === 'session'
+						? [implicit, provider, host]
+						: layer === 'process'
+							? [implicit]
+							: [implicit, host]
+				);
+			}
+		}
+	);
+
+	it('retains a missing selected Grok root separately from the populated default', async () => {
+		const implicit = makeAccountDir(homeDir, '.grok', 'sessions');
+		const missing = path.join(outsideHome, 'not-created');
+		const options: AgentAccountDirOptions = {
+			homeDir,
+			env: {},
+			agentLevelEnvVars: {},
+			globalShellEnvVars: {},
+			sessions: [{ id: 'selected', toolType: 'grok', customEnvVars: { GROK_HOME: missing } }],
+		};
+
+		expect(await getProviderAccountDirs('grok', options)).toEqual([missing, implicit]);
+		expect(resolveAgentAccountDir('selected', options)).toBe(missing);
+		expect(fs.existsSync(missing)).toBe(false);
+	});
+
+	it('attributes a shared Grok pool to the configured selection before provider/default aliases', async () => {
+		const implicit = makeAccountDir(homeDir, '.grok', 'sessions');
+		const independent = makeAccountDir(homeDir, '.grok-work', 'sessions');
+		const selected = path.join(outsideHome, 'z-selected');
+		const provider = path.join(outsideHome, 'a-provider');
+		for (const alias of [selected, provider]) {
+			fs.mkdirSync(alias);
+			fs.symlinkSync(path.join(implicit, 'sessions'), path.join(alias, 'sessions'), SYMLINK_TYPE);
+		}
+		const options: AgentAccountDirOptions = {
+			homeDir,
+			env: {},
+			agentLevelEnvVars: { GROK_HOME: provider },
+			globalShellEnvVars: {},
+			sessions: [{ toolType: 'grok', customEnvVars: { GROK_HOME: selected } }],
+		};
+
+		expect(await getProviderAccountDirs('grok', options)).toEqual([selected, independent]);
+		// Multiple configured aliases are sorted before deduplication, so
+		// persisted session order cannot change attribution on each refresh.
+		for (const aliases of [
+			[selected, provider],
+			[provider, selected],
+		]) {
+			expect(
+				await getProviderAccountDirs('grok', {
+					...options,
+					sessions: aliases.map((root) => ({
+						toolType: 'grok',
+						customEnvVars: { GROK_HOME: root },
+					})),
+				})
+			).toEqual([provider, independent]);
+		}
+		// Without that agent, the provider default owns the same pool once.
+		expect(await getProviderAccountDirs('grok', { ...options, sessions: [] })).toEqual([
+			provider,
+			independent,
+		]);
+	});
+
+	it('never probes Grok SSH account paths locally even when matching directories exist', async () => {
+		const remoteAbsolute = makeAccountDir(outsideHome, 'remote-account', 'sessions');
+		const remoteTilde = makeAccountDir(homeDir, 'remote-account', 'sessions');
+		const local = makeAccountDir(outsideHome, 'local', 'sessions');
+		const otherProvider = makeAccountDir(outsideHome, 'other-provider', 'sessions');
+		const realpath = vi.spyOn(fsp, 'realpath');
+		const stat = vi.spyOn(fsp, 'stat');
+		const dirs = await getProviderAccountDirs('grok', {
+			homeDir,
+			env: {},
+			agentLevelEnvVars: {},
+			globalShellEnvVars: {},
+			sessions: [
+				...[remoteAbsolute, '~/remote-account'].map((root) => ({
+					toolType: 'grok',
+					customEnvVars: { GROK_HOME: root },
+					sessionSshRemoteConfig: { enabled: true },
+				})),
+				{
+					toolType: 'grok',
+					customEnvVars: { GROK_HOME: local },
+					sessionSshRemoteConfig: { enabled: false },
+				},
+				{ toolType: 'codex', customEnvVars: { GROK_HOME: otherProvider } },
+			],
+		});
+
+		expect(dirs).toEqual([local, path.join(homeDir, '.grok')]);
+		for (const forbidden of [remoteAbsolute, remoteTilde, otherProvider]) {
+			expect(realpath).not.toHaveBeenCalledWith(path.join(forbidden, 'sessions'));
+			expect(stat).not.toHaveBeenCalledWith(path.join(forbidden, 'sessions'));
+		}
 	});
 
 	it('keeps two Codex accounts apart instead of merging them', async () => {
