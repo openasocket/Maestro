@@ -1458,6 +1458,42 @@
 			],
 			"testOwners": ["GT1-04-07C1ST", "GT1-04-07C1SRT", "GT1-04-07C1RT", "GT1-04-07C1T"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-remote-native-source-observation": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c1sr-remote-native-source-observation",
+			"sourceCommit": "93532ac42d8052fd9725a46811f7f2f03b7a4b80",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/storage/grok-session-storage.ts": "e58ce372b0c1aceee4266c848eb039311127a11bcfbe016fcc8c3f81316c0eb7",
+				"src/main/utils/remote-fs.ts": "765ce3134493c51f67b717687148c9c977a020ccd2e2606a169813e9f958379e"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"mainTypeCheck": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P13", "P14", "P15", "C-supportsResume", "REG-SESSION-MUTATION"],
+			"scope": "Remote physical source and opened-descriptor observations, exact canonical account/cwd/native-ID selection, alias and uniqueness rechecks, bounded admitted reads and separate ownership/content receipts. Caller supplies executing endpoint identity; legacy unbound browsing unchanged.",
+			"limitations": [
+				"POSIX Python 3 and no-follow descriptor support required; unavailable observations never fall back locally.",
+				"Incomplete or over-1000-entry cwd enumeration conservatively refuses uniqueness proof.",
+				"Executing endpoint qualification remains GT1-04-07C1R; no deterministic or live qualification executed."
+			],
+			"remainingImplementationOwners": [
+				"GT1-04-07C1R",
+				"GT1-04-07C2",
+				"GT1-04-07C3",
+				"GT1-04-07C4",
+				"GT1-04-07C5",
+				"GT1-04-07D",
+				"GT1-04-07E",
+				"GT1-04-07F"
+			],
+			"testOwners": ["GT1-04-07C1SRT", "GT1-04-07C1ST", "GT1-04-07C1RT", "GT1-04-07C1T"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {

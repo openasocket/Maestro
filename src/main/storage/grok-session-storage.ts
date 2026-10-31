@@ -23,7 +23,13 @@ import fs from 'fs/promises';
 import { isUtf8 } from 'node:buffer';
 import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
-import { readFileRemote, readDirRemote, statRemote } from '../utils/remote-fs';
+import {
+	readFileRemote,
+	readDirRemote,
+	statRemote,
+	observePathRemote,
+	type RemotePathIdentity,
+} from '../utils/remote-fs';
 import {
 	mapWithConcurrency,
 	LOCAL_SESSION_READ_CONCURRENCY,
@@ -1000,7 +1006,30 @@ export class GrokSessionStorage extends BaseSessionStorage {
 	/** Observe a physical object without opening its contents. Identity is separate
 	 * from size/mtime: appending to a transcript changes completeness, not ownership.
 	 */
-	private async observeNativePath(requested: string, directory: boolean) {
+	private async observeNativePath(
+		requested: string,
+		directory: boolean,
+		sshConfig?: SshRemoteConfig
+	) {
+		if (sshConfig) {
+			const observed = await observePathRemote(requested, sshConfig);
+			if (!observed.success || !observed.data) {
+				if (!observed.errorCode && !isExpectedRemoteError(observed.error)) {
+					captureException(new Error(observed.error || 'observePathRemote failed'), {
+						operation: 'grokStorage:observeNativeSource',
+					});
+				}
+				return null;
+			}
+			if (observed.data.kind !== (directory ? 'directory' : 'file')) return null;
+			return {
+				requested,
+				physical: observed.data.canonicalPath,
+				directory,
+				dev: observed.data.device,
+				ino: observed.data.inode,
+			};
+		}
 		const physical = await fs.realpath(requested);
 		const stat = await fs.stat(physical);
 		if (
@@ -1012,27 +1041,66 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		) {
 			return null;
 		}
-		return { requested, physical, directory, dev: stat.dev, ino: stat.ino };
+		return { requested, physical, directory, dev: String(stat.dev), ino: String(stat.ino) };
 	}
 
 	/** Exact physical cwd only. Descendant folders are useful for browsing, but
 	 * cannot establish ownership of a retained native session. Directory aliases
 	 * participate in ambiguity checks even when they point at the same object.
 	 */
-	private async findBoundSessionCandidates(sessionsDir: string, cwd: string, sessionId: string) {
+	private async findBoundSessionCandidates(
+		sessionsDir: string,
+		cwd: string,
+		sessionId: string,
+		sshConfig?: SshRemoteConfig
+	) {
 		const candidates: string[] = [];
-		for (const entry of await fs.readdir(sessionsDir, { withFileTypes: true })) {
-			if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+		const paths = sshConfig ? path.posix : path;
+		const remoteEntries = sshConfig ? await readDirRemote(sessionsDir, sshConfig) : undefined;
+		if (
+			sshConfig &&
+			(!remoteEntries?.success || !remoteEntries.data || remoteEntries.data.length > 1000)
+		) {
+			if (remoteEntries && !remoteEntries.success && !isExpectedRemoteError(remoteEntries.error)) {
+				captureException(new Error(remoteEntries.error || 'readDirRemote failed'), {
+					operation: 'grokStorage:observeNativeCandidates',
+				});
+			}
+			return null; // An incomplete enumeration cannot prove uniqueness.
+		}
+		const entries = sshConfig
+			? remoteEntries!.data!
+			: await fs.readdir(sessionsDir, { withFileTypes: true });
+		for (const entry of entries) {
+			const directory =
+				typeof entry.isDirectory === 'function' ? entry.isDirectory() : entry.isDirectory;
+			const symlink = 'isSymlink' in entry ? entry.isSymlink : entry.isSymbolicLink();
+			if (!directory && !symlink) continue;
 			const decoded = this.decodeCwdFolder(entry.name);
-			if (decoded === null || !path.isAbsolute(decoded)) continue;
+			if (decoded === null || !paths.isAbsolute(decoded)) continue;
 			try {
-				const project = await this.observeNativePath(decoded, true);
+				const project = await this.observeNativePath(decoded, true, sshConfig);
+				if (sshConfig && !project) return null;
 				if (project?.physical !== cwd) continue;
-				const candidate = path.join(sessionsDir, entry.name, sessionId);
-				// lstat counts dangling/non-directory candidates too. Never let a bad
-				// duplicate cause us to open a different candidate with the same ID.
-				await fs.lstat(candidate);
+				const folder = paths.join(sessionsDir, entry.name);
+				const candidate = paths.join(folder, sessionId);
+				// Count dangling/non-directory candidates too; a bad duplicate never
+				// authorizes opening another candidate with the same native ID.
+				if (sshConfig) {
+					const children = await readDirRemote(folder, sshConfig);
+					if (!children.success || !children.data) {
+						if (!isExpectedRemoteError(children.error))
+							captureException(new Error(children.error || 'readDirRemote failed'), {
+								operation: 'grokStorage:observeNativeCandidates',
+							});
+						return null;
+					}
+					if (!children.data.some((child) => child.name === sessionId)) continue;
+				} else {
+					await fs.lstat(candidate);
+				}
 				candidates.push(candidate);
+				if (candidates.length > 1) return candidates;
 			} catch (error) {
 				if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') continue;
 				throw error;
@@ -1042,7 +1110,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 	}
 
 	/** A host-observed binding is a constraint, never evidence by itself. Pin the
-	 * actual local source before reading and compare the opened descriptor too.
+	 * actual source before reading and compare the opened descriptor too.
 	 * The caller owns executing-host observation and its post-read endpoint fence.
 	 */
 	private async readBoundTranscript(
@@ -1080,10 +1148,8 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		) {
 			return unavailable('native-source-binding-invalid');
 		}
-		// statRemote's size/mtime are not physical identity or descriptor evidence.
-		// Never probe local paths or echo a receipt for an unobserved remote source.
-		if (sshConfig) return unavailable('native-source-unobserved');
-		if (!path.isAbsolute(projectPath) || !path.isAbsolute(supplied.cwd)) {
+		const paths = sshConfig ? path.posix : path;
+		if (!paths.isAbsolute(projectPath) || !paths.isAbsolute(supplied.cwd)) {
 			return unavailable('native-source-binding-invalid');
 		}
 		const binding: Extract<NativeSessionBinding, { state: 'bound' }> = {
@@ -1093,65 +1159,76 @@ export class GrokSessionStorage extends BaseSessionStorage {
 			nativeSessionId: sessionId,
 			accountRef: supplied.accountRef,
 			cwd: supplied.cwd,
-			host: { kind: 'local', identity: supplied.host.identity },
+			host: { kind: supplied.host.kind, identity: supplied.host.identity },
 		};
 		const includeNativeRecords = options.includeNativeRecords;
 		try {
-			const account = await this.observeNativePath(this.getAccountDir(undefined, accountDir), true);
-			const project = await this.observeNativePath(projectPath, true);
+			const account = await this.observeNativePath(
+				this.getAccountDir(sshConfig, accountDir),
+				true,
+				sshConfig
+			);
+			const project = await this.observeNativePath(projectPath, true, sshConfig);
 			if (
 				!account ||
 				!project ||
 				project.physical !== binding.cwd ||
 				resolveAgentAccountRef(
-					{ toolType: 'grok', managedAccountDir: account.physical },
-					{ homeDir: os.homedir() }
+					{ toolType: 'grok', managedAccountDir: account.physical, sshRemote: Boolean(sshConfig) },
+					{ homeDir: sshConfig ? '' : os.homedir() }
 				) !== binding.accountRef
 			) {
 				return unavailable('native-source-scope-mismatch');
 			}
 			// Accounts can intentionally share a symlinked sessions pool. Pin that
 			// selected subtree independently; never replace the selected accountRef.
-			const sessions = await this.observeNativePath(path.join(account.physical, 'sessions'), true);
+			const sessions = await this.observeNativePath(
+				paths.join(account.physical, 'sessions'),
+				true,
+				sshConfig
+			);
 			if (!sessions) return unavailable('native-source-unobserved');
 			const candidates = await this.findBoundSessionCandidates(
 				sessions.physical,
 				project.physical,
-				sessionId
+				sessionId,
+				sshConfig
 			);
+			if (!candidates) return unavailable('native-source-unobserved');
 			if (candidates.length !== 1) {
 				return unavailable(candidates.length ? 'native-source-ambiguous' : 'session-not-found');
 			}
 			const candidate = candidates[0];
-			const folder = await this.observeNativePath(path.dirname(candidate), true);
-			const session = await this.observeNativePath(candidate, true);
+			const folder = await this.observeNativePath(paths.dirname(candidate), true, sshConfig);
+			const session = await this.observeNativePath(candidate, true, sshConfig);
 			if (
 				!folder ||
 				!session ||
-				path.dirname(folder.physical) !== sessions.physical ||
-				path.dirname(session.physical) !== folder.physical ||
-				path.basename(session.physical) !== sessionId
+				paths.dirname(folder.physical) !== sessions.physical ||
+				paths.dirname(session.physical) !== folder.physical ||
+				paths.basename(session.physical) !== sessionId
 			) {
 				return unavailable('native-source-scope-mismatch');
 			}
 			// Both logical and physical encoded cwd names must belong to this cwd.
 			const sourceProjects = [];
-			for (const directory of [path.dirname(candidate), folder.physical]) {
-				const decoded = this.decodeCwdFolder(path.basename(directory));
-				if (decoded === null || !path.isAbsolute(decoded)) {
+			for (const directory of [paths.dirname(candidate), folder.physical]) {
+				const decoded = this.decodeCwdFolder(paths.basename(directory));
+				if (decoded === null || !paths.isAbsolute(decoded)) {
 					return unavailable('native-source-scope-mismatch');
 				}
-				const observed = await this.observeNativePath(decoded, true);
+				const observed = await this.observeNativePath(decoded, true, sshConfig);
 				if (observed?.physical !== project.physical) {
 					return unavailable('native-source-scope-mismatch');
 				}
 				sourceProjects.push(observed);
 			}
 			const file = await this.observeNativePath(
-				path.join(session.physical, 'chat_history.jsonl'),
-				false
+				paths.join(session.physical, 'chat_history.jsonl'),
+				false,
+				sshConfig
 			);
-			if (!file || path.dirname(file.physical) !== session.physical) {
+			if (!file || paths.dirname(file.physical) !== session.physical) {
 				return unavailable('native-source-scope-mismatch');
 			}
 			const observations = [account, project, sessions, folder, session, ...sourceProjects, file];
@@ -1159,11 +1236,21 @@ export class GrokSessionStorage extends BaseSessionStorage {
 				const currentCandidates = await this.findBoundSessionCandidates(
 					sessions.physical,
 					project.physical,
-					sessionId
+					sessionId,
+					sshConfig
 				);
-				if (currentCandidates.length !== 1 || currentCandidates[0] !== candidate) return false;
+				if (
+					!currentCandidates ||
+					currentCandidates.length !== 1 ||
+					currentCandidates[0] !== candidate
+				)
+					return false;
 				for (const original of observations) {
-					const current = await this.observeNativePath(original.requested, original.directory);
+					const current = await this.observeNativePath(
+						original.requested,
+						original.directory,
+						sshConfig
+					);
 					if (
 						!current ||
 						current.physical !== original.physical ||
@@ -1175,17 +1262,28 @@ export class GrokSessionStorage extends BaseSessionStorage {
 				return true;
 			};
 			if (!(await recheck())) return unavailable('native-source-changed');
-			const read = await this.readSessionFile(file.physical, undefined, MAX_SESSION_FILE_SIZE, {
+			const read = await this.readSessionFile(file.physical, sshConfig, MAX_SESSION_FILE_SIZE, {
 				dev: file.dev,
 				ino: file.ino,
 				recheck,
+				remotePaths: sshConfig
+					? observations.map((observed) => ({
+							path: observed.requested,
+							identity: {
+								canonicalPath: observed.physical,
+								device: observed.dev,
+								inode: observed.ino,
+								kind: observed.directory ? ('directory' as const) : ('file' as const),
+							},
+						}))
+					: undefined,
 			});
 			if (read.source.reason === 'native-source-changed' || !(await recheck())) {
 				return unavailable('native-source-changed');
 			}
 			return {
-				...(await this.readTranscript(session.physical, undefined, includeNativeRecords, read)),
-				nativeSessionBinding: binding,
+				...(await this.readTranscript(session.physical, sshConfig, includeNativeRecords, read)),
+				...(!sshConfig || read.identityVerified ? { nativeSessionBinding: binding } : {}),
 			};
 		} catch (error) {
 			// A dangling/cyclic alias is unavailable, not a reason to try another account.
@@ -1445,23 +1543,30 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		filePath: string,
 		sshConfig?: SshRemoteConfig,
 		maxBytes = MAX_SESSION_METADATA_SIZE,
-		ownership?: { dev: number; ino: number; recheck: () => Promise<boolean> }
+		ownership?: {
+			dev: string;
+			ino: string;
+			recheck: () => Promise<boolean>;
+			remotePaths?: Array<{ path: string; identity: RemotePathIdentity }>;
+		}
 	): Promise<{
 		content: string | null;
 		source: NonNullable<SessionMessagesResult['source']>;
 		generation?: string;
+		identityVerified?: boolean;
 	}> {
 		const source: NonNullable<SessionMessagesResult['source']> = {
 			provider: 'grok',
 			status: 'unavailable',
 			maxBytes,
 		};
+		let identityVerified = false;
 		const unavailable = (reason: string) => {
 			source.status = 'unavailable';
 			source.reason = reason;
 			if (reason === 'too-large')
 				logger.warn('Grok session file exceeds read limit', LOG_CONTEXT, { filePath, maxBytes });
-			return { content: null, source };
+			return { content: null, source, identityVerified };
 		};
 		try {
 			let content: string;
@@ -1482,8 +1587,47 @@ export class GrokSessionStorage extends BaseSessionStorage {
 				if (before.data.isDirectory) return unavailable('not-a-file');
 				if (!Number.isSafeInteger(before.data.size) || before.data.size < 0)
 					return unavailable('invalid-size');
-				if (before.data.size > maxBytes) return unavailable('too-large');
-				const read = await readFileRemote(filePath, sshConfig, undefined, { maxBytes });
+				if (before.data.size > maxBytes && !ownership) return unavailable('too-large');
+				if (ownership && !(await ownership.recheck())) return unavailable('native-source-changed');
+				const read = await readFileRemote(filePath, sshConfig, undefined, {
+					maxBytes,
+					...(ownership
+						? {
+								expectedIdentity: {
+									canonicalPath: filePath,
+									device: ownership.dev,
+									inode: ownership.ino,
+									kind: 'file' as const,
+								},
+								expectedPaths: ownership.remotePaths,
+							}
+						: {}),
+				});
+				identityVerified = Boolean(
+					ownership &&
+					read.observedIdentity &&
+					read.observedIdentity.canonicalPath === filePath &&
+					read.observedIdentity.device === ownership.dev &&
+					read.observedIdentity.inode === ownership.ino &&
+					read.observedIdentity.kind === 'file'
+				);
+				if (ownership && !identityVerified) {
+					if (!read.errorCode && !isExpectedRemoteError(read.error)) {
+						captureException(new Error(read.error || 'readFileRemote failed'), {
+							operation: 'grokStorage:readSessionFile',
+							filePath,
+						});
+					}
+					return unavailable(
+						read.errorCode === 'identity-mismatch'
+							? 'native-source-changed'
+							: 'native-source-unobserved'
+					);
+				}
+				if (read.contentChanged) {
+					source.status = 'partial';
+					source.reason = 'changed-during-read';
+				}
 				if (!read.success || read.data === undefined) {
 					if (read.errorCode === 'too-large') return unavailable('too-large');
 					if (read.errorCode === 'invalid-encoding') return unavailable('invalid-encoding');
@@ -1526,7 +1670,10 @@ export class GrokSessionStorage extends BaseSessionStorage {
 				// Reject special files before open; O_NONBLOCK also avoids hanging if a
 				// regular file is replaced with a FIFO between stat and open.
 				const before = await fs.stat(filePath);
-				if (ownership && (before.dev !== ownership.dev || before.ino !== ownership.ino)) {
+				if (
+					ownership &&
+					(String(before.dev) !== ownership.dev || String(before.ino) !== ownership.ino)
+				) {
 					return unavailable('native-source-changed');
 				}
 				source.sizeBytes = before.size;
@@ -1546,8 +1693,8 @@ export class GrokSessionStorage extends BaseSessionStorage {
 					if (!opened.isFile()) return unavailable('not-a-file');
 					if (
 						ownership &&
-						(opened.dev !== ownership.dev ||
-							opened.ino !== ownership.ino ||
+						(String(opened.dev) !== ownership.dev ||
+							String(opened.ino) !== ownership.ino ||
 							!(await ownership.recheck()))
 					) {
 						return unavailable('native-source-changed');
@@ -1615,7 +1762,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 				}
 			}
 			if (!source.reason) source.status = 'available';
-			return { content, source, generation };
+			return { content, source, generation, identityVerified };
 		} catch (error) {
 			if (error instanceof RangeError) return unavailable('too-large');
 			if (
