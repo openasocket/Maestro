@@ -3226,6 +3226,27 @@
 				"Renderer TypeScript retains the known baseline RequestInit.dispatcher error.",
 				"Native discovery/invocation depends on GT1-07-02; selectable entries and capability remain disabled."
 			]
+		},
+		"phase05-slash-dispatch-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-06-slash-dispatch-regression-tests",
+			"sourceCommit": "0f2afbebec28b4982534365ecb93abc7eee5f9ca",
+			"sourceRevisionScope": "Pre-task HEAD plus authored test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/hooks/useInputProcessing.test.ts": "51a2eaeb3dd1dd4991f310cd6c905c5db8286dbc8e903f94959910c7dfb780a3",
+				"src/__tests__/renderer/stores/agentStore.test.ts": "bd1d97ac00bd3e334a2db9f36c91004d3304c447d06778689c3ccc6a67f086ab"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P18", "S02", "C-supportsSlashCommands"],
+			"authoredCases": 34,
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"Tests are authored only; no runtime or semantic type-check pass. GT1-05-13 must execute both suites and GT1-05-06C completion coverage.",
+				"Native Grok invocation remains unsupported. Mocked managed spawn rejection proves no host enforcement; existing template-variable mock remains, with full template/remote coverage owned by GT1-05-06B."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -8090,6 +8111,14 @@
 					"src/renderer/slashCommands.ts": "08b601420d1214d32a93b764d17060a817d1a1fe1357581ae23ad3183ce025af",
 					"src/renderer/hooks/input/useInputProcessing.ts": "6fcf5b151c65bdef3bf105798f7f08a83f609bb8e1f390b325979f4fb25d3ca3",
 					"src/renderer/stores/agentStore.ts": "3be99327319381269300c646412d5722a3b674dc3af8af4d1e614875387deb02"
+				},
+				"testAuthoring": {
+					"task": "GT1-05-06",
+					"evidenceRef": "phase05-slash-dispatch-tests",
+					"static": "pass",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"verificationTask": "GT1-05-13"
 				}
 			},
 			"phase05SlashCompletion": {
@@ -13979,6 +14008,14 @@
 					"src/renderer/slashCommands.ts": "08b601420d1214d32a93b764d17060a817d1a1fe1357581ae23ad3183ce025af",
 					"src/renderer/hooks/input/useInputProcessing.ts": "6fcf5b151c65bdef3bf105798f7f08a83f609bb8e1f390b325979f4fb25d3ca3",
 					"src/renderer/stores/agentStore.ts": "3be99327319381269300c646412d5722a3b674dc3af8af4d1e614875387deb02"
+				},
+				"testAuthoring": {
+					"task": "GT1-05-06",
+					"evidenceRef": "phase05-slash-dispatch-tests",
+					"static": "pass",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"verificationTask": "GT1-05-13"
 				}
 			},
 			"phase05SlashCompletion": {
@@ -19273,6 +19310,14 @@
 					"src/renderer/slashCommands.ts": "08b601420d1214d32a93b764d17060a817d1a1fe1357581ae23ad3183ce025af",
 					"src/renderer/hooks/input/useInputProcessing.ts": "6fcf5b151c65bdef3bf105798f7f08a83f609bb8e1f390b325979f4fb25d3ca3",
 					"src/renderer/stores/agentStore.ts": "3be99327319381269300c646412d5722a3b674dc3af8af4d1e614875387deb02"
+				},
+				"testAuthoring": {
+					"task": "GT1-05-06",
+					"evidenceRef": "phase05-slash-dispatch-tests",
+					"static": "pass",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"verificationTask": "GT1-05-13"
 				}
 			},
 			"phase05SlashCompletion": {

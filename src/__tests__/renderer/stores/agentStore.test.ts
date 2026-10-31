@@ -5,7 +5,7 @@
  * (kill, interrupt). The store orchestrates sessionStore mutations + IPC calls.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { logger } from '../../../renderer/utils/logger';
 import { renderHook, act } from '@testing-library/react';
 import { useAgentStore } from '../../../renderer/stores/agentStore';
@@ -69,6 +69,8 @@ const mockInterrupt = vi.fn().mockResolvedValue(true);
 const mockDetect = vi.fn().mockResolvedValue([]);
 const mockGetAgent = vi.fn().mockResolvedValue(null);
 const mockClearError = vi.fn().mockResolvedValue(undefined);
+const mockDiscoverSlashCommands = vi.fn().mockResolvedValue(null);
+const mockGetActiveProcesses = vi.fn().mockResolvedValue([]);
 
 (window as any).maestro = {
 	process: {
@@ -1939,6 +1941,189 @@ describe('agentStore', () => {
 			const spawnCall = mockSpawn.mock.calls[0][0];
 			expect(spawnCall.readOnlyMode).toBe(false);
 			expect(spawnCall.permissionMode).toBe('full');
+		});
+
+		describe('Grok queued slash refusal (GT1-05-06)', () => {
+			beforeEach(() => {
+				window.maestro.process.getActiveProcesses = mockGetActiveProcesses;
+				window.maestro.agents.discoverSlashCommands = mockDiscoverSlashCommands;
+			});
+			afterEach(() => {
+				Reflect.deleteProperty(window.maestro.process, 'getActiveProcesses');
+				Reflect.deleteProperty(window.maestro.agents, 'discoverSlashCommands');
+			});
+			it.each([
+				{ type: 'message', command: '/skills', remote: false, background: false, running: true },
+				{ type: 'message', command: '/review', remote: true, background: false, running: false },
+				{ type: 'command', command: '/review', remote: false, background: false, running: false },
+				{ type: 'command', command: '/review', remote: false, background: true, running: true },
+			] as const)(
+				'refuses $type $command (remote=$remote, background=$background, running=$running)',
+				async ({ type, command, remote, background, running }) => {
+					const item = createQueuedItem({
+						type,
+						command,
+						text: `${command} private-argument @Peer`,
+						crossAgentMention: true,
+					});
+					const session = createMockSession({
+						toolType: 'grok',
+						state: 'busy',
+						busySource: 'ai',
+						agentCommands: [{ command, description: 'Stale', prompt: 'OTHER PROVIDER BODY' }],
+						sessionSshRemoteConfig: remote ? { enabled: true, remoteId: 'remote-grok' } : undefined,
+					});
+					session.aiTabs[0] = {
+						...session.aiTabs[0],
+						agentSessionId: 'grok-native',
+						state: 'busy',
+						logs: [
+							{
+								id: 'unsent',
+								timestamp: 1,
+								source: 'user',
+								text: item.text!,
+								queuedItemId: item.id,
+							},
+						],
+					};
+					const sibling = {
+						...session.aiTabs[0],
+						id: 'other-tab',
+						state: 'idle' as const,
+						logs: [],
+					};
+					session.aiTabs.push(sibling);
+					if (background) session.activeTabId = sibling.id;
+					useSessionStore.getState().setSessions([session]);
+					mockGetActiveProcesses.mockResolvedValueOnce(
+						running ? [{ sessionId: 'session-1-ai-default-tab', isTerminal: false }] : []
+					);
+
+					expect(
+						await useAgentStore.getState().processQueuedItem('session-1', item, defaultDeps)
+					).toBe(false);
+
+					const updated = useSessionStore.getState().sessions[0];
+					expect(updated.aiTabs[0].state).toBe(running ? 'busy' : 'idle');
+					expect(updated.state).toBe(running ? 'busy' : 'idle');
+					expect(updated.aiTabs[1]).toEqual(sibling);
+					expect(updated.aiTabs[0].logs).toEqual([
+						expect.objectContaining({
+							source: 'error',
+							text: expect.stringContaining('No command was sent.'),
+						}),
+					]);
+					expect(JSON.stringify(updated.aiTabs[0].logs)).not.toMatch(
+						/private-argument|OTHER PROVIDER BODY/
+					);
+					expect(updated.executionQueue).toEqual([]);
+					expect(mockDiscoverSlashCommands).toHaveBeenCalledTimes(remote || background ? 0 : 1);
+					if (!remote && !background) {
+						expect(mockDiscoverSlashCommands).toHaveBeenCalledWith({
+							providerId: 'grok',
+							context: {
+								kind: 'agent',
+								sessionId: 'session-1',
+								model: undefined,
+								effort: undefined,
+							},
+						});
+					}
+					expect(mockGetActiveProcesses).toHaveBeenCalledWith({ includeChildProcesses: false });
+					expect(mockGetAgent).not.toHaveBeenCalled();
+					expect(mockSpawn).not.toHaveBeenCalled();
+					expect(requestTabAutoNameForMessage).not.toHaveBeenCalled();
+					expect(dispatchCrossAgentMentionsForMessage).not.toHaveBeenCalled();
+				}
+			);
+
+			it.each([false, true])(
+				'expands a custom collision once through the selected spawn (managed refusal=%s)',
+				async (denied) => {
+					const session = createMockSession({
+						toolType: 'grok',
+						cwd: '/selected/project',
+						customPath: '/selected/bin/grok',
+						customEnvVars: { GROK_HOME: '/selected/account' },
+						agentCommands: [
+							{ command: '/review', description: 'Foreign', prompt: 'OTHER PROVIDER BODY' },
+						],
+					});
+					session.aiTabs[0] = {
+						...session.aiTabs[0],
+						agentSessionId: 'grok-native',
+						permissionMode: 'readonly',
+						readOnlyMode: true,
+					};
+					const sibling = { ...session.aiTabs[0], id: 'other-tab', agentSessionId: 'other-native' };
+					session.aiTabs.push(sibling);
+					session.activeTabId = sibling.id;
+					useSessionStore.getState().setSessions([session]);
+					mockGetAgent.mockResolvedValueOnce(
+						createMockAgentConfig({ id: 'grok', command: 'grok', args: [] })
+					);
+					const item = createQueuedItem({
+						type: 'command',
+						command: '/review',
+						text: undefined,
+						commandArgs: 'selected changes',
+						turnSettings: { model: 'grok-selected', effort: 'high' },
+						delegation: { contractVersion: '1.0', traceId: 'selected-trace' } as never,
+						dispatchTicket: 'selected-ticket',
+					});
+					const deps = {
+						...defaultDeps,
+						customAICommands: [
+							{
+								id: 'custom-review',
+								command: '/review',
+								description: 'Custom review',
+								prompt: 'Review $ARGUMENTS',
+							},
+						],
+					};
+					if (denied) mockSpawn.mockRejectedValueOnce(new Error('Managed policy denied this turn'));
+
+					const dispatched = useAgentStore.getState().processQueuedItem('session-1', item, deps);
+					if (denied) await expect(dispatched).rejects.toThrow('Managed policy denied this turn');
+					else expect(await dispatched).toBe(true);
+
+					expect(mockSpawn).toHaveBeenCalledTimes(1);
+					expect(mockSpawn).toHaveBeenCalledWith(
+						expect.objectContaining({
+							sessionId: 'session-1-ai-default-tab',
+							toolType: 'grok',
+							command: 'grok',
+							prompt: 'Review selected changes',
+							cwd: '/selected/project',
+							agentSessionId: 'grok-native',
+							sessionCustomPath: '/selected/bin/grok',
+							sessionCustomEnvVars: { GROK_HOME: '/selected/account' },
+							sessionCustomModel: 'grok-selected',
+							sessionCustomEffort: 'high',
+							permissionMode: 'readonly',
+							readOnlyMode: true,
+							delegation: item.delegation,
+							dispatchTicket: item.dispatchTicket,
+						})
+					);
+					expect(mockGetAgent).toHaveBeenCalledWith('grok');
+					expect(mockDiscoverSlashCommands).not.toHaveBeenCalled();
+					const updated = useSessionStore.getState().sessions[0];
+					expect(updated.aiTabs[1]).toEqual(sibling);
+					expect(updated.customEnvVars).toEqual(session.customEnvVars);
+					expect(updated.aiTabs[0].logs).toEqual([
+						expect.objectContaining({
+							source: denied ? 'error' : 'user',
+							text: denied
+								? expect.stringContaining('Managed policy denied this turn')
+								: 'Review selected changes',
+						}),
+					]);
+					expect(updated.executionQueue).toEqual(denied ? [{ ...item, paused: true }] : []);
+				}
+			);
 		});
 
 		it('processes slash command and spawns agent', async () => {
