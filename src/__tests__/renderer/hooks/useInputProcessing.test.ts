@@ -1257,14 +1257,25 @@ describe('useInputProcessing', () => {
 			}
 		);
 
-		it.each([
-			['idle', false, '\t'],
-			['idle', true, '\n'],
-			['busy', false, '\n'],
-			['busy', true, '  '],
-		] as const)(
-			'keeps custom command arguments raw at the %s queue boundary (SSH: %s)',
-			async (state, remote, separator) => {
+		it.each(
+			(
+				[
+					['idle', false, '\t'],
+					['idle', true, '\n'],
+					['busy', false, '\n'],
+					['busy', true, '  '],
+				] as const
+			).flatMap(([state, remote, separator]) =>
+				(['staged', 'explicit', 'empty'] as const).map((imageSource) => ({
+					state,
+					remote,
+					separator,
+					imageSource,
+				}))
+			)
+		)(
+			'keeps $imageSource images and raw arguments at the $state queue boundary (SSH: $remote)',
+			async ({ state, remote, separator, imageSource }) => {
 				const target = createMockTab({
 					id: 'command-target',
 					name: 'Selected command tab',
@@ -1280,6 +1291,14 @@ describe('useInputProcessing', () => {
 					aiTabs: [...session.aiTabs, target],
 					...(remote && { sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-a' } }),
 				};
+				const stagedImages = ['data:image/png;base64,staged-1', 'data:image/png;base64,staged-2'];
+				const images =
+					imageSource === 'staged'
+						? undefined
+						: imageSource === 'explicit'
+							? ['data:image/png;base64,explicit-1', 'data:image/jpeg;base64,explicit-2']
+							: [];
+				const expectedImages = images ?? stagedImages;
 				const args = "$& $$ $` $' {{agent_name}}\nnext  line";
 				const commandText = `/review${separator}${args}`;
 				const readPrompt = vi.fn(() => 'Review {{agent_name}}: $ARGUMENTS');
@@ -1288,6 +1307,7 @@ describe('useInputProcessing', () => {
 					const deps = createDeps({
 						activeSession: session,
 						inputValue: `  ${commandText}  `,
+						stagedImages,
 						customAICommands: [
 							{
 								id: 'custom-review',
@@ -1301,8 +1321,17 @@ describe('useInputProcessing', () => {
 					});
 					const { result } = renderHook(() => useInputProcessing(deps));
 					await act(async () => {
-						await result.current.processInput(undefined, { tabId: target.id });
+						await result.current.processInput(undefined, { tabId: target.id, images });
 					});
+					if (imageSource === 'staged') {
+						expect(mockSetStagedImages).toHaveBeenCalledExactlyOnceWith([]);
+						// Acceptance is the synchronous state/queue handoff, before the idle timer runs.
+						expect(mockSetStagedImages.mock.invocationCallOrder[0]).toBeGreaterThan(
+							mockSetSessions.mock.invocationCallOrder[mockSetSessions.mock.calls.length - 1]
+						);
+					} else {
+						expect(mockSetStagedImages).not.toHaveBeenCalled();
+					}
 					expect(mockProcessQueuedItemRef.current).not.toHaveBeenCalled();
 					await act(async () => {
 						await vi.advanceTimersByTimeAsync(50);
@@ -1323,6 +1352,12 @@ describe('useInputProcessing', () => {
 						turnSettings: { model: target.customModel, effort: target.customEffort },
 						commandScope: { provider: 'grok' },
 					});
+					if (expectedImages.length > 0) {
+						expect(item.images).toEqual(expectedImages);
+						expect(item.images).not.toBe(expectedImages);
+					} else {
+						expect(item).not.toHaveProperty('images');
+					}
 					expect(item).not.toHaveProperty('text');
 					expect(item).not.toHaveProperty('prompt');
 					if (state === 'idle') {
@@ -1331,6 +1366,7 @@ describe('useInputProcessing', () => {
 							item
 						);
 						expect(current.executionQueue).toEqual([]);
+						expect(current.aiTabs.find((tab) => tab.id === target.id)?.state).toBe('busy');
 					} else {
 						expect(mockProcessQueuedItemRef.current).not.toHaveBeenCalled();
 						expect(current.executionQueue).toEqual([item]);
@@ -1363,30 +1399,44 @@ describe('useInputProcessing', () => {
 			}
 		);
 
-		it('keeps a custom command draft when its explicit target tab disappeared', async () => {
-			const deps = createDeps({
-				activeSession: session,
-				inputValue: '/review $ARGUMENTS',
-				customAICommands: [
-					{ id: 'review', command: '/review', description: 'Review', prompt: 'Run' },
-				],
-			});
-			const { result } = renderHook(() => useInputProcessing(deps));
-			await act(async () => {
-				await result.current.processInput(undefined, { tabId: 'removed-tab' });
-				await vi.advanceTimersByTimeAsync(50);
-			});
-			expect(useSessionStore.getState().sessions).toEqual([session]);
-			for (const effect of [
-				mockSetInputValue,
-				mockSyncAiInputToSession,
-				mockProcessQueuedItemRef.current,
-				discover,
-				window.maestro.process.spawn,
-			]) {
-				expect(effect).not.toHaveBeenCalled();
+		it.each(['staged', 'explicit', 'empty'] as const)(
+			'keeps the custom command draft and %s images when its explicit target disappeared',
+			async (imageSource) => {
+				const draft = '/review $ARGUMENTS';
+				session.aiTabs[0].inputValue = draft;
+				const images =
+					imageSource === 'staged'
+						? undefined
+						: imageSource === 'explicit'
+							? ['data:image/png;base64,explicit-image']
+							: [];
+				const deps = createDeps({
+					activeSession: session,
+					inputValue: draft,
+					stagedImages: session.aiTabs[0].stagedImages,
+					customAICommands: [
+						{ id: 'review', command: '/review', description: 'Review', prompt: 'Run' },
+					],
+				});
+				const { result } = renderHook(() => useInputProcessing(deps));
+				await act(async () => {
+					await result.current.processInput(undefined, { tabId: 'removed-tab', images });
+					await vi.advanceTimersByTimeAsync(50);
+				});
+				expect(useSessionStore.getState().sessions).toEqual([session]);
+				for (const effect of [
+					mockSetInputValue,
+					mockSetStagedImages,
+					mockSetSlashCommandOpen,
+					mockSyncAiInputToSession,
+					mockProcessQueuedItemRef.current,
+					discover,
+					window.maestro.process.spawn,
+				]) {
+					expect(effect).not.toHaveBeenCalled();
+				}
 			}
-		});
+		);
 
 		it.each(['resolve', 'reject'])(
 			'bounds a disconnected lookup and ignores its late %s',
