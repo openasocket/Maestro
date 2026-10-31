@@ -2926,7 +2926,9 @@
 					"GT1-10-04A",
 					"GT1-03-01A",
 					"GT1-03-05A",
-					"GT1-07-03A"
+					"GT1-07-03A",
+					"GT1-03-05C",
+					"GT1-03-05C1"
 				],
 				"test": [
 					"GT1-03-02",
@@ -2943,7 +2945,8 @@
 					"GT1-10-04B",
 					"GT1-03-01B",
 					"GT1-03-05B",
-					"GT1-07-03C"
+					"GT1-07-03C",
+					"GT1-03-05D"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -2992,7 +2995,7 @@
 				{
 					"id": "gap:P09",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented and GT1-03-05B boundary/outcome tests are authored, not run. Complete GT1-03-05C/D propagation and consumer tests, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata and authored tests alone do not complete this outcome.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C shared cost/cache/scope propagation are implemented but unverified. Complete GT1-03-05C1 proven process-session baselines and covered unfinished-response reconciliation, GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and downstream persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c-shared-usage-propagation.",
 					"affectedRows": ["P09"]
 				},
 				{
@@ -3186,7 +3189,9 @@
 					"GT1-03-05A",
 					"GT1-03-11A",
 					"GT1-07-03A",
-					"GT1-07-04C"
+					"GT1-07-04C",
+					"GT1-03-05C",
+					"GT1-03-05C1"
 				],
 				"test": [
 					"GT1-03-02",
@@ -3204,7 +3209,8 @@
 					"GT1-03-05B",
 					"GT1-03-11B",
 					"GT1-07-03C",
-					"GT1-07-04D"
+					"GT1-07-04D",
+					"GT1-03-05D"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -3259,7 +3265,7 @@
 				{
 					"id": "gap:P10",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented and GT1-03-05B boundary/outcome tests are authored, not run. Complete GT1-03-05C/D propagation and consumer tests, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata and authored tests alone do not complete this outcome.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C shared cost/cache/scope propagation are implemented but unverified. Complete GT1-03-05C1 proven process-session baselines and covered unfinished-response reconciliation, GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and downstream persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c-shared-usage-propagation.",
 					"affectedRows": ["P10"]
 				},
 				{
@@ -3358,7 +3364,8 @@
 					"GT1-07-02",
 					"GT1-07-03",
 					"GT1-03-05A",
-					"GT1-03-05C"
+					"GT1-03-05C",
+					"GT1-03-05C1"
 				],
 				"test": [
 					"GT1-03-06",
@@ -3418,7 +3425,7 @@
 				{
 					"id": "gap:P11",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented and GT1-03-05B boundary/outcome tests are authored, not run. Complete GT1-03-05C/D propagation and consumer tests, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata and authored tests alone do not complete this outcome.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C shared cost/cache/scope propagation are implemented but unverified. Complete GT1-03-05C1 proven process-session baselines and covered unfinished-response reconciliation, GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and downstream persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c-shared-usage-propagation.",
 					"affectedRows": ["P11"]
 				},
 				{
@@ -3571,7 +3578,9 @@
 					"GT1-03-11",
 					"GT1-02-03",
 					"GT1-03-05A",
-					"GT1-03-11A"
+					"GT1-03-11A",
+					"GT1-03-05C",
+					"GT1-03-05C1"
 				],
 				"test": [
 					"GT1-03-02",
@@ -3582,7 +3591,8 @@
 					"GT1-02-04",
 					"GT1-10-13",
 					"GT1-03-05B",
-					"GT1-03-11B"
+					"GT1-03-11B",
+					"GT1-03-05D"
 				],
 				"verification": [
 					"GT1-03-13",
@@ -3634,7 +3644,7 @@
 				{
 					"id": "gap:P12",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented and GT1-03-05B boundary/outcome tests are authored, not run. Complete GT1-03-05C/D propagation and consumer tests, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata and authored tests alone do not complete this outcome.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C shared cost/cache/scope propagation are implemented but unverified. Complete GT1-03-05C1 proven process-session baselines and covered unfinished-response reconciliation, GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and downstream persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c-shared-usage-propagation.",
 					"affectedRows": ["P12"]
 				},
 				{
@@ -9943,7 +9953,8 @@
 					"GT1-07-02",
 					"GT1-07-03",
 					"GT1-03-05A",
-					"GT1-03-05C"
+					"GT1-03-05C",
+					"GT1-03-05C1"
 				],
 				"test": [
 					"GT1-03-06",
@@ -10001,7 +10012,7 @@
 				{
 					"id": "gap:C-supportsCostTracking",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented and GT1-03-05B boundary/outcome tests are authored, not run. Complete GT1-03-05C/D propagation and consumer tests, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata and authored tests alone do not complete this outcome.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C shared cost/cache/scope propagation are implemented but unverified. Complete GT1-03-05C1 proven process-session baselines and covered unfinished-response reconciliation, GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and downstream persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c-shared-usage-propagation.",
 					"affectedRows": ["C-supportsCostTracking"]
 				},
 				{
@@ -10087,7 +10098,8 @@
 					"GT1-07-02",
 					"GT1-07-03",
 					"GT1-03-05A",
-					"GT1-03-05C"
+					"GT1-03-05C",
+					"GT1-03-05C1"
 				],
 				"test": [
 					"GT1-03-06",
@@ -10145,7 +10157,7 @@
 				{
 					"id": "gap:C-supportsUsageStats",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented and GT1-03-05B boundary/outcome tests are authored, not run. Complete GT1-03-05C/D propagation and consumer tests, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata and authored tests alone do not complete this outcome.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C shared cost/cache/scope propagation are implemented but unverified. Complete GT1-03-05C1 proven process-session baselines and covered unfinished-response reconciliation, GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and downstream persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c-shared-usage-propagation.",
 					"affectedRows": ["C-supportsUsageStats"]
 				},
 				{
@@ -10569,8 +10581,15 @@
 				"src/main/process-manager/handlers/StdoutHandler.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-03-05", "GT1-03-11", "GT1-11-14A", "GT1-03-05A"],
-				"test": ["GT1-03-06", "GT1-03-12", "GT1-11-14B", "GT1-03-05B"],
+				"implementation": [
+					"GT1-03-05",
+					"GT1-03-11",
+					"GT1-11-14A",
+					"GT1-03-05A",
+					"GT1-03-05C",
+					"GT1-03-05C1"
+				],
+				"test": ["GT1-03-06", "GT1-03-12", "GT1-11-14B", "GT1-03-05B", "GT1-03-05D"],
 				"verification": ["GT1-03-13", "GT1-03-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -10611,7 +10630,7 @@
 				{
 					"id": "gap:C-supportsResultMessages",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented and GT1-03-05B boundary/outcome tests are authored, not run. Complete GT1-03-05C/D propagation and consumer tests, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata and authored tests alone do not complete this outcome.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C shared cost/cache/scope propagation are implemented but unverified. Complete GT1-03-05C1 proven process-session baselines and covered unfinished-response reconciliation, GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and downstream persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c-shared-usage-propagation.",
 					"affectedRows": ["C-supportsResultMessages"]
 				},
 				{
@@ -12433,7 +12452,9 @@
 					"GT1-03-09",
 					"GT1-03-11",
 					"GT1-03-01A",
-					"GT1-03-05A"
+					"GT1-03-05A",
+					"GT1-03-05C",
+					"GT1-03-05C1"
 				],
 				"test": [
 					"GT1-03-02",
@@ -12442,7 +12463,8 @@
 					"GT1-03-10",
 					"GT1-03-12",
 					"GT1-03-01B",
-					"GT1-03-05B"
+					"GT1-03-05B",
+					"GT1-03-05D"
 				],
 				"verification": ["GT1-03-13", "GT1-03-14", "GT1-07-11"],
 				"live": ["GT1-11-11"],
@@ -12484,7 +12506,7 @@
 				{
 					"id": "gap:REG-PARSER",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented and GT1-03-05B boundary/outcome tests are authored, not run. Complete GT1-03-05C/D propagation and consumer tests, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata and authored tests alone do not complete this outcome.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C shared cost/cache/scope propagation are implemented but unverified. Complete GT1-03-05C1 proven process-session baselines and covered unfinished-response reconciliation, GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and downstream persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c-shared-usage-propagation.",
 					"affectedRows": ["REG-PARSER"]
 				},
 				{
@@ -13111,7 +13133,8 @@
 					"GT1-07-02",
 					"GT1-07-03",
 					"GT1-03-05A",
-					"GT1-03-05C"
+					"GT1-03-05C",
+					"GT1-03-05C1"
 				],
 				"test": [
 					"GT1-03-06",
@@ -13170,7 +13193,7 @@
 				{
 					"id": "gap:REG-USAGE",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "GT1-03-05A shared terminal/accounting contract is implemented and GT1-03-05B boundary/outcome tests are authored, not run. Complete GT1-03-05C/D propagation and consumer tests, remaining adapters and phases04/07/10 owners, then verify under GT1-03-13; metadata and authored tests alone do not complete this outcome.",
+					"missingPrerequisite": "GT1-03-05A types, GT1-03-05B authored tests and GT1-03-05C shared cost/cache/scope propagation are implemented but unverified. Complete GT1-03-05C1 proven process-session baselines and covered unfinished-response reconciliation, GT1-03-05D consumer tests, remaining adapters and phases04/07/10 consumers, then verify under GT1-03-13. Native compliance and downstream persistence/UI remain unqualified. See Plans/grok-tier1/evidence/03.md#gt1-03-05c-shared-usage-propagation.",
 					"affectedRows": ["REG-USAGE"]
 				},
 				{

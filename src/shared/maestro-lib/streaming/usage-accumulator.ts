@@ -27,7 +27,13 @@
 
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../canonicalJson';
-import { calculateWithPricing, resolveModelPricing } from '../../modelPricing';
+import {
+	calculateWithPricing,
+	MODEL_PRICING,
+	normalizeModelId,
+	resolveModelPricing,
+} from '../../modelPricing';
+import { addUsageStats, mergeUsageCost, replaceUsageStats, usageCostUsd } from './usage-totals';
 import type { UsageStats } from '../../types';
 
 interface UsageTotals {
@@ -59,6 +65,84 @@ export class UsageAccumulator {
 	private _lastTotals: UsageTotals | undefined;
 	private _isCumulative: boolean | undefined;
 	private readonly attachesAbsoluteUsage: boolean;
+	private readonly scoped = new Map<string, { turn: string; usage: UsageStats }>();
+	private readonly finalTurns = new Set<string>();
+	private readonly coveredResponses = new Set<string>();
+
+	/** Scope snapshots for reconciliation, including non-additive session/child detail. */
+	get scopedReports(): readonly UsageStats[] {
+		return structuredClone([...this.scoped.values()].map(({ usage }) => usage));
+	}
+
+	/**
+	 * Explicit accounting path. Returns the captured turn spend, not a delta.
+	 * A capture owns one turn when IDs are absent. Equal delta payloads are valid
+	 * separate observations; the producer must suppress replay before this port.
+	 */
+	accumulate(usage: UsageStats): UsageStats | undefined {
+		const fact = usage.accounting;
+		if (!fact) throw new Error('Scoped usage requires accounting metadata');
+		const turn = canonicalJson([
+			fact.route ?? null,
+			fact.scopeId ?? null,
+			fact.providerSessionId ?? null,
+			fact.processGeneration ?? null,
+			fact.turnId ?? fact.requestId ?? null,
+		]);
+		const key = canonicalJson([
+			turn,
+			fact.scope,
+			fact.scope === 'response' ? (fact.responseId ?? fact.requestId ?? null) : null,
+		]);
+		let previous = this.scoped.get(key)?.usage;
+		const additive = fact.scope === 'turn' || fact.scope === 'response';
+		if (
+			!previous?.accounting?.final &&
+			!this.coveredResponses.has(key) &&
+			!(additive && this.finalTurns.has(turn))
+		) {
+			// A turn snapshot includes its preceding responses. Replace them rather
+			// than summing the same model calls a second time. New response deltas
+			// after a provisional snapshot can still contribute until final.
+			if (fact.scope === 'turn' && fact.reporting === 'snapshot') {
+				for (const [id, entry] of this.scoped) {
+					if (entry.turn === turn && entry.usage.accounting?.scope === 'response') {
+						previous = addUsageStats(previous, entry.usage);
+						if (entry.usage.accounting?.final) this.coveredResponses.add(id);
+						this.scoped.delete(id);
+					}
+				}
+			}
+			const next =
+				fact.reporting === 'snapshot'
+					? replaceUsageStats(previous, usage)
+					: addUsageStats(previous, usage);
+			// Preserve the scope identity and latest settlement after adding deltas.
+			next.accounting = { ...next.accounting!, reporting: fact.reporting, final: fact.final };
+			this.scoped.set(key, { turn, usage: next });
+			if (fact.scope === 'turn' && fact.final) this.finalTurns.add(turn);
+		}
+		let total: UsageStats | undefined;
+		for (const { usage: report } of this.scoped.values()) {
+			// Process-session/lifetime snapshots need a proven baseline before
+			// attribution to this turn. Child reports are detail, not extra spend.
+			if (report.accounting?.scope !== 'turn' && report.accounting?.scope !== 'response') continue;
+			total = addUsageStats(total, report);
+		}
+		if (total?.accounting) {
+			total.accounting.scope = 'turn';
+			total.accounting.reporting = 'snapshot';
+			if (!total.accounting.final || !this.finalTurns.size) {
+				total.accounting.completeness = 'partial';
+				if (total.accounting.cost.status === 'estimated') {
+					total.accounting.estimatedCost = { ...total.accounting.cost, completeness: 'partial' };
+				}
+				total.accounting.cost = mergeUsageCost(total.accounting.cost, { status: 'unknown' });
+				total.totalCostUsd = usageCostUsd(total.accounting.cost) ?? 0;
+			}
+		}
+		return total;
+	}
 
 	constructor(options: UsageAccumulatorOptions) {
 		this.attachesAbsoluteUsage = options.attachesAbsoluteUsage;
@@ -241,6 +325,7 @@ export interface UsageReport {
 	model?: string;
 	contextWindowReported?: boolean;
 	correctionOnly?: boolean;
+	accounting?: UsageStats['accounting'];
 }
 
 /** What one process's stream said about itself, as the tracker saw it. */
@@ -298,7 +383,11 @@ export class UsageProvenanceTracker {
 			return;
 		}
 		this.events += 1;
-		if (typeof report.costUsd === 'number' && Number.isFinite(report.costUsd))
+		if (
+			report.accounting
+				? usageCostUsd(report.accounting.cost) !== undefined
+				: typeof report.costUsd === 'number' && Number.isFinite(report.costUsd)
+		)
 			this.costReports += 1;
 		if (report.cacheReadTokens !== undefined) this.cacheReadReports += 1;
 		if (report.cacheCreationTokens !== undefined) this.cacheCreationReports += 1;
@@ -358,7 +447,9 @@ export function priceUsageEstimate(
 		'inputTokens' | 'outputTokens' | 'cacheReadInputTokens' | 'cacheCreationInputTokens'
 	>,
 	model: string | null | undefined
-): UsagePriceEstimate {
+): UsagePriceEstimate | undefined {
+	if (model && /grok/i.test(model) && !Object.hasOwn(MODEL_PRICING, normalizeModelId(model)))
+		return undefined;
 	const pricing = resolveModelPricing(model);
 	return {
 		costUsd: calculateWithPricing(
@@ -377,7 +468,8 @@ export function priceUsageEstimate(
 
 /** The cache convention of the rate table a model resolves to; `unknown` with no model to resolve. */
 export function cacheReadCountingFor(model: string | null | undefined): CacheReadCounting {
-	if (!model) return 'unknown';
+	if (!model || (/grok/i.test(model) && !Object.hasOwn(MODEL_PRICING, normalizeModelId(model))))
+		return 'unknown';
 	return resolveModelPricing(model).CACHE_READ_SUBSET_OF_INPUT ? 'inside-input' : 'beside-input';
 }
 
@@ -480,10 +572,40 @@ export function describeUsageProvenance(
 			observed.contextWindowReported && total.contextWindow > 0 ? total.contextWindow : null,
 		cacheReadCounting: cacheReadCountingFor(effectiveModel),
 	};
-	if (observed.costReports > 0) {
+	if (total.accounting) {
+		const { cost, estimatedCost, cacheReadCounting } = total.accounting;
+		const knownCost = usageCostUsd(cost);
+		const explicit = {
+			...base,
+			cacheReadCounting:
+				cacheReadCounting === 'unknown' && !total.accounting.route
+					? base.cacheReadCounting
+					: cacheReadCounting,
+		};
+		if (cost.status !== 'estimated' && knownCost !== undefined) {
+			return { ...explicit, cost: 'reported', costUsd: knownCost };
+		}
+		const estimate = cost.status === 'estimated' ? cost : estimatedCost;
+		if (estimate)
+			return {
+				...explicit,
+				cost: 'priced',
+				costUsd: estimate.costUsd,
+				priceRevision: estimate.pricingRevision,
+			};
+		// An explicit route never receives a guessed price. Legacy unscoped
+		// observations retain the existing supported-model estimate below.
+		if (total.accounting.route) return explicit;
+	}
+	if (!total.accounting && observed.costReports > 0) {
 		return { ...base, cost: 'reported', costUsd: total.totalCostUsd };
 	}
-	if (!effectiveModel) return base;
+	if (
+		!effectiveModel ||
+		(/grok/i.test(effectiveModel) &&
+			!Object.hasOwn(MODEL_PRICING, normalizeModelId(effectiveModel)))
+	)
+		return base;
 	const priced = priceUsageEstimate(
 		{
 			inputTokens: counts.inputTokens,
@@ -493,5 +615,7 @@ export function describeUsageProvenance(
 		},
 		effectiveModel
 	);
-	return { ...base, cost: 'priced', costUsd: priced.costUsd, priceRevision: priced.priceRevision };
+	return priced
+		? { ...base, cost: 'priced', costUsd: priced.costUsd, priceRevision: priced.priceRevision }
+		: base;
 }

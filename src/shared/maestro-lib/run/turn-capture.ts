@@ -63,6 +63,12 @@ export class TurnCapture {
 	private streamedText = '';
 	private readonly usageReporting: UsageReporting;
 	private readonly usageAccumulator: UsageAccumulator | undefined;
+	private readonly scopedUsage = new UsageAccumulator({ attachesAbsoluteUsage: false });
+
+	/** Retained session/child observations for consumers that reconcile those scopes. */
+	get usageReports(): readonly UsageStats[] {
+		return this.scopedUsage.scopedReports;
+	}
 
 	private readonly classifiesInBandErrors: boolean;
 
@@ -115,7 +121,19 @@ export class TurnCapture {
 		}
 
 		const usage = this.parser.extractUsage(event);
-		if (usage) this.addUsage(parsedUsageToStats(usage));
+		if (usage) {
+			const reported = parsedUsageToStats(usage);
+			if (usage.accounting) this.usage = this.scopedUsage.accumulate(reported) ?? this.usage;
+			else this.addUsage(reported);
+		}
+		if (
+			event.terminal &&
+			event.terminal.status !== 'success' &&
+			this.usage?.accounting &&
+			!this.usage.accounting.final
+		) {
+			this.usage.accounting.completeness = 'partial';
+		}
 	}
 
 	/** The answer: the result event's text, else what was streamed. */
