@@ -3143,6 +3143,27 @@
 				"GT1-05-02D1 owns real creation-consumer allocation, permission refusal and fresh native identity; custom executable strings are draft configuration, not validated launches.",
 				"Production ACP stays phase07, Symphony execution phase08 and native/platform qualification phase11; no capability or beta promotion."
 			]
+		},
+		"phase05-creation-consumer-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-02d1-creation-consumer-regression-tests",
+			"sourceCommit": "e8ee1cfeea309c5de3a4faacfc61c8bd424bde37",
+			"sourceRevisionScope": "Pre-task HEAD plus the authored test hash and task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/hooks/useSessionCrud.test.ts": "3fcbf42dfde22f3c35625a9bf4468ca72243bc9a3229c1ffd948c0c419fcbab2"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P04", "P17", "S30"],
+			"authoredCases": 12,
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"Twelve cases exercise the real createNewSession/buildNewAgentRecord consumer with existing stores and synthetic configuration; authored only, without test execution or semantic type checking.",
+				"GT1-05-13 must execute useSessionCrud.test.ts and both GT1-05-02D creation-dialog suites. Canonical binary/admission coverage remains in GT1-05-02B1.",
+				"Custom executable values are idle draft configuration, not binary or admission certification. Production ACP and native/platform qualification remain pending; no capability or beta promotion."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -4809,7 +4830,8 @@
 				"phase05WorktreeTestsEvidenceRef": "phase05-worktree-tests",
 				"phase05WorktreeLaunchTestsEvidenceRef": "phase05-worktree-launch-tests",
 				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation",
-				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests"
+				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests",
+				"phase05CreationConsumerTestsEvidenceRef": "phase05-creation-consumer-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7772,7 +7794,8 @@
 				"phase05WorktreeLaunchTestsEvidenceRef": "phase05-worktree-launch-tests",
 				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation",
 				"phase05DuplicatePermissionsEvidenceRef": "phase05-duplicate-permissions",
-				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests"
+				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests",
+				"phase05CreationConsumerTestsEvidenceRef": "phase05-creation-consumer-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7804,9 +7827,10 @@
 				},
 				{
 					"id": "duplicate-permission-handoff:P17",
-					"code": "implementation-pending",
-					"missingPrerequisite": "GT1-05-02C1 must thread selected-tab permission into the fresh initial tab; GT1-05-02D/D1 and GT1-05-13 must prove creation behavior.",
-					"affectedRows": ["P17"]
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-05-02C1 implemented permission handoff; GT1-05-02D/D1 authored component and real creation-consumer assertions. GT1-05-13 must execute all three existing suites; no behavioral pass claimed.",
+					"affectedRows": ["P17"],
+					"evidenceRef": "phase05-creation-consumer-tests"
 				}
 			],
 			"phase": "05",
@@ -21845,7 +21869,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation",
 				"phase05DuplicatePermissionsEvidenceRef": "phase05-duplicate-permissions",
-				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests"
+				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests",
+				"phase05CreationConsumerTestsEvidenceRef": "phase05-creation-consumer-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21883,8 +21908,9 @@
 				{
 					"id": "duplicate-permission-handoff:S30",
 					"code": "verification-pending",
-					"missingPrerequisite": "GT1-05-02C1 implemented permission handoff; GT1-05-02D authored component assertions. GT1-05-02D1 must cover actual fresh-record creation/refusal and GT1-05-13 must execute all three suites.",
-					"affectedRows": ["S30"]
+					"missingPrerequisite": "GT1-05-02C1 implemented permission handoff; GT1-05-02D/D1 authored component and real creation-consumer assertions. GT1-05-13 must execute all three existing suites; no behavioral pass claimed.",
+					"affectedRows": ["S30"],
+					"evidenceRef": "phase05-creation-consumer-tests"
 				}
 			],
 			"ownerScopeReview": {
