@@ -1,4 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { spawnSync } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 import {
 	readDirRemote,
 	readFileRemote,
@@ -374,6 +377,35 @@ describe('remote-fs', () => {
 			vi.clearAllMocks();
 		});
 
+		it.each([
+			{ expectedIdentity: null },
+			{ expectedIdentity: { ...identity, kind: 'directory' } },
+			{ expectedIdentity: { ...identity, inode: '0' } },
+			{ expectedIdentity: { ...identity, canonicalPath: '/a/../b' } },
+			{ maxBytes: undefined },
+			{ expectedIdentity: undefined, expectedPaths: [] },
+			{ expectedPaths: {} },
+			{ expectedPaths: Array(17).fill({ path: '/guard', identity }) },
+			{ expectedPaths: [null] },
+			{ expectedPaths: [{ path: '/guard', identity: {} }] },
+			...['', '/bad\npath', '/bad\0path', 'a'.repeat(16385)].map((guard) => ({
+				expectedPaths: [{ path: guard, identity }],
+			})),
+		])('rejects invalid requested identity/guards %# before transport', async (patch) => {
+			const deps = createMockDeps({ stdout: '', stderr: '', exitCode: 0 });
+			const options = { maxBytes: 8, expectedIdentity: identity, ...patch };
+			expect(
+				await readFileRemote(
+					'/alias',
+					baseConfig,
+					deps,
+					options as Parameters<typeof readFileRemote>[3]
+				)
+			).toMatchObject({ success: false, errorCode: 'identity-unavailable' });
+			expect(deps.execSsh).not.toHaveBeenCalled();
+			expect(deps.buildSshArgs).not.toHaveBeenCalled();
+		});
+
 		it.each(['file', 'directory'] as const)(
 			'observes a physical %s without inventing endpoint identity',
 			async (kind) => {
@@ -607,6 +639,259 @@ describe('remote-fs', () => {
 				input: undefined,
 			});
 		});
+	});
+
+	// This transport executes the emitted program; response-only mocks above do not.
+	describe('emitted Python against disposable POSIX fixtures', () => {
+		let root: string;
+		let transcript: string;
+		let alias: string;
+		let account: string;
+		let fault = '';
+		let deps: RemoteFsDeps;
+		const audits: Array<{
+			reads: number;
+			bytes: number;
+			requests: number[];
+			opened: number;
+			closed: number;
+			live: number;
+			alarm: number;
+			writes: string[];
+			flags: number[];
+			outputBytes: number;
+		}> = [];
+		// Instrument syscalls, not the program's branches. Faults model an external writer.
+		const instrument = `import os, sys, json, shlex, signal, errno
+v = json.load(sys.stdin)
+args = shlex.split(v['command'])
+assert args[:5] == ['python3', '-I', '-S', '-B', '-c']
+program, sys.argv = args[5], ['-c'] + args[6:]
+root, fault = v['root'], v['fault']
+assert all(os.path.commonpath([root, p]) == root for p in sys.argv[1:] if p.startswith('/'))
+audit = dict(reads=0, bytes=0, requests=[], opened=0, closed=0, live=0, alarm=0, writes=[], flags=[])
+opened = set()
+original_open, original_read, original_close = os.open, os.read, os.close
+original_alarm = signal.alarm
+injected = False
+def mutation(which):
+ global injected
+ injected = True
+ try:
+  if which == 'replace': os.replace(root + '/replacement', root + '/transcript')
+  elif which == 'grow':
+   fd = original_open(root + '/transcript', os.O_WRONLY | os.O_APPEND)
+   try: os.write(fd, b'yz')
+   finally: original_close(fd)
+  else:
+   link = root + ('/account-alias' if which == 'guard' else '/transcript-alias')
+   os.unlink(link)
+   os.symlink(root + ('/account-b' if which == 'guard' else '/replacement'), link)
+ finally: injected = False
+def audit_event(event, args):
+ writing = event == 'open' and args[2] & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_TRUNC | os.O_APPEND)
+ if not injected and (writing or event in ('os.remove', 'os.rename', 'os.symlink', 'os.mkdir')):
+  audit['writes'].append(event)
+  raise RuntimeError('Reader attempted a mutation')
+sys.addaudithook(audit_event)
+def tracked_open(p, flags, *rest, **kw):
+ if fault == 'replace-before-open': mutation('replace')
+ fd = original_open(p, flags, *rest, **kw)
+ opened.add(fd)
+ audit['opened'] += 1
+ audit['flags'].append(flags)
+ if fault in ('alias-before', 'guard-before'): mutation(fault.split('-')[0])
+ return fd
+def tracked_read(fd, count):
+ audit['reads'] += 1
+ audit['requests'].append(count)
+ if fault == 'read-error': raise OSError(errno.EIO, 'injected read failure')
+ data = original_read(fd, count)
+ audit['bytes'] += len(data)
+ if audit['reads'] == 1 and fault in ('alias-during', 'guard-during', 'grow'):
+  mutation(fault.split('-')[0])
+ return data
+def tracked_close(fd):
+ original_close(fd)
+ audit['closed'] += 1
+ opened.remove(fd)
+def tracked_alarm(seconds):
+ audit['alarm'] = seconds
+ return original_alarm(seconds)
+os.open, os.read, os.close, signal.alarm = tracked_open, tracked_read, tracked_close, tracked_alarm
+if fault == 'unsupported': del os.O_NOFOLLOW
+try: exec(compile(program, '<emitted-remote-observer>', 'exec'))
+finally:
+ for fd in opened:
+  try: os.fstat(fd); audit['live'] += 1
+  except OSError as exc:
+   if exc.errno != errno.EBADF: raise
+ sys.stderr.write('\\nAUDIT:' + json.dumps(audit))
+`;
+
+		beforeEach((context) => {
+			root = '';
+			audits.length = 0;
+			if (process.platform === 'win32') context.skip(true, 'POSIX Python observer requires POSIX');
+			const probe = spawnSync(
+				'python3',
+				[
+					'-I',
+					'-S',
+					'-B',
+					'-c',
+					'import os, signal; assert hasattr(os, "O_NOFOLLOW") and hasattr(signal, "alarm")',
+				],
+				{ timeout: 3000 }
+			);
+			if (probe.error || probe.status !== 0)
+				context.skip(true, 'Python 3 descriptor APIs unavailable');
+			const parent = path.resolve('tmp');
+			fs.mkdirSync(parent, { recursive: true });
+			root = fs.realpathSync(fs.mkdtempSync(path.join(parent, 'remote-identity-')));
+			transcript = path.join(root, 'transcript');
+			alias = path.join(root, 'transcript-alias');
+			account = path.join(root, 'account-alias');
+			for (const dir of ['account-a', 'account-b', 'pool']) fs.mkdirSync(path.join(root, dir));
+			fs.writeFileSync(transcript, 'x');
+			fs.writeFileSync(path.join(root, 'replacement'), 'other');
+			fs.symlinkSync(transcript, alias);
+			fs.symlinkSync(path.join(root, 'account-a'), account);
+			fs.symlinkSync(path.join(root, 'pool'), path.join(root, 'account-a/sessions'));
+			fault = '';
+			deps = createMockDeps({ stdout: '', stderr: '', exitCode: 0 });
+			vi.mocked(deps.buildSshArgs).mockImplementation(() => ['inert-fixture-host']);
+			vi.mocked(deps.execSsh).mockImplementation(async (_ssh, args) => {
+				const result = spawnSync('python3', ['-I', '-S', '-B', '-c', instrument], {
+					input: JSON.stringify({ command: args.at(-1), root, fault }),
+					encoding: 'utf8',
+					cwd: root,
+					timeout: 3000,
+					maxBuffer: 1024 * 1024,
+				});
+				expect(result.error).toBeUndefined();
+				expect(result.signal).toBeNull();
+				const marker = result.stderr.lastIndexOf('\nAUDIT:');
+				expect(marker).toBeGreaterThanOrEqual(0);
+				audits.push({
+					...JSON.parse(result.stderr.slice(marker + 7)),
+					outputBytes: Buffer.byteLength(result.stdout),
+				});
+				return {
+					stdout: result.stdout,
+					stderr: result.stderr.slice(0, marker),
+					exitCode: result.status!,
+				};
+			});
+		});
+		afterEach(() => {
+			if (root) fs.rmSync(root, { recursive: true, force: true });
+			for (const audit of audits) {
+				expect(audit).toMatchObject({ live: 0, alarm: 25, writes: [] });
+				expect(audit.closed).toBe(audit.opened);
+			}
+		});
+
+		it('observes canonical account, sessions and transcript aliases without reading or writing', async () => {
+			for (const [logical, physical, kind] of [
+				[account, path.join(root, 'account-a'), 'directory'],
+				[path.join(account, 'sessions'), path.join(root, 'pool'), 'directory'],
+				[alias, transcript, 'file'],
+			]) {
+				const observed = await observePathRemote(logical, baseConfig, deps);
+				const stat = fs.statSync(physical, { bigint: true });
+				expect(observed).toEqual({
+					success: true,
+					data: {
+						canonicalPath: physical,
+						kind,
+						device: String(stat.dev),
+						inode: String(stat.ino),
+					},
+				});
+				expect(audits.at(-1)).toMatchObject({ reads: 0, opened: 0 });
+			}
+		});
+
+		it.each(['missing', 'transcript/child'])(
+			'refuses absent/non-directory root %s',
+			async (suffix) => {
+				expect(await observePathRemote(path.join(root, suffix), baseConfig, deps)).toMatchObject({
+					success: false,
+					errorCode: 'identity-unavailable',
+				});
+				expect(audits.at(-1)).toMatchObject({ reads: 0, opened: 0 });
+			}
+		);
+
+		it.each([
+			['replace-before-open', 'identity-mismatch', 0, 1],
+			['alias-before', 'identity-mismatch', 0, 1],
+			['guard-before', 'identity-mismatch', 0, 1],
+			['alias-during', 'identity-mismatch', 2, 1],
+			['guard-during', 'identity-mismatch', 2, 1],
+			['read-error', undefined, 1, 1],
+			['unsupported', 'identity-unavailable', 0, 0],
+		] as const)(
+			'rejects %s and closes every descriptor',
+			async (scenario, errorCode, reads, opened) => {
+				const expected = (await observePathRemote(alias, baseConfig, deps)).data!;
+				const guard = (await observePathRemote(account, baseConfig, deps)).data!;
+				fault = scenario;
+				const result = await readFileRemote(alias, baseConfig, deps, {
+					maxBytes: 8,
+					expectedIdentity: expected,
+					expectedPaths: [{ path: account, identity: guard }],
+				});
+				expect(result).toMatchObject({ success: false, errorCode });
+				expect(result.data).toBeUndefined();
+				expect(result.observedIdentity).toBeUndefined();
+				expect(audits.at(-1)).toMatchObject({ reads, opened, closed: opened, live: 0 });
+			}
+		);
+
+		it.each([
+			{ content: '雪', cap: 3, grow: false, bytes: 3, success: true, reads: 2 },
+			{
+				content: 'x'.repeat(65537),
+				cap: 65537,
+				grow: false,
+				bytes: 65537,
+				success: true,
+				reads: 3,
+			},
+			{ content: '', cap: 1, grow: false, bytes: 0, success: true, reads: 1 },
+			{ content: 'four', cap: 3, grow: false, bytes: 0, success: false, reads: 0 },
+			{ content: 'x', cap: 8, grow: true, bytes: 3, success: true, reads: 3 },
+			{ content: 'x', cap: 1, grow: true, bytes: 2, success: false, reads: 2 },
+		])(
+			'bounds actual content and sentinel reads %#',
+			async ({ content, cap, grow, bytes, success, reads }) => {
+				fs.writeFileSync(transcript, content);
+				const names = fs.readdirSync(root, { recursive: true }).sort();
+				const before = fs.statSync(transcript);
+				const expected = (await observePathRemote(alias, baseConfig, deps)).data!;
+				fault = grow ? 'grow' : '';
+				const result = await readFileRemote(alias, baseConfig, deps, {
+					maxBytes: cap,
+					expectedIdentity: expected,
+				});
+				expect(result).toMatchObject({ success, observedIdentity: expected, contentChanged: grow });
+				if (success) expect(result.data).toBe(content + (grow ? 'yz' : ''));
+				else expect(result).toMatchObject({ errorCode: 'too-large', data: undefined });
+				const audit = audits.at(-1)!;
+				expect(audit).toMatchObject({ bytes, reads, opened: 1, closed: 1 });
+				expect(bytes).toBeLessThanOrEqual(cap + 1);
+				expect(audit.outputBytes).toBeLessThanOrEqual(100001 + 4 * Math.ceil((cap + 3) / 3));
+				expect(audit.requests.every((count) => count <= Math.min(65536, cap + 1))).toBe(true);
+				expect(
+					audit.flags[0] & (fs.constants.O_WRONLY | fs.constants.O_RDWR | fs.constants.O_CREAT)
+				).toBe(0);
+				expect(fs.readdirSync(root, { recursive: true }).sort()).toEqual(names);
+				expect(fs.readFileSync(transcript, 'utf8')).toBe(content + (grow ? 'yz' : ''));
+				if (!grow) expect(fs.statSync(transcript).mtimeMs).toBe(before.mtimeMs);
+			}
+		);
 	});
 
 	describe('readFileRemote', () => {

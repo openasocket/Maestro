@@ -1516,6 +1516,31 @@
 			"scope": "Fake-remote source selection and inode/candidate races, canonical account/pool aliases, independent ownership/content receipts, inert SSH observation/header validation, admission, quoting and finite bounds. No tests run or collected; no endpoint or native qualification.",
 			"remainingTestOwners": ["GT1-04-07C1SRT1"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-emitted-remote-native-source-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c1srt1-emitted-remote-native-source-tests",
+			"sourceCommit": "9d543e0ed26a0c8cefbdd05512480e315c146cea",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/storage/grok-session-storage.test.ts": "66025b63a9ec31651fecd41dd2e141b51016f15c7c706db64edbf55276decd20",
+				"src/__tests__/main/utils/remote-fs.test.ts": "685bc79a8f9de3ce80de2deaa2b85f1f3d9280fc5605173539b270e6527a3313"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"authoredCases": 40,
+			"static": "pass",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"scopedTypeCheck": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P13", "P14", "P15", "C-supportsResume", "REG-SESSION-MUTATION"],
+			"scope": "Authored emitted-Python fixture transport with audited reads, descriptor cleanup, aliases and races, exact byte/sentinel/output bounds, mutation denial, unsupported-platform skips; invalid guard options and remote account/enumeration/observation edges. No tests run or collected.",
+			"limitations": [
+				"Only disposable POSIX fixtures will execute the Python observer; no real SSH endpoint or native account qualification.",
+				"Python 3 with POSIX descriptor/alarm support is required; unavailable platforms explicitly skip fixture scenarios."
+			],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {

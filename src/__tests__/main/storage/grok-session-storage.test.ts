@@ -1081,7 +1081,129 @@ describe('GrokSessionStorage - SSH remote', () => {
 			expect(captureException).not.toHaveBeenCalled();
 		});
 
-		it.each(['account', 'pool', 'file', 'duplicate'])(
+		it('keeps colliding native IDs bound to their selected remote accounts', async () => {
+			const f = scopedRemote();
+			const second = '/remote/second';
+			for (const [key, identity] of [...f.identities]) {
+				if (key.startsWith(account))
+					f.identities.set(key.replace(account, second), {
+						...identity,
+						canonicalPath: identity.canonicalPath.replace(account, second),
+						inode: `${identity.inode}0`,
+					});
+			}
+			for (const [key, entries] of [...f.directories])
+				f.directories.set(
+					key.replace(account, second),
+					entries.map((entry) => ({ ...entry }))
+				);
+			for (const [key, content] of Object.entries(f.files))
+				f.files[key.replace(account, second)] = content.replaceAll('hello.txt', 'second.txt');
+			for (const selected of [account, second]) {
+				vi.mocked(remoteFs.readFileRemote).mockClear();
+				const nativeSessionBinding = {
+					...binding,
+					accountRef: resolveAgentAccountRef(
+						{ toolType: 'grok', managedAccountDir: selected, sshRemote: true },
+						{ homeDir: '' }
+					)!,
+				};
+				const result = await new GrokSessionStorage().readSessionMessages(
+					PROJECT,
+					SESSION_ID,
+					{ configDir: selected, nativeSessionBinding },
+					sshConfig
+				);
+				expect(result.nativeSessionBinding).toEqual(nativeSessionBinding);
+				expect(result.messages.at(-1)?.content).toContain(
+					selected === account ? 'hello.txt' : 'second.txt'
+				);
+				expect(remoteFs.readFileRemote).toHaveBeenCalledTimes(1);
+				expect(vi.mocked(remoteFs.readFileRemote).mock.calls[0][0]).toBe(
+					f.file.replace(account, selected)
+				);
+			}
+			vi.mocked(remoteFs.readFileRemote).mockClear();
+			expect(
+				await new GrokSessionStorage().readSessionMessages(
+					PROJECT,
+					SESSION_ID,
+					{ configDir: second, nativeSessionBinding: binding },
+					sshConfig
+				)
+			).toMatchObject({
+				messages: [],
+				source: { reason: 'native-source-scope-mismatch' },
+			});
+			expect(remoteFs.readFileRemote).not.toHaveBeenCalled();
+		});
+
+		it.each(['pool-failed', 'pool-missing', 'pool-over-1000', 'cwd-failed', 'cwd-missing'])(
+			'refuses incomplete candidate enumeration: %s',
+			async (scenario) => {
+				const f = scopedRemote();
+				const readDir = vi.mocked(remoteFs.readDirRemote).getMockImplementation()!;
+				const target = scenario.startsWith('pool') ? f.sessionsDir : f.cwdDir;
+				vi.mocked(remoteFs.readDirRemote).mockImplementation(async (...args) => {
+					if (args[0] !== target) return readDir(...args);
+					if (scenario.endsWith('failed'))
+						return { success: false, error: 'Connection reset by peer' };
+					if (scenario.endsWith('missing')) return { success: true };
+					return {
+						success: true,
+						data: Array.from({ length: 1001 }, () => f.directories.get(target)![0]),
+					};
+				});
+				const result = await f.read();
+				expect(result).toMatchObject({
+					messages: [],
+					source: { reason: 'native-source-unobserved' },
+				});
+				expect(result.nativeSessionBinding).toBeUndefined();
+				expect(remoteFs.readFileRemote).not.toHaveBeenCalled();
+				expect(captureException).toHaveBeenCalledTimes(
+					scenario.endsWith('failed') || scenario === 'cwd-missing' ? 1 : 0
+				);
+			}
+		);
+
+		it.each(['coded', 'expected', 'unexpected'])(
+			'refuses an unobserved candidate cwd and classifies %s failure',
+			async (scenario) => {
+				const f = scopedRemote();
+				f.directories.get(f.sessionsDir)!.push({
+					name: encodeURIComponent(OTHER_PROJECT),
+					isDirectory: true,
+					isSymlink: false,
+				});
+				const observe = vi.mocked(remoteFs.observePathRemote).getMockImplementation()!;
+				vi.mocked(remoteFs.observePathRemote).mockImplementation(async (...args) =>
+					args[0] === OTHER_PROJECT
+						? {
+								success: false,
+								error:
+									scenario === 'unexpected' ? 'fixture observation defect' : 'Permission denied',
+								...(scenario === 'coded' ? { errorCode: 'identity-unavailable' as const } : {}),
+							}
+						: observe(...args)
+				);
+				const result = await f.read();
+				expect(result).toMatchObject({
+					messages: [],
+					source: { reason: 'native-source-unobserved' },
+				});
+				expect(result.nativeSessionBinding).toBeUndefined();
+				expect(remoteFs.readFileRemote).not.toHaveBeenCalled();
+				expect(captureException).toHaveBeenCalledTimes(scenario === 'unexpected' ? 1 : 0);
+				if (scenario === 'unexpected')
+					expect(captureException).toHaveBeenCalledWith(
+						expect.objectContaining({ message: 'fixture observation defect' }),
+						{ operation: 'grokStorage:observeNativeSource' }
+					);
+			}
+		);
+
+		it.each(['account', 'pool', 'file', 'duplicate', 'target'])(
 			'rechecks changed %s before and after reading',
 			async (scenario) => {
 				for (const duringRead of [false, true]) {
@@ -1093,7 +1215,10 @@ describe('GrokSessionStorage - SSH remote', () => {
 						} else {
 							const key =
 								scenario === 'account' ? account : scenario === 'pool' ? f.sessionsDir : f.file;
-							f.identities.set(key, { ...f.identities.get(key)!, inode: '777' });
+							f.identities.set(key, {
+								...f.identities.get(key)!,
+								...(scenario === 'target' ? { canonicalPath: `${key}-changed` } : { inode: '777' }),
+							});
 						}
 					};
 					if (duringRead) {
