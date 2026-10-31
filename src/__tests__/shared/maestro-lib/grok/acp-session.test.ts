@@ -348,8 +348,164 @@ describe('GrokAcpSession lifecycle over fake ACP bytes', () => {
 		});
 		expect(h.session.sessionId).toBe('native-1');
 		expect(h.sent('session/prompt')).toHaveLength(0);
+		expect(h.sent('session/set_config_option')).toHaveLength(0);
 		expect(h.terminate).toHaveBeenCalledTimes(1);
 	});
+
+	it.each(['outer-error', 'inner-error', 'method-not-found'] as const)(
+		'treats %s model discovery as unavailable without retry or session allocation',
+		async (mode) => {
+			const h = harness({ extensions: { agentVersion: 'fixture-version', modelsList: true } });
+			const discovery = h.session.discoverModels();
+			h.reply(await h.next('initialize'), {
+				protocolVersion: 1,
+				_meta: { grokShell: true, agentVersion: 'fixture-version' },
+			});
+			const request = await h.next('_x.ai/models/list');
+			const result = { currentModelId: 'hidden', availableModels: [] };
+			const error = { code: -32601, message: 'synthetic-private-diagnostic' };
+			if (mode === 'method-not-found') h.receive({ id: request.id, error });
+			else
+				h.reply(
+					request,
+					mode === 'outer-error' ? { result, error } : { result: { ...result, error } }
+				);
+			await expect(discovery).resolves.toBeUndefined();
+			await expect(h.session.discoverModels()).resolves.toBeUndefined();
+			expect(h.sent('_x.ai/models/list')).toHaveLength(1);
+			expect(h.sent('session/new')).toHaveLength(0);
+			expect(h.sent('session/prompt')).toHaveLength(0);
+			expect(h.session.error).toBeUndefined();
+			expect(h.terminate).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each([
+		{ availableModels: [] },
+		{ availableModels: [{ modelId: 'offered', name: 'Offered' }] },
+	])(
+		'preserves an authoritative catalog $availableModels without promoting its hidden current model',
+		async ({ availableModels }) => {
+			const h = harness({ extensions: { agentVersion: 'fixture-version', modelsList: true } });
+			const discovery = h.session.discoverModels();
+			h.reply(await h.next('initialize'), {
+				protocolVersion: 1,
+				_meta: { grokShell: true, agentVersion: 'fixture-version' },
+			});
+			const result = { currentModelId: 'hidden', availableModels };
+			h.reply(await h.next('_x.ai/models/list'), { result });
+			await expect(discovery).resolves.toEqual(result);
+			expect(h.session.sessionId).toBeUndefined();
+			expect(h.sent('session/prompt')).toHaveLength(0);
+		}
+	);
+
+	it.each([
+		'acknowledged',
+		'unchanged',
+		'nested-error',
+		'method-not-found',
+		'already-current',
+	] as const)(
+		'requires selected effort acknowledgement before dispatch (%s), even with a hidden model',
+		async (mode) => {
+			const h = harness({ model: 'hidden', effort: 'high' });
+			const configOptions = [
+				{
+					id: 'reasoning_effort',
+					type: 'select',
+					currentValue: mode === 'already-current' ? 'high' : 'low',
+					options: [{ value: 'high', name: 'High' }],
+				},
+			];
+			const turn = h.session.prompt('once').catch((error: unknown) => error);
+			h.reply(await h.allocation(), {
+				sessionId: 'native-1',
+				models: { currentModelId: 'hidden' },
+				configOptions,
+			});
+			if (mode !== 'already-current') {
+				const request = await h.next('session/set_config_option');
+				expect(request.params).toEqual({
+					sessionId: 'native-1',
+					configId: 'reasoning_effort',
+					value: 'high',
+				});
+				expect(h.sent('session/prompt')).toHaveLength(0);
+				const error = { code: -32601, message: 'synthetic-private-diagnostic' };
+				if (mode === 'method-not-found') h.receive({ id: request.id, error });
+				else
+					h.reply(request, {
+						configOptions: [
+							{ ...configOptions[0], currentValue: mode === 'unchanged' ? 'low' : 'high' },
+						],
+						...(mode === 'nested-error' ? { error } : {}),
+					});
+			}
+			if (mode === 'acknowledged' || mode === 'already-current') {
+				h.reply(await h.next('session/prompt'), { stopReason: 'end_turn' });
+				expect(await turn).toEqual({ stopReason: 'end_turn' });
+				expect(h.session.configuration.model).toBe('hidden');
+				expect(h.sent('session/set_config_option')).toHaveLength(
+					mode === 'already-current' ? 0 : 1
+				);
+			} else {
+				expect(await turn).toMatchObject({
+					reason: mode === 'unchanged' ? 'effort-unacknowledged' : 'config-unsupported',
+					dispatchMayHaveOccurred: false,
+				});
+				expect(h.sent('session/prompt')).toHaveLength(0);
+				expect(h.session.sessionId).toBe('native-1');
+				expect(String(h.session.error)).not.toContain('synthetic-private-diagnostic');
+			}
+		}
+	);
+
+	it.each([false, true])(
+		'drops old effort support after changing model (new effort requested: %s)',
+		async (requestEffort) => {
+			const h = harness({ model: 'first', effort: 'high' });
+			await h.ready({
+				sessionId: 'native-1',
+				configOptions: [
+					{
+						id: 'model',
+						type: 'select',
+						currentValue: 'first',
+						options: [{ value: 'second', name: 'Second' }],
+					},
+					{
+						id: 'reasoning_effort',
+						type: 'select',
+						currentValue: 'high',
+						options: [{ value: 'high', name: 'High' }],
+					},
+				],
+			});
+			const change = h.session
+				.setConfiguration({ model: 'second', ...(requestEffort ? { effort: 'high' } : {}) })
+				.catch((error: unknown) => error);
+			const request = await h.next('session/set_config_option');
+			expect(request.params).toEqual({ sessionId: 'native-1', configId: 'model', value: 'second' });
+			expect(h.session.configuration).toMatchObject({ model: undefined, configOptions: [] });
+			h.reply(request, { models: { currentModelId: 'second' }, configOptions: [] });
+			if (requestEffort) {
+				expect(await change).toMatchObject({
+					reason: 'config-unsupported',
+					dispatchMayHaveOccurred: false,
+				});
+				await expect(h.session.prompt('unsent')).rejects.toBe(h.session.error);
+				expect(h.sent('session/prompt')).toHaveLength(0);
+			} else {
+				await expect(change).resolves.toBeUndefined();
+				expect(h.session.configuration).toMatchObject({ model: 'second', configOptions: [] });
+				const turn = h.session.prompt('after model change');
+				h.reply(await h.next('session/prompt'), { stopReason: 'end_turn' });
+				await expect(turn).resolves.toEqual({ stopReason: 'end_turn' });
+			}
+			expect(h.sent('session/set_config_option')).toHaveLength(1);
+		}
+	);
 
 	it.each(['setup', 'turn'] as const)(
 		'enforces silence during %s with stdout/stderr activity and empty chunks',

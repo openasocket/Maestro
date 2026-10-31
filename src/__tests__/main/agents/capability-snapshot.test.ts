@@ -140,6 +140,28 @@ describe('CapabilitySnapshotManager', () => {
 		}
 	);
 
+	it('does not revive Grok catalogs after replacing a binary and rehydrating', () => {
+		manager.init(store, broadcast);
+		for (const version of ['1.0.70', '1.0.71']) {
+			manager.markOk('grok', {
+				path: `/synthetic/${version}/grok`,
+				version,
+				models: [`account-${version}`],
+				contextWindow: 500_000,
+			});
+		}
+		const reloaded = new CapabilitySnapshotManager();
+		reloaded.init(store);
+		expect(reloaded.get('grok')).toMatchObject({
+			status: 'ok',
+			version: '1.0.71',
+			path: '/synthetic/1.0.71/grok',
+		});
+		expect(reloaded.get('grok')?.models).toBeUndefined();
+		expect(reloaded.get('grok')?.contextWindow).toBeUndefined();
+		expect(reloaded.getAll()).toEqual(store.raw.snapshots);
+	});
+
 	it('markOk persists and broadcasts an update', () => {
 		manager.init(store, broadcast);
 		const result = manager.markOk('claude-code', { path: '/usr/bin/claude' });
