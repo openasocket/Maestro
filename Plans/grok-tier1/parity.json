@@ -923,6 +923,35 @@
 				"REG-USAGE"
 			],
 			"scope": "GT1-04-05A summary recovery, native title/metadata, unknown dates and lifetime usage normalization only. Exact tick costs, raw model IDs and unknown/partial model detail use existing UsageAccounting. GT1-04-06 authors tests; GT1-04-13 executes them. Bounded reads, generation consistency and accounting consumers retain their existing owners. No full-row or native qualification."
+		},
+		"phase04-bounded-native-reads": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-05b-bounded-native-reads-and-pagination",
+			"sourceCommit": "219348e2d5177f11deb90e49f1febad9e05cccde",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/storage/grok-session-storage.ts": "6a60e1f534fa814a1c04ca4b5f9fcb444110d00ddc58b7c0337b8f3f22cd7082",
+				"src/main/utils/remote-fs.ts": "0cd06f233a0ec2853b4e8008c7d8e73a1ee4e6eef8a3c9586bc97756daf5ac7d",
+				"src/main/agents/session-storage.ts": "5f7a71cea11d7f43d9152e36213a3caab2eb9860a7ad426344494e0553173350"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"status": "not-run",
+			"implementation": "implemented",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P11",
+				"P13",
+				"P15",
+				"P21",
+				"C-supportsSessionStorage",
+				"C-supportsCostTracking",
+				"C-supportsUsageStats",
+				"REG-STORAGE",
+				"REG-USAGE",
+				"S06"
+			],
+			"scope": "GT1-04-05B bounded local/SSH reads, explicit per-source availability and bounded shared pagination. Tests GT1-04-06/06C; execution GT1-04-13. Cross-file generations and export consumers retain their owners. No native or whole-row qualification."
 		}
 	},
 	"sourceCatalog": {
@@ -4148,7 +4177,8 @@
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
-				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4592,7 +4622,8 @@
 				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
 				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
 				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
-				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4845,7 +4876,8 @@
 				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
 				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
 				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
-				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5679,7 +5711,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization"
+				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10937,7 +10970,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
 				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
-				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11108,7 +11142,8 @@
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
-				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11301,7 +11336,8 @@
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
-				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13933,7 +13969,8 @@
 				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
 				"phase04RemotePathEvidenceRef": "phase04-remote-history-paths",
 				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
-				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14570,7 +14607,8 @@
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
-				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage"
+				"phase04NativeSummaryUsageEvidenceRef": "phase04-native-summary-usage",
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16081,7 +16119,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization"
+				"phase04NativeTranscriptEvidenceRef": "phase04-native-transcript-normalization",
+				"phase04BoundedReadsEvidenceRef": "phase04-bounded-native-reads"
 			},
 			"evidenceApplicability": {
 				"static": {

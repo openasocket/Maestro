@@ -53,6 +53,8 @@ export interface RemoteFsResult<T> {
 	data?: T;
 	/** Error message (if success is false) */
 	error?: string;
+	/** A bounded read rejected content exceeding its byte budget. */
+	errorCode?: 'too-large';
 }
 
 /**
@@ -610,12 +612,13 @@ export async function bulkStatFileInSubdirsRemote(
 /**
  * Read file contents from a remote host via SSH.
  *
- * Executes `cat` on the remote to read the file contents.
- * For binary files or very large files, consider using different approaches.
+ * Executes `cat` on the remote, or a bounded `head` when maxBytes is supplied.
+ * A bounded read rejects overflow rather than returning a truncated success.
  *
  * @param filePath Path to the file on the remote host
  * @param sshRemote SSH remote configuration
  * @param deps Optional dependencies for testing
+ * @param options Optional positive byte budget, below 100 MiB
  * @returns File contents as a string
  *
  * @example
@@ -625,11 +628,26 @@ export async function bulkStatFileInSubdirsRemote(
 export async function readFileRemote(
 	filePath: string,
 	sshRemote: SshRemoteConfig,
-	deps: RemoteFsDeps = defaultDeps
+	deps: RemoteFsDeps = defaultDeps,
+	options?: { maxBytes?: number }
 ): Promise<RemoteFsResult<string>> {
+	const maxBytes = options?.maxBytes;
+	// Leave room for the overflow sentinel below execFileNoThrow's 100 MiB cap.
+	if (
+		maxBytes !== undefined &&
+		(!Number.isSafeInteger(maxBytes) || maxBytes <= 0 || maxBytes >= 100 * 1024 * 1024)
+	) {
+		throw new RangeError('Remote read maxBytes must be a positive integer below 100 MiB');
+	}
 	const escapedPath = shellEscapeRemotePath(filePath);
-	// Use cat with explicit error handling
-	const remoteCommand = `cat ${escapedPath}`;
+	// The remote byte ceiling also holds when a file grows after the caller's stat.
+	// Redirection keeps leading dashes out of head's option parsing. The regular
+	// file check avoids waiting on a provider path replaced with a pipe/device.
+	const remoteCommand =
+		maxBytes === undefined
+			? `cat ${escapedPath}`
+			: `if test -f ${escapedPath}; then head -c ${maxBytes + 1} < ${escapedPath}; ` +
+				`else echo 'File not found or not a regular file' >&2; exit 1; fi`;
 
 	const result = await execRemoteCommand(
 		sshRemote,
@@ -637,6 +655,18 @@ export async function readFileRemote(
 		read('readFile', filePath),
 		deps
 	);
+
+	if (
+		maxBytes !== undefined &&
+		(result.exitCode === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' ||
+			(result.exitCode === 0 && Buffer.byteLength(result.stdout, 'utf8') > maxBytes))
+	) {
+		return {
+			success: false,
+			error: `File exceeds the ${maxBytes} byte read limit: ${filePath}`,
+			errorCode: 'too-large',
+		};
+	}
 
 	if (result.exitCode !== 0) {
 		const error = result.stderr || `Failed to read file: ${filePath}`;

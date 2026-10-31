@@ -60,7 +60,10 @@ import { parseJsonWithBom, preserveJsonNumberTokens } from '../../shared/jsonUti
 import { usageCostUsd } from '../../shared/maestro-lib/streaming/usage-totals';
 
 const LOG_CONTEXT = '[GrokSessionStorage]';
-const MAX_SESSION_FILE_SIZE = 100 * 1024 * 1024; // 100 MB
+// Below the SSH exec buffer ceiling, including its one-byte overflow probe.
+const MAX_SESSION_FILE_SIZE = 64 * 1024 * 1024;
+const MAX_SESSION_METADATA_SIZE = 1024 * 1024;
+const MAX_SESSION_SOURCE_LINES = 100_000;
 const FIRST_MESSAGE_PREVIEW_LENGTH = 200;
 
 /**
@@ -266,6 +269,7 @@ interface ParsedGrokChatHistory {
 	messages: SessionMessage[];
 	firstUserMessage: string;
 	firstAssistantMessage: string;
+	hasMalformedRecords: boolean;
 }
 
 /** Extract plain text from a user record's content block array. */
@@ -411,6 +415,15 @@ function parseChatHistory(content: string, includeNativeRecords = false): Parsed
 	const results = new Map<string, SessionMessage[]>();
 
 	const lines = parseNativeLines(content);
+	// One row can contain a huge legacy/tool array. Bound normalization's
+	// additional objects as well as the physical source rows.
+	let projectedItems = lines.length;
+	for (const { entry } of lines) {
+		for (const value of [entry?.tool_calls, entry?.raw_output]) {
+			if (Array.isArray(value)) projectedItems += value.length;
+		}
+		if (projectedItems > MAX_SESSION_SOURCE_LINES) throw new RangeError('Grok projection limit');
+	}
 	const backendIds = new Set<string>(
 		lines.flatMap(({ entry }) =>
 			entry?.type === 'backend_tool_call' && typeof entry.kind?.id === 'string'
@@ -595,6 +608,7 @@ function parseChatHistory(content: string, includeNativeRecords = false): Parsed
 		messages: includeNativeRecords ? messages : messages.filter((message) => !hidden.has(message)),
 		firstUserMessage,
 		firstAssistantMessage,
+		hasMalformedRecords: lines.some((line) => line.malformed),
 	};
 }
 
@@ -768,7 +782,12 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		sshConfig?: SshRemoteConfig
 	): Promise<PaginatedSessionsResult> {
 		const sessions = await this.listSessions(projectPath, sshConfig, options?.configDir);
-		return BaseSessionStorage.paginateSessions(sessions, options);
+		return BaseSessionStorage.paginateSessions(sessions, {
+			...options,
+			limit: Number.isFinite(options?.limit)
+				? Math.min(1000, Math.max(1, Math.trunc(options!.limit!)))
+				: 100,
+		});
 	}
 
 	async searchSessions(
@@ -798,13 +817,15 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		if (cwd === null || !isSafeGrokPathSegment(sessionId)) return null;
 		const sessionDir = this.joinPath(sshConfig, sessionsDir, cwdFolder, sessionId);
 		try {
-			const summaryContent = await this.readSessionFile(
+			const summaryRead = await this.readSessionFile(
 				this.joinPath(sshConfig, sessionDir, 'summary.json'),
 				sshConfig
 			);
+			const summaryContent = summaryRead.content;
 			const nativeMetadata: NonNullable<AgentSessionInfo['nativeMetadata']> = {
 				provider: 'grok',
 				summaryStatus: 'unavailable',
+				sources: { 'summary.json': summaryRead.source },
 			};
 			if (summaryContent?.trim()) {
 				nativeMetadata.summaryStatus = 'invalid';
@@ -815,16 +836,28 @@ export class GrokSessionStorage extends BaseSessionStorage {
 						nativeMetadata.summaryStatus = 'available';
 					}
 				} catch (error) {
-					if (!(error instanceof SyntaxError)) throw error;
+					if (!(error instanceof SyntaxError) && !(error instanceof RangeError)) throw error;
+					if (error instanceof RangeError) {
+						summaryRead.source.status = 'unavailable';
+						summaryRead.source.reason = 'too-large';
+						logger.warn('Grok summary exceeds parser limits', LOG_CONTEXT);
+					}
 					logger.debug(`Grok session ${sessionId} has malformed summary.json`, LOG_CONTEXT);
 				}
+			}
+			if (
+				summaryRead.source.status !== 'unavailable' &&
+				nativeMetadata.summaryStatus !== 'available'
+			) {
+				summaryRead.source.status = 'partial';
+				summaryRead.source.reason ??= 'invalid-summary';
 			}
 			const summary = nativeMetadata.summary ?? {};
 
 			const transcript = await this.readTranscript(sessionDir, sshConfig);
-			if (!transcript) return null;
-
-			const parsed = parseChatHistory(transcript.content);
+			nativeMetadata.sources!['chat_history.jsonl'] = transcript.source;
+			const parsed = transcript.parsed;
+			if (!parsed) return null;
 			if (parsed.messages.length === 0) {
 				// Never-prompted sessions exist on disk with only system/synthetic records.
 				logger.debug(
@@ -850,9 +883,26 @@ export class GrokSessionStorage extends BaseSessionStorage {
 					? Math.max(0, Math.floor((modifiedMs - createdMs) / 1000))
 					: 0;
 			const preview = parsed.firstUserMessage || parsed.firstAssistantMessage || title;
-			const usage = parseGrokUsageFile(
-				await this.readSessionFile(this.joinPath(sshConfig, sessionDir, 'usage.json'), sshConfig)
+			const usageRead = await this.readSessionFile(
+				this.joinPath(sshConfig, sessionDir, 'usage.json'),
+				sshConfig
 			);
+			let usage: ReturnType<typeof parseGrokUsageFile> = null;
+			try {
+				// A changing ledger cannot supply authoritative totals, even if its
+				// sampled text happens to parse. Cross-file generations are separate.
+				if (usageRead.source.status === 'available') usage = parseGrokUsageFile(usageRead.content);
+			} catch (error) {
+				if (!(error instanceof RangeError)) throw error;
+				usageRead.source.status = 'unavailable';
+				usageRead.source.reason = 'too-large';
+				logger.warn('Grok usage exceeds parser limits', LOG_CONTEXT);
+			}
+			if (usageRead.source.status !== 'unavailable' && !usage) {
+				usageRead.source.status = 'partial';
+				usageRead.source.reason ??= 'invalid-usage';
+			}
+			nativeMetadata.sources!['usage.json'] = usageRead.source;
 
 			return {
 				// Search/read must address the directory we validated, even when a
@@ -863,7 +913,7 @@ export class GrokSessionStorage extends BaseSessionStorage {
 				modifiedAt,
 				firstMessage: preview.slice(0, FIRST_MESSAGE_PREVIEW_LENGTH),
 				messageCount: parsed.messages.length,
-				sizeBytes: transcript.size,
+				sizeBytes: transcript.source.sizeBytes ?? 0,
 				nativeMetadata,
 				// Required numeric fields retain compatibility; accounting explicitly
 				// marks absent legacy ledgers unknown, never a measured zero.
@@ -944,16 +994,36 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		);
 		if (!sessionDir) {
 			logger.warn(`Grok session not found for project: ${sessionId}`, LOG_CONTEXT);
-			return { messages: [], total: 0, hasMore: false };
+			return {
+				messages: [],
+				total: 0,
+				hasMore: false,
+				source: { provider: 'grok', status: 'unavailable', reason: 'session-not-found' },
+			};
 		}
 
-		const transcript = await this.readTranscript(sessionDir, sshConfig);
-		if (!transcript) {
-			return { messages: [], total: 0, hasMore: false };
+		const transcript = await this.readTranscript(
+			sessionDir,
+			sshConfig,
+			options?.includeNativeRecords
+		);
+		if (!transcript.parsed) {
+			return { messages: [], total: 0, hasMore: false, source: transcript.source };
 		}
 
-		const { messages } = parseChatHistory(transcript.content, options?.includeNativeRecords);
-		return BaseSessionStorage.applyMessagePagination(messages, options);
+		const { messages } = transcript.parsed;
+		return {
+			...BaseSessionStorage.applyMessagePagination(messages, {
+				...options,
+				offset: Number.isFinite(options?.offset)
+					? Math.min(messages.length, Math.max(0, Math.trunc(options!.offset!)))
+					: 0,
+				limit: Number.isFinite(options?.limit)
+					? Math.min(1000, Math.max(1, Math.trunc(options!.limit!)))
+					: 20,
+			}),
+			source: transcript.source,
+		};
 	}
 
 	/** Get searchable user/assistant messages for session search. */
@@ -971,10 +1041,10 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		if (!sessionDir) return [];
 
 		const transcript = await this.readTranscript(sessionDir, sshConfig);
-		if (!transcript) return [];
+		if (!transcript.parsed) return [];
 
-		return parseChatHistory(transcript.content)
-			.messages.filter((message) => message.role === 'user' || message.role === 'assistant')
+		return transcript.parsed.messages
+			.filter((message) => message.role === 'user' || message.role === 'assistant')
 			.map((message) => ({
 				role: message.role as 'user' | 'assistant',
 				textContent: message.content,
@@ -1035,84 +1105,183 @@ export class GrokSessionStorage extends BaseSessionStorage {
 		};
 	}
 
-	/** Read a session's transcript with a size cap, returning content plus file stats. */
+	/** Read and normalize one bounded transcript; rejection is never an empty success. */
 	private async readTranscript(
 		sessionDir: string,
-		sshConfig?: SshRemoteConfig
-	): Promise<{ content: string; size: number; mtimeMs: number } | null> {
-		const transcriptPath = this.joinPath(sshConfig, sessionDir, 'chat_history.jsonl');
-
-		const stat = await this.statSessionFile(transcriptPath, sshConfig);
-		if (!stat) return null;
-		if (stat.size > MAX_SESSION_FILE_SIZE) {
-			logger.warn('Skipping oversized Grok session transcript', LOG_CONTEXT, {
-				transcriptPath,
-				size: stat.size,
-			});
-			return null;
-		}
-
-		const content = await this.readSessionFile(transcriptPath, sshConfig);
-		if (!content?.trim()) return null;
-		return { content, size: stat.size, mtimeMs: stat.mtimeMs };
-	}
-
-	/** Stat a file locally or over SSH. Returns null on missing/unreadable files. */
-	private async statSessionFile(
-		filePath: string,
-		sshConfig?: SshRemoteConfig
-	): Promise<{ size: number; mtimeMs: number } | null> {
-		if (sshConfig) {
-			const result = await statRemote(filePath, sshConfig);
-			if (!result.success || !result.data) {
-				if (!isExpectedRemoteError(result.error)) {
-					logger.warn(`Unexpected SSH failure stating ${filePath}: ${result.error}`, LOG_CONTEXT);
-					captureException(new Error(result.error || 'statRemote failed'), {
-						operation: 'grokStorage:statSessionFile',
-						filePath,
-					});
-				}
-				return null;
+		sshConfig?: SshRemoteConfig,
+		includeNativeRecords = false
+	): Promise<{
+		parsed: ParsedGrokChatHistory | null;
+		source: NonNullable<SessionMessagesResult['source']>;
+	}> {
+		const read = await this.readSessionFile(
+			this.joinPath(sshConfig, sessionDir, 'chat_history.jsonl'),
+			sshConfig,
+			MAX_SESSION_FILE_SIZE
+		);
+		if (read.content === null) return { parsed: null, source: read.source };
+		// Byte limits alone still permit millions of tiny rows. Count physical
+		// lines without allocating split arrays, before the shared parser does so.
+		let lineCount = 1;
+		for (
+			let index = read.content.indexOf('\n');
+			index >= 0;
+			index = read.content.indexOf('\n', index + 1)
+		) {
+			if (++lineCount > MAX_SESSION_SOURCE_LINES) {
+				logger.warn('Grok transcript exceeds source line limit', LOG_CONTEXT);
+				return {
+					parsed: null,
+					source: { ...read.source, status: 'unavailable', reason: 'too-many-lines' },
+				};
 			}
-			return { size: result.data.size, mtimeMs: result.data.mtime };
 		}
-
 		try {
-			const stat = await fs.stat(filePath);
-			return { size: stat.size, mtimeMs: stat.mtimeMs };
-		} catch (error) {
-			if (!isExpectedSessionReadError(error)) {
-				captureException(error, { operation: 'grokStorage:statSessionFile', filePath });
+			const parsed = parseChatHistory(read.content, includeNativeRecords);
+			if (parsed.hasMalformedRecords) {
+				read.source.status = 'partial';
+				read.source.reason ??= 'malformed-records';
 			}
-			return null;
+			return { parsed, source: read.source };
+		} catch (error) {
+			if (!(error instanceof RangeError)) throw error;
+			logger.warn('Grok transcript exceeds parser limits', LOG_CONTEXT);
+			return {
+				parsed: null,
+				source: { ...read.source, status: 'unavailable', reason: 'too-large' },
+			};
 		}
 	}
 
-	/** Read a file locally or over SSH. Returns null on missing/unreadable files; reports unexpected failures. */
+	/** A stat guards allocation; the bounded read also guards growth after that stat. */
 	private async readSessionFile(
 		filePath: string,
-		sshConfig?: SshRemoteConfig
-	): Promise<string | null> {
-		if (sshConfig) {
-			const result = await readFileRemote(filePath, sshConfig);
-			if (result.success && result.data != null) return result.data;
-			if (!isExpectedRemoteError(result.error)) {
-				logger.warn(`Unexpected SSH failure reading ${filePath}: ${result.error}`, LOG_CONTEXT);
-				captureException(new Error(result.error || 'readFileRemote failed'), {
-					operation: 'grokStorage:readSessionFile',
-					filePath,
-				});
-			}
-			return null;
-		}
-
+		sshConfig?: SshRemoteConfig,
+		maxBytes = MAX_SESSION_METADATA_SIZE
+	): Promise<{
+		content: string | null;
+		source: NonNullable<SessionMessagesResult['source']>;
+	}> {
+		const source: NonNullable<SessionMessagesResult['source']> = {
+			provider: 'grok',
+			status: 'unavailable',
+			maxBytes,
+		};
+		const unavailable = (reason: string) => {
+			source.status = 'unavailable';
+			source.reason = reason;
+			if (reason === 'too-large')
+				logger.warn('Grok session file exceeds read limit', LOG_CONTEXT, { filePath, maxBytes });
+			return { content: null, source };
+		};
 		try {
-			return await fs.readFile(filePath, 'utf8');
+			let content: string;
+			if (sshConfig) {
+				const before = await statRemote(filePath, sshConfig);
+				if (!before.success || !before.data) {
+					if (!isExpectedRemoteError(before.error)) {
+						captureException(new Error(before.error || 'statRemote failed'), {
+							operation: 'grokStorage:statSessionFile',
+							filePath,
+						});
+					}
+					return unavailable('unreadable');
+				}
+				source.sizeBytes = before.data.size;
+				if (before.data.isDirectory) return unavailable('not-a-file');
+				if (!Number.isSafeInteger(before.data.size) || before.data.size < 0)
+					return unavailable('invalid-size');
+				if (before.data.size > maxBytes) return unavailable('too-large');
+				const read = await readFileRemote(filePath, sshConfig, undefined, { maxBytes });
+				if (!read.success || read.data === undefined) {
+					if (read.errorCode === 'too-large') return unavailable('too-large');
+					if (!isExpectedRemoteError(read.error)) {
+						captureException(new Error(read.error || 'readFileRemote failed'), {
+							operation: 'grokStorage:readSessionFile',
+							filePath,
+						});
+					}
+					return unavailable('unreadable');
+				}
+				content = read.data;
+				// Check actual output as well as stat, including injected remote transports.
+				if (Buffer.byteLength(content, 'utf8') > maxBytes) return unavailable('too-large');
+				const after = await statRemote(filePath, sshConfig);
+				if (!after.success || !after.data) {
+					if (!isExpectedRemoteError(after.error)) {
+						captureException(new Error(after.error || 'statRemote failed'), {
+							operation: 'grokStorage:statSessionFile',
+							filePath,
+						});
+					}
+					source.status = 'partial';
+					source.reason = 'post-read-stat-unavailable';
+				} else {
+					if (!Number.isSafeInteger(after.data.size) || after.data.size < 0)
+						return unavailable('invalid-size');
+					if (after.data.size > maxBytes) return unavailable('too-large');
+					if (
+						after.data.isDirectory ||
+						after.data.size !== before.data.size ||
+						after.data.mtime !== before.data.mtime ||
+						Buffer.byteLength(content, 'utf8') !== before.data.size
+					) {
+						source.status = 'partial';
+						source.reason = 'changed-during-read';
+					}
+				}
+			} else {
+				// Reject special files before open; O_NONBLOCK also avoids hanging if a
+				// regular file is replaced with a FIFO between stat and open.
+				const before = await fs.stat(filePath);
+				source.sizeBytes = before.size;
+				if (!before.isFile()) return unavailable('not-a-file');
+				if (before.size > maxBytes) return unavailable('too-large');
+				const handle = await fs.open(filePath, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+				try {
+					const opened = await handle.stat();
+					if (!opened.isFile()) return unavailable('not-a-file');
+					if (opened.size > maxBytes) return unavailable('too-large');
+					const chunks: Buffer[] = [];
+					let total = 0;
+					while (total <= maxBytes) {
+						const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes + 1 - total));
+						const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+						if (bytesRead === 0) break;
+						total += bytesRead;
+						if (total > maxBytes) return unavailable('too-large');
+						chunks.push(chunk.subarray(0, bytesRead));
+					}
+					const after = await handle.stat();
+					if (after.size > maxBytes) return unavailable('too-large');
+					content = Buffer.concat(chunks, total).toString('utf8');
+					source.sizeBytes = total;
+					if (
+						opened.size !== after.size ||
+						opened.mtimeMs !== after.mtimeMs ||
+						opened.size !== total ||
+						Buffer.byteLength(content, 'utf8') !== total ||
+						before.ino !== opened.ino ||
+						before.size !== opened.size ||
+						before.mtimeMs !== opened.mtimeMs
+					) {
+						source.status = 'partial';
+						source.reason = 'changed-during-read';
+					}
+				} finally {
+					await handle.close();
+				}
+			}
+			if (!source.reason) source.status = 'available';
+			return { content, source };
 		} catch (error) {
+			if (error instanceof RangeError) return unavailable('too-large');
 			if (!isExpectedSessionReadError(error)) {
 				captureException(error, { operation: 'grokStorage:readSessionFile', filePath });
+			} else {
+				logger.debug('Grok session file not readable', LOG_CONTEXT, { filePath, error });
 			}
-			return null;
+			return unavailable('unreadable');
 		}
 	}
 }

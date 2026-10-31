@@ -82,6 +82,8 @@ export interface AgentSessionInfo {
 		provider: string;
 		summaryStatus: 'available' | 'unavailable' | 'invalid';
 		summary?: Record<string, unknown>;
+		/** Individual file observations, not an atomic cross-file snapshot. */
+		sources?: Record<string, NonNullable<SessionMessagesResult['source']>>;
 	};
 	inputTokens: number;
 	outputTokens: number;
@@ -126,6 +128,17 @@ export interface SessionMessagesResult {
 	messages: SessionMessage[];
 	total: number;
 	hasMore: boolean;
+	/** Source availability is independent of pagination. An unavailable source's
+	 * zero total is not evidence of an empty transcript. Export must disclose
+	 * partial/unavailable content; available does not certify native migration.
+	 */
+	source?: {
+		provider: string;
+		status: 'available' | 'partial' | 'unavailable';
+		reason?: string;
+		sizeBytes?: number;
+		maxBytes?: number;
+	};
 }
 
 /**
