@@ -62,6 +62,9 @@ export function getReadOnlyModeLabel(agentId: AgentId | string): string {
  * Get the tooltip text for the read-only mode toggle based on the agent.
  */
 export function getReadOnlyModeTooltip(agentId: AgentId | string): string {
+	if (agentId === 'grok') {
+		return 'Read-Only requests Grok plan mode with shell commands denied. This is not a filesystem sandbox or an all-tools-off mode.';
+	}
 	return PLAN_MODE_AGENTS.has(agentId as AgentId)
 		? 'Toggle plan mode (agent will plan but not modify files)'
 		: "Toggle Read-Only mode (agent won't modify files)";
@@ -97,6 +100,9 @@ export function getPermissionModeTooltip(
 	mode: 'full' | 'standard' | 'readonly',
 	agentId?: AgentId | string
 ): string {
+	if (agentId === 'grok' && mode === 'standard') {
+		return 'Standard permissions are unavailable for Grok in Maestro. Headless streaming cannot show tool approval or ask-back prompts; the ACP approval route is not connected.';
+	}
 	switch (mode) {
 		case 'full':
 			return 'Full Access: All permission prompts bypassed. Agent can read, write, and execute without confirmation. Ask-back questions (AskUserQuestion) are not surfaced in this mode.';

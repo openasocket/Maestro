@@ -2957,6 +2957,17 @@
 			"acceptanceRun": false,
 			"status": "pass",
 			"scope": "54 files / 4557 passed; 182 process tests at 4ddd8ce6f plus 4375 historical passes at fcc5b3fbb. Original failing batch exits remain historical facts. No new execution or live qualification in GT1-04-14."
+		},
+		"phase05-controls": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-01-existing-provider-controls",
+			"sourceCommit": "60612fe45573a3bd4c2708a6e221197a6373f3b0",
+			"sourceRevisionScope": "Pre-task HEAD plus GT1-05-01 source hashes in evidence/05.md",
+			"provenance": "source-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P04", "P06", "P17", "S01", "META-01", "META-03", "META-04"]
 		}
 	},
 	"sourceCatalog": {
@@ -4616,7 +4627,8 @@
 				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests",
 				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
 				"phase04EvidenceRef": "phase04-reconciliation",
-				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
+				"phase05ControlsEvidenceRef": "phase05-controls"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -4980,7 +4992,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase05ControlsEvidenceRef": "phase05-controls"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7551,7 +7564,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05ControlsEvidenceRef": "phase05-controls"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18533,7 +18547,8 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05ControlsEvidenceRef": "phase05-controls"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21819,7 +21834,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"observation": "All four providers have names and alphabetical picker metadata. Grok existing ID retained."
+				"observation": "All four providers have names and alphabetical picker metadata. Grok existing ID retained.",
+				"phase05ControlsEvidenceRef": "phase05-controls"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21967,7 +21983,8 @@
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase05ControlsEvidenceRef": "phase05-controls"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -22098,7 +22115,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"observation": "Claude then Codex then Antigravity; Grok absent and falls back to alphabetical picker if necessary."
+				"observation": "Claude then Codex then Antigravity; Grok absent and falls back to alphabetical picker if necessary.",
+				"phase05ControlsEvidenceRef": "phase05-controls"
 			},
 			"evidenceApplicability": {
 				"static": {
