@@ -12,9 +12,10 @@
  */
 
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { SshRemoteConfig } from '../../../shared/types';
+import type { SshLaunchTarget } from '../../../shared/maestro-lib/launch/ssh-remote-resolver';
 
 vi.mock('../../../main/utils/logger', () => ({
 	logger: { warn: vi.fn(), info: vi.fn(), debug: vi.fn(), error: vi.fn() },
@@ -46,10 +47,13 @@ vi.mock('../../../main/stores/getters', () => ({
 import {
 	getProviderAccountDirs,
 	resolveAgentAccountDir,
+	type AgentAccountDirOptions,
 } from '../../../main/agents/provider-account-dirs';
 import {
 	resolveAgentAccountDir as resolveAccountDirForAgent,
 	resolveAgentAccountRef,
+	observeGrokLaunchScope,
+	type GrokLaunchScopePorts,
 } from '../../../shared/agentAccountDir';
 
 let homeDir: string;
@@ -71,7 +75,9 @@ function makeAccountDir(root: string, name: string, sessionsSubdir: string): str
 let tmpRoot: string;
 
 beforeEach(() => {
-	tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-account-dirs-'));
+	const fixtureRoot = path.join(process.cwd(), 'tmp');
+	fs.mkdirSync(fixtureRoot, { recursive: true });
+	tmpRoot = fs.mkdtempSync(path.join(fixtureRoot, 'maestro-account-dirs-'));
 	fs.mkdirSync(path.join(tmpRoot, 'home'), { recursive: true });
 	fs.mkdirSync(path.join(tmpRoot, 'elsewhere'), { recursive: true });
 	// realpath so macOS's /var -> /private/var symlink does not make every
@@ -369,7 +375,7 @@ describe('resolveAgentAccountDir', () => {
 				env: { GROK_HOME: root },
 			};
 			const session = agent({ toolType: 'grok' });
-			const cases = [
+			const cases: AgentAccountDirOptions[] = [
 				{ ...layers, sessions: [{ ...session, customEnvVars: { GROK_HOME: blank } }] },
 				{ ...layers, sessions: [session], agentLevelEnvVars: { GROK_HOME: blank } },
 				{
@@ -528,5 +534,311 @@ describe('resolveAgentAccountDir', () => {
 		expect(
 			resolveAgentAccountDir('agent-1', { ...base(), sessions: [agent({ toolType: 'terminal' })] })
 		).toBeUndefined();
+	});
+});
+describe('observeGrokLaunchScope shared directory ports', () => {
+	let cwd: string;
+	let env: NodeJS.ProcessEnv;
+	let ports: GrokLaunchScopePorts;
+	let remote: SshRemoteConfig;
+	let endpoint: string;
+	let receipt: {
+		cwd: { canonicalPath: string; inode: string };
+		account: { canonicalPath: string; inode: string };
+		effective: { HOME: string; GROK_HOME: string };
+	};
+	const observe = (target: SshRemoteConfig | null = null, args: string[] = []) =>
+		observeGrokLaunchScope({ cwd }, target, env, args, ports);
+
+	beforeEach(() => {
+		cwd = path.join(tmpRoot, 'virtual-project');
+		env = { HOME: homeDir, USERPROFILE: homeDir };
+		remote = {
+			id: 'remote-1',
+			name: 'Fixture',
+			host: 'fixture.invalid',
+			port: 22,
+			username: 'fixture',
+			privateKeyPath: '',
+			enabled: true,
+			remoteEnv: {},
+		};
+		endpoint = 'remote-installation';
+		receipt = {
+			cwd: { canonicalPath: '/remote/project', inode: '2' },
+			account: { canonicalPath: '/remote/account', inode: '3' },
+			effective: { HOME: '/remote/home', GROK_HOME: '/remote/account' },
+		};
+		ports = {
+			local: {
+				homedir: vi.fn(() => homeDir),
+				realpath: vi.fn(async (directory) => directory),
+				stat: vi.fn(async () => ({ isDirectory: () => true })),
+				realpathSync: vi.fn((directory) => directory),
+				isExpectedError: vi.fn((error) => (error as NodeJS.ErrnoException).code === 'ENOENT'),
+				installationId: vi.fn(() => 'local-installation'),
+			},
+			remote: {
+				observe: vi.fn(async () => ({ success: true, data: structuredClone(receipt) })),
+				qualify: vi.fn(
+					async (selected): Promise<SshLaunchTarget> => ({
+						kind: 'remote',
+						remote: selected,
+						endpoint: {
+							contractVersion: '1',
+							installationId: endpoint,
+							runtimeId: 'runtime',
+							processEpoch: 'epoch',
+							tenantId: 'tenant',
+							orgId: 'org',
+							authorityId: 'authority',
+							policyRevision: 1,
+							authority: 'registered',
+							routes: [],
+						},
+					})
+				),
+				isExpectedError: vi.fn((error) => error === 'disconnected'),
+			},
+		};
+	});
+
+	it.each([undefined, '', 'relative-account', '~/.grok-work', 'absolute'])(
+		'observes the native local root %j through injected directories only',
+		async (root) => {
+			env.GROK_HOME = root === 'absolute' ? outsideHome : root;
+			const account = root ? path.resolve(cwd, env.GROK_HOME!) : path.join(homeDir, '.grok');
+			const result = await observe();
+			expect(result.scope).toEqual({
+				version: 1,
+				state: 'bound',
+				provider: 'grok',
+				cwd,
+				accountRef: resolveAgentAccountRef(
+					{ toolType: 'grok', managedAccountDir: account },
+					{ homeDir }
+				),
+				host: { kind: 'local', identity: 'local-installation' },
+			});
+			expect(vi.mocked(ports.local.realpath).mock.calls).toEqual([[cwd], [account]]);
+			expect(vi.mocked(ports.local.stat).mock.calls).toEqual([[cwd], [account]]);
+			expect(result.recheck?.()).toBe(true); // Local admission recheck stays synchronous.
+			expect(vi.mocked(ports.local.realpathSync).mock.calls).toEqual([[cwd], [account]]);
+			expect(ports.remote.observe).not.toHaveBeenCalled();
+			expect(ports.remote.qualify).not.toHaveBeenCalled();
+			expect(Object.isFrozen(result.scope)).toBe(true);
+			if (result.scope.state === 'bound') expect(Object.isFrozen(result.scope.host)).toBe(true);
+			expect(result.scope).not.toHaveProperty('nativeSessionId');
+		}
+	);
+
+	it('uses the injected home fallback and keeps two canonical accounts separate', async () => {
+		env = {};
+		const personal = await observe();
+		expect(ports.local.homedir).toHaveBeenCalledOnce();
+		env.GROK_HOME = outsideHome;
+		const work = await observe();
+		expect(work.scope.state).toBe('bound');
+		expect(work.scope).not.toEqual(personal.scope);
+		vi.mocked(ports.local.realpath).mockImplementation(async (dir) =>
+			dir === outsideHome ? path.join(homeDir, '.grok') : dir
+		);
+		expect((await observe()).scope).toEqual(personal.scope);
+	});
+
+	it.each(['whitespace-root', 'padded-root', 'relative-home', 'empty-home', 'relative-cwd'])(
+		'keeps %s unknown without directory probes',
+		async (selection) => {
+			if (selection === 'whitespace-root') env.GROK_HOME = ' \t';
+			if (selection === 'padded-root') env.GROK_HOME = ` ${outsideHome} `;
+			if (selection === 'relative-home') env.HOME = env.USERPROFILE = 'relative-home';
+			if (selection === 'empty-home') env.HOME = env.USERPROFILE = '';
+			if (selection === 'relative-cwd') cwd = 'relative-project';
+			expect(await observe()).toEqual({
+				scope: { version: 1, state: 'unknown', reason: 'unobserved' },
+			});
+			expect(ports.local.realpath).not.toHaveBeenCalled();
+			expect(ports.local.installationId).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['missing-account', 'not-directory', 'unexpected'])(
+		'preserves %s instead of falling back to the default root',
+		async (failure) => {
+			env.GROK_HOME = outsideHome;
+			const error = Object.assign(new Error(failure), {
+				code: failure === 'unexpected' ? 'EMFILE' : 'ENOENT',
+			});
+			if (failure === 'not-directory')
+				vi.mocked(ports.local.stat).mockResolvedValue({ isDirectory: () => false });
+			else
+				vi.mocked(ports.local.realpath).mockImplementation(async (dir) => {
+					if (dir === outsideHome) throw error;
+					return dir;
+				});
+			if (failure === 'unexpected') await expect(observe()).rejects.toBe(error);
+			else expect((await observe()).scope.state).toBe('unknown');
+			expect(vi.mocked(ports.local.realpath).mock.calls).toEqual([[cwd], [outsideHome]]);
+			expect(ports.local.installationId).not.toHaveBeenCalled();
+		}
+	);
+
+	it.each(['cwd', 'account', 'missing', 'unexpected'])(
+		'refuses changed local %s on recheck and propagates unexpected errors',
+		async (change) => {
+			const result = await observe();
+			const error = Object.assign(new Error(change), {
+				code: change === 'missing' ? 'ENOENT' : 'EMFILE',
+			});
+			vi.mocked(ports.local.realpathSync).mockImplementation((dir) => {
+				if (change === 'missing' || change === 'unexpected') throw error;
+				return dir === (change === 'cwd' ? cwd : path.join(homeDir, '.grok')) ? outsideHome : dir;
+			});
+			if (change === 'unexpected') expect(() => result.recheck?.()).toThrow(error);
+			else expect(result.recheck?.()).toBe(false);
+		}
+	);
+
+	describe('SSH observations', () => {
+		beforeEach(() => {
+			cwd = '/remote/shell-project';
+		});
+		afterEach(() => {
+			for (const port of Object.values(ports.local)) expect(port).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			{ args: [], nativeCwd: undefined },
+			{ args: ['--cwd', 'relative-project'], nativeCwd: 'relative-project' },
+			{ args: ['--cwd=~/literal-project'], nativeCwd: '~/literal-project' },
+		])(
+			'passes native cwd separately from the shell cwd: $nativeCwd',
+			async ({ args, nativeCwd }) => {
+				env = { GROK_HOME: '~/chosen account', HOME: '/selected/home' };
+				const result = await observe(remote, args);
+				expect(ports.remote.observe).toHaveBeenCalledWith(cwd, remote, {
+					env,
+					nativeCwd,
+				});
+				expect(result.scope).toEqual({
+					version: 1,
+					state: 'bound',
+					provider: 'grok',
+					cwd: '/remote/project',
+					accountRef: resolveAgentAccountRef(
+						{ toolType: 'grok', sshRemote: true, managedAccountDir: '/remote/account' },
+						{ homeDir: '' }
+					),
+					host: { kind: 'ssh', identity: endpoint },
+				});
+				expect(vi.mocked(ports.remote.qualify).mock.calls[0][0]).not.toBe(remote);
+				expect(await result.recheck?.()).toBe(true);
+				expect(ports.remote.qualify).toHaveBeenCalledTimes(4);
+			}
+		);
+
+		it.each([undefined, '', ' \t', 'relative-account', '~/.grok-work'])(
+			'leaves remote root %j to the injected host observation',
+			async (root) => {
+				env = { GROK_HOME: root };
+				const result = await observe(remote);
+				expect(ports.remote.observe).toHaveBeenCalledWith(cwd, remote, {
+					env,
+					nativeCwd: undefined,
+				});
+				expect(result.scope.state).toBe('bound');
+				expect(await result.recheck?.()).toBe(true);
+			}
+		);
+
+		it.each(['cwd', 'account'] as const)(
+			'does not normalize an unrepresentable remote %s',
+			async (field) => {
+				for (const canonicalPath of [' /remote/padded ', '/remote/literal\\name']) {
+					receipt[field].canonicalPath = canonicalPath;
+					expect(await observe(remote)).toEqual({
+						scope: { version: 1, state: 'unknown', reason: 'unobserved' },
+					});
+				}
+			}
+		);
+
+		it('separates accounts and executing installations despite identical SSH aliases', async () => {
+			const first = await observe(remote);
+			receipt.account.canonicalPath = '/remote/account-two';
+			const second = await observe(remote);
+			expect(second.scope.state).toBe('bound');
+			expect(second.scope).not.toEqual(first.scope);
+			receipt.account.canonicalPath = '/remote/account';
+			endpoint = 'second-installation';
+			expect((await observe(remote)).scope).toEqual({
+				...first.scope,
+				host: { kind: 'ssh', identity: endpoint },
+			});
+		});
+
+		it.each([
+			'unqualified',
+			'wrong-config',
+			'blank-identity',
+			'control-identity',
+			'changed-endpoint',
+		])('leaves %s unknown without inventing a config-based host identity', async (failure) => {
+			const qualified = await ports.remote.qualify(remote);
+			vi.mocked(ports.remote.qualify).mockClear();
+			if (failure === 'unqualified') vi.mocked(ports.remote.qualify).mockResolvedValue(undefined);
+			if (failure === 'wrong-config')
+				vi.mocked(ports.remote.qualify).mockResolvedValue({
+					...qualified,
+					remote: { ...remote, host: 'different.invalid' },
+				} as SshLaunchTarget);
+			if (failure === 'blank-identity') endpoint = ' ';
+			if (failure === 'control-identity') endpoint = 'bad\nidentity';
+			if (failure === 'changed-endpoint')
+				vi.mocked(ports.remote.observe).mockImplementation(async () => {
+					endpoint = 'replacement-installation';
+					return { success: true, data: receipt };
+				});
+			expect((await observe(remote)).scope.state).toBe('unknown');
+			if (failure !== 'changed-endpoint') expect(ports.remote.observe).not.toHaveBeenCalled();
+		});
+
+		it.each(['missing', 'disconnected', 'unexpected'])(
+			'preserves remote %s during both observation and recheck',
+			async (failure) => {
+				const result = await observe(remote);
+				vi.mocked(ports.remote.observe).mockResolvedValue({
+					success: false,
+					error: failure,
+					...(failure === 'missing' ? { errorCode: 'identity-unavailable' } : {}),
+				});
+				if (failure === 'unexpected') {
+					await expect(observe(remote)).rejects.toThrow(failure);
+					await expect(result.recheck?.()).rejects.toThrow(failure);
+				} else {
+					expect((await observe(remote)).scope.state).toBe('unknown');
+					expect(await result.recheck?.()).toBe(false);
+				}
+			}
+		);
+
+		it.each(['cwd', 'account', 'inode', 'environment', 'endpoint-before', 'endpoint-after'])(
+			'rechecks complete remote evidence: %s',
+			async (change) => {
+				const result = await observe(remote);
+				if (change === 'cwd') receipt.cwd.canonicalPath = '/remote/changed';
+				if (change === 'account') receipt.account.canonicalPath = '/remote/changed';
+				if (change === 'inode') receipt.account.inode = 'replacement-inode';
+				if (change === 'environment') receipt.effective.HOME = '/changed-home';
+				if (change === 'endpoint-before') endpoint = 'replacement-installation';
+				if (change === 'endpoint-after')
+					vi.mocked(ports.remote.observe).mockImplementation(async () => {
+						endpoint = 'replacement-installation';
+						return { success: true, data: receipt };
+					});
+				expect(await result.recheck?.()).toBe(false);
+				if (change === 'endpoint-before') expect(ports.remote.observe).toHaveBeenCalledOnce();
+			}
+		);
 	});
 });

@@ -14,6 +14,7 @@
 import { describe, it, expect } from 'vitest';
 import {
 	PROVIDER_OVERRIDE_KEYS,
+	matchesNativeSessionBinding,
 	providerOverridesFor,
 	resolveTurnProvider,
 	switchAgentProvider,
@@ -26,6 +27,7 @@ import {
 	type ProviderSwitchTab,
 } from '../../../../shared/maestro-lib/agents/providerSwap';
 import type { ToolType, UsageStats } from '../../../../shared/types';
+import { matchesNativeSessionBinding as rendererMatchesNativeSessionBinding } from '../../../../renderer/services/resumableSession';
 
 /** A tab as the desktop holds it: the switch fields plus fields it must never touch. */
 interface TestTab extends ProviderSwitchTab {
@@ -272,6 +274,81 @@ describe('native session ownership', () => {
 		host: { kind: 'ssh', identity: 'fixture-endpoint-a' },
 		cwd: '/work/project',
 	};
+
+	describe('matchesNativeSessionBinding', () => {
+		it('keeps the renderer compatibility export on the shared matcher', () => {
+			expect(rendererMatchesNativeSessionBinding).toBe(matchesNativeSessionBinding);
+			expect(rendererMatchesNativeSessionBinding(bound, structuredClone(bound))).toBe(true);
+		});
+
+		it.each(['local', 'ssh'] as const)(
+			'matches complete %s ownership regardless of key order',
+			(kind) => {
+				const retained = { ...bound, host: { kind, identity: 'fixture-machine-a' } };
+				const observed = {
+					cwd: retained.cwd,
+					host: { identity: retained.host.identity, kind },
+					accountRef: retained.accountRef,
+					nativeSessionId: retained.nativeSessionId,
+					provider: retained.provider,
+					state: retained.state,
+					version: retained.version,
+				};
+				expect(matchesNativeSessionBinding(retained, observed)).toBe(true);
+				expect(matchesNativeSessionBinding(observed, retained)).toBe(true);
+			}
+		);
+
+		it.each([
+			{ ...bound, accountRef: 'fixture-account-b' },
+			{ ...bound, host: { ...bound.host, identity: 'fixture-endpoint-b' } },
+			{ ...bound, host: { ...bound.host, kind: 'local' as const } },
+			{ ...bound, cwd: '/work/other-project' },
+			{ ...bound, cwd: `${bound.cwd}/` },
+			{ ...bound, provider: 'codex' as const },
+			{ ...bound, nativeSessionId: 'different-native-id' },
+			{ ...bound, extraReceipt: 'different-evidence' },
+		])('rejects a different complete binding: %j', (observed) => {
+			expect(matchesNativeSessionBinding(observed, observed)).toBe(true);
+			expect(matchesNativeSessionBinding(bound, observed)).toBe(false);
+			expect(matchesNativeSessionBinding(observed, bound)).toBe(false);
+			expect(rendererMatchesNativeSessionBinding(bound, observed)).toBe(false);
+		});
+
+		it.each([
+			undefined,
+			null,
+			{},
+			{ version: 1, state: 'unknown', reason: 'legacy' },
+			{ version: 1, state: 'unknown', reason: 'unobserved' },
+			{ ...bound, version: 2 },
+			{ ...bound, state: 'pending' },
+			{ ...bound, host: undefined },
+			{ ...bound, host: null },
+			{ ...bound, host: { ...bound.host, kind: 'alias' } },
+		])('rejects malformed or unknown persisted ownership even against itself: %j', (raw) => {
+			const malformed = raw as NativeSessionBinding | undefined;
+			expect(matchesNativeSessionBinding(malformed, malformed)).toBe(false);
+			expect(matchesNativeSessionBinding(malformed, bound)).toBe(false);
+			expect(matchesNativeSessionBinding(bound, malformed)).toBe(false);
+		});
+
+		it.each(['provider', 'nativeSessionId', 'accountRef', 'cwd', 'identity'] as const)(
+			'rejects absent, blank, non-string and NUL-containing %s without repairing it',
+			(field) => {
+				for (const value of [undefined, null, '', ' \t', 7, 'observed\0scope']) {
+					const malformed = (
+						field === 'identity'
+							? { ...bound, host: { ...bound.host, identity: value } }
+							: { ...bound, [field]: value }
+					) as NativeSessionBinding;
+					expect(matchesNativeSessionBinding(malformed, malformed)).toBe(false);
+					expect(matchesNativeSessionBinding(bound, malformed)).toBe(false);
+					expect(matchesNativeSessionBinding(malformed, bound)).toBe(false);
+				}
+			}
+		);
+	});
 
 	it.each([
 		undefined,

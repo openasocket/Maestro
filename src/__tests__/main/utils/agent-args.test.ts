@@ -13,8 +13,11 @@ import {
 	getContextWindowValue,
 	placeResumeSelectorLast,
 	GrokModelEffortError,
+	grokLaunchArgsProblem,
 	type GrokEffortMenu,
 } from '../../../main/utils/agent-args';
+import { grokLaunchArgsProblem as processGrokLaunchArgsProblem } from '../../../main/process-manager/types';
+import { grokLaunchArgsProblem as sharedGrokLaunchArgsProblem } from '../../../shared/maestro-lib/launch/agent-args';
 import { AGENT_DEFINITIONS, getAgentDefinition } from '../../../main/agents/definitions';
 import type { AgentConfig } from '../../../main/agents';
 import { logger as mockLogger } from '../../../main/utils/logger';
@@ -363,7 +366,7 @@ describe('buildAgentArgs', () => {
 	it("claude-code with permissionMode 'full' adds --dangerously-skip-permissions", () => {
 		const claude = AGENT_DEFINITIONS.find((agent) => agent.id === 'claude-code');
 		expect(claude).toBeDefined();
-		const result = buildAgentArgs(claude!, {
+		const result = buildAgentArgs(makeAgent(claude!), {
 			baseArgs: ['--print'],
 			prompt: 'do the thing',
 			permissionMode: 'full',
@@ -377,7 +380,7 @@ describe('buildAgentArgs', () => {
 		// treats a literal undefined as non-full, so callers MUST resolve first.
 		const claude = AGENT_DEFINITIONS.find((agent) => agent.id === 'claude-code');
 		expect(claude).toBeDefined();
-		const result = buildAgentArgs(claude!, {
+		const result = buildAgentArgs(makeAgent(claude!), {
 			baseArgs: ['--print'],
 			prompt: 'do the thing',
 			permissionMode: undefined,
@@ -523,7 +526,7 @@ describe('buildAgentArgs', () => {
 		expect(hermes).toBeDefined();
 		const prompt = 'Summarize the current branch status';
 
-		const baseArgs = buildAgentArgs(hermes!, {
+		const baseArgs = buildAgentArgs(makeAgent(hermes!), {
 			baseArgs: [],
 			prompt,
 			modelId: 'anthropic/claude-sonnet-4-20250514',
@@ -546,7 +549,7 @@ describe('buildAgentArgs', () => {
 		expect(pi).toBeDefined();
 		const prompt = 'Plan the next implementation step';
 
-		const baseArgs = buildAgentArgs(pi!, {
+		const baseArgs = buildAgentArgs(makeAgent(pi!), {
 			baseArgs: [],
 			prompt,
 			modelId: 'claude-sonnet-4.5',
@@ -563,7 +566,7 @@ describe('buildAgentArgs', () => {
 		]);
 		expect(pi!.imageArgs!('/tmp/screenshot.png')).toEqual(['@/tmp/screenshot.png']);
 		expect(
-			buildAgentArgs(pi!, {
+			buildAgentArgs(makeAgent(pi!), {
 				baseArgs: [],
 				prompt,
 				agentSessionId: 'pi-session-1',
@@ -578,15 +581,14 @@ describe('buildAgentArgs', () => {
 			'--session',
 			'pi-session-1',
 		]);
-		expect(
-			pi!.configOptions?.find((option) => option.key === 'model')?.argBuilder?.('gpt-5')
-		).toEqual(['--model', 'gpt-5']);
+		const model = pi!.configOptions?.find((option) => option.key === 'model');
+		expect(model?.type === 'text' && model.argBuilder?.('gpt-5')).toEqual(['--model', 'gpt-5']);
 	});
 
 	it('builds Qwen read-only args with --approval-mode plan and never -y', () => {
 		const qwen = AGENT_DEFINITIONS.find((agent) => agent.id === 'qwen3-coder');
 		expect(qwen).toBeDefined();
-		const result = buildAgentArgs(qwen!, {
+		const result = buildAgentArgs(makeAgent(qwen!), {
 			baseArgs: [],
 			prompt: 'review this code',
 			readOnlyMode: true,
@@ -600,7 +602,7 @@ describe('buildAgentArgs', () => {
 	it('builds omp read-only args restricting tools to read/search', () => {
 		const omp = AGENT_DEFINITIONS.find((agent) => agent.id === 'omp');
 		expect(omp).toBeDefined();
-		const result = buildAgentArgs(omp!, {
+		const result = buildAgentArgs(makeAgent(omp!), {
 			baseArgs: [],
 			prompt: 'review this code',
 			readOnlyMode: true,
@@ -1092,11 +1094,13 @@ describe('applyAgentConfigOverrides', () => {
 			'preserves repeated %s pairs until conflicts can be refused',
 			(flag) => {
 				const input = [flag, 'high', flag, 'low'];
-				const built = buildAgentArgs(grok, { baseArgs: input });
+				const built = buildAgentArgs(makeAgent(grok), { baseArgs: input });
 				expect(built).toEqual(input);
 				expect(() => applyAgentConfigOverrides(grok, built, {})).toThrow(GrokModelEffortError);
 				expect(input).toEqual([flag, 'high', flag, 'low']);
-				const repeated = buildAgentArgs(grok, { baseArgs: [flag, 'high', flag, 'high'] });
+				const repeated = buildAgentArgs(makeAgent(grok), {
+					baseArgs: [flag, 'high', flag, 'high'],
+				});
 				expect(applyAgentConfigOverrides(grok, repeated, {}).args).toEqual([
 					flag.includes('effort') ? '--reasoning-effort' : '-m',
 					'high',
@@ -1217,7 +1221,7 @@ describe('applyAgentConfigOverrides', () => {
 
 		it('keeps the summary override when Codex runs in read-only mode', () => {
 			const agent = codex();
-			const readOnlyArgs = buildAgentArgs(agent, { baseArgs, readOnlyMode: true });
+			const readOnlyArgs = buildAgentArgs(makeAgent(agent), { baseArgs, readOnlyMode: true });
 			const { args } = applyAgentConfigOverrides(agent, readOnlyArgs, {
 				readOnlyMode: true,
 				agentConfigValues: { reasoningSummary: 'auto' },
@@ -2215,4 +2219,76 @@ describe('buildAgentArgs with the Antigravity definition', () => {
 			'30m',
 		]);
 	});
+});
+
+describe('shared Grok launch selector compatibility', () => {
+	const cwd = path.resolve('grok-selector-project');
+	const nativeId = 'native:opaque-42';
+
+	it('keeps both main compatibility exports on the shared validator', () => {
+		expect(grokLaunchArgsProblem).toBe(sharedGrokLaunchArgsProblem);
+		expect(processGrokLaunchArgsProblem).toBe(sharedGrokLaunchArgsProblem);
+	});
+
+	it.each<[string[], string | undefined, string | undefined]>([
+		[[], undefined, undefined],
+		[['--cwd', cwd], undefined, cwd],
+		[[`--cwd=${cwd}`], undefined, cwd],
+		[['--resume', nativeId], nativeId, cwd],
+		[[`--resume=${nativeId}`], nativeId, cwd],
+		[['--cwd', cwd, '--resume', nativeId], nativeId, cwd],
+		[['--resume', nativeId, `--cwd=${cwd}`, '--output-format', 'streaming-json'], nativeId, cwd],
+	])('accepts only the requested explicit selection: %j', (args, requestedId, requestedCwd) => {
+		const original = [...args];
+		expect(sharedGrokLaunchArgsProblem(args, requestedId, requestedCwd)).toBeUndefined();
+		expect(args).toEqual(original);
+	});
+
+	it.each<[string[], string | undefined, string | undefined]>([
+		[[], nativeId, cwd],
+		[['--resume', nativeId], undefined, cwd],
+		[['--resume', 'other-id'], nativeId, cwd],
+		[['--resume'], nativeId, cwd],
+		[['--resume='], nativeId, cwd],
+		[['--resume', nativeId, `--resume=${nativeId}`], nativeId, cwd],
+		[['--resume', ''], '', cwd],
+		[['--resume', '  '], '  ', cwd],
+		[['--resume', 'native\n42'], 'native\n42', cwd],
+		[['--resume', 'native\x0042'], 'native\x0042', cwd],
+		[['--resume', 'native\x7f42'], 'native\x7f42', cwd],
+		[['--cwd', path.join(cwd, 'other')], undefined, cwd],
+		[[`--cwd=${cwd}`, '--cwd', cwd], undefined, cwd],
+		[['--cwd'], undefined, cwd],
+		[['--cwd='], undefined, cwd],
+		[['--cwd', cwd], undefined, undefined],
+	])('refuses a mismatched retained request: %j', (args, requestedId, requestedCwd) => {
+		expect(sharedGrokLaunchArgsProblem(args, requestedId, requestedCwd)).toBe(
+			'Grok resume or working-directory arguments do not match the retained launch request.'
+		);
+	});
+
+	it.each([
+		'--continue',
+		'--continue=true',
+		'-c',
+		'-cother',
+		'--fork-session',
+		'--fork-session=other',
+		'--session-id',
+		'--session-id=other',
+		'--worktree',
+		'--worktree=other',
+		'-w',
+		'-wother',
+		'-r',
+		'-rother',
+		'--',
+	])(
+		'refuses implicit or alternate ownership selector %s even with an exact resume',
+		(selector) => {
+			expect(sharedGrokLaunchArgsProblem(['--resume', nativeId, selector], nativeId, cwd)).toBe(
+				'Grok implicit continuation, fork or workspace selectors cannot supply native launch ownership.'
+			);
+		}
+	);
 });

@@ -2483,6 +2483,29 @@
 			"implementationOwner": "GT1-04-07F3",
 			"testOwner": "GT1-04-07FPT",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-shared-launch-prerequisite-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07fpt-shared-launch-prerequisite-tests",
+			"sourceCommit": "c8011b53d7857e19c44729ae7816a8dc15979689",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/agents/provider-account-dirs.test.ts": "942ea6a8171842e2868b65f84793fc1a78856f24ad16a08d6b33d573baa97319",
+				"src/__tests__/main/utils/agent-args.test.ts": "bf24e388c0b886a1e2a1bd4f629ccf65ee49f9a42029f97d374dea7ef92fcd76",
+				"src/__tests__/shared/maestro-lib/agents/providerSwap.test.ts": "42e2a3555c270930f1308d88818294189bde6b55818d24a41b7d58fcb6089144"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "108 added parameter-expanded cases: main/renderer compatibility exports, exact launch selectors, injected directory and SSH observation, account/host isolation, honest unknown scopes and failed rechecks, complete binding comparison and malformed rejection. Existing fixture typing repaired without production changes.",
+			"limitations": [
+				"Tests are authored only; GT1-04-13 executes these and existing desktop launch suites. No native account, provider or remote-host qualification.",
+				"Scoped TypeScript retains the pre-existing RequestInit.dispatcher diagnostic; baseline comparison adds no diagnostics. Runtime admitted receipts remain GT1-04-07F4."
+			],
+			"testOwner": "GT1-04-07FPT",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6421,7 +6444,8 @@
 				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests",
 				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector",
 				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
-				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher"
+				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
+				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11738,7 +11762,8 @@
 				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests",
 				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector",
 				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
-				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher"
+				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
+				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12324,7 +12349,8 @@
 				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests",
 				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector",
 				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
-				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher"
+				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
+				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16980,7 +17006,8 @@
 				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests",
 				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector",
 				"phase04SharedGrokLaunchScopeRef": "phase04-shared-grok-launch-scope",
-				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher"
+				"phase04SharedNativeSessionMatcherRef": "phase04-shared-native-session-matcher",
+				"phase04SharedLaunchPrerequisiteTestsRef": "phase04-shared-launch-prerequisite-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
