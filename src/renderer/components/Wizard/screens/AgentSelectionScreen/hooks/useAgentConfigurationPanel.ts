@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AgentConfig } from '../../../../../types';
 import type { AgentDiscoveryRequest, AgentSshRemoteConfig } from '../../../../../../shared/types';
 import { useAgentModelEffortOptions } from '../../../../../hooks/agent/useAgentModelEffortOptions';
@@ -11,7 +11,6 @@ import { AGENT_TILES } from '../utils/agentTiles';
 import {
 	addEnvVar,
 	normalizeOptionalWizardString,
-	normalizeWizardEnvVars,
 	removeEnvVar,
 	renameEnvVarKey,
 	updateEnvVarValue,
@@ -62,6 +61,9 @@ export function useAgentConfigurationPanel({
 	const agentConfigRef = useRef<Record<string, any>>({});
 	const [loadedConfigFor, setLoadedConfigFor] = useState<string>();
 	const configRequestRef = useRef(0);
+	const agentRefreshRequestRef = useRef(0);
+	const currentConfiguringAgent = useRef(configuringAgentId);
+	currentConfiguringAgent.current = configuringAgentId;
 	const [availableModels, setAvailableModels] = useState<string[]>([]);
 	const [loadingModels, setLoadingModels] = useState(false);
 	const [refreshingAgent, setRefreshingAgent] = useState(false);
@@ -93,12 +95,19 @@ export function useAgentConfigurationPanel({
 	);
 	const currentDraft = useRef<typeof draft | undefined>(draft);
 	currentDraft.current = draft;
-	useEffect(() => {
+	useLayoutEffect(() => {
 		currentDraft.current = draft;
+		setLoadingModels(false);
+		setRefreshingAgent(false);
 		return () => {
 			currentDraft.current = undefined;
+			configRequestRef.current++;
+			agentRefreshRequestRef.current++;
 		};
-	}, [draft]);
+	}, [draft, configuringAgentId]);
+	useLayoutEffect(() => {
+		setAvailableModels([]);
+	}, [sshRemoteConfig?.enabled, sshRemoteConfig?.remoteId]);
 
 	const grokContext = useMemo<AgentDiscoveryRequest['context'] | undefined>(() => {
 		void grokRefresh;
@@ -155,56 +164,78 @@ export function useAgentConfigurationPanel({
 	);
 
 	const setCustomEnvVars = useCallback(
-		(value: Record<string, string>) => setWizardCustomEnvVars(normalizeWizardEnvVars(value)),
+		// Called only for an explicit edit. An empty map replaces inherited account
+		// settings; opening or closing the panel leaves undefined inheritance intact.
+		(value: Record<string, string>) => setWizardCustomEnvVars(value),
 		[setWizardCustomEnvVars]
 	);
 
 	const handleOpenConfig = useCallback(
 		async (agentId: string) => {
+			if (currentDraft.current !== draft || currentConfiguringAgent.current !== configuringAgentId)
+				return;
 			const requestId = ++configRequestRef.current;
+			const isCurrentRequest = () =>
+				configRequestRef.current === requestId &&
+				currentDraft.current === draft &&
+				currentConfiguringAgent.current === configuringAgentId;
 			setLoadedConfigFor(undefined);
 			setAvailableModels([]);
 			setLoadingModels(false);
-			const config = await window.maestro.agents.getConfig(agentId);
-			if (configRequestRef.current !== requestId || currentDraft.current !== draft) return;
-			agentConfigRef.current = config || {};
-			setAgentConfig(config || {});
-			setLoadedConfigFor(agentId);
-			setConfiguringAgentId(agentId);
-
-			const agent = detectedAgents.find((candidate) => candidate.id === agentId);
-			if (agentId !== 'grok' && agent?.capabilities?.supportsModelSelection) {
-				setLoadingModels(true);
+			try {
+				const config = await window.maestro.agents.getConfig(agentId);
+				if (!isCurrentRequest()) return;
+				let models: string[] = [];
+				const agent = detectedAgents.find((candidate) => candidate.id === agentId);
 				const sshRemoteId = getSshRemoteIdForDetection(sshRemoteConfig);
-				try {
-					const models = await window.maestro.agents.getModels(agentId, false, sshRemoteId);
-					if (configRequestRef.current !== requestId || currentDraft.current !== draft) return;
-					setAvailableModels(models);
-				} catch (error) {
-					logger.error('Failed to load models:', undefined, error);
-					captureException(error, {
-						extra: {
-							operation: 'agentSelection:loadModels',
-							agentId,
-							remoteMode: Boolean(sshRemoteId),
-						},
-					});
-				} finally {
-					if (configRequestRef.current === requestId) {
-						setLoadingModels(false);
+				if (
+					agentId !== 'grok' &&
+					agent?.capabilities?.supportsModelSelection &&
+					(!sshRemoteConfig?.enabled || sshRemoteId)
+				) {
+					setLoadingModels(true);
+					try {
+						models = await window.maestro.agents.getModels(agentId, false, sshRemoteId);
+					} catch (error) {
+						if (!isCurrentRequest()) return;
+						logger.error('Failed to load models:', undefined, error);
+						captureException(error, {
+							extra: {
+								operation: 'agentSelection:loadModels',
+								agentId,
+								remoteMode: Boolean(sshRemoteId),
+							},
+						});
 					}
 				}
+
+				if (!isCurrentRequest()) return;
+				// Publish together after every read. Changing the panel's provider here
+				// must not invalidate its own pending model lookup.
+				agentConfigRef.current = config || {};
+				setAgentConfig(config || {});
+				setLoadedConfigFor(agentId);
+				setAvailableModels(models);
+				setConfiguringAgentId(agentId);
+				setSelectedAgent(agentId);
+				showConfigView();
+
+				const tile = AGENT_TILES.find((candidate) => candidate.id === agentId);
+				announce(`Configuring ${tile?.name || agentId}`);
+			} catch (error) {
+				if (!isCurrentRequest()) return;
+				logger.error('Failed to load agent configuration:', undefined, error);
+				captureException(error, {
+					extra: { operation: 'agentSelection:loadConfig', agentId },
+				});
+				announce('Failed to load agent configuration. Please try again.');
+			} finally {
+				if (isCurrentRequest()) setLoadingModels(false);
 			}
-
-			if (configRequestRef.current !== requestId || currentDraft.current !== draft) return;
-			setSelectedAgent(agentId);
-			showConfigView();
-
-			const tile = AGENT_TILES.find((candidate) => candidate.id === agentId);
-			announce(`Configuring ${tile?.name || agentId}`);
 		},
 		[
 			announce,
+			configuringAgentId,
 			detectedAgents,
 			draft,
 			setConfiguringAgentId,
@@ -216,11 +247,17 @@ export function useAgentConfigurationPanel({
 
 	const handleCloseConfig = useCallback(() => {
 		configRequestRef.current++;
+		agentRefreshRequestRef.current++;
 		currentGrokContext.current = undefined;
 		setLoadedConfigFor(undefined);
 		setAvailableModels([]);
 		setLoadingModels(false);
-		setWizardSessionSshRemoteConfig(toWizardSshRemoteConfig(sshRemoteConfig));
+		setRefreshingAgent(false);
+		setWizardSessionSshRemoteConfig(
+			sshRemoteConfig?.enabled && !sshRemoteConfig.remoteId
+				? { ...sshRemoteConfig, remoteId: null }
+				: toWizardSshRemoteConfig(sshRemoteConfig)
+		);
 		showGridView(configuringAgentId);
 		announce('Returned to agent selection');
 	}, [
@@ -232,17 +269,30 @@ export function useAgentConfigurationPanel({
 	]);
 
 	const handleRefreshAgent = useCallback(async () => {
-		if (!configuringAgentId) return;
+		if (
+			!configuringAgentId ||
+			currentDraft.current !== draft ||
+			currentConfiguringAgent.current !== configuringAgentId
+		)
+			return;
+		const requestId = ++agentRefreshRequestRef.current;
 		setRefreshingAgent(true);
 		try {
 			await refreshAgentDetection();
 		} finally {
-			setRefreshingAgent(false);
+			if (agentRefreshRequestRef.current === requestId && currentDraft.current === draft) {
+				setRefreshingAgent(false);
+			}
 		}
-	}, [configuringAgentId, refreshAgentDetection]);
+	}, [configuringAgentId, draft, refreshAgentDetection]);
 
 	const handleRefreshModels = useCallback(async () => {
-		if (!configuringAgentId) return;
+		if (
+			!configuringAgentId ||
+			currentConfiguringAgent.current !== configuringAgentId ||
+			currentDraft.current !== draft
+		)
+			return;
 		if (configuringAgentId === 'grok') {
 			if (!grokContext) return;
 			// The forced request refreshes the host cache. Only the shared hook
@@ -268,13 +318,19 @@ export function useAgentConfigurationPanel({
 			return;
 		}
 		const requestId = ++configRequestRef.current;
-		setLoadingModels(true);
 		const sshRemoteId = getSshRemoteIdForDetection(sshRemoteConfig);
+		if (sshRemoteConfig?.enabled && !sshRemoteId) return;
+		const isCurrentRequest = () =>
+			configRequestRef.current === requestId &&
+			currentDraft.current === draft &&
+			currentConfiguringAgent.current === configuringAgentId;
+		setLoadingModels(true);
 		try {
 			const models = await window.maestro.agents.getModels(configuringAgentId, true, sshRemoteId);
-			if (configRequestRef.current !== requestId || currentDraft.current !== draft) return;
+			if (!isCurrentRequest()) return;
 			setAvailableModels(models);
 		} catch (error) {
+			if (!isCurrentRequest()) return;
 			logger.error('Failed to refresh models:', undefined, error);
 			captureException(error, {
 				extra: {
@@ -284,7 +340,7 @@ export function useAgentConfigurationPanel({
 				},
 			});
 		} finally {
-			if (configRequestRef.current === requestId) {
+			if (isCurrentRequest()) {
 				setLoadingModels(false);
 			}
 		}

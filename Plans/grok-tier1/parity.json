@@ -3558,6 +3558,29 @@
 				"GT1-05-12A owns caller tests; GT1-05-13 executes them. GT1-05-11B/C/D still own selected-host readiness, generation handoff and streaming preview.",
 				"No native resume, provider invocation, live qualification, capability or beta promotion."
 			]
+		},
+		"phase05-onboarding-account-host-readiness": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-11b-onboarding-account-and-host-readiness",
+			"sourceCommit": "b38934061204f2b553a7e1c95eac7572d4da9508",
+			"sourceRevisionScope": "Pre-task HEAD plus source hashes in the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useAgentConfigurationPanel.ts": "82e45946df0faeae4b6f32ec009e68a55fa4630d9ebe145f987750f03bb33da7",
+				"src/renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useAgentDetection.ts": "a6801db795730d9e483648ce3c2992c392bb9ebe56f89617bde6d8f033907b18"
+			},
+			"provenance": "implementation-and-static-review",
+			"static": "pass",
+			"typecheck": "fail",
+			"typecheckLimitation": "Renderer TypeScript retains only the existing RequestInit.dispatcher diagnostic in plugin-host-handlers.ts(1196,76).",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P20", "S05", "C-supportsWizard"],
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"GT1-05-11B preserves explicit empty account env edits, invalidates pending configuration reads on close/provider/host changes, and shares current-request/current-host detection ownership for initial and manual refreshes. Host failures clear availability; unresolved SSH never probes or closes to local.",
+				"GT1-05-12A owns regression authoring and GT1-05-13 owns execution. GT1-05-11C/D still own generation configuration and streaming preview.",
+				"No native invocation, live qualification, capability or beta promotion."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -8684,7 +8707,9 @@
 				"src/renderer/components/Wizard/screens/ConversationScreen/utils/providerName.ts",
 				"src/renderer/components/Wizard/screens/ConversationScreen/types.ts",
 				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useConversationBootstrap.ts",
-				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useWizardConversationSend.ts"
+				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useWizardConversationSend.ts",
+				"src/renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useAgentConfigurationPanel.ts",
+				"src/renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useAgentDetection.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -8734,7 +8759,8 @@
 				"phase05GenerationCancellationTestsEvidenceRef": "phase05-generation-cancellation-tests",
 				"phase05InlineWizardCallerTestsEvidenceRef": "phase05-inline-wizard-caller-tests",
 				"phase05OnboardingDiscoveryEvidenceRef": "phase05-onboarding-discovery-contract",
-				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff"
+				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff",
+				"phase05OnboardingReadinessEvidenceRef": "phase05-onboarding-account-host-readiness"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8779,9 +8805,9 @@
 				{
 					"id": "grok-onboarding-callers:P20",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-11A selected conversation configuration and stale-read ownership are implemented with static checks only. Complete GT1-05-11B/C/D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
+					"missingPrerequisite": "GT1-05-11A/B selected conversation configuration, stale-read ownership and account/host readiness are implemented with static checks only. Complete GT1-05-11C/D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
 					"affectedRows": ["P20"],
-					"evidenceRef": "phase05-onboarding-configuration-handoff"
+					"evidenceRef": "phase05-onboarding-account-host-readiness"
 				}
 			],
 			"phase": "05",
@@ -16487,7 +16513,9 @@
 				"src/renderer/components/Wizard/screens/ConversationScreen/utils/providerName.ts",
 				"src/renderer/components/Wizard/screens/ConversationScreen/types.ts",
 				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useConversationBootstrap.ts",
-				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useWizardConversationSend.ts"
+				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useWizardConversationSend.ts",
+				"src/renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useAgentConfigurationPanel.ts",
+				"src/renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useAgentDetection.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -16538,7 +16566,8 @@
 				"phase05GenerationCancellationTestsEvidenceRef": "phase05-generation-cancellation-tests",
 				"phase05InlineWizardCallerTestsEvidenceRef": "phase05-inline-wizard-caller-tests",
 				"phase05OnboardingDiscoveryEvidenceRef": "phase05-onboarding-discovery-contract",
-				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff"
+				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff",
+				"phase05OnboardingReadinessEvidenceRef": "phase05-onboarding-account-host-readiness"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16583,9 +16612,9 @@
 				{
 					"id": "grok-onboarding-callers:C-supportsWizard",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-11A selected conversation configuration and stale-read ownership are implemented with static checks only. Complete GT1-05-11B/C/D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
+					"missingPrerequisite": "GT1-05-11A/B selected conversation configuration, stale-read ownership and account/host readiness are implemented with static checks only. Complete GT1-05-11C/D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
 					"affectedRows": ["C-supportsWizard"],
-					"evidenceRef": "phase05-onboarding-configuration-handoff"
+					"evidenceRef": "phase05-onboarding-account-host-readiness"
 				}
 			],
 			"field": "supportsWizard",
@@ -20108,7 +20137,9 @@
 				"src/renderer/components/Wizard/WizardContext.tsx",
 				"src/renderer/components/Wizard/screens/ConversationScreen/types.ts",
 				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useConversationBootstrap.ts",
-				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useWizardConversationSend.ts"
+				"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useWizardConversationSend.ts",
+				"src/renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useAgentConfigurationPanel.ts",
+				"src/renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useAgentDetection.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -20143,7 +20174,8 @@
 				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests",
 				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair",
 				"phase05OnboardingDiscoveryEvidenceRef": "phase05-onboarding-discovery-contract",
-				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff"
+				"phase05OnboardingConfigurationEvidenceRef": "phase05-onboarding-configuration-handoff",
+				"phase05OnboardingReadinessEvidenceRef": "phase05-onboarding-account-host-readiness"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20188,9 +20220,9 @@
 				{
 					"id": "grok-onboarding-callers:S05",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-11A selected conversation configuration and stale-read ownership are implemented with static checks only. Complete GT1-05-11B/C/D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
+					"missingPrerequisite": "GT1-05-11A/B selected conversation configuration, stale-read ownership and account/host readiness are implemented with static checks only. Complete GT1-05-11C/D, author GT1-05-12/12A/12B and run GT1-05-13. Native exact-version qualification remains separate.",
 					"affectedRows": ["S05"],
-					"evidenceRef": "phase05-onboarding-configuration-handoff"
+					"evidenceRef": "phase05-onboarding-account-host-readiness"
 				}
 			],
 			"branchAuditRefs": ["B15", "B27"]
