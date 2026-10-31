@@ -3636,78 +3636,124 @@ describe('AgentSessionsBrowser', () => {
 			);
 		}
 
-		it('retains a rename completed while backfill waits in the detail, resume and list', async () => {
-			const onResumeSession = vi.fn().mockResolvedValue(false);
-			const props = createDefaultProps({ activeSession: owner, onResumeSession });
-			await act(async () => {
-				renderWithProvider(<AgentSessionsBrowser {...props} />);
-				await vi.runAllTimersAsync();
-			});
-			await act(async () => {
-				fireEvent.click(screen.getByText(row.firstMessage));
-				await vi.runAllTimersAsync();
-			});
-			let finish!: (value: SessionMessagesResult) => void;
-			vi.mocked(window.maestro.agentSessions.read).mockReturnValueOnce(
-				new Promise((resolve) => {
-					finish = resolve;
-				})
-			);
-			await act(async () => {
-				fireEvent.click(screen.getByText('Load earlier messages...'));
-			});
-			await act(async () => {
-				fireEvent.click(screen.getByTitle('Add session name'));
-			});
-			const input = screen.getByPlaceholderText('Enter session name...');
-			await act(async () => {
-				fireEvent.change(input, { target: { value: 'Retained native name' } });
-			});
-			await act(async () => {
-				fireEvent.keyDown(input, { key: 'Enter' });
-			});
-			expect(window.maestro.agentSessions.setSessionName).toHaveBeenCalledWith(
-				'grok',
-				owner.projectRoot,
-				row.sessionId,
-				'Retained native name'
-			);
-			expect(props.onUpdateTab).toHaveBeenCalledWith(row.sessionId, {
-				name: 'Retained native name',
-			});
-			expect(screen.getByText('Retained native name')).toBeInTheDocument();
-			expect(screen.getByTestId('icon-loader')).toBeInTheDocument();
-			await act(async () => {
-				finish({
+		it.each([
+			{ provider: 'grok', expectedName: 'Original native name' },
+			{ provider: 'codex', expectedName: 'Retained native name' },
+		] as const)(
+			'$provider retains "$expectedName" after a rename during backfill in detail, resume and list',
+			async ({ provider, expectedName }) => {
+				const renameOwner = {
+					...owner,
+					toolType: provider,
+					customEnvVars: {
+						[provider === 'grok' ? 'GROK_HOME' : 'CODEX_HOME']: '/fixture/account-a',
+					},
+				};
+				const renameBinding = { ...binding, provider };
+				const renamePage: SessionMessagesResult = {
 					...page,
+					nativeSessionBinding: renameBinding,
+					source: { provider, status: 'available' },
+				};
+				useSessionStore.setState({ sessions: [renameOwner] });
+				vi.mocked(window.maestro.agentSessions.listPaginated).mockResolvedValue({
+					sessions: [{ ...row, sessionName: 'Original native name' }],
 					hasMore: false,
-					messages: [createMockMessage({ uuid: 'older', content: 'Older renamed history' })],
+					totalCount: 1,
+					nextCursor: null,
 				});
-			});
-			expect(screen.getByText('Retained native name')).toBeInTheDocument();
-			expect(screen.getByText('Older renamed history')).toBeInTheDocument();
-			await act(async () => {
-				fireEvent.click(screen.getByText('Resume'));
-			});
-			expect(onResumeSession).toHaveBeenCalledTimes(1);
-			expect(onResumeSession.mock.calls[0]).toEqual([
-				row.sessionId,
-				[
-					expect.objectContaining({ text: 'Older renamed history' }),
-					expect.objectContaining({ text: 'Scoped recent message' }),
-				],
-				'Retained native name',
-				false,
-				expect.any(Object),
-				'/remote/project',
-				{ targetSessionId: owner.id, nativeSessionBinding: binding },
-			]);
-			expect(props.onClose).not.toHaveBeenCalled();
-			await act(async () => {
-				fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
-			});
-			expect(screen.getByText('Retained native name')).toBeInTheDocument();
-		});
+				vi.mocked(window.maestro.agentSessions.read).mockResolvedValue(renamePage);
+				const onResumeSession = vi.fn().mockResolvedValue(false);
+				const props = createDefaultProps({ activeSession: renameOwner, onResumeSession });
+				await act(async () => {
+					renderWithProvider(<AgentSessionsBrowser {...props} />);
+					await vi.runAllTimersAsync();
+				});
+				await act(async () => {
+					fireEvent.click(screen.getByText('Original native name'));
+					await vi.runAllTimersAsync();
+				});
+				let finish!: (value: SessionMessagesResult) => void;
+				vi.mocked(window.maestro.agentSessions.read).mockReturnValueOnce(
+					new Promise((resolve) => {
+						finish = resolve;
+					})
+				);
+				await act(async () => {
+					fireEvent.click(screen.getByText('Load earlier messages...'));
+				});
+				await act(async () => {
+					fireEvent.click(screen.getByTitle('Rename session'));
+				});
+				const input = screen.getByPlaceholderText('Enter session name...');
+				await act(async () => {
+					fireEvent.change(input, { target: { value: 'Retained native name' } });
+				});
+				await act(async () => {
+					fireEvent.keyDown(input, { key: 'Enter' });
+				});
+				if (provider === 'grok') {
+					expect(input).toHaveValue('Retained native name');
+					expect(window.maestro.agentSessions.setSessionName).not.toHaveBeenCalled();
+					expect(window.maestro.agentSessions.updateSessionName).not.toHaveBeenCalled();
+					expect(window.maestro.claude.updateSessionName).not.toHaveBeenCalled();
+					expect(props.onUpdateTab).not.toHaveBeenCalled();
+					await act(async () => {
+						fireEvent.keyDown(input, { key: 'Escape' });
+					});
+				} else {
+					expect(window.maestro.agentSessions.setSessionName).toHaveBeenCalledTimes(1);
+					expect(window.maestro.agentSessions.setSessionName).toHaveBeenCalledWith(
+						'codex',
+						renameOwner.projectRoot,
+						row.sessionId,
+						'Retained native name'
+					);
+					expect(props.onUpdateTab).toHaveBeenCalledWith(row.sessionId, {
+						name: 'Retained native name',
+					});
+				}
+				expect(screen.getByText(expectedName)).toBeInTheDocument();
+				expect(screen.getByTestId('icon-loader')).toBeInTheDocument();
+				await act(async () => {
+					finish({
+						...renamePage,
+						hasMore: false,
+						messages: [createMockMessage({ uuid: 'older', content: 'Older renamed history' })],
+					});
+				});
+				expect(screen.getByText(expectedName)).toBeInTheDocument();
+				expect(screen.getByText('Older renamed history')).toBeInTheDocument();
+				await act(async () => {
+					fireEvent.click(screen.getByText('Resume'));
+				});
+				expect(onResumeSession).toHaveBeenCalledTimes(1);
+				expect(onResumeSession.mock.calls[0]).toEqual([
+					row.sessionId,
+					[
+						expect.objectContaining({ text: 'Older renamed history' }),
+						expect.objectContaining({ text: 'Scoped recent message' }),
+					],
+					expectedName,
+					false,
+					expect.any(Object),
+					'/remote/project',
+					{ targetSessionId: renameOwner.id, nativeSessionBinding: renameBinding },
+				]);
+				expect(props.onClose).not.toHaveBeenCalled();
+				await act(async () => {
+					fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
+				});
+				expect(screen.getByText(expectedName)).toBeInTheDocument();
+				if (provider === 'grok') {
+					expect(screen.queryByText('Retained native name')).not.toBeInTheDocument();
+					expect(window.maestro.agentSessions.setSessionName).not.toHaveBeenCalled();
+					expect(window.maestro.agentSessions.updateSessionName).not.toHaveBeenCalled();
+					expect(window.maestro.claude.updateSessionName).not.toHaveBeenCalled();
+					expect(props.onUpdateTab).not.toHaveBeenCalled();
+				}
+			}
+		);
 
 		for (const phase of ['initial', 'backfill'] as const) {
 			it.each(['back', 'escape', 'reselect', 'unmount'] as const)(
@@ -3754,6 +3800,13 @@ describe('AgentSessionsBrowser', () => {
 						else fireEvent.click(screen.getByRole('button', { name: 'Go back' }));
 						await vi.runAllTimersAsync();
 					});
+					if (departure === 'back' || departure === 'escape') {
+						// The navigation commit schedules the legitimate list-focus restoration.
+						await act(async () => {
+							await vi.advanceTimersByTimeAsync(50);
+						});
+						expect(screen.getByPlaceholderText('Search all content...')).toHaveFocus();
+					}
 					if (departure === 'reselect') {
 						read.mockReturnValueOnce(
 							new Promise((resolve) => {
