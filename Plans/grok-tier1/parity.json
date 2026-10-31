@@ -3071,7 +3071,7 @@
 			"affectedRows": ["P04", "P17", "S29"],
 			"verificationTask": "GT1-05-13",
 			"limitations": [
-				"Fourteen authored cases await execution together with GT1-05-02B’s three worktree suites; no behavior or type-check pass is claimed.",
+				"Fourteen authored cases await execution together with GT1-05-02B\u2019s three worktree suites; no behavior or type-check pass is claimed.",
 				"The real shared runner uses a fake provider process and synthetic in-process authority; SSH wrapping and directory observation are fixture ports, not live host or policy qualification.",
 				"Production ACP routing remains phase07; Auto Run ownership remains phase08; exact-binary and platform qualification remains phase11."
 			]
@@ -3163,6 +3163,27 @@
 				"Twelve cases exercise the real createNewSession/buildNewAgentRecord consumer with existing stores and synthetic configuration; authored only, without test execution or semantic type checking.",
 				"GT1-05-13 must execute useSessionCrud.test.ts and both GT1-05-02D creation-dialog suites. Canonical binary/admission coverage remains in GT1-05-02B1.",
 				"Custom executable values are idle draft configuration, not binary or admission certification. Production ACP and native/platform qualification remain pending; no capability or beta promotion."
+			]
+		},
+		"phase05-discovery-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-04-scoped-discovery-regression-tests",
+			"sourceCommit": "f159101b5a36019bfd8d4310add69b8be73baf35",
+			"sourceRevisionScope": "Pre-task HEAD plus authored file hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/agents/grok-skills.test.ts": "b0dca86a92eef255048b28c624709fa01f3d9c1004daf444c183c37303627c9d",
+				"src/__tests__/main/ipc/handlers/agents.test.ts": "52f534007f6342bc0e9d885f4c75c4846fb1248494cd9053f3f1a1c27798a071",
+				"src/__tests__/fixtures/grok-command-observation.ts": "b49440e7d9e42189bb7e9daeb2a855c71865b7700c23b7be618cfd33ffed3cac"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P18", "S02", "C-supportsSlashCommands"],
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"Two discovery/IPC suites authored only; no test execution or semantic type checking.",
+				"Synthetic observations do not certify native catalogs, version ranges or live process ownership. GT1-07-02 capture and GT1-05-05/06 dispatch remain pending."
 			]
 		}
 	},
@@ -7904,7 +7925,7 @@
 					"GT1-05-03B",
 					"GT1-07-02"
 				],
-				"test": ["GT1-05-04", "GT1-05-06", "GT1-08-02"],
+				"test": ["GT1-05-04", "GT1-05-06", "GT1-08-02", "GT1-05-04A"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-01-07", "GT1-08-07", "GT1-11-11B"],
 				"live": ["GT1-11-11", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -7994,6 +8015,14 @@
 					"deterministic": "not-run",
 					"live": "not-run",
 					"contract": "AgentDiscoveryRequest object overload preserves GrokCommandDiscoveryResult or null for other providers; positional API and legacy Grok null are unchanged. Native kind/scope and complete binding remain typed; no dispatch enabled."
+				},
+				"testAuthoring": {
+					"task": "GT1-05-04",
+					"evidenceRef": "phase05-discovery-tests",
+					"static": "pass",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"verificationTask": "GT1-05-13"
 				}
 			}
 		},
@@ -13719,7 +13748,7 @@
 					"GT1-05-03B",
 					"GT1-07-02"
 				],
-				"test": ["GT1-05-04", "GT1-05-06", "GT1-11-14B"],
+				"test": ["GT1-05-04", "GT1-05-06", "GT1-11-14B", "GT1-05-04A"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-14C", "GT1-11-11B"],
 				"live": ["GT1-11-11", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -13823,6 +13852,14 @@
 					"deterministic": "not-run",
 					"live": "not-run",
 					"contract": "AgentDiscoveryRequest object overload preserves GrokCommandDiscoveryResult or null for other providers; positional API and legacy Grok null are unchanged. Native kind/scope and complete binding remain typed; no dispatch enabled."
+				},
+				"testAuthoring": {
+					"task": "GT1-05-04",
+					"evidenceRef": "phase05-discovery-tests",
+					"static": "pass",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"verificationTask": "GT1-05-13"
 				}
 			}
 		},
@@ -18965,7 +19002,7 @@
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-05-03", "GT1-05-05", "GT1-05-03A", "GT1-05-03B", "GT1-07-02"],
-				"test": ["GT1-05-04", "GT1-05-06"],
+				"test": ["GT1-05-04", "GT1-05-06", "GT1-05-04A"],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-11B"],
 				"live": ["GT1-11-11", "GT1-11-12", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -19053,6 +19090,14 @@
 					"deterministic": "not-run",
 					"live": "not-run",
 					"contract": "AgentDiscoveryRequest object overload preserves GrokCommandDiscoveryResult or null for other providers; positional API and legacy Grok null are unchanged. Native kind/scope and complete binding remain typed; no dispatch enabled."
+				},
+				"testAuthoring": {
+					"task": "GT1-05-04",
+					"evidenceRef": "phase05-discovery-tests",
+					"static": "pass",
+					"deterministic": "not-run",
+					"live": "not-run",
+					"verificationTask": "GT1-05-13"
 				}
 			}
 		},

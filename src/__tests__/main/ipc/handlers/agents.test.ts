@@ -13,6 +13,8 @@ import {
 } from '../../../../main/ipc/handlers/agents';
 import * as agentCapabilities from '../../../../main/agents';
 import { discoverCodexSkills } from '../../../../main/agents/codex-skills';
+import { makeGrokCommandObservation } from '../../../fixtures/grok-command-observation';
+import * as spawnPath from '../../../../shared/maestro-lib/launch/spawn-path';
 import { checkCustomPath } from '../../../../main/agents/path-prober';
 import {
 	CodexRpcRequestError,
@@ -37,6 +39,11 @@ vi.mock('../../../../main/agents/path-prober', () => ({
 
 vi.mock('../../../../main/agents/codex-skills', () => ({
 	discoverCodexSkills: vi.fn().mockRejectedValue(new Error('Unsupported skills/list')),
+}));
+
+// Mutable namespace for scoped PATH isolation; retain real launch-environment layering.
+vi.mock('../../../../shared/maestro-lib/launch/spawn-path', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../../../shared/maestro-lib/launch/spawn-path')>()),
 }));
 
 // Mock electron's ipcMain
@@ -1473,6 +1480,181 @@ describe('agents IPC handlers', () => {
 			mockAgentDetector.discoverGrokOptions.mockResolvedValue({
 				status: 'discovered',
 				options: ['catalog-model'],
+			});
+		});
+
+		describe('Grok command advertisements', () => {
+			let readObservation: ReturnType<typeof vi.fn<typeof makeGrokCommandObservation>>;
+			let managed: boolean;
+			let missingOwner: boolean;
+			let discover: (event: object, request: unknown, cwd?: string) => Promise<unknown>;
+			const request = { providerId: 'grok', context: { kind: 'agent', sessionId: 'alice' } };
+			const unavailable = { status: 'unavailable', commands: [] };
+
+			beforeEach(() => {
+				managed = false;
+				missingOwner = false;
+				vi.spyOn(spawnPath, 'buildSpawnPath').mockImplementation((extraPaths) =>
+					[...(extraPaths ?? []), path.resolve('fixture-bin')].join(path.delimiter)
+				);
+				readObservation = vi.fn(makeGrokCommandObservation);
+				for (const session of sessionsStore.get()) {
+					session.activeTabId = `${session.id}-tab`;
+					session.aiTabs = [{ id: session.activeTabId, agentSessionId: `${session.id}-native` }];
+				}
+				registerAgentsHandlers({
+					...deps,
+					settingsStore: settingsStore as any,
+					sessionsStore: sessionsStore as any,
+					getProcessManager: () =>
+						missingOwner
+							? null
+							: ({
+									grokCommandObservation: readObservation,
+									managedPort: () => (managed ? { standing: () => 'managed' } : null),
+								} as any),
+				});
+				discover = handlers.get('agents:discoverSlashCommands')! as typeof discover;
+			});
+
+			afterEach(() => {
+				vi.restoreAllMocks();
+				for (const operation of [
+					execFileNoThrow,
+					buildSshCommand,
+					checkCustomPath,
+					discoverCodexSkills,
+					mockAgentDetector.getAgent,
+					mockAgentDetector.discoverGrokOptions,
+					fs.existsSync,
+					fs.readdirSync,
+					fs.accessSync,
+					fs.promises.readdir,
+					fs.promises.readFile,
+				]) {
+					expect(operation).not.toHaveBeenCalled();
+				}
+			});
+
+			it.each([false, true])(
+				'binds both saved accounts and selected tab settings (inherited=%s)',
+				async (inherited) => {
+					for (const session of sessionsStore.get().slice(0, 2)) {
+						if (!inherited)
+							Object.assign(session.aiTabs[0], { customModel: 'tab-model', customEffort: 'max' });
+						const request = {
+							providerId: 'grok',
+							context: {
+								kind: 'agent',
+								sessionId: session.id,
+								cwd: 'forged',
+								customPath: 'forged',
+								customEnvVars: { GROK_HOME: 'forged' },
+								grokCommandObservation: { commands: ['forged'] },
+							},
+						};
+						const result = await discover({}, request);
+						expect(readObservation).toHaveBeenLastCalledWith({
+							cwd: session.cwd,
+							customPath: session.customPath,
+							model: inherited ? session.customModel : 'tab-model',
+							effort: inherited ? 'low' : 'max',
+							sessionId: `${session.id}-native`,
+							environment: {
+								surface: 'desktop',
+								defaultEnvVars: undefined,
+								globalShellEnvVars: globalEnv,
+								agentCustomEnvVars: providerEnv,
+								sessionCustomEnvVars: session.customEnvVars,
+							},
+						});
+						expect(result).toMatchObject({
+							status: 'discovered',
+							commands: [{ name: 'review', kind: 'native-command' }],
+							binding: {
+								route: 'grok-acp',
+								sessionId: `${session.id}-native`,
+								processGeneration: 'process-1',
+								configGeneration: 'config-1',
+								catalogRevision: 1,
+								agentVersion: '1.0.70',
+							},
+						});
+						expect(JSON.stringify(result)).not.toMatch(/secret|forged/);
+						expect(JSON.stringify(result)).not.toContain(cwd);
+					}
+					expect(readObservation).toHaveBeenCalledTimes(2);
+				}
+			);
+
+			it('inherits provider settings while preserving an explicitly empty account environment', async () => {
+				const session = sessionsStore.get()[0];
+				for (const key of ['customPath', 'customModel', 'customEffort']) delete session[key];
+				session.customEnvVars = {};
+				const result = await discover({}, request);
+				expect(result).toMatchObject({ status: 'discovered' });
+				expect(readObservation).toHaveBeenCalledWith(
+					expect.objectContaining({
+						customPath: path.join(cwd, 'provider-grok'),
+						model: 'saved-model',
+						effort: 'high',
+						environment: expect.objectContaining({
+							sessionCustomEnvVars: {},
+							agentCustomEnvVars: providerEnv,
+						}),
+					})
+				);
+			});
+
+			it.each([
+				undefined,
+				{ kind: 'draft', cwd },
+				{ kind: 'provider-settings', cwd },
+				{ kind: 'agent', sessionId: 'missing' },
+				{ kind: 'agent', sessionId: 'mismatch' },
+				{ kind: 'agent', sessionId: 'alice', model: 'stale-model' },
+				{ kind: 'agent', sessionId: 'alice', effort: 'stale-effort' },
+			])('refuses unowned or stale command context %j before observing', async (context) => {
+				expect(await discover({}, { ...request, context })).toEqual({
+					...unavailable,
+					reason: 'missing-context',
+				});
+				expect(readObservation).not.toHaveBeenCalled();
+			});
+
+			it.each(['remote', 'disabled', 'missing', 'managed'])(
+				'refuses %s command discovery without a probe',
+				async (target) => {
+					managed = target === 'managed';
+					if (!managed)
+						sessionsStore.get()[0].sessionSshRemoteConfig = { enabled: true, remoteId: target };
+					const reason = managed ? 'managed-unqualified' : 'remote-unqualified';
+					expect(await discover({}, request)).toEqual({ ...unavailable, reason });
+					expect(readObservation).not.toHaveBeenCalled();
+				}
+			);
+
+			it('keeps discovery unavailable when the host has no observation reader', async () => {
+				missingOwner = true;
+				expect(await discover({}, request)).toEqual({
+					...unavailable,
+					reason: 'observation-unavailable',
+				});
+			});
+
+			it('discards a receipt when the selected account changes while the read settles', async () => {
+				readObservation.mockImplementation((selection) => {
+					const receipt = makeGrokCommandObservation(selection);
+					sessionsStore.get()[0].customEnvVars = { GROK_HOME: path.join(cwd, 'replacement') };
+					return receipt;
+				});
+				expect(await discover({}, request)).toEqual({ ...unavailable, reason: 'missing-context' });
+				expect(readObservation).toHaveBeenCalledTimes(1);
+			});
+
+			it('preserves legacy Grok null without detection or provider substitution', async () => {
+				expect(await discover({}, 'grok', cwd)).toBeNull();
+				expect(readObservation).not.toHaveBeenCalled();
 			});
 		});
 
