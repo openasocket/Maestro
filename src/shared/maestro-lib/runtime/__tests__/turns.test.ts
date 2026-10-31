@@ -639,7 +639,35 @@ describe('runtime turns', () => {
 			},
 			{ name: 'end-only allocation', early: [], end: 'native-new' },
 			{ name: 'allocation without terminal ID', early: ['native-new'], end: undefined },
+			{
+				name: 'allocation without end event',
+				early: ['native-new'],
+				end: undefined,
+				missingEnd: true,
+			},
+			{ name: 'no allocation or end event', early: [], end: undefined, missingEnd: true },
 			{ name: 'cancelled allocation', early: ['native-new'], end: undefined, cancel: true },
+			{
+				name: 'allocation after stop',
+				early: ['native-new'],
+				end: undefined,
+				cancel: true,
+				late: true,
+			},
+			{
+				name: 'allocation without receipt',
+				early: ['native-new'],
+				end: undefined,
+				noReceipt: true,
+			},
+			{
+				name: 'resume without receipt',
+				resume: 'original',
+				early: ['original'],
+				end: undefined,
+				noReceipt: true,
+				refused: true,
+			},
 			{ name: 'raw same-ID resume', resume: 'original', early: ['original'], end: undefined },
 			{ name: 'unobserved resume', resume: 'original', early: [], end: undefined },
 			{ name: 'unobserved new turn', early: [], end: undefined },
@@ -651,7 +679,7 @@ describe('runtime turns', () => {
 				writeRefused: 'allocation',
 			},
 			{
-				name: 'rejected same-ID check',
+				name: 'superseded same-ID write',
 				resume: 'original',
 				early: ['original'],
 				end: undefined,
@@ -684,15 +712,38 @@ describe('runtime turns', () => {
 			},
 		])(
 			'records Grok identity honestly: $name',
-			async ({ resume, early, end, cancel, refused, writeRefused, mutate }) => {
+			async ({
+				resume,
+				early,
+				end,
+				cancel,
+				refused,
+				writeRefused,
+				mutate,
+				late,
+				noReceipt,
+				missingEnd,
+			}) => {
 				// Exercise the real repository/journal/recorder around controlled parsed ID observations.
 				// The existing inert child still supplies the actual process, admission and cancellation.
 				hold = cancel === true;
 				recordings.grok = writeFakeTurn(work, {
-					chunks: ['{"type":"text","data":"answer"}\n', '{"type":"end","stopReason":"EndTurn"}\n'],
+					chunks: [
+						'{"type":"text","data":"answer"}\n',
+						...(missingEnd
+							? []
+							: [
+									JSON.stringify({
+										type: 'end',
+										stopReason: 'EndTurn',
+										...(!early.length && end === 'native-new' ? { sessionId: end } : {}),
+									}) + '\n',
+								]),
+					],
 					close: { code: 0, signal: null },
 				});
 				let changeScope: () => void = () => undefined;
+				const stopped = Promise.withResolvers<void>();
 				const run: RuntimeDeps['turns']['runAgentTurn'] = async (assembled, options) => {
 					expect(assembled.resumeSessionId).toBe(resume);
 					const started = await fakeProvider(assembled, {
@@ -707,7 +758,13 @@ describe('runtime turns', () => {
 						ok: true,
 						run: {
 							...started.run,
+							...(noReceipt ? { nativeLaunchReceipt: undefined } : {}),
+							interrupt: () => {
+								started.run.interrupt();
+								stopped.resolve();
+							},
 							events: (async function* () {
+								if (late) await stopped.promise;
 								for (const sessionId of early) yield { type: 'system' as const, sessionId };
 								if (mutate) {
 									value(await runtime.agents.update('a1', { provider: 'codex' }));
@@ -717,7 +774,7 @@ describe('runtime turns', () => {
 							})(),
 							result: started.run.result.then((completed) => ({
 								...completed,
-								sessionId: end,
+								sessionId: !early.length && end === 'native-new' ? completed.sessionId : end,
 								usage: {
 									inputTokens: 7,
 									outputTokens: 3,
@@ -751,19 +808,23 @@ describe('runtime turns', () => {
 						};
 						const record = repository.recordTabSession.bind(repository);
 						vi.spyOn(repository, 'recordTabSession').mockImplementation((...args) => {
-							const update = args[3];
-							if (
-								writeRefused === 'allocation'
-									? !!update.agentSessionId
-									: writeRefused === 'check' && !update.agentSessionId && !update.addUsage
-							) {
-								return Promise.resolve({
-									ok: false,
-									error: {
-										code: 'rejected',
-										method: 'turns.send',
-										message: 'Native ownership changed.',
+							if (writeRefused && args[3].agentSessionId) {
+								// Queue a real successor ahead of the original guarded mutation.
+								const successor = repository.beginTurn('a1', 't1', {
+									turnId: 'successor',
+									provider: 'grok',
+									consumedMergedContext: false,
+									userEntry: {
+										id: 'successor-entry',
+										source: 'user',
+										text: 'successor',
+										timestamp: T0,
 									},
+								});
+								const pending = record(...args);
+								return successor.then((result) => {
+									value(result);
+									return pending;
 								});
 							}
 							return record(...args);
@@ -771,7 +832,7 @@ describe('runtime turns', () => {
 						return repository;
 					});
 				}
-				const binding = { version: 1, state: 'unknown', reason: 'unobserved' };
+				const unknownBinding = { version: 1, state: 'unknown', reason: 'unobserved' };
 				const resumeBinding = {
 					version: 1,
 					state: 'bound',
@@ -784,6 +845,9 @@ describe('runtime turns', () => {
 					),
 					host: { kind: 'local', identity: 'recording-host' },
 				};
+				const binding = noReceipt
+					? unknownBinding
+					: { ...resumeBinding, nativeSessionId: resume ?? 'native-new' };
 				const runtime = await startManaged(
 					managedAuthority(),
 					{ turns: { runAgentTurn: run } },
@@ -812,13 +876,15 @@ describe('runtime turns', () => {
 				);
 				expect(result.status).toBe('ok');
 				if (cancel) {
+					await turn.saw(late ? 'started' : 'session');
+					if (late) expect((await tabOf(runtime)).agentSessionId).toBeNull();
+					value(await runtime.turns.interrupt('a1', 't1'));
 					await turn.saw('session');
-					// Allocation is persisted before its event becomes visible, even if Stop follows it.
-					expect(await tabOf(runtime)).toMatchObject({
+					// A genuine allocation survives Stop, including one observed during drainage.
+					expect(sessions().sessions[0].aiTabs[0]).toMatchObject({
 						agentSessionId: 'native-new',
 						nativeSessionBinding: binding,
 					});
-					value(await runtime.turns.interrupt('a1', 't1'));
 				}
 				await turn.outcome();
 				const retained =
@@ -837,11 +903,11 @@ describe('runtime turns', () => {
 					? (current.providerSessions as Record<string, typeof current>).grok
 					: current;
 				expect(tab.agentSessionId).toBe(retained);
-				expect(current.runtimeTurnId).toEqual(expect.any(String));
+				expect(current.runtimeTurnId).toEqual(writeRefused ? 'successor' : expect.any(String));
 				if (retained) expect(tab.nativeSessionBinding).toEqual(resume ? resumeBinding : binding);
 				else expect(tab.nativeSessionBinding).toBeUndefined();
 				expect(turn.outcomes()).toEqual([
-					refused ? 'crashed' : cancel ? 'interrupted' : 'completed',
+					refused || missingEnd ? 'crashed' : cancel ? 'interrupted' : 'completed',
 				]);
 				const sessionIds = turn.events.flatMap((event) =>
 					event.kind === 'session' ? [event.providerSessionId] : []
@@ -854,24 +920,33 @@ describe('runtime turns', () => {
 							: []
 				);
 				const history = readHistory(runtime.paths, 'a1');
-				if (refused || cancel) expect(history.status).toBe('missing');
+				if (refused || cancel || missingEnd) expect(history.status).toBe('missing');
 				else {
 					if (history.status !== 'ok') throw new Error(`history ${history.status}`);
 					expect(history.entries).toHaveLength(1);
-					expect(history.entries[0].projectPath).toBe(work);
+					expect(history.entries[0].projectPath).toBe(fs.realpathSync(work));
 					expect(history.entries[0].agentSessionId).toBe(observed);
-					expect(history.entries[0].nativeSessionBinding).toEqual(binding);
+					expect(history.entries[0].nativeSessionBinding).toEqual(
+						observed ? binding : unknownBinding
+					);
 				}
 				expect(journalRuns()[0]).toMatchObject({
-					state: refused ? 'failed' : cancel ? 'cancelled' : 'completed',
+					state: refused || missingEnd ? 'failed' : cancel ? 'cancelled' : 'completed',
 					providerSessionId: observed ?? null,
 					attempts: [
 						expect.objectContaining({
 							phase: 'terminal',
-							outcome: refused ? 'failed' : cancel ? 'cancelled' : 'completed',
+							outcome: refused || missingEnd ? 'failed' : cancel ? 'cancelled' : 'completed',
 						}),
 					],
 				});
+				if (writeRefused) {
+					expect(await transcript(runtime)).toEqual([
+						expect.objectContaining({ text: 'identity recording', source: 'user' }),
+						expect.objectContaining({ id: 'successor-entry', text: 'successor' }),
+					]);
+					expect(sessions().sessions[0].aiTabs[0].runtimeTurnId).toBe('successor');
+				}
 				if (refused) {
 					expect(tab.usageStats).toBeUndefined();
 					expect(turn.events).toContainEqual(
@@ -883,6 +958,44 @@ describe('runtime turns', () => {
 				} else expect(tab.usageStats).toMatchObject({ inputTokens: 7, outputTokens: 3 });
 			}
 		);
+
+		it.each([false, true])('fences pre-begin removal (recreate=%s)', async (recreate) => {
+			let repository: repositories.AgentRepository;
+			const create = repositories.createAgentRepository;
+			vi.spyOn(repositories, 'createAgentRepository').mockImplementationOnce((options) => {
+				repository = create(options);
+				return repository;
+			});
+			recordings.grok = writeFakeTurn(work, { chunks: [], close: { code: 0, signal: null } });
+			const runtime = await startManaged(
+				null,
+				{
+					rules: { ...deps().rules!, newId: () => 't1' },
+					turns: {
+						runAgentTurn: async (assembled, options) => {
+							const started = await fakeProvider(assembled, options);
+							expect(started.ok).toBe(true);
+							value(await repository.closeTab('a1', 't1'));
+							if (recreate) expect(value(await repository.createTab('a1')).tabId).toBe('t1');
+							return started;
+						},
+					},
+				},
+				seedAgent({ toolType: 'grok', customEnvVars: { GROK_HOME: work } })
+			);
+			const events = watch(runtime);
+			expect(errorOf(await runtime.turns.send('a1', 't1', { text: 'stale message' })).code).toBe(
+				'failed'
+			);
+			expect(events.kinds()).not.toContain('user');
+			expect(readHistory(runtime.paths, 'a1').status).toBe('missing');
+			const stored = sessions().sessions[0].aiTabs.find((tab: { id: string }) => tab.id === 't1');
+			if (recreate) {
+				expect(stored.logs).toEqual([]);
+				expect(stored.runtimeTurnId).toBeUndefined();
+				expect(stored.usageStats).toBeUndefined();
+			} else expect(stored).toBeUndefined();
+		});
 
 		it.each([
 			{ stage: 'invalid', change: 'id', rawId: '' },
@@ -936,6 +1049,13 @@ describe('runtime turns', () => {
 					return result;
 				}
 			);
+			const oldLog = {
+				id: 'original-answer',
+				source: 'ai',
+				text: 'retained answer',
+				timestamp: T0,
+			};
+			const oldUsage = { inputTokens: 9, outputTokens: 4, totalCostUsd: 0.02 };
 			const runtime = await startManaged(
 				null,
 				{
@@ -955,22 +1075,36 @@ describe('runtime turns', () => {
 							id: 't1',
 							agentSessionId: 'rawId' in test ? test.rawId : 'original',
 							nativeSessionBinding: binding,
-							logs: [],
+							logs: [oldLog],
+							usageStats: oldUsage,
 						},
 					],
 				})
 			);
+			const historyFile = path.join(runtime.paths.historyDir, 'a1.jsonl');
+			fs.mkdirSync(runtime.paths.historyDir, { recursive: true });
+			const oldHistory =
+				JSON.stringify({
+					id: 'old',
+					type: 'USER',
+					timestamp: T0,
+					summary: 'old',
+					sessionId: 'a1',
+					agentSessionId: 'original',
+					usageStats: oldUsage,
+				}) + '\n';
+			fs.writeFileSync(historyFile, oldHistory);
 			const before = sessions().sessions[0].aiTabs[0];
 			const turn = watch(runtime);
 			const result = await runtime.turns.send('a1', 't1', { text: 'resume original' });
 			expect(errorOf(result).message).toContain('Grok');
 			expect(launch).toHaveBeenCalledTimes(test.stage === 'launch' ? 1 : 0);
 			expect(ran()).toEqual([]);
-			expect(await transcript(runtime)).toEqual([]);
+			expect(await transcript(runtime)).toEqual([oldLog]);
 			expect(
 				turn.events.some((event) => ['started', 'session', 'outcome'].includes(event.kind))
 			).toBe(false);
-			expect(readHistory(runtime.paths, 'a1').status).toBe('missing');
+			expect(fs.readFileSync(historyFile, 'utf-8')).toBe(oldHistory);
 			expect(sessions().sessions[0].aiTabs[0]).toEqual(before);
 		});
 

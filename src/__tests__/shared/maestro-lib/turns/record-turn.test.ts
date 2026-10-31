@@ -6,11 +6,15 @@
  * the real one where the question is what happens when SQLite is not there.
  */
 import * as fs from 'fs';
-import * as os from 'os';
+import * as fsp from 'fs/promises';
 import * as path from 'path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 let userData = '';
+
+vi.mock('fs/promises', async (importOriginal) => ({
+	...(await importOriginal<typeof import('fs/promises')>()),
+}));
 
 vi.mock('electron', () => ({ app: { getPath: vi.fn(() => userData) } }));
 vi.mock('../../../../main/utils/logger', () => ({
@@ -148,7 +152,9 @@ describe('turn records', () => {
 	}
 
 	beforeEach(() => {
-		userData = fs.mkdtempSync(path.join(os.tmpdir(), 'record-turn-test-'));
+		const scratch = path.join(process.cwd(), 'tmp');
+		fs.mkdirSync(scratch, { recursive: true });
+		userData = fs.mkdtempSync(path.join(scratch, 'record-turn-test-'));
 		paths = resolveMaestroPaths({ env: { MAESTRO_USER_DATA: userData } });
 		statsEvents = [];
 		statsRecorder = {
@@ -163,6 +169,7 @@ describe('turn records', () => {
 		seed();
 	});
 	afterEach(() => {
+		vi.restoreAllMocks();
 		fs.rmSync(userData, { recursive: true, force: true });
 	});
 
@@ -252,6 +259,140 @@ describe('turn records', () => {
 			});
 		}
 	);
+
+	it('rejects an old transcript queued behind a successor without changing prior History or usage', async () => {
+		seed(
+			{ toolType: 'grok' },
+			{
+				agentSessionId: turn().completed.sessionId,
+				runtimeTurnId: 'original',
+				usageStats: USAGE,
+			}
+		);
+		const { recorder: records, repository } = await recorder();
+		const original = turn({ assembled: { entry: { text: 'hi' }, settings: { provider: 'grok' } } });
+		await records.recordTurn(original);
+		const historyFile = path.join(paths.historyDir, 'a1.jsonl');
+		const historyBefore = fs.readFileSync(historyFile, 'utf-8');
+		const statsBefore = structuredClone(statsEvents);
+		const logsBefore = structuredClone(repository.getTab('a1', 't1')!.logs);
+		const incarnation = repository.captureTabIncarnation('a1', 't1');
+		const writeGuard = () =>
+			incarnation() && repository.getTab('a1', 't1')?.runtimeTurnId === 'original';
+		const successorEntry = buildUserTranscriptEntry({ text: 'successor' }, 2_000, context());
+		// Both calls enter with the original owner; the actual queued mutation sees the successor.
+		const successor = repository.beginTurn('a1', 't1', {
+			turnId: 'successor',
+			provider: 'grok',
+			consumedMergedContext: false,
+			userEntry: successorEntry,
+		});
+		expect(writeGuard()).toBe(true);
+		const recording = records.recordTurn({ ...original, writeGuard });
+		expect((await successor).ok).toBe(true);
+		const result = await recording;
+		expect(result.transcript).toMatchObject({ ok: false, error: { code: 'rejected' } });
+		expect(result.history).toMatchObject({ ok: false, reason: 'not-recorded' });
+		expect(result.stats).toMatchObject({ ok: false });
+		expect(fs.readFileSync(historyFile, 'utf-8')).toBe(historyBefore);
+		expect(statsEvents).toEqual(statsBefore);
+		const stored = JSON.parse(fs.readFileSync(paths.sessionsFile, 'utf-8')).sessions[0].aiTabs[0];
+		expect(stored).toMatchObject({
+			runtimeTurnId: 'successor',
+			agentSessionId: original.completed.sessionId,
+			usageStats: USAGE,
+		});
+		expect(stored.logs).toEqual([...logsBefore!, successorEntry]);
+	});
+
+	it('holds a successor outside the real History append and keeps the original scope through stats', async () => {
+		seed(
+			{ toolType: 'grok' },
+			{
+				agentSessionId: turn().completed.sessionId,
+				runtimeTurnId: 'original',
+			}
+		);
+		const { recorder: records, repository } = await recorder();
+		const incarnation = repository.captureTabIncarnation('a1', 't1');
+		const writeGuard = () =>
+			incarnation() && repository.getTab('a1', 't1')?.runtimeTurnId === 'original';
+		expect(
+			(
+				await repository.updateAgent('a1', {
+					provider: 'codex',
+					cwd: '/changed/project',
+					env: { GROK_HOME: '/changed/account' },
+				})
+			).ok
+		).toBe(true);
+		const recordQuery = statsRecorder.recordQuery;
+		statsRecorder.recordQuery = async (event) => {
+			// The ownership reservation must still cover the actual usage mutation.
+			expect(writeGuard()).toBe(true);
+			return recordQuery(event);
+		};
+		const blocked = Promise.withResolvers<void>();
+		const writing = Promise.withResolvers<void>();
+		const append = fsp.appendFile;
+		vi.spyOn(fsp, 'appendFile').mockImplementationOnce(async (...args) => {
+			writing.resolve();
+			await blocked.promise;
+			return append(...args);
+		});
+		const recording = records.recordTurn(
+			turn({
+				writeGuard,
+				scope: { projectPath: '/original/project', isRemote: true, isWorktree: true },
+				assembled: { entry: { text: 'hi' }, settings: { provider: 'grok' } },
+			})
+		);
+		await writing.promise;
+		let successorCommitted = false;
+		const successor = repository
+			.beginTurn('a1', 't1', {
+				turnId: 'successor',
+				provider: 'codex',
+				consumedMergedContext: false,
+				userEntry: buildUserTranscriptEntry({ text: 'successor' }, 2_000, context()),
+			})
+			.then((result) => {
+				successorCommitted = true;
+				return result;
+			});
+		try {
+			await Promise.resolve();
+			expect(successorCommitted).toBe(false);
+			expect(repository.getTab('a1', 't1')?.runtimeTurnId).toBe('original');
+			expect(statsEvents).toEqual([]);
+		} finally {
+			blocked.resolve();
+		}
+		expect((await recording).history.ok).toBe(true);
+		expect((await successor).ok).toBe(true);
+		const [entry] = await new HistoryManager().getEntries('a1');
+		expect(entry).toMatchObject({
+			agentSessionId: turn().completed.sessionId,
+			projectPath: '/original/project',
+			usageStats: USAGE,
+		});
+		expect(statsEvents).toEqual([
+			expect.objectContaining({
+				agentType: 'grok',
+				projectPath: '/original/project',
+				isRemote: true,
+				isWorktree: true,
+			}),
+		]);
+		const stored = JSON.parse(fs.readFileSync(paths.sessionsFile, 'utf-8')).sessions[0].aiTabs[0];
+		expect(stored.runtimeTurnId).toBe('successor');
+		expect(stored.providerSessions.grok.agentSessionId).toBe(turn().completed.sessionId);
+		expect(stored.logs.map((entry: { text: string }) => entry.text)).toEqual([
+			'hi',
+			turn().completed.answerText,
+			'successor',
+		]);
+	});
 
 	it('records unobserved Grok provenance without borrowing the current account or host', async () => {
 		seed({
