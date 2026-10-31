@@ -6,6 +6,7 @@
  */
 
 import * as os from 'os';
+import * as path from 'path';
 import { EventEmitter } from 'events';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
@@ -77,6 +78,10 @@ import {
 	type ModelStats,
 	type AgentError,
 } from '../../main/process-manager';
+import type { ManagedProcess, ProcessConfig } from '../../main/process-manager/types';
+import { nextSpawnGeneration } from '../../main/process-manager/generation';
+import { buildSpawnRequestSnapshot } from '../../main/process-manager/ProcessManager';
+import { fakeSpawnPort } from '../helpers/managedSpawnPort';
 
 describe('process-manager.ts', () => {
 	describe('aggregateModelUsage', () => {
@@ -407,6 +412,278 @@ describe('process-manager.ts', () => {
 			processManager = new ProcessManager();
 			mockExecFile.mockClear();
 			mockExecFileSync.mockClear();
+		});
+
+		describe('Grok native request correlation', () => {
+			let port: ReturnType<typeof fakeSpawnPort>;
+			let request: ProcessConfig;
+			let processes: Map<string, ManagedProcess>;
+			let spawn: ReturnType<
+				typeof vi.fn<(config: ProcessConfig) => { pid: number; success: boolean }>
+			>;
+
+			beforeEach(() => {
+				port = fakeSpawnPort();
+				processManager = new ProcessManager(() => false, {
+					spawnAuthority: () => port,
+					isCoworkingEnabled: () => false,
+				});
+				const scope = {
+					version: 1,
+					state: 'bound',
+					provider: 'grok',
+					accountRef: 'grok:fixture-account',
+					host: { kind: 'local', identity: 'fixture-machine' },
+					cwd: process.cwd(),
+				} as const;
+				request = {
+					sessionId: 'correlation-ai-tab',
+					tabId: 'tab',
+					toolType: 'grok',
+					cwd: process.cwd(),
+					command: 'grok',
+					args: ['--resume', 'native-requested'],
+					customEnvVars: { GROK_HOME: path.join(process.cwd(), 'fixture-account') },
+					agentSessionId: 'native-requested',
+					nativeSessionScope: scope,
+					nativeSessionBinding: { ...scope, nativeSessionId: 'native-requested' },
+					nativeSessionRequestId: 'attempt_1-A',
+				};
+				// Same inert spawner/map pattern as ProcessManager.serveSpawn.test.ts.
+				const internals = processManager as unknown as {
+					processes: Map<string, ManagedProcess>;
+					childProcessSpawner: { spawn: typeof spawn };
+				};
+				processes = internals.processes;
+				spawn = vi.fn((config: ProcessConfig) => {
+					processes.set(config.sessionId, {
+						sessionId: config.sessionId,
+						toolType: config.toolType,
+						cwd: config.cwd,
+						pid: 4242,
+						isTerminal: false,
+						startTime: 1,
+						spawnGeneration: nextSpawnGeneration(config.sessionId),
+					});
+					return { pid: 4242, success: true };
+				});
+				internals.childProcessSpawner = { spawn };
+			});
+
+			afterEach(() => {
+				for (const id of processes.keys()) processManager.kill(id);
+				processManager.emit('exit', request.sessionId, 0);
+				vi.restoreAllMocks();
+			});
+
+			it.each(['a', 'attempt_1-A', 'Z'.repeat(128)])(
+				'echoes valid token %s without changing admission or launch',
+				async (token) => {
+					const snapshot = buildSpawnRequestSnapshot({
+						...request,
+						nativeSessionRequestId: undefined,
+					});
+					request.nativeSessionRequestId = token;
+					expect(buildSpawnRequestSnapshot(request)).toEqual(snapshot);
+					expect(await processManager.spawnAdmitted(request, { peer: 'in-process' })).toMatchObject(
+						{ success: true }
+					);
+					const proc = processManager.get(request.sessionId)!;
+					const receipt = processManager.nativeSessionLaunchOf(request.sessionId);
+					expect(receipt).toEqual({
+						scope: request.nativeSessionScope,
+						processGeneration: proc.spawnGeneration,
+						tabId: 'tab',
+						requestedNativeSessionId: 'native-requested',
+						nativeSessionRequestId: token,
+					});
+					expect(spawn.mock.calls[0][0].args).toEqual(request.args);
+					expect(spawn.mock.calls[0][0].customEnvVars).toEqual(request.customEnvVars);
+					expect(spawn.mock.calls[0][0].shellEnvVars).toBeUndefined();
+					expect(processManager.admissionOf(request.sessionId)).toBe(proc.admission);
+					expect(processManager.admissionLive(request.sessionId)).toEqual({ ok: true });
+					expect(port.asked).toHaveLength(1);
+					expect(proc.agentSessionId).toBeUndefined();
+					// Observing a different native ID must not rewrite the requested ID or token.
+					proc.agentSessionId = 'native-observed';
+					expect(processManager.nativeSessionLaunchOf(request.sessionId)).toMatchObject({
+						requestedNativeSessionId: 'native-requested',
+						nativeSessionRequestId: token,
+					});
+					expect(proc.agentSessionId).toBe('native-observed');
+				}
+			);
+
+			it.each([
+				undefined,
+				null,
+				1,
+				true,
+				{},
+				['attempt'],
+				new String('attempt'),
+				'',
+				'x'.repeat(129),
+				' ',
+				' leading',
+				'trailing ',
+				'two words',
+				'line\nbreak',
+				'trailing\n',
+				'tab\t',
+				'nul\0',
+				'del\u007f',
+				'caf\u00e9',
+			])('omits malformed or legacy token %# without coercion', async (token) => {
+				delete request.nativeSessionRequestId;
+				if (token !== undefined) Object.assign(request, { nativeSessionRequestId: token });
+				expect(await processManager.spawnAdmitted(request, { peer: 'in-process' })).toMatchObject({
+					success: true,
+				});
+				expect(processManager.nativeSessionLaunchOf(request.sessionId)).not.toHaveProperty(
+					'nativeSessionRequestId'
+				);
+				expect(processManager.nativeSessionLaunchOf(request.sessionId)).toMatchObject({
+					scope: request.nativeSessionScope,
+					requestedNativeSessionId: 'native-requested',
+				});
+			});
+
+			it.each(['local', 'ssh'] as const)(
+				'retains the %s request across pending admission and synchronous spawn callbacks',
+				async (kind) => {
+					const scope = {
+						...request.nativeSessionScope,
+						host: { kind, identity: `${kind}-fixture` },
+					} as Extract<NonNullable<ProcessConfig['nativeSessionScope']>, { state: 'bound' }>;
+					if (kind === 'ssh') {
+						Object.assign(scope, { cwd: '/work/project' });
+						request.sshRemoteId = 'remote-fixture';
+					}
+					request.nativeSessionScope = scope;
+					request.nativeSessionBinding = { ...scope, nativeSessionId: 'native-requested' };
+					const original = structuredClone(request);
+					let release!: () => void;
+					const gate = new Promise<void>((resolve) => {
+						release = resolve;
+					});
+					port = fakeSpawnPort({
+						decide: async () => {
+							await gate;
+							return { decision: 'allow', policyRevision: 1 };
+						},
+					});
+					const pending = processManager.spawnAdmitted(request, { peer: 'in-process' });
+					request.nativeSessionRequestId = 'mutated_pending';
+					request.agentSessionId = 'wrong-native';
+					request.cwd = 'wrong-cwd';
+					request.tabId = 'wrong-tab';
+					request.args.push('--continue');
+					request.customEnvVars!.GROK_HOME = 'wrong-account';
+					Object.assign(scope, { accountRef: 'wrong-account', cwd: 'wrong-cwd' });
+					Object.assign(scope.host, { identity: 'wrong-host' });
+					const register = spawn.getMockImplementation()!;
+					spawn.mockImplementation((config) => {
+						expect(config).toMatchObject(original);
+						config.nativeSessionRequestId = 'mutated_callback';
+						return register(config);
+					});
+					release();
+					expect(await pending).toMatchObject({ success: true });
+					expect(processManager.nativeSessionLaunchOf(original.sessionId)).toMatchObject({
+						scope: original.nativeSessionScope,
+						tabId: original.tabId,
+						requestedNativeSessionId: original.agentSessionId,
+						nativeSessionRequestId: 'attempt_1-A',
+					});
+					expect(processManager.admissionLive(original.sessionId)).toEqual({ ok: true });
+				}
+			);
+
+			it('captures the token before a direct synchronous spawn mutates its caller', () => {
+				port.setStanding('standalone');
+				const register = spawn.getMockImplementation()!;
+				spawn.mockImplementation((config) => {
+					request.nativeSessionRequestId = 'later';
+					return register(config);
+				});
+				expect(processManager.spawn(request).success).toBe(true);
+				expect(
+					processManager.nativeSessionLaunchOf(request.sessionId)?.nativeSessionRequestId
+				).toBe('attempt_1-A');
+			});
+
+			it('keeps unknown scope unknown and does not create receipts for another provider', async () => {
+				delete request.agentSessionId;
+				delete request.nativeSessionBinding;
+				delete request.nativeSessionScope;
+				request.args = [];
+				expect(await processManager.spawnAdmitted(request, { peer: 'in-process' })).toMatchObject({
+					success: true,
+				});
+				expect(processManager.nativeSessionLaunchOf(request.sessionId)?.scope).toEqual({
+					version: 1,
+					state: 'unknown',
+					reason: 'unobserved',
+				});
+				processManager.kill(request.sessionId);
+				processManager.emit('exit', request.sessionId, 0);
+				request.toolType = 'copilot-cli';
+				expect(await processManager.spawnAdmitted(request, { peer: 'in-process' })).toMatchObject({
+					success: true,
+				});
+				expect(processManager.nativeSessionLaunchOf(request.sessionId)).toBeUndefined();
+			});
+
+			it.each(['denied', 'admission-error', 'spawn-failed', 'no-process', 'cancelled'] as const)(
+				'does not manufacture a receipt when %s',
+				async (failure) => {
+					if (failure === 'denied')
+						port = fakeSpawnPort({
+							decide: () => ({ decision: 'deny', policyRevision: 1, reason: 'fixture denial' }),
+						});
+					if (failure === 'admission-error')
+						vi.spyOn(processManager, 'admitSpawn').mockRejectedValueOnce(
+							new Error('fixture admission failure')
+						);
+					if (failure === 'spawn-failed' || failure === 'no-process')
+						spawn.mockReturnValueOnce({ pid: -1, success: failure === 'no-process' });
+					const controller = new AbortController();
+					const pending = processManager.spawnAdmitted(
+						request,
+						{ peer: 'in-process' },
+						{ signal: controller.signal }
+					);
+					if (failure === 'cancelled') controller.abort();
+					if (failure === 'admission-error')
+						await expect(pending).rejects.toThrow('fixture admission failure');
+					else expect(await pending).toMatchObject({ success: failure === 'no-process' });
+					expect(processManager.nativeSessionLaunchOf(request.sessionId)).toBeUndefined();
+					expect(processManager.get(request.sessionId)).toBeUndefined();
+					if (failure === 'no-process')
+						expect(processManager.admissionOf(request.sessionId)).not.toBeNull();
+					else expect(processManager.admissionOf(request.sessionId)).toBeNull();
+					if (!['spawn-failed', 'no-process'].includes(failure))
+						expect(spawn).not.toHaveBeenCalled();
+				}
+			);
+
+			it('retains the successful receipt through cancellation drainage and a failed retry', async () => {
+				await processManager.spawnAdmitted(request, { peer: 'in-process' });
+				const receipt = processManager.nativeSessionLaunchOf(request.sessionId);
+				expect(receipt?.nativeSessionRequestId).toBe('attempt_1-A');
+				expect(processManager.kill(request.sessionId)).toBe(true);
+				expect(processManager.get(request.sessionId)).toBeUndefined();
+				expect(processManager.nativeSessionLaunchOf(request.sessionId)).toBe(receipt);
+				request.nativeSessionRequestId = 'failed_retry';
+				spawn.mockReturnValueOnce({ pid: -1, success: false });
+				expect(await processManager.spawnAdmitted(request, { peer: 'in-process' })).toMatchObject({
+					success: false,
+				});
+				expect(processManager.nativeSessionLaunchOf(request.sessionId)).toBe(receipt);
+				processManager.emit('exit', request.sessionId, 0);
+				expect(processManager.nativeSessionLaunchOf(request.sessionId)).toBeUndefined();
+			});
 		});
 
 		describe('error detection exports', () => {

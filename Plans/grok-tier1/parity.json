@@ -2290,6 +2290,28 @@
 			"scope": "Three-file desktop lifecycle packet establishes synchronous per-attempt/tab incarnation fencing, validates captured host receipts, retains mismatched native IDs/history, and atomically persists bound IDs through live/parked provider slots. Old/web bridge absence remains unobserved; no ACP desktop routing claim.",
 			"testOwners": ["GT1-04-07ET", "GT1-04-07E1T"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-host-request-correlation-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07e1pt-host-request-correlation-regression-tests",
+			"sourceCommit": "636e63d817e1e49097260b1e3a7a15bad543f59c",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/process-manager.test.ts": "3afe3ff848886e74e93f927d06f7d5313f331416d66a9ff31b49f29cb1f315e2",
+				"src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts": "7fd6772029043063c74be87038d88dee266eb41db29c0cbf6565703eccf7f522"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"newTypeDiagnostics": 0,
+			"staticLimitations": "Four pre-existing TypeScript diagnostics reproduced against HEAD; no added diagnostics. One pre-existing ESLint warning. Tests neither run nor collected.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "40 authored host correlation regressions in two existing suites: immutable preparation/admission capture, validation bounds, exact argv/env/admission independence, native scope/ID separation, failure and cancellation/drain receipt behavior. Synthetic SSH scope is not endpoint qualification; simulated observed IDs are not ACP/parser/renderer persistence proof.",
+			"testOwner": "GT1-04-07E1PT",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6205,7 +6227,8 @@
 				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests",
 				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge",
 				"phase04NativeRequestCorrelationRef": "phase04-native-request-correlation",
-				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence"
+				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence",
+				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11492,7 +11515,8 @@
 				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests",
 				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge",
 				"phase04NativeRequestCorrelationRef": "phase04-native-request-correlation",
-				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence"
+				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence",
+				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12048,7 +12072,8 @@
 				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests",
 				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge",
 				"phase04NativeRequestCorrelationRef": "phase04-native-request-correlation",
-				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence"
+				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence",
+				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16675,7 +16700,8 @@
 				"phase04RemoteLaunchObserverEdgeTestsRef": "phase04-remote-launch-observer-edge-tests",
 				"phase04NativeIdentityBridgeRef": "phase04-native-identity-bridge",
 				"phase04NativeRequestCorrelationRef": "phase04-native-request-correlation",
-				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence"
+				"phase04NativeAttemptPersistenceRef": "phase04-native-attempt-persistence",
+				"phase04HostRequestCorrelationTestsRef": "phase04-host-request-correlation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {

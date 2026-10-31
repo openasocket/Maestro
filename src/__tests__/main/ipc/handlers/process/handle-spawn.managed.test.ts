@@ -17,6 +17,7 @@
  *   before the launch plan, never lowered to fit;
  * - a standalone host and a bare manager are unchanged.
  */
+import { realpathSync } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -39,6 +40,7 @@ vi.mock('../../../../../main/coworking/coworking-socket-path', () => ({
 }));
 
 import * as platform from '../../../../../shared/platformDetection';
+import { resolveAgentAccountRef } from '../../../../../shared/agentAccountDir';
 import * as sshPath from '../../../../../shared/maestro-lib/launch/ssh-path';
 import * as sshBuilder from '../../../../../main/utils/ssh-command-builder';
 import * as systemDelivery from '../../../../../main/utils/system-prompt-delivery';
@@ -1193,6 +1195,151 @@ describe('process:spawn Grok directory-grant refusal (GT1-02-11A1T)', () => {
 			);
 			expect(spawned(h).promptArtifact).toMatchObject({ owner: host });
 			expect(h.errors).toEqual([]);
+		}
+	);
+});
+
+describe('process:spawn native request correlation (GT1-04-07E1PT)', () => {
+	isolateAgentEnv(['GROK_HOME', 'GROK_AUTH', 'GROK_AUTH_PATH']);
+	const definition = getAgentDefinition('grok')!;
+	// Existing repository directories stand in for the selected account/project.
+	// Only directory identity is observed; no provider files are opened or written.
+	const cwd = path.resolve('src', '__tests__');
+	const account = path.resolve('src', '__tests__', 'fixtures');
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.spyOn(platform, 'isWindows').mockReturnValue(false);
+	});
+	afterEach(() => vi.restoreAllMocks());
+
+	it.each(['discovery', 'preparation', 'admission'])(
+		'preserves the submitted token and launch scope when the caller mutates during %s',
+		async (stage) => {
+			const token = `Request_${'a'.repeat(120)}`;
+			const request = payload({
+				toolType: 'grok',
+				command: definition.command,
+				args: [...definition.args],
+				cwd,
+				nativeSessionRequestId: token,
+				sessionCustomEnvVars: { GROK_HOME: account },
+			});
+			const mutate = () => {
+				request.nativeSessionRequestId = 'replacement';
+				request.agentSessionId = 'invented-native-id';
+				request.cwd = path.join(cwd, 'wrong-project');
+				request.sessionCustomEnvVars!.GROK_HOME = path.join(account, 'wrong-account');
+				request.args.push('--resume', 'invented-native-id');
+				request.tabId = 'replacement-tab';
+				request.sessionSshRemoteConfig = { enabled: true, remoteId: 'wrong-host' };
+			};
+			const port = fakeSpawnPort({
+				decide: async () => {
+					if (stage === 'admission') mutate();
+					return { decision: 'allow', policyRevision: 1 };
+				},
+			});
+			const h = harness(port, { provider: 'grok' });
+			if (stage === 'discovery') {
+				const detector = h.deps.getAgentDetector()!;
+				const getAgent = detector.getAgent.bind(detector);
+				vi.spyOn(detector, 'getAgent').mockImplementation(async (id) => {
+					mutate();
+					return getAgent(id);
+				});
+				h.deps.getAgentDetector = () => detector;
+			}
+			if (stage === 'preparation') {
+				const deliver = systemDelivery.applySystemPromptDelivery;
+				vi.spyOn(systemDelivery, 'applySystemPromptDelivery').mockImplementation(async (input) => {
+					mutate();
+					return deliver(input);
+				});
+			}
+			expect(await handleProcessSpawn(request, h.deps)).toMatchObject({ success: true });
+			expect(request.nativeSessionRequestId).toBe('replacement');
+			const config = spawned(h);
+			expect(config).toMatchObject({
+				nativeSessionRequestId: token,
+				tabId: TAB,
+				cwd,
+				customEnvVars: { GROK_HOME: account },
+				nativeSessionScope: {
+					version: 1,
+					state: 'bound',
+					provider: 'grok',
+					cwd: realpathSync(cwd),
+					accountRef: resolveAgentAccountRef(
+						{ toolType: 'grok', managedAccountDir: realpathSync(account) },
+						{ homeDir: '' }
+					),
+					host: { kind: 'local', identity: expect.any(String) },
+				},
+			});
+			expect(config.agentSessionId).toBeUndefined();
+			expect(config.nativeSessionBinding).toBeUndefined();
+			expect(config.sshRemoteId).toBeUndefined();
+			expect(config.args).not.toContain('--resume');
+			for (const value of [config.args, config.customEnvVars, config.shellEnvVars, port.asked])
+				expect(JSON.stringify(value) ?? '').not.toContain(token);
+			expect(port.asked).toHaveLength(1);
+			expect(port.asked[0].snapshot).toMatchObject({ provider: 'grok', operation: 'start' });
+			expect(port.authority.live()[0].leaseId).toBe(config.admission?.leaseId);
+			// A spied sink never installed a process: the handler cannot invent its receipt.
+			expect(h.processManager.nativeSessionLaunchOf(PROCESS)).toBeUndefined();
+		}
+	);
+
+	it.each(['grok', 'codex'] as const)('keeps optional legacy omission for %s', async (provider) => {
+		const agent = getAgentDefinition(provider)!;
+		const h = harness(fakeSpawnPort(), { provider });
+		expect(
+			await handleProcessSpawn(
+				payload({
+					toolType: provider,
+					command: agent.command,
+					args: [...agent.args],
+					cwd,
+					sessionCustomEnvVars: { GROK_HOME: account },
+				}),
+				h.deps
+			)
+		).toMatchObject({ success: true });
+		expect(spawned(h)).not.toHaveProperty('nativeSessionRequestId');
+		expect(h.processManager.nativeSessionLaunchOf(PROCESS)).toBeUndefined();
+	});
+
+	it.each(['ownership', 'admission', 'sink'])(
+		'cannot use a caller token to recover %s failure or manufacture a receipt',
+		async (failure) => {
+			const port =
+				failure === 'admission'
+					? denyProvider('grok', 'Synthetic correlation policy denial')
+					: fakeSpawnPort();
+			const h = harness(port, { provider: 'grok' });
+			if (failure === 'sink')
+				h.spawn.mockReturnValue({ pid: -1, success: false, error: 'Synthetic sink failure' });
+			const run = handleProcessSpawn(
+				payload({
+					toolType: 'grok',
+					command: definition.command,
+					args: [...definition.args],
+					cwd,
+					nativeSessionRequestId: 'requested-native-id',
+					agentSessionId: failure === 'ownership' ? 'requested-native-id' : undefined,
+					sessionCustomEnvVars: { GROK_HOME: account },
+				}),
+				h.deps
+			);
+			if (failure === 'admission') {
+				await expect(run).rejects.toThrow();
+				expect(port.asked).toHaveLength(1);
+				expect(port.authority.live()).toHaveLength(0);
+			} else expect(await run).toMatchObject({ success: false });
+			if (failure !== 'sink') expect(h.spawn).not.toHaveBeenCalled();
+			else expect(h.spawn).toHaveBeenCalledOnce();
+			if (failure === 'ownership') expect(port.asked).toHaveLength(0);
+			expect(h.processManager.nativeSessionLaunchOf(PROCESS)).toBeUndefined();
 		}
 	);
 });
