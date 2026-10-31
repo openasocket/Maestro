@@ -15,6 +15,7 @@ vi.mock('electron', () => ({
 
 import { createAgentsApi } from '../../../main/preload/agents';
 import type { AgentDiscoveryRequest, AgentDiscoveryResult } from '../../../shared/types';
+import type { GrokCommandDiscoveryResult } from '../../../main/agents/grok-skills';
 
 describe('Agents Preload API', () => {
 	let api: ReturnType<typeof createAgentsApi>;
@@ -436,6 +437,164 @@ describe('Agents Preload API', () => {
 	});
 
 	describe('discoverSlashCommands', () => {
+		it.each<AgentDiscoveryRequest['context']>([
+			{ kind: 'agent', sessionId: 'selected-agent', model: 'manual-model', effort: 'high' },
+			{
+				kind: 'draft',
+				cwd: '/remote/workspace',
+				customPath: '/custom bin/grok',
+				customEnvVars: { GROK_HOME: '/account-b', GROK_AUTH: '' },
+				sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-b' },
+				sshRemoteId: 'remote-b',
+				model: 'draft-model',
+				effort: 'low',
+			},
+			{ kind: 'provider-settings', cwd: '/workspace', customEnvVars: {}, model: '', effort: '' },
+		])('forwards the typed $kind request and complete native result unchanged', async (context) => {
+			const request: AgentDiscoveryRequest = { providerId: 'grok', forceRefresh: true, context };
+			// Synthetic IPC response only; the host owns validation and availability.
+			const response: GrokCommandDiscoveryResult = {
+				status: 'discovered',
+				commands: [
+					{ name: 'review', description: 'Review changes', kind: 'native-command' },
+					{
+						name: 'repo:check',
+						description: 'Check the selected project',
+						kind: 'skill',
+						scope: 'repo',
+						argumentHint: '<target> [--verbose]',
+					},
+					{ name: 'user:check', description: 'User skill', kind: 'skill', scope: 'user' },
+					{ name: 'plugin:check', description: 'Plugin skill', kind: 'skill', scope: 'plugin' },
+					{ name: 'workflow:check', description: 'Workflow', kind: 'workflow' },
+				],
+				binding: {
+					route: 'grok-acp',
+					sessionId: 'native-session',
+					processGeneration: 'process-2',
+					configGeneration: 'config-3',
+					catalogRevision: 4,
+					agentVersion: '1.0.0-fixture',
+					observedAt: 1_800_000_000_000,
+				},
+			};
+			const expected = structuredClone({ request, response });
+			mockInvoke.mockResolvedValueOnce(response);
+
+			const result: GrokCommandDiscoveryResult | null = await api.discoverSlashCommands(request);
+
+			expect(mockInvoke.mock.calls).toEqual([['agents:discoverSlashCommands', expected.request]]);
+			expect(result).toBe(response);
+			expect(result).toEqual(expected.response);
+		});
+
+		it.each<NonNullable<GrokCommandDiscoveryResult['reason']>>([
+			'missing-context',
+			'remote-unqualified',
+			'managed-unqualified',
+			'executable-unavailable',
+			'observation-unavailable',
+			'invalid-catalog',
+			'canceled',
+		])('preserves the host refusal reason %s without legacy fallback', async (reason) => {
+			const request: AgentDiscoveryRequest = {
+				providerId: 'grok',
+				context: { kind: 'agent', sessionId: 'selected-agent' },
+			};
+			const response: GrokCommandDiscoveryResult = { status: 'unavailable', commands: [], reason };
+			mockInvoke.mockResolvedValueOnce(response);
+
+			const result = await api.discoverSlashCommands(request);
+			expect(result).toBe(response);
+			expect(result).toEqual({ status: 'unavailable', commands: [], reason });
+			expect(mockInvoke.mock.calls).toEqual([['agents:discoverSlashCommands', request]]);
+		});
+
+		it('preserves an authoritative empty catalog and its binding', async () => {
+			const request: AgentDiscoveryRequest = {
+				providerId: 'grok',
+				context: { kind: 'agent', sessionId: 'selected-agent' },
+			};
+			const response: GrokCommandDiscoveryResult = {
+				status: 'discovered',
+				commands: [],
+				binding: {
+					route: 'grok-acp',
+					sessionId: 'empty-native-session',
+					processGeneration: 'process-5',
+					configGeneration: 'config-6',
+					catalogRevision: 0,
+					agentVersion: '1.0.0-fixture',
+					observedAt: 1_800_000_000_001,
+				},
+			};
+			const expected = structuredClone(response);
+			mockInvoke.mockResolvedValueOnce(response);
+
+			const result = await api.discoverSlashCommands(request);
+			expect(result).toBe(response);
+			expect(result).toEqual(expected);
+			expect(mockInvoke.mock.calls).toEqual([['agents:discoverSlashCommands', request]]);
+		});
+
+		it.each(['claude-code', 'codex'])(
+			'preserves null for a non-Grok %s object request',
+			async (providerId) => {
+				const request: AgentDiscoveryRequest = {
+					providerId,
+					context: { kind: 'agent', sessionId: 'selected-agent' },
+				};
+				mockInvoke.mockResolvedValueOnce(null);
+
+				expect(await api.discoverSlashCommands(request)).toBeNull();
+				expect(mockInvoke.mock.calls).toEqual([['agents:discoverSlashCommands', request]]);
+			}
+		);
+
+		it('propagates IPC rejection once without retrying positional discovery', async () => {
+			const request: AgentDiscoveryRequest = {
+				providerId: 'grok',
+				context: { kind: 'agent', sessionId: 'missing-agent' },
+			};
+			const error = new Error('Selected discovery context required');
+			mockInvoke.mockRejectedValueOnce(error);
+
+			await expect(api.discoverSlashCommands(request)).rejects.toBe(error);
+			expect(mockInvoke.mock.calls).toEqual([['agents:discoverSlashCommands', request]]);
+		});
+
+		it('distinguishes omitted and undefined positional env from explicit empty env', async () => {
+			const commands = [{ name: 'check', prompt: 'Check $ARGUMENTS', description: 'Check files' }];
+			mockInvoke.mockResolvedValue(commands);
+
+			expect(
+				await api.discoverSlashCommands('codex', '/project', '/custom/codex', 'remote-a')
+			).toBe(commands);
+			expect(
+				await api.discoverSlashCommands('codex', '/project', '/custom/codex', 'remote-a', undefined)
+			).toBe(commands);
+			expect(
+				await api.discoverSlashCommands('codex', '/project', '/custom/codex', 'remote-a', {})
+			).toBe(commands);
+			expect(mockInvoke.mock.calls).toEqual([
+				['agents:discoverSlashCommands', 'codex', '/project', '/custom/codex', 'remote-a'],
+				['agents:discoverSlashCommands', 'codex', '/project', '/custom/codex', 'remote-a'],
+				['agents:discoverSlashCommands', 'codex', '/project', '/custom/codex', 'remote-a', {}],
+			]);
+		});
+
+		it('preserves legacy Grok null with positional custom path, remote and account env', async () => {
+			const env = { GROK_HOME: '/account-b' };
+			mockInvoke.mockResolvedValueOnce(null);
+
+			expect(
+				await api.discoverSlashCommands('grok', '/project', '/custom/grok', 'remote-b', env)
+			).toBeNull();
+			expect(mockInvoke.mock.calls).toEqual([
+				['agents:discoverSlashCommands', 'grok', '/project', '/custom/grok', 'remote-b', env],
+			]);
+		});
+
 		it('passes the Codex session environment to discovery', async () => {
 			mockInvoke.mockResolvedValue([]);
 			await api.discoverSlashCommands('codex', '/project', undefined, undefined, {

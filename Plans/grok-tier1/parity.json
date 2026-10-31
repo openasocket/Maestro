@@ -3185,6 +3185,26 @@
 				"Two discovery/IPC suites authored only; no test execution or semantic type checking.",
 				"Synthetic observations do not certify native catalogs, version ranges or live process ownership. GT1-07-02 capture and GT1-05-05/06 dispatch remain pending."
 			]
+		},
+		"phase05-discovery-preload-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-04a-preload-discovery-regression-tests",
+			"sourceCommit": "dd026f5674f82e976fa03385109480a7fbd5eb46",
+			"sourceRevisionScope": "Pre-task HEAD plus the authored test hash and task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/main/preload/agents.test.ts": "e609c2104cf6ef98e451263e8f2567728bc20f2261f70ad8d3707a99b6a0b93a"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P18", "S02", "C-supportsSlashCommands"],
+			"authoredCases": 16,
+			"verificationTask": "GT1-05-13",
+			"limitations": [
+				"Preload request/result forwarding coverage authored only; no test execution or semantic type checking. GT1-05-13 must run this suite and both GT1-05-04 discovery/IPC suites.",
+				"Synthetic IPC responses do not qualify host context acceptance, native catalogs, executable liveness or route dispatch. GT1-07-02 capture and GT1-05-05/06 dispatch remain pending."
+			]
 		}
 	},
 	"sourceCatalog": {
