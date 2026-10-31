@@ -129,6 +129,54 @@ export function resolveGrokModelEffortArgs(args: string[], menu?: GrokEffortMenu
 	return normalized;
 }
 
+/** Grok native selectors must describe the retained request before SSH hides argv.
+ * Implicit continuation, injected IDs and forks cannot inherit its ownership. */
+export function grokLaunchArgsProblem(
+	args: readonly string[],
+	nativeId?: string,
+	cwd?: string
+): string | undefined {
+	const resumes: string[] = [];
+	const directories: string[] = [];
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (
+			[
+				'--continue',
+				'-c',
+				'--fork-session',
+				'--session-id',
+				'--worktree',
+				'-w',
+				'-r',
+				'--',
+			].includes(arg) ||
+			['--continue=', '--fork-session=', '--session-id=', '--worktree=', '-r', '-w', '-c'].some(
+				(prefix) => arg.startsWith(prefix)
+			)
+		) {
+			return 'Grok implicit continuation, fork or workspace selectors cannot supply native launch ownership.';
+		}
+		for (const [flag, values] of [
+			['--resume', resumes],
+			['--cwd', directories],
+		] as const) {
+			if (arg === flag) values.push(args[++i] ?? '');
+			else if (arg.startsWith(flag + '=')) values.push(arg.slice(flag.length + 1));
+		}
+	}
+	if (
+		resumes.length !== (nativeId ? 1 : 0) ||
+		(nativeId && resumes[0] !== nativeId) ||
+		(nativeId !== undefined && (!nativeId.trim() || /[\x00-\x1f\x7f]/.test(nativeId))) ||
+		directories.length > 1 ||
+		(directories.length === 1 && directories[0] !== cwd)
+	) {
+		return 'Grok resume or working-directory arguments do not match the retained launch request.';
+	}
+	return undefined;
+}
+
 export type BuildAgentArgsOptions = {
 	baseArgs: string[];
 	prompt?: string;

@@ -44,6 +44,8 @@ import type { LaunchPermissionDecision } from '../../shared/maestro-lib/launch/l
 import type { PromptDelivery } from '../../shared/maestro-lib/launch/prompt-delivery';
 import type { SteeringRunIdentity } from '../../shared/chatSteering';
 
+export { grokLaunchArgsProblem } from '../../shared/maestro-lib/launch/agent-args';
+
 // ============================================================================
 // Managed admission at the process sink
 // ============================================================================
@@ -470,57 +472,6 @@ export interface SdkProcessController {
 	kill: (options?: { sync?: boolean; shutdown?: boolean }) => void;
 }
 
-/**
- * Configuration for spawning a new process
- */
-/** Grok native selectors must describe the retained request before SSH hides argv.
- * Implicit continuation, injected IDs and forks cannot inherit its ownership. */
-export function grokLaunchArgsProblem(
-	args: readonly string[],
-	nativeId?: string,
-	cwd?: string
-): string | undefined {
-	const resumes: string[] = [];
-	const directories: string[] = [];
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
-		if (
-			[
-				'--continue',
-				'-c',
-				'--fork-session',
-				'--session-id',
-				'--worktree',
-				'-w',
-				'-r',
-				'--',
-			].includes(arg) ||
-			['--continue=', '--fork-session=', '--session-id=', '--worktree=', '-r', '-w', '-c'].some(
-				(prefix) => arg.startsWith(prefix)
-			)
-		) {
-			return 'Grok implicit continuation, fork or workspace selectors cannot supply native launch ownership.';
-		}
-		for (const [flag, values] of [
-			['--resume', resumes],
-			['--cwd', directories],
-		] as const) {
-			if (arg === flag) values.push(args[++i] ?? '');
-			else if (arg.startsWith(flag + '=')) values.push(arg.slice(flag.length + 1));
-		}
-	}
-	if (
-		resumes.length !== (nativeId ? 1 : 0) ||
-		(nativeId && resumes[0] !== nativeId) ||
-		(nativeId !== undefined && (!nativeId.trim() || /[\x00-\x1f\x7f]/.test(nativeId))) ||
-		directories.length > 1 ||
-		(directories.length === 1 && directories[0] !== cwd)
-	) {
-		return 'Grok resume or working-directory arguments do not match the retained launch request.';
-	}
-	return undefined;
-}
-
 /** Observed launch ownership before a provider has allocated its native ID. */
 export type NativeSessionLaunchScope =
 	| Extract<NativeSessionBinding, { state: 'unknown' }>
@@ -541,6 +492,9 @@ export interface NativeSessionLaunch {
 	readonly nativeSessionRequestId?: string;
 }
 
+/**
+ * Configuration for spawning a new process
+ */
 export interface ProcessConfig {
 	sessionId: string;
 	toolType: string;

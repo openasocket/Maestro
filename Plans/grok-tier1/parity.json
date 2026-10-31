@@ -2412,6 +2412,29 @@
 			"scope": "32 added parameter-expanded cases across the existing runtime, recorder and rules suites: original scope after provider/settings changes, detached live/parked ID/binding writes, expected turn/ID/binding checks, unknown provenance, raw same-ID resume observations, invalid/conflicting early/end IDs, refused persistence, History/journal/usage exclusion, cancellation and absent-ID honesty. Two beginTurnRecord cases adapted for optional turnId.",
 			"testOwner": "GT1-04-07FT",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-shared-grok-launch-selector": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07f1-shared-grok-launch-selector",
+			"sourceCommit": "16387ea7da3ab3655d5125d593e1483c6368ad82",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/main/process-manager/types.ts": "3cd71306f004c4a139ee4caeb23dca32b2610e51d8166883011701884bdec574",
+				"src/shared/maestro-lib/launch/agent-args.ts": "bcd9ebce1b0e194905ea65041061bd4ec160f8e120ccd2cf10f13429c3873a1c"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"implementation": "implemented",
+			"static": "pass",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
+			"scope": "Exact extraction of grokLaunchArgsProblem into shared launch agent-args with a named main compatibility re-export; no selector behavior or caller changes.",
+			"limitations": [
+				"Shared runtime admission and native launch receipts remain GT1-04-07F4; this extraction does not qualify native resume."
+			],
+			"implementationOwner": "GT1-04-07F1",
+			"testOwner": "GT1-04-07FPT",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -6252,7 +6275,8 @@
 				"src/renderer/hooks/agent/internal/useAgentSessionIdListener.ts",
 				"src/shared/maestro-lib/runtime/turns.ts",
 				"src/shared/maestro-lib/turns/record-turn.ts",
-				"src/shared/maestro-lib/agents/rules.ts"
+				"src/shared/maestro-lib/agents/rules.ts",
+				"src/shared/maestro-lib/launch/agent-args.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -6344,7 +6368,8 @@
 				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests",
 				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests",
 				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites",
-				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests"
+				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests",
+				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11566,7 +11591,8 @@
 				"src/renderer/hooks/agent/internal/useAgentSessionIdListener.ts",
 				"src/shared/maestro-lib/runtime/turns.ts",
 				"src/shared/maestro-lib/turns/record-turn.ts",
-				"src/shared/maestro-lib/agents/rules.ts"
+				"src/shared/maestro-lib/agents/rules.ts",
+				"src/shared/maestro-lib/launch/agent-args.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -11654,7 +11680,8 @@
 				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests",
 				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests",
 				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites",
-				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests"
+				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests",
+				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12145,7 +12172,8 @@
 				"src/renderer/hooks/agent/internal/useAgentSessionIdListener.ts",
 				"src/shared/maestro-lib/runtime/turns.ts",
 				"src/shared/maestro-lib/turns/record-turn.ts",
-				"src/shared/maestro-lib/agents/rules.ts"
+				"src/shared/maestro-lib/agents/rules.ts",
+				"src/shared/maestro-lib/launch/agent-args.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -12233,7 +12261,8 @@
 				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests",
 				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests",
 				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites",
-				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests"
+				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests",
+				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16791,7 +16820,8 @@
 				"src/renderer/hooks/agent/internal/useAgentSessionIdListener.ts",
 				"src/shared/maestro-lib/runtime/turns.ts",
 				"src/shared/maestro-lib/turns/record-turn.ts",
-				"src/shared/maestro-lib/agents/rules.ts"
+				"src/shared/maestro-lib/agents/rules.ts",
+				"src/shared/maestro-lib/launch/agent-args.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -16883,7 +16913,8 @@
 				"phase04NativeIdentityBridgeTestsRef": "phase04-native-identity-bridge-tests",
 				"phase04RendererNativeOwnershipTestsRef": "phase04-renderer-native-ownership-tests",
 				"phase04RuntimeNativeRecordingPrerequisitesRef": "phase04-runtime-native-recording-prerequisites",
-				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests"
+				"phase04RuntimeNativeRecordingTestsRef": "phase04-runtime-native-recording-tests",
+				"phase04SharedGrokLaunchSelectorRef": "phase04-shared-grok-launch-selector"
 			},
 			"evidenceApplicability": {
 				"static": {
