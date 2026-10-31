@@ -583,6 +583,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 								session: activeSession,
 								tab: activeTab,
 								text: commandText,
+								images: effectiveImages,
 								slashCommand: true,
 							}),
 							commandDescription: matchingCustomCommand.description,
@@ -650,6 +651,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 								).slice(-50),
 							}));
 						}
+						if (!usingOverrideImages) setStagedImages([]);
 						return;
 					}
 					if (activeSession.toolType === 'grok') {

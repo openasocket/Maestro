@@ -5633,8 +5633,8 @@
 				},
 				{
 					"id": "composer-command-images-omitted",
-					"code": "implementation-pending",
-					"missingPrerequisite": "The composer custom-command producer omits effectiveImages from buildQueuedMessageItem. GT1-05-06A3 must forward attachments and GT1-05-06B3 must cover staged/explicit input; GT1-05-13 must execute the regressions. Existing queue-spawn forwarding cannot recover discarded images. See Plans/grok-tier1/evidence/05.md#gt1-05-06b-custom-command-producer-and-template-tests.",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-05-06A3 forwards effectiveImages through the existing command queue builder and clears staged images after handoff only when no explicit images override was supplied. Scoped formatting, ESLint and independent static review pass; renderer TypeScript retains the known RequestInit.dispatcher baseline error. GT1-05-06B3 must author staged/explicit image producer regressions, GT1-05-06B1 covers final queued spawn delivery and managed refusal, and GT1-05-13 must execute them. Behavioral and native qualification remain not-run; remote macro attachment refusal is unchanged. See Plans/grok-tier1/evidence/05.md#gt1-05-06a3-custom-command-attachments.",
 					"affectedRows": ["P07", "S31"]
 				}
 			],
@@ -22641,8 +22641,8 @@
 				},
 				{
 					"id": "composer-command-images-omitted",
-					"code": "implementation-pending",
-					"missingPrerequisite": "The composer custom-command producer omits effectiveImages from buildQueuedMessageItem. GT1-05-06A3 must forward attachments and GT1-05-06B3 must cover staged/explicit input; GT1-05-13 must execute the regressions. Existing queue-spawn forwarding cannot recover discarded images. See Plans/grok-tier1/evidence/05.md#gt1-05-06b-custom-command-producer-and-template-tests.",
+					"code": "verification-pending",
+					"missingPrerequisite": "GT1-05-06A3 forwards effectiveImages through the existing command queue builder and clears staged images after handoff only when no explicit images override was supplied. Scoped formatting, ESLint and independent static review pass; renderer TypeScript retains the known RequestInit.dispatcher baseline error. GT1-05-06B3 must author staged/explicit image producer regressions, GT1-05-06B1 covers final queued spawn delivery and managed refusal, and GT1-05-13 must execute them. Behavioral and native qualification remain not-run; remote macro attachment refusal is unchanged. See Plans/grok-tier1/evidence/05.md#gt1-05-06a3-custom-command-attachments.",
 					"affectedRows": ["P07", "S31"]
 				}
 			],
