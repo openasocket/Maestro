@@ -2171,7 +2171,8 @@ interface MaestroAPI {
 		list: (
 			agentId: string,
 			projectPath: string,
-			sshRemoteId?: string
+			sshRemoteId?: string,
+			ownerAgentId?: string
 		) => Promise<
 			Array<{
 				sessionId: string;
@@ -2221,26 +2222,19 @@ interface MaestroAPI {
 			agentId: string,
 			projectPath: string,
 			sessionId: string,
-			options?: { offset?: number; limit?: number },
+			/** The owner selects its account/host; unavailable or conflicting scope rejects the read. */
+			options?: import('../main/agents/session-storage').SessionReadOptions & {
+				ownerAgentId?: string;
+			},
 			sshRemoteId?: string
-		) => Promise<{
-			messages: Array<{
-				type: string;
-				role?: string;
-				content: string;
-				timestamp: string;
-				uuid: string;
-				toolUse?: unknown;
-			}>;
-			total: number;
-			hasMore: boolean;
-		}>;
+		) => Promise<import('../main/agents/session-storage').SessionMessagesResult>;
 		search: (
 			agentId: string,
 			projectPath: string,
 			query: string,
 			searchMode: 'title' | 'user' | 'assistant' | 'all',
-			sshRemoteId?: string
+			sshRemoteId?: string,
+			ownerAgentId?: string
 		) => Promise<
 			Array<{
 				sessionId: string;
@@ -2253,7 +2247,8 @@ interface MaestroAPI {
 			agentId: string,
 			projectPath: string,
 			sessionId: string,
-			sshRemoteId?: string
+			sshRemoteId?: string,
+			ownerAgentId?: string
 		) => Promise<string | null>;
 		// Delete a message pair from a session (not supported for SSH remote sessions)
 		deleteMessagePair: (

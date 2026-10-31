@@ -23,7 +23,7 @@ import { logger } from '../../utils/logger';
 import { withIpcErrorLogging } from '../../utils/ipcHandler';
 import { createSafeSend } from '../../utils/safe-send';
 import { getSessionStorage, hasSessionStorage, getAllSessionStorages } from '../../agents';
-import { getSshRemoteById as getSshRemoteByIdFromStore } from '../../stores';
+import { getLiveSessions, getSshRemoteById } from '../../stores';
 import { calculateModelCost } from '../../utils/pricing';
 import {
 	computeClaudeUsageWithSubagents,
@@ -47,7 +47,12 @@ import type {
 	SessionListOptions,
 	SessionReadOptions,
 } from '../../agents';
-import type { GlobalAgentStats, ProviderStats, SshRemoteConfig } from '../../../shared/types';
+import type {
+	GlobalAgentStats,
+	ProviderStats,
+	SshRemoteConfig,
+	AgentSshRemoteConfig,
+} from '../../../shared/types';
 import { captureException } from '../../utils/sentry';
 import { isExpectedSessionReadError } from '../../utils/session-read-errors';
 import {
@@ -66,6 +71,7 @@ import {
 } from '../../utils/concurrency';
 import { countClaudeTranscriptMessages } from '../../../shared/claudeTranscriptMessages';
 import { resolveAgentAccountDir } from '../../agents/provider-account-dirs';
+import { resolveSshLaunchTarget } from '../../utils/ssh-remote-resolver';
 
 // Re-export for backwards compatibility
 export type { GlobalAgentStats, ProviderStats };
@@ -105,14 +111,86 @@ export interface AgentSessionsHandlerDependencies {
 	agentSessionOriginsStore?: Store<AgentSessionOriginsData>;
 }
 
-/**
- * Resolve an enabled SSH remote by ID via the shared settings store.
- * Wrapper around the canonical getter; preserves the `enabled` filter that
- * this handler used historically so disabled remotes never silently route SSH.
- */
-function getSshRemoteById(sshRemoteId: string): SshRemoteConfig | undefined {
-	const remote = getSshRemoteByIdFromStore(sshRemoteId);
-	return remote?.enabled ? remote : undefined;
+/** Resolve the selected owner before any native read or transcript restoration. */
+function resolveHistoryScope(
+	agentId: string,
+	sshRemoteId?: string,
+	ownerAgentId?: string,
+	configDir?: string
+): { sshConfig?: SshRemoteConfig; configDir?: string } {
+	for (const [name, value] of [
+		['ownerAgentId', ownerAgentId],
+		['sshRemoteId', sshRemoteId],
+	] as const) {
+		if (
+			value !== undefined &&
+			(typeof value !== 'string' || !value.trim() || value.includes('\0'))
+		) {
+			throw new Error(`Invalid history ${name}.`);
+		}
+	}
+	if (configDir !== undefined && (typeof configDir !== 'string' || configDir.includes('\0'))) {
+		throw new Error('Invalid history account directory.');
+	}
+
+	let sessionSshConfig: AgentSshRemoteConfig | undefined =
+		sshRemoteId === undefined ? undefined : { enabled: true, remoteId: sshRemoteId };
+	let owner;
+	if (ownerAgentId !== undefined) {
+		owner = getLiveSessions().find((session) => session.id === ownerAgentId);
+		if (!owner || owner.toolType !== agentId) {
+			throw new Error(
+				'History owner is unavailable or uses a different provider. Refresh the agent selection.'
+			);
+		}
+		if (configDir !== undefined) {
+			throw new Error('An owned history read cannot override its account directory.');
+		}
+		// Prefer the current configured target; retain legacy observed SSH routing
+		// only when no configuration exists. Never expand its home on this host.
+		sessionSshConfig =
+			owner.sessionSshRemoteConfig ??
+			(owner.sshRemoteId ? { enabled: true, remoteId: owner.sshRemoteId } : undefined);
+		if (
+			sessionSshConfig !== undefined &&
+			(typeof sessionSshConfig !== 'object' ||
+				sessionSshConfig === null ||
+				Array.isArray(sessionSshConfig) ||
+				typeof sessionSshConfig.enabled !== 'boolean')
+		) {
+			throw new Error('History owner has invalid SSH configuration.');
+		}
+		const ownerRemoteId = sessionSshConfig?.enabled ? sessionSshConfig.remoteId : undefined;
+		if (sshRemoteId !== undefined && sshRemoteId !== ownerRemoteId) {
+			throw new Error('History SSH target does not match its owner. Refresh the agent selection.');
+		}
+	}
+	const target = resolveSshLaunchTarget(
+		{
+			getSshRemotes: () => {
+				const id = sessionSshConfig?.remoteId;
+				const remote = typeof id === 'string' && id.trim() ? getSshRemoteById(id) : undefined;
+				return remote ? [remote] : [];
+			},
+		},
+		sessionSshConfig
+	);
+	if (target.kind === 'unresolved') {
+		throw new Error(
+			`History SSH target unavailable (${target.reason}). Select an enabled SSH remote.`
+		);
+	}
+	if (owner) {
+		configDir = resolveAgentAccountDir(owner.id, {
+			sessions: [{ ...owner, sessionSshRemoteConfig: sessionSshConfig }],
+		});
+		// Grok's remote default remains undefined (the adapter uses ~/.grok).
+		// A missing local account resolution must never revive the host default.
+		if (agentId === 'grok' && target.kind === 'local' && configDir === undefined) {
+			throw new Error('History owner account could not be resolved.');
+		}
+	}
+	return { sshConfig: target.kind === 'remote' ? target.remote : undefined, configDir };
 }
 
 /**
@@ -379,7 +457,8 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 			async (
 				agentId: string,
 				projectPath: string,
-				sshRemoteId?: string
+				sshRemoteId?: string,
+				ownerAgentId?: string
 			): Promise<AgentSessionInfo[]> => {
 				const storage = getSessionStorage(agentId);
 				if (!storage) {
@@ -387,10 +466,12 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 					return [];
 				}
 
-				// Get SSH config if provided
-				const sshConfig = sshRemoteId ? getSshRemoteById(sshRemoteId) : undefined;
-
-				const sessions = await storage.listSessions(projectPath, sshConfig);
+				const { sshConfig, configDir } = resolveHistoryScope(agentId, sshRemoteId, ownerAgentId);
+				const sessions = await storage.listSessions(
+					projectPath,
+					sshConfig,
+					...(ownerAgentId === undefined ? [] : [configDir])
+				);
 				logger.info(
 					`Listed ${sessions.length} sessions for agent ${agentId} at ${projectPath}${sshRemoteId ? ' (remote via SSH)' : ''}`,
 					LOG_CONTEXT
@@ -418,17 +499,18 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 					return { sessions: [], hasMore: false, totalCount: 0, nextCursor: null };
 				}
 
-				// Get SSH config if provided
-				const sshConfig = sshRemoteId ? getSshRemoteById(sshRemoteId) : undefined;
+				const { sshConfig, configDir } = resolveHistoryScope(
+					agentId,
+					sshRemoteId,
+					options?.ownerAgentId
+				);
 
 				// List the pool of the account this agent actually runs under: its
 				// provider only resumes sessions from that config dir.
 				const listOptions: SessionListOptions = {
 					cursor: options?.cursor,
 					limit: options?.limit,
-					configDir: options?.ownerAgentId
-						? resolveAgentAccountDir(options.ownerAgentId)
-						: undefined,
+					configDir,
 				};
 				const result = await storage.listSessionsPaginated(projectPath, listOptions, sshConfig);
 				logger.info(
@@ -450,7 +532,7 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 				agentId: string,
 				projectPath: string,
 				sessionId: string,
-				options?: SessionReadOptions,
+				options?: SessionReadOptions & { ownerAgentId?: string },
 				sshRemoteId?: string
 			): Promise<SessionMessagesResult> => {
 				const storage = getSessionStorage(agentId);
@@ -459,21 +541,40 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 					return { messages: [], total: 0, hasMore: false };
 				}
 
-				// Get SSH config if provided
-				const sshConfig = sshRemoteId ? getSshRemoteById(sshRemoteId) : undefined;
+				const { sshConfig, configDir } = resolveHistoryScope(
+					agentId,
+					sshRemoteId,
+					options?.ownerAgentId,
+					options?.configDir
+				);
 
 				// Rehydrate an aged-out starred session: on the initial load of a LOCAL
 				// session, if the provider transcript is gone but we hold a mirror, copy
 				// it back to the provider's path so the read below (and a later native
 				// --resume) finds it. No-op/cheap when the provider file still exists.
-				if (!sshConfig && !options?.offset) {
+				// Mirrors have no account/host identity and cannot restore Grok's
+				// multi-file native state. Scoped reads must never rewrite another pool.
+				if (
+					agentId !== 'grok' &&
+					!sshConfig &&
+					options?.ownerAgentId === undefined &&
+					configDir === undefined &&
+					!options?.offset
+				) {
 					await restoreStarredTranscript({ agentId, projectPath, sessionId });
 				}
 
 				const result = await storage.readSessionMessages(
 					projectPath,
 					sessionId,
-					options,
+					options?.ownerAgentId === undefined
+						? options
+						: {
+								offset: options.offset,
+								limit: options.limit,
+								includeNativeRecords: options.includeNativeRecords,
+								configDir,
+							},
 					sshConfig
 				);
 				logger.info(
@@ -496,7 +597,8 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 				projectPath: string,
 				query: string,
 				searchMode: SessionSearchMode,
-				sshRemoteId?: string
+				sshRemoteId?: string,
+				ownerAgentId?: string
 			): Promise<SessionSearchResult[]> => {
 				const storage = getSessionStorage(agentId);
 				if (!storage) {
@@ -504,10 +606,14 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 					return [];
 				}
 
-				// Get SSH config if provided
-				const sshConfig = sshRemoteId ? getSshRemoteById(sshRemoteId) : undefined;
-
-				const results = await storage.searchSessions(projectPath, query, searchMode, sshConfig);
+				const { sshConfig, configDir } = resolveHistoryScope(agentId, sshRemoteId, ownerAgentId);
+				const results = await storage.searchSessions(
+					projectPath,
+					query,
+					searchMode,
+					sshConfig,
+					...(ownerAgentId === undefined ? [] : [configDir])
+				);
 				logger.info(
 					`Found ${results.length} matching sessions for query "${query}" (agent: ${agentId})${sshRemoteId ? ' (remote via SSH)' : ''}`,
 					LOG_CONTEXT
@@ -523,14 +629,23 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 		'agentSessions:getPath',
 		withIpcErrorLogging(
 			handlerOpts('getPath'),
-			async (agentId: string, projectPath: string, sessionId: string): Promise<string | null> => {
+			async (
+				agentId: string,
+				projectPath: string,
+				sessionId: string,
+				sshRemoteId?: string,
+				ownerAgentId?: string
+			): Promise<string | null> => {
 				const storage = getSessionStorage(agentId);
 				if (!storage) {
 					logger.warn(`No session storage available for agent: ${agentId}`, LOG_CONTEXT);
 					return null;
 				}
 
-				return storage.getSessionPath(projectPath, sessionId);
+				const { sshConfig, configDir } = resolveHistoryScope(agentId, sshRemoteId, ownerAgentId);
+				return sshRemoteId === undefined && ownerAgentId === undefined
+					? storage.getSessionPath(projectPath, sessionId)
+					: storage.getSessionPath(projectPath, sessionId, sshConfig, configDir);
 			}
 		)
 	);
