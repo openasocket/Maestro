@@ -22,7 +22,12 @@ import {
 	type GrokAcpPermissionTurn,
 	type GrokAcpRequestOptions,
 } from './acp-requests';
-import { GrokAcpSession, GrokAcpSessionError, type GrokAcpSessionOptions } from './acp-session';
+import {
+	GrokAcpSession,
+	GrokAcpSessionError,
+	type GrokAcpModelState,
+	type GrokAcpSessionOptions,
+} from './acp-session';
 
 export interface GrokAcpTurnOptions
 	extends
@@ -32,6 +37,7 @@ export interface GrokAcpTurnOptions
 			| 'account'
 			| 'host'
 			| 'model'
+			| 'effort'
 			| 'resumeSessionId'
 			| 'idleTimeoutMs'
 			| 'maxTurnMs'
@@ -44,12 +50,28 @@ export interface GrokAcpTurnOptions
 	/** Unique host dispatch and process identities, never substituted for native IDs. */
 	turnId: string;
 	processGeneration: string;
-	/** Already assembled system/user text. This port does not accept attachments or effort. */
+	/** Already assembled system/user text. This port does not accept attachments. */
 	prompt: string;
+	/** Explicit discovery qualification for this selected account/host and exact binary version. */
+	modelDiscovery?: Pick<GrokAcpSessionOptions, 'account' | 'host'> & { agentVersion: string };
 	permission?: Pick<GrokAcpPermissionTurn, 'authority' | 'binding'>;
 }
 
+/** Detached pre-dispatch facts; never a provider-wide capability or persistence record. */
+export interface GrokAcpConfigurationObservation extends Pick<
+	GrokAcpTurnOptions,
+	'account' | 'host' | 'cwd' | 'processGeneration'
+> {
+	sessionId: string;
+	observedAt: number;
+	configuration: GrokAcpSession['configuration'];
+	/** Undefined means unavailable; an empty availableModels array is authoritative. */
+	models?: GrokAcpModelState;
+}
+
 export interface GrokAcpTurnHandlers extends Pick<TurnHandlers, 'onStarted' | 'onEvent'> {
+	/** Observation only: mutation/failure cannot affect the turn or its retained snapshot. */
+	onConfiguration?: (observation: GrokAcpConfigurationObservation) => void;
 	onQuestion?: GrokAcpRequestOptions['onQuestion'];
 	onRequestSettlement?: GrokAcpRequestOptions['onSettlement'];
 }
@@ -60,6 +82,7 @@ export interface GrokAcpRunningTurn extends Omit<RunningTurn, 'completed'> {
 	>;
 	/** Cancel the prompt before escalating through the session's bounded grace period. */
 	cancel(): void;
+	configuration: () => GrokAcpConfigurationObservation | undefined;
 	questionSupport: GrokAcpRequestAdapter['questionSupport'];
 	answerQuestion: GrokAcpRequestAdapter['answerQuestion'];
 }
@@ -93,9 +116,11 @@ export function startGrokAcpTurn(
 			},
 		},
 		extensions: options.extensions && { ...options.extensions },
+		modelDiscovery: options.modelDiscovery && { ...options.modelDiscovery },
 	};
 	const controller = new AbortController();
 	let session: GrokAcpSession | undefined;
+	let configuration: GrokAcpConfigurationObservation | undefined;
 	let events: GrokAcpEventAdapter | undefined;
 	let capture: TurnCapture | undefined;
 	let endRequests: (() => void) | undefined;
@@ -226,6 +251,16 @@ export function startGrokAcpTurn(
 			await session.open();
 			if (failure || controller.signal.aborted) throw new GrokAcpSessionError('cancelled');
 			const sessionId = session.sessionId!;
+			const qualification = options.modelDiscovery;
+			const models =
+				qualification &&
+				qualification.account === options.account &&
+				qualification.host === options.host &&
+				qualification.agentVersion === session.configuration.agentVersion &&
+				qualification.agentVersion === options.extensions?.agentVersion &&
+				options.extensions?.modelsList === true
+					? await session.discoverModels(controller.signal)
+					: undefined;
 			// A distinct native ID is useful only when actually sent on a qualified route.
 			const promptId = session.supportsPromptId ? generateUUID() : undefined;
 			const scopeId = canonicalJson([options.account, options.host]);
@@ -252,6 +287,24 @@ export function startGrokAcpTurn(
 			});
 			// Incomplete baseline observations remain separate, non-additive facts.
 			for (const event of initialEvents) emit(event);
+			if (failure || controller.signal.aborted) throw new GrokAcpSessionError('cancelled');
+			configuration = structuredClone({
+				account: options.account,
+				host: options.host,
+				cwd: options.cwd,
+				processGeneration: options.processGeneration,
+				sessionId,
+				observedAt: Date.now(),
+				configuration: session.configuration,
+				models,
+			});
+			try {
+				void Promise.resolve(handlers.onConfiguration?.(structuredClone(configuration))).catch(
+					() => {}
+				);
+			} catch {
+				// Optional observers cannot fail a successfully acknowledged configuration.
+			}
 			if (failure || controller.signal.aborted) throw new GrokAcpSessionError('cancelled');
 			endRequests = requests.beginTurn({
 				...options.permission,
@@ -378,6 +431,7 @@ export function startGrokAcpTurn(
 		completed,
 		cancel,
 		answerSoFar: () => capture?.answerText,
+		configuration: () => configuration && structuredClone(configuration),
 		questionSupport: requests.questionSupport,
 		answerQuestion: requests.answerQuestion.bind(requests),
 	};

@@ -45,7 +45,9 @@ import {
 import { isBlankEnvValue } from '../../shared/agentEnvironment';
 import { resolveAgentAccountDir } from '../../shared/agentAccountDir';
 import { canonicalJson } from '../../shared/canonicalJson';
-import { stripAnsiCodes } from '../../shared/stringUtils';
+import type { AgentDiscoveryResult } from '../../shared/types';
+import type { GrokAcpConfigurationObservation } from '../../shared/maestro-lib/grok/acp-turn';
+import type { TurnProcessSpec } from '../../shared/maestro-lib/run/start-turn';
 import {
 	buildAgentEnvironment,
 	type BuildAgentEnvironmentOptions,
@@ -369,7 +371,7 @@ export interface ModelDiscoveryContext {
 	effort?: string;
 	/**
 	 * Host-owned revision covering file-based auth, endpoint and project config.
-	 * Without one, only the CLI's own scope-validated cache may be reused.
+	 * An owned ACP observation port must supply one when the caller cannot.
 	 */
 	configGeneration?: string;
 	/** Host-owned cancellation; never serialize an AbortSignal over IPC. */
@@ -387,6 +389,23 @@ export interface AgentDetectorDeps {
 	managedProbe?: () => ProviderProbeManaged | undefined;
 	/** Provider-settings context when no individual agent was selected. */
 	modelDiscoveryContext?: (agentId: string) => ModelDiscoveryContext | undefined;
+	/**
+	 * Read only, no spawn/RPC: the host returns a current owned-process observation
+	 * for this exact selection, or undefined. It owns auth/config-file invalidation,
+	 * actual executable/version and local account/host identity. Never persist/log
+	 * the launch environment; return the actual launch receipt, not echoed input.
+	 * Production wiring belongs to the route owner, not the renderer or detector.
+	 */
+	grokAcpObservation?: (
+		selection: Pick<TurnProcessSpec, 'command' | 'env' | 'cwd'> & { model?: string }
+	) =>
+		| {
+				launch: Pick<TurnProcessSpec, 'command' | 'env' | 'cwd'>;
+				agentVersion: string;
+				configGeneration: string;
+				observation: GrokAcpConfigurationObservation;
+		  }
+		| undefined;
 }
 
 export class AgentDetector {
@@ -720,10 +739,13 @@ export class AgentDetector {
 		context?: ModelDiscoveryContext
 	): Promise<string[]> {
 		if (agentId === 'grok') {
-			return this.discoverGrokModels(
-				context ?? this.deps.modelDiscoveryContext?.(agentId),
-				forceRefresh
-			);
+			return (
+				await this.discoverGrokOptions(
+					context ?? this.deps.modelDiscoveryContext?.(agentId),
+					'model',
+					forceRefresh
+				)
+			).options;
 		}
 		const agent = await this.getAgent(agentId);
 
@@ -763,161 +785,124 @@ export class AgentDetector {
 		return models;
 	}
 
-	private async discoverGrokModels(
+	/** Typed selected-context discovery keeps empty catalogs distinct from unavailable metadata. */
+	async discoverGrokOptions(
 		context: ModelDiscoveryContext | undefined,
-		forceRefresh: boolean
-	): Promise<string[]> {
-		// Existing provider-only IPC callers cannot identify an account. Refuse to
-		// read the host's default account while a different agent is being edited.
-		if (!context || context.target.kind !== 'local') {
-			logger.debug(
-				'Grok model discovery unavailable: selected local context required',
-				LOG_CONTEXT
-			);
-			return context?.model?.trim() ? [context.model.trim()] : [];
-		}
-		const configured = context.model?.trim();
-		const fallback = configured ? [configured] : [];
-		if (context.signal?.aborted) return fallback;
-		// Grok's managed environment vocabulary is not registered yet. The
-		// environment builder reports that gap but does not itself refuse launch.
-		if (context.environment.managed || !path.isAbsolute(context.cwd)) {
-			logger.debug(
-				'Grok model discovery unavailable: launch context is not qualified',
-				LOG_CONTEXT
-			);
-			return fallback;
-		}
+		optionKey = 'model',
+		forceRefresh = false
+	): Promise<AgentDiscoveryResult> {
+		const isModel = optionKey === 'model';
+		const isEffort = optionKey === 'effort' || optionKey === 'reasoningEffort';
+		const configuredValue = (
+			isModel ? context?.model : isEffort ? context?.effort : undefined
+		)?.trim();
+		const fallback = (reason: AgentDiscoveryResult['reason']): AgentDiscoveryResult => ({
+			status: configuredValue ? 'configured-fallback' : 'unavailable',
+			options: configuredValue ? [configuredValue] : [],
+			configuredValue: configuredValue || undefined,
+			reason,
+		});
+		if (!context) return fallback('missing-context');
+		if (context.target.kind !== 'local') return fallback('remote-unqualified');
+		if (context.environment.managed) return fallback('managed-unqualified');
+		if (!path.isAbsolute(context.cwd)) return fallback('missing-context');
+		if (!isModel && !isEffort) return fallback('metadata-unavailable');
+		if (context.signal?.aborted) return fallback('discovery-unavailable');
 		try {
 			const managed = this.deps.managedProbe?.();
-			if (managed && managed.port.standing() !== 'standalone') {
-				logger.debug(
-					'Grok model discovery unavailable: managed route is not qualified',
-					LOG_CONTEXT
-				);
-				return fallback;
-			}
+			if (managed && managed.port.standing() !== 'standalone')
+				return fallback('managed-unqualified');
+			const readObservation = this.deps.grokAcpObservation;
+			// Pre-turn discovery has no contained probe route. Even --version remains
+			// refused by runProviderProbe; do not create a second admission/spawn path.
+			if (!readObservation) return fallback('discovery-unavailable');
+			context = { ...context, environment: structuredClone(context.environment) };
 			const customPath = context.customPath?.trim() || this.customPaths.grok?.trim();
-			const agent = customPath ? undefined : await this.getAgent('grok');
 			const binary = customPath
 				? await checkCustomPath(customPath)
-				: { exists: agent?.available, path: agent?.path };
-			if (!binary.exists || !binary.path) {
-				logger.debug('Grok model discovery unavailable: selected binary missing', LOG_CONTEXT);
-				return fallback;
-			}
+				: await checkBinaryExists('grok');
+			if (context.signal?.aborted) return fallback('discovery-unavailable');
+			const currentManaged = this.deps.managedProbe?.();
+			if (currentManaged && currentManaged.port.standing() !== 'standalone')
+				return fallback('managed-unqualified');
+			if (!binary.exists || !binary.path) return fallback('executable-context-unavailable');
 			const command = binary.path;
 			const env = buildAgentEnvironment({
 				...context.environment,
 				extraPathDirs: [path.dirname(command), ...(context.environment.extraPathDirs ?? [])],
 			});
-			const accountDir = resolveAgentAccountDir(
-				{ toolType: 'grok' },
-				{ env, homeDir: os.homedir() }
+			env.GROK_HOME = resolveAgentAccountDir({ toolType: 'grok' }, { env, homeDir: os.homedir() });
+			const launch = { command, env, cwd: context.cwd };
+			const owned = readObservation(structuredClone({ ...launch, model: context.model }));
+			if (!owned || context.signal?.aborted) return fallback('discovery-unavailable');
+			const {
+				observation,
+				agentVersion,
+				configGeneration,
+				launch: actualLaunch,
+			} = structuredClone(owned);
+			const { configuration, observedAt } = observation;
+			if (
+				canonicalJson(actualLaunch) !== canonicalJson(launch) ||
+				observation.cwd !== context.cwd ||
+				!agentVersion ||
+				configuration.agentVersion !== agentVersion ||
+				!configGeneration ||
+				(context.configGeneration !== undefined && context.configGeneration !== configGeneration) ||
+				!observation.account ||
+				!observation.host ||
+				!observation.processGeneration ||
+				!observation.sessionId ||
+				!Number.isFinite(observedAt) ||
+				observedAt > Date.now() ||
+				Date.now() - observedAt >= this.modelCacheTtlMs
+			)
+				return fallback('discovery-unavailable');
+			// Only hashes/menus enter the existing ephemeral caches. Each read still
+			// requires a current host receipt, even when a matching cache entry exists.
+			const key = `grok:${createHash('sha256')
+				.update(
+					canonicalJson({
+						launch,
+						agentVersion,
+						configGeneration,
+						observation,
+						selectedModel: context.model,
+					})
+				)
+				.digest('hex')}`;
+			const modelSelector = configuration.configOptions.find(({ id }) => id === 'model');
+			const effortSelector = configuration.configOptions.find(
+				({ id }) => id === 'reasoning_effort'
 			);
-			// Resolve once for this probe; blank/unset and tilde overrides
-			// follow the same canonical environment/account rules as a real launch.
-			env.GROK_HOME = accountDir;
-			const versionResult = await this.probe(
-				'grok',
-				'version',
-				command,
-				['--version'],
-				env,
-				context.cwd,
-				context.signal
-			);
-			const version = stripAnsiCodes(versionResult.stdout)
-				.trim()
-				.match(/^grok\s+(\d+\.\d+\.\d+(?:[-+][\w.-]+)?)$/i)?.[1];
-			if (context.signal?.aborted || versionResult.exitCode !== 0 || !version) {
-				logger.debug(
-					'Grok model discovery unavailable: version probe failed or unrecognized',
-					LOG_CONTEXT
-				);
-				return fallback;
-			}
-			// Never persist or log this key: the environment can contain credentials.
-			// A version alone cannot detect auth/config changes on disk. The host must
-			// supply a revision before this extra in-memory cache is safe to use.
-			const cacheKey = context.configGeneration
-				? `grok:${createHash('sha256')
-						.update(
-							canonicalJson({
-								command,
-								version,
-								env,
-								cwd: context.cwd,
-								generation: context.configGeneration,
-							})
-						)
-						.digest('hex')}`
-				: undefined;
-			const cached = cacheKey && !forceRefresh ? this.modelCache.get(cacheKey) : undefined;
-			if (cached && Date.now() - cached.timestamp < this.modelCacheTtlMs) {
-				return [...new Set([...cached.models, ...fallback])];
-			}
-			// Pinned source 2bdd1d6: `grok models` validates version/auth/origin/identity
-			// in the native cache, resolves aliases and applies picker eligibility.
-			// Reading models_cache.json ourselves bypasses all of those checks.
-			const result = await this.probe(
-				'grok',
-				'models',
-				command,
-				['models'],
-				env,
-				context.cwd,
-				context.signal
-			);
-			if (context.signal?.aborted || result.exitCode !== 0) {
-				logger.debug(
-					'Grok model discovery unavailable: catalog probe failed or refused',
-					LOG_CONTEXT
-				);
-				return fallback;
-			}
-			const models: string[] = [];
-			let inCatalog = false;
-			for (const line of stripAnsiCodes(result.stdout).split(/\r?\n/)) {
-				if (line.trim() === 'Available models:') {
-					inCatalog = true;
-					continue;
-				}
-				if (!inCatalog || !line.trim()) continue;
-				const match = line.match(/^\s*[*-]\s+(\S+?)(?:\s+\(default\))?\s*$/);
-				if (!match) {
-					logger.debug('Grok model discovery unavailable: malformed catalog', LOG_CONTEXT);
-					return fallback;
-				}
-				if (!models.includes(match[1])) models.push(match[1]);
-			}
-			if (!inCatalog) {
-				logger.debug('Grok model discovery unavailable: unrecognized catalog format', LOG_CONTEXT);
-				return fallback;
-			}
-			if (cacheKey) {
-				// Retain only the latest Grok scope; old credentials/config generations
-				// must not accumulate as opaque entries in a long-running desktop.
-				this.clearModelCache('grok');
-				this.modelCache.set(cacheKey, { models, timestamp: Date.now() });
-			}
-			logger.debug(
-				'Grok model catalog discovered; per-model metadata remains unavailable',
-				LOG_CONTEXT,
-				{ count: models.length }
-			);
-			return [...new Set([...models, ...fallback])];
+			const models =
+				observation.models?.availableModels.map(({ modelId }) => modelId) ??
+				modelSelector?.options.map(({ value }) => value);
+			const efforts =
+				configuration.model && (!context.model || context.model === configuration.model)
+					? effortSelector?.options.map(({ value }) => value)
+					: undefined;
+			const cached = isModel
+				? this.modelCache.get(key)?.models
+				: this.configOptionCache.get(key)?.options;
+			// Replace both menus together, including absence after a model change.
+			this.clearModelCache('grok');
+			if (models !== undefined) this.modelCache.set(key, { models, timestamp: observedAt });
+			if (efforts !== undefined)
+				this.configOptionCache.set(key, { options: efforts, timestamp: observedAt });
+			const values = !forceRefresh && cached !== undefined ? cached : isModel ? models : efforts;
+			if (values === undefined) return fallback('metadata-unavailable');
+			const stale = configuredValue && !values.includes(configuredValue);
+			return {
+				status: stale ? 'configured-fallback' : 'discovered',
+				options: [...new Set([...values, ...(configuredValue ? [configuredValue] : [])])],
+				configuredValue: configuredValue || undefined,
+				...(stale ? { reason: 'metadata-unavailable' as const } : {}),
+			};
 		} catch {
-			// Native diagnostics may contain an auth banner, endpoint or credential.
-			void captureException(new Error('Grok model discovery failed'), {
-				operation: 'agent:modelDiscovery',
-				agentId: 'grok',
-			});
-			logger.debug(
-				'Grok model discovery unavailable: selected context could not be probed',
-				LOG_CONTEXT
-			);
-			return fallback;
+			// Never expose native diagnostics, receipt keys or credential-bearing contexts.
+			logger.debug('Grok discovery unavailable: owned observation unavailable', LOG_CONTEXT);
+			return fallback('discovery-unavailable');
 		}
 	}
 
@@ -1165,16 +1150,13 @@ export class AgentDetector {
 		context?: ModelDiscoveryContext
 	): Promise<string[]> {
 		if (agentId === 'grok') {
-			const selected = context ?? this.deps.modelDiscoveryContext?.(agentId);
-			if (optionKey === 'model') {
-				return ['', ...(await this.discoverGrokModels(selected, forceRefresh))];
-			}
-			if (optionKey === 'reasoningEffort') {
-				// The text catalog has no per-model effort metadata. Preserve an
-				// explicit selection, but never advertise a universal effort ladder.
-				return selected?.effort?.trim() ? ['', selected.effort.trim()] : [''];
-			}
-			return [];
+			if (!['model', 'effort', 'reasoningEffort'].includes(optionKey)) return [];
+			const result = await this.discoverGrokOptions(
+				context ?? this.deps.modelDiscoveryContext?.(agentId),
+				optionKey,
+				forceRefresh
+			);
+			return ['', ...result.options];
 		}
 		const agent = await this.getAgent(agentId);
 

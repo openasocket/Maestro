@@ -2042,21 +2042,23 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 					sessionCustomEnvVars: selection.customEnvVars,
 				},
 			};
-			// The detector builds the environment and resolves the account directory.
-			// No auth/config invalidation owner exists here, so no configGeneration.
-			if (request.providerId === 'grok' && optionKey !== 'model') {
-				return unavailable('metadata-unavailable');
-			}
+			// The detector's host port owns auth/config generations and observed native
+			// state. IPC carries selections only, including the selected effort model.
 			const detector = getAgentDetector();
 			if (!detector) return unavailable('discovery-unavailable');
+			if (request.providerId === 'grok') {
+				return await detector.discoverGrokOptions(
+					context,
+					optionKey,
+					request.forceRefresh ?? false
+				);
+			}
 			const options =
 				optionKey === 'model'
 					? await detector.discoverModels(
 							request.providerId,
 							request.forceRefresh ?? false,
-							// Grok uses model only for fallback/appending. Keep that value here,
-							// so a failed probe cannot masquerade as a discovered one-item catalog.
-							request.providerId === 'grok' ? { ...context, model: undefined } : context
+							context
 						)
 					: await detector.discoverConfigOptions(
 							request.providerId,
