@@ -59,6 +59,7 @@ import { requestWebBridgeReconcile } from '../../services/webBridgeReconcile';
 import { steerQueuedItemOrExplain } from '../../services/chatSteering';
 import { isWebDesktop } from '../../utils/runtimeContext';
 import { notifyToast } from '../../stores/notificationStore';
+import { getGrokSlashCommandRefusal } from '../../slashCommands';
 
 let cachedImageOnlyPrompt: string = '';
 let inputProcessingPromptsLoaded = false;
@@ -516,9 +517,12 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 						firstSpaceIndex === -1 ? '' : commandText.substring(firstSpaceIndex + 1).trim();
 
 					// Check custom AI commands first, then agent-discovered commands with prompts
-					const matchingAgentCommand = activeSession.agentCommands?.find(
-						(cmd) => cmd.command === baseCommand && cmd.prompt
-					);
+					const matchingAgentCommand =
+						activeSession.toolType === 'grok'
+							? undefined
+							: activeSession.agentCommands?.find(
+									(cmd) => cmd.command === baseCommand && cmd.prompt
+								);
 					const matchingCustomCommand =
 						customAICommands.find((cmd) => cmd.command === baseCommand) ||
 						(matchingAgentCommand
@@ -662,6 +666,21 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 							}
 							// Note: Input already cleared synchronously before this async block
 						})();
+						return;
+					}
+					if (activeSession.toolType === 'grok') {
+						const refusal = await getGrokSlashCommandRefusal(
+							activeSession,
+							resolveTargetTab(activeSession),
+							commandText
+						);
+						// Keep the draft/images and pinned target intact. No queue, naming,
+						// mention consult, Claude skill scan or ordinary prompt may follow.
+						if (targetTabId) {
+							useSessionStore
+								.getState()
+								.addLogToTab(activeSession.id, { source: 'error', text: refusal }, targetTabId);
+						}
 						return;
 					}
 				}

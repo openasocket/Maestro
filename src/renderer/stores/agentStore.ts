@@ -71,6 +71,7 @@ import {
 } from '../utils/executionQueue';
 import { logger } from '../utils/logger';
 import { requestTabAutoNameForMessage } from '../services/tabAutoNaming';
+import { getGrokSlashCommandRefusal } from '../slashCommands';
 
 // ============================================================================
 // Store Types
@@ -439,6 +440,32 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 
 		const targetSessionId = `${sessionId}-ai-${targetTab.id}`;
 
+		// External/remote producers can bypass the composer and queue raw slash
+		// text as a message. Refuse before naming, mentions, retries or spawning.
+		const slashInput = item.type === 'command' ? item.command : item.text?.trim();
+		if (session.toolType === 'grok' && slashInput?.startsWith('/')) {
+			const isMaestroPrompt =
+				item.type === 'command' &&
+				[
+					...deps.customAICommands,
+					...deps.speckitCommands,
+					...deps.openspecCommands,
+					...(deps.bmadCommands ?? []),
+				].some((command) => command.command === item.command);
+			if (!isMaestroPrompt) {
+				const refusal = await getGrokSlashCommandRefusal(session, targetTab, slashInput);
+				const ownerRunning = (await probeSessionAiProcesses(sessionId, targetTab.id))
+					.targetTabActive;
+				updateSessionWith(sessionId, (s) =>
+					applyQueuedItemAbort(s, item, ownerRunning ? undefined : targetTab.id)
+				);
+				useSessionStore
+					.getState()
+					.addLogToTab(sessionId, { source: 'error', text: refusal }, targetTab.id);
+				return false;
+			}
+		}
+
 		// Name the tab from the message it is about to run. The composer names at
 		// submit time, but `dispatch --queue`, a busy `dispatch --new-tab`, a snooze
 		// wake prompt and other external producers only reach a tab through this
@@ -611,9 +638,10 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 			} else if (item.type === 'command' && item.command) {
 				// Process a slash command - find matching command
 				// Check user-defined commands first, then agent-discovered commands with prompts
-				const matchingAgentCommand = session.agentCommands?.find(
-					(cmd) => cmd.command === item.command && cmd.prompt
-				);
+				const matchingAgentCommand =
+					session.toolType === 'grok'
+						? undefined
+						: session.agentCommands?.find((cmd) => cmd.command === item.command && cmd.prompt);
 				const matchingCommand =
 					deps.customAICommands.find((cmd) => cmd.command === item.command) ||
 					deps.speckitCommands.find((cmd) => cmd.command === item.command) ||
