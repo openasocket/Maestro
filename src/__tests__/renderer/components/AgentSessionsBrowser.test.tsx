@@ -17,6 +17,9 @@ import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { AgentSessionsBrowser } from '../../../renderer/components/AgentSessionsBrowser';
 import { LayerStackProvider } from '../../../renderer/contexts/LayerStackContext';
 import type { Theme, Session, LogEntry } from '../../../renderer/types';
+import type { SessionMessagesResult } from '../../../main/agents/session-storage';
+import { useSessionStore } from '../../../renderer/stores/sessionStore';
+import { resetStore } from '../../helpers/resetStores';
 
 // Mock lucide-react icons
 vi.mock('lucide-react', () => ({
@@ -179,6 +182,8 @@ describe('AgentSessionsBrowser', () => {
 		vi.clearAllMocks();
 		vi.useFakeTimers();
 		projectStatsCallback = null;
+		resetStore(useSessionStore);
+		useSessionStore.setState({ sessions: [createMockActiveSession()] });
 
 		// Setup mock implementations for generic agentSessions API
 		vi.mocked(window.maestro.agentSessions.listPaginated).mockResolvedValue({
@@ -210,6 +215,7 @@ describe('AgentSessionsBrowser', () => {
 	});
 
 	afterEach(() => {
+		resetStore(useSessionStore);
 		vi.useRealTimers();
 	});
 
@@ -2421,7 +2427,7 @@ describe('AgentSessionsBrowser', () => {
 				hasMore: false,
 			});
 
-			const onResumeSession = vi.fn();
+			const onResumeSession = vi.fn().mockResolvedValue(true);
 			const onClose = vi.fn();
 			const props = createDefaultProps({ onResumeSession, onClose });
 
@@ -2458,7 +2464,9 @@ describe('AgentSessionsBrowser', () => {
 					inputTokens: 0,
 					outputTokens: 0,
 					totalCostUsd: 0.15,
-				})
+				}),
+				'/path/to/project',
+				{ targetSessionId: 'session-1', nativeSessionBinding: undefined }
 			);
 			expect(onClose).toHaveBeenCalled();
 		});
@@ -2507,7 +2515,9 @@ describe('AgentSessionsBrowser', () => {
 					inputTokens: 0,
 					outputTokens: 0,
 					totalCostUsd: 0.15,
-				})
+				}),
+				'/path/to/project',
+				{ targetSessionId: 'session-1', nativeSessionBinding: undefined }
 			);
 		});
 
@@ -2623,7 +2633,7 @@ describe('AgentSessionsBrowser', () => {
 				nextCursor: null,
 			});
 
-			const onResumeSession = vi.fn();
+			const onResumeSession = vi.fn().mockResolvedValue(true);
 			const onClose = vi.fn();
 			const props = createDefaultProps({ onResumeSession, onClose });
 
@@ -2650,7 +2660,9 @@ describe('AgentSessionsBrowser', () => {
 					inputTokens: 0,
 					outputTokens: 0,
 					totalCostUsd: 0.15,
-				})
+				}),
+				'/path/to/project',
+				{ targetSessionId: 'session-1', nativeSessionBinding: undefined }
 			);
 			expect(onClose).toHaveBeenCalled();
 		});
@@ -3340,5 +3352,305 @@ describe('AgentSessionsBrowser', () => {
 
 			expect(screen.getByText('D02D0BD6-1234-5678-90AB-CDEFGHIJKLMN')).toBeInTheDocument();
 		});
+	});
+	describe('Grok observed history ownership', () => {
+		const owner = createMockActiveSession({
+			toolType: 'grok',
+			customEnvVars: { GROK_HOME: '/fixture/account-a' },
+			remoteCwd: '/remote/project',
+			sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-a' },
+		});
+		const binding = {
+			version: 1,
+			state: 'bound',
+			provider: 'grok',
+			nativeSessionId: 'native-collision',
+			accountRef: 'fixture-account-a',
+			host: { kind: 'ssh', identity: 'fixture-endpoint-a' },
+			cwd: '/remote/project',
+		} as const;
+		const row = createMockClaudeSession({ sessionId: binding.nativeSessionId });
+		const page: SessionMessagesResult = {
+			messages: [createMockMessage({ uuid: 'recent', content: 'Scoped recent message' })],
+			total: 2,
+			hasMore: true,
+			nativeSessionBinding: binding,
+			source: { provider: 'grok', status: 'available' },
+		};
+
+		beforeEach(() => {
+			useSessionStore.setState({ sessions: [owner] });
+			vi.mocked(window.maestro.agentSessions.getOrigins).mockResolvedValue({});
+			vi.mocked(window.maestro.agentSessions.listPaginated).mockResolvedValue({
+				sessions: [row],
+				hasMore: false,
+				totalCount: 1,
+				nextCursor: null,
+			});
+			vi.mocked(window.maestro.agentSessions.read).mockResolvedValue(page);
+		});
+
+		it.each(['detail', 'quick'] as const)(
+			'%s verifies scoped pages before forwarding a detached receipt and retaining a refused open',
+			async (entry) => {
+				const onResumeSession = vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+				const props = createDefaultProps({ activeSession: owner, onResumeSession });
+				await act(async () => {
+					renderWithProvider(<AgentSessionsBrowser {...props} />);
+					await vi.runAllTimersAsync();
+				});
+				expect(window.maestro.agentSessions.listPaginated).toHaveBeenCalledWith(
+					'grok',
+					'/remote/project',
+					{ limit: 100, ownerAgentId: owner.id },
+					'remote-a'
+				);
+				await act(async () => {
+					fireEvent.click(
+						entry === 'quick'
+							? screen.getByTestId('icon-play').closest('button')!
+							: screen.getByText(row.firstMessage)
+					);
+					await vi.runAllTimersAsync();
+				});
+				expect(props.onResumeSession).not.toHaveBeenCalled();
+				expect(window.maestro.agentSessions.read).toHaveBeenNthCalledWith(
+					1,
+					'grok',
+					'/remote/project',
+					row.sessionId,
+					{ offset: 0, limit: 20, ownerAgentId: owner.id },
+					'remote-a'
+				);
+				vi.mocked(window.maestro.agentSessions.read).mockResolvedValueOnce({
+					...page,
+					hasMore: false,
+					messages: [createMockMessage({ uuid: 'older', content: 'Scoped older message' })],
+				});
+				await act(async () => {
+					fireEvent.click(screen.getByText('Load earlier messages...'));
+					await vi.runAllTimersAsync();
+				});
+				expect(window.maestro.agentSessions.read).toHaveBeenNthCalledWith(
+					2,
+					'grok',
+					'/remote/project',
+					row.sessionId,
+					{ offset: 1, limit: 20, ownerAgentId: owner.id, nativeSessionBinding: binding },
+					'remote-a'
+				);
+				expect(
+					vi.mocked(window.maestro.agentSessions.read).mock.calls[1][3]?.nativeSessionBinding
+				).not.toBe(binding);
+				await act(async () => {
+					fireEvent.click(screen.getByText('Resume'));
+				});
+				expect(props.onResumeSession).toHaveBeenCalledWith(
+					row.sessionId,
+					[
+						expect.objectContaining({ text: 'Scoped older message' }),
+						expect.objectContaining({ text: 'Scoped recent message' }),
+					],
+					undefined,
+					false,
+					expect.any(Object),
+					'/remote/project',
+					{ targetSessionId: owner.id, nativeSessionBinding: binding }
+				);
+				const forwarded = onResumeSession.mock.calls[0][6].nativeSessionBinding;
+				expect(forwarded).not.toBe(binding);
+				expect(forwarded.host).not.toBe(binding.host);
+				expect(props.onClose).not.toHaveBeenCalled();
+				expect(screen.getByText('Scoped recent message')).toBeInTheDocument();
+				await act(async () => {
+					fireEvent.click(screen.getByText('Resume'));
+				});
+				expect(props.onClose).toHaveBeenCalledTimes(1);
+			}
+		);
+
+		for (const pending of ['list', 'initial', 'backfill'] as const) {
+			it.each([
+				['account', { customEnvVars: { GROK_HOME: '/fixture/account-b' } }],
+				['host', { sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-b' } }],
+				['provider', { toolType: 'codex' }],
+			] satisfies [string, Partial<Session>][])(
+				`rejects a pending ${pending} page after a %s change`,
+				async (_change, updates) => {
+					const props = createDefaultProps({ activeSession: owner });
+					const read = vi.mocked(window.maestro.agentSessions.read);
+					const list = vi.mocked(window.maestro.agentSessions.listPaginated);
+					let finish!: () => void;
+					if (pending === 'list') {
+						list.mockImplementationOnce(
+							() =>
+								new Promise((resolve) => {
+									finish = () =>
+										resolve({ sessions: [row], hasMore: false, totalCount: 1, nextCursor: null });
+								})
+						);
+					} else {
+						if (pending === 'backfill') read.mockResolvedValueOnce(page);
+						read.mockImplementationOnce(
+							() =>
+								new Promise((resolve) => {
+									finish = () => resolve({ ...page, hasMore: false });
+								})
+						);
+					}
+					const view = renderWithProvider(<AgentSessionsBrowser {...props} />);
+					await act(async () => {
+						await vi.runAllTimersAsync();
+					});
+					if (pending !== 'list') {
+						await act(async () => {
+							fireEvent.click(screen.getByText(row.firstMessage));
+							await vi.runAllTimersAsync();
+						});
+						if (pending === 'backfill') {
+							await act(async () => {
+								fireEvent.click(screen.getByText('Load earlier messages...'));
+							});
+						}
+					}
+					const changed = { ...owner, ...updates };
+					list.mockResolvedValue({ sessions: [], hasMore: false, totalCount: 0, nextCursor: null });
+					await act(async () => {
+						useSessionStore.setState({ sessions: [changed] });
+						view.rerender(
+							<LayerStackProvider>
+								<AgentSessionsBrowser {...props} activeSession={changed} />
+							</LayerStackProvider>
+						);
+						await vi.runAllTimersAsync();
+					});
+					await act(async () => {
+						finish();
+						await vi.runAllTimersAsync();
+					});
+					expect(list).toHaveBeenCalledTimes(2);
+					expect(list.mock.calls[1][0]).toBe(changed.toolType);
+					expect(list.mock.calls[1][3]).toBe(changed.sessionSshRemoteConfig?.remoteId);
+					expect(screen.queryByText(row.firstMessage)).not.toBeInTheDocument();
+					expect(screen.queryByText('Scoped recent message')).not.toBeInTheDocument();
+					expect(screen.queryByText('Resume')).not.toBeInTheDocument();
+					expect(props.onResumeSession).not.toHaveBeenCalled();
+					expect(props.onClose).not.toHaveBeenCalled();
+				}
+			);
+		}
+
+		for (const phase of ['initial', 'backfill'] as const) {
+			it.each(
+				(
+					[
+						['legacy absent receipt', undefined],
+						['legacy unknown receipt', { version: 1, state: 'unknown', reason: 'legacy' }],
+						['changed account', { ...binding, accountRef: 'fixture-account-b' }],
+						[
+							'changed endpoint',
+							{ ...binding, host: { kind: 'ssh', identity: 'fixture-endpoint-b' } },
+						],
+					] satisfies [string, SessionMessagesResult['nativeSessionBinding']][]
+				).filter((_, i) => phase === 'backfill' || i < 2)
+			)(
+				`refuses %s on ${phase} without retaining mismatched messages`,
+				async (_label, observed) => {
+					const props = createDefaultProps({ activeSession: owner });
+					await act(async () => {
+						renderWithProvider(<AgentSessionsBrowser {...props} />);
+						await vi.runAllTimersAsync();
+					});
+					if (phase === 'backfill')
+						await act(async () => {
+							fireEvent.click(screen.getByText(row.firstMessage));
+							await vi.runAllTimersAsync();
+						});
+					vi.mocked(window.maestro.agentSessions.read).mockResolvedValueOnce({
+						...page,
+						nativeSessionBinding: observed,
+						messages: [createMockMessage({ content: 'Wrong account content' })],
+					});
+					await act(async () => {
+						fireEvent.click(
+							screen.getByText(phase === 'backfill' ? 'Load earlier messages...' : row.firstMessage)
+						);
+						await vi.runAllTimersAsync();
+					});
+					expect(screen.getByRole('status')).toHaveTextContent(
+						'History ownership is unavailable or changed'
+					);
+					expect(screen.queryByText('Wrong account content')).not.toBeInTheDocument();
+					expect(screen.queryByText('Scoped recent message')).not.toBeInTheDocument();
+					expect(props.onResumeSession).not.toHaveBeenCalled();
+					expect(props.onClose).not.toHaveBeenCalled();
+				}
+			);
+		}
+
+		it('keeps a partial first page non-resumable after an available backfill', async () => {
+			const props = createDefaultProps({ activeSession: owner });
+			vi.mocked(window.maestro.agentSessions.read).mockResolvedValueOnce({
+				...page,
+				source: { provider: 'grok', status: 'partial' },
+			});
+			await act(async () => {
+				renderWithProvider(<AgentSessionsBrowser {...props} />);
+				await vi.runAllTimersAsync();
+			});
+			await act(async () => {
+				fireEvent.click(screen.getByText(row.firstMessage));
+			});
+			vi.mocked(window.maestro.agentSessions.read).mockResolvedValueOnce({
+				...page,
+				hasMore: false,
+				messages: [createMockMessage({ uuid: 'older', content: 'Older partial history' })],
+			});
+			await act(async () => {
+				fireEvent.click(screen.getByText('Load earlier messages...'));
+			});
+			await act(async () => {
+				fireEvent.click(screen.getByText('Resume'));
+			});
+			expect(screen.getByRole('status')).toHaveTextContent('This history is incomplete');
+			expect(screen.getByText('Older partial history')).toBeInTheDocument();
+			expect(props.onResumeSession).not.toHaveBeenCalled();
+			expect(props.onClose).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			['account', [{ ...owner, customEnvVars: { GROK_HOME: '/fixture/account-b' } }]],
+			['host', [{ ...owner, sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-b' } }]],
+			['provider', [{ ...owner, toolType: 'codex' }]],
+			['removed owner', []],
+		] satisfies [string, Session[]][])(
+			'rejects a pending page when the store has a changed %s before props rerender',
+			async (_label, sessions) => {
+				let finish!: (value: SessionMessagesResult) => void;
+				vi.mocked(window.maestro.agentSessions.read).mockReturnValueOnce(
+					new Promise((resolve) => {
+						finish = resolve;
+					})
+				);
+				const props = createDefaultProps({ activeSession: owner });
+				await act(async () => {
+					renderWithProvider(<AgentSessionsBrowser {...props} />);
+					await vi.runAllTimersAsync();
+				});
+				await act(async () => {
+					fireEvent.click(screen.getByText(row.firstMessage));
+				});
+				await act(async () => {
+					useSessionStore.setState({ sessions });
+					finish(page);
+					await vi.runAllTimersAsync();
+				});
+				expect(screen.getByRole('status')).toHaveTextContent('The selected agent changed');
+				expect(screen.queryByText('Scoped recent message')).not.toBeInTheDocument();
+				expect(screen.queryByText('Resume')).not.toBeInTheDocument();
+				expect(props.onResumeSession).not.toHaveBeenCalled();
+				expect(props.onClose).not.toHaveBeenCalled();
+			}
+		);
 	});
 });

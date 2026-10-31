@@ -2092,6 +2092,34 @@
 			],
 			"scope": "36 new parameter-expanded cases across HistoryPanel (12), HistoryEntryItem (4), and browser resume hook (20); recorded owner/account/host scope, colliding IDs, click/keyboard/detailed/quick forwarding, unknown legacy provenance, refused-open selection retention, confirmed closing and deferred navigation/unmount/newer-request guards.",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-browser-modal-ownership-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07cuiat-browser-and-history-modal-ownership-tests",
+			"sourceCommit": "ab39451c7b1252d1f4cf86dad95fbc9f14e909e9",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/components/AgentSessionsBrowser.test.tsx": "da479114e3e1a7bb52bcac80bbdffe2676a2957fed9c29989308049bcfaefbb7",
+				"src/__tests__/renderer/components/HistoryDetailModal.test.tsx": "dcd374e526df78a02de7f788d65bba5bc0886a58c9d7909b45ccbffd2e29ccc3"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Supplemental compiler comparison: 160 baseline / 49 current diagnostics, zero new; existing fixture/mock types and RequestInit.dispatcher remain. Seven pre-existing ESLint warnings.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "31 new parameter-expanded cases: browser scoped initial/backfill reads and detached receipts, pending list/read/backfill account/host/provider races, fresh-store changes, legacy receipt refusal, partial-source latching, detailed/quick resume; History modal click/keyboard owner/binding forwarding, false/void retention and stale closing fences. Five existing success/forwarding cases adapted. 493 changed test lines.",
+			"remainingCoverageOwner": "GT1-04-07CUIAT1",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -3705,7 +3733,9 @@
 					"GT1-04-07CT",
 					"GT1-04-07CQT",
 					"GT1-04-07CQT1",
-					"GT1-04-07CUIT"
+					"GT1-04-07CUIT",
+					"GT1-04-07CUIAT",
+					"GT1-04-07CUIAT1"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -3745,7 +3775,8 @@
 				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
-				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests"
+				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
+				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5944,7 +5975,9 @@
 					"GT1-04-07CT",
 					"GT1-04-07CQT",
 					"GT1-04-07CQT1",
-					"GT1-04-07CUIT"
+					"GT1-04-07CUIT",
+					"GT1-04-07CUIAT",
+					"GT1-04-07CUIAT1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -5976,7 +6009,8 @@
 				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
-				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests"
+				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
+				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6110,7 +6144,9 @@
 					"GT1-04-07CT",
 					"GT1-04-07CQT",
 					"GT1-04-07CQT1",
-					"GT1-04-07CUIT"
+					"GT1-04-07CUIT",
+					"GT1-04-07CUIAT",
+					"GT1-04-07CUIAT1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-02-13", "GT1-02-14", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
@@ -6154,7 +6190,8 @@
 				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
-				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests"
+				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
+				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11194,7 +11231,9 @@
 					"GT1-04-07CT",
 					"GT1-04-07CQT",
 					"GT1-04-07CQT1",
-					"GT1-04-07CUIT"
+					"GT1-04-07CUIT",
+					"GT1-04-07CUIAT",
+					"GT1-04-07CUIAT1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -11226,7 +11265,8 @@
 				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
-				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests"
+				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
+				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11717,7 +11757,9 @@
 					"GT1-04-07CT",
 					"GT1-04-07CQT",
 					"GT1-04-07CQT1",
-					"GT1-04-07CUIT"
+					"GT1-04-07CUIT",
+					"GT1-04-07CUIAT",
+					"GT1-04-07CUIAT1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
@@ -11749,7 +11791,8 @@
 				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
-				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests"
+				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
+				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16311,7 +16354,9 @@
 					"GT1-04-07CT",
 					"GT1-04-07CQT",
 					"GT1-04-07CQT1",
-					"GT1-04-07CUIT"
+					"GT1-04-07CUIT",
+					"GT1-04-07CUIAT",
+					"GT1-04-07CUIAT1"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -16343,7 +16388,8 @@
 				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
 				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
-				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests"
+				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests",
+				"phase04BrowserModalOwnershipTestsRef": "phase04-browser-modal-ownership-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
