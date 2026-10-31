@@ -65,6 +65,7 @@ import { captureException } from '../utils/sentry';
 import { jumpToAgent } from './agentNavigation';
 import { enqueuePromptForTab, removeQueuedItem, sendQueuedItemNow } from './queuedPrompt';
 import { reopenClosedConversation, routeQuickChatMessage } from './quickChatRouter';
+import { resumeSelectionKey, SessionResumeRefusedError } from './resumableSession';
 import { collectNamingPrompt, requestTabAutoName } from './tabAutoNaming';
 import { getAgentDisplayName } from '../../shared/agentMetadata';
 import { isAgentDormant } from '../../shared/agentVisibility';
@@ -148,6 +149,8 @@ interface Chat {
 	home: Promise<string | null> | null;
 	/** What `home` last resolved to, for the window to show. */
 	homeTabId: string | null;
+	/** A refused native continuation stays refused until the user chooses another destination. */
+	resumeRefusal: string | null;
 	/**
 	 * Where the user asked the NEXT message to go, overriding `home`. Taken by
 	 * the next send; null means the message follows the chat.
@@ -167,6 +170,7 @@ function newChat(): Chat {
 		ownedTabIds: new Set(),
 		home: null,
 		homeTabId: null,
+		resumeRefusal: null,
 		choice: null,
 		savedRecent: '',
 	};
@@ -817,6 +821,8 @@ async function routeAndDeliver(
 		// the order they were sent, and the chat's tab is decided in that order.
 		homeTabId = home ? await home : null;
 		if (!stillWanted()) return homeTabId;
+		if (choice?.kind === 'new' || choice?.kind === 'tab') c.resumeRefusal = null;
+		else if (c.resumeRefusal) throw new SessionResumeRefusedError(c.resumeRefusal);
 		if (!findSession(sessionId)) {
 			fail(turn, 'The agent is no longer available');
 			return homeTabId;
@@ -856,6 +862,13 @@ async function routeAndDeliver(
 		// A tab that did not take the message is not the conversation's home.
 		return deliverToTab(c, turn, sessionId, tabId, origin) ? homeTabId : tabId;
 	} catch (error) {
+		if (error instanceof SessionResumeRefusedError) {
+			if (stillWanted()) {
+				c.resumeRefusal = error.message;
+				fail(turn, error.message);
+			}
+			return homeTabId;
+		}
 		// Routing has a fallback for every failure it expects, so this is a bug.
 		// The message must not hang on "searching": say so, and report it.
 		captureException(error, { extra: { operation: 'quick-chat-route' } });
@@ -879,6 +892,7 @@ async function routeToTab(
 ): Promise<{ tabId: string; origin: QuickChatRouteOrigin } | null> {
 	const session = findSession(sessionId);
 	if (!session) return null;
+	const selectionKey = resumeSelectionKey(session);
 	// The routing turn spends the ticket, so the turn lets go of it here: a turn
 	// is routed once, and a spent ticket is nothing to carry.
 	const routingTicket = turn.routingTicket;
@@ -889,11 +903,30 @@ async function routeToTab(
 		ownedTabIds: new Set(c.ownedTabIds),
 		...(routingTicket && { routingTicket }),
 	});
+	const current = findSession(sessionId);
+	if (!current || resumeSelectionKey(current) !== selectionKey) {
+		throw new SessionResumeRefusedError(
+			'The agent selection changed while finding this conversation.'
+		);
+	}
 	if (target.kind === 'open' && findTab(findSession(sessionId), target.tabId)) {
 		return { tabId: target.tabId, origin: 'open' };
 	}
 	if (target.kind === 'closed') {
+		// Closed routing candidates currently carry only an ID/name. Until they
+		// retain observed scope, a collision cannot become a new conversation.
+		if (session.toolType === 'grok') {
+			throw new SessionResumeRefusedError(
+				'Grok history ownership cannot yet be verified. Choose a new chat explicitly to start over.'
+			);
+		}
 		const tabId = await reopenClosedConversation(sessionId, target);
+		const afterRead = findSession(sessionId);
+		if (!afterRead || resumeSelectionKey(afterRead) !== selectionKey) {
+			throw new SessionResumeRefusedError(
+				'The agent selection changed while reopening this conversation.'
+			);
+		}
 		return tabId ? { tabId, origin: 'reopened' } : null;
 	}
 	return null;
@@ -1185,6 +1218,14 @@ function restoreTurn(turn: QuickChatRecentTurn): Turn {
 async function restoreHome(sessionId: string, recent: QuickChatRecent): Promise<string | null> {
 	const session = findSession(sessionId);
 	if (!session) return null;
+	const selectionKey = resumeSelectionKey(session);
+	// Recent records also lack ownership: even a matching native ID in an open
+	// tab does not prove that it belongs to the remembered account and host.
+	if (session.toolType === 'grok' && (recent.homeTabId || recent.homeAgentSessionId)) {
+		throw new SessionResumeRefusedError(
+			'Grok history ownership cannot yet be verified. Choose a new chat explicitly to start over.'
+		);
+	}
 	const open =
 		session.aiTabs.find((t) => t.id === recent.homeTabId) ??
 		(recent.homeAgentSessionId
@@ -1196,6 +1237,12 @@ async function restoreHome(sessionId: string, recent: QuickChatRecent): Promise<
 			agentSessionId: recent.homeAgentSessionId,
 			name: recent.homeTabName,
 		});
+		const current = findSession(sessionId);
+		if (!current || resumeSelectionKey(current) !== selectionKey) {
+			throw new SessionResumeRefusedError(
+				'The agent selection changed while reopening this conversation.'
+			);
+		}
 		// Another chat took the window while the conversation was being read.
 		if (!tabId || chat.id !== recent.id) return null;
 		if (recent.homeTabId && recent.ownedTabIds.includes(recent.homeTabId)) {
@@ -1269,14 +1316,20 @@ async function recall(chatId: string): Promise<string | null> {
 	);
 	chat.turns = recent.turns.map(restoreTurn);
 	// A message sent while the tab is being reopened waits for it, like any home.
-	const home = restoreHome(session.id, recent);
-	chat.home = home;
-	void home.then((tabId) => {
-		if (chat.home === home) chat.homeTabId = tabId;
-		notifyChanged();
+	const recalled = chat;
+	const home = restoreHome(session.id, recent).catch((error: unknown) => {
+		if (!(error instanceof SessionResumeRefusedError)) throw error;
+		recalled.resumeRefusal = error.message;
+		return null;
 	});
-	await home;
-	return null;
+	recalled.home = home;
+	try {
+		const tabId = await home;
+		if (chat === recalled && recalled.home === home) recalled.homeTabId = tabId;
+		return recalled.resumeRefusal;
+	} finally {
+		notifyChanged();
+	}
 }
 
 /** Run one command and report the state it leaves behind. */

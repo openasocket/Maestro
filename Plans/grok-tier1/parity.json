@@ -1343,6 +1343,51 @@
 			],
 			"scope": "Native ownership retention/invalidation in live/parked slots, translation snapshots/replay and open/snoozed hook serialization. No tests run or collected; native admission, History writers and Grok translation remain unqualified.",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-scoped-resume-callers": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07c-scoped-resume-caller-safeguards",
+			"sourceCommit": "93fdec6d8c459e96a1331197cc37ffb1b073c512",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/renderer/services/resumableSession.ts": "4fbdd11865a8b7efba40b0e78100cd7447cb246ea1683a93c63fc712f961cbac",
+				"src/renderer/hooks/agent/useAgentSessionManagement.ts": "5eecdc659ec2c2d2bcfb2178f7a901625d82010ec04251cf36451b714a9d4211",
+				"src/renderer/services/quickChatEngine.ts": "a4abd5febe5b657395b543ff643a7a7d8d2da61e7f478f049e68da4e06371931"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Pre-existing RequestInit.dispatcher TS2339 in src/main/plugins/plugin-host-handlers.ts:1196; no changed-file diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "Owner-forwarding, retained-binding comparison, stale-selection fences and no fresh-session fallback. Grok history reopening remains explicitly unavailable pending observed receipt and upstream scope wiring.",
+			"remainingImplementationOwners": [
+				"GT1-04-07C1",
+				"GT1-04-07C2",
+				"GT1-04-07C3",
+				"GT1-04-07C4",
+				"GT1-04-07C5",
+				"GT1-04-07D",
+				"GT1-04-07E",
+				"GT1-04-07F"
+			],
+			"testOwners": [
+				"GT1-04-07C1T",
+				"GT1-04-07CT",
+				"GT1-04-07CQT",
+				"GT1-04-07CUIT",
+				"GT1-04-07CUIAT"
+			],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {

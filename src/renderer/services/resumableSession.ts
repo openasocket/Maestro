@@ -13,7 +13,9 @@
  */
 
 import { FALLBACK_CONTEXT_WINDOW } from '../../shared/agentConstants';
-import type { LogEntry, ToolType, UsageStats } from '../types';
+import { canonicalJson } from '../../shared/canonicalJson';
+import type { NativeSessionBinding } from '../../shared/maestro-lib/agents/providerSwap';
+import type { LogEntry, Session, ToolType, UsageStats } from '../types';
 import { isSessionIdLabel } from '../utils/tabHelpers';
 import {
 	TRANSCRIPT_RESUME_READ_LIMIT,
@@ -24,6 +26,10 @@ import {
 import { logger } from '../utils/logger';
 
 export interface LoadResumableSessionOptions {
+	/** Maestro owner whose selected account/host the main process must resolve. */
+	ownerAgentId?: string;
+	/** Ownership retained by the selected history record, never inferred from its ID. */
+	nativeSessionBinding?: NativeSessionBinding;
 	/** The agent's provider. Decides which transcript store is read. */
 	toolType: ToolType | undefined;
 	/** Where the provider keeps this agent's conversations (see `resolveSessionProjectPath`). */
@@ -31,7 +37,7 @@ export interface LoadResumableSessionOptions {
 	/** The SSH remote the transcript lives on, when the agent is remote. */
 	sshRemoteId?: string;
 	agentSessionId: string;
-	/** Messages the caller already has. When given, nothing is read from disk. */
+	/** Retained display messages. Grok still requires a scoped native read. */
 	providedMessages?: LogEntry[];
 	/** A RECORDED display name (a history entry's pill, a starred label). */
 	sessionName?: string;
@@ -41,12 +47,62 @@ export interface LoadResumableSessionOptions {
 
 /** Everything `createTab` needs to bring a conversation back. */
 export interface ResumableSession {
+	nativeSessionBinding?: NativeSessionBinding;
 	origin?: 'user' | 'auto' | 'relay';
 	messages: LogEntry[];
 	/** Null when the conversation was never named, so the tab can still be auto-named. */
 	name: string | null;
 	starred: boolean;
 	usageStats?: UsageStats;
+}
+
+/** Expected refusal: callers must preserve history and must not start a new conversation. */
+export class SessionResumeRefusedError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = 'SessionResumeRefusedError';
+	}
+}
+
+/** Compare observed ownership, including account/endpoint, rather than a native ID alone. */
+export function matchesNativeSessionBinding(
+	left: NativeSessionBinding | undefined,
+	right: NativeSessionBinding | undefined
+): boolean {
+	for (const binding of [left, right]) {
+		if (
+			binding?.state !== 'bound' ||
+			binding.version !== 1 ||
+			!['local', 'ssh'].includes(binding.host?.kind) ||
+			![
+				binding.provider,
+				binding.nativeSessionId,
+				binding.accountRef,
+				binding.host?.identity,
+				binding.cwd,
+			].every(
+				(value) => typeof value === 'string' && value.trim().length > 0 && !value.includes('\0')
+			)
+		)
+			return false;
+	}
+	return canonicalJson(left) === canonicalJson(right);
+}
+
+/** An in-memory selection fence, not an account identity. Never log or persist it. */
+export function resumeSelectionKey(session: Session): string {
+	return canonicalJson({
+		id: session.id,
+		provider: session.toolType,
+		cwd: session.cwd,
+		projectRoot: session.projectRoot,
+		remoteCwd: session.remoteCwd,
+		sshRemoteId: session.sshRemoteId,
+		ssh: session.sessionSshRemoteConfig,
+		customPath: session.customPath,
+		customArgs: session.customArgs,
+		customEnvVars: session.customEnvVars,
+	});
 }
 
 /**
@@ -61,9 +117,26 @@ export async function loadResumableSession(
 ): Promise<ResumableSession | null> {
 	const { toolType, projectRoot, sshRemoteId, agentSessionId, providedMessages, sessionName } =
 		options;
+	const binding = options.nativeSessionBinding;
+	if (
+		binding &&
+		(binding.state !== 'bound' ||
+			!matchesNativeSessionBinding(binding, binding) ||
+			binding.provider !== toolType ||
+			binding.nativeSessionId !== agentSessionId)
+	) {
+		throw new SessionResumeRefusedError(
+			'The selected history has unknown or mismatched ownership.'
+		);
+	}
+	if (toolType === 'grok' && !options.ownerAgentId) {
+		throw new SessionResumeRefusedError(
+			'Select the owning Grok agent before reopening its history.'
+		);
+	}
 
 	let messages: LogEntry[];
-	if (providedMessages && providedMessages.length > 0) {
+	if (toolType !== 'grok' && providedMessages && providedMessages.length > 0) {
 		messages = providedMessages;
 	} else {
 		// Use projectRoot (not cwd) for consistent session storage access, and
@@ -72,9 +145,27 @@ export async function loadResumableSession(
 			toolType || 'claude-code',
 			projectRoot,
 			agentSessionId,
-			{ offset: 0, limit: TRANSCRIPT_RESUME_READ_LIMIT },
+			{
+				offset: 0,
+				limit: TRANSCRIPT_RESUME_READ_LIMIT,
+				...(options.ownerAgentId === undefined ? {} : { ownerAgentId: options.ownerAgentId }),
+			},
 			sshRemoteId
 		);
+		if (toolType === 'grok') {
+			if (result.source?.provider !== 'grok' || result.source.status !== 'available') {
+				throw new SessionResumeRefusedError(
+					'Grok history is unavailable or incomplete. Retained history was kept.'
+				);
+			}
+			// GT1-04-07C1 supplies the observed account/endpoint receipt. An owner
+			// selection or retained logs cannot prove that this read has that owner.
+			// Keep this refusal until that typed receipt is validated here, before
+			// using messages or the unscoped origins store (which can collide too).
+			throw new SessionResumeRefusedError(
+				'Grok history ownership cannot yet be verified. Retained history was kept.'
+			);
+		}
 
 		// Strip the Auto Run synopsis turns, then convert. Shared with the
 		// scroll-to-top backfill (issue #1407), which matches what it reads
@@ -134,5 +225,5 @@ export async function loadResumableSession(
 		};
 	}
 
-	return { messages, name, starred: isStarred, usageStats, origin };
+	return { messages, name, starred: isStarred, usageStats, origin, nativeSessionBinding: binding };
 }
