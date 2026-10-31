@@ -2602,7 +2602,7 @@
 				{
 					"id": "grok-safe-replay:P05",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11B/13 verify it. Separate limit and blanket Auto Run resume bypasses require GT1-03-11A1/11A1T/13; phase07/10 must propagate settled host facts and verify all consumers. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
+					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11A1 now applies that decision to limit and blanket Auto Run scheduling/firing, current chat/batch errors, restored pauses and captured-prompt ownership; manual Resume stays explicit. GT1-03-11B/11A1T/13 must verify these paths. Phase07/10 still must propagate settled host facts and verify all consumers; absent evidence fails closed. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a1-automatic-resume-consumer-guards.",
 					"affectedRows": ["P05"]
 				}
 			],
@@ -3795,7 +3795,7 @@
 				{
 					"id": "grok-safe-replay:P10",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11B/13 verify it. Separate limit and blanket Auto Run resume bypasses require GT1-03-11A1/11A1T/13; phase07/10 must propagate settled host facts and verify all consumers. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
+					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11A1 now applies that decision to limit and blanket Auto Run scheduling/firing, current chat/batch errors, restored pauses and captured-prompt ownership; manual Resume stays explicit. GT1-03-11B/11A1T/13 must verify these paths. Phase07/10 still must propagate settled host facts and verify all consumers; absent evidence fails closed. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a1-automatic-resume-consumer-guards.",
 					"affectedRows": ["P10"]
 				}
 			],
@@ -4251,7 +4251,7 @@
 				{
 					"id": "grok-safe-replay:P12",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11B/13 verify it. Separate limit and blanket Auto Run resume bypasses require GT1-03-11A1/11A1T/13; phase07/10 must propagate settled host facts and verify all consumers. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
+					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11A1 now applies that decision to limit and blanket Auto Run scheduling/firing, current chat/batch errors, restored pauses and captured-prompt ownership; manual Resume stays explicit. GT1-03-11B/11A1T/13 must verify these paths. Phase07/10 still must propagate settled host facts and verify all consumers; absent evidence fails closed. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a1-automatic-resume-consumer-guards.",
 					"affectedRows": ["P12"]
 				}
 			],
@@ -13821,7 +13821,7 @@
 				{
 					"id": "grok-safe-replay:REG-AUTH",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11B/13 verify it. Separate limit and blanket Auto Run resume bypasses require GT1-03-11A1/11A1T/13; phase07/10 must propagate settled host facts and verify all consumers. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
+					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11A1 now applies that decision to limit and blanket Auto Run scheduling/firing, current chat/batch errors, restored pauses and captured-prompt ownership; manual Resume stays explicit. GT1-03-11B/11A1T/13 must verify these paths. Phase07/10 still must propagate settled host facts and verify all consumers; absent evidence fails closed. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a1-automatic-resume-consumer-guards.",
 					"affectedRows": ["REG-AUTH"]
 				}
 			],
@@ -14915,7 +14915,7 @@
 				{
 					"id": "grok-safe-replay:REG-ERRORS",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11B/13 verify it. Separate limit and blanket Auto Run resume bypasses require GT1-03-11A1/11A1T/13; phase07/10 must propagate settled host facts and verify all consumers. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
+					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11A1 now applies that decision to limit and blanket Auto Run scheduling/firing, current chat/batch errors, restored pauses and captured-prompt ownership; manual Resume stays explicit. GT1-03-11B/11A1T/13 must verify these paths. Phase07/10 still must propagate settled host facts and verify all consumers; absent evidence fails closed. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a1-automatic-resume-consumer-guards.",
 					"affectedRows": ["REG-ERRORS"]
 				}
 			]
@@ -18822,7 +18822,7 @@
 				{
 					"id": "grok-safe-replay:META-05",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11B/13 verify it. Separate limit and blanket Auto Run resume bypasses require GT1-03-11A1/11A1T/13; phase07/10 must propagate settled host facts and verify all consumers. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a-canonical-error-and-retry-safety.",
+					"missingPrerequisite": "GT1-03-11A implements canonical error distinctions and requires host-owned failed/provider/not-dispatched facts for Grok Agent Resilience. GT1-03-11A1 now applies that decision to limit and blanket Auto Run scheduling/firing, current chat/batch errors, restored pauses and captured-prompt ownership; manual Resume stays explicit. GT1-03-11B/11A1T/13 must verify these paths. Phase07/10 still must propagate settled host facts and verify all consumers; absent evidence fails closed. No native/platform or end-to-end replay-safety claim. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-11a1-automatic-resume-consumer-guards.",
 					"affectedRows": ["META-05"]
 				}
 			],
