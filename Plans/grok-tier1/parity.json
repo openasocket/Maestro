@@ -2968,6 +2968,18 @@
 			"deterministic": "not-run",
 			"live": "not-run",
 			"affectedRows": ["P04", "P06", "P17", "S01", "META-01", "META-03", "META-04"]
+		},
+		"phase05-control-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-02-renderer-test-authoring",
+			"sourceCommit": "d6e56bcc788181d5deb801ddfe5f1624e0fcc72e",
+			"sourceRevisionScope": "Pre-task HEAD plus GT1-05-02 authored tests; no tests executed",
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P04", "P17", "S01", "META-01", "META-03", "META-04", "META-06"],
+			"continuationTasks": ["GT1-05-02E"],
+			"verificationTask": "GT1-05-13"
 		}
 	},
 	"sourceCatalog": {
@@ -4628,7 +4640,8 @@
 				"phase04BrowserEdgeTestsRef": "phase04-browser-edge-tests",
 				"phase04EvidenceRef": "phase04-reconciliation",
 				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
-				"phase05ControlsEvidenceRef": "phase05-controls"
+				"phase05ControlsEvidenceRef": "phase05-controls",
+				"phase05ControlTestsEvidenceRef": "phase05-control-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7565,7 +7578,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase05ControlsEvidenceRef": "phase05-controls"
+				"phase05ControlsEvidenceRef": "phase05-controls",
+				"phase05ControlTestsEvidenceRef": "phase05-control-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18548,7 +18562,8 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase05ControlsEvidenceRef": "phase05-controls"
+				"phase05ControlsEvidenceRef": "phase05-controls",
+				"phase05ControlTestsEvidenceRef": "phase05-control-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21835,7 +21850,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"observation": "All four providers have names and alphabetical picker metadata. Grok existing ID retained.",
-				"phase05ControlsEvidenceRef": "phase05-controls"
+				"phase05ControlsEvidenceRef": "phase05-controls",
+				"phase05ControlTestsEvidenceRef": "phase05-control-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21984,7 +22000,8 @@
 				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
-				"phase05ControlsEvidenceRef": "phase05-controls"
+				"phase05ControlsEvidenceRef": "phase05-controls",
+				"phase05ControlTestsEvidenceRef": "phase05-control-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -22116,7 +22133,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"observation": "Claude then Codex then Antigravity; Grok absent and falls back to alphabetical picker if necessary.",
-				"phase05ControlsEvidenceRef": "phase05-controls"
+				"phase05ControlsEvidenceRef": "phase05-controls",
+				"phase05ControlTestsEvidenceRef": "phase05-control-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -22465,7 +22483,8 @@
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase05ControlTestsEvidenceRef": "phase05-control-tests"
 			},
 			"evidenceApplicability": {
 				"static": {

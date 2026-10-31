@@ -13,6 +13,9 @@ import type { AgentConfig, AgentCapabilities } from '../../../../renderer/types'
 
 import { createMockTheme } from '../../../helpers/mockTheme';
 import { getAgentDefinition } from '../../../../shared/maestro-lib/providers/definitions';
+import { useSettingsStore } from '../../../../renderer/stores/settingsStore';
+import { AGENT_CONFIG_LOCK_KEYS } from '../../../../shared/managedSettingsLock';
+import { resetStore } from '../../../helpers/resetStores';
 
 // Mock lucide-react icons
 vi.mock('lucide-react', () => ({
@@ -411,8 +414,181 @@ describe('AgentConfigPanel', () => {
 			...getAgentDefinition('grok'),
 			capabilities: { supportsModelSelection: true } as AgentCapabilities,
 		});
-		beforeEach(() => vi.useFakeTimers());
-		afterEach(() => vi.useRealTimers());
+		beforeEach(() => {
+			vi.useFakeTimers();
+			resetStore(useSettingsStore);
+		});
+		afterEach(() => {
+			vi.useRealTimers();
+			resetStore(useSettingsStore);
+		});
+
+		it('uses the selected account environment and supplied model/effort menu through existing handlers', () => {
+			const props = createDefaultProps({
+				agent,
+				customEnvVars: { GROK_HOME: '/profiles/grok-a' },
+				availableModels: ['account-a-model'],
+				dynamicOptions: { reasoningEffort: ['minimal'] },
+			});
+			const { rerender } = render(<AgentConfigPanel {...props} />);
+			const account = screen.getByDisplayValue('/profiles/grok-a');
+			fireEvent.change(account, { target: { value: '/profiles/grok-b' } });
+			fireEvent.blur(account);
+			expect(props.onEnvVarValueChange).toHaveBeenCalledExactlyOnceWith(
+				'GROK_HOME',
+				'/profiles/grok-b',
+				true
+			);
+			expect(props.onEnvVarsBlur).toHaveBeenCalledOnce();
+			rerender(
+				<AgentConfigPanel
+					{...props}
+					customEnvVars={{ GROK_HOME: '/profiles/grok-b' }}
+					availableModels={['grok-4.5']}
+					dynamicOptions={{ reasoningEffort: ['low', 'high'] }}
+				/>
+			);
+			expect(screen.queryByDisplayValue('/profiles/grok-a')).not.toBeInTheDocument();
+			expect(screen.getByRole('textbox', { name: 'Model' })).toHaveValue('');
+			expect(screen.getByRole('textbox', { name: 'Reasoning Effort' })).toHaveValue('');
+			fireEvent.click(screen.getByRole('button', { name: 'Show model options' }));
+			expect(screen.getByRole('textbox', { name: 'Model' })).toHaveFocus();
+			expect(screen.queryByRole('button', { name: 'account-a-model' })).not.toBeInTheDocument();
+			fireEvent.click(screen.getByRole('button', { name: 'grok-4.5' }));
+			expect(props.onConfigChange).toHaveBeenLastCalledWith('model', 'grok-4.5');
+			expect(props.onConfigBlur).toHaveBeenLastCalledWith('model', 'grok-4.5');
+			fireEvent.click(screen.getByRole('button', { name: 'Show reasoning effort options' }));
+			expect(screen.queryByRole('button', { name: 'none' })).not.toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: 'minimal' })).not.toBeInTheDocument();
+			fireEvent.click(screen.getByRole('button', { name: 'high' }));
+			expect(props.onConfigChange).toHaveBeenLastCalledWith('reasoningEffort', 'high');
+			expect(props.onConfigBlur).toHaveBeenLastCalledWith('reasoningEffort', 'high');
+			rerender(
+				<AgentConfigPanel {...props} agentConfig={{ model: 'grok-4.5', reasoningEffort: 'high' }} />
+			);
+			for (const [name, key] of [
+				['model', 'model'],
+				['reasoning effort', 'reasoningEffort'],
+			]) {
+				fireEvent.click(screen.getByRole('button', { name: `Clear ${name} override` }));
+				expect(props.onConfigChange).toHaveBeenLastCalledWith(key, '');
+				expect(props.onConfigBlur).toHaveBeenLastCalledWith(key, '');
+			}
+		});
+
+		it('explains the unavailable approval route and disables model selection with the capability off', () => {
+			const props = createDefaultProps({
+				agent: {
+					...agent,
+					capabilities: { ...agent.capabilities!, supportsModelSelection: false },
+				},
+				agentConfig: { model: 'grok-4.5' },
+				availableModels: ['grok-4.5'],
+				onRefreshModels: vi.fn(),
+				onCodexTransportChange: vi.fn(),
+				onEnableMaestroPChange: vi.fn(),
+			});
+			render(<AgentConfigPanel {...props} />);
+			expect(
+				screen.getByText(/ACP and Standard permission prompts are unavailable/)
+			).toHaveTextContent(/Read-Only/);
+			expect(
+				screen.getByText('Model selection is unavailable for this provider.')
+			).toBeInTheDocument();
+			expect(screen.getByRole('textbox', { name: 'Model' })).toBeDisabled();
+			const clear = screen.getByRole('button', { name: 'Clear model override' });
+			expect(clear).toBeDisabled();
+			clear.click();
+			expect(screen.queryByRole('button', { name: 'Show model options' })).not.toBeInTheDocument();
+			expect(screen.queryByTitle('Refresh available models')).not.toBeInTheDocument();
+			expect(
+				screen.queryByRole('button', { name: /ACP|Standard|TUI Wrapper|codex app-server/ })
+			).not.toBeInTheDocument();
+			for (const handler of [
+				props.onConfigChange,
+				props.onConfigBlur,
+				props.onRefreshModels,
+				props.onCodexTransportChange,
+				props.onEnableMaestroPChange,
+			])
+				expect(handler).not.toHaveBeenCalled();
+		});
+
+		it.each(AGENT_CONFIG_LOCK_KEYS)(
+			'disables only controls held by %s and exposes the policy reason',
+			(key) => {
+				useSettingsStore.setState({
+					managedLocks: {
+						policyRevision: 7,
+						locks: {
+							[key]: { code: 'locked', message: `Policy holds ${key}`, pinned: false },
+						},
+					},
+				});
+				const props = createDefaultProps({
+					agent,
+					customEnvVars: { GROK_HOME: '/profiles/grok-a' },
+					agentConfig: { model: 'grok-4.5', reasoningEffort: 'high' },
+					availableModels: ['grok-4.5'],
+					dynamicOptions: { reasoningEffort: ['high'] },
+					onRefreshModels: vi.fn(),
+					onRefreshAgent: vi.fn(),
+				});
+				render(<AgentConfigPanel {...props} />);
+				const controls = [
+					screen.getByRole('textbox', { name: 'Path' }),
+					screen.getByRole('textbox', { name: 'Custom Arguments' }),
+					screen.getByDisplayValue('/profiles/grok-a'),
+					screen.getByRole('textbox', { name: 'Model' }),
+					screen.getByRole('textbox', { name: 'Reasoning Effort' }),
+				];
+				controls.forEach((control, index) => {
+					if (AGENT_CONFIG_LOCK_KEYS[index] === key) expect(control).toBeDisabled();
+					else expect(control).not.toBeDisabled();
+				});
+				const held = controls[AGENT_CONFIG_LOCK_KEYS.indexOf(key)].closest('fieldset')!;
+				const badge = screen.getByRole('note', { name: `Policy holds ${key}` });
+				expect(badge).toHaveAttribute('tabindex', '0');
+				expect(held).toHaveAttribute('aria-describedby', badge.id);
+				for (const button of held.querySelectorAll('button')) {
+					expect(button).toBeDisabled();
+					button.click();
+				}
+				expect(screen.getByRole('spinbutton', { name: 'Context Window Size' })).not.toBeDisabled();
+				for (const handler of [
+					props.onConfigChange,
+					props.onConfigBlur,
+					props.onRefreshModels,
+					props.onRefreshAgent,
+					props.onEnvVarAdd,
+					props.onEnvVarRemove,
+				])
+					expect(handler).not.toHaveBeenCalled();
+			}
+		);
+
+		it('refuses a pending model blur when policy locks the field before persistence', async () => {
+			const props = createDefaultProps({ agent, availableModels: ['grok-4.5'] });
+			render(<AgentConfigPanel {...props} />);
+			const input = screen.getByRole('textbox', { name: 'Model' });
+			fireEvent.focus(input);
+			fireEvent.change(input, { target: { value: 'pending-model' } });
+			fireEvent.blur(input);
+			act(() =>
+				useSettingsStore.setState({
+					managedLocks: {
+						policyRevision: 8,
+						locks: {
+							'agentConfig.model': { code: 'locked', message: 'Model locked', pinned: false },
+						},
+					},
+				})
+			);
+			await act(async () => vi.advanceTimersByTimeAsync(150));
+			expect(input).toBeDisabled();
+			expect(props.onConfigChange).not.toHaveBeenCalled();
+			expect(props.onConfigBlur).not.toHaveBeenCalled();
+		});
 
 		it.each([{ availableModels: [] }, { availableModels: ['catalog-only'] }])(
 			'keeps stored selections while options change to %j and refresh is requested',
