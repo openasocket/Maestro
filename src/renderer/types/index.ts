@@ -809,6 +809,8 @@ export interface AITab {
 	origin?: 'user' | 'auto' | 'relay';
 	id: string; // Unique tab ID (generated UUID)
 	agentSessionId: string | null; // Agent session UUID (null for new tabs)
+	/** Native ownership captured by the host; absent on legacy tabs means unknown. */
+	nativeSessionBinding?: ProviderTabSession['nativeSessionBinding'];
 	name: string | null; // User-defined name (null = show UUID octet)
 	starred: boolean; // Whether session is starred (for pill display)
 	logs: LogEntry[]; // Conversation history
@@ -895,8 +897,8 @@ export interface AITab {
 	pendingMentionHandoff?: MentionHandoff;
 	/**
 	 * Parked per-provider state for every provider this tab is NOT currently
-	 * using. The live provider's values stay in `agentSessionId` / `usageStats` /
-	 * `customModel` / `customEffort` as they always have, so this map never holds
+	 * using. The live provider's values stay in `agentSessionId` / `nativeSessionBinding` /
+	 * `usageStats` / `customModel` / `customEffort`, so this map never holds
 	 * an entry for `session.toolType`. Changing the agent's provider swaps the
 	 * live values with this map's entry rather than clearing them.
 	 */
@@ -1318,7 +1320,7 @@ export interface Session {
 	providerTranslationHistoryMappings?: HistoryTranslationMapping[];
 	providerTranslationKnowledgeDirectory?: string;
 	providerTranslationTabInventory?: Array<
-		Pick<AITab, 'id' | 'agentSessionId' | 'providerSessions'>
+		Pick<AITab, 'id' | 'agentSessionId' | 'nativeSessionBinding' | 'providerSessions'>
 	>;
 	id: string;
 	/** Browser-only marker. Main restores omitted content on every partial save. */

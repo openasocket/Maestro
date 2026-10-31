@@ -16,8 +16,8 @@
  * relies on it: the live fields ALWAYS belong to the agent's current
  * `toolType`, and a parked map NEVER holds an entry for it.
  *
- *   - `AITab.providerSessions` parks a tab's `agentSessionId`, `usageStats`,
- *     `customModel`, and `customEffort`.
+ *   - `AITab.providerSessions` parks a tab's `agentSessionId`, native binding,
+ *     `usageStats`, `customModel`, and `customEffort`.
  *   - `Session.providerOverrides` parks the agent-level overrides named in
  *     {@link PROVIDER_OVERRIDE_KEYS}.
  *
@@ -37,6 +37,44 @@ import { switchTabProvider } from '../translation/session';
 export { switchTabProvider } from '../translation/session';
 
 /**
+ * Durable native-session provenance, shared by live/parked tabs and History.
+ * A missing field on a legacy record means unknown, never the current settings.
+ * Only an observed launch/history owner may supply a bound value; matching a
+ * native ID alone proves no ownership. This is not a managed admission grant.
+ * Replace the entire value: parked and closed-tab snapshots may share it.
+ */
+export type NativeSessionBinding =
+	| {
+			readonly version: 1;
+			readonly state: 'unknown';
+			readonly reason: 'legacy' | 'unobserved';
+	  }
+	| {
+			readonly version: 1;
+			readonly state: 'bound';
+			readonly provider: ToolType;
+			readonly nativeSessionId: string;
+			/**
+			 * resolveAgentAccountRef's opaque reference of the canonical provider
+			 * home on the executing host. No credentials or billing identity.
+			 * An unresolved remote home (including unexpanded ~) is not bound.
+			 */
+			readonly accountRef: string;
+			readonly host: {
+				readonly kind: 'local' | 'ssh';
+				/**
+				 * Stable observed machine/endpoint reference, never just an SSH
+				 * config ID/alias or the word "local". Excludes runtime/process
+				 * epochs so reloads do not invent a different owner. Managed hosts
+				 * use the qualified endpoint's installation identity.
+				 */
+				readonly identity: string;
+			};
+			/** Canonical cwd on that host, never expanded using another host's home. */
+			readonly cwd: string;
+	  };
+
+/**
  * A tab's parked state for one provider it is not currently using.
  *
  * `agentSessionId` is a provider-specific resume token (`--resume <id>` for
@@ -50,6 +88,8 @@ export { switchTabProvider } from '../translation/session';
  */
 export interface ProviderTabSession {
 	agentSessionId: string | null;
+	/** Absent is unknown legacy ownership; null agentSessionId has no resumable binding. */
+	nativeSessionBinding?: NativeSessionBinding;
 	usageStats?: UsageStats;
 	customModel?: string;
 	customEffort?: string;
@@ -58,6 +98,7 @@ export interface ProviderTabSession {
 /** The AI tab fields a provider switch reads and writes. */
 export interface ProviderSwitchTab {
 	agentSessionId: string | null;
+	nativeSessionBinding?: NativeSessionBinding;
 	usageStats?: UsageStats;
 	customModel?: string;
 	customEffort?: string;
@@ -370,11 +411,30 @@ export function updateProviderSlot<T extends ProviderSwitchTab>(
 	owningProvider: ToolType,
 	update: Partial<ProviderTabSession>
 ): T {
+	const existing = owningProvider === agent.toolType ? tab : tab.providerSessions?.[owningProvider];
+	const nativeId =
+		update.agentSessionId !== undefined ? update.agentSessionId : existing?.agentSessionId;
+	const binding = update.nativeSessionBinding;
+	if (
+		binding?.state === 'bound' &&
+		(binding.provider !== owningProvider || binding.nativeSessionId !== nativeId || !nativeId)
+	) {
+		throw new Error('Native session binding does not match the provider slot.');
+	}
+	// An unscoped ID replacement cannot inherit the previous session's owner.
+	// Leave legacy records absent rather than manufacturing observed provenance.
+	const scopedUpdate = { ...update };
+	// Partial updates omit undefined IDs; null is the explicit session reset.
+	if (scopedUpdate.agentSessionId === undefined) delete scopedUpdate.agentSessionId;
+	if (existing?.nativeSessionBinding && !binding && nativeId !== existing.agentSessionId) {
+		scopedUpdate.nativeSessionBinding = nativeId
+			? { version: 1, state: 'unknown', reason: 'unobserved' }
+			: undefined;
+	}
 	if (owningProvider === agent.toolType) {
-		return { ...tab, ...update };
+		return { ...tab, ...scopedUpdate };
 	}
 
-	const existing = tab.providerSessions?.[owningProvider];
 	return {
 		...tab,
 		providerSessions: {
@@ -382,7 +442,7 @@ export function updateProviderSlot<T extends ProviderSwitchTab>(
 			[owningProvider]: {
 				agentSessionId: existing?.agentSessionId ?? null,
 				...existing,
-				...update,
+				...scopedUpdate,
 			},
 		},
 	};

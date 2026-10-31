@@ -1240,6 +1240,44 @@
 			"affectedRows": ["P14", "C-supportsResume", "C-supportsSessionId", "REG-SESSION-MUTATION"],
 			"scope": "Renderer event fixtures only: observed IDs, explicit tab ownership, retained resume evidence, provider parking and late-error isolation. No tests run or collected; no ACP desktop or immutable account/host/generation proof.",
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-native-session-binding": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07a-durable-native-session-binding",
+			"sourceCommit": "984293e16509db2becd7a69d4657b36837db0e64",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/shared/maestro-lib/agents/providerSwap.ts": "19e614762ce0227ac8c341c71ddc637734435efed22e439d874a3ede29413ff6",
+				"src/shared/maestro-lib/translation/session.ts": "693f30017077b8a679e152b5eac3fa4c74c784105415fc6e90241fbe4aa30dfd",
+				"src/renderer/types/index.ts": "b775fba77575144e3c5e71b03be6d25b75c87585a775e2f68006debbcc7dae92"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"mainAndCliTypeChecks": "pass",
+			"typeCheckBlocker": "Pre-existing RequestInit.dispatcher TS2339 in src/main/plugins/plugin-host-handlers.ts:1196; no changed-file diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "Durable readonly native ownership contract, live/parked slots, tab serialization and translation inventory invalidation. Launch capture/admission and History writers remain pending. No native/remote certification.",
+			"remainingImplementationOwners": [
+				"GT1-04-07A1",
+				"GT1-04-07B",
+				"GT1-04-07C",
+				"GT1-04-07D",
+				"GT1-04-07E",
+				"GT1-04-07F"
+			],
+			"testOwners": ["GT1-04-07AT", "GT1-04-08"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -2876,7 +2914,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
-				"phase04AccountScopeEvidenceRef": "phase04-account-storage"
+				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
+				"phase04NativeSessionBindingRef": "phase04-native-session-binding"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5078,7 +5117,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
-				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests"
+				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
+				"phase04NativeSessionBindingRef": "phase04-native-session-binding"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5233,7 +5273,8 @@
 				"phase04RemoteEncodingAdapterTestsEvidenceRef": "phase04-remote-encoding-adapter-tests",
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
-				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests"
+				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
+				"phase04NativeSessionBindingRef": "phase04-native-session-binding"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10278,7 +10319,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
-				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests"
+				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
+				"phase04NativeSessionBindingRef": "phase04-native-session-binding"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10774,7 +10816,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
-				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests"
+				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
+				"phase04NativeSessionBindingRef": "phase04-native-session-binding"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -15339,7 +15382,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
-				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests"
+				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
+				"phase04NativeSessionBindingRef": "phase04-native-session-binding"
 			},
 			"evidenceApplicability": {
 				"static": {
