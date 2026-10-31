@@ -5,6 +5,7 @@
 export { AGENT_IDS, isValidAgentId } from './agentIds';
 export type { AgentId } from './agentIds';
 import type { CodexTransport } from './codexTransport';
+import type { NativeSessionBinding } from './maestro-lib/agents/providerSwap';
 import type { CacheReadCounting, UsageSourceKind } from './maestro-lib/streaming/usage-accumulator';
 
 /**
@@ -572,6 +573,8 @@ export interface HistoryEntry {
 	summary: string;
 	fullResponse?: string;
 	agentSessionId?: string;
+	/** Observed native ownership for this turn; absent legacy scope remains unknown. */
+	nativeSessionBinding?: NativeSessionBinding;
 	sessionName?: string;
 	projectPath: string;
 	sessionId?: string;

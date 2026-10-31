@@ -1278,6 +1278,42 @@
 			],
 			"testOwners": ["GT1-04-07AT", "GT1-04-08"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-persisted-native-binding-declarations": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07a1-persisted-native-binding-declarations",
+			"sourceCommit": "b39dba74fc05cb0b796665cc7d209e85f186edc2",
+			"sourceCommitScope": "Pre-task HEAD plus source hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/shared/types.ts": "1cd02941ca96560fe7ba5bb1d0e7d4de836a8cd1b9fc6093b1c68714a9267620",
+				"src/shared/maestro-lib/store/records.ts": "afab1205e6e7887e9101dfca2700ac2606cfb15b4affd360a2ebf76d412a2dd0"
+			},
+			"provenance": "implementation-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"mainAndCliTypeChecks": "pass",
+			"typeCheckBlocker": "Pre-existing RequestInit.dispatcher TS2339 in src/main/plugins/plugin-host-handlers.ts:1196; no changed-file diagnostics.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "Optional canonical binding on HistoryEntry and AITabRecord, with forward-compatible parked slots. Declarations only; raw readers unchanged. Observed scope capture, validation, resume admission and History writers remain pending.",
+			"remainingImplementationOwners": [
+				"GT1-04-07B",
+				"GT1-04-07C",
+				"GT1-04-07D",
+				"GT1-04-07E",
+				"GT1-04-07F"
+			],
+			"testOwners": ["GT1-04-07AT", "GT1-04-08"],
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -2915,7 +2951,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase04AccountScopeEvidenceRef": "phase04-account-storage",
-				"phase04NativeSessionBindingRef": "phase04-native-session-binding"
+				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
+				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5118,7 +5155,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
 				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
-				"phase04NativeSessionBindingRef": "phase04-native-session-binding"
+				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
+				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5274,7 +5312,8 @@
 				"phase04BoundedRemoteReadTestsEvidenceRef": "phase04-bounded-remote-read-tests",
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
 				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
-				"phase04NativeSessionBindingRef": "phase04-native-session-binding"
+				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
+				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10320,7 +10359,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
 				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
-				"phase04NativeSessionBindingRef": "phase04-native-session-binding"
+				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
+				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10817,7 +10857,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
 				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
-				"phase04NativeSessionBindingRef": "phase04-native-session-binding"
+				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
+				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -15383,7 +15424,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase04DesktopNativeIdRetentionRef": "phase04-desktop-native-id-retention",
 				"phase04DesktopNativeIdTestsRef": "phase04-desktop-native-id-tests",
-				"phase04NativeSessionBindingRef": "phase04-native-session-binding"
+				"phase04NativeSessionBindingRef": "phase04-native-session-binding",
+				"phase04PersistedNativeBindingRef": "phase04-persisted-native-binding-declarations"
 			},
 			"evidenceApplicability": {
 				"static": {
