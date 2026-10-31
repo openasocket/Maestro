@@ -27,7 +27,6 @@ import {
 	type ProviderSwitchTab,
 } from '../../../../shared/maestro-lib/agents/providerSwap';
 import type { ToolType, UsageStats } from '../../../../shared/types';
-import { matchesNativeSessionBinding as rendererMatchesNativeSessionBinding } from '../../../../renderer/services/resumableSession';
 
 /** A tab as the desktop holds it: the switch fields plus fields it must never touch. */
 interface TestTab extends ProviderSwitchTab {
@@ -276,11 +275,6 @@ describe('native session ownership', () => {
 	};
 
 	describe('matchesNativeSessionBinding', () => {
-		it('keeps the renderer compatibility export on the shared matcher', () => {
-			expect(rendererMatchesNativeSessionBinding).toBe(matchesNativeSessionBinding);
-			expect(rendererMatchesNativeSessionBinding(bound, structuredClone(bound))).toBe(true);
-		});
-
 		it.each(['local', 'ssh'] as const)(
 			'matches complete %s ownership regardless of key order',
 			(kind) => {
@@ -312,7 +306,6 @@ describe('native session ownership', () => {
 			expect(matchesNativeSessionBinding(observed, observed)).toBe(true);
 			expect(matchesNativeSessionBinding(bound, observed)).toBe(false);
 			expect(matchesNativeSessionBinding(observed, bound)).toBe(false);
-			expect(rendererMatchesNativeSessionBinding(bound, observed)).toBe(false);
 		});
 
 		it.each([

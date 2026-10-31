@@ -5,7 +5,10 @@ import {
 	SessionResumeRefusedError,
 	type LoadResumableSessionOptions,
 } from '../../../renderer/services/resumableSession';
-import type { NativeSessionBinding } from '../../../shared/maestro-lib/agents/providerSwap';
+import {
+	matchesNativeSessionBinding as sharedMatchesNativeSessionBinding,
+	type NativeSessionBinding,
+} from '../../../shared/maestro-lib/agents/providerSwap';
 import type { SessionMessagesResult } from '../../../main/agents/session-storage';
 
 describe('reopened Relay origin', () => {
@@ -59,6 +62,11 @@ describe('Grok native resume receipts', () => {
 	};
 	const read = vi.mocked(window.maestro.agentSessions.read);
 	beforeEach(() => vi.clearAllMocks());
+
+	it('keeps the renderer compatibility export on the shared matcher', () => {
+		expect(matchesNativeSessionBinding).toBe(sharedMatchesNativeSessionBinding);
+		expect(matchesNativeSessionBinding(binding, structuredClone(binding))).toBe(true);
+	});
 
 	it.each([
 		...[
