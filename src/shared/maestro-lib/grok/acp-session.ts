@@ -9,6 +9,7 @@ import {
 	GrokAcpTransportError,
 	type AcpCall,
 	type AcpFailure,
+	type AcpInitialization,
 } from './acp-protocol';
 
 export interface GrokAcpSessionOptions extends Pick<
@@ -20,6 +21,8 @@ export interface GrokAcpSessionOptions extends Pick<
 	/** Opaque selected account and executing-host references, never credentials or a tab ID. */
 	account: string;
 	host: string;
+	/** Native config selector ID, not an inferred universal effort rung. */
+	effort?: string;
 	write: GrokAcpClientOptions['write'];
 	requestHandlers?: GrokAcpClientOptions['requestHandlers'];
 	maxFrameBytes?: number;
@@ -34,10 +37,28 @@ export interface GrokAcpSessionOptions extends Pick<
 	 * The pinned peer advertises no exhaustive method list. Source knowledge alone
 	 * does not enable these options; the host owns qualification and discovery admission.
 	 */
-	extensions?: { agentVersion: string; promptId?: boolean; sessionUsage?: boolean };
+	extensions?: {
+		agentVersion: string;
+		promptId?: boolean;
+		sessionUsage?: boolean;
+		modelsList?: boolean;
+	};
 	/** SSH owners supply their existing guarded terminate operation. */
 	terminate?: () => void;
 	onNotification?: (message: AcpCall, context: { replay: boolean; turn: number | null }) => void;
+}
+
+/** ACP wire state. Current values may be hidden from the selectable catalog. */
+export interface GrokAcpModelState {
+	currentModelId: string;
+	availableModels: { modelId: string; name: string }[];
+}
+
+export interface GrokAcpConfigOption {
+	id: 'model' | 'reasoning_effort';
+	type: 'select';
+	currentValue: string;
+	options: { value: string; name: string }[];
 }
 
 /** Lifecycle facts only; protocol terminal/usage normalization belongs to the event adapter. */
@@ -58,6 +79,8 @@ export class GrokAcpSessionError extends Error {
 			| 'load-unsupported'
 			| 'prompt-id-unsupported'
 			| 'model-unacknowledged'
+			| 'effort-unacknowledged'
+			| 'config-unsupported'
 			| 'cwd-mismatch',
 		readonly dispatchMayHaveOccurred = false,
 		/** Retained for accounting after cancellation, never interpolated into diagnostics. */
@@ -82,6 +105,7 @@ export class GrokAcpSession {
 	private readonly client: GrokAcpClient;
 	private readonly options: Readonly<GrokAcpSessionOptions>;
 	private opening?: Promise<Record<string, unknown>>;
+	private openingDone = false;
 	private nativeId?: string;
 	private claim?: string;
 	private failure?: GrokAcpSessionError;
@@ -92,16 +116,29 @@ export class GrokAcpSession {
 	private cancelled = false;
 	private replay = false;
 	private turn = 0;
-	private queryingUsage = false;
+	private querying = false;
 	private usageUnavailable = false;
+	private modelsUnavailable = false;
 	private extensionsMatched = false;
+	private agentVersion?: string;
 	private lastPromptDispatched = false;
+	private configOptions: GrokAcpConfigOption[] = [];
+	private effectiveModel?: string;
+	private selectedModel?: string;
+	private selectedEffort?: string;
+	private configRevision = 0;
+	private readonly unboundConfigSessions = new Map<
+		string,
+		{ model?: string; effort?: string; ambiguous?: true }
+	>();
 
 	constructor(options: GrokAcpSessionOptions) {
 		this.options = Object.freeze({
 			...options,
 			extensions: options.extensions && Object.freeze({ ...options.extensions }),
 		});
+		this.selectedModel = options.model;
+		this.selectedEffort = options.effort;
 		for (const value of [
 			options.idleTimeoutMs,
 			options.maxTurnMs,
@@ -115,6 +152,7 @@ export class GrokAcpSession {
 			options.account,
 			options.host,
 			options.model,
+			options.effort,
 			options.resumeSessionId,
 			options.extensions?.agentVersion,
 		]) {
@@ -126,11 +164,13 @@ export class GrokAcpSession {
 			requestHandlers: options.requestHandlers,
 			requestTimeoutMs: options.requestTimeoutMs,
 			maxFrameBytes: options.maxFrameBytes,
-			onNotification: (message) =>
+			onNotification: (message) => {
+				this.observeConfiguration(message);
 				this.options.onNotification?.(message, {
 					replay: this.replay,
 					turn: this.dispatched ? this.turn : null,
-				}),
+				});
+			},
 			onClose: (error) => this.fail('transport-lost', error),
 		});
 		options.child.once('exit', this.processLost);
@@ -156,6 +196,18 @@ export class GrokAcpSession {
 	get supportsPromptId(): boolean {
 		return this.extensionsMatched && this.options.extensions?.promptId === true;
 	}
+	/** Detached snapshot; no host/account-wide catalog is implied. */
+	get configuration(): {
+		agentVersion?: string;
+		model?: string;
+		configOptions: GrokAcpConfigOption[];
+	} {
+		return structuredClone({
+			agentVersion: this.agentVersion,
+			model: this.effectiveModel,
+			configOptions: this.configOptions,
+		});
+	}
 
 	feedStdout(chunk: Uint8Array): void {
 		if (chunk.byteLength) this.watchdog?.touch();
@@ -173,17 +225,13 @@ export class GrokAcpSession {
 	open(): Promise<Record<string, unknown>> {
 		if (this.failure) return Promise.reject(this.failure);
 		if (!this.opening) {
+			if (this.querying) return Promise.reject(new GrokAcpSessionError('busy'));
 			this.armWatchdog();
 			this.opening = Promise.resolve()
 				.then(async () => {
 					this.checkOpen();
 					if (this.active && this.cancelled) throw new GrokAcpSessionError('cancelled');
-					const initialized = await this.client.initialize();
-					this.checkOpen();
-					this.extensionsMatched =
-						!!this.options.extensions?.agentVersion &&
-						initialized._meta?.grokShell === true &&
-						initialized._meta.agentVersion === this.options.extensions.agentVersion;
+					const initialized = await this.initialize();
 					if (this.active && this.cancelled) throw new GrokAcpSessionError('cancelled');
 					const { cwd, model, resumeSessionId } = this.options;
 					if (resumeSessionId) {
@@ -218,8 +266,28 @@ export class GrokAcpSession {
 						if (effectiveCwd !== undefined && effectiveCwd !== cwd)
 							throw new GrokAcpSessionError('cwd-mismatch');
 					}
-					if (model) this.checkModel(response, model);
-					return response;
+					this.readConfiguration(response);
+					// Native setup emits model_changed before its response. Accept matching
+					// state, but never guess the order of conflicting notifications/replies.
+					const observed = this.unboundConfigSessions.get(id);
+					if (
+						observed &&
+						(observed.ambiguous ||
+							observed.model !== this.effectiveModel ||
+							(observed.effort !== undefined &&
+								observed.effort !==
+									this.configOptions.find(({ id }) => id === 'reasoning_effort')?.currentValue))
+					)
+						throw new GrokAcpSessionError('invalid-response');
+					this.replay = false;
+					if (this.active && this.cancelled) throw new GrokAcpSessionError('cancelled');
+					// A successful create may have silently retained the default. Never accept it.
+					if (model && this.effectiveModel !== model)
+						throw new GrokAcpSessionError('model-unacknowledged');
+					if (this.selectedEffort !== undefined)
+						await this.applyConfig('reasoning_effort', this.selectedEffort);
+					this.checkSelection();
+					return { ...response, configOptions: this.configuration.configOptions };
 				})
 				.catch((error: unknown) => {
 					if (!this.failure)
@@ -230,6 +298,8 @@ export class GrokAcpSession {
 					throw this.failure;
 				})
 				.finally(() => {
+					this.unboundConfigSessions.clear();
+					this.openingDone = true;
 					this.replay = false;
 					this.watchdog?.disarm();
 				});
@@ -244,7 +314,7 @@ export class GrokAcpSession {
 		promptId?: string
 	): Promise<Record<string, unknown>> {
 		this.checkOpen();
-		if (this.active || this.queryingUsage) throw new GrokAcpSessionError('busy');
+		if (this.active || this.querying) throw new GrokAcpSessionError('busy');
 		if (promptId !== undefined && (typeof promptId !== 'string' || !promptId.trim()))
 			throw new GrokAcpSessionError('invalid-options');
 		if (signal?.aborted) throw new GrokAcpSessionError('cancelled');
@@ -259,6 +329,7 @@ export class GrokAcpSession {
 			await this.open();
 			this.checkOpen();
 			if (this.cancelled) throw new GrokAcpSessionError('cancelled');
+			this.checkSelection();
 			if (promptId !== undefined && !this.supportsPromptId)
 				throw new GrokAcpSessionError('prompt-id-unsupported');
 			this.armWatchdog(this.options.maxTurnMs);
@@ -302,6 +373,75 @@ export class GrokAcpSession {
 		}
 	}
 
+	/** Optional discovery on this already admitted process; never allocates a session or probes. */
+	async discoverModels(signal?: AbortSignal): Promise<GrokAcpModelState | undefined> {
+		return this.withQuery(async () => {
+			await this.initialize();
+			if (
+				!this.extensionsMatched ||
+				this.options.extensions?.modelsList !== true ||
+				this.modelsUnavailable
+			)
+				return;
+			try {
+				const envelope = this.record(await this.client.request('_x.ai/models/list', {}));
+				this.checkOpen();
+				// Extension errors win even when the transport also carried a result.
+				if (envelope.error != null || envelope.result == null) {
+					this.modelsUnavailable = true;
+					return;
+				}
+				const state = this.record(envelope.result);
+				if (state.error != null) {
+					this.modelsUnavailable = true;
+					return;
+				}
+				if (typeof state.currentModelId !== 'string' || !Array.isArray(state.availableModels))
+					throw new GrokAcpSessionError('invalid-response');
+				const availableModels = state.availableModels.map((value) => {
+					const model = this.record(value);
+					if (
+						typeof model.modelId !== 'string' ||
+						!model.modelId.trim() ||
+						typeof model.name !== 'string'
+					)
+						throw new GrokAcpSessionError('invalid-response');
+					return { modelId: model.modelId, name: model.name };
+				});
+				// Empty is authoritative. Do not append the hidden current model as an allowed option.
+				return { currentModelId: state.currentModelId, availableModels };
+			} catch (error) {
+				if (!(error instanceof GrokAcpRequestError)) throw error;
+				this.modelsUnavailable = true;
+				return;
+			}
+		}, signal);
+	}
+
+	/** Exact advertised IDs only. A model change drops the old effort selection and menu. */
+	async setConfiguration(
+		selection: { model?: string; effort?: string },
+		signal?: AbortSignal
+	): Promise<void> {
+		const { model, effort } = selection;
+		for (const value of [model, effort])
+			if (value !== undefined && (typeof value !== 'string' || !value.trim()))
+				throw new GrokAcpSessionError('invalid-options');
+		if (!this.nativeId || !this.claim) throw new GrokAcpSessionError('missing-session-id');
+		await this.withQuery(async () => {
+			if (model !== undefined) {
+				if (model !== this.effectiveModel) this.selectedEffort = undefined;
+				await this.applyConfig('model', model);
+				this.selectedModel = model;
+			}
+			if (effort !== undefined) {
+				await this.applyConfig('reasoning_effort', effort);
+				this.selectedEffort = effort;
+			}
+			this.checkSelection();
+		}, signal);
+	}
+
 	/**
 	 * Correlated optional process ledger, only between prompts under our native claim.
 	 * Never poll during a turn: a sample could predate already delivered response usage.
@@ -309,7 +449,7 @@ export class GrokAcpSession {
 	 */
 	async processUsage(signal?: AbortSignal): Promise<Record<string, unknown> | undefined> {
 		this.checkOpen();
-		if (this.active || this.queryingUsage) throw new GrokAcpSessionError('busy');
+		if (this.active || this.querying) throw new GrokAcpSessionError('busy');
 		if (signal?.aborted) throw new GrokAcpSessionError('cancelled');
 		if (!this.nativeId || !this.claim) throw new GrokAcpSessionError('missing-session-id');
 		if (
@@ -318,59 +458,42 @@ export class GrokAcpSession {
 			this.usageUnavailable
 		)
 			return;
-		this.queryingUsage = true;
-		const onAbort = (): void => this.fail('cancelled');
-		signal?.addEventListener('abort', onAbort, { once: true });
-		try {
-			this.checkOpen();
-			if (signal?.aborted) throw new GrokAcpSessionError('cancelled');
-			this.armWatchdog();
-			const value = await this.client.request('_x.ai/session/usage', { sessionId: this.nativeId });
-			this.checkOpen();
-			if (value == null) return;
-			let response = this.record(value);
-			// The pinned usage handler returns {usage} directly; other extension adapters
-			// wrap {result, error}. A nested error (including string codes) always wins.
-			if (response.error != null) {
-				this.usageUnavailable = true;
-				return;
-			}
-			if (Object.hasOwn(response, 'result')) {
-				if (response.result == null) return;
-				response = this.record(response.result);
+		return this.withQuery(async () => {
+			try {
+				const value = await this.client.request('_x.ai/session/usage', {
+					sessionId: this.nativeId,
+				});
+				this.checkOpen();
+				if (value == null) return;
+				let response = this.record(value);
+				// The pinned usage handler returns {usage} directly; other extension adapters
+				// wrap {result, error}. A nested error (including string codes) always wins.
 				if (response.error != null) {
 					this.usageUnavailable = true;
 					return;
 				}
-			}
-			if (response.sessionId !== undefined && response.sessionId !== this.nativeId)
-				throw new GrokAcpSessionError('invalid-response', this.lastPromptDispatched);
-			return response;
-		} catch (error) {
-			if (this.failure) throw this.failure;
-			if (error instanceof GrokAcpRequestError) {
+				if (Object.hasOwn(response, 'result')) {
+					if (response.result == null) return;
+					response = this.record(response.result);
+					if (response.error != null) {
+						this.usageUnavailable = true;
+						return;
+					}
+				}
+				if (response.sessionId !== undefined && response.sessionId !== this.nativeId)
+					throw new GrokAcpSessionError('invalid-response', this.lastPromptDispatched);
+				return response;
+			} catch (error) {
+				if (!(error instanceof GrokAcpRequestError)) throw error;
 				this.usageUnavailable = true;
 				return;
 			}
-			this.fail(
-				error instanceof GrokAcpSessionError
-					? error.reason
-					: error instanceof GrokAcpTransportError && error.reason === 'timeout'
-						? 'turn-timeout'
-						: 'transport-lost',
-				error
-			);
-			throw this.failure;
-		} finally {
-			signal?.removeEventListener('abort', onAbort);
-			this.watchdog?.disarm();
-			this.queryingUsage = false;
-		}
+		}, signal);
 	}
 
 	/** Wait for the original prompt response; the notification has no response of its own. */
 	cancel(): void {
-		if (this.queryingUsage) {
+		if (this.querying) {
 			this.fail('cancelled');
 			return;
 		}
@@ -402,22 +525,210 @@ export class GrokAcpSession {
 			throw new GrokAcpSessionError('invalid-response', this.dispatched);
 		return value as Record<string, unknown>;
 	}
-	private checkModel(response: Record<string, unknown>, requested: string): void {
-		const models = response.models == null ? undefined : this.record(response.models);
-		const config = response.configOptions;
-		let effective = models?.currentModelId;
-		if (config != null) {
-			if (!Array.isArray(config)) throw new GrokAcpSessionError('invalid-response');
-			for (const value of config) {
-				const option = this.record(value);
-				if (option.id === 'model') {
-					if (option.type !== 'select' || option.currentValue !== requested)
-						throw new GrokAcpSessionError('model-unacknowledged');
-					effective ??= option.currentValue;
-				}
-			}
+	private async initialize(): Promise<AcpInitialization> {
+		const initialized = await this.client.initialize();
+		this.checkOpen();
+		this.agentVersion =
+			initialized._meta?.grokShell === true && typeof initialized._meta.agentVersion === 'string'
+				? initialized._meta.agentVersion
+				: undefined;
+		this.extensionsMatched =
+			!!this.options.extensions?.agentVersion &&
+			initialized._meta?.grokShell === true &&
+			initialized._meta.agentVersion === this.options.extensions.agentVersion;
+		return initialized;
+	}
+	private async withQuery<T>(action: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+		this.checkOpen();
+		if (this.active || this.querying || (this.opening && !this.openingDone))
+			throw new GrokAcpSessionError('busy');
+		if (signal?.aborted) throw new GrokAcpSessionError('cancelled');
+		this.querying = true;
+		const onAbort = (): void => this.fail('cancelled');
+		signal?.addEventListener('abort', onAbort, { once: true });
+		try {
+			this.armWatchdog();
+			const value = await action();
+			this.checkOpen();
+			return value;
+		} catch (error) {
+			if (!this.failure)
+				this.fail(
+					error instanceof GrokAcpSessionError
+						? error.reason
+						: error instanceof GrokAcpTransportError && error.reason === 'timeout'
+							? 'turn-timeout'
+							: 'transport-lost',
+					error
+				);
+			throw this.failure;
+		} finally {
+			signal?.removeEventListener('abort', onAbort);
+			this.watchdog?.disarm();
+			this.querying = false;
 		}
-		if (effective !== requested) throw new GrokAcpSessionError('model-unacknowledged');
+	}
+	private readConfiguration(response: Record<string, unknown>): void {
+		const models = response.models == null ? undefined : this.record(response.models);
+		const config = response.configOptions ?? [];
+		let effective = models?.currentModelId;
+		if (!Array.isArray(config)) throw new GrokAcpSessionError('invalid-response');
+		const options: GrokAcpConfigOption[] = [];
+		for (const value of config) {
+			const option = this.record(value);
+			if (option.id !== 'model' && option.id !== 'reasoning_effort') continue;
+			if (option.type !== 'select') throw new GrokAcpSessionError('config-unsupported');
+			if (typeof option.currentValue !== 'string' || options.some(({ id }) => id === option.id))
+				throw new GrokAcpSessionError('invalid-response');
+			// Legacy peers may acknowledge a value without offering a menu.
+			const choices = option.options ?? [];
+			if (!Array.isArray(choices)) throw new GrokAcpSessionError('invalid-response');
+			const entries = choices.map((value) => {
+				const choice = this.record(value);
+				if (
+					typeof choice.value !== 'string' ||
+					!choice.value.trim() ||
+					typeof choice.name !== 'string'
+				)
+					throw new GrokAcpSessionError('invalid-response');
+				return { value: choice.value, name: choice.name };
+			});
+			if (option.id === 'model') {
+				if (effective !== undefined && effective !== option.currentValue)
+					throw new GrokAcpSessionError('model-unacknowledged');
+				effective = option.currentValue;
+			}
+			options.push({
+				id: option.id,
+				type: 'select',
+				currentValue: option.currentValue,
+				options: entries,
+			});
+		}
+		if (effective !== undefined && typeof effective !== 'string')
+			throw new GrokAcpSessionError('invalid-response');
+		// Empty catalogs omit the model selector; only an explicit model change invalidates it.
+		this.effectiveModel = effective ?? this.effectiveModel;
+		this.configOptions = options;
+	}
+	private checkSelection(): void {
+		if (this.selectedModel !== undefined && this.effectiveModel !== this.selectedModel)
+			throw new GrokAcpSessionError('model-unacknowledged');
+		if (
+			this.selectedEffort !== undefined &&
+			this.configOptions.find(({ id }) => id === 'reasoning_effort')?.currentValue !==
+				this.selectedEffort
+		)
+			throw new GrokAcpSessionError('effort-unacknowledged');
+	}
+	private async applyConfig(id: GrokAcpConfigOption['id'], value: string): Promise<void> {
+		this.checkOpen();
+		if (this.active && this.cancelled) throw new GrokAcpSessionError('cancelled');
+		const before = this.effectiveModel;
+		const option = this.configOptions.find((option) => option.id === id);
+		if ((id === 'model' ? before : option?.currentValue) === value) return;
+		if (
+			!option?.options.some((option) => option.value === value) ||
+			(id === 'reasoning_effort' && before === undefined)
+		)
+			throw new GrokAcpSessionError('config-unsupported');
+		// The response replaces all options. An in-flight model switch exposes no stale effort menu.
+		if (id === 'model') {
+			this.configOptions = [];
+			this.effectiveModel = undefined;
+		}
+		const revision = this.configRevision;
+		let response: unknown;
+		try {
+			response = await this.client.request('session/set_config_option', {
+				sessionId: this.nativeId,
+				configId: id,
+				value,
+			});
+		} catch (error) {
+			if (error instanceof GrokAcpRequestError) throw new GrokAcpSessionError('config-unsupported');
+			throw error;
+		}
+		this.checkOpen();
+		if (this.active && this.cancelled) throw new GrokAcpSessionError('cancelled');
+		const observed = this.configuration;
+		const updated = this.record(response);
+		if (updated.error != null) throw new GrokAcpSessionError('config-unsupported');
+		this.readConfiguration(updated);
+		// A notification can arrive after the response frame but before this promise resumes.
+		// Conflicting observations have uncertain order; never resurrect a stale effort menu.
+		if (
+			revision !== this.configRevision &&
+			canonicalJson(observed) !== canonicalJson(this.configuration)
+		)
+			throw new GrokAcpSessionError('invalid-response');
+		if (id === 'model') {
+			if (this.effectiveModel !== value) throw new GrokAcpSessionError('model-unacknowledged');
+		} else {
+			if (this.effectiveModel !== before) throw new GrokAcpSessionError('model-unacknowledged');
+			if (this.configOptions.find(({ id }) => id === 'reasoning_effort')?.currentValue !== value)
+				throw new GrokAcpSessionError('effort-unacknowledged');
+		}
+	}
+	private observeConfiguration(message: AcpCall): void {
+		if (this.failure || message.id !== undefined) return;
+		if (message.method !== 'session/update' && message.method !== '_x.ai/session_notification')
+			return;
+		const params = message.params;
+		if (!params || Array.isArray(params) || typeof params.sessionId !== 'string') return;
+		const update = params.update;
+		if (!update || typeof update !== 'object' || Array.isArray(update)) return;
+		const data = update as Record<string, unknown>;
+		const sessionId = params.sessionId;
+		if (data.sessionUpdate !== 'model_changed' && data.sessionUpdate !== 'config_option_update')
+			return;
+		if (!this.nativeId || this.replay) {
+			if (!this.opening || this.openingDone) return;
+			// Bounded scalar observations only; never retain replay payloads or credentials.
+			if (
+				sessionId.length > 1024 ||
+				(!this.unboundConfigSessions.has(sessionId) && this.unboundConfigSessions.size >= 16)
+			) {
+				this.fail('invalid-response');
+				return;
+			}
+			const model = data.model_id;
+			const effort = data.reasoning_effort;
+			if (
+				data.sessionUpdate === 'config_option_update' ||
+				typeof model !== 'string' ||
+				!model.trim() ||
+				model.length > 1024 ||
+				(effort !== undefined &&
+					(typeof effort !== 'string' || !effort.trim() || effort.length > 1024))
+			) {
+				this.unboundConfigSessions.set(sessionId, { ambiguous: true });
+			} else {
+				this.unboundConfigSessions.set(sessionId, {
+					model,
+					effort,
+					ambiguous: this.unboundConfigSessions.get(sessionId)?.ambiguous,
+				});
+			}
+			return;
+		}
+		if (sessionId !== this.nativeId) return;
+		try {
+			this.configRevision += 1;
+			if (data.sessionUpdate === 'model_changed') {
+				this.configOptions = [];
+				this.effectiveModel =
+					typeof data.model_id === 'string' && data.model_id.trim() ? data.model_id : undefined;
+			} else {
+				this.readConfiguration(data);
+			}
+		} catch (error) {
+			if (error instanceof GrokAcpSessionError) {
+				this.fail(error.reason);
+				return;
+			}
+			throw error;
+		}
 	}
 	private claimSession(id: string): void {
 		const key = canonicalJson([this.options.account, this.options.host, id]);
@@ -436,6 +747,8 @@ export class GrokAcpSession {
 	}
 	private fail(reason: GrokAcpSessionError['reason'], cause?: unknown): void {
 		if (this.failure) return;
+		this.configOptions = [];
+		this.effectiveModel = undefined;
 		this.failure = new GrokAcpSessionError(
 			reason,
 			this.lastPromptDispatched,

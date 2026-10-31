@@ -2143,7 +2143,8 @@
 				"src/main/agents/path-prober.ts",
 				"src/main/agents/detector.ts",
 				"src/main/agents/provider-probe.ts",
-				"src/main/agents/capability-snapshot.ts"
+				"src/main/agents/capability-snapshot.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -2168,7 +2169,9 @@
 					"GT1-02-05I1",
 					"GT1-02-05D2",
 					"GT1-02-05F1A",
-					"GT1-02-05F1B"
+					"GT1-02-05F1B",
+					"GT1-03-10A",
+					"GT1-03-10A1"
 				],
 				"test": [
 					"GT1-02-06",
@@ -2189,9 +2192,19 @@
 					"GT1-02-05H2",
 					"GT1-02-05I2",
 					"GT1-02-05F1AT",
-					"GT1-02-05F1BT"
+					"GT1-02-05F1BT",
+					"GT1-03-10B",
+					"GT1-03-10A1T"
 				],
-				"verification": ["GT1-02-13", "GT1-10-12", "GT1-11-10", "GT1-07-11", "GT1-11-11A"],
+				"verification": [
+					"GT1-02-13",
+					"GT1-10-12",
+					"GT1-11-10",
+					"GT1-07-11",
+					"GT1-11-11A",
+					"GT1-03-13",
+					"GT1-03-14"
+				],
 				"live": ["GT1-11-11", "GT1-11-11A"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -2255,6 +2268,12 @@
 					"id": "grok-dialog-discovery-regressions-pending",
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Dialog/configuration lifecycle tests pass at their scoped 13/13J revisions, including selected SSH drafts, stale replies and manual choices; the deterministic authoring gap is resolved. Operational selected-account discovery remains blocked by unproven host containment and acknowledged native metadata under GT1-03-10A/10B/13/14 and phase11. No native dialog/discovery certification. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
+					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
+				},
+				{
+					"id": "grok-acp-config-discovery-wiring-pending",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-10A implements session-side qualified models/list and acknowledged configuration only; deterministic execution remains not-run. GT1-03-10A1 must carry effort/observations through the public turn, scoped detector cache and IPC; GT1-03-10B/10A1T author tests, GT1-03-13 executes. Existing Grok exec probe containment refusal and unscoped snapshot stripping remain. Matching native setup observations are accepted; conflicting or ambiguous configuration notifications around allocation refuse before prompt; exact-binary operational discovery, route wiring and remote/managed qualification remain GT1-07-01 and phases09/10/11. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-10a-acknowledged-acp-model-and-configuration-state.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
@@ -2630,7 +2649,8 @@
 				"src/shared/effortRejection.ts",
 				"src/shared/types.ts",
 				"src/shared/maestro-lib/providers/capabilities.ts",
-				"src/shared/directorNotesProvider.ts"
+				"src/shared/directorNotesProvider.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -2660,7 +2680,8 @@
 					"GT1-02-07B",
 					"GT1-02-07C",
 					"GT1-02-07A1",
-					"GT1-08-14E"
+					"GT1-08-14E",
+					"GT1-03-10A1"
 				],
 				"test": [
 					"GT1-02-06",
@@ -2687,7 +2708,8 @@
 					"GT1-02-07BT",
 					"GT1-02-07CT",
 					"GT1-02-07A1T",
-					"GT1-08-14F"
+					"GT1-08-14F",
+					"GT1-03-10A1T"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -2768,6 +2790,12 @@
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Final model/effort aliases, conflicts, none and remembered refusals are guarded; exact advertised wire membership gates minimal/medium/max hints, with no invented model tiers. Scoped deterministic tests pass for exercised cases (13 and repaired CLI 13J). Actual consumers still lack acknowledged account/host/version/model menus, owned by GT1-03-10A/10B/13/14 and phase08. Tab-naming/runtime retry provenance and captured cross-attempt configuration remain GT1-08-14E/14F/21; native effort acceptance is not-run. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
 					"affectedRows": ["P06", "REG-MODEL", "REG-DEFINITIONS", "P29", "P32", "S10", "S19"]
+				},
+				{
+					"id": "grok-acp-config-discovery-wiring-pending",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-10A implements session-side qualified models/list and acknowledged configuration only; deterministic execution remains not-run. GT1-03-10A1 must carry effort/observations through the public turn, scoped detector cache and IPC; GT1-03-10B/10A1T author tests, GT1-03-13 executes. Existing Grok exec probe containment refusal and unscoped snapshot stripping remain. Matching native setup observations are accepted; conflicting or ambiguous configuration notifications around allocation refuse before prompt; exact-binary operational discovery, route wiring and remote/managed qualification remain GT1-07-01 and phases09/10/11. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-10a-acknowledged-acp-model-and-configuration-state.",
+					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
 			"phase": "02",
@@ -13752,7 +13780,8 @@
 				"src/shared/agentConstants.ts",
 				"src/shared/modelTiers.ts",
 				"src/shared/effortRejection.ts",
-				"src/shared/directorNotesProvider.ts"
+				"src/shared/directorNotesProvider.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -13781,7 +13810,8 @@
 					"GT1-02-07B",
 					"GT1-02-07C",
 					"GT1-02-07A1",
-					"GT1-08-14E"
+					"GT1-08-14E",
+					"GT1-03-10A1"
 				],
 				"test": [
 					"GT1-02-06",
@@ -13807,7 +13837,8 @@
 					"GT1-02-07BT",
 					"GT1-02-07CT",
 					"GT1-02-07A1T",
-					"GT1-08-14F"
+					"GT1-08-14F",
+					"GT1-03-10A1T"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -13887,6 +13918,12 @@
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Final model/effort aliases, conflicts, none and remembered refusals are guarded; exact advertised wire membership gates minimal/medium/max hints, with no invented model tiers. Scoped deterministic tests pass for exercised cases (13 and repaired CLI 13J). Actual consumers still lack acknowledged account/host/version/model menus, owned by GT1-03-10A/10B/13/14 and phase08. Tab-naming/runtime retry provenance and captured cross-attempt configuration remain GT1-08-14E/14F/21; native effort acceptance is not-run. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
 					"affectedRows": ["P06", "REG-MODEL", "REG-DEFINITIONS", "P29", "P32", "S10", "S19"]
+				},
+				{
+					"id": "grok-acp-config-discovery-wiring-pending",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-10A implements session-side qualified models/list and acknowledged configuration only; deterministic execution remains not-run. GT1-03-10A1 must carry effort/observations through the public turn, scoped detector cache and IPC; GT1-03-10B/10A1T author tests, GT1-03-13 executes. Existing Grok exec probe containment refusal and unscoped snapshot stripping remain. Matching native setup observations are accepted; conflicting or ambiguous configuration notifications around allocation refuse before prompt; exact-binary operational discovery, route wiring and remote/managed qualification remain GT1-07-01 and phases09/10/11. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-10a-acknowledged-acp-model-and-configuration-state.",
+					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
 			"branchAuditRefs": ["B08", "B36"]
@@ -14531,7 +14568,8 @@
 				"src/main/agents/capability-snapshot.ts",
 				"src/shared/maestro-lib/runtime/providers.ts",
 				"src/shared/maestro-lib/parsers/parser-factory.ts",
-				"src/cli/services/agent-spawner.ts"
+				"src/cli/services/agent-spawner.ts",
+				"src/shared/maestro-lib/grok/acp-session.ts"
 			],
 			"ownerTasks": {
 				"implementation": [
@@ -14556,7 +14594,8 @@
 					"GT1-02-05I1",
 					"GT1-02-05D2",
 					"GT1-02-05F1A",
-					"GT1-02-05F1B"
+					"GT1-02-05F1B",
+					"GT1-03-10A1"
 				],
 				"test": [
 					"GT1-02-06",
@@ -14577,7 +14616,8 @@
 					"GT1-02-05H2",
 					"GT1-02-05I2",
 					"GT1-02-05F1AT",
-					"GT1-02-05F1BT"
+					"GT1-02-05F1BT",
+					"GT1-03-10A1T"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -14650,6 +14690,12 @@
 					"id": "grok-dialog-discovery-regressions-pending",
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Dialog/configuration lifecycle tests pass at their scoped 13/13J revisions, including selected SSH drafts, stale replies and manual choices; the deterministic authoring gap is resolved. Operational selected-account discovery remains blocked by unproven host containment and acknowledged native metadata under GT1-03-10A/10B/13/14 and phase11. No native dialog/discovery certification. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
+					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
+				},
+				{
+					"id": "grok-acp-config-discovery-wiring-pending",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-03-10A implements session-side qualified models/list and acknowledged configuration only; deterministic execution remains not-run. GT1-03-10A1 must carry effort/observations through the public turn, scoped detector cache and IPC; GT1-03-10B/10A1T author tests, GT1-03-13 executes. Existing Grok exec probe containment refusal and unscoped snapshot stripping remain. Matching native setup observations are accepted; conflicting or ambiguous configuration notifications around allocation refuse before prompt; exact-binary operational discovery, route wiring and remote/managed qualification remain GT1-07-01 and phases09/10/11. Evidence: Plans/grok-tier1/evidence/03.md#gt1-03-10a-acknowledged-acp-model-and-configuration-state.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"]
 				}
 			],
