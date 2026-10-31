@@ -1005,6 +1005,8 @@ describe('runtime turns', () => {
 				['id', 'binding', 'account', 'ssh'].map((change) => ({ stage, change }))
 			),
 		])('refuses Grok resume without replacing history: $stage / $change', async (test) => {
+			// Keep launch assembly valid so the native ownership guard supplies the refusal.
+			recordings.grok = writeFakeTurn(work, { chunks: [], close: { code: 0, signal: null } });
 			let repository: ReturnType<typeof repositories.createAgentRepository>;
 			const create = repositories.createAgentRepository;
 			vi.spyOn(repositories, 'createAgentRepository').mockImplementationOnce((options) => {

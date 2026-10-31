@@ -792,7 +792,9 @@ describe('process-manager.ts', () => {
 					const retainedBinding = structuredClone(request.nativeSessionBinding);
 					request.nativeSessionScope = scope;
 					request.sshRemoteId = 'unchanged-alias';
-					request.cwd = '/remote/project';
+					// The SSH client starts locally; native ownership retains the remote project.
+					request.cwd = process.cwd();
+					request.projectPath = '/remote/project';
 					request.command = 'ssh';
 					request.args = ['unchanged-alias', 'grok --resume native-requested'];
 					if (changed === 'account') scope.accountRef = 'grok:other-account';
@@ -804,6 +806,12 @@ describe('process-manager.ts', () => {
 					if (changed === 'unchanged') {
 						expect(result.success).toBe(true);
 						expect(spawn).toHaveBeenCalledOnce();
+						expect(spawn.mock.lastCall![0]).toMatchObject({
+							cwd: process.cwd(),
+							projectPath: '/remote/project',
+							nativeSessionScope: scope,
+							nativeSessionBinding: retainedBinding,
+						});
 						expect(onError).not.toHaveBeenCalled();
 						return;
 					}
