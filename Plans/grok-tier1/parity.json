@@ -2064,6 +2064,34 @@
 			"scope": "Seven added engine lines fence getRecent by recall request generation and current Chat identity before endChat, adoption, history replacement or native reopen. Existing native scope/ownership checks and both stale-read regression cases are unchanged.",
 			"testOwners": ["GT1-04-07CQT1"],
 			"verificationOwner": "GT1-04-13"
+		},
+		"phase04-history-browser-resume-ui-tests": {
+			"path": "Plans/grok-tier1/evidence/04.md#gt1-04-07cuit-history-and-browser-resume-ui-tests",
+			"sourceCommit": "bdf15d909e254008b241554c8f3bc247490ad39f",
+			"sourceCommitScope": "Pre-task HEAD plus test hashes and the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/components/HistoryPanel.test.tsx": "1d09b7c4ed7f3370d1122edfdcff915a88405d8a1c3df551b93e9d8d15801521",
+				"src/__tests__/renderer/components/History/HistoryEntryItem.test.tsx": "20ffd76894f9dfb07a46756d6fad0c0a090bd5917ae8da3235c9bd517880d9bf",
+				"src/__tests__/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsResume.test.ts": "72d474de9114e54438587867c84b6d25d52924afc6183a4fdfd6bc7fa312bcfb"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"acceptanceRun": false,
+			"static": "fail",
+			"staticReview": "pass",
+			"formattingAndLint": "pass",
+			"typeCheckBlocker": "Supplemental compiler comparison: 15 baseline/current diagnostics, zero new; existing Encore flags, mock signature, tokenCacheHits fixtures and RequestInit.dispatcher errors.",
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": [
+				"P04",
+				"P14",
+				"P15",
+				"C-supportsResume",
+				"C-supportsSessionId",
+				"REG-SESSION-MUTATION"
+			],
+			"scope": "36 new parameter-expanded cases across HistoryPanel (12), HistoryEntryItem (4), and browser resume hook (20); recorded owner/account/host scope, colliding IDs, click/keyboard/detailed/quick forwarding, unknown legacy provenance, refused-open selection retention, confirmed closing and deferred navigation/unmount/newer-request guards.",
+			"verificationOwner": "GT1-04-13"
 		}
 	},
 	"sourceCatalog": {
@@ -3676,7 +3704,8 @@
 					"GT1-04-07C5UT1",
 					"GT1-04-07CT",
 					"GT1-04-07CQT",
-					"GT1-04-07CQT1"
+					"GT1-04-07CQT1",
+					"GT1-04-07CUIT"
 				],
 				"verification": [
 					"GT1-02-13",
@@ -3715,7 +3744,8 @@
 				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
 				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
-				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence"
+				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
+				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5913,7 +5943,8 @@
 					"GT1-04-07C5UT1",
 					"GT1-04-07CT",
 					"GT1-04-07CQT",
-					"GT1-04-07CQT1"
+					"GT1-04-07CQT1",
+					"GT1-04-07CUIT"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -5944,7 +5975,8 @@
 				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
 				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
-				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence"
+				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
+				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6077,7 +6109,8 @@
 					"GT1-04-07C5UT1",
 					"GT1-04-07CT",
 					"GT1-04-07CQT",
-					"GT1-04-07CQT1"
+					"GT1-04-07CQT1",
+					"GT1-04-07CUIT"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-02-13", "GT1-02-14", "GT1-11-11A"],
 				"live": ["GT1-11-11", "GT1-11-11A"],
@@ -6120,7 +6153,8 @@
 				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
 				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
-				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence"
+				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
+				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11159,7 +11193,8 @@
 					"GT1-04-07C5UT1",
 					"GT1-04-07CT",
 					"GT1-04-07CQT",
-					"GT1-04-07CQT1"
+					"GT1-04-07CQT1",
+					"GT1-04-07CUIT"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -11190,7 +11225,8 @@
 				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
 				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
-				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence"
+				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
+				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11680,7 +11716,8 @@
 					"GT1-04-07C5UT1",
 					"GT1-04-07CT",
 					"GT1-04-07CQT",
-					"GT1-04-07CQT1"
+					"GT1-04-07CQT1",
+					"GT1-04-07CUIT"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-14C"],
 				"live": ["GT1-11-11"],
@@ -11711,7 +11748,8 @@
 				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
 				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
-				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence"
+				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
+				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16272,7 +16310,8 @@
 					"GT1-04-07C5UT1",
 					"GT1-04-07CT",
 					"GT1-04-07CQT",
-					"GT1-04-07CQT1"
+					"GT1-04-07CQT1",
+					"GT1-04-07CUIT"
 				],
 				"verification": ["GT1-04-13", "GT1-04-14", "GT1-11-11C"],
 				"live": ["GT1-11-11", "GT1-11-11C"],
@@ -16303,7 +16342,8 @@
 				"phase04CanonicalScopedResumeTestsRef": "phase04-canonical-scoped-resume-tests",
 				"phase04QuickChatNativeTestsRef": "phase04-quick-chat-native-tests",
 				"phase04QuickChatEdgeTestsRef": "phase04-quick-chat-edge-tests",
-				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence"
+				"phase04QuickChatRecentReadFenceRef": "phase04-quick-chat-recent-read-fence",
+				"phase04HistoryBrowserResumeUiTestsRef": "phase04-history-browser-resume-ui-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
