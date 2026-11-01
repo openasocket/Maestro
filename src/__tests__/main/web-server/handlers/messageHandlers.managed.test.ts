@@ -12,7 +12,7 @@
  * intended `enterprise:*` reads and the settings lock read.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { ipcMain } from 'electron';
 
 vi.mock('electron', () => ({
@@ -29,6 +29,8 @@ vi.mock('../../../../main/plugins/plugin-manager-singleton', () => ({
 }));
 
 import { WebSocketMessageHandler } from '../../../../main/web-server/handlers/messageHandlers';
+import { setSettingsWriteAuthority } from '../../../../main/enterprise/settings-policy';
+import { claimDispatchTicket } from '../../../../main/web-server/auth/transport-actor';
 import type { WebClient } from '../../../../main/web-server/handlers/messageHandlers';
 import {
 	MANAGED_CLI_ONLY_MESSAGE,
@@ -574,5 +576,109 @@ describe('managed bridge handlers (MRC2-07-03)', () => {
 		]) {
 			expect(isRemoteMethodAllowed(method), method).toBe(false);
 		}
+	});
+});
+
+// GT1-10-04: the config hold names the STORED provider, never one in the message; a send the
+// spawn sink refuses comes back failed and its dispatch ticket claims nothing.
+describe('Grok under the managed holds of the web routes (GT1-10-04)', () => {
+	let handler: WebSocketMessageHandler;
+	const authorizeAgentConfig = vi.fn();
+
+	beforeEach(() => {
+		authorizeAgentConfig.mockReset();
+		authorizeAgentConfig.mockImplementation((_provider: string, field: string) =>
+			field === 'model'
+				? {
+						allowed: false,
+						code: 'locked',
+						message: 'the "agentConfig.model" setting is locked by managed policy revision 7',
+						policyRevision: 7,
+					}
+				: { allowed: true }
+		);
+		setSettingsWriteAuthority({
+			authorize: () => ({ allowed: true }),
+			authorizeAgentConfig,
+			pins: () => null,
+		} as never);
+		handler = new WebSocketMessageHandler();
+	});
+
+	afterEach(() => {
+		setSettingsWriteAuthority(null);
+	});
+
+	const callbacksFor = (overrides: Record<string, unknown> = {}) => ({
+		getSessions: () => [{ id: 'grok-agent', name: 'Grok', toolType: 'grok' }],
+		updateSessionConfig: vi.fn().mockResolvedValue({ success: true }),
+		...overrides,
+	});
+
+	it('holds a Grok config patch under the stored provider and refuses a locked model as a typed result', async () => {
+		const callbacks = callbacksFor();
+		handler.setCallbacks(callbacks as never);
+		const reply = await ask(handler, createClient({ cli: true }), {
+			type: 'update_session_config',
+			sessionId: 'grok-agent',
+			// A provider named in the message is not the provider held.
+			toolType: 'claude-code',
+			configPatch: { customEnvVars: { GROK_HOME: '/h' }, customModel: 'grok-4' },
+		});
+		expect(reply).toMatchObject({
+			type: 'update_session_config_result',
+			success: false,
+			error: 'the "agentConfig.model" setting is locked by managed policy revision 7',
+			sessionId: 'grok-agent',
+			requestId: 'req-1',
+			managed: { state: 'denied', code: 'locked' },
+		});
+		expect(authorizeAgentConfig.mock.calls.map((call) => [call[0], call[1]])).toEqual([
+			['grok', 'customEnvVars'],
+			['grok', 'model'],
+		]);
+		expect(callbacks.updateSessionConfig).not.toHaveBeenCalled();
+
+		const allowed = await ask(handler, createClient({ cli: true }), {
+			type: 'update_session_config',
+			sessionId: 'grok-agent',
+			configPatch: { customEffort: 'high' },
+		});
+		expect(allowed).toMatchObject({ success: true });
+		expect(authorizeAgentConfig).toHaveBeenLastCalledWith('grok', 'reasoningEffort', 'high');
+		expect(callbacks.updateSessionConfig).toHaveBeenCalledWith('grok-agent', {
+			customEffort: 'high',
+		});
+	});
+
+	it('reports a Grok send the spawn sink refused as a failed command_result whose ticket claims nothing', async () => {
+		const executeCommand = vi.fn().mockResolvedValue(false);
+		handler.setCallbacks(
+			callbacksFor({
+				getSessionDetail: () => ({ state: 'idle', inputMode: 'ai', toolType: 'grok' }),
+				executeCommand,
+			}) as never
+		);
+		const reply = await ask(
+			handler,
+			createClient({ user: { id: 'u1', username: 'ada', displayName: 'Ada' } }),
+			{
+				type: 'send_command',
+				sessionId: 'grok-agent',
+				tabId: 'tab-a',
+				command: 'go',
+				inputMode: 'ai',
+			}
+		);
+		expect(reply).toMatchObject({
+			type: 'command_result',
+			success: false,
+			sessionId: 'grok-agent',
+			tabId: 'tab-a',
+			requestId: 'req-1',
+		});
+		const ticket = executeCommand.mock.calls[0][8] as string;
+		expect(typeof ticket).toBe('string');
+		expect(claimDispatchTicket(ticket, { agentId: 'grok-agent', tabId: 'tab-a' })).toBeUndefined();
 	});
 });
