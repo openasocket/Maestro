@@ -326,3 +326,169 @@ describe('the plain settings file, the other sink of the WakaTime key (MRC2-06-0
 		expect(PLAIN_SETTINGS_CREDENTIAL_KEYS).toEqual({ wakatimeApiKey: 'wakatime.apiKey' });
 	});
 });
+
+/**
+ * GT1-09-12: synthetic Grok canaries through the same real package write.
+ *
+ * Planted where Grok material can reach a support package: its auth and
+ * environment names in an env dump (the API key under `XAI_API_KEY`, the auth
+ * file and home under `GROK_AUTH_PATH` / `GROK_HOME`), its session and profile
+ * paths in a storage warning, a private model gateway in a base-URL line, and
+ * prompt, output, thought and tool text in a log entry's `data` and in a
+ * stored agent's tabs. None may appear in any entry.
+ *
+ * One gap is pinned rather than hidden (GT1-09-R15): the value of
+ * `GROK_AUTH`, and an `xai-` key printed with no credential-shaped name in
+ * front of it, are not redacted by `redactSecrets()` today. The continuation
+ * GT1-09-12B adds the `xai-` key prefix to the redactor and flips the pin.
+ */
+describe('support package redaction canaries for Grok (GT1-09-12)', () => {
+	const XAI_KEY = 'xai-' + 'Q9zR4tKp7LmN2vXc'.repeat(3);
+	const GROK = {
+		apiKeyInEnv: XAI_KEY,
+		authFile: '/Users/grokcanary/.grok/auth.json',
+		home: '/Users/grokcanary/.grok',
+		sessionFile: '/Users/grokcanary/.grok/sessions/acme-ledger/9d1e.jsonl',
+		profileDir: 'C:\\Users\\grokcanary\\.grok\\profiles\\acme-ledger',
+		gatewayHost: 'grok-gw.tenant-gateway.example',
+		gatewayQuery: 'tenant=acme-ledger-42',
+		prompt: 'PROMPT-CANARY summarize the acme-ledger payroll export',
+		output: 'OUTPUT-CANARY payroll totals are ready',
+		thought: 'THOUGHT-CANARY the user wants payroll',
+		toolInput: 'TOOL-CANARY cat payroll.csv',
+	};
+
+	it('writes a package with none of the Grok auth, path, endpoint or conversation canaries', async () => {
+		vi.mocked(logger.getLogs).mockReturnValue([
+			{
+				timestamp: 1,
+				level: 'debug',
+				message: `grok spawn env: XAI_API_KEY=${GROK.apiKeyInEnv} GROK_AUTH_PATH=${GROK.authFile} GROK_HOME=${GROK.home}`,
+				context: 'GrokAcpSpawner',
+			},
+			{
+				timestamp: 2,
+				level: 'warn',
+				message: `Unexpected failure loading Grok session ${GROK.sessionFile} (profile ${GROK.profileDir})`,
+				context: 'GrokSessionStorage',
+				// The collector drops `data` whole, so text here never reaches the zip.
+				data: {
+					prompt: GROK.prompt,
+					output: GROK.output,
+					thinking: GROK.thought,
+					tool: { name: 'shell', input: GROK.toolInput },
+				},
+			},
+			{
+				timestamp: 3,
+				level: 'info',
+				message: `grok model grok-4-fast via GROK_BASE_URL=https://${GROK.gatewayHost}/v1/responses?${GROK.gatewayQuery}`,
+				context: 'GrokAcpSpawner',
+			},
+			{
+				timestamp: 4,
+				level: 'warn',
+				message: `grok auth {"api_key":"${XAI_KEY}"}`,
+				context: 'GrokAcpSpawner',
+			},
+		] as never);
+		const sessionsStore = store({
+			sessions: [
+				{
+					id: 'grok-agent-1',
+					toolType: 'grok',
+					cwd: GROK.home,
+					projectRoot: GROK.home,
+					aiTabs: [
+						{
+							id: 'tab-1',
+							logs: [
+								{ source: 'user', text: GROK.prompt },
+								{ source: 'stdout', text: GROK.output },
+								{ source: 'thinking', text: GROK.thought },
+								{ source: 'tool', text: GROK.toolInput },
+							],
+						},
+					],
+				},
+			],
+		});
+
+		const result = await generateDebugPackage(path.join(OUTPUT_DIR, 'grok'), {
+			getAgentDetector: () => null,
+			getProcessManager: () => null,
+			getWebServer: () => null,
+			settingsStore: store({ theme: 'dark' }) as never,
+			sessionsStore: sessionsStore as never,
+			groupsStore: store({ groups: [] }) as never,
+		});
+		expect(result.success).toBe(true);
+		expect(result.filesIncluded).toContain('logs.json');
+		expect(result.filesIncluded).toContain('sessions.json');
+
+		const extracted = path.join(OUTPUT_DIR, 'grok-extracted');
+		extractZipTo(result.path!, extracted);
+		const entries = fs
+			.readdirSync(extracted)
+			.map((name) => [name, fs.readFileSync(path.join(extracted, name), 'utf8')] as const);
+		const whole = entries.map(([, text]) => text).join('\n');
+
+		for (const [name, canary] of Object.entries(GROK)) {
+			expect(whole, `Grok ${name} reached the package`).not.toContain(canary);
+		}
+		for (const fragment of ['grokcanary', 'acme-ledger', 'grok-gw', 'CANARY']) {
+			expect(whole, `${fragment} reached the package`).not.toContain(fragment);
+		}
+
+		const logs = (
+			JSON.parse(entries.find(([name]) => name === 'logs.json')![1]) as {
+				entries: Array<{ message: string; data?: unknown }>;
+			}
+		).entries;
+		expect(logs.every((entry) => !('data' in entry))).toBe(true);
+		const messages = logs.map((entry) => entry.message).join('\n');
+		expect(messages).toContain('XAI_API_KEY=[REDACTED_SECRET]');
+		expect(messages).toContain('"api_key":[REDACTED_SECRET]');
+		// The gateway keeps its registrable domain and loses host label, path and query.
+		expect(messages).toContain('https://tenant-gateway.example/[redacted]');
+		// The provider and model stay readable: they are diagnostics, not identity.
+		expect(messages).toContain('grok model grok-4-fast');
+
+		const sessions = JSON.parse(entries.find(([name]) => name === 'sessions.json')![1]);
+		expect(JSON.stringify(sessions)).toContain('"toolType":"grok"');
+		expect(JSON.stringify(sessions)).toContain('"tabCount":1');
+	});
+
+	it('GAP GT1-09-R15: a GROK_AUTH value and a bare xai- key still reach the package today', async () => {
+		vi.mocked(logger.getLogs).mockReturnValue([
+			{
+				timestamp: 1,
+				level: 'debug',
+				message: `grok spawn env: GROK_AUTH=${XAI_KEY}`,
+				context: 'GrokAcpSpawner',
+			},
+			{
+				timestamp: 2,
+				level: 'error',
+				message: `grok refused key ${XAI_KEY} (401)`,
+				context: 'GrokAcpSpawner',
+			},
+		] as never);
+		const result = await generateDebugPackage(path.join(OUTPUT_DIR, 'grok-gap'), {
+			getAgentDetector: () => null,
+			getProcessManager: () => null,
+			getWebServer: () => null,
+			settingsStore: store({}) as never,
+			sessionsStore: store({ sessions: [] }) as never,
+			groupsStore: store({ groups: [] }) as never,
+		});
+		expect(result.success).toBe(true);
+		const extracted = path.join(OUTPUT_DIR, 'grok-gap-extracted');
+		extractZipTo(result.path!, extracted);
+		const logs = fs.readFileSync(path.join(extracted, 'logs.json'), 'utf8');
+		// Pinned so the fix (GT1-09-12B, `redactSecrets()` only) has to flip it:
+		// neither the name GROK_AUTH nor the `xai-` shape is known to the redactor.
+		expect(logs).toContain(`GROK_AUTH=${XAI_KEY}`);
+		expect(logs).toContain(`grok refused key ${XAI_KEY}`);
+	});
+});

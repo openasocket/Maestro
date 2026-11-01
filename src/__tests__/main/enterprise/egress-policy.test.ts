@@ -8,7 +8,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import type { IdentityRead } from '../../../main/enterprise/identity-store';
 import {
@@ -29,6 +29,12 @@ import {
 	type EgressRequest,
 	type ManagedEgressStanding,
 } from '../../../main/enterprise/egress-policy';
+import {
+	fetchWithTimeout,
+	heldEgress,
+	setEgressAuthority,
+} from '../../../main/utils/fetchWithTimeout';
+import { managedAccountRef } from '../../../shared/maestro-lib/managed/credentials';
 
 function document(overrides: Record<string, unknown> = {}): Record<string, unknown> {
 	return {
@@ -838,5 +844,157 @@ describe('sink classification (MRC2-05-02..05-05, recorded by MRC2-05-08)', () =
 			/egress: EgressClass \| FetchEgressOptions = DEFAULT_CLASS\n\): Promise<Response> \{/
 		);
 		expect(DEFAULT_EGRESS_CLASS).toBe('content');
+	});
+});
+
+/**
+ * GT1-09-12: Grok against the egress ceiling.
+ *
+ * What this ceiling governs, stated plainly: Maestro's OWN outbound requests,
+ * the ones that pass `fetchWithTimeout()` / `holdEgress()` in this process.
+ * It does not and cannot constrain the network of a provider process. The
+ * `grok` child Maestro spawns opens its own sockets to api.x.ai (or a
+ * configured gateway) and none of them passes this chokepoint, so a Grok
+ * turn's network is not governed here; that guarantee stays an open blocker
+ * (GT1-09-R12) until a real preventive network control exists.
+ */
+describe('Grok and the egress ceiling (GT1-09-12)', () => {
+	const GROK_HOME = '/Users/grokcanary/.grok';
+	const GROK_ACCOUNT = {
+		providerId: 'grok',
+		accountRef: managedAccountRef('grok', GROK_HOME),
+	} as const;
+	const GROK_URL = 'https://api.x.ai/v1/usage?api_key=xai-canary-query&tenant=acme-ledger';
+	const grokCeiling = (accounts: string[]) =>
+		ceilingOf(
+			document({
+				classes: [{ class: 'provider-account', destinations: ['https://api.x.ai:443'], accounts }],
+			})
+		);
+
+	/** Every string a refusal or a receipt carries, for the canary checks. */
+	const carried = (value: unknown) => JSON.stringify(value);
+
+	it('holds a Maestro-owned Grok account request by destination, then by an opaque account reference', () => {
+		// The fixture ceiling lists chatgpt.com only: api.x.ai is refused by origin.
+		const unlisted = egressVerdict(
+			managed(),
+			request({ url: GROK_URL, class: 'provider-account', account: GROK_ACCOUNT })
+		);
+		expect(unlisted).toMatchObject({
+			allowed: false,
+			code: 'destination-denied',
+			managed: {
+				origin: 'https://api.x.ai',
+				class: 'provider-account',
+				outcome: 'destination-denied',
+			},
+		});
+
+		const approved = egressVerdict(
+			managed(grokCeiling([GROK_ACCOUNT.accountRef])),
+			request({ url: GROK_URL, class: 'provider-account', account: GROK_ACCOUNT })
+		);
+		expect(approved).toEqual({
+			allowed: true,
+			managed: {
+				policyRevision: 3,
+				class: 'provider-account',
+				actor: 'the operator',
+				origin: 'https://api.x.ai',
+				account: GROK_ACCOUNT.accountRef,
+				outcome: 'within-ceiling',
+			},
+		});
+
+		const personal = egressVerdict(
+			managed(grokCeiling(['c'.repeat(64)])),
+			request({ url: GROK_URL, class: 'provider-account', account: GROK_ACCOUNT })
+		);
+		expect(personal.allowed).toBe(false);
+		if (personal.allowed) return;
+		expect(personal.code).toBe('account-denied');
+		expect(personal.message).toContain(`grok account ${GROK_ACCOUNT.accountRef.slice(0, 12)}`);
+
+		// No answer carries the path, the query (with its key), the tenant or the
+		// account directory: the receipt names an origin and an opaque reference.
+		for (const decision of [unlisted, approved, personal]) {
+			const text = carried(decision);
+			for (const canary of [
+				'xai-canary-query',
+				'acme-ledger',
+				'/v1/usage',
+				'grokcanary',
+				'.grok',
+			]) {
+				expect(text, canary).not.toContain(canary);
+			}
+		}
+	});
+
+	it('refuses a denied Grok request at the chokepoint before any socket, recording the origin only', async () => {
+		const sent = vi.fn(async () => new Response('{}'));
+		vi.stubGlobal('fetch', sent);
+		setEgressAuthority({ evaluateEgress: (asked) => egressVerdict(managed(), asked) });
+		try {
+			const refused = await fetchWithTimeout(GROK_URL, {}, 1000, {
+				class: 'provider-account',
+				account: GROK_ACCOUNT,
+			}).then(
+				() => null,
+				(error: unknown) => error
+			);
+			expect(isEgressDeniedError(refused)).toBe(true);
+			if (!isEgressDeniedError(refused)) return;
+			expect(refused.code).toBe('destination-denied');
+			expect(sent).not.toHaveBeenCalled();
+
+			// The thrown message and receipt carry no path, query or key; only the
+			// caller-facing `url` field holds what the caller itself passed in.
+			for (const text of [refused.message, carried(refused.receipt)]) {
+				expect(text).not.toContain('xai-canary-query');
+				expect(text).not.toContain('acme-ledger');
+			}
+			expect(refused.url).toBe(GROK_URL);
+			expect(heldEgress()).toEqual([
+				expect.objectContaining({
+					class: 'provider-account',
+					code: 'destination-denied',
+					origin: 'https://api.x.ai',
+					count: 1,
+				}),
+			]);
+			expect(carried(heldEgress())).not.toContain('xai-canary-query');
+
+			// Standalone (no authority), the same call is not held at all.
+			setEgressAuthority(null);
+			await fetchWithTimeout(GROK_URL, {}, 1000, 'provider-account');
+			expect(sent).toHaveBeenCalledTimes(1);
+		} finally {
+			setEgressAuthority(null);
+			vi.unstubAllGlobals();
+		}
+	});
+
+	it('names no Grok sink on the chokepoint: the grok process network never passes this ceiling', () => {
+		const read = (file: string) => readFileSync(join(process.cwd(), file), 'utf8');
+		const GROK_SOURCES = [
+			'src/main/agents/grok-skills.ts',
+			'src/main/parsers/grok-output-parser.ts',
+			'src/main/process-manager/spawners/GrokAcpSpawner.ts',
+			'src/main/storage/grok-session-storage.ts',
+			'src/shared/grokSpawnSelection.ts',
+			'src/shared/maestro-lib/grok/acp-client.ts',
+			'src/shared/maestro-lib/grok/acp-session.ts',
+			'src/shared/maestro-lib/grok/acp-turn.ts',
+			'src/shared/maestro-lib/grok/route.ts',
+		];
+		for (const file of GROK_SOURCES) {
+			const source = read(file);
+			expect(source, file).not.toMatch(/\bfetchWithTimeout\(|\bholdEgress\(|\bfetch\(/);
+		}
+		// The ceiling module itself knows nothing of spawned processes.
+		const policy = read('src/main/enterprise/egress-policy.ts');
+		expect(policy).not.toMatch(/process-manager|child_process|ProcessManager/);
 	});
 });

@@ -413,7 +413,12 @@
 					"present": false,
 					"requiredProof": "Grok outbound requests confined independently of Maestro fetch gating"
 				}
-			]
+			],
+			"progress": {
+				"task": "GT1-09-12",
+				"state": "maestro-owned-egress-and-redaction-tested-provider-network-open",
+				"detail": "egress-policy.test.ts: a Maestro-owned Grok provider-account request to api.x.ai is held by destination, then by an opaque managedAccountRef('grok', GROK_HOME); a denied request throws EgressDeniedError before fetch is called and the hold ledger keeps the origin only; no receipt, message or hold carries path, query, key or account directory. No Grok source file calls fetchWithTimeout, holdEgress or fetch, so the grok process's own network never passes the ceiling: Maestro fetch gating does not constrain it. Status unchanged."
+			}
 		},
 		{
 			"id": "GT1-09-R13",
@@ -477,6 +482,29 @@
 				"result": "6 files, 210 passed, 0 failed, 0 skipped",
 				"scope": "client integration against synthetic or fake policy answers; not real endpoint or provider qualification",
 				"detail": "settings-policy.test.ts 7/7 Grok cases, agent-config-writes.test.ts 5/5, permission-ceiling.test.ts 13/13, context-groomer.managed.test.ts 5/5."
+			}
+		},
+		{
+			"id": "GT1-09-R15",
+			"requirement": "A Grok credential printed into a log line, an error or a support package is redacted by the one secret redactor whatever name it travels under.",
+			"surface": "support package (logs.json, settings.json sweep), Send Feedback outbound text, every redactSecrets() caller",
+			"route": ["native-headless", "acp-candidate"],
+			"status": "fixable-in-maestro",
+			"reason": "redactSecrets() knows no xAI key shape and GROK_AUTH carries no credential-shaped name, so `GROK_AUTH=xai-...`, a bare `xai-...` key in an error line and a `{\"key\":\"xai-...\"}` record reach the support package verbatim. The same key under XAI_API_KEY or an api_key field is redacted by name. Found by the GT1-09-12 canaries through a real generateDebugPackage() write.",
+			"requiredAuthority": "None outside Maestro: a bounded change to src/shared/redactSecrets.ts (an xai- provider key prefix beside sk-/rk-), owned by continuation GT1-09-12B, which flips the pinned gap case in redaction-canaries.test.ts.",
+			"sourceRefs": [
+				"src/shared/redactSecrets.ts (RULES: provider key prefixes)",
+				"src/main/debug-package/index.ts (redactPackageContents)",
+				"src/main/debug-package/collectors/sanitize.ts (sanitizeLogMessage)",
+				"src/__tests__/main/debug-package/redaction-canaries.test.ts (GAP GT1-09-R15 case)"
+			],
+			"ownerTasks": ["GT1-09-12", "GT1-09-12B", "GT1-09-13"],
+			"parityRows": ["P36"],
+			"releaseImpact": "Until GT1-09-12B lands, a support package or feedback text can carry a Grok API key that was printed under GROK_AUTH or without a name.",
+			"progress": {
+				"task": "GT1-09-12",
+				"state": "leak-pinned-fix-scheduled",
+				"detail": "Pinned offline as a passing gap case so the fix has to flip it; XAI_API_KEY, api_key JSON, Grok session/profile/auth/home paths, a private gateway (host label, path and query), and prompt, output, thought and tool text (log data and stored tabs) are proven absent from the package."
 			}
 		}
 	],
