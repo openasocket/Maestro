@@ -1449,6 +1449,115 @@ describe('cue-process-lifecycle', () => {
 			});
 		});
 
+		// GT1-11-05: Grok Cue runs as a workflow. This lifecycle is the one the desktop
+		// executor and the headless engine (`maestro-cli cue`) both settle a prompt run
+		// on, so a run it reads as completed is what fires a downstream chain. Composed
+		// with the GT1-08-08/09 cases above (empty stdout, auth, stop, timeout).
+		describe('Grok Cue workflow outcomes (GT1-11-05)', () => {
+			afterEach(() => mockGetOutputParser.mockReturnValue(null));
+
+			const line = (record: Record<string, unknown>) => JSON.stringify(record) + '\n';
+			const end = (stopReason = 'end_turn') =>
+				line({ type: 'end', stopReason, sessionId: 'grok-cue-session' });
+
+			async function runGrok(chunks: string[]) {
+				mockGetOutputParser.mockReturnValue(new GrokOutputParser());
+				const pending = runProcess(
+					'grok-flow',
+					createSpec({ command: 'grok', args: ['--prompt-file', '/tmp/prompt.json'] }),
+					createOptions({ toolType: 'grok' })
+				);
+				await vi.advanceTimersByTimeAsync(0);
+				for (const chunk of chunks) mockChild.stdout.emit('data', chunk);
+				return pending;
+			}
+
+			it('fails an in-band rate limit, names it, and spawns the run once', async () => {
+				const pending = runGrok([
+					line({ type: 'text', data: 'Working on' }),
+					line({ type: 'error', message: 'Rate limit exceeded (429). Try again later.' }),
+				]);
+				const result = await (async () => {
+					await vi.advanceTimersByTimeAsync(0);
+					mockChild.emit('close', 1);
+					return pending;
+				})();
+
+				expect(result.status).toBe('failed');
+				expect(result.stderr).toMatch(/rate limit/i);
+				// No second process: a failed run is never retried behind the chain's back.
+				expect(mockSpawn).toHaveBeenCalledTimes(1);
+			});
+
+			it('fails a turn a failed tool cancelled, with the headless approval hint', async () => {
+				const pending = runGrok([
+					line({ type: 'text', data: 'Deleting the build folder' }),
+					line({ type: 'tool_call', toolCallId: 't1', toolName: 'run_terminal_command' }),
+					line({ type: 'tool_call_update', toolCallId: 't1', status: 'failed' }),
+					end('cancelled'),
+				]);
+				await vi.advanceTimersByTimeAsync(0);
+				mockChild.emit('close', 0);
+				const result = await pending;
+
+				expect(result.status).toBe('failed');
+				expect(result.stderr).toContain('stopReason: cancelled');
+				expect(result.stderr).toContain('permission approval');
+				// The streamed partial stays as the record; the failed status is what keeps
+				// it from reaching a chain as a finished answer.
+				expect(result.usage?.accounting).not.toMatchObject({ final: true });
+			});
+
+			it('completes a turn that finished after one of its tools failed, with the answer alone', async () => {
+				const pending = runGrok([
+					line({ type: 'tool_call', toolCallId: 't1', toolName: 'read_file' }),
+					line({
+						type: 'tool_call_update',
+						toolCallId: 't1',
+						status: 'failed',
+						rawOutput: 'ENOENT: tool output',
+					}),
+					line({ type: 'text', data: 'The file is missing.' }),
+					end(),
+				]);
+				await vi.advanceTimersByTimeAsync(0);
+				mockChild.emit('close', 0);
+				const result = await pending;
+
+				expect(result.status).toBe('completed');
+				expect(result.stdout).toBe('The file is missing.');
+				expect(result.stdout).not.toContain('ENOENT');
+				expect(result.providerSessionId).toBe('grok-cue-session');
+			});
+
+			it.each(['max_tokens', 'refusal', 'max_turn_requests'])(
+				'fails a turn interrupted by stopReason %s instead of chaining partial text',
+				async (stopReason) => {
+					const pending = runGrok([line({ type: 'text', data: 'half an answ' }), end(stopReason)]);
+					await vi.advanceTimersByTimeAsync(0);
+					mockChild.emit('close', 0);
+					const result = await pending;
+
+					expect(result.status).toBe('failed');
+					expect(result.stderr).toContain(`stopReason: ${stopReason}`);
+				}
+			);
+
+			it('settles a Grok run once, whatever the child emits after its close', async () => {
+				const pending = runGrok([line({ type: 'text', data: 'ok' }), end()]);
+				await vi.advanceTimersByTimeAsync(0);
+				mockChild.emit('close', 0);
+				mockChild.emit('error', new Error('late failure'));
+				mockChild.emit('close', 1);
+				const result = await pending;
+
+				expect(result.status).toBe('completed');
+				expect(result.stdout).toBe('ok');
+				expect(getActiveProcessMap().has('grok-flow')).toBe(false);
+				expect(mockSpawn).toHaveBeenCalledTimes(1);
+			});
+		});
+
 		describe('stderr cleaning (benign noise filter)', () => {
 			it('strips "Reading additional input from stdin..." from Codex stderr', async () => {
 				const resultPromise = runProcess(

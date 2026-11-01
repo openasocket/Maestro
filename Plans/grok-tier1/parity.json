@@ -10789,6 +10789,14 @@
 					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P29"],
 					"evidenceRef": "phase07-verification"
+				},
+				{
+					"id": "grok-shared-autorun-failed-turn-keeps-ticks",
+					"code": "implementation-gap",
+					"missingPrerequisite": "A11-F11: Shared task/document engine (maestro-cli playbook, the library runtime and maestro-cli host Auto Run): a failed Grok task turn that ticked its box before failing keeps the tick and is counted (probe: task_complete success false, complete totalTasksCompleted 1, no document write). The desktop engine unticks it through restoreTasksCheckedByFailedTurn (GT1-08-01); the shared engine has no equivalent, so failed work checks off a task headless. Repair GT1-11-05A, pinned by GT1-11-05C.",
+					"affectedRows": ["P29", "S10"],
+					"taskId": "GT1-11-05",
+					"evidenceRef": ".maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-11.md#GT1-11-05"
 				}
 			],
 			"phase": "08",
@@ -11154,6 +11162,14 @@
 					"affectedRows": ["P31", "S14"],
 					"taskId": "GT1-11-03",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
+				},
+				{
+					"id": "grok-room-text-after-terminal-routed",
+					"code": "implementation-gap",
+					"missingPrerequisite": "A11-F12: Group chat: extractGrokText keeps concatenating text deltas after the successful terminal record, so a record past the end of the turn is spliced into the routed answer (probe: \"Ask @Alice.\" + end + \" @Eve go\" reads \"Ask @Alice. @Eve go\"). Real Grok ends its stream at the terminal record, so this is corruption the read must refuse rather than route. Repair GT1-11-05B, pinned by GT1-11-05C.",
+					"affectedRows": ["P31", "S14"],
+					"taskId": "GT1-11-05",
+					"evidenceRef": ".maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-11.md#GT1-11-05"
 				}
 			],
 			"phase": "08",
@@ -21911,6 +21927,14 @@
 					"missingPrerequisite": "Existing final model/effort argument guards and exact advertised hint membership retain their scoped evidence. ACP configuration acknowledgement and owned discovery pass GT1-03-13E; production receipt wiring and orchestration remain GT1-07-01 and phase08/10. Tab-naming/runtime retry provenance remains GT1-08-14E/14F/21; native acceptance is not-run.",
 					"affectedRows": ["P06", "REG-MODEL", "REG-DEFINITIONS", "P29", "P32", "S10", "S19"],
 					"evidenceRef": "phase03-reconciliation"
+				},
+				{
+					"id": "grok-shared-autorun-failed-turn-keeps-ticks",
+					"code": "implementation-gap",
+					"missingPrerequisite": "A11-F11: Shared task/document engine (maestro-cli playbook, the library runtime and maestro-cli host Auto Run): a failed Grok task turn that ticked its box before failing keeps the tick and is counted (probe: task_complete success false, complete totalTasksCompleted 1, no document write). The desktop engine unticks it through restoreTasksCheckedByFailedTurn (GT1-08-01); the shared engine has no equivalent, so failed work checks off a task headless. Repair GT1-11-05A, pinned by GT1-11-05C.",
+					"affectedRows": ["P29", "S10"],
+					"taskId": "GT1-11-05",
+					"evidenceRef": ".maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-11.md#GT1-11-05"
 				}
 			],
 			"branchAuditRefs": ["B45"]
@@ -22331,6 +22355,14 @@
 					"affectedRows": ["P31", "S14"],
 					"taskId": "GT1-11-03",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
+				},
+				{
+					"id": "grok-room-text-after-terminal-routed",
+					"code": "implementation-gap",
+					"missingPrerequisite": "A11-F12: Group chat: extractGrokText keeps concatenating text deltas after the successful terminal record, so a record past the end of the turn is spliced into the routed answer (probe: \"Ask @Alice.\" + end + \" @Eve go\" reads \"Ask @Alice. @Eve go\"). Real Grok ends its stream at the terminal record, so this is corruption the read must refuse rather than route. Repair GT1-11-05B, pinned by GT1-11-05C.",
+					"affectedRows": ["P31", "S14"],
+					"taskId": "GT1-11-05",
+					"evidenceRef": ".maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-11.md#GT1-11-05"
 				}
 			],
 			"branchAuditRefs": ["B14", "B39"]
@@ -31958,5 +31990,47 @@
 			}
 		],
 		"repairTasks": ["GT1-11-04A", "GT1-11-04B"]
+	},
+	"phase11WorkflowIntegration": {
+		"taskId": "GT1-11-05",
+		"recordedAt": "2026-11-01",
+		"evidenceRef": ".maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-11.md#GT1-11-05",
+		"method": "Extended three workflow suites with sanitized synthetic Grok results and native records: batch-processor.test.ts (shared runPlaybook engine through the CLI deps, spawnAgent mocked with Grok AgentResults), cue-process-lifecycle.test.ts (the run lifecycle both the desktop executor and the headless engine settle on, real GrokOutputParser over a mock child), output-parser.test.ts (the group chat router read, real Grok parser). Composed with GT1-08-06, GT1-08-08/09 and GT1-08-11 cases rather than repeating them. Not native qualification.",
+		"liveCalls": 0,
+		"imagesAnalyzed": 0,
+		"findings": [
+			{
+				"id": "A11-F11",
+				"classification": "implementation-gap",
+				"anchors": [
+					"src/shared/maestro-lib/autorun/run-playbook.ts:734",
+					"src/renderer/hooks/batch/useDocumentProcessor.ts:270"
+				],
+				"consequence": "Shared task/document engine (maestro-cli playbook, the library runtime and maestro-cli host Auto Run): a failed Grok task turn that ticked its box before failing keeps the tick and is counted (probe: task_complete success false, complete totalTasksCompleted 1, no document write). The desktop engine unticks it through restoreTasksCheckedByFailedTurn (GT1-08-01); the shared engine has no equivalent, so failed work checks off a task headless.",
+				"rows": ["P29", "S10"],
+				"blocker": "grok-shared-autorun-failed-turn-keeps-ticks",
+				"repairTask": "GT1-11-05A",
+				"testTask": "GT1-11-05C"
+			},
+			{
+				"id": "A11-F12",
+				"classification": "implementation-gap",
+				"anchors": ["src/main/group-chat/output-parser.ts:170"],
+				"consequence": "Group chat: extractGrokText keeps concatenating text deltas after the successful terminal record, so a record past the end of the turn is spliced into the routed answer (probe: \"Ask @Alice.\" + end + \" @Eve go\" reads \"Ask @Alice. @Eve go\"). Real Grok ends its stream at the terminal record, so this is corruption the read must refuse rather than route.",
+				"rows": ["P31", "S14"],
+				"blocker": "grok-room-text-after-terminal-routed",
+				"repairTask": "GT1-11-05B",
+				"testTask": "GT1-11-05C"
+			}
+		],
+		"composedWith": [
+			"GT1-08-04",
+			"GT1-08-06",
+			"GT1-08-09",
+			"GT1-08-09F",
+			"GT1-08-11",
+			"GT1-08-14F"
+		],
+		"repairTasks": ["GT1-11-05A", "GT1-11-05B", "GT1-11-05C"]
 	}
 }
