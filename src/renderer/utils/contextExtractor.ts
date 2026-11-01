@@ -545,6 +545,18 @@ function mapHeaderToSource(header: string): LogEntry['source'] {
 }
 
 /**
+ * Whether a source's usage stats measure the context it carries. Grok's usage
+ * is per-turn and per-session accounting (phase03 semantics): a cumulative
+ * session total is not context occupancy, and its combined-window gauge math
+ * is unverified. Size a Grok context from its text instead.
+ */
+function usageStatsMeasureContext(
+	context: ContextSource
+): context is ContextSource & { usageStats: NonNullable<ContextSource['usageStats']> } {
+	return !!context.usageStats && context.agentType !== 'grok';
+}
+
+/**
  * Estimate the token count for a context source (synchronous).
  * Uses a character-based heuristic for quick estimates.
  * For accurate counts, use countContextTokens() instead.
@@ -558,7 +570,7 @@ function mapHeaderToSource(header: string): LogEntry['source'] {
  */
 export function estimateTokenCount(context: ContextSource): number {
 	// If we have usage stats, use the actual token counts with agent-specific logic
-	if (context.usageStats) {
+	if (usageStatsMeasureContext(context)) {
 		return calculateContextTokens(
 			{
 				inputTokens: context.usageStats.inputTokens ?? 0,
@@ -596,7 +608,7 @@ export function estimateTokenCount(context: ContextSource): number {
  */
 export async function countContextTokens(context: ContextSource): Promise<number> {
 	// If we have usage stats, use the actual token counts with agent-specific logic
-	if (context.usageStats) {
+	if (usageStatsMeasureContext(context)) {
 		return calculateContextTokens(
 			{
 				inputTokens: context.usageStats.inputTokens ?? 0,
@@ -762,6 +774,156 @@ function findPartialDuplicates(contexts: ContextSource[]): {
  */
 export function calculateTotalTokens(contexts: ContextSource[]): number {
 	return contexts.reduce((total, context) => total + estimateTokenCount(context), 0);
+}
+
+/** Options for {@link formatLogsForContextInjection}. */
+export interface ContextInjectionOptions {
+	/** Provider that produced the logs; Grok text is redacted like its export. */
+	sourceAgentType?: ToolType;
+	/** Include visible reasoning entries (default false: the visibility policy omits them). */
+	includeThinking?: boolean;
+	/**
+	 * Token budget for the formatted context. 0 or absent means unbounded.
+	 * Oldest whole entries are dropped first so the newest turns survive.
+	 */
+	maxTokens?: number;
+}
+
+/** Result of {@link formatLogsForContextInjection}. */
+export interface ContextInjectionResult {
+	/** Formatted conversation, or '' when nothing survives. */
+	text: string;
+	/** Entries carried, in source order. */
+	includedEntries: number;
+	/** Maestro notices, agent errors and stderr left out of the conversation. */
+	omittedNotices: number;
+	/** Reasoning entries left out by the visibility policy. */
+	omittedThinking: number;
+	/** Oldest entries dropped to fit `maxTokens`. */
+	omittedForBudget: number;
+	/** Image attachments named but not carried (images are not text). */
+	omittedImages: number;
+	/** Estimated tokens of `text`, from its characters (never from usage totals). */
+	estimatedTokens: number;
+}
+
+const INJECTED_TOOL_OUTPUT_MAX_CHARS = 2000;
+
+function describeInjectedTool(log: LogEntry): string {
+	const state = log.metadata?.toolState;
+	const status = state?.status ? `, ${state.status}` : '';
+	const lines = [`Tool call${status} (historical; it does not run again): ${log.text.trim()}`];
+	const output = state?.output;
+	if (typeof output === 'string' && output.trim()) {
+		const trimmed = output.trim();
+		lines.push(
+			trimmed.length > INJECTED_TOOL_OUTPUT_MAX_CHARS
+				? `Result (truncated): ${trimmed.slice(0, INJECTED_TOOL_OUTPUT_MAX_CHARS)}...`
+				: `Result: ${trimmed}`
+		);
+	}
+	return lines.join('\n');
+}
+
+/**
+ * Format a tab's logs as conversation context for ANOTHER agent's prompt (the
+ * merge-into-tab path).
+ *
+ * - Keeps source order; never re-sorts by timestamp (unknown timestamps are NaN).
+ * - Keeps user prose, assistant prose and tool calls distinct instead of
+ *   labelling everything that is not the user "Assistant".
+ * - Leaves Maestro notices (`system`, `error`, `stderr`) out of the
+ *   conversation, except a stored Grok export's provenance disclosure.
+ * - Omits reasoning unless `includeThinking` is set.
+ * - Names attached images by count; their bytes are not carried in text.
+ * - Bounds the result to `maxTokens`, dropping the oldest entries first and
+ *   saying so, so a long conversation cannot overflow the target's window.
+ */
+export function formatLogsForContextInjection(
+	logs: LogEntry[],
+	options: ContextInjectionOptions = {}
+): ContextInjectionResult {
+	const { includeThinking = false, maxTokens = 0, sourceAgentType } = options;
+	let omittedNotices = 0;
+	let omittedThinking = 0;
+	let omittedImages = 0;
+	const blocks: string[] = [];
+
+	for (const log of logs) {
+		if (!log.text || !log.text.trim()) continue;
+		let block: string | null = null;
+		switch (log.source) {
+			case 'user':
+				block = `User: ${log.text}`;
+				break;
+			case 'ai':
+			case 'stdout':
+				block = `Assistant: ${log.text}`;
+				break;
+			case 'tool':
+				block = describeInjectedTool(log);
+				break;
+			case 'thinking':
+				if (includeThinking) block = `Assistant reasoning (visible text): ${log.text}`;
+				else omittedThinking++;
+				break;
+			case 'system':
+				if (log.id === GROK_CONTEXT_PROVENANCE_ID) block = `Provenance: ${log.text}`;
+				else omittedNotices++;
+				break;
+			default:
+				// error, stderr and any future notice kind: Maestro's, not the conversation's.
+				omittedNotices++;
+		}
+		if (block === null) continue;
+		const imageCount = log.images?.length ?? 0;
+		if (imageCount > 0) {
+			omittedImages += imageCount;
+			block += `\n[${imageCount} attached image(s) not carried over; re-attach them to share their content]`;
+		}
+		blocks.push(block);
+	}
+
+	let kept = blocks;
+	let omittedForBudget = 0;
+	if (maxTokens > 0) {
+		let used = 0;
+		let start = blocks.length;
+		while (start > 0) {
+			const cost = estimateTokens(blocks[start - 1]) + 1;
+			if (used + cost > maxTokens) break;
+			used += cost;
+			start--;
+		}
+		if (start === blocks.length && blocks.length > 0) {
+			// The newest entry alone exceeds the budget: keep its head, marked.
+			const newest = blocks[blocks.length - 1];
+			const chars = Math.max(0, maxTokens * 4 - 64);
+			kept = [`${newest.slice(0, chars)}\n[Entry truncated to fit the target's context budget]`];
+			omittedForBudget = blocks.length - 1;
+		} else {
+			kept = blocks.slice(start);
+			omittedForBudget = start;
+		}
+		if (omittedForBudget > 0) {
+			kept = [
+				`[${omittedForBudget} earlier entr${omittedForBudget === 1 ? 'y' : 'ies'} omitted to fit the target's context budget]`,
+				...kept,
+			];
+		}
+	}
+
+	let text = kept.join('\n\n');
+	if (sourceAgentType === 'grok') text = redactSecrets(text).text;
+	return {
+		text,
+		includedEntries: blocks.length - omittedForBudget,
+		omittedNotices,
+		omittedThinking,
+		omittedForBudget,
+		omittedImages,
+		estimatedTokens: estimateTokens(text),
+	};
 }
 
 export interface FormatLogsOptions {

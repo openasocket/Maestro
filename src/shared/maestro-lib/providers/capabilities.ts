@@ -519,7 +519,7 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 		supportsStreamJsonInput: false, // Conservative default: no --input-format stream-json equivalent in grok --help
 		supportsPromptViaStdin: false, // Pinned native source has no raw-stdin prompt reader; use the owned JSON prompt file
 		supportsThinkingDisplay: true, // Verified: thought delta events precede text deltas
-		supportsContextMerge: false, // Conservative default: not yet exercised
+		supportsContextMerge: true, // PROVISIONAL (GT1-06-01): receives merged context as prompt text through the shared formatter (order, tools vs prose, no notices, bounded by the known window or a fixed bound); unqualified until GT1-06-02 tests and phase 11 live evidence
 		supportsContextExport: true, // Verified: session storage reads full transcripts (chat_history.jsonl), same export path as siblings
 		supportsWizard: true, // Streaming-json text deltas carry structured JSON wizard replies; discovery uses --always-approve + --max-turns 8 + --no-subagents (not plan - plan blocks read/fetch needed for discovery)
 		supportsGroupChatModeration: false, // Conservative default: moderation flow not yet exercised
