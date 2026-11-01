@@ -3805,6 +3805,36 @@
 				"S31"
 			],
 			"scope": "Scoped phase05 outcomes and remaining blockers; whole-row statuses, applicability, capability flags and beta status preserved."
+		},
+		"phase06-verification": {
+			"path": "Plans/grok-tier1/evidence/06-verification.json",
+			"sha256": "e72340914ed8285a3cb2b11a472ebf47541867677ac16877a34fcb38e97f1a3d",
+			"sourceCommit": "10cbcbeb594e85a3cca8afec6caf31e640d167a4",
+			"provenance": "deterministic-fixture-verification",
+			"acceptanceRun": false,
+			"status": "pass",
+			"scope": "GT1-06-12: 33 complete files in three groups (context, translation, boundary), 1306 passed, 0 failed, 61 skipped (pre-existing describe.skip only); main/CLI tsc 0/0, renderer tsc exit 2 (1 diagnostic(s), see receipt). No live calls."
+		},
+		"phase06-reconciliation": {
+			"path": "Plans/grok-tier1/evidence/06.md#gt1-06-12-phase-06-verification",
+			"sourceCommit": "10cbcbeb594e85a3cca8afec6caf31e640d167a4",
+			"provenance": "deterministic-fixture-verification-and-reconciliation",
+			"acceptanceRun": false,
+			"status": "pass",
+			"affectedRows": [
+				"P19",
+				"P21",
+				"P22",
+				"P23",
+				"P24",
+				"C-supportsContextMerge",
+				"C-supportsContextExport",
+				"REG-TRANSLATION",
+				"S06",
+				"S07",
+				"S36"
+			],
+			"scope": "Phase06 context, merge, grooming and native translation outcomes; whole-row statuses, applicability and Grok beta status preserved; native certification false."
 		}
 	},
 	"sourceCatalog": {
@@ -8831,7 +8861,8 @@
 			},
 			"limitations": [
 				"GT1-05-07 provides a truthful native-memory refusal and preserves explicit Maestro-bound knowledge with configured-host, entry-path and redacted-error guards; native discovery/binding and deterministic/live qualification remain pending.",
-				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
+				"GT1-06-12 verification: Grok project skills carry over (.grok/skills to .claude/skills or .agents/skills and back); Grok rules and agents are reported unsupported because their loaders are not in the pinned source. Native memory binding is unchanged from phase05. Deterministic only. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8844,7 +8875,9 @@
 				"phase05NativeMemoryBoundaryEvidenceRef": "phase05-native-memory-boundary",
 				"phase05MemoryBoundaryTestEvidenceRef": "phase05-memory-boundary-tests",
 				"phase05DeterministicEvidenceRef": "phase05-reverification",
-				"phase05ReconciliationRef": "phase05-reconciliation"
+				"phase05ReconciliationRef": "phase05-reconciliation",
+				"phase06DeterministicEvidenceRef": "phase06-verification",
+				"phase06ReconciliationRef": "phase06-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8877,6 +8910,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P19"]
+				},
+				{
+					"id": "grok-resource-loaders-unpinned",
+					"code": "evidence-gap",
+					"missingPrerequisite": "The Grok skill, rule and agent loaders are not in the pinned source (2bdd1d6 retained tree); rules and subagents stay unsupported and copied skills are not proof of native discovery. Pin the loaders and qualify discovery live (GT1-11-13).",
+					"evidenceRef": "phase06-verification",
 					"affectedRows": ["P19"]
 				}
 			],
@@ -9165,7 +9205,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Phase04 scoped Grok context extraction and inert redacted role/tool/image provenance pass deterministic checks. Export returns at most 1000 normalized records, discloses omitted/raw/opaque content and never claims a native archive. UI/CLI export callers and validated budgeted merge/handoff remain GT1-06-01; supportsContextMerge remains false. Native migration is a separate unsupported registry outcome owned by phase06."
+				"Phase04 scoped Grok context extraction and inert redacted role/tool/image provenance pass deterministic checks. Export returns at most 1000 normalized records, discloses omitted/raw/opaque content and never claims a native archive. UI/CLI export callers and validated budgeted merge/handoff remain GT1-06-01; supportsContextMerge remains false. Native migration is a separate unsupported registry outcome owned by phase06.",
+				"GT1-06-12 verification: Merge and export run through the shared extractor and merge consumers: source order, tool vs prose, omitted notices and reasoning, named images, Grok redaction, and a budget from the target model window (fixed 100k bound when unknown), sized from text not cumulative usage. Grooming is a read-only turn on the source account and fails visibly when read-only cannot be enforced. Deterministic only. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -9188,7 +9229,9 @@
 				"phase04ContextExportEvidenceRef": "phase04-grok-context-export",
 				"phase04ContextExportTestsEvidenceRef": "phase04-grok-context-export-tests",
 				"phase04EvidenceRef": "phase04-reconciliation",
-				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
+				"phase06DeterministicEvidenceRef": "phase06-verification",
+				"phase06ReconciliationRef": "phase06-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -9226,9 +9269,9 @@
 				{
 					"id": "grok-context-export-consumers-and-verification-pending",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Scoped stored-context normalization, redaction and explicit omissions pass phase04 deterministic tests. Neither stored-context retrieval entry currently has a production UI caller; GT1-06-01 owns UI/CLI export and merge wiring. Native resume, live consumption, token budgeting and directional migration need separate proof.",
+					"missingPrerequisite": "Production merge/export consumers, token budgeting and read-only grooming pass phase06 deterministic tests (phase06-verification). Remaining: exact-binary live consumption of exported and merged Grok context on each declared route (GT1-11-11, GT1-11-11C).",
 					"affectedRows": ["P21"],
-					"evidenceRef": "phase04-reconciliation"
+					"evidenceRef": "phase06-verification"
 				}
 			],
 			"phase": "06",
@@ -9310,7 +9353,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok has neither native adapter nor declared directions. Host import/root logic contains Claude/Codex-specific branches (including account env selection), so adding registry rows alone is insufficient. Existing History reader/context export is not reversible native translation. Every direction and supported version needs explicit limits and destination resume evidence. Grok is absent from native translation adapters/support. History readers and prompt summaries do not establish native round-trip continuation."
+				"Grok has neither native adapter nor declared directions. Host import/root logic contains Claude/Codex-specific branches (including account env selection), so adding registry rows alone is insufficient. Existing History reader/context export is not reversible native translation. Every direction and supported version needs explicit limits and destination resume evidence. Grok is absent from native translation adapters/support. History readers and prompt summaries do not establish native round-trip continuation.",
+				"GT1-06-12 verification: grok to and from claude-code and codex are declared for Grok 1.0.70 with verification unverified. Extraction, staging with strict readback, host wiring (GROK_HOME binding, destination model, confined session root, capacity) and rollback are implemented and fixture-tested. Grok to Grok across accounts and Antigravity directions are unsupported. No native resume has been run. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -9320,7 +9364,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04EvidenceRef": "phase04-reconciliation"
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase06DeterministicEvidenceRef": "phase06-verification",
+				"phase06ReconciliationRef": "phase06-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -9353,6 +9399,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P22"]
+				},
+				{
+					"id": "grok-native-translation-round-trip-unverified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Declared directions are fixture-tested only. Exact-binary Grok 1.0.70 plus pinned Claude/Codex versions must resume each translated session natively and round-trip it (GT1-11-13) before any direction leaves unverified.",
+					"evidenceRef": "phase06-verification",
 					"affectedRows": ["P22"]
 				}
 			],
@@ -9439,7 +9492,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok has neither native adapter nor declared directions. Host import/root logic contains Claude/Codex-specific branches (including account env selection), so adding registry rows alone is insufficient. Existing History reader/context export is not reversible native translation. Every direction and supported version needs explicit limits and destination resume evidence. Grok is absent from native translation adapters/support. History readers and prompt summaries do not establish native round-trip continuation. Distinguish Grok native rules/memory from Maestro bound project knowledge; false flag is not universal memory absence."
+				"Grok has neither native adapter nor declared directions. Host import/root logic contains Claude/Codex-specific branches (including account env selection), so adding registry rows alone is insufficient. Existing History reader/context export is not reversible native translation. Every direction and supported version needs explicit limits and destination resume evidence. Grok is absent from native translation adapters/support. History readers and prompt summaries do not establish native round-trip continuation. Distinguish Grok native rules/memory from Maestro bound project knowledge; false flag is not universal memory absence.",
+				"GT1-06-12 verification: Translated history keeps provider IDs, tool linkage and portable origins; repeated Grok-Claude-Grok and Grok-Codex-Grok fixture round trips reconcile with no new records. Resource carry-over is limited to instructions and skills; Grok rule, agent and subagent discovery is unpinned and reported. Destination native resume and native resource discovery are not proven. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -9449,7 +9503,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04EvidenceRef": "phase04-reconciliation"
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase06DeterministicEvidenceRef": "phase06-verification",
+				"phase06ReconciliationRef": "phase06-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -9482,6 +9538,20 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P23"]
+				},
+				{
+					"id": "grok-native-translation-round-trip-unverified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Declared directions are fixture-tested only. Exact-binary Grok 1.0.70 plus pinned Claude/Codex versions must resume each translated session natively and round-trip it (GT1-11-13) before any direction leaves unverified.",
+					"evidenceRef": "phase06-verification",
+					"affectedRows": ["P23"]
+				},
+				{
+					"id": "grok-resource-loaders-unpinned",
+					"code": "evidence-gap",
+					"missingPrerequisite": "The Grok skill, rule and agent loaders are not in the pinned source (2bdd1d6 retained tree); rules and subagents stay unsupported and copied skills are not proof of native discovery. Pin the loaders and qualify discovery live (GT1-11-13).",
+					"evidenceRef": "phase06-verification",
 					"affectedRows": ["P23"]
 				}
 			],
@@ -9559,7 +9629,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok has neither native adapter nor declared directions. Host import/root logic contains Claude/Codex-specific branches (including account env selection), so adding registry rows alone is insufficient. Existing History reader/context export is not reversible native translation. Every direction and supported version needs explicit limits and destination resume evidence. Grok is absent from native translation adapters/support. History readers and prompt summaries do not establish native round-trip continuation."
+				"Grok has neither native adapter nor declared directions. Host import/root logic contains Claude/Codex-specific branches (including account env selection), so adding registry rows alone is insufficient. Existing History reader/context export is not reversible native translation. Every direction and supported version needs explicit limits and destination resume evidence. Grok is absent from native translation adapters/support. History readers and prompt summaries do not establish native round-trip continuation.",
+				"GT1-06-12 verification: Plans report Grok-specific lossy and unsupported codes before apply (replay absent, search index, remote sync, long cwd, tool error flag, timestamps, attachments, runtime state, compaction, backend tools, rules, subagents, missing account, unknown capacity) and block limitations cannot be accepted. Directions stay labeled unverified in UI and CLI. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -9569,7 +9640,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04EvidenceRef": "phase04-reconciliation"
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase06DeterministicEvidenceRef": "phase06-verification",
+				"phase06ReconciliationRef": "phase06-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -9602,6 +9675,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P24"]
+				},
+				{
+					"id": "grok-native-translation-round-trip-unverified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Declared directions are fixture-tested only. Exact-binary Grok 1.0.70 plus pinned Claude/Codex versions must resume each translated session natively and round-trip it (GT1-11-13) before any direction leaves unverified.",
+					"evidenceRef": "phase06-verification",
 					"affectedRows": ["P24"]
 				}
 			],
@@ -16526,7 +16606,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok false excludes merge; implement validated budgeted transfer before enabling, independently from native translation."
+				"Grok false excludes merge; implement validated budgeted transfer before enabling, independently from native translation.",
+				"GT1-06-12 verification: Grok supportsContextMerge is now true and marked PROVISIONAL in capabilities.ts. Deterministic merge, budget and read-only grooming invariants pass; the flag is not certified until exact-binary live evidence (GT1-11-11/11C). Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -16536,7 +16617,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04EvidenceRef": "phase04-reconciliation"
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase06DeterministicEvidenceRef": "phase06-verification",
+				"phase06ReconciliationRef": "phase06-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16569,6 +16652,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["C-supportsContextMerge"]
+				},
+				{
+					"id": "grok-context-merge-flag-provisional",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "supportsContextMerge true is provisional; it needs exact-binary merged-context consumption receipts (GT1-11-11, GT1-11-11C) before certification.",
+					"evidenceRef": "phase06-verification",
 					"affectedRows": ["C-supportsContextMerge"]
 				}
 			],
@@ -16645,7 +16735,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"The scoped stored-context extraction boundary passes phase04 fixtures, including source ownership, tool linkage, missing images, redaction and truncation notices. It has no production UI caller; GT1-06-01 owns UI/CLI wiring and budgeted transfer. No native resume or migration qualification follows."
+				"The scoped stored-context extraction boundary passes phase04 fixtures, including source ownership, tool linkage, missing images, redaction and truncation notices. It has no production UI caller; GT1-06-01 owns UI/CLI wiring and budgeted transfer. No native resume or migration qualification follows.",
+				"GT1-06-12 verification: Export consumers and the merge injection path pass deterministic checks at the verified source. Live consumption is not run. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -16658,7 +16749,9 @@
 				"phase04ContextExportEvidenceRef": "phase04-grok-context-export",
 				"phase04ContextExportTestsEvidenceRef": "phase04-grok-context-export-tests",
 				"phase04EvidenceRef": "phase04-reconciliation",
-				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
+				"phase06DeterministicEvidenceRef": "phase06-verification",
+				"phase06ReconciliationRef": "phase06-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19204,7 +19297,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok has neither native adapter nor declared directions. Host import/root logic contains Claude/Codex-specific branches (including account env selection), so adding registry rows alone is insufficient. Existing History reader/context export is not reversible native translation. Every direction and supported version needs explicit limits and destination resume evidence."
+				"Grok has neither native adapter nor declared directions. Host import/root logic contains Claude/Codex-specific branches (including account env selection), so adding registry rows alone is insufficient. Existing History reader/context export is not reversible native translation. Every direction and supported version needs explicit limits and destination resume evidence.",
+				"GT1-06-12 verification: Four Grok directions are registered unverified with exact version 1.0.70; the registry, adapters and host share one plan/apply/status/recover/rollback path for UI and CLI. Fixture-only; not certified. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -19214,7 +19308,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04EvidenceRef": "phase04-reconciliation"
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase06DeterministicEvidenceRef": "phase06-verification",
+				"phase06ReconciliationRef": "phase06-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19247,6 +19343,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["REG-TRANSLATION"]
+				},
+				{
+					"id": "grok-native-translation-round-trip-unverified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Declared directions are fixture-tested only. Exact-binary Grok 1.0.70 plus pinned Claude/Codex versions must resume each translated session natively and round-trip it (GT1-11-13) before any direction leaves unverified.",
+					"evidenceRef": "phase06-verification",
 					"affectedRows": ["REG-TRANSLATION"]
 				}
 			],
@@ -20596,7 +20699,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok supportsContextMerge=false hides merge actions; native transcript export is not proof of validated merge/handoff."
+				"Grok supportsContextMerge=false hides merge actions; native transcript export is not proof of validated merge/handoff.",
+				"GT1-06-12 verification: Grok merge actions are shown (provisional flag) and merge into tab or a new agent passes deterministic checks, including no target history duplication and source-account inheritance. Live not run. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20617,7 +20721,9 @@
 				"phase04ConcurrentNativeHistoryEvidenceRef": "phase04-concurrent-native-history",
 				"phase04ConcurrentNativeHistoryTestsEvidenceRef": "phase04-concurrent-native-history-tests",
 				"phase04EvidenceRef": "phase04-reconciliation",
-				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
+				"phase06DeterministicEvidenceRef": "phase06-verification",
+				"phase06ReconciliationRef": "phase06-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20715,7 +20821,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok is absent from native translation adapters/support. History readers and prompt summaries do not establish native round-trip continuation."
+				"Grok is absent from native translation adapters/support. History readers and prompt summaries do not establish native round-trip continuation.",
+				"GT1-06-12 verification: Grok translation runs through the shared transaction (locks, plan IDs, conflict hashes, journal, idempotent retry, recovery, non-destructive rollback, busy deferral, stale-plan and stored-toolType refusals). Fixture-only. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20725,7 +20832,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase04EvidenceRef": "phase04-reconciliation"
+				"phase04EvidenceRef": "phase04-reconciliation",
+				"phase06DeterministicEvidenceRef": "phase06-verification",
+				"phase06ReconciliationRef": "phase06-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20758,6 +20867,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["S07"]
+				},
+				{
+					"id": "grok-native-translation-round-trip-unverified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Declared directions are fixture-tested only. Exact-binary Grok 1.0.70 plus pinned Claude/Codex versions must resume each translated session natively and round-trip it (GT1-11-13) before any direction leaves unverified.",
+					"evidenceRef": "phase06-verification",
 					"affectedRows": ["S07"]
 				}
 			],
@@ -26173,7 +26289,8 @@
 			},
 			"limitations": [
 				"Generic agent/settings/playbook export retains toolType, but native assets are collected only for Claude agents and MCP secret names from .mcp.json are attached only to Claude on export/import. These guards correctly protect Claude-specific formats; Grok needs a separately qualified native-resource projection/explicit limitation so bundling does not silently promise full portability.",
-				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim."
+				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim.",
+				"GT1-06-12 verification: Phase06 carries Grok project skills and refuses account files; Cue/agent bundle portability and MCP secret names stay with GROK-TIER1-08. No change in status. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -26182,7 +26299,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "branchAudit.sourceCommit",
-				"evidenceRef": "phase01-branches"
+				"evidenceRef": "phase01-branches",
+				"phase06DeterministicEvidenceRef": "phase06-verification",
+				"phase06ReconciliationRef": "phase06-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -26215,6 +26334,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["S36"]
+				},
+				{
+					"id": "grok-resource-loaders-unpinned",
+					"code": "evidence-gap",
+					"missingPrerequisite": "The Grok skill, rule and agent loaders are not in the pinned source (2bdd1d6 retained tree); rules and subagents stay unsupported and copied skills are not proof of native discovery. Pin the loaders and qualify discovery live (GT1-11-13).",
+					"evidenceRef": "phase06-verification",
 					"affectedRows": ["S36"]
 				}
 			],
@@ -29279,5 +29405,195 @@
 			"diffExitCode": 0,
 			"productTestsRun": false
 		}
+	},
+	"phase06Reconciliation": {
+		"taskId": "GT1-06-12",
+		"recordedAt": "2026-11-01",
+		"sourceCommit": "10cbcbeb594e85a3cca8afec6caf31e640d167a4",
+		"evidenceRef": "phase06-reconciliation",
+		"baseObservation": {
+			"ref": "feature/mega-maestro-v1.1.0-rc",
+			"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
+			"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+			"aheadBehind": [358, 10],
+			"baseIsAncestorOfSource": false,
+			"sourceIsAncestorOfBase": false
+		},
+		"phase06Deterministic": "pass",
+		"nativeQualification": "not-run",
+		"nativeCertification": false,
+		"productAcceptance": "not-run",
+		"repositoryValidation": "fail",
+		"repositoryValidationReason": "Renderer tsc keeps only the known baseline src/main/plugins/plugin-host-handlers.ts TS2339 RequestInit.dispatcher diagnostic (P46, GT1-12-03); main and CLI tsc exit 0. Not a phase06 regression.",
+		"scope": "No source or test changes in this task. Whole-row statuses, applicability and required scope unchanged; Grok stays beta.",
+		"capabilityState": {
+			"supportsContextMerge": true,
+			"supportsContextMergeNote": "PROVISIONAL (GT1-06-01); deterministic only, not certified.",
+			"supportsContextExport": true
+		},
+		"directions": [
+			{
+				"source": "grok",
+				"destination": "claude-code",
+				"versions": {
+					"grok": ["1.0.70"]
+				},
+				"declared": true,
+				"verification": "unverified",
+				"deterministic": "pass",
+				"live": "not-run"
+			},
+			{
+				"source": "grok",
+				"destination": "codex",
+				"versions": {
+					"grok": ["1.0.70"]
+				},
+				"declared": true,
+				"verification": "unverified",
+				"deterministic": "pass",
+				"live": "not-run"
+			},
+			{
+				"source": "claude-code",
+				"destination": "grok",
+				"versions": {
+					"grok": ["1.0.70"]
+				},
+				"declared": true,
+				"verification": "unverified",
+				"deterministic": "pass",
+				"live": "not-run"
+			},
+			{
+				"source": "codex",
+				"destination": "grok",
+				"versions": {
+					"grok": ["1.0.70"]
+				},
+				"declared": true,
+				"verification": "unverified",
+				"deterministic": "pass",
+				"live": "not-run"
+			},
+			{
+				"source": "grok",
+				"destination": "grok",
+				"declared": false,
+				"status": "unsupported",
+				"reason": "Cross-account Grok move is not a declared direction."
+			},
+			{
+				"source": "antigravity",
+				"destination": "*",
+				"declared": false,
+				"status": "unsupported",
+				"reason": "No adapter, writer or import path; SQLite/protobuf store (GT1-06-03)."
+			}
+		],
+		"payloadCoverage": {
+			"projected": [
+				"user prose",
+				"assistant prose",
+				"client tool calls with verbatim IDs",
+				"tool results",
+				"inline data-URI images",
+				"compaction boundary",
+				"fork/branch marks"
+			],
+			"archivedNotProjected": [
+				"system prompt",
+				"<user_info> prefix",
+				"runtime synthetic_reason rows",
+				"unknown rows",
+				"reasoning incl. encrypted",
+				"backend tool calls",
+				"model_id"
+			],
+			"blocked": [
+				"external image URLs (never fetched)",
+				"corrupt base64",
+				"non-image attachments to Grok",
+				"malformed rows",
+				"duplicate/dangling/orphan tool links",
+				"unknown chat_format_version",
+				"session/cwd mismatch",
+				"missing summary",
+				"long cwd hashed folder",
+				"missing destination account",
+				"missing destination model"
+			],
+			"resources": {
+				"carried": ["CLAUDE.md/AGENTS.md instructions", "project skills"],
+				"unsupported": [
+					".grok/rules",
+					".grok/agents",
+					"selected Grok subagents",
+					"skills with advisory allowed-tools"
+				],
+				"excluded": ["auth.json", "config.toml", "account-global files"]
+			}
+		},
+		"receipts": [
+			{
+				"path": "Plans/grok-tier1/evidence/06-verification.json",
+				"sha256": "e72340914ed8285a3cb2b11a472ebf47541867677ac16877a34fcb38e97f1a3d",
+				"sourceCommit": "10cbcbeb594e85a3cca8afec6caf31e640d167a4",
+				"status": "pass"
+			}
+		],
+		"latestScopedResult": {
+			"receipt": "Plans/grok-tier1/evidence/06-verification.json",
+			"files": 33,
+			"passedTests": 1306,
+			"failedTests": 0,
+			"skippedTests": 61,
+			"groups": {
+				"context": {
+					"files": 16,
+					"passed": 562,
+					"skipped": 61,
+					"exitCode": 0
+				},
+				"translation": {
+					"files": 12,
+					"passed": 556,
+					"skipped": 0,
+					"exitCode": 0
+				},
+				"boundary": {
+					"files": 5,
+					"passed": 188,
+					"skipped": 0,
+					"exitCode": 0
+				}
+			},
+			"typeChecks": {
+				"main": 0,
+				"cli": 0,
+				"renderer": 2
+			}
+		},
+		"remainingRealNativeRequirements": [
+			"GT1-11-13: exact-binary Grok 1.0.70 native resume of a session staged from Claude and from Codex, and Claude/Codex native resume of a session extracted from Grok, on pinned versions; then the repeated round trips live.",
+			"GT1-11-13: pin the Grok skill, rule and agent loaders and qualify that carried project skills and instructions are discovered by the binary.",
+			"GT1-11-11 / GT1-11-11C: live consumption of exported and merged Grok context and a live read-only grooming turn on a disposable account.",
+			"Remote (SSH) Grok translation stays blocked by remote-translation (GROK-TIER1-10)."
+		],
+		"liveBoundary": {
+			"status": "not-run",
+			"providerCalls": 0,
+			"budgetUsd": 0,
+			"authorizedEndpoints": [],
+			"authorizedSshTargets": []
+		},
+		"promotion": {
+			"grokRemainsBeta": true,
+			"capabilityChanges": false,
+			"wholeRowStatusChanges": false,
+			"applicabilityChanges": false,
+			"directionsCertified": false
+		},
+		"imagesAnalyzed": 0
 	}
 }
