@@ -357,9 +357,18 @@ export function sshRemoteEndpointProblems(value: unknown, expect: SshRemoteExpec
 		);
 	}
 	if (expect.providerId === null) return problems;
-	const row = identity.routes.find(
+	const rows = identity.routes.filter(
 		(entry) => entry.providerId === expect.providerId && entry.route === SSH_REMOTE_ARRIVAL_ROUTE
 	);
+	// One row per provider and route: a table that answers twice is not read
+	// by its first answer (GT1-09-09), it is a remote that does not say.
+	if (rows.length > 1) {
+		problems.push(
+			`the remote reports ${rows.length} rows for ${expect.providerId} launches arriving over SSH, so whether it confines them is not known`
+		);
+		return problems;
+	}
+	const row = rows[0];
 	if (!row) {
 		problems.push(
 			`the remote does not report whether it confines ${expect.providerId} launches arriving over SSH`

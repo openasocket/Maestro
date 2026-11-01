@@ -192,7 +192,16 @@
 			],
 			"ownerTasks": ["GT1-09-09", "GT1-09-10", "GT1-11-12"],
 			"parityRows": ["P15", "P36", "P39"],
-			"releaseImpact": "Managed remote Grok is refused unless a remote endpoint qualifies it."
+			"releaseImpact": "Managed remote Grok is refused unless a remote endpoint qualifies it.",
+			"progress": {
+				"task": "GT1-09-09",
+				"state": "target-bound-at-adapter-producer-absent",
+				"detail": "The host adapter refuses an SSH snapshot with no bound ManagedSshEndpointRef, or one whose endpoint policy revision is null or behind the request, as unavailable before the endpoint is asked, because the endpoint execution operation names no target and would read the launch as local. The resolver refuses a remote whose route table reports more than one row for the provider on the ssh route. The remote attestation producer is still absent (GT1-11-12); the account is not describable to the endpoint (R07).",
+				"sourceRefs": [
+					"src/shared/maestro-lib/managed/host-adapter.ts remoteTargetProblem",
+					"src/shared/maestro-lib/launch/ssh-remote-resolver.ts sshRemoteEndpointProblems"
+				]
+			}
 		},
 		{
 			"id": "GT1-09-R09",

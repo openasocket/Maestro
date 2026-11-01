@@ -701,6 +701,29 @@ function executionRequestProblem(request: AdmissionRequest): string | null {
 		return 'the model is not an endpoint identifier';
 	}
 	if (request.policy.policyRevision === null) return 'no policy revision is known for this host';
+	return remoteTargetProblem(request);
+}
+
+/**
+ * Why an SSH target cannot stand behind this decision, or null (GT1-09-09).
+ * The endpoint's execution operation names no target, so the broker reads
+ * every request as a launch on this host: an SSH launch reaches it only with
+ * the remote endpoint the sink qualified bound into the snapshot's target
+ * (`qualifySshLaunchTarget`, `managedSshEndpointRef`), and that endpoint
+ * may not apply a policy older than the one this decision is made under. A
+ * remote with no qualified endpoint is never described as a local launch.
+ */
+function remoteTargetProblem(request: AdmissionRequest): string | null {
+	const { target } = request.snapshot;
+	if (target.kind !== 'ssh') return null;
+	if (!target.endpoint) {
+		return `the SSH remote "${target.remoteId}" carries no qualified managed endpoint, and the endpoint would read the launch as one on this host`;
+	}
+	const required = request.policy.policyRevision;
+	const remote = target.endpoint.policyRevision;
+	if (required !== null && (remote === null || remote < required)) {
+		return `the SSH remote "${target.remoteId}" endpoint applies policy revision ${remote ?? 'none'}, behind this host's ${required}`;
+	}
 	return null;
 }
 
