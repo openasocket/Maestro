@@ -156,6 +156,8 @@ import {
 	grokSteeringAvailability,
 } from '../../shared/maestro-lib/grok/route';
 import { STEERING_TURN_FINISHED_DETAIL } from '../../shared/chatSteering';
+import { discoverGrokSlashCommands } from '../../main/agents/grok-skills';
+import { readSyntheticGrokAcpLog, writeSyntheticGrokAcpPeer } from '../fixtures/grok-acp-peer';
 
 describe('process-manager.ts', () => {
 	describe('aggregateModelUsage', () => {
@@ -1102,6 +1104,490 @@ describe('process-manager.ts', () => {
 				expectNoSteerSideEffects(2);
 			});
 		});
+
+		// GT1-07-04: the real ProcessManager, GrokAcpSpawner, shared ACP driver, StdoutHandler and
+		// ExitHandler against the synthetic wire-1 peer process of fixtures/grok-acp-peer.ts (not
+		// native qualification). POSIX only: the peer starts through a `#!/bin/sh` wrapper.
+		describe.skipIf(process.platform === 'win32')(
+			'Grok ACP transport consumers (GT1-07-04)',
+			() => {
+				let dir: string;
+				let wrapper: string;
+				let events: Array<[string, ...unknown[]]>;
+				let consent: {
+					bindings: Array<{ sessionId: string; tabId: string }>;
+					asked: Array<{ tabId: string; toolName: string; input: Record<string, unknown> }>;
+					closed: string[];
+					answer: (tabId: string) => 'allow' | 'deny';
+				};
+				type HeadlessSpawn = (config: ProcessConfig) => { pid: number; success: boolean };
+				let headless: ReturnType<typeof vi.fn<HeadlessSpawn>>;
+				type Internals = {
+					processes: Map<string, ManagedProcess>;
+					childProcessSpawner: { spawn: (config: ProcessConfig) => unknown };
+					grokAcpSpawner: {
+						spawn: (config: ProcessConfig) => { pid: number; success: boolean };
+						ctx: { liveTurns: Set<unknown>; consent: unknown };
+					};
+				};
+				const internals = () => processManager as unknown as Internals;
+				const scope = (account = 'grok:fixture-account') =>
+					({
+						version: 1,
+						state: 'bound',
+						provider: 'grok',
+						accountRef: account,
+						host: { kind: 'local', identity: 'fixture-machine' },
+						cwd: dir,
+					}) as const;
+				const logOf = (name: string) => readSyntheticGrokAcpLog(path.join(dir, `${name}.log`));
+				function config(
+					sessionId: string,
+					env: Record<string, string>,
+					extra: Partial<ProcessConfig> = {}
+				): ProcessConfig {
+					return {
+						sessionId,
+						tabId: `${sessionId}-tab`,
+						toolType: 'grok',
+						cwd: dir,
+						command: wrapper,
+						// handle-spawn passes the agent executable's own directory, as discovery assumes.
+						extraPathDirs: [dir],
+						args: [],
+						prompt: `work on ${sessionId}`,
+						nativeSessionScope: scope(),
+						permission: { requested: 'standard' },
+						// One native session per key: the driver refuses a second live owner (busy).
+						customEnvVars: {
+							FAKE_LOG: path.join(dir, `${sessionId}.log`),
+							FAKE_SESSION: `native-${sessionId}`,
+							...env,
+						},
+						...extra,
+					} as ProcessConfig;
+				}
+				const of = (name: string, sessionId?: string) =>
+					events.filter(([event, id]) => event === name && (!sessionId || id === sessionId));
+				const exited = (sessionId: string) =>
+					vi.waitFor(() => expect(of('exit', sessionId)).toHaveLength(1), { timeout: 8000 });
+				const exitCodes = (sessionId: string) => of('exit', sessionId).map(([, , code]) => code);
+				const usageOf = (sessionId: string) =>
+					of('usage', sessionId).map(([, , usage]) => usage as Record<string, any>);
+
+				beforeEach(() => {
+					dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gt1-07-04-'));
+					wrapper = writeSyntheticGrokAcpPeer(dir);
+					processManager = new ProcessManager(() => false, { isCoworkingEnabled: () => false });
+					events = [];
+					const emit = processManager.emit.bind(processManager);
+					vi.spyOn(processManager, 'emit').mockImplementation((event, ...args) => {
+						events.push([String(event), ...args]);
+						return emit(event, ...args);
+					});
+					headless = vi.fn<HeadlessSpawn>(() => ({ pid: 1, success: true }));
+					internals().childProcessSpawner = { spawn: headless };
+					consent = { bindings: [], asked: [], closed: [], answer: () => 'deny' };
+					internals().grokAcpSpawner.ctx.consent = {
+						openConsentSession: (binding: { sessionId: string; tabId: string }) => {
+							consent.bindings.push(binding);
+							return {
+								request: async (toolName: string, input: Record<string, unknown>) => {
+									consent.asked.push({ tabId: binding.tabId, toolName, input });
+									return consent.answer(binding.tabId) === 'allow'
+										? { behavior: 'allow' }
+										: { behavior: 'deny', message: 'Denied by the person' };
+								},
+								close: () => consent.closed.push(binding.tabId),
+							};
+						},
+					};
+				});
+				afterEach(() => {
+					processManager.killAll();
+					vi.restoreAllMocks();
+					fs.rmSync(dir, { recursive: true, force: true });
+				});
+
+				it('runs a standard turn on ACP: late native session id, streamed answer, one exit, no headless', async () => {
+					const result = processManager.spawn(config('acp-ok', { FAKE_SESSION: 'native-late' }));
+					expect(result).toMatchObject({ success: true });
+					expect(result.pid).toBeGreaterThan(0);
+					// The native session id is the peer's, learned after spawn() returned.
+					expect(of('session-id')).toHaveLength(0);
+					await exited('acp-ok');
+
+					expect(of('session-id', 'acp-ok')).toEqual([['session-id', 'acp-ok', 'native-late']]);
+					expect(
+						of('data', 'acp-ok')
+							.map(([, , text]) => text)
+							.join('')
+					).toContain('Hello from ACP');
+					expect(exitCodes('acp-ok')).toEqual([0]);
+					expect(of('agent-error')).toHaveLength(0);
+					expect(logOf('acp-ok')).toEqual([
+						'initialize',
+						'session/new',
+						'session/prompt native-late',
+						'prompt [{"type":"text","text":"work on acp-ok"}]',
+					]);
+					expect(headless).not.toHaveBeenCalled();
+					expect(internals().grokAcpSpawner.ctx.liveTurns.size).toBe(0);
+					expect(processManager.get('acp-ok')).toBeUndefined();
+					// The person's consent session belonged to this tab and closed with the turn.
+					expect(consent.bindings).toEqual([{ sessionId: 'acp-ok', tabId: 'acp-ok-tab' }]);
+					expect(consent.closed).toEqual(['acp-ok-tab']);
+				});
+
+				it('keeps a Full Access turn on the headless route and never starts the ACP peer', () => {
+					processManager.spawn(config('full', {}, { permission: { requested: 'full' } } as never));
+					expect(headless).toHaveBeenCalledTimes(1);
+					expect(internals().grokAcpSpawner.ctx.liveTurns.size).toBe(0);
+					expect(logOf('full')).toEqual([]);
+				});
+
+				it.each([
+					['no consent surface', { tabId: undefined }, /consent/i],
+					['an image payload', { images: ['data:image/png;base64,AAAA'] }, /image/i],
+					['an unbound account', { nativeSessionScope: undefined }, /ownership is unknown/],
+					['an SSH remote', { sshRemoteId: 'remote-1' }, /remote/i],
+				])('refuses %s before any process, with no headless fallback', (_name, extra, message) => {
+					const result = processManager.spawn(
+						config('refused', {}, extra as Partial<ProcessConfig>)
+					);
+					expect(result).toMatchObject({ success: false, pid: -1 });
+					expect(result.error).toMatch(/Nothing was started/);
+					expect(of('agent-error', 'refused')).toHaveLength(1);
+					expect((of('agent-error')[0][2] as AgentError).message).toMatch(message);
+					expect(logOf('refused')).toEqual([]);
+					expect(headless).not.toHaveBeenCalled();
+					expect(processManager.get('refused')).toBeUndefined();
+				});
+
+				it('refuses a peer that proves no agent version after negotiation, before any prompt', async () => {
+					processManager.spawn(config('noversion', { FAKE_MODE: 'noversion' }));
+					await exited('noversion');
+					expect(logOf('noversion').some((line) => line.startsWith('session/prompt'))).toBe(false);
+					expect(exitCodes('noversion')).toEqual([1]);
+					const [error] = of('agent-error', 'noversion');
+					expect((error[2] as AgentError).message).toMatch(/agent version.*No prompt was sent/);
+					expect(headless).not.toHaveBeenCalled();
+				});
+
+				it('correlates each permission request to its own concurrent tab and answers only it', async () => {
+					consent.answer = (tabId) => (tabId === 'perm-a-tab' ? 'allow' : 'deny');
+					processManager.spawn(
+						config('perm-a', { FAKE_MODE: 'permission', FAKE_SESSION: 'native-a' })
+					);
+					processManager.spawn(
+						config('perm-b', { FAKE_MODE: 'permission', FAKE_SESSION: 'native-b' })
+					);
+					expect(internals().grokAcpSpawner.ctx.liveTurns.size).toBe(2);
+					await exited('perm-a');
+					await exited('perm-b');
+
+					expect(consent.asked).toEqual(
+						expect.arrayContaining([
+							{ tabId: 'perm-a-tab', toolName: 'Read', input: { path: 'README.md' } },
+							{ tabId: 'perm-b-tab', toolName: 'Read', input: { path: 'README.md' } },
+						])
+					);
+					expect(consent.asked).toHaveLength(2);
+					expect(
+						of('data', 'perm-a')
+							.map(([, , t]) => t)
+							.join('')
+					).toContain('Allowed answer');
+					expect(
+						of('data', 'perm-b')
+							.map(([, , t]) => t)
+							.join('')
+					).toContain('Denied');
+					expect(
+						of('data', 'perm-b')
+							.map(([, , t]) => t)
+							.join('')
+					).not.toContain('Allowed');
+					expect(exitCodes('perm-a')).toEqual([0]);
+					expect(exitCodes('perm-b')).toEqual([1]);
+					expect(logOf('perm-a')).toContain('answer:perm-1');
+					expect(logOf('perm-b')).toContain('answer:perm-1');
+					expect(consent.closed.sort()).toEqual(['perm-a-tab', 'perm-b-tab']);
+					expect(headless).not.toHaveBeenCalled();
+				});
+
+				it('cancels by protocol (a stop, not a crash), keeps partial usage, then resumes the same native session', async () => {
+					processManager.spawn(config('cancel', { FAKE_MODE: 'hold', FAKE_SESSION: 'native-c' }));
+					await vi.waitFor(() =>
+						expect(logOf('cancel').some((l) => l.startsWith('prompt'))).toBe(true)
+					);
+					expect(processManager.interrupt('cancel')).toBe(true);
+					await exited('cancel');
+					expect(logOf('cancel')).toContain('session/cancel native-c');
+					expect(exitCodes('cancel')).toEqual([0]);
+					expect(of('agent-error', 'cancel')).toHaveLength(0);
+					const partial = usageOf('cancel');
+					expect(partial.at(-1)?.accounting?.cost).toMatchObject({ status: 'partial' });
+
+					events.length = 0;
+					processManager.spawn(
+						config('cancel', { FAKE_LOG: path.join(dir, 'resume.log') }, {
+							args: ['--resume', 'native-c'],
+							agentSessionId: 'native-c',
+							nativeSessionBinding: { ...scope(), nativeSessionId: 'native-c' },
+						} as Partial<ProcessConfig>)
+					);
+					await exited('cancel');
+					expect(logOf('resume')).toEqual([
+						'initialize',
+						'session/load native-c',
+						'session/prompt native-c',
+						'prompt [{"type":"text","text":"work on cancel"}]',
+					]);
+					expect(exitCodes('cancel')).toEqual([0]);
+				});
+
+				it('lets only the current owner of a restarted key exit; a superseded completion is not a second exit', async () => {
+					// ProcessManager.spawn refuses a live key; a restart reaches the spawner directly.
+					const first = internals().grokAcpSpawner.spawn(
+						config('restart', { FAKE_MODE: 'hold', FAKE_LOG: path.join(dir, 'first.log') })
+					);
+					await vi.waitFor(() =>
+						expect(logOf('first').some((l) => l.startsWith('prompt'))).toBe(true)
+					);
+					const superseded = processManager.get('restart')!;
+					internals().grokAcpSpawner.spawn(
+						config('restart', { FAKE_LOG: path.join(dir, 'second.log'), FAKE_SESSION: 'native-2' })
+					);
+					await exited('restart');
+					expect(exitCodes('restart')).toEqual([0]);
+
+					// The superseded turn now ends; its completion reaches neither the tab nor the map.
+					superseded.sdkController!.kill();
+					await vi.waitFor(() => expect(internals().grokAcpSpawner.ctx.liveTurns.size).toBe(0));
+					await new Promise((r) => setTimeout(r, 50));
+					expect(of('exit', 'restart')).toHaveLength(1);
+					expect(of('agent-error', 'restart')).toHaveLength(0);
+					expect(first.pid).not.toBe(processManager.get('restart')?.pid);
+				});
+
+				it.each([
+					['exact ticks above safe integer precision', '123456789012345678'],
+					['an authoritative zero', '0'],
+					['no reported cost', undefined],
+				])('carries %s through the desktop recorder once', async (_name, ticks) => {
+					const key = `usage-${ticks ?? 'none'}`;
+					processManager.spawn(config(key, ticks === undefined ? {} : { FAKE_TICKS: ticks }));
+					await exited(key);
+					const usage = usageOf(key);
+					// One terminal observation: recorded and billed once, with its provenance intact.
+					expect(usage).toHaveLength(1);
+					expect(usage[0]).toMatchObject({
+						inputTokens: 100,
+						outputTokens: 10,
+						cacheReadInputTokens: 20,
+						cacheCreationInputTokens: 10,
+						reasoningTokens: 3,
+						accounting: {
+							source: 'runtime-stream',
+							route: 'acp',
+							scope: 'turn',
+							final: true,
+							completeness: 'complete',
+							providerSessionId: `native-${key}`,
+							turnId: `${key}:${usage[0].accounting.processGeneration}`,
+							scopeId: JSON.stringify(['grok:fixture-account', 'fixture-machine']),
+						},
+					});
+					const cost = usage[0].accounting.cost;
+					if (ticks === undefined) {
+						// Unknown is not a known zero: no ticks, no exact status.
+						expect(cost).toEqual({ status: 'unknown' });
+					} else {
+						// The tick string is carried verbatim, never rebuilt from an unsafe number.
+						expect(cost).toMatchObject({ status: 'exact', costUsdTicks: ticks });
+						if (ticks === '0') expect(cost.costUsd).toBe(0);
+					}
+				});
+
+				// GT1-05-03 discovery handoff: `agents:discoverSlashCommands` hands
+				// `discoverGrokSlashCommands` this ProcessManager's own reader; nothing else answers.
+				describe('selected-agent command discovery over the live owner', () => {
+					const COMMANDS = [
+						{ name: 'review', description: 'Review the diff', input: { hint: 'path' } },
+					];
+					const SECRET = 'xai-fixture-secret-0123456789';
+					const envFor = (key: string, extra: Record<string, string> = {}) => ({
+						FAKE_LOG: path.join(dir, `${key}.log`),
+						FAKE_SESSION: `native-${key}`,
+						FAKE_MODE: 'hold',
+						FAKE_COMMANDS: JSON.stringify(COMMANDS),
+						XAI_API_KEY: SECRET,
+						...extra,
+					});
+					async function liveTurn(key: string, env: Record<string, string>, extra = {}) {
+						expect(processManager.spawn(config(key, env, extra)).success).toBe(true);
+						await vi.waitFor(() =>
+							expect(logOf(key).some((l) => l.startsWith('prompt'))).toBe(true)
+						);
+					}
+					function discover(
+						key: string,
+						env: Record<string, string>,
+						over: Record<string, unknown> = {},
+						managed?: 'managed'
+					) {
+						const context = {
+							cwd: dir,
+							customPath: wrapper,
+							model: undefined,
+							effort: undefined,
+							environment: { surface: 'desktop', sessionCustomEnvVars: env },
+							target: { kind: 'local' },
+							...over,
+						} as Parameters<typeof discoverGrokSlashCommands>[0];
+						return discoverGrokSlashCommands(
+							context,
+							(over.sessionId as string | undefined) ?? `native-${key}`,
+							(selection) => processManager.grokCommandObservation(selection),
+							() => (managed ? ({ port: { standing: () => 'managed' } } as never) : undefined)
+						);
+					}
+					const unavailable = (reason: string) => ({ status: 'unavailable', commands: [], reason });
+
+					it('answers two tabs on two accounts from their own advertisements, with no RPC, process or leak', async () => {
+						const a = envFor('disc-a');
+						const b = envFor('disc-b', {
+							FAKE_COMMANDS: JSON.stringify([{ name: 'plan', description: 'Plan it' }]),
+						});
+						await liveTurn('disc-a', a);
+						await liveTurn('disc-b', b, { nativeSessionScope: scope('grok:second-account') });
+						const before = [logOf('disc-a').length, logOf('disc-b').length];
+
+						const first = await discover('disc-a', a);
+						const second = await discover('disc-b', b);
+
+						expect(first).toMatchObject({
+							status: 'discovered',
+							commands: [{ name: 'review', kind: 'native-command', argumentHint: 'path' }],
+							binding: {
+								route: 'grok-acp',
+								sessionId: 'native-disc-a',
+								account: 'grok:fixture-account',
+								host: 'fixture-machine',
+								agentVersion: '9.9.9-fixture',
+							},
+						});
+						expect(second).toMatchObject({
+							status: 'discovered',
+							commands: [{ name: 'plan', kind: 'native-command' }],
+							binding: { sessionId: 'native-disc-b', account: 'grok:second-account' },
+						});
+						// A read is not a request: no RPC to either peer, no process, no headless fallback.
+						expect([logOf('disc-a').length, logOf('disc-b').length]).toEqual(before);
+						expect(headless).not.toHaveBeenCalled();
+						for (const result of [first, second]) {
+							expect(JSON.stringify(result)).not.toContain(SECRET);
+							expect(JSON.stringify(result)).not.toContain(dir);
+						}
+					});
+
+					it('tells an empty advertisement from a missing one, and refuses an invalid catalog', async () => {
+						await liveTurn('disc-empty', envFor('disc-empty', { FAKE_COMMANDS: '[]' }));
+						const missing = envFor('disc-none');
+						delete (missing as Record<string, string>).FAKE_COMMANDS;
+						await liveTurn('disc-none', missing);
+						const invalid = envFor('disc-bad', {
+							FAKE_COMMANDS: JSON.stringify([...COMMANDS, ...COMMANDS]),
+						});
+						await liveTurn('disc-bad', invalid);
+
+						expect(
+							await discover('disc-empty', envFor('disc-empty', { FAKE_COMMANDS: '[]' }))
+						).toMatchObject({ status: 'discovered', commands: [] });
+						expect(await discover('disc-none', missing)).toEqual(
+							unavailable('observation-unavailable')
+						);
+						expect(await discover('disc-bad', invalid)).toEqual(unavailable('invalid-catalog'));
+					});
+
+					it('reads a changed executable, model, environment, cwd, session or stale generation as unavailable', async () => {
+						const env = envFor('disc-stale');
+						await liveTurn('disc-stale', env);
+						expect(await discover('disc-stale', env)).toMatchObject({ status: 'discovered' });
+						for (const over of [
+							{ customPath: path.join(dir, 'other-grok') },
+							{ model: 'grok-other' },
+							{ effort: 'high' },
+							{
+								environment: {
+									surface: 'desktop',
+									sessionCustomEnvVars: { ...env, GROK_HOME: dir },
+								},
+							},
+							{ cwd: path.join(dir, 'elsewhere') },
+							{ sessionId: 'native-someone-else' },
+							{ configGeneration: 'stale-generation' },
+						])
+							expect(await discover('disc-stale', env, over)).toEqual(
+								unavailable('observation-unavailable')
+							);
+					});
+
+					it('reads a stopped, exited, replaced or never-started owner as unavailable', async () => {
+						const env = envFor('disc-life');
+						await liveTurn('disc-life', env);
+						const replaced = processManager.get('disc-life')!;
+						// A newer spawn on the key takes the advertisement away from the older turn.
+						const next = envFor('disc-life', { FAKE_SESSION: 'native-disc-life-2' });
+						internals().grokAcpSpawner.spawn(config('disc-life', next));
+						await vi.waitFor(() =>
+							expect(logOf('disc-life').filter((l) => l.startsWith('prompt'))).toHaveLength(2)
+						);
+						expect(await discover('disc-life', env)).toEqual(
+							unavailable('observation-unavailable')
+						);
+						expect(
+							await discover('disc-life', next, { sessionId: 'native-disc-life-2' })
+						).toMatchObject({ status: 'discovered' });
+						replaced.sdkController!.kill();
+
+						// Stop withdraws it at once, before the process has exited.
+						expect(processManager.interrupt('disc-life')).toBe(true);
+						expect(await discover('disc-life', next, { sessionId: 'native-disc-life-2' })).toEqual(
+							unavailable('observation-unavailable')
+						);
+						await exited('disc-life');
+						expect(await discover('disc-life', next, { sessionId: 'native-disc-life-2' })).toEqual(
+							unavailable('observation-unavailable')
+						);
+						expect(await discover('never-started', envFor('never-started'))).toEqual(
+							unavailable('observation-unavailable')
+						);
+					});
+
+					it('refuses remote and managed routes without reading the owner', async () => {
+						const env = envFor('disc-route');
+						await liveTurn('disc-route', env);
+						const read = vi.spyOn(processManager, 'grokCommandObservation');
+						expect(
+							await discover('disc-route', env, {
+								target: { kind: 'ssh', remoteId: 'remote-1' },
+							})
+						).toEqual(unavailable('remote-unqualified'));
+						expect(
+							await discover('disc-route', env, {
+								environment: { surface: 'desktop', sessionCustomEnvVars: env, managed: true },
+							})
+						).toEqual(unavailable('managed-unqualified'));
+						expect(await discover('disc-route', env, {}, 'managed')).toEqual(
+							unavailable('managed-unqualified')
+						);
+						expect(read).not.toHaveBeenCalled();
+					});
+				});
+			}
+		);
 
 		describe('error detection exports', () => {
 			it('should export AgentError type', () => {

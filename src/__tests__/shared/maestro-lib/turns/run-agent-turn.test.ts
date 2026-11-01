@@ -77,8 +77,13 @@ import {
 	CAPTURED_OPENCODE_SESSION_ID,
 } from '../../../main/process-manager/recordings/captured';
 import { FAKE_AGENT_PATH, fakeTurnFromRecording, writeFakeTurn } from '../run/fakeAgent';
-import { makeAgent, makeContext, makeTab } from './fixtures';
+import { makeAgent, makeContext, makeTab, providerFor } from './fixtures';
 import { createMockSession } from '../../../helpers/mockSession';
+import { tableEffects } from '../../../helpers/managedSpawnPort';
+import {
+	readSyntheticGrokAcpLog,
+	writeSyntheticGrokAcpPeer,
+} from '../../../fixtures/grok-acp-peer';
 import { createMockAITab } from '../../../helpers/mockTab';
 import { buildWorktreeSession } from '../../../../renderer/utils/worktreeSession';
 
@@ -2049,6 +2054,201 @@ describe.each(['local', 'SSH'] as const)('runAgentTurn: Grok native ownership on
 		expect(await collect(started.run)).toEqual([]);
 	});
 });
+
+// GT1-07-04: the portable consumer (library runtime, `maestro-cli host`) on the negotiated ACP
+// route against the synthetic wire-1 peer of fixtures/grok-acp-peer.ts; not native qualification.
+describe.skipIf(process.platform === 'win32')(
+	'runAgentTurn: the Grok ACP route (GT1-07-04)',
+	() => {
+		let dir: string;
+		let wrapper: string;
+		beforeEach(() => {
+			dir = fs.mkdtempSync(path.join(scratch.dir, 'grok-acp-'));
+			wrapper = writeSyntheticGrokAcpPeer(dir);
+			vi.spyOn(runToCompletion, 'runTurn');
+		});
+		afterEach(() => vi.restoreAllMocks());
+
+		const logOf = () => readSyntheticGrokAcpLog(path.join(dir, 'peer.log'));
+		function grokTurn(env: Record<string, string>, tab: Partial<TurnTab> = {}) {
+			const account = path.join(dir, 'account');
+			const assembled = assembleTurn(
+				makeAgent({
+					toolType: 'grok',
+					cwd: dir,
+					customPath: wrapper,
+					customEnvVars: { GROK_HOME: account, FAKE_LOG: path.join(dir, 'peer.log'), ...env },
+				}),
+				makeTab({ permissionMode: 'standard', ...tab }),
+				{ text: 'portable work' },
+				makeContext('grok', { provider: providerFor('grok', wrapper), command: wrapper })
+			);
+			if (!assembled.ok) throw new Error(assembled.message);
+			return { turn: assembled.turn, scope: grokScopeFixture(dir, account) };
+		}
+		function managedOptions(
+			scope: ReturnType<typeof grokScopeFixture>,
+			effects?: ReturnType<typeof tableEffects>
+		) {
+			const leases: Array<{ leaseId: string; actor: unknown }> = [];
+			const options = optionsFor({
+				grokLaunchScope: scope.ports,
+				managed: {
+					authority: createLocalHostAuthority({
+						authorityId: 'acp-route-test',
+						decide: () => ({ decision: 'allow', policyRevision: 1 }),
+						now: () => 0,
+						newId: () => `acp-lease-${leases.length + 1}`,
+					}),
+					context: verifiedContext(),
+					policy: { sources: [], policyRevision: 1 },
+					onLease: (lease) => leases.push(lease),
+					...(effects ? { effects } : {}),
+				},
+			});
+			return { options, leases };
+		}
+		async function finished(run: AgentTurnRun) {
+			const [events, result] = await Promise.all([collect(run), run.result]);
+			return { events, result };
+		}
+		const usageOf = (events: ParsedEvent[]) => events.filter((event) => event.usage?.accounting);
+
+		it('negotiates, binds the permission answer to the lease, and never touches the headless runner', async () => {
+			const effects = tableEffects(() => ({ decision: 'allow' }));
+			const { turn, scope } = grokTurn({
+				FAKE_MODE: 'permission',
+				FAKE_SESSION: 'native-portable',
+			});
+			const { options, leases } = managedOptions(scope, effects);
+
+			const { events, result } = await finished(await start(turn, options));
+
+			expect(result).toMatchObject({ outcome: 'completed', sessionId: 'native-portable' });
+			expect(result.answerText).toContain('Allowed answer');
+			expect(effects.asked).toHaveLength(1);
+			expect(effects.asked[0].effect.kind).toBe('permissions');
+			expect(effects.asked[0].binding).toMatchObject({
+				leaseId: leases[0].leaseId,
+				actor: leases[0].actor,
+			});
+			expect(logOf()).toEqual([
+				'initialize',
+				'session/new',
+				'session/prompt native-portable',
+				// One text block: the composed prompt (system context, then the user's request).
+				expect.stringMatching(/^prompt \[\{"type":"text","text":"[^"]*portable work"\}\]$/),
+				'answer:perm-1',
+			]);
+			expect(events.some((event) => event.sessionId === 'native-portable')).toBe(true);
+			expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+		});
+
+		it('denies a permission request no effect authority can decide, never approving it', async () => {
+			const { turn, scope } = grokTurn({ FAKE_MODE: 'permission' });
+			const { result } = await finished(await start(turn, managedOptions(scope).options));
+			expect(result.outcome).not.toBe('completed');
+			expect(result.answerText ?? '').not.toContain('Allowed');
+			expect(logOf()).toContain('answer:perm-1');
+			expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+		});
+
+		it('refuses an unmanaged standard turn before any process, with no headless fallback', async () => {
+			const { turn, scope } = grokTurn({});
+			const unmanaged = await runAgentTurn(turn, optionsFor({ grokLaunchScope: scope.ports }));
+			expect(unmanaged).toMatchObject({ ok: false, reason: 'grok-route-refused' });
+			expect(logOf()).toEqual([]);
+			expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+		});
+
+		it('keeps a Full Access turn on the native headless runner, never dialing ACP', async () => {
+			const { turn, scope } = grokTurn({}, { permissionMode: 'full' });
+			const run = await start(turn, managedOptions(scope).options);
+			await run.result;
+			expect(runToCompletion.runTurn).toHaveBeenCalledTimes(1);
+			const spec = vi.mocked(runToCompletion.runTurn).mock.calls[0][0];
+			expect(spec.args).toContain('--always-approve');
+			expect(spec.args).not.toContain('stdio');
+			expect(logOf()).toEqual([]);
+		});
+
+		it('refuses a peer that proves no agent version after negotiation, before any prompt', async () => {
+			const { turn, scope } = grokTurn({ FAKE_MODE: 'noversion' });
+			const { result } = await finished(await start(turn, managedOptions(scope).options));
+			expect(result.outcome).not.toBe('completed');
+			expect(logOf().some((line) => line.startsWith('session/prompt'))).toBe(false);
+			expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			['exact ticks above safe integer precision', '123456789012345678'],
+			['an authoritative zero', '0'],
+			['no reported cost', undefined],
+		])('hands the recorder %s once, with its provenance', async (_name, ticks) => {
+			const { turn, scope } = grokTurn(ticks === undefined ? {} : { FAKE_TICKS: ticks });
+			const { events, result } = await finished(await start(turn, managedOptions(scope).options));
+			expect(result.outcome).toBe('completed');
+			const reported = usageOf(events);
+			// One terminal observation, reported once and carried once to the recorder.
+			expect(reported).toHaveLength(1);
+			expect(result.usage).toMatchObject({
+				inputTokens: 100,
+				outputTokens: 10,
+				cacheReadInputTokens: 20,
+				cacheCreationInputTokens: 10,
+				reasoningTokens: 3,
+				accounting: {
+					source: 'runtime-stream',
+					route: 'acp',
+					scope: 'turn',
+					final: true,
+					completeness: 'complete',
+					providerSessionId: 'native-1',
+					turnId: expect.stringMatching(/^agent-1-ai-tab-1:/),
+					processGeneration: reported[0].usage!.accounting!.processGeneration,
+				},
+			});
+			const cost = result.usage!.accounting!.cost;
+			expect(reported[0].usage!.accounting!.cost).toEqual(cost);
+			if (ticks === undefined) expect(cost).toEqual({ status: 'unknown' });
+			else expect(cost).toEqual({ status: 'exact', costUsdTicks: ticks });
+			if (ticks === '0') expect(result.usage!.totalCostUsd).toBe(0);
+		});
+
+		it('cancels by protocol first, keeps partial usage, and resumes the same native session', async () => {
+			const { turn, scope } = grokTurn({ FAKE_MODE: 'hold', FAKE_SESSION: 'native-hold' });
+			const run = await start(turn, managedOptions(scope).options);
+			const done = finished(run);
+			await waitUntil(() => logOf().some((line) => line.startsWith('prompt')));
+			run.interrupt();
+			const { events, result } = await done;
+			expect(logOf()).toContain('session/cancel native-hold');
+			expect(result.outcome).not.toBe('completed');
+			const partial = usageOf(events).at(-1)!.usage!.accounting!;
+			expect(partial.cost).toMatchObject({ status: 'partial', costUsdTicks: '777' });
+			expect(partial.final).toBe(true);
+			expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+
+			// Resume: the retained native session is loaded on a new process, never a new session.
+			const again = grokTurn(
+				{ FAKE_LOG: path.join(dir, 'resume.log') },
+				{ agentSessionId: 'native-hold' }
+			);
+			const resumed = await finished(
+				await start(again.turn, {
+					...managedOptions(again.scope).options,
+					retainedNativeSessionBinding: { ...again.scope.binding, nativeSessionId: 'native-hold' },
+				})
+			);
+			expect(resumed.result).toMatchObject({ outcome: 'completed', sessionId: 'native-hold' });
+			expect(readSyntheticGrokAcpLog(path.join(dir, 'resume.log')).slice(0, 3)).toEqual([
+				'initialize',
+				'session/load native-hold',
+				'session/prompt native-hold',
+			]);
+		});
+	}
+);
 
 describe('runAgentTurn: the Claude token source', () => {
 	const tuiSource = { enableMaestroP: true, maestroPMode: 'interactive' as const };
