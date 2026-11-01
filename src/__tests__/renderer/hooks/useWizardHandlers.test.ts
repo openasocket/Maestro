@@ -1915,7 +1915,12 @@ describe('useWizardHandlers', () => {
 	// handleWizardCommand
 	// ========================================================================
 	describe('Grok wizard configuration handoff', () => {
-		beforeEach(() => vi.useFakeTimers());
+		beforeEach(() => {
+			vi.useFakeTimers();
+			window.maestro.settings = {
+				onExternalChange: vi.fn(() => vi.fn()),
+			} as unknown as typeof window.maestro.settings;
+		});
 		afterEach(() => vi.useRealTimers());
 
 		it.each([

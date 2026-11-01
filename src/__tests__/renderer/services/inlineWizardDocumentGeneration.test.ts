@@ -834,16 +834,16 @@ CONTENT:
 				.mockImplementation(async (id: string) => ({ id, available: true, command: id, args: [] }));
 			Object.assign(window.maestro.process, {
 				spawn: vi.fn().mockResolvedValue({ pid: 123, success: true }),
-				onData: vi.fn(() => vi.fn(removeListener)),
-				onExit: vi.fn(() => vi.fn(removeListener)),
-				onAgentError: vi.fn(() => vi.fn(removeListener)),
+				onData: vi.fn(() => vi.fn(() => removeListener())),
+				onExit: vi.fn(() => vi.fn(() => removeListener())),
+				onAgentError: vi.fn(() => vi.fn(() => removeListener())),
 				kill: vi.fn().mockResolvedValue(true),
 			});
 			Object.assign(window.maestro.autorun, {
 				listDocs: vi.fn().mockResolvedValue({ success: true, files: [], tree: [] }),
 				watchFolder: vi.fn().mockResolvedValue({ success: true }),
 				unwatchFolder: vi.fn().mockResolvedValue({ success: true }),
-				onFileChanged: vi.fn(() => vi.fn(removeListener)),
+				onFileChanged: vi.fn(() => vi.fn(() => removeListener())),
 				writeDoc: vi.fn().mockResolvedValue({ success: true }),
 			});
 		});
