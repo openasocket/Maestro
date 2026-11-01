@@ -137,17 +137,20 @@ const GROK_NATIVE_TYPES = new Set([
 	'max_turns_reached',
 ]);
 
-function isGrokNativeLine(line: string): boolean {
+/** The native record type of a Grok stream line, or null when it is not one. */
+function grokNativeType(line: string): string | null {
 	try {
 		const msg: unknown = JSON.parse(line);
-		return (
-			!!msg &&
-			typeof msg === 'object' &&
-			GROK_NATIVE_TYPES.has(String((msg as { type?: unknown }).type))
-		);
+		if (!msg || typeof msg !== 'object') return null;
+		const type = String((msg as { type?: unknown }).type);
+		return GROK_NATIVE_TYPES.has(type) ? type : null;
 	} catch {
-		return false;
+		return null;
 	}
+}
+
+function isGrokNativeLine(line: string): boolean {
+	return grokNativeType(line) !== null;
 }
 
 /**
@@ -160,7 +163,8 @@ function isGrokNativeLine(line: string): boolean {
  * the model's reasoning to the router as instructions. So the deltas are
  * concatenated directly, thoughts and tool records are dropped, and the text counts
  * only once a successful terminal record arrived, which is when the process manager
- * emits it on the desktop path too.
+ * emits it on the desktop path too. Any native record after that terminal (other
+ * than a trailing usage line) is corruption, and the read returns no answer.
  *
  * The parser is a fresh instance: a Grok parser latches the turn's terminal outcome,
  * so the shared registry instance would carry one turn's failure into the next read.
@@ -178,6 +182,15 @@ function extractGrokText(rawOutput: string): string {
 	let succeeded = false;
 	let resultText: string | null = null;
 	for (const line of lines) {
+		if (succeeded) {
+			// The successful terminal record closes the turn. A later native record
+			// (text, error, a second end) is a corrupted stream, and splicing it in
+			// would hand the router an instruction the turn never answered with. A
+			// trailing usage line carries no text and the parser already ignores it.
+			const type = grokNativeType(line);
+			if (type !== null && type !== 'usage') return '';
+			continue;
+		}
 		const event = parser.parseJsonLine(line);
 		if (!event) continue;
 		if (event.type === 'text' && event.text && !event.isReasoning) {
