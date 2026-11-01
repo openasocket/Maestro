@@ -94,54 +94,17 @@ import {
 	type GrokRouteSnapshot,
 } from '../../../shared/maestro-lib/grok/route';
 import {
+	grokQuestionGapMessage,
+	grokQuestionGapOf,
 	startGrokAcpTurn,
 	validateGrokNativeCommand,
 	type GrokAcpNativeCommandIntent,
 	type GrokAcpRunningTurn,
 	type GrokNativeCommandRefusal,
 } from '../../../shared/maestro-lib/grok/acp-turn';
-import type {
-	GrokAcpQuestionEvent,
-	GrokAcpQuestionSettlement,
-} from '../../../shared/maestro-lib/grok/acp-requests';
+import type { GrokAcpQuestionSettlement } from '../../../shared/maestro-lib/grok/acp-requests';
 
 const LOG_CONTEXT = 'GrokAcpSpawner';
-
-/**
- * The question this turn owned and could not put to a person, when one ended it. A
- * question is never a permission: the driver answers it with the method's own cancel
- * outcome (no tool authorized, no policy changed), and this only decides what the tab
- * is told. The pinned peer advertises no ask-back capability, so the driver settles
- * every question at once (`unavailable`) and no answer path exists to wait on; a
- * pending event would need a negotiated contract and a surface, neither of which the
- * desktop has, so it is not treated as a question this turn can show. A request for
- * another session or turn (stale, `turnId` null) belongs to no turn and is ignored.
- */
-export function grokQuestionGapOf(
-	event: GrokAcpQuestionEvent,
-	turnId: string
-): GrokAcpQuestionSettlement | undefined {
-	if (event.state !== 'settled') return undefined;
-	const { settlement } = event;
-	return settlement.turnId === turnId && settlement.reason !== 'stale-request'
-		? settlement
-		: undefined;
-}
-
-/** What the tab reads when a Grok question ended the turn: a capability gap, not a denial. */
-export function grokQuestionGapMessage(settlement: GrokAcpQuestionSettlement): string {
-	const kind =
-		settlement.method === '_x.ai/mcp/elicit' ? 'an MCP elicitation' : 'a question for you';
-	const why =
-		settlement.reason === 'unavailable'
-			? 'this Grok ACP connection advertises no ask-back capability, so Maestro has no way to show it or send an answer'
-			: `the request could not be handled (${settlement.reason})`;
-	return (
-		`Grok asked ${kind} (${settlement.method}) that this turn could not answer: ${why}. ` +
-		'The question was cancelled and the turn ended; no tool was authorized and no permission or policy changed. ' +
-		'Reply in the chat to give Grok the answer in a new turn.'
-	);
-}
 
 /** Silence budget of a desktop ACP turn (reset by any output, including setup). */
 export const GROK_ACP_DESKTOP_IDLE_MS = GROK_ACP_TURN_IDLE_MS;

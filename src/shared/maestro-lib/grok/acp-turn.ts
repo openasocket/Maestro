@@ -21,6 +21,8 @@ import { GROK_ACP_PROTOCOL_VERSION, GrokAcpTransportError } from './acp-protocol
 import {
 	GrokAcpRequestAdapter,
 	type GrokAcpPermissionTurn,
+	type GrokAcpQuestionEvent,
+	type GrokAcpQuestionSettlement,
 	type GrokAcpRequestOptions,
 } from './acp-requests';
 import {
@@ -298,6 +300,47 @@ export function validateGrokNativeCommand(
 	};
 }
 
+/**
+ * The question this turn owned and could not put to a person, when one ended it. A
+ * question is never a permission: the driver answers it with the method's own cancel
+ * outcome (no tool authorized, no policy changed), and this only decides what the tab
+ * is told. The pinned peer advertises no ask-back capability, so the driver settles
+ * every question at once (`unavailable`) and no answer path exists to wait on; a
+ * pending event would need a negotiated contract and a surface, neither of which any
+ * host has (desktop, browser, Lite or a headless caller), so it is not treated as a
+ * question this turn can show and no answer path is ever waited on. A request for
+ * another session or turn (stale, `turnId` null) belongs to no turn and is ignored.
+ */
+export function grokQuestionGapOf(
+	event: GrokAcpQuestionEvent,
+	turnId: string
+): GrokAcpQuestionSettlement | undefined {
+	if (event.state !== 'settled') return undefined;
+	const { settlement } = event;
+	return settlement.turnId === turnId && settlement.reason !== 'stale-request'
+		? settlement
+		: undefined;
+}
+
+/**
+ * What a caller reads when a Grok question ended the turn: a capability gap, not a
+ * denial and not a stop. The desktop tab, every browser and Lite client mirroring it, and
+ * a headless caller of `startGrokAcpTurn` (the completed turn's `error`) read these words.
+ */
+export function grokQuestionGapMessage(settlement: GrokAcpQuestionSettlement): string {
+	const kind =
+		settlement.method === '_x.ai/mcp/elicit' ? 'an MCP elicitation' : 'a question for you';
+	const why =
+		settlement.reason === 'unavailable'
+			? 'this Grok ACP connection advertises no ask-back capability, so Maestro has no way to show it or send an answer'
+			: `the request could not be handled (${settlement.reason})`;
+	return (
+		`Grok asked ${kind} (${settlement.method}) that this turn could not answer: ${why}. ` +
+		'The question was cancelled and the turn ended; no tool was authorized and no permission or policy changed. ' +
+		'Reply in the chat to give Grok the answer in a new turn.'
+	);
+}
+
 export interface GrokAcpTurnHandlers extends Pick<TurnHandlers, 'onStarted' | 'onEvent'> {
 	/** Observation only: mutation/failure cannot affect the turn or its retained snapshot. */
 	onConfiguration?: (observation: GrokAcpConfigurationObservation) => void;
@@ -374,6 +417,8 @@ export function startGrokAcpTurn(
 	let signalling = false;
 	let failure: Exclude<TurnTerminal, { status: 'success' }> | undefined;
 	let requestFailure: Exclude<TurnTerminal, { status: 'success' }> | undefined;
+	/** The first question this turn owned and settled unanswered (grokQuestionGapOf). */
+	let questionGap: GrokAcpQuestionSettlement | undefined;
 	const parser = new GrokOutputParser();
 	const fault = (): void => {
 		if (settled) return;
@@ -389,7 +434,10 @@ export function startGrokAcpTurn(
 		processGeneration: options.processGeneration,
 		timeoutMs: options.requestTimeoutMs,
 		onFault: fault,
-		onQuestion: handlers.onQuestion,
+		onQuestion: (event) => {
+			questionGap ??= grokQuestionGapOf(event, options.turnId);
+			handlers.onQuestion?.(event);
+		},
 		onSettlement: (value) => {
 			if (value.turnId === options.turnId && value.terminal && value.terminal.status !== 'success')
 				requestFailure ??= { ...value.terminal };
@@ -705,14 +753,31 @@ export function startGrokAcpTurn(
 			parser,
 			{ providerId: 'grok', sessionId: options.turnId }
 		);
+		// A question this turn could not put to anyone settled it (the cancelled terminal is
+		// the question's own, not a later stop or failure). That is no stop a caller asked
+		// for, so it never reads as interrupted: a headless caller gets the same capability
+		// gap the desktop tab shows, and nobody waits on an answer. Nothing was approved.
+		const unanswered =
+			questionGap && !failure && terminal.reason === questionGap.terminal?.reason
+				? questionGap
+				: undefined;
 		return {
-			outcome: resolved.outcome,
+			outcome: unanswered ? 'crashed' : resolved.outcome,
 			terminal: resolved.terminal ?? terminal,
 			answerText: capture?.answerText,
 			sessionId: session?.sessionId,
 			usage: capture?.usage,
 			usageReports: capture?.usageReports ?? [],
-			error: resolved.error,
+			error: unanswered
+				? {
+						type: 'unknown',
+						message: grokQuestionGapMessage(unanswered),
+						recoverable: false,
+						agentId: 'grok',
+						...(session?.sessionId ? { sessionId: session.sessionId } : {}),
+						timestamp: Date.now(),
+					}
+				: resolved.error,
 			exit,
 		};
 	})();
