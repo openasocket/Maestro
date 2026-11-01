@@ -4626,7 +4626,7 @@ Some text with [x] in it that's not a checkbox
 									sshRemoteConfig: remote ? { enabled: true, remoteId: 'r1' } : undefined,
 								}),
 								0,
-								'{"type":"text","data":"done"}\n{"type":"end","sessionId":"selected-resume"}\n'
+								'{"type":"text","data":"done"}\n{"type":"end","stopReason":"EndTurn","sessionId":"selected-resume"}\n'
 							);
 							expect(result.success).toBe(true);
 							const wrapped = mockWrapSpawnWithSsh.mock.calls[0]?.[0];
@@ -4764,7 +4764,7 @@ Some text with [x] in it that's not a checkbox
 								sshRemoteConfig: remote ? { enabled: true, remoteId: 'r1' } : undefined,
 							}),
 							code,
-							'{"type":"text","data":"done"}\n{"type":"end","sessionId":"fixture-session"}\n'
+							'{"type":"text","data":"done"}\n{"type":"end","stopReason":"EndTurn","sessionId":"fixture-session"}\n'
 						);
 						expect(result).toMatchObject({
 							success: true,
