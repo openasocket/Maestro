@@ -842,9 +842,12 @@ export interface ToolExecution {
 	 *  merge `running` and `completed`/`failed` events into a single
 	 *  log entry keyed by this id instead of appending two bubbles. */
 	toolCallId?: string;
-	/** When this tool ran inside a subagent, the `toolCallId` of the parent tool
-	 *  call that spawned it (claude-code's Task tool). Renderers nest the badge
-	 *  under that parent entry; absent for main-transcript tool calls. */
+	/** When this tool ran inside a subagent, the `toolCallId` of the entry to nest
+	 *  under: the parent tool call that spawned it (claude-code's Task tool), or
+	 *  for a child reported by session lineage alone (Grok ACP) the display entry
+	 *  `subagentToolCallId(childSessionId)`, never a provider tool-call id.
+	 *  Renderers nest the badge under that parent entry; absent for
+	 *  main-transcript tool calls. */
 	parentToolUseId?: string;
 }
 

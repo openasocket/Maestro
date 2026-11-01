@@ -19,6 +19,10 @@ import {
 	usageCostUsd,
 } from '../../../shared/maestro-lib/streaming/usage-totals';
 import { TurnCapture } from '../../../shared/maestro-lib/run/turn-capture';
+import {
+	subagentDisplayParentOf,
+	subagentToolCallOf,
+} from '../../../shared/maestro-lib/turns/turn-events';
 import { canonicalJson } from '../../../shared/canonicalJson';
 import type { UsageAccounting, UsageCost } from '../../../shared/types';
 import type { ManagedProcess, UsageStats, AgentError } from '../types';
@@ -993,7 +997,22 @@ export class StdoutHandler {
 				state: event.toolState,
 				timestamp: Date.now(),
 				toolCallId: event.toolCallId,
-				parentToolUseId: event.parentToolUseId,
+				parentToolUseId: subagentDisplayParentOf(event),
+			});
+		}
+
+		// A reported child (Grok ACP lineage) is the tool entry its nested tools name as
+		// display parent, so it renders through the same badge and nesting as a Task call.
+		// Every lifecycle report re-emits it: the renderer merges by id, and the child's
+		// status is monotonic in the capture, so a late report never reopens it.
+		const subagent = subagentToolCallOf(event);
+		if (subagent) {
+			this.emitter.emit('tool-execution', sessionId, {
+				toolName: subagent.toolName,
+				state: subagent.state,
+				timestamp: Date.now(),
+				toolCallId: subagent.toolCallId,
+				parentToolUseId: subagent.parentToolUseId,
 			});
 		}
 

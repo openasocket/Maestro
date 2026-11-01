@@ -279,9 +279,12 @@ export interface LogEntry {
 		};
 		/**
 		 * For tool entries produced inside a subagent: the `toolCallId` of the
-		 * parent tool call that spawned it (claude-code's Task tool). The
-		 * transcript nests these badges under the matching parent entry; entries
-		 * whose parent is not in the log render flat. Only claude-code sets it.
+		 * entry to nest under, either the parent tool call that spawned it
+		 * (claude-code's Task tool) or, for a Grok child reported by session
+		 * lineage, the `Subagent` entry keyed by the child session
+		 * (`subagentToolCallId`), never a provider tool-call id. The transcript
+		 * nests these badges under the matching parent entry; entries whose parent
+		 * is not in the log render flat.
 		 */
 		parentToolUseId?: string;
 		hiddenProgress?: {
