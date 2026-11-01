@@ -416,6 +416,30 @@ describe('useForkConversation', () => {
 			expect(toast.tabId).toBe(newTab.id);
 			expect(toast.title).toBe('Conversation Forked');
 		});
+
+		// GT1-07-02H: a fork names the source tab's resolved mode, never none (which
+		// plans `standard` whatever the source tab shows).
+		it.each([
+			['an explicit standard tab', { permissionMode: 'standard' as const }, 'standard'],
+			['a tab never set (the pill reads Full Access)', {}, 'full'],
+			['a legacy read-only tab', { readOnlyMode: true }, 'readonly'],
+		])('spawns and stamps the fork with the mode of %s', async (_label, tabFields, expected) => {
+			const sourceTab = buildSourceTab(tabFields);
+			const session = buildSession({ aiTabs: [sourceTab], activeTabId: sourceTab.id });
+			const { fork, getSessions } = mountHook([session], session.id);
+
+			fork('log-2');
+
+			const newTab = getSessions()[0].aiTabs.find((t) => t.id !== 'source-tab')!;
+			expect(newTab.permissionMode).toBe(expected);
+			expect(newTab.readOnlyMode).toBe(expected === 'readonly');
+			await waitFor(() => {
+				expect((window as any).maestro.process.spawn).toHaveBeenCalledTimes(1);
+			});
+			const spawnArgs = (window as any).maestro.process.spawn.mock.calls[0][0];
+			expect(spawnArgs.permissionMode).toBe(expected);
+			expect(spawnArgs.readOnlyMode).toBe(expected === 'readonly');
+		});
 	});
 
 	describe('multi-chunk AI response', () => {
