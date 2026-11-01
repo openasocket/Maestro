@@ -40,6 +40,7 @@ import { getAgentDisplayName } from '../../../shared/agentMetadata';
 import { providerProfileKey, providerProfileLabel } from '../../../shared/providerProfiles';
 import { normalizeModelId } from '../../../shared/modelPricing';
 import { canonicalJson } from '../../../shared/canonicalJson';
+import type { UsageCost } from '../../../shared/types';
 import { mergeUsageCost, usageCostUsd } from '../../../shared/maestro-lib/streaming/usage-totals';
 import { summarizeTokenSpeed, type TokenSpeedSource } from '../../../shared/tokenSpeed';
 import {
@@ -371,6 +372,20 @@ function emptyTotals(): TokenUsageTotals {
 	};
 }
 
+/**
+ * A legacy provider-reported amount, which carries no completeness proof. Summed
+ * float amounts (0.1 + 0.2) are not tick-representable, and the canonical merge
+ * keeps only the tick-representable subtotal beside exact Grok ticks, so such an
+ * amount used to vanish from a mixed total. Round it to the 10^-10 USD tick, far
+ * below display precision; an amount past the safe-integer range stays decimal.
+ */
+function legacyReportedCost(costUsd: number): UsageCost {
+	const ticks = Math.round(costUsd * 1e10);
+	return Number.isSafeInteger(ticks)
+		? { status: 'partial', costUsd: ticks / 1e10, costUsdTicks: String(ticks) }
+		: { status: 'partial', costUsd };
+}
+
 /** Add independent session totals or model detail, preserving cost evidence. */
 function addUsageToTotals(
 	t: TokenUsageTotals,
@@ -379,16 +394,12 @@ function addUsageToTotals(
 ): void {
 	// Track each legacy contribution before canonical evidence arrives, so mixed
 	// reported/estimated subtotals do not depend on provider enumeration order.
-	// Convert reported decimals through the canonical tick merger before summing.
 	const previous = accountingByTotals.get(t);
 	const next = m.accounting ?? {
 		completeness: 'unknown' as const,
 		cost:
 			m.costUsd > 0 && !m.costEstimated
-				? mergeUsageCost(
-						{ status: 'exact', costUsdTicks: '0' },
-						{ status: 'partial', costUsd: m.costUsd }
-					)
+				? legacyReportedCost(m.costUsd)
 				: { status: 'unknown' as const },
 	};
 	const accounting: NonNullable<TokenUsageTotals['accounting']> = {
