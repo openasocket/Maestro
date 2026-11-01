@@ -54,6 +54,10 @@ import {
 import { canonicalJson } from '../../../../shared/canonicalJson';
 import { fingerprintGrokSpawnSelection } from '../../../../shared/grokSpawnSelection';
 import { sha256Hex } from '../../../../shared/maestro-lib/managed/authority';
+import {
+	validateGrokNativeCommand,
+	type GrokNativeCommandRefusal,
+} from '../../../../shared/maestro-lib/grok/acp-turn';
 import { generateUUID } from '../../../../shared/uuid';
 import { QUERY_USER_ENV_VAR } from '../../../../shared/webLogin';
 import { getActingUser } from '../../../web-server/auth/acting-user';
@@ -242,6 +246,17 @@ async function handleProcessSpawnImpl(
 		return { success: false, pid: 0, error };
 	}
 	const processManager = requireProcessManager(getProcessManager);
+	// A native command rides this request and is checked before discovery or
+	// preparation; every refusal here is final, never an ordinary prompt.
+	const nativeCommandProblem = grokNativeCommandRequestProblem(
+		config,
+		processManager.managedPort()?.standing() === 'managed'
+	);
+	if (nativeCommandProblem) {
+		const error = `Native Grok command refused (native-command-${nativeCommandProblem}). Nothing was started.`;
+		reportSpawnRefusal(deps, config.sessionId, error);
+		return { success: false, pid: 0, error };
+	}
 	const agentDetector = requireDependency(getAgentDetector, 'Agent detector');
 	const migrationAgentId = config.sessionId.replace(/-ai(?:-.+)?$/, '');
 	const migrationAgent = (
@@ -1456,6 +1471,9 @@ async function handleProcessSpawnImpl(
 	const {
 		dispatchTicket: _claimedTicket,
 		expectedGrokSpawnSelection: _checkedGrokSelection,
+		// Never spread into an ordinary launch: a request that still carries one
+		// here was refused above (host forwarding is GT1-07-02D).
+		grokNativeCommand: _nativeCommand,
 		...spawnConfig
 	} = config;
 	if (promptArtifact) delete spawnConfig.appendSystemPrompt;
@@ -1834,6 +1852,59 @@ async function observeGrokLaunchScope(
 			isExpectedError: isExpectedRemoteError,
 		},
 	});
+}
+
+/** Request-contract refusals a native command gets before any host work. */
+export type GrokNativeCommandRequestProblem =
+	| GrokNativeCommandRefusal
+	| 'not-grok'
+	| 'prompt-mismatch'
+	| 'images-unsupported'
+	| 'route-unavailable'
+	| 'forwarding-unavailable';
+
+/**
+ * Check a `process:spawn` request carrying `grokNativeCommand` against what the
+ * request alone can prove, before discovery or preparation. Reuses
+ * `validateGrokNativeCommand()` with no catalog: anything short of
+ * `catalog-unavailable` is a refusal the live process could never cure. The
+ * catalog, config generation and process generation are the driver's to check
+ * immediately before submission. Undefined when the request carries none.
+ */
+export function grokNativeCommandRequestProblem(
+	config: SpawnProcessConfig,
+	managed: boolean
+): GrokNativeCommandRequestProblem | undefined {
+	if (!Object.prototype.hasOwnProperty.call(config, 'grokNativeCommand')) return undefined;
+	if (config.toolType !== 'grok') return 'not-grok';
+	const intent = config.grokNativeCommand;
+	const tabId = spawnTabId(config);
+	const checked = validateGrokNativeCommand(intent!, undefined, {
+		tabId: tabId ?? '',
+		// The binding's own generation: the host's current one is compared at submission.
+		configGeneration:
+			typeof intent?.binding?.configGeneration === 'string' ? intent.binding.configGeneration : '',
+		processGeneration: '',
+		resumeSessionId: config.agentSessionId,
+		managed,
+		cancelled: false,
+	});
+	if (checked.ok) return 'invalid-intent';
+	if (checked.reason !== 'catalog-unavailable') return checked.reason;
+	// The tab is a request fact, so a wrong one is final here as well.
+	if (!tabId || tabId !== intent!.binding.tabId) return 'scope-mismatch';
+	// The binding's target is the sender's word; the request's own SSH choice decides.
+	if (config.sessionSshRemoteConfig?.enabled) return 'remote-unqualified';
+	const text = intent!.arguments ? `/${intent!.name} ${intent!.arguments}` : `/${intent!.name}`;
+	if (config.prompt !== text) return 'prompt-mismatch';
+	if (config.images?.length) return 'images-unsupported';
+	// Only the negotiated ACP route submits native commands; full and read-only
+	// requests are planned onto the native headless CLI.
+	if (config.permissionMode !== undefined && config.permissionMode !== 'standard')
+		return 'route-unavailable';
+	// Host forwarding to the ACP driver lands with GT1-07-02D; until then nothing
+	// reaches ProcessManager with a native command.
+	return 'forwarding-unavailable';
 }
 
 function spawnTabId(config: Pick<SpawnProcessConfig, 'sessionId' | 'tabId'>): string | undefined {

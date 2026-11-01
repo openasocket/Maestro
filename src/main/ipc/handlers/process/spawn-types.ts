@@ -4,6 +4,7 @@ import type { AutoRunSpawnLineage } from '../../../../shared/maestro-lib/autorun
 import type { ManagedDelegationContext } from '../../../../shared/maestro-lib/managed/delegation';
 import type { NativeSessionLaunch } from '../../../process-manager/types';
 import type { GrokSpawnSelectionFingerprint } from '../../../../shared/grokSpawnSelection';
+import type { GrokAcpNativeCommandIntent } from '../../../../shared/maestro-lib/grok/acp-turn';
 
 /**
  * IPC payload for `process:spawn`.
@@ -30,6 +31,13 @@ export interface SpawnProcessConfig {
 	 *  Omitted for unguarded turns; null means guarded but evidence unavailable.
 	 *  A guarded request must refuse missing/stale evidence before preparation. */
 	expectedGrokSpawnSelection?: GrokSpawnSelectionFingerprint | null;
+	/** One ACP-advertised native Grok command the person picked (GT1-07-02B intent),
+	 *  riding this same request: there is no second queue. It authorizes nothing;
+	 *  `prompt` must be its exact text, the turn must resume its native session on
+	 *  its tab, and the newly admitted process must advertise the same entry before
+	 *  submission. A request carrying it is refused, never run as an ordinary prompt,
+	 *  when any of that cannot hold. Grok only. */
+	grokNativeCommand?: GrokAcpNativeCommandIntent;
 	readOnlyMode?: boolean; // For read-only/plan mode
 	modelId?: string; // For model selection
 	yoloMode?: boolean; // For YOLO/full-access mode (bypasses confirmations)
