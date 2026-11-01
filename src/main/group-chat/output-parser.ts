@@ -4,6 +4,7 @@
  */
 
 import { getOutputParser } from '../parsers';
+import { createOutputParser } from '../parsers/parser-factory';
 import { logger } from '../utils/logger';
 
 /**
@@ -62,6 +63,10 @@ export function extractTextGeneric(rawOutput: string): string {
  * @returns Extracted text content
  */
 export function extractTextFromAgentOutput(rawOutput: string, agentType: string): string {
+	if (agentType === 'grok') {
+		return extractGrokText(rawOutput);
+	}
+
 	const parser = getOutputParser(agentType);
 
 	// If no parser found, try a generic extraction
@@ -118,6 +123,74 @@ export function extractTextFromAgentOutput(rawOutput: string, agentType: string)
 	// Fallback: if no result message, concatenate streaming text parts with newlines
 	// to preserve paragraph structure from partial streaming events
 	return textParts.join('\n');
+}
+
+/** The line types a Grok `streaming-json` stream is made of (see GrokOutputParser). */
+const GROK_NATIVE_TYPES = new Set([
+	'thought',
+	'text',
+	'tool_call',
+	'tool_call_update',
+	'usage',
+	'end',
+	'error',
+	'max_turns_reached',
+]);
+
+function isGrokNativeLine(line: string): boolean {
+	try {
+		const msg: unknown = JSON.parse(line);
+		return (
+			!!msg &&
+			typeof msg === 'object' &&
+			GROK_NATIVE_TYPES.has(String((msg as { type?: unknown }).type))
+		);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Grok's answer, read through the shared Grok parser.
+ *
+ * Grok streams the answer as token-sized `text` deltas whose whitespace is in the
+ * payload, beside `thought` deltas tagged `isReasoning`, and names no answer on its
+ * `end` record. Joining the deltas with newlines (the generic fallback) split words
+ * and moderator `@mention` tags across lines, and keeping the thoughts would hand
+ * the model's reasoning to the router as instructions. So the deltas are
+ * concatenated directly, thoughts and tool records are dropped, and the text counts
+ * only once a successful terminal record arrived, which is when the process manager
+ * emits it on the desktop path too.
+ *
+ * The parser is a fresh instance: a Grok parser latches the turn's terminal outcome,
+ * so the shared registry instance would carry one turn's failure into the next read.
+ * Output with no native Grok line (the plain text the process manager already
+ * extracted, which may itself begin with `{`) is returned as it is.
+ */
+function extractGrokText(rawOutput: string): string {
+	const lines = rawOutput.split('\n');
+	if (!lines.some(isGrokNativeLine)) return rawOutput;
+
+	const parser = createOutputParser('grok');
+	if (!parser) return extractTextGeneric(rawOutput);
+
+	let answer = '';
+	let succeeded = false;
+	let resultText: string | null = null;
+	for (const line of lines) {
+		const event = parser.parseJsonLine(line);
+		if (!event) continue;
+		if (event.type === 'text' && event.text && !event.isReasoning) {
+			answer += event.text;
+		} else if (event.type === 'result') {
+			// A failed turn never reads `result`: the parser latches the failure,
+			// so a later `end` arrives as `error` too.
+			succeeded = true;
+			if (event.text) resultText = event.text;
+		}
+	}
+	if (!succeeded) return '';
+	return resultText ?? answer;
 }
 
 /**
