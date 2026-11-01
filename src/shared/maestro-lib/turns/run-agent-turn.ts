@@ -14,6 +14,8 @@
  *   in its place.
  * - Images without an explicit file route and admitted, resolved content blocks (PA12).
  *   Missing bytes or support refuse in the planner, never falling back to tool-read files.
+ *   A Grok turn's images are resolved here and handed to the planner as ordered ACP blocks
+ *   under the caller's `embeddedImageSupport`; an image that cannot be read refuses first.
  * - Standard permission mode on a Claude Code API turn (PA11). The permission relay lives in
  *   the desktop; without it Claude aborts on the first tool call.
  * - A standard-mode Grok turn the negotiated route selector (`grok/route.ts`) cannot carry.
@@ -61,6 +63,7 @@ import {
 	isManagedLaunchRefusal,
 	type ManagedLaunchInput,
 } from '../launch/launch-plan';
+import { parseDataUrl, type AcpPromptBlock, type EmbeddedImageSupport } from '../launch/image-refs';
 import { resolveSshLaunchTarget, type SshRemoteSettingsStore } from '../launch/ssh-remote-resolver';
 import { newRemotePromptFileDestination } from '../launch/ssh-command-builder';
 import {
@@ -198,6 +201,14 @@ export interface RunAgentTurnOptions {
 	retainedNativeSessionBinding?: NativeSessionBinding;
 	/** Recheck the original tab/provider selection across asynchronous admission. */
 	recheckNativeSelection?(): boolean;
+	/**
+	 * The host-admitted image bounds for this route, model and fresh or resumed turn (MIME
+	 * types, count, bytes per image and in total). A Grok turn's attachments go into its ACP
+	 * prompt file as ordered embedded blocks checked against these bounds; absent, a Grok turn
+	 * with images is refused before anything is written or started. Caller policy, never a
+	 * grant of tools, files or permissions.
+	 */
+	embeddedImageSupport?: EmbeddedImageSupport;
 	/** The managed authority this turn runs under. Absent: an unmanaged turn. */
 	managed?: ManagedTurnAuthority;
 	/**
@@ -493,9 +504,41 @@ export async function runAgentTurn(
 			);
 		}
 	}
+	// A Grok turn's attachments reach its native route the one way phase02 qualified: ordered
+	// ACP blocks (the composed text, then each image in attachment order) in the prompt file the
+	// planner validates against the host-admitted bounds. Each image is resolved to bytes here,
+	// before any artifact or process; one that cannot be read refuses the turn, never dropping it,
+	// sending the text alone, or handing the model a path to read with a tool. The ACP route
+	// counts these blocks and refuses them while its port carries no attachments.
+	let promptBlocks: AcpPromptBlock[] | undefined;
+	let embeddedImageSupport: EmbeddedImageSupport | undefined;
+	if (providerId === 'grok' && turn.entry.images?.length) {
+		promptBlocks = [];
+		if (typeof launch.prompt === 'string' && launch.prompt.length > 0)
+			promptBlocks.push({ type: 'text', text: launch.prompt });
+		for (const image of turn.entry.images) {
+			const resolved = typeof image === 'string' ? parseDataUrl(image) : null;
+			if (!resolved)
+				return refuse(
+					'images-unsupported',
+					'An attached image could not be read, so the turn was not started. Remove it and send again.'
+				);
+			promptBlocks.push({ type: 'image', data: resolved.base64, mimeType: resolved.mediaType });
+		}
+		const support = options.embeddedImageSupport;
+		embeddedImageSupport = support
+			? {
+					mimeTypes: Array.isArray(support.mimeTypes) ? [...support.mimeTypes] : support.mimeTypes,
+					maxCount: support.maxCount,
+					maxBytesPerImage: support.maxBytesPerImage,
+					maxTotalBytes: support.maxTotalBytes,
+				}
+			: undefined;
+	}
 	const planLaunch = () =>
 		buildAgentLaunchPlan({
 			...launch,
+			...(promptBlocks ? { prompt: undefined, promptBlocks, embeddedImageSupport } : {}),
 			args,
 			hasImages,
 			promptFileDestination,
