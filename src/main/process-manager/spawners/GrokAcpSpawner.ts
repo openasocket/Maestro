@@ -33,10 +33,16 @@
  * generation, no admission); the selector then requires native command support, and the
  * driver revalidates the intent against the new process's own catalog immediately before
  * submission. Any refusal is final: never an ordinary prompt, never the headless CLI.
+ *
+ * It is also the one owner of a live Grok ACP advertisement on this host: the discovery
+ * handoff (`ProcessManager.grokCommandObservation`, read by `agents:discoverSlashCommands`)
+ * is answered from `GrokAcpRunningTurn.commands()` of a current turn that this spawner
+ * started for the exact selection, never from a probe, a cache or the disk.
  */
 
 import { createHash } from 'crypto';
 import type { EventEmitter } from 'events';
+import * as path from 'path';
 import { logger } from '../../utils/logger';
 import { captureException } from '../../utils/sentry';
 import { createOutputParser } from '../../parsers';
@@ -44,7 +50,15 @@ import type { AgentError, ManagedProcess, ProcessConfig, SpawnResult } from '../
 import type { DataBufferManager } from '../handlers/DataBufferManager';
 import { StdoutHandler } from '../handlers/StdoutHandler';
 import { ExitHandler } from '../handlers/ExitHandler';
-import { buildChildProcessEnv, collectMaestroEnvVars } from '../utils/envBuilder';
+import {
+	buildAgentEnvironment,
+	buildChildProcessEnv,
+	collectMaestroEnvVars,
+} from '../utils/envBuilder';
+import type {
+	GrokCommandObservation,
+	GrokCommandObservationReader,
+} from '../../agents/grok-skills';
 import { isSupersededGeneration, nextSpawnGeneration } from '../generation';
 import { DEFAULT_QUERY_SOURCE } from '../../../shared/querySource';
 import { canonicalJson } from '../../../shared/canonicalJson';
@@ -282,10 +296,28 @@ function grokAcpDesktopEnv(config: ProcessConfig): NodeJS.ProcessEnv {
 }
 
 /**
+ * The effective launch environment a Grok ACP process is configured by: the complete child
+ * environment without Maestro's own per-spawn facts (the `MAESTRO_` namespace: resume marker,
+ * query source, caller identity, acting user, delegation context). Those differ between two
+ * turns of the same tab and configure nothing of the provider; every inherited, global,
+ * provider and agent layer (auth, endpoint, PATH and the executable's directory) stays in.
+ */
+function grokAcpLaunchEnvProjection(env: NodeJS.ProcessEnv): Record<string, string> {
+	const projected: Record<string, string> = {};
+	for (const [key, value] of Object.entries(env)) {
+		if (value === undefined || key.toUpperCase().startsWith('MAESTRO_')) continue;
+		projected[key] = value;
+	}
+	return projected;
+}
+
+/**
  * Opaque fingerprint of everything a desktop ACP launch depends on (executable, cwd, the
- * complete child environment, bound account/host scope); never persisted or shown. A native
+ * effective launch environment, bound account/host scope); never persisted or shown. A native
  * command intent must carry the generation of the launch it will run under, so a catalog
- * projection stamps this same value, and any change refuses `config-changed`.
+ * projection stamps this same value, and any change refuses `config-changed`. Hashing the
+ * projection (not the raw environment) is what lets a catalog read on one turn bind the
+ * resumed turn after it, while any user, provider or inherited change still moves it.
  */
 export function grokAcpDesktopConfigGeneration(
 	config: ProcessConfig,
@@ -296,12 +328,15 @@ export function grokAcpDesktopConfigGeneration(
 			canonicalJson({
 				command: config.command,
 				cwd: config.cwd,
-				env,
+				env: grokAcpLaunchEnvProjection(env),
 				scope: config.nativeSessionScope,
 			})
 		)
 		.digest('hex');
 }
+
+/** What `agents:discoverSlashCommands` asks the route owner for. */
+export type GrokCommandObservationSelection = Parameters<GrokCommandObservationReader>[0];
 
 interface SpawnerContext {
 	processes: Map<string, ManagedProcess>;
@@ -310,6 +345,8 @@ interface SpawnerContext {
 	exitHandler: ExitHandler;
 	effects: () => ManagedEffectAuthority | null;
 	consent: GrokConsentPort;
+	/** Turns started and not yet finished, stopped or superseded: the advertisement owners. */
+	liveTurns: Set<GrokAcpDesktopTurn>;
 }
 
 export class GrokAcpSpawner {
@@ -332,7 +369,27 @@ export class GrokAcpSpawner {
 			exitHandler: new ExitHandler({ processes, emitter, bufferManager }),
 			effects: options.effects ?? (() => null),
 			consent: options.consent ?? permissionRelayServer,
+			liveTurns: new Set(),
 		};
+	}
+
+	/**
+	 * The live native advertisement for one discovery selection, or undefined. Read only: no
+	 * process, RPC, probe, cache or disk read. The answer comes from `commands()` of the one
+	 * current turn whose own launch matches the selection (see
+	 * `GrokAcpDesktopTurn.observeCommands`); two live owners of one native session prove
+	 * nothing and answer undefined. Exit, Stop, a newer spawn on the process key, a native
+	 * catalog reload and any selection or configuration change all read undefined.
+	 */
+	observeCommands(selection: GrokCommandObservationSelection): GrokCommandObservation | undefined {
+		let observed: GrokCommandObservation | undefined;
+		for (const turn of this.ctx.liveTurns) {
+			const receipt = turn.observeCommands(selection);
+			if (!receipt) continue;
+			if (observed) return undefined;
+			observed = receipt;
+		}
+		return observed;
 	}
 
 	spawn(config: ProcessConfig): SpawnResult {
@@ -592,6 +649,7 @@ class GrokAcpDesktopTurn {
 		managedProcess.pid = this.running.handle.pid ?? -1;
 		managedProcess.spawnGeneration = generation;
 		this.ctx.processes.set(config.sessionId, managedProcess);
+		this.ctx.liveTurns.add(this);
 		void this.running.completed.then(
 			(completed) => this.settle(completed),
 			(error: unknown) => {
@@ -654,6 +712,62 @@ class GrokAcpDesktopTurn {
 		else this.running.handle.terminate();
 	}
 
+	/**
+	 * This turn's live advertisement as a host receipt, when the discovery selection is the
+	 * launch this turn actually runs: same native session (the catalog's own), cwd, requested
+	 * model/effort, executable (the selection's custom path, when it names one), a local
+	 * standalone target, and the same config generation recomputed from the selection's
+	 * environment layers over this executable. The launch environment returned is that
+	 * recomputed projection's source, proven equal to this turn's by the generation; nothing
+	 * of the raw child environment is retained or returned for it. Undefined otherwise.
+	 */
+	observeCommands(selection: GrokCommandObservationSelection): GrokCommandObservation | undefined {
+		const { config, input } = this;
+		if (
+			this.stopped ||
+			!this.isCurrent() ||
+			config.admission ||
+			config.sshRemoteId ||
+			input.snapshot.target !== 'local' ||
+			selection.environment.managed ||
+			!path.isAbsolute(config.command)
+		)
+			return undefined;
+		const catalog = this.running.commands();
+		if (
+			!catalog ||
+			catalog.processGeneration !== String(this.managedProcess.spawnGeneration) ||
+			catalog.sessionId !== selection.sessionId ||
+			catalog.cwd !== config.cwd ||
+			selection.cwd !== config.cwd ||
+			catalog.account !== input.snapshot.account ||
+			catalog.host !== input.snapshot.host ||
+			catalog.selection.model !== input.model ||
+			catalog.selection.effort !== input.effort ||
+			selection.model !== input.model ||
+			selection.effort !== input.effort ||
+			(selection.customPath !== undefined && selection.customPath !== config.command)
+		)
+			return undefined;
+		const env = buildAgentEnvironment({
+			...selection.environment,
+			extraPathDirs: [path.dirname(config.command), ...(selection.environment.extraPathDirs ?? [])],
+		});
+		const configGeneration = grokAcpDesktopConfigGeneration(config, env);
+		if (configGeneration !== input.snapshot.configGeneration) return undefined;
+		return {
+			...catalog,
+			target: 'local',
+			configGeneration,
+			selection: {
+				customPath: selection.customPath,
+				model: input.model,
+				effort: input.effort,
+			},
+			launch: { command: config.command, cwd: config.cwd, env },
+		};
+	}
+
 	private isCurrent(): boolean {
 		return (
 			!this.finished &&
@@ -681,6 +795,7 @@ class GrokAcpDesktopTurn {
 
 	/** Report the turn's exit through ExitHandler, exactly once. */
 	private finish(code: number): void {
+		this.ctx.liveTurns.delete(this);
 		if (this.finished) return;
 		// Every request still waiting on the person is denied; exit clears the prompt.
 		this.input.consentSession?.close();

@@ -61,7 +61,12 @@ import { PtySpawner } from './spawners/PtySpawner';
 import { ChildProcessSpawner } from './spawners/ChildProcessSpawner';
 import { OpencodeServerSpawner } from './spawners/OpencodeServerSpawner';
 import { CodexAppServerSpawner } from './spawners/CodexAppServerSpawner';
-import { GrokAcpSpawner, wantsGrokAcp } from './spawners/GrokAcpSpawner';
+import {
+	GrokAcpSpawner,
+	wantsGrokAcp,
+	type GrokCommandObservationSelection,
+} from './spawners/GrokAcpSpawner';
+import type { GrokCommandObservation } from '../agents/grok-skills';
 import { codexAppServerConfigBlocker, wantsCodexAppServer } from '../codex-app-server/invocation';
 import { DataBufferManager } from './handlers/DataBufferManager';
 import { pushResolvedOmpContextWindow } from './handlers/StdoutHandler';
@@ -1278,6 +1283,17 @@ export class ProcessManager extends EventEmitter {
 	/** The host authority port this manager admits with, read live. */
 	managedPort(): ProcessSpawnAuthorityPort | null {
 		return this.spawnAuthority();
+	}
+
+	/**
+	 * The GT1-05-03 discovery handoff (`ProcessManagerForAgents.grokCommandObservation`): the
+	 * live ACP advertisement of the current Grok turn that owns this exact selection, or
+	 * undefined. No standalone probe and no disk fallback; see `GrokAcpSpawner.observeCommands`.
+	 */
+	grokCommandObservation(
+		selection: GrokCommandObservationSelection
+	): GrokCommandObservation | undefined {
+		return this.grokAcpSpawner.observeCommands(selection);
 	}
 
 	/**
