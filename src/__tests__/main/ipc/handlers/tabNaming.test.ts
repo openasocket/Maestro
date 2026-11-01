@@ -2223,6 +2223,244 @@ describe('Tab Naming IPC Handlers', () => {
 			expect(await resultPromise).toBeNull();
 			expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
 		});
+
+		// GT1-08-14E: a refusal of the effort on a turn that RAN on Grok is never
+		// retried. Neither proof a retry needs exists here (automatic-hint
+		// provenance, a distinct fallback validated for the selected model,
+		// account, host and version), so the first failure stands with one spawn.
+		// The agent double has no prompt file, so the cheap effort of the
+		// REQUESTED provider is what reaches the Grok utility agent: the only way
+		// the retry branch could fire, and so the case the Grok guard must hold.
+		describe('Grok effort refusal keeps the first failure (GT1-08-14F)', () => {
+			const GROK_REFUSAL = {
+				type: 'unknown',
+				agentId: 'grok',
+				recoverable: true,
+				timestamp: 0,
+				message:
+					"--effort/--reasoning-effort: unknown effort level 'low'; use one of: medium, high",
+			};
+			const NAMING_SESSION = 'tab-naming-mock-uuid-1234';
+			const grokAgent = { ...mockClaudeAgent, id: 'grok', name: 'Grok', command: 'grok' };
+
+			function useGrokUtility(model: string | null = 'grok-utility') {
+				mockSettingsStore.get.mockImplementation((key: string, defaultValue?: unknown) =>
+					key === 'utilityAgentId'
+						? 'grok'
+						: key === 'utilityModelId'
+							? model
+							: (defaultValue ?? {})
+				);
+				mockAgentDetector.getAgent.mockImplementation(async (id: string) =>
+					id === 'grok' ? grokAgent : null
+				);
+			}
+
+			function grokWarnings(): unknown[][] {
+				return (logger.warn as Mock).mock.calls.filter(
+					([message]) => message === 'Tab naming effort rejected by Grok; keeping the failure'
+				);
+			}
+
+			it('a Grok utility agent refusing the requested provider cheap effort keeps the failure with one spawn', async () => {
+				const { applyAgentConfigOverrides } = await import('../../../../main/utils/agent-args');
+				useGrokUtility();
+				const callbacks = captureListeners();
+
+				const resultPromise = invokeHandler('tabNaming:generateTabName', {
+					userMessage: 'Fix the Slack formatting',
+					agentType: 'claude-code',
+					cwd: '/test/project',
+				});
+				await vi.waitFor(() => {
+					expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				});
+				// The effort was the requested provider's ladder value, not a Grok hint.
+				expect((applyAgentConfigOverrides as Mock).mock.calls[0][2]).toMatchObject({
+					sessionCustomEffort: 'low',
+				});
+				const spawned = mockProcessManager.spawn.mock.calls[0][0] as ProcessConfig;
+				expect(spawned.toolType).toBe('grok');
+
+				callbacks['agent-error']?.(NAMING_SESSION, GROK_REFUSAL);
+				callbacks.exit?.(NAMING_SESSION, 1);
+
+				expect(await resultPromise).toBeNull();
+				expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				expect(applyAgentConfigOverrides).toHaveBeenCalledTimes(1);
+				expect(mockAgentDetector.getAgent).toHaveBeenCalledExactlyOnceWith('grok');
+				// One log line, the session id alone: no prompt, no value, no offered menu.
+				expect(grokWarnings()).toEqual([
+					[
+						'Tab naming effort rejected by Grok; keeping the failure',
+						'[TabNaming]',
+						{ sessionId: NAMING_SESSION },
+					],
+				]);
+				expect(
+					(logger.warn as Mock).mock.calls.some(([message]) =>
+						String(message).includes('retrying at the agent default')
+					)
+				).toBe(false);
+			});
+
+			it('keeps an uppercase refusal with no selectable menu, read from the output alone', async () => {
+				useGrokUtility();
+				const callbacks = captureListeners();
+
+				const resultPromise = invokeHandler('tabNaming:generateTabName', {
+					userMessage: 'Fix the Slack formatting',
+					agentType: 'claude-code',
+					cwd: '/test/project',
+				});
+				await vi.waitFor(() => {
+					expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				});
+				// No agent error: the refusal is only in what the turn printed.
+				callbacks.data?.(
+					NAMING_SESSION,
+					"--effort/--reasoning-effort: unknown effort level 'LOW'; this model has no selectable effort levels"
+				);
+				callbacks.exit?.(NAMING_SESSION, 1);
+
+				expect(await resultPromise).toBeNull();
+				expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				expect(grokWarnings()).toHaveLength(1);
+			});
+
+			it('a distinct value on the refusal menu is a diagnostic, not a fallback to retry on', async () => {
+				const { applyAgentConfigOverrides } = await import('../../../../main/utils/agent-args');
+				useGrokUtility();
+				// The agent's own configured (inherited) Grok effort: what a retry would fall back to.
+				mockAgentConfigsStore.get.mockReturnValue({ grok: { effort: 'low' } });
+				const callbacks = captureListeners();
+
+				const resultPromise = invokeHandler('tabNaming:generateTabName', {
+					userMessage: 'Fix the Slack formatting',
+					agentType: 'claude-code',
+					cwd: '/test/project',
+				});
+				await vi.waitFor(() => {
+					expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				});
+				callbacks['agent-error']?.(NAMING_SESSION, {
+					...GROK_REFUSAL,
+					message:
+						"--effort/--reasoning-effort: unknown effort level 'low'; use one of: minimal, max",
+				});
+				callbacks.exit?.(NAMING_SESSION, 1);
+
+				expect(await resultPromise).toBeNull();
+				expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				expect(applyAgentConfigOverrides).toHaveBeenCalledTimes(1);
+				expect((applyAgentConfigOverrides as Mock).mock.calls[0][2].agentConfigValues).toEqual({
+					effort: 'low',
+				});
+			});
+
+			it('a Grok session agent (no utility agent) keeps its refusal with one spawn', async () => {
+				mockAgentDetector.getAgent.mockResolvedValue(grokAgent);
+				const callbacks = captureListeners();
+
+				const resultPromise = invokeHandler('tabNaming:generateTabName', {
+					userMessage: 'Fix the Slack formatting',
+					agentType: 'grok',
+					cwd: '/test/project',
+				});
+				await vi.waitFor(() => {
+					expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				});
+				callbacks['agent-error']?.(NAMING_SESSION, {
+					...GROK_REFUSAL,
+					message: "--effort/--reasoning-effort: unknown effort level 'HIGH'; use one of: low",
+				});
+				callbacks.exit?.(NAMING_SESSION, 1);
+
+				expect(await resultPromise).toBeNull();
+				expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				expect(mockAgentDetector.getAgent).toHaveBeenCalledExactlyOnceWith('grok');
+			});
+
+			it('the Grok rule keys on the agent that ran: a Grok session named by a Codex utility agent still retries once', async () => {
+				const { applyAgentConfigOverrides } = await import('../../../../main/utils/agent-args');
+				mockSettingsStore.get.mockImplementation((key: string, defaultValue?: unknown) =>
+					key === 'utilityAgentId'
+						? 'codex'
+						: key === 'utilityModelId'
+							? null
+							: (defaultValue ?? {})
+				);
+				mockAgentDetector.getAgent.mockResolvedValue({ ...mockClaudeAgent, id: 'codex' });
+				const callbacks = captureListeners();
+
+				const resultPromise = invokeHandler('tabNaming:generateTabName', {
+					userMessage: 'Fix the Slack formatting',
+					agentType: 'claude-code',
+					cwd: '/test/project',
+				});
+				await vi.waitFor(() => {
+					expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				});
+				// The same Grok wording, on a turn Codex ran: an ordinary provider's single retry.
+				callbacks['agent-error']?.(NAMING_SESSION, GROK_REFUSAL);
+				callbacks.exit?.(NAMING_SESSION, 1);
+				await vi.waitFor(() => {
+					expect(mockProcessManager.spawn).toHaveBeenCalledTimes(2);
+				});
+				expect((applyAgentConfigOverrides as Mock).mock.calls[1][2].sessionCustomEffort).toBe(
+					undefined
+				);
+				expect((mockProcessManager.spawn.mock.calls[1][0] as ProcessConfig).toolType).toBe('codex');
+
+				// At most one retry: a second refusal ends it.
+				callbacks['agent-error']?.(NAMING_SESSION, GROK_REFUSAL);
+				callbacks.exit?.(NAMING_SESSION, 1);
+				expect(await resultPromise).toBeNull();
+				expect(mockProcessManager.spawn).toHaveBeenCalledTimes(2);
+				expect(grokWarnings()).toEqual([]);
+			});
+
+			it('a Grok refusal followed by a clean exit is not retried and reads the answer it gave', async () => {
+				useGrokUtility();
+				const callbacks = captureListeners();
+
+				const resultPromise = invokeHandler('tabNaming:generateTabName', {
+					userMessage: 'Fix the Slack formatting',
+					agentType: 'claude-code',
+					cwd: '/test/project',
+				});
+				await vi.waitFor(() => {
+					expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				});
+				callbacks['agent-error']?.(NAMING_SESSION, GROK_REFUSAL);
+				callbacks.exit?.(NAMING_SESSION, 0);
+
+				// Nothing to extract from an empty answer: null, and still one process.
+				expect(await resultPromise).toBeNull();
+				expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				expect(grokWarnings()).toHaveLength(1);
+			});
+
+			it('an ordinary Grok failure is not reported as an effort refusal', async () => {
+				useGrokUtility();
+				const callbacks = captureListeners();
+
+				const resultPromise = invokeHandler('tabNaming:generateTabName', {
+					userMessage: 'Fix the Slack formatting',
+					agentType: 'claude-code',
+					cwd: '/test/project',
+				});
+				await vi.waitFor(() => {
+					expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				});
+				callbacks['agent-error']?.(NAMING_SESSION, { ...GROK_REFUSAL, message: 'Not logged in' });
+				callbacks.exit?.(NAMING_SESSION, 1);
+
+				expect(await resultPromise).toBeNull();
+				expect(mockProcessManager.spawn).toHaveBeenCalledTimes(1);
+				expect(grokWarnings()).toEqual([]);
+			});
+		});
 	});
 
 	describe('Grok owned prompt-file naming (GT1-02-11D)', () => {

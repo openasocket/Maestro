@@ -745,3 +745,169 @@ describe('Grok naming owns real artifact cleanup (GT1-02-11D1)', () => {
 		}
 	);
 });
+
+/**
+ * GT1-08-14E at the managed sink: a naming turn that ran on Grok and was
+ * refused its effort keeps that failure. One admission, one spawn, no second
+ * attempt id; a cancelled or policy-refused turn starts nothing more. The
+ * prompt-file-less Grok double is the only shape that carries a cheap effort
+ * (the requested provider's) into a Grok turn, so it is the case the guard holds.
+ */
+describe('Grok naming effort refusal at the managed sink (GT1-08-14F)', () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	const GROK_REFUSAL_WARNING = 'Tab naming effort rejected by Grok; keeping the failure';
+
+	function grokRefusal(sessionId: string, message: string) {
+		return {
+			type: 'unknown',
+			agentId: 'grok',
+			recoverable: true,
+			timestamp: 0,
+			sessionId,
+			message,
+		};
+	}
+
+	/** Grok as the utility agent, through a definition with no prompt file. */
+	function grokUtility(h: Harness, configs: Record<string, unknown> = {}): void {
+		const definition = getAgentDefinition('grok');
+		if (!definition) throw new Error('no grok definition');
+		const agent = {
+			...definition,
+			promptFile: undefined,
+			available: true,
+			path: '/usr/local/bin/grok',
+			capabilities: getAgentCapabilities('grok'),
+		};
+		h.deps.getAgentDetector = () =>
+			({
+				getAgent: async (id: string) => (id === 'grok' ? agent : null),
+			}) as unknown as AgentDetector;
+		h.deps.settingsStore = fakeStore({
+			shellEnvVars: {},
+			utilityAgentId: 'grok',
+			utilityModelId: 'grok-utility',
+			shortenLongTabNames: false,
+		}) as unknown as TabNamingHandlerDependencies['settingsStore'];
+		h.deps.agentConfigsStore = fakeStore({
+			configs,
+		}) as unknown as TabNamingHandlerDependencies['agentConfigsStore'];
+	}
+
+	function grokWarnings(): unknown[][] {
+		return vi
+			.mocked(logger.warn)
+			.mock.calls.filter(([message]) => message === GROK_REFUSAL_WARNING);
+	}
+
+	it('a dispatched Grok utility turn refusing the cheap effort is admitted once, spawned once and resolves null', async () => {
+		const port = fakeSpawnPort();
+		const h = harness(port);
+		grokUtility(h);
+		const pending = generateTabName(h.deps, { ...dispatchedConfig(), useUtilityAgent: true });
+		await vi.waitFor(() => expect(h.spawn).toHaveBeenCalledOnce());
+		const config = h.spawn.mock.calls[0][0] as ProcessConfig;
+		expect(config.toolType).toBe('grok');
+		expect(config.args).toEqual(expect.arrayContaining(['grok-utility']));
+		expect(config.dispatchedAs).toEqual(DISPATCHED_AS);
+		expect(config.admission).toMatchObject({ provider: 'grok', ...DISPATCHED_AS });
+
+		h.processManager.emit(
+			'agent-error',
+			config.sessionId,
+			grokRefusal(
+				config.sessionId,
+				"--effort/--reasoning-effort: unknown effort level 'low'; use one of: medium, high"
+			)
+		);
+		h.processManager.emit('exit', config.sessionId, 1);
+
+		await expect(pending).resolves.toBeNull();
+		expect(h.spawn).toHaveBeenCalledOnce();
+		// No second attempt of the request was ever taken to the authority.
+		expect(port.asked).toHaveLength(1);
+		expect(port.asked[0].snapshot).toMatchObject({ provider: 'grok' });
+		expect(grokWarnings()).toEqual([
+			[GROK_REFUSAL_WARNING, '[TabNaming]', { sessionId: config.sessionId }],
+		]);
+		expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain('Build a login form');
+	});
+
+	it('an explicit inherited Grok effort refused in upper case keeps the failure on the real prompt-file route', async () => {
+		const port = fakeSpawnPort();
+		const h = harness(port, { provider: 'grok' });
+		h.deps.agentConfigsStore = fakeStore({
+			configs: { grok: { effort: 'HIGH' } },
+		}) as unknown as TabNamingHandlerDependencies['agentConfigsStore'];
+		const pending = generateTabName(h.deps, { ...dispatchedConfig(), agentType: 'grok' });
+		await vi.waitFor(() => expect(h.spawn).toHaveBeenCalledOnce());
+		const config = h.spawn.mock.calls[0][0] as ProcessConfig;
+		expect(config.promptArtifact).toBeDefined();
+
+		h.processManager.emit(
+			'agent-error',
+			config.sessionId,
+			grokRefusal(
+				config.sessionId,
+				"--effort/--reasoning-effort: unknown effort level 'HIGH'; this model has no selectable effort levels"
+			)
+		);
+		h.processManager.emit('exit', config.sessionId, 1);
+
+		await expect(pending).resolves.toBeNull();
+		expect(h.spawn).toHaveBeenCalledOnce();
+		expect(port.asked).toHaveLength(1);
+		expect(grokWarnings()).toHaveLength(1);
+	});
+
+	it('a cancelled Grok turn resolves null and a refusal that arrives after the stop starts nothing', async () => {
+		const port = fakeSpawnPort();
+		const h = harness(port);
+		grokUtility(h);
+		const controller = new AbortController();
+		const pending = generateTabName(
+			h.deps,
+			{ ...dispatchedConfig(), useUtilityAgent: true },
+			controller.signal
+		);
+		await vi.waitFor(() => expect(h.spawn).toHaveBeenCalledOnce());
+		const config = h.spawn.mock.calls[0][0] as ProcessConfig;
+
+		controller.abort();
+		await expect(pending).resolves.toBeNull();
+		h.processManager.emit(
+			'agent-error',
+			config.sessionId,
+			grokRefusal(
+				config.sessionId,
+				"--effort/--reasoning-effort: unknown effort level 'low'; use one of: medium"
+			)
+		);
+		h.processManager.emit('exit', config.sessionId, 1);
+
+		expect(h.spawn).toHaveBeenCalledOnce();
+		expect(port.asked).toHaveLength(1);
+		expect(grokWarnings()).toEqual([]);
+	});
+
+	it('a policy-refused Grok turn never spawns, so there is no refusal to retry', async () => {
+		const port = fakeSpawnPort({
+			decide: () => ({
+				decision: 'deny',
+				reason: 'no naming on this host',
+				policyRevision: 1,
+				code: 'policy-denied',
+			}),
+		});
+		const h = harness(port);
+		grokUtility(h);
+
+		await expect(
+			generateTabName(h.deps, { ...dispatchedConfig(), useUtilityAgent: true })
+		).resolves.toBeNull();
+		expect(h.spawn).not.toHaveBeenCalled();
+		expect(port.asked).toHaveLength(1);
+		expect(grokWarnings()).toEqual([]);
+	});
+});
