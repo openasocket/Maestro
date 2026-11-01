@@ -1264,6 +1264,16 @@ export interface ParsedDeepLink {
 // ============================================================================
 
 /**
+ * How much of a stats cost total is backed by reported cost evidence.
+ * `complete`: every counted session reported an exact cost. `partial`: some
+ * amount is known but at least one session's cost is partial or unknown, so the
+ * total is a floor. `unknown`: sessions were counted but none reported a cost,
+ * which is never the same as a free (zero) total. Independent of
+ * `GlobalAgentStats.isComplete`, which only says the calculation finished.
+ */
+export type StatsCostCoverage = 'complete' | 'partial' | 'unknown';
+
+/**
  * Per-provider statistics breakdown
  */
 export interface ProviderStats {
@@ -1271,8 +1281,17 @@ export interface ProviderStats {
 	messages: number;
 	inputTokens: number;
 	outputTokens: number;
+	/** Legacy numeric projection; read `costCoverage` before treating it as a full total. */
 	costUsd: number;
 	hasCostData: boolean;
+	/**
+	 * Present for providers whose stored history carries its own cost observation
+	 * (Grok's `usage.json` ledger). Absent on providers whose cost is derived by
+	 * the legacy rule (`hasCostData` alone decides), so older payloads still read.
+	 */
+	costCoverage?: StatsCostCoverage;
+	/** Exact amount in 10^10 ticks per USD when every summed amount was tick-exact. */
+	costUsdTicks?: string;
 }
 
 /**
@@ -1291,8 +1310,18 @@ export interface GlobalAgentStats {
 	/** Whether any provider contributed cost data */
 	hasCostData: boolean;
 	totalSizeBytes: number;
-	/** Whether stats calculation is complete (used for progressive updates) */
+	/**
+	 * Whether stats calculation is complete (used for progressive updates). Says
+	 * nothing about cost evidence: a finished calculation can still hold a
+	 * partial or unknown cost, which `costCoverage` reports.
+	 */
 	isComplete: boolean;
+	/**
+	 * Coverage of `totalCostUsd` across the providers that report one
+	 * (`ProviderStats.costCoverage`). Absent when no counted provider reports
+	 * coverage, in which case the legacy `hasCostData` reading applies.
+	 */
+	costCoverage?: StatsCostCoverage;
 	/** Per-provider breakdown */
 	byProvider: Record<string, ProviderStats>;
 }
