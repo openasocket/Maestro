@@ -432,6 +432,8 @@ class ConversationManager {
 		return new Promise<SendMessageResult>((resolveResult) => {
 			let settled = false;
 			let providerError: string | undefined;
+			let spawnAccepted = false;
+			let pendingExit: SendMessageResult | undefined;
 			const resolve = (result: SendMessageResult) => {
 				if (settled) return;
 				settled = true;
@@ -509,6 +511,7 @@ class ConversationManager {
 				(sessionId: string, data: string) => {
 					if (
 						!settled &&
+						!pendingExit &&
 						session.isActive &&
 						this.session === session &&
 						sessionId === session.sessionId
@@ -527,6 +530,7 @@ class ConversationManager {
 					(sessionId: string, content: string) => {
 						if (
 							!settled &&
+							!pendingExit &&
 							session.isActive &&
 							this.session === session &&
 							sessionId === session.sessionId &&
@@ -550,6 +554,7 @@ class ConversationManager {
 					) => {
 						if (
 							!settled &&
+							!pendingExit &&
 							session.isActive &&
 							this.session === session &&
 							sessionId === session.sessionId
@@ -571,14 +576,12 @@ class ConversationManager {
 					});
 					if (
 						!settled &&
+						!pendingExit &&
 						session.isActive &&
 						this.session === session &&
 						sessionId === session.sessionId
 					) {
 						wizardDebugLogger.log('exit', 'Session ID matched, processing exit', { sessionId });
-
-						// Agent finished - cleanupListeners() clears the inactivity timeout
-						this.cleanupListeners(session);
 
 						if (session.agentType === 'grok') {
 							const response = this.parseAgentOutput();
@@ -599,10 +602,21 @@ class ConversationManager {
 									rawOutput: session.outputBuffer,
 								});
 							} else {
-								resolve({ success: true, response, rawOutput: session.outputBuffer });
+								const result: SendMessageResult = {
+									success: true,
+									response,
+									rawOutput: session.outputBuffer,
+								};
+								// A fast exit may precede the IPC receipt. Keep cancellation and
+								// inactivity tracking until the launch is explicitly accepted.
+								if (!spawnAccepted) pendingExit = result;
+								else resolve(result);
 							}
 							return;
 						}
+
+						// Agent finished - cleanupListeners() clears the inactivity timeout
+						this.cleanupListeners(session);
 
 						if (code === 0) {
 							const parsedResponse = this.parseAgentOutput();
@@ -764,8 +778,17 @@ class ConversationManager {
 						return window.maestro.process.kill(session.sessionId);
 					}
 					if (settled || this.session !== session) return;
-					if (session.agentType === 'grok' && !spawnResult.success) {
+					if (session.agentType === 'grok' && spawnResult?.success !== true) {
 						resolve({ success: false, error: providerError || 'Grok wizard launch was refused.' });
+						return;
+					}
+					spawnAccepted = true;
+					if (pendingExit) {
+						resolve(
+							providerError
+								? { success: false, error: providerError, rawOutput: session.outputBuffer }
+								: pendingExit
+						);
 						return;
 					}
 					wizardDebugLogger.log('spawn', 'Agent process spawned successfully', {
