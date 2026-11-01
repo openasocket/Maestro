@@ -7,7 +7,10 @@ import {
 	type TranslatableSession,
 } from '../../../shared/maestro-lib/translation/session';
 import type { NativeSessionBinding } from '../../../shared/maestro-lib/agents/providerSwap';
-import { getDeclaredTranslationDirection } from '../../../shared/maestro-lib/translation/support';
+import {
+	getDeclaredTranslationDirection,
+	TRANSLATION_PROVIDER_VERSIONS,
+} from '../../../shared/maestro-lib/translation/support';
 import { switchTabProvider as rendererSwitch } from '../../../renderer/utils/providerTabSessions';
 import { switchTabProvider } from '../../../shared/maestro-lib/translation/session';
 
@@ -324,9 +327,19 @@ describe('native ownership in translation snapshots', () => {
 					},
 				]);
 				expect(session).toEqual(before);
-				// Committing an already supplied mapping does not declare a native migration route.
-				expect(getDeclaredTranslationDirection('grok', 'codex')).toBeUndefined();
-				expect(getDeclaredTranslationDirection('codex', 'grok')).toBeUndefined();
+				// Committing an already supplied mapping does not declare or certify a native
+				// migration route: the Grok routes are the static, unverified declarations.
+				for (const [source, destination] of [
+					['grok', 'codex'],
+					['codex', 'grok'],
+				])
+					expect(getDeclaredTranslationDirection(source, destination)).toEqual({
+						source,
+						destination,
+						sourceVersions: TRANSLATION_PROVIDER_VERSIONS[source as 'grok' | 'codex'],
+						destinationVersions: TRANSLATION_PROVIDER_VERSIONS[destination as 'grok' | 'codex'],
+						verification: 'unverified',
+					});
 			}
 		);
 	});

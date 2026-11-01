@@ -435,18 +435,24 @@ describe('extractStoredSessionContext: Grok export', () => {
 		['codex', 'grok'],
 		['grok', 'claude-code'],
 		['claude-code', 'grok'],
-	])('does not enable native migration %s -> %s after export', async (source, destination) => {
-		expect(getDeclaredTranslationDirection(source, destination)).toBeUndefined();
-		const context = await extractStoredSessionContext(
-			'grok',
-			binding.cwd,
-			'native-shared',
-			options
-		);
-		expect(context!.logs[1].text).toContain('Selected account content');
-		expect(getDeclaredTranslationDirection(source, destination)).toBeUndefined();
-		expect(context).not.toHaveProperty('nativeSessionBinding');
-	});
+	])(
+		'does not enable or certify native migration %s -> %s by export',
+		async (source, destination) => {
+			// The route is a static, unverified declaration; an export neither adds nor upgrades it.
+			const declared = getDeclaredTranslationDirection(source, destination);
+			const before = structuredClone(declared);
+			expect(declared?.verification).toBe('unverified');
+			const context = await extractStoredSessionContext(
+				'grok',
+				binding.cwd,
+				'native-shared',
+				options
+			);
+			expect(context!.logs[1].text).toContain('Selected account content');
+			expect(getDeclaredTranslationDirection(source, destination)).toEqual(before);
+			expect(context).not.toHaveProperty('nativeSessionBinding');
+		}
+	);
 
 	it('preserves the non-Grok three-argument read and dialogue projection', async () => {
 		const context = await extractStoredSessionContext('claude-code', binding.cwd, 'legacy-native');

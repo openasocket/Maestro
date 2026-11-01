@@ -985,7 +985,8 @@ describe('EditAgentModal', () => {
 						} as AgentConfig,
 					]);
 					fireEvent.click(screen.getByRole('button', { name: 'Agent Provider' }));
-					fireEvent.click(screen.getByRole('option', { name: 'Claude Code' }));
+					// Grok -> Claude Code is a declared (unverified) carry-over direction.
+					fireEvent.click(screen.getByRole('option', { name: 'Claude Code Carry Over' }));
 				} else {
 					fireEvent.change(screen.getByDisplayValue('Local Execution'), {
 						target: { value: change === 'remote' ? 'new-host' : '' },
