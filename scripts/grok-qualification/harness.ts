@@ -7,11 +7,27 @@
  * case and writes one structured receipt per run. It never reads a credential,
  * never contacts an endpoint and never spawns a provider. A case is only ever
  * handed to an executor after every admission input is present AND every
- * harness capability it needs is implemented; in this packet the isolation
- * preflight (GT1-11-08B) and the atomic spend admission (GT1-11-08C) are not,
- * so every case that would touch a binary, an endpoint or a paid model records
- * `not-run` with machine-readable reasons. Default execution, with no
- * configuration, therefore makes zero paid requests and zero network contacts.
+ * harness capability it needs is implemented; the atomic spend admission
+ * (GT1-11-08C) and the case executor are not yet, so every case that would
+ * touch a paid model records `not-run` with machine-readable reasons. Default
+ * execution, with no configuration, therefore makes zero paid requests and
+ * zero network contacts.
+ *
+ * Isolation preflight (GT1-11-08B): before anything could spawn, every case
+ * that needs the binary is held to the declared disposable boundary (actual OS
+ * home, owned local/SSH roots, no production home or readable operator
+ * credentials), the immutable pinned binary (read-only, sha256 before and
+ * after), inspected system/managed policy, empty or synthetic hooks/MCP/plugins
+ * with envrc off, and verified update/telemetry/background-upload suppression
+ * or an operation-aware egress boundary (an origin allowlist alone never
+ * covers a same-origin upload). The final child environment is planned through
+ * the shared env layering and validated by name: credential-free for offline
+ * probes, only the selected account's source for discovery and paid prompts,
+ * every Grok control pinned and every ambient credential, proxy, OTEL, agent
+ * socket, runtime injection and unapproved gateway refused. Offline probes,
+ * discovery operations and paid prompts are separate operation sets. Unknown
+ * isolation or controls are structured `not-run` reasons; no check reads a
+ * previous qualification result.
  *
  * Candidate capabilities (GT1-11-08A): features implemented behind a false
  * production flag are recorded per case as a frozen harness-only snapshot
@@ -30,9 +46,20 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 import { canonicalJson } from '../../src/shared/canonicalJson';
+import {
+	isBlankEnvValue,
+	isSecretEnvKey,
+	stripBlankEnvVars,
+} from '../../src/shared/agentEnvironment';
+import {
+	ALL_ROUTE_ENV_NAMES,
+	PROVIDER_ROUTE_ENV_NAMES,
+	resolveAgentEnvVars,
+} from '../../src/shared/maestro-lib/launch/env';
 import {
 	DEFAULT_MODEL_PRICING,
 	MODEL_PRICING,
@@ -59,7 +86,7 @@ export const RUNS_ROOT = 'tmp/grok-tier1-environment/runs';
  */
 export const HARNESS_CAPABILITIES = {
 	/** Pre-spawn isolation and discovery preflight (GT1-11-08B). */
-	isolationPreflight: false,
+	isolationPreflight: true,
 	/** Atomic shared reservation / provider-cap admission (GT1-11-08C). */
 	atomicSpendAdmission: false,
 	/** A case executor bound to the admitted tuple (later VERIFY owners). */
@@ -103,6 +130,8 @@ export interface QualificationConfig {
 	binary: { path: string | null; sha256: string | null; version: string | null };
 	autoUpdateDisabled: boolean;
 	isolationReceipt: string | null;
+	/** The audited disposable boundary the preflight holds every binary case to; null is not-run. */
+	isolation?: IsolationDeclaration | null;
 	discovery: { authorizationReference: string | null; operations: string[] };
 	spendGuarantee:
 		| { kind: 'worst-case-reservation'; reference: string }
@@ -138,7 +167,12 @@ export interface QualificationCase {
 
 export interface AdmissionReason {
 	id: string;
-	kind: 'admission-input' | 'harness-capability' | 'config-problem' | 'pricing';
+	kind:
+		| 'admission-input'
+		| 'harness-capability'
+		| 'config-problem'
+		| 'pricing'
+		| 'isolation-preflight';
 	detail: string;
 	owner?: string;
 }
@@ -170,6 +204,8 @@ export interface CaseReceipt {
 	cleanup: { ownedProcesses: number; stopped: number };
 	/** Harness-only candidate capabilities for this case; never production availability. */
 	candidateSnapshot: CandidateCapabilitySnapshot | null;
+	/** Pre-spawn isolation and discovery preflight; null when the case needs no binary. */
+	preflight: PreflightResult | null;
 }
 
 export interface BudgetLedger {
@@ -203,6 +239,12 @@ export interface QualificationReceipt {
 		candidates: CandidateCapability[];
 		nonCandidates: typeof NON_CANDIDATE_CAPABILITIES;
 		snapshots: number;
+	};
+	isolationContract: {
+		schema: typeof PREFLIGHT_SCHEMA;
+		requiredControls: string[];
+		offlineProbes: string[];
+		discoveryOperations: string[];
 	};
 	totals: {
 		cases: number;
@@ -277,6 +319,7 @@ export function defaultConfigFromRunState(runState: {
 		binary: { path: null, sha256: null, version: null },
 		autoUpdateDisabled: false,
 		isolationReceipt: str(auth.isolationReceipt),
+		isolation: null,
 		discovery: {
 			authorizationReference: str(auth.discoveryAuthorizationReference),
 			operations: list(auth.allowedDiscoveryOperations),
@@ -627,6 +670,642 @@ export function buildCandidateSnapshot(
 	};
 }
 
+// ---------------------------------------------------------------------------
+// Pre-spawn isolation and discovery preflight (GT1-11-08B)
+// ---------------------------------------------------------------------------
+
+export const PREFLIGHT_SCHEMA = 'grok-isolation-preflight/v1';
+
+/** How a suppression control is known to hold: only `verified` counts without an operation-aware boundary. */
+export type SuppressionState = 'verified' | 'flags-only' | 'unknown';
+export type ResourceState = 'empty' | 'synthetic-owned' | 'unknown';
+
+/**
+ * What the operator's audit says of the disposable boundary. Every field is a
+ * declaration with a reference; the preflight checks what it can observe
+ * (paths, the binary, the planned environment) and refuses every unknown.
+ */
+export interface IsolationDeclaration {
+	boundary: {
+		kind: 'disposable-os-account' | 'vm' | 'container' | 'audited-namespace';
+		reference: string;
+		/** The child's actual OS home inside the boundary; an owned path, never the operator's. */
+		actualHome: string;
+		productionHomeMounted: boolean | null;
+		operatorCredentialsReadable: boolean | null;
+	} | null;
+	/** Owned Grok account homes (`GROK_HOME`), under the allowed roots. */
+	accountRoots: { A?: string; B?: string };
+	/** Per approved SSH target: the owned remote root and the remote binary's sha256. */
+	remoteRoots: Record<string, { root: string; binarySha256: string | null }>;
+	policy: {
+		systemPolicyInspected: boolean;
+		managedPolicy: 'absent' | 'synthetic' | 'unknown';
+		requiredPolicyCompatible: boolean | null;
+	};
+	resources: {
+		hooks: ResourceState;
+		mcp: ResourceState;
+		plugins: ResourceState;
+		envrc: 'disabled' | 'unknown';
+	};
+	egress: {
+		kind: 'deny-all' | 'operation-aware' | 'origin-allowlist' | 'none';
+		reference: string | null;
+		suppression: {
+			update: SuppressionState;
+			telemetry: SuppressionState;
+			backgroundUpload: SuppressionState;
+		};
+	};
+	/** PATH entries for the child, inside the boundary. */
+	path: string[];
+}
+
+const COMPAT_VENDORS = ['CLAUDE', 'CURSOR', 'CODEX'] as const;
+const COMPAT_SURFACES = ['SKILLS', 'RULES', 'AGENTS', 'MCPS', 'HOOKS', 'SESSIONS'] as const;
+
+/**
+ * The Grok controls every planned child carries (run-state
+ * `testEnvironment.controlAudit.envOverrides` plus the 18 compatibility
+ * scanners). Source-supported values; exact-binary efficacy is what the egress
+ * and suppression declarations must vouch for, not these flags alone.
+ */
+export const GROK_CONTROL_ENV: Readonly<Record<string, string>> = Object.freeze({
+	GROK_DISABLE_AUTOUPDATER: '1',
+	GROK_TELEMETRY_ENABLED: '0',
+	GROK_TELEMETRY_TRACE_UPLOAD: '0',
+	GROK_TELEMETRY_MIXPANEL_ENABLED: '0',
+	GROK_EXTERNAL_OTEL: '0',
+	...Object.fromEntries(
+		COMPAT_VENDORS.flatMap((v) => COMPAT_SURFACES.map((s) => [`GROK_${v}_${s}_ENABLED`, '0']))
+	),
+});
+
+/** Credential-free offline probes: the only invocations an offline-inspection case may make. */
+export const OFFLINE_PROBES: Readonly<Record<string, readonly string[]>> = Object.freeze({
+	version: ['--version'],
+	help: ['--help'],
+});
+
+/**
+ * Discovery operations a run may authorize by id, per route. Anything else in
+ * `discovery.operations` is unknown and refused; discovery never implies a
+ * prompt, and a catalog operation needs no preselected model.
+ */
+export const DISCOVERY_OPERATIONS: Readonly<Record<string, { route: Route; detail: string }>> =
+	Object.freeze({
+		'acp-initialize': { route: 'acp-stdio', detail: 'ACP initialize and capability negotiation' },
+		'acp-session-new': { route: 'acp-stdio', detail: 'ACP session/new without a prompt' },
+		'acp-model-catalog': { route: 'acp-stdio', detail: 'ACP config/model menu read' },
+		'native-model-catalog': {
+			route: 'native-headless',
+			detail: 'native model listing without a prompt',
+		},
+	});
+
+/** Gateway names Grok splits its endpoint across; allowed only to an approved origin. */
+const GROK_GATEWAY_ENV = [
+	'GROK_MODELS_BASE_URL',
+	'GROK_CLI_CHAT_PROXY_BASE_URL',
+	'GROK_XAI_API_BASE_URL',
+];
+
+const DENIED_ENV_PATTERNS: ReadonlyArray<[RegExp, string]> = [
+	[/^(https?|all|no|ftp)_proxy$/i, 'proxy'],
+	[/^OTEL_/i, 'otel'],
+	[/^SSH_(AUTH_SOCK|AGENT_PID)$/, 'ssh-agent'],
+	[/^(AWS_|AZURE_|GCLOUD_|CLOUDSDK_|GOOGLE_APPLICATION_CREDENTIALS$)/, 'cloud-credential'],
+	[/^(NODE_OPTIONS|LD_PRELOAD|LD_LIBRARY_PATH|BASH_ENV|DYLD_.*)$/, 'runtime-injection'],
+	[/^GROK_.*(OIDC|AUTH_PROVIDER|AUTH_HELPER|EXTERNAL_AUTH|LOGIN)/, 'auth-helper'],
+	[/^GROK_FOLDER_TRUST$/, 'folder-trust-ungates-hooks'],
+	[/^XAI_/, 'xai-ambient'],
+];
+
+export type CredentialMode = 'none' | 'file' | 'secret-name';
+
+export interface LaunchEnvironmentExpectation {
+	/** `local` paths are checked with the host's resolver, `ssh` paths as remote POSIX paths. */
+	target: Target;
+	home: string;
+	accountRoot: string;
+	roots: string[];
+	credentialMode: CredentialMode;
+	/** The selected auth file the child must read (file mode only). */
+	authPath: string | null;
+	operatorHome: string;
+	approvedEndpoints: string[];
+}
+
+export interface LaunchEnvironmentReport {
+	keys: string[];
+	denied: string[];
+	missingControls: string[];
+	reasons: AdmissionReason[];
+}
+
+const preflightReason = (id: string, detail: string): AdmissionReason => ({
+	id,
+	kind: 'isolation-preflight',
+	detail,
+	owner: 'GT1-11-08B',
+});
+
+function normalizeFor(target: Target, p: string): string {
+	return target === 'ssh' ? path.posix.normalize(p) : path.resolve(p).replace(/\\/g, '/');
+}
+
+function underAny(target: Target, p: string, roots: string[]): boolean {
+	const n = normalizeFor(target, p);
+	return roots.some((r) => isPathAtOrUnderRoot(n, normalizeFor(target, r)));
+}
+
+/** True when two paths are equal or one contains the other. */
+function overlaps(target: Target, a: string, b: string): boolean {
+	const x = normalizeFor(target, a);
+	const y = normalizeFor(target, b);
+	return isPathAtOrUnderRoot(x, y) || isPathAtOrUnderRoot(y, x);
+}
+
+/**
+ * Validate a final child environment by NAME (values are never reported). An
+ * executor hands its fully resolved launch (after every custom layer and
+ * managed pin, e.g. `buildAgentEnvironment` output) through this same check;
+ * an inherited ambient credential there is refused exactly as here.
+ */
+export function validateLaunchEnvironment(
+	env: Record<string, string | undefined>,
+	expect: LaunchEnvironmentExpectation
+): LaunchEnvironmentReport {
+	const reasons: AdmissionReason[] = [];
+	const denied: string[] = [];
+	const missingControls: string[] = [];
+	const set = Object.fromEntries(
+		Object.entries(env).filter(
+			(e): e is [string, string] => typeof e[1] === 'string' && !isBlankEnvValue(e[1])
+		)
+	);
+	const grok = PROVIDER_ROUTE_ENV_NAMES.grok;
+	const allowed = new Set<string>([grok.accountDir ?? 'GROK_HOME']);
+	if (expect.credentialMode === 'file') allowed.add('GROK_AUTH_PATH');
+	if (expect.credentialMode === 'secret-name') allowed.add('XAI_API_KEY');
+	const deny = (key: string, why: string) => {
+		denied.push(key);
+		reasons.push(preflightReason(`env-denied:${why}`, key));
+	};
+
+	for (const key of Object.keys(set).sort()) {
+		if (key in GROK_CONTROL_ENV || key === 'HOME' || key === 'PATH') continue;
+		if (key === 'GROK_AUTH') {
+			deny(key, 'inline-auth');
+			continue;
+		}
+		if (GROK_GATEWAY_ENV.includes(key)) {
+			let origin: string | null = null;
+			try {
+				origin = new URL(set[key]).origin;
+			} catch {
+				origin = null;
+			}
+			const approved = expect.approvedEndpoints
+				.filter((e) => endpointOriginProblem(e) === null)
+				.map((e) => new URL(e).origin);
+			if (expect.credentialMode === 'none' || !origin || !approved.includes(origin))
+				deny(key, 'gateway-unapproved');
+			continue;
+		}
+		if (allowed.has(key)) continue;
+		if (ALL_ROUTE_ENV_NAMES.includes(key)) {
+			deny(key, 'route-credential');
+			continue;
+		}
+		const pattern = DENIED_ENV_PATTERNS.find(([re]) => re.test(key));
+		if (pattern) {
+			deny(key, pattern[1]);
+			continue;
+		}
+		if (isSecretEnvKey(key)) deny(key, 'secret-shaped');
+	}
+	if (expect.credentialMode === 'file' && !set.GROK_AUTH_PATH)
+		reasons.push(preflightReason('env-credential-absent', 'GROK_AUTH_PATH'));
+	if (expect.credentialMode === 'secret-name' && !set.XAI_API_KEY)
+		reasons.push(preflightReason('env-credential-absent', 'XAI_API_KEY'));
+
+	for (const [key, value] of Object.entries(GROK_CONTROL_ENV)) {
+		if (!(key in set)) {
+			missingControls.push(key);
+			reasons.push(preflightReason('env-control-missing', key));
+		} else if (set[key].trim() !== value) {
+			missingControls.push(key);
+			reasons.push(preflightReason('env-control-wrong', key));
+		}
+	}
+
+	const t = expect.target;
+	const same = (a: string | undefined, b: string | null) =>
+		Boolean(a && b && normalizeFor(t, a) === normalizeFor(t, b));
+	if (!same(set.HOME, expect.home)) reasons.push(preflightReason('env-home-mismatch', 'HOME'));
+	if (set.USERPROFILE && !same(set.USERPROFILE, expect.home))
+		reasons.push(preflightReason('env-home-mismatch', 'USERPROFILE'));
+	if (
+		t === 'local' &&
+		set.HOME &&
+		isPathAtOrUnderRoot(normalizeFor(t, expect.operatorHome), normalizeFor(t, set.HOME))
+	)
+		reasons.push(preflightReason('env-home-is-operator-home', 'HOME'));
+	if (!same(set.GROK_HOME, expect.accountRoot))
+		reasons.push(preflightReason('env-grok-home-mismatch', 'GROK_HOME'));
+	if (
+		expect.credentialMode === 'file' &&
+		set.GROK_AUTH_PATH &&
+		!same(set.GROK_AUTH_PATH, expect.authPath)
+	)
+		reasons.push(preflightReason('env-auth-path-mismatch', 'GROK_AUTH_PATH'));
+	if (set.GROK_CONFIG_PATH && !underAny(t, set.GROK_CONFIG_PATH, [expect.accountRoot]))
+		reasons.push(preflightReason('env-path-outside-roots', 'GROK_CONFIG_PATH'));
+	for (const key of [
+		'TMPDIR',
+		'TMP',
+		'TEMP',
+		'XDG_CONFIG_HOME',
+		'XDG_DATA_HOME',
+		'XDG_CACHE_HOME',
+		'XDG_STATE_HOME',
+	])
+		if (set[key] && !underAny(t, set[key], expect.roots))
+			reasons.push(preflightReason('env-path-outside-roots', key));
+	if (t === 'local')
+		for (const entry of (set.PATH ?? '').split(path.delimiter).filter(Boolean))
+			if (
+				isPathAtOrUnderRoot(normalizeFor(t, entry), normalizeFor(t, expect.operatorHome)) &&
+				!underAny(t, entry, expect.roots)
+			) {
+				reasons.push(preflightReason('env-path-under-operator-home', 'PATH'));
+				break;
+			}
+	return { keys: Object.keys(set).sort(), denied, missingControls, reasons };
+}
+
+export interface PlannedLaunch {
+	target: Target;
+	account: 'A' | 'B';
+	credentialMode: CredentialMode;
+	env: Record<string, string>;
+	expectation: LaunchEnvironmentExpectation;
+}
+
+/**
+ * Plan the child environment for one account and mode: a minimal base (PATH,
+ * the boundary's HOME and owned temp roots, never `process.env`) under the
+ * shared layering (`resolveAgentEnvVars`: Grok controls as the provider
+ * defaults, the owned account home and selected credential source as the
+ * session layer), blanks stripped by the shared spawn rule. `offline` carries
+ * no credential source at all.
+ */
+export function planIsolatedLaunch(
+	c: QualificationCase,
+	config: QualificationConfig,
+	account: 'A' | 'B',
+	mode: 'offline' | 'credentialed',
+	workspace: string,
+	operatorHome: string
+): PlannedLaunch | null {
+	const iso = config.isolation;
+	if (!iso?.boundary) return null;
+	const ref = config.credentialReferences.find(
+		(r) => r.provider === 'grok' && r.account === account
+	);
+	const credentialMode: CredentialMode =
+		mode === 'offline' || !ref ? 'none' : ref.kind === 'file' ? 'file' : 'secret-name';
+	let home: string;
+	let accountRoot: string | undefined;
+	let tmp: string;
+	let authPath: string | null = null;
+	let roots: string[];
+	if (c.target === 'ssh') {
+		const target = config.allowedSshTargets[0];
+		const remote = target ? iso.remoteRoots[target] : undefined;
+		if (!remote) return null;
+		const root = path.posix.normalize(remote.root);
+		roots = [root];
+		home = path.posix.join(root, 'home');
+		accountRoot = path.posix.join(root, `grok-${account.toLowerCase()}`);
+		tmp = path.posix.join(root, 'cache', 'tmp');
+		if (credentialMode === 'file' && ref?.kind === 'file')
+			authPath = path.posix.join(root, 'auth', path.basename(ref.path));
+	} else {
+		roots = config.allowedRoots.map((r) => path.resolve(workspace, r));
+		if (!roots.length) return null;
+		home = path.resolve(workspace, iso.boundary.actualHome);
+		accountRoot = iso.accountRoots[account] && path.resolve(workspace, iso.accountRoots[account]);
+		tmp = path.join(roots[0], 'cache', 'tmp');
+		if (credentialMode === 'file' && ref?.kind === 'file')
+			authPath = path.resolve(workspace, ref.path);
+	}
+	if (!accountRoot) return null;
+	const session: Record<string, string> = {
+		GROK_HOME: accountRoot,
+		GROK_CONFIG_PATH:
+			c.target === 'ssh'
+				? path.posix.join(accountRoot, 'config.toml')
+				: path.join(accountRoot, 'config.toml'),
+	};
+	if (credentialMode === 'file' && authPath) session.GROK_AUTH_PATH = authPath;
+	// A secret is resolved by name at spawn; the plan carries only the reference.
+	if (credentialMode === 'secret-name' && ref?.kind === 'secret-name')
+		session.XAI_API_KEY = `secret-ref:${ref.name}`;
+	const env = {
+		PATH: iso.path.join(c.target === 'ssh' ? ':' : path.delimiter),
+		HOME: home,
+		TMPDIR: tmp,
+		TMP: tmp,
+		TEMP: tmp,
+		...stripBlankEnvVars(
+			resolveAgentEnvVars({
+				defaultEnvVars: { ...GROK_CONTROL_ENV },
+				sessionCustomEnvVars: session,
+			})
+		),
+	};
+	return {
+		target: c.target,
+		account,
+		credentialMode,
+		env,
+		expectation: {
+			target: c.target,
+			home,
+			accountRoot,
+			roots,
+			credentialMode,
+			authPath,
+			operatorHome,
+			approvedEndpoints: config.allowedEndpoints,
+		},
+	};
+}
+
+/** sha256 and mutability of a local executable, following a symlink to the real file. */
+export function inspectExecutable(file: string): {
+	sha256: string | null;
+	regular: boolean;
+	readOnly: boolean;
+} {
+	try {
+		const real = fs.realpathSync(file);
+		const st = fs.statSync(real);
+		if (!st.isFile()) return { sha256: null, regular: false, readOnly: false };
+		return {
+			sha256: createHash('sha256').update(fs.readFileSync(real)).digest('hex'),
+			regular: true,
+			readOnly: (st.mode & 0o222) === 0,
+		};
+	} catch {
+		return { sha256: null, regular: false, readOnly: false };
+	}
+}
+
+export interface PreflightResult {
+	schema: typeof PREFLIGHT_SCHEMA;
+	caseId: string;
+	status: 'pass' | 'not-run';
+	operations: { offlineProbes: string[]; discovery: string[]; paidPrompts: boolean };
+	binary: {
+		state: 'local' | 'remote-declared' | 'unpinned';
+		sha256Before: string | null;
+		sha256After: string | null;
+		readOnly: boolean | null;
+	};
+	launches: Array<{
+		account: 'A' | 'B';
+		mode: 'offline' | 'credentialed';
+		credentialMode: CredentialMode;
+		keys: string[];
+		denied: string[];
+		missingControls: string[];
+	}>;
+	reasons: AdmissionReason[];
+}
+
+export interface PreflightContext {
+	workspace: string;
+	/** The harness operator's own home; the child's home may neither be nor contain it. */
+	operatorHome: string;
+}
+
+/**
+ * The pre-spawn isolation and discovery preflight for one case. Pure apart
+ * from reading the pinned binary and owned paths; it never spawns, never reads
+ * a credential value and never consults an earlier qualification result.
+ */
+export function preflightCase(
+	c: QualificationCase,
+	config: QualificationConfig,
+	ctx: PreflightContext
+): PreflightResult {
+	const reasons: AdmissionReason[] = [];
+	const add = (id: string, detail: string) => reasons.push(preflightReason(id, detail));
+	const offline = c.classes.includes('offline-inspection');
+	const discovery = c.classes.includes('discovery');
+	const paid = c.classes.includes('paid');
+	const credentialed = discovery || paid;
+	const result: PreflightResult = {
+		schema: PREFLIGHT_SCHEMA,
+		caseId: c.caseId,
+		status: 'not-run',
+		operations: {
+			offlineProbes: offline ? Object.keys(OFFLINE_PROBES) : [],
+			discovery: [],
+			paidPrompts: paid,
+		},
+		binary: { state: 'unpinned', sha256Before: null, sha256After: null, readOnly: null },
+		launches: [],
+		reasons,
+	};
+
+	// Discovery operations are their own authorized set, separate from probes and prompts.
+	for (const op of config.discovery.operations)
+		if (!(op in DISCOVERY_OPERATIONS)) add('discovery-operation-unknown', op);
+	if (discovery) {
+		result.operations.discovery = config.discovery.operations.filter(
+			(op) => DISCOVERY_OPERATIONS[op]?.route === c.route
+		);
+		if (!result.operations.discovery.length) add('discovery-operation-unauthorized', c.route);
+	}
+
+	// Only the Grok child is planned here; another provider's leg has no preflight of its own yet.
+	for (const p of c.providers)
+		if (p !== 'grok')
+			reasons.push({
+				id: 'cross-provider-preflight-unimplemented',
+				kind: 'isolation-preflight',
+				detail: p,
+				owner: 'GT1-11-13',
+			});
+
+	const iso = config.isolation;
+	if (!iso) {
+		add('isolation-undeclared', 'isolation');
+		return result;
+	}
+	const b = iso.boundary;
+	if (!b) add('boundary-undeclared', 'isolation.boundary');
+	else {
+		if (!b.reference.trim()) add('boundary-reference-absent', 'isolation.boundary.reference');
+		if (b.productionHomeMounted !== false)
+			add(
+				b.productionHomeMounted ? 'production-home-mounted' : 'production-home-unknown',
+				'isolation.boundary.productionHomeMounted'
+			);
+		if (b.operatorCredentialsReadable !== false)
+			add(
+				b.operatorCredentialsReadable
+					? 'operator-credentials-readable'
+					: 'operator-credentials-unknown',
+				'isolation.boundary.operatorCredentialsReadable'
+			);
+	}
+
+	// Owned roots: local paths under the allowed roots (symlinks resolved), SSH under its remote root.
+	const accounts: Array<'A' | 'B'> = c.family === 'E01' ? ['A', 'B'] : ['A'];
+	if (c.target === 'local') {
+		const roots = config.allowedRoots.map((r) => path.resolve(ctx.workspace, r));
+		const owned = (label: string, p: string | undefined) => {
+			if (!p) return add('owned-root-absent', label);
+			const resolved = path.resolve(ctx.workspace, p);
+			if (!underAny('local', resolved, roots)) return add('owned-root-outside-allowed', label);
+			if (fs.existsSync(resolved)) {
+				const real = fs.realpathSync(resolved);
+				const realRoots = roots.filter((r) => fs.existsSync(r)).map((r) => fs.realpathSync(r));
+				if (!underAny('local', real, realRoots)) add('owned-root-symlink-escape', label);
+			}
+			if (
+				isPathAtOrUnderRoot(
+					normalizeFor('local', ctx.operatorHome),
+					normalizeFor('local', resolved)
+				)
+			)
+				add('owned-root-contains-operator-home', label);
+		};
+		if (b) owned('isolation.boundary.actualHome', b.actualHome);
+		for (const a of accounts) owned(`isolation.accountRoots.${a}`, iso.accountRoots[a]);
+		const ra = iso.accountRoots.A;
+		const rb = iso.accountRoots.B;
+		if (
+			accounts.length === 2 &&
+			ra &&
+			rb &&
+			overlaps('local', path.resolve(ctx.workspace, ra), path.resolve(ctx.workspace, rb))
+		)
+			add('account-roots-overlap', 'isolation.accountRoots');
+	} else {
+		const targets = config.allowedSshTargets;
+		if (!targets.length) add('remote-root-absent', 'allowedSshTargets');
+		for (const target of targets) {
+			const remote = iso.remoteRoots[target];
+			if (!remote) {
+				add('remote-root-absent', target);
+				continue;
+			}
+			const root = path.posix.normalize(remote.root);
+			if (!path.posix.isAbsolute(root) || root === '/' || remote.root.includes('~'))
+				add('remote-root-invalid', target);
+			if (!remote.binarySha256) add('remote-binary-undeclared', target);
+			else if (remote.binarySha256 !== config.binary.sha256)
+				add('remote-binary-hash-mismatch', target);
+		}
+	}
+
+	// The immutable pinned binary.
+	if (c.target === 'local' && config.binary.path) {
+		const seen = inspectExecutable(path.resolve(ctx.workspace, config.binary.path));
+		result.binary = {
+			state: 'local',
+			sha256Before: seen.sha256,
+			sha256After: null,
+			readOnly: seen.readOnly,
+		};
+		if (!seen.regular) add('binary-unreadable', 'binary.path');
+		else {
+			if (!seen.readOnly) add('binary-mutable', 'binary.path');
+			if (seen.sha256 !== config.binary.sha256) add('binary-hash-mismatch', 'binary.sha256');
+		}
+	} else if (c.target === 'ssh' && config.binary.sha256) {
+		result.binary = {
+			state: 'remote-declared',
+			sha256Before: config.binary.sha256,
+			sha256After: null,
+			readOnly: null,
+		};
+	}
+
+	// Required policy, compatibility resources and hooks.
+	if (!iso.policy.systemPolicyInspected) add('system-policy-uninspected', 'isolation.policy');
+	if (iso.policy.managedPolicy === 'unknown') add('managed-policy-unknown', 'isolation.policy');
+	if (iso.policy.requiredPolicyCompatible !== true)
+		add(
+			iso.policy.requiredPolicyCompatible === false
+				? 'required-policy-incompatible'
+				: 'required-policy-unknown',
+			'isolation.policy'
+		);
+	for (const k of ['hooks', 'mcp', 'plugins'] as const)
+		if (iso.resources[k] === 'unknown') add(`resource-unknown:${k}`, `isolation.resources.${k}`);
+	if (iso.resources.envrc !== 'disabled') add('envrc-not-disabled', 'isolation.resources.envrc');
+
+	// Egress: offline denies all; discovery/paid need verified suppression or an operation-aware boundary.
+	const egress = iso.egress;
+	if (egress.kind === 'none' || !egress.reference)
+		add('egress-boundary-undeclared', 'isolation.egress');
+	if (offline && !credentialed && egress.kind !== 'deny-all')
+		add('offline-egress-not-denied', 'isolation.egress.kind');
+	if (credentialed && egress.kind !== 'operation-aware') {
+		for (const k of ['update', 'telemetry', 'backgroundUpload'] as const)
+			if (egress.suppression[k] !== 'verified')
+				add(`suppression-unverified:${k}`, `isolation.egress.suppression.${k}`);
+		if (egress.kind === 'origin-allowlist' && egress.suppression.backgroundUpload !== 'verified')
+			add('same-origin-upload-unguarded', 'isolation.egress');
+	}
+	if (
+		!config.autoUpdateDisabled ||
+		(c.target === 'local' && result.binary.readOnly !== true && config.binary.path)
+	)
+		add('update-not-immutable', 'autoUpdateDisabled/binary');
+
+	// The final child environments: credential-free for probes, the selected account source for the rest.
+	const modes: Array<'offline' | 'credentialed'> = [
+		...(offline ? (['offline'] as const) : []),
+		...(credentialed ? (['credentialed'] as const) : []),
+	];
+	for (const a of accounts)
+		for (const mode of modes) {
+			const plan = planIsolatedLaunch(c, config, a, mode, ctx.workspace, ctx.operatorHome);
+			if (!plan) {
+				add('launch-unplannable', `${a}/${mode}`);
+				continue;
+			}
+			const report = validateLaunchEnvironment(plan.env, plan.expectation);
+			reasons.push(...report.reasons);
+			result.launches.push({
+				account: a,
+				mode,
+				credentialMode: plan.credentialMode,
+				keys: report.keys,
+				denied: report.denied,
+				missingControls: report.missingControls,
+			});
+			const cfgPath = plan.env.GROK_CONFIG_PATH;
+			if (c.target === 'local' && cfgPath && fs.existsSync(cfgPath)) {
+				const text = fs.readFileSync(cfgPath, 'utf8');
+				if (/^\s*(api_key|env_key)\s*=/m.test(text))
+					add('config-per-model-credential', `${a}/GROK_CONFIG_PATH`);
+			}
+		}
+
+	result.status = reasons.length ? 'not-run' : 'pass';
+	return result;
+}
+
 export function createBudgetLedger(config: QualificationConfig, runId: string): BudgetLedger {
 	const byProvider: BudgetLedger['byProvider'] = {};
 	for (const p of config.providers)
@@ -826,6 +1505,8 @@ export interface RunOptions {
 	capabilities?: HarnessCapabilities;
 	now?: () => Date;
 	runId?: string;
+	/** The operator's own home the preflight keeps the child out of (defaults to `os.homedir()`). */
+	operatorHome?: string;
 	/** Write the receipt into the owned run directory (the CLI does; tests may not). */
 	write?: boolean;
 }
@@ -850,14 +1531,38 @@ export async function runQualification(options: RunOptions): Promise<{
 	const cases = expandCases(families, selected);
 	const ledger = createBudgetLedger(config, runId);
 	const productionDigestBefore = productionCapabilityDigest();
+	const operatorHome = options.operatorHome ?? os.homedir();
 
 	const receipts: CaseReceipt[] = [];
 	for (const c of cases) {
 		const reasons = admitCase(c, config, problems, capabilities, now());
+		const needsBinary = c.classes.some((k) => k !== 'deterministic');
+		// Pre-spawn: every binary case is held to the isolation preflight first.
+		const preflight =
+			needsBinary && capabilities.isolationPreflight
+				? preflightCase(c, config, { workspace: options.workspace, operatorHome })
+				: null;
+		if (preflight) reasons.push(...preflight.reasons);
 		const lifetime = createCaseLifetime(config.limits.cleanupSeconds);
-		// No executor exists in this packet: an admitted case would be handed to
-		// one here. A case with any reason is recorded and never started.
+		// No executor exists yet: an admitted case would be handed to one here.
+		// A case with any reason is recorded and never started.
 		const cleanup = await lifetime.cleanup();
+		// The pinned binary must be byte-identical after the case as before it.
+		if (
+			preflight?.binary.state === 'local' &&
+			preflight.binary.sha256Before &&
+			config.binary.path
+		) {
+			preflight.binary.sha256After = inspectExecutable(
+				path.resolve(options.workspace, config.binary.path)
+			).sha256;
+			if (preflight.binary.sha256After !== preflight.binary.sha256Before) {
+				const changed = preflightReason('binary-changed-during-case', 'binary.path');
+				preflight.reasons.push(changed);
+				preflight.status = 'not-run';
+				reasons.push(changed);
+			}
+		}
 		receipts.push({
 			...c,
 			status: reasons.length ? 'not-run' : 'admitted',
@@ -869,6 +1574,7 @@ export async function runQualification(options: RunOptions): Promise<{
 			budget: { reservedUsd: 0, settledUsd: 0, uncertainUsd: 0, calls: 0 },
 			cleanup,
 			candidateSnapshot: buildCandidateSnapshot(c, config),
+			preflight,
 		});
 	}
 	const productionDigestAfter = productionCapabilityDigest();
@@ -894,6 +1600,12 @@ export async function runQualification(options: RunOptions): Promise<{
 			candidates: CANDIDATE_CAPABILITIES.map((x) => ({ ...x })),
 			nonCandidates: NON_CANDIDATE_CAPABILITIES,
 			snapshots: receipts.filter((r) => r.candidateSnapshot).length,
+		},
+		isolationContract: {
+			schema: PREFLIGHT_SCHEMA,
+			requiredControls: Object.keys(GROK_CONTROL_ENV),
+			offlineProbes: Object.keys(OFFLINE_PROBES),
+			discoveryOperations: Object.keys(DISCOVERY_OPERATIONS),
 		},
 		totals: {
 			cases: receipts.length,
