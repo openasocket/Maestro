@@ -7,11 +7,24 @@
  * case and writes one structured receipt per run. It never reads a credential,
  * never contacts an endpoint and never spawns a provider. A case is only ever
  * handed to an executor after every admission input is present AND every
- * harness capability it needs is implemented; the atomic spend admission
- * (GT1-11-08C) and the case executor are not yet, so every case that would
- * touch a paid model records `not-run` with machine-readable reasons. Default
+ * harness capability it needs is implemented; the case executor is not yet,
+ * so every case records `not-run` with machine-readable reasons. Default
  * execution, with no configuration, therefore makes zero paid requests and
  * zero network contacts.
+ *
+ * Spend admission (GT1-11-08C): a paid case needs a worst-case plan from
+ * declared per-call token bounds and per-turn billable calls (model rounds,
+ * children, retries, side models, compaction), priced through the canonical
+ * `calculateModelCost`; an unknown price or bound is admitted only under a
+ * provider-enforced cap covering every provider of the case and no larger
+ * than the run budget, and the cost then stays unknown. One ledger per run
+ * (never reset; a translation leg or repeated roundtrip shares it) takes each
+ * reservation in one synchronous check-and-hold, bound to the exact provider,
+ * account, endpoint, models, target, case and authorization expiry, under the
+ * run and per-case spend/call/turn/time limits and the concurrency ceiling.
+ * Every billable call draws from the allowance before dispatch; an uncertain
+ * effect is never retried; an unknown or partial charge stays `uncertain` and
+ * is never refunded or read as zero.
  *
  * Isolation preflight (GT1-11-08B): before anything could spawn, every case
  * that needs the binary is held to the declared disposable boundary (actual OS
@@ -61,6 +74,7 @@ import {
 	resolveAgentEnvVars,
 } from '../../src/shared/maestro-lib/launch/env';
 import {
+	calculateModelCost,
 	DEFAULT_MODEL_PRICING,
 	MODEL_PRICING,
 	normalizeModelId,
@@ -88,7 +102,7 @@ export const HARNESS_CAPABILITIES = {
 	/** Pre-spawn isolation and discovery preflight (GT1-11-08B). */
 	isolationPreflight: true,
 	/** Atomic shared reservation / provider-cap admission (GT1-11-08C). */
-	atomicSpendAdmission: false,
+	atomicSpendAdmission: true,
 	/** A case executor bound to the admitted tuple (later VERIFY owners). */
 	caseExecutor: false,
 } as const;
@@ -135,10 +149,38 @@ export interface QualificationConfig {
 	discovery: { authorizationReference: string | null; operations: string[] };
 	spendGuarantee:
 		| { kind: 'worst-case-reservation'; reference: string }
-		| { kind: 'provider-cap'; reference: string; capUsd: number }
+		| {
+				kind: 'provider-cap';
+				reference: string;
+				capUsd: number;
+				/** Providers whose account the enforced cap covers; omitted means Grok only. */
+				providers?: ProviderId[];
+		  }
 		| null;
+	/** Worst-case work bounds behind a reservation (GT1-11-08C); null leaves the cost unknown. */
+	spendBounds?: SpendBounds | null;
 	limits: QualificationLimits;
 	cases: string[];
+}
+
+export interface SpendBounds {
+	/** The most one billable model call may charge, in tokens. */
+	perCall: {
+		inputTokens: number;
+		outputTokens: number;
+		cacheReadTokens: number;
+		cacheCreationTokens: number;
+	};
+	/** Billable calls per user turn: internal rounds, descendants, retries, side models, compaction. */
+	perTurnCalls: {
+		modelRounds: number;
+		children: number;
+		retries: number;
+		sideModels: number;
+		compaction: number;
+	};
+	/** Models a child, side call or compaction may use beyond allowedModels; each must be priced or capped. */
+	sideModels: string[];
 }
 
 export interface ConfigProblem {
@@ -172,7 +214,8 @@ export interface AdmissionReason {
 		| 'harness-capability'
 		| 'config-problem'
 		| 'pricing'
-		| 'isolation-preflight';
+		| 'isolation-preflight'
+		| 'spend-admission';
 	detail: string;
 	owner?: string;
 }
@@ -200,7 +243,16 @@ export interface CaseReceipt {
 	paidRequests: number;
 	networkContacts: number;
 	pricing: PricingProvenance[];
-	budget: { reservedUsd: number; settledUsd: number; uncertainUsd: number; calls: number };
+	budget: {
+		reservedUsd: number;
+		settledUsd: number;
+		uncertainUsd: number;
+		calls: number;
+		/** Worst-case plan and guarantee provenance for a paid case; null otherwise. */
+		plan: ReservationPlan | null;
+		/** Every reservation this case held (one per leg), with its effect provenance. */
+		reservations: SpendReservation[];
+	};
 	cleanup: { ownedProcesses: number; stopped: number };
 	/** Harness-only candidate capabilities for this case; never production availability. */
 	candidateSnapshot: CandidateCapabilitySnapshot | null;
@@ -213,12 +265,19 @@ export interface BudgetLedger {
 	readonly key: string;
 	readonly limitUsd: number;
 	readonly limitCalls: number;
+	readonly limitTurns: number;
+	/** The overall run deadline; no leg or roundtrip extends it. */
+	readonly deadlineAt: string;
 	reservedUsd: number;
 	settledUsd: number;
 	/** Charges that may have happened; never refunded, never read as zero. */
 	uncertainUsd: number;
 	calls: number;
+	turns: number;
 	byProvider: Record<string, { reservedUsd: number; settledUsd: number; uncertainUsd: number }>;
+	/** Cases whose admission passed; only these may reserve. */
+	authorizedCaseIds: string[];
+	reservations: SpendReservation[];
 }
 
 export interface QualificationReceipt {
@@ -325,6 +384,7 @@ export function defaultConfigFromRunState(runState: {
 			operations: list(auth.allowedDiscoveryOperations),
 		},
 		spendGuarantee: null,
+		spendBounds: null,
 		limits: {
 			budgetUsd: num(live.budgetUsd),
 			maxCalls: num(live.maxCalls),
@@ -425,6 +485,11 @@ export function validateConfig(config: QualificationConfig, workspace: string): 
 		!positiveFinite(config.spendGuarantee.capUsd)
 	)
 		add('spendGuarantee.capUsd', 'cap-not-positive-finite');
+	if (config.spendGuarantee?.kind === 'provider-cap')
+		(config.spendGuarantee.providers ?? []).forEach((p, i) => {
+			if (!['grok', 'claude-code', 'codex'].includes(p))
+				add(`spendGuarantee.providers[${i}]`, 'unknown-provider');
+		});
 	return problems;
 }
 
@@ -1306,20 +1371,534 @@ export function preflightCase(
 	return result;
 }
 
-export function createBudgetLedger(config: QualificationConfig, runId: string): BudgetLedger {
+// ---------------------------------------------------------------------------
+// Atomic shared spend admission (GT1-11-08C)
+// ---------------------------------------------------------------------------
+
+/**
+ * DESIGN.md design ceilings. They are never authorized values: every effective
+ * limit is the smaller of the ceiling and the explicit authorization.
+ */
+export const HARNESS_CEILINGS = {
+	concurrentCases: 1,
+	turnsPerCase: 2,
+	caseSeconds: 120,
+	discoverySeconds: 30,
+	idleSeconds: 30,
+	cleanupSeconds: 5,
+} as const;
+
+export const RESERVATION_SCHEMA = 'grok-spend-reservation/v1';
+
+/** Every kind of model call that can bill. A user turn is not the unit; a call is. */
+export type BillableCallKind = 'model-round' | 'child' | 'retry' | 'side-model' | 'compaction';
+
+const CALL_KINDS: Record<BillableCallKind, keyof SpendBounds['perTurnCalls']> = {
+	'model-round': 'modelRounds',
+	child: 'children',
+	retry: 'retries',
+	'side-model': 'sideModels',
+	compaction: 'compaction',
+};
+
+export interface ReservationPlan {
+	caseId: string;
+	guarantee: 'worst-case-reservation' | 'provider-cap' | null;
+	guaranteeReference: string | null;
+	/** Effective per-case turns: min(authorization, design ceiling). */
+	turns: number;
+	/** Billable calls per user turn (rounds, children, retries, side models, compaction); null when undeclared. */
+	callsPerTurn: number | null;
+	/** Billable calls the case may make; null when the bounds are undeclared (only a covering cap admits that). */
+	calls: number | null;
+	models: Array<PricingProvenance & { perCallUsd: number | null }>;
+	/** Conservative maximum charge; null means unknown, never zero. */
+	worstCaseUsd: number | null;
+	/** What the shared ledger holds for the case while it runs. */
+	holdUsd: number;
+	/** True only when every price and bound is known; a cap never makes a missing cost known. */
+	costKnown: boolean;
+	providerCap: { capUsd: number; providers: ProviderId[]; covers: boolean } | null;
+	effectiveLimits: {
+		budgetUsd: number;
+		maxCalls: number;
+		maxTurns: number;
+		maxWallClockSeconds: number;
+	};
+	reasons: AdmissionReason[];
+}
+
+export interface SpendReservation {
+	schema: typeof RESERVATION_SCHEMA;
+	id: string;
+	caseId: string;
+	/** E11 translation leg; legs share the case and run ledgers and never reset them. */
+	leg: string | null;
+	provider: ProviderId;
+	account: 'A' | 'B';
+	endpoint: string;
+	models: string[];
+	target: Target;
+	sshTarget: string | null;
+	authorizationReference: string;
+	authorizationExpiresAt: string;
+	createdAt: string;
+	/** min(authorization expiry, case deadline, run deadline). */
+	deadlineAt: string;
+	guarantee: 'worst-case-reservation' | 'provider-cap';
+	guaranteeReference: string;
+	costKnown: boolean;
+	holdUsd: number;
+	callAllowance: number;
+	turnAllowance: number;
+	state: 'held' | 'settled' | 'uncertain' | 'released';
+	callsUsed: number;
+	callsByKind: Record<BillableCallKind, number>;
+	turnsUsed: number;
+	settledUsd: number;
+	/** Charges that may have happened; never refunded, never read as zero. */
+	uncertainUsd: number;
+	/** Settled above the hold (a reservation bound was wrong); kept, never hidden. */
+	overrunUsd: number;
+	/** Set once an effect's completion is uncertain; such an effect is never retried automatically. */
+	uncertainEffect: boolean;
+	pricing: PricingProvenance[];
+	settlement: { reason: string; at: string } | null;
+}
+
+export interface ReservationRequest {
+	caseId: string;
+	leg?: string | null;
+	provider: ProviderId;
+	account: 'A' | 'B';
+	endpoint: string;
+	models: string[];
+	target: Target;
+	sshTarget?: string | null;
+	plan: ReservationPlan;
+}
+
+export type ReservationResult =
+	| { ok: true; reservation: SpendReservation }
+	| { ok: false; reasons: AdmissionReason[] };
+
+const ledgerKeys = new Set<string>();
+
+const roundUsd = (n: number) => Math.ceil(n * 1e6) / 1e6;
+const spendReason = (id: string, detail: string, owner?: string): AdmissionReason => ({
+	id,
+	kind: 'spend-admission',
+	detail,
+	...(owner ? { owner } : {}),
+});
+
+function effectiveLimits(config: QualificationConfig) {
+	const pc = config.limits.perCase;
+	const pick = (n: number, ceiling = Infinity) => (positiveFinite(n) ? Math.min(n, ceiling) : 0);
+	return {
+		budgetUsd: pick(pc.budgetUsd),
+		maxCalls: pick(pc.maxCalls),
+		maxTurns: Math.floor(pick(pc.maxTurns, HARNESS_CEILINGS.turnsPerCase)),
+		maxWallClockSeconds: pick(pc.maxWallClockSeconds, HARNESS_CEILINGS.caseSeconds),
+	};
+}
+
+function capProviders(config: QualificationConfig): ProviderId[] {
+	const g = config.spendGuarantee;
+	return g?.kind === 'provider-cap' ? (g.providers?.length ? [...g.providers] : ['grok']) : [];
+}
+
+/**
+ * The worst-case charge of one case, from the declared bounds and the
+ * canonical price table. Unknown prices or bounds leave the cost unknown; only
+ * a provider-enforced cap covering every provider of the case, no larger than
+ * the run budget, admits that, and the hold is then the whole case budget.
+ */
+export function planCaseReservation(
+	c: QualificationCase,
+	config: QualificationConfig
+): ReservationPlan {
+	const reasons: AdmissionReason[] = [];
+	const limits = effectiveLimits(config);
+	const g = config.spendGuarantee;
+	const bounds = config.spendBounds ?? null;
+	let callsPerTurn: number | null = null;
+	// Missing bounds leave the cost unknown: only a covering provider cap admits
+	// that, and the ledger then holds the per-case call limit as the allowance.
+	if (!bounds) {
+		if (g?.kind !== 'provider-cap')
+			reasons.push(spendReason('spend-bounds-undeclared', 'spendBounds'));
+	} else {
+		const counts = Object.values(bounds.perTurnCalls);
+		const tokens = Object.values(bounds.perCall);
+		const bad =
+			counts.some((n) => !Number.isInteger(n) || n < 0) ||
+			bounds.perTurnCalls.modelRounds < 1 ||
+			tokens.some((n) => typeof n !== 'number' || !Number.isFinite(n) || n < 0) ||
+			!positiveFinite(bounds.perCall.inputTokens) ||
+			!positiveFinite(bounds.perCall.outputTokens);
+		if (bad) reasons.push(spendReason('spend-bounds-invalid', 'spendBounds'));
+		else callsPerTurn = counts.reduce((a, b) => a + b, 0);
+	}
+	const turns = limits.maxTurns;
+	const calls = callsPerTurn === null ? null : callsPerTurn * turns;
+	if (calls !== null) {
+		if (calls > limits.maxCalls)
+			reasons.push(spendReason('call-allowance-exceeds-case-limit', `${calls} > perCase.maxCalls`));
+		if (calls > (positiveFinite(config.limits.maxCalls) ? config.limits.maxCalls : 0))
+			reasons.push(spendReason('call-allowance-exceeds-run-limit', `${calls} > maxCalls`));
+	}
+	const modelIds = [...new Set([...config.allowedModels, ...(bounds?.sideModels ?? [])])];
+	const models = modelIds.map((model) => {
+		const p = pricingProvenance(model);
+		const perCallUsd =
+			p.source !== 'unknown' && bounds && callsPerTurn !== null
+				? calculateModelCost(bounds.perCall, model)
+				: null;
+		return { ...p, perCallUsd };
+	});
+	const known = models.length > 0 && models.every((m) => m.perCallUsd !== null) && calls !== null;
+	const worstCaseUsd = known
+		? roundUsd(calls! * Math.max(...models.map((m) => m.perCallUsd as number)))
+		: null;
+
+	let providerCap: ReservationPlan['providerCap'] = null;
+	let holdUsd = 0;
+	if (g?.kind === 'worst-case-reservation') {
+		for (const m of models)
+			if (m.source === 'unknown' && !config.allowedModels.includes(m.model))
+				reasons.push({ id: 'price-unknown', kind: 'pricing', detail: m.model });
+		if (worstCaseUsd === null)
+			reasons.push(spendReason('worst-case-unknown', 'prices or bounds unknown; no provider cap'));
+		else {
+			if (worstCaseUsd > limits.budgetUsd)
+				reasons.push(spendReason('worst-case-exceeds-case-budget', `${worstCaseUsd}`));
+			if (worstCaseUsd > config.limits.budgetUsd)
+				reasons.push(spendReason('worst-case-exceeds-run-budget', `${worstCaseUsd}`));
+			holdUsd = worstCaseUsd;
+		}
+	} else if (g?.kind === 'provider-cap') {
+		const providers = capProviders(config);
+		const uncovered = c.providers.filter((p) => !providers.includes(p));
+		for (const p of uncovered) reasons.push(spendReason('provider-cap-does-not-cover', p));
+		if (positiveFinite(g.capUsd) && g.capUsd > config.limits.budgetUsd)
+			reasons.push(spendReason('provider-cap-exceeds-run-budget', `${g.capUsd}`));
+		providerCap = {
+			capUsd: g.capUsd,
+			providers,
+			covers: uncovered.length === 0 && g.capUsd <= config.limits.budgetUsd,
+		};
+		holdUsd = worstCaseUsd !== null ? Math.min(worstCaseUsd, limits.budgetUsd) : limits.budgetUsd;
+	}
+	return {
+		caseId: c.caseId,
+		guarantee: g?.kind ?? null,
+		guaranteeReference: g?.reference ?? null,
+		turns,
+		callsPerTurn,
+		calls,
+		models,
+		worstCaseUsd,
+		holdUsd,
+		costKnown: worstCaseUsd !== null,
+		providerCap,
+		effectiveLimits: limits,
+		reasons,
+	};
+}
+
+/**
+ * One ledger per run, shared by every case, leg and provider. There is no reset:
+ * a second ledger for the same run id throws, so a translation leg or a
+ * repeated roundtrip can never start from a fresh budget.
+ */
+export function createBudgetLedger(
+	config: QualificationConfig,
+	runId: string,
+	startedAt: Date = new Date()
+): BudgetLedger {
+	const key = `ledger:${runId}`;
+	if (ledgerKeys.has(key)) throw new Error(`A budget ledger already exists for run ${runId}`);
+	ledgerKeys.add(key);
 	const byProvider: BudgetLedger['byProvider'] = {};
 	for (const p of config.providers)
 		byProvider[p] = { reservedUsd: 0, settledUsd: 0, uncertainUsd: 0 };
+	const runSeconds = positiveFinite(config.limits.maxWallClockSeconds)
+		? config.limits.maxWallClockSeconds
+		: 0;
 	return {
-		key: `ledger:${runId}`,
+		key,
 		limitUsd: positiveFinite(config.limits.budgetUsd) ? config.limits.budgetUsd : 0,
 		limitCalls: positiveFinite(config.limits.maxCalls) ? config.limits.maxCalls : 0,
+		limitTurns: positiveFinite(config.limits.maxTurns) ? config.limits.maxTurns : 0,
+		deadlineAt: new Date(startedAt.getTime() + runSeconds * 1000).toISOString(),
 		reservedUsd: 0,
 		settledUsd: 0,
 		uncertainUsd: 0,
 		calls: 0,
+		turns: 0,
 		byProvider,
+		authorizedCaseIds: [],
+		reservations: [],
 	};
+}
+
+const committedUsd = (r: SpendReservation) =>
+	(r.state === 'held' ? r.holdUsd : 0) + r.settledUsd + r.uncertainUsd;
+const committedCalls = (r: SpendReservation) =>
+	r.state === 'held' ? Math.max(r.callAllowance, r.callsUsed) : r.callsUsed;
+const committedTurns = (r: SpendReservation) =>
+	r.state === 'held' ? Math.max(r.turnAllowance, r.turnsUsed) : r.turnsUsed;
+
+/**
+ * Check and hold in one synchronous step, so concurrent cases (and every leg
+ * of a cross-provider case) see each other's holds. The reservation is bound
+ * to the exact provider, account, endpoint, models, target, case and
+ * authorization; anything outside the authorization is refused, never widened.
+ */
+export function reserveSpend(
+	ledger: BudgetLedger,
+	config: QualificationConfig,
+	request: ReservationRequest,
+	now: Date
+): ReservationResult {
+	const reasons: AdmissionReason[] = [];
+	const add = (id: string, detail: string) => reasons.push(spendReason(id, detail));
+	const { plan } = request;
+	const t = now.getTime();
+	if (plan.caseId !== request.caseId) add('plan-case-mismatch', request.caseId);
+	if (plan.reasons.length) add('plan-not-admissible', plan.reasons.map((r) => r.id).join(','));
+	if (!ledger.authorizedCaseIds.includes(request.caseId)) add('case-not-admitted', request.caseId);
+	if (!plan.guarantee || !plan.guaranteeReference) add('spend-guarantee-absent', 'spendGuarantee');
+	const auth = config.authorizationReference;
+	const expiry = config.expiresAt ? Date.parse(config.expiresAt) : NaN;
+	if (!auth) add('live-authorization-absent', 'authorizationReference');
+	else if (!Number.isFinite(expiry) || expiry <= t) add('live-authorization-expired', 'expiresAt');
+	if (!config.providers.includes(request.provider))
+		add('provider-not-authorized', request.provider);
+	if (
+		!config.credentialReferences.some(
+			(r) => r.provider === request.provider && r.account === request.account
+		)
+	)
+		add('credential-reference-absent', `${request.provider}/${request.account}`);
+	try {
+		assertEndpointApproved(request.endpoint, config);
+	} catch {
+		add('endpoint-not-approved', request.endpoint);
+	}
+	const priced = new Set(plan.models.map((m) => m.model));
+	if (!request.models.length) add('models-unselected', 'models');
+	for (const m of request.models)
+		if (!config.allowedModels.includes(m) && !(config.spendBounds?.sideModels ?? []).includes(m))
+			add('model-not-authorized', m);
+		else if (!priced.has(m)) add('model-not-in-plan', m);
+	if (request.target === 'ssh') {
+		if (!request.sshTarget || !config.allowedSshTargets.includes(request.sshTarget))
+			add('ssh-target-unapproved', request.sshTarget ?? 'none');
+	}
+	if (plan.guarantee === 'provider-cap' && !plan.providerCap?.providers.includes(request.provider))
+		add('provider-cap-does-not-cover', request.provider);
+	const runDeadline = Date.parse(ledger.deadlineAt);
+	if (!(runDeadline > t)) add('run-deadline-passed', ledger.deadlineAt);
+
+	// Concurrency: a case with a live hold occupies a slot; legs of one case share it.
+	const activeCases = new Set(
+		ledger.reservations
+			.filter((r) => r.state === 'held' && r.caseId !== request.caseId)
+			.map((r) => r.caseId)
+	);
+	if (activeCases.size >= HARNESS_CEILINGS.concurrentCases)
+		add('concurrency-limit', `${activeCases.size} active`);
+
+	const holdUsd = plan.holdUsd;
+	const callAllowance = plan.calls ?? plan.effectiveLimits.maxCalls;
+	const turnAllowance = plan.turns;
+	if (!positiveFinite(holdUsd)) add('reservation-hold-not-positive', `${holdUsd}`);
+	const runUsd = ledger.reservations.reduce((s, r) => s + committedUsd(r), 0);
+	const runCalls = ledger.reservations.reduce((s, r) => s + committedCalls(r), 0);
+	const runTurns = ledger.reservations.reduce((s, r) => s + committedTurns(r), 0);
+	if (runUsd + holdUsd > ledger.limitUsd) add('run-budget-exhausted', `${runUsd} + ${holdUsd}`);
+	if (runCalls + callAllowance > ledger.limitCalls) add('run-calls-exhausted', `${runCalls}`);
+	if (runTurns + turnAllowance > ledger.limitTurns) add('run-turns-exhausted', `${runTurns}`);
+	const mine = ledger.reservations.filter((r) => r.caseId === request.caseId);
+	const caseUsd = mine.reduce((s, r) => s + committedUsd(r), 0);
+	const caseCalls = mine.reduce((s, r) => s + committedCalls(r), 0);
+	// DESIGN.md E11: each translation leg is its own subcase under the turn ceiling;
+	// spend, calls and the deadline stay shared by every leg of the case.
+	const caseTurns = mine
+		.filter((r) => r.leg === (request.leg ?? null))
+		.reduce((s, r) => s + committedTurns(r), 0);
+	const lim = plan.effectiveLimits;
+	if (caseUsd + holdUsd > lim.budgetUsd) add('case-budget-exhausted', `${caseUsd} + ${holdUsd}`);
+	if (caseCalls + callAllowance > lim.maxCalls) add('case-calls-exhausted', `${caseCalls}`);
+	if (caseTurns + turnAllowance > lim.maxTurns) add('case-turns-exhausted', `${caseTurns}`);
+	if (reasons.length) return { ok: false, reasons };
+
+	// The case deadline starts at its first hold; later legs inherit it.
+	const caseStart = mine.length ? Math.min(...mine.map((r) => Date.parse(r.createdAt))) : t;
+	const deadline = Math.min(expiry, runDeadline, caseStart + lim.maxWallClockSeconds * 1000);
+	if (!(deadline > t)) return { ok: false, reasons: [spendReason('case-deadline-passed', '')] };
+	const reservation: SpendReservation = {
+		schema: RESERVATION_SCHEMA,
+		id: `res:${randomUUID()}`,
+		caseId: request.caseId,
+		leg: request.leg ?? null,
+		provider: request.provider,
+		account: request.account,
+		endpoint: new URL(request.endpoint).origin,
+		models: [...request.models],
+		target: request.target,
+		sshTarget: request.sshTarget ?? null,
+		authorizationReference: auth!,
+		authorizationExpiresAt: new Date(expiry).toISOString(),
+		createdAt: now.toISOString(),
+		deadlineAt: new Date(deadline).toISOString(),
+		guarantee: plan.guarantee!,
+		guaranteeReference: plan.guaranteeReference!,
+		costKnown: plan.costKnown,
+		holdUsd,
+		callAllowance,
+		turnAllowance,
+		state: 'held',
+		callsUsed: 0,
+		callsByKind: { 'model-round': 0, child: 0, retry: 0, 'side-model': 0, compaction: 0 },
+		turnsUsed: 0,
+		settledUsd: 0,
+		uncertainUsd: 0,
+		overrunUsd: 0,
+		uncertainEffect: false,
+		pricing: plan.models
+			.filter((m) => request.models.includes(m.model))
+			.map(({ perCallUsd: _perCall, ...p }) => p),
+		settlement: null,
+	};
+	ledger.reservations.push(reservation);
+	ledger.reservedUsd = roundUsd(ledger.reservedUsd + holdUsd);
+	const bp = (ledger.byProvider[request.provider] ??= {
+		reservedUsd: 0,
+		settledUsd: 0,
+		uncertainUsd: 0,
+	});
+	bp.reservedUsd = roundUsd(bp.reservedUsd + holdUsd);
+	return { ok: true, reservation };
+}
+
+function heldReservation(ledger: BudgetLedger, id: string, now: Date): SpendReservation {
+	const r = ledger.reservations.find((x) => x.id === id);
+	if (!r) throw new Error(`Unknown reservation ${id}`);
+	if (r.state !== 'held') throw new Error(`Reservation ${id} is ${r.state}`);
+	if (Date.parse(r.deadlineAt) <= now.getTime())
+		throw new Error(`Reservation ${id} passed its deadline`);
+	return r;
+}
+
+/**
+ * Count one billable call before it is dispatched. Every model round, child,
+ * retry, side model and compaction draws from the same allowance; a retry
+ * after an uncertain effect is refused, never automatic.
+ */
+export function recordBillableCall(
+	ledger: BudgetLedger,
+	reservationId: string,
+	call: { kind: BillableCallKind; model: string },
+	now: Date
+): void {
+	if (!Object.prototype.hasOwnProperty.call(CALL_KINDS, call.kind))
+		throw new Error(`Unknown call kind ${call.kind}`);
+	const r = heldReservation(ledger, reservationId, now);
+	if (call.kind === 'retry' && r.uncertainEffect)
+		throw new Error('An uncertain effect is never retried automatically');
+	if (!r.models.includes(call.model))
+		throw new Error(`Model ${call.model} is not bound to this reservation`);
+	if (r.callsUsed >= r.callAllowance) throw new Error('Call allowance exhausted');
+	if (ledger.calls >= ledger.limitCalls) throw new Error('Run call limit exhausted');
+	r.callsUsed++;
+	r.callsByKind[call.kind]++;
+	ledger.calls++;
+}
+
+/** Count one user turn before it is sent. */
+export function recordUserTurn(ledger: BudgetLedger, reservationId: string, now: Date): void {
+	const r = heldReservation(ledger, reservationId, now);
+	if (r.turnsUsed >= r.turnAllowance) throw new Error('Turn allowance exhausted');
+	if (ledger.turns >= ledger.limitTurns) throw new Error('Run turn limit exhausted');
+	r.turnsUsed++;
+	ledger.turns++;
+}
+
+/** Mark that an effect was dispatched and its completion is now uncertain (disconnect, timeout). */
+export function markUncertainEffect(ledger: BudgetLedger, reservationId: string): void {
+	const r = ledger.reservations.find((x) => x.id === reservationId);
+	if (!r) throw new Error(`Unknown reservation ${reservationId}`);
+	r.uncertainEffect = true;
+}
+
+export type SettlementOutcome =
+	| { kind: 'settled'; actualUsd: number | null; reason: string }
+	| { kind: 'uncertain'; partialUsd?: number; reason: string };
+
+/**
+ * Close a reservation. A known actual replaces the hold; an unknown actual
+ * (a provider cap with no price, a timeout, a disconnect) keeps the whole
+ * hold as uncertain, minus any part that is known. Nothing uncertain is ever
+ * refunded or read as zero; a charge above the hold is kept as an overrun.
+ */
+export function settleReservation(
+	ledger: BudgetLedger,
+	reservationId: string,
+	outcome: SettlementOutcome,
+	now: Date
+): SpendReservation {
+	const r = ledger.reservations.find((x) => x.id === reservationId);
+	if (!r) throw new Error(`Unknown reservation ${reservationId}`);
+	if (r.state !== 'held') throw new Error(`Reservation ${reservationId} is ${r.state}`);
+	const known =
+		outcome.kind === 'settled'
+			? outcome.actualUsd
+			: typeof outcome.partialUsd === 'number'
+				? outcome.partialUsd
+				: null;
+	if (known !== null && (!Number.isFinite(known) || known < 0))
+		throw new Error('A settled charge must be a finite non-negative number');
+	const exact = outcome.kind === 'settled' && known !== null && !r.uncertainEffect;
+	const settled = known ?? 0;
+	const uncertain = exact ? 0 : Math.max(0, r.holdUsd - settled);
+	r.settledUsd = roundUsd(settled);
+	r.uncertainUsd = roundUsd(uncertain);
+	r.overrunUsd = roundUsd(Math.max(0, settled - r.holdUsd));
+	r.state = exact ? 'settled' : 'uncertain';
+	if (!exact)
+		r.uncertainEffect = r.uncertainEffect || outcome.kind === 'uncertain' || r.callsUsed > 0;
+	r.settlement = { reason: outcome.reason, at: now.toISOString() };
+	const bp = ledger.byProvider[r.provider];
+	ledger.reservedUsd = roundUsd(ledger.reservedUsd - r.holdUsd);
+	ledger.settledUsd = roundUsd(ledger.settledUsd + r.settledUsd);
+	ledger.uncertainUsd = roundUsd(ledger.uncertainUsd + r.uncertainUsd);
+	bp.reservedUsd = roundUsd(bp.reservedUsd - r.holdUsd);
+	bp.settledUsd = roundUsd(bp.settledUsd + r.settledUsd);
+	bp.uncertainUsd = roundUsd(bp.uncertainUsd + r.uncertainUsd);
+	return r;
+}
+
+/** Return a hold that never dispatched anything. Once a call was counted it must be settled. */
+export function releaseReservation(
+	ledger: BudgetLedger,
+	reservationId: string,
+	now: Date
+): SpendReservation {
+	const r = ledger.reservations.find((x) => x.id === reservationId);
+	if (!r) throw new Error(`Unknown reservation ${reservationId}`);
+	if (r.state !== 'held') throw new Error(`Reservation ${reservationId} is ${r.state}`);
+	if (r.callsUsed > 0 || r.turnsUsed > 0 || r.uncertainEffect)
+		throw new Error('A reservation that dispatched work must be settled, not released');
+	r.state = 'released';
+	r.settlement = { reason: 'released-before-dispatch', at: now.toISOString() };
+	ledger.reservedUsd = roundUsd(ledger.reservedUsd - r.holdUsd);
+	ledger.byProvider[r.provider].reservedUsd = roundUsd(
+		ledger.byProvider[r.provider].reservedUsd - r.holdUsd
+	);
+	return r;
 }
 
 /** Decide one case. Every applicable missing input is listed; nothing short-circuits. */
@@ -1431,7 +2010,8 @@ export function admitCase(
 				if (pricingProvenance(model).source === 'unknown')
 					add({ id: 'price-unknown', kind: 'pricing', detail: model });
 		}
-		if (!capabilities.atomicSpendAdmission)
+		if (capabilities.atomicSpendAdmission) reasons.push(...planCaseReservation(c, config).reasons);
+		else
 			add({
 				id: 'spend-admission-unimplemented',
 				kind: 'harness-capability',
@@ -1529,7 +2109,7 @@ export async function runQualification(options: RunOptions): Promise<{
 	const families = options.runState.testEnvironment?.cases ?? [];
 	const selected = options.selectedCases?.length ? options.selectedCases : config.cases;
 	const cases = expandCases(families, selected);
-	const ledger = createBudgetLedger(config, runId);
+	const ledger = createBudgetLedger(config, runId, new Date(startedAt));
 	const productionDigestBefore = productionCapabilityDigest();
 	const operatorHome = options.operatorHome ?? os.homedir();
 
@@ -1563,6 +2143,11 @@ export async function runQualification(options: RunOptions): Promise<{
 				reasons.push(changed);
 			}
 		}
+		// Only an admitted case may reserve; the executor (not yet bound) is the one that would.
+		if (!reasons.length) ledger.authorizedCaseIds.push(c.caseId);
+		const paid = c.classes.includes('paid');
+		const plan = paid && capabilities.atomicSpendAdmission ? planCaseReservation(c, config) : null;
+		const held = ledger.reservations.filter((r) => r.caseId === c.caseId);
 		receipts.push({
 			...c,
 			status: reasons.length ? 'not-run' : 'admitted',
@@ -1571,7 +2156,14 @@ export async function runQualification(options: RunOptions): Promise<{
 			paidRequests: 0,
 			networkContacts: 0,
 			pricing: c.classes.includes('paid') ? config.allowedModels.map(pricingProvenance) : [],
-			budget: { reservedUsd: 0, settledUsd: 0, uncertainUsd: 0, calls: 0 },
+			budget: {
+				reservedUsd: held.reduce((s, r) => s + (r.state === 'held' ? r.holdUsd : 0), 0),
+				settledUsd: held.reduce((s, r) => s + r.settledUsd, 0),
+				uncertainUsd: held.reduce((s, r) => s + r.uncertainUsd, 0),
+				calls: held.reduce((s, r) => s + r.callsUsed, 0),
+				plan,
+				reservations: held.map((r) => ({ ...r })),
+			},
 			cleanup,
 			candidateSnapshot: buildCandidateSnapshot(c, config),
 			preflight,
