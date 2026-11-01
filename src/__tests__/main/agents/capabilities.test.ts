@@ -314,6 +314,8 @@ describe('agent-capabilities', () => {
 			expect(hasCapability('copilot-cli', 'supportsGroupChatModeration')).toBe(true);
 			expect(hasCapability('factory-droid', 'supportsGroupChatModeration')).toBe(true);
 			expect(hasCapability('terminal', 'supportsGroupChatModeration')).toBe(false);
+			// Grok moderation is refused by the router; the flag stays honest (GT1-11-02).
+			expect(hasCapability('grok', 'supportsGroupChatModeration')).toBe(false);
 
 			// usesJsonLineOutput
 			expect(hasCapability('claude-code', 'usesJsonLineOutput')).toBe(false);
@@ -321,11 +323,14 @@ describe('agent-capabilities', () => {
 			expect(hasCapability('opencode', 'usesJsonLineOutput')).toBe(true);
 			expect(hasCapability('factory-droid', 'usesJsonLineOutput')).toBe(true);
 			expect(hasCapability('terminal', 'usesJsonLineOutput')).toBe(false);
+			expect(hasCapability('grok', 'usesJsonLineOutput')).toBe(true);
 
 			// usesCombinedContextWindow
 			expect(hasCapability('codex', 'usesCombinedContextWindow')).toBe(true);
 			expect(hasCapability('claude-code', 'usesCombinedContextWindow')).toBe(false);
 			expect(hasCapability('opencode', 'usesCombinedContextWindow')).toBe(false);
+			// signals.json reports one contextTokensUsed; combined gauge math is unverified.
+			expect(hasCapability('grok', 'usesCombinedContextWindow')).toBe(false);
 		});
 	});
 

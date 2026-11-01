@@ -229,6 +229,27 @@ import {
 	getAgentLoginCommand,
 } from '../../../shared/agentMetadata';
 import { createAgentRegistry } from '../../../shared/plugins/agent-registry';
+import * as sharedProviderCapabilities from '../../../shared/maestro-lib/providers/capabilities';
+import * as sharedProviderDefinitions from '../../../shared/maestro-lib/providers/definitions';
+import * as mainCapabilities from '../../../main/agents/capabilities';
+import * as mainDefinitions from '../../../main/agents/definitions';
+import { AGENT_DISPLAY_NAMES, isBetaAgent } from '../../../shared/agentMetadata';
+import { COMBINED_CONTEXT_AGENTS, DEFAULT_CONTEXT_WINDOWS } from '../../../shared/agentConstants';
+import { SYNOPSIS_PROVIDER_PREFERENCE } from '../../../shared/directorNotesProvider';
+import {
+	PROVIDER_PROFILE_CONFIGS,
+	resolveAgentAccountKey,
+	resolveAgentProfile,
+} from '../../../shared/providerProfiles';
+import { PROVIDER_ROUTE_ENV_NAMES } from '../../../shared/maestro-lib/launch/env';
+import { PROVIDER_ENV_VAR_SUGGESTIONS } from '../../../shared/envVarCatalog';
+import { MCP_CONFIG_BY_AGENT } from '../../../shared/plugins/mcp-agent-config';
+import { resolveAgentAccountDir } from '../../../shared/agentAccountDir';
+import {
+	resolveTierModel,
+	supportsEffortSelection,
+	supportsTierSelection,
+} from '../../../shared/modelTiers';
 
 beforeAll(() => {
 	initializeOutputParsers();
@@ -565,6 +586,189 @@ describe('Agent Completeness', () => {
 		expect(grok).toBeDefined();
 		expect(grok?.additionalDirArgs).toBeUndefined();
 		expect(getAgentCapabilities('grok').supportsAdditionalDirectories).toBe(false);
+	});
+
+	// GT1-11-02: the invariants pass one discovered for Grok. Each registry a
+	// provider joins is keyed by the canonical id, so a renamed id, an alias or a
+	// half-finished addition fails here instead of silently falling back.
+	describe('Grok canonical registration (GT1-11-02)', () => {
+		const ids = new Set<string>(AGENT_IDS);
+		const keyedRegistries: Array<[string, Iterable<string>]> = [
+			['AGENT_DISPLAY_NAMES', Object.keys(AGENT_DISPLAY_NAMES)],
+			['AGENT_PICKER_META', Object.keys(AGENT_PICKER_META)],
+			['DEFAULT_CONTEXT_WINDOWS', Object.keys(DEFAULT_CONTEXT_WINDOWS)],
+			['SYNOPSIS_PROVIDER_PREFERENCE', SYNOPSIS_PROVIDER_PREFERENCE],
+			['PROVIDER_PROFILE_CONFIGS', Object.keys(PROVIDER_PROFILE_CONFIGS)],
+			['PROVIDER_ROUTE_ENV_NAMES', Object.keys(PROVIDER_ROUTE_ENV_NAMES)],
+			['PROVIDER_ENV_VAR_SUGGESTIONS', Object.keys(PROVIDER_ENV_VAR_SUGGESTIONS)],
+			['MCP_CONFIG_BY_AGENT', Object.keys(MCP_CONFIG_BY_AGENT)],
+			['AGENT_CAPABILITIES', Object.keys(AGENT_CAPABILITIES)],
+		];
+
+		it('keys every provider registry by a canonical agent id, never an alias', () => {
+			for (const [name, keys] of keyedRegistries) {
+				for (const key of keys) {
+					expect(ids.has(key), `${name} has "${key}", which is not in AGENT_IDS`).toBe(true);
+				}
+			}
+			// One Grok id, spelled once; no `grok-cli`, `xai` or `grok-build` alias.
+			expect(AGENT_IDS.filter((id) => /grok|xai/i.test(id))).toEqual(['grok']);
+		});
+
+		it('names Grok identically across the definition, metadata and login registries', () => {
+			const def = AGENT_DEFINITIONS.find((d) => d.id === 'grok');
+			expect(def).toMatchObject({ id: 'grok', binaryName: 'grok', command: 'grok' });
+			expect(def?.hidden).toBeFalsy();
+			expect(def?.name).toBe(AGENT_DISPLAY_NAMES.grok);
+			expect(getAgentDisplayName('grok')).toBe('Grok CLI');
+			expect(isBetaAgent('grok')).toBe(true);
+			expect(PICKABLE_AGENT_IDS).toContain('grok');
+			expect(getAgentLoginCommand('grok')?.binary).toBe(def?.binaryName);
+			// Reachable through the alphabetical fallback, never preferred (A11-F06).
+			expect(AGENT_AUTOSELECT_ORDER).not.toContain('grok');
+		});
+
+		it('joins every registry the comparators join, with its deliberate exclusions intact', () => {
+			expect(getOutputParser('grok')).not.toBeNull();
+			expect(getSessionStorage('grok')).toBeInstanceOf(GrokSessionStorage);
+			expect(Object.keys(getErrorPatterns('grok')).length).toBeGreaterThan(0);
+			expect(MCP_CONFIG_BY_AGENT.grok?.strategy).toBe('grok-config-overlay');
+			expect(PROVIDER_PROFILE_CONFIGS.grok).toEqual({
+				envVar: 'GROK_HOME',
+				defaultSubdir: '.grok',
+				sessionsSubdir: 'sessions',
+			});
+			// Present with an unknown window on purpose, not missing.
+			expect(Object.prototype.hasOwnProperty.call(DEFAULT_CONTEXT_WINDOWS, 'grok')).toBe(true);
+			expect(DEFAULT_CONTEXT_WINDOWS.grok).toBe(0);
+			// Last on purpose: a synopsis is a read-only batch turn.
+			expect(SYNOPSIS_PROVIDER_PREFERENCE.at(-1)).toBe('grok');
+			expect(supportsEffortSelection('grok')).toBe(true);
+			// No stable three-tier catalog: the configured model stays in charge.
+			expect(supportsTierSelection('grok')).toBe(false);
+			expect(resolveTierModel('grok', 'high')).toBeUndefined();
+		});
+
+		it('routes the profile env var through the route ceiling and the env catalog for every provider', () => {
+			for (const [toolType, config] of Object.entries(PROVIDER_PROFILE_CONFIGS)) {
+				expect(
+					PROVIDER_ROUTE_ENV_NAMES[toolType]?.accountDir,
+					`${toolType}: the route ceiling must control ${config.envVar}`
+				).toBe(config.envVar);
+				expect(
+					PROVIDER_ENV_VAR_SUGGESTIONS[toolType]?.map((s) => s.key) ?? [],
+					`${toolType}: the env catalog must suggest ${config.envVar}`
+				).toContain(config.envVar);
+			}
+			const grokCatalog = PROVIDER_ENV_VAR_SUGGESTIONS.grok.map((s) => s.key);
+			for (const name of PROVIDER_ROUTE_ENV_NAMES.grok.credential) {
+				expect(grokCatalog, name).toContain(name);
+			}
+			// Grok splits its endpoint across three names; pinning one would leave
+			// the others routing the launch (GT1-09-R14).
+			expect(PROVIDER_ROUTE_ENV_NAMES.grok.baseUrl).toBeNull();
+		});
+
+		it('propagates the effective Grok profile from the layer the process receives', () => {
+			const homeDir = path.join(isolation.userData, 'home');
+			const work = path.join(homeDir, '.grok-work');
+			const provider = path.join(homeDir, '.grok-provider');
+			const shell = path.join(homeDir, '.grok-shell');
+			const dir = (customEnvVars?: Record<string, string>, sshRemote = false) =>
+				resolveAgentAccountDir(
+					{ toolType: 'grok', customEnvVars, sshRemote },
+					{
+						homeDir,
+						agentLevelEnvVars: { GROK_HOME: provider },
+						globalShellEnvVars: { GROK_HOME: shell },
+					}
+				);
+			expect(dir({ GROK_HOME: work })).toBe(work);
+			// No agent env: the provider-level set is inherited.
+			expect(dir()).toBe(provider);
+			// The agent's own vars REPLACE the provider set, so its GROK_HOME is gone
+			// and the next layer (Settings -> Environment) decides.
+			expect(dir({ FIXTURE_UNRELATED_VAR: 'x' })).toBe(shell);
+			// A blank at the winning layer selects the default, never another account.
+			expect(dir({ GROK_HOME: '' })).toBe(path.join(homeDir, '.grok'));
+			// A remote path is the remote's and is not resolved on this machine.
+			expect(dir({ GROK_HOME: '~/.grok-remote' }, true)).toBe('~/.grok-remote');
+			// A remote agent carries only its custom layer (inherited or its own) to the
+			// host; the shell and host env of this machine never reach it.
+			expect(dir(undefined, true)).toBe(provider);
+			expect(dir({ FIXTURE_UNRELATED_VAR: 'x' }, true)).toBeUndefined();
+			// The profile reads the same selected root the launch resolves.
+			const env = { GROK_HOME: work };
+			expect(resolveAgentAccountKey('grok', env, homeDir)).toBe(work);
+			expect(resolveAgentProfile('grok', env, homeDir)?.accountKey).toBe(work);
+			// An inline bundle identifies no account: no profile, rather than a merge.
+			expect(resolveAgentProfile('grok', { ...env, GROK_AUTH: '{}' }, homeDir)).toBeNull();
+		});
+
+		it('reports route-dependent truth, not a capability table of all trues', () => {
+			const caps = getAgentCapabilities('grok');
+			// Unqualified or withheld: each stays false until phase 11 evidence promotes it.
+			for (const flag of [
+				'supportsSlashCommands',
+				'supportsStreamJsonInput',
+				'supportsPromptViaStdin',
+				'supportsGroupChatModeration',
+				'usesCombinedContextWindow',
+				'supportsAppendSystemPrompt',
+				'supportsProjectMemory',
+				'supportsAdditionalDirectories',
+			] as const) {
+				expect(caps[flag], flag).toBe(false);
+			}
+			expect(Object.values(caps).filter((v) => v === false).length).toBeGreaterThanOrEqual(8);
+			// The static set agrees with the canonical flag for every provider.
+			for (const id of AGENT_IDS) {
+				expect(
+					COMBINED_CONTEXT_AGENTS.has(id),
+					`${id}: COMBINED_CONTEXT_AGENTS disagrees with usesCombinedContextWindow`
+				).toBe(getAgentCapabilities(id).usesCombinedContextWindow);
+			}
+			const def = AGENT_DEFINITIONS.find((d) => d.id === 'grok');
+			// No verified all-tools-off switch and no qualified root grant builder.
+			expect(def?.noToolsArgs).toBeUndefined();
+			expect(def?.additionalDirArgs).toBeUndefined();
+			expect(def?.readOnlyArgs).toEqual(['--permission-mode', 'plan', '--deny', 'Bash(*)']);
+			// The CLI read-only filter strips batch args only when they equal YOLO args.
+			expect(def?.batchModeArgs).toEqual(def?.yoloModeArgs);
+			const routes = Object.fromEntries(
+				sharedProviderCapabilities.providerRouteSupport('grok').map((r) => [r.route, r])
+			);
+			// Managed admission is the child process alone; every other route refuses.
+			expect(
+				Object.values(routes)
+					.filter((r) => r.managed !== 'unsupported')
+					.map((r) => r.route)
+			).toEqual(['child-process']);
+			expect(routes['grok-acp'].standalone).toBe('implemented');
+			expect(routes.pty.standalone).toBe('unverified');
+			expect(routes.ssh.standalone).toBe('unverified');
+			expect(routes['codex-app-server'].standalone).toBe('unsupported');
+			expect(routes['opencode-server'].standalone).toBe('unsupported');
+		});
+
+		it('exports one provider table from the shared library and the main process', () => {
+			expect(mainDefinitions.AGENT_DEFINITIONS).toBe(sharedProviderDefinitions.AGENT_DEFINITIONS);
+			expect(mainCapabilities.AGENT_CAPABILITIES).toBe(
+				sharedProviderCapabilities.AGENT_CAPABILITIES
+			);
+			expect(AGENT_DEFINITIONS).toBe(sharedProviderDefinitions.AGENT_DEFINITIONS);
+			expect(AGENT_CAPABILITIES).toBe(sharedProviderCapabilities.AGENT_CAPABILITIES);
+			expect(mainCapabilities.getAgentCapabilities('grok')).toBe(
+				sharedProviderCapabilities.AGENT_CAPABILITIES.grok
+			);
+			expect(mainDefinitions.getAgentDefinition('grok')).toBe(
+				sharedProviderDefinitions.getAgentDefinition('grok')
+			);
+			expect(mainCapabilities.GROK_DIRECTORY_GRANT_SUPPORT).toBe(GROK_DIRECTORY_GRANT_SUPPORT);
+			expect(mainCapabilities.providerRouteSupport).toBe(
+				sharedProviderCapabilities.providerRouteSupport
+			);
+		});
 	});
 
 	describe('provider picker registration', () => {
