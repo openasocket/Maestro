@@ -26,6 +26,7 @@ import {
 	type AdmissionOutcome,
 	type DispatchLease,
 } from '../../../shared/maestro-lib/managed/authority';
+import { managedAccountRef } from '../../../shared/maestro-lib/managed/credentials';
 import { LOCAL_ENDPOINT_PROTOCOL } from '../../../shared/maestro-lib/managed/endpoint-port';
 import type { LifecycleFact } from '../../../shared/maestro-lib/managed/events';
 import { fakeAnchor, fakeSeal } from '../../main/enterprise/fakeCustody';
@@ -478,4 +479,158 @@ describe('offline recovery: a daemon speaking another schema version', () => {
 		expect(new Set(operations(fake))).toEqual(new Set(['attachment', 'compatibility']));
 		expect(service.identity.read()).toMatchObject(enrolledRecord);
 	});
+});
+
+describe('offline recovery: a Grok dispatch through the real composition (GT1-09-12A)', () => {
+	// A synthetic Grok command line over the labeled double: no grok binary, account or endpoint.
+	const GROK_CANARY = 'xai-canary-gt1-09-12a-never-on-the-wire';
+	const GROK_HOME = '/home/u/.grok-team';
+	let dir: string;
+	let fake: FakeEndpoint;
+	let service: EnterpriseService;
+	let clock = T0;
+	const now = () => clock;
+	const holder: Holder = { value: null };
+	let grokRuns = 0;
+
+	/** One Grok launch asked of the real process-manager port, with an inline key in its environment. */
+	async function admitGrok(): Promise<{ outcome: AdmissionOutcome; runId: string }> {
+		const runId = `grok-run-${++grokRuns}`;
+		const verified = service.spawnAuthority.verify({
+			actor: { peer: 'in-process' },
+			identity: {
+				requestId: `req-${runId}`,
+				idempotencyKey: `key-${runId}`,
+				attemptId: `att-${runId}`,
+				runId,
+				rootRunId: runId,
+				parentRunId: null,
+			},
+			traceId: `trace-${runId}`,
+			policyRevision: service.host.policy().policyRevision,
+			workflow: null,
+		});
+		if (!verified.ok) throw new Error(verified.problems.join('; '));
+		const outcome = await service.spawnAuthority.authority.admit({
+			context: verified.context,
+			snapshot: buildDispatchSnapshot(
+				{
+					command: '/usr/local/bin/grok',
+					args: ['-m', 'grok-4', '--output-format', 'streaming-json'],
+					cwd: dir,
+					env: { XAI_API_KEY: GROK_CANARY, GROK_HOME },
+				},
+				{
+					provider: 'grok',
+					model: 'grok-4',
+					account: managedAccountRef('grok', GROK_HOME),
+					resourceIds: [],
+				}
+			),
+			policy: service.spawnAuthority.policy(),
+		});
+		return { outcome, runId };
+	}
+	const executions = () =>
+		fake.calls
+			.map((c) => c.body as { operation?: string; payload?: Record<string, unknown> })
+			.filter((b) => b.operation === 'execution');
+	/** Everything the composition wrote to its data directory, as text. */
+	const onDisk = (): string =>
+		fs
+			.readdirSync(dir, { recursive: true, withFileTypes: true })
+			.filter((e) => e.isFile())
+			.map((e) => fs.readFileSync(path.join(e.parentPath, e.name), 'latin1'))
+			.join('\n');
+
+	beforeAll(async () => {
+		({ dir, fake, service } = await boot('offline-grok-', doubleOptions(now), holder));
+		service.telemetry.stop();
+	}, 30_000);
+	afterAll(async () => {
+		await service.close();
+		await fake.close();
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
+
+	it('enrolled but unregistered: the Grok launch is unavailable and nothing is asked of the endpoint', async () => {
+		expect(service.spawnAuthority.standing()).toBe('managed');
+		const { outcome } = await admitGrok();
+		expect(outcome.state).toBe('unavailable');
+		await expect(startChild(outcome, dir)).rejects.toThrow(/^unavailable/);
+		expect(executions()).toHaveLength(0);
+		expect(service.dispatch.receipts()).toEqual([]);
+	});
+
+	it('registered: the admitted receipt names Grok, its model, the actor, the turn and the registration; no key or account path reaches the wire or the disk', async () => {
+		await register(service);
+		const { outcome, runId } = await admitGrok();
+		if (outcome.state !== 'admitted') throw new Error(`${outcome.state}: ${outcome.message}`);
+		const [execution] = executions();
+		expect(execution.payload).toMatchObject({
+			provider: 'grok',
+			model: 'grok-4',
+			requestId: `req-${runId}`,
+			attemptId: `att-${runId}`,
+			runId,
+			arguments: [],
+		});
+		await service.dispatch.flush();
+		const receipt = service.dispatch.receipt(outcome.lease.leaseId);
+		expect(receipt).toMatchObject({
+			provider: 'grok',
+			operation: 'start',
+			requestId: `req-${runId}`,
+			runId,
+			actor: outcome.lease.actor,
+			decision: { decisionId: expect.any(String) },
+			registration: { challengeId: expect.any(String) },
+			effect: { state: 'admitted' },
+		});
+		for (const text of [JSON.stringify(fake.calls), onDisk()]) {
+			expect(text).not.toContain(GROK_CANARY);
+			expect(text).not.toContain(GROK_HOME);
+		}
+		expect(service.dispatch.authority.revokeAll('grok case over')).toBe(1);
+	});
+
+	it('a dropped daemon refuses the next Grok launch on the last policy, and a revoked registration keeps refusing it; no child, no new execution', async () => {
+		fake.dropConnections();
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		clock += 1_000;
+		const sent = executions().length;
+		const dropped = await admitGrok();
+		expect(dropped.outcome).toMatchObject({ state: 'unavailable', code: 'runtime-unavailable' });
+		await expect(startChild(dropped.outcome, dir)).rejects.toThrow(/^unavailable/);
+		expect(service.policy.status().admission.possible).toBe(false);
+
+		expect(executions()).toHaveLength(sent);
+
+		expect((await service.policy.refresh()).status).toBe('ok');
+		fake.revokeRegistration();
+		const receipts = service.dispatch.receipts().length;
+		const revoked = await admitGrok();
+		expect(revoked.outcome).toMatchObject({
+			state: 'unavailable',
+			message: expect.stringContaining('unauthenticated'),
+		});
+		// The revoked registration is asked and answers unauthenticated: no decision, no receipt, no lease.
+		expect(service.dispatch.receipts()).toHaveLength(receipts);
+		expect(service.dispatch.authority.live()).toEqual([]);
+	});
+
+	it('a restart over the same directory must register again before Grok is admitted', async () => {
+		await service.close();
+		clock += 5_000;
+		service = compose(dir, holder, 4444, new Date(now()).toISOString(), now);
+		await service.start();
+		service.telemetry.stop();
+		expect(service.dispatch.receipts().map((r) => r.provider)).toEqual(['grok']);
+		const sent = executions().length;
+		expect((await admitGrok()).outcome.state).toBe('unavailable');
+		expect(executions()).toHaveLength(sent);
+		await register(service);
+		expect((await admitGrok()).outcome.state).toBe('admitted');
+		expect(service.dispatch.authority.revokeAll('grok case over')).toBe(1);
+	}, 20_000);
 });

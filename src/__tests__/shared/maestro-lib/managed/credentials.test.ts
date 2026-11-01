@@ -344,3 +344,164 @@ describe('the launch plan under management', () => {
 		}
 	});
 });
+
+describe('a Grok launch under approved credential references (GT1-09-12A)', () => {
+	// Synthetic values only: no real xAI key, account or endpoint is read.
+	const GROK_CANARY = 'canary-gt1-09-12a-approved-grok-value';
+	const GROK_HOME = '/home/u/.grok-team';
+	const GROK_ROUTE: ManagedRouteCeiling = { ...ROUTE, providerId: 'grok' };
+	const grokRef = (overrides: Partial<ManagedCredentialRef> = {}): ManagedCredentialRef =>
+		ref({
+			refId: 'grok-cred-1',
+			audience: { providerId: 'grok', destination: null },
+			source: { kind: 'server-secret', secretName: 'XAI_KEY_TEAM', envVar: 'XAI_API_KEY' },
+			...overrides,
+		});
+	const grokBinding = (overrides: Partial<CredentialLaunchBinding> = {}) =>
+		binding({ providerId: 'grok', ...overrides });
+	let tmp: string;
+	let runSecrets: string;
+
+	beforeEach(() => {
+		tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'managed-grok-credentials-')));
+		runSecrets = path.join(tmp, 'run-secrets');
+		fs.mkdirSync(runSecrets);
+		fs.writeFileSync(path.join(runSecrets, 'XAI_KEY_TEAM'), `${GROK_CANARY}\n`);
+	});
+	afterEach(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+	const grokInput = (overrides: Partial<AgentLaunchInput> = {}): AgentLaunchInput => ({
+		surface: 'desktop',
+		agent: { ...getAgentDefinition('grok'), capabilities: getAgentCapabilities('grok') },
+		command: '/usr/local/bin/grok',
+		args: [],
+		cwd: '/project',
+		prompt: 'hello',
+		isWindowsHost: false,
+		// A personal inline key on the agent and stale credential sources in the "shell".
+		sessionCustomEnvVars: { GROK_AUTH: 'personal-grok-auth-on-the-agent' },
+		secretLookup: {
+			env: {
+				GROK_AUTH: 'stale-shell-grok-auth',
+				GROK_AUTH_PATH: '/home/u/.grok/auth.json',
+				XAI_API_KEY: 'stale-shell-xai-key',
+			},
+			runSecretsDir: runSecrets,
+		},
+		...overrides,
+	});
+
+	it('delivers the approved key under XAI_API_KEY, drops every unselected Grok credential source, and names it only by reference', () => {
+		const set = bindApprovedCredentials([grokRef()], grokBinding());
+		const result = buildAgentLaunchPlan(
+			grokInput({ managed: { route: GROK_ROUTE, credentials: set, now: NOW } })
+		);
+		if (!result.ok) throw new Error(result.error);
+		expect(result.plan.env?.XAI_API_KEY).toBe(GROK_CANARY);
+		expect(result.plan.env?.GROK_AUTH).toBeUndefined();
+		expect(result.plan.env?.GROK_AUTH_PATH).toBeUndefined();
+		expect(result.plan.managedCredentials).toMatchObject({
+			approved: [{ refId: 'grok-cred-1', envVar: 'XAI_API_KEY' }],
+			delivered: [{ refId: 'grok-cred-1', envVar: 'XAI_API_KEY', source: 'run-secrets' }],
+			bindingDigest: set.digest,
+		});
+		expect(result.plan.managedCredentials?.ceiling?.removed).toEqual(
+			expect.arrayContaining(['GROK_AUTH'])
+		);
+		const { env: _env, ...rest } = result.plan;
+		const visible = JSON.stringify(rest);
+		for (const secret of [GROK_CANARY, 'personal-grok-auth', 'stale-shell'])
+			expect(visible).not.toContain(secret);
+	});
+
+	it('binds an account-bound reference only to the launch account it names', () => {
+		const account = managedAccountRef('grok', GROK_HOME);
+		expect(account).toBe(managedAccountRef('grok', `${GROK_HOME}/`));
+		expect(account).not.toBe(managedAccountRef('claude-code', GROK_HOME));
+		expect(account).not.toContain(GROK_HOME);
+		const bound = grokRef({ accountRef: account });
+		expect(bindApprovedCredentials([bound], grokBinding()).refused[0]?.reason).toBe(
+			'account-mismatch'
+		);
+		expect(
+			bindApprovedCredentials(
+				[bound],
+				grokBinding({ accountRef: managedAccountRef('codex', GROK_HOME) })
+			).refused[0]?.reason
+		).toBe('account-mismatch');
+		const set = bindApprovedCredentials([bound], grokBinding({ accountRef: account }));
+		expect(set.approved).toEqual([expect.objectContaining({ accountRef: account })]);
+		// A Grok reference never binds to another provider's launch.
+		expect(bindApprovedCredentials([grokRef()], binding()).refused[0]?.reason).toBe(
+			'audience-mismatch'
+		);
+	});
+
+	it.each([
+		[
+			'revoked at binding',
+			() => bindApprovedCredentials([grokRef({ status: 'revoked' })], grokBinding()),
+			NOW,
+			'managed-credential-refused',
+		],
+		[
+			'expired between binding and launch',
+			() => bindApprovedCredentials([grokRef()], grokBinding()),
+			Date.parse('2026-10-23T00:00:00Z'),
+			'managed-credential-refused',
+		],
+		[
+			'forged (not bound on this host)',
+			() => structuredClone(bindApprovedCredentials([grokRef()], grokBinding())),
+			NOW,
+			'managed-credentials-unbound',
+		],
+	] as const)(
+		'refuses a %s reference: no plan, no environment, no Grok value',
+		(_label, makeSet, now, reason) => {
+			const result = buildAgentLaunchPlan(
+				grokInput({ managed: { route: GROK_ROUTE, credentials: makeSet(), now } })
+			);
+			expect(result.ok).toBe(false);
+			if (result.ok) return;
+			expect(result.reason).toBe(reason);
+			expect(isManagedLaunchRefusal(result.reason)).toBe(true);
+			expect('plan' in result).toBe(false);
+			expect(JSON.stringify(result)).not.toContain(GROK_CANARY);
+		}
+	);
+
+	it('denies when the approved secret is missing instead of falling back to the inherited GROK_AUTH or XAI_API_KEY', () => {
+		const set = bindApprovedCredentials(
+			[
+				grokRef({
+					source: { kind: 'server-secret', secretName: 'XAI_ABSENT', envVar: 'XAI_API_KEY' },
+				}),
+			],
+			grokBinding()
+		);
+		const result = buildAgentLaunchPlan(
+			grokInput({ managed: { route: GROK_ROUTE, credentials: set, now: NOW } })
+		);
+		expect(result.ok).toBe(false);
+		if (result.ok) return;
+		expect(result.reason).toBe('managed-credential-unavailable');
+		expect(result.error).toContain('XAI_ABSENT');
+		expect(result.error).not.toContain('stale-shell');
+	});
+
+	it('refuses a launch the policy routes to Grok when another provider is started under it', () => {
+		const set = bindApprovedCredentials([grokRef()], grokBinding());
+		const result = buildAgentLaunchPlan(
+			grokInput({
+				agent: {
+					...getAgentDefinition('claude-code'),
+					capabilities: getAgentCapabilities('claude-code'),
+				},
+				managed: { route: GROK_ROUTE, credentials: set, now: NOW },
+			})
+		);
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.reason).toBe('managed-route-refused');
+	});
+});

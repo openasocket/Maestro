@@ -114,3 +114,92 @@ describe('the source, the headless authority and the module hold', () => {
 		expect(holdCredentialCustody('cue.odinToken', env)).toEqual({ allowed: true });
 	});
 });
+
+describe('Grok credentials under the custody ceiling (GT1-09-12A)', () => {
+	// Synthetic names only; no Grok credential file or key is read.
+	const grokEnv = (name: string): CredentialCustody => ({ kind: 'environment', name });
+
+	it('holds no Grok credential of its own: the launch plan ceiling and settings-policy hold GROK_AUTH and XAI_API_KEY instead', () => {
+		expect(MANAGED_CREDENTIALS.some((credential) => /grok|xai/i.test(credential))).toBe(false);
+		expect(Object.keys(PLAIN_SETTINGS_CREDENTIAL_KEYS).some((key) => /grok|xai/i.test(key))).toBe(
+			false
+		);
+	});
+
+	it('never turns an unknown or unreadable enrollment into a permissive standing', () => {
+		const unknown: IdentityRead[] = [
+			...(['anchor-missing', 'foreign', 'rollback', 'unsealable', 'malformed'] as const).map(
+				(reason): IdentityRead => ({ status: 'untrusted', reason, message: reason })
+			),
+			...(['encryption-unavailable', 'anchor-unavailable', 'seal-not-protected'] as const).map(
+				(reason): IdentityRead => ({
+					status: 'unprotected',
+					reason,
+					message: reason,
+					fileExists: true,
+				})
+			),
+		];
+		for (const read of unknown) {
+			const source = createCredentialCustodySource({ identity: { read: () => read } });
+			expect(source.standing()).toBe('managed');
+			for (const name of ['XAI_API_KEY', 'GROK_AUTH']) {
+				expect(source.authorize('cue.odinToken', grokEnv(name))).toMatchObject({
+					allowed: false,
+					code: 'environment',
+					message: expect.stringContaining(name),
+				});
+			}
+			expect(source.authorize('wakatime.apiKey', SETTINGS_FILE_CUSTODY)).toMatchObject({
+				allowed: false,
+				code: 'plain-file',
+			});
+		}
+	});
+
+	it('follows revocation, a lost custody and a restart on the next read, and never caches a release', () => {
+		let read: IdentityRead = enrolled;
+		const source = createCredentialCustodySource({ identity: { read: () => read } });
+		setCredentialCustodyAuthority(source);
+		expect(holdCredentialCustody('cue.odinToken', grokEnv('GROK_AUTH'))).toMatchObject({
+			allowed: false,
+		});
+		// The record is rolled back or its anchor is lost: still managed, still refused.
+		read = { status: 'untrusted', reason: 'rollback', message: 'rolled back' };
+		expect(holdCredentialCustody('cue.odinToken', grokEnv('GROK_AUTH'))).toMatchObject({
+			allowed: false,
+		});
+		read = {
+			status: 'unprotected',
+			reason: 'anchor-unavailable',
+			message: 'keyring gone',
+			fileExists: true,
+		};
+		expect(holdCredentialCustody('cue.odinToken', grokEnv('XAI_API_KEY'))).toMatchObject({
+			allowed: false,
+		});
+		// A restart composes a new source over the same identity: the standing is read again, not remembered.
+		const restarted = createCredentialCustodySource({ identity: { read: () => read } });
+		setCredentialCustodyAuthority(restarted);
+		expect(holdCredentialCustody('cue.odinToken', grokEnv('XAI_API_KEY'))).toMatchObject({
+			allowed: false,
+		});
+		// Only an authenticated release (no record at all) reads standalone again.
+		read = { status: 'none' };
+		expect(holdCredentialCustody('cue.odinToken', grokEnv('XAI_API_KEY'))).toEqual({
+			allowed: true,
+		});
+	});
+
+	it('a headless process that read managed refuses a Grok env custody and admits only the anchored OS key store', () => {
+		setCredentialCustodyAuthority(headlessCredentialAuthority({ standing: () => 'managed' }));
+		expect(holdCredentialCustody('cue.odinToken', grokEnv('GROK_AUTH'))).toMatchObject({
+			allowed: false,
+			code: 'environment',
+		});
+		expect(
+			holdCredentialCustody('cue.odinToken', sealed(fakeSeal({ available: false })))
+		).toMatchObject({ allowed: false, code: 'unprotected' });
+		expect(holdCredentialCustody('cue.odinToken', sealed())).toEqual({ allowed: true });
+	});
+});

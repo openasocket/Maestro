@@ -450,7 +450,12 @@
 					"present": false,
 					"requiredProof": "a real admission decision with audit attribution to the actual account, actor and turn, GT1-11-12 exact-binary live scenario against an enrolled installation and a live endpoint"
 				}
-			]
+			],
+			"progress": {
+				"task": "GT1-09-12A",
+				"state": "wiring-tested-against-labeled-double-real-endpoint-absent",
+				"detail": "offline-recovery.test.ts over the real createEnterpriseService composition and the labeled fake endpoint: a Grok snapshot (provider grok, model grok-4, opaque managedAccountRef account, an inline xai- canary in its env) is unavailable while enrolled but unregistered with no execution sent; once the test plays the actor's registration it is admitted and the endpoint's execution request and the dispatch receipt name grok, grok-4, the request, attempt and run ids, the lease actor and the registration, with neither the key nor the account home on the socket or anywhere in the data directory; a dropped daemon refuses on the last policy with no execution, a revoked registration is asked and answers unauthenticated with no decision, receipt or lease, and a restart must register again before Grok is admitted. credentials.test.ts: an approved XAI_API_KEY reference is delivered while the agent's GROK_AUTH is removed and the shell's GROK_AUTH/XAI_API_KEY are never used; revoked, expired-before-launch, forged and missing-secret references refuse with no plan. credential-custody.test.ts: every untrusted or unprotected-with-file identity read stays managed and refuses a GROK_AUTH or XAI_API_KEY environment custody; the custody ceiling holds no Grok credential of its own (MANAGED_CREDENTIALS has none). Passing doubles prove wiring only; status unchanged."
+			}
 		},
 		{
 			"id": "GT1-09-R14",
