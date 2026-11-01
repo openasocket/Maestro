@@ -795,6 +795,132 @@ describe('spawnGroupChatAgent', () => {
 		});
 	});
 
+	// GT1-08-11: the real Grok definition in each room role, and a managed refusal at the real sink.
+	describe('Grok room roles (GT1-08-11)', () => {
+		const ROOM = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+		const grok = (): AgentConfig => ({
+			...getAgentDefinition('grok')!,
+			available: true,
+			capabilities: { ...getAgentCapabilities('grok') },
+		});
+		const readOnly = ['--permission-mode', 'plan', '--deny', 'Bash(*)'];
+		let spawnAdmitted: ReturnType<typeof vi.fn>;
+		beforeEach(() => {
+			mockResolve.mockReturnValue({ mode: 'api', reason: 'auto' });
+			spawnAdmitted = vi.fn().mockResolvedValue({ pid: 5151, success: true });
+		});
+
+		it.each([
+			['moderator', `group-chat-${ROOM}-moderator-1700000000001`, true, undefined],
+			['synthesis', `group-chat-${ROOM}-moderator-1700000000002`, true, 'grok-moderator-sess'],
+			['participant', `group-chat-${ROOM}-participant-Alpha-1700000000003`, false, undefined],
+			[
+				'continuation',
+				`group-chat-${ROOM}-participant-Alpha-1700000000004`,
+				false,
+				'grok-alpha-sess',
+			],
+		] as const)(
+			'%s turn is the room child with its own identity and one prompt delivery',
+			async (_role, sessionId, readOnlyMode, resumeId) => {
+				const agent = grok();
+				const args = buildAgentArgs(agent, {
+					baseArgs: agent.args,
+					prompt: 'route @Alpha',
+					readOnlyMode,
+					...(resumeId ? { agentSessionId: resumeId } : {}),
+				});
+				const result = await spawnGroupChatAgent({
+					sessionId,
+					agentId: 'grok',
+					agent,
+					args,
+					cwd: os.tmpdir(),
+					prompt: 'route @Alpha',
+					appendSystemPrompt: 'room rules',
+					customEnvVars: { GROK_HOME: path.resolve('grok-account') },
+					agentConfigValues: { contextWindow: 131072 },
+					readOnlyMode,
+					processManager: {
+						...processManager,
+						spawnAdmitted: spawnAdmitted as IProcessManager['spawnAdmitted'],
+					},
+				});
+				expect(result).toEqual({ pid: 5151, success: true });
+				expect(spawnAdmitted).toHaveBeenCalledOnce();
+				expect(spawnSpy).not.toHaveBeenCalled();
+				const [spawned, actor] = spawnAdmitted.mock.calls[0] as [ProcessConfig, unknown];
+				expect(actor).toEqual({ peer: 'in-process' });
+				expect(spawned).toMatchObject({
+					sessionId,
+					toolType: 'grok',
+					contextWindow: 131072,
+					delegation: groupChatRoomContext(ROOM),
+					dispatchedAs: { requestId: sessionId, attemptId: sessionId },
+					prompt: undefined,
+				});
+				// Usage and the resumed provider session are read against this identity.
+				expect(spawned.agentSessionId).toBe(resumeId);
+				expect(spawned.args.includes('--resume')).toBe(!!resumeId);
+				expect(spawned.customEnvVars!.GROK_HOME).toBe(path.resolve('grok-account'));
+				expect(readDelegationContextEnv(spawned.customEnvVars!)).toEqual({
+					status: 'ok',
+					context: groupChatTurnContext({ processId: sessionId }),
+				});
+				const at = spawned.args.indexOf('--permission-mode');
+				expect(at >= 0 ? spawned.args.slice(at, at + 4) : []).toEqual(readOnlyMode ? readOnly : []);
+				if (readOnlyMode) expect(spawned.args).not.toContain('--always-approve');
+				// The system prompt is embedded once, and not again on a resumed turn.
+				const blocks = JSON.parse(spawned.promptArtifact!.content).content;
+				expect(blocks).toEqual([
+					{
+						type: 'text',
+						text: resumeId
+							? 'route @Alpha'
+							: embedSystemPromptInPrompt('room rules', 'route @Alpha'),
+					},
+				]);
+			}
+		);
+
+		it.each(['moderator', 'participant'] as const)(
+			'a managed refusal of a Grok %s at the real sink starts nothing and is not retried unmanaged',
+			async (role) => {
+				const sessionId =
+					role === 'moderator'
+						? `group-chat-${ROOM}-moderator-1700000000005`
+						: `group-chat-${ROOM}-participant-Alpha-1700000000006`;
+				const port = fakeSpawnPort({
+					decide: () => ({ decision: 'deny', reason: 'Grok is not admitted.', policyRevision: 3 }),
+				});
+				const { manager, cli } = managedManager(port);
+				const legacySpawn = vi.spyOn(manager, 'spawn');
+				const agent = grok();
+				const result = await spawnGroupChatAgent({
+					sessionId,
+					agentId: 'grok',
+					agent,
+					args: buildAgentArgs(agent, {
+						baseArgs: agent.args,
+						prompt: 'go',
+						readOnlyMode: role === 'moderator',
+					}),
+					cwd: os.tmpdir(),
+					prompt: 'go',
+					readOnlyMode: role === 'moderator',
+					processManager: manager,
+				});
+				expect(result).toMatchObject({ pid: -1, success: false, managed: { state: 'denied' } });
+				expect(port.asked).toHaveLength(1);
+				expect(port.authority.live()).toHaveLength(0);
+				expect(manager.admissionOf(sessionId)).toBeNull();
+				expect(legacySpawn).not.toHaveBeenCalled();
+				expect(cli).not.toHaveBeenCalled();
+				expect(spawnSpy).not.toHaveBeenCalled();
+			}
+		);
+	});
+
 	describe('the room lineage and the admitted spawn (MRC-07-05)', () => {
 		const CHAT = '11111111-2222-4333-8444-555555555555';
 		const PARTICIPANT = `group-chat-${CHAT}-participant-Alpha-1700000000000`;
