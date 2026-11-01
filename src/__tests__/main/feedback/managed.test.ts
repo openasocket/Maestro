@@ -90,6 +90,7 @@ import {
 	type RepositoryEffectRequest,
 } from '../../../main/enterprise/repository-policy';
 import {
+	buildFeedbackConversationPrompt,
 	submitFeedback,
 	submitFeedbackConversation,
 	subscribeFeedbackIssue,
@@ -312,5 +313,46 @@ describe('Send Feedback under management (MRC2-04-05)', () => {
 		});
 		expect(execFile.execFileNoThrow).not.toHaveBeenCalled();
 		expect(held.effects()).toEqual(['issue']);
+	});
+});
+
+describe('A Grok feedback interview under management (GT1-08-14D)', () => {
+	it('building the Grok interview prompt runs no gh process and asks the ceiling for nothing', async () => {
+		const held = ceiling(null);
+
+		const built = await buildFeedbackConversationPrompt();
+
+		expect(built.prompt).toContain('TEMPLATE');
+		expect(built.cwd).toBeTruthy();
+		expect(execFile.execFileNoThrow).not.toHaveBeenCalled();
+		expect(held.requests).toEqual([]);
+		expect(written.size).toBe(0);
+	});
+
+	it("a Grok interview's result is refused before any gh call under a denying ceiling, the draft untouched", async () => {
+		const held = ceiling(null);
+
+		const result = await submitFeedbackConversation(
+			conversation({ agentProvider: 'Grok CLI', attachments: [png] })
+		);
+
+		expect(result).toEqual({
+			success: false,
+			refused: true,
+			error: expect.stringContaining('[managed-unavailable]'),
+		});
+		expect(execFile.execFileNoThrow).not.toHaveBeenCalled();
+		expect(written.size).toBe(0);
+		expect(held.effects()).toEqual(['issue']);
+	});
+
+	it('standalone, a Grok interview files under its own provider name, redacted, with no other provider named', async () => {
+		const result = await submitFeedbackConversation(conversation({ agentProvider: 'Grok CLI' }));
+
+		expect(result.success).toBe(true);
+		const body = [...written.values()].find((text) => text.includes('## Summary'));
+		expect(body).toContain('- Agent/provider involved: Grok CLI');
+		expect(body).not.toMatch(/Agent\/provider involved: (Claude|Codex|OpenCode)/);
+		expect(body).not.toContain(TOKEN);
 	});
 });
