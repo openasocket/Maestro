@@ -30,7 +30,18 @@ import {
 	replayAfterAuth,
 	stopRetriesForAgent,
 	useRetryStore,
+	noteFailedTurnExited,
+	cancelContextCompaction,
+	cancelRecoveryForTab,
+	isAwaitingContextCompaction,
+	registerAgentErrorSurfacer,
 } from '../../../renderer/stores/retryStore';
+import {
+	registerContextCompactionSpawner,
+	type HiddenTurnSpawner,
+} from '../../../renderer/services/contextCompaction';
+import { getContextCompactionBlocker } from '../../../shared/contextCompaction';
+import { logger } from '../../../renderer/utils/logger';
 import { useSessionStore, updateSessionWith } from '../../../renderer/stores/sessionStore';
 import { settleTabThinkingState } from '../../../renderer/utils/tabHelpers';
 import { useNotificationStore } from '../../../renderer/stores/notificationStore';
@@ -1805,5 +1816,224 @@ describe('noteDirectDispatch', () => {
 		noteDirectDispatch('s-unwired', { ...directItem, tabId: 't-unwired' });
 
 		expect(scheduleRetryForError('s-unwired', 't-unwired', weekly())).toBe(false);
+	});
+});
+
+/**
+ * GT1-07-04D. Grok's context-limit recovery is a required-feature blocker
+ * (GT1-07-04C): there is no qualified native compaction operation, so the store
+ * must decline by name and hand the original refusal back. A scripted Grok
+ * operation that would report success is wired in every case, so a decline that
+ * silently spawned it, or read its result as a compaction, would show up as a
+ * call, a pill, an entry or a resend. Each case uses its own keys: dispatch
+ * snapshots are module-level and outlive a test.
+ */
+describe('Grok context-limit recovery is a visible blocker (GT1-07-04D)', () => {
+	const GROK_NATIVE_ID = 'grok-native-session-9';
+	const GROK_ACCOUNT_ENV = { GROK_HOME: '/accounts/grok-work' };
+	const GROK_SSH = { enabled: true, remoteId: 'grok-host-1' };
+	/**
+	 * Host dispatch facts saying the prompt never reached the provider, so the
+	 * classifier itself would not fail closed for Grok: a decline must come from
+	 * the blocker. The renderer AgentError does not declare the field the shared
+	 * classifier reads, hence the cast.
+	 */
+	function notDispatched(error: AgentError): AgentError {
+		return {
+			...error,
+			terminal: { status: 'failed', kind: 'provider', dispatchState: 'not-dispatched' },
+		} as AgentError;
+	}
+	const ORIGINAL_PROMPT = 'summarize the failing suites, then fix the first one';
+
+	let operation: ReturnType<typeof vi.fn<HiddenTurnSpawner>>;
+	let surfaced: ReturnType<typeof vi.fn<(processSessionId: string, error: AgentError) => void>>;
+	let warn: { mock: { calls: unknown[][] }; mockRestore: () => void };
+
+	function grokContextLimit(): AgentError {
+		return notDispatched(
+			err({
+				type: 'token_exhaustion',
+				message: 'Prompt is too long. Try a shorter message or start a new session.',
+				agentId: 'grok',
+			})
+		);
+	}
+
+	/** A Grok agent mid-conversation on a selected account, model and host. */
+	function setupGrok(id: string, tabId: string) {
+		const session = createMockSession({
+			id,
+			toolType: 'grok',
+			customModel: 'grok-4',
+			customEnvVars: { ...GROK_ACCOUNT_ENV },
+			sessionSshRemoteConfig: { ...GROK_SSH },
+			aiTabs: [createMockAITab({ id: tabId, agentSessionId: GROK_NATIVE_ID })],
+			activeTabId: tabId,
+		});
+		useSessionStore.setState({ sessions: [session] } as any);
+	}
+
+	/** The user's Grok turn goes out and is refused on the context limit. */
+	function failGrokOnContextLimit(id: string, tabId: string, options?: { batch?: boolean }) {
+		noteDispatch(
+			id,
+			{ id: `turn-${id}`, timestamp: 1, tabId, type: 'message', text: ORIGINAL_PROMPT },
+			deps
+		);
+		return scheduleRetryForError(id, tabId, grokContextLimit(), options);
+	}
+
+	function grokTab(id: string, tabId: string) {
+		return useSessionStore
+			.getState()
+			.sessions.find((s) => s.id === id)!
+			.aiTabs.find((t) => t.id === tabId)!;
+	}
+
+	function blockerWarns() {
+		return warn.mock.calls.filter(([message]) =>
+			String(message).includes('compaction is a required-feature blocker')
+		);
+	}
+
+	/** Nothing in the store claims a compaction or a retry for this key. */
+	function expectNothingTakenOver(id: string, tabId: string) {
+		expect(getRetryEntry(id, tabId)).toBeUndefined();
+		expect(hasPendingRetry(id, tabId)).toBe(false);
+		expect(isAwaitingContextCompaction(id, tabId)).toBe(false);
+		expect(grokTab(id, tabId).logs.some((log) => log.contextCompaction)).toBe(false);
+		expect(operation).not.toHaveBeenCalled();
+		expect(processQueuedItem).not.toHaveBeenCalled();
+	}
+
+	beforeEach(() => {
+		operation = vi.fn<HiddenTurnSpawner>().mockResolvedValue({ success: true });
+		registerContextCompactionSpawner(operation);
+		surfaced = vi.fn<(processSessionId: string, error: AgentError) => void>();
+		registerAgentErrorSurfacer(surfaced);
+		warn = vi.spyOn(logger, 'warn');
+	});
+
+	afterEach(() => {
+		registerContextCompactionSpawner(null);
+		registerAgentErrorSurfacer(null);
+		warn.mockRestore();
+	});
+
+	it('declines by name and hands the original refusal back to the caller', async () => {
+		setupGrok('g1', 't1');
+
+		// false is the hand-back: the caller surfaces the original error unchanged.
+		expect(failGrokOnContextLimit('g1', 't1')).toBe(false);
+
+		const blocker = getContextCompactionBlocker('grok')!;
+		expect(blockerWarns()).toHaveLength(1);
+		expect(blockerWarns()[0][2]).toEqual({
+			key: expect.stringContaining('g1'),
+			feature: blocker.feature,
+			parityRows: blocker.parityRows,
+		});
+
+		// The failed turn exits and time passes: still nothing starts.
+		noteFailedTurnExited('g1', 't1');
+		await vi.advanceTimersByTimeAsync(60_000);
+
+		expectNothingTakenOver('g1', 't1');
+		// The store raises nothing of its own over the caller's surfacing.
+		expect(surfaced).not.toHaveBeenCalled();
+		expect(useRetryStore.getState().outages).toEqual({});
+	});
+
+	it('keeps the native session, account, host and model exactly as they were', async () => {
+		setupGrok('g2', 't1');
+		failGrokOnContextLimit('g2', 't1');
+		noteFailedTurnExited('g2', 't1');
+		await vi.advanceTimersByTimeAsync(0);
+
+		const session = useSessionStore.getState().sessions[0];
+		expect(grokTab('g2', 't1').agentSessionId).toBe(GROK_NATIVE_ID);
+		expect(session.customEnvVars).toEqual(GROK_ACCOUNT_ENV);
+		expect(session.sessionSshRemoteConfig).toEqual(GROK_SSH);
+		expect(session.customModel).toBe('grok-4');
+		expect(session.toolType).toBe('grok');
+		// The original prompt is not parked, rewritten or resent behind the user.
+		expect(session.executionQueue.some((item) => item.text === ORIGINAL_PROMPT)).toBe(false);
+		expect(processQueuedItem).not.toHaveBeenCalled();
+	});
+
+	it('stays bounded: repeated and late refusals never start a retry or a compaction', async () => {
+		setupGrok('g3', 't1');
+
+		for (let i = 0; i < 5; i++) {
+			expect(failGrokOnContextLimit('g3', 't1')).toBe(false);
+			noteFailedTurnExited('g3', 't1');
+		}
+		// A late refusal for a turn that already ended, after a long wait.
+		await vi.advanceTimersByTimeAsync(10 * 60_000);
+		expect(scheduleRetryForError('g3', 't1', grokContextLimit())).toBe(false);
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(blockerWarns()).toHaveLength(6);
+		expectNothingTakenOver('g3', 't1');
+		expect(Object.keys(useRetryStore.getState().retries)).toEqual([]);
+	});
+
+	it('leaves Stop and cancellation with nothing to undo', async () => {
+		setupGrok('g4', 't1');
+		failGrokOnContextLimit('g4', 't1');
+
+		cancelContextCompaction('g4');
+		cancelRecoveryForTab('g4', 't1');
+		stopRetriesForAgent('g4');
+		noteFailedTurnExited('g4', 't1');
+		await vi.advanceTimersByTimeAsync(30_000);
+
+		expectNothingTakenOver('g4', 't1');
+		expect(surfaced).not.toHaveBeenCalled();
+	});
+
+	it("declines the user's own /compact on Grok the same way, never sending it as a prompt", async () => {
+		setupGrok('g5', 't1');
+		noteDispatch(
+			'g5',
+			{ id: 'turn-g5', timestamp: 1, tabId: 't1', type: 'message', text: '/compact' },
+			deps
+		);
+
+		expect(scheduleRetryForError('g5', 't1', grokContextLimit())).toBe(false);
+		noteFailedTurnExited('g5', 't1');
+		await vi.advanceTimersByTimeAsync(0);
+
+		expectNothingTakenOver('g5', 't1');
+	});
+
+	it('leaves an Auto Run task to the batch, unchanged', () => {
+		setupGrok('g6', 't1');
+		expect(failGrokOnContextLimit('g6', 't1', { batch: true })).toBe(false);
+		// The batch owns the turn: the recovery is never consulted, so not even the
+		// blocker decline runs for an Auto Run task.
+		expect(blockerWarns()).toHaveLength(0);
+		expectNothingTakenOver('g6', 't1');
+	});
+
+	it('scopes the blocker to compaction: a Grok availability refusal still retries', () => {
+		setupGrok('g7', 't1');
+		noteDispatch(
+			'g7',
+			{ id: 'turn-g7', timestamp: 1, tabId: 't1', type: 'message', text: ORIGINAL_PROMPT },
+			deps
+		);
+
+		expect(
+			scheduleRetryForError(
+				'g7',
+				't1',
+				notDispatched(err({ message: 'API Error: 529 Overloaded', agentId: 'grok' }))
+			)
+		).toBe(true);
+		expect(getRetryEntry('g7', 't1')?.strategy).toBe('availability');
+		expect(blockerWarns()).toHaveLength(0);
+		expect(operation).not.toHaveBeenCalled();
 	});
 });
