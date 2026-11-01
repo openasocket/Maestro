@@ -3,7 +3,10 @@ import { canonicalJson } from '../../shared/canonicalJson';
 import { redactSecrets } from '../../shared/redactSecrets';
 import { stripAnsiCodes } from '../../shared/stringUtils';
 import { buildAgentEnvironment } from '../../shared/maestro-lib/launch/env';
-import type { GrokAcpCommandObservation } from '../../shared/maestro-lib/grok/acp-turn';
+import {
+	grokNativeCommandEntryDigest,
+	type GrokAcpCommandObservation,
+} from '../../shared/maestro-lib/grok/acp-turn';
 import type { TurnProcessSpec } from '../../shared/maestro-lib/run/start-turn';
 import { captureException } from '../utils/sentry';
 import type { ModelDiscoveryContext } from './detector';
@@ -36,6 +39,11 @@ export interface GrokDiscoveredCommand {
 	kind: 'skill' | 'native-command' | 'workflow';
 	scope?: 'local' | 'repo' | 'user' | 'server' | 'bundled' | 'plugin';
 	argumentHint?: string;
+	/**
+	 * `grokNativeCommandEntryDigest()` of the raw advertised entry. A person's pick carries it
+	 * into the native command intent; the next process must advertise the same entry.
+	 */
+	entryDigest: string;
 }
 
 export interface GrokCommandDiscoveryResult {
@@ -58,6 +66,15 @@ export interface GrokCommandDiscoveryResult {
 		catalogRevision: number;
 		agentVersion: string;
 		observedAt: number;
+		/**
+		 * Opaque account and host references the catalog was read under; an intent built from
+		 * it binds the same scope. The cwd is the caller's own (checked equal above), never echoed.
+		 */
+		account: string;
+		host: string;
+		/** Requested selection, as the observation reported it. */
+		model?: string;
+		effort?: string;
 	};
 }
 
@@ -178,6 +195,8 @@ export async function discoverGrokSlashCommands(
 			)
 				return unavailable('invalid-catalog');
 			names.add(name);
+			const entryDigest = grokNativeCommandEntryDigest(entry);
+			if (!entryDigest) return unavailable('invalid-catalog');
 			let kind: GrokDiscoveredCommand['kind'] = 'native-command';
 			let scope: GrokDiscoveredCommand['scope'];
 			if (meta?.scope !== undefined) {
@@ -213,6 +232,7 @@ export async function discoverGrokSlashCommands(
 				...(scope ? { scope } : {}),
 				description: redactSecrets(stripAnsiCodes(description)).text,
 				...(input ? { argumentHint: redactSecrets(stripAnsiCodes(input.hint)).text } : {}),
+				entryDigest,
 			});
 		}
 		return {
@@ -226,6 +246,10 @@ export async function discoverGrokSlashCommands(
 				catalogRevision: observed.catalogRevision,
 				agentVersion: observed.agentVersion,
 				observedAt: observed.observedAt,
+				account: observed.account,
+				host: observed.host,
+				...(observed.selection.model !== undefined ? { model: observed.selection.model } : {}),
+				...(observed.selection.effort !== undefined ? { effort: observed.selection.effort } : {}),
 			},
 		};
 	} catch {

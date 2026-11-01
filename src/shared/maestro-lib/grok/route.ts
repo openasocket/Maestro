@@ -25,12 +25,13 @@ export const GROK_ACP_ARGS: readonly string[] = Object.freeze(['agent', 'stdio']
 /**
  * What this checkout's ACP port implements, independent of any peer advertisement. An
  * advertised capability the port cannot carry is still missing: `startGrokAcpTurn` takes
- * no attachments, has no SSH owner and submits no native command yet.
+ * no attachments and has no SSH owner. Native commands run only as a validated intent
+ * (`startGrokAcpTurn` `nativeCommand`), revalidated against the new process's catalog.
  */
 export const GROK_ACP_PORT_SUPPORT = Object.freeze({
 	images: false,
 	remote: false,
-	nativeCommands: false,
+	nativeCommands: true,
 });
 
 /**

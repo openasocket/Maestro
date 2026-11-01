@@ -1107,9 +1107,10 @@ describe('useInputProcessing', () => {
 		});
 
 		it.each([
-			['skill', 'native command execution is not available'],
-			['native-command', 'native command execution is not available'],
-			['workflow', 'native command execution is not available'],
+			// The draft stages an image; a native command takes none.
+			['skill', 'take no images'],
+			['native-command', 'take no images'],
+			['workflow', 'take no images'],
 			['empty', 'TUI-only actions and CLI subcommands cannot run through chat'],
 			['skills', 'TUI-only actions and CLI subcommands cannot run through chat'],
 			['missing', 'discovery is unavailable'],
@@ -1197,6 +1198,81 @@ describe('useInputProcessing', () => {
 				expect(effect).not.toHaveBeenCalled();
 			}
 			expect(vi.getTimerCount()).toBe(0);
+		});
+
+		describe('host-admitted native commands', () => {
+			const digest = 'a'.repeat(64);
+			const submit = async (inputValue: string) => {
+				session.aiTabs[0].inputValue = inputValue;
+				session.aiTabs[0].stagedImages = [];
+				const deps = createDeps({ activeSession: session, inputValue, stagedImages: [] });
+				const { result } = renderHook(() => useInputProcessing(deps));
+				await act(async () => {
+					await result.current.processInput();
+				});
+				await act(async () => {
+					vi.advanceTimersByTime(60);
+				});
+			};
+
+			beforeEach(() => {
+				receipt.commands = [
+					{
+						name: 'review',
+						description: 'Review',
+						kind: 'skill',
+						argumentHint: 'path',
+						entryDigest: digest,
+					},
+				];
+				Object.assign(receipt.binding!, {
+					account: 'account-ref',
+					host: 'host-ref',
+					model: 'grok-4.5',
+					effort: 'high',
+				});
+			});
+
+			it('queues an advertised command through the existing command queue', async () => {
+				await submit('/review src/a.ts');
+				expect(discover).toHaveBeenCalledOnce();
+				expect(mockProcessQueuedItemRef.current).toHaveBeenCalledExactlyOnceWith(
+					session.id,
+					expect.objectContaining({
+						type: 'command',
+						command: '/review',
+						commandArgs: 'src/a.ts',
+						commandScope: { provider: 'grok' },
+						commandDescription: 'Grok native command',
+					})
+				);
+				expect(useSessionStore.getState().sessions[0].aiTabs[0].logs).toEqual([]);
+				expect(window.maestro.process.spawn).not.toHaveBeenCalled();
+				expect(mockSetInputValue).toHaveBeenCalledWith('');
+			});
+
+			it.each([
+				['unbound', 'did not bind this command to an account and host'],
+				['no-digest', 'did not bind this command to an account and host'],
+				['other-model', 'stale or belongs to another conversation'],
+				['arguments', 'takes no arguments'],
+				['multi-line', 'must be one line'],
+			])('refuses %s keeping the draft', async (kind, message) => {
+				let input = '/review src/a.ts';
+				if (kind === 'unbound') delete (receipt.binding as { account?: string }).account;
+				else if (kind === 'no-digest')
+					delete (receipt.commands[0] as { entryDigest?: string }).entryDigest;
+				else if (kind === 'other-model') receipt.binding!.model = 'grok-other';
+				else if (kind === 'arguments') delete receipt.commands[0].argumentHint;
+				else input = '/review src/a.ts\nsecond line';
+				await submit(input);
+				expect(useSessionStore.getState().sessions[0].aiTabs[0].logs).toEqual([
+					expect.objectContaining({ source: 'error', text: expect.stringContaining(message) }),
+				]);
+				expect(mockProcessQueuedItemRef.current).not.toHaveBeenCalled();
+				expect(mockSetInputValue).not.toHaveBeenCalled();
+				expect(useSessionStore.getState().sessions[0].executionQueue).toEqual([]);
+			});
 		});
 
 		it.each(['sshRemoteId', 'sessionSshRemoteConfig', 'missing-native'])(

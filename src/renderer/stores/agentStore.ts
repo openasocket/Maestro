@@ -71,7 +71,8 @@ import {
 } from '../utils/executionQueue';
 import { logger } from '../utils/logger';
 import { requestTabAutoNameForMessage } from '../services/tabAutoNaming';
-import { getGrokSlashCommandRefusal } from '../slashCommands';
+import { admitGrokNativeCommand, getGrokSlashCommandRefusal } from '../slashCommands';
+import type { GrokAcpNativeCommandIntent } from '../../shared/maestro-lib/grok/acp-turn';
 import {
 	getQueuedCommandScopeRefusal,
 	getQueuedCommandSelectionRefusal,
@@ -454,7 +455,14 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 
 		// External/remote producers can bypass the composer and queue raw slash
 		// text as a message. Refuse before naming, mentions, retries or spawning.
-		const slashInput = item.type === 'command' ? item.command : item.text?.trim();
+		// A command item that is none of the user's prompts is a native Grok command: it runs
+		// only as the intent admitted here, against this tab's current catalog. Raw slash
+		// text in a message item has no intent and is refused as before.
+		let grokNativeCommand: GrokAcpNativeCommandIntent | undefined;
+		const slashInput =
+			item.type === 'command'
+				? [item.command, item.commandArgs].filter(Boolean).join(' ')
+				: item.text?.trim();
 		if (session.toolType === 'grok' && slashInput?.startsWith('/')) {
 			const isMaestroPrompt =
 				item.type === 'command' &&
@@ -464,8 +472,16 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 					...deps.openspecCommands,
 					...(deps.bmadCommands ?? []),
 				].some((command) => command.command === item.command);
-			if (!isMaestroPrompt) {
-				const refusal = await getGrokSlashCommandRefusal(session, targetTab, slashInput);
+			const admission = isMaestroPrompt
+				? undefined
+				: item.type === 'command'
+					? await admitGrokNativeCommand(session, targetTab, slashInput, {
+							imageCount: item.images?.length ?? 0,
+						})
+					: { refusal: await getGrokSlashCommandRefusal(session, targetTab, slashInput) };
+			grokNativeCommand = admission?.intent;
+			if (admission?.refusal) {
+				const refusal = admission.refusal;
 				const ownerRunning = (await probeSessionAiProcesses(sessionId, targetTab.id))
 					.targetTabActive;
 				updateSessionWith(sessionId, (s) =>
@@ -705,7 +721,65 @@ export const useAgentStore = create<AgentStore>()((set, get) => ({
 							}
 						: undefined);
 
-				if (matchingCommand) {
+				if (grokNativeCommand) {
+					// The exact `/name args` text, with no system prompt, New Session Message
+					// or template pass: main refuses any other prompt for the intent, and the
+					// new process must advertise the same entry before it is submitted.
+					const nativeText = slashInput!;
+					if (await refuseChangedCommand()) return false;
+					const expectedGrokSpawnSelection = await getQueuedCommandSpawnSelection(sessionId, item);
+					if (deps.isCancelled?.()) {
+						await settleUnsentCommand();
+						return false;
+					}
+					// No asynchronous gap between this selection check and the spawn.
+					const selectionRefusal = getQueuedCommandSelectionRefusal(sessionId, item);
+					if (selectionRefusal) {
+						await settleUnsentCommand(selectionRefusal);
+						return false;
+					}
+					useSessionStore.getState().addLogToTab(
+						sessionId,
+						{
+							source: 'user',
+							text: nativeText,
+							aiCommand: { command: item.command, description: 'Grok native command' },
+							queuedItemId: item.id,
+							...(item.forceParallel && { forceParallel: true }),
+						},
+						targetTab.id
+					);
+					const result = await window.maestro.process.spawn({
+						sessionId: targetSessionId,
+						toolType: session.toolType,
+						cwd: session.cwd,
+						command: commandToUse,
+						args: spawnArgs,
+						prompt: nativeText,
+						grokNativeCommand,
+						expectedGrokSpawnSelection,
+						agentSessionId: tabAgentSessionId ?? undefined,
+						readOnlyMode: isReadOnly,
+						permissionMode: effectivePermissionMode,
+						sessionCustomPath: session.customPath,
+						sessionCustomArgs: session.customArgs,
+						sessionAdditionalDirectories: session.additionalDirectories,
+						sessionCustomEnvVars: session.customEnvVars,
+						sessionCustomModel: turnModel,
+						sessionCustomEffort: turnEffort,
+						sessionCustomContextWindow: session.customContextWindow,
+						sessionSshRemoteConfig: session.sessionSshRemoteConfig,
+						delegation: item.delegation,
+						dispatchTicket: item.dispatchTicket,
+					});
+					if (result?.success === false) {
+						throw new Error(
+							'error' in result && typeof result.error === 'string'
+								? result.error
+								: 'Native Grok command spawn was refused'
+						);
+					}
+				} else if (matchingCommand) {
 					if (scopedCommand && (await refuseChangedCommand())) return false;
 					if (deps.isCancelled?.()) {
 						await settleUnsentCommand();

@@ -59,7 +59,7 @@ import { requestWebBridgeReconcile } from '../../services/webBridgeReconcile';
 import { steerQueuedItemOrExplain } from '../../services/chatSteering';
 import { isWebDesktop } from '../../utils/runtimeContext';
 import { notifyToast } from '../../stores/notificationStore';
-import { getGrokSlashCommandRefusal } from '../../slashCommands';
+import { admitGrokNativeCommand } from '../../slashCommands';
 
 let cachedImageOnlyPrompt: string = '';
 let inputProcessingPromptsLoaded = false;
@@ -541,7 +541,37 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 									prompt: matchingAgentCommand.prompt!,
 								}
 							: undefined);
-					if (matchingCustomCommand) {
+					// Any other Grok slash text is a native command: admitted against this
+					// tab's live catalog, or refused here keeping the draft, images and target.
+					// No naming, mention consult, Claude skill scan or ordinary prompt follows.
+					if (!matchingCustomCommand && activeSession.toolType === 'grok') {
+						const admission = await admitGrokNativeCommand(
+							activeSession,
+							resolveTargetTab(activeSession),
+							commandText,
+							{ imageCount: effectiveImages.length }
+						);
+						if (admission.refusal) {
+							if (targetTabId) {
+								useSessionStore
+									.getState()
+									.addLogToTab(
+										activeSession.id,
+										{ source: 'error', text: admission.refusal },
+										targetTabId
+									);
+							}
+							return;
+						}
+					}
+					// The queue drain re-admits a native command against the catalog current
+					// when it runs, and the host revalidates it on the new process.
+					const queuedCommand =
+						matchingCustomCommand ??
+						(activeSession.toolType === 'grok'
+							? { command: baseCommand, description: 'Grok native command' }
+							: undefined);
+					if (queuedCommand) {
 						const activeTab = resolveTargetTab(activeSession);
 						if (!activeTab) {
 							logger.error('[processInput] Custom command has no target AI tab');
@@ -586,7 +616,7 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 								images: effectiveImages,
 								slashCommand: true,
 							}),
-							commandDescription: matchingCustomCommand.description,
+							commandDescription: queuedCommand.description,
 							...(forceParallel && { forceParallel: true }),
 							...(options?.hold && { paused: true }),
 						};
@@ -652,21 +682,6 @@ export function useInputProcessing(deps: UseInputProcessingDeps): UseInputProces
 							}));
 						}
 						if (!usingOverrideImages) setStagedImages([]);
-						return;
-					}
-					if (activeSession.toolType === 'grok') {
-						const refusal = await getGrokSlashCommandRefusal(
-							activeSession,
-							resolveTargetTab(activeSession),
-							commandText
-						);
-						// Keep the draft/images and pinned target intact. No queue, naming,
-						// mention consult, Claude skill scan or ordinary prompt may follow.
-						if (targetTabId) {
-							useSessionStore
-								.getState()
-								.addLogToTab(activeSession.id, { source: 'error', text: refusal }, targetTabId);
-						}
 						return;
 					}
 				}

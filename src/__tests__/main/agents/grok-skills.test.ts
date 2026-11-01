@@ -95,6 +95,7 @@ describe('Grok owned command discovery', () => {
 				description: scope,
 				kind: 'skill',
 				scope,
+				entryDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
 			}))
 		);
 	});
@@ -124,12 +125,26 @@ describe('Grok owned command discovery', () => {
 				kind: 'native-command',
 				description: 'Summarize [REDACTED_API_KEY]',
 				argumentHint: '[REDACTED_API_KEY]',
+				entryDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
 			},
-			{ name: 'flow', kind: 'workflow', description: 'Workflow' },
+			{
+				name: 'flow',
+				kind: 'workflow',
+				description: 'Workflow',
+				entryDigest: expect.stringMatching(/^[0-9a-f]{64}$/),
+			},
 		]);
+		// The digest names the raw entry, so a body or secret change is a different command.
+		expect(result.commands[0].entryDigest).not.toBe(result.commands[1].entryDigest);
+		// Opaque account and host references bind a native command intent; only there.
+		expect(result.binding).toMatchObject({ account: owned.account, host: owned.host });
+		const { account: _account, host: _host, ...unscoped } = result.binding!;
+		expect(JSON.stringify({ ...result, binding: unscoped })).not.toMatch(
+			/synthetic-account|synthetic-host/
+		);
 		expect(JSON.stringify(result)).not.toContain(secret);
 		expect(JSON.stringify(result)).not.toMatch(
-			/PRIVATE BODY|\/private|private-source|synthetic-account|synthetic-host|GROK_HOME|prompt|login/
+			/PRIVATE BODY|\/private|private-source|GROK_HOME|prompt|login/
 		);
 	});
 

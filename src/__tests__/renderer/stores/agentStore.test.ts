@@ -2076,6 +2076,131 @@ describe('agentStore', () => {
 				}
 			);
 
+			it.each(['advertised', 'absent'] as const)(
+				'drains a native command only as the admitted intent (%s)',
+				async (catalog) => {
+					const session = createMockSession({
+						toolType: 'grok',
+						cwd: '/selected/project',
+						customEnvVars: { GROK_HOME: '/selected/account' },
+						newSessionMessage: 'NEW SESSION MESSAGE',
+					});
+					session.aiTabs[0] = {
+						...session.aiTabs[0],
+						agentSessionId: 'grok-native',
+						nativeSessionBinding: {
+							version: 1,
+							state: 'bound',
+							provider: 'grok',
+							nativeSessionId: 'grok-native',
+							accountRef: 'fixture-account',
+							host: { kind: 'local', identity: 'fixture-host' },
+							cwd: session.cwd,
+						},
+						customModel: 'grok-selected',
+						customEffort: 'high',
+					};
+					session.activeTabId = session.aiTabs[0].id;
+					useSessionStore.getState().setSessions([session]);
+					mockGetAgent.mockResolvedValueOnce(
+						createMockAgentConfig({ id: 'grok', command: 'grok', args: [] })
+					);
+					const entryDigest = 'b'.repeat(64);
+					mockDiscoverSlashCommands.mockResolvedValue({
+						status: 'discovered',
+						commands:
+							catalog === 'advertised'
+								? [
+										{
+											name: 'review',
+											description: 'Review',
+											kind: 'skill',
+											argumentHint: 'path',
+											entryDigest,
+										},
+									]
+								: [],
+						binding: {
+							route: 'grok-acp',
+							sessionId: 'grok-native',
+							processGeneration: 'process-1',
+							configGeneration: 'config-1',
+							catalogRevision: 3,
+							agentVersion: '1.0.70',
+							observedAt: Date.now(),
+							account: 'fixture-account',
+							host: 'fixture-host',
+							model: 'grok-selected',
+							effort: 'high',
+						},
+					});
+					const item = buildQueuedMessageItem({
+						session,
+						tab: session.aiTabs[0],
+						slashCommand: true,
+						text: '/review src/a.ts',
+					});
+					const expectedGrokSpawnSelection = await getQueuedCommandSpawnSelection(session.id, item);
+					useSessionStore.getState().setSessions([applyQueuedItemDispatch(session, item)]);
+
+					const dispatched = await useAgentStore
+						.getState()
+						.processQueuedItem(session.id, item, defaultDeps);
+
+					const updated = useSessionStore.getState().sessions[0];
+					if (catalog === 'absent') {
+						expect(dispatched).toBe(false);
+						expect(mockSpawn).not.toHaveBeenCalled();
+						expect(updated.aiTabs[0].logs.at(-1)).toMatchObject({
+							source: 'error',
+							text: expect.stringContaining('not advertised for this Grok conversation'),
+						});
+						return;
+					}
+					expect(dispatched).toBe(true);
+					expect(mockSpawn).toHaveBeenCalledTimes(1);
+					const request = mockSpawn.mock.calls[0][0];
+					expect(request).toMatchObject({
+						toolType: 'grok',
+						cwd: '/selected/project',
+						// Exact text: no New Session Message, template pass or system prompt.
+						prompt: '/review src/a.ts',
+						agentSessionId: 'grok-native',
+						sessionCustomModel: 'grok-selected',
+						sessionCustomEffort: 'high',
+						expectedGrokSpawnSelection,
+						grokNativeCommand: {
+							source: 'acp-advertised',
+							name: 'review',
+							arguments: 'src/a.ts',
+							entryDigest,
+							binding: {
+								target: 'local',
+								account: 'fixture-account',
+								host: 'fixture-host',
+								cwd: '/selected/project',
+								tabId: session.aiTabs[0].id,
+								sessionId: 'grok-native',
+								model: 'grok-selected',
+								effort: 'high',
+								agentVersion: '1.0.70',
+								configGeneration: 'config-1',
+								processGeneration: 'process-1',
+								catalogRevision: 3,
+							},
+						},
+					});
+					expect(request.appendSystemPrompt).toBeUndefined();
+					expect(request.images).toBeUndefined();
+					expect(substituteTemplateVariables).not.toHaveBeenCalled();
+					expect(updated.aiTabs[0].logs.at(-1)).toMatchObject({
+						source: 'user',
+						text: '/review src/a.ts',
+						queuedItemId: item.id,
+					});
+				}
+			);
+
 			it.each([
 				{ outcome: 'accepted', remote: false },
 				{ outcome: 'thrown', remote: false },
