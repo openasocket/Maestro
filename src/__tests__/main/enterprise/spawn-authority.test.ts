@@ -15,7 +15,20 @@ import {
 } from '../../../main/enterprise/spawn-authority';
 import type { IdentityRead } from '../../../main/enterprise/identity-store';
 import type { ManagedWorkflowRef } from '../../../shared/maestro-lib/managed/types';
-import { fakeSpawnPort } from '../../helpers/managedSpawnPort';
+import { fakeAdmission, fakeSpawnPort } from '../../helpers/managedSpawnPort';
+import {
+	ProcessManager,
+	buildSpawnRequestSnapshot,
+} from '../../../main/process-manager/ProcessManager';
+import type { ProcessConfig } from '../../../main/process-manager/types';
+import { managedChildRefusal } from '../../../main/process-manager/spawners/ChildProcessSpawner';
+import { managedPtyRefusal } from '../../../main/process-manager/spawners/PtySpawner';
+
+// node-pty is native; nothing in this file opens a terminal.
+vi.mock('node-pty', () => ({ spawn: vi.fn() }));
+vi.mock('../../../main/utils/logger', () => ({
+	logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
 
 const INSTALLATION = { installationId: 'inst-1', runtimeId: 'desktop-1', processEpoch: 'e1' };
 
@@ -452,5 +465,210 @@ describe('standing by custody (MRC2-05-10A)', () => {
 			expect(port(unprotected(true)).standing()).toBe('managed');
 			expect(port(untrusted).standing()).toBe('managed');
 		}
+	});
+});
+
+/**
+ * Grok at the desktop sink (GT1-09-03; requirements GT1-09-R05..R07): the
+ * real `ProcessManager` admits with the real desktop authority above, over
+ * the real local lease authority. Only the policy answer is a table
+ * (`fakeSpawnPort`, SYNTHETIC) and the child-process spawner is a capture-only
+ * stub, so nothing launches. What passes here is client wiring: the refusal
+ * happens before any spawner runs and no fallback drops the managed binding.
+ * It proves nothing about Grok's own tools, files or network, and no real
+ * endpoint authority is involved (CP-01, CP-03).
+ */
+describe('Grok at the managed desktop sink (synthetic policy table)', () => {
+	const REGISTERED: IdentityRead = {
+		status: 'ok',
+		record: { registration: { actorId: 'actor-registered' } } as never,
+	};
+	const ACTOR = { peer: 'in-process' } as const;
+	type Decide = NonNullable<Parameters<typeof fakeSpawnPort>[0]>['decide'];
+	let clock = 1_000_000;
+	let next = 0;
+
+	function sink(options: { read?: IdentityRead; decide?: Decide; leaseTtlMs?: number } = {}) {
+		const dispatch = fakeSpawnPort({
+			now: () => clock,
+			decide: options.decide ?? (() => ({ decision: 'allow', policyRevision: 3 })),
+			...(options.leaseTtlMs !== undefined ? { leaseTtlMs: options.leaseTtlMs } : {}),
+		});
+		const port = createProcessSpawnAuthority({
+			installation: INSTALLATION,
+			identity: { read: () => options.read ?? REGISTERED },
+			host: { policy: () => ({ sources: [], policyRevision: 3 }) },
+			dispatch: { authority: dispatch.authority },
+			now: () => clock,
+		});
+		const pm = new ProcessManager(() => false, {
+			spawnAuthority: () => port,
+			isCoworkingEnabled: () => false,
+		});
+		const spawned: ProcessConfig[] = [];
+		(pm as unknown as { childProcessSpawner: unknown }).childProcessSpawner = {
+			spawn: (config: ProcessConfig) => {
+				spawned.push(config);
+				return { pid: 4242, success: true };
+			},
+		};
+		return { pm, dispatch, spawned };
+	}
+
+	/** A read-only Grok turn whose custom args repeat -m (the CLI keeps the last). */
+	const grokTurn = (overrides: Partial<ProcessConfig> = {}): ProcessConfig => ({
+		sessionId: `grok-agent-ai-tab-${++next}`,
+		tabId: 'tab',
+		toolType: 'grok',
+		cwd: process.cwd(),
+		command: 'grok',
+		args: [
+			'--output-format',
+			'streaming-json',
+			'--permission-mode',
+			'plan',
+			'--deny',
+			'Bash(*)',
+			'-m',
+			'grok-default',
+			'-m',
+			'grok-custom',
+		],
+		prompt: 'read the repo',
+		permission: { requested: 'readonly', ceiling: 'readonly' },
+		customEnvVars: { GROK_HOME: '/synthetic/grok-home' },
+		...overrides,
+	});
+
+	it('admits a read-only Grok turn on the effective model, names no account, and stops it on revocation', async () => {
+		const { pm, dispatch, spawned } = sink();
+		const turn = grokTurn();
+		const admitted = await pm.admitSpawn(turn, ACTOR);
+		if (admitted.state !== 'admitted') throw new Error(admitted.state);
+		const snapshot = dispatch.asked[0].snapshot;
+		expect(snapshot).toEqual(buildSpawnRequestSnapshot(turn));
+		expect(snapshot).toMatchObject({
+			provider: 'grok',
+			model: 'grok-custom',
+			target: { kind: 'local' },
+		});
+		// ProcessConfig carries no account source (GT1-09-R07): null, never a guess.
+		expect(snapshot.account).toBeNull();
+		expect(dispatch.asked[0].context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
+
+		expect(pm.spawn({ ...turn, admission: admitted.admission })).toMatchObject({ success: true });
+		expect(spawned).toHaveLength(1);
+		expect(spawned[0].admission).toBe(admitted.admission);
+		expect(pm.admissionLive(turn.sessionId)).toEqual({ ok: true });
+
+		expect(dispatch.authority.revoke(admitted.admission.leaseId, 'policy changed')).toBe(true);
+		expect(pm.admissionLive(turn.sessionId).ok).toBe(false);
+		expect(pm.admissionOf(turn.sessionId)).toBeNull();
+	});
+
+	it.each([
+		['denied', () => ({ decision: 'deny', reason: 'grok blocked', policyRevision: 3 }), 'denied'],
+		['unavailable', () => ({ decision: 'unavailable', reason: 'endpoint down' }), 'unavailable'],
+		['unknown', () => ({ decision: 'unknown', reason: 'no answer' }), undefined],
+	] as const)('spawns nothing when the policy answer is %s', async (_name, decide, state) => {
+		const { pm, spawned } = sink({ decide: decide as Decide });
+		const result = await pm.spawnAdmitted(grokTurn(), ACTOR);
+		expect(result.success).toBe(false);
+		expect(result.managed?.state).not.toBe('admitted');
+		if (state) expect(result.managed?.state).toBe(state);
+		expect(spawned).toHaveLength(0);
+	});
+
+	it('refuses a managed Grok spawn with no admission or one this host did not mint', () => {
+		const { pm, spawned } = sink();
+		expect(pm.spawn(grokTurn())).toMatchObject({
+			success: false,
+			managed: { state: 'denied', code: 'lease-invalid' },
+			error: expect.stringContaining('carries no admission'),
+		});
+		expect(pm.spawn(grokTurn({ admission: fakeAdmission({ provider: 'grok' }) }))).toMatchObject({
+			success: false,
+			error: expect.stringContaining('did not mint'),
+		});
+		expect(spawned).toHaveLength(0);
+	});
+
+	it.each([
+		[
+			'a full-access flag appended',
+			(t: ProcessConfig) => ({ args: [...t.args, '--always-approve'] }),
+		],
+		['another model appended', (t: ProcessConfig) => ({ args: [...t.args, '-m', 'grok-other'] })],
+		['another account home', () => ({ customEnvVars: { GROK_HOME: '/synthetic/other-home' } })],
+		[
+			'an added credential variable',
+			(t: ProcessConfig) => ({ customEnvVars: { ...t.customEnvVars, XAI_API_KEY: 'synthetic' } }),
+		],
+	])('refuses the admitted Grok turn after %s, spawning nothing', async (_name, change) => {
+		const { pm, spawned } = sink();
+		const turn = grokTurn();
+		const admitted = await pm.admitSpawn(turn, ACTOR);
+		if (admitted.state !== 'admitted') throw new Error(admitted.state);
+		const result = pm.spawn({ ...turn, ...change(turn), admission: admitted.admission });
+		expect(result).toMatchObject({ success: false, managed: { code: 'lease-invalid' } });
+		expect(spawned).toHaveLength(0);
+	});
+
+	it('refuses an expired or revoked Grok lease before the spawner runs', async () => {
+		const expiring = sink({ leaseTtlMs: 10 });
+		const late = grokTurn();
+		const first = await expiring.pm.admitSpawn(late, ACTOR);
+		if (first.state !== 'admitted') throw new Error(first.state);
+		clock += 11;
+		expect(expiring.pm.spawn({ ...late, admission: first.admission }).error).toContain('expired');
+		expect(expiring.spawned).toHaveLength(0);
+
+		const revoked = sink();
+		const turn = grokTurn();
+		const second = await revoked.pm.admitSpawn(turn, ACTOR);
+		if (second.state !== 'admitted') throw new Error(second.state);
+		revoked.dispatch.authority.revoke(second.admission.leaseId, 'revoked by policy');
+		expect(revoked.pm.spawn({ ...turn, admission: second.admission }).error).toContain('revoked');
+		expect(revoked.spawned).toHaveLength(0);
+	});
+
+	it('refuses an admitted standard Grok turn on the ACP route with no headless fallback and releases its lease', async () => {
+		const { pm, dispatch, spawned } = sink();
+		const turn = grokTurn({
+			args: ['--output-format', 'streaming-json', '-m', 'grok-custom'],
+			permission: { requested: 'standard', ceiling: null },
+		});
+		const admitted = await pm.admitSpawn(turn, ACTOR);
+		if (admitted.state !== 'admitted') throw new Error(admitted.state);
+		const result = pm.spawn({ ...turn, admission: admitted.admission });
+		expect(result).toMatchObject({
+			success: false,
+			managed: { state: 'unavailable', code: 'capability-unsupported' },
+		});
+		expect(spawned).toHaveLength(0);
+		expect(pm.get(turn.sessionId)).toBeUndefined();
+		expect(dispatch.authority.live()).toHaveLength(0);
+	});
+
+	it('leaves a standalone Grok turn unadmitted and unchanged', async () => {
+		const { pm, dispatch, spawned } = sink({ read: { status: 'none' } });
+		expect(await pm.spawnAdmitted(grokTurn(), ACTOR)).toMatchObject({ success: true });
+		expect(dispatch.asked).toHaveLength(0);
+		expect(spawned[0].admission).toBeUndefined();
+	});
+
+	it('refuses an admitted Grok turn over an unqualified SSH endpoint or a PTY', () => {
+		const admission = fakeAdmission({ provider: 'grok' });
+		expect(managedChildRefusal(grokTurn({ sshRemoteId: 'remote-1', admission }))).toMatchObject({
+			state: 'unavailable',
+			code: 'capability-unsupported',
+			message: expect.stringContaining('no qualified remote endpoint'),
+		});
+		expect(managedChildRefusal(grokTurn({ sshRemoteId: 'remote-1' }))).toBeNull();
+		expect(managedPtyRefusal(grokTurn({ requiresPty: true, admission }))).toMatchObject({
+			state: 'unavailable',
+			code: 'capability-unsupported',
+		});
+		expect(managedPtyRefusal(grokTurn({ requiresPty: true }))).toBeNull();
 	});
 });

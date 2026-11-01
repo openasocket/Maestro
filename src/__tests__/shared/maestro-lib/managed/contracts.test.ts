@@ -636,6 +636,58 @@ describe('support matrices', () => {
 		expect(providerRouteSupport('not-a-provider')['0'].standalone).toBe('unsupported');
 	});
 
+	it('names Grok launch admission on the child process only, and refuses ACP, PTY and SSH under management', () => {
+		const grok = Object.fromEntries(providerRouteSupport('grok').map((r) => [r.route, r]));
+		expect(grok['child-process']).toMatchObject({
+			standalone: 'implemented',
+			managed: 'implemented',
+		});
+		// Launch admission is not preventive control over Grok's own tools, files or network.
+		expect(grok['child-process'].note).toContain(
+			'provider-internal tool, file and network effects unqualified'
+		);
+		expect(grok['grok-acp']).toMatchObject({ standalone: 'implemented', managed: 'unsupported' });
+		expect(grok['grok-acp'].note).toContain('the ACP peer reports its own');
+		expect(grok['grok-acp'].note).toContain('CP-01, CP-03');
+		for (const route of ['pty', 'ssh', 'codex-app-server', 'opencode-server'] as const) {
+			expect(grok[route].managed, route).toBe('unsupported');
+		}
+		for (const definition of getVisibleAgentDefinitions()) {
+			if (definition.id === 'grok') continue;
+			const acp = providerRouteSupport(definition.id).find((r) => r.route === 'grok-acp');
+			expect(acp, definition.id).toMatchObject({
+				standalone: 'unsupported',
+				managed: 'unsupported',
+			});
+		}
+		// An unknown provider (a renamed Grok fork) gets no managed route at all.
+		for (const row of providerRouteSupport('grok-unknown-fork')) {
+			expect(row.managed, row.route).toBe('unsupported');
+		}
+		expect(
+			providerRouteSupport('grok-unknown-fork').find((r) => r.route === 'grok-acp')?.standalone
+		).toBe('unsupported');
+	});
+
+	it('denies a Grok managed request the host does not serve instead of downgrading it', () => {
+		// A host profile without Grok refuses the provider by name.
+		const withoutGrok = negotiateCompatibility(profile, { ...baseRequest, providers: ['grok'] });
+		expect(withoutGrok.outcome).toBe('denied');
+		if (withoutGrok.outcome !== 'denied') return;
+		expect(withoutGrok.reasons.map((r) => r.reason)).toEqual(['provider']);
+		// A host that runs Grok still refuses an unsupported required capability.
+		const withGrok = negotiateCompatibility(hostCompatibilityProfile({ providers: ['grok'] }), {
+			...baseRequest,
+			providers: ['grok'],
+			required: ['capabilities.negotiate', 'events.resume'],
+		});
+		expect(withGrok.outcome).toBe('denied');
+		if (withGrok.outcome !== 'denied') return;
+		expect(withGrok.reasons).toEqual([
+			{ reason: 'missing-required-capability', detail: expect.stringContaining('events.resume') },
+		]);
+	});
+
 	it('versions the library, the managed contract and Node independently', () => {
 		expect(MAESTRO_LIB_VERSION_INFO).toEqual({
 			library: MAESTRO_LIB_VERSION,

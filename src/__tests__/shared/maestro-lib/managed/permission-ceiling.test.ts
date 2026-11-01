@@ -16,6 +16,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
 	KNOWN_FULL_ACCESS_FLAGS,
+	applyManagedEnvCeiling,
 	fullAccessFlagsOf,
 	managedArgsProblems,
 	managedPermissionModeProblem,
@@ -32,7 +33,12 @@ import {
 } from '../../../../shared/maestro-lib/managed/host-adapter';
 import { createLocalHostAuthority } from '../../../../shared/maestro-lib/managed/authority';
 import { MANAGED_CONTRACT_VERSION } from '../../../../shared/maestro-lib/managed/types';
-import { managedPermissionModeRefusal } from '../../../../main/process-manager/types';
+import {
+	managedGrokAcpRefusal,
+	managedPermissionModeRefusal,
+	runsOnGrokAcpRoute,
+} from '../../../../main/process-manager/types';
+import { fakeAdmission } from '../../../helpers/managedSpawnPort';
 import {
 	codexSandboxCeiling,
 	parseCodexExecArgs,
@@ -455,5 +461,150 @@ describe('the Codex sandbox under the ceiling', () => {
 		expect(
 			parseCodexExecArgs([...EXEC, '--add-dir', '/other'], '/p', { ceiling: 'standard' })
 		).toEqual({ ok: false, reason: 'write grant (--add-dir) outside full access' });
+	});
+});
+
+/**
+ * Grok under the managed ceiling (GT1-09-03; requirements GT1-09-R05..R07).
+ * Pure rules over synthetic argv and a synthetic admission (`fakeAdmission`,
+ * a look-alike the spawners read and the process manager would refuse): they
+ * prove what the client refuses before a launch, never that Grok's own tools,
+ * files or network obey a policy.
+ */
+describe('Grok under the managed ceiling', () => {
+	const READ_ONLY = ['--permission-mode', 'plan', '--deny', 'Bash(*)'];
+	const HEADLESS = ['--output-format', 'streaming-json', '-p', 'hi'];
+
+	it('reads the read-only and full-access vocabulary from the Grok definition', () => {
+		expect(permissionVocabularyOf('grok')).toMatchObject({
+			known: true,
+			readOnlyArgs: READ_ONLY,
+			readOnlyCliEnforced: true,
+		});
+		expect(permissionVocabularyOf('grok').fullAccessFlags).toContain('--always-approve');
+	});
+
+	it('refuses a read-only turn that also carries a full-access flag, by name, and rewrites nothing', () => {
+		const args = [...HEADLESS, ...READ_ONLY, '--always-approve'];
+		const before = [...args];
+		expect(managedArgsProblems(args, ceiling('grok', 'readonly'))).toEqual([
+			'--always-approve asks for full access but the policy\'s ceiling allows at most "readonly" for grok',
+		]);
+		expect(args).toEqual(before);
+		// A custom argument re-asking for bypass after the plan flags is the same collision.
+		expect(
+			managedArgsProblems(
+				[...HEADLESS, ...READ_ONLY, '--permission-mode', 'bypassPermissions'],
+				ceiling('grok', 'readonly')
+			)
+		).toEqual([
+			expect.stringContaining('--permission-mode bypassPermissions asks for full access'),
+		]);
+		expect(
+			managedArgsProblems([...HEADLESS, '--always-approve'], ceiling('grok', 'standard'))
+		).toHaveLength(1);
+		// Under an allowing pin the same flag is the person's own choice.
+		expect(managedArgsProblems([...HEADLESS, '--always-approve'], ceiling('grok', 'full'))).toEqual(
+			[]
+		);
+	});
+
+	it('under readonly demands both plan and the Bash deny, so a custom override dropping one is seen', () => {
+		expect(managedArgsProblems([...HEADLESS, ...READ_ONLY], ceiling('grok', 'readonly'))).toEqual(
+			[]
+		);
+		expect(
+			managedArgsProblems([...HEADLESS, '--permission-mode', 'plan'], ceiling('grok', 'readonly'))
+		).toEqual([
+			"the policy pins read-only and the arguments do not carry grok's read-only flags (--permission-mode plan --deny Bash(*))",
+		]);
+	});
+
+	it('holds every Grok model flag to a pinned model, however a custom argument spells it', () => {
+		const pinned = ceiling('grok', 'standard', { model: 'grok-pinned' });
+		expect(managedArgsProblems(['-m', 'grok-pinned'], pinned)).toEqual([]);
+		expect(managedArgsProblems(['-m=grok-pinned'], pinned)).toEqual([]);
+		// The CLI keeps the last -m; a custom argument appended after the pin is refused, not ignored.
+		expect(managedArgsProblems(['-m', 'grok-pinned', '-m', 'grok-other'], pinned)).toEqual([
+			'-m names grok-other but the policy pins grok-pinned',
+		]);
+		expect(managedArgsProblems(['--model=grok-other'], pinned)).toEqual([
+			'--model names grok-other but the policy pins grok-pinned',
+		]);
+		expect(managedArgsProblems(['-m'], pinned)).toEqual([
+			'-m names (nothing) but the policy pins grok-pinned',
+		]);
+	});
+
+	it('refuses a Grok model, account or approved-credential pin the environment cannot carry, rather than launching unpinned', () => {
+		// Grok has no PROVIDER_ROUTE_ENV_NAMES entry, so no variable can carry
+		// these pins; each is a problem the caller refuses on (synthetic env).
+		const report = applyManagedEnvCeiling(
+			{ PATH: '/usr/bin' },
+			{
+				ceiling: ceiling('grok', 'standard', {
+					model: 'grok-pinned',
+					accountDir: '/managed/grok-home',
+					login: 'approved-credential',
+				}),
+				credentialEnvVars: {},
+			}
+		);
+		expect(report.pinned).toEqual([]);
+		expect(report.problems).toEqual([
+			'the policy pins the model but grok has no variable for it',
+			'the policy pins the account home but grok has no variable for it',
+			'the route requires an approved credential and none was delivered; grok would fall back to the personal login in its account home',
+		]);
+	});
+
+	it('holds a full-access request to the desktop mode refusal on a managed host only', () => {
+		expect(managedPermissionModeRefusal('full', { permissionMode: 'readonly' }, 'managed')).toMatch(
+			/allows at most "readonly"/
+		);
+		expect(
+			managedPermissionModeRefusal('full', { permissionMode: 'readonly' }, 'standalone')
+		).toBeNull();
+	});
+
+	describe('the grok-acp route under an admission', () => {
+		const admission = fakeAdmission({ provider: 'grok' });
+		const turn = (requested: LaunchPermissionMode, extra: Record<string, unknown> = {}) => ({
+			toolType: 'grok',
+			permission: { requested, ceiling: null },
+			...extra,
+		});
+
+		it('routes the standard (provider-prompting) Grok turn to ACP and every other mode to the child process', () => {
+			expect(runsOnGrokAcpRoute(turn('standard'))).toBe(true);
+			expect(runsOnGrokAcpRoute(turn('readonly'))).toBe(false);
+			expect(runsOnGrokAcpRoute(turn('full'))).toBe(false);
+			expect(
+				runsOnGrokAcpRoute({
+					toolType: 'codex',
+					permission: { requested: 'standard', ceiling: null },
+				})
+			).toBe(false);
+			expect(runsOnGrokAcpRoute({ toolType: 'grok' })).toBe(false);
+		});
+
+		it('refuses an admitted ACP turn unavailable/capability-unsupported, with no headless fallback', () => {
+			const refusal = managedGrokAcpRefusal(turn('standard', { admission }));
+			expect(refusal).toMatchObject({ state: 'unavailable', code: 'capability-unsupported' });
+			expect(refusal?.message).toContain('grok-acp route is unavailable');
+			expect(refusal?.message).toContain('CP-01');
+			expect(refusal?.message).toContain('does not fall back to headless streaming');
+			expect(refusal?.message).toContain('Nothing was started.');
+			// A forwarded native command takes ACP whatever the mode, so it is refused too.
+			expect(
+				managedGrokAcpRefusal(turn('readonly', { admission, grokNativeCommand: {} as never }))
+			).toMatchObject({ code: 'capability-unsupported' });
+		});
+
+		it('leaves standalone ACP and admitted child-process Grok turns to their own checks', () => {
+			expect(managedGrokAcpRefusal(turn('standard'))).toBeNull();
+			expect(managedGrokAcpRefusal(turn('readonly', { admission }))).toBeNull();
+			expect(managedGrokAcpRefusal(turn('full', { admission }))).toBeNull();
+		});
 	});
 });
