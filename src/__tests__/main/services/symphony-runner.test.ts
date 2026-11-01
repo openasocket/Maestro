@@ -2343,3 +2343,333 @@ describe('Symphony Runner over the real repository ceiling (MRC-09-07)', () => {
 		expect(fs.rm).toHaveBeenCalledWith(LOCAL_PATH, { recursive: true, force: true });
 	});
 });
+
+// ============================================================================
+// Grok participation (GT1-08-17)
+// ============================================================================
+
+describe('Symphony Runner with a Grok agent (GT1-08-17)', () => {
+	// The runner takes no agent type: a Grok contribution reaches it as the Grok
+	// agent's worktree path and nothing else. These cases prove the worktree and
+	// the Auto Run documents are handed over unchanged, every outcome propagates,
+	// a managed refusal stops before any git mutation or PR, and nothing in the
+	// runner assumes Claude or substitutes a provider.
+	const grokWorktree = '/Users/ada/worktrees/widgets-agent-a';
+	const claudeWorktree = '/Users/ada/worktrees/widgets-agent-b';
+	const okExec = { stdout: '', stderr: '', exitCode: 0 };
+	const providerWords = /grok|claude|codex|antigravity|agentType|toolType|provider/i;
+
+	const options = (localPath: string, gate?: SymphonyRepositoryGate) => ({
+		contributionId: 'contrib_a_1',
+		repoSlug: 'acme/widgets',
+		repoUrl: 'https://github.com/acme/widgets',
+		issueNumber: 31,
+		issueTitle: 'Tidy widget docs',
+		documentPaths: [
+			{ name: 'TASK-01.md', path: 'docs/TASK-01.md', isExternal: false },
+			{ name: 'TASK-02.md', path: 'docs/TASK-02.md', isExternal: false },
+		],
+		localPath,
+		branchName: 'symphony/issue-31',
+		...(gate ? { gate } : {}),
+	});
+
+	const successfulStart = () => {
+		vi.mocked(execFileNoThrow)
+			.mockResolvedValueOnce(okExec) // clone
+			.mockResolvedValueOnce(okExec) // checkout -b
+			.mockResolvedValueOnce(okExec) // config user.name
+			.mockResolvedValueOnce(okExec) // config user.email
+			.mockResolvedValueOnce(okExec) // commit --allow-empty
+			.mockResolvedValueOnce(okExec) // push
+			.mockResolvedValueOnce({
+				stdout: 'https://github.com/acme/widgets/pull/77',
+				stderr: '',
+				exitCode: 0,
+			}); // pr create
+	};
+
+	/** Every execFileNoThrow call with the worktree path replaced, so two agents compare by shape. */
+	const callsFor = (localPath: string) =>
+		vi
+			.mocked(execFileNoThrow)
+			.mock.calls.map((call) =>
+				JSON.parse(JSON.stringify(call).split(localPath).join('<worktree>'))
+			);
+
+	/** A ceiling double: refuses the named effects by code, admits the rest with a receipt. */
+	function authority(refuse: Partial<Record<RepositoryEffectRequest['effect'], string>> = {}) {
+		const requests: RepositoryEffectRequest[] = [];
+		const auth: RepositoryEffectAuthority = {
+			authorize(request): RepositoryEffectDecision {
+				requests.push(request);
+				const receipt = {
+					policyRevision: 3,
+					surface: request.surface,
+					actor: 'ada',
+					effect: request.effect,
+					repository: request.repository,
+					remote: request.remote,
+					outcome: 'within-ceiling' as const,
+				};
+				const code = refuse[request.effect];
+				if (!code) return { allowed: true, managed: receipt };
+				return {
+					allowed: false,
+					code: code as never,
+					message: `no ${request.effect} for ada`,
+					managed: { ...receipt, outcome: code as never },
+				};
+			},
+		} as RepositoryEffectAuthority;
+		return { auth, requests };
+	}
+	const actor: RepositoryEffectActor = {
+		kind: 'transport',
+		actor: { peer: 'web-login', username: 'ada' },
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.mocked(execFileNoThrow).mockReset();
+		vi.mocked(fs.mkdir).mockResolvedValue(undefined);
+		vi.mocked(fs.rm).mockResolvedValue(undefined);
+		vi.mocked(fs.copyFile).mockResolvedValue(undefined);
+		vi.mocked(ensureForkSetup).mockResolvedValue({ isFork: false });
+	});
+
+	it('starts in the Grok worktree and hands the Auto Run documents over inside it', async () => {
+		successfulStart();
+		const statuses: string[] = [];
+
+		const result = await startContribution({
+			...options(grokWorktree),
+			onStatusChange: (s) => statuses.push(s),
+		});
+
+		expect(result).toEqual({
+			success: true,
+			draftPrUrl: 'https://github.com/acme/widgets/pull/77',
+			draftPrNumber: 77,
+			autoRunPath: `${grokWorktree}/.maestro/playbooks`,
+			isFork: false,
+			forkSlug: undefined,
+		});
+		expect(statuses).toEqual(['cloning', 'setting_up', 'running']);
+		expect(vi.mocked(execFileNoThrow).mock.calls[0]).toEqual([
+			'git',
+			['clone', '--depth=1', 'https://github.com/acme/widgets', grokWorktree],
+		]);
+		for (const call of vi.mocked(execFileNoThrow).mock.calls.slice(1)) {
+			expect(call[2]).toBe(grokWorktree);
+		}
+		expect(ensureForkSetup).toHaveBeenCalledWith(grokWorktree, 'acme/widgets');
+		expect(fs.mkdir).toHaveBeenCalledWith(`${grokWorktree}/.maestro/playbooks`, {
+			recursive: true,
+		});
+		expect(vi.mocked(fs.copyFile).mock.calls).toEqual([
+			[`${grokWorktree}/docs/TASK-01.md`, `${grokWorktree}/.maestro/playbooks/TASK-01.md`],
+			[`${grokWorktree}/docs/TASK-02.md`, `${grokWorktree}/.maestro/playbooks/TASK-02.md`],
+		]);
+		expect(fs.rm).not.toHaveBeenCalled();
+	});
+
+	it('runs the same git and gh commands for a Grok worktree as for a Claude worktree', async () => {
+		successfulStart();
+		const grok = await startContribution(options(grokWorktree));
+		const grokCalls = callsFor(grokWorktree);
+
+		vi.mocked(execFileNoThrow).mockReset();
+		vi.mocked(fs.copyFile).mockClear();
+		successfulStart();
+		const claude = await startContribution(options(claudeWorktree));
+		const claudeCalls = callsFor(claudeWorktree);
+
+		expect(grokCalls).toEqual(claudeCalls);
+		expect(grokCalls).toHaveLength(7);
+		expect(JSON.stringify(grokCalls)).not.toMatch(providerWords);
+		expect({ ...grok, autoRunPath: undefined }).toEqual({ ...claude, autoRunPath: undefined });
+	});
+
+	it('propagates a push failure from the Grok worktree, removes it and opens no PR', async () => {
+		vi.mocked(execFileNoThrow)
+			.mockResolvedValueOnce(okExec) // clone
+			.mockResolvedValueOnce(okExec) // checkout -b
+			.mockResolvedValueOnce(okExec) // config user.name
+			.mockResolvedValueOnce(okExec) // config user.email
+			.mockResolvedValueOnce(okExec) // commit --allow-empty
+			.mockResolvedValueOnce({ stdout: '', stderr: 'denied', exitCode: 1 }); // push
+
+		const result = await startContribution(options(grokWorktree));
+
+		expect(result).toEqual({ success: false, error: 'Push failed' });
+		expect(fs.rm).toHaveBeenCalledWith(grokWorktree, { recursive: true, force: true });
+		const commands = vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1]);
+		expect(commands).not.toContainEqual(expect.arrayContaining(['pr']));
+		expect(fs.copyFile).not.toHaveBeenCalled();
+	});
+
+	it('finalizes the Grok worktree after the batch: commit, push, ready, with no provider in any command', async () => {
+		vi.mocked(execFileNoThrow)
+			.mockResolvedValueOnce(okExec) // config user.name
+			.mockResolvedValueOnce(okExec) // config user.email
+			.mockResolvedValueOnce(okExec) // git add -A
+			.mockResolvedValueOnce(okExec) // git commit
+			.mockResolvedValueOnce(okExec) // git push
+			.mockResolvedValueOnce(okExec) // gh pr ready
+			.mockResolvedValueOnce(okExec) // gh pr edit
+			.mockResolvedValueOnce({
+				stdout: 'https://github.com/acme/widgets/pull/77\n',
+				stderr: '',
+				exitCode: 0,
+			}); // gh pr view
+
+		const result = await finalizeContribution(grokWorktree, 77, 31, 'Tidy widget docs');
+
+		expect(result).toEqual({ success: true, prUrl: 'https://github.com/acme/widgets/pull/77' });
+		const calls = vi.mocked(execFileNoThrow).mock.calls;
+		expect(calls.every((call) => call[2] === grokWorktree)).toBe(true);
+		expect(calls.map((call) => call[1]?.slice(0, 2))).toEqual([
+			['config', 'user.name'],
+			['config', 'user.email'],
+			['add', '-A'],
+			['commit', '-m'],
+			['push'],
+			['pr', 'ready'],
+			['pr', 'edit'],
+			['pr', 'view'],
+		]);
+		expect(JSON.stringify(callsFor(grokWorktree))).not.toMatch(providerWords);
+	});
+
+	it('propagates a finalize failure: a refused ready leaves the draft a draft and is reported', async () => {
+		vi.mocked(execFileNoThrow)
+			.mockResolvedValueOnce(okExec) // config user.name
+			.mockResolvedValueOnce(okExec) // config user.email
+			.mockResolvedValueOnce(okExec) // git add -A
+			.mockResolvedValueOnce(okExec) // git commit
+			.mockResolvedValueOnce(okExec) // git push
+			.mockResolvedValueOnce({ stdout: '', stderr: 'not mergeable', exitCode: 1 }); // gh pr ready
+
+		const result = await finalizeContribution(grokWorktree, 77, 31, 'Tidy widget docs');
+
+		expect(result).toEqual({ success: false, error: 'Failed to mark PR ready: not mergeable' });
+		const commands = vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1]);
+		expect(commands).not.toContainEqual(expect.arrayContaining(['pr', 'edit']));
+	});
+
+	it('cancels a Grok contribution: closes the draft PR and removes the Grok worktree only when asked', async () => {
+		vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+
+		expect(await cancelContribution(grokWorktree, 77)).toEqual({ success: true });
+		expect(vi.mocked(execFileNoThrow).mock.calls[0]).toEqual([
+			'gh',
+			['pr', 'close', '77', '--delete-branch'],
+			grokWorktree,
+		]);
+		expect(fs.rm).toHaveBeenCalledWith(grokWorktree, { recursive: true, force: true });
+
+		vi.mocked(fs.rm).mockClear();
+		expect(await cancelContribution(grokWorktree, 77, false)).toEqual({ success: true });
+		expect(fs.rm).not.toHaveBeenCalled();
+	});
+
+	it('propagates a failed cancel and keeps the Grok worktree', async () => {
+		vi.mocked(execFileNoThrow).mockResolvedValue({ stdout: '', stderr: 'no PR', exitCode: 1 });
+
+		const result = await cancelContribution(grokWorktree, 77);
+
+		expect(result).toEqual({ success: false, error: 'Failed to close PR #77: no PR' });
+		expect(fs.rm).not.toHaveBeenCalled();
+	});
+
+	it('refuses a managed clone for a Grok contribution before any git command, fork, document or PR', async () => {
+		const { auth, requests } = authority({ clone: 'outside-ceiling' });
+
+		const result = await startContribution(options(grokWorktree, { authority: auth, actor }));
+
+		expect(result).toEqual({
+			success: false,
+			error: '[managed-outside-ceiling] no clone for ada',
+			managed: [expect.objectContaining({ effect: 'clone', outcome: 'outside-ceiling' })],
+		});
+		expect(execFileNoThrow).not.toHaveBeenCalled();
+		expect(ensureForkSetup).not.toHaveBeenCalled();
+		expect(fs.mkdir).not.toHaveBeenCalled();
+		expect(fs.copyFile).not.toHaveBeenCalled();
+		expect(fs.rm).not.toHaveBeenCalled();
+		expect(JSON.stringify(requests)).not.toMatch(providerWords);
+	});
+
+	it('refuses a managed branch after the clone: removes the Grok clone and runs no git mutation', async () => {
+		vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+		const { auth } = authority({ branch: 'outside-ceiling' });
+
+		const result = await startContribution(options(grokWorktree, { authority: auth, actor }));
+
+		expect(result.error).toBe('[managed-outside-ceiling] no branch for ada');
+		expect(vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1]?.[0])).toEqual(['clone']);
+		expect(fs.rm).toHaveBeenCalledWith(grokWorktree, { recursive: true, force: true });
+		expect(fs.copyFile).not.toHaveBeenCalled();
+	});
+
+	it('refuses a managed draft PR for a Grok contribution and never runs gh pr create', async () => {
+		vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+		const { auth, requests } = authority({ 'pull-request': 'remote-denied' });
+
+		const result = await startContribution(options(grokWorktree, { authority: auth, actor }));
+
+		expect(result.success).toBe(false);
+		expect(result.error).toBe('[managed-remote-denied] no pull-request for ada');
+		expect(result.autoRunPath).toBeUndefined();
+		const commands = vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1]);
+		expect(commands).not.toContainEqual(expect.arrayContaining(['pr', 'create']));
+		expect(fs.copyFile).not.toHaveBeenCalled();
+		expect(requests.map((r) => r.effect)).toEqual([
+			'clone',
+			'branch',
+			'commit',
+			'push',
+			'pull-request',
+		]);
+		expect(requests.every((r) => r.surface === 'symphony-runner' && r.actor === actor)).toBe(true);
+	});
+
+	it('refuses a managed finalize commit for a Grok contribution before git add, commit, push or gh', async () => {
+		vi.mocked(execFileNoThrow).mockResolvedValue({
+			stdout: 'https://github.com/acme/widgets.git\n',
+			stderr: '',
+			exitCode: 0,
+		});
+		const { auth } = authority({ commit: 'outside-ceiling' });
+
+		const result = await finalizeContribution(grokWorktree, 77, 31, 'Tidy widget docs', undefined, {
+			authority: auth,
+			actor,
+		});
+
+		expect(result).toEqual({
+			success: false,
+			error: '[managed-outside-ceiling] no commit for ada',
+			managed: [expect.objectContaining({ effect: 'commit', repository: 'acme/widgets' })],
+		});
+		expect(vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1])).toEqual([
+			['remote', 'get-url', 'origin'],
+		]);
+	});
+
+	it('refuses a managed cancel for a Grok contribution: the PR stays open and the worktree stays', async () => {
+		vi.mocked(execFileNoThrow).mockResolvedValue(okExec);
+		const { auth } = authority({ cancel: 'outside-ceiling' });
+
+		const result = await cancelContribution(grokWorktree, 77, true, 'acme/widgets', {
+			authority: auth,
+			actor,
+		});
+
+		expect(result.error).toBe('[managed-outside-ceiling] no cancel for ada');
+		const commands = vi.mocked(execFileNoThrow).mock.calls.map((call) => call[1]);
+		expect(commands).not.toContainEqual(expect.arrayContaining(['pr', 'close']));
+		expect(fs.rm).not.toHaveBeenCalled();
+	});
+});
