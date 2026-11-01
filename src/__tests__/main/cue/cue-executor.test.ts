@@ -21,6 +21,7 @@ import * as path from 'path';
 import { embedSystemPromptInPrompt } from '../../../shared/embeddedSystemPrompt';
 import { signalRemoteAgent } from '../../../shared/maestro-lib/control/ssh-remote-signal';
 import { isolateAgentEnv } from '../../helpers/agentEnvIsolation';
+import { GrokOutputParser } from '../../../main/parsers/grok-output-parser';
 import * as proofIdentity from '../../../main/plugins/plugin-tool-run-identity';
 import * as wakaTime from '../../../main/wakatime-instance';
 import { logger } from '../../../main/utils/logger';
@@ -1865,9 +1866,12 @@ describe('cue-executor', () => {
 					vi.spyOn(fs, 'closeSync').mockImplementation(() => undefined);
 				});
 
+				// A Grok turn finishes only on its native success record (GT1-08-08), so
+				// the clean row writes one; the failed row stays silent.
 				it.each([0, 7])(
 					'retains local bytes and identity through admission and exit %i',
 					async (exitCode) => {
+						if (exitCode === 0) mockGetOutputParser.mockReturnValue(new GrokOutputParser());
 						const { admission, asked } = admissionWith(() => ({
 							decision: 'allow',
 							policyRevision: 1,
@@ -1890,6 +1894,12 @@ describe('cue-executor', () => {
 								expect(fs.unlinkSync).not.toHaveBeenCalled();
 								const runningProcesses = getCueProcessList();
 								expect(runningProcesses).toHaveLength(1);
+								if (exitCode === 0)
+									mockChild.stdout.emit(
+										'data',
+										JSON.stringify({ type: 'end', stopReason: 'end_turn', sessionId: 'grok-s1' }) +
+											'\n'
+									);
 								mockChild.emit('close', exitCode);
 								return JSON.stringify(runningProcesses);
 							})(),
@@ -1933,6 +1943,19 @@ describe('cue-executor', () => {
 						expectProofReleased();
 					}
 				);
+
+				it('fails a silent clean Grok exit with no native terminal record', async () => {
+					const resultPromise = executeCuePrompt(
+						createExecutionConfig({ toolType: 'grok', promptPath: privateContent })
+					);
+					await vi.advanceTimersByTimeAsync(0);
+					expect(mockSpawn).toHaveBeenCalledTimes(1);
+					mockChild.emit('close', 0);
+					const result = await resultPromise;
+					expect(result).toMatchObject({ exitCode: 0, status: 'failed' });
+					expect(result.stderr).toContain('native terminal record');
+					expectProofReleased();
+				});
 
 				it.each(['partial write', 'competing stdin', 'transport mismatch'])(
 					'refuses %s and never retries text',
