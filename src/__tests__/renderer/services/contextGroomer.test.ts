@@ -322,6 +322,59 @@ describe('AGENT_TARGET_NOTES', () => {
 	});
 });
 
+/**
+ * GT1-11-01A pins: a Grok source or target must carry its own transfer
+ * metadata instead of falling through to the generic note, and that metadata
+ * may only use vocabulary the Grok integration actually has.
+ */
+describe('Grok context-transfer metadata (GT1-11-01A)', () => {
+	beforeAll(async () => {
+		await loadContextGroomerPrompts(true);
+	});
+
+	it('lists the Grok brand, model and session artifacts', () => {
+		const artifacts = AGENT_ARTIFACTS.grok;
+		expect(artifacts).toBeDefined();
+		expect(artifacts).toEqual(
+			expect.arrayContaining([
+				'Grok',
+				'Grok CLI',
+				'xAI',
+				'~/.grok/sessions',
+				'--resume',
+				'--prompt-file',
+			])
+		);
+	});
+
+	it('lists no slash commands, since Grok has no fixed catalog to scrub', () => {
+		expect((AGENT_ARTIFACTS.grok ?? []).filter((artifact) => artifact.startsWith('/'))).toEqual([]);
+	});
+
+	it('has its own target note that matches the headless capability block', () => {
+		const notes = AGENT_TARGET_NOTES.grok;
+		expect(notes).toBeDefined();
+		expect(notes).toContain('xAI');
+		expect(notes).toContain('resuming the same session');
+		expect(notes).toContain('no slash commands');
+	});
+
+	it('makes no read-only claim in the target note (A11-F05 stays unqualified)', () => {
+		expect(AGENT_TARGET_NOTES.grok ?? '').not.toMatch(/read-only|readonly/i);
+	});
+
+	it('carries the Grok metadata through a transfer prompt in both directions', () => {
+		const fromGrok = buildContextTransferPrompt('grok', 'claude-code');
+		expect(fromGrok).toContain('"Grok CLI"');
+		expect(fromGrok).toContain('"~/.grok/sessions"');
+		expect(fromGrok).not.toContain('No specific artifacts to remove');
+
+		const toGrok = buildContextTransferPrompt('claude-code', 'grok');
+		expect(toGrok).toContain('Grok CLI is xAI');
+		expect(toGrok).not.toContain('No specific notes for this agent.');
+	});
+});
+
 describe('getAgentDisplayName', () => {
 	it('should return correct display names for all agents', () => {
 		expect(getAgentDisplayName('claude-code')).toBe('Claude Code');

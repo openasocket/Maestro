@@ -417,6 +417,87 @@ describe('agents IPC handlers', () => {
 				grokHomes: [],
 			});
 		});
+
+		// GT1-11-01B pins: Grok homes come from configured GROK_HOME values only,
+		// through the same walk as the comparators, never from the implicit ~/.grok.
+		// Keys are the provider-profile keys (resolveAgentAccountKey), so two agents
+		// on one home collapse to one suggestion.
+		it('collects configured Grok homes from provider settings and local Grok agents', async () => {
+			mockAgentConfigsStore.get.mockReturnValue({
+				grok: { customEnvVars: { GROK_HOME: '/Users/me/.grok-provider' } },
+			});
+			const sessionsStore = {
+				get: vi.fn().mockReturnValue([
+					{
+						toolType: 'grok',
+						cwd: '/Users/me/project',
+						customEnvVars: { GROK_HOME: '/Users/me/.grok-agent' },
+					},
+					{
+						toolType: 'grok',
+						cwd: '/Users/me/other',
+						customEnvVars: { GROK_HOME: '/Users/me/.grok-agent' },
+					},
+					{
+						toolType: 'grok',
+						cwd: '/Users/me/project',
+						sshRemoteId: 'remote-1',
+						customEnvVars: { GROK_HOME: '/remote/.grok' },
+					},
+					{
+						toolType: 'codex',
+						cwd: '/Users/me/project',
+						customEnvVars: { GROK_HOME: '/Users/me/.grok-on-codex' },
+					},
+				]),
+			};
+			registerAgentsHandlers({
+				...deps,
+				sessionsStore: sessionsStore as unknown as NonNullable<
+					AgentsHandlerDependencies['sessionsStore']
+				>,
+			});
+
+			const result = await handlers.get('agents:getKnownAuthDirs')?.({});
+
+			expect(result).toEqual({
+				claudeConfigDirs: [],
+				codexHomes: [],
+				grokHomes: [
+					path.resolve('/Users/me/.grok-agent'),
+					path.resolve('/Users/me/.grok-provider'),
+				],
+			});
+		});
+
+		it('offers no Grok home when GROK_HOME is unset or blank', async () => {
+			mockAgentConfigsStore.get.mockReturnValue({
+				grok: { customEnvVars: { GROK_HOME: '   ' } },
+			});
+			const sessionsStore = {
+				get: vi.fn().mockReturnValue([
+					{ toolType: 'grok', cwd: '/Users/me/project', customEnvVars: {} },
+					{
+						toolType: 'grok',
+						cwd: '/Users/me/project',
+						customEnvVars: { GROK_HOME: '' },
+					},
+				]),
+			};
+			registerAgentsHandlers({
+				...deps,
+				sessionsStore: sessionsStore as unknown as NonNullable<
+					AgentsHandlerDependencies['sessionsStore']
+				>,
+			});
+
+			const result = (await handlers.get('agents:getKnownAuthDirs')?.({})) as {
+				grokHomes: string[];
+			};
+
+			// Not the implicit ~/.grok default, and not a blank value resolved to a path.
+			expect(result.grokHomes).toEqual([]);
+		});
 	});
 
 	describe('agents:detect', () => {
