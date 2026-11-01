@@ -233,7 +233,7 @@
 			"route": ["native-headless", "acp-candidate"],
 			"status": "fixable-in-maestro",
 			"reason": "Grok has no PROVIDER_ROUTE_ENV_NAMES entry. Before GT1-09-04 a managed customEnvVars write naming GROK_AUTH, XAI_API_KEY, GROK_AUTH_PATH, GROK_HOME or a GROK_*_BASE_URL was admitted (the Claude and Codex equivalents were refused as ceiling), so the plain configuration file kept an inline credential or an account or endpoint change. At launch, applyManagedEnvCeiling still does not strip a shell-inherited GROK_HOME, GROK_AUTH or XAI_API_KEY for Grok.",
-			"requiredAuthority": "None for the write-time hold (done). The launch-time strip needs a Grok entry in PROVIDER_ROUTE_ENV_NAMES (src/shared/maestro-lib/launch/env.ts), outside GT1-09-04, scheduled as GT1-09-04A.",
+			"requiredAuthority": "None inside Maestro for the write-time hold (GT1-09-04) and the launch-time strip of credential and account names (GT1-09-04A). The remaining gap is the three Grok gateway names (GROK_MODELS_BASE_URL, GROK_CLI_CHAT_PROXY_BASE_URL, GROK_XAI_API_BASE_URL): ProviderRouteEnvNames holds one baseUrl, so a gateway pin is refused for Grok and an inherited gateway name is not stripped at launch.",
 			"sourceRefs": [
 				"src/main/enterprise/settings-policy.ts (agentConfigCeilingProblems, grokRouteEnvName)",
 				"src/shared/maestro-lib/launch/env.ts (PROVIDER_ROUTE_ENV_NAMES, ALL_ROUTE_ENV_NAMES)",
@@ -243,11 +243,11 @@
 			],
 			"ownerTasks": ["GT1-09-04", "GT1-09-04A", "GT1-09-05", "GT1-09-06"],
 			"parityRows": ["P33", "P36"],
-			"releaseImpact": "Until GT1-09-04A lands, a managed Grok launch can still pick up a credential or account home from the inherited shell environment.",
+			"releaseImpact": "A managed Grok launch no longer inherits GROK_AUTH, GROK_AUTH_PATH, XAI_API_KEY or GROK_HOME, and receives the approved account home. An inherited Grok gateway URL can still route a managed launch to another endpoint; a managed policy cannot pin a Grok gateway or model through the environment.",
 			"progress": {
-				"task": "GT1-09-04",
-				"state": "write-time-implemented-tests-pending-launch-strip-open",
-				"detail": "GT1-09-04: agentConfigCeilingProblems refuses, with code ceiling and under a usable managed policy, a Grok customEnvVars name that is catalogued for Grok, is its account-home variable, or is a GROK_* name isSecretEnvKey treats as a secret. Every write path reaches it through holdAgentConfigWrite, and applyAgentConfigWrite holds before the store is read, so a refused write persists nothing. Standalone and other providers are unchanged; a Grok model, effort, path or arguments write was already held by the lock and by managedArgsProblems, and Grok config options are model, reasoningEffort and contextWindow only. The account remains open on R07. GT1-09-05 adds the regression cases."
+				"task": "GT1-09-04A",
+				"state": "write-time-and-launch-credential-strip-implemented-gateway-open-tests-pending",
+				"detail": "GT1-09-04 holds Grok credential, account and endpoint names at managed config write. GT1-09-04A adds PROVIDER_ROUTE_ENV_NAMES.grok { credential: GROK_AUTH, GROK_AUTH_PATH, XAI_API_KEY; baseUrl: null; model: null; accountDir: GROK_HOME } in src/shared/maestro-lib/launch/env.ts. applyManagedEnvCeiling now strips those names from every managed launch and rebinds the approved GROK_HOME. A delivered credential must be a Grok name, and an approved-credential route with none delivered is refused. Standalone is unchanged. Open: the three GROK_*_BASE_URL names are not stripped at launch, and gateway and model pins are refused for Grok. The account is not named in the dispatch snapshot (R07). GT1-09-05 adds the regression cases and GT1-09-06 verifies."
 			}
 		}
 	],

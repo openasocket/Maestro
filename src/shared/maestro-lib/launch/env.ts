@@ -685,6 +685,20 @@ export const PROVIDER_ROUTE_ENV_NAMES: Readonly<Record<string, ProviderRouteEnvN
 		model: null,
 		accountDir: 'COPILOT_HOME',
 	},
+	// Grok (GT1-09-04A): the credential names its env catalog lists
+	// (`PROVIDER_ENV_VAR_SUGGESTIONS.grok`), the inline bundle and auth-file
+	// path included, and its account home (`PROVIDER_PROFILE_CONFIGS.grok`).
+	// No base URL: Grok splits its endpoint across GROK_MODELS_BASE_URL,
+	// GROK_CLI_CHAT_PROXY_BASE_URL and GROK_XAI_API_BASE_URL, and pinning one
+	// would leave the others routing the launch. A policy that pins a gateway
+	// is refused for Grok ("has no variable for it"); the three names stay an
+	// open gap (GT1-09-R14), held at config write by settings-policy.ts.
+	grok: {
+		credential: ['GROK_AUTH', 'GROK_AUTH_PATH', 'XAI_API_KEY'],
+		baseUrl: null,
+		model: null,
+		accountDir: 'GROK_HOME',
+	},
 };
 
 /** Every route-controlling name of every provider, once. */

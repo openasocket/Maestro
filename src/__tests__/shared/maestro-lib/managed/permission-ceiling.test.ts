@@ -536,24 +536,23 @@ describe('Grok under the managed ceiling', () => {
 		]);
 	});
 
-	it('refuses a Grok model, account or approved-credential pin the environment cannot carry, rather than launching unpinned', () => {
-		// Grok has no PROVIDER_ROUTE_ENV_NAMES entry, so no variable can carry
-		// these pins; each is a problem the caller refuses on (synthetic env).
-		const report = applyManagedEnvCeiling(
-			{ PATH: '/usr/bin' },
-			{
-				ceiling: ceiling('grok', 'standard', {
-					model: 'grok-pinned',
-					accountDir: '/managed/grok-home',
-					login: 'approved-credential',
-				}),
-				credentialEnvVars: {},
-			}
-		);
-		expect(report.pinned).toEqual([]);
+	it('pins a Grok account home and refuses a model or approved-credential pin the environment cannot carry, rather than launching unpinned', () => {
+		// Grok's PROVIDER_ROUTE_ENV_NAMES entry carries the account home
+		// (GROK_HOME, GT1-09-04A) but no model variable, so the model pin and the
+		// missing approved credential are problems the caller refuses on (synthetic env).
+		const env: NodeJS.ProcessEnv = { PATH: '/usr/bin' };
+		const report = applyManagedEnvCeiling(env, {
+			ceiling: ceiling('grok', 'standard', {
+				model: 'grok-pinned',
+				accountDir: '/managed/grok-home',
+				login: 'approved-credential',
+			}),
+			credentialEnvVars: {},
+		});
+		expect(report.pinned).toEqual(['GROK_HOME']);
+		expect(env.GROK_HOME).toBe('/managed/grok-home');
 		expect(report.problems).toEqual([
 			'the policy pins the model but grok has no variable for it',
-			'the policy pins the account home but grok has no variable for it',
 			'the route requires an approved credential and none was delivered; grok would fall back to the personal login in its account home',
 		]);
 	});

@@ -495,7 +495,9 @@ describe('groomContext prompt-file requirements under management (GT1-02-10GT)',
 		expect(h.processManager.listenerCount('data')).toBe(0);
 	});
 
-	it.each(['model', 'accountDir', 'ssh'] as const)(
+	// An accountDir pin is no longer unqualified for Grok: GROK_HOME carries it
+	// (GT1-09-04A, PROVIDER_ROUTE_ENV_NAMES.grok), as CODEX_HOME does for Codex.
+	it.each(['model', 'ssh'] as const)(
 		'refuses an unqualified Grok %s route before artifact admission',
 		async (kind) => {
 			const port = fakeSpawnPort();
