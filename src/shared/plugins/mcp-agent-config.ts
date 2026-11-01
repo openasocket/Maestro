@@ -17,7 +17,11 @@
  *
  * Pure: no Node, no Electron. The caller writes `files`, merges `env`, and
  * merges `globalArgs` into the agent argv with {@link mergeMcpInjectionArgs}.
+ * The caller asks {@link mcpInjectionProblem} first: an answer means no
+ * injection at all for this spawn, never a partial or guessed one.
  */
+
+import { stringify as stringifyToml } from 'smol-toml';
 
 export type McpInjectionStrategy =
 	/** claude: `--mcp-config <inline-json>` (additive, no temp file; user MCP servers preserved). */
@@ -26,6 +30,11 @@ export type McpInjectionStrategy =
 	| 'codex-config-override'
 	/** opencode: `OPENCODE_CONFIG=<temp opencode.json>` with an `mcp` block. */
 	| 'opencode-env-config'
+	/** grok: `GROK_CONFIG_PATH=<temp config.toml>` holding one `[mcp_servers.maestro]`
+	 *  table. The file is an overlay on the account's own `config.toml` (which is
+	 *  never written), so the user's servers, disabled entries and policy stay as
+	 *  they are; the overlay adds the Maestro bridge and nothing else. */
+	| 'grok-config-overlay'
 	/** Generic: write a `{ mcpServers }` temp file and (optionally) point an env
 	 *  var at it. Used as a best-guess for gemini/qwen/copilot/droid-style CLIs. */
 	| 'mcp-json-file';
@@ -51,6 +60,67 @@ export interface McpConfigCapability {
 	envVar?: string;
 	/** For file strategies: the temp file basename to write. */
 	fileName?: string;
+	/**
+	 * Exact reported CLI versions the native config schema is qualified on. Absent:
+	 * the mechanism is not version-bound (claude, codex). Present: only a spawn whose
+	 * observed version is listed may be injected, so an empty list injects nothing.
+	 * A newer release is unqualified, never a member of an assumed semver range.
+	 */
+	qualifiedVersions?: readonly string[];
+	/** For overlay strategies: the native source revision whose schema the payload follows. */
+	schemaSource?: string;
+}
+
+/**
+ * Why a spawn gets no MCP injection. Every one is a refusal, not a degraded
+ * injection: the spawn runs without Maestro tools, and a caller that requires
+ * them (the plugin runner, `--require-plugin-tools`) refuses on its own gate.
+ */
+export type McpInjectionProblem =
+	/** No strategy is registered for this agent. */
+	| 'no-strategy'
+	/** The mechanism has not been verified against the installed CLI. */
+	| 'unverified'
+	/** The strategy is version-bound and this spawn's version is not qualified (or unknown). */
+	| 'version-unqualified'
+	/** The bridge reaches the app over a local socket a remote host cannot see, and an
+	 *  owned temp file would land on the wrong machine. */
+	| 'remote-unsupported'
+	/** The effective environment already points the agent's config variable at the
+	 *  user's own file; replacing it would drop their configuration. */
+	| 'config-path-conflict';
+
+export interface McpInjectionContext {
+	/** The spawn targets an SSH remote host. */
+	remote?: boolean;
+	/** The CLI version observed for this exact executable, when one was observed. */
+	version?: string | null;
+	/** The effective spawn environment (inherited plus the agent's own variables). */
+	env?: Readonly<Record<string, string | undefined>>;
+}
+
+/**
+ * The one admission rule for an ephemeral MCP injection. `undefined` means the
+ * caller may build and apply {@link buildMcpInjection}; any problem means it
+ * must apply nothing. Pure, so the desktop, CLI and Cue boundaries share it.
+ */
+export function mcpInjectionProblem(
+	cap: McpConfigCapability | undefined,
+	ctx: McpInjectionContext = {}
+): McpInjectionProblem | undefined {
+	if (!cap) return 'no-strategy';
+	if (!cap.verified) return 'unverified';
+	if (cap.qualifiedVersions) {
+		const version = ctx.version?.trim();
+		if (!version || !cap.qualifiedVersions.includes(version)) return 'version-unqualified';
+	}
+	if (ctx.remote) return 'remote-unsupported';
+	if (cap.strategy === 'grok-config-overlay' || cap.strategy === 'opencode-env-config') {
+		const envVar = cap.envVar;
+		const existing = envVar ? ctx.env?.[envVar] : undefined;
+		if (existing !== undefined && existing.trim() !== '') return 'config-path-conflict';
+	}
+	return undefined;
 }
 
 /** The ephemeral mutation to apply to one agent spawn. */
@@ -157,6 +227,25 @@ export function buildMcpInjection(
 			};
 		}
 
+		case 'grok-config-overlay': {
+			// Schema: `[mcp_servers.<name>]` with command/args/env/enabled, as the
+			// pinned source documents (`schemaSource`). TOML is serialized, never
+			// templated, so paths and env values cannot break out of their strings.
+			const file = opts.join(opts.tmpDir, cap.fileName ?? 'config.toml');
+			const server: Record<string, unknown> = {
+				command: spec.command,
+				args: [...spec.args],
+				enabled: true,
+			};
+			if (spec.env && Object.keys(spec.env).length > 0) server.env = { ...spec.env };
+			const content = `${stringifyToml({ mcp_servers: { [MCP_SERVER_NAME]: server } })}\n`;
+			return {
+				globalArgs: [],
+				env: { [cap.envVar ?? 'GROK_CONFIG_PATH']: file },
+				files: [{ path: file, content }],
+			};
+		}
+
 		case 'mcp-json-file': {
 			const file = opts.join(opts.tmpDir, cap.fileName ?? 'mcp.json');
 			return {
@@ -211,6 +300,21 @@ export const MCP_CONFIG_BY_AGENT: Record<string, McpConfigCapability> = {
 		strategy: 'mcp-json-file',
 		verified: false,
 		fileName: 'maestro-droid-mcp.json',
+	},
+	// grok: the overlay shape follows the `[mcp_servers.<name>]` schema of the pinned
+	// grok-build source, and `GROK_CONFIG_PATH` overlays (does not replace) the
+	// account's config. No exact binary is qualified yet (parity P25/P26/S08 have no
+	// supported range), so `qualifiedVersions` is empty and nothing is injected;
+	// Phase 11 adds a version only with live evidence that the effective process
+	// loads the overlay and advertises the bridge. A project `.grok/config.toml`
+	// defining its own `maestro` server is a native precedence case to qualify then.
+	grok: {
+		strategy: 'grok-config-overlay',
+		verified: false,
+		envVar: 'GROK_CONFIG_PATH',
+		fileName: 'config.toml',
+		qualifiedVersions: [],
+		schemaSource: 'xai-org/grok-build@2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8',
 	},
 	// hermes / pi: MCP support is unconfirmed. Carried as inert best-guess entries
 	// (the generic `{ mcpServers }` file shape) so the map covers every shipping

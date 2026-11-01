@@ -20,6 +20,7 @@ import {
 } from '../../../plugins/plugin-manager-singleton';
 import {
 	buildMcpInjection,
+	mcpInjectionProblem,
 	mergeMcpInjectionArgs,
 	MCP_CONFIG_BY_AGENT,
 } from '../../../../shared/plugins/mcp-agent-config';
@@ -775,12 +776,28 @@ async function handleProcessSpawnImpl(
 	// intentionally skipped to avoid breaking their startup with a wrong shape.
 	let pluginRunToken: string | undefined;
 	let pluginRunProofFile: string | undefined;
+	// The per-spawn directory holding an owned MCP config file. It lives as long
+	// as the process (a native CLI may re-read its config mid-run) and goes with
+	// the run proof on exit, stop, spawn failure or an early refusal.
+	let mcpTmpDir: string | undefined;
 	const exitListener: { current?: (sessionId: string) => void } = {};
 	const cleanupPluginRunProof = (): void => {
 		const token = pluginRunToken;
 		const file = pluginRunProofFile;
+		const ownedMcpDir = mcpTmpDir;
 		pluginRunToken = undefined;
 		pluginRunProofFile = undefined;
+		mcpTmpDir = undefined;
+		if (ownedMcpDir) {
+			fsp.rm(ownedMcpDir, { recursive: true, force: true }).catch((err: unknown) => {
+				if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+					captureException(err instanceof Error ? err : new Error(String(err)), {
+						context: 'mcp config temp dir cleanup',
+						dir: ownedMcpDir,
+					});
+				}
+			});
+		}
 		if (exitListener.current) processManager.off('exit', exitListener.current);
 		if (token) pluginToolRunIdentity.revoke(token);
 		if (file) {
@@ -795,10 +812,20 @@ async function handleProcessSpawnImpl(
 	};
 	proofCleanup.release = cleanupPluginRunProof;
 	const mcpCap = MCP_CONFIG_BY_AGENT[config.toolType];
+	// One pure admission rule (`mcpInjectionProblem`; the CLI and Cue spawners
+	// still gate on `verified` alone, which refuses Grok the same way): unverified or
+	// version-unqualified strategies, remote targets and a user-owned config
+	// path all mean no injection. No version is observed before the spawn, so a
+	// version-bound strategy (grok) is never injected here until it is qualified.
+	const mcpProblem = mcpInjectionProblem(mcpCap, {
+		remote: !!config.sessionSshRemoteConfig?.enabled,
+		version: null,
+		env: { ...process.env, ...(effectiveCustomEnvVars || {}) },
+	});
 	if (
-		mcpCap?.verified &&
+		mcpCap &&
+		!mcpProblem &&
 		isPluginsFeatureEnabled() &&
-		!config.sessionSshRemoteConfig?.enabled &&
 		// Skip the electron-as-node interactive path (claude maestro-p): there
 		// argv[0] is a script path, so prepending global flags ahead of it would
 		// make Node reject the launch. API-mode/codex spawn the agent binary
@@ -842,24 +869,19 @@ async function handleProcessSpawnImpl(
 				join: path.join,
 			});
 			if (mcpInjection.files.length > 0) {
-				const mcpTmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'maestro-mcp-'));
-				mcpInjection = buildMcpInjection(mcpCap, mcpSpec, {
-					tmpDir: mcpTmpDir,
-					join: path.join,
-				});
-				for (const file of mcpInjection.files) {
-					await fsp.writeFile(file.path, file.content, 'utf-8');
-				}
-				setTimeout(() => {
-					fsp.rm(mcpTmpDir, { recursive: true, force: true }).catch((err: unknown) => {
-						if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
-							captureException(err instanceof Error ? err : new Error(String(err)), {
-								context: 'mcp config temp dir cleanup',
-								dir: mcpTmpDir,
-							});
-						}
+				try {
+					mcpTmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'maestro-mcp-'));
+					mcpInjection = buildMcpInjection(mcpCap, mcpSpec, {
+						tmpDir: mcpTmpDir,
+						join: path.join,
 					});
-				}, 30_000);
+					for (const file of mcpInjection.files) {
+						await fsp.writeFile(file.path, file.content, { encoding: 'utf-8', mode: 0o600 });
+					}
+				} catch (error) {
+					cleanupPluginRunProof();
+					throw error;
+				}
 			}
 			finalArgs = mergeMcpInjectionArgs(mcpCap, finalArgs, mcpInjection.globalArgs);
 			effectiveCustomEnvVars = {
