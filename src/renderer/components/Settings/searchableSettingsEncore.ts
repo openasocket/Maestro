@@ -161,7 +161,7 @@ export const ENCORE_SETTINGS: SearchableSetting[] = [
 		tabLabel: 'Encore Features',
 		label: 'Coworking',
 		description:
-			'Beta - let agents read terminal scrollback on demand. Installs a per-agent MCP server (Claude Code, Codex, OpenCode, Factory Droid) and adds a `term:N` pill to terminal tabs.',
+			'Beta - let agents read terminal scrollback on demand. Installs a per-agent MCP server (Claude Code, Codex, OpenCode, Factory Droid, Grok) and adds a `term:N` pill to terminal tabs.',
 		keywords: [
 			'coworking',
 			'mcp',
@@ -173,6 +173,7 @@ export const ENCORE_SETTINGS: SearchableSetting[] = [
 			'codex',
 			'opencode',
 			'factory droid',
+			'grok',
 			'beta',
 			'install',
 			'server',
@@ -240,6 +241,7 @@ export const ENCORE_SETTINGS: SearchableSetting[] = [
 			'claude',
 			'codex',
 			'opencode',
+			'grok',
 		],
 	},
 	{
