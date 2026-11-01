@@ -3835,6 +3835,55 @@
 				"S36"
 			],
 			"scope": "Phase06 context, merge, grooming and native translation outcomes; whole-row statuses, applicability and Grok beta status preserved; native certification false."
+		},
+		"phase07-verification": {
+			"path": "Plans/grok-tier1/evidence/07-verification.json",
+			"sha256": "64f12e9555a3a09ab6e2c47ff161d2727a719f6f8e315efeeda917b02d4c0b63",
+			"sourceCommit": "1cb47e62b47801731f63d36baaf152b37902d981",
+			"provenance": "deterministic-fixture-verification",
+			"acceptanceRun": false,
+			"status": "fail",
+			"scope": "GT1-07-11: 44 complete files in six groups, 3224 passed, 16 failed (16 pre-existing CLI agent-spawner cases, bisected to fdaaa8906), 1 skipped; tsc main/cli 0, lint tsc baseline TS2339 only, maestro-lib build 0, eslint/prettier on changed files 0. No live calls."
+		},
+		"phase07-reconciliation": {
+			"path": "Plans/grok-tier1/evidence/07.md#gt1-07-11-phase-07-verification",
+			"sourceCommit": "1cb47e62b47801731f63d36baaf152b37902d981",
+			"provenance": "deterministic-fixture-verification-and-reconciliation",
+			"acceptanceRun": false,
+			"status": "fail",
+			"affectedRows": [
+				"P07",
+				"S31",
+				"P08",
+				"C-supportsImageInput",
+				"C-supportsImageInputOnResume",
+				"C-supportsAdditionalDirectories",
+				"P09",
+				"P10",
+				"P11",
+				"P12",
+				"P16",
+				"P18",
+				"C-supportsSlashCommands",
+				"S02",
+				"P25",
+				"P26",
+				"P28",
+				"S08",
+				"S35",
+				"P27",
+				"REG-CHILD",
+				"S09",
+				"S21",
+				"S22",
+				"P34",
+				"P33",
+				"C-supportsStandardPermissionMode",
+				"S34",
+				"P29",
+				"P31"
+			],
+			"scope": "Phase07 transport consumers, native commands, steering, images, plans/questions, compaction, MCP/plugin tools and subagents; whole-row statuses, applicability and Grok beta status preserved; native certification false."
 		}
 	},
 	"sourceCatalog": {
@@ -6088,7 +6137,8 @@
 				"GT1-05-06B authors 26 producer/template regressions and repairs four obsolete remote macro assertions in three existing suites. Static checks pass; execution stays not-run for GT1-05-13. GT1-05-06B1/B2 retain final queue and system-context/new-tab coverage; GT1-05-06A3/B3 own the demonstrated composer image omission. See Plans/grok-tier1/evidence/05.md#gt1-05-06b-custom-command-producer-and-template-tests.",
 				"GT1-05-06B3 extends the existing producer matrix to 12 idle/busy local/SSH staged/explicit/empty-image cases and three missing-target cases (10 additional cases). Exact copied image lists, pinned tab/raw arguments, one queue handoff, acceptance-before-clear and draft retention are authored in useInputProcessing.test.ts. Static checks pass; tests remain not-run for GT1-05-13. GT1-05-06B1 owns final queued spawn delivery and managed refusal; GT1-05-06B retains remote macro attachment refusal. See Plans/grok-tier1/evidence/05.md#gt1-05-06b3-custom-command-attachment-regression-tests.",
 				"GT1-05-06B2 authors 32 additional system-context/new-tab cases in the two assigned existing renderer suites. Configured local/SSH Git and plugin context, selected native identity and legacy aliases, literal macro arguments/delegation/tickets, fresh-tab ownership, native refusal before creation and truthful queue/failure receipts are covered. Scoped static checks and independent review pass; tests remain not-run for GT1-05-13. Reuses GT1-05-06B/B1 admission and remote-handler coverage; no native capability or parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06b2-system-context-and-new-tab-regression-tests.",
-				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
+				"GT1-07-11 verification: Native Grok commands from the composer and queue are admitted host-side and revalidated on the new ACP process (catalog entry digest, binding, generation) before submission; absent, changed or unadvertised commands refuse with no chat fallback. Synthetic catalog only. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -6100,7 +6150,9 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase05DeterministicEvidenceRef": "phase05-reverification",
-				"phase05ReconciliationRef": "phase05-reconciliation"
+				"phase05ReconciliationRef": "phase05-reconciliation",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6278,7 +6330,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Registered prompt-file delivery requires ordered embedded image bytes plus explicit EmbeddedImageSupport; absent admission refuses without falling back to tool-read paths. Legacy image flags remain true, not native certification. Portable image consumers remain GT1-07-03D/03E/11; fresh/resumed exact-binary and SSH image behavior remain phase11 not-run. Active additional-root grants safely refuse pending native/managed qualification."
+				"Registered prompt-file delivery requires ordered embedded image bytes plus explicit EmbeddedImageSupport; absent admission refuses without falling back to tool-read paths. Legacy image flags remain true, not native certification. Portable image consumers remain GT1-07-03D/03E/11; fresh/resumed exact-binary and SSH image behavior remain phase11 not-run. Active additional-root grants safely refuse pending native/managed qualification.",
+				"GT1-07-11 verification: Portable turns carry images as ordered ACP blocks when a host passes embeddedImageSupport; no production host passes it, so real image turns refuse; the standard ACP route refuses acp-images. CLI managed directory-grant cases fail pre-existing (GT1-07-12). Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -6288,7 +6341,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6328,6 +6383,20 @@
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Active read/write grants and custom --add-dir refuse before prompt preparation in planner, desktop, CLI, Cue and shared turns; empty/inert grants and other-provider builders have scoped deterministic evidence (13/13J), and full completeness passes in 13Q. Public capability remains false and builder absent. Native CLI root grants, symlink containment, managed preventive effects and platforms remain GT1-09-07/08/11/12 and phase11; pinned-source ACP resume roots are unsupported. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
 					"affectedRows": ["P08", "P35", "C-supportsAdditionalDirectories", "REG-DEFINITIONS"]
+				},
+				{
+					"id": "grok-cli-managed-fixture-regression",
+					"code": "regression",
+					"missingPrerequisite": "16 managed Grok cases in agent-spawner.test.ts fail since fdaaa8906 (parser fails closed on an end event without stopReason; fixtures omit it). Bounded repair GT1-07-12, re-verified by GT1-07-13.",
+					"evidenceRef": "phase07-verification",
+					"affectedRows": ["P08"]
+				},
+				{
+					"id": "grok-image-host-bounds-producer-absent",
+					"code": "implementation-gap",
+					"missingPrerequisite": "No production host passes RunAgentTurnOptions.embeddedImageSupport, and the ACP port refuses images (acp-images); a host-admitted image bound producer and exact-binary image qualification are required.",
+					"evidenceRef": "phase07-verification",
+					"affectedRows": ["P08"]
 				}
 			],
 			"phase": "02",
@@ -6535,7 +6604,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Native GrokOutputParser and the separate shared ACP client/session/event/request/turn stack are implemented and covered by the 26-file GT1-03-13E matrix. Structured terminal/partial usage and raw exact ticks are retained at parser boundaries. Production ACP callers, raw desktop native decoding and end-to-end native terminal propagation remain incomplete; historical native fixture versions are not binary qualification. ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. startGrokAcpTurn is exported and tested but has no production caller. Desktop, runtime, CLI and automation must wire the shared port with explicit refusal of unsafe fallback. Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work. Existing Grok NDJSON parser is not an ACP transport; registration does not prove current release protocol compatibility. Shared ACP interleaving, cancellation and bounded framing pass GT1-03-13E fixtures. Real consumer buffering, native protocol compliance and platform behavior remain unqualified. Preserve actual terminal outcome/error contract; success must not follow merely from process exit or an end-shaped event. Reasoning summaries must retain source tags and never be fabricated; qualify Grok ACP/native interleaving and tool suppression."
+				"Native GrokOutputParser and the separate shared ACP client/session/event/request/turn stack are implemented and covered by the 26-file GT1-03-13E matrix. Structured terminal/partial usage and raw exact ticks are retained at parser boundaries. Production ACP callers, raw desktop native decoding and end-to-end native terminal propagation remain incomplete; historical native fixture versions are not binary qualification. ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. startGrokAcpTurn is exported and tested but has no production caller. Desktop, runtime, CLI and automation must wire the shared port with explicit refusal of unsafe fallback. Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work. Existing Grok NDJSON parser is not an ACP transport; registration does not prove current release protocol compatibility. Shared ACP interleaving, cancellation and bounded framing pass GT1-03-13E fixtures. Real consumer buffering, native protocol compliance and platform behavior remain unqualified. Preserve actual terminal outcome/error contract; success must not follow merely from process exit or an end-shaped event. Reasoning summaries must retain source tags and never be fabricated; qualify Grok ACP/native interleaving and tool suppression.",
+				"GT1-07-11 verification: Desktop and runtime ACP turns stream answer, thoughts, tools, notices, plans and late session IDs through the shared mapper and recorders against synthetic peers. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -6562,7 +6632,9 @@
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6608,30 +6680,30 @@
 				{
 					"id": "acp-plan-consumers:P09",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Owned ordered plan replacement, original dispatch/prompt binding, duplicate/late rejection and unsupported states pass GT1-03-13E. Phase07/10 must carry empty replacement, cancelled and unsupported states through real consumers; native plan behavior remains phase11 not-run.",
+					"missingPrerequisite": "Ordered plan snapshots, including empty replacement clearing the task list, reach the desktop consumers (phase07-verification). Remaining: phase10 web/Lite consumers and native plan behavior in phase11.",
 					"affectedRows": ["P09"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-permission-consumers:P09",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Scoped once-only consent, synchronous cancellation/disconnect invalidation and non-success precedence pass GT1-03-13E with synthetic authority. Phase07/10 must wire real channels; phase09 must classify/enforce preventive effects and phase11 must prove native coverage. Tool display does not enforce policy; missing authority denies.",
+					"missingPrerequisite": "Desktop permission requests reach the standalone consent port (PermissionRelayServer.openConsentSession) and portable runs use ManagedTurnAuthority.effects; unmanaged portable standard turns and Cue assist on a standard tab refuse consent-port (phase07-verification). Remaining: phase09 preventive effect classification, phase10 web/Lite channels, phase11 native consent proof.",
 					"affectedRows": ["P09"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-question-negotiation:P09",
 					"code": "unsupported-capability",
-					"missingPrerequisite": "Pinned initialize advertises neither ask-back nor elicitation. Composed unavailable/negative request handling passes GT1-03-13E; positive conversational support stays unsupported until an advertised contract is qualified. Phase07/10 must retain unavailable behavior and phase11 must verify native negotiation.",
+					"missingPrerequisite": "Questions surface on the desktop as a visible capability gap (type unknown, never permission_denied) with no answer channel (phase07-verification). Positive ask-back stays unsupported until an advertised contract is qualified; phase10 web/Lite must keep the unavailable behavior.",
 					"affectedRows": ["P09"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-turn-consumers:P09",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P09"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "native-parser-followup:P09",
@@ -6879,7 +6951,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Native GrokOutputParser and the separate shared ACP client/session/event/request/turn stack are implemented and covered by the 26-file GT1-03-13E matrix. Structured terminal/partial usage and raw exact ticks are retained at parser boundaries. Production ACP callers, raw desktop native decoding and end-to-end native terminal propagation remain incomplete; historical native fixture versions are not binary qualification. Canonical native/ACP errors and conservative retry guards pass GT1-03-13E fixtures. Automatic replay requires settled host-owned failed/provider/not-dispatched facts. Native terminal propagation and all real consumer paths remain phase07/08/10 work; real-provider error/recovery qualification remains phase11. ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. startGrokAcpTurn is exported and tested but has no production caller. Desktop, runtime, CLI and automation must wire the shared port with explicit refusal of unsafe fallback. Grok has no owned steering channel; ProcessManager sends the non-Codex route to sendSteeringRequest, which can only succeed for a registered maestro-p channel. Comparable user outcome needs explicit implementation or documented gap; GT1-01-07 must reconcile missing explicit steering acceptance in phase07 task text. Grok native child-process route exists; ACP consumer wiring and automation outcomes are not yet proven. Flag is not a deferred-spawn integration proof; Grok interactive PTY is not wired and need not be conflated with headless parity. Audit real CLI route settlement and usage, not just parsing-format flag."
+				"Native GrokOutputParser and the separate shared ACP client/session/event/request/turn stack are implemented and covered by the 26-file GT1-03-13E matrix. Structured terminal/partial usage and raw exact ticks are retained at parser boundaries. Production ACP callers, raw desktop native decoding and end-to-end native terminal propagation remain incomplete; historical native fixture versions are not binary qualification. Canonical native/ACP errors and conservative retry guards pass GT1-03-13E fixtures. Automatic replay requires settled host-owned failed/provider/not-dispatched facts. Native terminal propagation and all real consumer paths remain phase07/08/10 work; real-provider error/recovery qualification remains phase11. ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. startGrokAcpTurn is exported and tested but has no production caller. Desktop, runtime, CLI and automation must wire the shared port with explicit refusal of unsafe fallback. Grok has no owned steering channel; ProcessManager sends the non-Codex route to sendSteeringRequest, which can only succeed for a registered maestro-p channel. Comparable user outcome needs explicit implementation or documented gap; GT1-01-07 must reconcile missing explicit steering acceptance in phase07 task text. Grok native child-process route exists; ACP consumer wiring and automation outcomes are not yet proven. Flag is not a deferred-spawn integration proof; Grok interactive PTY is not wired and need not be conflated with headless parity. Audit real CLI route settlement and usage, not just parsing-format flag.",
+				"GT1-07-11 verification: Desktop GrokAcpSpawner and runAgentTurn start, cancel, kill and clean up owned ACP turns; steering refuses with a typed reason; consent cancellation and disconnect invalidate. Synthetic peers only. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -6905,7 +6978,9 @@
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6951,23 +7026,23 @@
 				{
 					"id": "acp-permission-consumers:P10",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Scoped once-only consent, synchronous cancellation/disconnect invalidation and non-success precedence pass GT1-03-13E with synthetic authority. Phase07/10 must wire real channels; phase09 must classify/enforce preventive effects and phase11 must prove native coverage. Tool display does not enforce policy; missing authority denies.",
+					"missingPrerequisite": "Desktop permission requests reach the standalone consent port (PermissionRelayServer.openConsentSession) and portable runs use ManagedTurnAuthority.effects; unmanaged portable standard turns and Cue assist on a standard tab refuse consent-port (phase07-verification). Remaining: phase09 preventive effect classification, phase10 web/Lite channels, phase11 native consent proof.",
 					"affectedRows": ["P10"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-question-negotiation:P10",
 					"code": "unsupported-capability",
-					"missingPrerequisite": "Pinned initialize advertises neither ask-back nor elicitation. Composed unavailable/negative request handling passes GT1-03-13E; positive conversational support stays unsupported until an advertised contract is qualified. Phase07/10 must retain unavailable behavior and phase11 must verify native negotiation.",
+					"missingPrerequisite": "Questions surface on the desktop as a visible capability gap (type unknown, never permission_denied) with no answer channel (phase07-verification). Positive ask-back stays unsupported until an advertised contract is qualified; phase10 web/Lite must keep the unavailable behavior.",
 					"affectedRows": ["P10"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-turn-consumers:P10",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P10"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "native-parser-followup:P10",
@@ -7130,7 +7205,8 @@
 			},
 			"limitations": [
 				"Phase03/04 fixtures preserve exact decimal ticks, unknown/partial cost, per-model identity, separate cache buckets and once-only turn/session totals. Phase04 selected-account disk reads, accessors, dashboard, CLI/export and Cue consumers pass deterministic regressions. Unknown Grok models never borrow unrelated prices. Real billing, running-child completeness, live/disk agreement and broader ACP/SSH consumer propagation remain phase07/10/11 qualification; managed account-path wiring remains phase09.",
-				"Context occupancy and native/ACP input semantics remain distinct; declared capability semantics still require native agreement."
+				"Context occupancy and native/ACP input semantics remain distinct; declared capability semantics still require native agreement.",
+				"GT1-07-11 verification: ACP usage reaches the desktop through per-process TurnCapture (exact ticks, partial upper bound on lowered buckets, cost NULL when unknown); child usage stays raw. Native StdoutHandler eager JSON parsing is unchanged. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -7167,7 +7243,9 @@
 				"phase04DashboardAccountTestsEvidenceRef": "phase04-dashboard-account-tests",
 				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests",
 				"phase04EvidenceRef": "phase04-reconciliation",
-				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7214,8 +7292,8 @@
 					"id": "acp-turn-consumers:P11",
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"affectedRows": ["P11"],
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
-					"evidenceRef": "phase03-reconciliation"
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "native-parser-followup:P11",
@@ -7419,7 +7497,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Native GrokOutputParser and the separate shared ACP client/session/event/request/turn stack are implemented and covered by the 26-file GT1-03-13E matrix. Structured terminal/partial usage and raw exact ticks are retained at parser boundaries. Production ACP callers, raw desktop native decoding and end-to-end native terminal propagation remain incomplete; historical native fixture versions are not binary qualification. Canonical native/ACP errors and conservative retry guards pass GT1-03-13E fixtures. Automatic replay requires settled host-owned failed/provider/not-dispatched facts. Native terminal propagation and all real consumer paths remain phase07/08/10 work; real-provider error/recovery qualification remains phase11. startTurn comments explicitly say buffering is unlimited absent options. Grok burst streams, listener cleanup, persistence privacy and cancellation require bounded workload evidence. Existing Grok NDJSON parser is not an ACP transport; registration does not prove current release protocol compatibility. Shared ACP interleaving, cancellation and bounded framing pass GT1-03-13E fixtures. Real consumer buffering, native protocol compliance and platform behavior remain unqualified. Preserve actual terminal outcome/error contract; success must not follow merely from process exit or an end-shaped event. Reasoning summaries must retain source tags and never be fabricated; qualify Grok ACP/native interleaving and tool suppression."
+				"Native GrokOutputParser and the separate shared ACP client/session/event/request/turn stack are implemented and covered by the 26-file GT1-03-13E matrix. Structured terminal/partial usage and raw exact ticks are retained at parser boundaries. Production ACP callers, raw desktop native decoding and end-to-end native terminal propagation remain incomplete; historical native fixture versions are not binary qualification. Canonical native/ACP errors and conservative retry guards pass GT1-03-13E fixtures. Automatic replay requires settled host-owned failed/provider/not-dispatched facts. Native terminal propagation and all real consumer paths remain phase07/08/10 work; real-provider error/recovery qualification remains phase11. startTurn comments explicitly say buffering is unlimited absent options. Grok burst streams, listener cleanup, persistence privacy and cancellation require bounded workload evidence. Existing Grok NDJSON parser is not an ACP transport; registration does not prove current release protocol compatibility. Shared ACP interleaving, cancellation and bounded framing pass GT1-03-13E fixtures. Real consumer buffering, native protocol compliance and platform behavior remain unqualified. Preserve actual terminal outcome/error contract; success must not follow merely from process exit or an end-shaped event. Reasoning summaries must retain source tags and never be fabricated; qualify Grok ACP/native interleaving and tool suppression.",
+				"GT1-07-11 verification: Tool, thought and child-tool rendering pass split and concurrent synthetic children; a child tool still running at parent settlement is closed only by renderer exit cleanup. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -7440,7 +7519,9 @@
 				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7486,9 +7567,9 @@
 				{
 					"id": "acp-turn-consumers:P12",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P12"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "native-parser-followup:P12",
@@ -7503,6 +7584,13 @@
 					"missingPrerequisite": "Canonical errors and Auto Run/coordinator guards pass GT1-03-13E. Replay requires host-owned failed/provider/not-dispatched facts; uncertain post-dispatch failures never replay automatically. Phase07/08/10 must propagate settled facts through all real callers and phase11 must qualify native recovery.",
 					"affectedRows": ["P12"],
 					"evidenceRef": "phase03-reconciliation"
+				},
+				{
+					"id": "grok-native-subagent-unqualified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Subagent lineage is synthetic (pinned _x.ai variants). A child tool running at parent settlement is closed only by renderer exit cleanup. Native child runs, termination and usage attribution need phase11 evidence.",
+					"evidenceRef": "phase07-verification",
+					"affectedRows": ["P12"]
 				}
 			],
 			"phase": "03",
@@ -8281,7 +8369,8 @@
 			},
 			"limitations": [
 				"Phase03/04 fixtures preserve exact decimal ticks, unknown/partial cost, per-model identity, separate cache buckets and once-only turn/session totals. Phase04 selected-account disk reads, accessors, dashboard, CLI/export and Cue consumers pass deterministic regressions. Unknown Grok models never borrow unrelated prices. Real billing, running-child completeness, live/disk agreement and broader ACP/SSH consumer propagation remain phase07/10/11 qualification; managed account-path wiring remains phase09.",
-				"Completed children already folded into lifetime totals are not added again. Native child lifecycle/completeness remains unknown without provider proof. Display grouping still supports one parentToolUseId level; deeper/orphan children remain flat and this phase does not qualify their orchestration."
+				"Completed children already folded into lifetime totals are not added again. Native child lifecycle/completeness remains unknown without provider proof. Display grouping still supports one parentToolUseId level; deeper/orphan children remain flat and this phase does not qualify their orchestration.",
+				"GT1-07-11 verification: Child usage is reported raw and parent totals equal a childless turn; aggregate children accounting is completed-included or unknown with partial completeness. Synthetic only. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8301,7 +8390,9 @@
 				"phase04DashboardAccountTestsEvidenceRef": "phase04-dashboard-account-tests",
 				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests",
 				"phase04EvidenceRef": "phase04-reconciliation",
-				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8342,6 +8433,13 @@
 					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
 					"affectedRows": ["P16"],
 					"evidenceRef": "phase04-reconciliation"
+				},
+				{
+					"id": "grok-native-subagent-unqualified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Subagent lineage is synthetic (pinned _x.ai variants). A child tool running at parent settlement is closed only by renderer exit cleanup. Native child runs, termination and usage attribution need phase11 evidence.",
+					"evidenceRef": "phase07-verification",
+					"affectedRows": ["P16"]
 				}
 			],
 			"phase": "04",
@@ -8634,7 +8732,8 @@
 				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B exposes the canonical request/result via preload and renderer overloads; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements.",
 				"GT1-05-05 implements only scoped slash refusals in the composer/queue and excludes stale provider prompt bodies. GT1-05-05A adds ephemeral discovery and completion metadata with no selectable native entries; admitted invocation with a fresh catalog on each new ACP process remains GT1-07-02. No native skill expansion, TUI action, CLI subcommand or headless command execution is certified.",
 				"GT1-05-05A refreshes advisory discovery on selected context, settings, focus and completion changes, with a finite receipt lifetime. Main-only revisions still require fresh admitted-sink validation; no native command is selectable or executed. GT1-05-06C/13 own completion regression coverage/execution.",
-				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
+				"GT1-07-11 verification: Native command discovery reads the live ACP catalog (GrokAcpSpawner.observeCommands); grok-skills projection stamps the entry digest and binding. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8645,7 +8744,9 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase05DeterministicEvidenceRef": "phase05-reverification",
-				"phase05ReconciliationRef": "phase05-reconciliation"
+				"phase05ReconciliationRef": "phase05-reconciliation",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -9746,7 +9847,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok absent from MCP_CONFIG_BY_AGENT; plugin runner refuses required tools/receipts when strategy is unverified or absent. Needs scoped native config and real receipt evidence. Native hooks/skills/plugin trust precedence and disabling across resume remain unqualified; project/persona instructions are not effect enforcement."
+				"Grok absent from MCP_CONFIG_BY_AGENT; plugin runner refuses required tools/receipts when strategy is unverified or absent. Needs scoped native config and real receipt evidence. Native hooks/skills/plugin trust precedence and disabling across resume remain unqualified; project/persona instructions are not effect enforcement.",
+				"GT1-07-11 verification: Grok MCP overlay (temp config.toml + GROK_CONFIG_PATH) and native config/trust facts gate injection; Grok is verified false with qualifiedVersions [], so production Grok stays uninjected. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -9755,7 +9857,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -9788,6 +9892,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P25"]
+				},
+				{
+					"id": "grok-native-mcp-unqualified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Grok MCP config is verified false with qualifiedVersions []; production Grok runs uninjected. Exact-binary MCP loading, trust/disable enforcement, coworking entry loading and real tool calls need phase11 evidence.",
+					"evidenceRef": "phase07-verification",
 					"affectedRows": ["P25"]
 				}
 			],
@@ -9854,7 +9965,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok absent from MCP_CONFIG_BY_AGENT; plugin runner refuses required tools/receipts when strategy is unverified or absent. Needs scoped native config and real receipt evidence. Native hooks/skills/plugin trust precedence and disabling across resume remain unqualified; project/persona instructions are not effect enforcement."
+				"Grok absent from MCP_CONFIG_BY_AGENT; plugin runner refuses required tools/receipts when strategy is unverified or absent. Needs scoped native config and real receipt evidence. Native hooks/skills/plugin trust precedence and disabling across resume remain unqualified; project/persona instructions are not effect enforcement.",
+				"GT1-07-11 verification: Plugin headless runs on Grok require host-observed per-run tool advertisement and fail without it; deterministic plugin receipts pass. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -9863,7 +9975,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -9896,6 +10010,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P26"]
+				},
+				{
+					"id": "grok-native-mcp-unqualified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Grok MCP config is verified false with qualifiedVersions []; production Grok runs uninjected. Exact-binary MCP loading, trust/disable enforcement, coworking entry loading and real tool calls need phase11 evidence.",
+					"evidenceRef": "phase07-verification",
 					"affectedRows": ["P26"]
 				}
 			],
@@ -9977,7 +10098,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"ACP normalizes reported child lineage; native/history child identity and real consumer propagation still require phase04/07/10/11 work. Task prose cannot substitute for native IDs or proven usage inclusion. Shared ACP lineage and scoped usage fixtures preserve reported children without fabricating per-child detail. Native child lifecycle/history reconciliation remains unqualified. Renderer groupSubagentToolLogs adopts metadata.parentToolUseId under tool-{id}; one level only, orphans/deeper descendants stay flat. Grok normalization must feed this existing contract or extend it deliberately."
+				"ACP normalizes reported child lineage; native/history child identity and real consumer propagation still require phase04/07/10/11 work. Task prose cannot substitute for native IDs or proven usage inclusion. Shared ACP lineage and scoped usage fixtures preserve reported children without fabricating per-child detail. Native child lifecycle/history reconciliation remains unqualified. Renderer groupSubagentToolLogs adopts metadata.parentToolUseId under tool-{id}; one level only, orphans/deeper descendants stay flat. Grok normalization must feed this existing contract or extend it deliberately.",
+				"GT1-07-11 verification: Subagent lifecycle, lineage, overlap, incomplete identity, failure, cancellation and reconnect pass with synthetic _x.ai variants; task text never becomes a child identity. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -9988,7 +10110,9 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10021,6 +10145,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P27"]
+				},
+				{
+					"id": "grok-native-subagent-unqualified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Subagent lineage is synthetic (pinned _x.ai variants). A child tool running at parent settlement is closed only by renderer exit cleanup. Native child runs, termination and usage attribution need phase11 evidence.",
+					"evidenceRef": "phase07-verification",
 					"affectedRows": ["P27"]
 				}
 			],
@@ -10129,7 +10260,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok has no discovery branch (agents.ts:1994), so native skills/commands are unavailable via this API despite upstream features. Grok absent from MCP_CONFIG_BY_AGENT; plugin runner refuses required tools/receipts when strategy is unverified or absent. Needs scoped native config and real receipt evidence. Native hooks/skills/plugin trust precedence and disabling across resume remain unqualified; project/persona instructions are not effect enforcement. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal."
+				"Grok has no discovery branch (agents.ts:1994), so native skills/commands are unavailable via this API despite upstream features. Grok absent from MCP_CONFIG_BY_AGENT; plugin runner refuses required tools/receipts when strategy is unverified or absent. Needs scoped native config and real receipt evidence. Native hooks/skills/plugin trust precedence and disabling across resume remain unqualified; project/persona instructions are not effect enforcement. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal.",
+				"GT1-07-11 verification: Native trust scanners, folder trust, disabled and shadowed servers refuse injection; native enforcement is unqualified. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -10138,7 +10270,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10171,6 +10305,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["P28"]
+				},
+				{
+					"id": "grok-native-mcp-unqualified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Grok MCP config is verified false with qualifiedVersions []; production Grok runs uninjected. Exact-binary MCP loading, trust/disable enforcement, coworking entry loading and real tool calls need phase11 evidence.",
+					"evidenceRef": "phase07-verification",
 					"affectedRows": ["P28"]
 				}
 			],
@@ -10342,7 +10483,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok reaches generic paths; end-only identity, failure/cancel checkbox preservation and override inheritance require actual-consumer fixtures. Grok late session IDs and failed-iteration counters need targeted recovery assertions. Grok uses generic registered definition/parser path. Final JSONL tail, malformed completion, cancel and late identity must be tested through batch processor. Grok reaches provider-neutral builder, but account/model/effort/route settings and local/remote isolation need explicit consumer assertions. Phase05/10 owners are provisional; GT1-01-07 must add bounded owner task coverage if current wording cannot cover these files. Grok is reached through generic queue, but command collisions, argument expansion, selected tab/account and managed dispatch need proof. GT1-05-05/06 ownership is provisional until GT1-01-07 confirms explicit template-consumer coverage. Grok native child-process route exists; ACP consumer wiring and automation outcomes are not yet proven. Flag is not a deferred-spawn integration proof; Grok interactive PTY is not wired and need not be conflated with headless parity. Audit real CLI route settlement and usage, not just parsing-format flag."
+				"Grok reaches generic paths; end-only identity, failure/cancel checkbox preservation and override inheritance require actual-consumer fixtures. Grok late session IDs and failed-iteration counters need targeted recovery assertions. Grok uses generic registered definition/parser path. Final JSONL tail, malformed completion, cancel and late identity must be tested through batch processor. Grok reaches provider-neutral builder, but account/model/effort/route settings and local/remote isolation need explicit consumer assertions. Phase05/10 owners are provisional; GT1-01-07 must add bounded owner task coverage if current wording cannot cover these files. Grok is reached through generic queue, but command collisions, argument expansion, selected tab/account and managed dispatch need proof. GT1-05-05/06 ownership is provisional until GT1-01-07 confirms explicit template-consumer coverage. Grok native child-process route exists; ACP consumer wiring and automation outcomes are not yet proven. Flag is not a deferred-spawn integration proof; Grok interactive PTY is not wired and need not be conflated with headless parity. Audit real CLI route settlement and usage, not just parsing-format flag.",
+				"GT1-07-11 verification: Auto Run/batch paths: CLI batch stays native headless (never standard); runtime Auto Run uses the shared runAgentTurn selector. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -10357,7 +10499,9 @@
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10402,9 +10546,9 @@
 				{
 					"id": "acp-turn-consumers:P29",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P29"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"phase": "08",
@@ -10667,7 +10811,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok moderation is rejected by shared storage capability gate although picker lists installed providers. Streaming fallback joins deltas with newline at output-parser.ts:120, risking corrupted Grok words/tags. No Grok-specific exclusion observed in selected source; managed repository refusal, cancellation and selected provider/worktree need deterministic proof. Grok candidate reachability follows declared capabilities; selected account/model, unavailable states, quotas and supervised termination remain unverified. Grok excluded by TranscriptAgent union; needs validated native human-decision shapes or explicit unsupported result. Antigravity exclusion does not reduce required union. Grok moderation currently rejected despite picker visibility. Antigravity own gap does not lower required outcome."
+				"Grok moderation is rejected by shared storage capability gate although picker lists installed providers. Streaming fallback joins deltas with newline at output-parser.ts:120, risking corrupted Grok words/tags. No Grok-specific exclusion observed in selected source; managed repository refusal, cancellation and selected provider/worktree need deterministic proof. Grok candidate reachability follows declared capabilities; selected account/model, unavailable states, quotas and supervised termination remain unverified. Grok excluded by TranscriptAgent union; needs validated native human-decision shapes or explicit unsupported result. Antigravity exclusion does not reduce required union. Grok moderation currently rejected despite picker visibility. Antigravity own gap does not lower required outcome.",
+				"GT1-07-11 verification: Group chat orchestration unchanged in phase07; desktop usage metadata now flows through TurnCapture on the ACP route. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -10677,7 +10822,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10984,7 +11131,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal."
+				"ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal.",
+				"GT1-07-11 verification: Spawn admission and permission-mode naming are preserved on the ACP route; managed effect qualification is phase09. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -10999,7 +11147,9 @@
 				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11037,16 +11187,16 @@
 				{
 					"id": "acp-permission-consumers:P33",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Scoped once-only consent, synchronous cancellation/disconnect invalidation and non-success precedence pass GT1-03-13E with synthetic authority. Phase07/10 must wire real channels; phase09 must classify/enforce preventive effects and phase11 must prove native coverage. Tool display does not enforce policy; missing authority denies.",
+					"missingPrerequisite": "Desktop permission requests reach the standalone consent port (PermissionRelayServer.openConsentSession) and portable runs use ManagedTurnAuthority.effects; unmanaged portable standard turns and Cue assist on a standard tab refuse consent-port (phase07-verification). Remaining: phase09 preventive effect classification, phase10 web/Lite channels, phase11 native consent proof.",
 					"affectedRows": ["P33"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-turn-consumers:P33",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P33"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"phase": "09",
@@ -11207,7 +11357,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal. The standard-permission flag remains omitted. The shared ACP request port has passing fail-closed synthetic coverage, but production consent channels and preventive native effect coverage remain unqualified; output-only headless streams cannot answer approvals."
+				"ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal. The standard-permission flag remains omitted. The shared ACP request port has passing fail-closed synthetic coverage, but production consent channels and preventive native effect coverage remain unqualified; output-only headless streams cannot answer approvals.",
+				"GT1-07-11 verification: ACP permission requests route through the desktop consent port and the portable ManagedTurnAuthority.effects; unmanaged portable standard turns refuse consent-port. Preventive effect classification is phase09. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -11227,7 +11378,9 @@
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11265,30 +11418,37 @@
 				{
 					"id": "acp-plan-consumers:P34",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Owned ordered plan replacement, original dispatch/prompt binding, duplicate/late rejection and unsupported states pass GT1-03-13E. Phase07/10 must carry empty replacement, cancelled and unsupported states through real consumers; native plan behavior remains phase11 not-run.",
+					"missingPrerequisite": "Ordered plan snapshots, including empty replacement clearing the task list, reach the desktop consumers (phase07-verification). Remaining: phase10 web/Lite consumers and native plan behavior in phase11.",
 					"affectedRows": ["P34"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-permission-consumers:P34",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Scoped once-only consent, synchronous cancellation/disconnect invalidation and non-success precedence pass GT1-03-13E with synthetic authority. Phase07/10 must wire real channels; phase09 must classify/enforce preventive effects and phase11 must prove native coverage. Tool display does not enforce policy; missing authority denies.",
+					"missingPrerequisite": "Desktop permission requests reach the standalone consent port (PermissionRelayServer.openConsentSession) and portable runs use ManagedTurnAuthority.effects; unmanaged portable standard turns and Cue assist on a standard tab refuse consent-port (phase07-verification). Remaining: phase09 preventive effect classification, phase10 web/Lite channels, phase11 native consent proof.",
 					"affectedRows": ["P34"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-question-negotiation:P34",
 					"code": "unsupported-capability",
-					"missingPrerequisite": "Pinned initialize advertises neither ask-back nor elicitation. Composed unavailable/negative request handling passes GT1-03-13E; positive conversational support stays unsupported until an advertised contract is qualified. Phase07/10 must retain unavailable behavior and phase11 must verify native negotiation.",
+					"missingPrerequisite": "Questions surface on the desktop as a visible capability gap (type unknown, never permission_denied) with no answer channel (phase07-verification). Positive ask-back stays unsupported until an advertised contract is qualified; phase10 web/Lite must keep the unavailable behavior.",
 					"affectedRows": ["P34"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-turn-consumers:P34",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P34"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
+				},
+				{
+					"id": "grok-cue-assist-standard-consent-port",
+					"code": "implementation-gap",
+					"missingPrerequisite": "Cue AI assist has no tab, so a Grok standard active tab yields no consent port and the host refuses (consent-port); full and read-only run. Needs a consent channel for tabless assist turns.",
+					"evidenceRef": "phase07-verification",
+					"affectedRows": ["P34"]
 				}
 			],
 			"phase": "09",
@@ -11513,16 +11673,16 @@
 				{
 					"id": "acp-permission-consumers:P35",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Scoped once-only consent, synchronous cancellation/disconnect invalidation and non-success precedence pass GT1-03-13E with synthetic authority. Phase07/10 must wire real channels; phase09 must classify/enforce preventive effects and phase11 must prove native coverage. Tool display does not enforce policy; missing authority denies.",
+					"missingPrerequisite": "Desktop permission requests reach the standalone consent port (PermissionRelayServer.openConsentSession) and portable runs use ManagedTurnAuthority.effects; unmanaged portable standard turns and Cue assist on a standard tab refuse consent-port (phase07-verification). Remaining: phase09 preventive effect classification, phase10 web/Lite channels, phase11 native consent proof.",
 					"affectedRows": ["P35"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-turn-consumers:P35",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P35"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"phase": "09",
@@ -11752,16 +11912,16 @@
 				{
 					"id": "acp-permission-consumers:P36",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Scoped once-only consent, synchronous cancellation/disconnect invalidation and non-success precedence pass GT1-03-13E with synthetic authority. Phase07/10 must wire real channels; phase09 must classify/enforce preventive effects and phase11 must prove native coverage. Tool display does not enforce policy; missing authority denies.",
+					"missingPrerequisite": "Desktop permission requests reach the standalone consent port (PermissionRelayServer.openConsentSession) and portable runs use ManagedTurnAuthority.effects; unmanaged portable standard turns and Cue assist on a standard tab refuse consent-port (phase07-verification). Remaining: phase09 preventive effect classification, phase10 web/Lite channels, phase11 native consent proof.",
 					"affectedRows": ["P36"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-turn-consumers:P36",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P36"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"phase": "09",
@@ -11886,16 +12046,16 @@
 				{
 					"id": "acp-plan-consumers:P37",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Owned ordered plan replacement, original dispatch/prompt binding, duplicate/late rejection and unsupported states pass GT1-03-13E. Phase07/10 must carry empty replacement, cancelled and unsupported states through real consumers; native plan behavior remains phase11 not-run.",
+					"missingPrerequisite": "Ordered plan snapshots, including empty replacement clearing the task list, reach the desktop consumers (phase07-verification). Remaining: phase10 web/Lite consumers and native plan behavior in phase11.",
 					"affectedRows": ["P37"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-question-negotiation:P37",
 					"code": "unsupported-capability",
-					"missingPrerequisite": "Pinned initialize advertises neither ask-back nor elicitation. Composed unavailable/negative request handling passes GT1-03-13E; positive conversational support stays unsupported until an advertised contract is qualified. Phase07/10 must retain unavailable behavior and phase11 must verify native negotiation.",
+					"missingPrerequisite": "Questions surface on the desktop as a visible capability gap (type unknown, never permission_denied) with no answer channel (phase07-verification). Positive ask-back stays unsupported until an advertised contract is qualified; phase10 web/Lite must keep the unavailable behavior.",
 					"affectedRows": ["P37"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"phase": "10",
@@ -12113,9 +12273,9 @@
 				{
 					"id": "acp-turn-consumers:P38",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P38"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"phase": "10",
@@ -12600,9 +12760,9 @@
 				{
 					"id": "acp-turn-consumers:P40",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P40"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "grok-usage-consumer-continuations-pending",
@@ -13817,7 +13977,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"The standard-permission flag remains omitted. The shared ACP request port has passing fail-closed synthetic coverage, but production consent channels and preventive native effect coverage remain unqualified; output-only headless streams cannot answer approvals."
+				"The standard-permission flag remains omitted. The shared ACP request port has passing fail-closed synthetic coverage, but production consent channels and preventive native effect coverage remain unqualified; output-only headless streams cannot answer approvals.",
+				"GT1-07-11 verification: Standard mode now reaches ACP with real consent channels on desktop; portable runs need ManagedTurnAuthority.effects. Not qualified natively. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -13830,7 +13991,9 @@
 				"phase03AcpPermissionsEvidenceRef": "phase03-acp-permissions",
 				"phase03AcpPermissionTestsEvidenceRef": "phase03-acp-permission-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -13868,9 +14031,9 @@
 				{
 					"id": "acp-permission-consumers:C-supportsStandardPermissionMode",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Scoped once-only consent, synchronous cancellation/disconnect invalidation and non-success precedence pass GT1-03-13E with synthetic authority. Phase07/10 must wire real channels; phase09 must classify/enforce preventive effects and phase11 must prove native coverage. Tool display does not enforce policy; missing authority denies.",
+					"missingPrerequisite": "Desktop permission requests reach the standalone consent port (PermissionRelayServer.openConsentSession) and portable runs use ManagedTurnAuthority.effects; unmanaged portable standard turns and Cue assist on a standard tab refuse consent-port (phase07-verification). Remaining: phase09 preventive effect classification, phase10 web/Lite channels, phase11 native consent proof.",
 					"affectedRows": ["C-supportsStandardPermissionMode"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"field": "supportsStandardPermissionMode",
@@ -14346,7 +14509,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Registered prompt-file delivery requires ordered embedded image bytes plus explicit EmbeddedImageSupport; absent admission refuses without falling back to tool-read paths. Legacy image flags remain true, not native certification. Portable image consumers remain GT1-07-03D/03E/11; fresh/resumed exact-binary and SSH image behavior remain phase11 not-run. Active additional-root grants safely refuse pending native/managed qualification."
+				"Registered prompt-file delivery requires ordered embedded image bytes plus explicit EmbeddedImageSupport; absent admission refuses without falling back to tool-read paths. Legacy image flags remain true, not native certification. Portable image consumers remain GT1-07-03D/03E/11; fresh/resumed exact-binary and SSH image behavior remain phase11 not-run. Active additional-root grants safely refuse pending native/managed qualification.",
+				"GT1-07-11 verification: Image payload ordering passes in run-agent-turn and runtime turns; no host producer of image bounds exists, so the claim stays unproven. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -14356,7 +14520,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14389,6 +14555,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["C-supportsImageInput"]
+				},
+				{
+					"id": "grok-image-host-bounds-producer-absent",
+					"code": "implementation-gap",
+					"missingPrerequisite": "No production host passes RunAgentTurnOptions.embeddedImageSupport, and the ACP port refuses images (acp-images); a host-admitted image bound producer and exact-binary image qualification are required.",
+					"evidenceRef": "phase07-verification",
 					"affectedRows": ["C-supportsImageInput"]
 				}
 			],
@@ -14520,7 +14693,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Registered prompt-file delivery requires ordered embedded image bytes plus explicit EmbeddedImageSupport; absent admission refuses without falling back to tool-read paths. Legacy image flags remain true, not native certification. Portable image consumers remain GT1-07-03D/03E/11; fresh/resumed exact-binary and SSH image behavior remain phase11 not-run. Active additional-root grants safely refuse pending native/managed qualification."
+				"Registered prompt-file delivery requires ordered embedded image bytes plus explicit EmbeddedImageSupport; absent admission refuses without falling back to tool-read paths. Legacy image flags remain true, not native certification. Portable image consumers remain GT1-07-03D/03E/11; fresh/resumed exact-binary and SSH image behavior remain phase11 not-run. Active additional-root grants safely refuse pending native/managed qualification.",
+				"GT1-07-11 verification: Same as C-supportsImageInput; resume image delivery not exercised on a real binary. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -14530,7 +14704,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -14563,6 +14739,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["C-supportsImageInputOnResume"]
+				},
+				{
+					"id": "grok-image-host-bounds-producer-absent",
+					"code": "implementation-gap",
+					"missingPrerequisite": "No production host passes RunAgentTurnOptions.embeddedImageSupport, and the ACP port refuses images (acp-images); a host-admitted image bound producer and exact-binary image qualification are required.",
+					"evidenceRef": "phase07-verification",
 					"affectedRows": ["C-supportsImageInputOnResume"]
 				}
 			],
@@ -14660,7 +14843,8 @@
 				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B exposes the canonical request/result via preload and renderer overloads; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements.",
 				"GT1-05-05 implements only scoped slash refusals in the composer/queue and excludes stale provider prompt bodies. GT1-05-05A adds ephemeral discovery and completion metadata with no selectable native entries; admitted invocation with a fresh catalog on each new ACP process remains GT1-07-02. No native skill expansion, TUI action, CLI subcommand or headless command execution is certified.",
 				"GT1-05-05A refreshes advisory discovery on selected context, settings, focus and completion changes, with a finite receipt lifetime. Main-only revisions still require fresh admitted-sink validation; no native command is selectable or executed. GT1-05-06C/13 own completion regression coverage/execution.",
-				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
+				"GT1-07-11 verification: Native command submission over ACP is implemented and fixture-tested; not qualified on a real binary. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -14671,7 +14855,9 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase05DeterministicEvidenceRef": "phase05-reverification",
-				"phase05ReconciliationRef": "phase05-reconciliation"
+				"phase05ReconciliationRef": "phase05-reconciliation",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -15190,8 +15376,8 @@
 					"id": "acp-turn-consumers:C-supportsCostTracking",
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"affectedRows": ["C-supportsCostTracking"],
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
-					"evidenceRef": "phase03-reconciliation"
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "native-parser-followup:C-supportsCostTracking",
@@ -15426,8 +15612,8 @@
 					"id": "acp-turn-consumers:C-supportsUsageStats",
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"affectedRows": ["C-supportsUsageStats"],
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
-					"evidenceRef": "phase03-reconciliation"
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "native-parser-followup:C-supportsUsageStats",
@@ -15572,9 +15758,16 @@
 				{
 					"id": "acp-turn-consumers:C-supportsBatchMode",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["C-supportsBatchMode"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
+				},
+				{
+					"id": "grok-cli-managed-fixture-regression",
+					"code": "regression",
+					"missingPrerequisite": "16 managed Grok cases in agent-spawner.test.ts fail since fdaaa8906 (parser fails closed on an end event without stopReason; fixtures omit it). Bounded repair GT1-07-12, re-verified by GT1-07-13.",
+					"evidenceRef": "phase07-verification",
+					"affectedRows": ["C-supportsBatchMode"]
 				}
 			],
 			"field": "supportsBatchMode",
@@ -15700,9 +15893,9 @@
 				{
 					"id": "acp-turn-consumers:C-requiresPromptToStart",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["C-requiresPromptToStart"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"field": "requiresPromptToStart",
@@ -17226,9 +17419,9 @@
 				{
 					"id": "acp-turn-consumers:C-usesJsonLineOutput",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["C-usesJsonLineOutput"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"field": "usesJsonLineOutput",
@@ -17673,7 +17866,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok prompt-only directory hints are not grants; prove native mechanism or maintain explicit safe refusal for required containment."
+				"Grok prompt-only directory hints are not grants; prove native mechanism or maintain explicit safe refusal for required containment.",
+				"GT1-07-11 verification: CLI managed Grok directory-grant composition cases fail at and before phase07 (parser fail-closed on missing stopReason, fixture regression from fdaaa8906); repair GT1-07-12. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -17683,7 +17877,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17723,6 +17919,13 @@
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Active read/write grants and custom --add-dir refuse before prompt preparation in planner, desktop, CLI, Cue and shared turns; empty/inert grants and other-provider builders have scoped deterministic evidence (13/13J), and full completeness passes in 13Q. Public capability remains false and builder absent. Native CLI root grants, symlink containment, managed preventive effects and platforms remain GT1-09-07/08/11/12 and phase11; pinned-source ACP resume roots are unsupported. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
 					"affectedRows": ["P08", "P35", "C-supportsAdditionalDirectories", "REG-DEFINITIONS"]
+				},
+				{
+					"id": "grok-cli-managed-fixture-regression",
+					"code": "regression",
+					"missingPrerequisite": "16 managed Grok cases in agent-spawner.test.ts fail since fdaaa8906 (parser fails closed on an end event without stopReason; fixtures omit it). Bounded repair GT1-07-12, re-verified by GT1-07-13.",
+					"evidenceRef": "phase07-verification",
+					"affectedRows": ["C-supportsAdditionalDirectories"]
 				}
 			],
 			"field": "supportsAdditionalDirectories",
@@ -18021,9 +18224,9 @@
 				{
 					"id": "acp-turn-consumers:REG-PARSER",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["REG-PARSER"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "native-parser-followup:REG-PARSER",
@@ -18857,8 +19060,8 @@
 					"id": "acp-turn-consumers:REG-USAGE",
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"affectedRows": ["REG-USAGE"],
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
-					"evidenceRef": "phase03-reconciliation"
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "native-parser-followup:REG-USAGE",
@@ -18934,7 +19137,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"ACP normalizes reported child lineage; native/history child identity and real consumer propagation still require phase04/07/10/11 work. Task prose cannot substitute for native IDs or proven usage inclusion."
+				"ACP normalizes reported child lineage; native/history child identity and real consumer propagation still require phase04/07/10/11 work. Task prose cannot substitute for native IDs or proven usage inclusion.",
+				"GT1-07-11 verification: Child identity comes from _x.ai subagent_* updates only; synthetic. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -18945,7 +19149,9 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18978,6 +19184,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["REG-CHILD"]
+				},
+				{
+					"id": "grok-native-subagent-unqualified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Subagent lineage is synthetic (pinned _x.ai variants). A child tool running at parent settlement is closed only by renderer exit cleanup. Native child runs, termination and usage attribution need phase11 evidence.",
+					"evidenceRef": "phase07-verification",
 					"affectedRows": ["REG-CHILD"]
 				}
 			]
@@ -19904,16 +20117,16 @@
 				{
 					"id": "acp-permission-consumers:REG-MANAGED-ROUTES",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Scoped once-only consent, synchronous cancellation/disconnect invalidation and non-success precedence pass GT1-03-13E with synthetic authority. Phase07/10 must wire real channels; phase09 must classify/enforce preventive effects and phase11 must prove native coverage. Tool display does not enforce policy; missing authority denies.",
+					"missingPrerequisite": "Desktop permission requests reach the standalone consent port (PermissionRelayServer.openConsentSession) and portable runs use ManagedTurnAuthority.effects; unmanaged portable standard turns and Cue assist on a standard tab refuse consent-port (phase07-verification). Remaining: phase09 preventive effect classification, phase10 web/Lite channels, phase11 native consent proof.",
 					"affectedRows": ["REG-MANAGED-ROUTES"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-turn-consumers:REG-MANAGED-ROUTES",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["REG-MANAGED-ROUTES"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"branchAuditRefs": ["B11", "B40", "B41"]
@@ -20100,7 +20313,8 @@
 				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B exposes the canonical request/result via preload and renderer overloads; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements.",
 				"GT1-05-05 implements only scoped slash refusals in the composer/queue and excludes stale provider prompt bodies. GT1-05-05A adds ephemeral discovery and completion metadata with no selectable native entries; admitted invocation with a fresh catalog on each new ACP process remains GT1-07-02. No native skill expansion, TUI action, CLI subcommand or headless command execution is certified.",
 				"GT1-05-05A refreshes advisory discovery on selected context, settings, focus and completion changes, with a finite receipt lifetime. Main-only revisions still require fresh admitted-sink validation; no native command is selectable or executed. GT1-05-06C/13 own completion regression coverage/execution.",
-				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
+				"GT1-07-11 verification: Live catalog observation and projection pass deterministic checks. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20111,7 +20325,9 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase05DeterministicEvidenceRef": "phase05-reverification",
-				"phase05ReconciliationRef": "phase05-reconciliation"
+				"phase05ReconciliationRef": "phase05-reconciliation",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20934,7 +21150,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok absent from MCP_CONFIG_BY_AGENT; plugin runner refuses required tools/receipts when strategy is unverified or absent. Needs scoped native config and real receipt evidence. Native hooks/skills/plugin trust precedence and disabling across resume remain unqualified; project/persona instructions are not effect enforcement."
+				"Grok absent from MCP_CONFIG_BY_AGENT; plugin runner refuses required tools/receipts when strategy is unverified or absent. Needs scoped native config and real receipt evidence. Native hooks/skills/plugin trust precedence and disabling across resume remain unqualified; project/persona instructions are not effect enforcement.",
+				"GT1-07-11 verification: MCP configuration and plugin tool receipts pass deterministic checks; real Grok MCP loading not run. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20943,7 +21160,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20976,6 +21195,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["S08"]
+				},
+				{
+					"id": "grok-native-mcp-unqualified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Grok MCP config is verified false with qualifiedVersions []; production Grok runs uninjected. Exact-binary MCP loading, trust/disable enforcement, coworking entry loading and real tool calls need phase11 evidence.",
+					"evidenceRef": "phase07-verification",
 					"affectedRows": ["S08"]
 				}
 			],
@@ -21036,7 +21262,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Shared ACP lineage and scoped usage fixtures preserve reported children without fabricating per-child detail. Native child lifecycle/history reconciliation remains unqualified. Renderer groupSubagentToolLogs adopts metadata.parentToolUseId under tool-{id}; one level only, orphans/deeper descendants stay flat. Grok normalization must feed this existing contract or extend it deliberately."
+				"Shared ACP lineage and scoped usage fixtures preserve reported children without fabricating per-child detail. Native child lifecycle/history reconciliation remains unqualified. Renderer groupSubagentToolLogs adopts metadata.parentToolUseId under tool-{id}; one level only, orphans/deeper descendants stay flat. Grok normalization must feed this existing contract or extend it deliberately.",
+				"GT1-07-11 verification: Subagent tool entries and nested child tools group correctly across reload; synthetic. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -21047,7 +21274,9 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -21080,6 +21309,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["S09"]
+				},
+				{
+					"id": "grok-native-subagent-unqualified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Subagent lineage is synthetic (pinned _x.ai variants). A child tool running at parent settlement is closed only by renderer exit cleanup. Native child runs, termination and usage attribution need phase11 evidence.",
+					"evidenceRef": "phase07-verification",
 					"affectedRows": ["S09"]
 				}
 			],
@@ -22281,7 +22517,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok has no owned steering channel; ProcessManager sends the non-Codex route to sendSteeringRequest, which can only succeed for a registered maestro-p channel. Comparable user outcome needs explicit implementation or documented gap; GT1-01-07 must reconcile missing explicit steering acceptance in phase07 task text."
+				"Grok has no owned steering channel; ProcessManager sends the non-Codex route to sendSteeringRequest, which can only succeed for a registered maestro-p channel. Comparable user outcome needs explicit implementation or documented gap; GT1-01-07 must reconcile missing explicit steering acceptance in phase07 task text.",
+				"GT1-07-11 verification: Steering is refused on every Grok route (steering-not-owned, native-steering, acp-steering) and the renderer marks it ineligible; no advertised input op exists. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22290,7 +22527,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -22323,6 +22562,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["S21"]
+				},
+				{
+					"id": "grok-steering-input-op-unadvertised",
+					"code": "unsupported",
+					"missingPrerequisite": "Wire 1 and the pinned _x.ai extensions advertise no in-progress input operation; every Grok route refuses steering. Needs an advertised, version-qualified op.",
+					"evidenceRef": "phase07-verification",
 					"affectedRows": ["S21"]
 				}
 			],
@@ -22387,7 +22633,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work."
+				"Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work.",
+				"GT1-07-11 verification: Permission prompts reach the standalone consent port; questions surface as a capability gap; empty plan snapshots clear. Cue assist on a Grok standard tab is refused consent-port. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22402,7 +22649,9 @@
 				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
 				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -22440,16 +22689,23 @@
 				{
 					"id": "acp-plan-consumers:S22",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Owned ordered plan replacement, original dispatch/prompt binding, duplicate/late rejection and unsupported states pass GT1-03-13E. Phase07/10 must carry empty replacement, cancelled and unsupported states through real consumers; native plan behavior remains phase11 not-run.",
+					"missingPrerequisite": "Ordered plan snapshots, including empty replacement clearing the task list, reach the desktop consumers (phase07-verification). Remaining: phase10 web/Lite consumers and native plan behavior in phase11.",
 					"affectedRows": ["S22"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-question-negotiation:S22",
 					"code": "unsupported-capability",
-					"missingPrerequisite": "Pinned initialize advertises neither ask-back nor elicitation. Composed unavailable/negative request handling passes GT1-03-13E; positive conversational support stays unsupported until an advertised contract is qualified. Phase07/10 must retain unavailable behavior and phase11 must verify native negotiation.",
+					"missingPrerequisite": "Questions surface on the desktop as a visible capability gap (type unknown, never permission_denied) with no answer channel (phase07-verification). Positive ask-back stays unsupported until an advertised contract is qualified; phase10 web/Lite must keep the unavailable behavior.",
 					"affectedRows": ["S22"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
+				},
+				{
+					"id": "grok-cue-assist-standard-consent-port",
+					"code": "implementation-gap",
+					"missingPrerequisite": "Cue AI assist has no tab, so a Grok standard active tab yields no consent port and the host refuses (consent-port); full and read-only run. Needs a consent channel for tabless assist turns.",
+					"evidenceRef": "phase07-verification",
+					"affectedRows": ["S22"]
 				}
 			]
 		},
@@ -23113,9 +23369,9 @@
 				{
 					"id": "acp-turn-consumers:S28",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["S28"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"branchAuditRefs": ["B12", "B42"]
@@ -23430,7 +23686,8 @@
 				"GT1-05-06B authors 26 producer/template regressions and repairs four obsolete remote macro assertions in three existing suites. Static checks pass; execution stays not-run for GT1-05-13. GT1-05-06B1/B2 retain final queue and system-context/new-tab coverage; GT1-05-06A3/B3 own the demonstrated composer image omission. See Plans/grok-tier1/evidence/05.md#gt1-05-06b-custom-command-producer-and-template-tests.",
 				"GT1-05-06B3 extends the existing producer matrix to 12 idle/busy local/SSH staged/explicit/empty-image cases and three missing-target cases (10 additional cases). Exact copied image lists, pinned tab/raw arguments, one queue handoff, acceptance-before-clear and draft retention are authored in useInputProcessing.test.ts. Static checks pass; tests remain not-run for GT1-05-13. GT1-05-06B1 owns final queued spawn delivery and managed refusal; GT1-05-06B retains remote macro attachment refusal. See Plans/grok-tier1/evidence/05.md#gt1-05-06b3-custom-command-attachment-regression-tests.",
 				"GT1-05-06B2 authors 32 additional system-context/new-tab cases in the two assigned existing renderer suites. Configured local/SSH Git and plugin context, selected native identity and legacy aliases, literal macro arguments/delegation/tickets, fresh-tab ownership, native refusal before creation and truthful queue/failure receipts are covered. Scoped static checks and independent review pass; tests remain not-run for GT1-05-13. Reuses GT1-05-06B/B1 admission and remote-handler coverage; no native capability or parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06b2-system-context-and-new-tab-regression-tests.",
-				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
+				"GT1-07-11 verification: Queued native commands drain through agentStore with re-admission at spawn; deterministic only. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23441,7 +23698,9 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase05DeterministicEvidenceRef": "phase05-reverification",
-				"phase05ReconciliationRef": "phase05-reconciliation"
+				"phase05ReconciliationRef": "phase05-reconciliation",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23802,16 +24061,16 @@
 				{
 					"id": "acp-permission-consumers:META-03",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Scoped once-only consent, synchronous cancellation/disconnect invalidation and non-success precedence pass GT1-03-13E with synthetic authority. Phase07/10 must wire real channels; phase09 must classify/enforce preventive effects and phase11 must prove native coverage. Tool display does not enforce policy; missing authority denies.",
+					"missingPrerequisite": "Desktop permission requests reach the standalone consent port (PermissionRelayServer.openConsentSession) and portable runs use ManagedTurnAuthority.effects; unmanaged portable standard turns and Cue assist on a standard tab refuse consent-port (phase07-verification). Remaining: phase09 preventive effect classification, phase10 web/Lite channels, phase11 native consent proof.",
 					"affectedRows": ["META-03"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-turn-consumers:META-03",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["META-03"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"symbols": ["PLAN_MODE_AGENTS", "getReadOnlyModeLabel", "getPermissionModeTooltip"]
@@ -24291,9 +24550,9 @@
 				{
 					"id": "acp-turn-consumers:META-06",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["META-06"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"symbols": ["DEFAULT_CONTEXT_WINDOWS", "getContextWindowForAgent", "COMBINED_CONTEXT_AGENTS"]
@@ -24463,9 +24722,9 @@
 				{
 					"id": "acp-turn-consumers:META-07",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["META-07"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"symbols": [
@@ -24747,16 +25006,16 @@
 				{
 					"id": "acp-permission-consumers:REG-DEFINITIONS",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Scoped once-only consent, synchronous cancellation/disconnect invalidation and non-success precedence pass GT1-03-13E with synthetic authority. Phase07/10 must wire real channels; phase09 must classify/enforce preventive effects and phase11 must prove native coverage. Tool display does not enforce policy; missing authority denies.",
+					"missingPrerequisite": "Desktop permission requests reach the standalone consent port (PermissionRelayServer.openConsentSession) and portable runs use ManagedTurnAuthority.effects; unmanaged portable standard turns and Cue assist on a standard tab refuse consent-port (phase07-verification). Remaining: phase09 preventive effect classification, phase10 web/Lite channels, phase11 native consent proof.",
 					"affectedRows": ["REG-DEFINITIONS"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				},
 				{
 					"id": "acp-turn-consumers:REG-DEFINITIONS",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Exported startGrokAcpTurn passes GT1-03-13E composed lifecycle, lease, ownership, version-qualified extension and accounting fixtures. It has no production caller. Phase07 wires desktop/runtime/CLI, phase08 automation, phase10 web/Lite/SSH and recording; phase09/11 own policy/native qualification. Attachments and remote process ownership are not supplied by this local text port.",
+					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["REG-DEFINITIONS"],
-					"evidenceRef": "phase03-reconciliation"
+					"evidenceRef": "phase07-verification"
 				}
 			],
 			"definitionInventory": [
@@ -26074,7 +26333,8 @@
 			},
 			"limitations": [
 				"Only Claude has a verified headless compaction command. Grok, Codex and Antigravity receive no automatic compact-and-resend recovery; this is a deliberate safe omission, not permission to send literal /compact as a prompt. Equivalent Grok recovery or explicit limitation needs a separate ledger row, including same native ID, original prompt retention, cancellation and failed compaction behavior. Auto Run is explicitly outside this existing recovery route.",
-				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim."
+				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim.",
+				"GT1-07-11 verification: Context-limit recovery refuses before spawn with required-feature grok-native-compaction; retryStore declines and the original error surfaces. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -26085,7 +26345,9 @@
 				"sourceRevisionRef": "branchAudit.sourceCommit",
 				"evidenceRef": "phase01-branches",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -26118,6 +26380,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["S34"]
+				},
+				{
+					"id": "grok-native-compaction-unqualified",
+					"code": "required-feature",
+					"missingPrerequisite": "No qualified Grok native compaction command; recovery refuses before spawn. Needs a pinned, qualified compaction operation (B03).",
+					"evidenceRef": "phase07-verification",
 					"affectedRows": ["S34"]
 				}
 			],
@@ -26179,7 +26448,8 @@
 			},
 			"limitations": [
 				"INSTALLERS registers Claude, Codex, OpenCode and Factory Droid only. The Settings status list and install-for-all derive from it; getInstaller(grok) is null and installFor(grok) throws unsupported. This is an unimplemented Grok outcome, not evidence that Grok lacks MCP. Preserve managed install admission when adding an adapter. Antigravity is also absent, which does not lower the union bar.",
-				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim."
+				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim.",
+				"GT1-07-11 verification: Coworking installer writes and removes a sentinel-owned maestro-coworking entry with explicit refusals; whether a selected binary loads it is not qualified. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -26188,7 +26458,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "branchAudit.sourceCommit",
-				"evidenceRef": "phase01-branches"
+				"evidenceRef": "phase01-branches",
+				"phase07DeterministicEvidenceRef": "phase07-verification",
+				"phase07ReconciliationRef": "phase07-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -26221,6 +26493,13 @@
 					"id": "live-authorization-absent",
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
+					"affectedRows": ["S35"]
+				},
+				{
+					"id": "grok-native-mcp-unqualified",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Grok MCP config is verified false with qualifiedVersions []; production Grok runs uninjected. Exact-binary MCP loading, trust/disable enforcement, coworking entry loading and real tool calls need phase11 evidence.",
+					"evidenceRef": "phase07-verification",
 					"affectedRows": ["S35"]
 				}
 			],
@@ -29593,6 +29872,169 @@
 			"wholeRowStatusChanges": false,
 			"applicabilityChanges": false,
 			"directionsCertified": false
+		},
+		"imagesAnalyzed": 0
+	},
+	"phase07Reconciliation": {
+		"taskId": "GT1-07-11",
+		"recordedAt": "2026-11-01",
+		"sourceCommit": "1cb47e62b47801731f63d36baaf152b37902d981",
+		"evidenceRef": "phase07-reconciliation",
+		"baseObservation": {
+			"ref": "feature/mega-maestro-v1.1.0-rc",
+			"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
+			"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+			"aheadBehind": [391, 10],
+			"baseIsAncestorOfSource": false,
+			"sourceIsAncestorOfBase": false
+		},
+		"phase07Deterministic": "pass",
+		"repositoryRegression": {
+			"status": "fail",
+			"suite": "src/__tests__/cli/services/agent-spawner.test.ts",
+			"failed": 16,
+			"firstBadCommit": "fdaaa89065b5e518a7c948a82c958ecac321e648",
+			"repairTask": "GT1-07-12",
+			"reverifyTask": "GT1-07-13"
+		},
+		"nativeQualification": "not-run",
+		"nativeCertification": false,
+		"productAcceptance": "not-run",
+		"consumers": {
+			"runtime": "pass",
+			"desktop": "pass",
+			"renderer": "pass",
+			"cliHost": "pass",
+			"cliBatch": "fail",
+			"cue": "pass",
+			"mcpPlugin": "pass",
+			"subagent": "pass"
+		},
+		"packetVerdicts": {
+			"GT1-07-02E native command consumers": "pass",
+			"GT1-07-02H implicit-mode callers": "pass",
+			"GT1-07-03C steering (main, menu, queue)": "pass",
+			"GT1-07-03E portable image consumers": "pass",
+			"GT1-07-04 transport consumers (desktop, library)": "pass",
+			"GT1-07-04B plans and questions": "pass",
+			"GT1-07-04D context-limit blocker": "pass",
+			"GT1-07-07 MCP overlay and plugin-tool evidence": "pass",
+			"GT1-07-07B coworking installer": "pass",
+			"GT1-07-07D native MCP state, auth and trust": "pass",
+			"GT1-07-10 subagents": "pass"
+		},
+		"routeCoverage": {
+			"desktopStandard": "acp-stdio via GrokAcpSpawner, consent port",
+			"desktopNativeCommand": "acp-stdio via GrokAcpSpawner, catalog revalidation",
+			"desktopFullReadOnly": "native headless (ChildProcessSpawner)",
+			"runtimeStandard": "acp-stdio via runAgentTurn when ManagedTurnAuthority.effects is present, else refused consent-port",
+			"runtimeOther": "native headless",
+			"cliHost": "runtime selector",
+			"cliBatch": "native headless only (--always-approve)",
+			"cueAssistStandard": "refused consent-port",
+			"ssh": "ACP refused (no SSH owner); phase10",
+			"images": "ordered ACP blocks only with embeddedImageSupport (no producer); ACP port refuses acp-images",
+			"steering": "refused on every route",
+			"compaction": "refused before spawn (required-feature)"
+		},
+		"typeChecks": {
+			"lint": 2,
+			"main": 0,
+			"cli": 0,
+			"maestroLibBuild": 0,
+			"eslintChanged": 0,
+			"prettierChanged": 0,
+			"docsVerify": 0
+		},
+		"receipts": [
+			{
+				"path": "Plans/grok-tier1/evidence/07-verification.json",
+				"sha256": "64f12e9555a3a09ab6e2c47ff161d2727a719f6f8e315efeeda917b02d4c0b63",
+				"sourceCommit": "1cb47e62b47801731f63d36baaf152b37902d981",
+				"status": "fail"
+			}
+		],
+		"latestScopedResult": {
+			"receipt": "Plans/grok-tier1/evidence/07-verification.json",
+			"files": 44,
+			"passedTests": 3224,
+			"failedTests": 16,
+			"skippedTests": 1,
+			"groups": {
+				"library": {
+					"files": 10,
+					"passed": 839,
+					"failed": 0,
+					"skipped": 1,
+					"exitCode": 0
+				},
+				"desktop": {
+					"files": 7,
+					"passed": 578,
+					"failed": 0,
+					"skipped": 0,
+					"exitCode": 0
+				},
+				"renderer": {
+					"files": 11,
+					"passed": 741,
+					"failed": 0,
+					"skipped": 0,
+					"exitCode": 0
+				},
+				"cli": {
+					"files": 6,
+					"passed": 399,
+					"failed": 16,
+					"skipped": 0,
+					"exitCode": 1
+				},
+				"mcp": {
+					"files": 7,
+					"passed": 363,
+					"failed": 0,
+					"skipped": 0,
+					"exitCode": 0
+				},
+				"subagent": {
+					"files": 3,
+					"passed": 304,
+					"failed": 0,
+					"skipped": 0,
+					"exitCode": 0
+				}
+			}
+		},
+		"remainingRealNativeRequirements": [
+			"GT1-11: exact-binary ACP turns on desktop and runtime (stream, consent, cancel, cleanup, usage) on a disposable account.",
+			"GT1-11: native command discovery and submission on the pinned binary.",
+			"GT1-11: real Grok MCP loading through the overlay and coworking entry, trust/disable enforcement and a host-observed plugin tool call.",
+			"GT1-11: native subagent runs with lineage, termination on parent cancel and usage attribution.",
+			"Phase09: preventive effect classification for ACP permission requests on managed routes.",
+			"Phase10: web/Lite/SSH consumers of the ACP route."
+		],
+		"knownGaps": [
+			"A child tool still running when the parent settles is not closed by the ACP adapter (only the child entry is); the renderer exit cleanup owns it (GT1-07-10).",
+			"No production caller passes embeddedImageSupport, so real Grok image turns still refuse prompt-delivery-refused; the standard ACP route refuses acp-images (GT1-07-03D).",
+			"Cue AI assist with a Grok standard active tab is refused consent-port: it has no tab and therefore no consent port (GT1-07-02H).",
+			"Steering is refused on every Grok route: wire 1 and the pinned _x.ai extensions advertise no in-progress input op (GT1-07-03A).",
+			"Grok questions surface as a visible capability gap; no answer channel (GT1-07-04A).",
+			"No qualified Grok native compaction: context-limit recovery is a required-feature blocker (GT1-07-04C).",
+			"Grok MCP injection is unverified (verified false, qualifiedVersions []), so production Grok runs uninjected; native trust/disable enforcement and loading of the coworking entry are unqualified.",
+			"Subagent lineage is synthetic, following the pinned _x.ai variants; no native child run has been observed."
+		],
+		"liveBoundary": {
+			"status": "not-run",
+			"providerCalls": 0,
+			"budgetUsd": 0,
+			"authorizedEndpoints": [],
+			"authorizedSshTargets": []
+		},
+		"promotion": {
+			"grokRemainsBeta": true,
+			"capabilityChanges": false,
+			"wholeRowStatusChanges": false,
+			"applicabilityChanges": false
 		},
 		"imagesAnalyzed": 0
 	}

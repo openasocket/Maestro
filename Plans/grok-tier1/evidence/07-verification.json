@@ -1,0 +1,941 @@
+{
+	"schemaVersion": 1,
+	"taskId": "GT1-07-11",
+	"recordedAt": "2026-11-01T13:50:40.173Z",
+	"sourceCommit": "1cb47e62b47801731f63d36baaf152b37902d981",
+	"executionRoot": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+	"branch": "auto-run-feature/grok-cli-integration",
+	"baseObservation": {
+		"ref": "feature/mega-maestro-v1.1.0-rc",
+		"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
+		"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+		"aheadBehind": [391, 10],
+		"baseIsAncestorOfSource": false,
+		"sourceIsAncestorOfBase": false
+	},
+	"status": "fail",
+	"phase07Deterministic": "pass",
+	"statusReason": "Every phase07-authored case passes. The one failing group (cli) fails only on 16 pre-existing agent-spawner cases, identical at the phase07 start; they are recorded as a regression of earlier playbook work with a bounded repair task (GT1-07-12), not waived.",
+	"summary": {
+		"files": 44,
+		"passed": 3224,
+		"failed": 16,
+		"skipped": 1,
+		"collectionFailures": 0
+	},
+	"skippedDetail": "One skip: start-turn.test.ts \"applyWindowsShellRules starts a .cmd shim under a path with spaces\" (Windows-only, pre-existing).",
+	"scope": {
+		"phaseStart": "a2d2eff362e02f3430af946ae1c8bd76c818a74e",
+		"selectedFiles": "Every phase07-changed test file plus the existing Grok ACP library, start-turn, assemble, provider-route, runtime turns, process IPC, preload, relay, usage ledger, execution queue, CLI spawner/host/turn-result/mcp-bridge, Cue router and plugin host suites. Complete suites, no name filters.",
+		"sourceAndTestsModified": false,
+		"newTestsAuthored": false,
+		"platform": "darwin/arm64",
+		"node": "v26.13.0",
+		"environment": "Repository runner (npm test -> vitest run), maxWorkers=1 per group. TMPDIR, MAESTRO_USER_DATA, XDG_CONFIG_HOME and XDG_CACHE_HOME isolated under tmp/grok-tier1-phase07-verify/<group>; GROK_HOME, GROK_AUTH, GROK_AUTH_PATH, GROK_CONFIG_PATH, CLAUDE_CONFIG_DIR and provider API keys removed. HOME and CODEX_HOME preserved. Synthetic ACP peers and fixtures only.",
+		"nativeEvidence": "No native provider calls, no Grok binary launched, no MCP server or native subagent exercised, no paid, live or SSH qualification."
+	},
+	"checks": [
+		{
+			"id": "library",
+			"sourceCommit": "1cb47e62b47801731f63d36baaf152b37902d981",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/shared/maestro-lib/grok/acp-client.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-protocol.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-session.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts",
+				"src/__tests__/shared/maestro-lib/run/start-turn.test.ts",
+				"src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts",
+				"src/__tests__/shared/maestro-lib/turns/assemble.test.ts",
+				"src/__tests__/shared/maestro-lib/managed/provider-route.test.ts",
+				"src/shared/maestro-lib/runtime/__tests__/turns.test.ts",
+				"--maxWorkers=1",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=tmp/grok-tier1-phase07-verify/library/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-11-01T13:43:54.635Z",
+			"finishedAt": "2026-11-01T13:44:06.723Z",
+			"durationSeconds": 12.088,
+			"exitCode": 0,
+			"result": {
+				"files": 10,
+				"failedFiles": [],
+				"failedTests": [],
+				"total": 840,
+				"passed": 839,
+				"failed": 0,
+				"skipped": 1,
+				"success": true
+			},
+			"resultsSha256": "4a167de1cb7354a8565042acdf47922b51fa3601c3b1b99bdad1e18283e1c4d1"
+		},
+		{
+			"id": "desktop",
+			"sourceCommit": "1cb47e62b47801731f63d36baaf152b37902d981",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/main/process-manager.test.ts",
+				"src/__tests__/main/ipc/handlers/process.test.ts",
+				"src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts",
+				"src/__tests__/main/preload/process/core.test.ts",
+				"src/__tests__/main/agents/grok-skills.test.ts",
+				"src/__tests__/main/permission-relay/relay-core.test.ts",
+				"src/__tests__/shared/turnUsageLedger.test.ts",
+				"--maxWorkers=1",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=tmp/grok-tier1-phase07-verify/desktop/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-11-01T13:48:45.361Z",
+			"finishedAt": "2026-11-01T13:48:52.527Z",
+			"durationSeconds": 7.166,
+			"exitCode": 0,
+			"result": {
+				"files": 7,
+				"failedFiles": [],
+				"failedTests": [],
+				"total": 578,
+				"passed": 578,
+				"failed": 0,
+				"skipped": 0,
+				"success": true
+			},
+			"resultsSha256": "abc634f5ea235183aea3fff08b46d2980d115e9041ccb0e54af2de30bf41adfb"
+		},
+		{
+			"id": "renderer",
+			"sourceCommit": "1cb47e62b47801731f63d36baaf152b37902d981",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/renderer/services/chatSteering.test.ts",
+				"src/__tests__/renderer/utils/sendMenu.test.ts",
+				"src/__tests__/renderer/utils/executionQueue.test.ts",
+				"src/__tests__/renderer/stores/agentStore.test.ts",
+				"src/__tests__/renderer/hooks/useInputProcessing.test.ts",
+				"src/__tests__/renderer/hooks/useForkConversation.test.ts",
+				"src/__tests__/renderer/hooks/useMergeTransferHandlers.test.ts",
+				"src/__tests__/renderer/components/CueYamlEditor.test.tsx",
+				"src/__tests__/renderer/utils/agentTaskList.test.ts",
+				"src/__tests__/renderer/services/contextCompaction.test.ts",
+				"src/__tests__/renderer/stores/retryStore.test.ts",
+				"--maxWorkers=1",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=tmp/grok-tier1-phase07-verify/renderer/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-11-01T13:48:52.623Z",
+			"finishedAt": "2026-11-01T13:48:56.738Z",
+			"durationSeconds": 4.115,
+			"exitCode": 0,
+			"result": {
+				"files": 11,
+				"failedFiles": [],
+				"failedTests": [],
+				"total": 741,
+				"passed": 741,
+				"failed": 0,
+				"skipped": 0,
+				"success": true
+			},
+			"resultsSha256": "57a9de7a343fe6b44343bf6eb1b8be0c5c952bcfd45bbf3944605b67c0549213"
+		},
+		{
+			"id": "cli",
+			"sourceCommit": "1cb47e62b47801731f63d36baaf152b37902d981",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/cli/services/agent-spawner.test.ts",
+				"src/__tests__/cli/services/turn-result.test.ts",
+				"src/__tests__/cli/services/runtime-host.test.ts",
+				"src/__tests__/cli/commands/host.test.ts",
+				"src/__tests__/cli/services/mcp-bridge.test.ts",
+				"src/__tests__/main/cue/cue-run-router.test.ts",
+				"--maxWorkers=1",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=tmp/grok-tier1-phase07-verify/cli/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-11-01T13:44:24.725Z",
+			"finishedAt": "2026-11-01T13:44:26.852Z",
+			"durationSeconds": 2.127,
+			"exitCode": 1,
+			"result": {
+				"files": 6,
+				"failedFiles": ["src/__tests__/cli/services/agent-spawner.test.ts"],
+				"failedTests": [
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=false resume=undefined runs empty/inert grant case 0 with selected identity",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=false resume=undefined runs empty/inert grant case 1 with selected identity",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=false resume=selected-resume runs empty/inert grant case 0 with selected identity",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=false resume=selected-resume runs empty/inert grant case 1 with selected identity",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=true resume=undefined runs empty/inert grant case 0 with selected identity",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=true resume=undefined runs empty/inert grant case 1 with selected identity",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=true resume=selected-resume runs empty/inert grant case 0 with selected identity",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches Grok directory-grant launch composition SSH=true resume=selected-resume runs empty/inert grant case 1 with selected identity",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=false) preserves prompt bytes and exit outcome for case 0",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=false) preserves prompt bytes and exit outcome for case 1",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=false) preserves prompt bytes and exit outcome for case 2",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=false) preserves prompt bytes and exit outcome for case 3",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=true) preserves prompt bytes and exit outcome for case 0",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=true) preserves prompt bytes and exit outcome for case 1",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=true) preserves prompt bytes and exit outcome for case 2",
+					"src/__tests__/cli/services/agent-spawner.test.ts > agent-spawner spawnAgent: managed launches opt-in Grok prompt artifacts host handoff (SSH=true) preserves prompt bytes and exit outcome for case 3"
+				],
+				"total": 415,
+				"passed": 399,
+				"failed": 16,
+				"skipped": 0,
+				"success": false
+			},
+			"resultsSha256": "7e52d680183511b594b2f93e894f3bbb5d9405700398440c5df059aa64ce0ca2"
+		},
+		{
+			"id": "mcp",
+			"sourceCommit": "1cb47e62b47801731f63d36baaf152b37902d981",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/shared/plugins/mcp-agent-config.test.ts",
+				"src/__tests__/main/plugins/plugin-tool-run-identity.test.ts",
+				"src/__tests__/main/plugins/plugin-headless-agent-runner.test.ts",
+				"src/__tests__/main/plugins/plugin-host-handlers.test.ts",
+				"src/__tests__/main/coworking/installers/grok.test.ts",
+				"src/__tests__/main/coworking/installers/managed.test.ts",
+				"src/__tests__/renderer/components/Settings/CoworkingSetup.test.tsx",
+				"--maxWorkers=1",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=tmp/grok-tier1-phase07-verify/mcp/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-11-01T13:44:08.062Z",
+			"finishedAt": "2026-11-01T13:44:09.896Z",
+			"durationSeconds": 1.834,
+			"exitCode": 0,
+			"result": {
+				"files": 7,
+				"failedFiles": [],
+				"failedTests": [],
+				"total": 363,
+				"passed": 363,
+				"failed": 0,
+				"skipped": 0,
+				"success": true
+			},
+			"resultsSha256": "a46208af8269de5f0eb9fab8aa5f5741fc6e90b5dd22962a2e9b5a3138c0bf34"
+		},
+		{
+			"id": "subagent",
+			"sourceCommit": "1cb47e62b47801731f63d36baaf152b37902d981",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/shared/maestro-lib/grok/acp-events.test.ts",
+				"src/__tests__/main/process-manager/handlers/StdoutHandler.test.ts",
+				"src/__tests__/renderer/components/TerminalOutput/groupSubagentToolLogs.test.ts",
+				"--maxWorkers=1",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=tmp/grok-tier1-phase07-verify/subagent/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-11-01T13:44:06.815Z",
+			"finishedAt": "2026-11-01T13:44:07.970Z",
+			"durationSeconds": 1.155,
+			"exitCode": 0,
+			"result": {
+				"files": 3,
+				"failedFiles": [],
+				"failedTests": [],
+				"total": 304,
+				"passed": 304,
+				"failed": 0,
+				"skipped": 0,
+				"success": true
+			},
+			"resultsSha256": "88d9e9233550957046b46598fdbf5c31338e954a2e0a8231280c4c326382dde1"
+		}
+	],
+	"perFile": {
+		"src/__tests__/shared/maestro-lib/grok/acp-client.test.ts": {
+			"group": "library",
+			"passed": 31,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/shared/maestro-lib/grok/acp-protocol.test.ts": {
+			"group": "library",
+			"passed": 51,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts": {
+			"group": "library",
+			"passed": 120,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/shared/maestro-lib/grok/acp-session.test.ts": {
+			"group": "library",
+			"passed": 147,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts": {
+			"group": "library",
+			"passed": 97,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/shared/maestro-lib/managed/provider-route.test.ts": {
+			"group": "library",
+			"passed": 4,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/shared/maestro-lib/run/start-turn.test.ts": {
+			"group": "library",
+			"passed": 81,
+			"failed": 0,
+			"skipped": 1
+		},
+		"src/__tests__/shared/maestro-lib/turns/assemble.test.ts": {
+			"group": "library",
+			"passed": 68,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts": {
+			"group": "library",
+			"passed": 176,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/shared/maestro-lib/runtime/__tests__/turns.test.ts": {
+			"group": "library",
+			"passed": 64,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/main/process-manager.test.ts": {
+			"group": "desktop",
+			"passed": 135,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/shared/turnUsageLedger.test.ts": {
+			"group": "desktop",
+			"passed": 12,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/main/agents/grok-skills.test.ts": {
+			"group": "desktop",
+			"passed": 37,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/main/permission-relay/relay-core.test.ts": {
+			"group": "desktop",
+			"passed": 23,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/main/preload/process/core.test.ts": {
+			"group": "desktop",
+			"passed": 37,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/main/ipc/handlers/process.test.ts": {
+			"group": "desktop",
+			"passed": 232,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts": {
+			"group": "desktop",
+			"passed": 102,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/renderer/components/CueYamlEditor.test.tsx": {
+			"group": "renderer",
+			"passed": 46,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/renderer/services/chatSteering.test.ts": {
+			"group": "renderer",
+			"passed": 43,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/renderer/services/contextCompaction.test.ts": {
+			"group": "renderer",
+			"passed": 15,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/renderer/hooks/useForkConversation.test.ts": {
+			"group": "renderer",
+			"passed": 22,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/renderer/hooks/useInputProcessing.test.ts": {
+			"group": "renderer",
+			"passed": 172,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/renderer/hooks/useMergeTransferHandlers.test.ts": {
+			"group": "renderer",
+			"passed": 46,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/renderer/stores/agentStore.test.ts": {
+			"group": "renderer",
+			"passed": 162,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/renderer/stores/retryStore.test.ts": {
+			"group": "renderer",
+			"passed": 98,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/renderer/utils/agentTaskList.test.ts": {
+			"group": "renderer",
+			"passed": 21,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/renderer/utils/executionQueue.test.ts": {
+			"group": "renderer",
+			"passed": 96,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/renderer/utils/sendMenu.test.ts": {
+			"group": "renderer",
+			"passed": 20,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/cli/services/agent-spawner.test.ts": {
+			"group": "cli",
+			"passed": 265,
+			"failed": 16,
+			"skipped": 0
+		},
+		"src/__tests__/cli/services/mcp-bridge.test.ts": {
+			"group": "cli",
+			"passed": 8,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/cli/services/runtime-host.test.ts": {
+			"group": "cli",
+			"passed": 15,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/cli/services/turn-result.test.ts": {
+			"group": "cli",
+			"passed": 36,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/cli/commands/host.test.ts": {
+			"group": "cli",
+			"passed": 38,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/main/cue/cue-run-router.test.ts": {
+			"group": "cli",
+			"passed": 37,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/renderer/components/Settings/CoworkingSetup.test.tsx": {
+			"group": "mcp",
+			"passed": 13,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/main/plugins/plugin-headless-agent-runner.test.ts": {
+			"group": "mcp",
+			"passed": 63,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/main/plugins/plugin-host-handlers.test.ts": {
+			"group": "mcp",
+			"passed": 179,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/main/plugins/plugin-tool-run-identity.test.ts": {
+			"group": "mcp",
+			"passed": 15,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/shared/plugins/mcp-agent-config.test.ts": {
+			"group": "mcp",
+			"passed": 62,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/main/coworking/installers/grok.test.ts": {
+			"group": "mcp",
+			"passed": 17,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/main/coworking/installers/managed.test.ts": {
+			"group": "mcp",
+			"passed": 14,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/renderer/components/TerminalOutput/groupSubagentToolLogs.test.ts": {
+			"group": "subagent",
+			"passed": 17,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/main/process-manager/handlers/StdoutHandler.test.ts": {
+			"group": "subagent",
+			"passed": 141,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/shared/maestro-lib/grok/acp-events.test.ts": {
+			"group": "subagent",
+			"passed": 146,
+			"failed": 0,
+			"skipped": 0
+		}
+	},
+	"packetVerdicts": [
+		{
+			"packet": "GT1-07-02E native command consumers",
+			"files": [
+				{
+					"file": "src/__tests__/main/agents/grok-skills.test.ts",
+					"group": "desktop",
+					"passed": 37,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useInputProcessing.test.ts",
+					"group": "renderer",
+					"passed": 172,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/stores/agentStore.test.ts",
+					"group": "renderer",
+					"passed": 162,
+					"failed": 0,
+					"skipped": 0
+				}
+			],
+			"verdict": "pass"
+		},
+		{
+			"packet": "GT1-07-02H implicit-mode callers",
+			"files": [
+				{
+					"file": "src/__tests__/renderer/components/CueYamlEditor.test.tsx",
+					"group": "renderer",
+					"passed": 46,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useForkConversation.test.ts",
+					"group": "renderer",
+					"passed": 22,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useMergeTransferHandlers.test.ts",
+					"group": "renderer",
+					"passed": 46,
+					"failed": 0,
+					"skipped": 0
+				}
+			],
+			"verdict": "pass"
+		},
+		{
+			"packet": "GT1-07-03C steering (main, menu, queue)",
+			"files": [
+				{
+					"file": "src/__tests__/main/process-manager.test.ts",
+					"group": "desktop",
+					"passed": 135,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/services/chatSteering.test.ts",
+					"group": "renderer",
+					"passed": 43,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/utils/sendMenu.test.ts",
+					"group": "renderer",
+					"passed": 20,
+					"failed": 0,
+					"skipped": 0
+				}
+			],
+			"verdict": "pass"
+		},
+		{
+			"packet": "GT1-07-03E portable image consumers",
+			"files": [
+				{
+					"file": "src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts",
+					"group": "library",
+					"passed": 176,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/shared/maestro-lib/runtime/__tests__/turns.test.ts",
+					"group": "library",
+					"passed": 64,
+					"failed": 0,
+					"skipped": 0
+				}
+			],
+			"verdict": "pass"
+		},
+		{
+			"packet": "GT1-07-04 transport consumers (desktop, library)",
+			"files": [
+				{
+					"file": "src/__tests__/main/process-manager.test.ts",
+					"group": "desktop",
+					"passed": 135,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts",
+					"group": "library",
+					"passed": 176,
+					"failed": 0,
+					"skipped": 0
+				}
+			],
+			"verdict": "pass"
+		},
+		{
+			"packet": "GT1-07-04B plans and questions",
+			"files": [
+				{
+					"file": "src/__tests__/main/process-manager.test.ts",
+					"group": "desktop",
+					"passed": 135,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/utils/agentTaskList.test.ts",
+					"group": "renderer",
+					"passed": 21,
+					"failed": 0,
+					"skipped": 0
+				}
+			],
+			"verdict": "pass"
+		},
+		{
+			"packet": "GT1-07-04D context-limit blocker",
+			"files": [
+				{
+					"file": "src/__tests__/renderer/services/contextCompaction.test.ts",
+					"group": "renderer",
+					"passed": 15,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/stores/retryStore.test.ts",
+					"group": "renderer",
+					"passed": 98,
+					"failed": 0,
+					"skipped": 0
+				}
+			],
+			"verdict": "pass"
+		},
+		{
+			"packet": "GT1-07-07 MCP overlay and plugin-tool evidence",
+			"files": [
+				{
+					"file": "src/__tests__/shared/plugins/mcp-agent-config.test.ts",
+					"group": "mcp",
+					"passed": 62,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/plugins/plugin-tool-run-identity.test.ts",
+					"group": "mcp",
+					"passed": 15,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/plugins/plugin-headless-agent-runner.test.ts",
+					"group": "mcp",
+					"passed": 63,
+					"failed": 0,
+					"skipped": 0
+				}
+			],
+			"verdict": "pass"
+		},
+		{
+			"packet": "GT1-07-07B coworking installer",
+			"files": [
+				{
+					"file": "src/__tests__/main/coworking/installers/grok.test.ts",
+					"group": "mcp",
+					"passed": 17,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/coworking/installers/managed.test.ts",
+					"group": "mcp",
+					"passed": 14,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/Settings/CoworkingSetup.test.tsx",
+					"group": "mcp",
+					"passed": 13,
+					"failed": 0,
+					"skipped": 0
+				}
+			],
+			"verdict": "pass"
+		},
+		{
+			"packet": "GT1-07-07D native MCP state, auth and trust",
+			"files": [
+				{
+					"file": "src/__tests__/shared/plugins/mcp-agent-config.test.ts",
+					"group": "mcp",
+					"passed": 62,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/plugins/plugin-headless-agent-runner.test.ts",
+					"group": "mcp",
+					"passed": 63,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts",
+					"group": "library",
+					"passed": 97,
+					"failed": 0,
+					"skipped": 0
+				}
+			],
+			"verdict": "pass"
+		},
+		{
+			"packet": "GT1-07-10 subagents",
+			"files": [
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-events.test.ts",
+					"group": "subagent",
+					"passed": 146,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/process-manager/handlers/StdoutHandler.test.ts",
+					"group": "subagent",
+					"passed": 141,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/TerminalOutput/groupSubagentToolLogs.test.ts",
+					"group": "subagent",
+					"passed": 17,
+					"failed": 0,
+					"skipped": 0
+				}
+			],
+			"verdict": "pass"
+		}
+	],
+	"consumers": {
+		"runtime": {
+			"verdict": "pass",
+			"groups": ["library"],
+			"route": "runAgentTurn -> beginGrokAcpNegotiation/startGrokAcpTurn for a standard tab and plan (consent from ManagedTurnAuthority.effects, else refused consent-port); native headless otherwise; ordered image blocks when embeddedImageSupport is passed (no production producer)"
+		},
+		"desktop": {
+			"verdict": "pass",
+			"groups": ["desktop", "subagent"],
+			"route": "process:spawn -> handle-spawn -> ProcessManager -> GrokAcpSpawner (standard tab or native command) with the standalone consent port, live command observation, steering refusal, scoped usage through TurnCapture; other modes native ChildProcessSpawner"
+		},
+		"renderer": {
+			"verdict": "pass",
+			"groups": ["renderer", "subagent"],
+			"route": "composer native-command admission and queue drain, steering ineligible (grok-no-input-op), fork/merge/Cue assist name the tab mode, plan snapshots, compaction blocker, Subagent entry grouping"
+		},
+		"cliHost": {
+			"verdict": "pass",
+			"groups": ["cli"],
+			"route": "maestro-cli host -> createMaestroRuntime -> turns.send -> runAgentTurn (same selector as runtime)",
+			"files": [
+				"src/__tests__/cli/services/runtime-host.test.ts",
+				"src/__tests__/cli/commands/host.test.ts"
+			]
+		},
+		"cliBatch": {
+			"verdict": "fail",
+			"groups": ["cli"],
+			"route": "agent-spawner native headless (batch argv carries --always-approve, so it never plans standard; no ACP)",
+			"failure": "16 managed Grok cases in agent-spawner.test.ts (directory-grant composition x8, opt-in prompt artifacts x8) fail identically at the phase07 start a2d2eff36; they passed at c7208fb92 and the bisect names fdaaa8906 (phase03 \"Preserve native Grok terminal outcomes and usage provenance\"): the parser now fails closed on an end event with no stopReason, and these fixtures emit {\"type\":\"end\",\"sessionId\":...} without one. Not a phase07 regression; repair owned by GT1-07-12."
+		},
+		"cue": {
+			"verdict": "pass",
+			"groups": ["cli", "renderer"],
+			"route": "cue-run-router unchanged; Cue AI assist on a Grok standard active tab refused consent-port (no tab, no consent port)"
+		},
+		"mcpPlugin": {
+			"verdict": "pass",
+			"groups": ["mcp"],
+			"route": "grok-config-overlay injection gated by mcpInjectionProblem (verified false, qualifiedVersions [] so production Grok stays uninjected), native trust/config facts, per-run host-observed tool advertisement required on Grok; coworking installer writes a sentinel block"
+		},
+		"subagent": {
+			"verdict": "pass",
+			"groups": ["subagent"],
+			"route": "_x.ai subagent_* updates -> nested child lineage -> Subagent tool entry -> renderer grouping (synthetic lineage only)"
+		}
+	},
+	"preexistingFailure": {
+		"suite": "src/__tests__/cli/services/agent-spawner.test.ts",
+		"failedAtPhaseStart": {
+			"commit": "a2d2eff362e02f3430af946ae1c8bd76c818a74e",
+			"total": 281,
+			"failed": 16,
+			"identicalNames": true
+		},
+		"passedAt": {
+			"commit": "c7208fb923a68983f254c6d8bb4cee62d2904b9a",
+			"total": 281,
+			"failed": 0
+		},
+		"firstBadCommit": "fdaaa89065b5e518a7c948a82c958ecac321e648",
+		"lastGoodCommit": "2d2e3b67987cb2d17dc225cfd6820d8b95a3b8ff",
+		"method": "git archive of each commit into tmp/grok-tier1-phase07-verify/baseline/<label>/tree with node_modules symlinked, then node node_modules/vitest/vitest.mjs run <suite> --maxWorkers=1 (Working/gt1-07-11/baseline.mjs, bisect.mjs, first-parent binary search)",
+		"cause": "grok-output-parser.ts reads an end event with no stopReason as an incomplete turn (incompleteTurnMessage \"missing\"); the 16 fixtures end with {\"type\":\"end\",\"sessionId\":...} and no stopReason.",
+		"repairTask": "GT1-07-12"
+	},
+	"staticChecks": {
+		"changedFiles": 69,
+		"tsc-lint": {
+			"command": ["node", "node_modules/typescript/bin/tsc", "-p", "tsconfig.lint.json"],
+			"fileArgs": 0,
+			"exitCode": 2,
+			"errors": [
+				"src/main/plugins/plugin-host-handlers.ts(1196,76): error TS2339: Property 'dispatcher' does not exist on type 'RequestInit'."
+			]
+		},
+		"tsc-main": {
+			"command": [
+				"node",
+				"node_modules/typescript/bin/tsc",
+				"-p",
+				"tsconfig.main.json",
+				"--noEmit"
+			],
+			"fileArgs": 0,
+			"exitCode": 0,
+			"errors": []
+		},
+		"tsc-cli": {
+			"command": ["node", "node_modules/typescript/bin/tsc", "-p", "tsconfig.cli.json", "--noEmit"],
+			"fileArgs": 0,
+			"exitCode": 0,
+			"errors": []
+		},
+		"maestro-lib-build": {
+			"command": ["node", "scripts/build-maestro-lib.mjs"],
+			"fileArgs": 0,
+			"exitCode": 0,
+			"errors": []
+		},
+		"eslint-changed": {
+			"command": ["node", "node_modules/eslint/bin/eslint.js", "--no-ignore"],
+			"fileArgs": 67,
+			"exitCode": 0,
+			"errors": []
+		},
+		"prettier-changed": {
+			"command": ["node", "node_modules/prettier/bin/prettier.cjs", "--check"],
+			"fileArgs": 69,
+			"exitCode": 0,
+			"errors": []
+		},
+		"docs-verify": {
+			"command": ["node", "scripts/verify-docs-paths.mjs"],
+			"fileArgs": 0,
+			"exitCode": 0,
+			"errors": []
+		},
+		"note": "tsc -p tsconfig.lint.json exits 2 only on the known baseline plugin-host-handlers.ts(1196,76) TS2339 RequestInit.dispatcher (P46). build-maestro-lib fails when a bundled input is Electron or under src/main and loads the bundle in plain Node: exit 0, so the shared library stays desktop-free after phase07."
+	},
+	"knownGaps": [
+		"A child tool still running when the parent settles is not closed by the ACP adapter (only the child entry is); the renderer exit cleanup owns it (GT1-07-10).",
+		"No production caller passes embeddedImageSupport, so real Grok image turns still refuse prompt-delivery-refused; the standard ACP route refuses acp-images (GT1-07-03D).",
+		"Cue AI assist with a Grok standard active tab is refused consent-port: it has no tab and therefore no consent port (GT1-07-02H).",
+		"Steering is refused on every Grok route: wire 1 and the pinned _x.ai extensions advertise no in-progress input op (GT1-07-03A).",
+		"Grok questions surface as a visible capability gap; no answer channel (GT1-07-04A).",
+		"No qualified Grok native compaction: context-limit recovery is a required-feature blocker (GT1-07-04C).",
+		"Grok MCP injection is unverified (verified false, qualifiedVersions []), so production Grok runs uninjected; native trust/disable enforcement and loading of the coworking entry are unqualified.",
+		"Subagent lineage is synthetic, following the pinned _x.ai variants; no native child run has been observed."
+	]
+}
