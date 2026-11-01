@@ -359,6 +359,7 @@ describe('process IPC handlers', () => {
 		terminalTabConfig: ReturnType<typeof vi.fn>;
 		admissionOf: ReturnType<typeof vi.fn>;
 		managedPort: ReturnType<typeof vi.fn>;
+		off: ReturnType<typeof vi.fn>;
 	};
 	let mockAgentDetector: {
 		getAgent: ReturnType<typeof vi.fn>;
@@ -407,6 +408,7 @@ describe('process IPC handlers', () => {
 			admissionOf: vi.fn().mockReturnValue(null),
 			// Standalone: no host authority port (see ProcessManager.managedPort).
 			managedPort: vi.fn().mockReturnValue(null),
+			off: vi.fn(),
 		};
 
 		// Create mock agent detector
@@ -5196,6 +5198,12 @@ describe('process IPC handlers', () => {
 						expect(mockProcessManager.spawnAdmitted).not.toHaveBeenCalled();
 						expect(mockProcessManager.spawn).not.toHaveBeenCalled();
 						expect(mockSessionsStore.set).not.toHaveBeenCalled();
+						expect(mockProcessManager.off).toHaveBeenCalledTimes(
+							boundary === 'SSH preparation' ? 1 : 0
+						);
+						if (boundary === 'SSH preparation') {
+							expect(mockProcessManager.off).toHaveBeenCalledWith('exit', expect.any(Function));
+						}
 					});
 				}
 			);

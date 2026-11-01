@@ -1302,7 +1302,7 @@ describe('useInputProcessing', () => {
 				const args = "$& $$ $` $' {{agent_name}}\nnext  line";
 				const commandText = `/review${separator}${args}`;
 				const readPrompt = vi.fn(() => 'Review {{agent_name}}: $ARGUMENTS');
-				const getBranch = vi.spyOn(window.maestro.git, 'getBranch');
+				const getBranch = vi.spyOn(window.maestro.git, 'branch');
 				try {
 					const deps = createDeps({
 						activeSession: session,

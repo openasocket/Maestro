@@ -30,8 +30,10 @@ import {
 } from '../../../../main/enterprise/settings-policy';
 
 vi.mock('../../../../main/utils/sentry', () => ({ captureException: vi.fn() }));
-// The translation archive's TOML codec is never exercised here (as in agents.remoteProbes.managed.test.ts).
-vi.mock('smol-toml', () => ({ parse: () => ({}), stringify: () => '' }));
+// Translation is registered but never invoked here (as in codex-skills.managed.test.ts).
+vi.mock('../../../../main/provider-translation-service', () => ({
+	ProviderTranslationService: class {},
+}));
 
 vi.mock('../../../../main/agents/path-prober', () => ({
 	checkCustomPath: vi.fn(async (requestedPath: string) => ({ exists: true, path: requestedPath })),
