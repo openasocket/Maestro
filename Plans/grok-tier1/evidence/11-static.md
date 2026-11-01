@@ -112,3 +112,109 @@ VERIFY packets see the repaired registries:
 - GT1-11-01E TEST: at most three existing suites pinning the four repairs.
 
 `parity.json` gains `phase11StaticAudit` and the row blockers listed in the table above.
+
+## GT1-11-03 VERIFY: pass-one static checks
+
+- Source revision: `d84638bfce6e883809688a051fdd11265e68111e` on
+  `auto-run-feature/grok-cli-integration` (GT1-11-02 head). The tree was clean apart from
+  untracked `.sloptimize/` caches. Toolchain: Node v26.13.0, TypeScript 6.0.3, ESLint 9.39.4,
+  Prettier 3.8.3, Vitest 4.1.11.
+- Runner: `Working/gt1-11-03/run.mjs` (results in `results.json`), auditor scans in
+  `scan.mjs` (`scan.json`), parity reconciliation in `build.mjs`. Live calls: 0. Images
+  analyzed: 0. No production or test source was edited by this VERIFY.
+- Scoped static set: 23 source files (every tracked `src/` file with `grok` in the path,
+  plus every source file changed `808b92608..HEAD`) and 21 test or fixture files on the same
+  rule.
+
+### Commands and results
+
+| Check                     | Command (from the execution root)                                                                                              | Exit | Result                                                                                                                    |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---- | ------------------------------------------------------------------------------------------------------------------------- |
+| Type check (lint config)  | `node node_modules/typescript/bin/tsc -p tsconfig.lint.json`                                                                   | 2    | one diagnostic: `src/main/plugins/plugin-host-handlers.ts(1196,76) TS2339`. It is pre-existing and outside the Grok scope |
+| Type check (main)         | `node node_modules/typescript/bin/tsc -p tsconfig.main.json --noEmit`                                                          | 0    | clean                                                                                                                     |
+| Type check (CLI)          | `node node_modules/typescript/bin/tsc -p tsconfig.cli.json --noEmit`                                                           | 0    | clean                                                                                                                     |
+| ESLint, scoped source     | `node node_modules/eslint/bin/eslint.js --max-warnings=0 <23 source files>`                                                    | 0    | 0 errors, 0 warnings                                                                                                      |
+| ESLint, tests (dash rule) | `node node_modules/eslint/bin/eslint.js -c eslint.dashes.config.mjs <21 test files>` (the main config ignores `src/__tests__`) | 0    | clean                                                                                                                     |
+| Prettier                  | `node node_modules/prettier/bin/prettier.cjs --check <44 files>`                                                               | 0    | all formatted                                                                                                             |
+| Docs paths                | `node scripts/verify-docs-paths.mjs`                                                                                           | 0    | clean                                                                                                                     |
+| Isolation sentinel        | `node node_modules/vitest/vitest.mjs run -t isolation src/__tests__/main/agents/agent-completeness.test.ts`                    | 0    | 13 passed, 109 filtered out                                                                                               |
+| Completeness and contract | `node node_modules/vitest/vitest.mjs run <8 suites below>`                                                                     | 0    | 8 files, 561 passed, 0 failed, 0 skipped (77 Grok-named cases)                                                            |
+
+Per-suite totals: `agent-completeness.test.ts` 122 (GT1-02-12A isolation, the prior
+completeness body and the GT1-11-02 Grok block), `capabilities.test.ts` 25,
+`managed/contracts.test.ts` 31, `contextGroomer.test.ts` 32, `ipc/handlers/agents.test.ts`
+154, `useKnownAuthDirs.test.ts` 1, `path-prober.test.ts` 52, `searchableSettings.test.ts` 144.
+
+**GT1-01-07 scope reconciliation.** The GT1-02-12A isolation sentinel ran first and on its
+own. All 13 isolation cases passed: real adapters behind the in-memory store, the Node
+preferences fallback blocked even with `MAESTRO_USER_DATA` set, string, buffer and URL
+paths refused, redacted refusal diagnostics, and sync and promise reads and writes
+refused. The full completeness body then ran in the same file. Production-home access was
+not restored, and `HOME` and `CODEX_HOME` were not changed.
+
+### Independent inspection: shared-library coupling, fallback routes, suppressions
+
+An independent read-only reviewer (a separate Explore agent given only the goal and the
+three defect classes) swept the library. The verifier re-read every anchor it reported and
+ran its own scans (`scan.mjs`).
+
+- **Desktop coupling: none.** None of the 210 non-test files under `src/shared/maestro-lib/`
+  imports `electron`, `electron-store`, `src/main`, `src/renderer`, `src/cli` or the web
+  trees, statically or through `import()`/`require()`. This was checked by resolving every
+  relative specifier. Relative imports leave the library only for `src/shared/`. The
+  remaining `window`/`electron` matches are local identifiers, comments, or
+  `process.versions.electron` reads.
+- **Suppressions: none unreviewed.** The branch added 61 suppression-pattern lines since the
+  merge base `0a56e0fa1c18`. None is `eslint-disable`, `@ts-ignore`, `@ts-expect-error` or
+  `@ts-nocheck`.
+  - 59 are `as any` casts on test doubles in test files.
+  - One is a false positive in a comment (`pianola-agent-select.test.ts:123`).
+  - The only non-test line is `src/renderer/utils/spawnHelpers.ts:169`
+    (`session: templateSession as any`). The same cast existed at the merge base on
+    `opts.session`; the branch only renamed its operand, so it is pre-existing and reviewed.
+  - No non-test file with `grok` in the path contains any suppression.
+- **Fallback routes on the Grok launch path: none that substitute another provider, route
+  or host.**
+  - The Grok route selector refuses rather than falling back. Unqualified routes, ACP over
+    SSH and remote discovery all produce structured refusals.
+  - SSH Grok on ACP is refused, and no hardcoded Grok model or effort default exists.
+  - The library's `ssh-spawn-wrapper.ts:193` local return (`sshRemoteUsed: null`) is
+    refused by every traced caller. `buildAgentLaunchPlan` refuses unresolved targets.
+  - An invalid local custom path falls back to the same provider binary on `PATH` with a
+    warning (`turns/provider-binary.ts:48`, CLI `agent-spawner.ts:625`). This is comparator
+    parity, and SSH uses the configured path.
+  - A Grok translation source projects skills and subagents with Claude metadata
+    (`translation/resources.ts:342`). This is archive data, not a launch.
+  - All three are recorded as observed with no change.
+
+| ID      | Anchor                                                                                                              | Classification              | Consequence                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | Rows     | Disposition             |
+| ------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ----------------------- |
+| A11-F07 | `src/shared/maestro-lib/groupchat/turn-end.ts:29`, `groupchat/session-recovery.ts:40`, `runtime/group-chats.ts:305` | hardcoded provider fallback | `turnEndOf` calls `detectSessionNotFoundError(tails)` with no provider, so the headless runtime's group chat reads every participant's stdout and stderr tails through Claude's `session_not_found` patterns before the router applies the provider's own (`router.ts:3104`). Grok reaches the right recovery decision only by coincidence: Claude's `/session.*not found/i` also matches Grok's non-fatal `not found locally, restoring from remote` line. A successful Grok remote restore with no answer text then counts as having output. | P31, S14 | repair GT1-11-03A / 03B |
+
+### Parity reconciliation
+
+`parity.json` gains `phase11StaticVerify`, which holds the commands, exits, totals, scope,
+toolchain, scans, A11-F07 and the observed no-change items.
+
+The four blockers repaired in this phase are cleared on this passing static run. Each row
+also carries a limitation note naming its repair:
+
+- `grok-known-auth-dirs-missing` (REG-PROFILE, P04, S01; GT1-11-01B/01B1)
+- `grok-context-transfer-metadata-missing` (S06, P21; GT1-11-01A)
+- `grok-known-install-paths-missing` (P03, REG-DISCOVERY; GT1-11-01C)
+- `grok-settings-search-copy-stale` (S35, S18; GT1-11-01D)
+
+Blocker `grok-groupchat-turn-end-claude-patterns` is added to P31 and S14, owned by
+GT1-11-03A (implementation) and GT1-11-03B (test).
+
+A11-F05 (`grok-readonly-cli-enforcement-unqualified`) stays open and live-owned. No row
+status was promoted: whole-row deterministic and live stay `not-run` until pass two and
+pass three.
+
+### Repair tasks added
+
+Inserted in [[GROK-TIER1-11]] after GT1-11-03 and before GT1-11-04:
+
+- GT1-11-03A IMPLEMENT: pass the participant provider id into the headless group chat turn
+  end (`turn-end.ts`, `runtime/group-chats.ts`).
+- GT1-11-03B TEST: pin Grok and Claude tails in `groupchat/__tests__/turn-end.test.ts`.

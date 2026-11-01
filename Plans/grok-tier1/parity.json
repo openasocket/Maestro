@@ -5486,7 +5486,8 @@
 			"limitations": [
 				"Grok identity already exists. Official-versus-community identity, unsupported versions, selected-account snapshots, SSH/platform isolation and exact candidate binary/source relationship are unqualified.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups launch pass 276/276; nativePlatformLaunch not-run; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158. Parity against the comparator baseline: launch plans match the shared planner the comparators use; native local/custom/PATH/SSH discovery not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11A, GT1-11-10, GT1-11-07, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
-				"GT1-11-01 audit at 808b92608: A11-F03 (accidental-exclusion) No Grok known install locations on Windows or Unix; discovery off PATH relies on which/where alone. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-01 audit at 808b92608: A11-F03 (accidental-exclusion) No Grok known install locations on Windows or Unix; discovery off PATH relies on which/where alone. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-03 verification at d84638bfc: A11-F03 repaired by GT1-11-01C (50d4f4b48), pinned by GT1-11-01E/02; blocker grok-known-install-paths-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -5562,14 +5563,6 @@
 					"missingPrerequisite": "Launch plans pass on fake POSIX, Windows/cmd.exe and SSH hosts (launch group); a real grok.exe/.cmd launch with spaces and % in paths, a native SSH prompt-file upload with remote --cwd, remote image and cleanup on cancel are not-run (GT1-11-10, GT1-11-11A).",
 					"affectedRows": ["P39", "P02", "P03", "REG-DISCOVERY"],
 					"evidenceRef": "phase10-reconciliation"
-				},
-				{
-					"id": "grok-known-install-paths-missing",
-					"code": "implementation-gap",
-					"missingPrerequisite": "GT1-11-01C adds verified Grok install locations to both path-prober tables; GT1-11-01E pins it.",
-					"affectedRows": ["P03", "REG-DISCOVERY"],
-					"taskId": "GT1-11-01",
-					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
 				}
 			],
 			"phase": "02",
@@ -5692,7 +5685,8 @@
 				"Canonical Grok account roots and environment precedence, explicit blank default selection and host separation have deterministic coverage. Phase04 selected-root history/usage wiring and discovery tests pass. Root grouping is not billing proof; fallback/inline/gateway/deployment/independent auth identities remain withheld. Current managed account-path wiring/custody and live account isolation remain phase09/11 work.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
 				"GT1-08-21 verification: phase 08 packets feedback; verdicts GT1-08-21 feedback accounts (14C) pass; GT1-08-21 feedback interview (14D) pass. Parity against the comparator baseline: feedback account roots deterministic; Pianola fresh session account absent for every provider. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-01 audit at 808b92608: A11-F01 (accidental-exclusion) KnownAuthDirs has no Grok homes; GROK_HOME gets no known-account suggestions. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-01 audit at 808b92608: A11-F01 (accidental-exclusion) KnownAuthDirs has no Grok homes; GROK_HOME gets no known-account suggestions. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-03 verification at d84638bfc: A11-F01 repaired by GT1-11-01B/01B1 (aa24f2557, b8edde38f), pinned by GT1-11-01E/02; blocker grok-known-auth-dirs-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -5781,14 +5775,6 @@
 					"missingPrerequisite": "PianolaTask and create_session carry no account, model or SSH remote, so a fresh Pianola session runs on provider defaults for every provider (GT1-08-20A). A bound agent keeps its configuration. Needs a schema extension outside the phase 08 file bounds.",
 					"affectedRows": ["S16", "P31", "P04"],
 					"evidenceRef": "phase08-reconciliation"
-				},
-				{
-					"id": "grok-known-auth-dirs-missing",
-					"code": "implementation-gap",
-					"missingPrerequisite": "GT1-11-01B adds Grok homes to KnownAuthDirs, the handler and the value input; GT1-11-01E pins it.",
-					"affectedRows": ["REG-PROFILE", "P04", "S01"],
-					"taskId": "GT1-11-01",
-					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
 				}
 			],
 			"phase": "02",
@@ -9532,7 +9518,8 @@
 			"limitations": [
 				"Phase04 scoped Grok context extraction and inert redacted role/tool/image provenance pass deterministic checks. Export returns at most 1000 normalized records, discloses omitted/raw/opaque content and never claims a native archive. UI/CLI export callers and validated budgeted merge/handoff remain GT1-06-01; supportsContextMerge remains false. Native migration is a separate unsupported registry outcome owned by phase06.",
 				"GT1-06-12 verification: Merge and export run through the shared extractor and merge consumers: source order, tool vs prose, omitted notices and reasoning, named images, Grok redaction, and a budget from the target model window (fixed 100k bound when unknown), sized from text not cumulative usage. Grooming is a read-only turn on the source account and fails visibly when read-only cannot be enforced. Deterministic only. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-11-01 audit at 808b92608: A11-F02 (accidental-exclusion) AGENT_ARTIFACTS and AGENT_TARGET_NOTES have no grok entry; Grok transfers get no scrubbing and a generic target note. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-01 audit at 808b92608: A11-F02 (accidental-exclusion) AGENT_ARTIFACTS and AGENT_TARGET_NOTES have no grok entry; Grok transfers get no scrubbing and a generic target note. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-03 verification at d84638bfc: A11-F02 repaired by GT1-11-01A (ca86f0def), pinned by GT1-11-01E/02; blocker grok-context-transfer-metadata-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -9598,14 +9585,6 @@
 					"missingPrerequisite": "Production merge/export consumers, token budgeting and read-only grooming pass phase06 deterministic tests (phase06-verification). Remaining: exact-binary live consumption of exported and merged Grok context on each declared route (GT1-11-11, GT1-11-11C).",
 					"affectedRows": ["P21"],
 					"evidenceRef": "phase06-verification"
-				},
-				{
-					"id": "grok-context-transfer-metadata-missing",
-					"code": "implementation-gap",
-					"missingPrerequisite": "GT1-11-01A adds grok AGENT_ARTIFACTS and AGENT_TARGET_NOTES entries; GT1-11-01E pins it.",
-					"affectedRows": ["S06", "P21"],
-					"taskId": "GT1-11-01",
-					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
 				}
 			],
 			"phase": "06",
@@ -11043,7 +11022,8 @@
 					"GT1-02-05C2A",
 					"GT1-02-05D2",
 					"GT1-02-05F1A",
-					"GT1-02-05F1B"
+					"GT1-02-05F1B",
+					"GT1-11-03A"
 				],
 				"test": [
 					"GT1-08-11",
@@ -11056,7 +11036,8 @@
 					"GT1-02-05C2T",
 					"GT1-02-05C2AT",
 					"GT1-02-05F1AT",
-					"GT1-02-05F1BT"
+					"GT1-02-05F1BT",
+					"GT1-11-03B"
 				],
 				"verification": ["GT1-08-12", "GT1-08-21", "GT1-11-11E", "GT1-02-13"],
 				"live": ["GT1-11-11", "GT1-11-11E"],
@@ -11069,7 +11050,8 @@
 			"limitations": [
 				"Grok moderation is rejected by shared storage capability gate although picker lists installed providers. Streaming fallback joins deltas with newline at output-parser.ts:120, risking corrupted Grok words/tags. No Grok-specific exclusion observed in selected source; managed repository refusal, cancellation and selected provider/worktree need deterministic proof. Grok candidate reachability follows declared capabilities; selected account/model, unavailable states, quotas and supervised termination remain unverified. Grok excluded by TranscriptAgent union; needs validated native human-decision shapes or explicit unsupported result. Antigravity exclusion does not reduce required union. Grok moderation currently rejected despite picker visibility. Antigravity own gap does not lower required outcome.",
 				"GT1-07-11 verification: Group chat orchestration unchanged in phase07; desktop usage metadata now flows through TurnCapture on the ACP route. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-08-21 verification: phase 08 packets groupChat, symphony, pianolaLearning, pianolaDispatch, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-21 symphony pass; GT1-08-21 transcript learning pass; GT1-08-21 dispatch (20) pass; GT1-08-21 orchestrate CLI and standalone supervisor (20A) pass; GT1-08-12 pass. Parity against the comparator baseline: gaps carried from S14 and S17; S15 match; S16 fresh session config absent. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets groupChat, symphony, pianolaLearning, pianolaDispatch, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-21 symphony pass; GT1-08-21 transcript learning pass; GT1-08-21 dispatch (20) pass; GT1-08-21 orchestrate CLI and standalone supervisor (20A) pass; GT1-08-12 pass. Parity against the comparator baseline: gaps carried from S14 and S17; S15 match; S16 fresh session config absent. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-11-03 verification at d84638bfc: A11-F07 (hardcoded-provider-fallback) turnEndOf calls detectSessionNotFoundError(tails) with no provider, so the headless runtime's group chat reads every participant's stdout/stderr tails through Claude's session_not_found patterns before the router applies the provider's own. Grok reaches the right recovery decision only by coincidence (Claude's /session.*not found/ also matches Grok's non-fatal 'not found locally, restoring from remote' line), and a successful Grok remote restore with no answer text then reports output it does not have. See Plans/grok-tier1/evidence/11-static.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -11156,6 +11138,14 @@
 					"missingPrerequisite": "PianolaTask and create_session carry no account, model or SSH remote, so a fresh Pianola session runs on provider defaults for every provider (GT1-08-20A). A bound agent keeps its configuration. Needs a schema extension outside the phase 08 file bounds.",
 					"affectedRows": ["S16", "P31", "P04"],
 					"evidenceRef": "phase08-reconciliation"
+				},
+				{
+					"id": "grok-groupchat-turn-end-claude-patterns",
+					"code": "implementation-gap",
+					"missingPrerequisite": "GT1-11-03A passes the participant provider id into the headless group chat turn end; GT1-11-03B pins Grok and Claude tails.",
+					"affectedRows": ["P31", "S14"],
+					"taskId": "GT1-11-03",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
 				}
 			],
 			"phase": "08",
@@ -18877,7 +18867,8 @@
 			},
 			"limitations": [
 				"Canonical Grok account roots and environment precedence, explicit blank default selection and host separation have deterministic coverage. Phase04 selected-root history/usage wiring and discovery tests pass. Root grouping is not billing proof; fallback/inline/gateway/deployment/independent auth identities remain withheld. Current managed account-path wiring/custody and live account isolation remain phase09/11 work.",
-				"GT1-11-01 audit at 808b92608: A11-F01 (accidental-exclusion) KnownAuthDirs has no Grok homes; GROK_HOME gets no known-account suggestions. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-01 audit at 808b92608: A11-F01 (accidental-exclusion) KnownAuthDirs has no Grok homes; GROK_HOME gets no known-account suggestions. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-03 verification at d84638bfc: A11-F01 repaired by GT1-11-01B/01B1 (aa24f2557, b8edde38f), pinned by GT1-11-01E/02; blocker grok-known-auth-dirs-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -18930,14 +18921,6 @@
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Profile readiness and stale dashboard filter regression cases pass in 13 with synthetic fixtures; deliberately withheld profiles no longer leave readiness pending. Native selected-model/file/managed account identity and selected-root storage/usage attribution remain unqualified under GT1-04-01/02/11/12/13 and phase09/11. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
 					"affectedRows": ["REG-PROFILE"]
-				},
-				{
-					"id": "grok-known-auth-dirs-missing",
-					"code": "implementation-gap",
-					"missingPrerequisite": "GT1-11-01B adds Grok homes to KnownAuthDirs, the handler and the value input; GT1-11-01E pins it.",
-					"affectedRows": ["REG-PROFILE", "P04", "S01"],
-					"taskId": "GT1-11-01",
-					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
 				}
 			],
 			"branchAuditRefs": ["B06", "B18", "B35", "B48"]
@@ -20241,7 +20224,8 @@
 			"limitations": [
 				"Grok identity already exists. Official-versus-community identity, unsupported versions, selected-account snapshots, SSH/platform isolation and exact candidate binary/source relationship are unqualified.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups launch pass 276/276; nativePlatformLaunch not-run; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158. Parity against the comparator baseline: launch-plan registration matches; native executable discovery not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11A, GT1-11-10, GT1-11-07, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
-				"GT1-11-01 audit at 808b92608: A11-F03 (accidental-exclusion) No Grok known install locations on Windows or Unix; discovery off PATH relies on which/where alone. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-01 audit at 808b92608: A11-F03 (accidental-exclusion) No Grok known install locations on Windows or Unix; discovery off PATH relies on which/where alone. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-03 verification at d84638bfc: A11-F03 repaired by GT1-11-01C (50d4f4b48), pinned by GT1-11-01E/02; blocker grok-known-install-paths-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20317,14 +20301,6 @@
 					"missingPrerequisite": "Launch plans pass on fake POSIX, Windows/cmd.exe and SSH hosts (launch group); a real grok.exe/.cmd launch with spaces and % in paths, a native SSH prompt-file upload with remote --cwd, remote image and cleanup on cancel are not-run (GT1-11-10, GT1-11-11A).",
 					"affectedRows": ["P39", "P02", "P03", "REG-DISCOVERY"],
 					"evidenceRef": "phase10-reconciliation"
-				},
-				{
-					"id": "grok-known-install-paths-missing",
-					"code": "implementation-gap",
-					"missingPrerequisite": "GT1-11-01C adds verified Grok install locations to both path-prober tables; GT1-11-01E pins it.",
-					"affectedRows": ["P03", "REG-DISCOVERY"],
-					"taskId": "GT1-11-01",
-					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
 				}
 			],
 			"branchAuditRefs": ["B05", "B36"]
@@ -20670,7 +20646,8 @@
 			"limitations": [
 				"Grok already has a beta picker entry. Installed/custom-path/account/model/effort and unsupported-mode consumer behavior needs end-to-end proof.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
-				"GT1-11-01 audit at 808b92608: A11-F01 (accidental-exclusion) KnownAuthDirs has no Grok homes; GROK_HOME gets no known-account suggestions. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-01 audit at 808b92608: A11-F01 (accidental-exclusion) KnownAuthDirs has no Grok homes; GROK_HOME gets no known-account suggestions. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-03 verification at d84638bfc: A11-F01 repaired by GT1-11-01B/01B1 (aa24f2557, b8edde38f), pinned by GT1-11-01E/02; blocker grok-known-auth-dirs-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20714,14 +20691,6 @@
 					"missingPrerequisite": "GT1-05-02E1 repair and the GT1-05-02E real-screen regression pass in GT1-05-13D. Remaining: none for this focus boundary beyond whole-row live/platform qualification.",
 					"affectedRows": ["S01"],
 					"evidenceRef": "phase05-reconciliation"
-				},
-				{
-					"id": "grok-known-auth-dirs-missing",
-					"code": "implementation-gap",
-					"missingPrerequisite": "GT1-11-01B adds Grok homes to KnownAuthDirs, the handler and the value input; GT1-11-01E pins it.",
-					"affectedRows": ["REG-PROFILE", "P04", "S01"],
-					"taskId": "GT1-11-01",
-					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
 				}
 			],
 			"branchAuditRefs": ["B06", "B14", "B15", "B18", "B29"]
@@ -21397,7 +21366,8 @@
 			"limitations": [
 				"Grok supportsContextMerge=false hides merge actions; native transcript export is not proof of validated merge/handoff.",
 				"GT1-06-12 verification: Grok merge actions are shown (provisional flag) and merge into tab or a new agent passes deterministic checks, including no target history duplication and source-account inheritance. Live not run. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-11-01 audit at 808b92608: A11-F02 (accidental-exclusion) AGENT_ARTIFACTS and AGENT_TARGET_NOTES have no grok entry; Grok transfers get no scrubbing and a generic target note. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-01 audit at 808b92608: A11-F02 (accidental-exclusion) AGENT_ARTIFACTS and AGENT_TARGET_NOTES have no grok entry; Grok transfers get no scrubbing and a generic target note. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-03 verification at d84638bfc: A11-F02 repaired by GT1-11-01A (ca86f0def), pinned by GT1-11-01E/02; blocker grok-context-transfer-metadata-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -21454,14 +21424,6 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S06"]
-				},
-				{
-					"id": "grok-context-transfer-metadata-missing",
-					"code": "implementation-gap",
-					"missingPrerequisite": "GT1-11-01A adds grok AGENT_ARTIFACTS and AGENT_TARGET_NOTES entries; GT1-11-01E pins it.",
-					"affectedRows": ["S06", "P21"],
-					"taskId": "GT1-11-01",
-					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
 				}
 			],
 			"branchAuditRefs": ["B21", "B29"]
@@ -22280,8 +22242,8 @@
 				"src/renderer/components/Wizard/screens/AgentSelectionScreen/utils/agentTiles.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-08-10"],
-				"test": ["GT1-08-11"],
+				"implementation": ["GT1-08-10", "GT1-11-03A"],
+				"test": ["GT1-08-11", "GT1-11-03B"],
 				"verification": ["GT1-08-12", "GT1-11-11E"],
 				"live": ["GT1-11-11", "GT1-11-11E"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -22292,7 +22254,8 @@
 			},
 			"limitations": [
 				"Grok moderation is rejected by shared storage capability gate although picker lists installed providers. Streaming fallback joins deltas with newline at output-parser.ts:120, risking corrupted Grok words/tags.",
-				"GT1-08-21 verification: phase 08 packets groupChat, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-12 pass. Parity against the comparator baseline: gap: moderation refused by capability while Claude Code and Codex moderate (release blocker). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets groupChat, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-12 pass. Parity against the comparator baseline: gap: moderation refused by capability while Claude Code and Codex moderate (release blocker). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-11-03 verification at d84638bfc: A11-F07 (hardcoded-provider-fallback) turnEndOf calls detectSessionNotFoundError(tails) with no provider, so the headless runtime's group chat reads every participant's stdout/stderr tails through Claude's session_not_found patterns before the router applies the provider's own. Grok reaches the right recovery decision only by coincidence (Claude's /session.*not found/ also matches Grok's non-fatal 'not found locally, restoring from remote' line), and a successful Grok remote restore with no answer text then reports output it does not have. See Plans/grok-tier1/evidence/11-static.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22344,6 +22307,14 @@
 					"missingPrerequisite": "A Grok moderator is refused at createGroupChat (supportsGroupChatModeration false) while Claude Code and Codex moderate. Participant and synthesis consumers pass GT1-08-12. Needs qualified native moderation evidence (GT1-11-11E) before the capability changes.",
 					"affectedRows": ["S14", "C-supportsGroupChatModeration", "P31"],
 					"evidenceRef": "phase08-reconciliation"
+				},
+				{
+					"id": "grok-groupchat-turn-end-claude-patterns",
+					"code": "implementation-gap",
+					"missingPrerequisite": "GT1-11-03A passes the participant provider id into the headless group chat turn end; GT1-11-03B pins Grok and Claude tails.",
+					"affectedRows": ["P31", "S14"],
+					"taskId": "GT1-11-03",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
 				}
 			],
 			"branchAuditRefs": ["B14", "B39"]
@@ -22727,7 +22698,8 @@
 			"limitations": [
 				"Grok absent from auto preference; manual selected-provider behavior and utility prerequisites need proof without silently substituting another provider.",
 				"GT1-08-21 verification: phase 08 packets directorNotes, directorNotesAndGrooming; verdicts GT1-08-21 director-notes pass; GT1-08-21 grooming pass. Parity against the comparator baseline: deterministic match (Grok last auto preference, explicit only, no substitution). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11D linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-01 audit at 808b92608: A11-F04 (stale-copy) Settings search for grok finds neither the coworking MCP setting nor the synopsis provider setting. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-01 audit at 808b92608: A11-F04 (stale-copy) Settings search for grok finds neither the coworking MCP setting nor the synopsis provider setting. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-03 verification at d84638bfc: A11-F04 repaired by GT1-11-01D (943dfe213), pinned by GT1-11-01E/02; blocker grok-settings-search-copy-stale cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22772,14 +22744,6 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S18"]
-				},
-				{
-					"id": "grok-settings-search-copy-stale",
-					"code": "implementation-gap",
-					"missingPrerequisite": "GT1-11-01D names Grok in the coworking and synopsis settings search copy.",
-					"affectedRows": ["S35", "S18"],
-					"taskId": "GT1-11-01",
-					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
 				}
 			],
 			"branchAuditRefs": ["B08"]
@@ -27148,7 +27112,8 @@
 				"INSTALLERS registers Claude, Codex, OpenCode and Factory Droid only. The Settings status list and install-for-all derive from it; getInstaller(grok) is null and installFor(grok) throws unsupported. This is an unimplemented Grok outcome, not evidence that Grok lacks MCP. Preserve managed install admission when adding an adapter. Antigravity is also absent, which does not lower the union bar.",
 				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim.",
 				"GT1-07-11 verification: Coworking installer writes and removes a sentinel-owned maestro-coworking entry with explicit refusals; whether a selected binary loads it is not qualified. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-11-01 audit at 808b92608: A11-F04 (stale-copy) Settings search for grok finds neither the coworking MCP setting nor the synopsis provider setting. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-01 audit at 808b92608: A11-F04 (stale-copy) Settings search for grok finds neither the coworking MCP setting nor the synopsis provider setting. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-03 verification at d84638bfc: A11-F04 repaired by GT1-11-01D (943dfe213), pinned by GT1-11-01E/02; blocker grok-settings-search-copy-stale cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -27200,14 +27165,6 @@
 					"missingPrerequisite": "Grok MCP config is verified false with qualifiedVersions []; production Grok runs uninjected. Exact-binary MCP loading, trust/disable enforcement, coworking entry loading and real tool calls need phase11 evidence.",
 					"evidenceRef": "phase07-verification",
 					"affectedRows": ["S35"]
-				},
-				{
-					"id": "grok-settings-search-copy-stale",
-					"code": "implementation-gap",
-					"missingPrerequisite": "GT1-11-01D names Grok in the coworking and synopsis settings search copy.",
-					"affectedRows": ["S35", "S18"],
-					"taskId": "GT1-11-01",
-					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
 				}
 			],
 			"ownerScopeReview": {
@@ -31774,5 +31731,166 @@
 				"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
 			}
 		]
+	},
+	"phase11StaticVerify": {
+		"taskId": "GT1-11-03",
+		"recordedAt": "2026-11-01",
+		"sourceCommit": "d84638bfce6e883809688a051fdd11265e68111e",
+		"branch": "auto-run-feature/grok-cli-integration",
+		"evidenceRef": "Plans/grok-tier1/evidence/11-static.md",
+		"toolchain": {
+			"node": "v26.13.0",
+			"vitest": "4.1.11",
+			"typescript": "6.0.3",
+			"eslint": "9.39.4",
+			"prettier": "3.8.3"
+		},
+		"scope": {
+			"sourceFiles": 23,
+			"testFiles": 21,
+			"rule": "tracked src files with grok in the path plus every file changed 808b92608..HEAD"
+		},
+		"commands": {
+			"eslint": {
+				"command": "(see run.mjs eslint)",
+				"exit": 0,
+				"ms": 1010
+			},
+			"eslintDashes": {
+				"command": "(see run.mjs eslintDashes)",
+				"exit": 0,
+				"ms": 766
+			},
+			"prettier": {
+				"command": "(see run.mjs prettier)",
+				"exit": 0,
+				"ms": 1062
+			},
+			"docsVerify": {
+				"command": "(see run.mjs docsVerify)",
+				"exit": 0,
+				"ms": 96
+			},
+			"isolation": {
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json -t isolation src/__tests__/main/agents/agent-completeness.test.ts",
+				"exit": 0,
+				"ms": 1207,
+				"files": 1,
+				"total": 122,
+				"passed": 13,
+				"failed": 0,
+				"skipped": 109
+			},
+			"suites": {
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/agents/agent-completeness.test.ts src/__tests__/main/agents/capabilities.test.ts src/__tests__/shared/maestro-lib/managed/contracts.test.ts src/__tests__/renderer/services/contextGroomer.test.ts src/__tests__/main/ipc/handlers/agents.test.ts src/__tests__/renderer/hooks/agent/useKnownAuthDirs.test.ts src/__tests__/main/agents/path-prober.test.ts src/__tests__/renderer/components/Settings/searchableSettings.test.ts",
+				"exit": 0,
+				"ms": 2101,
+				"files": 8,
+				"total": 561,
+				"passed": 561,
+				"failed": 0,
+				"skipped": 0
+			},
+			"tscLint": {
+				"command": "(see run.mjs tscLint)",
+				"exit": 2,
+				"ms": 18244,
+				"diagnostics": [
+					"src/main/plugins/plugin-host-handlers.ts(1196,76): error TS2339: Property 'dispatcher' does not exist on type 'RequestInit'."
+				]
+			},
+			"tscMain": {
+				"command": "(see run.mjs tscMain)",
+				"exit": 0,
+				"ms": 5413
+			},
+			"tscCli": {
+				"command": "(see run.mjs tscCli)",
+				"exit": 0,
+				"ms": 4568
+			}
+		},
+		"baselineDiagnostics": [
+			"src/main/plugins/plugin-host-handlers.ts(1196,76): error TS2339 (tsconfig.lint.json, pre-existing, outside Grok scope)"
+		],
+		"isolationSentinel": {
+			"suite": "src/__tests__/main/agents/agent-completeness.test.ts",
+			"filter": "isolation",
+			"passed": 13,
+			"authoredBy": "GT1-02-12A",
+			"productionHomeAccess": "none restored"
+		},
+		"sharedLibraryCoupling": {
+			"files": 210,
+			"desktopImports": 0
+		},
+		"suppressionsAddedSinceMergeBase": {
+			"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+			"total": 61,
+			"nonTest": ["src/renderer/utils/spawnHelpers.ts:169"],
+			"eslintDisableOrTsIgnore": 0,
+			"reviewed": true
+		},
+		"findings": [
+			{
+				"id": "A11-F07",
+				"classification": "hardcoded-provider-fallback",
+				"anchors": [
+					"src/shared/maestro-lib/groupchat/turn-end.ts:29",
+					"src/shared/maestro-lib/groupchat/session-recovery.ts:40",
+					"src/shared/maestro-lib/runtime/group-chats.ts:305"
+				],
+				"consequence": "turnEndOf calls detectSessionNotFoundError(tails) with no provider, so the headless runtime's group chat reads every participant's stdout/stderr tails through Claude's session_not_found patterns before the router applies the provider's own. Grok reaches the right recovery decision only by coincidence (Claude's /session.*not found/ also matches Grok's non-fatal 'not found locally, restoring from remote' line), and a successful Grok remote restore with no answer text then reports output it does not have.",
+				"rows": ["P31", "S14"],
+				"blocker": "grok-groupchat-turn-end-claude-patterns",
+				"repairTask": "GT1-11-03A",
+				"testTask": "GT1-11-03B"
+			}
+		],
+		"observedNoChange": [
+			"src/shared/maestro-lib/turns/provider-binary.ts:48 and src/cli/services/agent-spawner.ts:625: an invalid local custom path warns and falls back to the same provider binary on PATH (comparator parity; SSH returns the configured path).",
+			"src/shared/maestro-lib/launch/ssh-spawn-wrapper.ts:193: library returns sshRemoteUsed null when the remote is unresolved; every traced caller refuses on it, and buildAgentLaunchPlan refuses unresolved targets.",
+			"src/shared/maestro-lib/translation/resources.ts:342: a Grok source projects skills and subagents with Claude metadata (archive data, not a launch route)."
+		],
+		"reviewer": "Independent read-only Explore agent (goal and defect classes only); every anchor re-read by the verifier.",
+		"blockerUpdates": [
+			{
+				"id": "grok-known-auth-dirs-missing",
+				"taskId": "GT1-11-03",
+				"change": "cleared",
+				"removedFrom": ["REG-PROFILE", "P04", "S01"],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
+			},
+			{
+				"id": "grok-context-transfer-metadata-missing",
+				"taskId": "GT1-11-03",
+				"change": "cleared",
+				"removedFrom": ["S06", "P21"],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
+			},
+			{
+				"id": "grok-known-install-paths-missing",
+				"taskId": "GT1-11-03",
+				"change": "cleared",
+				"removedFrom": ["P03", "REG-DISCOVERY"],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
+			},
+			{
+				"id": "grok-settings-search-copy-stale",
+				"taskId": "GT1-11-03",
+				"change": "cleared",
+				"removedFrom": ["S35", "S18"],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
+			},
+			{
+				"id": "grok-groupchat-turn-end-claude-patterns",
+				"taskId": "GT1-11-03",
+				"change": "added",
+				"addedTo": ["P31", "S14"],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
+			}
+		],
+		"rowsPromoted": [],
+		"liveCalls": 0
 	}
 }
