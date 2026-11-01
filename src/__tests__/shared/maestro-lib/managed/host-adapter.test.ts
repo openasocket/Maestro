@@ -1471,6 +1471,7 @@ describe('Grok launches through the endpoint-backed adapter (GT1-09-10, fake end
 		account?: string | null;
 		purpose?: 'conversation' | 'utility';
 		operation?: 'start' | 'resume';
+		env?: Record<string, string>;
 	}
 	/** A Grok turn as the sink resolves it: `-m` is the effective model, the account home synthetic. */
 	function grokAdmission(turn: GrokTurn = {}): AdmissionRequest {
@@ -1508,7 +1509,7 @@ describe('Grok launches through the endpoint-backed adapter (GT1-09-10, fake end
 					command: 'grok',
 					args: ['-p', ...(model ? ['-m', model] : [])],
 					cwd: '/work',
-					env: { GROK_HOME: '/synthetic/grok-home' },
+					env: turn.env ?? { GROK_HOME: '/synthetic/grok-home' },
 				},
 				{
 					provider: 'grok',
@@ -1522,7 +1523,12 @@ describe('Grok launches through the endpoint-backed adapter (GT1-09-10, fake end
 			policy: { sources: [], policyRevision: 3 },
 		};
 	}
-	async function grokAdapter() {
+	async function grokAdapter(
+		opts: {
+			now?: () => number;
+			status?: (port: EndpointPort, view: ManagedIdentityView) => ManagedEnrollmentStatus;
+		} = {}
+	) {
 		const fake = await startFakeEndpoint({
 			registrationRequired: true,
 			capabilities: ['execution'],
@@ -1537,8 +1543,8 @@ describe('Grok launches through the endpoint-backed adapter (GT1-09-10, fake end
 			installation: INSTALLATION,
 			identity: { read: () => view },
 			endpoint: port,
-			status: () => standing(port, view),
-			now: () => T0,
+			status: () => (opts.status ?? standing)(port, view),
+			now: opts.now ?? (() => T0),
 			newId: () => `lease-${++minted}`,
 		});
 		const executions = () =>
@@ -1742,4 +1748,98 @@ describe('Grok launches through the endpoint-backed adapter (GT1-09-10, fake end
 		}
 		expect(byAttempt('att-4')?.operation).toBe('resume');
 	}, 10_000);
+
+	// GT1-11-06 pass two. The endpoint is still the fake daemon (a declared double).
+	it('offline keeps the installed revision and grants nothing new from it: detached and stale admit unasked, fresh admits again', async () => {
+		let clock = T0;
+		let offline = false;
+		const { adapter, executions } = await grokAdapter({
+			now: () => clock,
+			status: (port, view) => (offline ? standing(null, view) : standing(port, view)),
+		});
+		const first = await adapter.authority.admit(grokAdmission());
+		if (first.state !== 'admitted') throw new Error('expected admitted');
+		expect(executions()).toHaveLength(1);
+
+		offline = true;
+		const offlineStanding = standing(null, okView(record('/synthetic/socket')));
+		expect(projectPolicyStatus({ standing: offlineStanding, now: clock })).toMatchObject({
+			source: 'cached',
+			installedRevision: 3,
+			connectivity: 'detached',
+			offline: { installedPolicyAvailable: true, mode: 'installed-policy-only' },
+			admission: { possible: false },
+		});
+		const detached = await adapter.authority.admit(
+			grokAdmission({ identity: { requestId: 'req-off', attemptId: 'att-off' } })
+		);
+		expect(detached.state).toBe('unavailable');
+		expect(message(detached)).toContain('not registered-attached-managed');
+		const leaseIds = () => adapter.authority.live().map((lease) => lease.leaseId);
+		expect(leaseIds()).toEqual([first.lease.leaseId]);
+
+		// Re-attached, but the last observation is older than the freshness window.
+		offline = false;
+		clock = T0 + POLICY_FRESHNESS_MS + 1;
+		const stale = await adapter.authority.admit(
+			grokAdmission({ identity: { requestId: 'req-stale', attemptId: 'att-stale' } })
+		);
+		expect(stale.state).toBe('unavailable');
+		expect(message(stale)).toContain('The policy observation is stale');
+		// Neither refusal asked the endpoint or minted a lease from the cached revision.
+		// (The first lease has by now outlived its own TTL; nothing replaced it.)
+		expect(executions()).toHaveLength(1);
+		expect(leaseIds().filter((id) => id !== first.lease.leaseId)).toEqual([]);
+
+		// The same request under a fresh observation is admitted: the refusals are not vacuous.
+		clock = T0;
+		const fresh = await adapter.authority.admit(
+			grokAdmission({ identity: { requestId: 'req-fresh', attemptId: 'att-fresh' } })
+		);
+		expect(fresh.state).toBe('admitted');
+		expect(executions()).toHaveLength(2);
+	});
+
+	it('never sends or echoes a Grok credential value: the endpoint sees key names only, refusals carry no secret', async () => {
+		const SECRET = 'xai-SENTINEL-ENDPOINT-3333';
+		const env = { GROK_HOME: '/synthetic/grok-a', XAI_API_KEY: SECRET };
+		let offline = false;
+		const { fake, adapter } = await grokAdapter({
+			status: (port, view) => (offline ? standing(null, view) : standing(port, view)),
+		});
+		const admitted = await adapter.authority.admit(grokAdmission({ env }));
+		expect(admitted.state).toBe('admitted');
+		const outcomes: unknown[] = [admitted];
+		outcomes.push(
+			await adapter.authority.admit(
+				grokAdmission({
+					env,
+					identity: { requestId: 'req-ssh' },
+					target: { kind: 'ssh', remoteId: 'remote-1' },
+				})
+			),
+			await adapter.authority.admit(
+				grokAdmission({
+					env,
+					identity: { requestId: 'req-del' },
+					delegation: { chain: [], grantRef: 'grant-1' },
+				})
+			)
+		);
+		offline = true;
+		outcomes.push(
+			await adapter.authority.admit(grokAdmission({ env, identity: { requestId: 'req-off' } }))
+		);
+		expect(outcomes.slice(1).map((o) => (o as { state: string }).state)).toEqual([
+			'unavailable',
+			'unavailable',
+			'unavailable',
+		]);
+		expect(JSON.stringify(outcomes)).not.toContain(SECRET);
+		expect(JSON.stringify(fake.calls)).not.toContain(SECRET);
+		// The snapshot the lease holds names the key and digests the value.
+		const snapshot = grokAdmission({ env }).snapshot;
+		expect(snapshot.envKeys).toEqual(['GROK_HOME', 'XAI_API_KEY']);
+		expect(JSON.stringify(snapshot)).not.toContain(SECRET);
+	});
 });

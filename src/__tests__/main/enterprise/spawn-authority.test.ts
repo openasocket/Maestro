@@ -671,4 +671,111 @@ describe('Grok at the managed desktop sink (synthetic policy table)', () => {
 		});
 		expect(managedPtyRefusal(grokTurn({ requiresPty: true }))).toBeNull();
 	});
+
+	// GT1-11-06 pass two: two synthetic Grok profiles on one desktop. The credential values
+	// are sentinels; none may reach the policy request, a refusal message or the other
+	// profile's spawn. The policy table is still the synthetic `fakeSpawnPort`.
+	describe('profile A/B isolation and redacted refusals (GT1-11-06)', () => {
+		const SECRET_A = 'xai-SENTINEL-PROFILE-A-0000';
+		const SECRET_B = 'xai-SENTINEL-PROFILE-B-1111';
+		const profileA = { GROK_HOME: '/synthetic/grok-a', XAI_API_KEY: SECRET_A };
+		const profileB = { GROK_HOME: '/synthetic/grok-b', XAI_API_KEY: SECRET_B };
+		const leaks = (value: unknown) => {
+			const text = JSON.stringify(value) ?? '';
+			return [SECRET_A, SECRET_B].filter((secret) => text.includes(secret));
+		};
+
+		it('holds each admission to its own profile: a home, a credential or a whole profile swapped in is refused', async () => {
+			const { pm, dispatch, spawned } = sink();
+			const turnA = grokTurn({ customEnvVars: profileA });
+			const turnB = grokTurn({ customEnvVars: profileB });
+			const a = await pm.admitSpawn(turnA, ACTOR);
+			const b = await pm.admitSpawn(turnB, ACTOR);
+			if (a.state !== 'admitted' || b.state !== 'admitted') throw new Error('expected admitted');
+			expect(a.admission.leaseId).not.toBe(b.admission.leaseId);
+
+			const refusals = [
+				pm.spawn({ ...turnA, customEnvVars: profileB, admission: a.admission }),
+				pm.spawn({ ...turnB, customEnvVars: profileA, admission: b.admission }),
+				// The same home with the other profile's credential value.
+				pm.spawn({
+					...turnA,
+					customEnvVars: { ...profileA, XAI_API_KEY: SECRET_B },
+					admission: a.admission,
+				}),
+				// The other profile's home with this profile's credential.
+				pm.spawn({
+					...turnA,
+					customEnvVars: { ...profileA, GROK_HOME: profileB.GROK_HOME },
+					admission: a.admission,
+				}),
+				// One tab's admission presented for the other tab's turn.
+				pm.spawn({ ...turnB, admission: a.admission }),
+			];
+			for (const result of refusals) {
+				expect(result).toMatchObject({ success: false, managed: { code: 'lease-invalid' } });
+				expect(leaks(result)).toEqual([]);
+			}
+			expect(spawned).toHaveLength(0);
+
+			// Each profile still runs on its own admission, with exactly its own environment.
+			expect(pm.spawn({ ...turnA, admission: a.admission })).toMatchObject({ success: true });
+			expect(pm.spawn({ ...turnB, admission: b.admission })).toMatchObject({ success: true });
+			expect(spawned.map((c) => c.customEnvVars)).toEqual([profileA, profileB]);
+
+			// The policy was asked about each profile by key names and a digest only.
+			expect(dispatch.asked).toHaveLength(2);
+			expect(leaks(dispatch.asked.map((ask) => ask.snapshot))).toEqual([]);
+			const [snapA, snapB] = dispatch.asked.map((ask) => ask.snapshot);
+			expect(snapA.envKeys).toEqual(snapB.envKeys);
+			expect(snapA.envDigest).not.toBe(snapB.envDigest);
+		});
+
+		it('keeps the sentinel out of every refusal: denied, revoked, expired and unsupported-route', async () => {
+			const denied = sink({
+				decide: () => ({ decision: 'deny', reason: 'grok blocked', policyRevision: 3 }),
+			});
+			const deniedResult = await denied.pm.spawnAdmitted(
+				grokTurn({ customEnvVars: profileA }),
+				ACTOR
+			);
+			expect(deniedResult).toMatchObject({ success: false, managed: { state: 'denied' } });
+			expect(leaks(deniedResult)).toEqual([]);
+			expect(leaks(denied.dispatch.asked)).toEqual([]);
+
+			const revoked = sink();
+			const turn = grokTurn({ customEnvVars: profileA });
+			const admitted = await revoked.pm.admitSpawn(turn, ACTOR);
+			if (admitted.state !== 'admitted') throw new Error(admitted.state);
+			revoked.dispatch.authority.revoke(admitted.admission.leaseId, 'revoked by policy');
+			const revokedResult = revoked.pm.spawn({ ...turn, admission: admitted.admission });
+			expect(revokedResult.error).toContain('revoked');
+			expect(leaks(revokedResult)).toEqual([]);
+
+			const expiring = sink({ leaseTtlMs: 10 });
+			const late = grokTurn({ customEnvVars: profileB });
+			const lateAdmission = await expiring.pm.admitSpawn(late, ACTOR);
+			if (lateAdmission.state !== 'admitted') throw new Error(lateAdmission.state);
+			clock += 11;
+			const expiredResult = expiring.pm.spawn({ ...late, admission: lateAdmission.admission });
+			expect(expiredResult.error).toContain('expired');
+			expect(leaks(expiredResult)).toEqual([]);
+
+			const route = sink();
+			const standard = grokTurn({
+				args: ['--output-format', 'streaming-json', '-m', 'grok-custom'],
+				permission: { requested: 'standard', ceiling: null },
+				customEnvVars: profileA,
+			});
+			const routeAdmission = await route.pm.admitSpawn(standard, ACTOR);
+			if (routeAdmission.state !== 'admitted') throw new Error(routeAdmission.state);
+			const routeResult = route.pm.spawn({ ...standard, admission: routeAdmission.admission });
+			expect(routeResult).toMatchObject({
+				success: false,
+				managed: { state: 'unavailable', code: 'capability-unsupported' },
+			});
+			expect(leaks(routeResult)).toEqual([]);
+			for (const s of [denied, revoked, expiring, route]) expect(s.spawned).toHaveLength(0);
+		});
+	});
 });
