@@ -4,6 +4,8 @@ import type { TranslationDirection } from './types';
 export const TRANSLATION_PROVIDER_VERSIONS = {
 	'claude-code': ['2.1.296', '2.1.302'],
 	codex: ['0.162.1', '0.163.0'],
+	/** Schema pinned at public source 2bdd1d6 (GT1-06-03); no Grok direction is declared yet. */
+	grok: ['1.0.70'],
 } as const;
 
 export const TRANSLATION_DIRECTIONS: readonly TranslationDirection[] = [

@@ -3,15 +3,23 @@ import * as path from 'node:path';
 import { generateUUID } from '../../uuid';
 import { encodeClaudeProjectPath } from '../../pathUtils';
 import { canonicalJson } from '../../canonicalJson';
-import { extractNativeConversation } from './native-records';
+import {
+	GROK_SUMMARY_MAX_BYTES,
+	GROK_TRANSCRIPT_MAX_BYTES,
+	encodeGrokSessionSnapshot,
+	extractGrokConversation,
+	extractNativeConversation,
+} from './native-records';
 import { nativeRecordKey, recordKey, translationHash } from './identity';
 import { TranslationRegistry } from './registry';
 import { TRANSLATION_DIRECTIONS, TRANSLATION_PROVIDER_VERSIONS } from './support';
 import { assertTranslationTarget } from './resource-projections';
+import { TranslationSourceBusyError } from './types';
 import type {
 	PortableConversation,
 	PortableRecord,
 	TranslationAdapter,
+	TranslationIdentity,
 	TranslationStageContext,
 	TranslationTabMapping,
 } from './types';
@@ -347,10 +355,106 @@ export const codexTranslationAdapter: TranslationAdapter = {
 	extract: extractNativeConversation,
 	stage: stageCodex,
 };
+
+/** `<GROK_HOME>/sessions` of the SELECTED account; never a process-global or default home. */
+export function grokSessionsRoot(identity: TranslationIdentity): string {
+	return identity.nativeSessionRoot ?? path.join(identity.accountRoot, 'sessions');
+}
+
+/** Bounded read of one regular file inside the sessions root; a symlink is never followed. */
+async function readGrokSessionFile(
+	file: string,
+	root: string,
+	maxBytes: number
+): Promise<Buffer | null> {
+	await assertTranslationTarget(file, root);
+	let stat;
+	try {
+		stat = await fs.lstat(file);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+		throw error;
+	}
+	if (!stat.isFile()) throw new Error('Grok session file is not a regular file');
+	if (stat.size > maxBytes) throw new RangeError('Grok session file exceeds the reader limit');
+	const bytes = await fs.readFile(file);
+	if (bytes.length > maxBytes) throw new RangeError('Grok session file exceeds the reader limit');
+	return bytes;
+}
+
+/**
+ * Locate the selected Grok session under the selected account and project
+ * (`<sessions root>/<percent-encoded realpath cwd>/<id>/`) and snapshot its two
+ * model-visible files twice. Only `summary.json` and `chat_history.jsonl` are
+ * read: no credential, config, usage or runtime file. A changed second sample
+ * means a live writer, so the plan defers instead of reading a torn session.
+ */
+export async function readGrokSessionSnapshot(
+	identity: TranslationIdentity,
+	sessionId: string
+): Promise<{ bytes: Buffer; sessionDir: string; transcriptPath: string }> {
+	if (identity.provider !== 'grok') throw new Error('Not a Grok translation identity');
+	if (!/^[a-zA-Z0-9_-]+$/.test(sessionId)) throw new Error('Unsafe native session ID');
+	const root = grokSessionsRoot(identity);
+	const cwds = new Set([path.resolve(identity.projectRoot).replace(/[/\\]+$/, '') || '/']);
+	try {
+		cwds.add(await fs.realpath(identity.projectRoot));
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+	}
+	const found: string[] = [];
+	for (const cwd of cwds) {
+		const dir = path.join(root, encodeURIComponent(cwd), sessionId);
+		await assertTranslationTarget(path.join(dir, 'summary.json'), root);
+		try {
+			const stat = await fs.lstat(dir);
+			if (stat.isDirectory()) found.push(dir);
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+		}
+	}
+	if (found.length !== 1)
+		throw new Error(
+			found.length
+				? 'Selected Grok session exists under more than one project folder; ownership is ambiguous'
+				: 'Selected Grok session is missing under the selected account and project'
+		);
+	const sessionDir = found[0];
+	const summaryPath = path.join(sessionDir, 'summary.json');
+	const transcriptPath = path.join(sessionDir, 'chat_history.jsonl');
+	const sample = async () => ({
+		summary: await readGrokSessionFile(summaryPath, root, GROK_SUMMARY_MAX_BYTES),
+		transcript:
+			(await readGrokSessionFile(transcriptPath, root, GROK_TRANSCRIPT_MAX_BYTES)) ??
+			Buffer.alloc(0),
+	});
+	const first = await sample();
+	const second = await sample();
+	const same = (a: Buffer | null, b: Buffer | null) =>
+		a === null || b === null ? a === b : a.equals(b);
+	if (!same(first.summary, second.summary) || !same(first.transcript, second.transcript))
+		throw new TranslationSourceBusyError();
+	return { bytes: encodeGrokSessionSnapshot(first), sessionDir, transcriptPath };
+}
+
+/**
+ * Grok source extraction (GT1-06-04). Destination staging is GT1-06-05's; until
+ * it exists no direction names Grok as a destination, so planning blocks first.
+ */
+export const grokTranslationAdapter: TranslationAdapter = {
+	provider: 'grok',
+	versions: TRANSLATION_PROVIDER_VERSIONS.grok,
+	extract: extractGrokConversation,
+	stage: async () => {
+		throw new Error('Grok destination staging is not implemented; no direction declares it');
+	},
+};
+
 export function createTranslationRegistry(): TranslationRegistry {
 	const registry = new TranslationRegistry();
 	registry.register(claudeTranslationAdapter);
 	registry.register(codexTranslationAdapter);
+	registry.register(grokTranslationAdapter);
 	for (const direction of TRANSLATION_DIRECTIONS) registry.declareDirection(direction);
 	return registry;
 }
