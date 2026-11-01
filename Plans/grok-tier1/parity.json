@@ -5210,7 +5210,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok identity already exists. Official-versus-community identity, unsupported versions, selected-account snapshots, SSH/platform isolation and exact candidate binary/source relationship are unqualified."
+				"Grok identity already exists. Official-versus-community identity, unsupported versions, selected-account snapshots, SSH/platform isolation and exact candidate binary/source relationship are unqualified.",
+				"GT1-11-10 verification at ba5db25c2: E02 offline version/help, ACP initialize and model discovery not-run (no selected isolated binary, no discovery authorization, no executor; A11-F14). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -5242,6 +5243,14 @@
 					"code": "implementation-or-evidence-pending",
 					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
 					"affectedRows": ["P01"]
+				},
+				{
+					"id": "grok-offline-inspection-not-separable",
+					"code": "harness-capability",
+					"missingPrerequisite": "An offline-inspection leg admitted without discovery inputs and an executor bound to it (pinned sha256 checked before spawn, OFFLINE_PROBES only, deny-all egress, GROK_CONTROL_ENV, owned cleanup). Repair GT1-11-10A, pinned by GT1-11-10B.",
+					"affectedRows": ["P01"],
+					"ownerTask": "GT1-11-10A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
 				}
 			],
 			"phase": "01",
@@ -5686,7 +5695,8 @@
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
 				"GT1-08-21 verification: phase 08 packets feedback; verdicts GT1-08-21 feedback accounts (14C) pass; GT1-08-21 feedback interview (14D) pass. Parity against the comparator baseline: feedback account roots deterministic; Pianola fresh session account absent for every provider. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
 				"GT1-11-01 audit at 808b92608: A11-F01 (accidental-exclusion) KnownAuthDirs has no Grok homes; GROK_HOME gets no known-account suggestions. See Plans/grok-tier1/evidence/11-static.md.",
-				"GT1-11-03 verification at d84638bfc: A11-F01 repaired by GT1-11-01B/01B1 (aa24f2557, b8edde38f), pinned by GT1-11-01E/02; blocker grok-known-auth-dirs-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-03 verification at d84638bfc: A11-F01 repaired by GT1-11-01B/01B1 (aa24f2557, b8edde38f), pinned by GT1-11-01E/02; blocker grok-known-auth-dirs-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-10 verification at ba5db25c2: E02 offline version/help, ACP initialize and model discovery not-run (no selected isolated binary, no discovery authorization, no executor; A11-F14). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -6780,7 +6790,8 @@
 			"limitations": [
 				"Native GrokOutputParser and the separate shared ACP client/session/event/request/turn stack are implemented and covered by the 26-file GT1-03-13E matrix. Structured terminal/partial usage and raw exact ticks are retained at parser boundaries. Production ACP callers, raw desktop native decoding and end-to-end native terminal propagation remain incomplete; historical native fixture versions are not binary qualification. ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. startGrokAcpTurn is exported and tested but has no production caller. Desktop, runtime, CLI and automation must wire the shared port with explicit refusal of unsafe fallback. Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work. Existing Grok NDJSON parser is not an ACP transport; registration does not prove current release protocol compatibility. Shared ACP interleaving, cancellation and bounded framing pass GT1-03-13E fixtures. Real consumer buffering, native protocol compliance and platform behavior remain unqualified. Preserve actual terminal outcome/error contract; success must not follow merely from process exit or an end-shaped event. Reasoning summaries must retain source tags and never be fabricated; qualify Grok ACP/native interleaving and tool suppression.",
 				"GT1-07-11 verification: Desktop and runtime ACP turns stream answer, thoughts, tools, notices, plans and late session IDs through the shared mapper and recorders against synthetic peers. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups interaction pass 137/137; cli pass 81/81; web pass 427/427; liteNative not-run. Parity against the comparator baseline: ACP correlation and plan updates pass through real consumers; gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-07, GT1-11-12, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups interaction pass 137/137; cli pass 81/81; web pass 427/427; liteNative not-run. Parity against the comparator baseline: ACP correlation and plan updates pass through real consumers; gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-07, GT1-11-12, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-10 verification at ba5db25c2: E02 offline version/help, ACP initialize and model discovery not-run (no selected isolated binary, no discovery authorization, no executor; A11-F14). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -32229,5 +32240,194 @@
 		],
 		"liveCalls": 0,
 		"imagesAnalyzed": 0
+	},
+	"phase11NativeOffline": {
+		"taskId": "GT1-11-10",
+		"recordedAt": "2026-11-01",
+		"sourceCommit": "ba5db25c2b8d303344eed36084c9c651d5344515",
+		"branch": "auto-run-feature/grok-cli-integration",
+		"evidenceRef": "Plans/grok-tier1/evidence/11-native.md",
+		"suites": {
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/scripts/grok-qualification-spend.test.ts src/__tests__/scripts/grok-qualification-harness.test.ts",
+			"exit": 0,
+			"total": 41,
+			"passed": 41,
+			"failed": 0,
+			"files": [
+				{
+					"file": "src/__tests__/scripts/grok-qualification-harness.test.ts",
+					"status": "passed",
+					"passed": 20,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-spend.test.ts",
+					"status": "passed",
+					"passed": 21,
+					"failed": 0,
+					"skipped": 0
+				}
+			]
+		},
+		"harness": {
+			"command": "node scripts/grok-qualification.mjs --json --no-write",
+			"exit": 0,
+			"configSource": "default-run-state",
+			"totals": {
+				"cases": 48,
+				"admitted": 0,
+				"notRun": 48,
+				"spawned": 0,
+				"paidRequests": 0,
+				"networkContacts": 0
+			},
+			"capabilities": {
+				"isolationPreflight": true,
+				"atomicSpendAdmission": true,
+				"caseExecutor": false
+			},
+			"reasonCounts": {
+				"live-authorization-absent": 48,
+				"credential-reference-absent": 60,
+				"binary-unpinned": 48,
+				"auto-update-not-disabled": 48,
+				"allowed-roots-absent": 48,
+				"host-isolation-unqualified": 48,
+				"endpoints-unapproved": 48,
+				"models-unselected": 44,
+				"live-limits-unset": 352,
+				"spend-guarantee-absent": 44,
+				"spend-bounds-undeclared": 44,
+				"case-executor-unimplemented": 48,
+				"isolation-undeclared": 48,
+				"ssh-target-unapproved": 24,
+				"discovery-authorization-absent": 8,
+				"discovery-operation-unauthorized": 8,
+				"cross-provider-authorization-absent": 8,
+				"cross-provider-preflight-unimplemented": 8
+			}
+		},
+		"artifact": {
+			"selected": false,
+			"executed": false,
+			"classification": "operator-production-install",
+			"pathResolution": ["/Users/dr3/.local/bin/grok", "/Users/dr3/.grok/bin/grok"],
+			"links": [
+				{
+					"path": "/Users/dr3/.local/bin/grok",
+					"symlink": "/Users/dr3/.grok/bin/grok",
+					"realpath": "/Users/dr3/.grok/downloads/grok-macos-aarch64",
+					"mode": "755"
+				},
+				{
+					"path": "/Users/dr3/.grok/bin/grok",
+					"symlink": "../downloads/grok-macos-aarch64",
+					"realpath": "/Users/dr3/.grok/downloads/grok-macos-aarch64",
+					"mode": "755"
+				}
+			],
+			"target": {
+				"path": "/Users/dr3/.grok/downloads/grok-macos-aarch64",
+				"bytes": 179063008,
+				"mtime": "2026-10-30T05:32:58.685Z",
+				"sha256": "5c8a688251bf61e35370b828b6a353b0a20fcc3f64000de8a91d426039f29cec",
+				"sha512": "d36c523acffdea846e9f245149fac200cd8faadaef818e7f796d6eff90bd8536d68e21d840f6443849a6eb70544599aa30feb9b9ea6b6aa7253c6b08918cd151",
+				"format": "Mach-O 64-bit executable arm64",
+				"codesign": [
+					"Identifier=xai-grok-pager",
+					"Format=Mach-O thin (arm64)",
+					"Signature size=8983",
+					"Authority=Developer ID Application: X.AI Corporation (5Y6N3AJ54S)",
+					"Authority=Developer ID Certification Authority",
+					"Authority=Apple Root CA",
+					"Timestamp=Oct 23, 2026 at 12:24:35 PM",
+					"TeamIdentifier=5Y6N3AJ54S",
+					"Runtime Version=27.0.0"
+				]
+			},
+			"installMetadata": {
+				"version": "1.0.70",
+				"stableVersion": "1.0.70",
+				"checkedAt": "2026-10-31T06:15:17.25096Z"
+			}
+		},
+		"identities": {
+			"npm": "not-downloaded",
+			"source": "not-built",
+			"executable": "disk-observed-unexecuted",
+			"equivalenceClaimed": false
+		},
+		"probes": {
+			"Offline version/help (E02 offline-inspection)": {
+				"result": "not-run",
+				"reason": "No explicitly selected isolated binary: run-state binary unpinned, autoUpdateDisabled false, no isolationReceipt or allowedRoots, live.enabled false; the only local binary is the operator production install, which this task does not execute. Harness: discovery-authorization-absent and case-executor-unimplemented also hold (A11-F14)."
+			},
+			"ACP initialize / protocol advertisement": {
+				"result": "not-run",
+				"reason": "discovery-authorization-absent, endpoints-unapproved, credential-reference-absent; may touch credentials or configured endpoints."
+			},
+			"Model/config discovery": {
+				"result": "not-run",
+				"reason": "Same as ACP; no discovery operation authorized."
+			},
+			"npm artifact integrity (sha512 vs referenceIntegrity)": {
+				"result": "not-run",
+				"reason": "Would need a registry download; offline task, no fetch."
+			},
+			"Native auto-update disablement": {
+				"result": "not-run",
+				"reason": "GROK_DISABLE_AUTOUPDATER=1 is source-supported in GROK_CONTROL_ENV but its efficacy on this binary is unverified without running it; the production install shows the updater active (D3)."
+			}
+		},
+		"discrepancies": [
+			{
+				"id": "D1",
+				"claim": "REFERENCE.md: official package `@xai-official/grok` 1.0.70 with a Node launcher (`>=20`).",
+				"observed": "The PATH binary is a self-managed native Mach-O (Mach-O 64-bit executable arm64) at /Users/dr3/.grok/downloads/grok-macos-aarch64, reached through /Users/dr3/.local/bin/grok -> /Users/dr3/.grok/bin/grok; no npm launcher is on PATH. The npm tarball was not fetched (offline), so npm-to-executable identity is unknown."
+			},
+			{
+				"id": "D2",
+				"claim": "Executable name `grok`.",
+				"observed": "Code signature Identifier is `xai-grok-pager`, TeamIdentifier 5Y6N3AJ54S; `~/.grok/bin/agent` links to the same file."
+			},
+			{
+				"id": "D3",
+				"claim": "run-state `installedGrok.version: null, invoked: false`; candidate 1.0.70.",
+				"observed": "Install metadata (not the executable) says version 1.0.70, stable 1.0.70, update check at 2026-10-31T06:15:17.25096Z, after the binary mtime 2026-10-30T05:32:58.685Z. The native updater is active on this production install; a metadata string is not executable identity."
+			},
+			{
+				"id": "D4",
+				"claim": "Reference public source commit 2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8.",
+				"observed": "No source checkout or build; source-to-executable relationship stays unknown (binarySourceRelationship unknown)."
+			}
+		],
+		"findings": [
+			{
+				"id": "A11-F14",
+				"classification": "harness-gap",
+				"anchors": [
+					"scripts/grok-qualification/harness.ts:324",
+					"scripts/grok-qualification/harness.ts:811",
+					"scripts/grok-qualification/harness.ts:2022"
+				],
+				"consequence": "Offline inspection cannot be admitted apart from network discovery: E02 carries both execution classes, so a pinned binary with an isolation receipt still needs discovery authorization, endpoints and credential references before `--version`/`--help` may run, and no executor exists for any admitted tuple (case-executor-unimplemented names GT1-11-10, a VERIFY packet that may not add harness code). Offline evidence and network evidence therefore cannot be produced or recorded as distinct results.",
+				"rows": ["P01"],
+				"blocker": "grok-offline-inspection-not-separable",
+				"repairTask": "GT1-11-10A"
+			}
+		],
+		"blockerUpdates": [
+			{
+				"id": "grok-offline-inspection-not-separable",
+				"finding": "A11-F14",
+				"taskId": "GT1-11-10",
+				"change": "added",
+				"addedTo": ["P01"],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+			}
+		],
+		"liveCalls": 0,
+		"readiness": false
 	}
 }
