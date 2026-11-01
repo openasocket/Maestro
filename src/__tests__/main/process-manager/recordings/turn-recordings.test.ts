@@ -697,3 +697,153 @@ describe('bounded synthetic Grok stream (many updates, cancellation, usage, iden
 		expect(events.settlements).toEqual([{ outcome: 'interrupted', answerCaptured: true }]);
 	});
 });
+
+// GT1-11-04 (pass two): sanitized Grok records through the desktop consumer (the real
+// StdoutHandler, ExitHandler and Grok parser), asserting what the desktop shows and keeps:
+// emitted session ids, answer, errors, the one exit and its settlement, and the released
+// process. Synthetic records, not native qualification.
+describe('Grok pass-two desktop records (GT1-11-04)', () => {
+	const line = (record: Record<string, unknown>) => JSON.stringify(record) + '\n';
+	const text = (data: string) => line({ type: 'text', data });
+	const end = (sessionId: string) => line({ type: 'end', stopReason: 'EndTurn', sessionId });
+
+	async function replay(name: string, chunks: string[], extra: Partial<TurnRecording> = {}) {
+		let retained: RetainedState | undefined;
+		const events = await runRecording(grokRecording(name, chunks, extra), (s) => {
+			retained = retainedStateOf(s);
+		});
+		// Every case: exactly one exit and one settlement, the process released, nothing buffered.
+		expect(events.exits).toHaveLength(1);
+		expect(events.settlements).toHaveLength(1);
+		expect(retained!.processesLeft).toBe(0);
+		expect(retained!.jsonBuffer).toBe('');
+		return events;
+	}
+
+	beforeEach(() => {
+		resetSpawnGenerationsForTest();
+	});
+
+	it('shows only the answer of a short turn, with thought and tool output on their own channels', async () => {
+		const events = await replay('grok-pass2-short', [
+			line({ type: 'thought', data: 'private plan' }),
+			line({
+				type: 'tool_call',
+				toolCallId: 'call-1',
+				toolName: 'read_file',
+				kind: 'read',
+				rawInput: { path: 'fixture/a.txt' },
+			}),
+			line({
+				type: 'tool_call_update',
+				toolCallId: 'call-1',
+				status: 'completed',
+				content: [{ type: 'content', content: { type: 'text', text: 'file body' } }],
+			}),
+			text('the answer'),
+			end('grok-pass2-short'),
+		]);
+		expect(events.data.join('')).toBe('the answer');
+		expect(events.thinking).toEqual(['private plan']);
+		expect(events.tools.map((tool) => tool.state?.status)).toEqual(['running', 'completed']);
+		expect(events.sessionIds).toEqual(['grok-pass2-short']);
+		expect(events.settlements).toEqual([{ outcome: 'completed', answerCaptured: true }]);
+	});
+
+	it.each([
+		[
+			'a startup login failure on stderr (exit 1)',
+			[] as string[],
+			{ stderrBuffer: 'Error: please run `grok login` first\n', exitCode: 1 },
+		],
+		[
+			'an in-band auth error on exit 0',
+			[line({ type: 'error', message: 'Not authenticated. Run grok login to sign in.' })],
+			{},
+		],
+	])('raises %s once as auth_expired, with no answer or session', async (_label, chunks, extra) => {
+		const events = await replay('grok-pass2-auth', chunks, extra);
+		expect(events.agentErrors.map((error) => error.type)).toEqual(['auth_expired']);
+		expect(events.data).toEqual([]);
+		expect(events.sessionIds).toEqual([]);
+		expect(events.settlements).toEqual([{ outcome: 'crashed', answerCaptured: false }]);
+	});
+
+	it('reads a forced process loss nobody asked for as a crash that keeps the partial text', async () => {
+		const events = await replay('grok-pass2-lost', [text('I started the')], {
+			exitCode: null,
+			exitSignal: 'SIGKILL',
+		});
+		expect(events.agentErrors).toHaveLength(1);
+		expect(events.agentErrors[0].message).toMatch(/without a successful terminal record/);
+		expect(events.data.join('')).toBe('I started the');
+		expect(events.sessionIds).toEqual([]);
+		expect(events.settlements).toEqual([{ outcome: 'crashed', answerCaptured: true }]);
+	});
+
+	it('fails a record cut at exit (partial JSONL) instead of completing', async () => {
+		const events = await replay('grok-pass2-partial', [text('partial '), '{"type":"text","da']);
+		expect(events.agentErrors).toHaveLength(1);
+		expect(events.agentErrors[0].message).toMatch(/malformed/);
+		expect(events.sessionIds).toEqual([]);
+		expect(events.settlements[0]?.outcome).toBe('crashed');
+	});
+
+	it('keeps a malformed line between valid records out of the answer', async () => {
+		const events = await replay('grok-pass2-malformed', [
+			text('a '),
+			'{not json}\n',
+			text('b'),
+			end('grok-pass2-malformed'),
+		]);
+		expect(events.data.join('')).toBe('a b');
+		expect(events.sessionIds).toEqual(['grok-pass2-malformed']);
+		// Current state, recorded as finding A11-F10 for GT1-11-07: the desktop skips the line
+		// and completes, while the runtime and the CLI fail the same bytes as malformed.
+		expect(events.agentErrors).toEqual([]);
+		expect(events.settlements).toEqual([{ outcome: 'completed', answerCaptured: true }]);
+	});
+
+	it('shows an oversized record whole and once', async () => {
+		const oversized = 'x'.repeat(2 * 1024 * 1024);
+		const events = await replay('grok-pass2-oversized', [
+			text(oversized),
+			text('tail'),
+			end('grok-pass2-oversized'),
+		]);
+		expect(events.data.join('')).toBe(oversized + 'tail');
+		expect(events.sessionIds).toEqual(['grok-pass2-oversized']);
+		expect(events.settlements).toEqual([{ outcome: 'completed', answerCaptured: true }]);
+	});
+
+	it('settles exactly once on a duplicated end record', async () => {
+		const events = await replay('grok-pass2-dup', [text('once'), end('grok-dup'), end('grok-dup')]);
+		expect(events.data).toEqual(['once']);
+		expect(events.sessionIds).toEqual(['grok-dup']);
+		expect(events.agentErrors).toEqual([]);
+		expect(events.settlements).toEqual([{ outcome: 'completed', answerCaptured: true }]);
+	});
+
+	it('emits a late native session id once, from an end record split across chunks', async () => {
+		const events = await replay('grok-pass2-late', [
+			text('a'),
+			text('b'),
+			'{"type":"end","stopReason":"EndTurn","sess',
+			'ionId":"grok-late"}\n',
+		]);
+		expect(events.sessionIds).toEqual(['grok-late']);
+		expect(events.data.join('')).toBe('ab');
+		expect(events.settlements).toEqual([{ outcome: 'completed', answerCaptured: true }]);
+	});
+
+	it.each([
+		['the same id', 'grok-kept', 'grok-kept'],
+		['a rotated id', 'grok-old', 'grok-new'],
+	])('follows a resumed turn that reports %s', async (_label, before, reported) => {
+		const events = await replay('grok-pass2-resumed', [text('again'), end(reported)], {
+			agentSessionIdBeforeStart: before,
+		});
+		expect(events.sessionIds).toEqual([reported]);
+		expect(events.settlements).toEqual([{ outcome: 'completed', answerCaptured: true }]);
+	});
+});

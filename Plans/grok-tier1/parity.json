@@ -7240,6 +7240,14 @@
 					"missingPrerequisite": "Canonical errors and Auto Run/coordinator guards pass GT1-03-13E. Replay requires host-owned failed/provider/not-dispatched facts; uncertain post-dispatch failures never replay automatically. Phase07/08/10 must propagate settled facts through all real callers and phase11 must qualify native recovery.",
 					"affectedRows": ["P10"],
 					"evidenceRef": "phase03-reconciliation"
+				},
+				{
+					"id": "grok-acp-transport-loss-reads-as-stop",
+					"code": "implementation-gap",
+					"missingPrerequisite": "A11-F09: Runtime ACP route: a peer lost mid-prompt (SIGKILL, no stop asked) settles crashed with no error, and the turn's own cleanup runs the stop ladder so run.stopRequested() is true and exit reads interrupted, stoppedBy caller. Repair GT1-11-04A, pinned by GT1-11-04B.",
+					"affectedRows": ["P10", "P38"],
+					"taskId": "GT1-11-04",
+					"evidenceRef": ".maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-11.md#GT1-11-04"
 				}
 			],
 			"phase": "03",
@@ -12636,6 +12644,14 @@
 					"missingPrerequisite": "Five non-publishing builds carry Grok (GT1-10-15); no packaged asar, signed installer, live desktop startup or Windows/Linux build was inspected. Needs a per-platform package smoke (GT1-11-10, GT1-12-06).",
 					"affectedRows": ["S25", "P38"],
 					"evidenceRef": "phase10-reconciliation"
+				},
+				{
+					"id": "grok-acp-transport-loss-reads-as-stop",
+					"code": "implementation-gap",
+					"missingPrerequisite": "A11-F09: Runtime ACP route: a peer lost mid-prompt (SIGKILL, no stop asked) settles crashed with no error, and the turn's own cleanup runs the stop ladder so run.stopRequested() is true and exit reads interrupted, stoppedBy caller. Repair GT1-11-04A, pinned by GT1-11-04B.",
+					"affectedRows": ["P10", "P38"],
+					"taskId": "GT1-11-04",
+					"evidenceRef": ".maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-11.md#GT1-11-04"
 				}
 			],
 			"phase": "10",
@@ -31892,5 +31908,55 @@
 		],
 		"rowsPromoted": [],
 		"liveCalls": 0
+	},
+	"phase11IntegrationPrep": {
+		"taskId": "GT1-11-04",
+		"recordedAt": "2026-11-01",
+		"evidenceRef": ".maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-11.md#GT1-11-04",
+		"method": "Extended three consumer suites with sanitized synthetic Grok native/ACP records: desktop (turn-recordings.test.ts, real StdoutHandler/ExitHandler/Grok parser), runtime (run-agent-turn.test.ts, fake-agent process and the synthetic ACP peer), CLI (agent-spawner.test.ts, spawnAgent on the fake child). Assertions read emitted session/answer/error/settlement state and turn results. Not native qualification.",
+		"liveCalls": 0,
+		"imagesAnalyzed": 0,
+		"findings": [
+			{
+				"id": "A11-F08",
+				"classification": "observation",
+				"anchors": [
+					"src/shared/maestro-lib/run/start-turn.ts:37",
+					"src/shared/maestro-lib/streaming/buffered-line-reader.ts:99"
+				],
+				"consequence": "Runtime: a native record longer than DEFAULT_MAX_LINE_LENGTH (1 MiB) is taken whole or dropped whole depending on pipe chunking; a dropped record still settles completed, with exit.droppedOutputBytes the only signal. Provider-generic, not Grok-specific; desktop and CLI show the same record whole.",
+				"rows": ["P10"],
+				"blocker": null,
+				"repairTask": null,
+				"decideIn": "GT1-11-07"
+			},
+			{
+				"id": "A11-F09",
+				"classification": "implementation-gap",
+				"anchors": [
+					"src/shared/maestro-lib/grok/acp-turn.ts:722",
+					"src/shared/maestro-lib/turns/run-agent-turn.ts:1048"
+				],
+				"consequence": "Runtime ACP route: a peer lost mid-prompt (SIGKILL, no stop asked) settles crashed with no error, and the turn's own cleanup runs the stop ladder so run.stopRequested() is true and exit reads interrupted, stoppedBy caller.",
+				"rows": ["P10", "P38"],
+				"blocker": "grok-acp-transport-loss-reads-as-stop",
+				"repairTask": "GT1-11-04A",
+				"testTask": "GT1-11-04B"
+			},
+			{
+				"id": "A11-F10",
+				"classification": "consumer-divergence",
+				"anchors": [
+					"src/main/process-manager/handlers/StdoutHandler.ts",
+					"src/shared/maestro-lib/parsers/grok-output-parser.ts"
+				],
+				"consequence": "A malformed line between valid Grok records completes on the desktop (line skipped) but fails as malformed in the runtime and the CLI. A record cut at exit is reported as a \"malformed native error envelope\" in both runtime and desktop, which misnames a cut text record.",
+				"rows": ["P10"],
+				"blocker": null,
+				"repairTask": null,
+				"decideIn": "GT1-11-07"
+			}
+		],
+		"repairTasks": ["GT1-11-04A", "GT1-11-04B"]
 	}
 }

@@ -182,6 +182,12 @@ import {
 } from '../../../cli/services/agent-spawner';
 import { getAgentDefinition } from '../../../main/agents/definitions';
 import { isolateAgentEnv } from '../../helpers/agentEnvIsolation';
+import {
+	GROK_SYNTHETIC_ROUNDS,
+	GROK_SYNTHETIC_SESSION_ID,
+	grokSyntheticStream,
+	rechunk,
+} from '../../helpers/grokSyntheticStream';
 // Static, so they share one module instance with the statically imported
 // `spawnAgent` above; other suites here call `vi.resetModules()`.
 import { getEffortRejection, resetEffortRejections } from '../../../shared/effortRejection';
@@ -4666,6 +4672,129 @@ Some text with [x] in it that's not a checkbox
 			expect(result.agentError).toBeUndefined();
 			expect(result.response ?? '').not.toBe('working on it');
 			expect(mockKill).toHaveBeenCalled();
+		});
+
+		// GT1-11-04 (pass two): the CLI consumer's result state for sanitized records, each
+		// stdout chunk a separate pipe read. Synthetic records, not native qualification.
+		async function grokChunks(
+			pending: Promise<AgentResult>,
+			chunks: string[],
+			close: { code?: number | null; signal?: NodeJS.Signals } = {}
+		): Promise<AgentResult> {
+			await waitForSpawnCall();
+			for (const chunk of chunks) {
+				mockStdout.emit('data', Buffer.from(chunk));
+				await yieldTick();
+			}
+			mockChild.emit('close', close.code === undefined ? 0 : close.code, close.signal);
+			return pending;
+		}
+
+		it('returns only the answer of a long fragmented stream, never thought or tool output', async () => {
+			const stream = grokSyntheticStream(GROK_SYNTHETIC_ROUNDS);
+			const result = await grokChunks(
+				spawnAgent('grok', '/project', 'task'),
+				rechunk(stream.lines, 4096)
+			);
+			expect(result).toMatchObject({
+				success: true,
+				outcome: 'completed',
+				agentSessionId: GROK_SYNTHETIC_SESSION_ID,
+			});
+			expect(result.response).toBe(stream.answer);
+			expect(result.response).not.toMatch(/Step \d|contents \d/);
+		});
+
+		it('hands a long input to the private prompt file, never argv or stdin', async () => {
+			const longInput = 'L'.repeat(300_000);
+			const result = await grokChunks(spawnAgent('grok', '/project', longInput), [
+				text('ok') + end('grok-long'),
+			]);
+			expect(result).toMatchObject({ success: true, agentSessionId: 'grok-long' });
+			const { args } = spawnCall();
+			expect(args.join(' ')).not.toContain('LLLL');
+			expect(mockStdin.write).not.toHaveBeenCalled();
+			expect(fs.writeFileSync).toHaveBeenCalledExactlyOnceWith(
+				73,
+				JSON.stringify({ type: 'acp', content: [{ type: 'text', text: longInput }] }),
+				'utf8'
+			);
+		});
+
+		it('learns a late native session id from an end record split across reads', async () => {
+			const result = await grokChunks(spawnAgent('grok', '/project', 'task'), [
+				text('a'),
+				text('b') + '{"type":"end","stopReason":"EndTurn","sess',
+				'ionId":"grok-late"}\n',
+			]);
+			expect(result).toMatchObject({
+				success: true,
+				outcome: 'completed',
+				response: 'ab',
+				agentSessionId: 'grok-late',
+			});
+		});
+
+		it('fails a malformed line between valid records, keeping the native id for resume', async () => {
+			const result = await grokChunks(spawnAgent('grok', '/project', 'task'), [
+				text('a ') + '{not json}\n' + text('b') + end('grok-malformed'),
+			]);
+			expect(result.success).toBe(false);
+			expect(result.outcome).toBe('crashed');
+			expect(result.error).toMatch(/malformed/);
+			expect(result.response ?? '').toBe('');
+			expect(result.agentSessionId).toBe('grok-malformed');
+		});
+
+		it('returns an oversized record whole and once', async () => {
+			const oversized = 'x'.repeat(2 * 1024 * 1024);
+			const result = await grokChunks(spawnAgent('grok', '/project', 'task'), [
+				text(oversized) + text('tail') + end('grok-oversized'),
+			]);
+			expect(result).toMatchObject({ success: true, agentSessionId: 'grok-oversized' });
+			expect(result.response).toBe(oversized + 'tail');
+		});
+
+		it('completes exactly once on a duplicated end record and a repeated close', async () => {
+			const pending = spawnAgent('grok', '/project', 'task');
+			const result = await grokChunks(pending, [text('once') + end('grok-dup') + end('grok-dup')]);
+			mockChild.emit('close', 1);
+			await yieldTick();
+			expect(result).toMatchObject({
+				success: true,
+				outcome: 'completed',
+				response: 'once',
+				agentSessionId: 'grok-dup',
+			});
+			expect(await pending).toBe(result);
+			expect(mockSpawn).toHaveBeenCalledTimes(1);
+		});
+
+		it('reads a forced process loss nobody asked for as a crash, never an interrupt', async () => {
+			const result = await grokChunks(
+				spawnAgent('grok', '/project', 'task'),
+				[line({ type: 'thought', data: 'planning' }) + text('I started the')],
+				{ code: null, signal: 'SIGKILL' }
+			);
+			expect(result.success).toBe(false);
+			expect(result.outcome).toBe('crashed');
+			expect(result.error).toMatch(/without a successful terminal record/);
+			expect(result.response ?? '').toBe('');
+			expect(result.agentSessionId).toBeUndefined();
+			expect(mockKill).not.toHaveBeenCalled();
+		});
+
+		it('follows a queued resume whose end record reports a rotated native id', async () => {
+			const result = await grokChunks(spawnAgent('grok', '/project', 'next task', 'grok-old'), [
+				text('continued') + end('grok-new'),
+			]);
+			const { args } = spawnCall();
+			expect(args[args.indexOf('--resume') + 1]).toBe('grok-old');
+			expect(result).toMatchObject({
+				success: true,
+				response: 'continued',
+				agentSessionId: 'grok-new',
+			});
 		});
 	});
 

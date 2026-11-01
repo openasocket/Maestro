@@ -43,6 +43,7 @@ import { SSH_STDIN_REMOTE_SHELL } from '../../../../shared/maestro-lib/control/s
 import { newRemotePromptFileDestination } from '../../../../shared/maestro-lib/launch/ssh-command-builder';
 import * as launchPlanner from '../../../../shared/maestro-lib/launch/launch-plan';
 import * as runToCompletion from '../../../../shared/maestro-lib/run/run-to-completion';
+import { DEFAULT_MAX_LINE_LENGTH } from '../../../../shared/maestro-lib/run/start-turn';
 import * as pipeSpawn from '../../../../shared/maestro-lib/run/pipe-spawn';
 import * as turnArgs from '../../../../shared/maestro-lib/turns/args';
 import { logger, setMaestroLibImageRefResolver } from '../../../../shared/maestro-lib/host';
@@ -76,7 +77,18 @@ import {
 	CAPTURED_CLAUDE_CODE_SESSION_ID,
 	CAPTURED_OPENCODE_SESSION_ID,
 } from '../../../main/process-manager/recordings/captured';
-import { FAKE_AGENT_PATH, fakeTurnFromRecording, writeFakeTurn } from '../run/fakeAgent';
+import {
+	FAKE_AGENT_PATH,
+	fakeTurnFromRecording,
+	writeFakeTurn,
+	type FakeTurn,
+} from '../run/fakeAgent';
+import {
+	GROK_SYNTHETIC_ROUNDS,
+	GROK_SYNTHETIC_SESSION_ID,
+	grokSyntheticStream,
+	rechunk,
+} from '../../../helpers/grokSyntheticStream';
 import { makeAgent, makeContext, makeTab, providerFor } from './fixtures';
 import { createMockSession } from '../../../helpers/mockSession';
 import { tableEffects } from '../../../helpers/managedSpawnPort';
@@ -2215,6 +2227,29 @@ describe.skipIf(process.platform === 'win32')(
 			if (ticks === '0') expect(result.usage!.totalCostUsd).toBe(0);
 		});
 
+		// GT1-11-04: the peer dies mid-prompt (forced process loss) with no stop requested.
+		it('reads a peer lost mid-prompt as a crash, never a stop, with no headless fallback', async () => {
+			const { turn, scope } = grokTurn({ FAKE_MODE: 'hold', FAKE_SESSION: 'native-lost' });
+			const run = await start(turn, managedOptions(scope).options);
+			const done = finished(run);
+			await waitUntil(() => logOf().some((line) => line.startsWith('prompt')));
+			expect(run.pid).toEqual(expect.any(Number));
+			process.kill(run.pid!, 'SIGKILL');
+			const { result } = await done;
+			expect(result.outcome).toBe('crashed');
+			expect(result.exit.signal).toBe('SIGKILL');
+			// Current state, recorded as finding A11-F09 for repair GT1-11-04A: the turn's own
+			// cleanup after the transport loss runs the stop ladder, so the run reads as a caller
+			// stop, and the crash carries no error naming the lost transport.
+			expect(run.stopRequested()).toBe(true);
+			expect(result.exit).toMatchObject({ interrupted: true, stoppedBy: 'caller' });
+			expect(result.error).toBeUndefined();
+			// The partial text is kept for display on the crashed outcome, never as a completion.
+			expect(result.answerText).toBe('working');
+			expect(logOf()).not.toContain('session/cancel native-lost');
+			expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+		});
+
 		it('cancels by protocol first, keeps partial usage, and resumes the same native session', async () => {
 			const { turn, scope } = grokTurn({ FAKE_MODE: 'hold', FAKE_SESSION: 'native-hold' });
 			const run = await start(turn, managedOptions(scope).options);
@@ -2529,3 +2564,203 @@ async function waitUntil(done: () => boolean): Promise<void> {
 		await new Promise((resolve) => setTimeout(resolve, 20));
 	}
 }
+
+// GT1-11-04 (pass two): sanitized Grok `streaming-json` records through the portable consumer
+// (library runtime, `maestro-cli host`) on the native headless route (Full Access), a real
+// fake-agent process on a real pipe. Each case asserts the turn's resulting state (outcome,
+// answer, native session, usage, error, exit), not a parser return value. Synthetic records,
+// not native qualification.
+describe('runAgentTurn: Grok native headless records (GT1-11-04)', () => {
+	const line = (record: Record<string, unknown>) => JSON.stringify(record) + '\n';
+	const text = (data: string) => line({ type: 'text', data });
+	const end = (sessionId: string) => line({ type: 'end', stopReason: 'EndTurn', sessionId });
+	const closed = (code: number | null = 0, signal: NodeJS.Signals | null = null) => ({
+		code,
+		signal,
+	});
+
+	async function grokNative(
+		fake: FakeTurn,
+		extra: { tab?: Partial<TurnTab>; text?: string; env?: Record<string, string> } = {}
+	) {
+		const account = path.join(scratch.dir, 'grok-native-account');
+		const turn = assembleWithFakeAgent('grok', {
+			recording: 'captured-opencode-normal',
+			text: extra.text,
+			env: {
+				FAKE_AGENT_RECORDING: writeFakeTurn(scratch.dir, fake),
+				GROK_HOME: account,
+				...extra.env,
+			},
+			tab: { permissionMode: 'full', ...extra.tab },
+		});
+		const scope = grokScopeFixture(scratch.dir, account);
+		const resume = extra.tab?.agentSessionId;
+		const run = await start(turn, {
+			grokLaunchScope: scope.ports,
+			...(resume
+				? { retainedNativeSessionBinding: { ...scope.binding, nativeSessionId: resume } }
+				: {}),
+		});
+		const [events, result] = await Promise.all([collect(run), run.result]);
+		return { events, result };
+	}
+
+	it('keeps answer, thought and tool output apart across a long fragmented stream', async () => {
+		const stream = grokSyntheticStream(GROK_SYNTHETIC_ROUNDS);
+		const { events, result } = await grokNative({
+			chunks: rechunk(stream.lines, 97),
+			close: closed(),
+		});
+		expect(result.outcome).toBe('completed');
+		expect(result.error).toBeUndefined();
+		expect(result.answerText).toBe(stream.answer);
+		expect(result.answerText).not.toMatch(/Step \d|contents \d/);
+		expect(result.sessionId).toBe(GROK_SYNTHETIC_SESSION_ID);
+		const reasoning = events.filter((event) => event.type === 'text' && event.isReasoning);
+		expect(reasoning).toHaveLength(stream.rounds);
+		expect(reasoning.map((event) => event.text).join('').length).toBe(stream.thoughtBytes);
+		expect(events.filter((event) => event.type === 'tool_use')).toHaveLength(2 * stream.rounds);
+		// The end record's turn total, once.
+		expect(result.usage).toMatchObject({
+			inputTokens: 100 * stream.rounds,
+			outputTokens: 20 * stream.rounds,
+		});
+		expect(result.exit.droppedOutputBytes).toBe(0);
+	});
+
+	it.each([
+		[
+			'a startup login failure on stderr (exit 1)',
+			{ chunks: [], stderr: 'Error: please run `grok login` first\n', close: closed(1) },
+		],
+		[
+			'an in-band auth error on exit 0',
+			{
+				chunks: [line({ type: 'error', message: 'Not authenticated. Run grok login to sign in.' })],
+				close: closed(0),
+			},
+		],
+	])('settles %s as an auth crash with no answer or session', async (_label, fake) => {
+		const { result } = await grokNative(fake);
+		expect(result.outcome).toBe('crashed');
+		expect(result.error?.type).toBe('auth_expired');
+		expect(result.error?.agentId).toBe('grok');
+		expect(result.answerText ?? '').toBe('');
+		expect(result.sessionId).toBeUndefined();
+	});
+
+	it('reads a forced process loss mid-answer as a crash, never a stop or a completion', async () => {
+		const { result } = await grokNative({
+			chunks: [line({ type: 'thought', data: 'planning' }), text('I started the')],
+			close: closed(null, 'SIGKILL'),
+		});
+		expect(result.outcome).toBe('crashed');
+		expect(result.exit).toMatchObject({ exitCode: null, signal: 'SIGKILL', interrupted: false });
+		expect(result.error?.message).toMatch(/without a successful terminal record/);
+		expect(result.sessionId).toBeUndefined();
+	});
+
+	it.each([
+		['a record cut at exit (partial JSONL)', [text('partial '), '{"type":"text","da'], undefined],
+		[
+			'a malformed line between valid records',
+			[text('a '), '{not json}\n', text('b'), end('grok-malformed')],
+			'grok-malformed',
+		],
+	])('fails %s instead of completing the turn', async (_label, chunks, sessionId) => {
+		const { result } = await grokNative({ chunks, close: closed() });
+		expect(result.outcome).toBe('crashed');
+		expect(result.error?.message).toMatch(/malformed/);
+		// A native id that did arrive is kept, so the conversation can still be resumed.
+		expect(result.sessionId).toBe(sessionId);
+	});
+
+	it('takes a large record whole under the line cap and an oversized one whole or not at all', async () => {
+		const large = 'y'.repeat(512 * 1024);
+		const kept = await grokNative({ chunks: [text(large), end('grok-large')], close: closed() });
+		expect(kept.result).toMatchObject({ outcome: 'completed', sessionId: 'grok-large' });
+		expect(kept.result.answerText).toBe(large);
+		expect(kept.result.exit.droppedOutputBytes).toBe(0);
+
+		const oversized = 'x'.repeat(DEFAULT_MAX_LINE_LENGTH + 4096);
+		const dropped = await grokNative({
+			chunks: [text(oversized), text('tail'), end('grok-oversized')],
+			close: closed(),
+		});
+		// Whole or nothing, never half-parsed: whether the reader drops the record depends on how
+		// the pipe chunks it (the cap bounds the unterminated remainder), so either none of it or
+		// all of it reaches the answer, the drop is counted when it happens, and the records
+		// after it still settle the native session.
+		const answer = dropped.result.answerText;
+		if (dropped.result.exit.droppedOutputBytes > 0) {
+			expect(answer).toBe('tail');
+			expect(dropped.result.exit.droppedOutputBytes).toBeGreaterThan(DEFAULT_MAX_LINE_LENGTH);
+		} else {
+			expect(answer).toBe(oversized + 'tail');
+		}
+		expect(dropped.result.sessionId).toBe('grok-oversized');
+		// Current state, recorded as finding A11-F08 for GT1-11-07: a dropped record still
+		// settles `completed`, with droppedOutputBytes as the only signal of the loss.
+		expect(dropped.result.outcome).toBe('completed');
+	});
+
+	it('settles exactly once when a duplicated end record arrives', async () => {
+		const { events, result } = await grokNative({
+			chunks: [text('once'), end('grok-dup'), end('grok-dup')],
+			close: closed(),
+		});
+		expect(result).toMatchObject({
+			outcome: 'completed',
+			answerText: 'once',
+			sessionId: 'grok-dup',
+		});
+		expect(events.filter((event) => event.type === 'text').map((event) => event.text)).toEqual([
+			'once',
+		]);
+	});
+
+	it('learns a late native session id only from the end record, split across chunks', async () => {
+		const { events, result } = await grokNative({
+			chunks: [
+				text('a'),
+				text('b'),
+				'{"type":"end","stopReason":"EndTurn","sess',
+				'ionId":"grok-late"}\n',
+			],
+			close: closed(),
+		});
+		expect(result).toMatchObject({
+			outcome: 'completed',
+			answerText: 'ab',
+			sessionId: 'grok-late',
+		});
+		const carrying = events.filter((event) => event.sessionId);
+		expect(carrying).toHaveLength(1);
+		expect(carrying[0].type).toBe('result');
+		expect(events.indexOf(carrying[0])).toBe(events.length - 1);
+	});
+
+	it('resumes a queued turn with a long input through the private prompt file, never argv', async () => {
+		const argvOut = outFile('grok-native-argv');
+		const longInput = 'L'.repeat(300_000);
+		const { result } = await grokNative(
+			{ chunks: [text('still here'), end('grok-resumed')], close: closed() },
+			{
+				text: longInput,
+				tab: { agentSessionId: 'grok-resumed' },
+				env: { FAKE_AGENT_ARGV_OUT: argvOut },
+			}
+		);
+		expect(result).toMatchObject({
+			outcome: 'completed',
+			answerText: 'still here',
+			sessionId: 'grok-resumed',
+		});
+		const argv = JSON.parse(fs.readFileSync(argvOut, 'utf8')) as string[];
+		expect(argv[argv.indexOf('--resume') + 1]).toBe('grok-resumed');
+		expect(argv[argv.indexOf('--prompt-file') + 1]).toMatch(/\.json$/);
+		expect(argv.join(' ')).not.toContain('LLLL');
+		expect(argv.join(' ').length).toBeLessThan(2048);
+	});
+});
