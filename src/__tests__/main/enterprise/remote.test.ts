@@ -489,3 +489,80 @@ describe('createRemoteEndpointQualifier', () => {
 		});
 	});
 });
+
+// A Grok launch on an SSH remote (GT1-09-10). The probe is a double standing in for
+// `maestro-cli host status --json` over ssh, and the local custody an in-memory read:
+// these prove the qualifier binds or refuses the actual remote by its own attested
+// word, never that a real remote confines Grok (no producer qualifies it, R08).
+describe('createRemoteEndpointQualifier for a Grok launch (GT1-09-10)', () => {
+	const grokRow = (managed: string) => ({ providerId: 'grok', route: 'ssh', managed });
+	const grokQualify = async (read: unknown) => {
+		const probe = vi.fn(async () => read as Awaited<ReturnType<typeof createRemoteEndpointProbe>>);
+		const qualifier = createRemoteEndpointQualifier({ identity: { read: () => okRead }, probe });
+		const target = await qualifier.qualify({
+			sshConfig: { enabled: true, remoteId: 'remote-1' },
+			sshStore: store,
+			providerId: 'grok',
+		});
+		return { target, probe };
+	};
+	const refusal = (target: Awaited<ReturnType<typeof grokQualify>>['target']) => {
+		expect(target).toMatchObject({ kind: 'unresolved', reason: 'remote-unqualified' });
+		if (target.kind !== 'unresolved') throw new Error('expected unresolved');
+		expect(target.message).toContain('nothing ran on the remote unmanaged');
+		return target.message;
+	};
+
+	it('binds the attested remote onto the launch when its table confines Grok on ssh', async () => {
+		const identity = attested({ routes: [grokRow('implemented')] });
+		const { target, probe } = await grokQualify({ status: 'attested', identity, via: 'probe' });
+		expect(probe).toHaveBeenCalledWith(buildBox);
+		expect(target).toEqual({ kind: 'remote', remote: buildBox, endpoint: identity });
+	});
+
+	it("refuses a remote that confines another provider, or names Grok's ssh route anything but implemented", async () => {
+		const claudeOnly = await grokQualify({
+			status: 'attested',
+			identity: attested(),
+			via: 'probe',
+		});
+		expect(refusal(claudeOnly.target)).toContain('grok');
+		for (const managed of ['unsupported', 'unverified']) {
+			const { target } = await grokQualify({
+				status: 'attested',
+				identity: attested({ routes: [grokRow(managed)] }),
+				via: 'probe',
+			});
+			expect(refusal(target)).toContain(`route table says ${managed}`);
+		}
+	});
+
+	it('refuses a remote reporting conflicting Grok ssh rows rather than reading the first', async () => {
+		const { target } = await grokQualify({
+			status: 'attested',
+			identity: attested({ routes: [grokRow('implemented'), grokRow('unsupported')] }),
+			via: 'probe',
+		});
+		expect(refusal(target)).toContain('2 rows');
+	});
+
+	it('refuses on a probe that timed out, and never falls back to this machine', async () => {
+		mockBuildSshCommand.mockResolvedValueOnce({ command: 'ssh', args: ['h'] });
+		const execSsh = vi.fn(async () => {
+			throw new Error('spawn ETIMEDOUT');
+		});
+		const qualifier = createRemoteEndpointQualifier({
+			identity: { read: () => okRead },
+			probe: createRemoteEndpointProbe({ execSsh }),
+		});
+		const target = await qualifier.qualify({
+			sshConfig: { enabled: true, remoteId: 'remote-1' },
+			sshStore: store,
+			providerId: 'grok',
+		});
+		expect(execSsh).toHaveBeenCalledWith('ssh', ['h'], REMOTE_ATTESTATION_TIMEOUT_MS);
+		const message = refusal(target);
+		expect(message).toContain('spawn ETIMEDOUT');
+		expect(message).toContain('nothing ran on this machine instead');
+	});
+});

@@ -30,7 +30,13 @@ import type {
 	ManagedIdentityView,
 } from '../../../../shared/maestro-lib/managed/endpoint-port';
 import type { LifecycleFact } from '../../../../shared/maestro-lib/managed/events';
-import type { ManagedDelegationRef } from '../../../../shared/maestro-lib/managed/types';
+import {
+	MANAGED_CONTRACT_VERSION,
+	type ManagedDelegationRef,
+	type ManagedOrigin,
+	type ManagedRunIdentity,
+	type ManagedWorkflowRef,
+} from '../../../../shared/maestro-lib/managed/types';
 import {
 	admitProbeTurn,
 	bindingEnrollment,
@@ -165,6 +171,12 @@ function admission(
 /** Register this process and attach on `fake` with the named capabilities, as the lifecycle does. */
 async function attachPort(fake: FakeEndpoint, supported: string[]): Promise<EndpointPort> {
 	const port = createLocalEndpointClient({ socketPath: fake.socketPath, timeoutMs: 1_000 });
+	await registerAndAttach(port, supported);
+	return port;
+}
+
+/** The registration handshake and attachment on an existing client, as the lifecycle runs it. */
+async function registerAndAttach(port: EndpointPort, supported: string[]): Promise<void> {
 	await port.registration.challenge({ runtimeId: 'desktop-100', processEpoch: 'epoch-1' });
 	await port.registration.redeem();
 	const attached = await port.attach({
@@ -177,7 +189,6 @@ async function attachPort(fake: FakeEndpoint, supported: string[]): Promise<Endp
 		requiredCapabilities: ['execution'],
 	});
 	expect(attached.status).toBe('ok');
-	return port;
 }
 
 describe('managed host adapter', () => {
@@ -1435,4 +1446,300 @@ describe('probe turns', () => {
 			expect(PROBE_REFUSAL_TTL_MS).toBe(5 * 60_000);
 		});
 	});
+});
+
+// Grok through the endpoint-backed adapter (GT1-09-10). Client wiring only: the
+// endpoint is the declared fake daemon and the custody an in-memory view, so these
+// prove what this host describes to an endpoint, refuses before asking it, and keeps
+// bound in its own lease. They prove nothing about a real broker's policy enforcement.
+describe('Grok launches through the endpoint-backed adapter (GT1-09-10, fake endpoint)', () => {
+	const open: FakeEndpoint[] = [];
+	const ports: EndpointPort[] = [];
+	afterEach(async () => {
+		for (const port of ports.splice(0)) await port.close();
+		for (const fake of open.splice(0)) await fake.close();
+	});
+
+	type Target = AdmissionRequest['snapshot']['target'];
+	interface GrokTurn {
+		origin?: Extract<ManagedOrigin, 'desktop' | 'cli' | 'cue' | 'headless'>;
+		delegation?: ManagedDelegationRef;
+		identity?: Partial<ManagedRunIdentity>;
+		workflow?: ManagedWorkflowRef | null;
+		target?: Target;
+		model?: string | null;
+		account?: string | null;
+		purpose?: 'conversation' | 'utility';
+		operation?: 'start' | 'resume';
+	}
+	/** A Grok turn as the sink resolves it: `-m` is the effective model, the account home synthetic. */
+	function grokAdmission(turn: GrokTurn = {}): AdmissionRequest {
+		const verified = createContextVerifier({
+			verifierId: 'gt1-09-10',
+			peer: 'in-process',
+			now: () => T0,
+			accept: () => [],
+		}).verify({
+			contractVersion: MANAGED_CONTRACT_VERSION,
+			installation: INSTALLATION,
+			origin: turn.origin ?? 'cli',
+			actor: { kind: 'human', id: 'ada' },
+			delegation: turn.delegation ?? { chain: [], grantRef: null },
+			identity: {
+				requestId: 'req-1',
+				idempotencyKey: 'key-1',
+				attemptId: 'att-1',
+				runId: 'run-1',
+				rootRunId: 'run-1',
+				parentRunId: null,
+				...turn.identity,
+			},
+			policyRevision: 3,
+			workflow: turn.workflow ?? null,
+			traceId: 'trace-1',
+			requestedCapabilities: ['runs.submit'],
+		});
+		if (!verified.ok) throw new Error(verified.problems.join('; '));
+		const model = turn.model === undefined ? 'grok-4' : turn.model;
+		return {
+			context: verified.context,
+			snapshot: buildDispatchSnapshot(
+				{
+					command: 'grok',
+					args: ['-p', ...(model ? ['-m', model] : [])],
+					cwd: '/work',
+					env: { GROK_HOME: '/synthetic/grok-home' },
+				},
+				{
+					provider: 'grok',
+					model,
+					account: turn.account ?? null,
+					target: turn.target ?? { kind: 'local' },
+					...(turn.purpose ? { purpose: turn.purpose } : {}),
+					...(turn.operation ? { operation: turn.operation } : {}),
+				}
+			),
+			policy: { sources: [], policyRevision: 3 },
+		};
+	}
+	async function grokAdapter() {
+		const fake = await startFakeEndpoint({
+			registrationRequired: true,
+			capabilities: ['execution'],
+			operations: { execution: (payload) => RECEIPT(payload as Record<string, unknown>) },
+		});
+		open.push(fake);
+		const port = await attachPort(fake, ['attachment', 'compatibility', 'execution']);
+		ports.push(port);
+		const view = okView(record(fake.socketPath));
+		let minted = 0;
+		const adapter = createManagedHostAdapter({
+			installation: INSTALLATION,
+			identity: { read: () => view },
+			endpoint: port,
+			status: () => standing(port, view),
+			now: () => T0,
+			newId: () => `lease-${++minted}`,
+		});
+		const executions = () =>
+			fake.calls
+				.map((c) => c.body as { operation: string; payload: Record<string, unknown> })
+				.filter((body) => body.operation === 'execution')
+				.map((body) => body.payload);
+		return { fake, port, adapter, executions };
+	}
+	const message = (outcome: unknown) => (outcome as { message?: string }).message ?? '';
+	const remoteEndpoint = (policyRevision: number | null) => ({
+		installationId: 'remote-inst',
+		runtimeId: 'remote-host-1',
+		processEpoch: 'epoch-remote',
+		authorityId: 'authority-remote',
+		policyRevision,
+	});
+
+	it('describes each origin as its own source with the Grok provider and the -m model, and never an account', async () => {
+		const { adapter, executions } = await grokAdapter();
+		const origins = [
+			['desktop', 'ux', 'conversation'],
+			['desktop', 'ux', 'utility'],
+			['cli', 'cli', undefined],
+			['cue', 'cue', undefined],
+			['headless', 'headless', undefined],
+		] as const;
+		for (const [i, [origin, , purpose]] of origins.entries()) {
+			const outcome = await adapter.authority.admit(
+				grokAdmission({
+					origin,
+					purpose,
+					account: 'synthetic-account',
+					identity: { requestId: `req-${i}`, attemptId: `att-${i}`, runId: `run-${i}` },
+				})
+			);
+			expect(outcome.state).toBe('admitted');
+		}
+		const sent = executions();
+		expect(sent.map((p) => p.source)).toEqual(origins.map(([, source]) => source));
+		for (const payload of sent) {
+			expect(payload).toMatchObject({ provider: 'grok', model: 'grok-4', arguments: [] });
+			// R07: the operation has no account (or purpose) field; a turn with no model reads unspecified.
+			expect(payload).not.toHaveProperty('account');
+		}
+		await adapter.authority.admit(grokAdmission({ model: null, identity: { requestId: 'req-x' } }));
+		expect(executions().at(-1)?.model).toBe('unspecified');
+	});
+
+	it('refuses a delegated or nested CLI child turn unasked, and carries a direct child run its parent', async () => {
+		const { adapter, executions } = await grokAdapter();
+		const nested = await adapter.authority.admit(
+			grokAdmission({
+				delegation: {
+					chain: [
+						{ kind: 'agent', id: 'parent-agent' },
+						{ kind: 'agent', id: 'grok-child' },
+					],
+					grantRef: null,
+				},
+			})
+		);
+		expect(nested.state).toBe('unavailable');
+		expect(message(nested)).toContain('a delegation chain of 2');
+		const granted = await adapter.authority.admit(
+			grokAdmission({ delegation: { chain: [], grantRef: 'grant-1' } })
+		);
+		expect(message(granted)).toContain('a grant reference');
+		expect(executions()).toHaveLength(0);
+		expect(adapter.authority.live()).toHaveLength(0);
+
+		const child = await adapter.authority.admit(
+			grokAdmission({
+				identity: { runId: 'run-child', rootRunId: 'run-root', parentRunId: 'run-root' },
+			})
+		);
+		expect(child.state).toBe('admitted');
+		expect(executions()[0]).toMatchObject({ runId: 'run-child', parentRunId: 'run-root' });
+	});
+
+	it('refuses a workflow-owned automation turn unasked, and a receipt naming another run or attempt is unknown', async () => {
+		const { fake, adapter, executions } = await grokAdapter();
+		const owned = await adapter.authority.admit(
+			grokAdmission({
+				origin: 'cue',
+				workflow: {
+					workflowId: 'cue:nightly',
+					version: 'v1',
+					triggerEventId: 'time.scheduled:evt-1',
+					ownerEpoch: 'epoch-1',
+					fencingToken: 'fence-1',
+				},
+			})
+		);
+		expect(owned.state).toBe('unavailable');
+		expect(message(owned)).toContain('workflow "cue:nightly"');
+		expect(executions()).toHaveLength(0);
+
+		for (const wrong of [{ runId: 'run-other' }, { attemptId: 'att-other' }]) {
+			fake.options.operations = {
+				execution: (payload) => ({ ...RECEIPT(payload as Record<string, unknown>), ...wrong }),
+			};
+			expect(await adapter.authority.admit(grokAdmission())).toMatchObject({
+				state: 'unknown',
+				code: 'outcome-unknown',
+			});
+		}
+		expect(adapter.authority.live()).toHaveLength(0);
+	});
+
+	it('holds the lease to the model and account it was admitted on, hears its revocation, and refuses a model it cannot describe', async () => {
+		const { adapter, executions } = await grokAdapter();
+		const request = grokAdmission({ account: 'synthetic-account' });
+		const outcome = await adapter.authority.admit(request);
+		if (outcome.state !== 'admitted') throw new Error('expected admitted');
+		const digest = (turn: GrokTurn) => dispatchSnapshotDigest(grokAdmission(turn).snapshot);
+		expect(adapter.authority.check(outcome.lease, digest({ model: 'grok-3' }))).toEqual({
+			ok: false,
+			reason: 'snapshot-mismatch',
+		});
+		expect(
+			adapter.authority.check(outcome.lease, digest({ account: 'another-synthetic-account' }))
+		).toEqual({ ok: false, reason: 'snapshot-mismatch' });
+		expect(
+			adapter.authority.check(outcome.lease, dispatchSnapshotDigest(request.snapshot))
+		).toEqual({ ok: true });
+		// A revocation is heard at the gate, whatever snapshot is presented.
+		expect(adapter.authority.revoke(outcome.lease.leaseId, 'policy changed')).toBe(true);
+		expect(
+			adapter.authority.check(outcome.lease, dispatchSnapshotDigest(request.snapshot))
+		).toEqual({ ok: false, reason: 'revoked' });
+
+		const asked = executions().length;
+		const bad = await adapter.authority.admit(grokAdmission({ model: 'grok 4; rm' }));
+		expect(bad.state).toBe('unavailable');
+		expect(message(bad)).toContain('the model is not an endpoint identifier');
+		expect(executions()).toHaveLength(asked);
+	});
+
+	it('refuses an SSH Grok launch with no qualified endpoint or one behind the policy, unasked', async () => {
+		const { adapter, executions } = await grokAdapter();
+		const bare = await adapter.authority.admit(
+			grokAdmission({ target: { kind: 'ssh', remoteId: 'remote-1' } })
+		);
+		expect(bare.state).toBe('unavailable');
+		expect(message(bare)).toContain('carries no qualified managed endpoint');
+		for (const revision of [null, 2]) {
+			const behind = await adapter.authority.admit(
+				grokAdmission({
+					target: { kind: 'ssh', remoteId: 'remote-1', endpoint: remoteEndpoint(revision) },
+				})
+			);
+			expect(behind.state).toBe('unavailable');
+			expect(message(behind)).toContain("behind this host's 3");
+		}
+		expect(executions()).toHaveLength(0);
+		expect(adapter.authority.live()).toHaveLength(0);
+		const current = await adapter.authority.admit(
+			grokAdmission({
+				target: { kind: 'ssh', remoteId: 'remote-1', endpoint: remoteEndpoint(3) },
+			})
+		);
+		expect(current.state).toBe('admitted');
+	});
+
+	it('is unknown on an endpoint timeout with no lease, and a retry or resume keeps the request identity', async () => {
+		const { fake, port, adapter, executions } = await grokAdapter();
+		fake.options.delayMs = 1_300;
+		const timedOut = await adapter.authority.admit(grokAdmission());
+		expect(timedOut).toMatchObject({ state: 'unknown', code: 'outcome-unknown' });
+		expect(adapter.authority.live()).toHaveLength(0);
+
+		// The timed-out client dropped its session: a retry on it is refused, never admitted stale.
+		fake.options.delayMs = 0;
+		const stale = await adapter.authority.admit(
+			grokAdmission({ identity: { attemptId: 'att-2' } })
+		);
+		expect(stale.state).toBe('unavailable');
+		expect(adapter.authority.live()).toHaveLength(0);
+
+		// Re-registered and re-attached, as the lifecycle does, the retry and a resume keep the request.
+		await registerAndAttach(port, ['attachment', 'compatibility', 'execution']);
+		const retry = await adapter.authority.admit(
+			grokAdmission({ identity: { attemptId: 'att-3' } })
+		);
+		expect(retry.state).toBe('admitted');
+		const resumed = await adapter.authority.admit(
+			grokAdmission({ operation: 'resume', identity: { attemptId: 'att-4' } })
+		);
+		expect(resumed.state).toBe('admitted');
+		const byAttempt = (id: string) => executions().find((p) => p.attemptId === id);
+		const first = byAttempt('att-1');
+		expect(first).toBeDefined();
+		for (const id of ['att-3', 'att-4']) {
+			expect(byAttempt(id)).toMatchObject({
+				requestId: first?.requestId,
+				runId: first?.runId,
+				provider: 'grok',
+				model: 'grok-4',
+			});
+		}
+		expect(byAttempt('att-4')?.operation).toBe('resume');
+	}, 10_000);
 });

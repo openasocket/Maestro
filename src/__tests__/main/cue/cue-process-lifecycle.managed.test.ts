@@ -301,3 +301,115 @@ describe('runProcess managed admission', () => {
 		expect(result.managed).toBeUndefined();
 	});
 });
+
+// Grok at the Cue spawn sink (GT1-09-10). The table authority is the real lease
+// lifetime over a synthetic policy answer: these prove the sink's wiring and that a
+// refusal starts no process, not a real broker's enforcement. The endpoint-backed
+// refusals (workflow, SSH target) run on the real client in host-adapter.test.ts.
+describe('runProcess managed admission for a Grok run (GT1-09-10)', () => {
+	function grokSpec(args: string[] = ['-p', '--always-approve', '-m', 'grok-4']): SpawnSpec {
+		return spec({
+			command: '/bin/grok',
+			args: [...args, '--', 'do the thing'],
+			env: { PATH: '/usr/bin', GROK_HOME: '/synthetic/grok-home', MAESTRO_QUERY_SOURCE: 'cue' },
+		});
+	}
+	const grokAttribution = (
+		target: CueManagedSpawn['attribution']['target'] = { kind: 'local' }
+	) => ({
+		provider: 'grok',
+		model: 'grok-4',
+		operation: 'start' as const,
+		account: null,
+		target,
+	});
+	const grokOptions = (managed: CueManagedSpawn, extra: Record<string, unknown> = {}) =>
+		options({ toolType: 'grok', managed, ...extra });
+
+	it('admits on the final Grok spec, the custom -m and the approval flag included, and binds the lease', async () => {
+		const { authority, asked } = tableAuthority(() => ({ decision: 'allow', policyRevision: 3 }));
+		const leases: DispatchLease[] = [];
+		const run = runProcess(
+			'run-1',
+			grokSpec(['-p', '--always-approve', '-m', 'grok-3', '-m', 'grok-4']),
+			grokOptions(
+				managedSpawn(authority, {
+					attribution: grokAttribution(),
+					onLease: (lease) => leases.push(lease),
+				})
+			)
+		);
+		const child = await spawned();
+		const snapshot = asked[0].snapshot;
+		expect(snapshot).toMatchObject({
+			executable: '/bin/grok',
+			provider: 'grok',
+			model: 'grok-4',
+			account: null,
+			target: { kind: 'local' },
+		});
+		expect(snapshot.args).toEqual(expect.arrayContaining(['--always-approve', '-m', 'grok-4']));
+		expect(snapshot.envKeys).toEqual(['GROK_HOME', 'MAESTRO_QUERY_SOURCE', 'PATH']);
+		expect(asked[0].context.origin).toBe('cue');
+		expect(leases[0].state()).toBe('bound');
+		child.emit('close', 0);
+		const result = await run;
+		expect(result.managed).toBeUndefined();
+		expect(leases[0].state()).toBe('released');
+		expect(leases[0].ended().release).toEqual({ outcome: 'exited', exitCode: 0, signal: null });
+	});
+
+	it('denied, unavailable and unknown (an endpoint that timed out) answers start no Grok process', async () => {
+		const answers: Array<[PolicyDecision, string, string]> = [
+			[
+				{ decision: 'deny', reason: 'grok-3 is the pinned model.', policyRevision: 3 },
+				'denied',
+				'policy-denied',
+			],
+			[
+				{ decision: 'unavailable', reason: 'No endpoint is attached.' },
+				'unavailable',
+				'runtime-unavailable',
+			],
+			[
+				{ decision: 'unknown', reason: 'The endpoint did not answer in time.' },
+				'unknown',
+				'outcome-unknown',
+			],
+		];
+		for (const [answer, state, code] of answers) {
+			const { authority } = tableAuthority(() => answer);
+			const result = await runProcess(
+				'run-1',
+				grokSpec(),
+				grokOptions(managedSpawn(authority, { attribution: grokAttribution() }))
+			);
+			expect(result.managed).toEqual({ state, code });
+			expect(result.status).toBe('failed');
+			expect(authority.live()).toEqual([]);
+		}
+		expect(mockSpawn).not.toHaveBeenCalled();
+	});
+
+	it('a revocation heard while the Grok child runs stops it through the gate', async () => {
+		const { authority } = tableAuthority(() => ({ decision: 'allow', policyRevision: 3 }));
+		const leases: DispatchLease[] = [];
+		const run = runProcess(
+			'run-1',
+			grokSpec(),
+			grokOptions(
+				managedSpawn(authority, {
+					attribution: grokAttribution(),
+					onLease: (lease) => leases.push(lease),
+				})
+			)
+		);
+		const child = await spawned();
+		expect(authority.revoke(leases[0].leaseId, 'policy revision 4 removed Grok')).toBe(true);
+		await vi.waitFor(() => expect(child.killed).toBe(true));
+		child.emit('close', null, 'SIGTERM');
+		await run;
+		expect(leases[0].state()).toBe('revoked');
+		expect(authority.live().filter((lease) => lease.state() === 'bound')).toEqual([]);
+	});
+});

@@ -175,6 +175,12 @@
 				"result": "6 files, 210 passed, 0 failed, 0 skipped",
 				"scope": "client integration against synthetic or fake policy answers; not real endpoint or provider qualification",
 				"detail": "spawn-authority.test.ts snapshot case (last -m, account null) and the args-changed-after-admission refusal."
+			},
+			"testCoverage": {
+				"task": "GT1-09-10",
+				"state": "account-absent-asserted",
+				"detail": "The host adapter execution payload for every Grok origin (ux, cli, cue, headless) names provider grok and the -m model and has no account field; the local lease still binds the snapshot account, so a changed account is a snapshot-mismatch at the gate.",
+				"sourceRefs": ["src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts"]
 			}
 		},
 		{
@@ -200,6 +206,16 @@
 				"sourceRefs": [
 					"src/shared/maestro-lib/managed/host-adapter.ts remoteTargetProblem",
 					"src/shared/maestro-lib/launch/ssh-remote-resolver.ts sshRemoteEndpointProblems"
+				]
+			},
+			"testCoverage": {
+				"task": "GT1-09-10",
+				"state": "client-wiring-tested-producer-absent",
+				"detail": "Fake-endpoint and probe-double cases prove the adapter refuses an SSH Grok snapshot with no endpoint ref or a stale endpoint policy before asking, and the qualifier binds a remote only on an implemented grok ssh row, refusing other providers rows, unsupported or unverified rows, conflicting rows and a timed-out probe. Finding: remoteExpectation ignores record.management, so a revoked record still qualifies a remote target; the adapter standing refuses the launch. No real remote attestation producer exists (GT1-11-12).",
+				"sourceRefs": [
+					"src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts",
+					"src/__tests__/main/enterprise/remote.test.ts",
+					"src/main/enterprise/remote.ts remoteExpectation"
 				]
 			}
 		},
