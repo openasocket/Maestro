@@ -329,3 +329,87 @@ describe('TokenStats timeline legend', () => {
 		}
 	);
 });
+
+describe('GT1-10-09 Grok token presentation', () => {
+	beforeEach(() => {
+		storage.clear();
+		clearCachedResources();
+	});
+
+	/** An aggregate shaped like the accessor's Grok output over two accounts. */
+	function grokAggregate(cost: UsageCost, completeness: 'complete' | 'partial' | 'unknown') {
+		const totals = makeTotals({
+			inputTokens: 60,
+			outputTokens: 20,
+			cacheReadTokens: 30,
+			cacheCreationTokens: 10,
+			costUsd: 0,
+			costEstimated: false,
+			sessionCount: 2,
+			accounting: { completeness, cost },
+		});
+		const half = { ...totals, inputTokens: 30, outputTokens: 10, sessionCount: 1 };
+		return {
+			...aggregate,
+			totals,
+			byAgent: [{ ...totals, key: 'grok', label: 'Grok CLI' }],
+			byAccount: ['alpha', 'beta'].map((a) => ({
+				...half,
+				key: providerProfileKey('grok', `/home/u/.grok-${a}`),
+				label: `Grok ${a}`,
+			})),
+			timeline: [bucket(1_700_000_000_000, totals)],
+			coverageByAgent: {
+				grok: completeness === 'complete' ? ('full' as const) : ('partial' as const),
+			},
+		};
+	}
+
+	function mountWith(data: TokenUsageAggregate) {
+		(window as unknown as { maestro: unknown }).maestro = {
+			stats: { getTokenUsage: vi.fn().mockResolvedValue(data) },
+		};
+		return mountTokens();
+	}
+
+	it.each<{
+		name: string;
+		cost: UsageCost;
+		completeness: 'complete' | 'partial' | 'unknown';
+		text: string;
+	}>([
+		{
+			name: 'exact zero',
+			cost: { status: 'exact', costUsdTicks: '0' },
+			completeness: 'complete',
+			text: '$0.00',
+		},
+		{ name: 'unknown', cost: { status: 'unknown' }, completeness: 'unknown', text: 'Unknown' },
+		{
+			name: 'unknown merged with zero',
+			cost: { status: 'partial', costUsdTicks: '0', costUsd: 0 },
+			completeness: 'partial',
+			text: '$0.00 (partial)',
+		},
+	])('shows $name Grok spend apart from token counts', async ({ cost, completeness, text }) => {
+		mountWith(grokAggregate(cost, completeness));
+		expect(await screen.findByRole('group', { name: `Total Cost: ${text}` })).toBeInTheDocument();
+		// Tokens are never presented as money, and cache creation counts on the input side.
+		expect(screen.getByRole('group', { name: 'Input Tokens: 60' })).toBeInTheDocument();
+		expect(screen.getByText('30% of input served from cache')).toBeInTheDocument();
+		expect(screen.getByTestId('token-stats')).toHaveTextContent(
+			'2 sessions read from agent transcripts.'
+		);
+		for (const a of ['alpha', 'beta']) {
+			const row = within(screen.getByTestId('token-by-account')).getByText(`Grok ${a}`);
+			expect(row).toHaveAttribute('title', `/home/u/.grok-${a}`);
+			expect(row.parentElement).toHaveTextContent(text);
+		}
+		expect(screen.queryByText(/~ are estimated/)).not.toBeInTheDocument();
+		expect(screen.getByText(/partial amounts include only known spend/)).toBeInTheDocument();
+		// No provider quota, balance or reset data is invented on this tab.
+		expect(screen.getByTestId('token-stats')).not.toHaveTextContent(
+			/quota|balance|unlimited|resets?/i
+		);
+	});
+});

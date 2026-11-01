@@ -733,3 +733,81 @@ describe('cue-token-accessor', () => {
 		});
 	});
 });
+
+describe('GT1-10-09 Grok Cue attribution', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		lookupRows = [];
+		storageRegistry.clear();
+		_resetCueTokenAccessorCache();
+	});
+
+	it('labels a Grok Cue run as grok while its spend stays unknown, beside a legacy provider', async () => {
+		lookupRows = [
+			{ session_id: 'm-grok', agent_type: 'grok', project_path: '/proj/s', is_remote: 0 },
+			{ session_id: 'm-claude', agent_type: 'claude-code', project_path: '/proj/s', is_remote: 0 },
+		];
+		registerFakeStorage('grok', [
+			makeInfo({
+				sessionId: 'p-grok',
+				inputTokens: 500,
+				cacheReadTokens: 50,
+				costUsd: 0,
+				accounting: {
+					completeness: 'complete',
+					cost: { status: 'exact', costUsdTicks: '0' },
+				} as unknown as AgentSessionInfo['accounting'],
+			}),
+		]);
+		registerFakeStorage('claude-code', [
+			makeInfo({ sessionId: 'p-claude', inputTokens: 40, cacheCreationTokens: 4, costUsd: 0.2 }),
+		]);
+		const range = { sinceMs: Date.parse('2026-04-28T00:00:00Z') };
+		const result = await getSessionTokenSummaries(
+			[
+				{ maestroSessionId: 'm-grok', providerSessionId: 'p-grok' },
+				{ maestroSessionId: 'm-claude', providerSessionId: 'p-claude' },
+			],
+			range
+		);
+		const grok = result.get(sessionTokenLookupKey('m-grok', 'p-grok'));
+		// A native exact-zero lifetime is not this event's spend: null, never 0.
+		expect(grok).toMatchObject({ agentType: 'grok', coverage: 'partial', costUsd: null });
+		expect(grok).not.toHaveProperty('accounting');
+		expect(grok!.inputTokens + grok!.cacheReadTokens + grok!.cacheCreationTokens).toBe(0);
+		expect(result.get(sessionTokenLookupKey('m-claude', 'p-claude'))).toMatchObject({
+			agentType: 'claude-code',
+			inputTokens: 40,
+			cacheCreationTokens: 4,
+			costUsd: 0.2,
+			coverage: 'full',
+		});
+		expect(storageRegistry.get('grok')!.listSessions).not.toHaveBeenCalled();
+		expect(getAgentTypesForSessions(['m-grok', 'm-claude'])).toEqual(
+			new Map([
+				['m-grok', 'grok'],
+				['m-claude', 'claude-code'],
+			])
+		);
+	});
+
+	it('keeps Grok partial, not unsupported, with no project or storage and no cached reuse', async () => {
+		lookupRows = [{ session_id: 'm-grok', agent_type: 'grok', project_path: null, is_remote: 0 }];
+		const lookups = [{ maestroSessionId: 'm-grok', providerSessionId: 'p-grok' }];
+		const key = sessionTokenLookupKey('m-grok', 'p-grok');
+		expect((await getSessionTokenSummaries(lookups)).get(key)).toMatchObject({
+			coverage: 'partial',
+			costUsd: null,
+			inputTokens: 0,
+		});
+		// Storage appearing later and a recorded project still cannot attribute it.
+		registerFakeStorage('grok', [makeInfo({ sessionId: 'p-grok', inputTokens: 9 })]);
+		lookupRows[0].project_path = '/proj/s';
+		expect((await getSessionTokenSummaries(lookups)).get(key)).toMatchObject({
+			coverage: 'partial',
+			inputTokens: 0,
+		});
+		expect(storageRegistry.get('grok')!.listSessions).not.toHaveBeenCalled();
+		expect(mockPrepareAll).toHaveBeenCalledTimes(2);
+	});
+});
