@@ -134,7 +134,12 @@
 			],
 			"ownerTasks": ["GT1-09-02", "GT1-09-03", "GT1-09-04"],
 			"parityRows": ["P33", "P36"],
-			"releaseImpact": "An enterprise model pin cannot be enforced against a Grok desktop launch from the snapshot."
+			"releaseImpact": "An enterprise model pin cannot be enforced against a Grok desktop launch from the snapshot.",
+			"progress": {
+				"task": "GT1-09-02A",
+				"state": "model-implemented-tests-pending-account-gap-open",
+				"detail": "GT1-09-02A: modelFromArgs in ProcessManager.ts reads Grok's -m (and --model, --model=, -m=) from the final argv, which already contains custom args, with the last flag winning, so the desktop snapshot names the effective Grok model. Other providers' snapshots are unchanged. Account remains open: DispatchAttribution.account exists, but ProcessConfig carries no account source, so the snapshot keeps account null. Naming it needs an account reference the spawn handler passes through ProcessConfig, which is a separate bounded change, and no field was invented here. The -m snapshot regression case is GT1-09-03's."
+			}
 		},
 		{
 			"id": "GT1-09-R08",

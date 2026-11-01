@@ -163,7 +163,7 @@ export function buildSpawnRequestSnapshot(config: ProcessConfig): DispatchSnapsh
 		},
 		{
 			provider: config.toolType,
-			model: modelFromArgs(config.args),
+			model: modelFromArgs(config.args, config.toolType),
 			operation: resuming ? 'resume' : 'start',
 			// An SSH target names the remote endpoint the launch was qualified
 			// against (MRC-08-04B), so the lease says which remote installation
@@ -331,12 +331,37 @@ export interface TerminalTabSpawnConfig {
 	admission?: ProcessSpawnAdmission;
 }
 
-function modelFromArgs(args: readonly string[]): string | null {
+/**
+ * The model a launch's final argv selects, for the dispatch snapshot. Read
+ * off `config.args`, which already carries the agent's custom arguments, so
+ * an override is what is named. Grok spells its model flag `-m <model>`
+ * (and accepts `--model`); a repeated flag is resolved as the CLI resolves
+ * it, the last one wins (GT1-09-R07). Every other provider keeps the first
+ * `--model` / `--model=` it carries, so their snapshots are unchanged.
+ */
+function modelFromArgs(args: readonly string[], toolType: string): string | null {
+	if (toolType === 'grok') return grokModelFromArgs(args);
 	for (let i = 0; i < args.length; i += 1) {
 		if (args[i] === '--model') return args[i + 1] ?? null;
 		if (args[i].startsWith('--model=')) return args[i].slice('--model='.length) || null;
 	}
 	return null;
+}
+
+function grokModelFromArgs(args: readonly string[]): string | null {
+	let model: string | null = null;
+	for (let i = 0; i < args.length; i += 1) {
+		const arg = args[i];
+		if (arg === '-m' || arg === '--model') {
+			model = args[i + 1] ?? null;
+			i += 1;
+		} else if (arg.startsWith('--model=')) {
+			model = arg.slice('--model='.length) || null;
+		} else if (arg.startsWith('-m=')) {
+			model = arg.slice('-m='.length) || null;
+		}
+	}
+	return model;
 }
 
 /**
