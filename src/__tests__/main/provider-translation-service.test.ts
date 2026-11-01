@@ -21,6 +21,8 @@ import {
 } from '../../shared/maestro-lib/translation/archive';
 import { openCodexTranslationConnection } from '../../shared/maestro-lib/codex/connection';
 import { applyTranslation } from '../../shared/maestro-lib/translation/transaction';
+import { TRANSLATION_PROVIDER_VERSIONS } from '../../shared/maestro-lib/translation/support';
+import { TranslationSourceBusyError } from '../../shared/maestro-lib/translation/types';
 
 vi.mock('node:fs/promises', async (importOriginal) => ({
 	...(await importOriginal<typeof import('node:fs/promises')>()),
@@ -700,5 +702,157 @@ describe('provider translation operation ownership', () => {
 			planId: 'explicit',
 		});
 		expect(read).toHaveBeenLastCalledWith('agent', 'explicit');
+	});
+});
+
+// Grok host seams (GT1-06-09): the stored agent the transaction commits into, with
+// synthetic accounts only. Deterministic tests, not native qualification.
+describe('provider translation Grok host', () => {
+	const grokVersion = TRANSLATION_PROVIDER_VERSIONS.grok[0];
+	function grokAgent() {
+		const tabs = ['one', 'two'].map((id) =>
+			createMockAITab({
+				id,
+				agentSessionId: `claude-${id}`,
+				inputValue: `draft ${id}`,
+				providerSessions: {
+					grok: { agentSessionId: `parked-grok-${id}`, customModel: `parked-model-${id}` },
+				},
+			} as any)
+		);
+		let stored = [
+			createMockSession({
+				id: 'agent',
+				toolType: 'claude-code',
+				activeTabId: 'one',
+				aiTabs: tabs,
+				executionQueue: [{ id: 'queued', type: 'message', text: 'queued prompt' } as any],
+				customEnvVars: { CLAUDE_CONFIG_DIR: '/isolated/claude-source' },
+			}),
+		];
+		const sessionsStore = {
+			get: vi.fn(() => stored),
+			set: vi.fn((_key: string, next: typeof stored) => {
+				stored = next;
+			}),
+		};
+		const journal = {
+			plan: {
+				id: 'operation',
+				agentId: 'agent',
+				source: { provider: 'claude-code', accountRoot: '/isolated/claude-source' },
+				destination: {
+					provider: 'grok',
+					version: grokVersion,
+					accountRoot: '/isolated/grok-selected',
+					nativeSessionRoot: '/isolated/grok-selected/sessions',
+					projectRoot: '/isolated/project',
+				},
+			},
+			mappings: tabs.map((tab) => ({
+				tabId: tab.id,
+				sourceSessionId: tab.agentSessionId,
+				destinationSessionId: `grok-${tab.id}`,
+				artifacts: [],
+				lineage: {},
+			})),
+		} as unknown as TranslationJournal;
+		return { sessionsStore, journal, stored: () => stored[0] };
+	}
+
+	it('commits every tab into the selected Grok account without carrying another credential', async () => {
+		const { sessionsStore, journal, stored } = grokAgent();
+		const service = new ProviderTranslationService({
+			sessionsStore,
+			agentConfigsStore: {
+				get: vi.fn(() => ({
+					grok: {
+						model: 'configured-model',
+						customEnvVars: {
+							GROK_AUTH: 'SYNTHETIC-INLINE-CREDENTIAL',
+							GROK_HOME: '/isolated/grok-configured',
+							GROK_LOG: 'synthetic',
+						},
+					},
+				})),
+			},
+		} as unknown as ProviderTranslationDependencies);
+		const host = (service as any).host(journal);
+		// Each tab's staged session names that tab's parked Grok model, never the source model.
+		expect(host.destinationModel('one')).toBe('parked-model-one');
+		expect(host.destinationModel('two')).toBe('parked-model-two');
+		await host.commit(journal);
+		const agent = stored();
+		expect(agent.toolType).toBe('grok');
+		expect(agent.customEnvVars).toEqual({
+			GROK_HOME: '/isolated/grok-selected',
+			GROK_LOG: 'synthetic',
+		});
+		expect(agent.providerMigration).toMatchObject({
+			operationId: 'operation',
+			state: 'committing',
+		});
+		expect(
+			agent.aiTabs.map((tab: any) => [
+				tab.id,
+				tab.agentSessionId,
+				tab.inputValue,
+				tab.providerSessions?.['claude-code']?.agentSessionId,
+			])
+		).toEqual([
+			['one', 'grok-one', 'draft one', 'claude-one'],
+			['two', 'grok-two', 'draft two', 'claude-two'],
+		]);
+		expect(agent.activeTabId).toBe('one');
+		expect(agent.executionQueue).toEqual([
+			expect.objectContaining({ id: 'queued', text: 'queued prompt' }),
+		]);
+		expect(agent.providerTranslationQueuedOrigins).toEqual({ queued: 'claude-code' });
+		expect(await host.isCommitted('operation')).toBe(true);
+		expect(await host.isCommitted('another-operation')).toBe(false);
+	});
+
+	it('defers a busy agent before reading any Grok tab and refuses a staging pass while a tab runs', async () => {
+		const root = await fs.realpath(
+			await fs.mkdtemp(path.join(os.tmpdir(), 'translation-grok-busy-'))
+		);
+		try {
+			const { sessionsStore, journal } = grokAgent();
+			const projectRoot = path.join(root, 'project');
+			await fs.mkdir(projectRoot);
+			const running = new Set(['agent-ai-two']);
+			const service = new ProviderTranslationService({
+				sessionsStore,
+				agentConfigsStore: { get: vi.fn(() => ({})) },
+				getProcessManager: () => ({ get: (id: string) => (running.has(id) ? {} : undefined) }),
+			} as unknown as ProviderTranslationDependencies);
+			vi.spyOn(service as any, 'identity').mockImplementation(
+				async (_session: unknown, provider: unknown) => ({
+					provider,
+					version: provider === 'grok' ? grokVersion : '2.1.296',
+					accountRoot: path.join(root, String(provider)),
+					projectRoot,
+				})
+			);
+			const conversation = vi.spyOn(service as any, 'conversation');
+			const prepared = await (service as any).prepare({
+				agentId: 'agent',
+				destination: 'grok',
+				action: 'plan',
+			});
+			expect(prepared.plan.status).toBe('deferred');
+			expect(conversation).not.toHaveBeenCalled();
+			expect(prepared.conversations.map((c: any) => [c.tabId, c.records.length])).toEqual([
+				['one', 0],
+				['two', 0],
+			]);
+			// The same rule holds at every staging step: a tab that starts a turn stops the pass.
+			await expect((service as any).host(journal).assertSourceUnchanged(journal)).rejects.toThrow(
+				TranslationSourceBusyError
+			);
+			expect(sessionsStore.set).not.toHaveBeenCalled();
+		} finally {
+			await fs.rm(root, { recursive: true, force: true });
+		}
 	});
 });
