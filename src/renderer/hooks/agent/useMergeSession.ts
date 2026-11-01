@@ -25,7 +25,11 @@ import { useCallback, useRef } from 'react';
 import type { Session, AITab, LogEntry } from '../../types';
 import type { MergeResult, GroomingProgress, MergeRequest } from '../../types/contextMerge';
 import type { MergeOptions } from '../../components/MergeSessionModal';
-import { ContextGroomingService, contextGroomingService } from '../../services/contextGroomer';
+import {
+	ContextGroomingService,
+	contextGroomingService,
+	groomingIdentityOf,
+} from '../../services/contextGroomer';
 import { extractTabContext, formatLogsForContextInjection } from '../../utils/contextExtractor';
 import { resolveContextWindow } from '../../utils/contextWindowPrecedence';
 import { getContextWindowForAgent } from '../../../shared/agentConstants';
@@ -428,6 +432,7 @@ export function useMergeSession(activeTabId?: string): UseMergeSessionResult {
 			// Step 3: Determine which logs to use (groomed or raw)
 			let mergedLogs: LogEntry[];
 			let tokensSaved = 0;
+			let groomed = false;
 
 			if (options.groomContext) {
 				// Use AI grooming to consolidate and deduplicate
@@ -439,10 +444,16 @@ export function useMergeSession(activeTabId?: string): UseMergeSessionResult {
 					},
 				});
 
+				// The source agent's provider runs the turn, so it runs on that
+				// agent's account, binary and host. A merge into an existing tab
+				// grooms the source alone: the target already holds its own
+				// history, and grooming it too would paste it back (duplicate
+				// context).
 				const groomingRequest: MergeRequest = {
-					sources: [sourceContext, targetContext],
+					sources: options.createNewSession ? [sourceContext, targetContext] : [sourceContext],
 					targetAgent: sourceSession.toolType,
 					targetProjectRoot: sourceSession.projectRoot,
+					...groomingIdentityOf(sourceSession),
 				};
 
 				const groomingResult = await groomingServiceRef.current.groomContexts(
@@ -467,6 +478,7 @@ export function useMergeSession(activeTabId?: string): UseMergeSessionResult {
 
 				mergedLogs = groomingResult.groomedLogs;
 				tokensSaved = groomingResult.tokensSaved;
+				groomed = true;
 			} else {
 				// Simply concatenate logs without grooming
 				useOperationStore.getState().updateMergeTabState(sourceTabId, {
@@ -528,6 +540,8 @@ export function useMergeSession(activeTabId?: string): UseMergeSessionResult {
 					newSessionId: mergedSession.id,
 					newTabId,
 					tokensSaved,
+					mergedLogs,
+					groomed,
 					sourceSessionName: sourceDisplayName,
 					targetSessionName: targetDisplayName,
 					estimatedTokens,
@@ -538,6 +552,7 @@ export function useMergeSession(activeTabId?: string): UseMergeSessionResult {
 					success: true,
 					tokensSaved,
 					mergedLogs,
+					groomed,
 					targetSessionId: targetSession.id,
 					targetTabId: targetTab.id,
 					sourceSessionName: sourceDisplayName,
@@ -727,22 +742,18 @@ export function useMergeSessionWithSessions(
 							targetTab
 						);
 
-						// Extract and merge logs (simplified - actual implementation uses groomed logs)
-						const sourceContext = extractTabContext(
-							sourceTab,
-							getSessionDisplayName(sourceSession),
-							sourceSession
-						);
-						const targetContext = extractTabContext(
-							targetTab,
-							getSessionDisplayName(targetSession),
-							targetSession
-						);
-						const mergedLogs = orderMergedLogs(
-							sourceContext.logs,
-							targetContext.logs,
-							options.preserveTimestamps
-						);
+						// The logs startMerge produced: the groomed output when grooming
+						// ran, else both raw sides in order. Never a fresh raw
+						// concatenation that would discard the grooming.
+						const mergedLogs =
+							result.mergedLogs ??
+							orderMergedLogs(
+								extractTabContext(sourceTab, getSessionDisplayName(sourceSession), sourceSession)
+									.logs,
+								extractTabContext(targetTab, getSessionDisplayName(targetSession), targetSession)
+									.logs,
+								options.preserveTimestamps
+							);
 
 						const { session: createdSession } = createMergedSession({
 							name: mergedName,
@@ -804,11 +815,13 @@ export function useMergeSessionWithSessions(
 					// Format the source context as a string to inject into the AI conversation
 					// Filter out system messages (including system prompts) - only include user/assistant messages
 
-					// Always use the SOURCE tab's logs for injection - we're transferring source context to target
-					// The result.mergedLogs contains both source AND target logs (for createNewSession=true case)
-					// but when injecting into existing tab, we only want the source context
+					// Inject SOURCE context only. When grooming ran, startMerge groomed
+					// the source alone, so its output is injected (and only then is it
+					// called cleaned). Otherwise result.mergedLogs holds both sides, so
+					// the source tab's own logs are injected.
 					const sourceTab = sourceSession.aiTabs.find((t) => t.id === sourceTabId);
-					const logsToInject = sourceTab?.logs ?? [];
+					const injectGroomed = result.groomed === true && result.mergedLogs !== undefined;
+					const logsToInject = injectGroomed ? result.mergedLogs! : (sourceTab?.logs ?? []);
 					const injectTargetTab = targetSession.aiTabs.find((t) => t.id === result.targetTabId);
 					const budget = injectTargetTab
 						? resolveMergeContextBudget(targetSession, injectTargetTab)
@@ -849,7 +862,7 @@ export function useMergeSessionWithSessions(
 						id: generateId(),
 						timestamp: Date.now(),
 						source: 'system',
-						text: `Context merged from "${sourceName}"${options.groomContext ? ' (cleaned to reduce size)' : ''}.`,
+						text: `Context merged from "${sourceName}"${injectGroomed ? ' (cleaned to reduce size)' : ''}.`,
 					};
 
 					// Prepare an introductory message to send with the merged context

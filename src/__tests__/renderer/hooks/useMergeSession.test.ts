@@ -982,8 +982,8 @@ describe('useMergeSessionWithSessions: Grok carry-over', () => {
 		expect(sessions).toBe(before);
 	});
 
-	// KNOWN GAPS found by GT1-06-02 and owned by its repair task GT1-06-02A.
-	// `it.fails` passes while the defect is present; the repair flips each to `it`.
+	// Gaps found by GT1-06-02 and repaired by GT1-06-02A: the groomed output is
+	// what a merge carries, and only groomed context is called cleaned.
 	describe('grooming results (repair: GT1-06-02A)', () => {
 		const groomed = [
 			{ id: 'groomed-1', timestamp: 5, source: 'ai' as const, text: 'GROOMED_SUMMARY' },
@@ -997,27 +997,22 @@ describe('useMergeSessionWithSessions: Grok carry-over', () => {
 			});
 		});
 
-		it.fails(
-			'a groomed new merged agent carries the groomed logs, not both raw sides',
-			async () => {
-				const source = grokSource([
-					{ id: 's-1', timestamp: 1, source: 'user', text: 'RAW_SOURCE' },
-				]);
-				seed(source, target('claude-code'));
-				const { result } = render();
-				await act(async () => {
-					await result.current.executeMerge(source, 'grok-tab', 'target', 'target-tab', {
-						groomContext: true,
-						createNewSession: true,
-						preserveTimestamps: false,
-					});
+		it('a groomed new merged agent carries the groomed logs, not both raw sides', async () => {
+			const source = grokSource([{ id: 's-1', timestamp: 1, source: 'user', text: 'RAW_SOURCE' }]);
+			seed(source, target('claude-code'));
+			const { result } = render();
+			await act(async () => {
+				await result.current.executeMerge(source, 'grok-tab', 'target', 'target-tab', {
+					groomContext: true,
+					createNewSession: true,
+					preserveTimestamps: false,
 				});
-				const created = sessions.find((s) => s.id === 'new-merged-session-id')!;
-				expect(created.aiTabs[0].logs.map((log) => log.text)).toEqual(['GROOMED_SUMMARY']);
-			}
-		);
+			});
+			const created = sessions.find((s) => s.id === 'new-merged-session-id')!;
+			expect(created.aiTabs[0].logs.map((log) => log.text)).toEqual(['GROOMED_SUMMARY']);
+		});
 
-		it.fails('a merge into a tab never labels raw injected context as cleaned', async () => {
+		it('a merge into a tab never labels raw injected context as cleaned', async () => {
 			const source = grokSource([{ id: 's-1', timestamp: 1, source: 'user', text: 'RAW_SOURCE' }]);
 			seed(source, target('claude-code'));
 			const { result } = render();

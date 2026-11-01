@@ -106,8 +106,9 @@ describe('ContextGroomingService', () => {
 			'claude-code',
 			expect.stringContaining('How do I implement X?'),
 			// The first source is the conversation the groom was raised from; a
-			// source with no open tab names the agent alone (MRC2-02-02B).
-			{ lineage: { sessionId: 'session-123' } }
+			// source with no open tab names the agent alone (MRC2-02-02B). Grooming
+			// is always a read-only turn (GT1-06-02A).
+			expect.objectContaining({ readOnly: true, lineage: { sessionId: 'session-123' } })
 		);
 		expect(stages.at(-1)).toBe('complete');
 	});

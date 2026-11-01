@@ -15,7 +15,11 @@
 import type { ToolType } from '../../shared/types';
 import { getAgentDisplayName as getDisplayName } from '../../shared/agentMetadata';
 import type { ContextSource, MergeRequest, GroomingProgress } from '../types/contextMerge';
-import type { LogEntry } from '../types';
+import type { LogEntry, Session } from '../types';
+import {
+	getClaudeTokenSourceFields,
+	type ClaudeTokenSourceFields,
+} from '../../shared/claudeTokenMode';
 import { logger } from '../utils/logger';
 import {
 	formatLogsForGrooming,
@@ -251,6 +255,49 @@ function servedLineage(
 }
 
 /**
+ * The grooming agent's own identity, read from the session whose provider
+ * runs the turn, for a {@link MergeRequest}. Without it the turn runs under
+ * the process-global account and locally, even for an agent on a remote.
+ */
+export function groomingIdentityOf(
+	session: Pick<Session, 'sessionSshRemoteConfig' | 'customPath' | 'customArgs' | 'customEnvVars'> &
+		ClaudeTokenSourceFields
+): Pick<
+	MergeRequest,
+	'sshRemoteConfig' | 'customPath' | 'customArgs' | 'customEnvVars' | 'claudeTokenSource'
+> {
+	return {
+		sshRemoteConfig: session.sessionSshRemoteConfig,
+		customPath: session.customPath,
+		customArgs: session.customArgs,
+		customEnvVars: session.customEnvVars,
+		claudeTokenSource: getClaudeTokenSourceFields(session),
+	};
+}
+
+/**
+ * Options for the grooming turn. Grooming only reads the prompt and answers,
+ * so it is always a read-only turn: the main process applies the provider's
+ * enforced read-only flags, and refuses a provider that cannot enforce them
+ * (Grok's prompt-file route) instead of running it unrestricted. Tools are not
+ * disabled here: Grok has no verified all-tools-off flag and the main process
+ * refuses `disableTools` for it. Not a cheap turn: the output BECOMES context.
+ */
+function groomingTurnOptions(
+	request: MergeRequest
+): NonNullable<Parameters<typeof window.maestro.context.groomContext>[3]> {
+	return {
+		readOnly: true,
+		sshRemoteConfig: request.sshRemoteConfig,
+		customPath: request.customPath,
+		customArgs: request.customArgs,
+		customEnvVars: request.customEnvVars,
+		claudeTokenSource: request.claudeTokenSource,
+		lineage: servedLineage(request.sources),
+	};
+}
+
+/**
  * Service for grooming and consolidating multiple conversation contexts.
  *
  * @example
@@ -346,7 +393,7 @@ export class ContextGroomingService {
 					targetProjectRoot,
 					request.targetAgent,
 					prompt,
-					{ lineage: servedLineage(sources) }
+					groomingTurnOptions(request)
 				);
 			} finally {
 				this.groomingInFlight--;
