@@ -3964,6 +3964,63 @@
 				"S33",
 				"S36"
 			]
+		},
+		"phase10-verification": {
+			"path": "Plans/grok-tier1/evidence/10.md#gt1-10-16-verify-phase-10-parity-reconciliation",
+			"sourceCommit": "d99faa7240f817ff7c5f1641fa11ee176435c913",
+			"provenance": "deterministic-fixture-verification",
+			"acceptanceRun": false,
+			"status": "pass",
+			"scope": "GT1-10-16 at HEAD: 12 groups, 27 files, 1895 passed, 0 failed, 0 skipped; Grok-named 858/858; vitest 4.1.11, Node v26.13.0. Builds from GT1-10-15. Lite native, native platform launch and packaging not-run. No live calls."
+		},
+		"phase10-reconciliation": {
+			"path": "Plans/grok-tier1/evidence/10.md#gt1-10-16-verify-phase-10-parity-reconciliation",
+			"sourceCommit": "d99faa7240f817ff7c5f1641fa11ee176435c913",
+			"provenance": "deterministic-fixture-verification-and-reconciliation",
+			"acceptanceRun": false,
+			"status": "pass",
+			"affectedRows": [
+				"P02",
+				"P03",
+				"P09",
+				"P10",
+				"P11",
+				"P12",
+				"P16",
+				"P17",
+				"P29",
+				"P34",
+				"P37",
+				"P38",
+				"P39",
+				"P40",
+				"C-supportsCostTracking",
+				"C-supportsUsageStats",
+				"C-supportsBatchMode",
+				"C-requiresPromptToStart",
+				"C-usesJsonLineOutput",
+				"C-usesCombinedContextWindow",
+				"REG-USAGE",
+				"REG-QUOTA",
+				"REG-DISCOVERY",
+				"S22",
+				"S24",
+				"S25",
+				"S26",
+				"S27",
+				"S28",
+				"S29",
+				"S30",
+				"META-01",
+				"META-03",
+				"META-04",
+				"META-05",
+				"META-06",
+				"META-07",
+				"REG-DEFINITIONS",
+				"S32",
+				"S37"
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -5252,7 +5309,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok identity already exists. Official-versus-community identity, unsupported versions, selected-account snapshots, SSH/platform isolation and exact candidate binary/source relationship are unqualified."
+				"Grok identity already exists. Official-versus-community identity, unsupported versions, selected-account snapshots, SSH/platform isolation and exact candidate binary/source relationship are unqualified.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups launch pass 276/276; nativePlatformLaunch not-run; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158. Parity against the comparator baseline: deterministic plan match on fake POSIX, Windows and SSH hosts; immutable binary/package evidence and a supported version range need native receipts (GT1-11-10). Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-10, GT1-11-11A, GT1-11-07, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -5262,7 +5320,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5290,6 +5350,13 @@
 					"code": "qualification-not-run",
 					"missingPrerequisite": "Exact binary/version and declared route/platform receipts.",
 					"affectedRows": ["P02"]
+				},
+				{
+					"id": "grok-native-windows-ssh-launch-not-run",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Launch plans pass on fake POSIX, Windows/cmd.exe and SSH hosts (launch group); a real grok.exe/.cmd launch with spaces and % in paths, a native SSH prompt-file upload with remote --cwd, remote image and cleanup on cancel are not-run (GT1-11-10, GT1-11-11A).",
+					"affectedRows": ["P39", "P02", "P03", "REG-DISCOVERY"],
+					"evidenceRef": "phase10-reconciliation"
 				}
 			],
 			"phase": "01",
@@ -5415,7 +5482,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok identity already exists. Official-versus-community identity, unsupported versions, selected-account snapshots, SSH/platform isolation and exact candidate binary/source relationship are unqualified."
+				"Grok identity already exists. Official-versus-community identity, unsupported versions, selected-account snapshots, SSH/platform isolation and exact candidate binary/source relationship are unqualified.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups launch pass 276/276; nativePlatformLaunch not-run; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158. Parity against the comparator baseline: launch plans match the shared planner the comparators use; native local/custom/PATH/SSH discovery not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11A, GT1-11-10, GT1-11-07, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -5427,7 +5495,9 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -5482,6 +5552,13 @@
 					"missingPrerequisite": "Acknowledged model/effort, detached observations, receipt identity/generation checks and typed selected-context IPC pass GT1-03-13E. No production grokAcpObservation supplier exists. GT1-07-01 and phase10 must wire/invalidate owned receipts; remote/managed discovery, exact binary and native policy qualification remain not-run.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"],
 					"evidenceRef": "phase03-reconciliation"
+				},
+				{
+					"id": "grok-native-windows-ssh-launch-not-run",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Launch plans pass on fake POSIX, Windows/cmd.exe and SSH hosts (launch group); a real grok.exe/.cmd launch with spaces and % in paths, a native SSH prompt-file upload with remote --cwd, remote image and cleanup on cancel are not-run (GT1-11-10, GT1-11-11A).",
+					"affectedRows": ["P39", "P02", "P03", "REG-DISCOVERY"],
+					"evidenceRef": "phase10-reconciliation"
 				}
 			],
 			"phase": "02",
@@ -6694,7 +6771,8 @@
 			},
 			"limitations": [
 				"Native GrokOutputParser and the separate shared ACP client/session/event/request/turn stack are implemented and covered by the 26-file GT1-03-13E matrix. Structured terminal/partial usage and raw exact ticks are retained at parser boundaries. Production ACP callers, raw desktop native decoding and end-to-end native terminal propagation remain incomplete; historical native fixture versions are not binary qualification. ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. startGrokAcpTurn is exported and tested but has no production caller. Desktop, runtime, CLI and automation must wire the shared port with explicit refusal of unsafe fallback. Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work. Existing Grok NDJSON parser is not an ACP transport; registration does not prove current release protocol compatibility. Shared ACP interleaving, cancellation and bounded framing pass GT1-03-13E fixtures. Real consumer buffering, native protocol compliance and platform behavior remain unqualified. Preserve actual terminal outcome/error contract; success must not follow merely from process exit or an end-shaped event. Reasoning summaries must retain source tags and never be fabricated; qualify Grok ACP/native interleaving and tool suppression.",
-				"GT1-07-11 verification: Desktop and runtime ACP turns stream answer, thoughts, tools, notices, plans and late session IDs through the shared mapper and recorders against synthetic peers. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-07-11 verification: Desktop and runtime ACP turns stream answer, thoughts, tools, notices, plans and late session IDs through the shared mapper and recorders against synthetic peers. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups interaction pass 137/137; cli pass 81/81; web pass 427/427; liteNative not-run. Parity against the comparator baseline: ACP correlation and plan updates pass through real consumers; gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-07, GT1-11-12, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -6723,7 +6801,9 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase07DeterministicEvidenceRef": "phase07-verification",
-				"phase07ReconciliationRef": "phase07-reconciliation"
+				"phase07ReconciliationRef": "phase07-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7042,7 +7122,8 @@
 			"limitations": [
 				"Native GrokOutputParser and the separate shared ACP client/session/event/request/turn stack are implemented and covered by the 26-file GT1-03-13E matrix. Structured terminal/partial usage and raw exact ticks are retained at parser boundaries. Production ACP callers, raw desktop native decoding and end-to-end native terminal propagation remain incomplete; historical native fixture versions are not binary qualification. Canonical native/ACP errors and conservative retry guards pass GT1-03-13E fixtures. Automatic replay requires settled host-owned failed/provider/not-dispatched facts. Native terminal propagation and all real consumer paths remain phase07/08/10 work; real-provider error/recovery qualification remains phase11. ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. startGrokAcpTurn is exported and tested but has no production caller. Desktop, runtime, CLI and automation must wire the shared port with explicit refusal of unsafe fallback. Grok has no owned steering channel; ProcessManager sends the non-Codex route to sendSteeringRequest, which can only succeed for a registered maestro-p channel. Comparable user outcome needs explicit implementation or documented gap; GT1-01-07 must reconcile missing explicit steering acceptance in phase07 task text. Grok native child-process route exists; ACP consumer wiring and automation outcomes are not yet proven. Flag is not a deferred-spawn integration proof; Grok interactive PTY is not wired and need not be conflated with headless parity. Audit real CLI route settlement and usage, not just parsing-format flag.",
 				"GT1-07-11 verification: Desktop GrokAcpSpawner and runAgentTurn start, cancel, kill and clean up owned ACP turns; steering refuses with a typed reason; consent cancellation and disconnect invalidate. Synthetic peers only. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: CLI create/update/send and web send/enqueue/resume match; stop is the shared REST/IPC route; native turn lifecycle qualification not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -7072,7 +7153,9 @@
 				"phase07DeterministicEvidenceRef": "phase07-verification",
 				"phase07ReconciliationRef": "phase07-reconciliation",
 				"phase08DeterministicEvidenceRef": "phase08-verification",
-				"phase08ReconciliationRef": "phase08-reconciliation"
+				"phase08ReconciliationRef": "phase08-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7298,7 +7381,8 @@
 			"limitations": [
 				"Phase03/04 fixtures preserve exact decimal ticks, unknown/partial cost, per-model identity, separate cache buckets and once-only turn/session totals. Phase04 selected-account disk reads, accessors, dashboard, CLI/export and Cue consumers pass deterministic regressions. Unknown Grok models never borrow unrelated prices. Real billing, running-child completeness, live/disk agreement and broader ACP/SSH consumer propagation remain phase07/10/11 qualification; managed account-path wiring remains phase09.",
 				"Context occupancy and native/ACP input semantics remain distinct; declared capability semantics still require native agreement.",
-				"GT1-07-11 verification: ACP usage reaches the desktop through per-process TurnCapture (exact ticks, partial upper bound on lowered buckets, cost NULL when unknown); child usage stays raw. Native StdoutHandler eager JSON parsing is unchanged. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-07-11 verification: ACP usage reaches the desktop through per-process TurnCapture (exact ticks, partial upper bound on lowered buckets, cost NULL when unknown); child usage stays raw. Native StdoutHandler eager JSON parsing is unchanged. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: token buckets counted once per native lifetime; cache read/creation disjoint; exact/partial/unknown cost kept apart; Grok cost reads partial until a verified cross-file snapshot exists. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -7337,7 +7421,9 @@
 				"phase04EvidenceRef": "phase04-reconciliation",
 				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
 				"phase07DeterministicEvidenceRef": "phase07-verification",
-				"phase07ReconciliationRef": "phase07-reconciliation"
+				"phase07ReconciliationRef": "phase07-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -7397,7 +7483,7 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
+					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established. GT1-10-16: phase 10 consumers now pass at HEAD (accessor, Cue accessor, legend, Agent Runs, global stats, About and share image); Grok cost reads partial or unknown, never complete, until a verified cross-file snapshot exists; real billing and live/disk convergence remain GT1-11-11F.",
 					"affectedRows": ["P11"],
 					"evidenceRef": "phase04-reconciliation"
 				}
@@ -7590,7 +7676,8 @@
 			},
 			"limitations": [
 				"Native GrokOutputParser and the separate shared ACP client/session/event/request/turn stack are implemented and covered by the 26-file GT1-03-13E matrix. Structured terminal/partial usage and raw exact ticks are retained at parser boundaries. Production ACP callers, raw desktop native decoding and end-to-end native terminal propagation remain incomplete; historical native fixture versions are not binary qualification. Canonical native/ACP errors and conservative retry guards pass GT1-03-13E fixtures. Automatic replay requires settled host-owned failed/provider/not-dispatched facts. Native terminal propagation and all real consumer paths remain phase07/08/10 work; real-provider error/recovery qualification remains phase11. startTurn comments explicitly say buffering is unlimited absent options. Grok burst streams, listener cleanup, persistence privacy and cancellation require bounded workload evidence. Existing Grok NDJSON parser is not an ACP transport; registration does not prove current release protocol compatibility. Shared ACP interleaving, cancellation and bounded framing pass GT1-03-13E fixtures. Real consumer buffering, native protocol compliance and platform behavior remain unqualified. Preserve actual terminal outcome/error contract; success must not follow merely from process exit or an end-shaped event. Reasoning summaries must retain source tags and never be fabricated; qualify Grok ACP/native interleaving and tool suppression.",
-				"GT1-07-11 verification: Tool, thought and child-tool rendering pass split and concurrent synthetic children; a child tool still running at parent settlement is closed only by renderer exit cleanup. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-07-11 verification: Tool, thought and child-tool rendering pass split and concurrent synthetic children; a child tool still running at parent settlement is closed only by renderer exit cleanup. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups recordings pass 37/37; performance pass 21/21. Parity against the comparator baseline: split chunks, cancellation and final usage stable under the synthetic stream; linear frames/bytes. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -7613,7 +7700,9 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase07DeterministicEvidenceRef": "phase07-verification",
-				"phase07ReconciliationRef": "phase07-reconciliation"
+				"phase07ReconciliationRef": "phase07-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8462,7 +8551,8 @@
 			"limitations": [
 				"Phase03/04 fixtures preserve exact decimal ticks, unknown/partial cost, per-model identity, separate cache buckets and once-only turn/session totals. Phase04 selected-account disk reads, accessors, dashboard, CLI/export and Cue consumers pass deterministic regressions. Unknown Grok models never borrow unrelated prices. Real billing, running-child completeness, live/disk agreement and broader ACP/SSH consumer propagation remain phase07/10/11 qualification; managed account-path wiring remains phase09.",
 				"Completed children already folded into lifetime totals are not added again. Native child lifecycle/completeness remains unknown without provider proof. Display grouping still supports one parentToolUseId level; deeper/orphan children remain flat and this phase does not qualify their orchestration.",
-				"GT1-07-11 verification: Child usage is reported raw and parent totals equal a childless turn; aggregate children accounting is completed-included or unknown with partial completeness. Synthetic only. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-07-11 verification: Child usage is reported raw and parent totals equal a childless turn; aggregate children accounting is completed-included or unknown with partial completeness. Synthetic only. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: resumed cumulative ledgers replace rather than sum; a child whose parent is in the same pool keeps no parent-attributed tokens. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8484,7 +8574,9 @@
 				"phase04EvidenceRef": "phase04-reconciliation",
 				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
 				"phase07DeterministicEvidenceRef": "phase07-verification",
-				"phase07ReconciliationRef": "phase07-reconciliation"
+				"phase07ReconciliationRef": "phase07-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8522,7 +8614,7 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
+					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established. GT1-10-16: phase 10 consumers now pass at HEAD (accessor, Cue accessor, legend, Agent Runs, global stats, About and share image); Grok cost reads partial or unknown, never complete, until a verified cross-file snapshot exists; real billing and live/disk convergence remain GT1-11-11F.",
 					"affectedRows": ["P16"],
 					"evidenceRef": "phase04-reconciliation"
 				},
@@ -8679,7 +8771,8 @@
 			},
 			"limitations": [
 				"Grok already has a beta picker entry. Installed/custom-path/account/model/effort and unsupported-mode consumer behavior needs end-to-end proof. Grok has a dedicated shared discovery-args branch and text extraction. Account/model, unavailable binary, resume and error handling need consumer evidence. Grok reaches provider-neutral builder, but account/model/effort/route settings and local/remote isolation need explicit consumer assertions. Phase05/10 owners are provisional; GT1-01-07 must add bounded owner task coverage if current wording cannot cover these files. Grok uses generic creation; verify duplicated profile/effort, custom executable availability and no fallback provider. No separate agent-template registry was found in bounded symbol search; prompt templates are a distinct surface. GT1-01-07 must reconcile task scope for AgentCreationDialog coverage.",
-				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: Grok advertised under stable id grok in CLI create help and pianola learn help; desktop pickers owned by phase 05. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-07, GT1-11-11C, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8701,7 +8794,9 @@
 				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests",
 				"phase05CreationConsumerTestsEvidenceRef": "phase05-creation-consumer-tests",
 				"phase05DeterministicEvidenceRef": "phase05-reverification",
-				"phase05ReconciliationRef": "phase05-reconciliation"
+				"phase05ReconciliationRef": "phase05-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10604,7 +10699,8 @@
 			"limitations": [
 				"Grok reaches generic paths; end-only identity, failure/cancel checkbox preservation and override inheritance require actual-consumer fixtures. Grok late session IDs and failed-iteration counters need targeted recovery assertions. Grok uses generic registered definition/parser path. Final JSONL tail, malformed completion, cancel and late identity must be tested through batch processor. Grok reaches provider-neutral builder, but account/model/effort/route settings and local/remote isolation need explicit consumer assertions. Phase05/10 owners are provisional; GT1-01-07 must add bounded owner task coverage if current wording cannot cover these files. Grok is reached through generic queue, but command collisions, argument expansion, selected tab/account and managed dispatch need proof. GT1-05-05/06 ownership is provisional until GT1-01-07 confirms explicit template-consumer coverage. Grok native child-process route exists; ACP consumer wiring and automation outcomes are not yet proven. Flag is not a deferred-spawn integration proof; Grok interactive PTY is not wired and need not be conflated with headless parity. Audit real CLI route settlement and usage, not just parsing-format flag.",
 				"GT1-07-11 verification: Auto Run/batch paths: CLI batch stays native headless (never standard); runtime Auto Run uses the shared runAgentTurn selector. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-08-21 verification: phase 08 packets autoRun, utilityEffortRetry; verdicts GT1-08-07 pass; GT1-08-21 tab naming (14F) pass; GT1-08-21 headless Auto Run retry (14F) pass. Parity against the comparator baseline: S10-S12 deterministic match; effort retry gap retained. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets autoRun, utilityEffortRetry; verdicts GT1-08-07 pass; GT1-08-21 tab naming (14F) pass; GT1-08-21 headless Auto Run retry (14F) pass. Parity against the comparator baseline: S10-S12 deterministic match; effort retry gap retained. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: CLI batch and headless Auto Run turns settle questions explicitly (crashed with AgentError), never stall; effort retry gap retained (grok-effort-validation-and-retry-pending). Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-11E, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -10623,7 +10719,9 @@
 				"phase07DeterministicEvidenceRef": "phase07-verification",
 				"phase07ReconciliationRef": "phase07-reconciliation",
 				"phase08DeterministicEvidenceRef": "phase08-verification",
-				"phase08ReconciliationRef": "phase08-reconciliation"
+				"phase08ReconciliationRef": "phase08-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11528,7 +11626,8 @@
 			},
 			"limitations": [
 				"ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal. The standard-permission flag remains omitted. The shared ACP request port has passing fail-closed synthetic coverage, but production consent channels and preventive native effect coverage remain unqualified; output-only headless streams cannot answer approvals.",
-				"GT1-07-11 verification: ACP permission requests route through the desktop consent port and the portable ManagedTurnAuthority.effects; unmanaged portable standard turns refuse consent-port. Preventive effect classification is phase09. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-07-11 verification: ACP permission requests route through the desktop consent port and the portable ManagedTurnAuthority.effects; unmanaged portable standard turns refuse consent-port. Preventive effect classification is phase09. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups interaction pass 137/137; cli pass 81/81; web pass 427/427; liteNative not-run. Parity against the comparator baseline: consent relay answers only the owning request on desktop, web-desktop and Lite bridges; gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-12, GT1-11-07, GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -11552,7 +11651,9 @@
 				"phase07DeterministicEvidenceRef": "phase07-verification",
 				"phase07ReconciliationRef": "phase07-reconciliation",
 				"phase09VerificationPath": "Plans/grok-tier1/evidence/09.md",
-				"phase09BlockersPath": "Plans/grok-tier1/evidence/09-blockers.json"
+				"phase09BlockersPath": "Plans/grok-tier1/evidence/09-blockers.json",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12206,7 +12307,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work. Grok included in canonical validation, but per-tab streaming/permissions/images/reconnect/auth and native Lite consumers need dedicated evidence."
+				"Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work. Grok included in canonical validation, but per-tab streaming/permissions/images/reconnect/auth and native Lite consumers need dedicated evidence.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups interaction pass 137/137; web pass 427/427; cli pass 81/81; liteNative not-run. Parity against the comparator baseline: web-desktop create/config/send/queue/resume/history match Electron through the same handlers; Lite native not-run (host display locked); gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-07, GT1-11-12, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12221,7 +12323,9 @@
 				"phase03AcpQuestionsEvidenceRef": "phase03-acp-questions-unavailable",
 				"phase03AcpQuestionTestsEvidenceRef": "phase03-acp-question-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12269,6 +12373,13 @@
 					"missingPrerequisite": "Questions surface on the desktop as a visible capability gap (type unknown, never permission_denied) with no answer channel (phase07-verification). Positive ask-back stays unsupported until an advertised contract is qualified; phase10 web/Lite must keep the unavailable behavior.",
 					"affectedRows": ["P37"],
 					"evidenceRef": "phase07-verification"
+				},
+				{
+					"id": "lite-native-host-display-locked",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "npm run test:lite-native needs npm run build:main and an unlocked macOS display (CGSSessionScreenIsLocked false) for capturePage; GT1-10-05 recorded the host prerequisite apart from assertions. Rerun in GT1-11-07 or GT1-11-11 on an unlocked host.",
+					"affectedRows": ["S24", "P37"],
+					"evidenceRef": "phase10-reconciliation"
 				}
 			],
 			"phase": "10",
@@ -12435,7 +12546,8 @@
 			},
 			"limitations": [
 				"Grok uses generic registered definition/parser path. Final JSONL tail, malformed completion, cancel and late identity must be tested through batch processor. startGrokAcpTurn is exported and tested but has no production caller. Desktop, runtime, CLI and automation must wire the shared port with explicit refusal of unsafe fallback. Grok native path exists; CLI help/creation and full send/queue/stop/profile settings require registry and real bridge checks; no portable Electron coupling allowed. Grok reaches provider-neutral builder, but account/model/effort/route settings and local/remote isolation need explicit consumer assertions. Phase05/10 owners are provisional; GT1-01-07 must add bounded owner task coverage if current wording cannot cover these files. Grok uses generic creation; verify duplicated profile/effort, custom executable availability and no fallback provider. No separate agent-template registry was found in bounded symbol search; prompt templates are a distinct surface. GT1-01-07 must reconcile task scope for AgentCreationDialog coverage. Grok native child-process route exists; ACP consumer wiring and automation outcomes are not yet proven. Flag is not a deferred-spawn integration proof; Grok interactive PTY is not wired and need not be conflated with headless parity. Audit real CLI route settlement and usage, not just parsing-format flag.",
-				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run; builds pass; nativePackaging not-run. Parity against the comparator baseline: CLI create/update/settings/send and library host match; built CLI and dist/maestro-lib carry Grok; list-sessions native disk listing is Claude-only for every non-Claude provider (parity with Codex); native package smoke not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-11E, GT1-11-07, GT1-11-12, GT1-11-10, GT1-12-06 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12451,7 +12563,9 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase08DeterministicEvidenceRef": "phase08-verification",
-				"phase08ReconciliationRef": "phase08-reconciliation"
+				"phase08ReconciliationRef": "phase08-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12492,6 +12606,13 @@
 					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P38"],
 					"evidenceRef": "phase07-verification"
+				},
+				{
+					"id": "grok-native-package-smoke-not-run",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Five non-publishing builds carry Grok (GT1-10-15); no packaged asar, signed installer, live desktop startup or Windows/Linux build was inspected. Needs a per-platform package smoke (GT1-11-10, GT1-12-06).",
+					"affectedRows": ["S25", "P38"],
+					"evidenceRef": "phase10-reconciliation"
 				}
 			],
 			"phase": "10",
@@ -12629,7 +12750,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Owned ACP JSON prompt-file delivery, host-local materialization/cleanup, consumer handoffs including tab naming, and first-turn system embedding/resume skipping have scoped deterministic evidence. Raw prompt stdin and native append/rules are disabled. Exact-binary text/system behavior, real SSH cleanup, Linux-only skipped shell cases and Windows permissions remain unqualified. Template/command integration remains GT1-05-05/06/06A/06B/13/14; utility retries remain GT1-08-14E/14F/21; native/platform qualification remains phase10/11."
+				"Owned ACP JSON prompt-file delivery, host-local materialization/cleanup, consumer handoffs including tab naming, and first-turn system embedding/resume skipping have scoped deterministic evidence. Raw prompt stdin and native append/rules are disabled. Exact-binary text/system behavior, real SSH cleanup, Linux-only skipped shell cases and Windows permissions remain unqualified. Template/command integration remains GT1-05-05/06/06A/06B/13/14; utility retries remain GT1-08-14E/14F/21; native/platform qualification remains phase10/11.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups launch pass 276/276; nativePlatformLaunch not-run; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158. Parity against the comparator baseline: fake-platform plans match Claude Code and Codex on quoting, Unicode, long input, env unsets and SSH; native Windows/macOS/Linux and SSH process smokes not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11A, GT1-11-10, GT1-11-07, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12639,7 +12761,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12673,6 +12797,13 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["P39"]
+				},
+				{
+					"id": "grok-native-windows-ssh-launch-not-run",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Launch plans pass on fake POSIX, Windows/cmd.exe and SSH hosts (launch group); a real grok.exe/.cmd launch with spaces and % in paths, a native SSH prompt-file upload with remote --cwd, remote image and cleanup on cancel are not-run (GT1-11-10, GT1-11-11A).",
+					"affectedRows": ["P39", "P02", "P03", "REG-DISCOVERY"],
+					"evidenceRef": "phase10-reconciliation"
 				}
 			],
 			"phase": "10",
@@ -12915,7 +13046,8 @@
 			},
 			"limitations": [
 				"Phase03/04 fixtures preserve exact decimal ticks, unknown/partial cost, per-model identity, separate cache buckets and once-only turn/session totals. Phase04 selected-account disk reads, accessors, dashboard, CLI/export and Cue consumers pass deterministic regressions. Unknown Grok models never borrow unrelated prices. Real billing, running-child completeness, live/disk agreement and broader ACP/SSH consumer propagation remain phase07/10/11 qualification; managed account-path wiring remains phase09.",
-				"Quota has no Grok provider/view entry; absent quota stays unknown, never zero/unlimited or budget certification. Conservative error/retry fixtures do not prove all real consumer recovery paths. Broader streaming burst/memory bounds, listener cleanup, persistence privacy and cancellation workload evidence remain with later phases."
+				"Quota has no Grok provider/view entry; absent quota stays unknown, never zero/unlimited or budget certification. Conservative error/retry fixtures do not prove all real consumer recovery paths. Broader streaming burst/memory bounds, listener cleanup, persistence privacy and cancellation workload evidence remain with later phases.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; quota pass 21/21; nativeQuota unsupported; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; recordings pass 37/37; performance pass 21/21; retry pass 158/158; launch pass 276/276; nativePlatformLaunch not-run. Parity against the comparator baseline: bounded buffers, lazy history, concurrency and dashboards verified deterministically; performance measured without wall-clock thresholds. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-11F, GT1-11-07, GT1-11-11A, GT1-11-10 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12938,7 +13070,9 @@
 				"phase04DashboardAccountTestsEvidenceRef": "phase04-dashboard-account-tests",
 				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests",
 				"phase04EvidenceRef": "phase04-reconciliation",
-				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12983,7 +13117,7 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
+					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established. GT1-10-16: phase 10 consumers now pass at HEAD (accessor, Cue accessor, legend, Agent Runs, global stats, About and share image); Grok cost reads partial or unknown, never complete, until a verified cross-file snapshot exists; real billing and live/disk convergence remain GT1-11-11F.",
 					"affectedRows": ["P40"],
 					"evidenceRef": "phase04-reconciliation"
 				}
@@ -15508,7 +15642,8 @@
 			},
 			"limitations": [
 				"Exact tick precision, partial/unreported cost and stream/final/disk reconciliation still require qualification.",
-				"Current phase04 evidence: selected account discovery, lifetime/child accounting, dashboard, CLI/export and Cue consumers pass deterministic regression checks; historical phase03 limitations above are superseded only for these tested boundaries. Live billing/child completeness, managed account paths and broader route qualification remain pending."
+				"Current phase04 evidence: selected account discovery, lifetime/child accounting, dashboard, CLI/export and Cue consumers pass deterministic regression checks; historical phase03 limitations above are superseded only for these tested boundaries. Live billing/child completeness, managed account paths and broader route qualification remain pending.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: cost tracked as exact ticks or partial/unknown with coverage; never priced from tokens for Grok; Claude reports, Codex estimates. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -15545,7 +15680,9 @@
 				"phase04DashboardAccountTestsEvidenceRef": "phase04-dashboard-account-tests",
 				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests",
 				"phase04EvidenceRef": "phase04-reconciliation",
-				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -15605,7 +15742,7 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
+					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established. GT1-10-16: phase 10 consumers now pass at HEAD (accessor, Cue accessor, legend, Agent Runs, global stats, About and share image); Grok cost reads partial or unknown, never complete, until a verified cross-file snapshot exists; real billing and live/disk convergence remain GT1-11-11F.",
 					"affectedRows": ["C-supportsCostTracking"],
 					"evidenceRef": "phase04-reconciliation"
 				}
@@ -15744,7 +15881,8 @@
 			},
 			"limitations": [
 				"Shared native uncached-input and ACP full-input buckets, cache/model scopes and child non-additivity pass GT1-03-13E fixtures; persistence, UI, native lifetime reconciliation and real-provider agreement remain unqualified.",
-				"Current phase04 evidence: selected account discovery, lifetime/child accounting, dashboard, CLI/export and Cue consumers pass deterministic regression checks; historical phase03 limitations above are superseded only for these tested boundaries. Live billing/child completeness, managed account paths and broader route qualification remain pending."
+				"Current phase04 evidence: selected account discovery, lifetime/child accounting, dashboard, CLI/export and Cue consumers pass deterministic regression checks; historical phase03 limitations above are superseded only for these tested boundaries. Live billing/child completeness, managed account paths and broader route qualification remain pending.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: usage stats reach accessor, Cue accessor, legend, Agent Runs, global stats and About through the same accessors as the comparators. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -15781,7 +15919,9 @@
 				"phase04DashboardAccountTestsEvidenceRef": "phase04-dashboard-account-tests",
 				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests",
 				"phase04EvidenceRef": "phase04-reconciliation",
-				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -15841,7 +15981,7 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
+					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established. GT1-10-16: phase 10 consumers now pass at HEAD (accessor, Cue accessor, legend, Agent Runs, global stats, About and share image); Grok cost reads partial or unknown, never complete, until a verified cross-file snapshot exists; real billing and live/disk convergence remain GT1-11-11F.",
 					"affectedRows": ["C-supportsUsageStats"],
 					"evidenceRef": "phase04-reconciliation"
 				}
@@ -15924,7 +16064,8 @@
 			},
 			"limitations": [
 				"Grok native child-process route exists; ACP consumer wiring and automation outcomes are not yet proven.",
-				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: batch/headless consumers settle Grok questions and errors without an interactive stall. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11E, GT1-11-07, GT1-11-11C, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -15939,7 +16080,9 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase08DeterministicEvidenceRef": "phase08-verification",
-				"phase08ReconciliationRef": "phase08-reconciliation"
+				"phase08ReconciliationRef": "phase08-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16055,7 +16198,8 @@
 			},
 			"limitations": [
 				"Flag is not a deferred-spawn integration proof; Grok interactive PTY is not wired and need not be conflated with headless parity.",
-				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11 linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11 linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: CLI send and web send carry the first prompt through the shared delivery (file route, no stdin). Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-07, GT1-11-11C, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -16070,7 +16214,9 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase08DeterministicEvidenceRef": "phase08-verification",
-				"phase08ReconciliationRef": "phase08-reconciliation"
+				"phase08ReconciliationRef": "phase08-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17596,7 +17742,8 @@
 			},
 			"limitations": [
 				"Audit real CLI route settlement and usage, not just parsing-format flag.",
-				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11 linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11 linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: synthetic stream through the real GrokOutputParser in recordings: answer once, linear in events. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-07, GT1-11-11C, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -17611,7 +17758,9 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase08DeterministicEvidenceRef": "phase08-verification",
-				"phase08ReconciliationRef": "phase08-reconciliation"
+				"phase08ReconciliationRef": "phase08-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17727,7 +17876,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok uses false conservatively; ACP/native accounting needs verified semantics and agreement with static set."
+				"Grok uses false conservatively; ACP/native accounting needs verified semantics and agreement with static set.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: context window rows unchanged by phase 10; usage accessors keep input/cache buckets disjoint. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -17738,7 +17888,9 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19202,7 +19354,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Phase03/04 fixtures preserve exact decimal ticks, unknown/partial cost, per-model identity, separate cache buckets and once-only turn/session totals. Phase04 selected-account disk reads, accessors, dashboard, CLI/export and Cue consumers pass deterministic regressions. Unknown Grok models never borrow unrelated prices. Real billing, running-child completeness, live/disk agreement and broader ACP/SSH consumer propagation remain phase07/10/11 qualification; managed account-path wiring remains phase09."
+				"Phase03/04 fixtures preserve exact decimal ticks, unknown/partial cost, per-model identity, separate cache buckets and once-only turn/session totals. Phase04 selected-account disk reads, accessors, dashboard, CLI/export and Cue consumers pass deterministic regressions. Unknown Grok models never borrow unrelated prices. Real billing, running-child completeness, live/disk agreement and broader ACP/SSH consumer propagation remain phase07/10/11 qualification; managed account-path wiring remains phase09.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: usage normalization registered through the shared accessors and stats cache contract; no Grok pricing table. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -19239,7 +19392,9 @@
 				"phase04DashboardAccountTestsEvidenceRef": "phase04-dashboard-account-tests",
 				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests",
 				"phase04EvidenceRef": "phase04-reconciliation",
-				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19299,7 +19454,7 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
+					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established. GT1-10-16: phase 10 consumers now pass at HEAD (accessor, Cue accessor, legend, Agent Runs, global stats, About and share image); Grok cost reads partial or unknown, never complete, until a verified cross-file snapshot exists; real billing and live/disk convergence remain GT1-11-11F.",
 					"affectedRows": ["REG-USAGE"],
 					"evidenceRef": "phase04-reconciliation"
 				}
@@ -19848,7 +20003,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok quota is absent. Contract permits native quota unavailability, but requires truthful unavailable/unknown display and no invented unlimited/zero balances; absence is not cost-budget correctness. No endpoint or quota probe was run."
+				"Grok quota is absent. Contract permits native quota unavailability, but requires truthful unavailable/unknown display and no invented unlimited/zero balances; absence is not cost-budget correctness. No endpoint or quota probe was run.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups quota pass 21/21; nativeQuota unsupported; launch pass 276/276; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: unavailable quota presentation passes (no tab, no HTTP call, no zero/unlimited inference); Claude Code and Codex have native quota views; native Grok quota unsupported, optional per the contract. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-10, GT1-11-11A, GT1-11-07 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -19857,7 +20013,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19891,6 +20049,13 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["REG-QUOTA"]
+				},
+				{
+					"id": "grok-native-quota-unavailable",
+					"code": "unsupported-capability",
+					"missingPrerequisite": "No qualified native Grok account quota endpoint exists (01.md B25/B43, GT1-10-10). Unavailable presentation passes (quota group). Distinct from usage/cost support; does not certify budget enforcement. A quota adapter is gated on evidence of a documented endpoint and its auth (GT1-11-11F).",
+					"affectedRows": ["S27", "REG-QUOTA"],
+					"evidenceRef": "phase10-reconciliation"
 				}
 			],
 			"branchAuditRefs": ["B25", "B43"]
@@ -20014,7 +20179,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok identity already exists. Official-versus-community identity, unsupported versions, selected-account snapshots, SSH/platform isolation and exact candidate binary/source relationship are unqualified."
+				"Grok identity already exists. Official-versus-community identity, unsupported versions, selected-account snapshots, SSH/platform isolation and exact candidate binary/source relationship are unqualified.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups launch pass 276/276; nativePlatformLaunch not-run; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158. Parity against the comparator baseline: launch-plan registration matches; native executable discovery not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11A, GT1-11-10, GT1-11-07, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20026,7 +20192,9 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20081,6 +20249,13 @@
 					"missingPrerequisite": "Acknowledged model/effort, detached observations, receipt identity/generation checks and typed selected-context IPC pass GT1-03-13E. No production grokAcpObservation supplier exists. GT1-07-01 and phase10 must wire/invalidate owned receipts; remote/managed discovery, exact binary and native policy qualification remain not-run.",
 					"affectedRows": ["P03", "P06", "REG-MODEL", "REG-DISCOVERY"],
 					"evidenceRef": "phase03-reconciliation"
+				},
+				{
+					"id": "grok-native-windows-ssh-launch-not-run",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Launch plans pass on fake POSIX, Windows/cmd.exe and SSH hosts (launch group); a real grok.exe/.cmd launch with spaces and % in paths, a native SSH prompt-file upload with remote --cwd, remote image and cleanup on cancel are not-run (GT1-11-10, GT1-11-11A).",
+					"affectedRows": ["P39", "P02", "P03", "REG-DISCOVERY"],
+					"evidenceRef": "phase10-reconciliation"
 				}
 			],
 			"branchAuditRefs": ["B05", "B36"]
@@ -22918,7 +23093,8 @@
 			},
 			"limitations": [
 				"Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work.",
-				"GT1-07-11 verification: Permission prompts reach the standalone consent port; questions surface as a capability gap; empty plan snapshots clear. Cue assist on a Grok standard tab is refused consent-port. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-07-11 verification: Permission prompts reach the standalone consent port; questions surface as a capability gap; empty plan snapshots clear. Cue assist on a Grok standard tab is refused consent-port. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups interaction pass 137/137; cli pass 81/81; web pass 427/427; liteNative not-run. Parity against the comparator baseline: plans and approvals match through existing UI and relay; gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-12, GT1-11-14C, GT1-11-07, GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22935,7 +23111,9 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase07DeterministicEvidenceRef": "phase07-verification",
-				"phase07ReconciliationRef": "phase07-reconciliation"
+				"phase07ReconciliationRef": "phase07-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23158,7 +23336,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok included in canonical validation, but per-tab streaming/permissions/images/reconnect/auth and native Lite consumers need dedicated evidence."
+				"Grok included in canonical validation, but per-tab streaming/permissions/images/reconnect/auth and native Lite consumers need dedicated evidence.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups web pass 427/427; interaction pass 137/137; cli pass 81/81; liteNative not-run. Parity against the comparator baseline: browser desktop and web-desktop routes match the desktop through the same admitted handlers (per-tab native id, socket-bound account, managed hold); Lite native host not-run; send dedupe is the busy guard for every provider. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-07, GT1-11-12, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23167,7 +23346,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23201,6 +23382,13 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S24"]
+				},
+				{
+					"id": "lite-native-host-display-locked",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "npm run test:lite-native needs npm run build:main and an unlocked macOS display (CGSSessionScreenIsLocked false) for capturePage; GT1-10-05 recorded the host prerequisite apart from assertions. Rerun in GT1-11-07 or GT1-11-11 on an unlocked host.",
+					"affectedRows": ["S24", "P37"],
+					"evidenceRef": "phase10-reconciliation"
 				}
 			],
 			"branchAuditRefs": ["B28"]
@@ -23264,7 +23452,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok native path exists; CLI help/creation and full send/queue/stop/profile settings require registry and real bridge checks; no portable Electron coupling allowed."
+				"Grok native path exists; CLI help/creation and full send/queue/stop/profile settings require registry and real bridge checks; no portable Electron coupling allowed.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run; builds pass; nativePackaging not-run. Parity against the comparator baseline: CLI and library host match through canonical handlers with JSON errors and managed refusal; built artifacts carry Grok; packaged-app proof not-run; generated CLI reference left to Phase 12. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-07, GT1-11-11C, GT1-11-12, GT1-11-10, GT1-12-06 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23273,7 +23462,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23307,6 +23498,13 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S25"]
+				},
+				{
+					"id": "grok-native-package-smoke-not-run",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Five non-publishing builds carry Grok (GT1-10-15); no packaged asar, signed installer, live desktop startup or Windows/Linux build was inspected. Needs a per-platform package smoke (GT1-11-10, GT1-12-06).",
+					"affectedRows": ["S25", "P38"],
+					"evidenceRef": "phase10-reconciliation"
 				}
 			],
 			"branchAuditRefs": ["B04", "B05", "B13"]
@@ -23388,7 +23586,8 @@
 			},
 			"limitations": [
 				"Phase04 accessors now retain partial/unknown completeness instead of declaring Grok full coverage unconditionally. Reconcile partial/unknown cost, cache, child totals, profiles and rate-limit accounting against normalized evidence.",
-				"Current phase04 evidence: selected account discovery, lifetime/child accounting, dashboard, CLI/export and Cue consumers pass deterministic regression checks; historical phase03 limitations above are superseded only for these tested boundaries. Live billing/child completeness, managed account paths and broader route qualification remain pending."
+				"Current phase04 evidence: selected account discovery, lifetime/child accounting, dashboard, CLI/export and Cue consumers pass deterministic regression checks; historical phase03 limitations above are superseded only for these tested boundaries. Live billing/child completeness, managed account paths and broader route qualification remain pending.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; storedHistory pass 441/441; aboutShare pass 66/66; launch pass 276/276; agentRuns pass 139/139; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: dashboard and Cue attribution match; unknown Grok spend never shown as zero; tokens never rendered as money. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-11A, GT1-11-10 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23405,7 +23604,9 @@
 				"phase04DashboardAccountTestsEvidenceRef": "phase04-dashboard-account-tests",
 				"phase04CliExportTestsEvidenceRef": "phase04-cli-export-tests",
 				"phase04EvidenceRef": "phase04-reconciliation",
-				"phase04DeterministicEvidenceRef": "phase04-selected-verification"
+				"phase04DeterministicEvidenceRef": "phase04-selected-verification",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23443,7 +23644,7 @@
 				{
 					"id": "grok-usage-consumer-continuations-pending",
 					"code": "remaining-consumer-or-native-qualification-pending",
-					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established.",
+					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established. GT1-10-16: phase 10 consumers now pass at HEAD (accessor, Cue accessor, legend, Agent Runs, global stats, About and share image); Grok cost reads partial or unknown, never complete, until a verified cross-file snapshot exists; real billing and live/disk convergence remain GT1-11-11F.",
 					"affectedRows": ["S26"],
 					"evidenceRef": "phase04-reconciliation"
 				}
@@ -23504,7 +23705,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok has no quota provider/view entry; native quota absence may remain unavailable, but unknown cannot mean zero/unlimited or certify budget enforcement."
+				"Grok has no quota provider/view entry; native quota absence may remain unavailable, but unknown cannot mean zero/unlimited or certify budget enforcement.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups quota pass 21/21; nativeQuota unsupported; retry pass 158/158; launch pass 276/276; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; nativePlatformLaunch not-run. Parity against the comparator baseline: unavailable quota presentation passes and stays distinct from usage/cost support; native Grok quota endpoint unqualified, so no balance, budget or reset time is shown. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23513,7 +23715,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23547,6 +23751,13 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S27"]
+				},
+				{
+					"id": "grok-native-quota-unavailable",
+					"code": "unsupported-capability",
+					"missingPrerequisite": "No qualified native Grok account quota endpoint exists (01.md B25/B43, GT1-10-10). Unavailable presentation passes (quota group). Distinct from usage/cost support; does not certify budget enforcement. A quota adapter is gated on evidence of a documented endpoint and its auth (GT1-11-11F).",
+					"affectedRows": ["S27", "REG-QUOTA"],
+					"evidenceRef": "phase10-reconciliation"
 				}
 			],
 			"branchAuditRefs": ["B25", "B43"]
@@ -23613,7 +23824,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"startTurn comments explicitly say buffering is unlimited absent options. Grok burst streams, listener cleanup, persistence privacy and cancellation require bounded workload evidence."
+				"startTurn comments explicitly say buffering is unlimited absent options. Grok burst streams, listener cleanup, persistence privacy and cancellation require bounded workload evidence.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups recordings pass 37/37; performance pass 21/21. Parity against the comparator baseline: retained output bounded after exit; one frame and one commit per round; cancellation synchronous. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23626,7 +23838,9 @@
 				"phase03AcpTurnEvidenceRef": "phase03-acp-turn-composition",
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23722,7 +23936,8 @@
 			},
 			"limitations": [
 				"Grok reaches provider-neutral builder, but account/model/effort/route settings and local/remote isolation need explicit consumer assertions. Phase05/10 owners are provisional; GT1-01-07 must add bounded owner task coverage if current wording cannot cover these files.",
-				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: worktree creation through the provider-generic CLI/desktop path; phase 05 owns inherited configuration. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23736,7 +23951,9 @@
 				"phase05WorktreeTestsEvidenceRef": "phase05-worktree-tests",
 				"phase05WorktreeLaunchTestsEvidenceRef": "phase05-worktree-launch-tests",
 				"phase05DeterministicEvidenceRef": "phase05-reverification",
-				"phase05ReconciliationRef": "phase05-reconciliation"
+				"phase05ReconciliationRef": "phase05-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23832,7 +24049,8 @@
 			},
 			"limitations": [
 				"Grok uses generic creation; verify duplicated profile/effort, custom executable availability and no fallback provider. No separate agent-template registry was found in bounded symbol search; prompt templates are a distinct surface. GT1-01-07 must reconcile task scope for AgentCreationDialog coverage.",
-				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: create-agent accepts grok with model/effort/env/background and refuses aliases before the bridge; duplicate creation owned by phase 05. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23847,7 +24065,9 @@
 				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests",
 				"phase05CreationConsumerTestsEvidenceRef": "phase05-creation-consumer-tests",
 				"phase05DeterministicEvidenceRef": "phase05-reverification",
-				"phase05ReconciliationRef": "phase05-reconciliation"
+				"phase05ReconciliationRef": "phase05-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -24141,7 +24361,8 @@
 			},
 			"limitations": [
 				"Verify installed/unavailable states and all picker surfaces, not merely registry membership.",
-				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: CREATE_AGENT_TYPES derives from AGENT_IDS minus terminal, so the CLI list cannot drift from the picker registry. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-07, GT1-11-11C, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -24159,7 +24380,9 @@
 				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation",
 				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests",
 				"phase05DeterministicEvidenceRef": "phase05-reverification",
-				"phase05ReconciliationRef": "phase05-reconciliation"
+				"phase05ReconciliationRef": "phase05-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -24299,7 +24522,8 @@
 			"limitations": [
 				"Grok label claims no writes despite route-specific containment unqualified.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
-				"GT1-08-21 verification: phase 08 packets utilityGrooming, directorNotesAndGrooming; verdicts GT1-08-21 grooming pass; GT1-08-21 director-notes pass. Parity against the comparator baseline: required no tools unsupported (gap); read-only fallback deterministic. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets utilityGrooming, directorNotesAndGrooming; verdicts GT1-08-21 grooming pass; GT1-08-21 director-notes pass. Parity against the comparator baseline: required no tools unsupported (gap); read-only fallback deterministic. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: Claude/Codex-only CLI flags refused on a grok agent as JSON; read-only label and required no-tools gap retained (grok-required-no-tools-unsupported). Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-12, GT1-11-07, GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -24324,7 +24548,9 @@
 				"phase05DeterministicEvidenceRef": "phase05-reverification",
 				"phase05ReconciliationRef": "phase05-reconciliation",
 				"phase08DeterministicEvidenceRef": "phase08-verification",
-				"phase08ReconciliationRef": "phase08-reconciliation"
+				"phase08ReconciliationRef": "phase08-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -24454,7 +24680,8 @@
 			"limitations": [
 				"Intentional preference differs from support; moderation backend still rejects Grok.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
-				"GT1-08-21 verification: phase 08 packets groupChat, symphony, pianolaLearning, pianolaDispatch, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-21 symphony pass; GT1-08-21 transcript learning pass; GT1-08-21 dispatch (20) pass; GT1-08-21 orchestrate CLI and standalone supervisor (20A) pass; GT1-08-12 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets groupChat, symphony, pianolaLearning, pianolaDispatch, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-21 symphony pass; GT1-08-21 transcript learning pass; GT1-08-21 dispatch (20) pass; GT1-08-21 orchestrate CLI and standalone supervisor (20A) pass; GT1-08-12 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: autoselect order unchanged; CLI exposes grok without reordering providers. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11E, GT1-11-07, GT1-11-11C, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -24470,7 +24697,9 @@
 				"phase05DeterministicEvidenceRef": "phase05-reverification",
 				"phase05ReconciliationRef": "phase05-reconciliation",
 				"phase08DeterministicEvidenceRef": "phase08-verification",
-				"phase08ReconciliationRef": "phase08-reconciliation"
+				"phase08ReconciliationRef": "phase08-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -24612,7 +24841,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok OAuth/API-key/gateway distinctions and remote login must be qualified."
+				"Grok OAuth/API-key/gateway distinctions and remote login must be qualified.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups launch pass 276/276; nativePlatformLaunch not-run; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158. Parity against the comparator baseline: login command registry unchanged by phase 10; launch plans never carry credentials; native login guidance stays phase 11. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11A, GT1-11-10, GT1-11-07, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -24625,7 +24855,9 @@
 				"observation": "Existing provider login registry is reused. Grok login is credential-gated; SSH uses login --device-auth with the selected custom executable and host. API-key/gateway/inline contexts suppress misleading login repair; actual auth remains not-run.",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -24805,7 +25037,8 @@
 			"limitations": [
 				"Grok context must follow selected model/account/route, not stale fallback or inconsistent combined flag/set.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
-				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; cli pass 81/81; quota pass 21/21; nativeQuota unsupported; recordings pass 37/37; performance pass 21/21; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; retry pass 158/158; nativePlatformLaunch not-run; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: context window constants unchanged by phase 10; usage and stream consumers verified. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-11C, GT1-11-10, GT1-11-11A, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -24826,7 +25059,9 @@
 				"phase05DeterministicEvidenceRef": "phase05-reverification",
 				"phase05ReconciliationRef": "phase05-reconciliation",
 				"phase08DeterministicEvidenceRef": "phase08-verification",
-				"phase08ReconciliationRef": "phase08-reconciliation"
+				"phase08ReconciliationRef": "phase08-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -24983,7 +25218,8 @@
 			},
 			"limitations": [
 				"Shared defaults do not prove Grok document-mode selection or quota retry correctness.",
-				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; usage pass 91/91; quota pass 21/21; nativeQuota unsupported; recordings pass 37/37; performance pass 21/21; retry pass 158/158; web pass 427/427; interaction pass 137/137; liteNative not-run; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; nativePlatformLaunch not-run. Parity against the comparator baseline: threshold constants unchanged by phase 10; retry surfaces unknown Grok resets without the Claude-only estimator. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11E, GT1-11-11F, GT1-11-07, GT1-11-11C, GT1-11-12, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -25001,7 +25237,9 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase08DeterministicEvidenceRef": "phase08-verification",
-				"phase08ReconciliationRef": "phase08-reconciliation"
+				"phase08ReconciliationRef": "phase08-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -25257,7 +25495,8 @@
 			},
 			"limitations": [
 				"Grok now has promptFileArgs and an explicit ACP JSON file plan; noToolsArgs and additionalDirArgs remain absent. Historical argv/read-only/model flags require exact-version and route evidence.",
-				"GT1-08-21 verification: phase 08 packets autoRun, utilityGrooming, utilityEffortRetry, directorNotesAndGrooming; verdicts GT1-08-07 pass; GT1-08-21 grooming pass; GT1-08-21 tab naming (14F) pass; GT1-08-21 headless Auto Run retry (14F) pass; GT1-08-21 director-notes pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets autoRun, utilityGrooming, utilityEffortRetry, directorNotesAndGrooming; verdicts GT1-08-07 pass; GT1-08-21 grooming pass; GT1-08-21 tab naming (14F) pass; GT1-08-21 headless Auto Run retry (14F) pass; GT1-08-21 director-notes pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups launch pass 276/276; nativePlatformLaunch not-run; cli pass 81/81; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: argument builders verified through generated plans and CLI routing; effort retry gap retained. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-12, GT1-11-10, GT1-11-11A, GT1-11-07, GT1-11-11, GT1-11-11C, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -25275,7 +25514,9 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase08DeterministicEvidenceRef": "phase08-verification",
-				"phase08ReconciliationRef": "phase08-reconciliation"
+				"phase08ReconciliationRef": "phase08-reconciliation",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -26460,7 +26701,8 @@
 			},
 			"limitations": [
 				"KNOWN_AGENT_RUN_PROVIDERS includes Claude/Codex but omits Grok and Antigravity; resolveAgentRunProvider returns unknown for both, losing actual provider identity in desktop and CLI capture. The fixed-point test derives its cases from the incomplete list and cannot discover missing AGENT_IDS.",
-				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim."
+				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; agentRuns pass 139/139; launch pass 276/276; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: Agent Runs capture and filter Grok as grok on desktop and CLI, derived from AGENT_IDS like every registered agent. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-07, GT1-11-11F, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -26469,7 +26711,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "branchAudit.sourceCommit",
-				"evidenceRef": "phase01-branches"
+				"evidenceRef": "phase01-branches",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -26491,6 +26735,13 @@
 					"code": "implementation-or-evidence-pending",
 					"missingPrerequisite": "KNOWN_AGENT_RUN_PROVIDERS includes Claude/Codex but omits Grok and Antigravity; resolveAgentRunProvider returns unknown for both, losing actual provider identity in desktop and CLI capture. The fixed-point test derives its cases from the incomplete list and cannot discover missing AGENT_IDS.",
 					"affectedRows": ["S32"]
+				},
+				{
+					"id": "grok-phase10-native-consumer-trace-not-run",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Agent Runs capture and stored-history aggregation pass on isolated fixtures only (agentRuns, storedHistory, aboutShare groups); a real Grok run and a real account history scan through these consumers are not-run (GT1-11-07, GT1-11-11F).",
+					"affectedRows": ["S32", "S37"],
+					"evidenceRef": "phase10-reconciliation"
 				}
 			],
 			"ownerScopeReview": {
@@ -27010,7 +27261,8 @@
 			},
 			"limitations": [
 				"agentSessions:getGlobalStats is labeled All Providers but discovers and aggregates only Claude/Codex stores. Grok history registration and the Cost & Tokens collector do not enter this distinct pipeline. Consequently About, usage-header/share and achievement totals omit Grok; Antigravity is omitted too. This warrants a separate outcome or explicit S26 expansion.",
-				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim."
+				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim.",
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; storedHistory pass 441/441; aboutShare pass 66/66; launch pass 276/276; agentRuns pass 139/139; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: lifetime global stats, About and share image include Grok local pools with honest partial/unknown cost; SSH-remote history not scanned for any provider. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-07, GT1-11-11F, GT1-11-11A, GT1-11-10 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -27019,7 +27271,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "branchAudit.sourceCommit",
-				"evidenceRef": "phase01-branches"
+				"evidenceRef": "phase01-branches",
+				"phase10DeterministicEvidenceRef": "phase10-verification",
+				"phase10ReconciliationRef": "phase10-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -27041,6 +27295,13 @@
 					"code": "implementation-or-evidence-pending",
 					"missingPrerequisite": "agentSessions:getGlobalStats is labeled All Providers but discovers and aggregates only Claude/Codex stores. Grok history registration and the Cost & Tokens collector do not enter this distinct pipeline. Consequently About, usage-header/share and achievement totals omit Grok; Antigravity is omitted too. This warrants a separate outcome or explicit S26 expansion.",
 					"affectedRows": ["S37"]
+				},
+				{
+					"id": "grok-phase10-native-consumer-trace-not-run",
+					"code": "qualification-not-run",
+					"missingPrerequisite": "Agent Runs capture and stored-history aggregation pass on isolated fixtures only (agentRuns, storedHistory, aboutShare groups); a real Grok run and a real account history scan through these consumers are not-run (GT1-11-07, GT1-11-11F).",
+					"affectedRows": ["S32", "S37"],
+					"evidenceRef": "phase10-reconciliation"
 				}
 			],
 			"ownerScopeReview": {
@@ -30722,6 +30983,515 @@
 				"rows": "all phase 08 rows",
 				"owner": ["run-state liveBoundary"],
 				"detail": "liveBoundary.enabled is false: no isolated account, endpoint, budget or SSH target is authorized. Phase 11 live cases stay not-run; this VERIFY does not wait for them."
+			}
+		],
+		"imagesAnalyzed": 0
+	},
+	"phase10Reconciliation": {
+		"taskId": "GT1-10-16",
+		"recordedAt": "2026-11-01",
+		"sourceCommit": "d99faa7240f817ff7c5f1641fa11ee176435c913",
+		"evidenceRef": "phase10-reconciliation",
+		"baseObservation": {
+			"ref": "feature/mega-maestro-v1.1.0-rc",
+			"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
+			"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+			"aheadBehind": [476, 10],
+			"baseIsAncestorOfSource": false,
+			"sourceIsAncestorOfBase": false
+		},
+		"runner": {
+			"vitest": "4.1.11",
+			"node": "v26.13.0",
+			"reporter": "json",
+			"liveCalls": 0,
+			"network": false,
+			"credentials": false,
+			"driver": "Working/gt1-10-16/run.mjs"
+		},
+		"phase10Deterministic": "pass",
+		"nativeQualification": "not-run",
+		"nativeCertification": false,
+		"productAcceptance": "not-run",
+		"consumers": {
+			"cli": "pass",
+			"web": "pass",
+			"interaction": "pass",
+			"launch": "pass",
+			"usage": "pass",
+			"agentRuns": "pass",
+			"storedHistory": "pass",
+			"aboutShare": "pass",
+			"quota": "pass",
+			"retry": "pass",
+			"recordings": "pass",
+			"performance": "pass",
+			"builds": "pass",
+			"liteNative": "not-run",
+			"nativePlatformLaunch": "not-run",
+			"nativePackaging": "not-run",
+			"nativeQuota": "unsupported"
+		},
+		"groups": {
+			"cli": {
+				"tasks": ["GT1-10-01", "GT1-10-02"],
+				"verdict": "pass",
+				"files": 3,
+				"passed": 81,
+				"total": 81,
+				"grokCases": "24/24",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/cli/commands/create-agent.test.ts src/__tests__/cli/commands/update-agent.test.ts src/__tests__/cli/commands/settings-agent.test.ts"
+			},
+			"web": {
+				"tasks": ["GT1-10-03", "GT1-10-04"],
+				"verdict": "pass",
+				"files": 3,
+				"passed": 427,
+				"total": 427,
+				"grokCases": "16/16",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/web-server/handlers/messageHandlers.test.ts src/__tests__/main/web-server/callbacks/sessionCallbacks.test.ts src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts"
+			},
+			"interaction": {
+				"tasks": ["GT1-10-04A", "GT1-10-04B"],
+				"verdict": "pass",
+				"files": 2,
+				"passed": 137,
+				"total": 137,
+				"grokCases": "114/114",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts src/__tests__/main/permission-relay/relay-core.test.ts"
+			},
+			"launch": {
+				"tasks": ["GT1-10-06", "GT1-10-07"],
+				"verdict": "pass",
+				"files": 3,
+				"passed": 276,
+				"total": 276,
+				"grokCases": "164/164",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/shared/maestro-lib/launch/prompt-delivery.test.ts src/__tests__/shared/maestro-lib/launch/launch-plan.test.ts src/__tests__/shared/maestro-lib/launch/launch-plan-secrets.test.ts"
+			},
+			"usage": {
+				"tasks": ["GT1-10-08", "GT1-10-09"],
+				"verdict": "pass",
+				"files": 3,
+				"passed": 91,
+				"total": 91,
+				"grokCases": "23/23",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/stats/token-usage/token-usage-accessor.test.ts src/__tests__/main/cue/cue-token-accessor.test.ts src/__tests__/renderer/components/UsageDashboard/TokenStatsLegend.test.tsx"
+			},
+			"agentRuns": {
+				"tasks": ["GT1-10-09A", "GT1-10-09B"],
+				"verdict": "pass",
+				"files": 3,
+				"passed": 139,
+				"total": 139,
+				"grokCases": "57/57",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/shared/agent-run/provider.test.ts src/__tests__/main/agent-run/capture-service.test.ts src/__tests__/cli/services/agent-run-capture.test.ts"
+			},
+			"storedHistory": {
+				"tasks": ["GT1-10-09C", "GT1-10-09D", "GT1-10-09F"],
+				"verdict": "pass",
+				"files": 2,
+				"passed": 441,
+				"total": 441,
+				"grokCases": "390/390",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/ipc/handlers/agentSessions.test.ts src/__tests__/main/utils/statsCache.test.ts"
+			},
+			"aboutShare": {
+				"tasks": ["GT1-10-09E", "GT1-10-09G"],
+				"verdict": "pass",
+				"files": 2,
+				"passed": 66,
+				"total": 66,
+				"grokCases": "14/14",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/renderer/components/AboutModal.test.tsx src/__tests__/renderer/components/AchievementShareButton.test.tsx"
+			},
+			"quota": {
+				"tasks": ["GT1-10-10", "GT1-10-11"],
+				"verdict": "pass",
+				"files": 2,
+				"passed": 21,
+				"total": 21,
+				"grokCases": "10/10",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/renderer/components/UsageDashboard/UsageDashboardModalHooks.test.tsx src/__tests__/renderer/components/UsageDashboard/useQuotaRefresh.test.tsx"
+			},
+			"retry": {
+				"tasks": ["GT1-10-11A"],
+				"verdict": "pass",
+				"files": 2,
+				"passed": 158,
+				"total": 158,
+				"grokCases": "36/36",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/renderer/stores/retryStore.test.ts src/__tests__/renderer/hooks/agent/internal/useAgentErrorListener.test.tsx"
+			},
+			"recordings": {
+				"tasks": ["GT1-10-13", "GT1-10-14"],
+				"verdict": "pass",
+				"files": 1,
+				"passed": 37,
+				"total": 37,
+				"grokCases": "7/7",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/process-manager/recordings/turn-recordings.test.ts"
+			},
+			"performance": {
+				"tasks": ["GT1-10-13", "GT1-10-14"],
+				"verdict": "pass",
+				"files": 1,
+				"passed": 21,
+				"total": 21,
+				"grokCases": "3/3",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json --config vitest.performance.config.mts src/__tests__/performance/ThinkingStreamPerformance.test.tsx"
+			},
+			"builds": {
+				"tasks": ["GT1-10-15"],
+				"verdict": "pass",
+				"sourceCommit": "458447ec524fcbb1c9b276caa46e4015d134bb09"
+			},
+			"liteNative": {
+				"tasks": ["GT1-10-05"],
+				"verdict": "not-run",
+				"blocker": "lite-native-host-display-locked"
+			},
+			"nativePlatformLaunch": {
+				"tasks": ["GT1-10-06", "GT1-10-07", "GT1-10-12"],
+				"verdict": "not-run",
+				"blocker": "grok-native-windows-ssh-launch-not-run"
+			},
+			"nativePackaging": {
+				"tasks": ["GT1-10-15"],
+				"verdict": "not-run",
+				"blocker": "grok-native-package-smoke-not-run"
+			},
+			"nativeQuota": {
+				"tasks": ["GT1-10-10", "GT1-10-11"],
+				"verdict": "unsupported",
+				"blocker": "grok-native-quota-unavailable",
+				"note": "distinct from usage/cost, which pass deterministically (usage, storedHistory, aboutShare)"
+			}
+		},
+		"builds": {
+			"task": "GT1-10-15",
+			"sourceCommit": "458447ec524fcbb1c9b276caa46e4015d134bb09",
+			"recordedBy": "d99faa7240f817ff7c5f1641fa11ee176435c913",
+			"commands": [
+				"npm run build:main",
+				"npm run build:renderer",
+				"npm run build:web-desktop",
+				"npm run build:cli",
+				"npm run build:maestro-lib"
+			],
+			"verdict": "pass",
+			"detail": "five builds exit 0 (macOS, Node v26.13.0); built main, renderer, web-desktop, CLI and dist/maestro-lib carry the Grok parser, storage, ACP spawner, name map and 28 library exports; smoke suites 4 files 40 passed. Only evidence commits since, so current at HEAD."
+		},
+		"totals": {
+			"files": 27,
+			"total": 1895,
+			"passed": 1895,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 858,
+			"grokPassed": 858
+		},
+		"priorVerifications": {
+			"GT1-10-05": {
+				"recordedBy": "f69de7968db66c79dbda4648463edefe81c30250",
+				"sourceCommit": "b846d88fe179974886f3a627b9bc50dabf0f0254",
+				"supersededAtHead": true
+			},
+			"GT1-10-12": {
+				"recordedBy": "239278c878751c6b4829f5e5fd9eadb722a741be",
+				"supersededAtHead": true
+			},
+			"GT1-10-14": {
+				"recordedBy": "458447ec524fcbb1c9b276caa46e4015d134bb09",
+				"supersededAtHead": true,
+				"note": "heap 33 MB / 71 MB, max RSS about 210 MB, linear scaling 400 to 3,200 rounds"
+			},
+			"GT1-10-15": {
+				"recordedBy": "d99faa7240f817ff7c5f1641fa11ee176435c913",
+				"sourceCommit": "458447ec524fcbb1c9b276caa46e4015d134bb09"
+			}
+		},
+		"baselineCoverageCheck": {
+			"rows": 40,
+			"comparatorsComplete": 40,
+			"missingComparators": [],
+			"withVerdictOrBlocker": 40,
+			"uncovered": []
+		},
+		"comparatorParity": {
+			"P02": "deterministic plan match on fake POSIX, Windows and SSH hosts; immutable binary/package evidence and a supported version range need native receipts (GT1-11-10)",
+			"P03": "launch plans match the shared planner the comparators use; native local/custom/PATH/SSH discovery not-run",
+			"P09": "ACP correlation and plan updates pass through real consumers; gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply",
+			"P10": "CLI create/update/send and web send/enqueue/resume match; stop is the shared REST/IPC route; native turn lifecycle qualification not-run",
+			"P11": "token buckets counted once per native lifetime; cache read/creation disjoint; exact/partial/unknown cost kept apart; Grok cost reads partial until a verified cross-file snapshot exists",
+			"P12": "split chunks, cancellation and final usage stable under the synthetic stream; linear frames/bytes",
+			"P16": "resumed cumulative ledgers replace rather than sum; a child whose parent is in the same pool keeps no parent-attributed tokens",
+			"P17": "Grok advertised under stable id grok in CLI create help and pianola learn help; desktop pickers owned by phase 05",
+			"P29": "CLI batch and headless Auto Run turns settle questions explicitly (crashed with AgentError), never stall; effort retry gap retained (grok-effort-validation-and-retry-pending)",
+			"P34": "consent relay answers only the owning request on desktop, web-desktop and Lite bridges; gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply",
+			"P37": "web-desktop create/config/send/queue/resume/history match Electron through the same handlers; Lite native not-run (host display locked); gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply",
+			"P38": "CLI create/update/settings/send and library host match; built CLI and dist/maestro-lib carry Grok; list-sessions native disk listing is Claude-only for every non-Claude provider (parity with Codex); native package smoke not-run",
+			"P39": "fake-platform plans match Claude Code and Codex on quoting, Unicode, long input, env unsets and SSH; native Windows/macOS/Linux and SSH process smokes not-run",
+			"P40": "bounded buffers, lazy history, concurrency and dashboards verified deterministically; performance measured without wall-clock thresholds",
+			"C-supportsCostTracking": "cost tracked as exact ticks or partial/unknown with coverage; never priced from tokens for Grok; Claude reports, Codex estimates",
+			"C-supportsUsageStats": "usage stats reach accessor, Cue accessor, legend, Agent Runs, global stats and About through the same accessors as the comparators",
+			"C-supportsBatchMode": "batch/headless consumers settle Grok questions and errors without an interactive stall",
+			"C-requiresPromptToStart": "CLI send and web send carry the first prompt through the shared delivery (file route, no stdin)",
+			"C-usesJsonLineOutput": "synthetic stream through the real GrokOutputParser in recordings: answer once, linear in events",
+			"C-usesCombinedContextWindow": "context window rows unchanged by phase 10; usage accessors keep input/cache buckets disjoint",
+			"REG-USAGE": "usage normalization registered through the shared accessors and stats cache contract; no Grok pricing table",
+			"REG-QUOTA": "unavailable quota presentation passes (no tab, no HTTP call, no zero/unlimited inference); Claude Code and Codex have native quota views; native Grok quota unsupported, optional per the contract",
+			"REG-DISCOVERY": "launch-plan registration matches; native executable discovery not-run",
+			"S22": "plans and approvals match through existing UI and relay; gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply",
+			"S24": "browser desktop and web-desktop routes match the desktop through the same admitted handlers (per-tab native id, socket-bound account, managed hold); Lite native host not-run; send dedupe is the busy guard for every provider",
+			"S25": "CLI and library host match through canonical handlers with JSON errors and managed refusal; built artifacts carry Grok; packaged-app proof not-run; generated CLI reference left to Phase 12",
+			"S26": "dashboard and Cue attribution match; unknown Grok spend never shown as zero; tokens never rendered as money",
+			"S27": "unavailable quota presentation passes and stays distinct from usage/cost support; native Grok quota endpoint unqualified, so no balance, budget or reset time is shown",
+			"S28": "retained output bounded after exit; one frame and one commit per round; cancellation synchronous",
+			"S29": "worktree creation through the provider-generic CLI/desktop path; phase 05 owns inherited configuration",
+			"S30": "create-agent accepts grok with model/effort/env/background and refuses aliases before the bridge; duplicate creation owned by phase 05",
+			"META-01": "CREATE_AGENT_TYPES derives from AGENT_IDS minus terminal, so the CLI list cannot drift from the picker registry",
+			"META-03": "Claude/Codex-only CLI flags refused on a grok agent as JSON; read-only label and required no-tools gap retained (grok-required-no-tools-unsupported)",
+			"META-04": "autoselect order unchanged; CLI exposes grok without reordering providers",
+			"META-05": "login command registry unchanged by phase 10; launch plans never carry credentials; native login guidance stays phase 11",
+			"META-06": "context window constants unchanged by phase 10; usage and stream consumers verified",
+			"META-07": "threshold constants unchanged by phase 10; retry surfaces unknown Grok resets without the Claude-only estimator",
+			"REG-DEFINITIONS": "argument builders verified through generated plans and CLI routing; effort retry gap retained",
+			"S32": "Agent Runs capture and filter Grok as grok on desktop and CLI, derived from AGENT_IDS like every registered agent",
+			"S37": "lifetime global stats, About and share image include Grok local pools with honest partial/unknown cost; SSH-remote history not scanned for any provider"
+		},
+		"unresolvedRequiredParity": ["S22", "P34", "P37", "P09", "P10"],
+		"nativeCapabilityUnavailable": {
+			"rows": ["S27", "REG-QUOTA"],
+			"blocker": "grok-native-quota-unavailable",
+			"usageCostSupportRows": [
+				"S26",
+				"C-supportsCostTracking",
+				"C-supportsUsageStats",
+				"REG-USAGE"
+			],
+			"note": "quota-native unsupported is not a usage/cost gap and certifies no budget enforcement"
+		},
+		"plannedNotExecuted": {
+			"liteNative": "not-run",
+			"nativeWindows": "not-run",
+			"nativeSsh": "not-run",
+			"nativePackaging": "not-run",
+			"liveGrok": "not-run",
+			"fakePlatformPlans": "pass (generated plans, not process smokes)"
+		},
+		"releaseBlocker": true,
+		"phase11Cases": [
+			"GT1-11-07",
+			"GT1-11-10",
+			"GT1-11-11",
+			"GT1-11-11A",
+			"GT1-11-11C",
+			"GT1-11-11F",
+			"GT1-11-12"
+		],
+		"phase12Owned": [
+			"generated CLI documentation",
+			"screenshots",
+			"beta removal",
+			"release approval claims",
+			"GT1-12-06 final acceptance"
+		],
+		"liveBoundary": {
+			"status": "not-run",
+			"providerCalls": 0,
+			"budgetUsd": 0,
+			"authorizedEndpoints": [],
+			"authorizedSshTargets": []
+		},
+		"promotion": {
+			"grokRemainsBeta": true,
+			"capabilityChanges": false,
+			"wholeRowStatusChanges": false,
+			"applicabilityChanges": false
+		},
+		"blockerUpdates": [
+			{
+				"id": "lite-native-host-display-locked",
+				"taskId": "GT1-10-16",
+				"change": "added",
+				"addedTo": ["S24", "P37"],
+				"evidenceRef": "phase10-reconciliation"
+			},
+			{
+				"id": "grok-native-windows-ssh-launch-not-run",
+				"taskId": "GT1-10-16",
+				"change": "added",
+				"addedTo": ["P39", "P02", "P03", "REG-DISCOVERY"],
+				"evidenceRef": "phase10-reconciliation"
+			},
+			{
+				"id": "grok-native-package-smoke-not-run",
+				"taskId": "GT1-10-16",
+				"change": "added",
+				"addedTo": ["S25", "P38"],
+				"evidenceRef": "phase10-reconciliation"
+			},
+			{
+				"id": "grok-native-quota-unavailable",
+				"taskId": "GT1-10-16",
+				"change": "added",
+				"addedTo": ["S27", "REG-QUOTA"],
+				"evidenceRef": "phase10-reconciliation"
+			},
+			{
+				"id": "grok-phase10-native-consumer-trace-not-run",
+				"taskId": "GT1-10-16",
+				"change": "added",
+				"addedTo": ["S32", "S37"],
+				"evidenceRef": "phase10-reconciliation"
+			},
+			{
+				"id": "grok-usage-consumer-continuations-pending",
+				"taskId": "GT1-10-16",
+				"change": "updated",
+				"note": "phase 10 consumer results appended; blocker kept"
+			}
+		],
+		"remainingDependencies": [
+			{
+				"id": "lite-native-host-display-locked",
+				"kind": "native-qualification",
+				"releaseBlocker": true,
+				"rows": ["S24", "P37"],
+				"detail": "npm run test:lite-native needs npm run build:main and an unlocked macOS display (CGSSessionScreenIsLocked false) for capturePage; GT1-10-05 recorded the host prerequisite apart from assertions. Rerun in GT1-11-07 or GT1-11-11 on an unlocked host."
+			},
+			{
+				"id": "grok-native-windows-ssh-launch-not-run",
+				"kind": "native-qualification",
+				"releaseBlocker": true,
+				"rows": ["P39", "P02", "P03", "REG-DISCOVERY"],
+				"detail": "Launch plans pass on fake POSIX, Windows/cmd.exe and SSH hosts (launch group); a real grok.exe/.cmd launch with spaces and % in paths, a native SSH prompt-file upload with remote --cwd, remote image and cleanup on cancel are not-run (GT1-11-10, GT1-11-11A)."
+			},
+			{
+				"id": "grok-native-package-smoke-not-run",
+				"kind": "native-qualification",
+				"releaseBlocker": true,
+				"rows": ["S25", "P38"],
+				"detail": "Five non-publishing builds carry Grok (GT1-10-15); no packaged asar, signed installer, live desktop startup or Windows/Linux build was inspected. Needs a per-platform package smoke (GT1-11-10, GT1-12-06)."
+			},
+			{
+				"id": "grok-native-quota-unavailable",
+				"kind": "native-capability-unavailable",
+				"releaseBlocker": false,
+				"rows": ["S27", "REG-QUOTA"],
+				"detail": "No qualified native Grok account quota endpoint exists (01.md B25/B43, GT1-10-10). Unavailable presentation passes (quota group). Distinct from usage/cost support; does not certify budget enforcement. A quota adapter is gated on evidence of a documented endpoint and its auth (GT1-11-11F)."
+			},
+			{
+				"id": "grok-phase10-native-consumer-trace-not-run",
+				"kind": "native-qualification",
+				"releaseBlocker": true,
+				"rows": ["S32", "S37"],
+				"detail": "Agent Runs capture and stored-history aggregation pass on isolated fixtures only (agentRuns, storedHistory, aboutShare groups); a real Grok run and a real account history scan through these consumers are not-run (GT1-11-07, GT1-11-11F)."
+			},
+			{
+				"id": "acp-question-negotiation",
+				"kind": "unsupported-capability",
+				"releaseBlocker": true,
+				"rows": ["S22", "P34", "P37", "P09", "P10"],
+				"owner": ["GT1-11-11", "GT1-11-12"],
+				"detail": "Existing phase 07 blocker retained: no advertised ask-back, so no person can answer a Grok question; web/Lite and headless callers keep the unavailable behavior (interaction group)."
+			},
+			{
+				"id": "grok-usage-consumer-continuations-pending",
+				"kind": "native-qualification",
+				"releaseBlocker": true,
+				"rows": [
+					"S26",
+					"P11",
+					"P16",
+					"P40",
+					"C-supportsCostTracking",
+					"C-supportsUsageStats",
+					"REG-USAGE"
+				],
+				"owner": ["GT1-11-11F"],
+				"detail": "Existing blocker updated: phase 10 consumers pass; cross-file native epoch and real billing unqualified."
+			},
+			{
+				"id": "cli-list-sessions-native-disk-listing",
+				"kind": "provider-neutral-limitation",
+				"releaseBlocker": false,
+				"rows": ["S25", "P38"],
+				"owner": ["unscheduled"],
+				"detail": "list-sessions reads native disk sessions for Claude only; Grok, Codex and OpenCode list stored AI tabs."
+			},
+			{
+				"id": "web-send-request-id-dedupe-absent",
+				"kind": "provider-neutral-limitation",
+				"releaseBlocker": false,
+				"rows": ["S24"],
+				"owner": ["unscheduled"],
+				"detail": "Reconnect duplicate send is refused by the busy guard; there is no request-id dedupe for any provider."
+			},
+			{
+				"id": "web-commands-claude-log-label",
+				"kind": "cosmetic-follow-up",
+				"releaseBlocker": false,
+				"rows": ["S24"],
+				"owner": ["unscheduled: messageHandlers/commands.ts"],
+				"detail": "AI-mode commands log \"Claude: <id>\" for every provider (label only)."
+			},
+			{
+				"id": "web-stats-synopsis-default-claude",
+				"kind": "provider-neutral-limitation",
+				"releaseBlocker": false,
+				"rows": ["S24"],
+				"owner": ["unscheduled: messageHandlers/stats.ts"],
+				"detail": "Director Notes synopsis provider defaults to claude-code when the client omits it (a default, not an exclusion)."
+			},
+			{
+				"id": "global-stats-ssh-remote-history-not-scanned",
+				"kind": "provider-neutral-limitation",
+				"releaseBlocker": false,
+				"rows": ["S37"],
+				"owner": ["unscheduled"],
+				"detail": "getGlobalStats scans local pools only, like Claude Code and Codex."
+			},
+			{
+				"id": "preload-global-stats-costcoverage-undeclared",
+				"kind": "typing-follow-up",
+				"releaseBlocker": false,
+				"rows": ["S37"],
+				"owner": ["unscheduled: preload GlobalStatsUpdate, global.d.ts"],
+				"detail": "costCoverage passes at runtime but the inline preload shapes do not declare it (optional, type-checks)."
+			},
+			{
+				"id": "performance-config-preexisting-autorun-failures",
+				"kind": "out-of-scope-regression",
+				"releaseBlocker": false,
+				"rows": [],
+				"owner": ["owner of the performance suites"],
+				"detail": "Full test:performance has 38 pre-existing Auto Run failures (stale imports, lucide mock) unrelated to Grok (GT1-10-14)."
+			},
+			{
+				"id": "generated-cli-reference-phase12",
+				"kind": "delivery",
+				"releaseBlocker": false,
+				"rows": ["S25", "P38"],
+				"owner": ["GT1-12"],
+				"detail": "docs/cli-reference.md and docs/cli.md still carry the old --type help; regenerated by Phase 12 with screenshots, beta removal and release claims."
+			},
+			{
+				"id": "qualified-binary-and-platforms-missing",
+				"kind": "native-qualification",
+				"releaseBlocker": true,
+				"rows": "all phase 10 rows",
+				"owner": ["GT1-11-07", "GT1-11-10", "GT1-11-11", "GT1-11-11A", "GT1-11-11F", "GT1-11-12"],
+				"detail": "Every phase 10 verdict is fixtures, fake processes or generated plans; no binary version tested."
+			},
+			{
+				"id": "live-authorization-absent",
+				"kind": "credentials-and-approval",
+				"releaseBlocker": true,
+				"rows": "all phase 10 rows",
+				"owner": ["run-state liveBoundary"],
+				"detail": "No isolated account, endpoint, budget or SSH target is authorized; Phase 11 live cases stay not-run and this VERIFY does not wait."
 			}
 		],
 		"imagesAnalyzed": 0
