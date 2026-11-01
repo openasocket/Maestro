@@ -549,4 +549,125 @@ describe('permission-relay server AskUserQuestion round-trip', () => {
 			managed: false,
 		});
 	});
+	// GT1-09-07 / GT1-09-08: the relay's vocabulary is Claude Code's. A request
+	// from a managed Grok spawn is refused before the effect authority is asked
+	// and before the user is asked; the allow-everything table is a declared
+	// double, and its empty `asked` list is what shows no decision was made.
+	describe('a managed Grok spawn (GT1-09-08)', () => {
+		const allowAll = () => tableEffects(() => ({ decision: 'allow' }));
+		const composeGate = (effects = allowAll()) => {
+			const port = fakeSpawnPort({ effects });
+			const admissions = new Map<string, ReturnType<typeof fakeAdmission>>([
+				['sGk', fakeAdmission({ leaseId: 'lease-gk', provider: 'grok' })],
+				['sCc', fakeAdmission({ leaseId: 'lease-cc', provider: 'claude-code' })],
+			]);
+			const revoked = new Set<string>();
+			const gate = createRelayManagedGate({
+				port: () => port,
+				admissionOf: (sessionId) => admissions.get(sessionId) ?? null,
+				admissionLive: (sessionId) =>
+					revoked.has(sessionId)
+						? { ok: false, reason: 'the lease is revoked.' }
+						: admissions.has(sessionId)
+							? { ok: true }
+							: { ok: false, reason: 'no admission' },
+			});
+			return { gate, port, effects, revoked };
+		};
+		const request = (
+			toolName: string,
+			input: Record<string, unknown>,
+			overrides: Partial<PermissionRequest> = {}
+		): PermissionRequest => ({
+			requestId: 'rg',
+			token: 't',
+			sessionId: 'sGk',
+			tabId: 'tab-g',
+			toolName,
+			input,
+			createdAt: 0,
+			...overrides,
+		});
+		const refusedForGrok = {
+			managed: true,
+			decision: {
+				decision: 'unavailable',
+				reason: expect.stringContaining('a request from a managed Grok spawn is not mapped'),
+			},
+		};
+
+		it.each([
+			['shell', 'Bash', { command: 'curl https://x' }],
+			['file', 'Write', { file_path: '/p/a.ts', content: 'x' }],
+			['network', 'WebFetch', { url: 'https://x' }],
+			['MCP', 'mcp__srv__fetch', { url: 'https://x' }],
+			['unknown', 'grok_internal_tool', {}],
+		])(
+			'refuses a %s request unavailable before the effect authority is asked',
+			async (_l, tool, input) => {
+				const { gate, effects } = composeGate();
+				expect(
+					await gate.decide({ sessionId: 'sGk', tabId: 'tab-g' }, request(tool, input))
+				).toEqual(refusedForGrok);
+				expect(effects.asked).toEqual([]);
+			}
+		);
+
+		it('binds the provider to the spawn token, not the request: a misattributed or replayed approval stays refused', async () => {
+			const { gate, effects } = composeGate();
+			const misattributed = request('Bash', { command: 'ls' }, { sessionId: 'sCc' });
+			expect(await gate.decide({ sessionId: 'sGk' }, misattributed)).toEqual(refusedForGrok);
+			expect(await gate.decide({ sessionId: 'sGk' }, misattributed)).toEqual(refusedForGrok);
+			expect(effects.asked).toEqual([]);
+			// The same gate still asks the authority for a Claude Code spawn.
+			expect(await gate.decide({ sessionId: 'sCc' }, request('Bash', { command: 'ls' }))).toEqual({
+				managed: true,
+				decision: { decision: 'allow' },
+			});
+			expect(effects.asked.map((a) => a.binding.provider)).toEqual(['claude-code']);
+		});
+
+		it('denies a revoked Grok admission with the lease reason, and a standalone host is never a managed pass', async () => {
+			const { gate, port, effects, revoked } = composeGate();
+			revoked.add('sGk');
+			expect(await gate.decide({ sessionId: 'sGk' }, request('Read', { file_path: '/p' }))).toEqual(
+				{
+					managed: true,
+					decision: { decision: 'deny', reason: 'the lease is revoked.' },
+				}
+			);
+			port.setStanding('standalone');
+			expect(await gate.decide({ sessionId: 'sGk' }, request('Read', { file_path: '/p' }))).toEqual(
+				{
+					managed: false,
+				}
+			);
+			expect(effects.asked).toEqual([]);
+		});
+
+		it('through the relay server: denied with the Grok reason and the user is never asked', async () => {
+			const { token, cleanup } = registerSpawn({ sessionId: 'sGk', tabId: 'tab-g' });
+			const asked: PermissionRequest[] = [];
+			server.setOnRequest((req) => {
+				asked.push(req);
+				resolvePending(req.requestId, { behavior: 'allow' });
+			});
+			const { gate, effects } = composeGate();
+			server.setManagedGate(gate);
+			try {
+				const response = await relayRequest(token, 'mg1', 'Bash', { command: 'rm -rf /' });
+				expect(response.decision).toEqual({
+					behavior: 'deny',
+					message: expect.stringContaining(
+						'Refused under management: The permission relay reads Claude Code'
+					),
+				});
+				expect(asked).toEqual([]);
+				expect(effects.asked).toEqual([]);
+			} finally {
+				server.setManagedGate(null);
+				cleanup();
+			}
+		});
+	});
 });

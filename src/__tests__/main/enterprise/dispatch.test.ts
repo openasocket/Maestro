@@ -22,7 +22,16 @@ import {
 	cueShellAttribution,
 	cueShellRouteSupport,
 	type CueShellSpawnPlan,
+	GROK_PRE_EFFECT_QUALIFIED_KINDS,
+	providerEffectRefusal,
+	qualifyProviderEffects,
 } from '../../../main/enterprise/dispatch';
+import { createProcessSpawnAuthority } from '../../../main/enterprise/spawn-authority';
+import type {
+	ManagedEffect,
+	ManagedEffectBinding,
+} from '../../../shared/maestro-lib/managed/effects';
+import { fakeSpawnPort, tableEffects } from '../../helpers/managedSpawnPort';
 import { createLocalEndpointClient } from '../../../main/enterprise/endpoint-client';
 import {
 	buildDispatchSnapshot,
@@ -467,6 +476,123 @@ describe('the Cue shell boundary', () => {
 		expect(await admitCueShell(denied, sshPlan, { routeSupport })).toMatchObject({
 			state: 'denied',
 			code: 'policy-denied',
+		});
+	});
+});
+
+/**
+ * Grok effect qualification (GT1-09-07, GT1-09-08). No Grok effect class is
+ * proven to ask before it executes, so every Grok effect reaching a managed
+ * desktop sink is refused `unavailable` BEFORE the composed authority is
+ * asked: the allow-everything table below is a declared double standing in
+ * for a producer, and its empty `asked` list is the proof that no decision
+ * (and so no receipt) exists for the refused effect. A passing case here
+ * proves the client-side refusal only, never a qualified Grok route.
+ */
+describe('Grok effect qualification at the managed effect sinks', () => {
+	const grok = (requestId = 'req-g'): ManagedEffectBinding => ({
+		leaseId: 'lease-g',
+		actor: { kind: 'human', id: 'ada' },
+		provider: 'grok',
+		threadId: null,
+		turnId: 'tab-g',
+		requestId,
+	});
+	const EFFECTS: Array<[string, ManagedEffect]> = [
+		['shell', { kind: 'command', command: 'curl https://x', cwd: '/p', argv: null }],
+		['file', { kind: 'file-change', paths: ['/p/a.ts'], cwd: '/p' }],
+		['network', { kind: 'permissions', permissions: { network: true } }],
+		['MCP', { kind: 'tool-call', tool: 'mcp__srv__fetch', input: { url: 'https://x' } }],
+		['user input', { kind: 'user-input', prompt: 'continue?' }],
+		['elicitation', { kind: 'elicitation', server: 'srv' }],
+	];
+	const allowAll = () => tableEffects(() => ({ decision: 'allow' }));
+	const signal = new AbortController().signal;
+
+	it('qualifies no Grok effect kind until exact-binary evidence exists', () => {
+		expect(GROK_PRE_EFFECT_QUALIFIED_KINDS).toEqual([]);
+	});
+
+	it.each(EFFECTS)(
+		'refuses a Grok %s effect unavailable before an allow-everything producer is asked',
+		async (_label, effect) => {
+			const inner = allowAll();
+			const decision = await qualifyProviderEffects(inner).decide(effect, grok(), signal);
+			expect(decision).toEqual({
+				decision: 'unavailable',
+				reason: expect.stringContaining(`A managed Grok ${effect.kind} effect is refused`),
+			});
+			expect((decision as { reason: string }).reason).toContain('GT1-11-12');
+			expect(inner.asked).toEqual([]);
+		}
+	);
+
+	it('refuses an unknown or unnamed Grok effect as unknown, never decided', async () => {
+		const inner = allowAll();
+		const qualified = qualifyProviderEffects(inner);
+		for (const effect of [
+			{ kind: 'other', method: 'hooks/run' },
+			{ kind: 'network-egress', host: 'x' } as unknown as ManagedEffect,
+		] as ManagedEffect[]) {
+			const decision = await qualified.decide(effect, grok(), signal);
+			expect(decision).toEqual({
+				decision: 'unavailable',
+				reason: expect.stringContaining(`unknown effect (${effect.kind})`),
+			});
+		}
+		expect(inner.asked).toEqual([]);
+	});
+
+	it('leaves other providers to the inner authority under its own id, so the refusal is not vacuous', async () => {
+		const inner = allowAll();
+		const qualified = qualifyProviderEffects(inner);
+		expect(qualified.authorityId).toBe('test-effects');
+		const effect = EFFECTS[0][1];
+		const binding = { ...grok(), provider: 'codex' };
+		expect(providerEffectRefusal(effect, binding)).toBeNull();
+		expect(await qualified.decide(effect, binding, signal)).toEqual({ decision: 'allow' });
+		expect(inner.asked).toEqual([{ effect, binding }]);
+	});
+
+	it('reads the provider from the lease binding: a replayed Grok approval request is refused every time', async () => {
+		const inner = allowAll();
+		const qualified = qualifyProviderEffects(inner);
+		const effect = EFFECTS[1][1];
+		const first = await qualified.decide(effect, grok('req-replay'), signal);
+		const replay = await qualified.decide(effect, grok('req-replay'), signal);
+		expect(first.decision).toBe('unavailable');
+		expect(replay).toEqual(first);
+		expect(inner.asked).toEqual([]);
+	});
+
+	it('holds the desktop port to the qualifier, with a composed producer and with none', async () => {
+		const deps = {
+			installation: { installationId: 'inst-1', runtimeId: 'desktop-1', processEpoch: 'e1' },
+			identity: { read: () => ({ status: 'none' }) as const },
+			host: { policy: () => ({ sources: [], policyRevision: 3 }) },
+			dispatch: { authority: fakeSpawnPort().authority },
+			now: () => 1_000_000,
+		};
+		const inner = allowAll();
+		const composed = createProcessSpawnAuthority({ ...deps, effects: inner });
+		const effect = EFFECTS[0][1];
+		expect((await composed.effects!.decide(effect, grok(), signal)).decision).toBe('unavailable');
+		expect(inner.asked).toEqual([]);
+		expect(
+			await composed.effects!.decide(effect, { ...grok(), provider: 'codex' }, signal)
+		).toEqual({ decision: 'allow' });
+
+		const bare = createProcessSpawnAuthority(deps);
+		const grokRefusal = await bare.effects!.decide(effect, grok(), signal);
+		expect((grokRefusal as { reason: string }).reason).toContain('A managed Grok command effect');
+		const codexRefusal = await bare.effects!.decide(
+			effect,
+			{ ...grok(), provider: 'codex' },
+			signal
+		);
+		expect(codexRefusal).toEqual({
+			decision: 'unavailable',
+			reason: expect.stringContaining('no per-effect authorization operation'),
 		});
 	});
 });

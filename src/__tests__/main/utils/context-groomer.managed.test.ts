@@ -49,7 +49,7 @@ import {
 	type GroomingProcessManager,
 } from '../../../main/utils/context-groomer';
 import type { ManagedRouteCeiling } from '../../../shared/maestro-lib/launch/env';
-import { fakeSpawnPort, type FakeSpawnPort } from '../../helpers/managedSpawnPort';
+import { fakeSpawnPort, tableEffects, type FakeSpawnPort } from '../../helpers/managedSpawnPort';
 
 const AGENT = '11111111-2222-4333-8444-555555555555';
 const TAB = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
@@ -421,6 +421,56 @@ describe('groomContext prompt-file requirements under management (GT1-02-10GT)',
 		expect(port.asked).toHaveLength(0);
 		expect(h.spawn).not.toHaveBeenCalled();
 		expect(getActiveGroomingSessionCount()).toBe(0);
+	});
+
+	// GT1-09-08: a composed effect authority never stands in for a guarantee the
+	// Grok route cannot give. Required no-tools is refused even when an
+	// allow-everything producer (a declared double) is composed, and a tool
+	// event streamed after it ran is telemetry: it asks no authority and mints
+	// no approval.
+	it('refuses required no-tools even with an allow-everything effect authority composed (GT1-09-08)', async () => {
+		const effects = tableEffects(() => ({ decision: 'allow' }));
+		const port = fakeSpawnPort({ effects });
+		const h = harness(port);
+		await expect(
+			groomContext(
+				{ ...baseOptions, agentType: 'grok', requireDisabledTools: true, disableTools: true },
+				h.processManager,
+				selectedDetector
+			)
+		).rejects.toThrow('cannot run this turn with tools disabled');
+		expect(port.asked).toHaveLength(0);
+		expect(effects.asked).toEqual([]);
+		expect(h.spawn).not.toHaveBeenCalled();
+	});
+
+	it('treats a tool event streamed after execution as telemetry, never an approval (GT1-09-08)', async () => {
+		const effects = tableEffects(() => ({ decision: 'allow' }));
+		const port = fakeSpawnPort({ effects });
+		const h = harness(port);
+		h.spawn.mockImplementation(((config: ProcessConfig) => {
+			setTimeout(() => {
+				h.processManager.emit(
+					'data',
+					config.sessionId,
+					JSON.stringify({ type: 'tool_call', name: 'bash', input: { command: 'curl x' } }) + '\n'
+				);
+				h.processManager.emit('data', config.sessionId, ANSWER);
+				h.processManager.emit('exit', config.sessionId, 0);
+			}, 5);
+			return { pid: 4243, success: true };
+		}) as never);
+		await groomContext(
+			{ ...baseOptions, agentType: 'grok', readOnlyMode: true },
+			h.processManager,
+			selectedDetector
+		);
+		// The launch admission is the only authority request; the streamed tool
+		// record reached no effect authority and admitted nothing further.
+		expect(port.asked).toHaveLength(1);
+		expect(port.asked[0].snapshot.provider).toBe('grok');
+		expect(effects.asked).toEqual([]);
+		expect(spawned(h).args).not.toContain('--always-approve');
 	});
 
 	// A managed utility authority that cannot answer, or that cannot bind the
