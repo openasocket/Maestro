@@ -1387,15 +1387,24 @@ describe('cue-process-lifecycle', () => {
 			});
 
 			// The parser fails a native stream that stopped short of its terminal
-			// record, so no success chain fires. Its reason is not yet named in
-			// stderr (continuation GT1-08-09G); only the status is pinned here.
+			// record, so no success chain fires. The stream wrote no stderr of its
+			// own, so the run names the parser's reason there (GT1-08-09G).
 			it('fails answer deltas that never reached a terminal record', async () => {
 				const { pending, close } = await runGrok([line({ type: 'text', data: 'pong' })], 0);
 				close();
 				const result = await pending;
 
 				expect(result.status).toBe('failed');
+				expect(result.stderr).toBe(
+					'Grok closed the native stream without a successful terminal record. Any response is incomplete.'
+				);
+				// The partial answer is not the reason, and nothing marks it as a
+				// finished turn a chain could read: no session, no final usage.
+				expect(result.stderr).not.toContain('pong');
 				expect(result.providerSessionId).toBeNull();
+				expect(result.usage?.accounting).toMatchObject({ source: 'none', providerId: 'grok' });
+				expect(result.usage?.accounting).not.toMatchObject({ final: true });
+				expect(result.usage?.outputTokens).toBe(0);
 			});
 
 			it('fails an in-band auth error and names it in stderr for the auth classifier', async () => {
