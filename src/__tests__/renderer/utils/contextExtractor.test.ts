@@ -11,6 +11,8 @@ import {
 	findDuplicateContent,
 	calculateTotalTokens,
 	getContextSummary,
+	countContextTokens,
+	formatLogsForContextInjection,
 } from '../../../renderer/utils/contextExtractor';
 import type { AITab, LogEntry, Session } from '../../../renderer/types';
 import type { ContextSource } from '../../../renderer/types/contextMerge';
@@ -1186,5 +1188,342 @@ describe('getContextSummary', () => {
 		expect(summary.estimatedTokens).toBe(475);
 		expect(summary.byAgent['claude-code']).toBe(1);
 		expect(summary.byAgent['opencode']).toBe(1);
+	});
+});
+
+// GT1-06-02: the merge-into-tab formatter and the Grok token rule. These carry
+// a Grok conversation into ANOTHER agent's prompt, so each case names the loss
+// it would catch: dropped or reordered turns, a tool rendered as prose (or run
+// again), a Maestro notice or hidden reasoning leaking into the conversation,
+// an image silently vanishing, an unbounded paste, or a context sized from
+// cumulative usage totals instead of its text.
+describe('formatLogsForContextInjection: Grok merge context', () => {
+	// Same inert sentinel as the canonical redaction suite, never a credential.
+	const secret = 'sk-ABCDEFGHIJKLMNOP1234';
+
+	function grokLog(
+		id: string,
+		source: LogEntry['source'],
+		text: string,
+		extra: Partial<LogEntry> = {}
+	) {
+		return createMockLog({ id, source, text, timestamp: Number.NaN, ...extra });
+	}
+
+	it('keeps a fresh Grok history in source order with prose and tools distinct', () => {
+		const longOutput = `${'x'.repeat(2_500)}TAIL_PAST_CAP`;
+		const logs: LogEntry[] = [
+			grokLog('u1', 'user', 'Read the config'),
+			grokLog('a1', 'ai', 'Reading it now'),
+			grokLog('t1', 'tool', 'read_file config.ts', {
+				metadata: { toolState: { status: 'completed', output: longOutput } },
+			}),
+			grokLog('a2', 'stdout', 'The config sets port 8080'),
+			grokLog('u2', 'user', 'Thanks'),
+		];
+		const result = formatLogsForContextInjection(logs, { sourceAgentType: 'grok' });
+		const blocks = result.text.split('\n\n');
+		expect(blocks.map((block) => block.split(':')[0])).toEqual([
+			'User',
+			'Assistant',
+			'Tool call, completed (historical; it does not run again)',
+			'Assistant',
+			'User',
+		]);
+		expect(result.text).toContain('Assistant: The config sets port 8080');
+		// The tool's result is evidence, bounded, never relabelled as the assistant's prose.
+		expect(result.text).toContain('Result (truncated): ');
+		expect(result.text).not.toContain('TAIL_PAST_CAP');
+		expect(result.text).not.toContain('Assistant: read_file');
+		expect(result).toMatchObject({
+			includedEntries: 5,
+			omittedNotices: 0,
+			omittedThinking: 0,
+			omittedForBudget: 0,
+			omittedImages: 0,
+		});
+	});
+
+	it('leaves Maestro notices out but keeps a stored export provenance line', () => {
+		const logs: LogEntry[] = [
+			grokLog(
+				'grok-context-provenance',
+				'system',
+				'Grok context export: a redacted text projection'
+			),
+			grokLog('s1', 'system', 'Session resumed (Maestro notice)'),
+			grokLog('u1', 'user', 'Question'),
+			grokLog('e1', 'error', 'Agent error: rate limited'),
+			grokLog('x1', 'stderr', 'warning: stray stderr'),
+			grokLog('a1', 'ai', 'Answer'),
+		];
+		const result = formatLogsForContextInjection(logs, { sourceAgentType: 'grok' });
+		expect(result.text).toBe(
+			'Provenance: Grok context export: a redacted text projection\n\nUser: Question\n\nAssistant: Answer'
+		);
+		expect(result.omittedNotices).toBe(3);
+		for (const leaked of ['Session resumed', 'rate limited', 'stray stderr'])
+			expect(result.text).not.toContain(leaked);
+	});
+
+	it.each([false, true])('applies reasoning visibility (includeThinking=%s)', (includeThinking) => {
+		const logs = [
+			grokLog('u1', 'user', 'Why?'),
+			grokLog('r1', 'thinking', 'HIDDEN_REASONING_TEXT'),
+			grokLog('a1', 'ai', 'Because'),
+		];
+		const result = formatLogsForContextInjection(logs, {
+			sourceAgentType: 'grok',
+			includeThinking,
+		});
+		expect(result.text.includes('HIDDEN_REASONING_TEXT')).toBe(includeThinking);
+		expect(result.omittedThinking).toBe(includeThinking ? 0 : 1);
+		if (includeThinking) expect(result.text).toContain('Assistant reasoning (visible text):');
+	});
+
+	it('names attached images by count and never pastes their bytes', () => {
+		const logs = [
+			grokLog('u1', 'user', 'What is in these?', {
+				images: ['data:image/png;base64,IMAGE_BYTES_ONE', 'data:image/png;base64,IMAGE_BYTES_TWO'],
+			}),
+			grokLog('a1', 'ai', 'A chart and a table'),
+		];
+		const result = formatLogsForContextInjection(logs, { sourceAgentType: 'grok' });
+		expect(result.omittedImages).toBe(2);
+		expect(result.text).toContain('[2 attached image(s) not carried over;');
+		expect(result.text).not.toContain('IMAGE_BYTES');
+	});
+
+	it('redacts Grok prose and tool output, and leaves other providers verbatim', () => {
+		const logs = [
+			grokLog('u1', 'user', `My key is ${secret}`),
+			grokLog('t1', 'tool', 'shell env', {
+				metadata: { toolState: { status: 'completed', output: `OPENAI=${secret}` } },
+			}),
+		];
+		const grok = formatLogsForContextInjection(logs, { sourceAgentType: 'grok' });
+		expect(grok.text).not.toContain(secret);
+		expect(grok.text.match(/\[REDACTED_API_KEY\]/g)).toHaveLength(2);
+		// The redaction is the Grok export rule, not a change to the shared formatter.
+		expect(formatLogsForContextInjection(logs, { sourceAgentType: 'codex' }).text).toContain(
+			secret
+		);
+	});
+
+	it('bounds a long conversation to the budget, newest first, with no duplicates', () => {
+		const logs = Array.from({ length: 400 }, (_, i) =>
+			grokLog(
+				`m${i}`,
+				i % 2 ? 'ai' : 'user',
+				`turn-${String(i).padStart(3, '0')} ${'w'.repeat(200)}`
+			)
+		);
+		const maxTokens = 2_000;
+		const result = formatLogsForContextInjection(logs, { sourceAgentType: 'grok', maxTokens });
+		expect(result.omittedForBudget).toBeGreaterThan(0);
+		expect(result.includedEntries + result.omittedForBudget).toBe(400);
+		expect(result.text.startsWith(`[${result.omittedForBudget} earlier entries omitted`)).toBe(
+			true
+		);
+		const turns = [...result.text.matchAll(/turn-(\d{3})/g)].map((match) => Number(match[1]));
+		// Contiguous newest suffix, in order, each turn exactly once.
+		expect(turns).toEqual(
+			Array.from({ length: result.includedEntries }, (_, i) => 400 - result.includedEntries + i)
+		);
+		expect(result.estimatedTokens).toBeLessThanOrEqual(maxTokens + 32);
+		// Unbounded (0) keeps everything.
+		expect(formatLogsForContextInjection(logs, { maxTokens: 0 }).includedEntries).toBe(400);
+	});
+
+	it('truncates a newest entry that alone exceeds the budget, and says so', () => {
+		const logs = [
+			grokLog('u1', 'user', 'old'),
+			grokLog('a1', 'ai', `NEWEST_HEAD ${'z'.repeat(40_000)}`),
+		];
+		const result = formatLogsForContextInjection(logs, { sourceAgentType: 'grok', maxTokens: 500 });
+		expect(result.text).toContain('NEWEST_HEAD');
+		expect(result.text).toContain('[Entry truncated to fit the target');
+		expect(result.text).toContain('[1 earlier entry omitted');
+		expect(result.text).not.toContain('User: old');
+		expect(result.estimatedTokens).toBeLessThanOrEqual(500 + 32);
+	});
+
+	it('survives malformed and out-of-order records without inventing content', () => {
+		const logs = [
+			grokLog('a2', 'ai', 'second by source order', { timestamp: 5 }),
+			grokLog('empty', 'ai', ''),
+			grokLog('blank', 'user', '   \n\t'),
+			{ id: 'missing-text', timestamp: 1, source: 'ai' } as unknown as LogEntry,
+			grokLog('future', 'future-kind' as LogEntry['source'], 'UNKNOWN_KIND_PAYLOAD'),
+			grokLog('tool-no-state', 'tool', 'grep TODO'),
+			grokLog('a1', 'ai', 'first timestamp, later source', { timestamp: 1 }),
+		];
+		const result = formatLogsForContextInjection(logs, { sourceAgentType: 'grok' });
+		// Source order wins over timestamps; NaN and missing fields never throw.
+		expect(result.text.indexOf('second by source order')).toBeLessThan(
+			result.text.indexOf('first timestamp, later source')
+		);
+		expect(result.text).toContain('Tool call (historical; it does not run again): grep TODO');
+		expect(result.text).not.toContain('Result');
+		// An unknown kind is not the conversation's, and is counted, not pasted.
+		expect(result.text).not.toContain('UNKNOWN_KIND_PAYLOAD');
+		expect(result).toMatchObject({ includedEntries: 3, omittedNotices: 1 });
+		expect(formatLogsForContextInjection([], { maxTokens: 100 })).toMatchObject({
+			text: '',
+			includedEntries: 0,
+			omittedForBudget: 0,
+		});
+	});
+
+	describe('stored (resumed) Grok export carried into a merge', () => {
+		const binding = {
+			version: 1 as const,
+			state: 'bound' as const,
+			provider: 'grok' as const,
+			nativeSessionId: 'native-resumed',
+			accountRef: 'account-a',
+			host: { kind: 'local' as const, identity: 'fixture-machine' },
+			cwd: '/fixture/project',
+		};
+		function storedResult(overrides: Partial<SessionMessagesResult> = {}): SessionMessagesResult {
+			return {
+				nativeSessionBinding: binding,
+				source: { provider: 'grok', status: 'available' },
+				messages: [
+					{
+						type: 'user',
+						role: 'user',
+						content: 'First question',
+						timestamp: '',
+						uuid: 'line-1',
+						native: { provider: 'grok', line: 1 },
+					},
+					{
+						type: 'reasoning',
+						role: 'assistant',
+						content: 'STORED_VISIBLE_REASONING',
+						timestamp: '',
+						uuid: 'line-2',
+						native: { provider: 'grok', line: 2, raw: 'OPAQUE_SIGNED_REASONING' },
+					},
+					{
+						type: 'backend_tool_call',
+						role: 'assistant',
+						content: '',
+						timestamp: '',
+						uuid: 'line-3',
+						toolUse: [{ id: 'call-1', name: 'read_file', arguments: { path: 'a.ts' } }],
+						native: { provider: 'grok', line: 3, raw: 'PRIVATE_TOOL_PAYLOAD' },
+					},
+					{
+						type: 'assistant',
+						role: 'assistant',
+						content: 'Resumed answer',
+						timestamp: '',
+						uuid: 'line-4',
+						native: { provider: 'grok', line: 4 },
+					},
+				],
+				total: 4,
+				hasMore: false,
+				...overrides,
+			};
+		}
+
+		beforeEach(() => mockAgentSessionsRead.mockReset());
+
+		it('keeps provenance and order, and drops hidden reasoning as a notice', async () => {
+			mockAgentSessionsRead.mockResolvedValue(storedResult());
+			const context = await extractStoredSessionContext(
+				'grok',
+				binding.cwd,
+				binding.nativeSessionId,
+				{
+					ownerAgentId: 'owner-a',
+					nativeSessionBinding: binding,
+				}
+			);
+			const result = formatLogsForContextInjection(context!.logs, { sourceAgentType: 'grok' });
+			expect(result.text.startsWith('Provenance: Grok context export:')).toBe(true);
+			expect(result.text).toContain('not lossless native migration or a resumable session');
+			const lines = [...result.text.matchAll(/source line (\d+)/g)].map((match) =>
+				Number(match[1])
+			);
+			// Line 2 (reasoning, hidden by the export policy) is a system row: omitted, not relabelled.
+			expect(lines).toEqual([1, 3, 4]);
+			expect(result.omittedNotices).toBe(1);
+			for (const leaked of [
+				'STORED_VISIBLE_REASONING',
+				'OPAQUE_SIGNED_REASONING',
+				'PRIVATE_TOOL_PAYLOAD',
+			])
+				expect(result.text).not.toContain(leaked);
+			expect(result.text).toContain('Tool call (historical; it does not run again):');
+			expect(result.text).toContain('"id":"call-1"');
+		});
+
+		it('carries a truncated or partial source disclosure through the merge budget', async () => {
+			mockAgentSessionsRead.mockResolvedValue(
+				storedResult({
+					source: { provider: 'grok', status: 'partial', reason: 'truncated' },
+					total: 900,
+					hasMore: true,
+				})
+			);
+			const context = await extractStoredSessionContext(
+				'grok',
+				binding.cwd,
+				binding.nativeSessionId,
+				{
+					ownerAgentId: 'owner-a',
+				}
+			);
+			// The provenance block is oldest; a budget that drops it must say so.
+			const full = formatLogsForContextInjection(context!.logs, { sourceAgentType: 'grok' });
+			expect(full.text).toContain('Missing content:');
+			expect(full.text).toContain('Partial export: the latest 4 of 900');
+			const tight = formatLogsForContextInjection(context!.logs, {
+				sourceAgentType: 'grok',
+				maxTokens: 60,
+			});
+			expect(tight.omittedForBudget).toBeGreaterThan(0);
+			expect(tight.text).toMatch(/^\[\d+ earlier entr(y|ies) omitted/);
+		});
+	});
+});
+
+describe('Grok context sizing ignores cumulative usage totals', () => {
+	const cumulative = {
+		inputTokens: 900_000,
+		outputTokens: 400_000,
+		cacheReadInputTokens: 5_000_000,
+		cacheCreationInputTokens: 300_000,
+		totalCostUsd: 12,
+		contextWindow: 0,
+	};
+
+	function context(agentType: ContextSource['agentType'], withUsage: boolean): ContextSource {
+		return {
+			type: 'tab',
+			sessionId: 'session-1',
+			projectRoot: '/project',
+			name: 'Grok tab',
+			logs: [createMockLog({ text: 'A'.repeat(400) }), createMockLog({ text: 'B'.repeat(400) })],
+			agentType,
+			...(withUsage ? { usageStats: { ...cumulative } } : {}),
+		};
+	}
+
+	it('estimates a Grok source from its text, as if no usage were reported', async () => {
+		const grok = context('grok', true);
+		expect(estimateTokenCount(grok)).toBe(estimateTokenCount(context('grok', false)));
+		expect(estimateTokenCount(grok)).toBe(200);
+		expect(await countContextTokens(grok)).toBe(await countContextTokens(context('grok', false)));
+		expect(await countContextTokens(grok)).toBeLessThan(1_000);
+		expect(calculateTotalTokens([grok, grok])).toBe(400);
+	});
+
+	it('still uses reported usage for a reference provider', () => {
+		expect(estimateTokenCount(context('claude-code', true))).toBeGreaterThan(100_000);
 	});
 });

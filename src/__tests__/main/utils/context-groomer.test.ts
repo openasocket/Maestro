@@ -10,6 +10,7 @@ import * as path from 'path';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
 	groomContext,
+	cancelAllGroomingSessions,
 	getActiveGroomingSessionCount,
 	type GroomingProcessManager,
 } from '../../../main/utils/context-groomer';
@@ -1281,6 +1282,129 @@ describe('groomContext', () => {
 				)
 			).rejects.toThrow(/Unsupported value/);
 			expect(spawns).toBe(2);
+		});
+	});
+
+	// GT1-06-02: a Grok utility turn (Quick Chat routing, consult grooming, a
+	// summary) must get its read-only / no-tools requirement from the CLI, not
+	// from a sentence in the prompt. These cases run the PRODUCTION Grok
+	// definition through the real argument builder: whatever it cannot enforce
+	// is refused before any process exists, never run with a polite request.
+	describe('Grok utility turn restrictions (production definition)', () => {
+		const buildMock = vi.mocked(buildAgentArgs).getMockImplementation()!;
+		const overridesMock = vi.mocked(applyAgentConfigOverrides).getMockImplementation()!;
+		const PROMPT_ONLY_RULE = 'Do not use any tools. Answer with one word.';
+		let grok: AgentConfig;
+
+		beforeEach(async () => {
+			const actual = await vi.importActual<
+				typeof import('../../../shared/maestro-lib/launch/agent-args')
+			>('../../../shared/maestro-lib/launch/agent-args');
+			vi.mocked(buildAgentArgs).mockImplementation(actual.buildAgentArgs);
+			vi.mocked(applyAgentConfigOverrides).mockImplementation(actual.applyAgentConfigOverrides);
+			grok = makeAgent({ ...getAgentDefinition('grok')!, path: '/usr/local/bin/grok' });
+		});
+		afterEach(() => {
+			vi.mocked(buildAgentArgs).mockImplementation(buildMock);
+			vi.mocked(applyAgentConfigOverrides).mockImplementation(overridesMock);
+			vi.restoreAllMocks();
+		});
+
+		function expectNothingSpawned(spawn: ReturnType<typeof vi.spyOn>) {
+			expect(spawn).not.toHaveBeenCalled();
+			for (const handlers of mockPM._handlers.values()) expect(handlers).toHaveLength(0);
+			expect(getActiveGroomingSessionCount()).toBe(0);
+		}
+
+		it('keeps the production definition free of an unverified all-tools-off flag', () => {
+			// If a future edit adds noToolsArgs, the refusal below stops being the
+			// contract and that flag needs its own binary qualification first.
+			expect(grok.promptFile).toBeTruthy();
+			expect(grok.noToolsArgs ?? []).toEqual([]);
+			expect(grok.readOnlyCliEnforced).toBe(true);
+		});
+
+		it.each([
+			['no tools', { disableTools: true }],
+			['read-only and no tools (Quick Chat routing)', { disableTools: true, readOnlyMode: true }],
+		] as const)(
+			'refuses %s before spawning instead of trusting the prompt',
+			async (_label, flags) => {
+				const spawn = vi.spyOn(mockPM, 'spawn');
+				await expect(
+					groomContext(
+						{ projectRoot: '/project', agentType: 'grok', prompt: PROMPT_ONLY_RULE, ...flags },
+						mockPM,
+						createMockAgentDetector(grok)
+					)
+				).rejects.toThrow('Prompt-file grooming cannot enforce disabled tools.');
+				expectNothingSpawned(spawn);
+			}
+		);
+
+		it('enforces read-only through the CLI policy and never auto-approves', async () => {
+			const spawn = vi.spyOn(mockPM, 'spawn');
+			await groomContext(
+				{
+					projectRoot: '/project',
+					agentType: 'grok',
+					prompt: PROMPT_ONLY_RULE,
+					readOnlyMode: true,
+					sessionCustomEnvVars: { GROK_HOME: '/accounts/selected' },
+				},
+				mockPM,
+				createMockAgentDetector(grok)
+			);
+			expect(spawn).toHaveBeenCalledTimes(1);
+			const config = spawn.mock.calls[0][0];
+			const args = config.args as string[];
+			const at = args.indexOf('--permission-mode');
+			expect(args.slice(at, at + 2)).toEqual(['--permission-mode', 'plan']);
+			const deny = args.indexOf('--deny');
+			expect(args.slice(deny, deny + 2)).toEqual(['--deny', 'Bash(*)']);
+			expect(args).not.toContain('--always-approve');
+			// The selected account rides on the spawn, not the process-global home.
+			expect(config.customEnvVars).toMatchObject({ GROK_HOME: '/accounts/selected' });
+			// The restriction is not smuggled into the prompt in place of a flag.
+			expect(JSON.parse(config.promptArtifact!.content).content[0].text).toBe(PROMPT_ONLY_RULE);
+		});
+
+		it('refuses read-only on a definition whose CLI cannot enforce it', async () => {
+			const spawn = vi.spyOn(mockPM, 'spawn');
+			for (const unenforced of [{ readOnlyCliEnforced: false }, { readOnlyArgs: [] as string[] }]) {
+				await expect(
+					groomContext(
+						{
+							projectRoot: '/project',
+							agentType: 'grok',
+							prompt: PROMPT_ONLY_RULE,
+							readOnlyMode: true,
+						},
+						mockPM,
+						createMockAgentDetector({ ...grok, ...unenforced })
+					)
+				).rejects.toThrow('Prompt-file grooming cannot enforce read-only mode.');
+			}
+			expectNothingSpawned(spawn);
+		});
+
+		it('stops a cancelled Grok utility turn and leaves nothing running', async () => {
+			const spawn = vi.spyOn(mockPM, 'spawn').mockReturnValue({ pid: 4242, success: true });
+			const pending = groomContext(
+				{ projectRoot: '/project', agentType: 'grok', prompt: 'consolidate', readOnlyMode: true },
+				mockPM,
+				createMockAgentDetector(grok)
+			);
+			await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(1));
+			const { sessionId } = spawn.mock.calls[0][0] as { sessionId: string };
+			cancelAllGroomingSessions();
+			await expect(pending).rejects.toThrow('Grooming cancelled by user');
+			expect(mockPM.kill).toHaveBeenCalledWith(sessionId);
+			// A late answer after the cancel is not delivered as a result.
+			mockPM._emitData(sessionId, 'late answer');
+			mockPM._emitExit(sessionId, 0);
+			for (const handlers of mockPM._handlers.values()) expect(handlers).toHaveLength(0);
+			expect(getActiveGroomingSessionCount()).toBe(0);
 		});
 	});
 });
