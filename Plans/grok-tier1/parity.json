@@ -7131,7 +7131,8 @@
 				"Native GrokOutputParser and the separate shared ACP client/session/event/request/turn stack are implemented and covered by the 26-file GT1-03-13E matrix. Structured terminal/partial usage and raw exact ticks are retained at parser boundaries. Production ACP callers, raw desktop native decoding and end-to-end native terminal propagation remain incomplete; historical native fixture versions are not binary qualification. Canonical native/ACP errors and conservative retry guards pass GT1-03-13E fixtures. Automatic replay requires settled host-owned failed/provider/not-dispatched facts. Native terminal propagation and all real consumer paths remain phase07/08/10 work; real-provider error/recovery qualification remains phase11. ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. startGrokAcpTurn is exported and tested but has no production caller. Desktop, runtime, CLI and automation must wire the shared port with explicit refusal of unsafe fallback. Grok has no owned steering channel; ProcessManager sends the non-Codex route to sendSteeringRequest, which can only succeed for a registered maestro-p channel. Comparable user outcome needs explicit implementation or documented gap; GT1-01-07 must reconcile missing explicit steering acceptance in phase07 task text. Grok native child-process route exists; ACP consumer wiring and automation outcomes are not yet proven. Flag is not a deferred-spawn integration proof; Grok interactive PTY is not wired and need not be conflated with headless parity. Audit real CLI route settlement and usage, not just parsing-format flag.",
 				"GT1-07-11 verification: Desktop GrokAcpSpawner and runAgentTurn start, cancel, kill and clean up owned ACP turns; steering refuses with a typed reason; consent cancellation and disconnect invalidate. Synthetic peers only. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: CLI create/update/send and web send/enqueue/resume match; stop is the shared REST/IPC route; native turn lifecycle qualification not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: CLI create/update/send and web send/enqueue/resume match; stop is the shared REST/IPC route; native turn lifecycle qualification not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-07 verification at 3cc958d88: A11-F09 repaired by GT1-11-04A/04B (c79a3e969, dc07c81); its pinning cases pass in run-agent-turn.test.ts, acp-turn.test.ts (pass2Consumers); blocker grok-acp-transport-loss-reads-as-stop cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -7240,14 +7241,6 @@
 					"missingPrerequisite": "Canonical errors and Auto Run/coordinator guards pass GT1-03-13E. Replay requires host-owned failed/provider/not-dispatched facts; uncertain post-dispatch failures never replay automatically. Phase07/08/10 must propagate settled facts through all real callers and phase11 must qualify native recovery.",
 					"affectedRows": ["P10"],
 					"evidenceRef": "phase03-reconciliation"
-				},
-				{
-					"id": "grok-acp-transport-loss-reads-as-stop",
-					"code": "implementation-gap",
-					"missingPrerequisite": "A11-F09: Runtime ACP route: a peer lost mid-prompt (SIGKILL, no stop asked) settles crashed with no error, and the turn's own cleanup runs the stop ladder so run.stopRequested() is true and exit reads interrupted, stoppedBy caller. Repair GT1-11-04A, pinned by GT1-11-04B.",
-					"affectedRows": ["P10", "P38"],
-					"taskId": "GT1-11-04",
-					"evidenceRef": ".maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-11.md#GT1-11-04"
 				}
 			],
 			"phase": "03",
@@ -10720,7 +10713,8 @@
 				"Grok reaches generic paths; end-only identity, failure/cancel checkbox preservation and override inheritance require actual-consumer fixtures. Grok late session IDs and failed-iteration counters need targeted recovery assertions. Grok uses generic registered definition/parser path. Final JSONL tail, malformed completion, cancel and late identity must be tested through batch processor. Grok reaches provider-neutral builder, but account/model/effort/route settings and local/remote isolation need explicit consumer assertions. Phase05/10 owners are provisional; GT1-01-07 must add bounded owner task coverage if current wording cannot cover these files. Grok is reached through generic queue, but command collisions, argument expansion, selected tab/account and managed dispatch need proof. GT1-05-05/06 ownership is provisional until GT1-01-07 confirms explicit template-consumer coverage. Grok native child-process route exists; ACP consumer wiring and automation outcomes are not yet proven. Flag is not a deferred-spawn integration proof; Grok interactive PTY is not wired and need not be conflated with headless parity. Audit real CLI route settlement and usage, not just parsing-format flag.",
 				"GT1-07-11 verification: Auto Run/batch paths: CLI batch stays native headless (never standard); runtime Auto Run uses the shared runAgentTurn selector. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-08-21 verification: phase 08 packets autoRun, utilityEffortRetry; verdicts GT1-08-07 pass; GT1-08-21 tab naming (14F) pass; GT1-08-21 headless Auto Run retry (14F) pass. Parity against the comparator baseline: S10-S12 deterministic match; effort retry gap retained. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: CLI batch and headless Auto Run turns settle questions explicitly (crashed with AgentError), never stall; effort retry gap retained (grok-effort-validation-and-retry-pending). Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-11E, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: CLI batch and headless Auto Run turns settle questions explicitly (crashed with AgentError), never stall; effort retry gap retained (grok-effort-validation-and-retry-pending). Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-11E, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-07 verification at 3cc958d88: A11-F11 repaired by GT1-11-05A/05C (1863a2ac2, a7bb8ff3a); its pinning cases pass in batch-processor.test.ts, useBatchProcessor.test.ts (pass2Workflows); blocker grok-shared-autorun-failed-turn-keeps-ticks cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -10789,14 +10783,6 @@
 					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P29"],
 					"evidenceRef": "phase07-verification"
-				},
-				{
-					"id": "grok-shared-autorun-failed-turn-keeps-ticks",
-					"code": "implementation-gap",
-					"missingPrerequisite": "A11-F11: Shared task/document engine (maestro-cli playbook, the library runtime and maestro-cli host Auto Run): a failed Grok task turn that ticked its box before failing keeps the tick and is counted (probe: task_complete success false, complete totalTasksCompleted 1, no document write). The desktop engine unticks it through restoreTasksCheckedByFailedTurn (GT1-08-01); the shared engine has no equivalent, so failed work checks off a task headless. Repair GT1-11-05A, pinned by GT1-11-05C.",
-					"affectedRows": ["P29", "S10"],
-					"taskId": "GT1-11-05",
-					"evidenceRef": ".maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-11.md#GT1-11-05"
 				}
 			],
 			"phase": "08",
@@ -11067,7 +11053,9 @@
 				"Grok moderation is rejected by shared storage capability gate although picker lists installed providers. Streaming fallback joins deltas with newline at output-parser.ts:120, risking corrupted Grok words/tags. No Grok-specific exclusion observed in selected source; managed repository refusal, cancellation and selected provider/worktree need deterministic proof. Grok candidate reachability follows declared capabilities; selected account/model, unavailable states, quotas and supervised termination remain unverified. Grok excluded by TranscriptAgent union; needs validated native human-decision shapes or explicit unsupported result. Antigravity exclusion does not reduce required union. Grok moderation currently rejected despite picker visibility. Antigravity own gap does not lower required outcome.",
 				"GT1-07-11 verification: Group chat orchestration unchanged in phase07; desktop usage metadata now flows through TurnCapture on the ACP route. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-08-21 verification: phase 08 packets groupChat, symphony, pianolaLearning, pianolaDispatch, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-21 symphony pass; GT1-08-21 transcript learning pass; GT1-08-21 dispatch (20) pass; GT1-08-21 orchestrate CLI and standalone supervisor (20A) pass; GT1-08-12 pass. Parity against the comparator baseline: gaps carried from S14 and S17; S15 match; S16 fresh session config absent. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-03 verification at d84638bfc: A11-F07 (hardcoded-provider-fallback) turnEndOf calls detectSessionNotFoundError(tails) with no provider, so the headless runtime's group chat reads every participant's stdout/stderr tails through Claude's session_not_found patterns before the router applies the provider's own. Grok reaches the right recovery decision only by coincidence (Claude's /session.*not found/ also matches Grok's non-fatal 'not found locally, restoring from remote' line), and a successful Grok remote restore with no answer text then reports output it does not have. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-03 verification at d84638bfc: A11-F07 (hardcoded-provider-fallback) turnEndOf calls detectSessionNotFoundError(tails) with no provider, so the headless runtime's group chat reads every participant's stdout/stderr tails through Claude's session_not_found patterns before the router applies the provider's own. Grok reaches the right recovery decision only by coincidence (Claude's /session.*not found/ also matches Grok's non-fatal 'not found locally, restoring from remote' line), and a successful Grok remote restore with no answer text then reports output it does not have. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-07 verification at 3cc958d88: A11-F07 repaired by GT1-11-03A/03B (84be096ef, 5ca81dcee); its pinning cases pass in turn-end.test.ts (pass2Workflows); blocker grok-groupchat-turn-end-claude-patterns cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md.",
+				"GT1-11-07 verification at 3cc958d88: A11-F12 repaired by GT1-11-05B/05C (99742f718, a7bb8ff3a); its pinning cases pass in output-parser.test.ts (pass2Workflows); blocker grok-room-text-after-terminal-routed cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -11154,22 +11142,6 @@
 					"missingPrerequisite": "PianolaTask and create_session carry no account, model or SSH remote, so a fresh Pianola session runs on provider defaults for every provider (GT1-08-20A). A bound agent keeps its configuration. Needs a schema extension outside the phase 08 file bounds.",
 					"affectedRows": ["S16", "P31", "P04"],
 					"evidenceRef": "phase08-reconciliation"
-				},
-				{
-					"id": "grok-groupchat-turn-end-claude-patterns",
-					"code": "implementation-gap",
-					"missingPrerequisite": "GT1-11-03A passes the participant provider id into the headless group chat turn end; GT1-11-03B pins Grok and Claude tails.",
-					"affectedRows": ["P31", "S14"],
-					"taskId": "GT1-11-03",
-					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
-				},
-				{
-					"id": "grok-room-text-after-terminal-routed",
-					"code": "implementation-gap",
-					"missingPrerequisite": "A11-F12: Group chat: extractGrokText keeps concatenating text deltas after the successful terminal record, so a record past the end of the turn is spliced into the routed answer (probe: \"Ask @Alice.\" + end + \" @Eve go\" reads \"Ask @Alice. @Eve go\"). Real Grok ends its stream at the terminal record, so this is corruption the read must refuse rather than route. Repair GT1-11-05B, pinned by GT1-11-05C.",
-					"affectedRows": ["P31", "S14"],
-					"taskId": "GT1-11-05",
-					"evidenceRef": ".maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-11.md#GT1-11-05"
 				}
 			],
 			"phase": "08",
@@ -12571,7 +12543,15 @@
 					"GT1-07-03D",
 					"GT1-03-09A"
 				],
-				"test": ["GT1-08-06", "GT1-07-04", "GT1-10-02", "GT1-05-02", "GT1-03-10", "GT1-07-03E"],
+				"test": [
+					"GT1-08-06",
+					"GT1-07-04",
+					"GT1-10-02",
+					"GT1-05-02",
+					"GT1-03-10",
+					"GT1-07-03E",
+					"GT1-11-07A"
+				],
 				"verification": [
 					"GT1-08-07",
 					"GT1-07-11",
@@ -12594,7 +12574,8 @@
 			"limitations": [
 				"Grok uses generic registered definition/parser path. Final JSONL tail, malformed completion, cancel and late identity must be tested through batch processor. startGrokAcpTurn is exported and tested but has no production caller. Desktop, runtime, CLI and automation must wire the shared port with explicit refusal of unsafe fallback. Grok native path exists; CLI help/creation and full send/queue/stop/profile settings require registry and real bridge checks; no portable Electron coupling allowed. Grok reaches provider-neutral builder, but account/model/effort/route settings and local/remote isolation need explicit consumer assertions. Phase05/10 owners are provisional; GT1-01-07 must add bounded owner task coverage if current wording cannot cover these files. Grok uses generic creation; verify duplicated profile/effort, custom executable availability and no fallback provider. No separate agent-template registry was found in bounded symbol search; prompt templates are a distinct surface. GT1-01-07 must reconcile task scope for AgentCreationDialog coverage. Grok native child-process route exists; ACP consumer wiring and automation outcomes are not yet proven. Flag is not a deferred-spawn integration proof; Grok interactive PTY is not wired and need not be conflated with headless parity. Audit real CLI route settlement and usage, not just parsing-format flag.",
 				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run; builds pass; nativePackaging not-run. Parity against the comparator baseline: CLI create/update/settings/send and library host match; built CLI and dist/maestro-lib carry Grok; list-sessions native disk listing is Claude-only for every non-Claude provider (parity with Codex); native package smoke not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-11E, GT1-11-07, GT1-11-12, GT1-11-10, GT1-12-06 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run; builds pass; nativePackaging not-run. Parity against the comparator baseline: CLI create/update/settings/send and library host match; built CLI and dist/maestro-lib carry Grok; list-sessions native disk listing is Claude-only for every non-Claude provider (parity with Codex); native package smoke not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-11E, GT1-11-07, GT1-11-12, GT1-11-10, GT1-12-06 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-07 verification at 3cc958d88: A11-F09 repaired by GT1-11-04A/04B (c79a3e969, dc07c81); its pinning cases pass in run-agent-turn.test.ts, acp-turn.test.ts (pass2Consumers); blocker grok-acp-transport-loss-reads-as-stop cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12660,14 +12641,6 @@
 					"missingPrerequisite": "Five non-publishing builds carry Grok (GT1-10-15); no packaged asar, signed installer, live desktop startup or Windows/Linux build was inspected. Needs a per-platform package smoke (GT1-11-10, GT1-12-06).",
 					"affectedRows": ["S25", "P38"],
 					"evidenceRef": "phase10-reconciliation"
-				},
-				{
-					"id": "grok-acp-transport-loss-reads-as-stop",
-					"code": "implementation-gap",
-					"missingPrerequisite": "A11-F09: Runtime ACP route: a peer lost mid-prompt (SIGKILL, no stop asked) settles crashed with no error, and the turn's own cleanup runs the stop ladder so run.stopRequested() is true and exit reads interrupted, stoppedBy caller. Repair GT1-11-04A, pinned by GT1-11-04B.",
-					"affectedRows": ["P10", "P38"],
-					"taskId": "GT1-11-04",
-					"evidenceRef": ".maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-11.md#GT1-11-04"
 				}
 			],
 			"phase": "10",
@@ -21872,7 +21845,8 @@
 			},
 			"limitations": [
 				"Grok reaches generic paths; end-only identity, failure/cancel checkbox preservation and override inheritance require actual-consumer fixtures.",
-				"GT1-08-21 verification: phase 08 packets autoRun, utilityEffortRetry; verdicts GT1-08-07 pass; GT1-08-21 tab naming (14F) pass; GT1-08-21 headless Auto Run retry (14F) pass. Parity against the comparator baseline: deterministic match with the shared orchestration; effort retry gap retained (grok-effort-validation-and-retry-pending). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets autoRun, utilityEffortRetry; verdicts GT1-08-07 pass; GT1-08-21 tab naming (14F) pass; GT1-08-21 headless Auto Run retry (14F) pass. Parity against the comparator baseline: deterministic match with the shared orchestration; effort retry gap retained (grok-effort-validation-and-retry-pending). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-11-07 verification at 3cc958d88: A11-F11 repaired by GT1-11-05A/05C (1863a2ac2, a7bb8ff3a); its pinning cases pass in batch-processor.test.ts, useBatchProcessor.test.ts (pass2Workflows); blocker grok-shared-autorun-failed-turn-keeps-ticks cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -21927,14 +21901,6 @@
 					"missingPrerequisite": "Existing final model/effort argument guards and exact advertised hint membership retain their scoped evidence. ACP configuration acknowledgement and owned discovery pass GT1-03-13E; production receipt wiring and orchestration remain GT1-07-01 and phase08/10. Tab-naming/runtime retry provenance remains GT1-08-14E/14F/21; native acceptance is not-run.",
 					"affectedRows": ["P06", "REG-MODEL", "REG-DEFINITIONS", "P29", "P32", "S10", "S19"],
 					"evidenceRef": "phase03-reconciliation"
-				},
-				{
-					"id": "grok-shared-autorun-failed-turn-keeps-ticks",
-					"code": "implementation-gap",
-					"missingPrerequisite": "A11-F11: Shared task/document engine (maestro-cli playbook, the library runtime and maestro-cli host Auto Run): a failed Grok task turn that ticked its box before failing keeps the tick and is counted (probe: task_complete success false, complete totalTasksCompleted 1, no document write). The desktop engine unticks it through restoreTasksCheckedByFailedTurn (GT1-08-01); the shared engine has no equivalent, so failed work checks off a task headless. Repair GT1-11-05A, pinned by GT1-11-05C.",
-					"affectedRows": ["P29", "S10"],
-					"taskId": "GT1-11-05",
-					"evidenceRef": ".maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-11.md#GT1-11-05"
 				}
 			],
 			"branchAuditRefs": ["B45"]
@@ -22295,7 +22261,9 @@
 			"limitations": [
 				"Grok moderation is rejected by shared storage capability gate although picker lists installed providers. Streaming fallback joins deltas with newline at output-parser.ts:120, risking corrupted Grok words/tags.",
 				"GT1-08-21 verification: phase 08 packets groupChat, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-12 pass. Parity against the comparator baseline: gap: moderation refused by capability while Claude Code and Codex moderate (release blocker). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-03 verification at d84638bfc: A11-F07 (hardcoded-provider-fallback) turnEndOf calls detectSessionNotFoundError(tails) with no provider, so the headless runtime's group chat reads every participant's stdout/stderr tails through Claude's session_not_found patterns before the router applies the provider's own. Grok reaches the right recovery decision only by coincidence (Claude's /session.*not found/ also matches Grok's non-fatal 'not found locally, restoring from remote' line), and a successful Grok remote restore with no answer text then reports output it does not have. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-03 verification at d84638bfc: A11-F07 (hardcoded-provider-fallback) turnEndOf calls detectSessionNotFoundError(tails) with no provider, so the headless runtime's group chat reads every participant's stdout/stderr tails through Claude's session_not_found patterns before the router applies the provider's own. Grok reaches the right recovery decision only by coincidence (Claude's /session.*not found/ also matches Grok's non-fatal 'not found locally, restoring from remote' line), and a successful Grok remote restore with no answer text then reports output it does not have. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-07 verification at 3cc958d88: A11-F07 repaired by GT1-11-03A/03B (84be096ef, 5ca81dcee); its pinning cases pass in turn-end.test.ts (pass2Workflows); blocker grok-groupchat-turn-end-claude-patterns cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md.",
+				"GT1-11-07 verification at 3cc958d88: A11-F12 repaired by GT1-11-05B/05C (99742f718, a7bb8ff3a); its pinning cases pass in output-parser.test.ts (pass2Workflows); blocker grok-room-text-after-terminal-routed cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22347,22 +22315,6 @@
 					"missingPrerequisite": "A Grok moderator is refused at createGroupChat (supportsGroupChatModeration false) while Claude Code and Codex moderate. Participant and synthesis consumers pass GT1-08-12. Needs qualified native moderation evidence (GT1-11-11E) before the capability changes.",
 					"affectedRows": ["S14", "C-supportsGroupChatModeration", "P31"],
 					"evidenceRef": "phase08-reconciliation"
-				},
-				{
-					"id": "grok-groupchat-turn-end-claude-patterns",
-					"code": "implementation-gap",
-					"missingPrerequisite": "GT1-11-03A passes the participant provider id into the headless group chat turn end; GT1-11-03B pins Grok and Claude tails.",
-					"affectedRows": ["P31", "S14"],
-					"taskId": "GT1-11-03",
-					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
-				},
-				{
-					"id": "grok-room-text-after-terminal-routed",
-					"code": "implementation-gap",
-					"missingPrerequisite": "A11-F12: Group chat: extractGrokText keeps concatenating text deltas after the successful terminal record, so a record past the end of the turn is spliced into the routed answer (probe: \"Ask @Alice.\" + end + \" @Eve go\" reads \"Ask @Alice. @Eve go\"). Real Grok ends its stream at the terminal record, so this is corruption the read must refuse rather than route. Repair GT1-11-05B, pinned by GT1-11-05C.",
-					"affectedRows": ["P31", "S14"],
-					"taskId": "GT1-11-05",
-					"evidenceRef": ".maestro/playbooks/2026-10-30-Grok-Tier1/GROK-TIER1-11.md#GT1-11-05"
 				}
 			],
 			"branchAuditRefs": ["B14", "B39"]
@@ -23560,7 +23512,7 @@
 			],
 			"ownerTasks": {
 				"implementation": ["GT1-10-01", "GT1-07-03", "GT1-07-03D"],
-				"test": ["GT1-10-02", "GT1-07-04", "GT1-07-03E"],
+				"test": ["GT1-10-02", "GT1-07-04", "GT1-07-03E", "GT1-11-07A"],
 				"verification": ["GT1-10-05", "GT1-10-15", "GT1-10-16", "GT1-07-11"],
 				"live": ["GT1-11-11"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -32032,5 +31984,250 @@
 			"GT1-08-14F"
 		],
 		"repairTasks": ["GT1-11-05A", "GT1-11-05B", "GT1-11-05C"]
+	},
+	"phase11IntegrationVerify": {
+		"taskId": "GT1-11-07",
+		"recordedAt": "2026-11-01",
+		"sourceCommit": "3cc958d88e202e25cacb6c0ca7accf8784e16739",
+		"branch": "auto-run-feature/grok-cli-integration",
+		"evidenceRef": "Plans/grok-tier1/evidence/11-integration.md",
+		"toolchain": {
+			"node": "v26.13.0",
+			"vitest": "4.1.11",
+			"electron": "41.10.7",
+			"playwright": "1.59.1"
+		},
+		"groups": {
+			"pass2Consumers": {
+				"tasks": ["GT1-11-04", "GT1-11-04A", "GT1-11-04B"],
+				"kind": "pass-two consumer integration (desktop, runtime, CLI)",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/process-manager/recordings/turn-recordings.test.ts src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts src/__tests__/cli/services/agent-spawner.test.ts src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts",
+				"exit": 0,
+				"ms": 13662,
+				"files": 4,
+				"total": 640,
+				"passed": 640,
+				"failed": 0,
+				"skipped": 0,
+				"grokCases": 358,
+				"grokPassed": 358
+			},
+			"pass2Workflows": {
+				"tasks": [
+					"GT1-11-03A",
+					"GT1-11-03B",
+					"GT1-11-05",
+					"GT1-11-05A",
+					"GT1-11-05B",
+					"GT1-11-05C"
+				],
+				"kind": "pass-two workflow integration (Auto Run, Cue, group chat)",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/cli/services/batch-processor.test.ts src/__tests__/main/cue/cue-process-lifecycle.test.ts src/__tests__/main/group-chat/output-parser.test.ts src/shared/maestro-lib/groupchat/__tests__/turn-end.test.ts src/__tests__/cli/commands/run-playbook.test.ts src/__tests__/cli/commands/run-doc.test.ts src/__tests__/renderer/hooks/batch/useDocumentProcessor.steering.test.ts src/__tests__/renderer/hooks/useBatchProcessor.test.ts",
+				"exit": 0,
+				"ms": 6344,
+				"files": 8,
+				"total": 480,
+				"passed": 479,
+				"failed": 0,
+				"skipped": 1,
+				"grokCases": 73,
+				"grokPassed": 73
+			},
+			"pass2Managed": {
+				"tasks": ["GT1-11-06"],
+				"kind": "pass-two adversarial managed/plugin/account",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/enterprise/spawn-authority.test.ts src/__tests__/main/enterprise/dispatch.test.ts src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts src/__tests__/main/permission-relay/relay-core.test.ts",
+				"exit": 0,
+				"ms": 2676,
+				"files": 4,
+				"total": 134,
+				"passed": 134,
+				"failed": 0,
+				"skipped": 0,
+				"grokCases": 55,
+				"grokPassed": 55
+			},
+			"recording": {
+				"tasks": ["phase 04", "GT1-10-13"],
+				"kind": "recording and turn record",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/shared/maestro-lib/turns/record-turn.test.ts src/__tests__/shared/maestro-lib/turns/context.test.ts",
+				"exit": 0,
+				"ms": 965,
+				"files": 2,
+				"total": 62,
+				"passed": 62,
+				"failed": 0,
+				"skipped": 0,
+				"grokCases": 14,
+				"grokPassed": 14
+			},
+			"contextTranslation": {
+				"tasks": ["phase 08"],
+				"kind": "context and translation",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/provider-translation-service.test.ts src/__tests__/shared/maestro-lib/translation-adapters.test.ts src/__tests__/shared/maestro-lib/translation-native.test.ts src/__tests__/shared/maestro-lib/translation-resources.test.ts src/__tests__/shared/maestro-lib/translation-session.test.ts src/__tests__/shared/maestro-lib/translation-transaction.test.ts src/__tests__/main/utils/context-groomer.test.ts src/__tests__/main/utils/context-groomer.managed.test.ts src/__tests__/main/ipc/handlers/context-groom.test.ts src/__tests__/renderer/services/contextGroomer.test.ts src/__tests__/renderer/services/providerTranslation.test.ts src/__tests__/renderer/services/contextCompaction.test.ts src/__tests__/renderer/utils/contextExtractor.test.ts src/__tests__/renderer/utils/contextWindowResolver.test.ts",
+				"exit": 0,
+				"ms": 5302,
+				"files": 14,
+				"total": 450,
+				"passed": 450,
+				"failed": 0,
+				"skipped": 0,
+				"grokCases": 131,
+				"grokPassed": 131
+			},
+			"webLite": {
+				"tasks": ["GT1-10-03", "GT1-10-04"],
+				"kind": "web / web-desktop / Lite bridge (mocked transport)",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/web-server/handlers/messageHandlers.test.ts src/__tests__/main/web-server/callbacks/sessionCallbacks.test.ts src/__tests__/main/web-server/handlers/messageHandlers.managed.test.ts src/__tests__/renderer/hooks/useRemoteHandlers.test.ts src/__tests__/renderer/hooks/useRemoteIntegration.test.ts",
+				"exit": 0,
+				"ms": 6844,
+				"files": 5,
+				"total": 683,
+				"passed": 683,
+				"failed": 0,
+				"skipped": 0,
+				"grokCases": 50,
+				"grokPassed": 50
+			},
+			"usage": {
+				"tasks": ["GT1-10-08", "GT1-10-09*"],
+				"kind": "usage, stats, cost",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/stats/token-usage/token-usage-accessor.test.ts src/__tests__/main/cue/cue-token-accessor.test.ts src/__tests__/main/stats/usage-export.test.ts src/__tests__/main/utils/statsCache.test.ts src/__tests__/main/ipc/handlers/agentSessions.test.ts src/__tests__/cli/commands/stats.test.ts src/__tests__/main/cue/cue-stats-query.test.ts src/__tests__/renderer/components/UsageDashboard/TokenStatsLegend.test.tsx src/__tests__/renderer/components/UsageDashboard/AgentOverviewCards.test.tsx",
+				"exit": 0,
+				"ms": 5212,
+				"files": 9,
+				"total": 699,
+				"passed": 699,
+				"failed": 0,
+				"skipped": 0,
+				"grokCases": 459,
+				"grokPassed": 459
+			},
+			"remote": {
+				"tasks": ["phase 09"],
+				"kind": "remote / SSH (mocked ssh and fs)",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/enterprise/remote.test.ts src/__tests__/main/utils/remote-fs.test.ts src/__tests__/main/utils/ssh-command-builder.test.ts src/__tests__/main/utils/ssh-spawn-wrapper.test.ts src/__tests__/renderer/hooks/batch/useBatchProcessor.remote.test.ts src/__tests__/renderer/components/Wizard/services/phaseGenerator_ssh.test.ts",
+				"exit": 0,
+				"ms": 14172,
+				"files": 6,
+				"total": 490,
+				"passed": 476,
+				"failed": 0,
+				"skipped": 14,
+				"grokCases": 49,
+				"grokPassed": 48
+			},
+			"completeness": {
+				"tasks": ["GT1-11-02"],
+				"kind": "completeness gate rerun",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/agents/agent-completeness.test.ts src/__tests__/main/agents/capabilities.test.ts",
+				"exit": 0,
+				"ms": 1241,
+				"files": 2,
+				"total": 147,
+				"passed": 147,
+				"failed": 0,
+				"skipped": 0,
+				"grokCases": 15,
+				"grokPassed": 15
+			}
+		},
+		"totals": {
+			"files": 54,
+			"total": 3785,
+			"passed": 3770,
+			"failed": 0,
+			"skipped": 15,
+			"grok": 1204
+		},
+		"skippedCases": {
+			"src/__tests__/main/utils/ssh-command-builder.test.ts": "13 cases, describe.skipIf(platform !== linux): owned remote prompt-file script lifetime on real bash; Linux CI leg only",
+			"src/__tests__/cli/services/batch-processor.test.ts": "1 pre-existing skipped loop-mode case (should respect maxLoops limit), not Grok"
+		},
+		"mockedBranches": [
+			"remote/SSH: ssh and remote fs are mocked (no SSH host)",
+			"Windows paths and cmd.exe launch: fake platform in launch suites (phase 10 group), no Windows host",
+			"web/Lite bridge: mocked WebSocket transport and callbacks",
+			"Grok producer: synthetic native records and the synthetic ACP peer fixture; no Grok binary launched"
+		],
+		"nativeRuns": {
+			"builds": {
+				"mainExit": 0,
+				"rendererExit": 0,
+				"note": "npm run build:main, npm run build:renderer (non-publishing, gitignored dist/)"
+			},
+			"liteNative": {
+				"status": "not-run",
+				"blocker": "host-display-locked",
+				"detail": "Six NATIVE_CASE lines reported, then remote.capturePage() at lite-native-entry.cjs:634 threw \"Current display surface not available for capture\"; ioreg CGSSessionScreenIsLocked true; runner SIGKILLed the process group at 100 s. Same stop as GT1-10-05; no branch commit touches Lite."
+			},
+			"e2e": [
+				{
+					"specs": ["e2e/concerto-html.spec.ts"],
+					"result": "2 passed",
+					"grok": false
+				},
+				{
+					"specs": ["e2e/browser-tab.spec.ts"],
+					"result": "2 failed: browser:pageAction \"Registered host browser tab is unavailable\" and a 15 s predicate timeout; webview host on a locked macOS session; no branch commit touches browser code",
+					"grok": false
+				},
+				{
+					"specs": ["e2e/bionify-reading-mode.spec.ts", "e2e/group-chat-load-demo.spec.ts"],
+					"result": "2 failed (with 2 retries each): TypographyChoiceModal intercepts pointer events; these specs do not seed the onboarding flags (base-harness drift)",
+					"grok": false
+				}
+			],
+			"isolation": "Playwright fixture launches dist/ with MAESTRO_DATA_DIR/MAESTRO_DEMO_DIR in a fresh os.tmpdir() folder and MAESTRO_E2E_TEST; Lite fixture uses a mkdtemp data dir and --user-data-dir; production Maestro data never read."
+		},
+		"findings": [
+			{
+				"id": "A11-F13",
+				"classification": "evidence-gap",
+				"anchors": [
+					"e2e/fixtures/electron-app.ts",
+					"e2e/browser-tab.spec.ts:98",
+					"e2e/concerto-html.spec.ts:13"
+				],
+				"consequence": "No Playwright spec in the isolated application harness seeds or drives a Grok agent, so the desktop UI surfaces (Left Bar entry, provider label, composer model/effort controls, refusal copy) have unit/component evidence only. Separately, two existing specs (bionify-reading-mode, group-chat-load-demo) do not seed the onboarding flags and time out behind TypographyChoiceModal; that is base-harness drift (no branch commit touches e2e, onboarding or the modal), not a Grok defect.",
+				"repairTask": "GT1-11-07A"
+			}
+		],
+		"blockerUpdates": [
+			{
+				"id": "grok-groupchat-turn-end-claude-patterns",
+				"finding": "A11-F07",
+				"taskId": "GT1-11-07",
+				"change": "cleared",
+				"removedFrom": ["P31", "S14"],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-integration.md"
+			},
+			{
+				"id": "grok-acp-transport-loss-reads-as-stop",
+				"finding": "A11-F09",
+				"taskId": "GT1-11-07",
+				"change": "cleared",
+				"removedFrom": ["P10", "P38"],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-integration.md"
+			},
+			{
+				"id": "grok-shared-autorun-failed-turn-keeps-ticks",
+				"finding": "A11-F11",
+				"taskId": "GT1-11-07",
+				"change": "cleared",
+				"removedFrom": ["P29", "S10"],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-integration.md"
+			},
+			{
+				"id": "grok-room-text-after-terminal-routed",
+				"finding": "A11-F12",
+				"taskId": "GT1-11-07",
+				"change": "cleared",
+				"removedFrom": ["P31", "S14"],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-integration.md"
+			}
+		],
+		"liveCalls": 0,
+		"imagesAnalyzed": 0
 	}
 }
