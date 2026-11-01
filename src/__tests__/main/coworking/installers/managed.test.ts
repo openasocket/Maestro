@@ -23,6 +23,7 @@ import { claudeCodeInstaller } from '../../../../main/coworking/installers/claud
 import { codexInstaller } from '../../../../main/coworking/installers/codex';
 import { factoryDroidInstaller } from '../../../../main/coworking/installers/factory-droid';
 import { opencodeInstaller } from '../../../../main/coworking/installers/opencode';
+import { grokInstaller } from '../../../../main/coworking/installers/grok';
 import {
 	holdMcpServerWrite,
 	mcpServerScriptPath,
@@ -258,6 +259,81 @@ describe('coworking MCP writers under the install ceiling', () => {
 				/^\[managed-digest-mismatch\]/
 			);
 			expect(fs.readFileSync(droidConfig(), 'utf8')).toBe(seed);
+		});
+	});
+
+	// GT1-07-07B: the Grok writer holds before it reads or writes config.toml.
+	describe('the Grok writer', () => {
+		let grokHome: string | undefined;
+		beforeEach(() => {
+			grokHome = process.env.GROK_HOME;
+			delete process.env.GROK_HOME;
+		});
+		afterEach(() => {
+			if (grokHome === undefined) delete process.env.GROK_HOME;
+			else process.env.GROK_HOME = grokHome;
+		});
+		const grokConfig = () => path.join(tmpHome, '.grok', 'config.toml');
+
+		it('standalone: writes its entry with no script on disk', async () => {
+			fs.rmSync(scriptPath);
+			await grokInstaller.install(spec());
+			expect(await grokInstaller.isInstalled()).toBe(true);
+			expect(fs.readFileSync(grokConfig(), 'utf8')).toContain('[mcp_servers.maestro-coworking]');
+		});
+
+		it('enrolled with no ceiling: refused unavailable, no directory created', async () => {
+			read = enrolled;
+			await expect(grokInstaller.install(spec())).rejects.toThrow(
+				/^\[managed-unavailable\] the managed install ceiling is unavailable/
+			);
+			expect(fs.existsSync(path.join(tmpHome, '.grok'))).toBe(false);
+		});
+
+		it('a denial is decided before the file is read: an unparseable or redirected target is never reached', async () => {
+			read = enrolled;
+			source.install({ policyRevision: 3, pins: [pinned()] });
+			// Were the file read first, these would refuse config-unreadable / target-unsupported.
+			const bad = 'model = = "broken"\n';
+			fs.mkdirSync(path.dirname(grokConfig()), { recursive: true });
+			fs.writeFileSync(grokConfig(), bad);
+			await expect(grokInstaller.install(spec())).rejects.toThrow(
+				/^\[managed-server-denied\] the install ceiling grants the maestro-coworking MCP server for grok on no route/
+			);
+			expect(fs.readFileSync(grokConfig(), 'utf8')).toBe(bad);
+			fs.rmSync(grokConfig());
+			fs.mkdirSync(grokConfig());
+			await expect(grokInstaller.install(spec())).rejects.toThrow(/^\[managed-server-denied\]/);
+			expect(fs.statSync(grokConfig()).isDirectory()).toBe(true);
+		});
+
+		it('a grant on pty refuses route-unsupported; on child-process it writes, other bytes refuse digest-mismatch', async () => {
+			read = enrolled;
+			source.install({ policyRevision: 3, pins: [pinned()], mcpServers: [grant('grok', 'pty')] });
+			await expect(grokInstaller.install(spec())).rejects.toThrow(
+				/^\[managed-route-unsupported\] the maestro-coworking MCP server for grok is granted on pty/
+			);
+			expect(fs.existsSync(grokConfig())).toBe(false);
+
+			source.install({ policyRevision: 3, pins: [pinned()], mcpServers: [grant('grok')] });
+			const seed = '# user comment\nmodel = "grok-4.5"\n';
+			fs.mkdirSync(path.dirname(grokConfig()), { recursive: true });
+			fs.writeFileSync(grokConfig(), seed);
+			await grokInstaller.install(spec());
+			expect(await grokInstaller.isInstalled()).toBe(true);
+			expect(fs.readFileSync(grokConfig(), 'utf8').startsWith(seed)).toBe(true);
+			const installed = fs.readFileSync(grokConfig(), 'utf8');
+
+			source.install({
+				policyRevision: 3,
+				pins: [pinned(`${SCRIPT}// tampered\n`)],
+				mcpServers: [grant('grok')],
+			});
+			await expect(grokInstaller.install(spec())).rejects.toThrow(/^\[managed-digest-mismatch\]/);
+			expect(fs.readFileSync(grokConfig(), 'utf8')).toBe(installed);
+			// Uninstall is not held: the operator can always take Maestro's entry out.
+			await grokInstaller.uninstall();
+			expect(fs.readFileSync(grokConfig(), 'utf8')).toBe(seed);
 		});
 	});
 });
