@@ -13,6 +13,12 @@
  * `not-run` with machine-readable reasons. Default execution, with no
  * configuration, therefore makes zero paid requests and zero network contacts.
  *
+ * Candidate capabilities (GT1-11-08A): features implemented behind a false
+ * production flag are recorded per case as a frozen harness-only snapshot
+ * (route, version basis, implementing tasks, consumer seam). A snapshot never
+ * changes admission, never touches a policy-bearing flag, and is a copy: the
+ * run fails if the production Grok registry entry changes underneath it.
+ *
  * Reuse: `canonicalJson` for the config digest, `redactSecrets` /
  * `containsCredentialToken` so nothing secret-shaped is accepted or written,
  * `isValidSecretName` for credential references, `resolveModelPricing` for
@@ -38,6 +44,8 @@ import { containsCredentialToken } from '../../src/shared/agent-run/redact';
 import { isValidSecretName } from '../../src/shared/serverSecrets';
 import { isPathAtOrUnderRoot } from '../../src/shared/worktreePaths';
 import { stopProcess } from '../../src/shared/maestro-lib/control/termination';
+import { getAgentCapabilities } from '../../src/shared/maestro-lib/providers/capabilities';
+import type { AgentCapabilities } from '../../src/shared/types';
 
 export const CONFIG_SCHEMA = 'grok-qualification-config/v1';
 export const RECEIPT_SCHEMA = 'grok-qualification-receipt/v1';
@@ -160,6 +168,8 @@ export interface CaseReceipt {
 	pricing: PricingProvenance[];
 	budget: { reservedUsd: number; settledUsd: number; uncertainUsd: number; calls: number };
 	cleanup: { ownedProcesses: number; stopped: number };
+	/** Harness-only candidate capabilities for this case; never production availability. */
+	candidateSnapshot: CandidateCapabilitySnapshot | null;
 }
 
 export interface BudgetLedger {
@@ -186,6 +196,14 @@ export interface QualificationReceipt {
 	configProblems: ConfigProblem[];
 	capabilities: HarnessCapabilities;
 	ledger: BudgetLedger;
+	candidateCapabilities: {
+		schema: typeof CANDIDATE_SNAPSHOT_SCHEMA;
+		productionDigestBefore: string;
+		productionDigestAfter: string;
+		candidates: CandidateCapability[];
+		nonCandidates: typeof NON_CANDIDATE_CAPABILITIES;
+		snapshots: number;
+	};
 	totals: {
 		cases: number;
 		admitted: number;
@@ -393,6 +411,220 @@ export function pricingProvenance(model: string): PricingProvenance {
 			outputPerMillion: resolved.OUTPUT_PER_MILLION,
 		};
 	return { model, source: 'unknown' };
+}
+
+// ---------------------------------------------------------------------------
+// Candidate capability snapshots (GT1-11-08A)
+// ---------------------------------------------------------------------------
+
+export const CANDIDATE_SNAPSHOT_SCHEMA = 'grok-candidate-capability-snapshot/v1';
+/** The version profile every candidate is judged against; no range is qualified yet. */
+export const CANDIDATE_VERSION_PROFILE = 'official-grok-candidate';
+
+type CapabilityFlag = {
+	[K in keyof AgentCapabilities]-?: NonNullable<AgentCapabilities[K]> extends boolean ? K : never;
+}[keyof AgentCapabilities];
+
+/**
+ * How a candidate reaches a consumer. `capabilities-parameter`: the consumer
+ * reads an `AgentCapabilities` / agent config object handed to it, so an
+ * executor can pass the snapshot. `global-registry`: the consumer reads
+ * `hasCapability()` off the production registry, which this harness never
+ * mutates, so that consumer cannot see the candidate and its evaluation stays
+ * not-run until it takes a capabilities parameter.
+ */
+export type CandidateSeam = 'capabilities-parameter' | 'global-registry';
+
+export interface CandidateCapability {
+	flag: CapabilityFlag;
+	candidateValue: true;
+	/** Routes whose implementation exists; another route never receives the override. */
+	routes: Route[];
+	/** Case families that evaluate it. */
+	families: string[];
+	parityRows: string[];
+	implementedBy: string[];
+	consumers: Array<{ path: string; seam: CandidateSeam }>;
+	basis: string;
+}
+
+/**
+ * Implemented behind a false production flag. Each entry names the work that
+ * implemented it and the consumers that would read it. Being listed is not
+ * availability: production keeps `false` until GT1-11-14A finalizes the
+ * registry from observed evidence.
+ */
+export const CANDIDATE_CAPABILITIES: readonly CandidateCapability[] = Object.freeze([
+	{
+		flag: 'supportsSlashCommands',
+		candidateValue: true,
+		routes: ['acp-stdio', 'native-headless'],
+		families: ['E08'],
+		parityRows: ['P18', 'C-supportsSlashCommands'],
+		implementedBy: ['GT1-05-03', 'GT1-05-03A', 'GT1-05-03B'],
+		consumers: [
+			{ path: 'src/renderer/App.tsx', seam: 'capabilities-parameter' },
+			{
+				path: 'src/renderer/components/QuickActionsModal/commands/featureCommands.ts',
+				seam: 'capabilities-parameter',
+			},
+		],
+		basis:
+			'Session-scoped ACP available_commands catalog and bounded detached native capture; execution semantics unobserved on a pinned binary',
+	},
+	{
+		flag: 'supportsGroupChatModeration',
+		candidateValue: true,
+		routes: ['acp-stdio', 'native-headless'],
+		families: ['E09'],
+		parityRows: ['C-supportsGroupChatModeration'],
+		implementedBy: ['GT1-08-12'],
+		consumers: [{ path: 'src/shared/maestro-lib/groupchat/storage.ts', seam: 'global-registry' }],
+		basis:
+			'Host orchestration with qualified participant/synthesis turns passes deterministically; moderator creation is refused by the production flag',
+	},
+]);
+
+/** Production-false flags that are NOT candidates, and why forcing them would misstate the product. */
+export const NON_CANDIDATE_CAPABILITIES: ReadonlyArray<{
+	flag: CapabilityFlag;
+	reason: string;
+	parityRow: string;
+}> = Object.freeze([
+	{
+		flag: 'supportsAppendSystemPrompt',
+		reason: 'native append/rules unimplemented; canonical first-turn embedding is the delivery',
+		parityRow: 'C-supportsAppendSystemPrompt',
+	},
+	{
+		flag: 'supportsProjectMemory',
+		reason: 'native memory binding unimplemented; the truthful refusal is the delivery',
+		parityRow: 'C-supportsProjectMemory',
+	},
+	{
+		flag: 'supportsAdditionalDirectories',
+		reason: 'no qualified native root-grant builder; policy-bearing, never forced',
+		parityRow: 'C-supportsAdditionalDirectories',
+	},
+	{
+		flag: 'supportsPromptViaStdin',
+		reason: 'no raw-stdin producer; false is the truthful transport declaration',
+		parityRow: 'C-supportsPromptViaStdin',
+	},
+	{
+		flag: 'supportsStreamJsonInput',
+		reason: 'no Claude-style stdin producer; ACP RPC is its own transport',
+		parityRow: 'C-supportsStreamJsonInput',
+	},
+	{
+		flag: 'usesCombinedContextWindow',
+		reason:
+			'a usage-semantics declaration, not a withheld feature; forcing it would misreport occupancy',
+		parityRow: 'C-usesCombinedContextWindow',
+	},
+]);
+
+/** Flags that carry an effect control. A candidate may never touch them. */
+export const POLICY_BEARING_FLAGS: readonly CapabilityFlag[] = Object.freeze([
+	'supportsReadOnlyMode',
+	'supportsStandardPermissionMode',
+	'supportsAdditionalDirectories',
+]);
+
+export interface CandidateOverride {
+	flag: CapabilityFlag;
+	production: boolean;
+	candidate: boolean;
+	implementedBy: string[];
+	parityRows: string[];
+	consumers: Array<{ path: string; seam: CandidateSeam }>;
+}
+
+export interface CandidateCapabilitySnapshot {
+	schema: typeof CANDIDATE_SNAPSHOT_SCHEMA;
+	/** Confined to this harness process and the case it was built for. */
+	scope: 'qualification-harness-only';
+	productionAvailability: false;
+	policyWaiver: false;
+	caseId: string;
+	route: Route;
+	target: Target;
+	versionBasis: {
+		profile: typeof CANDIDATE_VERSION_PROFILE;
+		supportedRange: null;
+		pinnedVersion: string | null;
+		pinnedSha256: string | null;
+		/** `unbound` until a pinned binary exists; an executor must refuse an unbound snapshot. */
+		state: 'bound-to-pinned-binary' | 'unbound';
+	};
+	/** sha256 of the production Grok registry entry the snapshot was derived from. */
+	productionDigest: string;
+	overrides: CandidateOverride[];
+	/** A fresh frozen object; the production registry is never written. */
+	capabilities: Readonly<AgentCapabilities>;
+}
+
+/** Digest of the production Grok capability entry, to prove the registry was not written. */
+export function productionCapabilityDigest(): string {
+	return createHash('sha256')
+		.update(canonicalJson(getAgentCapabilities('grok')))
+		.digest('hex');
+}
+
+/**
+ * Build the candidate snapshot for one case: the production entry copied, with
+ * only the listed candidates for this route/family applied, and only where
+ * production says `false`. Returns null when no candidate applies. Admission
+ * is untouched; the snapshot is what a future executor hands to consumers.
+ */
+export function buildCandidateSnapshot(
+	c: QualificationCase,
+	config: QualificationConfig,
+	candidates: readonly CandidateCapability[] = CANDIDATE_CAPABILITIES
+): CandidateCapabilitySnapshot | null {
+	const production = getAgentCapabilities('grok');
+	const overrides: CandidateOverride[] = [];
+	for (const candidate of candidates) {
+		if (POLICY_BEARING_FLAGS.includes(candidate.flag))
+			throw new Error(`Candidate may not override policy-bearing flag ${candidate.flag}`);
+		if (NON_CANDIDATE_CAPABILITIES.some((n) => n.flag === candidate.flag))
+			throw new Error(`Flag ${candidate.flag} is not an implemented candidate`);
+		if (!candidate.routes.includes(c.route) || !candidate.families.includes(c.family)) continue;
+		// Production already advertising it needs no override and records none.
+		if (Boolean(production[candidate.flag]) === candidate.candidateValue) continue;
+		overrides.push({
+			flag: candidate.flag,
+			production: Boolean(production[candidate.flag]),
+			candidate: candidate.candidateValue,
+			implementedBy: [...candidate.implementedBy],
+			parityRows: [...candidate.parityRows],
+			consumers: candidate.consumers.map((x) => ({ ...x })),
+		});
+	}
+	if (!overrides.length) return null;
+	const capabilities: AgentCapabilities = { ...production };
+	for (const o of overrides) capabilities[o.flag] = o.candidate;
+	const b = config.binary;
+	const bound = Boolean(b.path && b.sha256 && b.version);
+	return {
+		schema: CANDIDATE_SNAPSHOT_SCHEMA,
+		scope: 'qualification-harness-only',
+		productionAvailability: false,
+		policyWaiver: false,
+		caseId: c.caseId,
+		route: c.route,
+		target: c.target,
+		versionBasis: {
+			profile: CANDIDATE_VERSION_PROFILE,
+			supportedRange: null,
+			pinnedVersion: b.version,
+			pinnedSha256: b.sha256,
+			state: bound ? 'bound-to-pinned-binary' : 'unbound',
+		},
+		productionDigest: productionCapabilityDigest(),
+		overrides,
+		capabilities: Object.freeze(capabilities),
+	};
 }
 
 export function createBudgetLedger(config: QualificationConfig, runId: string): BudgetLedger {
@@ -617,6 +849,7 @@ export async function runQualification(options: RunOptions): Promise<{
 	const selected = options.selectedCases?.length ? options.selectedCases : config.cases;
 	const cases = expandCases(families, selected);
 	const ledger = createBudgetLedger(config, runId);
+	const productionDigestBefore = productionCapabilityDigest();
 
 	const receipts: CaseReceipt[] = [];
 	for (const c of cases) {
@@ -635,8 +868,13 @@ export async function runQualification(options: RunOptions): Promise<{
 			pricing: c.classes.includes('paid') ? config.allowedModels.map(pricingProvenance) : [],
 			budget: { reservedUsd: 0, settledUsd: 0, uncertainUsd: 0, calls: 0 },
 			cleanup,
+			candidateSnapshot: buildCandidateSnapshot(c, config),
 		});
 	}
+	const productionDigestAfter = productionCapabilityDigest();
+	// A candidate is a copy; a changed production entry means something wrote the registry.
+	if (productionDigestAfter !== productionDigestBefore)
+		throw new Error('Production Grok capability registry changed during a qualification run');
 
 	const receipt: QualificationReceipt = redactDeep({
 		schema: RECEIPT_SCHEMA,
@@ -649,6 +887,14 @@ export async function runQualification(options: RunOptions): Promise<{
 		configProblems: problems,
 		capabilities,
 		ledger,
+		candidateCapabilities: {
+			schema: CANDIDATE_SNAPSHOT_SCHEMA,
+			productionDigestBefore,
+			productionDigestAfter,
+			candidates: CANDIDATE_CAPABILITIES.map((x) => ({ ...x })),
+			nonCandidates: NON_CANDIDATE_CAPABILITIES,
+			snapshots: receipts.filter((r) => r.candidateSnapshot).length,
+		},
 		totals: {
 			cases: receipts.length,
 			admitted: receipts.filter((r) => r.status === 'admitted').length,
