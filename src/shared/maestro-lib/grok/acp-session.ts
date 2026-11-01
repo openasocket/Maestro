@@ -148,6 +148,7 @@ export class GrokAcpSession {
 	private catalogRevision = 0;
 	// One pending/current catalog, never an account-wide or per-session cache.
 	private commandCatalog?: { sessionId: string; serialized: string; observedAt: number };
+	private readonly commandWaiters = new Set<() => void>();
 	private readonly unboundConfigSessions = new Map<
 		string,
 		{ model?: string; effort?: string; ambiguous?: true }
@@ -265,6 +266,36 @@ export class GrokAcpSession {
 		};
 	}
 
+	/**
+	 * Bounded wait for this process's live catalog, for a host that validates a native command
+	 * against the advertisement of the newly admitted process (the update can follow the
+	 * allocation response). Resolves undefined on timeout, abort or failure; issues no RPC and
+	 * never returns a catalog of an earlier process or session.
+	 */
+	awaitCommands(
+		timeoutMs: number,
+		signal?: AbortSignal
+	): Promise<GrokAcpCommandCatalog | undefined> {
+		if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 2_147_483_647)
+			return Promise.reject(new GrokAcpSessionError('invalid-options'));
+		const current = this.commands;
+		if (current || this.failure || signal?.aborted) return Promise.resolve(current);
+		return new Promise((resolve) => {
+			const done = (): void => {
+				clearTimeout(timer);
+				signal?.removeEventListener('abort', done);
+				this.commandWaiters.delete(check);
+				resolve(this.commands);
+			};
+			const check = (): void => {
+				if (this.commands || this.failure) done();
+			};
+			const timer = setTimeout(done, timeoutMs);
+			signal?.addEventListener('abort', done, { once: true });
+			this.commandWaiters.add(check);
+		});
+	}
+
 	/** Hosts withhold receipts during reload, and invalidate before and after it (or replace us). */
 	invalidateCommands(): void {
 		this.commandCatalog = undefined;
@@ -367,6 +398,8 @@ export class GrokAcpSession {
 					this.openingDone = true;
 					this.replay = false;
 					this.watchdog?.disarm();
+					// A catalog that arrived during allocation becomes current only now.
+					this.notifyCommandWaiters();
 				});
 		}
 		return this.opening;
@@ -837,6 +870,10 @@ export class GrokAcpSession {
 		}
 		if (Buffer.byteLength(serialized, 'utf8') > 1024 * 1024) return;
 		this.commandCatalog = { sessionId, serialized, observedAt: Date.now() };
+		this.notifyCommandWaiters();
+	}
+	private notifyCommandWaiters(): void {
+		for (const check of [...this.commandWaiters]) check();
 	}
 	private claimSession(id: string): void {
 		const key = canonicalJson([this.options.account, this.options.host, id]);
@@ -868,6 +905,7 @@ export class GrokAcpSession {
 		);
 		this.watchdog?.disarm();
 		this.cancelWatchdog?.disarm();
+		this.notifyCommandWaiters();
 		this.client.close();
 		this.options.child.off('exit', this.processLost);
 		// Keep error/close listeners and the claim until the owned process's pipes close.

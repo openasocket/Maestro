@@ -1,4 +1,5 @@
 import { canonicalJson } from '../../canonicalJson';
+import { sha256Hex } from '../managed/authority';
 import type { UsageStats } from '../../types';
 import { generateUUID } from '../../uuid';
 import { guardTurn } from '../control/turn-guard';
@@ -61,6 +62,20 @@ export interface GrokAcpTurnOptions
 	 * A returned reason refuses the turn before any prompt is sent; so does a throw.
 	 */
 	qualify?: (negotiated: GrokAcpNegotiatedFacts) => string | undefined;
+	/**
+	 * Submit one ACP-advertised native command instead of a chat prompt. `prompt` must be the
+	 * exact command text the intent names. The driver waits (bounded) for this process's
+	 * catalog, then runs `validateGrokNativeCommand()` in the same tick as submission; any
+	 * refusal settles `refused/admission`, `not-dispatched`, never an ordinary prompt.
+	 */
+	nativeCommand?: {
+		intent: GrokAcpNativeCommandIntent;
+		/** Host facts: the turn's tab and the current config generation. */
+		tabId: string;
+		configGeneration: string;
+		/** Bound on waiting for the advertisement; defaults to 5 seconds. */
+		catalogWaitMs?: number;
+	};
 }
 
 /** What a started process proved during `initialize` and session allocation. */
@@ -89,6 +104,198 @@ export interface GrokAcpConfigurationObservation extends Pick<
 /** Process-bound native advertisement. Hosts add their launch and config receipts. */
 export interface GrokAcpCommandObservation extends GrokAcpCommandCatalog {
 	readonly processGeneration: string;
+}
+
+/**
+ * A person's request to run one ACP-advertised native command, carried from the catalog they
+ * picked from to the next turn. It authorizes nothing by itself: ACP owns one process per
+ * turn, so the newly admitted (resumed) process must advertise the same entry under the same
+ * scope, checked by `validateGrokNativeCommand()` immediately before prompt submission.
+ */
+export interface GrokAcpNativeCommandIntent {
+	/** Only an entry advertised over ACP; TUI and CLI-only actions have no such source. */
+	source: 'acp-advertised';
+	/** Exact advertised invocation name, without the leading slash. */
+	name: string;
+	/** Raw argument text; empty when none. Never reinterpreted or reflowed. */
+	arguments: string;
+	/** `grokNativeCommandEntryDigest()` of the entry the person picked. */
+	entryDigest: string;
+	binding: {
+		target: 'local' | 'remote';
+		account: string;
+		host: string;
+		cwd: string;
+		tabId: string;
+		/** The native session whose catalog was shown; the turn must resume it. */
+		sessionId: string;
+		/** Requested selection, as the catalog's `selection` reports it. */
+		model?: string;
+		effort?: string;
+		agentVersion: string;
+		/** Host-owned auth/endpoint/project revision the catalog was read under. */
+		configGeneration: string;
+		/** Informational: the earlier process and catalog the person saw. Never matched. */
+		processGeneration?: string;
+		catalogRevision?: number;
+	};
+}
+
+/** Host facts about the turn about to run, never supplied by the intent's sender. */
+export interface GrokAcpNativeCommandContext {
+	tabId: string;
+	configGeneration: string;
+	processGeneration: string;
+	/** The resumed native session this process was started on. */
+	resumeSessionId?: string;
+	/** Managed native command effects are not qualified yet (phase09). */
+	managed: boolean;
+	cancelled: boolean;
+}
+
+export type GrokNativeCommandRefusal =
+	| 'invalid-intent'
+	| 'canceled'
+	| 'remote-unqualified'
+	| 'managed-unqualified'
+	| 'resume-required'
+	| 'catalog-unavailable'
+	| 'scope-mismatch'
+	| 'session-mismatch'
+	| 'selection-mismatch'
+	| 'version-mismatch'
+	| 'process-mismatch'
+	| 'config-changed'
+	| 'invalid-catalog'
+	| 'absent'
+	| 'changed'
+	| 'arguments-unsupported'
+	| 'invalid-arguments';
+
+export type GrokNativeCommandValidation =
+	| { ok: true; text: string; catalogRevision: number }
+	| { ok: false; reason: GrokNativeCommandRefusal };
+
+const NATIVE_COMMAND_NAME = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/;
+const MAX_NATIVE_COMMAND_ARGUMENTS = 8192;
+// C0 controls and DEL would let arguments carry a second line past the command boundary.
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+
+function isNativeCommandName(value: unknown): value is string {
+	return (
+		typeof value === 'string' &&
+		NATIVE_COMMAND_NAME.test(value) &&
+		value.split(':').every((part) => part && !part.startsWith('.'))
+	);
+}
+
+/**
+ * Digest of one raw advertised entry (canonical JSON, so key order is irrelevant), or
+ * undefined when it is not a well-formed entry. Any change of name, description, input hint
+ * or native provenance (`_meta`) is a different command.
+ */
+export function grokNativeCommandEntryDigest(entry: unknown): string | undefined {
+	if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return;
+	const { name, description, input, _meta: meta } = entry as Record<string, unknown>;
+	if (
+		!isNativeCommandName(name) ||
+		typeof description !== 'string' ||
+		(input != null &&
+			(typeof input !== 'object' ||
+				Array.isArray(input) ||
+				typeof (input as Record<string, unknown>).hint !== 'string')) ||
+		(meta != null && (typeof meta !== 'object' || Array.isArray(meta)))
+	)
+		return;
+	try {
+		return sha256Hex(canonicalJson(entry));
+	} catch {
+		return;
+	}
+}
+
+/**
+ * Bind a native command intent to the live catalog of the newly admitted process. Pure and
+ * synchronous: call it with `GrokAcpRunningTurn.commands()` (or the driver's own read) in
+ * the same tick as prompt submission. Success yields the exact prompt text to submit.
+ */
+export function validateGrokNativeCommand(
+	intent: GrokAcpNativeCommandIntent,
+	catalog: GrokAcpCommandObservation | undefined,
+	context: GrokAcpNativeCommandContext
+): GrokNativeCommandValidation {
+	const refuse = (reason: GrokNativeCommandRefusal): GrokNativeCommandValidation => ({
+		ok: false,
+		reason,
+	});
+	const binding = intent?.binding;
+	if (
+		!intent ||
+		intent.source !== 'acp-advertised' ||
+		!isNativeCommandName(intent.name) ||
+		typeof intent.arguments !== 'string' ||
+		typeof intent.entryDigest !== 'string' ||
+		!/^[0-9a-f]{64}$/.test(intent.entryDigest) ||
+		!binding ||
+		[
+			binding.account,
+			binding.host,
+			binding.cwd,
+			binding.tabId,
+			binding.sessionId,
+			binding.agentVersion,
+			binding.configGeneration,
+		].some((value) => typeof value !== 'string' || !value.trim()) ||
+		[binding.model, binding.effort].some(
+			(value) => value !== undefined && (typeof value !== 'string' || !value.trim())
+		)
+	)
+		return refuse('invalid-intent');
+	if (context.cancelled) return refuse('canceled');
+	if (binding.target !== 'local') return refuse('remote-unqualified');
+	if (context.managed) return refuse('managed-unqualified');
+	if (context.resumeSessionId !== binding.sessionId) return refuse('resume-required');
+	if (context.configGeneration !== binding.configGeneration) return refuse('config-changed');
+	if (!catalog) return refuse('catalog-unavailable');
+	if (catalog.processGeneration !== context.processGeneration) return refuse('process-mismatch');
+	if (
+		catalog.account !== binding.account ||
+		catalog.host !== binding.host ||
+		catalog.cwd !== binding.cwd ||
+		context.tabId !== binding.tabId
+	)
+		return refuse('scope-mismatch');
+	if (catalog.sessionId !== binding.sessionId) return refuse('session-mismatch');
+	if (catalog.selection.model !== binding.model || catalog.selection.effort !== binding.effort)
+		return refuse('selection-mismatch');
+	if (catalog.agentVersion !== binding.agentVersion) return refuse('version-mismatch');
+	if (!Array.isArray(catalog.commands) || catalog.commands.length > 256)
+		return refuse('invalid-catalog');
+	const matches = catalog.commands.filter(
+		(entry) =>
+			!!entry &&
+			typeof entry === 'object' &&
+			(entry as Record<string, unknown>).name === intent.name
+	);
+	if (matches.length === 0) return refuse('absent');
+	if (matches.length > 1) return refuse('invalid-catalog');
+	const digest = grokNativeCommandEntryDigest(matches[0]);
+	if (!digest) return refuse('invalid-catalog');
+	if (digest !== intent.entryDigest) return refuse('changed');
+	const args = intent.arguments;
+	if (args && (matches[0] as Record<string, unknown>).input == null)
+		return refuse('arguments-unsupported');
+	if (
+		args.length > MAX_NATIVE_COMMAND_ARGUMENTS ||
+		CONTROL_CHARACTER.test(args) ||
+		args !== args.trim()
+	)
+		return refuse('invalid-arguments');
+	return {
+		ok: true,
+		text: args ? `/${intent.name} ${args}` : `/${intent.name}`,
+		catalogRevision: catalog.catalogRevision,
+	};
 }
 
 export interface GrokAcpTurnHandlers extends Pick<TurnHandlers, 'onStarted' | 'onEvent'> {
@@ -129,6 +336,16 @@ export function startGrokAcpTurn(
 	if (spec.stdin !== undefined || spec.promptArtifact || typeof options.prompt !== 'string')
 		throw new GrokAcpSessionError('invalid-options');
 	if (!options.turnId?.trim()) throw new GrokAcpSessionError('invalid-options');
+	const nativeCommand = options.nativeCommand && structuredClone(options.nativeCommand);
+	if (
+		nativeCommand &&
+		(typeof nativeCommand.intent?.arguments !== 'string' ||
+			options.prompt !==
+				(nativeCommand.intent.arguments
+					? `/${nativeCommand.intent.name} ${nativeCommand.intent.arguments}`
+					: `/${nativeCommand.intent.name}`))
+	)
+		throw new GrokAcpSessionError('invalid-options');
 	if (options.signal?.aborted) throw new GrokAcpSessionError('cancelled');
 	// Freeze caller-owned launch data before admission invokes host code.
 	spec = { ...spec, args: [...spec.args], env: { ...spec.env } };
@@ -201,6 +418,15 @@ export function startGrokAcpTurn(
 		} catch {
 			fault();
 		}
+	};
+	const refuseBeforeDispatch = (reason: string): never => {
+		failure ??= {
+			status: 'refused',
+			origin: 'admission',
+			reason,
+			dispatchState: 'not-dispatched',
+		};
+		throw new GrokAcpSessionError('cancelled');
 	};
 	const cancel = (): void => {
 		if (settled || controller.signal.aborted) return;
@@ -289,16 +515,12 @@ export function startGrokAcpTurn(
 				} catch {
 					refusal = 'route-qualification-failed';
 				}
-				if (refusal !== undefined) {
-					failure ??= {
-						status: 'refused',
-						origin: 'admission',
-						reason: refusal,
-						dispatchState: 'not-dispatched',
-					};
-					throw new GrokAcpSessionError('cancelled');
-				}
+				if (refusal !== undefined) refuseBeforeDispatch(refusal);
 			}
+			// The advertisement can follow allocation; a missing one is refused below.
+			if (nativeCommand)
+				await session.awaitCommands(nativeCommand.catalogWaitMs ?? 5_000, controller.signal);
+			if (failure || controller.signal.aborted) throw new GrokAcpSessionError('cancelled');
 			const qualification = options.modelDiscovery;
 			const models =
 				qualification &&
@@ -363,9 +585,29 @@ export function startGrokAcpTurn(
 			});
 			emit({ type: 'init', sessionId });
 			if (failure || controller.signal.aborted) throw new GrokAcpSessionError('cancelled');
+			let promptText = options.prompt;
+			if (nativeCommand) {
+				// Same tick as submission: prompt() reaches its write through microtasks only,
+				// so no frame (and no catalog update) can be processed in between.
+				const catalog = session.commands;
+				const checked = validateGrokNativeCommand(
+					nativeCommand.intent,
+					catalog && { ...catalog, processGeneration: options.processGeneration },
+					{
+						tabId: nativeCommand.tabId,
+						configGeneration: nativeCommand.configGeneration,
+						processGeneration: options.processGeneration,
+						resumeSessionId: options.resumeSessionId,
+						managed: options.admission !== undefined,
+						cancelled: controller.signal.aborted,
+					}
+				);
+				if (!checked.ok) refuseBeforeDispatch(`native-command-${checked.reason}`);
+				else promptText = checked.text;
+			}
 			promptStarted = true;
 			try {
-				response = await session.prompt(options.prompt, controller.signal, promptId);
+				response = await session.prompt(promptText, controller.signal, promptId);
 			} catch (error) {
 				promptError = error;
 				if (error instanceof GrokAcpSessionError) response = error.response;
