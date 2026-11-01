@@ -1402,8 +1402,9 @@ export class ProcessManager extends EventEmitter {
 
 	/**
 	 * Ask a running turn to take `text` into the turn in flight (chat steering):
-	 * a Claude turn on maestro-p, or a Codex turn on the app-server transport.
-	 * Resolves with a verdict for the UI; never rejects. The later verdict for a
+	 * a Claude turn on maestro-p, or a Codex turn on the app-server transport. A
+	 * Grok turn is answered by `GrokAcpSpawner.steer`, which refuses until Grok
+	 * advertises an in-progress input operation (parity S21). Resolves with a verdict for the UI; never rejects. The later verdict for a
 	 * delivered steer is emitted as `steering-verdict` with the same id: for
 	 * maestro-p it arrives on stdout (StdoutHandler), for Codex it comes from
 	 * `steerCodexAppServerTurn`.
@@ -1443,6 +1444,9 @@ export class ProcessManager extends EventEmitter {
 				detail: STEERING_TURN_FINISHED_DETAIL,
 			};
 		}
+		// A Grok process never reaches the maestro-p channel below: its own host answers
+		// from the active route (GT1-07-03A), and today that answer is a structured refusal.
+		if (process.toolType === 'grok') return this.grokAcpSpawner.steer(process, id);
 		if (process.codexAppServer) {
 			return steerCodexAppServerTurn(process.codexAppServer, { id, text }, (verdict) =>
 				this.emit('steering-verdict', sessionId, verdict)

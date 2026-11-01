@@ -46,6 +46,7 @@ import { logger } from '../../utils/logger';
 import { captureException } from '../../utils/sentry';
 import { createOutputParser } from '../../parsers';
 import type { AgentError, ManagedProcess, ProcessConfig, SpawnResult } from '../types';
+import type { SteeringResultFrame } from '../../../shared/chatSteering';
 import type { DataBufferManager } from '../handlers/DataBufferManager';
 import { StdoutHandler } from '../handlers/StdoutHandler';
 import { ExitHandler } from '../handlers/ExitHandler';
@@ -77,6 +78,7 @@ import {
 	grokAcpConfigGeneration,
 	grokAcpProcessSpec,
 	grokAcpPromptOf,
+	grokSteeringAvailability,
 	parseGrokNativeArgs,
 	GROK_ACP_TURN_IDLE_MS,
 	GROK_ACP_TURN_MAX_MS,
@@ -302,6 +304,30 @@ export class GrokAcpSpawner {
 			observed = receipt;
 		}
 		return observed;
+	}
+
+	/**
+	 * Answer a steer into a registered Grok process (parity S21, GT1-07-03A). The route and
+	 * ownership come from this host's own record: the ACP turn whose managed process IS the
+	 * registered one, active and current, or else the native headless route. Every answer is
+	 * the established structured refusal (`grokSteeringAvailability`); nothing is written to
+	 * the peer, no maestro-p channel is dialed, and no turn is queued, cancelled or restarted.
+	 */
+	steer(process: ManagedProcess, id: string): SteeringResultFrame {
+		let owner: GrokAcpDesktopTurn | undefined;
+		for (const turn of this.ctx.liveTurns) if (turn.runs(process)) owner = turn;
+		const refusal = grokSteeringAvailability(
+			owner
+				? { route: 'acp-stdio', owned: owner.ownsSteering() }
+				: { route: 'native-headless', owned: true }
+		);
+		return {
+			type: 'steering',
+			id,
+			verdict: 'refused',
+			refusal: 'not-running',
+			detail: refusal.detail,
+		};
 	}
 
 	spawn(config: ProcessConfig): SpawnResult {
@@ -690,6 +716,16 @@ class GrokAcpDesktopTurn {
 			},
 			launch: { command: config.command, cwd: config.cwd, env },
 		};
+	}
+
+	/** Whether `process` is this turn's own process record (identity, not key). */
+	runs(process: ManagedProcess): boolean {
+		return process === this.managedProcess;
+	}
+
+	/** The active, current owner of its process key: not stopped, finished or superseded. */
+	ownsSteering(): boolean {
+		return !this.stopped && this.isCurrent();
 	}
 
 	private isCurrent(): boolean {

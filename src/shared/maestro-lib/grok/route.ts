@@ -33,6 +33,8 @@ export const GROK_ACP_PORT_SUPPORT = Object.freeze({
 	images: false,
 	remote: false,
 	nativeCommands: true,
+	/** No in-progress input operation is pinned; see `grokSteeringAvailability`. */
+	steering: false,
 });
 
 /**
@@ -379,6 +381,71 @@ export function grokAcpRouteOptions(
 		account: decision.facts.account,
 		host: decision.facts.host,
 		agentVersion: decision.facts.agentVersion,
+	};
+}
+
+/**
+ * Why a steer into a Grok turn cannot be delivered:
+ * - `steering-not-owned` the turn is not the active owner of its process key (stopped,
+ *   finished, superseded, or the key now holds another process);
+ * - `native-steering` the native headless route has no input channel into a running turn;
+ * - `acp-steering` the ACP route has no advertised in-progress input operation.
+ */
+export type GrokSteeringGap = 'steering-not-owned' | 'native-steering' | 'acp-steering';
+
+/** What a steering host observed of the turn a steer names. */
+export interface GrokSteeringFacts {
+	/** The route the registered process runs on. */
+	route: GrokRoute;
+	/** True only for the active, current owner of the steered process key. */
+	owned: boolean;
+}
+
+/**
+ * The negotiated steering answer. Only a refusal is reachable today: the pinned ACP wire 1
+ * (schema 0.11.4) and the Grok extensions this checkout pins advertise no operation that
+ * adds input to a running turn (`session/prompt` starts a turn and the session refuses a
+ * concurrent one; `session/cancel` ends one), and the port implements none
+ * (`GROK_ACP_PORT_SUPPORT.steering`). Parity S21 therefore stays a required blocker.
+ */
+export interface GrokSteeringRefusal {
+	ok: false;
+	reason: 'grok-steering-refused';
+	route: GrokRoute;
+	missing: readonly GrokSteeringGap[];
+	parityRows: readonly string[];
+	/** The established steering-refusal detail (`this turn is not steerable - ...`). */
+	detail: string;
+}
+
+const STEERING_GAP_DETAIL: Record<GrokSteeringGap, string> = {
+	'steering-not-owned': 'this turn is not steerable - it is no longer the active Grok turn',
+	'native-steering':
+		'this turn is not steerable - the Grok headless route has no input channel into a running turn',
+	'acp-steering':
+		'this turn is not steerable - Grok advertises no in-progress input operation on this route',
+};
+
+/**
+ * Decide whether a steer may reach a Grok turn. Never sends, queues, cancels or restarts
+ * anything: a refused steer leaves the message with its caller. Grok input never travels
+ * the maestro-p steering channel, which belongs to Claude TUI turns alone.
+ */
+export function grokSteeringAvailability(facts: GrokSteeringFacts): GrokSteeringRefusal {
+	// An owned ACP turn is still refused: there is no advertised operation to negotiate, and
+	// a port that grows one must grow its delivery here, with this answer, in the same change.
+	const gap: GrokSteeringGap = !facts.owned
+		? 'steering-not-owned'
+		: facts.route === 'native-headless'
+			? 'native-steering'
+			: 'acp-steering';
+	return {
+		ok: false,
+		reason: 'grok-steering-refused',
+		route: facts.route,
+		missing: [gap],
+		parityRows: ['P10', 'S21'],
+		detail: STEERING_GAP_DETAIL[gap],
 	};
 }
 
