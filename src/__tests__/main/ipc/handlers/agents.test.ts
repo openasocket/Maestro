@@ -330,6 +330,7 @@ describe('agents IPC handlers', () => {
 					path.resolve('/Users/me/.codex-agent'),
 					path.resolve('/Users/me/.codex-session'),
 				],
+				grokHomes: [],
 			});
 		});
 
@@ -377,6 +378,7 @@ describe('agents IPC handlers', () => {
 			expect(result).toEqual({
 				claudeConfigDirs: [path.resolve('/Users/me/.claude-agent')],
 				codexHomes: [path.resolve('/Users/me/.codex-agent')],
+				grokHomes: [],
 			});
 		});
 
@@ -412,6 +414,7 @@ describe('agents IPC handlers', () => {
 					path.resolve('/Users/me/.claude-migrated'),
 				],
 				codexHomes: [],
+				grokHomes: [],
 			});
 		});
 	});

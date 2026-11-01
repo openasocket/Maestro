@@ -41,7 +41,10 @@ import type { AITabRecord } from '../../../shared/maestro-lib/store/records';
 import { checkCustomPath } from '../../agents/path-prober';
 import { CodexRpcRequestError, CodexRpcTransportError } from '../../codex-app-server/rpc-client';
 import { buildChildProcessEnv } from '../../process-manager/utils/envBuilder';
-import { effectiveAgentCustomEnvVars } from '../../../shared/providerProfiles';
+import {
+	effectiveAgentCustomEnvVars,
+	resolveAgentAccountKey,
+} from '../../../shared/providerProfiles';
 import { probeClaudeSlashCommands } from '../../agents/claude-slash-command-probe';
 import { logger } from '../../utils/logger';
 import { getWhichCommand } from '../../../shared/platformDetection';
@@ -113,7 +116,16 @@ const handlerOpts = (
 	operation,
 });
 
-type AuthPathResolver = (env: NodeJS.ProcessEnv) => string;
+/** Canonical key for a configured auth path, or `null` when the value names no path. */
+type AuthPathResolver = (env: NodeJS.ProcessEnv) => string | null;
+
+/**
+ * Grok's account key through the canonical provider-profile rule (the one the
+ * profile picker and `getProviderAccountDirs` use). No home dir is passed, so a
+ * blank `GROK_HOME` names nothing rather than the implicit `~/.grok` default.
+ */
+const resolveGrokHomeKey: AuthPathResolver = (env) =>
+	resolveAgentAccountKey('grok', { GROK_HOME: env.GROK_HOME ?? '' }, undefined);
 
 /**
  * Hold a per-provider configuration write to the managed policy and the
@@ -166,7 +178,7 @@ function collectKnownAuthPaths(
 	agentEnvVars: Record<string, unknown>,
 	sessions: Array<Record<string, unknown>>,
 	toolType: string,
-	envVarName: 'CLAUDE_CONFIG_DIR' | 'CODEX_HOME',
+	envVarName: 'CLAUDE_CONFIG_DIR' | 'CODEX_HOME' | 'GROK_HOME',
 	resolveKey: AuthPathResolver
 ): string[] {
 	const pathsByKey = new Map<string, string>();
@@ -174,6 +186,7 @@ function collectKnownAuthPaths(
 		const value = envVars[envVarName];
 		if (typeof value !== 'string' || value.length === 0) return;
 		const canonicalPath = resolveKey({ [envVarName]: value });
+		if (canonicalPath === null) return;
 		if (!pathsByKey.has(canonicalPath)) {
 			pathsByKey.set(canonicalPath, canonicalPath);
 		}
@@ -1823,6 +1836,13 @@ export function registerAgentsHandlers(deps: AgentsHandlerDependencies): void {
 						'codex',
 						'CODEX_HOME',
 						resolveCodexHomeKey
+					),
+					grokHomes: collectKnownAuthPaths(
+						getCustomEnvVars(allConfigs.grok),
+						sessions,
+						'grok',
+						'GROK_HOME',
+						resolveGrokHomeKey
 					),
 				};
 			}
