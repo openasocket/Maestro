@@ -1,0 +1,547 @@
+{
+	"schemaVersion": 1,
+	"taskId": "GT1-08-21",
+	"recordedAt": "2026-11-01T17:19:48.517Z",
+	"sourceCommit": "4d671263875bbf3d527e2dfa272ce69a74b940a2",
+	"executionRoot": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+	"branch": "auto-run-feature/grok-cli-integration",
+	"baseObservation": {
+		"ref": "feature/mega-maestro-v1.1.0-rc",
+		"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
+		"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+		"aheadBehind": [432, 10],
+		"baseIsAncestorOfSource": false,
+		"sourceIsAncestorOfBase": false
+	},
+	"status": "pass",
+	"runner": {
+		"vitest": "4.1.11",
+		"node": "v26.13.0",
+		"config": "vitest.config.mts (default)",
+		"reporter": "json",
+		"liveCalls": 0,
+		"network": false,
+		"credentials": false
+	},
+	"summary": {
+		"files": 19,
+		"tests": 734,
+		"passed": 734,
+		"failed": 0,
+		"skipped": 0,
+		"grokCases": 246,
+		"grokPassed": 246
+	},
+	"suites": [
+		{
+			"task": "GT1-08-15",
+			"consumer": "director-notes",
+			"suite": "src/__tests__/main/utils/director-notes-provider.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/main/utils/director-notes-provider.test.ts",
+			"exit": 0,
+			"total": 15,
+			"passed": 15,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 7,
+			"grokPassed": 7,
+			"durationMs": 559
+		},
+		{
+			"task": "GT1-08-15",
+			"consumer": "grooming",
+			"suite": "src/__tests__/main/utils/context-groomer.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/main/utils/context-groomer.test.ts",
+			"exit": 0,
+			"total": 74,
+			"passed": 74,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 21,
+			"grokPassed": 21,
+			"durationMs": 1915
+		},
+		{
+			"task": "GT1-08-15",
+			"consumer": "grooming-managed",
+			"suite": "src/__tests__/main/utils/context-groomer.managed.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/main/utils/context-groomer.managed.test.ts",
+			"exit": 0,
+			"total": 34,
+			"passed": 34,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 8,
+			"grokPassed": 8,
+			"durationMs": 1422
+		},
+		{
+			"task": "GT1-08-17",
+			"consumer": "symphony-runner",
+			"suite": "src/__tests__/main/services/symphony-runner.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/main/services/symphony-runner.test.ts",
+			"exit": 0,
+			"total": 110,
+			"passed": 110,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 12,
+			"grokPassed": 12,
+			"durationMs": 974
+		},
+		{
+			"task": "GT1-08-17",
+			"consumer": "symphony-hook",
+			"suite": "src/__tests__/renderer/hooks/symphony/useSymphony.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/renderer/hooks/symphony/useSymphony.test.ts",
+			"exit": 0,
+			"total": 71,
+			"passed": 71,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 11,
+			"grokPassed": 11,
+			"durationMs": 3784
+		},
+		{
+			"task": "GT1-08-19",
+			"consumer": "pianola-learning",
+			"suite": "src/__tests__/shared/pianola/transcript-mining.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/shared/pianola/transcript-mining.test.ts",
+			"exit": 0,
+			"total": 51,
+			"passed": 51,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 20,
+			"grokPassed": 20,
+			"durationMs": 583
+		},
+		{
+			"task": "GT1-08-19",
+			"consumer": "pianola-learn-cli",
+			"suite": "src/__tests__/cli/commands/pianola-learn.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/cli/commands/pianola-learn.test.ts",
+			"exit": 0,
+			"total": 14,
+			"passed": 14,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 8,
+			"grokPassed": 8,
+			"durationMs": 691
+		},
+		{
+			"task": "GT1-08-20",
+			"consumer": "pianola-select",
+			"suite": "src/__tests__/shared/pianola/pianola-agent-select.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/shared/pianola/pianola-agent-select.test.ts",
+			"exit": 0,
+			"total": 24,
+			"passed": 24,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 13,
+			"grokPassed": 13,
+			"durationMs": 560
+		},
+		{
+			"task": "GT1-08-20",
+			"consumer": "pianola-orchestrator",
+			"suite": "src/__tests__/shared/pianola/pianola-orchestrator.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/shared/pianola/pianola-orchestrator.test.ts",
+			"exit": 0,
+			"total": 25,
+			"passed": 25,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 9,
+			"grokPassed": 9,
+			"durationMs": 566
+		},
+		{
+			"task": "GT1-08-20",
+			"consumer": "pianola-supervisor-managed",
+			"suite": "src/__tests__/main/pianola/pianola-supervisor.managed.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/main/pianola/pianola-supervisor.managed.test.ts",
+			"exit": 0,
+			"total": 16,
+			"passed": 16,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 6,
+			"grokPassed": 6,
+			"durationMs": 876
+		},
+		{
+			"task": "GT1-08-14C",
+			"consumer": "feedback-accounts",
+			"suite": "src/__tests__/shared/feedbackAccounts.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/shared/feedbackAccounts.test.ts",
+			"exit": 0,
+			"total": 12,
+			"passed": 12,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 7,
+			"grokPassed": 7,
+			"durationMs": 592
+		},
+		{
+			"task": "GT1-08-14C",
+			"consumer": "feedback-accounts-main",
+			"suite": "src/__tests__/main/feedback/accounts.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/main/feedback/accounts.test.ts",
+			"exit": 0,
+			"total": 11,
+			"passed": 11,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 6,
+			"grokPassed": 6,
+			"durationMs": 646
+		},
+		{
+			"task": "GT1-08-14D",
+			"consumer": "feedback-interview",
+			"suite": "src/__tests__/renderer/services/feedbackConversation.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/renderer/services/feedbackConversation.test.ts",
+			"exit": 0,
+			"total": 26,
+			"passed": 26,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 11,
+			"grokPassed": 11,
+			"durationMs": 898
+		},
+		{
+			"task": "GT1-08-14D",
+			"consumer": "feedback-managed",
+			"suite": "src/__tests__/main/feedback/managed.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/main/feedback/managed.test.ts",
+			"exit": 0,
+			"total": 9,
+			"passed": 9,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 3,
+			"grokPassed": 3,
+			"durationMs": 821
+		},
+		{
+			"task": "GT1-08-20A",
+			"consumer": "pianola-orchestrate-cli",
+			"suite": "src/__tests__/cli/commands/pianola-orchestrate.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/cli/commands/pianola-orchestrate.test.ts",
+			"exit": 0,
+			"total": 26,
+			"passed": 26,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 17,
+			"grokPassed": 17,
+			"durationMs": 3701
+		},
+		{
+			"task": "GT1-08-20A",
+			"consumer": "pianola-supervisor-standalone",
+			"suite": "src/__tests__/main/pianola/pianola-supervisor.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/main/pianola/pianola-supervisor.test.ts",
+			"exit": 0,
+			"total": 31,
+			"passed": 31,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 9,
+			"grokPassed": 9,
+			"durationMs": 966
+		},
+		{
+			"task": "GT1-08-14F",
+			"consumer": "tab-naming",
+			"suite": "src/__tests__/main/ipc/handlers/tabNaming.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/main/ipc/handlers/tabNaming.test.ts",
+			"exit": 0,
+			"total": 144,
+			"passed": 144,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 54,
+			"grokPassed": 54,
+			"durationMs": 8821
+		},
+		{
+			"task": "GT1-08-14F",
+			"consumer": "tab-naming-managed",
+			"suite": "src/__tests__/main/ipc/handlers/tabNaming.managed.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/main/ipc/handlers/tabNaming.managed.test.ts",
+			"exit": 0,
+			"total": 26,
+			"passed": 26,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 18,
+			"grokPassed": 18,
+			"durationMs": 2556
+		},
+		{
+			"task": "GT1-08-14F",
+			"consumer": "headless-autorun-retry",
+			"suite": "src/shared/maestro-lib/runtime/__tests__/autorun-turns.test.ts",
+			"command": "node node_modules/vitest/vitest.mjs run src/shared/maestro-lib/runtime/__tests__/autorun-turns.test.ts",
+			"exit": 0,
+			"total": 15,
+			"passed": 15,
+			"failed": 0,
+			"skipped": 0,
+			"grokCases": 6,
+			"grokPassed": 6,
+			"durationMs": 2003
+		}
+	],
+	"typeChecks": {
+		"main": 0,
+		"cli": 0,
+		"commands": [
+			"node node_modules/typescript/bin/tsc -p tsconfig.main.json --noEmit",
+			"node node_modules/typescript/bin/tsc -p tsconfig.cli.json --noEmit"
+		]
+	},
+	"consumerVerdicts": {
+		"directorNotes": {
+			"task": "GT1-08-15",
+			"suites": ["director-notes-provider.test.ts"],
+			"verdict": "pass"
+		},
+		"utilityGrooming": {
+			"task": "GT1-08-15",
+			"suites": ["context-groomer.test.ts", "context-groomer.managed.test.ts"],
+			"verdict": "pass",
+			"note": "Best-effort no tools runs as enforced read-only; required all-tools-off refused before spawn (unsupported)."
+		},
+		"symphony": {
+			"task": "GT1-08-17",
+			"suites": ["symphony-runner.test.ts", "useSymphony.test.ts"],
+			"verdict": "pass"
+		},
+		"pianolaTranscriptLearning": {
+			"task": "GT1-08-19",
+			"suites": ["transcript-mining.test.ts", "pianola-learn.test.ts"],
+			"verdict": "pass",
+			"note": "Prose ask/reply pairs mined; tool-permission decisions are the explicit unsupported result grok-permission-decisions-unrecorded."
+		},
+		"pianolaDispatch": {
+			"task": "GT1-08-20",
+			"suites": [
+				"pianola-agent-select.test.ts",
+				"pianola-orchestrator.test.ts",
+				"pianola-supervisor.managed.test.ts"
+			],
+			"verdict": "pass"
+		},
+		"pianolaOrchestrateCliAndStandaloneSupervisor": {
+			"task": "GT1-08-20A",
+			"suites": ["pianola-orchestrate.test.ts", "pianola-supervisor.test.ts"],
+			"verdict": "pass"
+		},
+		"feedbackAccounts": {
+			"task": "GT1-08-14C",
+			"suites": [
+				"src/__tests__/shared/feedbackAccounts.test.ts",
+				"src/__tests__/main/feedback/accounts.test.ts"
+			],
+			"verdict": "pass"
+		},
+		"feedbackInterview": {
+			"task": "GT1-08-14D",
+			"suites": ["feedbackConversation.test.ts", "src/__tests__/main/feedback/managed.test.ts"],
+			"verdict": "pass"
+		},
+		"tabNaming": {
+			"task": "GT1-08-14F",
+			"suites": ["tabNaming.test.ts", "tabNaming.managed.test.ts"],
+			"verdict": "pass",
+			"note": "A Grok effort refusal keeps the first failure and starts no second process."
+		},
+		"headlessAutoRunRetry": {
+			"task": "GT1-08-14F",
+			"suites": ["autorun-turns.test.ts"],
+			"verdict": "pass",
+			"note": "The shared headless Auto Run runner does not retry a Grok effort refusal."
+		}
+	},
+	"phase08PriorVerifications": {
+		"GT1-08-07": {
+			"sourceCommit": "649b8bb492a011302b7693a105aef0c69c6c694d",
+			"evidence": "Plans/grok-tier1/evidence/08.md#gt1-08-07-verify-auto-run-task-document-goal-and-headless-suites",
+			"files": 5,
+			"tests": 443,
+			"passed": 442,
+			"failed": 0,
+			"skipped": 1
+		},
+		"GT1-08-12": {
+			"sourceCommit": "0d1aa53a205f23c1a6af21f31938bab0e6e43592",
+			"evidence": "Plans/grok-tier1/evidence/08.md#gt1-08-12-verify-grok-cue-and-group-chat-suites",
+			"files": 12,
+			"tests": 495,
+			"passed": 493,
+			"failed": 2,
+			"skipped": 0,
+			"failureNote": "Two pre-existing Windows taskkill cases outside the Grok blocks."
+		}
+	},
+	"fixtureProvenance": "Synthetic native records and sanitized fixture shapes authored in the test files, fed through the real parsers, hooks, runners and selection engine over fake processes, spawn callbacks and lease authorities. No binary captured, no binary version tested; candidate @xai-official/grok@1.0.70 has qualifiedVersions [].",
+	"nativeQualification": "not-run",
+	"productAcceptance": "not-run",
+	"phase11LiveCases": [
+		"GT1-11-11",
+		"GT1-11-11A",
+		"GT1-11-11B",
+		"GT1-11-11C",
+		"GT1-11-11D",
+		"GT1-11-11E",
+		"GT1-11-11F",
+		"GT1-11-12",
+		"GT1-11-13"
+	],
+	"remainingDependencies": [
+		{
+			"id": "grok-groupchat-moderation-refused",
+			"kind": "unsupported-capability",
+			"releaseBlocker": true,
+			"rows": ["S14", "C-supportsGroupChatModeration", "P31"],
+			"owner": ["GT1-11-11E", "GT1-12-06"],
+			"detail": "A Grok moderator is refused at createGroupChat because supportsGroupChatModeration stays false; Claude Code and Codex moderate. Needs qualified native moderation evidence before the capability can be declared."
+		},
+		{
+			"id": "grok-permission-decisions-unrecorded",
+			"kind": "unsupported-capability",
+			"releaseBlocker": true,
+			"rows": ["S17", "P31"],
+			"owner": ["GT1-11-11E"],
+			"detail": "chat_history.jsonl records no tool-permission outcome and the updates.jsonl row schema is not pinned; Claude Code and Codex mine paired human decisions. Pianola learn reports scanned.grok.unsupported."
+		},
+		{
+			"id": "grok-required-no-tools-unsupported",
+			"kind": "unsupported-capability",
+			"releaseBlocker": true,
+			"rows": ["S19", "P20", "P32", "P35", "META-03"],
+			"owner": ["GT1-11-11D"],
+			"detail": "requireDisabledTools is refused before spawn; best-effort disableTools runs as enforced read-only (plan plus deny Bash), read and MCP tools stay available. Claude Code has noToolsArgs. Needs a qualified all-tools-off flag."
+		},
+		{
+			"id": "grok-effort-validation-and-retry-pending",
+			"kind": "unsupported-capability",
+			"releaseBlocker": true,
+			"rows": ["P06", "P29", "P32", "REG-MODEL", "S10", "S19", "REG-DEFINITIONS"],
+			"owner": ["phase10", "GT1-11-11A", "GT1-11-11D"],
+			"detail": "Tab naming and the shared headless Auto Run runner keep the first Grok effort refusal and never retry (GT1-08-14E/14F pass); Claude Code and Codex retry without effort. A retry needs hint provenance plus the selected model menu on the request (existing blocker retained)."
+		},
+		{
+			"id": "pianola-fresh-session-config-absent",
+			"kind": "defect-follow-up",
+			"providerNeutral": true,
+			"releaseBlocker": true,
+			"rows": ["S16", "P31", "P04"],
+			"owner": ["unscheduled: PianolaTask and create_session schema"],
+			"detail": "PianolaTask and the CLI create_session command carry no account, model or SSH remote, so a fresh Pianola session runs on provider defaults for every provider; only a bound agent keeps its configured account, model and remote target."
+		},
+		{
+			"id": "pianola-required-flags-latent-substitution",
+			"kind": "defect-follow-up",
+			"providerNeutral": true,
+			"releaseBlocker": false,
+			"rows": ["S16"],
+			"owner": ["unscheduled: pianola-orchestrate.ts"],
+			"detail": "choosePianolaToolType passes no required flags; its non-empty-pool fallthrough to PIANOLA_COLD_START_TOOL_TYPE is unreachable today but would substitute claude-code once required flags are passed."
+		},
+		{
+			"id": "director-notes-callback-detector",
+			"kind": "defect-follow-up",
+			"providerNeutral": true,
+			"releaseBlocker": false,
+			"rows": ["S18", "P32"],
+			"owner": ["unscheduled: src/main/web-server/callbacks/directorNotesCallbacks.ts"],
+			"detail": "The web/CLI synopsis callback builds a bare AgentDetector with no custom paths and forwards no Director Notes custom path/args/env, so a configured-path provider reads not available there."
+		},
+		{
+			"id": "director-notes-resolver-custom-path",
+			"kind": "defect-follow-up",
+			"providerNeutral": true,
+			"releaseBlocker": false,
+			"rows": ["S18", "P32"],
+			"owner": ["unscheduled: director-notes IPC handler"],
+			"detail": "resolveSynopsisProvider checks detection only while the handler spawns with the Director Notes customPath, so a provider installed only at that path is refused."
+		},
+		{
+			"id": "utility-cheap-tier-keyed-on-session-agent",
+			"kind": "defect-follow-up",
+			"providerNeutral": true,
+			"releaseBlocker": false,
+			"rows": ["S19", "P32"],
+			"owner": ["unscheduled: src/main/ipc/handlers/context.ts"],
+			"detail": "cheapTurnSettings is computed from the session agent even when utilityAgentId swaps the provider, so a Grok utility turn can get another provider model/effort tier."
+		},
+		{
+			"id": "feedback-chat-refused-fallthrough",
+			"kind": "defect-follow-up",
+			"releaseBlocker": false,
+			"rows": ["S33"],
+			"owner": ["unscheduled: FeedbackChatView"],
+			"detail": "sendTurn returns refused:true for an unqualified or unsupported Grok account before any spawn; FeedbackChatView still falls through to its generic failure handling."
+		},
+		{
+			"id": "autorun-goal-handoff-resume-lineage",
+			"kind": "defect-follow-up",
+			"releaseBlocker": false,
+			"rows": ["S11", "P29"],
+			"owner": ["unscheduled: src/renderer/hooks/agent/useAgentExecution.ts"],
+			"detail": "Recorded under GT1-08-03: handoff resume lineage in useAgentExecution.ts is an open dependency."
+		},
+		{
+			"id": "cli-grok-inherited-auth-and-structured-terminal",
+			"kind": "defect-follow-up",
+			"releaseBlocker": false,
+			"rows": ["S12", "P10", "P38"],
+			"owner": ["phase10"],
+			"detail": "Recorded under GT1-08-05: inherited GROK_AUTH, CLI goal options F6 and the structured terminal in turn-result.ts are unchanged."
+		},
+		{
+			"id": "grok-resource-loaders-unpinned",
+			"kind": "native-qualification",
+			"releaseBlocker": true,
+			"rows": ["S36", "P28"],
+			"owner": ["GT1-11-11B", "GT1-11-13"],
+			"detail": "Bundle Grok resources stay verification unverified; native discovery of skills, rules and agents is unqualified (existing blocker retained)."
+		},
+		{
+			"id": "qualified-binary-and-platforms-missing",
+			"kind": "native-qualification",
+			"releaseBlocker": true,
+			"rows": "all phase 08 rows",
+			"owner": [
+				"GT1-11-11",
+				"GT1-11-11A",
+				"GT1-11-11B",
+				"GT1-11-11C",
+				"GT1-11-11D",
+				"GT1-11-11E",
+				"GT1-11-11F",
+				"GT1-11-12",
+				"GT1-11-13"
+			],
+			"detail": "Every phase 08 verdict is synthetic native records through real parsers over fake processes; no binary version tested, qualifiedVersions empty."
+		},
+		{
+			"id": "live-authorization-absent",
+			"kind": "credentials-and-approval",
+			"releaseBlocker": true,
+			"rows": "all phase 08 rows",
+			"owner": ["run-state liveBoundary"],
+			"detail": "liveBoundary.enabled is false: no isolated account, endpoint, budget or SSH target is authorized. Phase 11 live cases stay not-run; this VERIFY does not wait for them."
+		}
+	],
+	"imagesAnalyzed": 0
+}
