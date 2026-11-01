@@ -25,7 +25,7 @@ import {
 	settingWriteVerdict,
 } from '../../../main/enterprise/settings-policy';
 import { handleUpdateSessionConfig } from '../../../main/web-server/handlers/messageHandlers/sessions';
-import { MANAGED_LOCK_KEYS } from '../../../shared/managedSettingsLock';
+import { MANAGED_LOCK_KEYS, changedAgentConfigFields } from '../../../shared/managedSettingsLock';
 import { handleSetSetting } from '../../../main/web-server/handlers/messageHandlers/settings';
 import type { MessageHandlerContext } from '../../../main/web-server/handlers/messageHandlers/types';
 
@@ -532,5 +532,207 @@ describe('Encore flag pins (MRC2-07-06)', () => {
 		expect(view.encorePins).toEqual({ plugins: false });
 		installed();
 		expect(readManagedSettingLocks().encorePins).toBeUndefined();
+	});
+});
+
+/**
+ * GT1-09-05: Grok configuration pins through the write verdict and the bridge.
+ * The policy source and its document are real; only the identity read is a
+ * synthetic fixture (an enrolled host). No real credentials: every secret is
+ * the literal string 'synthetic'.
+ */
+describe('Grok configuration under the managed settings policy (GT1-09-05)', () => {
+	const standalone = managedSettingsStanding({ enrolled: false, policy: null, installed: null });
+	const none = managedSettingsStanding({ enrolled: true, policy: null, installed: null });
+	const GROK_LOCKS = document({
+		locks: [
+			{ key: 'agentConfig.model' },
+			{ key: 'agentConfig.reasoningEffort' },
+			{ key: 'agentConfig.customPath' },
+		],
+	});
+
+	it('admits every Grok field standalone, credential names and permission flags included', () => {
+		for (const [field, value] of [
+			['model', 'grok-4'],
+			['reasoningEffort', 'high'],
+			['customPath', '/opt/grok'],
+			['customArgs', '--always-approve -m grok-4 --base-url http://synthetic'],
+			['customEnvVars', { XAI_API_KEY: 'synthetic', GROK_HOME: '/h', GROK_MODELS_BASE_URL: 'u' }],
+		] as const)
+			expect(agentConfigWriteVerdict(standalone, 'grok', field, value)).toEqual({ allowed: true });
+		expect(holdAgentConfigWrite('grok', 'customEnvVars', { GROK_AUTH: 'synthetic' })).toEqual({
+			allowed: true,
+		});
+	});
+
+	it('refuses each held Grok field unavailable with no usable policy, and admits a field no policy may hold', () => {
+		for (const field of ['model', 'reasoningEffort', 'customPath', 'customArgs', 'customEnvVars'])
+			expect(agentConfigWriteVerdict(none, 'grok', field, 'x')).toMatchObject({
+				allowed: false,
+				code: 'unavailable',
+				message: expect.stringContaining(`"agentConfig.${field}" setting is held`),
+				policyRevision: null,
+			});
+		// The canonical contract: only AGENT_CONFIG_LOCK_FIELDS are holdable; any
+		// other key (contextWindow, an unknown one, a session-level spelling) is
+		// admitted as written, never rewritten into another field.
+		for (const field of ['contextWindow', 'fooBar', 'customModel'])
+			expect(agentConfigWriteVerdict(none, 'grok', field, 1)).toEqual({ allowed: true });
+	});
+
+	it('holds locked Grok fields, even a write of the value already stored', () => {
+		const current = installed(GROK_LOCKS);
+		expect(holdAgentConfigWrite('grok', 'model', 'grok-4')).toEqual({
+			allowed: false,
+			code: 'locked',
+			message: 'the "agentConfig.model" setting is locked by managed policy revision 3',
+			policyRevision: 3,
+		});
+		expect(current.authorizeAgentConfig('grok', 'model', 'grok-managed')).toMatchObject({
+			code: 'locked',
+		});
+		expect(holdAgentConfigWrite('grok', 'model', undefined)).toMatchObject({ code: 'locked' });
+		expect(holdAgentConfigWrite('grok', 'reasoningEffort', 'low')).toMatchObject({
+			code: 'locked',
+			message: 'the "agentConfig.reasoningEffort" setting is locked by managed policy revision 3',
+		});
+		expect(holdAgentConfigWrite('grok', 'customPath', '/tmp/grok')).toMatchObject({
+			code: 'locked',
+		});
+		expect(holdAgentConfigWrite('grok', 'contextWindow', 200000)).toEqual({ allowed: true });
+	});
+
+	it('refuses a whole document that pins a Grok field or names an unknown field, keeping the last policy', () => {
+		const current = installed(GROK_LOCKS);
+		expect(
+			current.install(document({ locks: [{ key: 'agentConfig.model', pin: { value: 'grok-4' } }] }))
+		).toEqual({
+			installed: false,
+			problems: [
+				'locks[0].pin.value pins "agentConfig.model", a per-provider configuration key that may be locked but never pinned',
+			],
+		});
+		expect(
+			current.install(
+				document({ locks: [{ key: 'agentConfig.contextWindow' }, { key: 'agentConfig.model' }] })
+			)
+		).toEqual({ installed: false, problems: ['locks[0].key is not a lockable setting key'] });
+		// Neither refusal stripped the bad entry into a narrower policy: the last one holds.
+		expect(holdAgentConfigWrite('grok', 'customPath', '/tmp/grok')).toMatchObject({
+			code: 'locked',
+		});
+		expect(holdAgentConfigWrite('grok', 'contextWindow', 1)).toEqual({ allowed: true });
+	});
+
+	it('refuses Grok credential, account and endpoint names and route-around flags as ceiling', () => {
+		installed(GROK_LOCKS);
+		expect(
+			holdAgentConfigWrite('grok', 'customEnvVars', {
+				XAI_API_KEY: 'synthetic',
+				GROK_AUTH: 'synthetic',
+				GROK_AUTH_PATH: '/p',
+				GROK_HOME: '/h',
+				EDITOR: 'vi',
+			})
+		).toEqual({
+			allowed: false,
+			code: 'ceiling',
+			message:
+				'the customEnvVars configuration of grok would route around the managed provider ceiling: XAI_API_KEY is removed by the managed environment ceiling at launch; GROK_AUTH is removed by the managed environment ceiling at launch; GROK_AUTH_PATH is removed by the managed environment ceiling at launch; GROK_HOME is removed by the managed environment ceiling at launch',
+			policyRevision: 3,
+		});
+		// Grok's split endpoint: no single route base URL carries it, so the write names it.
+		expect(
+			holdAgentConfigWrite('grok', 'customEnvVars', { GROK_MODELS_BASE_URL: 'u' })
+		).toMatchObject({
+			code: 'ceiling',
+			message: expect.stringContaining(
+				'GROK_MODELS_BASE_URL selects a Grok credential, account or endpoint the managed provider ceiling cannot qualify'
+			),
+		});
+		expect(holdAgentConfigWrite('grok', 'customEnvVars', { EDITOR: 'vi' })).toEqual({
+			allowed: true,
+		});
+		expect(holdAgentConfigWrite('grok', 'customArgs', '--api-key synthetic')).toMatchObject({
+			code: 'ceiling',
+			message: expect.stringContaining('--api-key is not allowed under management'),
+		});
+		expect(
+			holdAgentConfigWrite('grok', 'customArgs', '-m grok-4 --base-url http://x')
+		).toMatchObject({
+			code: 'ceiling',
+			message: expect.stringContaining('--base-url is not allowed'),
+		});
+		// The write ceiling pins nothing: a model flag and the full-access flag are
+		// the launch plan's to hold against the turn's pins (permission-ceiling suite).
+		expect(holdAgentConfigWrite('grok', 'customArgs', '-m grok-4 --always-approve')).toEqual({
+			allowed: true,
+		});
+	});
+
+	it('names only the held fields a whole-record write changes, so an inherited value is not re-held but a changed one is', () => {
+		const inherited = {
+			model: 'grok-managed',
+			reasoningEffort: 'high',
+			customEnvVars: { EDITOR: 'vi' },
+			contextWindow: 1,
+		};
+		expect(changedAgentConfigFields(inherited, { ...inherited, contextWindow: 2 })).toEqual([]);
+		expect(
+			changedAgentConfigFields(inherited, {
+				...inherited,
+				model: 'grok-4',
+				customEnvVars: { EDITOR: 'vi', XAI_API_KEY: 'synthetic' },
+			})
+		).toEqual(['customEnvVars', 'model']);
+		expect(changedAgentConfigFields(inherited, { contextWindow: 1 })).toEqual([
+			'customEnvVars',
+			'model',
+			'reasoningEffort',
+		]);
+	});
+
+	it('refuses a Grok agent patch on the bridge as a whole, before the renderer, and passes unmanaged fields', () => {
+		installed(GROK_LOCKS);
+		const client = { cli: true } as never;
+		const ctx = {
+			send: vi.fn(),
+			sendError: vi.fn(),
+			callbacks: {
+				updateSessionConfig: vi.fn().mockResolvedValue({ success: true }),
+				getSessions: () => [{ id: 'g1', toolType: 'grok' }],
+			},
+		};
+		const send = (configPatch: Record<string, unknown>) =>
+			handleUpdateSessionConfig(ctx as unknown as MessageHandlerContext, client, {
+				type: 'update_session_config',
+				sessionId: 'g1',
+				requestId: 'r1',
+				configPatch,
+			} as never);
+		send({ nudgeMessage: 'hi', fooBar: 1, customModel: 'grok-4' });
+		expect(ctx.send).toHaveBeenLastCalledWith(client, {
+			type: 'update_session_config_result',
+			success: false,
+			error: 'the "agentConfig.model" setting is locked by managed policy revision 3',
+			sessionId: 'g1',
+			requestId: 'r1',
+			managed: { state: 'denied', code: 'locked' },
+		});
+		send({ customEffort: 'low' });
+		send({ customEnvVars: { XAI_API_KEY: 'synthetic' } });
+		expect(ctx.send).toHaveBeenLastCalledWith(
+			client,
+			expect.objectContaining({ success: false, managed: { state: 'denied', code: 'ceiling' } })
+		);
+		expect(ctx.send).toHaveBeenCalledTimes(3);
+		expect(ctx.callbacks.updateSessionConfig).not.toHaveBeenCalled();
+		send({ nudgeMessage: 'hi', fooBar: 1, customEnvVars: { EDITOR: 'vi' } });
+		expect(ctx.callbacks.updateSessionConfig).toHaveBeenCalledWith('g1', {
+			nudgeMessage: 'hi',
+			fooBar: 1,
+			customEnvVars: { EDITOR: 'vi' },
+		});
 	});
 });

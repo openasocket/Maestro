@@ -12,8 +12,10 @@ import {
 	applyAgentConfigWriteStrict,
 	type AgentConfigsStore,
 } from '../../../main/agents/agent-config-writes';
+import type { IdentityRead } from '../../../main/enterprise/identity-store';
 import {
 	ManagedSettingLockedError,
+	createSettingsPolicySource,
 	setSettingsWriteAuthority,
 	type SettingsWriteAuthority,
 } from '../../../main/enterprise/settings-policy';
@@ -139,5 +141,138 @@ describe('bridge set_agent_config_value / reset_agent_config_value', () => {
 			cli,
 			expect.objectContaining({ type: 'reset_agent_config_value_result', ...refused })
 		);
+	});
+});
+
+/**
+ * GT1-09-05: Grok writes through the one store writer under a real installed
+ * settings policy source. Only the identity read is a synthetic fixture (an
+ * enrolled host); every secret is the literal string 'synthetic'.
+ */
+describe('Grok configuration writes under a managed policy (GT1-09-05)', () => {
+	const enrolled = { status: 'ok', record: {}, fileExists: true } as unknown as IdentityRead;
+	function managed(locks: unknown[] | null) {
+		const source = createSettingsPolicySource({
+			identity: { read: () => enrolled },
+			policy: () => (locks === null ? null : { appliedRevision: 7 }),
+		});
+		if (locks !== null)
+			expect(source.install({ policyRevision: 7, locks })).toMatchObject({
+				installed: true,
+			});
+		setSettingsWriteAuthority(source);
+	}
+	const stored = () => ({
+		grok: {
+			model: 'grok-managed',
+			reasoningEffort: 'high',
+			customEnvVars: { EDITOR: 'vi' },
+			customArgs: '--permission-mode plan',
+		},
+		codex: { model: 'o3' },
+	});
+
+	it('standalone: every Grok field, an unknown key included, persists exactly as written', () => {
+		const { store, sets } = fakeStore(stored());
+		for (const [key, value] of [
+			['model', 'grok-4'],
+			['customArgs', '--always-approve -m grok-4'],
+			['customEnvVars', { XAI_API_KEY: 'synthetic', GROK_HOME: '/h' }],
+			['fooBar', { nested: true }],
+		] as const)
+			expect(applyAgentConfigWrite(store, set('grok', key, value)).success).toBe(true);
+		expect(sets.at(-1)).toEqual({
+			grok: {
+				model: 'grok-4',
+				reasoningEffort: 'high',
+				customEnvVars: { XAI_API_KEY: 'synthetic', GROK_HOME: '/h' },
+				customArgs: '--always-approve -m grok-4',
+				fooBar: { nested: true },
+			},
+			codex: { model: 'o3' },
+		});
+	});
+
+	it('refuses locked Grok fields, set or reset, and persists nothing', () => {
+		managed([
+			{ key: 'agentConfig.model' },
+			{ key: 'agentConfig.reasoningEffort' },
+			{ key: 'agentConfig.customPath' },
+		]);
+		const { store, sets } = fakeStore(stored());
+		expect(applyAgentConfigWrite(store, set('grok', 'model', 'grok-4'))).toEqual({
+			success: false,
+			error: 'the "agentConfig.model" setting is locked by managed policy revision 7',
+			managed: { state: 'denied', code: 'locked', policyRevision: 7 },
+		});
+		expect(applyAgentConfigWrite(store, reset('grok', 'model')).success).toBe(false);
+		expect(applyAgentConfigWrite(store, reset('grok', 'reasoningEffort')).success).toBe(false);
+		expect(applyAgentConfigWrite(store, set('grok', 'customPath', '/tmp/grok')).success).toBe(
+			false
+		);
+		expect(() => applyAgentConfigWriteStrict(store, set('grok', 'reasoningEffort', 'low'))).toThrow(
+			expect.objectContaining({ key: 'agentConfig.reasoningEffort', code: 'locked' })
+		);
+		expect(sets).toEqual([]);
+		expect(store.get('configs', {})).toEqual(stored());
+	});
+
+	it('refuses a Grok credential, account or endpoint write as ceiling and keeps no secret', () => {
+		managed([]);
+		const { store, sets } = fakeStore(stored());
+		for (const env of [
+			{ EDITOR: 'vi', XAI_API_KEY: 'synthetic' },
+			{ GROK_AUTH: 'synthetic' },
+			{ GROK_AUTH_PATH: '/synthetic/auth.json' },
+			{ GROK_HOME: '/other-account' },
+			{ GROK_XAI_API_BASE_URL: 'https://synthetic.invalid' },
+		])
+			expect(applyAgentConfigWrite(store, set('grok', 'customEnvVars', env))).toMatchObject({
+				success: false,
+				managed: { state: 'denied', code: 'ceiling', policyRevision: 7 },
+			});
+		expect(() =>
+			applyAgentConfigWriteStrict(store, set('grok', 'customArgs', '--api-key synthetic'))
+		).toThrow(expect.objectContaining({ key: 'agentConfig.customArgs', code: 'ceiling' }));
+		expect(sets).toEqual([]);
+		expect(JSON.stringify(store.get('configs', {}))).not.toContain('synthetic');
+	});
+
+	it('admits unmanaged Grok writes and unknown keys verbatim, beside a lock', () => {
+		managed([{ key: 'agentConfig.model' }]);
+		const { store, sets } = fakeStore(stored());
+		expect(applyAgentConfigWrite(store, set('grok', 'customEnvVars', { EDITOR: 'nano' }))).toEqual({
+			success: true,
+			previous: { EDITOR: 'vi' },
+		});
+		expect(applyAgentConfigWrite(store, set('grok', 'contextWindow', 256000)).success).toBe(true);
+		expect(applyAgentConfigWrite(store, set('grok', 'fooBar', 'kept')).success).toBe(true);
+		expect(applyAgentConfigWrite(store, reset('grok', 'customArgs'))).toMatchObject({
+			success: true,
+			removed: true,
+		});
+		expect(sets.at(-1)).toEqual({
+			grok: {
+				model: 'grok-managed',
+				reasoningEffort: 'high',
+				customEnvVars: { EDITOR: 'nano' },
+				contextWindow: 256000,
+				fooBar: 'kept',
+			},
+			codex: { model: 'o3' },
+		});
+	});
+
+	it('refuses held Grok fields unavailable on an enrolled host with no applied policy', () => {
+		managed(null);
+		const { store, sets } = fakeStore(stored());
+		expect(
+			applyAgentConfigWrite(store, set('grok', 'customEnvVars', { EDITOR: 'nano' }))
+		).toMatchObject({
+			success: false,
+			managed: { state: 'unavailable', code: 'unavailable', policyRevision: null },
+		});
+		expect(applyAgentConfigWrite(store, set('grok', 'contextWindow', 1)).success).toBe(true);
+		expect(sets).toHaveLength(1);
 	});
 });
