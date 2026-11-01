@@ -832,3 +832,85 @@ describe('update-agent Grok carry-over', () => {
 		}
 	);
 });
+
+// GT1-10-02: editable settings of an existing Grok agent. Model, effort and env
+// ride the generic update_session_config message; Claude-only and Codex-only
+// fields are refused with a parseable JSON error before the bridge is touched.
+describe('update-agent Grok agent settings', () => {
+	let logSpy: MockInstance;
+	let exitSpy: MockInstance;
+	let sendCommand: ReturnType<typeof vi.fn>;
+	const lastJson = () => JSON.parse(String(logSpy.mock.calls.at(-1)![0]));
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+		vi.spyOn(console, 'error').mockImplementation(() => {});
+		exitSpy = vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+			throw new Error(`process.exit(${code})`);
+		});
+		vi.mocked(resolveAgentId).mockReturnValue('grok-session-id');
+		vi.mocked(getSessionById).mockReturnValue({
+			id: 'grok-session-id',
+			toolType: 'grok',
+		} as never);
+		sendCommand = vi
+			.fn()
+			.mockResolvedValue({ type: 'update_session_config_result', success: true });
+		vi.mocked(withMaestroClient).mockImplementation(async (action) =>
+			action({ sendCommand } as never)
+		);
+	});
+
+	it('sends the selected model, effort and env as one config patch with no provider change', async () => {
+		await updateAgent('grok', {
+			model: 'grok-code-fast-1',
+			effort: 'high',
+			env: ['GROK_TELEMETRY=0'],
+			json: true,
+		});
+
+		expect(sendCommand).toHaveBeenCalledTimes(1);
+		const [message, expectType] = sendCommand.mock.calls[0];
+		expect(expectType).toBe('update_session_config_result');
+		expect(message).toEqual({
+			type: 'update_session_config',
+			sessionId: 'grok-session-id',
+			configPatch: {
+				customModel: 'grok-code-fast-1',
+				customEffort: 'high',
+				customEnvVars: { GROK_TELEMETRY: '0' },
+			},
+		});
+		expect(message.configPatch).not.toHaveProperty('toolType');
+		expect(lastJson()).toMatchObject({ success: true });
+		expect(exitSpy).not.toHaveBeenCalled();
+	});
+
+	it('clears the Grok model override with an empty value instead of substituting a default', async () => {
+		await updateAgent('grok', { model: '' });
+		expect(sendCommand.mock.calls[0][0].configPatch).toEqual({ customModel: null });
+	});
+
+	it.each([
+		[{ tokenSource: 'tui' }, 'only applies to Claude Code agents'],
+		[{ codexTransport: 'app-server' }, 'only applies to Codex agents'],
+	])('refuses %o on a Grok agent as parseable JSON, before any bridge call', async (flags, why) => {
+		await expect(updateAgent('grok', { ...flags, json: true })).rejects.toThrow('process.exit(1)');
+		const printed = lastJson();
+		expect(printed.success).toBe(false);
+		expect(printed.error).toContain(why);
+		expect(printed.error).toContain('is a grok agent');
+		expect(withMaestroClient).not.toHaveBeenCalled();
+	});
+
+	it('refuses a non-registry provider spelling and lists grok, without a translation request', async () => {
+		await expect(updateAgent('grok', { provider: 'grok-cli', json: true })).rejects.toThrow(
+			'process.exit(1)'
+		);
+		const printed = lastJson();
+		expect(printed.error).toContain('Invalid provider "grok-cli"');
+		expect(printed.error).toMatch(/\bgrok\b/);
+		expect(withMaestroClient).not.toHaveBeenCalled();
+	});
+});

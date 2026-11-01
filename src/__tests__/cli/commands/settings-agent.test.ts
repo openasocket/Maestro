@@ -223,3 +223,114 @@ describe('settings agent', () => {
 		});
 	});
 });
+
+// GT1-10-02: `settings agent` for Grok. The provider ID `grok` names the
+// provider defaults store; a Grok Left Bar agent reads its own record with the
+// Claude-only and Codex-only fields null; writes go through the desktop, whose
+// managed refusal reaches the caller as parseable JSON.
+describe('settings agent Grok', () => {
+	let logSpy: ReturnType<typeof vi.spyOn>;
+	let errorSpy: ReturnType<typeof vi.spyOn>;
+	const grokAgent: SessionInfo = {
+		id: 'b2c3d4e5-0000-4000-8000-000000000002',
+		name: 'Grok Worker',
+		toolType: 'grok',
+		cwd: '/repo',
+		projectRoot: '/repo',
+		customModel: 'grok-code-fast-1',
+	};
+	const desktop = (outcome: Record<string, unknown>) => {
+		const sendCommand = vi.fn().mockResolvedValue(outcome);
+		vi.mocked(withMaestroClient).mockImplementation(async (action) =>
+			action({ sendCommand } as never)
+		);
+		return sendCommand;
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		vi.mocked(dataDirHasManagedBinding).mockReturnValue(false);
+		logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+		errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+		vi.spyOn(process, 'exit').mockImplementation((code?: string | number | null) => {
+			throw new Error(`process.exit(${code})`);
+		});
+		vi.mocked(readAgentConfigs).mockReturnValue({ grok: { model: 'grok-4' } });
+		vi.mocked(getSessionById).mockImplementation((id: string) =>
+			grokAgent.id.startsWith(id) ? grokAgent : undefined
+		);
+	});
+
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it('reads the grok provider default from the provider store, not an agent record', () => {
+		vi.mocked(readAgentConfigValue).mockReturnValue('grok-4');
+		settingsAgentGet('grok', 'model', { json: true });
+		expect(readAgentConfigValue).toHaveBeenCalledWith('grok', 'model');
+		expect(getSessionById).not.toHaveBeenCalled();
+		expect(jsonLines(logSpy)[0]).toMatchObject({
+			type: 'setting',
+			scope: 'provider',
+			agentId: 'grok',
+			key: 'model',
+			value: 'grok-4',
+		});
+	});
+
+	it("lists a Grok agent's own model with Claude and Codex fields null", () => {
+		settingsAgentList(grokAgent.id, { json: true });
+		const lines = jsonLines(logSpy);
+		const value = (key: string) => lines.find((l) => l.key === key)?.value;
+		expect(lines.every((l) => l.scope === 'agent' && l.agentId === grokAgent.id)).toBe(true);
+		expect(value('customModel')).toBe('grok-code-fast-1');
+		expect(value('tokenSource')).toBeNull();
+		expect(value('codexTransport')).toBeNull();
+	});
+
+	it('writes the grok model default through the desktop bridge, never the file', async () => {
+		const sendCommand = desktop({ success: true, previous: 'grok-4' });
+		await settingsAgentSet('grok', 'model', 'grok-code-fast-1', { json: true });
+		expect(sendCommand).toHaveBeenCalledWith(
+			{
+				type: 'set_agent_config_value',
+				op: 'set',
+				providerId: 'grok',
+				key: 'model',
+				value: 'grok-code-fast-1',
+			},
+			'set_agent_config_value_result'
+		);
+		expect(jsonLines(logSpy)[0]).toMatchObject({
+			type: 'setting_set',
+			agentId: 'grok',
+			key: 'model',
+			oldValue: 'grok-4',
+			newValue: 'grok-code-fast-1',
+		});
+		expect(writeAgentConfigValue).not.toHaveBeenCalled();
+	});
+
+	it('surfaces the managed ceiling refusal of a Grok credential env as parseable JSON', async () => {
+		const managed = { state: 'denied', code: 'ceiling', policyRevision: 4 };
+		const error =
+			'agentConfig.customEnvVars names XAI_API_KEY, a Grok credential the ceiling holds';
+		desktop({ success: false, error, managed });
+		await expect(
+			settingsAgentSet('grok', 'customEnvVars', '{"XAI_API_KEY":"redacted"}', { json: true })
+		).rejects.toThrow('process.exit(1)');
+		expect(JSON.parse(String(errorSpy.mock.calls[0][0]))).toEqual({ error, managed });
+		expect(writeAgentConfigValue).not.toHaveBeenCalled();
+	});
+
+	it('refuses a provider write under a Grok agent ID before any bridge call', async () => {
+		await expect(settingsAgentSet(grokAgent.id, 'model', 'grok-4', { json: true })).rejects.toThrow(
+			'process.exit(1)'
+		);
+		expect(withMaestroClient).not.toHaveBeenCalled();
+		expect(JSON.parse(String(errorSpy.mock.calls[0][0])).error).toContain(
+			`update-agent ${grokAgent.id}`
+		);
+	});
+});
