@@ -9,7 +9,14 @@
  *
  * - `FAKE_MODE`: `ok` (default) answers each prompt; `permission` asks one
  *   `session/request_permission` (`perm-1`) and answers by the selected option; `hold` keeps
- *   the prompt open until `session/cancel`; `noversion` reports no agent version.
+ *   the prompt open until `session/cancel`; `noversion` reports no agent version; `question`
+ *   (GT1-07-04B) sends a `plan` update (`FAKE_PLAN` entries, default one in-progress step)
+ *   and then one reverse request `q-1` of method `FAKE_QMETHOD` (default
+ *   `_x.ai/ask_user_question`) for session `FAKE_QSESSION` (default its own), with params
+ *   `FAKE_QPARAMS` (JSON) or a two-choice question; `FAKE_QREPLAY` sends the same request
+ *   twice. The answer is logged as `qanswer <result>` or `qerror <code>`, and then
+ *   `FAKE_QTHEN` decides: absent, the turn ends `end_turn`; `permission` asks `perm-1` as the
+ *   `permission` mode does; `hold` keeps the prompt open until `session/cancel`.
  * - `FAKE_SESSION`: the native session id `session/new` allocates (default `native-1`).
  * - `FAKE_TICKS`: the terminal usage's `costUsdTicks`; absent, the turn reports no cost.
  * - `FAKE_COMMANDS`: a JSON array advertised as `available_commands_update` once the
@@ -34,6 +41,15 @@ const finish = (id, stopReason, cost) => send({ id, result: { stopReason, _meta:
 	reasoningTokens: 3, ...cost } } } });
 const advertise = () => env.FAKE_COMMANDS && send({ method: 'session/update', params: { sessionId: sid,
 	update: { sessionUpdate: 'available_commands_update', availableCommands: JSON.parse(env.FAKE_COMMANDS) } } });
+const ask = () => {
+	send({ method: 'session/update', params: { sessionId: sid, update: { sessionUpdate: 'plan',
+		entries: env.FAKE_PLAN ? JSON.parse(env.FAKE_PLAN) : [{ content: 'step one', status: 'in_progress', priority: 'high' }] } } });
+	const q = { id: 'q-1', method: env.FAKE_QMETHOD || '_x.ai/ask_user_question', params: {
+		sessionId: env.FAKE_QSESSION || sid, ...(env.FAKE_QPARAMS ? JSON.parse(env.FAKE_QPARAMS)
+			: { questions: [{ question: 'Pick one', options: [{ label: 'A' }, { label: 'B' }] }] }) } };
+	send(q);
+	if (env.FAKE_QREPLAY) send(q);
+};
 process.stdin.on('data', (d) => {
 	buf += d;
 	let i;
@@ -54,7 +70,16 @@ process.stdin.on('data', (d) => {
 				options: [{ optionId: 'yes', name: 'Allow', kind: 'allow_once' },
 					{ optionId: 'no', name: 'Deny', kind: 'reject_once' }] } });
 			else if (env.FAKE_MODE === 'hold') chunk('working');
+			else if (env.FAKE_MODE === 'question') ask();
 			else { chunk('Hello from ACP'); finish(m.id, 'end_turn', env.FAKE_TICKS ? { costUsdTicks: env.FAKE_TICKS } : {}); }
+		} else if (m.id === 'q-1' && !m.method) {
+			log(m.error ? 'qerror ' + m.error.code : 'qanswer ' + JSON.stringify(m.result));
+			if (env.FAKE_QTHEN === 'permission') send({ id: 'perm-1', method: 'session/request_permission', params: {
+				sessionId: sid, toolCall: { toolCallId: 'perm-1', title: 'Read', rawInput: { path: 'README.md' } },
+				options: [{ optionId: 'yes', name: 'Allow', kind: 'allow_once' },
+					{ optionId: 'no', name: 'Deny', kind: 'reject_once' }] } });
+			else if (env.FAKE_QTHEN === 'hold') chunk('waiting');
+			else { chunk('after question'); finish(pending, 'end_turn', {}); }
 		} else if (m.id === 'perm-1') {
 			const allowed = m.result && m.result.outcome && m.result.outcome.optionId === 'yes';
 			chunk(allowed ? 'Allowed answer' : 'Denied');

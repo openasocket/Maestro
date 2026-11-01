@@ -1410,6 +1410,241 @@ describe('process-manager.ts', () => {
 					}
 				});
 
+				// GT1-07-04B: plans and negotiated questions through the real desktop consumer. The
+				// pinned peer advertises no ask-back capability, so every question the turn owns is
+				// cancelled on the wire with its method's own outcome and the tab reads one capability
+				// gap; nothing reaches the consent surface and no answer path exists to cross tabs.
+				describe('plans and questions (GT1-07-04B)', () => {
+					const ASK = '_x.ai/ask_user_question';
+					const ELICIT = '_x.ai/mcp/elicit';
+					const textOf = (key: string) =>
+						of('data', key)
+							.map(([, , t]) => t)
+							.join('');
+					const plansOf = (key: string) =>
+						of('tool-execution', key)
+							.map(([, , e]) => e as any)
+							.filter((e) => e.toolName === 'update_plan');
+					const answersOf = (key: string) =>
+						logOf(key).filter((l) => l.startsWith('qanswer ') || l.startsWith('qerror '));
+					function expectGap(key: string, method: string) {
+						const errors = of('agent-error', key);
+						expect(errors).toHaveLength(1);
+						const error = errors[0][2] as AgentError;
+						expect(error.type).toBe('unknown');
+						expect(error.type).not.toBe('permission_denied');
+						expect(error.recoverable).toBe(false);
+						expect(error.message).toContain(`(${method})`);
+						expect(error.message).toMatch(/advertises no ask-back capability/);
+						expect(error.message).toMatch(
+							/no tool was authorized and no permission or policy changed/
+						);
+						expect(exitCodes(key)).toEqual([1]);
+					}
+
+					it('keeps two simultaneous tabs reusing one request id apart: plan, wire answer and gap stay with their owner', async () => {
+						consent.answer = () => 'allow';
+						processManager.spawn(
+							config('qa', {
+								FAKE_MODE: 'question',
+								FAKE_PLAN: JSON.stringify([
+									{ content: 'plan a', status: 'in_progress', priority: 'high' },
+								]),
+							})
+						);
+						processManager.spawn(
+							config('qb', {
+								FAKE_MODE: 'question',
+								FAKE_QMETHOD: ELICIT,
+								FAKE_QPARAMS: JSON.stringify({
+									mode: 'form',
+									message: 'Choose',
+									requestedSchema: { type: 'object' },
+								}),
+								FAKE_PLAN: JSON.stringify([
+									{ content: 'plan b', status: 'pending', priority: 'low' },
+								]),
+							})
+						);
+						processManager.spawn(config('plain', {}));
+						expect(internals().grokAcpSpawner.ctx.liveTurns.size).toBe(3);
+						await Promise.all([exited('qa'), exited('qb'), exited('plain')]);
+
+						// Both peers used request id q-1; each got its own method's cancel outcome once.
+						expect(answersOf('qa')).toEqual(['qanswer {"outcome":"cancelled"}']);
+						expect(answersOf('qb')).toEqual(['qanswer {"outcome":"cancel"}']);
+						expectGap('qa', ASK);
+						expectGap('qb', ELICIT);
+						expect((of('agent-error', 'qa')[0][2] as AgentError).message).toMatch(
+							/a question for you/
+						);
+						expect((of('agent-error', 'qb')[0][2] as AgentError).message).toMatch(
+							/an MCP elicitation/
+						);
+						// Each plan is a snapshot of its own native session, on its own tab only.
+						const [planA] = plansOf('qa');
+						const [planB] = plansOf('qb');
+						expect(plansOf('qa')).toHaveLength(1);
+						expect(plansOf('qb')).toHaveLength(1);
+						expect(planA.state.input.plan).toEqual([
+							expect.objectContaining({ step: 'plan a', status: 'in_progress' }),
+						]);
+						expect(planA.state.planUpdate).toMatchObject({
+							reporting: 'snapshot',
+							providerSessionId: 'native-qa',
+						});
+						expect(planB.state.input.plan).toEqual([
+							expect.objectContaining({ step: 'plan b', status: 'pending' }),
+						]);
+						expect(planB.state.planUpdate).toMatchObject({ providerSessionId: 'native-qb' });
+						// An answer is never an approval, even on a tab whose consent would allow.
+						expect(consent.asked).toEqual([]);
+						expect(of('agent-error', 'plain')).toHaveLength(0);
+						expect(plansOf('plain')).toHaveLength(0);
+						expect(exitCodes('plain')).toEqual([0]);
+						expect(consent.closed.sort()).toEqual(['plain-tab', 'qa-tab', 'qb-tab']);
+						expect(headless).not.toHaveBeenCalled();
+					});
+
+					it.each([
+						[
+							'a choices field that is not a list',
+							{ questions: [{ question: 'x', options: 'A,B' }] },
+						],
+						[
+							'a choice with no label',
+							{ questions: [{ question: 'x', options: [{ label: null }] }] },
+						],
+						['no questions at all', { questions: 'malformed' }],
+						['a free-text question', { questions: [{ question: 'Why?', options: [] }] }],
+					])('cancels %s without waiting or asking the consent surface', async (_name, params) => {
+						consent.answer = () => 'allow';
+						processManager.spawn(
+							config('malformed', { FAKE_MODE: 'question', FAKE_QPARAMS: JSON.stringify(params) })
+						);
+						await exited('malformed');
+						expect(answersOf('malformed')).toEqual(['qanswer {"outcome":"cancelled"}']);
+						expectGap('malformed', ASK);
+						expect(consent.asked).toEqual([]);
+						expect(textOf('malformed')).toContain('after question');
+					});
+
+					it.each([
+						['another native session', { FAKE_QSESSION: 'native-elsewhere' }],
+						[
+							'an old prompt',
+							{
+								FAKE_QPARAMS: JSON.stringify({
+									_meta: { promptId: 'old-prompt' },
+									questions: [{ question: 'x', options: [{ label: 'A' }] }],
+								}),
+							},
+						],
+					])(
+						'keeps a stale question for %s out of the turn: cancelled on the wire, no gap',
+						async (_name, env) => {
+							processManager.spawn(config('stale', { FAKE_MODE: 'question', ...env }));
+							await exited('stale');
+							expect(answersOf('stale')).toEqual(['qanswer {"outcome":"cancelled"}']);
+							expect(of('agent-error', 'stale')).toHaveLength(0);
+							expect(exitCodes('stale')).toEqual([0]);
+							expect(textOf('stale')).toContain('after question');
+							expect(consent.asked).toEqual([]);
+						}
+					);
+
+					it('answers a duplicated question id once and ends the turn without a second answer', async () => {
+						processManager.spawn(config('dup', { FAKE_MODE: 'question', FAKE_QREPLAY: '1' }));
+						await exited('dup');
+						expect(answersOf('dup')).toEqual(['qanswer {"outcome":"cancelled"}']);
+						expect(of('exit', 'dup')).toHaveLength(1);
+						expect(exitCodes('dup')).toEqual([1]);
+						expectGap('dup', ASK);
+						expect(consent.asked).toEqual([]);
+						expect(internals().grokAcpSpawner.ctx.liveTurns.size).toBe(0);
+					});
+
+					it.each(['allow', 'deny'] as const)(
+						'decides a later tool permission by the consent surface alone (%s), never by the question',
+						async (decision) => {
+							consent.answer = () => decision;
+							processManager.spawn(
+								config('scoped', { FAKE_MODE: 'question', FAKE_QTHEN: 'permission' })
+							);
+							await exited('scoped');
+							expect(answersOf('scoped')).toEqual(['qanswer {"outcome":"cancelled"}']);
+							// The consent surface saw the tool request, and only it.
+							expect(consent.asked).toEqual([
+								{ tabId: 'scoped-tab', toolName: 'Read', input: { path: 'README.md' } },
+							]);
+							expect(logOf('scoped')).toContain('answer:perm-1');
+							expect(textOf('scoped')).toContain(
+								decision === 'allow' ? 'Allowed answer' : 'Denied'
+							);
+							if (decision === 'deny') expect(textOf('scoped')).not.toContain('Allowed');
+							// The cancelled question still keeps the turn from reading as a success.
+							expectGap('scoped', ASK);
+						}
+					);
+
+					it('treats a stop after a question as the person stopping, not a gap', async () => {
+						processManager.spawn(
+							config('qstop', {
+								FAKE_MODE: 'question',
+								FAKE_QTHEN: 'hold',
+								FAKE_SESSION: 'native-qs',
+							})
+						);
+						await vi.waitFor(() => expect(answersOf('qstop')).toHaveLength(1));
+						expect(processManager.interrupt('qstop')).toBe(true);
+						await exited('qstop');
+						expect(logOf('qstop')).toContain('session/cancel native-qs');
+						expect(exitCodes('qstop')).toEqual([0]);
+						expect(of('agent-error', 'qstop')).toHaveLength(0);
+						expect(consent.asked).toEqual([]);
+					});
+
+					it('reconnects to the same native session after a gap without re-delivering the old question', async () => {
+						processManager.spawn(
+							config('recon', { FAKE_MODE: 'question', FAKE_SESSION: 'native-r' })
+						);
+						await exited('recon');
+						expectGap('recon', ASK);
+
+						events.length = 0;
+						processManager.spawn(
+							config('recon', { FAKE_LOG: path.join(dir, 'recon-resume.log') }, {
+								args: ['--resume', 'native-r'],
+								agentSessionId: 'native-r',
+								nativeSessionBinding: { ...scope(), nativeSessionId: 'native-r' },
+							} as Partial<ProcessConfig>)
+						);
+						await exited('recon');
+						expect(logOf('recon-resume')).toEqual([
+							'initialize',
+							'session/load native-r',
+							'session/prompt native-r',
+							'prompt [{"type":"text","text":"work on recon"}]',
+						]);
+						expect(of('agent-error', 'recon')).toHaveLength(0);
+						expect(exitCodes('recon')).toEqual([0]);
+						expect(textOf('recon')).toContain('Hello from ACP');
+					});
+
+					it('refuses an unsupported reverse method with a structured Method not found, not a gap or approval', async () => {
+						consent.answer = () => 'allow';
+						processManager.spawn(
+							config('unsupported', { FAKE_MODE: 'question', FAKE_QMETHOD: `${ASK}/v2` })
+						);
+						await exited('unsupported');
+						expect(answersOf('unsupported')).toEqual(['qerror -32601']);
+						expect(of('agent-error', 'unsupported')).toHaveLength(0);
+						expect(exitCodes('unsupported')).toEqual([0]);
+						expect(consent.asked).toEqual([]);
+						expect(plansOf('unsupported')).toHaveLength(1);
+					});
+				});
+
 				// GT1-05-03 discovery handoff: `agents:discoverSlashCommands` hands
 				// `discoverGrokSlashCommands` this ProcessManager's own reader; nothing else answers.
 				describe('selected-agent command discovery over the live owner', () => {
