@@ -23,7 +23,9 @@ import {
 	mcpInjectionProblem,
 	mergeMcpInjectionArgs,
 	MCP_CONFIG_BY_AGENT,
+	type NativeMcpConfigFacts,
 } from '../../../../shared/plugins/mcp-agent-config';
+import { parse as parseToml } from 'smol-toml';
 import type { InteractiveReplayController } from '../../../agents/claude-interactive-replay';
 import type {
 	NativeSessionLaunchScope,
@@ -817,11 +819,19 @@ async function handleProcessSpawnImpl(
 	// version-unqualified strategies, remote targets and a user-owned config
 	// path all mean no injection. No version is observed before the spawn, so a
 	// version-bound strategy (grok) is never injected here until it is qualified.
-	const mcpProblem = mcpInjectionProblem(mcpCap, {
+	const mcpContext = {
 		remote: !!config.sessionSshRemoteConfig?.enabled,
 		version: null,
 		env: { ...process.env, ...(effectiveCustomEnvVars || {}) },
-	});
+	};
+	let mcpProblem = mcpInjectionProblem(mcpCap, mcpContext);
+	// An overlay joins the native configuration: read the user's disabled servers
+	// and the project servers that would shadow the bridge only when that is the
+	// one remaining question, so a refused spawn never touches the user's files.
+	if (mcpProblem === 'native-config-unread') {
+		const nativeConfig = await readGrokNativeMcpConfigFacts(mcpContext.env, config.cwd);
+		mcpProblem = mcpInjectionProblem(mcpCap, { ...mcpContext, nativeConfig });
+	}
 	if (
 		mcpCap &&
 		!mcpProblem &&
@@ -2006,4 +2016,85 @@ export function reportSpawnRefusal(
 	if (win && isWebContentsAvailable(win)) {
 		win.webContents.send('process:data', sessionId, `\r\n[Maestro] ${message}\r\n`);
 	}
+}
+
+function isTomlTable(value: unknown): value is Record<string, unknown> {
+	return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+/** A TOML file as a table: `{}` when absent, `null` when present but unreadable or not TOML. */
+async function readTomlTable(file: string): Promise<Record<string, unknown> | null> {
+	let text: string;
+	try {
+		text = await fsp.readFile(file, 'utf8');
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === 'ENOENT' ? {} : null;
+	}
+	try {
+		const parsed: unknown = parseToml(text);
+		return isTomlTable(parsed) ? parsed : null;
+	} catch {
+		return null;
+	}
+}
+
+/** The nearest ancestor of `cwd` holding `.git` (the native repo root), else `null`. */
+async function findRepoRoot(cwd: string): Promise<string | null> {
+	let dir = path.resolve(cwd);
+	for (;;) {
+		try {
+			await fsp.stat(path.join(dir, '.git'));
+			return dir;
+		} catch {
+			const parent = path.dirname(dir);
+			if (parent === dir) return null;
+			dir = parent;
+		}
+	}
+}
+
+/**
+ * GT1-07-07C: what a Grok overlay joins, read and never written. The user config
+ * (`$GROK_HOME/config.toml`, else `~/.grok/config.toml`) supplies the disabled
+ * servers (`disabled_mcp_servers` and any `[mcp_servers.<name>]` with
+ * `enabled = false`, as `grok mcp disable` persists them); `<repo-root>/.grok` and
+ * `<cwd>/.grok` supply the project server names, each of which replaces a same-named
+ * entry whole. `undefined` when any of those files exists but cannot be read or
+ * does not have the documented shape, so the overlay is refused rather than guessed.
+ */
+export async function readGrokNativeMcpConfigFacts(
+	env: Readonly<Record<string, string | undefined>>,
+	cwd: string
+): Promise<NativeMcpConfigFacts | undefined> {
+	const home = env.GROK_HOME?.trim() ? env.GROK_HOME : path.join(os.homedir(), '.grok');
+	const userFile = path.resolve(home, 'config.toml');
+	const user = await readTomlTable(userFile);
+	if (user === null) return undefined;
+	const disabled = new Set<string>();
+	const list = user.disabled_mcp_servers;
+	if (list !== undefined) {
+		if (!Array.isArray(list) || !list.every((name) => typeof name === 'string')) return undefined;
+		for (const name of list as string[]) disabled.add(name);
+	}
+	const userServers = user.mcp_servers ?? {};
+	if (!isTomlTable(userServers)) return undefined;
+	for (const [name, entry] of Object.entries(userServers)) {
+		if (isTomlTable(entry) && entry.enabled === false) disabled.add(name);
+	}
+	const projectServers = new Set<string>();
+	const repoRoot = await findRepoRoot(cwd);
+	const projectFiles = new Set(
+		[repoRoot, cwd]
+			.filter((dir): dir is string => !!dir)
+			.map((dir) => path.resolve(dir, '.grok', 'config.toml'))
+			.filter((file) => file !== userFile)
+	);
+	for (const file of projectFiles) {
+		const project = await readTomlTable(file);
+		if (project === null) return undefined;
+		const servers = project.mcp_servers ?? {};
+		if (!isTomlTable(servers)) return undefined;
+		for (const name of Object.keys(servers)) projectServers.add(name);
+	}
+	return { disabledServers: [...disabled], projectServers: [...projectServers] };
 }

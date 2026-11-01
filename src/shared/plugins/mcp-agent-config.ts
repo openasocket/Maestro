@@ -97,7 +97,33 @@ export type McpInjectionProblem =
 	| 'remote-unsupported'
 	/** The effective environment already points the agent's config variable at the
 	 *  user's own file; replacing it would drop their configuration. */
-	| 'config-path-conflict';
+	| 'config-path-conflict'
+	/** grok: the effective environment ungates folder trust (`GROK_FOLDER_TRUST` off),
+	 *  which lets untrusted project hooks/MCP/LSP load beside the bridge. */
+	| 'folder-trust-ungated'
+	/** grok: a trust or compatibility-scanner variable holds a value whose meaning the
+	 *  pinned source does not establish, so the effective trust cannot be stated. */
+	| 'trust-setting-invalid'
+	/** grok: the caller did not read the native configuration the overlay lands in
+	 *  (or could not), so a disabled or shadowing entry cannot be ruled out. */
+	| 'native-config-unread'
+	/** grok: the user disabled a server with the bridge's name; the overlay's
+	 *  `enabled = true` would undo that choice, so nothing is injected. */
+	| 'server-disabled'
+	/** grok: a project config defines a server with the bridge's name, which replaces
+	 *  the overlay entry whole (the deepest file wins), so the bridge would not load. */
+	| 'server-shadowed';
+
+/**
+ * What the caller read of the native configuration an overlay joins (grok): the
+ * user config's disabled servers (`disabled_mcp_servers`, or an entry whose
+ * `enabled = false`) and the server names project configs define. Read facts only,
+ * never written back: disabling and project files stay the user's.
+ */
+export interface NativeMcpConfigFacts {
+	disabledServers: readonly string[];
+	projectServers: readonly string[];
+}
 
 export interface McpInjectionContext {
 	/** The spawn targets an SSH remote host. */
@@ -106,6 +132,198 @@ export interface McpInjectionContext {
 	version?: string | null;
 	/** The effective spawn environment (inherited plus the agent's own variables). */
 	env?: Readonly<Record<string, string | undefined>>;
+	/** grok-config-overlay only: the native configuration facts; absent refuses. */
+	nativeConfig?: NativeMcpConfigFacts;
+}
+
+// ============================================================================
+// Grok native trust (GT1-07-07C). The pinned grok-build source loads skills,
+// rules, agents, MCP servers, hooks and sessions from Claude, Cursor and Codex
+// compatibility scanners unless `GROK_<VENDOR>_<RESOURCE>_ENABLED` is off, and
+// `GROK_FOLDER_TRUST=0` ungates (does not disable) project hooks/MCP/LSP. The
+// snapshot below is what the effective environment says of each source; it is
+// part of the spawn environment, so the config generation a resumed session is
+// bound to moves when any source is enabled or disabled between turns.
+// ============================================================================
+
+export const GROK_COMPAT_VENDORS = ['claude', 'cursor', 'codex'] as const;
+export const GROK_COMPAT_RESOURCES = [
+	'skills',
+	'rules',
+	'agents',
+	'mcps',
+	'hooks',
+	'sessions',
+] as const;
+export type GrokCompatVendor = (typeof GROK_COMPAT_VENDORS)[number];
+export type GrokCompatResource = (typeof GROK_COMPAT_RESOURCES)[number];
+
+/** `GROK_CLAUDE_SKILLS_ENABLED` and its 17 siblings. */
+export function grokCompatScannerEnvName(
+	vendor: GrokCompatVendor,
+	resource: GrokCompatResource
+): string {
+	return `GROK_${vendor.toUpperCase()}_${resource.toUpperCase()}_ENABLED`;
+}
+
+export const GROK_FOLDER_TRUST_ENV = 'GROK_FOLDER_TRUST';
+
+/**
+ * One trust source as the environment states it. `native-default` means the
+ * environment says nothing (blank or unset) and the native config, whose source
+ * default is on, decides; it is never read as off. `invalid` is a value the
+ * pinned source does not establish.
+ */
+export type GrokTrustCell = 'enabled' | 'disabled' | 'native-default' | 'invalid';
+
+export interface GrokNativeTrustSnapshot {
+	/** `GROK_FOLDER_TRUST`: `ungated` when it is off, else the native rule. */
+	folderTrust: 'native' | 'ungated' | 'invalid';
+	/** Keyed by the scanner variable name. */
+	scanners: Record<string, GrokTrustCell>;
+}
+
+function grokTrustCell(value: string | undefined): GrokTrustCell {
+	if (value === undefined || value.trim() === '') return 'native-default';
+	switch (value.trim().toLowerCase()) {
+		case '1':
+		case 'true':
+			return 'enabled';
+		case '0':
+		case 'false':
+			return 'disabled';
+		default:
+			return 'invalid';
+	}
+}
+
+/** What the effective spawn environment says of every Grok trust source. Pure. */
+export function readGrokNativeTrust(
+	env: Readonly<Record<string, string | undefined>> = {}
+): GrokNativeTrustSnapshot {
+	const scanners: Record<string, GrokTrustCell> = {};
+	for (const vendor of GROK_COMPAT_VENDORS) {
+		for (const resource of GROK_COMPAT_RESOURCES) {
+			const name = grokCompatScannerEnvName(vendor, resource);
+			scanners[name] = grokTrustCell(env[name]);
+		}
+	}
+	const folder = grokTrustCell(env[GROK_FOLDER_TRUST_ENV]);
+	return {
+		folderTrust: folder === 'disabled' ? 'ungated' : folder === 'invalid' ? 'invalid' : 'native',
+		scanners,
+	};
+}
+
+/** The first trust problem of a snapshot, or `undefined` when the sources are stated. */
+export function grokNativeTrustProblem(
+	snapshot: GrokNativeTrustSnapshot
+): 'folder-trust-ungated' | 'trust-setting-invalid' | undefined {
+	if (snapshot.folderTrust === 'invalid') return 'trust-setting-invalid';
+	if (snapshot.folderTrust === 'ungated') return 'folder-trust-ungated';
+	if (Object.values(snapshot.scanners).includes('invalid')) return 'trust-setting-invalid';
+	return undefined;
+}
+
+// ============================================================================
+// Grok MCP server state (GT1-07-07C). Authentication and handshake states are
+// never tool readiness: only a server the host saw advertise tools is `ready`,
+// and only one the host saw execute is `executed`. Maestro never opens a login;
+// every auth state is a bounded outcome naming the native place to fix it.
+// ============================================================================
+
+export type GrokMcpServerState =
+	| 'disabled'
+	| 'oauth-required'
+	| 'auth-pending'
+	| 'auth-denied'
+	| 'auth-expired'
+	| 'auth-unsupported'
+	| 'handshake-failed'
+	| 'installed'
+	| 'ready'
+	| 'executed';
+
+/** A sanitized observation of one native MCP server. */
+export interface GrokMcpServerObservation {
+	name: string;
+	/** Effective enabled state after the user's disable list and project overrides. */
+	enabled: boolean;
+	/** Authentication channel; anything else is a channel Maestro cannot drive. */
+	auth?: 'none' | 'bearer-token' | 'oauth' | (string & {});
+	authState?: 'authorized' | 'required' | 'pending' | 'denied' | 'expired';
+	handshake?: 'ok' | 'pending' | 'failed' | 'timeout';
+	/** The host observed this server advertise tools to the run. */
+	advertised?: boolean;
+	/** The host observed an executed call (a receipt), not a provider claim. */
+	executed?: boolean;
+}
+
+export interface GrokMcpServerOutcome {
+	name: string;
+	state: GrokMcpServerState;
+	/** Tools from this server may be offered to the model this run. */
+	usable: boolean;
+	/** What the user does next; `null` when nothing is needed (or a disable is kept). */
+	action: string | null;
+	/** Maestro never starts an interactive login for a native server. */
+	interactiveLogin: false;
+}
+
+const KNOWN_GROK_MCP_AUTH = new Set(['none', 'bearer-token', 'oauth']);
+
+/** A server name safe to put in a user-facing line (bounded, plain characters). */
+function displayServerName(name: string): string {
+	const plain = name.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 64);
+	return plain === '' ? '(unnamed)' : plain;
+}
+
+function grokMcpServerAction(state: GrokMcpServerState, name: string): string | null {
+	const server = `MCP server "${displayServerName(name)}"`;
+	const fix = "in Grok's own /mcps view (press i) for this account, then retry";
+	switch (state) {
+		case 'oauth-required':
+			return `${server} needs OAuth authorization. Maestro does not open a login: authorize it ${fix}.`;
+		case 'auth-pending':
+			return `${server} authorization is still pending. Finish it ${fix}.`;
+		case 'auth-denied':
+			return `${server} authorization was denied. Re-authorize it ${fix}, or disable the server.`;
+		case 'auth-expired':
+			return `${server} authorization expired. Re-authorize it ${fix}.`;
+		case 'auth-unsupported':
+			return `${server} uses an authentication channel Maestro cannot drive. Configure a bearer_token_file for it, or authorize it in Grok directly, then retry.`;
+		case 'handshake-failed':
+			return `${server} did not complete its handshake. Check logs/mcp/${displayServerName(name)}.stderr.log under the Grok home or run grok mcp doctor.`;
+		default:
+			return null;
+	}
+}
+
+/** Classify one native MCP server observation. Pure; never a login, never a guess. */
+export function classifyGrokMcpServer(observation: GrokMcpServerObservation): GrokMcpServerOutcome {
+	const state = grokMcpServerStateOf(observation);
+	return {
+		name: observation.name,
+		state,
+		usable: state === 'ready' || state === 'executed',
+		action: grokMcpServerAction(state, observation.name),
+		interactiveLogin: false,
+	};
+}
+
+function grokMcpServerStateOf(o: GrokMcpServerObservation): GrokMcpServerState {
+	// A disabled server is preserved as disabled: never started, never re-enabled.
+	if (!o.enabled) return 'disabled';
+	const auth = o.auth ?? 'none';
+	if (!KNOWN_GROK_MCP_AUTH.has(auth)) return 'auth-unsupported';
+	if (o.authState === 'denied') return 'auth-denied';
+	if (o.authState === 'expired') return 'auth-expired';
+	if (o.authState === 'pending') return 'auth-pending';
+	if (o.authState === 'required') return 'oauth-required';
+	if (auth === 'oauth' && o.authState !== 'authorized') return 'oauth-required';
+	if (o.handshake === 'failed' || o.handshake === 'timeout') return 'handshake-failed';
+	if (o.handshake !== 'ok' || !o.advertised) return 'installed';
+	return o.executed ? 'executed' : 'ready';
 }
 
 /**
@@ -128,6 +346,14 @@ export function mcpInjectionProblem(
 		const envVar = cap.envVar;
 		const existing = envVar ? ctx.env?.[envVar] : undefined;
 		if (existing !== undefined && existing.trim() !== '') return 'config-path-conflict';
+	}
+	if (cap.strategy === 'grok-config-overlay') {
+		const trust = grokNativeTrustProblem(readGrokNativeTrust(ctx.env));
+		if (trust) return trust;
+		const facts = ctx.nativeConfig;
+		if (!facts) return 'native-config-unread';
+		if (facts.disabledServers.includes(MCP_SERVER_NAME)) return 'server-disabled';
+		if (facts.projectServers.includes(MCP_SERVER_NAME)) return 'server-shadowed';
 	}
 	return undefined;
 }

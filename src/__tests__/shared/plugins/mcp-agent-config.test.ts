@@ -287,9 +287,14 @@ describe('Grok MCP configuration overlay (GT1-07-07)', () => {
 			expect(mcpInjectionProblem(undefined, { version: '0.1.200' })).toBe('no-strategy');
 		});
 
+		// GT1-07-07C: an overlay is admitted only with the native config facts read.
+		const nativeConfig = { disabledServers: [], projectServers: [] };
+
 		it('admits only an exactly listed version, never an assumed range or an unknown one', () => {
-			expect(mcpInjectionProblem(qualified, { version: '0.1.200' })).toBeUndefined();
-			expect(mcpInjectionProblem(qualified, { version: '  0.1.200\n' })).toBeUndefined();
+			expect(mcpInjectionProblem(qualified, { version: '0.1.200', nativeConfig })).toBeUndefined();
+			expect(
+				mcpInjectionProblem(qualified, { version: '  0.1.200\n', nativeConfig })
+			).toBeUndefined();
 			for (const version of [
 				undefined,
 				null,
@@ -328,6 +333,7 @@ describe('Grok MCP configuration overlay (GT1-07-07)', () => {
 					mcpInjectionProblem(qualified, {
 						version: '0.1.200',
 						env: { GROK_CONFIG_PATH: value, XAI_API_KEY: 'secret', OPENCODE_CONFIG: '/x' },
+						nativeConfig,
 					})
 				).toBeUndefined();
 			}
