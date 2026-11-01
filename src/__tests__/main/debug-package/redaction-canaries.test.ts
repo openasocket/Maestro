@@ -337,10 +337,9 @@ describe('the plain settings file, the other sink of the WakaTime key (MRC2-06-0
  * prompt, output, thought and tool text in a log entry's `data` and in a
  * stored agent's tabs. None may appear in any entry.
  *
- * One gap is pinned rather than hidden (GT1-09-R15): the value of
- * `GROK_AUTH`, and an `xai-` key printed with no credential-shaped name in
- * front of it, are not redacted by `redactSecrets()` today. The continuation
- * GT1-09-12B adds the `xai-` key prefix to the redactor and flips the pin.
+ * The value of `GROK_AUTH`, and an `xai-` key printed with no
+ * credential-shaped name in front of it, were a leak (GT1-09-R15) until
+ * GT1-09-12B added the `xai-` key prefix to `redactSecrets()`.
  */
 describe('support package redaction canaries for Grok (GT1-09-12)', () => {
 	const XAI_KEY = 'xai-' + 'Q9zR4tKp7LmN2vXc'.repeat(3);
@@ -459,7 +458,7 @@ describe('support package redaction canaries for Grok (GT1-09-12)', () => {
 		expect(JSON.stringify(sessions)).toContain('"tabCount":1');
 	});
 
-	it('GAP GT1-09-R15: a GROK_AUTH value and a bare xai- key still reach the package today', async () => {
+	it('GT1-09-R15: a GROK_AUTH value and a bare xai- key never reach the package', async () => {
 		vi.mocked(logger.getLogs).mockReturnValue([
 			{
 				timestamp: 1,
@@ -486,9 +485,11 @@ describe('support package redaction canaries for Grok (GT1-09-12)', () => {
 		const extracted = path.join(OUTPUT_DIR, 'grok-gap-extracted');
 		extractZipTo(result.path!, extracted);
 		const logs = fs.readFileSync(path.join(extracted, 'logs.json'), 'utf8');
-		// Pinned so the fix (GT1-09-12B, `redactSecrets()` only) has to flip it:
-		// neither the name GROK_AUTH nor the `xai-` shape is known to the redactor.
-		expect(logs).toContain(`GROK_AUTH=${XAI_KEY}`);
-		expect(logs).toContain(`grok refused key ${XAI_KEY}`);
+		// Fixed by GT1-09-12B: `redactSecrets()` knows the `xai-` key prefix, so
+		// the value is gone whether or not a credential-shaped name precedes it.
+		expect(logs).not.toContain(XAI_KEY);
+		expect(logs).not.toContain('Q9zR4tKp7LmN2vXc');
+		expect(logs).toContain('GROK_AUTH=[REDACTED_API_KEY]');
+		expect(logs).toContain('grok refused key [REDACTED_API_KEY] (401)');
 	});
 });

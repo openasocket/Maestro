@@ -494,9 +494,9 @@
 			"requirement": "A Grok credential printed into a log line, an error or a support package is redacted by the one secret redactor whatever name it travels under.",
 			"surface": "support package (logs.json, settings.json sweep), Send Feedback outbound text, every redactSecrets() caller",
 			"route": ["native-headless", "acp-candidate"],
-			"status": "fixable-in-maestro",
-			"reason": "redactSecrets() knows no xAI key shape and GROK_AUTH carries no credential-shaped name, so `GROK_AUTH=xai-...`, a bare `xai-...` key in an error line and a `{\"key\":\"xai-...\"}` record reach the support package verbatim. The same key under XAI_API_KEY or an api_key field is redacted by name. Found by the GT1-09-12 canaries through a real generateDebugPackage() write.",
-			"requiredAuthority": "None outside Maestro: a bounded change to src/shared/redactSecrets.ts (an xai- provider key prefix beside sk-/rk-), owned by continuation GT1-09-12B, which flips the pinned gap case in redaction-canaries.test.ts.",
+			"status": "fixed-in-maestro",
+			"reason": "Was: redactSecrets() knew no xAI key shape and GROK_AUTH carries no credential-shaped name, so `GROK_AUTH=xai-...`, a bare `xai-...` key in an error line and a `{\"key\":\"xai-...\"}` record reached the support package verbatim (found by the GT1-09-12 canaries). Fixed by GT1-09-12B: the one redactor now has an xai- provider key prefix rule (kind api_key, `xai-` and 20 or more alphanumeric characters, word-bounded, linear) beside sk-/rk-, so every caller (support package, Send Feedback, agent-run ledger, Computer History) redacts it.",
+			"requiredAuthority": "None: fixed inside Maestro in src/shared/redactSecrets.ts.",
 			"sourceRefs": [
 				"src/shared/redactSecrets.ts (RULES: provider key prefixes)",
 				"src/main/debug-package/index.ts (redactPackageContents)",
@@ -505,11 +505,11 @@
 			],
 			"ownerTasks": ["GT1-09-12", "GT1-09-12B", "GT1-09-13"],
 			"parityRows": ["P36"],
-			"releaseImpact": "Until GT1-09-12B lands, a support package or feedback text can carry a Grok API key that was printed under GROK_AUTH or without a name.",
+			"releaseImpact": "None for the shapes covered. A Grok credential in a shape other than an xai- key and under no credential-shaped name would still need a new rule.",
 			"progress": {
-				"task": "GT1-09-12",
-				"state": "leak-pinned-fix-scheduled",
-				"detail": "Pinned offline as a passing gap case so the fix has to flip it; XAI_API_KEY, api_key JSON, Grok session/profile/auth/home paths, a private gateway (host label, path and query), and prompt, output, thought and tool text (log data and stored tabs) are proven absent from the package."
+				"task": "GT1-09-12B",
+				"state": "fixed",
+				"detail": "redaction-canaries.test.ts flips the pinned gap: GROK_AUTH=xai-... and a bare xai- key are absent from logs.json in a real generateDebugPackage() write, replaced by [REDACTED_API_KEY]. redactSecrets.test.ts adds the GROK_AUTH, error-line and JSON-value shapes, non-key twins (xai-sdk, xai-grok-cli-integration-tests, xai-key, a 16-character run) left untouched, and two 64 KB ReDoS inputs. With the rule removed the four new key cases fail; the 22 redaction consumer suites otherwise match HEAD. No Grok bypass, no second redactor. GT1-09-13 executes the verification."
 			}
 		}
 	],
