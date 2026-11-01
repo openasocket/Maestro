@@ -88,9 +88,14 @@
 				"src/main/process-manager/spawners/GrokAcpSpawner.ts:373-451",
 				"src/main/process-manager/ProcessManager.ts:150-189"
 			],
-			"ownerTasks": ["GT1-09-02", "GT1-09-03"],
+			"ownerTasks": ["GT1-09-02", "GT1-09-02B", "GT1-09-03"],
 			"parityRows": ["REG-MANAGED-ROUTES", "P33"],
-			"releaseImpact": "Fleet inventory and policy cannot see which Grok route ran."
+			"releaseImpact": "Fleet inventory and policy cannot see which Grok route ran.",
+			"progress": {
+				"task": "GT1-09-02",
+				"state": "table-and-rule-implemented-sink-unwired",
+				"detail": "ManagedRoute and MANAGED_ROUTES gain 'grok-acp' (capabilities.ts): standalone implemented for grok and unsupported for every other provider, managed unsupported with the R01/R06 gap as its note. src/main/process-manager/types.ts adds runsOnGrokAcpRoute(config) (the same rule as wantsGrokAcp) and managedGrokAcpRefusal(config) (an admitted ACP spawn returns { state: 'unavailable', code: 'capability-unsupported' } from the table, no fallback to headless). GrokAcpSpawner.spawn does not call it yet; continuation GT1-09-02B wires it. Fleet inventory now reports the grok-acp row for every provider through MANAGED_ROUTES."
+			}
 		},
 		{
 			"id": "GT1-09-R06",
@@ -105,9 +110,14 @@
 				"src/main/process-manager/spawners/GrokAcpSpawner.ts:593-597",
 				"src/shared/maestro-lib/grok/route.ts:316-324"
 			],
-			"ownerTasks": ["GT1-09-02", "GT1-09-03", "GT1-11-12"],
+			"ownerTasks": ["GT1-09-02", "GT1-09-02B", "GT1-09-03", "GT1-11-12"],
 			"parityRows": ["P02", "P09", "REG-MANAGED-ROUTES"],
-			"releaseImpact": "A new Grok release would run under management without new qualification."
+			"releaseImpact": "A new Grok release would run under management without new qualification.",
+			"progress": {
+				"task": "GT1-09-02",
+				"state": "refused-under-management-once-wired",
+				"detail": "The grok-acp managed row stays unsupported because the version is the peer-reported one, so a managed ACP turn is refused before negotiation instead of adopting it (after GT1-09-02B). The standalone selector still adopts the reported version; a qualified range needs GT1-11-12 live evidence."
+			}
 		},
 		{
 			"id": "GT1-09-R07",

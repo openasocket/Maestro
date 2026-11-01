@@ -42,6 +42,7 @@ import {
 	type ManagedRouteCeiling,
 } from '../../shared/maestro-lib/launch/env';
 import type { LaunchPermissionDecision } from '../../shared/maestro-lib/launch/launch-plan';
+import { providerRouteSupport } from '../../shared/maestro-lib/providers/capabilities';
 import type { PromptDelivery } from '../../shared/maestro-lib/launch/prompt-delivery';
 import type { SteeringRunIdentity } from '../../shared/chatSteering';
 
@@ -430,6 +431,50 @@ export function managedCommandRefusal(
 			? 'a transient PTY (a shell child on Windows)'
 			: 'a remote login shell over SSH';
 	return `A one-off ${route === 'local-shell' ? 'terminal' : 'SSH terminal'} command is unavailable under management on this host: it would run in ${where} with no confinement, and no producer qualifies that route. Nothing was started.`;
+}
+
+/**
+ * Whether a desktop spawn runs on the Grok ACP stdio route (`grok-acp` in the
+ * managed route table): any spawn carrying a forwarded native command, or a
+ * Grok turn whose launch plan asked for the provider's own prompting. Read off
+ * the final config the sink receives, so the permission decision is the
+ * plan's (`config.permission`, stamped by the spawn handler after custom
+ * arguments were joined), never a flag the renderer sent. The one rule for
+ * which Grok turns take ACP; `wantsGrokAcp` in the spawner names the same.
+ */
+export function runsOnGrokAcpRoute(
+	config: Pick<ProcessConfig, 'toolType' | 'grokNativeCommand' | 'permission'>
+): boolean {
+	return (
+		config.grokNativeCommand !== undefined ||
+		(config.toolType === 'grok' && config.permission?.requested === 'standard')
+	);
+}
+
+/**
+ * Why an admitted spawn cannot run on the Grok ACP route under management, or
+ * null when it may (GT1-09-R05, R06). The route is its own row in
+ * `providerRouteSupport`, not the child-process row its snapshot was admitted
+ * on, and its `managed` status decides: today `unsupported`, because the ACP
+ * peer reports its own version during negotiation instead of a qualified range
+ * bound before launch, and no real endpoint authority decides its permission
+ * requests. A refusal is `unavailable` with the existing structured code, never
+ * a policy decision, and the spawn is not rerouted to headless streaming or any
+ * other spawner in its place: the person asked for the provider's own
+ * prompting, and a managed host does not quietly run something weaker. A
+ * standalone launch (no admission) and every other route are untouched.
+ */
+export function managedGrokAcpRefusal(
+	config: Pick<ProcessConfig, 'toolType' | 'grokNativeCommand' | 'permission' | 'admission'>
+): { state: 'unavailable'; code: ManagedDenialCode; message: string } | null {
+	if (!config.admission || !runsOnGrokAcpRoute(config)) return null;
+	const support = providerRouteSupport(config.toolType).find((entry) => entry.route === 'grok-acp');
+	if (support?.managed === 'implemented') return null;
+	return {
+		state: 'unavailable',
+		code: 'capability-unsupported',
+		message: `Managed execution of ${config.toolType} over the grok-acp route is unavailable on this host: ${support?.note ?? 'the route is not known'}. A managed host does not fall back to headless streaming for it. Nothing was started.`,
+	};
 }
 
 /**

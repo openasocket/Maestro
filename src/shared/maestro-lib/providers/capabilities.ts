@@ -561,11 +561,18 @@ export function hasCapability(agentId: string, capability: keyof AgentCapabiliti
  * The distinct execution routes a provider's work can take. They are separate
  * enforcement families: a check on one proves nothing about another.
  */
-export type ManagedRoute = 'child-process' | 'codex-app-server' | 'opencode-server' | 'pty' | 'ssh';
+export type ManagedRoute =
+	| 'child-process'
+	| 'codex-app-server'
+	| 'grok-acp'
+	| 'opencode-server'
+	| 'pty'
+	| 'ssh';
 
 export const MANAGED_ROUTES: readonly ManagedRoute[] = [
 	'child-process',
 	'codex-app-server',
+	'grok-acp',
 	'opencode-server',
 	'pty',
 	'ssh',
@@ -587,6 +594,16 @@ export interface ProviderRouteSupport {
 }
 
 const NO_MANAGED_ENFORCEMENT = 'no managed enforcement producer on this route in this build';
+/**
+ * Why the Grok ACP stdio route carries no managed enforcement (GT1-09-R05,
+ * R06, R01): the route is its own family, not the child-process row its
+ * snapshot was admitted on. The version it runs under is the one the peer
+ * reports during negotiation, not a qualified range bound before launch, and
+ * no real endpoint authority decides the permission requests it raises, so a
+ * managed host refuses it instead of running it as headless streaming.
+ */
+const GROK_ACP_MANAGED_GAP =
+	'no qualified Grok version range is bound before launch (the ACP peer reports its own) and no real endpoint authority decides its permission requests (CP-01, CP-03)';
 const CHILD_PROCESS_MANAGED =
 	'launch admitted at the real spawn (runAgentTurn, startTurn) against a local authority; no real authority producer paired (CP-03); provider-internal tool, file and network effects unqualified';
 
@@ -594,7 +611,7 @@ const CHILD_PROCESS_MANAGED =
  * Report a provider's routes precisely. `standalone` comes from the
  * capability table and the spawner each route has: a provider that cannot
  * run a headless turn has no child-process route, only Codex has an
- * app-server, only OpenCode a server. Nothing here is advertised because a
+ * app-server, only Grok an ACP stdio route, only OpenCode a server. Nothing here is advertised because a
  * binary starts or metadata says so: a route whose only evidence is the
  * table is `unverified`. `managed` is `implemented` on the child-process
  * route only: its launch is admitted at the real spawn (phase 2), while the
@@ -615,6 +632,10 @@ export function providerRouteSupport(agentId: string): ProviderRouteSupport[] {
 				return agentId === 'codex'
 					? ['implemented', 'Codex app-server transport']
 					: ['unsupported', 'only Codex has an app-server'];
+			case 'grok-acp':
+				return agentId === 'grok'
+					? ['implemented', 'Grok ACP stdio turn through the shared ACP driver']
+					: ['unsupported', 'only Grok has an ACP stdio route'];
 			case 'opencode-server':
 				return agentId === 'opencode'
 					? ['implemented', 'shared OpenCode server']
@@ -640,7 +661,13 @@ export function providerRouteSupport(agentId: string): ProviderRouteSupport[] {
 			note:
 				status === 'unsupported'
 					? note
-					: `${note}; ${managedLaunch ? CHILD_PROCESS_MANAGED : NO_MANAGED_ENFORCEMENT}`,
+					: `${note}; ${
+							managedLaunch
+								? CHILD_PROCESS_MANAGED
+								: route === 'grok-acp'
+									? GROK_ACP_MANAGED_GAP
+									: NO_MANAGED_ENFORCEMENT
+						}`,
 		};
 	});
 }
