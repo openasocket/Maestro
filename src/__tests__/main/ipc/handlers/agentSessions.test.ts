@@ -5,7 +5,7 @@
  * with any agent supporting the AgentSessionStorage interface.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from 'vitest';
 import { ipcMain } from 'electron';
 import {
 	registerAgentSessionsHandlers,
@@ -18,8 +18,11 @@ import {
 	GLOBAL_STATS_CACHE_MIN_UPGRADABLE_VERSION,
 	GLOBAL_STATS_CACHE_VERSION,
 	loadGlobalStatsCache,
+	qualifiedGlobalStatsSessionKey,
 	saveGlobalStatsCache,
+	type GlobalStatsCache,
 } from '../../../../main/utils/statsCache';
+import { GrokSessionStorage } from '../../../../main/storage/grok-session-storage';
 import os from 'os';
 import path from 'path';
 import { promises as realFs } from 'fs';
@@ -82,6 +85,8 @@ vi.mock('../../../../main/stores', () => ({
 vi.mock('../../../../main/utils/remote-fs', () => ({ observePathRemote: vi.fn() }));
 vi.mock('../../../../main/stores/instances', () => ({ isInitialized: () => true }));
 vi.mock('../../../../main/stores/getters', () => ({
+	// Grok account discovery reads stored agents; none are configured here.
+	getSessionsStore: () => ({ get: () => [] }),
 	getAgentConfigsStore: () => ({
 		get: () => ({ grok: { customEnvVars: accountStores.provider } }),
 	}),
@@ -2142,5 +2147,303 @@ describe('agentSessions:getGlobalStats discovery', () => {
 	it('reports zero when neither provider has a transcript directory', async () => {
 		const stats = await getGlobalStats();
 		expect(stats.totalSessions).toBe(0);
+	});
+});
+
+// GT1-10-09F: Grok stored history through the registered getGlobalStats path,
+// read by the real Grok storage over isolated temp account pools. GROK_HOME is
+// blanked so discovery never reaches a production ~/.grok.
+describe('agentSessions:getGlobalStats Grok history', () => {
+	const CWD = '/work/alpha';
+	const USD = 10_000_000_000; // costUsdTicks per dollar
+	let home: string;
+	let listSpy: MockInstance<GrokSessionStorage['listSessions']>;
+	let getGlobalStats: () => Promise<any>;
+
+	const transcript = [
+		{ type: 'system', content: 'fixture system prompt' },
+		{ type: 'user', content: [{ type: 'text', text: '<user_query>\nhello\n</user_query>' }] },
+		{ type: 'assistant', content: 'hi' },
+	]
+		.map((record) => JSON.stringify(record))
+		.join('\n');
+
+	const usage = (session: Record<string, unknown>) =>
+		// Ticks are written unquoted, as Grok does; the storage keeps them exact.
+		JSON.stringify({ session }).replace(/"costUsdTicks":"(\d+)"/g, '"costUsdTicks":$1');
+
+	const sessionDir = (account: string, id: string, cwd = CWD) =>
+		path.join(home, account, 'sessions', encodeURIComponent(cwd), id);
+
+	const writeSession = async (
+		account: string,
+		id: string,
+		files: { usage?: string; transcript?: string; summary?: Record<string, unknown> } = {},
+		cwd = CWD
+	) => {
+		const dir = sessionDir(account, id, cwd);
+		await realFs.mkdir(dir, { recursive: true });
+		await realFs.writeFile(
+			path.join(dir, 'summary.json'),
+			JSON.stringify({
+				info: { id, cwd },
+				created_at: '2026-10-01T00:00:00.000Z',
+				updated_at: '2026-10-01T00:01:00.000Z',
+				...files.summary,
+			})
+		);
+		await realFs.writeFile(path.join(dir, 'chat_history.jsonl'), files.transcript ?? transcript);
+		if (files.usage !== undefined)
+			await realFs.writeFile(path.join(dir, 'usage.json'), files.usage);
+	};
+
+	const keyFor = async (account: string, id: string, cwd = CWD) =>
+		qualifiedGlobalStatsSessionKey({
+			accountScope: await realFs.realpath(path.join(home, account, 'sessions')),
+			projectPath: cwd,
+			nativeSessionId: id,
+		});
+
+	const lastSaved = (): GlobalStatsCache =>
+		structuredClone(vi.mocked(saveGlobalStatsCache).mock.calls.at(-1)![0]);
+
+	beforeEach(async () => {
+		home = await realFs.mkdtemp(path.join(os.tmpdir(), 'maestro-grok-global-stats-'));
+		vi.spyOn(os, 'homedir').mockReturnValue(home);
+		vi.stubEnv('GROK_HOME', '');
+		vi.mocked(saveGlobalStatsCache).mockClear();
+		const storage = new GrokSessionStorage();
+		listSpy = vi.spyOn(storage, 'listSessions');
+		vi.mocked(agentSessionStorage.getSessionStorage).mockImplementation((id) =>
+			id === 'grok' ? storage : null
+		);
+		const handlers = new Map<string, (...args: any[]) => any>();
+		vi.mocked(ipcMain.handle).mockImplementation((channel, handler) => {
+			handlers.set(channel, handler);
+		});
+		registerAgentSessionsHandlers();
+		const handler = handlers.get('agentSessions:getGlobalStats')!;
+		getGlobalStats = () => handler({});
+	});
+
+	afterEach(async () => {
+		vi.mocked(agentSessionStorage.getSessionStorage).mockReset();
+		vi.restoreAllMocks();
+		vi.unstubAllEnvs();
+		await realFs.rm(home, { recursive: true, force: true });
+	});
+
+	it('keeps the same native ID in two account pools as two sessions under qualified keys', async () => {
+		await writeSession('.grok', 'S1', {
+			usage: usage({
+				inputTokens: 100,
+				outputTokens: 10,
+				cachedReadTokens: 0,
+				cacheCreationTokens: 0,
+				costUsdTicks: String(2 * USD),
+			}),
+		});
+		await writeSession('.grok-work', 'S1', {
+			usage: usage({
+				inputTokens: 40,
+				outputTokens: 4,
+				cachedReadTokens: 0,
+				cacheCreationTokens: 0,
+				costUsdTicks: String(USD / 2),
+			}),
+		});
+
+		const stats = await getGlobalStats();
+
+		expect(stats.byProvider.grok).toMatchObject({
+			sessions: 2,
+			messages: 4,
+			inputTokens: 140,
+			outputTokens: 14,
+			hasCostData: true,
+			// The storage cannot bind usage.json to the transcript: a floor, never complete.
+			costCoverage: 'partial',
+			costUsdTicks: String(2.5 * USD),
+		});
+		expect(stats.byProvider.grok.costUsd).toBeCloseTo(2.5, 10);
+		expect(stats.totalCostUsd).toBeCloseTo(2.5, 10);
+		expect(stats.costCoverage).toBe('partial');
+		const saved = lastSaved().providers.grok.sessions;
+		const keys = [await keyFor('.grok', 'S1'), await keyFor('.grok-work', 'S1')];
+		expect(Object.keys(saved).sort()).toEqual([...keys].sort());
+		expect(keys[0]).not.toBe(keys[1]);
+		expect(saved[keys[1]]).toMatchObject({
+			inputTokens: 40,
+			usageSource: 'runtime-stream',
+			identity: { projectPath: CWD, nativeSessionId: 'S1' },
+		});
+		// One read per account pool, through the registered storage with that account.
+		expect(listSpy.mock.calls.map(([cwd, ssh, account]) => [cwd, ssh, account]).sort()).toEqual(
+			[
+				[CWD, undefined, path.join(home, '.grok')],
+				[CWD, undefined, path.join(home, '.grok-work')],
+			].sort()
+		);
+	});
+
+	it('reports a missing ledger as unknown cost, never a measured or free zero', async () => {
+		await writeSession('.grok', 'NOLEDGER');
+
+		const stats = await getGlobalStats();
+
+		expect(stats.byProvider.grok).toMatchObject({
+			sessions: 1,
+			inputTokens: 0,
+			costUsd: 0,
+			hasCostData: false,
+			costCoverage: 'unknown',
+		});
+		expect(stats.byProvider.grok.costUsdTicks).toBeUndefined();
+		expect(stats.hasCostData).toBe(false);
+		expect(stats.costCoverage).toBe('unknown');
+		const [entry] = Object.values(lastSaved().providers.grok.sessions);
+		expect(entry.cost).toMatchObject({ status: 'unknown' });
+		expect(entry.cost).not.toHaveProperty('costUsdTicks');
+		expect(entry.costUsd).toBeUndefined();
+		expect(entry.usageSource).toBe('none');
+	});
+
+	it('keeps an explicit zero cost as evidence, partial beside an unknown one', async () => {
+		await writeSession('.grok', 'ZERO', {
+			usage: usage({
+				inputTokens: 5,
+				outputTokens: 1,
+				cachedReadTokens: 0,
+				cacheCreationTokens: 0,
+				costUsdTicks: '0',
+			}),
+		});
+		await writeSession('.grok', 'UNKNOWN', {
+			usage: usage({
+				inputTokens: 7,
+				outputTokens: 2,
+				cachedReadTokens: 0,
+				cacheCreationTokens: 0,
+			}),
+		});
+
+		const stats = await getGlobalStats();
+
+		expect(stats.byProvider.grok).toMatchObject({
+			sessions: 2,
+			inputTokens: 12,
+			costUsd: 0,
+			hasCostData: true,
+			costCoverage: 'partial',
+			costUsdTicks: '0',
+		});
+		const saved = lastSaved().providers.grok.sessions;
+		expect(saved[await keyFor('.grok', 'ZERO')].cost).toMatchObject({
+			status: 'partial',
+			costUsdTicks: '0',
+		});
+		expect(saved[await keyFor('.grok', 'UNKNOWN')].cost).toMatchObject({ status: 'unknown' });
+	});
+
+	it('skips empty or absent transcripts and keeps malformed or partial ledgers honest', async () => {
+		// A 0-byte transcript sits alone in its folder: discovery must never hand it to the storage.
+		await writeSession('.grok', 'EMPTY', { transcript: '' }, '/work/empty');
+		await realFs.mkdir(sessionDir('.grok', 'NOTRANSCRIPT'), { recursive: true });
+		await realFs.writeFile(path.join(sessionDir('.grok', 'NOTRANSCRIPT'), 'usage.json'), '{}');
+		await writeSession('.grok', 'UNPROMPTED', {
+			transcript: JSON.stringify({ type: 'system', content: 'fixture system prompt' }),
+		});
+		await writeSession('.grok', 'MALFORMED', { usage: '{"session":' });
+		await writeSession('.grok', 'PARTIAL', { usage: usage({ inputTokens: 9, outputTokens: 2 }) });
+
+		const stats = await getGlobalStats();
+
+		expect(stats.byProvider.grok).toMatchObject({
+			sessions: 2,
+			messages: 4,
+			hasCostData: false,
+			costCoverage: 'unknown',
+		});
+		const saved = lastSaved().providers.grok.sessions;
+		expect(Object.keys(saved).sort()).toEqual(
+			[await keyFor('.grok', 'MALFORMED'), await keyFor('.grok', 'PARTIAL')].sort()
+		);
+		expect(saved[await keyFor('.grok', 'MALFORMED')]).toMatchObject({
+			inputTokens: 0,
+			cost: { status: 'unknown' },
+			usageSource: 'none',
+		});
+		expect(saved[await keyFor('.grok', 'PARTIAL')]).toMatchObject({
+			outputTokens: 2,
+			usageCompleteness: 'partial',
+			cost: { status: 'unknown' },
+		});
+		expect(listSpy.mock.calls.map(([cwd]) => cwd)).toEqual([CWD]);
+	});
+
+	it('reuses unchanged sessions from the reloaded cache and replaces a resumed cumulative ledger', async () => {
+		const ledger = (input: number, ticks: number) =>
+			usage({
+				inputTokens: input,
+				outputTokens: 10,
+				cachedReadTokens: 0,
+				cacheCreationTokens: 0,
+				costUsdTicks: String(ticks),
+			});
+		await writeSession('.grok', 'RESUMED', { usage: ledger(100, USD) });
+		await writeSession('.grok', 'STEADY', { usage: ledger(50, USD) });
+
+		const first = await getGlobalStats();
+		expect(first.byProvider.grok.inputTokens).toBe(150);
+
+		// Reload, nothing changed: no storage read, the same totals.
+		listSpy.mockClear();
+		vi.mocked(loadGlobalStatsCache).mockResolvedValueOnce(lastSaved());
+		const unchanged = await getGlobalStats();
+		expect(listSpy).not.toHaveBeenCalled();
+		expect(unchanged.byProvider.grok).toEqual(first.byProvider.grok);
+
+		// A resume rewrites the same session's lifetime snapshot (250 includes the
+		// first 100): the entry is replaced, never added to, and only its folder is read.
+		const dir = sessionDir('.grok', 'RESUMED');
+		await realFs.writeFile(path.join(dir, 'usage.json'), ledger(250, 3 * USD));
+		const later = new Date(Date.now() + 120_000);
+		await realFs.utimes(path.join(dir, 'usage.json'), later, later);
+		vi.mocked(loadGlobalStatsCache).mockResolvedValueOnce(lastSaved());
+		const resumed = await getGlobalStats();
+
+		expect(listSpy).toHaveBeenCalledTimes(1);
+		expect(resumed.byProvider.grok).toMatchObject({
+			sessions: 2,
+			inputTokens: 300,
+			outputTokens: 20,
+			costUsdTicks: String(4 * USD),
+		});
+		expect(resumed.byProvider.grok.costUsd).toBeCloseTo(4, 10);
+	});
+
+	it('archives a deleted session from the reloaded cache and still counts its lifetime usage', async () => {
+		const ledger = usage({
+			inputTokens: 30,
+			outputTokens: 3,
+			cachedReadTokens: 0,
+			cacheCreationTokens: 0,
+			costUsdTicks: String(USD),
+		});
+		await writeSession('.grok', 'KEPT', { usage: ledger });
+		await writeSession('.grok-work', 'GONE', { usage: ledger });
+		await getGlobalStats();
+
+		await realFs.rm(sessionDir('.grok-work', 'GONE'), { recursive: true, force: true });
+		listSpy.mockClear();
+		vi.mocked(loadGlobalStatsCache).mockResolvedValueOnce(lastSaved());
+		const stats = await getGlobalStats();
+
+		expect(listSpy).not.toHaveBeenCalled();
+		expect(stats.byProvider.grok).toMatchObject({ sessions: 2, inputTokens: 60 });
+		expect(stats.byProvider.grok.costUsd).toBeCloseTo(2, 10);
+		const saved = lastSaved().providers.grok.sessions;
+		expect(saved[await keyFor('.grok-work', 'GONE')].archived).toBe(true);
+		expect(saved[await keyFor('.grok', 'KEPT')].archived).toBe(false);
 	});
 });
