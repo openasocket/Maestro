@@ -496,3 +496,135 @@ describe('resolveSystemPromptDelivery', () => {
 		).toEqual({ via: 'as-prompt' });
 	});
 });
+
+// GT1-10-07: Grok fake-platform prompt-delivery plans. These exercise the
+// generated plan only; native Windows/macOS/Linux and SSH process smokes are
+// Phase 11 and are not claimed here.
+describe('GT1-10-07: Grok fake-platform prompt plans (generated plans, not a native smoke)', () => {
+	const grok = provider('grok');
+	const refusedDestination =
+		'Prompt-file delivery requires a fresh owned .json destination on the executing host and a provider file-argument builder.';
+	const surrogateRefusal =
+		'Prompt-file text must be well-formed Unicode; it contains an unpaired surrogate.';
+	const hosts = [
+		{
+			name: 'POSIX',
+			isWindowsHost: false,
+			sshRemote: false,
+			destination: { owner: 'local' as const, path: path.posix.join('/tmp/owned dir', 'p.json') },
+		},
+		{
+			name: 'Windows',
+			isWindowsHost: true,
+			sshRemote: false,
+			destination: {
+				owner: 'local' as const,
+				path: path.win32.join('C:\\Users\\A B\\100% 雪 & co', 'p.json'),
+			},
+		},
+		{
+			name: 'SSH from Windows',
+			isWindowsHost: true,
+			sshRemote: true,
+			sshRemoteId: 'selected-host',
+			destination: {
+				owner: 'remote' as const,
+				path: '/remote/scratch dir/p.json',
+				sshRemoteId: 'selected-host',
+			},
+		},
+	];
+
+	it('declares no verified stdin route, so stdin is never chosen for Grok', () => {
+		expect(getAgentCapabilities('grok').supportsPromptViaStdin).toBe(false);
+		// Even a forged stdin declaration cannot pull the prompt off the file route.
+		const forged: PromptDeliveryAgent = {
+			...grok,
+			capabilities: { supportsPromptViaStdin: true, supportsStreamJsonInput: true },
+			stdinPromptArgs: ['--stdin'],
+		};
+		for (const host of hosts) {
+			const result = resolvePromptDelivery({
+				agent: forged,
+				prompt: 'hi',
+				hasImages: false,
+				isWindowsHost: host.isWindowsHost,
+				sshRemote: host.sshRemote,
+				sshRemoteId: host.sshRemoteId,
+				promptFileDestination: host.destination,
+			});
+			expect(result.via).toBe('file');
+		}
+	});
+
+	describe.each(hosts)('$name host', (host) => {
+		const at = {
+			agent: grok,
+			isWindowsHost: host.isWindowsHost,
+			sshRemote: host.sshRemote,
+			sshRemoteId: host.sshRemoteId,
+			promptFileDestination: host.destination,
+		};
+
+		it('keeps a quoted path with spaces, % and & as the only argv value', () => {
+			const prompt = 'line 1\r\nline 2 "q" \'s\' `x` $(y) %PATH% ^& | > 🧪 雪\n'.repeat(4096);
+			const result = resolvePromptDelivery({ ...at, prompt });
+			if (result.via !== 'file') throw new Error('expected file route');
+			expect(result.args).toEqual(['--prompt-file', host.destination.path]);
+			expect(result.artifact).toMatchObject({ ...host.destination, flag: 'wx', mode: 0o600 });
+			expect(JSON.parse(result.artifact.content).content[0].text).toBe(prompt);
+		});
+
+		it.each([
+			['high surrogate at the end', 'cut emoji \uD83D'],
+			['low surrogate alone', '\uDE00 leads'],
+			['reversed pair', 'x\uDE00\uD83Dy'],
+		])('refuses a %s with a fixed diagnostic', (_label, text) => {
+			const inputs: ResolvePromptDeliveryInput[] = [
+				{ ...at, prompt: text },
+				{ ...at, prompt: undefined, promptBlocks: [{ type: 'text', text }] },
+			];
+			for (const input of inputs) {
+				const result = resolvePromptDelivery(input);
+				expect(result).toEqual({ via: 'refused', error: surrogateRefusal });
+				expect(JSON.stringify(result)).not.toContain(text);
+			}
+		});
+
+		it.each(['\r', '\n', '\t', '\u001b', '\u007f', '\u0000'])(
+			'refuses a destination holding control character %j',
+			(control) => {
+				const destination = {
+					...host.destination,
+					path: host.destination.path.replace('p.json', `p${control}x.json`),
+				};
+				const result = resolvePromptDelivery({
+					...at,
+					prompt: 'private-prompt',
+					promptFileDestination: destination,
+				});
+				expect(result).toEqual({ via: 'refused', error: refusedDestination });
+				expect(JSON.stringify(result)).not.toContain('private-prompt');
+			}
+		);
+	});
+
+	it.each([
+		['home-relative', { owner: 'remote' as const, path: '~/p.json', sshRemoteId: 'h' }],
+		['relative', { owner: 'remote' as const, path: 'scratch/p.json', sshRemoteId: 'h' }],
+		['Windows drive', { owner: 'remote' as const, path: 'C:\\scratch\\p.json', sshRemoteId: 'h' }],
+		['other remote', { owner: 'remote' as const, path: '/scratch/p.json', sshRemoteId: 'other' }],
+		['local-owned', { owner: 'local' as const, path: '/scratch/p.json' }],
+	])('refuses a %s destination for an SSH launch', (_label, promptFileDestination) => {
+		expect(
+			resolvePromptDelivery({
+				agent: grok,
+				prompt: 'hi',
+				isWindowsHost: true,
+				sshRemote: true,
+				sshRemoteId: 'h',
+				promptFileDestination,
+			})
+		).toEqual({ via: 'refused', error: refusedDestination });
+	});
+});

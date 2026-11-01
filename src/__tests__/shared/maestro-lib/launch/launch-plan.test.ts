@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
 import * as path from 'node:path';
 import {
 	buildAgentLaunchPlan,
@@ -1157,5 +1159,153 @@ describe('a managed launch on an SSH remote is unsupported, never local (MRC-08-
 				expectation
 			)
 		).toEqual({ kind: 'local' });
+	});
+});
+
+// GT1-10-07: Grok fake-platform launch plans. Generated plans only; a native
+// Windows/macOS/Linux or SSH process smoke is Phase 11's and not claimed here.
+describe('GT1-10-07: Grok fake-platform launch plans (generated plans, not a native smoke)', () => {
+	const agent = { ...getAgentDefinition('grok'), capabilities: getAgentCapabilities('grok') };
+	let savedEnv: NodeJS.ProcessEnv;
+	let scratch: string;
+
+	beforeEach(() => {
+		savedEnv = { ...process.env };
+		scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'gt1-10-07-'));
+	});
+
+	afterEach(() => {
+		process.env = savedEnv;
+		fs.rmSync(scratch, { recursive: true, force: true });
+	});
+
+	it('layers account home over global, keeps blank values as unsets, and creates no file', () => {
+		process.env.GROK_INHERITED_FLAG = 'from-shell';
+		const destination = { owner: 'local' as const, path: path.join(scratch, 'owned p.json') };
+		const result = buildAgentLaunchPlan(
+			input({
+				agent,
+				args: [],
+				command: path.join(scratch, 'grok bin', 'grok'),
+				prompt: 'hi "there" $(nope)',
+				globalShellEnvVars: { GROK_HOME: '/global/home', GLOBAL_ONLY: 'g' },
+				sessionCustomEnvVars: { GROK_HOME: '/accounts/selected', GROK_INHERITED_FLAG: '' },
+				promptFileDestination: destination,
+			})
+		);
+		if (!result.ok) throw new Error(result.error);
+		expect(result.plan.env?.GROK_HOME).toBe('/accounts/selected');
+		expect(result.plan.env?.GLOBAL_ONLY).toBe('g');
+		expect(result.plan.env).not.toHaveProperty('GROK_INHERITED_FLAG');
+		expect(result.plan.envVars).toEqual({
+			GROK_HOME: '/accounts/selected',
+			GROK_INHERITED_FLAG: '',
+		});
+		expect(result.plan.args).toEqual(['--prompt-file', destination.path]);
+		expect(result.plan.prompt).toMatchObject({ via: 'file', artifact: { cleanup: 'turn' } });
+		// The planner does no I/O: the launch owner creates and removes the artifact.
+		expect(fs.existsSync(destination.path)).toBe(false);
+		expect(process.env.GROK_INHERITED_FLAG).toBe('from-shell');
+	});
+
+	it('carries unsets and account home to a remote record, never a local environment', () => {
+		const result = buildAgentLaunchPlan(
+			input({
+				agent,
+				args: [],
+				cwd: '/remote/work tree/雪',
+				prompt: 'hi',
+				globalShellEnvVars: { GLOBAL_ONLY: 'g' },
+				sessionCustomEnvVars: { GROK_HOME: '/remote/accounts/b', STALE_VAR: ' ' },
+				sshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+				sshStore: storeWith(remote()),
+				promptFileDestination: {
+					owner: 'remote',
+					path: '/remote/tmp/p.json',
+					sshRemoteId: 'remote-1',
+				},
+			})
+		);
+		if (!result.ok) throw new Error(result.error);
+		expect(result.plan.command).toBe(agent.binaryName);
+		expect(result.plan.cwd).toBe('/remote/work tree/雪');
+		expect(result.plan.env).toBeUndefined();
+		expect(result.plan.envVars).toEqual({ GROK_HOME: '/remote/accounts/b', STALE_VAR: ' ' });
+	});
+
+	it.each([
+		['Windows cmd.exe shim', { isWindowsHost: true, cmdShellLaunch: true }],
+		['POSIX', { isWindowsHost: false }],
+	])('refuses an unpaired surrogate before any file or argv on %s', (_label, host) => {
+		const destination = { owner: 'local' as const, path: path.join(scratch, 'p.json') };
+		const prompt = 'private-text-\uD83D';
+		const result = buildAgentLaunchPlan(
+			input({ agent, args: [], prompt, promptFileDestination: destination, ...host })
+		);
+		expect(result).toEqual({
+			ok: false,
+			reason: 'prompt-delivery-refused',
+			error: 'Prompt-file text must be well-formed Unicode; it contains an unpaired surrogate.',
+		});
+		expect(JSON.stringify(result)).not.toContain('private-text');
+		expect(fs.existsSync(destination.path)).toBe(false);
+	});
+
+	it.each(['\r\n', '\n', '\u0000'])(
+		'refuses a destination with %j that would split the argument',
+		(control) => {
+			const result = buildAgentLaunchPlan(
+				input({
+					agent,
+					args: [],
+					prompt: 'private-text',
+					isWindowsHost: true,
+					cmdShellLaunch: true,
+					promptFileDestination: { owner: 'local', path: `C:\\scratch\\a${control}b.json` },
+				})
+			);
+			expect(result).toMatchObject({ ok: false, reason: 'prompt-delivery-refused' });
+			expect(JSON.stringify(result)).not.toContain('private-text');
+		}
+	);
+
+	it('embeds admitted image bytes in a remote-owned artifact, with no image path on argv', () => {
+		const blocks = [
+			{ type: 'text' as const, text: `see ${'x'.repeat(10)}` },
+			{ type: 'image' as const, mimeType: 'image/png', data: 'AQID' },
+		];
+		const result = buildAgentLaunchPlan(
+			input({
+				agent,
+				args: [],
+				prompt: undefined,
+				promptBlocks: blocks,
+				hasImages: true,
+				embeddedImageSupport: {
+					mimeTypes: ['image/png'],
+					maxCount: 1,
+					maxBytesPerImage: 3,
+					maxTotalBytes: 3,
+				},
+				sshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+				sshStore: storeWith(remote()),
+				promptFileDestination: {
+					owner: 'remote',
+					path: '/remote/tmp/i.json',
+					sshRemoteId: 'remote-1',
+				},
+			})
+		);
+		if (!result.ok) throw new Error(result.error);
+		if (result.plan.prompt.via !== 'file') throw new Error('expected remote artifact');
+		expect(result.plan.prompt.artifact).toMatchObject({
+			owner: 'remote',
+			sshRemoteId: 'remote-1',
+			path: '/remote/tmp/i.json',
+			cleanup: 'turn',
+		});
+		expect(JSON.parse(result.plan.prompt.artifact.content).content).toEqual(blocks);
+		expect(result.plan.args).toEqual(['--prompt-file', '/remote/tmp/i.json']);
+		expect(result.plan.stdin).toBeUndefined();
 	});
 });
