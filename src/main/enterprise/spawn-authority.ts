@@ -51,7 +51,7 @@ import type {
 } from '../process-manager/types';
 import type { CueSpawnAuthorityPort } from '../cue/cue-run-router';
 import type { HeadlessSpawnContextInput } from '../../shared/maestro-lib/managed/host-adapter';
-import type { BrokerDispatch } from './dispatch';
+import { qualifyProviderEffects, type BrokerDispatch } from './dispatch';
 import {
 	identityStandingOf,
 	publicEnterpriseIdentity,
@@ -63,7 +63,12 @@ export interface ProcessSpawnAuthorityDeps {
 	identity: Pick<EnterpriseIdentityStore, 'read'>;
 	host: Pick<ManagedHostAdapter, 'policy'>;
 	dispatch: Pick<BrokerDispatch, 'authority'>;
-	/** The per-effect authority, when a producer exists. Default: none, every effect unavailable. */
+	/**
+	 * The per-effect authority, when a producer exists. Default: none, every
+	 * effect unavailable. Either way the port holds it to
+	 * `qualifyProviderEffects`, so a producer never decides an effect the
+	 * provider's route does not ask about before it executes.
+	 */
 	effects?: ManagedEffectAuthority;
 	/**
 	 * The workflow owner claim the port hands the process sink as its
@@ -179,12 +184,16 @@ export function createProcessSpawnAuthority(
 		// No per-effect operation exists on the endpoint socket in this build,
 		// so a managed turn's commands, file changes, permissions and tool
 		// calls are refused as unavailable, never decided here and never
-		// granted by the provider's own full-access mode.
-		effects:
+		// granted by the provider's own full-access mode. Whatever authority is
+		// composed, an effect its provider's route cannot put before the host
+		// ahead of execution (every Grok effect today, GT1-09-07) is refused
+		// before that authority is asked.
+		effects: qualifyProviderEffects(
 			deps.effects ??
-			unavailableEffectAuthority(
-				'The endpoint exposes no per-effect authorization operation in this build (CP-01, CP-03; owner mega-maestro).'
-			),
+				unavailableEffectAuthority(
+					'The endpoint exposes no per-effect authorization operation in this build (CP-01, CP-03; owner mega-maestro).'
+				)
+		),
 		// The sink claims an unowned Auto Run's fence through this, for the
 		// attempt it is admitting; handed through as it is, never wrapped in a
 		// fallback that answers a fence the registry did not issue.

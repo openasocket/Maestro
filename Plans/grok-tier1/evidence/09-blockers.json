@@ -26,7 +26,11 @@
 			],
 			"ownerTasks": ["GT1-09-07", "GT1-09-11", "GT1-11-12"],
 			"parityRows": ["P33", "P34"],
-			"releaseImpact": "Managed standard-mode Grok cannot complete a turn that needs any tool approval; no managed effect-enforcement claim."
+			"releaseImpact": "Managed standard-mode Grok cannot complete a turn that needs any tool approval; no managed effect-enforcement claim.",
+			"effectQualification": {
+				"task": "GT1-09-07",
+				"detail": "createProcessSpawnAuthority now holds its effects to qualifyProviderEffects (dispatch.ts): every Grok effect is refused unavailable before any producer is asked, so even a real endpoint producer cannot grant a Grok effect until GT1-09-R04 is cleared. Still blocked on the CP-01/CP-03 per-effect operation."
+			}
 		},
 		{
 			"id": "GT1-09-R02",
@@ -44,7 +48,11 @@
 			],
 			"ownerTasks": ["GT1-09-07", "GT1-09-08", "GT1-11-12"],
 			"parityRows": ["P33", "P34", "P35"],
-			"releaseImpact": "Launch admission is the only managed guarantee on headless Grok."
+			"releaseImpact": "Launch admission is the only managed guarantee on headless Grok.",
+			"effectQualification": {
+				"task": "GT1-09-07",
+				"detail": "Not fixable in dispatch.ts or spawn-authority.ts: the policy contract (PolicySourceSet, ManagedPolicySource, ManagedRouteCeiling, DispatchSnapshot) has no field naming a required preventive control, so no launch can be refused on one without inventing it. Managed headless Grok keeps launch admission only. Needs a policy field or endpoint operation naming required controls plus a confinement producer."
+			}
 		},
 		{
 			"id": "GT1-09-R03",
@@ -73,7 +81,11 @@
 			],
 			"ownerTasks": ["GT1-09-07", "GT1-09-08", "GT1-11-12"],
 			"parityRows": ["P34"],
-			"releaseImpact": "ACP availability is not a policy boundary for Grok."
+			"releaseImpact": "ACP availability is not a policy boundary for Grok.",
+			"effectQualification": {
+				"task": "GT1-09-07",
+				"detail": "GROK_PRE_EFFECT_QUALIFIED_KINDS is empty and providerEffectRefusal refuses every Grok kind (unknown and other as unknown effects) with an actionable reason; createRelayManagedGate refuses a Grok request before claudeToolEffect. A kind joins the list only on exact-binary live evidence (GT1-11-12)."
+			}
 		},
 		{
 			"id": "GT1-09-R05",
@@ -193,7 +205,11 @@
 			"sourceRefs": ["Plans/grok-tier1/evidence/07.md"],
 			"ownerTasks": ["GT1-09-07", "GT1-11-12"],
 			"parityRows": ["P34", "P35"],
-			"releaseImpact": "No managed MCP claim for Grok."
+			"releaseImpact": "No managed MCP claim for Grok.",
+			"effectQualification": {
+				"task": "GT1-09-07",
+				"detail": "A Grok MCP tool-call effect is refused unavailable at the effect sink (GT1-09-07); no MCP claim is made."
+			}
 		},
 		{
 			"id": "GT1-09-R10",
@@ -206,7 +222,11 @@
 			"sourceRefs": ["Plans/grok-tier1/evidence/07.md"],
 			"ownerTasks": ["GT1-09-07", "GT1-11-12"],
 			"parityRows": ["P34"],
-			"releaseImpact": "No managed subagent claim for Grok."
+			"releaseImpact": "No managed subagent claim for Grok.",
+			"effectQualification": {
+				"task": "GT1-09-07",
+				"detail": "Any effect a Grok subagent surfaces through the parent binding is refused unavailable at the effect sink (GT1-09-07)."
+			}
 		},
 		{
 			"id": "GT1-09-R11",
@@ -219,7 +239,11 @@
 			"sourceRefs": ["src/shared/maestro-lib/providers/definitions.ts:921-928"],
 			"ownerTasks": ["GT1-09-07", "GT1-09-08"],
 			"parityRows": ["P35"],
-			"releaseImpact": "Safety pass; the functional no-tools guarantee stays absent."
+			"releaseImpact": "Safety pass; the functional no-tools guarantee stays absent.",
+			"effectQualification": {
+				"task": "GT1-09-07",
+				"detail": "No noTools requirement reaches dispatch.ts or spawn-authority.ts; the groomer refusal (GT1-08-14) remains the enforcing site. Plan mode plus --deny Bash(*) is not treated as no-tools anywhere."
+			}
 		},
 		{
 			"id": "GT1-09-R12",

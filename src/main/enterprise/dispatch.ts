@@ -73,6 +73,7 @@ import type { ManagedTurnAuthority } from '../../shared/maestro-lib/turns/run-ag
 import {
 	unavailableEffectAuthority,
 	type ManagedEffect,
+	type ManagedEffectAuthority,
 	type ManagedEffectBinding,
 } from '../../shared/maestro-lib/managed/effects';
 import type { RelayManagedGate } from '../permission-relay/PermissionRelayServer';
@@ -489,6 +490,79 @@ export function claudeToolEffect(toolName: string, input: Record<string, unknown
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Grok effect qualification (GT1-09-07)
+// ---------------------------------------------------------------------------
+
+const GROK_PROVIDER = 'grok';
+
+/** The effect kinds the managed vocabulary names; anything else is an unknown effect. */
+const MANAGED_EFFECT_KINDS: ReadonlySet<string> = new Set<ManagedEffect['kind']>([
+	'command',
+	'file-change',
+	'permissions',
+	'tool-call',
+	'user-input',
+	'elicitation',
+	'other',
+]);
+
+/**
+ * The Grok effect kinds proven to reach the host BEFORE they execute, on an
+ * exact binary, for every path that can produce them (hooks, subagents, MCP
+ * meta-tools, the provider's own network). Empty: no such evidence exists
+ * (GT1-09-R04, owner GT1-11-12). ACP being available proves none of it, a
+ * streamed tool event arrives after the effect, and plan mode with
+ * `--deny Bash(*)` is neither an all-tools-off switch nor a network sandbox.
+ * A kind joins this list only on that live evidence, never from a test.
+ */
+export const GROK_PRE_EFFECT_QUALIFIED_KINDS: readonly ManagedEffect['kind'][] = [];
+
+const GROK_EFFECT_REMEDY =
+	'Run this agent unmanaged, or use a provider whose effects are qualified on this host. Qualifying Grok needs exact-binary evidence that it asks before each effect class (GT1-11-12) and an endpoint per-effect operation (CP-01, CP-03; owner mega-maestro).';
+
+const GROK_RELAY_UNQUALIFIED = `The permission relay reads Claude Code's tool vocabulary; a request from a managed Grok spawn is not mapped through it and is refused before any authority is asked. ${GROK_EFFECT_REMEDY}`;
+
+/**
+ * Why a running managed turn's effect may not be decided for its provider on
+ * this host, or null when the provider's effects go to the authority as
+ * before. Only Grok is held here: an unknown effect kind, `other`, and every
+ * kind not in {@link GROK_PRE_EFFECT_QUALIFIED_KINDS} is refused with the
+ * reason and the remedy. Other providers are untouched.
+ */
+export function providerEffectRefusal(
+	effect: ManagedEffect,
+	binding: Pick<ManagedEffectBinding, 'provider'>
+): string | null {
+	if (binding.provider !== GROK_PROVIDER) return null;
+	const kind: string = effect.kind;
+	if (!MANAGED_EFFECT_KINDS.has(kind) || kind === 'other') {
+		return `A managed Grok turn reached for an unknown effect (${kind}); an effect the managed vocabulary cannot name is refused, never decided. ${GROK_EFFECT_REMEDY}`;
+	}
+	if ((GROK_PRE_EFFECT_QUALIFIED_KINDS as readonly string[]).includes(kind)) return null;
+	return `A managed Grok ${kind} effect is refused: no Grok effect class is proven to ask before it executes (ACP permission requests do not cover hooks, subagents, MCP meta-tools or the provider's own network). ${GROK_EFFECT_REMEDY}`;
+}
+
+/**
+ * The host's effect authority held to {@link providerEffectRefusal}: an
+ * effect the provider's route cannot put before the host ahead of execution
+ * is `unavailable` with an actionable reason, and the inner authority is
+ * never asked, so no decision or receipt exists for it. Everything else goes
+ * to the inner authority unchanged, under its own id.
+ */
+export function qualifyProviderEffects(inner: ManagedEffectAuthority): ManagedEffectAuthority {
+	return {
+		get authorityId() {
+			return inner.authorityId;
+		},
+		decide(effect, binding, signal) {
+			const refusal = providerEffectRefusal(effect, binding);
+			if (refusal) return { decision: 'unavailable', reason: refusal };
+			return inner.decide(effect, binding, signal);
+		},
+	};
+}
+
 export interface RelayGateDeps {
 	/** The host's spawn authority port, read live; null or standalone means every request is the user's. */
 	port(): ProcessSpawnAuthorityPort | null;
@@ -523,6 +597,14 @@ export function createRelayManagedGate(deps: RelayGateDeps): RelayManagedGate {
 			}
 			const live = deps.admissionLive(binding.sessionId);
 			if (!live.ok) return { managed: true, decision: { decision: 'deny', reason: live.reason } };
+			// The relay's tool vocabulary is Claude Code's. A Grok request is never
+			// read through it by assumption, and no authority is asked to decide it.
+			if (admission.provider === GROK_PROVIDER) {
+				return {
+					managed: true,
+					decision: { decision: 'unavailable', reason: GROK_RELAY_UNQUALIFIED },
+				};
+			}
 			const effect = claudeToolEffect(request.toolName, request.input);
 			const effectBinding: ManagedEffectBinding = {
 				leaseId: admission.leaseId,
