@@ -61,6 +61,7 @@ import { PtySpawner } from './spawners/PtySpawner';
 import { ChildProcessSpawner } from './spawners/ChildProcessSpawner';
 import { OpencodeServerSpawner } from './spawners/OpencodeServerSpawner';
 import { CodexAppServerSpawner } from './spawners/CodexAppServerSpawner';
+import { GrokAcpSpawner, wantsGrokAcp } from './spawners/GrokAcpSpawner';
 import { codexAppServerConfigBlocker, wantsCodexAppServer } from '../codex-app-server/invocation';
 import { DataBufferManager } from './handlers/DataBufferManager';
 import { pushResolvedOmpContextWindow } from './handlers/StdoutHandler';
@@ -350,6 +351,7 @@ export class ProcessManager extends EventEmitter {
 	private childProcessSpawner: ChildProcessSpawner;
 	private opencodeServerSpawner: OpencodeServerSpawner;
 	private codexAppServerSpawner: CodexAppServerSpawner;
+	private grokAcpSpawner: GrokAcpSpawner;
 	private localCommandRunner: LocalCommandRunner;
 	private sshCommandRunner: SshCommandRunner;
 	private readonly isCoworkingEnabled: () => boolean;
@@ -416,6 +418,12 @@ export class ProcessManager extends EventEmitter {
 				effects: () => this.spawnAuthority()?.effects ?? null,
 			}
 		);
+		// A Grok turn that asked for the provider's own prompting runs on the shared
+		// ACP driver or is refused by the route selector; it never falls back to the
+		// output-only headless CLI, which answers permission prompts by itself.
+		this.grokAcpSpawner = new GrokAcpSpawner(this.processes, this, this.bufferManager, {
+			effects: () => this.spawnAuthority()?.effects ?? null,
+		});
 		this.localCommandRunner = new LocalCommandRunner(this);
 		this.sshCommandRunner = new SshCommandRunner(this);
 	}
@@ -795,6 +803,9 @@ export class ProcessManager extends EventEmitter {
 		// fingerprint, unlike OpenCode serve), so it takes the coworking env like
 		// any CLI spawn and is routed after the injection.
 		const result = this.withLease(config, lease, () => {
+			if (wantsGrokAcp(configToSpawn)) {
+				return this.grokAcpSpawner.spawn(configToSpawn);
+			}
 			if (this.shouldUseCodexAppServer(configToSpawn)) {
 				return this.codexAppServerSpawner.spawn(configToSpawn);
 			}

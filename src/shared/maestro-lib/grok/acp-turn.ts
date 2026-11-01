@@ -16,7 +16,7 @@ import { TurnCapture } from '../run/turn-capture';
 import { resolveTurnOutcome, type TurnTerminal } from '../streaming/turn-outcome';
 import { parsedUsageToStats } from '../streaming/usage-totals';
 import { GrokAcpEventAdapter } from './acp-events';
-import { GrokAcpTransportError } from './acp-protocol';
+import { GROK_ACP_PROTOCOL_VERSION, GrokAcpTransportError } from './acp-protocol';
 import {
 	GrokAcpRequestAdapter,
 	type GrokAcpPermissionTurn,
@@ -56,6 +56,22 @@ export interface GrokAcpTurnOptions
 	/** Explicit discovery qualification for this selected account/host and exact binary version. */
 	modelDiscovery?: Pick<GrokAcpSessionOptions, 'account' | 'host'> & { agentVersion: string };
 	permission?: Pick<GrokAcpPermissionTurn, 'authority' | 'binding'>;
+	/**
+	 * Pre-dispatch route check over what this process negotiated (`completeGrokAcpNegotiation`).
+	 * A returned reason refuses the turn before any prompt is sent; so does a throw.
+	 */
+	qualify?: (negotiated: GrokAcpNegotiatedFacts) => string | undefined;
+}
+
+/** What a started process proved during `initialize` and session allocation. */
+export interface GrokAcpNegotiatedFacts {
+	/** `initialize` rejects any other protocol version before this point. */
+	protocolVersion: typeof GROK_ACP_PROTOCOL_VERSION;
+	/** The peer's `_meta.agentVersion`; undefined when it reported none. */
+	agentVersion: string | undefined;
+	/** True only when a requested `session/load` succeeded on an advertised `loadSession`. */
+	loadSession: boolean;
+	sessionId: string;
 }
 
 /** Detached pre-dispatch facts; never a provider-wide capability or persistence record. */
@@ -261,6 +277,28 @@ export function startGrokAcpTurn(
 			await session.open();
 			if (failure || controller.signal.aborted) throw new GrokAcpSessionError('cancelled');
 			const sessionId = session.sessionId!;
+			if (options.qualify) {
+				let refusal: string | undefined;
+				try {
+					refusal = options.qualify({
+						protocolVersion: GROK_ACP_PROTOCOL_VERSION,
+						agentVersion: session.configuration.agentVersion,
+						loadSession: options.resumeSessionId !== undefined,
+						sessionId,
+					});
+				} catch {
+					refusal = 'route-qualification-failed';
+				}
+				if (refusal !== undefined) {
+					failure ??= {
+						status: 'refused',
+						origin: 'admission',
+						reason: refusal,
+						dispatchState: 'not-dispatched',
+					};
+					throw new GrokAcpSessionError('cancelled');
+				}
+			}
 			const qualification = options.modelDiscovery;
 			const models =
 				qualification &&

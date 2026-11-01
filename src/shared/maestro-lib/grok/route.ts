@@ -235,6 +235,91 @@ export function selectGrokRoute(
 	};
 }
 
+/**
+ * An ACP route that qualifies on everything except the peer's own advertisement, which
+ * only its `initialize` can supply. The process may start to negotiate; no prompt may be
+ * dispatched until `completeGrokAcpNegotiation` accepts the negotiated facts.
+ */
+export interface GrokAcpNegotiation {
+	ok: true;
+	contract: typeof GROK_ROUTE_CONTRACT;
+	pending: 'acp-initialize';
+	route: 'acp-stdio';
+	permissionMode: LaunchPermissionMode;
+	requirements: Readonly<GrokRouteRequirements>;
+	/** The advertisement-free snapshot; any other change before completion makes it stale. */
+	snapshot: Readonly<Omit<GrokRouteSnapshot, 'acp'>>;
+	snapshotKey: string;
+	facts: GrokRouteDecision['facts'];
+}
+
+function withoutAcp(snapshot: GrokRouteSnapshot): Omit<GrokRouteSnapshot, 'acp'> {
+	const { acp: _acp, ...rest } = snapshot;
+	return rest;
+}
+
+/**
+ * Begin a negotiate-then-prompt ACP route for a consumer with no admitted discovery: the
+ * selector's answer, unless its only gap is the missing advertisement, in which case a
+ * pending negotiation. Every other gap (consent, remote, images, custom argv) still refuses.
+ */
+export function beginGrokAcpNegotiation(
+	req: GrokRouteRequirements,
+	snapshot: GrokRouteSnapshot
+): GrokRouteResult | GrokAcpNegotiation {
+	const result = selectGrokRoute(req, snapshot);
+	if (result.ok || result.route !== 'acp-stdio' || snapshot.acp) return result;
+	// Gaps no advertisement could close (consent, remote, port support, custom argv),
+	// judged against the most permissive one; only the advertisement is left pending.
+	const version = snapshot.agentVersion ?? 'pending-negotiation';
+	const probe = selectGrokRoute(req, {
+		...snapshot,
+		agentVersion: version,
+		acp: {
+			protocolVersion: GROK_ACP_PROTOCOL_VERSION,
+			agentVersion: version,
+			loadSession: true,
+			images: true,
+			commands: true,
+		},
+	});
+	if (!probe.ok) return probe;
+	const base = structuredClone(withoutAcp(snapshot));
+	return {
+		ok: true,
+		contract: GROK_ROUTE_CONTRACT,
+		pending: 'acp-initialize',
+		route: 'acp-stdio',
+		permissionMode: req.permissionMode,
+		requirements: Object.freeze({ ...req }),
+		snapshot: Object.freeze(base),
+		snapshotKey: grokRouteSnapshotKey(base),
+		facts: Object.freeze({
+			agentVersion: base.agentVersion,
+			account: base.account,
+			host: base.host,
+			target: base.target,
+			configGeneration: base.configGeneration,
+		}),
+	};
+}
+
+/**
+ * The decision for a pending negotiation once the started process answered `initialize`.
+ * The version the process reported binds the snapshot when none was observed beforehand;
+ * a different previously observed version is unbound. The result is the selector's own.
+ */
+export function completeGrokAcpNegotiation(
+	negotiation: GrokAcpNegotiation,
+	acp: NonNullable<GrokRouteSnapshot['acp']>
+): GrokRouteResult {
+	return selectGrokRoute(negotiation.requirements, {
+		...structuredClone(negotiation.snapshot),
+		agentVersion: negotiation.snapshot.agentVersion ?? acp.agentVersion,
+		acp: { ...acp },
+	});
+}
+
 export class GrokRouteError extends Error {
 	constructor(readonly code: 'not-acp' | 'stale' | 'plan-mismatch') {
 		super(
@@ -249,20 +334,25 @@ export class GrokRouteError extends Error {
 }
 
 /**
- * The ACP process for an accepted local decision, from the same final launch plan the
+ * The ACP process for an accepted local decision (or a pending negotiation, whose prompt
+ * still waits on `completeGrokAcpNegotiation`), from the same final launch plan the
  * headless route would use: its executable, cwd and complete environment (selected account,
  * attribution, scoped homes) are kept, and only the argv changes. Model, effort, cwd and
  * resume travel over the protocol (`grokAcpRouteOptions`), the prompt over RPC; no prompt
  * artifact, stdin script or headless batch flag reaches the ACP process.
  */
 export function grokAcpProcessSpec(
-	decision: GrokRouteResult,
-	plan: LocalLaunchPlan,
+	decision: GrokRouteResult | GrokAcpNegotiation,
+	plan: Pick<LocalLaunchPlan, 'command' | 'cwd' | 'env' | 'target' | 'permission'>,
 	current: GrokRouteSnapshot,
 	options: WindowsShellRulesOptions = {}
 ): TurnProcessSpec {
 	if (!decision.ok || decision.route !== 'acp-stdio') throw new GrokRouteError('not-acp');
-	if (!isGrokRouteDecisionCurrent(decision, current)) throw new GrokRouteError('stale');
+	const currentKey =
+		'pending' in decision
+			? grokRouteSnapshotKey(withoutAcp(current))
+			: grokRouteSnapshotKey(current);
+	if (decision.snapshotKey !== currentKey) throw new GrokRouteError('stale');
 	if (
 		plan.target.kind !== 'local' ||
 		decision.facts.target !== 'local' ||

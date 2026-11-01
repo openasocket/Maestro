@@ -700,6 +700,22 @@ export class StdoutHandler {
 		const event = outputParser.parseJsonObject(parsed);
 
 		if (!event) return;
+		this.handleNormalizedEvent(sessionId, managedProcess, event);
+	}
+
+	/**
+	 * Handle an event a protocol driver already normalized (the shared Grok ACP turn),
+	 * through the same usage, session-id, thinking, tool and result path as a parsed
+	 * stdout line. Error events stop here as they do for lines: the transport owns
+	 * their `agent-error`. Ignored for a process with no output parser.
+	 */
+	handleNormalizedEvent(
+		sessionId: string,
+		managedProcess: ManagedProcess,
+		event: ParsedEvent
+	): void {
+		const outputParser = managedProcess.outputParser;
+		if (!outputParser) return;
 
 		// Ahead of every early return below, so a subscriber sees each line once.
 		emitParsedEvent(this.emitter, sessionId, event);
