@@ -44,7 +44,12 @@ import {
 	CachedSessionStats,
 	GLOBAL_STATS_CACHE_VERSION,
 	rescaleArchivedEntries,
+	qualifiedGlobalStatsSessionKey,
+	summarizeCachedSessionCost,
+	mergeStatsCostCoverage,
+	type CachedSessionIdentity,
 } from '../../utils/statsCache';
+import { usageCostUsd } from '../../../shared/maestro-lib/streaming/usage-totals';
 import type {
 	AgentSessionInfo,
 	PaginatedSessionsResult,
@@ -77,7 +82,7 @@ import {
 	LOCAL_SESSION_PARSE_CONCURRENCY,
 } from '../../utils/concurrency';
 import { countClaudeTranscriptMessages } from '../../../shared/claudeTranscriptMessages';
-import { resolveAgentAccountDir } from '../../agents/provider-account-dirs';
+import { resolveAgentAccountDir, getProviderAccountDirs } from '../../agents/provider-account-dirs';
 import { resolveSshLaunchTarget } from '../../utils/ssh-remote-resolver';
 import { resolveAgentAccountRef } from '../../../shared/agentAccountDir';
 import { canonicalJson } from '../../../shared/canonicalJson';
@@ -602,6 +607,140 @@ async function discoverCodexSessionFiles(): Promise<SessionFileInfo[]> {
 	return statSessionFiles(listings.flat());
 }
 
+/** One native Grok session directory, fingerprinted without opening any file. */
+interface GrokSessionDirInfo {
+	/** Account dir handed to the registered storage reader. */
+	accountDir: string;
+	/** Raw cwd folder name, and the cwd the storage decodes it to. */
+	cwd: string;
+	key: string;
+	identity: CachedSessionIdentity;
+	/** Newest mtime of the files the storage reads: summary, transcript, usage ledger. */
+	mtimeMs: number;
+}
+
+/** Files of a Grok session directory whose change invalidates its cached stats. */
+const GROK_SESSION_STAT_FILES = ['chat_history.jsonl', 'usage.json', 'summary.json'] as const;
+
+/**
+ * Discover local Grok session directories in every account pool
+ * (`getProviderAccountDirs`, already deduped by the real sessions directory).
+ * The account scope is that real directory, so the same pool keeps the same
+ * keys whichever alias selected it, and two pools never share a key. Only
+ * stats are taken here; contents are read by the registered storage.
+ */
+async function discoverGrokSessionDirs(): Promise<GrokSessionDirInfo[]> {
+	const accountDirs = await getProviderAccountDirs('grok');
+	const candidates: Array<Omit<GrokSessionDirInfo, 'mtimeMs'> & { dir: string }> = [];
+	for (const accountDir of accountDirs) {
+		const sessionsDir = path.join(accountDir, 'sessions');
+		const accountScope = await fs.realpath(sessionsDir).catch(() => path.resolve(sessionsDir));
+		const folders = await readdirOrEmpty(sessionsDir);
+		const listings = await mapWithConcurrency(
+			folders,
+			LOCAL_SESSION_READ_CONCURRENCY,
+			async (folder) => {
+				let cwd: string;
+				try {
+					cwd = decodeURIComponent(folder);
+				} catch {
+					return [];
+				}
+				const folderDir = path.join(sessionsDir, folder);
+				return (await readdirOrEmpty(folderDir)).map((nativeSessionId) => {
+					const identity = { accountScope, projectPath: cwd, nativeSessionId };
+					return {
+						accountDir,
+						cwd,
+						identity,
+						key: qualifiedGlobalStatsSessionKey(identity),
+						dir: path.join(folderDir, nativeSessionId),
+					};
+				});
+			}
+		);
+		candidates.push(...listings.flat());
+	}
+	const stats = await mapWithConcurrency(
+		candidates,
+		LOCAL_SESSION_READ_CONCURRENCY,
+		async ({ dir, ...candidate }) => {
+			let mtimeMs = -1;
+			for (const name of GROK_SESSION_STAT_FILES) {
+				try {
+					const fileStat = await fs.stat(path.join(dir, name));
+					if (name === 'chat_history.jsonl' && fileStat.size === 0) return null;
+					mtimeMs = Math.max(mtimeMs, fileStat.mtimeMs);
+				} catch {
+					// No transcript: not a session the storage lists. Others are optional.
+					if (name === 'chat_history.jsonl') return null;
+				}
+			}
+			return { ...candidate, mtimeMs };
+		}
+	);
+	return stats.filter((info): info is GrokSessionDirInfo => info !== null);
+}
+
+/**
+ * Project one session from the registered Grok storage into the global cache
+ * entry. Tokens and cost are the storage's own reading of `usage.json` (no
+ * second parser, no pricing): the stored `cost` governs and an absent ledger
+ * stays unknown, never free.
+ */
+function grokCachedSessionStats(
+	session: AgentSessionInfo,
+	info: GrokSessionDirInfo
+): CachedSessionStats {
+	const cost = session.accounting?.cost ?? { status: 'unknown' as const };
+	const costUsd = usageCostUsd(cost);
+	return {
+		messages: session.messageCount,
+		inputTokens: session.inputTokens,
+		outputTokens: session.outputTokens,
+		cacheReadTokens: session.cacheReadTokens,
+		cacheCreationTokens: session.cacheCreationTokens,
+		cachedInputTokens: 0,
+		sizeBytes: session.sizeBytes,
+		cost,
+		...(costUsd !== undefined ? { costUsd } : {}),
+		usageSource: session.accounting?.source ?? 'none',
+		...(session.accounting?.completeness
+			? { usageCompleteness: session.accounting.completeness }
+			: {}),
+		identity: info.identity,
+		fileMtimeMs: info.mtimeMs,
+		archived: false,
+	};
+}
+
+/** The native parent a Grok fork or subagent session names in its summary, if any. */
+function grokParentSessionId(session: AgentSessionInfo): string | undefined {
+	const parent = session.nativeMetadata?.summary?.parent_session_id;
+	return typeof parent === 'string' && parent.length > 0 && parent !== session.sessionId
+		? parent
+		: undefined;
+}
+
+/**
+ * A fork copies its parent's ledger and a parent folds its finished children
+ * into its own, so a session whose parent is counted in the same pool would
+ * attribute that usage twice. It keeps its session and messages but none of the
+ * shared tokens or amount, and its cost reads partial: the total stays a floor
+ * (its own post-fork delta is not separable), never an overcount.
+ */
+function withoutParentAttributedUsage(stats: CachedSessionStats): CachedSessionStats {
+	const { costUsd: _costUsd, ...rest } = stats;
+	return {
+		...rest,
+		inputTokens: 0,
+		outputTokens: 0,
+		cacheReadTokens: 0,
+		cacheCreationTokens: 0,
+		cost: { status: 'partial', reason: 'usage attributed to its native parent session' },
+	};
+}
+
 /**
  * Calculate aggregated stats from cached sessions for a provider
  */
@@ -637,8 +776,11 @@ function aggregateProviderStats(
 		totalCacheCreationTokens += stats.cacheCreationTokens;
 		totalCachedInputTokens += stats.cachedInputTokens;
 		totalSizeBytes += stats.sizeBytes;
-		// Prefer the per-model cost stored at parse time; fall back to flat-rate
-		// pricing for cache entries written before per-model cost was tracked.
+		// An entry carrying its own `cost` is never priced from its tokens; its
+		// amount is summarized by `summarizeCachedSessionCost`. Otherwise prefer
+		// the per-model cost stored at parse time, then flat-rate pricing for
+		// cache entries written before per-model cost was tracked.
+		if (stats.cost) continue;
 		totalCostUsd +=
 			stats.costUsd ??
 			calculateModelCost({
@@ -1462,6 +1604,50 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 					result.totalSizeBytes += codexAgg.sizeBytes;
 				}
 
+				// Aggregate Grok stats: tokens as the registered storage read each
+				// ledger; the amount only from each session's own cost observation,
+				// so an unknown cost stays unknown and a partial one keeps a floor.
+				const grokSessions = cache.providers['grok']?.sessions || {};
+				const grokAgg = aggregateProviderStats(grokSessions, false);
+				if (grokAgg.sessions > 0) {
+					const grokCost = summarizeCachedSessionCost(grokSessions);
+					const costCoverage = grokCost?.coverage ?? 'unknown';
+					result.byProvider['grok'] = {
+						sessions: grokAgg.sessions,
+						messages: grokAgg.messages,
+						inputTokens: grokAgg.inputTokens,
+						outputTokens: grokAgg.outputTokens,
+						costUsd: grokCost?.costUsd ?? 0,
+						hasCostData: costCoverage !== 'unknown',
+						costCoverage,
+						...(grokCost?.costUsdTicks !== undefined
+							? { costUsdTicks: grokCost.costUsdTicks }
+							: {}),
+					};
+					result.totalSessions += grokAgg.sessions;
+					result.totalMessages += grokAgg.messages;
+					result.totalInputTokens += grokAgg.inputTokens;
+					result.totalOutputTokens += grokAgg.outputTokens;
+					result.totalCacheReadTokens += grokAgg.cacheReadTokens;
+					result.totalCacheCreationTokens += grokAgg.cacheCreationTokens;
+					result.totalCostUsd += grokCost?.costUsd ?? 0;
+					result.totalSizeBytes += grokAgg.sizeBytes;
+					if (costCoverage !== 'unknown') result.hasCostData = true;
+				}
+
+				// Once any provider reports coverage, the total's coverage counts every
+				// provider: a legacy one with cost data as covered, one without as
+				// unknown, so a total missing a provider's cost is never complete.
+				// Payloads with no reporting provider keep the legacy shape.
+				const providers = Object.values(result.byProvider);
+				if (providers.some((provider) => provider.costCoverage !== undefined)) {
+					result.costCoverage = mergeStatsCostCoverage(
+						providers.map(
+							(provider) => provider.costCoverage ?? (provider.hasCostData ? 'complete' : 'unknown')
+						)
+					);
+				}
+
 				return result;
 			};
 
@@ -1491,13 +1677,34 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 			if (!cache.providers['codex']) {
 				cache.providers['codex'] = { sessions: {} };
 			}
+			if (!cache.providers['grok']) {
+				cache.providers['grok'] = { sessions: {} };
+			}
+			const grokCache = cache.providers['grok'].sessions;
 
 			// Discover all session files
 			logger.info('Discovering session files for global stats', LOG_CONTEXT);
-			const [claudeFiles, codexFiles] = await Promise.all([
+			const [claudeFiles, codexFiles, discoveredGrokDirs] = await Promise.all([
 				discoverClaudeSessionFiles(),
 				discoverCodexSessionFiles(),
+				// A failed account discovery must not archive every Grok session as
+				// deleted: keep the cached entries as they are for this run.
+				discoverGrokSessionDirs().catch((error: unknown) => {
+					void captureException(error, { operation: 'agentSessions:discoverGrokSessionDirs' });
+					logger.warn('Grok session discovery failed; cached Grok stats kept', LOG_CONTEXT, {
+						error,
+					});
+					return null;
+				}),
 			]);
+			const grokDirs = discoveredGrokDirs ?? [];
+			if (discoveredGrokDirs) {
+				const currentGrokKeys = new Set(discoveredGrokDirs.map((info) => info.key));
+				for (const [key, session] of Object.entries(grokCache)) {
+					// Same archive rule as Claude and Codex below.
+					session.archived = !currentGrokKeys.has(key);
+				}
+			}
 
 			// Build sets of current session keys for archive detection
 			const currentClaudeKeys = new Set(claudeFiles.map((f) => f.sessionKey));
@@ -1541,11 +1748,16 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 				return !cached || cached.fileMtimeMs < f.mtimeMs;
 			});
 
-			const totalToProcess = claudeToProcess.length + codexToProcess.length;
-			const cachedCount = claudeFiles.length + codexFiles.length - totalToProcess;
+			const grokToProcess = grokDirs.filter((info) => {
+				const cached = grokCache[info.key];
+				return !cached || cached.fileMtimeMs < info.mtimeMs;
+			});
+
+			const totalToProcess = claudeToProcess.length + codexToProcess.length + grokToProcess.length;
+			const cachedCount = claudeFiles.length + codexFiles.length + grokDirs.length - totalToProcess;
 
 			logger.info(
-				`Global stats: ${totalToProcess} to process (${claudeToProcess.length} Claude, ${codexToProcess.length} Codex), ${cachedCount} cached`,
+				`Global stats: ${totalToProcess} to process (${claudeToProcess.length} Claude, ${codexToProcess.length} Codex, ${grokToProcess.length} Grok), ${cachedCount} cached`,
 				LOG_CONTEXT
 			);
 
@@ -1614,6 +1826,61 @@ export function registerAgentSessionsHandlers(deps?: AgentSessionsHandlerDepende
 					}
 				}
 			);
+
+			// Grok sessions are read by the registered storage, one cwd folder of
+			// one account per call (it reads that folder's sessions with its own
+			// bounded concurrency), one folder at a time. Its results for
+			// descendant folders are left to their own folder.
+			const grokStorage = grokToProcess.length > 0 ? getSessionStorage('grok') : null;
+			const grokParents = new Map<string, string>();
+			if (grokStorage) {
+				const groups = new Map<string, GrokSessionDirInfo[]>();
+				for (const info of grokToProcess) {
+					const groupKey = `${info.accountDir}\0${info.cwd}`;
+					groups.set(groupKey, [...(groups.get(groupKey) ?? []), info]);
+				}
+				await mapWithConcurrency([...groups.values()], 1, async (infos) => {
+					const { accountDir, cwd } = infos[0];
+					const wanted = new Map(infos.map((info) => [info.identity.nativeSessionId, info]));
+					try {
+						const sessions = await grokStorage.listSessions(cwd, undefined, accountDir);
+						for (const session of sessions) {
+							const info = session.projectPath === cwd ? wanted.get(session.sessionId) : undefined;
+							if (!info) continue;
+							grokCache[info.key] = grokCachedSessionStats(session, info);
+							const parent = grokParentSessionId(session);
+							if (parent) grokParents.set(info.key, parent);
+							processedCount++;
+							if (processedCount % 10 === 0) sendUpdate(cache, false);
+						}
+					} catch (error) {
+						void captureException(error, { operation: 'agentSessions:grokGlobalStats' });
+						logger.warn('Failed to read Grok sessions for global stats', LOG_CONTEXT, { error });
+					}
+				});
+			} else if (grokToProcess.length > 0) {
+				logger.warn(
+					'Grok session storage is not registered; Grok stats not refreshed',
+					LOG_CONTEXT
+				);
+			}
+			// Decided when the child is read, against every cached session of its
+			// pool (archived parents included, as lifetime totals include them).
+			if (grokParents.size > 0) {
+				const present = new Set(
+					Object.values(grokCache).flatMap((entry) =>
+						entry.identity
+							? [`${entry.identity.accountScope}\0${entry.identity.nativeSessionId}`]
+							: []
+					)
+				);
+				for (const [key, parent] of grokParents) {
+					const entry = grokCache[key];
+					if (entry?.identity && present.has(`${entry.identity.accountScope}\0${parent}`)) {
+						grokCache[key] = withoutParentAttributedUsage(entry);
+					}
+				}
+			}
 
 			if (claudeSessionsBefore) {
 				rescaleArchivedEntries(
