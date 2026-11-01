@@ -34,6 +34,7 @@ import {
 	type LifecycleLineage,
 } from '../../../shared/maestro-lib/managed/events';
 import { MANAGED_CONTRACT_VERSION } from '../../../shared/maestro-lib/managed/types';
+import { AGENT_IDS } from '../../../shared/agentIds';
 
 // Terminal states inlined as a static lookup so the fake store's "active run"
 // resolution mirrors the real store without importing the impl's own helper.
@@ -786,5 +787,111 @@ describe('newRunId', () => {
 		expect(a).toContain('sess-1');
 		expect(a).toContain('1000');
 		expect(a).not.toBe(b); // random suffix keeps ids distinct at the same ts
+	});
+});
+
+/**
+ * GT1-10-09B: Grok capture metadata on the desktop seam. Completeness is
+ * generated from `AGENT_IDS`; a stored run keeps the provider it was written
+ * with, so historical and future values survive the exit untouched.
+ */
+describe('AgentRunCaptureService Grok capture metadata (GT1-10-09B)', () => {
+	it('captures a Grok spawn as grok and keeps it through the exit, filterable beside another provider', async () => {
+		const store = makeStore();
+		const service = new AgentRunCaptureService(store.deps);
+		store.clock.t = 1000;
+		const grok = service.captureSpawn({
+			sessionId: 'agent-g-ai-tab-1',
+			toolType: 'grok',
+			cwd: '/repo',
+			tabId: 'tab-1',
+			model: 'grok-4',
+			agentId: 'agent-g',
+			source: 'desktop',
+		});
+		service.captureSpawn({ sessionId: 'agent-g-ai-tab-2', toolType: 'codex', cwd: '/repo' });
+		expect(grok).toMatchObject({
+			provider: 'grok',
+			model: 'grok-4',
+			agentId: 'agent-g',
+			tabId: 'tab-1',
+			status: 'running',
+		});
+
+		store.clock.t = 1500;
+		const settled = await service.captureExit({ sessionId: 'agent-g-ai-tab-1', exitCode: 0 });
+		expect(settled).toMatchObject({ id: grok!.id, provider: 'grok', status: 'completed' });
+
+		const byProvider = (provider: string) =>
+			[...store.runs.values()].filter((run) => run.provider === provider).map((run) => run.id);
+		expect(byProvider('grok')).toEqual([grok!.id]);
+		expect(byProvider('codex')).toHaveLength(1);
+		expect(byProvider('unknown')).toEqual([]);
+	});
+
+	it.each(AGENT_IDS.filter((id) => id !== 'terminal'))(
+		'attributes a %s spawn as its registered ID',
+		(id) => {
+			const store = makeStore();
+			const service = new AgentRunCaptureService(store.deps);
+			const created = service.captureSpawn({
+				sessionId: `agent-1-ai-${id}`,
+				toolType: id,
+				cwd: '/r',
+			});
+			expect(created?.provider).toBe(id);
+		}
+	);
+
+	it('a superseded Grok run and its replacement both stay grok', () => {
+		const store = makeStore();
+		const service = new AgentRunCaptureService(store.deps);
+		store.clock.t = 1000;
+		const first = service.captureSpawn({ sessionId: 'agent-g-ai-t', toolType: 'grok', cwd: '/r' });
+		store.clock.t = 2000;
+		const second = service.captureSpawn({ sessionId: 'agent-g-ai-t', toolType: 'GROK', cwd: '/r' });
+		expect(store.runs.get(first!.id)).toMatchObject({ provider: 'grok', status: 'cancelled' });
+		expect(store.runs.get(second!.id)).toMatchObject({ provider: 'grok', status: 'running' });
+	});
+
+	it.each(['grok', 'cursor', 'qwen-coder', 'future-agent', 'unknown'])(
+		'a stored run tagged %s keeps its provider when it settles',
+		async (provider) => {
+			const store = makeStore();
+			const service = new AgentRunCaptureService(store.deps);
+			store.seed(baseRun({ id: `run-${provider}`, provider, sessionId: 'sess-stored' }));
+			const settled = await service.captureExit({ sessionId: 'sess-stored', exitCode: 1 });
+			expect(settled).toMatchObject({ provider, status: 'failed' });
+			expect(store.runs.get(`run-${provider}`)?.provider).toBe(provider);
+		}
+	);
+
+	it('projects the Grok lifecycle start and exit under provider grok, the spawn and the restart path alike', async () => {
+		const facts: LifecycleFact[] = [];
+		const store = makeStore({
+			lifecycle: {
+				record: (fact) => {
+					facts.push(fact);
+					return [];
+				},
+			},
+		});
+		const service = new AgentRunCaptureService(store.deps);
+		service.captureSpawn({
+			sessionId: 'agent-g-ai-t',
+			toolType: 'grok',
+			cwd: '/r',
+			model: 'grok-4',
+		});
+		await service.captureExit({ sessionId: 'agent-g-ai-t', exitCode: 0 });
+		// A run written before a restart has no live binding: the exit reads the stored provider.
+		store.seed(baseRun({ id: 'run-before-restart', provider: 'grok', sessionId: 'agent-h-ai-t' }));
+		await service.captureExit({ sessionId: 'agent-h-ai-t', exitCode: 0 });
+
+		expect(facts.map((fact) => [fact.state, fact.provider])).toEqual([
+			['running', 'grok'],
+			['completed', 'grok'],
+			['completed', 'grok'],
+		]);
 	});
 });
