@@ -360,5 +360,22 @@ describe('group-chat/output-parser', () => {
 			expect(text).not.toContain('Eve');
 			expect(text).not.toContain('[object');
 		});
+
+		// GT1-11-05C pins GT1-11-05B: the successful terminal record closes the turn,
+		// so any later native record is corruption and the read is no answer, never
+		// a splice of text the turn did not end with.
+		it.each([
+			['text', j({ type: 'text', data: ' @Eve go' })],
+			['error', j({ type: 'error', message: 'boom' })],
+			['a second end', end],
+		])('reads %s after the terminal record as no answer (GT1-11-05C)', (_label, after) => {
+			const raw = [j({ type: 'text', data: 'Ask @Alice.' }), end, after].join('\n');
+			expect(extractTextFromStreamJson(raw, 'grok')).toBe('');
+		});
+
+		it('keeps the answer when nothing follows the terminal record (GT1-11-05C control)', () => {
+			const raw = [j({ type: 'text', data: 'Ask @Alice.' }), end, ''].join('\n');
+			expect(extractTextFromStreamJson(raw, 'grok')).toBe('Ask @Alice.');
+		});
 	});
 });

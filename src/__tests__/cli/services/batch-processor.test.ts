@@ -2712,5 +2712,89 @@ describe('batch-processor', () => {
 			expect(resumeCalls().map((c) => c[3])).toEqual(['grok-fresh']);
 			expect(resumed.find((e) => e.type === 'complete')?.totalTasksCompleted).toBe(1);
 		});
+
+		// GT1-11-05C pins GT1-11-05A: a failed or interrupted Grok turn finished nothing,
+		// so the shared engine unticks the box it ticked (the desktop's
+		// restoreTasksCheckedByFailedTurn rule) and counts 0. Other providers keep
+		// today's behavior.
+		describe('a failed Grok turn that ticked its box (GT1-11-05C)', () => {
+			/** One task document whose reads follow every write and every tick. */
+			const liveDocument = () => {
+				const doc = { state: '- [ ] Grok task' };
+				vi.mocked(readDocAndCountTasks).mockImplementation(() => ({
+					content: doc.state,
+					taskCount: doc.state.includes('- [ ]') ? 1 : 0,
+				}));
+				vi.mocked(writeDoc).mockImplementation((_folder, _name, content) => {
+					doc.state = content as string;
+				});
+				return doc;
+			};
+			const failures = [
+				[
+					'failed',
+					{
+						success: false,
+						outcome: 'crashed' as const,
+						error: 'Grok rate limit exceeded.',
+						agentSessionId: 'grok-failed-ticked',
+					},
+				],
+				[
+					'interrupted',
+					{
+						success: false,
+						outcome: 'interrupted' as const,
+						error: 'Agent run timed out or was cancelled',
+						agentSessionId: 'grok-interrupted-ticked',
+					},
+				],
+			] as const;
+
+			it.each(failures)(
+				'unticks the box a Grok turn ticked when the turn %s, and counts 0',
+				async (_l, failure) => {
+					const doc = liveDocument();
+					vi.mocked(spawnAgent).mockImplementation(async (_t, _c, _p, resume) => {
+						if (resume) return { success: true, response: 'resumed', agentSessionId: resume };
+						doc.state = '- [x] Grok task';
+						return { ...failure };
+					});
+
+					const events = await collectEvents(
+						runPlaybook(grokSession(), mockPlaybook(), '/playbooks')
+					);
+
+					expect(vi.mocked(writeDoc).mock.calls.map((c) => c[2])).toContain('- [ ] Grok task');
+					expect(doc.state).toBe('- [ ] Grok task');
+					expect(resumeCalls()).toHaveLength(0);
+					const completes = events.filter((e) => e.type === 'task_complete');
+					expect(completes.length).toBeGreaterThan(0);
+					expect(completes.every((e) => e.success === false)).toBe(true);
+					expect(events.find((e) => e.type === 'complete')?.totalTasksCompleted).toBe(0);
+				}
+			);
+
+			it('leaves a failed Claude turn that ticked its box as today: kept and counted', async () => {
+				const doc = liveDocument();
+				vi.mocked(spawnAgent).mockImplementation(async () => {
+					doc.state = '- [x] Grok task';
+					return { ...failures[0][1], agentSessionId: 'claude-failed-ticked' };
+				});
+
+				const events = await collectEvents(
+					runPlaybook(mockSession({ toolType: 'claude-code' }), mockPlaybook(), '/playbooks')
+				);
+
+				expect(writeDoc).not.toHaveBeenCalledWith(
+					expect.anything(),
+					expect.anything(),
+					'- [ ] Grok task'
+				);
+				expect(doc.state).toBe('- [x] Grok task');
+				expect(events.find((e) => e.type === 'task_complete')).toMatchObject({ success: false });
+				expect(events.find((e) => e.type === 'complete')?.totalTasksCompleted).toBe(1);
+			});
+		});
 	});
 });
