@@ -1,0 +1,1308 @@
+{
+	"schemaVersion": 1,
+	"taskId": "GT1-05-13",
+	"recordedAt": "2026-11-01T00:16:40.794217+00:00",
+	"sourceCommit": "c49299230115746ce54b85d943c26c3b88a7a7e8",
+	"executionRoot": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+	"branch": "auto-run-feature/grok-cli-integration",
+	"baseObservation": {
+		"ref": "feature/mega-maestro-v1.1.0-rc",
+		"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
+		"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+		"aheadBehind": [339, 10]
+	},
+	"status": "fail",
+	"taskExecution": "pass",
+	"summary": {
+		"files": 43,
+		"passedFiles": 35,
+		"failedFiles": 8,
+		"collected": 3309,
+		"passed": 3257,
+		"failed": 52,
+		"skipped": 0,
+		"collectionFailures": 1,
+		"reportedUnhandledErrors": 0
+	},
+	"scope": {
+		"phaseStart": "60612fe45573a3bd4c2708a6e221197a6373f3b0",
+		"selectedFiles": "All 43 test files changed during phase05; complete suites, no test-name filters. Shared fixture is hashed but not a suite.",
+		"sourceAndTestsModified": false,
+		"newTestsAuthored": false,
+		"platform": "darwin/arm64",
+		"node": "v26.13.0",
+		"npm": "11.20.0",
+		"vitest": "4.1.11",
+		"typescript": "6.0.3",
+		"environment": "Repository vitest.config.mts projects select jsdom or node, forks, maxWorkers=1 per independent group. Synthetic IPC/process/filesystem fixtures; account variables scrubbed, temporary/cache/data directories isolated inside checkout. HOME and CODEX_HOME preserved.",
+		"nativeEvidence": "No native provider calls, no paid/live/SSH qualification. Previously unsupported operations retain that status."
+	},
+	"checks": [
+		{
+			"id": "controls",
+			"sourceCommit": "c49299230115746ce54b85d943c26c3b88a7a7e8",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/renderer/components/AgentCreationDialog.test.tsx",
+				"src/__tests__/renderer/components/NewInstanceModal.test.tsx",
+				"src/__tests__/renderer/components/NewInstanceModal/AgentPickerGrid.test.tsx",
+				"src/__tests__/renderer/components/MainPanel/MainPanelHeader.test.tsx",
+				"src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx",
+				"src/__tests__/renderer/components/InputArea/ComposerOptionsSheet.test.tsx",
+				"src/__tests__/renderer/components/InputArea/components/ToolbarControls.test.tsx",
+				"src/__tests__/renderer/components/Wizard/screens/AgentSelectionScreen/hooks.test.tsx",
+				"src/__tests__/renderer/hooks/useSessionCrud.test.ts",
+				"src/__tests__/renderer/hooks/useWorktreeHandlers.test.ts",
+				"src/__tests__/renderer/utils/worktreeSession.test.ts",
+				"src/__tests__/renderer/utils/worktreeSpawn.test.ts",
+				"src/__tests__/shared/maestro-lib/turns/context.test.ts",
+				"src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts",
+				"--maxWorkers=1",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/controls/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-11-01T00:14:17.973325+00:00",
+			"finishedAt": "2026-11-01T00:14:48.562588+00:00",
+			"durationSeconds": 30.589,
+			"exitCode": 1,
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/controls/temp",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/controls/temp",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/controls/temp",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/controls/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/controls/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/controls/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/controls/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/controls/xdg-data"
+			},
+			"removedEnvironmentKeyNames": [
+				"CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+				"CODEX_CI",
+				"CODEX_SESSION_ID",
+				"CODEX_THREAD_ID",
+				"CODEX_TOOL_CALL_ID",
+				"CODEX_VERSION",
+				"MAESTRO_CALLER_AGENT_ID",
+				"MAESTRO_QUERY_SOURCE",
+				"MAESTRO_USER_DATA",
+				"OPENAI_API_KEY",
+				"OPENROUTER_API_KEY"
+			],
+			"homeAndCodexHomeUnchanged": true,
+			"log": "tmp/grok-tier1-phase05-verify/controls/output.log",
+			"status": "fail",
+			"receiptPath": "tmp/grok-tier1-phase05-verify/controls/receipt.json",
+			"receiptSha256": "bdaee855c5ed1621c28ed035132c44e98213a3d00c947fddb34a5e3c57c20e81",
+			"logSha256": "b309a2b40c19d74aa3671bed203295406f4b16638345f8e66a2e329f30190879",
+			"report": "tmp/grok-tier1-phase05-verify/controls/results.json",
+			"reportSha256": "e7d565add3364364e35cd7baec83ade46cb193c668b11d496232d5800714f990",
+			"files": [
+				{
+					"path": "src/__tests__/renderer/hooks/useSessionCrud.test.ts",
+					"sha256": "3fcbf42dfde22f3c35625a9bf4468ca72243bc9a3229c1ffd948c0c419fcbab2",
+					"status": "passed",
+					"collected": 72,
+					"passed": 72,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/hooks/useWorktreeHandlers.test.ts",
+					"sha256": "8cfd0d3cdfe150ccc35a78bb01912b67745421c78ac0378845bc0e1a6bc08414",
+					"status": "passed",
+					"collected": 295,
+					"passed": 295,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/components/AgentCreationDialog.test.tsx",
+					"sha256": "1816d6160be064aa1c25c9000e011fcfd1acfbb5c904e5ff5b275c4408e7d6b2",
+					"status": "failed",
+					"collected": 0,
+					"passed": 0,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": "Failed to resolve import \"@testing-library/user-event\" from \"src/__tests__/renderer/components/AgentCreationDialog.test.tsx\". Does the file exist?",
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/components/NewInstanceModal.test.tsx",
+					"sha256": "67731ee304a015febc7e941016add85ba2e81a6cb7020cdfb3e39e7ea6bbb9bc",
+					"status": "passed",
+					"collected": 118,
+					"passed": 118,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/utils/worktreeSession.test.ts",
+					"sha256": "e5294372e2894517698b1bb50cbc9798317dc2aa90c7ecb041d4d638886bf89d",
+					"status": "passed",
+					"collected": 19,
+					"passed": 19,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/utils/worktreeSpawn.test.ts",
+					"sha256": "f5a7fa83ef426fb2ea934e0ddf2dce3f268c477842fc1d86d80e2d7d3f6ca7c6",
+					"status": "passed",
+					"collected": 8,
+					"passed": 8,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/components/InputArea/ComposerOptionsSheet.test.tsx",
+					"sha256": "cae90f634ae2dcfbccbbef770b62eb8fce621fa1935b335d14aea20df335f3b6",
+					"status": "passed",
+					"collected": 17,
+					"passed": 17,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/components/MainPanel/MainPanelHeader.test.tsx",
+					"sha256": "e98786004a9aca3c897b1c8999cffff03ad587ef62a5d6f0ce421d9bfd1b8f83",
+					"status": "passed",
+					"collected": 57,
+					"passed": 57,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/components/NewInstanceModal/AgentPickerGrid.test.tsx",
+					"sha256": "af6aabd1210467d6ba3126b31e5d84021a64d4529e217548e56ea8a86ee9758c",
+					"status": "failed",
+					"collected": 28,
+					"passed": 27,
+					"failed": 1,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": [
+						{
+							"fullName": "AgentPickerGrid Grok provider picker contract keeps alphabetical rows, the preferred selection and the real Grok mark",
+							"message": "TestingLibraryElementError: Unable to find an accessible element with the role \"option\" and name `/Grok CLI Beta Available/`"
+						}
+					]
+				},
+				{
+					"path": "src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx",
+					"sha256": "5fc2c6837e4395384f7594d76b447f33b8537c2ce37332c16b566607104b1f9c",
+					"status": "passed",
+					"collected": 65,
+					"passed": 65,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/components/InputArea/components/ToolbarControls.test.tsx",
+					"sha256": "b6cc1a2d52c62c0e9c7ebd30d6ee9b00f48ffcbfd75a8ae35c0cb999d963dc7d",
+					"status": "passed",
+					"collected": 22,
+					"passed": 22,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/components/Wizard/screens/AgentSelectionScreen/hooks.test.tsx",
+					"sha256": "d8d0b962d874a3c945a78845688e324bf3fa970bacb7a56c50db4423f9cc5fd9",
+					"status": "failed",
+					"collected": 68,
+					"passed": 67,
+					"failed": 1,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": [
+						{
+							"fullName": "AgentSelectionScreen hooks opens and closes config panel, loading config and models with SSH ID",
+							"message": "AssertionError: expected \"vi.fn()\" to be called with arguments: [ 'codex' ]"
+						}
+					]
+				},
+				{
+					"path": "src/__tests__/shared/maestro-lib/turns/context.test.ts",
+					"sha256": "64b0338ac0b95331c65a3d74de2dcf380d0b797d6a4fd33b70e17e713bd4970d",
+					"status": "passed",
+					"collected": 31,
+					"passed": 31,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts",
+					"sha256": "e01b8c80cd441aafe2aff3165d2ba3a4fcb3d9ccc91be4f3f5b7ca0ba3dd5d8f",
+					"status": "passed",
+					"collected": 140,
+					"passed": 140,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				}
+			],
+			"summary": {
+				"files": 14,
+				"passedFiles": 11,
+				"failedFiles": 3,
+				"collected": 940,
+				"passed": 938,
+				"failed": 2,
+				"skipped": 0,
+				"collectionFailures": 1,
+				"reportedUnhandledErrors": 0
+			}
+		},
+		{
+			"id": "commands-memory",
+			"sourceCommit": "c49299230115746ce54b85d943c26c3b88a7a7e8",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/main/agents/grok-skills.test.ts",
+				"src/__tests__/main/ipc/handlers/agents.test.ts",
+				"src/__tests__/main/ipc/handlers/memory.test.ts",
+				"src/__tests__/main/ipc/handlers/process.test.ts",
+				"src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts",
+				"src/__tests__/main/memory-manager.test.ts",
+				"src/__tests__/main/preload/agents.test.ts",
+				"src/__tests__/renderer/hooks/useInputHandlers.test.ts",
+				"src/__tests__/renderer/hooks/useInputProcessing.test.ts",
+				"src/__tests__/renderer/hooks/useRemoteHandlers.test.ts",
+				"src/__tests__/renderer/hooks/useRemoteIntegration.test.ts",
+				"src/__tests__/renderer/services/queuedPrompt.test.ts",
+				"src/__tests__/renderer/stores/agentStore.test.ts",
+				"src/__tests__/renderer/utils/spawnHelpers.test.ts",
+				"src/__tests__/shared/maestro-lib/turns/prompt.test.ts",
+				"src/__tests__/shared/templateVariables.test.ts",
+				"--maxWorkers=1",
+				"--reporter=json",
+				"--reporter=default",
+				"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/commands-memory/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-11-01T00:14:29.856687+00:00",
+			"finishedAt": "2026-11-01T00:14:50.392519+00:00",
+			"durationSeconds": 20.535,
+			"exitCode": 1,
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/commands-memory/temp",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/commands-memory/temp",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/commands-memory/temp",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/commands-memory/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/commands-memory/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/commands-memory/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/commands-memory/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/commands-memory/xdg-data"
+			},
+			"removedEnvironmentKeyNames": [
+				"CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+				"CODEX_CI",
+				"CODEX_SESSION_ID",
+				"CODEX_THREAD_ID",
+				"CODEX_TOOL_CALL_ID",
+				"CODEX_VERSION",
+				"MAESTRO_CALLER_AGENT_ID",
+				"MAESTRO_QUERY_SOURCE",
+				"MAESTRO_USER_DATA",
+				"OPENAI_API_KEY",
+				"OPENROUTER_API_KEY"
+			],
+			"homeAndCodexHomeUnchanged": true,
+			"log": "tmp/grok-tier1-phase05-verify/commands-memory/output.log",
+			"status": "fail",
+			"receiptPath": "tmp/grok-tier1-phase05-verify/commands-memory/receipt.json",
+			"receiptSha256": "6db3a6b3c4cc1dd7f7cab3226031faa4b40e75bad05510ca8f35042fead2e41d",
+			"logSha256": "2bd0e4ac96c54395fa25cdaf9e2c23bfc1cd5c4148ae06704802f056e94ee95a",
+			"report": "tmp/grok-tier1-phase05-verify/commands-memory/results.json",
+			"reportSha256": "ad74ce0b203bd0ae0a5305d8f89eacb8f79409a343bba3d9b966a4657b2c694e",
+			"files": [
+				{
+					"path": "src/__tests__/renderer/services/queuedPrompt.test.ts",
+					"sha256": "8dc3eaf23f126ef7681e54060b59fce80ddbf89aa3cc043b627dbe37c03f3171",
+					"status": "passed",
+					"collected": 57,
+					"passed": 57,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/hooks/useInputHandlers.test.ts",
+					"sha256": "3e77eeac1c3b7b4bed41768e3a829661d96ed55f7dd4499a73f03656b256d53b",
+					"status": "passed",
+					"collected": 108,
+					"passed": 108,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/hooks/useInputProcessing.test.ts",
+					"sha256": "0d1c96e12e01fce40b49e6a3846f45ac13b5566a4ad0b7cfb83567357279605d",
+					"status": "failed",
+					"collected": 166,
+					"passed": 154,
+					"failed": 12,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": [
+						{
+							"fullName": "useInputProcessing Grok slash dispatch boundary keeps 'staged' images and raw arguments at the 'idle' queue boundary (SSH: false)",
+							"message": "Error: The property \"getBranch\" is not defined on the object.\n    at assert (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:279:9)\n    at Object.spyOn (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:194:2)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/renderer/hooks/useInputProcessing.test.ts:1305:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2027:60\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20"
+						},
+						{
+							"fullName": "useInputProcessing Grok slash dispatch boundary keeps 'explicit' images and raw arguments at the 'idle' queue boundary (SSH: false)",
+							"message": "Error: The property \"getBranch\" is not defined on the object.\n    at assert (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:279:9)\n    at Object.spyOn (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:194:2)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/renderer/hooks/useInputProcessing.test.ts:1305:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2027:60\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20"
+						},
+						{
+							"fullName": "useInputProcessing Grok slash dispatch boundary keeps 'empty' images and raw arguments at the 'idle' queue boundary (SSH: false)",
+							"message": "Error: The property \"getBranch\" is not defined on the object.\n    at assert (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:279:9)\n    at Object.spyOn (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:194:2)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/renderer/hooks/useInputProcessing.test.ts:1305:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2027:60\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20"
+						},
+						{
+							"fullName": "useInputProcessing Grok slash dispatch boundary keeps 'staged' images and raw arguments at the 'idle' queue boundary (SSH: true)",
+							"message": "Error: The property \"getBranch\" is not defined on the object.\n    at assert (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:279:9)\n    at Object.spyOn (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:194:2)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/renderer/hooks/useInputProcessing.test.ts:1305:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2027:60\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20"
+						},
+						{
+							"fullName": "useInputProcessing Grok slash dispatch boundary keeps 'explicit' images and raw arguments at the 'idle' queue boundary (SSH: true)",
+							"message": "Error: The property \"getBranch\" is not defined on the object.\n    at assert (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:279:9)\n    at Object.spyOn (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:194:2)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/renderer/hooks/useInputProcessing.test.ts:1305:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2027:60\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20"
+						},
+						{
+							"fullName": "useInputProcessing Grok slash dispatch boundary keeps 'empty' images and raw arguments at the 'idle' queue boundary (SSH: true)",
+							"message": "Error: The property \"getBranch\" is not defined on the object.\n    at assert (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:279:9)\n    at Object.spyOn (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:194:2)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/renderer/hooks/useInputProcessing.test.ts:1305:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2027:60\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20"
+						},
+						{
+							"fullName": "useInputProcessing Grok slash dispatch boundary keeps 'staged' images and raw arguments at the 'busy' queue boundary (SSH: false)",
+							"message": "Error: The property \"getBranch\" is not defined on the object.\n    at assert (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:279:9)\n    at Object.spyOn (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:194:2)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/renderer/hooks/useInputProcessing.test.ts:1305:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2027:60\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20"
+						},
+						{
+							"fullName": "useInputProcessing Grok slash dispatch boundary keeps 'explicit' images and raw arguments at the 'busy' queue boundary (SSH: false)",
+							"message": "Error: The property \"getBranch\" is not defined on the object.\n    at assert (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:279:9)\n    at Object.spyOn (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:194:2)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/renderer/hooks/useInputProcessing.test.ts:1305:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2027:60\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20"
+						},
+						{
+							"fullName": "useInputProcessing Grok slash dispatch boundary keeps 'empty' images and raw arguments at the 'busy' queue boundary (SSH: false)",
+							"message": "Error: The property \"getBranch\" is not defined on the object.\n    at assert (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:279:9)\n    at Object.spyOn (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:194:2)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/renderer/hooks/useInputProcessing.test.ts:1305:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2027:60\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20"
+						},
+						{
+							"fullName": "useInputProcessing Grok slash dispatch boundary keeps 'staged' images and raw arguments at the 'busy' queue boundary (SSH: true)",
+							"message": "Error: The property \"getBranch\" is not defined on the object.\n    at assert (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:279:9)\n    at Object.spyOn (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:194:2)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/renderer/hooks/useInputProcessing.test.ts:1305:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2027:60\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20"
+						},
+						{
+							"fullName": "useInputProcessing Grok slash dispatch boundary keeps 'explicit' images and raw arguments at the 'busy' queue boundary (SSH: true)",
+							"message": "Error: The property \"getBranch\" is not defined on the object.\n    at assert (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:279:9)\n    at Object.spyOn (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:194:2)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/renderer/hooks/useInputProcessing.test.ts:1305:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2027:60\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20"
+						},
+						{
+							"fullName": "useInputProcessing Grok slash dispatch boundary keeps 'empty' images and raw arguments at the 'busy' queue boundary (SSH: true)",
+							"message": "Error: The property \"getBranch\" is not defined on the object.\n    at assert (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:279:9)\n    at Object.spyOn (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/spy/dist/index.js:194:2)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/renderer/hooks/useInputProcessing.test.ts:1305:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2027:60\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:302:11\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:26\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2326:20\n    at new Promise (<anonymous>)\n    at runWithCancel (file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2323:10)\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:2305:20"
+						}
+					]
+				},
+				{
+					"path": "src/__tests__/renderer/hooks/useRemoteHandlers.test.ts",
+					"sha256": "556eff0e013ad2e6cbec5ada46f9205f15c7bd0e8f224ccb59ab10f95655b253",
+					"status": "passed",
+					"collected": 99,
+					"passed": 99,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/hooks/useRemoteIntegration.test.ts",
+					"sha256": "960121f9a648e427686ff5604a964eed30504c88e70ed514bfab848dc823d840",
+					"status": "passed",
+					"collected": 157,
+					"passed": 157,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/stores/agentStore.test.ts",
+					"sha256": "a7f168773235eba2b2978510368c7fea27490e73d998f65a07804de3f6498fb1",
+					"status": "passed",
+					"collected": 160,
+					"passed": 160,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/utils/spawnHelpers.test.ts",
+					"sha256": "f9e097c5c08252437ddae8164d9f3c73598429c557980d82ec778681fb1b5807",
+					"status": "passed",
+					"collected": 37,
+					"passed": 37,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/main/memory-manager.test.ts",
+					"sha256": "2fae38494b0ccc4e043fe7dea2fa92a0a126a98fed92355e53ee1d4d7d26f695",
+					"status": "passed",
+					"collected": 37,
+					"passed": 37,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/shared/templateVariables.test.ts",
+					"sha256": "fe987a2e75d777446bb963fdb97134c091ebe181c2bd679ec94f17f8c9e2f1ef",
+					"status": "passed",
+					"collected": 116,
+					"passed": 116,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/main/agents/grok-skills.test.ts",
+					"sha256": "b0dca86a92eef255048b28c624709fa01f3d9c1004daf444c183c37303627c9d",
+					"status": "passed",
+					"collected": 37,
+					"passed": 37,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/main/preload/agents.test.ts",
+					"sha256": "e609c2104cf6ef98e451263e8f2567728bc20f2261f70ad8d3707a99b6a0b93a",
+					"status": "passed",
+					"collected": 62,
+					"passed": 62,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/main/ipc/handlers/agents.test.ts",
+					"sha256": "52f534007f6342bc0e9d885f4c75c4846fb1248494cd9053f3f1a1c27798a071",
+					"status": "failed",
+					"collected": 152,
+					"passed": 135,
+					"failed": 17,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": [
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements binds both saved accounts and selected tab settings (inherited=false)",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements binds both saved accounts and selected tab settings (inherited=true)",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements inherits provider settings while preserving an explicitly empty account environment",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements refuses unowned or stale command context undefined before observing",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements refuses unowned or stale command context {\"kind\":\"draft\",\"cwd\":\"/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/synthetic-discovery\"} before observing",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements refuses unowned or stale command context {\"kind\":\"provider-settings\",\"cwd\":\"/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/synthetic-discovery\"} before observing",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements refuses unowned or stale command context {\"kind\":\"agent\",\"sessionId\":\"missing\"} before observing",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements refuses unowned or stale command context {\"kind\":\"agent\",\"sessionId\":\"mismatch\"} before observing",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements refuses unowned or stale command context {\"kind\":\"agent\",\"sessionId\":\"alice\",\"model\":\"stale-model\"} before observing",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements refuses unowned or stale command context {\"kind\":\"agent\",\"sessionId\":\"alice\",\"effort\":\"stale-effort\"} before observing",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements refuses remote command discovery without a probe",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements refuses disabled command discovery without a probe",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements refuses missing command discovery without a probe",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements refuses managed command discovery without a probe",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements keeps discovery unavailable when the host has no observation reader",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements discards a receipt when the selected account changes while the read settles",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						},
+						{
+							"fullName": "agents IPC handlers selected Grok discovery Grok command advertisements preserves legacy Grok null without detection or provider substitution",
+							"message": "Error: [vitest] No \"app\" export is defined on the \"electron\" mock. Did you forget to return it from \"vi.mock\"?\nIf you need to partially mock a module, you can use \"importOriginal\" helper inside:"
+						}
+					]
+				},
+				{
+					"path": "src/__tests__/main/ipc/handlers/memory.test.ts",
+					"sha256": "df5c3e221dddd5ddb4ea0b1a740c6ec0de4d528cadfa7a11be8780a162766b31",
+					"status": "passed",
+					"collected": 28,
+					"passed": 28,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/main/ipc/handlers/process.test.ts",
+					"sha256": "83259079ac1193aff1c938ef655f2b5100b8c5f6b45322cef6d2df8a674445c3",
+					"status": "failed",
+					"collected": 232,
+					"passed": 220,
+					"failed": 12,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": [
+						{
+							"fullName": "process IPC handlers Grok remote launch observation (GT1-04-07D1T) queued selection at main entry (GT1-05-06A1T) changed selection at SSH preparation refuses changed inherited account before remote effects",
+							"message": "TypeError: processManager.off is not a function\n    at Object.cleanupPluginRunProof [as release] (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:769:44)\n    at handleProcessSpawnImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:1383:16)\n    at handleProcessSpawn (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:169:10)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/utils/ipcHandler.ts:229:11\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/main/ipc/handlers/process.test.ts:5182:8\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+						},
+						{
+							"fullName": "process IPC handlers Grok remote launch observation (GT1-04-07D1T) queued selection at main entry (GT1-05-06A1T) changed selection at SSH preparation refuses changed executable before remote effects",
+							"message": "TypeError: processManager.off is not a function\n    at Object.cleanupPluginRunProof [as release] (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:769:44)\n    at handleProcessSpawnImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:1383:16)\n    at handleProcessSpawn (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:169:10)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/utils/ipcHandler.ts:229:11\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/main/ipc/handlers/process.test.ts:5182:8\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+						},
+						{
+							"fullName": "process IPC handlers Grok remote launch observation (GT1-04-07D1T) queued selection at main entry (GT1-05-06A1T) changed selection at SSH preparation refuses changed arguments before remote effects",
+							"message": "TypeError: processManager.off is not a function\n    at Object.cleanupPluginRunProof [as release] (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:769:44)\n    at handleProcessSpawnImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:1383:16)\n    at handleProcessSpawn (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:169:10)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/utils/ipcHandler.ts:229:11\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/main/ipc/handlers/process.test.ts:5182:8\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+						},
+						{
+							"fullName": "process IPC handlers Grok remote launch observation (GT1-04-07D1T) queued selection at main entry (GT1-05-06A1T) changed selection at SSH preparation refuses changed global environment before remote effects",
+							"message": "TypeError: processManager.off is not a function\n    at Object.cleanupPluginRunProof [as release] (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:769:44)\n    at handleProcessSpawnImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:1383:16)\n    at handleProcessSpawn (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:169:10)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/utils/ipcHandler.ts:229:11\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/main/ipc/handlers/process.test.ts:5182:8\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+						},
+						{
+							"fullName": "process IPC handlers Grok remote launch observation (GT1-04-07D1T) queued selection at main entry (GT1-05-06A1T) changed selection at SSH preparation refuses changed same-ID host before remote effects",
+							"message": "TypeError: processManager.off is not a function\n    at Object.cleanupPluginRunProof [as release] (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:769:44)\n    at handleProcessSpawnImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:1383:16)\n    at handleProcessSpawn (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:169:10)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/utils/ipcHandler.ts:229:11\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/main/ipc/handlers/process.test.ts:5182:8\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+						},
+						{
+							"fullName": "process IPC handlers Grok remote launch observation (GT1-04-07D1T) queued selection at main entry (GT1-05-06A1T) changed selection at SSH preparation refuses changed same-ID port before remote effects",
+							"message": "TypeError: processManager.off is not a function\n    at Object.cleanupPluginRunProof [as release] (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:769:44)\n    at handleProcessSpawnImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:1383:16)\n    at handleProcessSpawn (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:169:10)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/utils/ipcHandler.ts:229:11\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/main/ipc/handlers/process.test.ts:5182:8\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+						},
+						{
+							"fullName": "process IPC handlers Grok remote launch observation (GT1-04-07D1T) queued selection at main entry (GT1-05-06A1T) changed selection at SSH preparation refuses changed same-ID user before remote effects",
+							"message": "TypeError: processManager.off is not a function\n    at Object.cleanupPluginRunProof [as release] (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:769:44)\n    at handleProcessSpawnImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:1383:16)\n    at handleProcessSpawn (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:169:10)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/utils/ipcHandler.ts:229:11\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/main/ipc/handlers/process.test.ts:5182:8\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+						},
+						{
+							"fullName": "process IPC handlers Grok remote launch observation (GT1-04-07D1T) queued selection at main entry (GT1-05-06A1T) changed selection at SSH preparation refuses changed same-ID key path before remote effects",
+							"message": "TypeError: processManager.off is not a function\n    at Object.cleanupPluginRunProof [as release] (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:769:44)\n    at handleProcessSpawnImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:1383:16)\n    at handleProcessSpawn (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:169:10)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/utils/ipcHandler.ts:229:11\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/main/ipc/handlers/process.test.ts:5182:8\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+						},
+						{
+							"fullName": "process IPC handlers Grok remote launch observation (GT1-04-07D1T) queued selection at main entry (GT1-05-06A1T) changed selection at SSH preparation refuses changed same-ID SSH options before remote effects",
+							"message": "TypeError: processManager.off is not a function\n    at Object.cleanupPluginRunProof [as release] (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:769:44)\n    at handleProcessSpawnImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:1383:16)\n    at handleProcessSpawn (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:169:10)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/utils/ipcHandler.ts:229:11\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/main/ipc/handlers/process.test.ts:5182:8\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+						},
+						{
+							"fullName": "process IPC handlers Grok remote launch observation (GT1-04-07D1T) queued selection at main entry (GT1-05-06A1T) changed selection at SSH preparation refuses changed same-ID remote environment before remote effects",
+							"message": "TypeError: processManager.off is not a function\n    at Object.cleanupPluginRunProof [as release] (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:769:44)\n    at handleProcessSpawnImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:1383:16)\n    at handleProcessSpawn (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:169:10)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/utils/ipcHandler.ts:229:11\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/main/ipc/handlers/process.test.ts:5182:8\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+						},
+						{
+							"fullName": "process IPC handlers Grok remote launch observation (GT1-04-07D1T) queued selection at main entry (GT1-05-06A1T) changed selection at SSH preparation refuses changed disabled remote before remote effects",
+							"message": "TypeError: processManager.off is not a function\n    at Object.cleanupPluginRunProof [as release] (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:769:44)\n    at handleProcessSpawnImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:1383:16)\n    at handleProcessSpawn (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:169:10)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/utils/ipcHandler.ts:229:11\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/main/ipc/handlers/process.test.ts:5182:8\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+						},
+						{
+							"fullName": "process IPC handlers Grok remote launch observation (GT1-04-07D1T) queued selection at main entry (GT1-05-06A1T) changed selection at SSH preparation refuses changed missing selected remote before remote effects",
+							"message": "TypeError: processManager.off is not a function\n    at Object.cleanupPluginRunProof [as release] (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:769:44)\n    at handleProcessSpawnImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:1383:16)\n    at handleProcessSpawn (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/ipc/handlers/process/handle-spawn.ts:169:10)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/main/utils/ipcHandler.ts:229:11\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/main/ipc/handlers/process.test.ts:5182:8\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+						}
+					]
+				},
+				{
+					"path": "src/__tests__/shared/maestro-lib/turns/prompt.test.ts",
+					"sha256": "e74388efb08232f76c48c6ab458bef3b97df5ae2fac44fa81054ac461233baba",
+					"status": "passed",
+					"collected": 37,
+					"passed": 37,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts",
+					"sha256": "86ddc1f6a40b183d36b7d0e6db690a2c4deb20574fc514458ff6b117801ed37d",
+					"status": "passed",
+					"collected": 102,
+					"passed": 102,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				}
+			],
+			"summary": {
+				"files": 16,
+				"passedFiles": 13,
+				"failedFiles": 3,
+				"collected": 1587,
+				"passed": 1546,
+				"failed": 41,
+				"skipped": 0,
+				"collectionFailures": 0,
+				"reportedUnhandledErrors": 0
+			}
+		},
+		{
+			"id": "wizards",
+			"sourceCommit": "c49299230115746ce54b85d943c26c3b88a7a7e8",
+			"command": [
+				"npm",
+				"test",
+				"--",
+				"src/__tests__/renderer/components/Wizard/WizardContext.test.tsx",
+				"src/__tests__/renderer/components/Wizard/screens/ConversationScreen/hooks.test.tsx",
+				"src/__tests__/renderer/components/Wizard/screens/ConversationScreen/utils.test.ts",
+				"src/__tests__/renderer/components/Wizard/screens/PreparingPlanScreen/hooks.test.tsx",
+				"src/__tests__/renderer/components/Wizard/services/conversationManager.test.ts",
+				"src/__tests__/renderer/components/Wizard/services/phaseGenerator.test.ts",
+				"src/__tests__/renderer/components/Wizard/services/phaseGenerator_ssh.test.ts",
+				"src/__tests__/renderer/hooks/useInlineWizard.test.ts",
+				"src/__tests__/renderer/hooks/useInlineWizard_overrides.test.ts",
+				"src/__tests__/renderer/hooks/useWizardHandlers.test.ts",
+				"src/__tests__/renderer/services/inlineWizardConversation.test.ts",
+				"src/__tests__/renderer/services/inlineWizardDocumentGeneration.test.ts",
+				"src/__tests__/renderer/utils/grokWizard.test.ts",
+				"--maxWorkers=1",
+				"--reporter=default",
+				"--reporter=json",
+				"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/wizards/results.json"
+			],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-11-01T00:14:23.419266+00:00",
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/wizards/temp",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/wizards/temp",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/wizards/temp",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/wizards/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/wizards/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/wizards/cache",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/wizards/xdg-data",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/wizards/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1"
+			},
+			"removedEnvironmentKeyNames": [
+				"CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+				"CODEX_CI",
+				"CODEX_SESSION_ID",
+				"CODEX_THREAD_ID",
+				"CODEX_TOOL_CALL_ID",
+				"CODEX_VERSION",
+				"MAESTRO_CALLER_AGENT_ID",
+				"MAESTRO_QUERY_SOURCE",
+				"MAESTRO_USER_DATA",
+				"OPENAI_API_KEY",
+				"OPENROUTER_API_KEY"
+			],
+			"homeAndCodexHomeUnchanged": true,
+			"exitCode": 1,
+			"finishedAt": "2026-11-01T00:14:41.840780+00:00",
+			"durationSeconds": 18.414,
+			"status": "fail",
+			"receiptPath": "tmp/grok-tier1-phase05-verify/wizards/receipt.json",
+			"receiptSha256": "86df653c453c6a51fd0c494b547f5fd16ccf5302306cd8404eb34e95b1f95e85",
+			"log": "tmp/grok-tier1-phase05-verify/wizards/output.log",
+			"logSha256": "d3ec53cbc871f7525406919b6ed0ad3ea0aac2ea46fddafa7c85f3d9c9b4a6f5",
+			"report": "tmp/grok-tier1-phase05-verify/wizards/results.json",
+			"reportSha256": "206cc2806976751a6afb786a8b3d4d33ab81bd751a790fcb95ae5fc2057c8c7a",
+			"files": [
+				{
+					"path": "src/__tests__/renderer/services/inlineWizardConversation.test.ts",
+					"sha256": "60b5ffc54f38161df34c6c41e278a4e6c2189adfb7dbddc13364b52f38b604e9",
+					"status": "passed",
+					"collected": 26,
+					"passed": 26,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/services/inlineWizardDocumentGeneration.test.ts",
+					"sha256": "c88e8a31bd53acb2176bfe3adadffb55d38e4f2ae1ec814230994a81824bb852",
+					"status": "failed",
+					"collected": 92,
+					"passed": 90,
+					"failed": 2,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": [
+						{
+							"fullName": "inlineWizardDocumentGeneration Grok complete generation cancellation and inactivity boundaries stops only the owned process when a pending spawn resolves after abort",
+							"message": "AssertionError: expected \"vi.fn()\" to be called once, but got 4 times\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/renderer/services/inlineWizardDocumentGeneration.test.ts:1253:61\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+						},
+						{
+							"fullName": "inlineWizardDocumentGeneration Grok complete generation cancellation and inactivity boundaries stops only the owned process when a pending spawn resolves after timeout",
+							"message": "AssertionError: expected \"vi.fn()\" to be called once, but got 4 times\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/__tests__/renderer/services/inlineWizardDocumentGeneration.test.ts:1253:61\n    at file:///Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20"
+						}
+					]
+				},
+				{
+					"path": "src/__tests__/renderer/hooks/useInlineWizard.test.ts",
+					"sha256": "a2b95a4fe5c4cdfa730cda60245c92260314ff16c55f29126a72bc01b00f8292",
+					"status": "passed",
+					"collected": 65,
+					"passed": 65,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/hooks/useInlineWizard_overrides.test.ts",
+					"sha256": "515c5e5b9ccb54f0196ea2f083ed35263932cfb09b2eb0d831791ea5925f82bd",
+					"status": "passed",
+					"collected": 8,
+					"passed": 8,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/hooks/useWizardHandlers.test.ts",
+					"sha256": "2758da139870070bdfc5c7f26b383db836a044635174d65bbe518d8ef81d8afc",
+					"status": "failed",
+					"collected": 140,
+					"passed": 133,
+					"failed": 7,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": [
+						{
+							"fullName": "useWizardHandlers Grok wizard configuration handoff forwards current tab / tab configuration (SSH: false)",
+							"message": "TypeError: Cannot read properties of undefined (reading 'onExternalChange')\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/renderer/hooks/wizard/useWizardHandlers.ts:265:34\n    at commitHookEffectListMount (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:23189:26)\n    at commitPassiveMountOnFiber (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24970:11)\n    at commitPassiveMountEffects_complete (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24930:9)\n    at commitPassiveMountEffects_begin (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24917:7)\n    at commitPassiveMountEffects (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24905:3)\n    at flushPassiveEffectsImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:27078:3)\n    at flushPassiveEffects (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:27023:14)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:26808:9\n    at fl"
+						},
+						{
+							"fullName": "useWizardHandlers Grok wizard configuration handoff forwards current tab / tab-model configuration (SSH: true)",
+							"message": "TypeError: Cannot read properties of undefined (reading 'onExternalChange')\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/renderer/hooks/wizard/useWizardHandlers.ts:265:34\n    at commitHookEffectListMount (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:23189:26)\n    at commitPassiveMountOnFiber (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24970:11)\n    at commitPassiveMountEffects_complete (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24930:9)\n    at commitPassiveMountEffects_begin (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24917:7)\n    at commitPassiveMountEffects (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24905:3)\n    at flushPassiveEffectsImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:27078:3)\n    at flushPassiveEffects (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:27023:14)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:26808:9\n    at fl"
+						},
+						{
+							"fullName": "useWizardHandlers Grok wizard configuration handoff forwards current tab / tab-effort configuration (SSH: false)",
+							"message": "TypeError: Cannot read properties of undefined (reading 'onExternalChange')\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/renderer/hooks/wizard/useWizardHandlers.ts:265:34\n    at commitHookEffectListMount (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:23189:26)\n    at commitPassiveMountOnFiber (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24970:11)\n    at commitPassiveMountEffects_complete (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24930:9)\n    at commitPassiveMountEffects_begin (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24917:7)\n    at commitPassiveMountEffects (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24905:3)\n    at flushPassiveEffectsImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:27078:3)\n    at flushPassiveEffects (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:27023:14)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:26808:9\n    at fl"
+						},
+						{
+							"fullName": "useWizardHandlers Grok wizard configuration handoff forwards current tab / agent configuration (SSH: true)",
+							"message": "TypeError: Cannot read properties of undefined (reading 'onExternalChange')\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/renderer/hooks/wizard/useWizardHandlers.ts:265:34\n    at commitHookEffectListMount (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:23189:26)\n    at commitPassiveMountOnFiber (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24970:11)\n    at commitPassiveMountEffects_complete (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24930:9)\n    at commitPassiveMountEffects_begin (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24917:7)\n    at commitPassiveMountEffects (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24905:3)\n    at flushPassiveEffectsImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:27078:3)\n    at flushPassiveEffects (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:27023:14)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:26808:9\n    at fl"
+						},
+						{
+							"fullName": "useWizardHandlers Grok wizard configuration handoff forwards current tab / provider configuration (SSH: false)",
+							"message": "TypeError: Cannot read properties of undefined (reading 'onExternalChange')\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/renderer/hooks/wizard/useWizardHandlers.ts:265:34\n    at commitHookEffectListMount (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:23189:26)\n    at commitPassiveMountOnFiber (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24970:11)\n    at commitPassiveMountEffects_complete (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24930:9)\n    at commitPassiveMountEffects_begin (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24917:7)\n    at commitPassiveMountEffects (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24905:3)\n    at flushPassiveEffectsImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:27078:3)\n    at flushPassiveEffects (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:27023:14)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:26808:9\n    at fl"
+						},
+						{
+							"fullName": "useWizardHandlers Grok wizard configuration handoff forwards new tab / agent configuration (SSH: false)",
+							"message": "TypeError: Cannot read properties of undefined (reading 'onExternalChange')\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/renderer/hooks/wizard/useWizardHandlers.ts:265:34\n    at commitHookEffectListMount (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:23189:26)\n    at commitPassiveMountOnFiber (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24970:11)\n    at commitPassiveMountEffects_complete (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24930:9)\n    at commitPassiveMountEffects_begin (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24917:7)\n    at commitPassiveMountEffects (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24905:3)\n    at flushPassiveEffectsImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:27078:3)\n    at flushPassiveEffects (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:27023:14)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:26808:9\n    at fl"
+						},
+						{
+							"fullName": "useWizardHandlers Grok wizard configuration handoff forwards new tab / provider configuration (SSH: true)",
+							"message": "TypeError: Cannot read properties of undefined (reading 'onExternalChange')\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/src/renderer/hooks/wizard/useWizardHandlers.ts:265:34\n    at commitHookEffectListMount (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:23189:26)\n    at commitPassiveMountOnFiber (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24970:11)\n    at commitPassiveMountEffects_complete (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24930:9)\n    at commitPassiveMountEffects_begin (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24917:7)\n    at commitPassiveMountEffects (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:24905:3)\n    at flushPassiveEffectsImpl (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:27078:3)\n    at flushPassiveEffects (/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:27023:14)\n    at /Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/node_modules/react-dom/cjs/react-dom.development.js:26808:9\n    at fl"
+						}
+					]
+				},
+				{
+					"path": "src/__tests__/renderer/utils/grokWizard.test.ts",
+					"sha256": "38161a2dab22a04e01fac0e2053cc4fcdc3b1197239d994bae00d9120ce16a14",
+					"status": "passed",
+					"collected": 24,
+					"passed": 24,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/components/Wizard/WizardContext.test.tsx",
+					"sha256": "b85b77222db17d6dac096037da5f4a14a7e6bb379396b74e192ba6e21e6249b1",
+					"status": "passed",
+					"collected": 110,
+					"passed": 110,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/components/Wizard/services/conversationManager.test.ts",
+					"sha256": "44cd697e4f061e2cf6bcb9cb98948ac7dc7b56b8b35033b4261a1bfcc480ef12",
+					"status": "passed",
+					"collected": 35,
+					"passed": 35,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/components/Wizard/services/phaseGenerator.test.ts",
+					"sha256": "cc2cb54942cca7880322244d7875a8298d4b2d51ed9c76db15be95bdcf60c9af",
+					"status": "passed",
+					"collected": 62,
+					"passed": 62,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/components/Wizard/services/phaseGenerator_ssh.test.ts",
+					"sha256": "272b259f7bec661909d742dc0d2afe862692bb7cb4e08c6c8367e2bd2bee2d74",
+					"status": "passed",
+					"collected": 14,
+					"passed": 14,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/components/Wizard/screens/ConversationScreen/hooks.test.tsx",
+					"sha256": "0c049ca456e64313bd51ef39adf8a7c8cd7fe55827de827ac7d1331ba593398e",
+					"status": "passed",
+					"collected": 159,
+					"passed": 159,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/components/Wizard/screens/ConversationScreen/utils.test.ts",
+					"sha256": "abaa2841950edd7a4cda0905e0bfde73f990770bbbc8f379263e3d754fe96ed8",
+					"status": "passed",
+					"collected": 35,
+					"passed": 35,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				},
+				{
+					"path": "src/__tests__/renderer/components/Wizard/screens/PreparingPlanScreen/hooks.test.tsx",
+					"sha256": "e8a42d212391996ddc98dc686b247faa9b659e31ac28eb257c894137a88b5c07",
+					"status": "passed",
+					"collected": 12,
+					"passed": 12,
+					"failed": 0,
+					"skipped": 0,
+					"collectionFailure": null,
+					"failures": []
+				}
+			],
+			"summary": {
+				"files": 13,
+				"passedFiles": 11,
+				"failedFiles": 2,
+				"collected": 782,
+				"passed": 773,
+				"failed": 9,
+				"skipped": 0,
+				"collectionFailures": 0,
+				"reportedUnhandledErrors": 0
+			}
+		},
+		{
+			"id": "lint",
+			"sourceCommit": "c49299230115746ce54b85d943c26c3b88a7a7e8",
+			"command": ["npm", "run", "lint"],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-11-01T00:14:33.390645+00:00",
+			"finishedAt": "2026-11-01T00:15:22.433900+00:00",
+			"durationSeconds": 49.042,
+			"exitCode": 2,
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/lint/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/lint/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/lint/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/lint/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/lint/xdg-data"
+			},
+			"removedEnvironmentKeyNames": [
+				"CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+				"CODEX_CI",
+				"CODEX_SESSION_ID",
+				"CODEX_THREAD_ID",
+				"CODEX_TOOL_CALL_ID",
+				"CODEX_VERSION",
+				"MAESTRO_CALLER_AGENT_ID",
+				"MAESTRO_QUERY_SOURCE",
+				"MAESTRO_USER_DATA",
+				"OPENAI_API_KEY",
+				"OPENROUTER_API_KEY"
+			],
+			"homeAndCodexHomeUnchanged": true,
+			"log": "tmp/grok-tier1-phase05-verify/lint/output.log",
+			"status": "fail",
+			"receiptPath": "tmp/grok-tier1-phase05-verify/lint/receipt.json",
+			"receiptSha256": "b4e8bc9fef32c82ca183ac535d6448661654d792ff92ec10c345385b7b5c0aa2",
+			"logSha256": "e5bb5e6a2d1a35e8e846e9eaabfca1ed1ec257e2e7a3919a6509f43f23c94fad",
+			"diagnostics": [
+				"",
+				"> maestro@1.1.0-RC lint",
+				"> tsc -p tsconfig.lint.json && tsc -p tsconfig.main.json --noEmit && tsc -p tsconfig.cli.json --noEmit",
+				"",
+				"src/main/plugins/plugin-host-handlers.ts(1196,76): error TS2339: Property 'dispatcher' does not exist on type 'RequestInit'."
+			]
+		},
+		{
+			"id": "tsc-main",
+			"sourceCommit": "c49299230115746ce54b85d943c26c3b88a7a7e8",
+			"command": ["./node_modules/.bin/tsc", "-p", "tsconfig.main.json", "--noEmit"],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-11-01T00:14:41.290027+00:00",
+			"finishedAt": "2026-11-01T00:14:59.152619+00:00",
+			"durationSeconds": 17.862,
+			"exitCode": 0,
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/tsc-main/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/tsc-main/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/tsc-main/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/tsc-main/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/tsc-main/xdg-data"
+			},
+			"removedEnvironmentKeyNames": [
+				"CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+				"CODEX_CI",
+				"CODEX_SESSION_ID",
+				"CODEX_THREAD_ID",
+				"CODEX_TOOL_CALL_ID",
+				"CODEX_VERSION",
+				"MAESTRO_CALLER_AGENT_ID",
+				"MAESTRO_QUERY_SOURCE",
+				"MAESTRO_USER_DATA",
+				"OPENAI_API_KEY",
+				"OPENROUTER_API_KEY"
+			],
+			"homeAndCodexHomeUnchanged": true,
+			"log": "tmp/grok-tier1-phase05-verify/tsc-main/output.log",
+			"status": "pass",
+			"receiptPath": "tmp/grok-tier1-phase05-verify/tsc-main/receipt.json",
+			"receiptSha256": "b20b55687c26313039a15e119003a5ea0dfb2b2cc7ca055eeadb8ada93375fc1",
+			"logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			"diagnostics": []
+		},
+		{
+			"id": "tsc-cli",
+			"sourceCommit": "c49299230115746ce54b85d943c26c3b88a7a7e8",
+			"command": ["./node_modules/.bin/tsc", "-p", "tsconfig.cli.json", "--noEmit"],
+			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+			"startedAt": "2026-11-01T00:14:42.468932+00:00",
+			"finishedAt": "2026-11-01T00:14:57.696831+00:00",
+			"durationSeconds": 15.227,
+			"exitCode": 0,
+			"environmentOverrides": {
+				"TMPDIR": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"TEMP": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+				"MAESTRO_USER_DATA": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/tsc-cli/data",
+				"XDG_CONFIG_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/tsc-cli/config",
+				"XDG_CACHE_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/tsc-cli/cache",
+				"npm_config_cache": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/tsc-cli/npm-cache",
+				"npm_config_update_notifier": "false",
+				"NO_COLOR": "1",
+				"NODE_DISABLE_COMPILE_CACHE": "1",
+				"XDG_DATA_HOME": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase05-verify/tsc-cli/xdg-data"
+			},
+			"removedEnvironmentKeyNames": [
+				"CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
+				"CODEX_CI",
+				"CODEX_SESSION_ID",
+				"CODEX_THREAD_ID",
+				"CODEX_TOOL_CALL_ID",
+				"CODEX_VERSION",
+				"MAESTRO_CALLER_AGENT_ID",
+				"MAESTRO_QUERY_SOURCE",
+				"MAESTRO_USER_DATA",
+				"OPENAI_API_KEY",
+				"OPENROUTER_API_KEY"
+			],
+			"homeAndCodexHomeUnchanged": true,
+			"log": "tmp/grok-tier1-phase05-verify/tsc-cli/output.log",
+			"status": "pass",
+			"receiptPath": "tmp/grok-tier1-phase05-verify/tsc-cli/receipt.json",
+			"receiptSha256": "3379357e629a6d70fc158262d344491f32b7dceb1537b1a50cf5c203a585e8bb",
+			"logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+			"diagnostics": []
+		}
+	],
+	"inputHashesSha256": {
+		"Plans/grok-tier1/parity.json": "b3b65af74f65b830284400c029e5e9a6a76c429d007cb93cdf73e87e71fe4f56",
+		"Plans/grok-tier1/run-state.json": "7b1502912e0b36dd91d3797660e2f1ff1426f2fd486fcac89f8c94b043a5a064",
+		"package-lock.json": "0b6b52f5ae6660b8cf2ca74cf9c7992e9630b08ce685c8413040caa305ecb747",
+		"package.json": "c6c1e45b7ba259420616990f408c70d9c07cd4226b9a8283197dd5944ba8b93b",
+		"src/__tests__/fixtures/grok-command-observation.ts": "b49440e7d9e42189bb7e9daeb2a855c71865b7700c23b7be618cfd33ffed3cac",
+		"src/__tests__/main/agents/grok-skills.test.ts": "b0dca86a92eef255048b28c624709fa01f3d9c1004daf444c183c37303627c9d",
+		"src/__tests__/main/ipc/handlers/agents.test.ts": "52f534007f6342bc0e9d885f4c75c4846fb1248494cd9053f3f1a1c27798a071",
+		"src/__tests__/main/ipc/handlers/memory.test.ts": "df5c3e221dddd5ddb4ea0b1a740c6ec0de4d528cadfa7a11be8780a162766b31",
+		"src/__tests__/main/ipc/handlers/process.test.ts": "83259079ac1193aff1c938ef655f2b5100b8c5f6b45322cef6d2df8a674445c3",
+		"src/__tests__/main/ipc/handlers/process/handle-spawn.managed.test.ts": "86ddc1f6a40b183d36b7d0e6db690a2c4deb20574fc514458ff6b117801ed37d",
+		"src/__tests__/main/memory-manager.test.ts": "2fae38494b0ccc4e043fe7dea2fa92a0a126a98fed92355e53ee1d4d7d26f695",
+		"src/__tests__/main/preload/agents.test.ts": "e609c2104cf6ef98e451263e8f2567728bc20f2261f70ad8d3707a99b6a0b93a",
+		"src/__tests__/renderer/components/AgentCreationDialog.test.tsx": "1816d6160be064aa1c25c9000e011fcfd1acfbb5c904e5ff5b275c4408e7d6b2",
+		"src/__tests__/renderer/components/InputArea/ComposerOptionsSheet.test.tsx": "cae90f634ae2dcfbccbbef770b62eb8fce621fa1935b335d14aea20df335f3b6",
+		"src/__tests__/renderer/components/InputArea/components/ToolbarControls.test.tsx": "b6cc1a2d52c62c0e9c7ebd30d6ee9b00f48ffcbfd75a8ae35c0cb999d963dc7d",
+		"src/__tests__/renderer/components/MainPanel/MainPanelHeader.test.tsx": "e98786004a9aca3c897b1c8999cffff03ad587ef62a5d6f0ce421d9bfd1b8f83",
+		"src/__tests__/renderer/components/NewInstanceModal.test.tsx": "67731ee304a015febc7e941016add85ba2e81a6cb7020cdfb3e39e7ea6bbb9bc",
+		"src/__tests__/renderer/components/NewInstanceModal/AgentPickerGrid.test.tsx": "af6aabd1210467d6ba3126b31e5d84021a64d4529e217548e56ea8a86ee9758c",
+		"src/__tests__/renderer/components/Wizard/WizardContext.test.tsx": "b85b77222db17d6dac096037da5f4a14a7e6bb379396b74e192ba6e21e6249b1",
+		"src/__tests__/renderer/components/Wizard/screens/AgentSelectionScreen/hooks.test.tsx": "d8d0b962d874a3c945a78845688e324bf3fa970bacb7a56c50db4423f9cc5fd9",
+		"src/__tests__/renderer/components/Wizard/screens/ConversationScreen/hooks.test.tsx": "0c049ca456e64313bd51ef39adf8a7c8cd7fe55827de827ac7d1331ba593398e",
+		"src/__tests__/renderer/components/Wizard/screens/ConversationScreen/utils.test.ts": "abaa2841950edd7a4cda0905e0bfde73f990770bbbc8f379263e3d754fe96ed8",
+		"src/__tests__/renderer/components/Wizard/screens/PreparingPlanScreen/hooks.test.tsx": "e8a42d212391996ddc98dc686b247faa9b659e31ac28eb257c894137a88b5c07",
+		"src/__tests__/renderer/components/Wizard/services/conversationManager.test.ts": "44cd697e4f061e2cf6bcb9cb98948ac7dc7b56b8b35033b4261a1bfcc480ef12",
+		"src/__tests__/renderer/components/Wizard/services/phaseGenerator.test.ts": "cc2cb54942cca7880322244d7875a8298d4b2d51ed9c76db15be95bdcf60c9af",
+		"src/__tests__/renderer/components/Wizard/services/phaseGenerator_ssh.test.ts": "272b259f7bec661909d742dc0d2afe862692bb7cb4e08c6c8367e2bd2bee2d74",
+		"src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx": "5fc2c6837e4395384f7594d76b447f33b8537c2ce37332c16b566607104b1f9c",
+		"src/__tests__/renderer/hooks/useInlineWizard.test.ts": "a2b95a4fe5c4cdfa730cda60245c92260314ff16c55f29126a72bc01b00f8292",
+		"src/__tests__/renderer/hooks/useInlineWizard_overrides.test.ts": "515c5e5b9ccb54f0196ea2f083ed35263932cfb09b2eb0d831791ea5925f82bd",
+		"src/__tests__/renderer/hooks/useInputHandlers.test.ts": "3e77eeac1c3b7b4bed41768e3a829661d96ed55f7dd4499a73f03656b256d53b",
+		"src/__tests__/renderer/hooks/useInputProcessing.test.ts": "0d1c96e12e01fce40b49e6a3846f45ac13b5566a4ad0b7cfb83567357279605d",
+		"src/__tests__/renderer/hooks/useRemoteHandlers.test.ts": "556eff0e013ad2e6cbec5ada46f9205f15c7bd0e8f224ccb59ab10f95655b253",
+		"src/__tests__/renderer/hooks/useRemoteIntegration.test.ts": "960121f9a648e427686ff5604a964eed30504c88e70ed514bfab848dc823d840",
+		"src/__tests__/renderer/hooks/useSessionCrud.test.ts": "3fcbf42dfde22f3c35625a9bf4468ca72243bc9a3229c1ffd948c0c419fcbab2",
+		"src/__tests__/renderer/hooks/useWizardHandlers.test.ts": "2758da139870070bdfc5c7f26b383db836a044635174d65bbe518d8ef81d8afc",
+		"src/__tests__/renderer/hooks/useWorktreeHandlers.test.ts": "8cfd0d3cdfe150ccc35a78bb01912b67745421c78ac0378845bc0e1a6bc08414",
+		"src/__tests__/renderer/services/inlineWizardConversation.test.ts": "60b5ffc54f38161df34c6c41e278a4e6c2189adfb7dbddc13364b52f38b604e9",
+		"src/__tests__/renderer/services/inlineWizardDocumentGeneration.test.ts": "c88e8a31bd53acb2176bfe3adadffb55d38e4f2ae1ec814230994a81824bb852",
+		"src/__tests__/renderer/services/queuedPrompt.test.ts": "8dc3eaf23f126ef7681e54060b59fce80ddbf89aa3cc043b627dbe37c03f3171",
+		"src/__tests__/renderer/stores/agentStore.test.ts": "a7f168773235eba2b2978510368c7fea27490e73d998f65a07804de3f6498fb1",
+		"src/__tests__/renderer/utils/grokWizard.test.ts": "38161a2dab22a04e01fac0e2053cc4fcdc3b1197239d994bae00d9120ce16a14",
+		"src/__tests__/renderer/utils/spawnHelpers.test.ts": "f9e097c5c08252437ddae8164d9f3c73598429c557980d82ec778681fb1b5807",
+		"src/__tests__/renderer/utils/worktreeSession.test.ts": "e5294372e2894517698b1bb50cbc9798317dc2aa90c7ecb041d4d638886bf89d",
+		"src/__tests__/renderer/utils/worktreeSpawn.test.ts": "f5a7fa83ef426fb2ea934e0ddf2dce3f268c477842fc1d86d80e2d7d3f6ca7c6",
+		"src/__tests__/setup.ts": "767c53aeb8cebd32a6297c2b1245e83af7ecb465a166ca61f0a85d4165bae3ed",
+		"src/__tests__/shared/maestro-lib/turns/context.test.ts": "64b0338ac0b95331c65a3d74de2dcf380d0b797d6a4fd33b70e17e713bd4970d",
+		"src/__tests__/shared/maestro-lib/turns/prompt.test.ts": "e74388efb08232f76c48c6ab458bef3b97df5ae2fac44fa81054ac461233baba",
+		"src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts": "e01b8c80cd441aafe2aff3165d2ba3a4fcb3d9ccc91be4f3f5b7ca0ba3dd5d8f",
+		"src/__tests__/shared/templateVariables.test.ts": "fe987a2e75d777446bb963fdb97134c091ebe181c2bd679ec94f17f8c9e2f1ef",
+		"src/main/agents/grok-skills.ts": "a3f6b9c58cc37f529c2e710c2308cc8d59498036d92c2ba4ee2ba2f17d4e2ad1",
+		"src/main/ipc/handlers/agents.ts": "a3eb7e7e548c44df6864a4ce3c944f0842c565b6f52fa770f0e173f37a56e52a",
+		"src/main/ipc/handlers/memory.ts": "4b49a95fdf87fcc0c9348548fccbad93c38b47cbaa7e329f781171a707f6c3f7",
+		"src/main/ipc/handlers/process/handle-spawn.ts": "2d281ad06ff13abae52fb994395f1b2876b3ad9323bcda1a5627571d2188fafa",
+		"src/main/ipc/handlers/process/spawn-types.ts": "d25e6e1a87685e9f2eccf9441fa12b055ace127170430c8b5800bc33d17f7dd3",
+		"src/main/memory-manager.ts": "045912ef68080c7fd2f710a72a79f8000ffc9805c1c1b57c173784383abbf35e",
+		"src/main/plugins/plugin-host-handlers.ts": "81ff275887037b6ec7596ebc68821661db52f739d1ba91f06eae9b774a026986",
+		"src/main/preload/agents.ts": "5af661f24d3a5d699d14f6eaa4665ccf6783bcebb0927d22e301f433a45616d9",
+		"src/renderer/App.tsx": "a9bf6505d3bfd935c7339fa200f66abd4222b9b7e79fdf135a00de8cfb477190",
+		"src/renderer/components/AgentCreationDialog.tsx": "75ecc5b7b9b37809ba3c46cf6097fbbfe2cd9cbde0dea3a212b93f741dc25658",
+		"src/renderer/components/MainPanel/MainPanelHeader.tsx": "879da2c5729f8ec89965eee556f0fc564fe78c7e66c048428d1f11f8ac11ee80",
+		"src/renderer/components/NewInstanceModal/NewInstanceModal.tsx": "145fcfa66908012bfb4affb1f034e8d446e7a23b3cf99560a3abd0d99401a658",
+		"src/renderer/components/NewInstanceModal/types.ts": "4a908335b4e016a7094e9dd361ff12108b3c47d0f01dc632aba54a438e351c99",
+		"src/renderer/components/Wizard/WizardContext.tsx": "a72309ae7bddb15243325d512c084746b592de353769960db9eee8975b6f94b5",
+		"src/renderer/components/Wizard/screens/AgentSelectionScreen/AgentSelectionScreen.tsx": "c14fd0756f0aa740a1a9d402fa8c8dcd9ea746709e10e49c86b7f3a08180af55",
+		"src/renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useAgentConfigurationPanel.ts": "82e45946df0faeae4b6f32ec009e68a55fa4630d9ebe145f987750f03bb33da7",
+		"src/renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useAgentDetection.ts": "a6801db795730d9e483648ce3c2992c392bb9ebe56f89617bde6d8f033907b18",
+		"src/renderer/components/Wizard/screens/AgentSelectionScreen/hooks/useAgentSelectionFocus.ts": "06258c7bfd7d9aaa1534cd1e83f98e0cfdc6307ba767367fc78b96021ead0e01",
+		"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useConversationBootstrap.ts": "87da459c29fae1f8402126ef8805e34981b70f9d49c06ca4875643298b82249c",
+		"src/renderer/components/Wizard/screens/ConversationScreen/hooks/useWizardConversationSend.ts": "dd089e7a55d55b368512bbef4d99834f4ccacff1a335518836e0bc9c39fccd59",
+		"src/renderer/components/Wizard/screens/ConversationScreen/types.ts": "2d7da90c1d71064eed78c4794f6fc6f66d8c16c3d095bf17b9dc1c650df76c55",
+		"src/renderer/components/Wizard/screens/ConversationScreen/utils/providerName.ts": "b22ad71094a314de8734864d432271416702c0d1859d70c675a26bc3acf81dc1",
+		"src/renderer/components/Wizard/screens/ConversationScreen/utils/streamingChunks.ts": "d5eee41d86739fde0ba3f7b185af4ae2e9cd69a8d607b18a4ccaef4ebab3a26c",
+		"src/renderer/components/Wizard/screens/PreparingPlanScreen/hooks/usePreparingPlanGeneration.ts": "e929be1a251e8d0bf6493726a6f6fda8f9fa979e8ad7591b266a206fa86aec09",
+		"src/renderer/components/Wizard/services/conversationManager.ts": "49a641fe11bb7d57c9c12e1b5f5c6a14f23ad3d4ca6d2007f85d86db746ffef0",
+		"src/renderer/components/Wizard/services/phaseGenerator.ts": "b7a0f3f3051ae6b9eaaef4b6278005c13f42cfcd9cde56c3cdc0ecbdf554bcfc",
+		"src/renderer/components/shared/AgentConfigPanel.tsx": "e01a52a0de357c1da609c45a1d4b71d7036813e1033d164c796f7c78c59863c3",
+		"src/renderer/global.d.ts": "6544e3d60f60d6f9305aab6a39a221b7aa77a64660cfd0758aab8932d07e7760",
+		"src/renderer/hooks/batch/inlineWizard/conversationActions.ts": "9ec5d5176a993b3c56e18a00e888b6665a8d770ea4ef7235c2cfe7bf825dc8f7",
+		"src/renderer/hooks/batch/inlineWizard/generationActions.ts": "0035761f1601a5d61dd08075e38f83501d10fd9bfcf6fafc4d90100f131063f3",
+		"src/renderer/hooks/batch/inlineWizard/lifecycleActions.ts": "dad31469cbbb25ac9621d9acb62032c33a339b5023cf0c5c706abd47803b1cad",
+		"src/renderer/hooks/batch/inlineWizard/types.ts": "dc27a86550355e4207a30822e2f0fd6a210ffc8643af36608af8a56d700d036f",
+		"src/renderer/hooks/batch/useInlineWizard.ts": "bf16bfab3bdef9385e75ceda4ecefe8a95b7de5ceb533c6f136f707504644132",
+		"src/renderer/hooks/input/useInputProcessing.ts": "579c05750d728044227140102d58aeb278e59c47c4a4229614e54ca1b30a6de7",
+		"src/renderer/hooks/remote/useRemoteHandlers.ts": "6db92be19173ee87e72125189da26aeeb079d4b3da31a307b72b8b094b92a18e",
+		"src/renderer/hooks/remote/useRemoteIntegration.ts": "443aac23fddb34f3846eeef5374089be3a5df4b1b208801d2f01f4600a465d94",
+		"src/renderer/hooks/session/useSessionCrud.ts": "d4e2a5d8657c0cd046c053b549fb50c18e4b3c92c1f96829d0ac078a0953a2f6",
+		"src/renderer/hooks/wizard/useWizardHandlers.ts": "c08aa893f8a0297180d6bf65a1698aaba361e1c9cbbeb473b92df8e47821c1e4",
+		"src/renderer/hooks/worktree/useWorktreeHandlers.ts": "b3a8fdef35e1b41e3bd65ccfcc98315b14c255ec223793016b61363a4cc7a961",
+		"src/renderer/services/inlineWizardConversation.ts": "f28cde45f2d0f9cbefa6fe1f418980ad80fc75ff44b2b160c71bfef19d436c4c",
+		"src/renderer/services/inlineWizardDocumentGeneration.ts": "819fc9146205886015ef7619f81ea974b86486852758c8a4748c97cf5cfa9ad2",
+		"src/renderer/services/queuedPrompt.ts": "0e2f5595cda6cec8418e44e76fb1e6b6b137dd65ee08eab9f7fbfe718234e1c2",
+		"src/renderer/slashCommands.ts": "c40527704a7a564d908438f0b6e5e6d0d777dd92971628fc8f36dbaaabf804ae",
+		"src/renderer/stores/agentStore.ts": "d630f034da4725d612eb9e7331986934283ab51cad493d4fe7f39fe92ece2ea4",
+		"src/renderer/types/index.ts": "ffd80793702df3b108edd1cac4e844100b973414fa256281ab3618f52e750b44",
+		"src/renderer/utils/grokWizard.ts": "84fdf19760142b8d7a3d9ab1f86afaf11d15aa2d9fd743b725007e26b48b2507",
+		"src/renderer/utils/spawnHelpers.ts": "6e3d4da46c4b2f98470f9cee5c62fcbd14f5c4a779c6635daa8e0f8a1934bac2",
+		"src/renderer/utils/worktreeSession.ts": "1ebbda50eff8c290d76b068c0cb36ef5c5d4b682e6886871bfc98ba2ef6a9a05",
+		"src/shared/agentMetadata.ts": "011f8008a94bb3c4261dec8fb254c758dd225ab1b52ac8b57da2e661a8843033",
+		"src/shared/grokSpawnSelection.ts": "e761224d5b8c99ff9da1ae98c0e668d9c6a7a15261d70c01803bff85c5556a11",
+		"src/shared/maestro-lib/grok/acp-session.ts": "197f97664d571b055aed89854afb609a5546cd225f29f9620c7605506193aa3b",
+		"src/shared/maestro-lib/grok/acp-turn.ts": "5b9144870ae2ecaf8c02d5caabcca917a6d75f7eb53369f9c47846c42404996f",
+		"src/shared/maestro-lib/providers/capabilities.ts": "8c807ecb85f296388263a8f1bd7a1d3efd15c3e26b52bdd68ea3c6a7b709e361",
+		"src/shared/maestro-lib/turns/prompt.ts": "9e825021c8885cbb5dbe7c2018682deb197a3d82f0514896f9fb3b30c3504a87",
+		"src/shared/templateVariables.ts": "3f684745a5a6207b519ce59357cca31bb68141e3c24e3d6a9b8083584f47cd6f",
+		"tsconfig.cli.json": "31213859259324304c3449b67dc48519c21fa94e0c3dcfd4e53ca593b587ed95",
+		"tsconfig.json": "5fbb896a59400b042cee9627f1e5987fa4db5c3a94d1f278a8e54ceb894b9c00",
+		"tsconfig.lint.json": "ea576d76e80ddf428e64e16d6495bcb2b5cd6bd1b1eb578116bd78decb22c083",
+		"tsconfig.main.json": "1a4b54a2a4613cb1c27771632697cd0f5ef130a5ea24659b461492e978f5d745",
+		"vitest.config.mts": "c72dbc05459559b23dce670db0f17c064dfdf026d46d3c0d2ea4777af654ac77"
+	},
+	"repairTasks": [
+		{
+			"task": "GT1-05-13A",
+			"kind": "TEST",
+			"files": [
+				"src/__tests__/renderer/components/AgentCreationDialog.test.tsx",
+				"src/__tests__/renderer/components/NewInstanceModal/AgentPickerGrid.test.tsx",
+				"src/__tests__/renderer/components/Wizard/screens/AgentSelectionScreen/hooks.test.tsx"
+			],
+			"failures": 2,
+			"collectionFailures": 1,
+			"reason": "Unavailable user-event import; accessible-name whitespace mismatch; unstable identity of semantically unchanged SSH fixture."
+		},
+		{
+			"task": "GT1-05-13B",
+			"kind": "TEST",
+			"files": [
+				"src/__tests__/renderer/hooks/useInputProcessing.test.ts",
+				"src/__tests__/main/ipc/handlers/agents.test.ts",
+				"src/__tests__/main/ipc/handlers/process.test.ts"
+			],
+			"failures": 41,
+			"collectionFailures": 0,
+			"reason": "Missing git.getBranch spy target, unisolated optional ProviderTranslationService constructor, missing processManager.off listener cleanup mock."
+		},
+		{
+			"task": "GT1-05-13C",
+			"kind": "TEST",
+			"files": [
+				"src/__tests__/renderer/services/inlineWizardDocumentGeneration.test.ts",
+				"src/__tests__/renderer/hooks/useWizardHandlers.test.ts"
+			],
+			"failures": 9,
+			"collectionFailures": 0,
+			"reason": "Rewrapped mock unsubscribe functions retain shared identity; replacement bridge lacks settings.onExternalChange."
+		},
+		{
+			"task": "GT1-05-13D",
+			"kind": "VERIFY",
+			"scope": "Rerun all 43 complete suites and renderer/main/CLI TypeScript checks after repairs; do not certify from partial runs."
+		}
+	],
+	"baselineDiagnostics": [
+		{
+			"file": "src/main/plugins/plugin-host-handlers.ts",
+			"line": 1196,
+			"column": 76,
+			"code": "TS2339",
+			"message": "Property 'dispatcher' does not exist on type 'RequestInit'.",
+			"introducedByPhase05": false,
+			"owner": "GT1-12-03 final validation; existing P46 blocker retained."
+		}
+	],
+	"live": {
+		"status": "not-run",
+		"budgetUsd": 0,
+		"providerCalls": 0,
+		"discoveryCalls": 0,
+		"remoteHosts": 0
+	},
+	"imagesAnalyzed": 0,
+	"acceptance": "No parity status, capability flag or beta change; phase05 certification must await bounded repairs and reverification.",
+	"publication": "Direct Auto Run commit/push request supersedes older CONTRACT local-only rule. Evidence-only task; no source repair is performed.",
+	"artifactChecks": [
+		{
+			"command": [
+				"./node_modules/.bin/prettier",
+				"--check",
+				"Plans/grok-tier1/evidence/05.md",
+				"Plans/grok-tier1/evidence/05-verification.json"
+			],
+			"exitCode": 0
+		},
+		{
+			"command": ["npm", "run", "docs:verify"],
+			"exitCode": 0,
+			"assertedPaths": 1183,
+			"indexEntries": 392,
+			"findings": 0
+		},
+		{
+			"command": ["python3", "tmp/grok-tier1-phase05-verify/check-artifacts.py"],
+			"exitCode": 0,
+			"assertions": "Exact 43-file scope, raw receipt/report/log hashes, 109 unchanged input hashes against HEAD, complete failure repair ownership, unchanged source/tests/parity and original task-line text."
+		},
+		{
+			"command": ["git", "diff", "--check"],
+			"exitCode": 0
+		}
+	],
+	"independentReview": {
+		"status": "pass",
+		"scope": "Read-only independent count/hash/source-scope and repair-task review; no material issues."
+	}
+}
