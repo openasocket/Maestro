@@ -45,7 +45,8 @@ import * as launchPlanner from '../../../../shared/maestro-lib/launch/launch-pla
 import * as runToCompletion from '../../../../shared/maestro-lib/run/run-to-completion';
 import * as pipeSpawn from '../../../../shared/maestro-lib/run/pipe-spawn';
 import * as turnArgs from '../../../../shared/maestro-lib/turns/args';
-import { logger } from '../../../../shared/maestro-lib/host';
+import { logger, setMaestroLibImageRefResolver } from '../../../../shared/maestro-lib/host';
+import type { EmbeddedImageSupport } from '../../../../shared/maestro-lib/launch/image-refs';
 import {
 	createContextVerifier,
 	createLocalHostAuthority,
@@ -112,6 +113,8 @@ interface FakeOptions {
 	/** Extra environment for the fake agent (it records what it was given). */
 	env?: Record<string, string>;
 	text?: string;
+	/** Attachments in the user's order, as the composer hands them to `assembleTurn`. */
+	images?: string[];
 }
 
 /** A real `assembleTurn` result whose process is the fake agent replaying a recording. */
@@ -130,7 +133,7 @@ function assembleWithFakeAgent(toolType: string, options: FakeOptions): Assemble
 			...options.agent,
 		}),
 		makeTab(options.tab),
-		{ text: options.text ?? 'hello' },
+		{ text: options.text ?? 'hello', ...(options.images ? { images: options.images } : {}) },
 		makeContext(toolType, options.context)
 	);
 	if (!result.ok) throw new Error(`expected a turn: ${result.message}`);
@@ -1239,6 +1242,344 @@ describe('runAgentTurn: private prompt-file handoff', () => {
 				expect(disclosure).not.toContain(JSON.stringify(secret).slice(1, -1));
 			}
 		});
+	});
+});
+
+describe('runAgentTurn: Grok ordered image payloads (GT1-07-03E)', () => {
+	const remote: SshRemoteConfig = {
+		id: 'remote-images',
+		name: 'Image host',
+		host: 'images.example.test',
+		port: 2222,
+		username: 'dev',
+		privateKeyPath: '~/.ssh/id_ed25519',
+		enabled: true,
+	};
+	// phase02's embedded-image wire shapes: canonical padded base64 bytes, never a path.
+	const PNG = 'iVBORw0KGgo=';
+	const JPEG = '/9j/4AAQ';
+	const REF_BYTES = Buffer.from([1, 2, 3]);
+	const png = `data:image/png;base64,${PNG}`;
+	const jpeg = `data:image/jpeg;base64,${JPEG}`;
+	const ref = 'maestro-image://sha256/fixture-webp';
+	const support: EmbeddedImageSupport = {
+		mimeTypes: ['image/png', 'image/jpeg', 'image/webp'],
+		maxCount: 3,
+		maxBytesPerImage: 64,
+		maxTotalBytes: 128,
+	};
+	const acp = (text: string, ...images: Array<[mimeType: string, data: string]>) =>
+		JSON.stringify({
+			type: 'acp',
+			content: [
+				{ type: 'text', text },
+				...images.map(([mimeType, data]) => ({ type: 'image', data, mimeType })),
+			],
+		});
+	beforeEach(() => {
+		vi.spyOn(runToCompletion, 'runTurn');
+		setMaestroLibImageRefResolver((value) =>
+			value === ref ? { buffer: Buffer.from(REF_BYTES), mediaType: 'image/webp' } : null
+		);
+	});
+	afterEach(() => {
+		setMaestroLibImageRefResolver(() => null);
+		vi.restoreAllMocks();
+	});
+
+	/** A Grok turn with attachments on the fake agent; its prompt file goes to a known owned path. */
+	function imageTurn(options: {
+		host: 'local' | 'SSH';
+		images: string[];
+		resume?: string | null;
+		tab?: Partial<TurnTab>;
+	}) {
+		const argvOut = outFile('image-argv');
+		const stdinOut = outFile('image-stdin');
+		const env = {
+			FAKE_AGENT_RECORDING: writeFakeTurn(scratch.dir, {
+				chunks: [],
+				close: { code: 0, signal: null },
+			}),
+			FAKE_AGENT_HOLD: '1',
+			FAKE_AGENT_ARGV_OUT: argvOut,
+			FAKE_AGENT_STDIN_OUT: stdinOut,
+			GROK_HOME: path.join(scratch.dir, 'image-account'),
+		};
+		const turn = assembleWithFakeAgent('grok', {
+			recording: 'captured-opencode-normal',
+			text: 'describe these',
+			images: options.images,
+			env,
+			tab: { agentSessionId: options.resume ?? null, ...options.tab },
+			agent: { customPath: '/opt/remote grok/bin/grok' },
+		});
+		if (options.host === 'SSH')
+			turn.launch.sshRemoteConfig = { enabled: true, remoteId: remote.id };
+		const destination =
+			options.host === 'SSH'
+				? newRemotePromptFileDestination(remote.id, 'acp-json')
+				: { owner: 'local' as const, path: outFile('image-prompt') + '.json' };
+		turn.launch.promptFileDestination = destination;
+		const sshArgs = ['-p', '2222', 'dev@images.example.test', ...SSH_STDIN_REMOTE_SHELL];
+		const wrap = vi.fn<NonNullable<RunAgentTurnDeps['wrapSpawnWithSsh']>>(async () => ({
+			command: process.execPath,
+			args: [FAKE_AGENT_PATH, ...sshArgs],
+			cwd: scratch.dir,
+			sshStdinScript: 'synthetic remote transfer',
+			sshRemoteUsed: remote,
+		}));
+		const scope = grokScopeFixture(
+			scratch.dir,
+			env.GROK_HOME,
+			options.host === 'SSH' ? remote : undefined
+		);
+		const runOptions = (overrides: Partial<RunAgentTurnOptions> = {}) =>
+			optionsFor({
+				grokLaunchScope: scope.ports,
+				retainedNativeSessionBinding: options.resume ? scope.binding : undefined,
+				sshStore: { getSshRemotes: () => [remote] },
+				deps: { wrapSpawnWithSsh: wrap, env: { ...process.env, ...env } },
+				...overrides,
+			});
+		return { turn, env, argvOut, stdinOut, destination, sshArgs, wrap, scope, runOptions };
+	}
+
+	/** Nothing was dispatched: no process, no transfer, no prompt file, no argv. */
+	function expectNothingStarted(t: ReturnType<typeof imageTurn>) {
+		expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+		expect(t.wrap).not.toHaveBeenCalled();
+		expect(fs.existsSync(t.argvOut)).toBe(false);
+		if (t.destination.owner === 'local') expect(fs.existsSync(t.destination.path)).toBe(false);
+		expect(remoteSignals).toEqual([]);
+	}
+
+	describe.each(['local', 'SSH'] as const)('%s owner', (host) => {
+		it.each([
+			{ name: 'fresh', resume: null },
+			{ name: 'resumed', resume: 'grok-native-session' },
+		])(
+			'carries the text, then every image in attachment order, once on a $name native route',
+			async ({ resume }) => {
+				const t = imageTurn({ host, images: [png, ref, jpeg], resume });
+				const plan = vi.spyOn(launchPlanner, 'buildAgentLaunchPlan');
+				const run = await start(t.turn, t.runOptions({ embeddedImageSupport: support }));
+				const content = acp(
+					t.turn.launch.prompt!,
+					['image/png', PNG],
+					['image/webp', REF_BYTES.toString('base64')],
+					['image/jpeg', JPEG]
+				);
+				try {
+					await waitUntil(() => fs.existsSync(t.stdinOut));
+					expect(runToCompletion.runTurn).toHaveBeenCalledOnce();
+					expect(plan).toHaveBeenCalledOnce();
+					expect(plan.mock.calls[0][0]).toMatchObject({
+						prompt: undefined,
+						hasImages: true,
+						embeddedImageSupport: support,
+					});
+					// The planner holds a copy of the caller's bounds, never the caller's object.
+					expect(plan.mock.calls[0][0].embeddedImageSupport).not.toBe(support);
+					const spec = vi.mocked(runToCompletion.runTurn).mock.calls[0][0];
+					const argv = JSON.parse(fs.readFileSync(t.argvOut, 'utf8')) as string[];
+					if (host === 'local') {
+						expect(t.wrap).not.toHaveBeenCalled();
+						expect(spec).toMatchObject({ cwd: scratch.dir, env: { GROK_HOME: t.env.GROK_HOME } });
+						expect(argv).toEqual([
+							...t.turn.launch.args.slice(1),
+							'--prompt-file',
+							t.destination.path,
+						]);
+						expect(fs.readFileSync(t.destination.path, 'utf8')).toBe(content);
+						expect(fs.readFileSync(t.stdinOut, 'utf8')).toBe('');
+					} else {
+						expect(t.wrap).toHaveBeenCalledOnce();
+						expect(t.wrap.mock.calls[0][0]).toMatchObject({
+							cwd: scratch.dir,
+							prompt: undefined,
+							customEnvVars: { GROK_HOME: t.env.GROK_HOME },
+							promptArtifact: { ...t.destination, content },
+							args: [...t.turn.launch.args, '--prompt-file', t.destination.path],
+						});
+						expect(spec.promptArtifact).toBeUndefined();
+						expect(argv).toEqual(t.sshArgs);
+					}
+					// One prompt source and no tool-read workaround: no `-p`, no image path or ref.
+					if (host === 'local') expect(argv).not.toContain('-p');
+					else expect(t.wrap.mock.calls[0][0].args).not.toContain('-p');
+					expect(content.split(JSON.stringify(t.turn.launch.prompt)).length).toBe(2);
+					expect(content).not.toContain('maestro-image://');
+					if (resume) expect(t.turn.launch.args).toContain(resume);
+					expect(run.nativeLaunchReceipt?.requestedNativeSessionId).toBe(resume ?? undefined);
+				} finally {
+					run.terminate();
+					await run.result;
+				}
+				if (host === 'local') {
+					expect(fs.existsSync(t.destination.path)).toBe(false);
+					expect(remoteSignals).toEqual([]);
+				} else {
+					expect(remoteSignals[0]).toMatchObject({
+						mode: 'terminate',
+						promptArtifactPath: t.destination.path,
+					});
+				}
+			}
+		);
+
+		it.each([
+			{
+				name: 'no host-admitted support',
+				images: [png],
+				bounds: undefined,
+				message: 'Embedded images require explicit support and bounded image limits.',
+			},
+			{
+				name: 'an unadmitted MIME type',
+				images: [png, 'data:image/gif;base64,R0lGODlh'],
+				bounds: support,
+				message: 'The embedded image MIME type is not supported for this turn.',
+			},
+			{
+				name: 'one image too many',
+				images: [png, jpeg],
+				bounds: { ...support, maxCount: 1 },
+				message: 'The prompt exceeds the admitted image count.',
+			},
+			{
+				name: 'an image over the per-image bound',
+				images: [jpeg, png],
+				bounds: { ...support, maxBytesPerImage: 7 },
+				message: 'The prompt exceeds the admitted image byte limits.',
+			},
+			{
+				name: 'images over the total bound',
+				images: [png, jpeg],
+				bounds: { ...support, maxTotalBytes: 13 },
+				message: 'The prompt exceeds the admitted image byte limits.',
+			},
+			{
+				name: 'malformed bytes',
+				images: ['data:image/png;base64,AAA'],
+				bounds: support,
+				message: 'An embedded image must contain valid base64 bytes.',
+			},
+		])('refuses $name before dispatch, every attachment still in the plan', async (test) => {
+			const t = imageTurn({ host, images: test.images });
+			const plan = vi.spyOn(launchPlanner, 'buildAgentLaunchPlan');
+
+			const started = await runAgentTurn(
+				t.turn,
+				t.runOptions(test.bounds ? { embeddedImageSupport: test.bounds } : {})
+			);
+
+			expect(started).toEqual({
+				ok: false,
+				reason: 'prompt-delivery-refused',
+				message: test.message,
+			});
+			// Validation saw the text and each attachment: none was dropped to make the turn fit.
+			expect(plan.mock.calls[0][0].promptBlocks).toHaveLength(test.images.length + 1);
+			expectNothingStarted(t);
+		});
+
+		it.each([
+			{ name: 'a ref the host cannot resolve', image: 'maestro-image://sha256/missing' },
+			{ name: 'a data URL that is not an image', image: 'data:text/plain;base64,AAAA' },
+		])('refuses $name before planning, with no text-only retry', async ({ image }) => {
+			const t = imageTurn({ host, images: [png, image] });
+			const plan = vi.spyOn(launchPlanner, 'buildAgentLaunchPlan');
+
+			const started = await runAgentTurn(t.turn, t.runOptions({ embeddedImageSupport: support }));
+
+			expect(started).toEqual({
+				ok: false,
+				reason: 'images-unsupported',
+				message:
+					'An attached image could not be read, so the turn was not started. Remove it and send again.',
+			});
+			expect(plan).not.toHaveBeenCalled();
+			expectNothingStarted(t);
+		});
+
+		it('refuses images on a provider surface with no prompt-file route (capability)', async () => {
+			const t = imageTurn({ host, images: [png] });
+			t.turn.launch.agent = { ...t.turn.launch.agent!, promptFile: undefined };
+			const plan = vi.spyOn(launchPlanner, 'buildAgentLaunchPlan');
+
+			const started = await runAgentTurn(t.turn, t.runOptions({ embeddedImageSupport: support }));
+
+			expect(started).toMatchObject({ ok: false, reason: 'images-unsupported' });
+			expect(plan).not.toHaveBeenCalled();
+			expectNothingStarted(t);
+		});
+
+		it('refuses images on the standard ACP route, never retrying them as text', async () => {
+			const t = imageTurn({ host, images: [png, jpeg], tab: { permissionMode: 'standard' } });
+			expect(t.turn.permissionMode).toBe('standard');
+
+			const started = await runAgentTurn(t.turn, t.runOptions({ embeddedImageSupport: support }));
+
+			expect(started).toMatchObject({ ok: false, reason: 'grok-route-refused' });
+			if (started.ok) throw new Error('expected a refusal');
+			// Refused on the route it asked for (unmanaged: no consent port), never re-planned headless.
+			expect(started.message).toMatch(/acp-stdio route: .*consent-port.*Nothing was started\./);
+			expectNothingStarted(t);
+		});
+	});
+
+	it('refuses a failed remote upload of the image prompt file and starts nothing', async () => {
+		const t = imageTurn({ host: 'SSH', images: [png, jpeg] });
+		t.wrap.mockRejectedValue(new Error('upload failed'));
+
+		const started = await runAgentTurn(t.turn, t.runOptions({ embeddedImageSupport: support }));
+
+		expect(started).toEqual({
+			ok: false,
+			reason: 'prompt-delivery-refused',
+			message: 'Remote prompt preparation unavailable.',
+		});
+		expect(t.wrap).toHaveBeenCalledOnce();
+		expect(t.wrap.mock.calls[0][0].promptArtifact).toMatchObject({
+			...t.destination,
+			content: acp(t.turn.launch.prompt!, ['image/png', PNG], ['image/jpeg', JPEG]),
+		});
+		expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+		expect(remoteSignals).toEqual([]);
+	});
+
+	it('removes the local image prompt file when the spawn fails', async () => {
+		const t = imageTurn({ host: 'local', images: [png] });
+		t.turn.launch.command = path.join(scratch.dir, 'no-such-grok');
+		t.turn.launch.args = t.turn.launch.args.slice(1);
+
+		const started = await runAgentTurn(t.turn, t.runOptions({ embeddedImageSupport: support }));
+
+		if (!started.ok) throw new Error(started.message);
+		expect((await started.run.result).outcome).not.toBe('completed');
+		expect(runToCompletion.runTurn).toHaveBeenCalledOnce();
+		await waitUntil(() => !fs.existsSync(t.destination.path));
+		expect(fs.existsSync(t.argvOut)).toBe(false);
+	});
+
+	it('removes the local image prompt file when the turn is cancelled', async () => {
+		const t = imageTurn({ host: 'local', images: [png, jpeg] });
+		const controller = new AbortController();
+		const run = await start(
+			t.turn,
+			t.runOptions({ embeddedImageSupport: support, signal: controller.signal })
+		);
+		await waitUntil(() => fs.existsSync(t.stdinOut));
+		expect(fs.readFileSync(t.destination.path, 'utf8')).toBe(
+			acp(t.turn.launch.prompt!, ['image/png', PNG], ['image/jpeg', JPEG])
+		);
+
+		controller.abort();
+		await run.result;
+
+		expect(fs.existsSync(t.destination.path)).toBe(false);
+		expect(runToCompletion.runTurn).toHaveBeenCalledOnce();
 	});
 });
 

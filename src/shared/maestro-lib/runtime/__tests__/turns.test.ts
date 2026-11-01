@@ -296,6 +296,45 @@ describe('runtime turns', () => {
 			]);
 		});
 
+		// GT1-07-03E: the runtime's public port carries no host-admitted image bounds, so a Grok
+		// message with attachments is refused whole at send: no turn, no queued item, no transcript
+		// entry, and never the text alone in its place.
+		it.each([
+			{ name: 'fresh local', resume: null, ssh: false },
+			{ name: 'resumed local', resume: 'grok-native-session', ssh: false },
+			{ name: 'fresh SSH', resume: null, ssh: true },
+		])('refuses Grok attachments at send, starting nothing: $name', async ({ resume, ssh }) => {
+			recordings.grok = writeFakeTurn(work, { chunks: [], close: { code: 0, signal: null } });
+			const runtime = await start([
+				seedAgent({
+					toolType: 'grok',
+					customEnvVars: { GROK_HOME: work },
+					aiTabs: [{ id: 't1', agentSessionId: resume, name: null, logs: [] }],
+					unifiedTabOrder: [{ type: 'ai', id: 't1' }],
+					...(ssh ? { sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-1' } } : {}),
+				}),
+			]);
+			const turn = watch(runtime);
+
+			const error = errorOf(
+				await runtime.turns.send('a1', 't1', {
+					text: 'describe these',
+					images: ['data:image/png;base64,iVBORw0KGgo=', 'maestro-image://sha256/fixture'],
+				})
+			);
+
+			expect(error).toMatchObject({
+				code: 'unsupported',
+				message:
+					'Images cannot be sent from here yet. Send the message without them, or use the desktop.',
+			});
+			expect(argvFiles).toEqual([]);
+			expect(turn.events).toEqual([]);
+			expect(value(await runtime.turns.queue.list('a1'))).toEqual([]);
+			expect(await transcript(runtime)).toEqual([]);
+			expect(sessions().sessions[0].aiTabs[0]).toMatchObject({ agentSessionId: resume, logs: [] });
+		});
+
 		it('refuses what cannot run, and says which', async () => {
 			const runtime = await start();
 			expect(errorOf(await runtime.turns.send('a1', 't1', { text: '   ' })).code).toBe('invalid');
