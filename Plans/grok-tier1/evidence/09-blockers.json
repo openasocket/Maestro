@@ -225,6 +225,30 @@
 			"ownerTasks": ["GT1-09-12A", "GT1-11-12"],
 			"parityRows": ["P33", "P36"],
 			"releaseImpact": "Fake-authority tests prove client wiring only."
+		},
+		{
+			"id": "GT1-09-R14",
+			"requirement": "A managed per-provider configuration write for Grok cannot persist a credential, auth-file, account-home or endpoint override that the managed launch cannot qualify, and a managed Grok launch does not inherit one from the shell.",
+			"surface": "settings write paths (agents:setConfig*, agents:setConfigValue, bridge set_agent_config_value and update_session_config), managed launch env ceiling",
+			"route": ["native-headless", "acp-candidate"],
+			"status": "fixable-in-maestro",
+			"reason": "Grok has no PROVIDER_ROUTE_ENV_NAMES entry. Before GT1-09-04 a managed customEnvVars write naming GROK_AUTH, XAI_API_KEY, GROK_AUTH_PATH, GROK_HOME or a GROK_*_BASE_URL was admitted (the Claude and Codex equivalents were refused as ceiling), so the plain configuration file kept an inline credential or an account or endpoint change. At launch, applyManagedEnvCeiling still does not strip a shell-inherited GROK_HOME, GROK_AUTH or XAI_API_KEY for Grok.",
+			"requiredAuthority": "None for the write-time hold (done). The launch-time strip needs a Grok entry in PROVIDER_ROUTE_ENV_NAMES (src/shared/maestro-lib/launch/env.ts), outside GT1-09-04, scheduled as GT1-09-04A.",
+			"sourceRefs": [
+				"src/main/enterprise/settings-policy.ts (agentConfigCeilingProblems, grokRouteEnvName)",
+				"src/shared/maestro-lib/launch/env.ts (PROVIDER_ROUTE_ENV_NAMES, ALL_ROUTE_ENV_NAMES)",
+				"src/shared/envVarCatalog.ts (PROVIDER_ENV_VAR_SUGGESTIONS.grok)",
+				"src/shared/providerProfiles.ts (PROVIDER_PROFILE_CONFIGS.grok)",
+				"src/shared/agentEnvironment.ts (isSecretEnvKey)"
+			],
+			"ownerTasks": ["GT1-09-04", "GT1-09-04A", "GT1-09-05", "GT1-09-06"],
+			"parityRows": ["P33", "P36"],
+			"releaseImpact": "Until GT1-09-04A lands, a managed Grok launch can still pick up a credential or account home from the inherited shell environment.",
+			"progress": {
+				"task": "GT1-09-04",
+				"state": "write-time-implemented-tests-pending-launch-strip-open",
+				"detail": "GT1-09-04: agentConfigCeilingProblems refuses, with code ceiling and under a usable managed policy, a Grok customEnvVars name that is catalogued for Grok, is its account-home variable, or is a GROK_* name isSecretEnvKey treats as a secret. Every write path reaches it through holdAgentConfigWrite, and applyAgentConfigWrite holds before the store is read, so a refused write persists nothing. Standalone and other providers are unchanged; a Grok model, effort, path or arguments write was already held by the lock and by managedArgsProblems, and Grok config options are model, reasoningEffort and contextWindow only. The account remains open on R07. GT1-09-05 adds the regression cases."
+			}
 		}
 	],
 	"notBlockers": [

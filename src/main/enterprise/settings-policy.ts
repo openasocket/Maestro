@@ -33,7 +33,10 @@ import {
 	managedArgsProblems,
 	type ManagedRouteCeiling,
 } from '../../shared/maestro-lib/launch/env';
+import { isSecretEnvKey } from '../../shared/agentEnvironment';
+import { PROVIDER_ENV_VAR_SUGGESTIONS } from '../../shared/envVarCatalog';
 import { isWindows } from '../../shared/platformDetection';
+import { PROVIDER_PROFILE_CONFIGS } from '../../shared/providerProfiles';
 import {
 	ENCORE_LOCK_PREFIX,
 	LOCKABLE_SETTING_KEYS,
@@ -168,11 +171,32 @@ const removedByEnvCeiling = (name: string): boolean => {
 };
 
 /**
+ * Grok's credential, auth-file, account-home and endpoint names (GT1-09-04).
+ * Grok has no `PROVIDER_ROUTE_ENV_NAMES` entry, so the launch ceiling neither
+ * removes nor qualifies them, and a managed write would keep an inline
+ * credential (`GROK_AUTH`, `XAI_API_KEY`) or an account or endpoint change in
+ * the plain configuration file. Derived from the existing schema only: the
+ * provider's catalogued names, its account-home variable, and the `GROK_*`
+ * names `isSecretEnvKey` treats as secrets (the auth path and gateway URLs).
+ */
+const grokRouteEnvName = (name: string): boolean => {
+	const upper = name.toUpperCase();
+	const same = (known: string) => known === name || (isWindows() && known.toUpperCase() === upper);
+	return (
+		(PROVIDER_ENV_VAR_SUGGESTIONS.grok ?? []).some(({ key }) => same(key)) ||
+		same(PROVIDER_PROFILE_CONFIGS.grok?.envVar ?? 'GROK_HOME') ||
+		(upper.startsWith('GROK_') && isSecretEnvKey(upper))
+	);
+};
+
+/**
  * What the Phase 1 provider ceiling would refuse at launch, named at write
  * time: an argument that routes around it (`managedArgsProblems` under a
  * ceiling that pins nothing) and an environment name `applyManagedEnvCeiling`
  * removes. The pinned model, origin, account home and permission mode stay
  * the launch plan's to hold, so a value admitted here can still be refused there.
+ * For Grok, a credential, account or endpoint name the ceiling cannot qualify
+ * is refused here too, so no managed write persists it.
  */
 export function agentConfigCeilingProblems(
 	providerId: string,
@@ -182,9 +206,15 @@ export function agentConfigCeilingProblems(
 	if (field === 'customArgs' && typeof value === 'string')
 		return managedArgsProblems(parseCustomArgs(value), unpinnedCeiling(providerId));
 	if (field === 'customEnvVars' && value && typeof value === 'object')
-		return Object.keys(value)
-			.filter(removedByEnvCeiling)
-			.map((name) => `${name} is removed by the managed environment ceiling at launch`);
+		return Object.keys(value).flatMap((name) =>
+			removedByEnvCeiling(name)
+				? [`${name} is removed by the managed environment ceiling at launch`]
+				: providerId === 'grok' && grokRouteEnvName(name)
+					? [
+							`${name} selects a Grok credential, account or endpoint the managed provider ceiling cannot qualify`,
+						]
+					: []
+		);
 	return [];
 }
 
