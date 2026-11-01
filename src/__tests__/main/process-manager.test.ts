@@ -67,6 +67,72 @@ vi.mock('../../main/process-manager/utils/childProcessInfo', async (importOrigin
 	return { ...actual, isPidAlive: (pid?: number) => mockIsPidAlive(pid) };
 });
 
+// Grok steering (GT1-07-03C): the maestro-p steering client is observed, never dialed for
+// Grok; while `grokScript.enabled`, the shared ACP driver is a scripted turn (no process)
+// and the selector is told a person can answer, so the real GrokAcpSpawner records a turn.
+const { mockSendSteeringRequest, grokScript } = vi.hoisted(() => ({
+	mockSendSteeringRequest: vi.fn(),
+	grokScript: {
+		enabled: false,
+		turns: [] as Array<{
+			cancel: ReturnType<typeof vi.fn>;
+			terminate: ReturnType<typeof vi.fn>;
+			terminateNow: ReturnType<typeof vi.fn>;
+			settle: (status: 'success' | 'cancelled') => void;
+		}>,
+	},
+}));
+vi.mock('../../main/process-manager/steering-client', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../main/process-manager/steering-client')>()),
+	sendSteeringRequest: mockSendSteeringRequest,
+}));
+vi.mock('../../shared/maestro-lib/grok/route', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../shared/maestro-lib/grok/route')>();
+	return {
+		...actual,
+		beginGrokAcpNegotiation: ((req, snapshot) =>
+			actual.beginGrokAcpNegotiation(
+				grokScript.enabled ? { ...req, consent: 'interactive' } : req,
+				snapshot
+			)) as typeof actual.beginGrokAcpNegotiation,
+	};
+});
+vi.mock('../../shared/maestro-lib/grok/acp-turn', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../shared/maestro-lib/grok/acp-turn')>();
+	return {
+		...actual,
+		startGrokAcpTurn: ((...args: Parameters<typeof actual.startGrokAcpTurn>) => {
+			if (!grokScript.enabled) return actual.startGrokAcpTurn(...args);
+			let resolve!: (value: unknown) => void;
+			const completed = new Promise((r) => (resolve = r));
+			const turn = {
+				cancel: vi.fn(),
+				terminate: vi.fn(),
+				terminateNow: vi.fn(),
+				settle: (status: 'success' | 'cancelled') =>
+					resolve({
+						exit: { code: 0, signal: null },
+						terminal: { status, dispatchState: 'dispatched' },
+						usageReports: [],
+					}),
+			};
+			grokScript.turns.push(turn);
+			return {
+				handle: {
+					pid: 7000 + grokScript.turns.length,
+					terminate: turn.terminate,
+					terminateNow: turn.terminateNow,
+				},
+				completed,
+				cancel: turn.cancel,
+				commands: () => undefined,
+				configuration: () => undefined,
+				invalidateCommands: () => {},
+			} as unknown as ReturnType<typeof actual.startGrokAcpTurn>;
+		}) as typeof actual.startGrokAcpTurn,
+	};
+});
+
 import * as fs from 'fs';
 
 import {
@@ -85,6 +151,11 @@ import { GrokOutputParser } from '../../main/parsers/grok-output-parser';
 import { StdoutHandler } from '../../main/process-manager/handlers/StdoutHandler';
 import { ExitHandler } from '../../main/process-manager/handlers/ExitHandler';
 import { DataBufferManager } from '../../main/process-manager/handlers/DataBufferManager';
+import {
+	GROK_ACP_PORT_SUPPORT,
+	grokSteeringAvailability,
+} from '../../shared/maestro-lib/grok/route';
+import { STEERING_TURN_FINISHED_DETAIL } from '../../shared/chatSteering';
 
 describe('process-manager.ts', () => {
 	describe('aggregateModelUsage', () => {
@@ -841,6 +912,194 @@ describe('process-manager.ts', () => {
 				expect(processManager.nativeSessionLaunchOf(request.sessionId)).toBe(receipt);
 				processManager.emit('exit', request.sessionId, 0);
 				expect(processManager.nativeSessionLaunchOf(request.sessionId)).toBeUndefined();
+			});
+		});
+
+		describe('Grok steering (GT1-07-03C)', () => {
+			// Scripted ACP turns through the real GrokAcpSpawner of this ProcessManager. Wire 1
+			// and the pinned Grok extensions advertise no in-progress input operation, so every
+			// answer is a structured refusal (parity S21); these are not native qualification.
+			let keyCounter = 0;
+			let emitted: string[];
+			type SpawnerInternals = {
+				grokAcpSpawner: {
+					spawn: (config: ProcessConfig) => { pid: number; success: boolean };
+					steer: (process: ManagedProcess, id: string) => unknown;
+					ctx: { liveTurns: Set<unknown> };
+				};
+			};
+			const internals = () => processManager as unknown as SpawnerInternals;
+			const liveTurns = () => internals().grokAcpSpawner.ctx.liveTurns.size;
+			const scope = {
+				version: 1,
+				state: 'bound',
+				provider: 'grok',
+				accountRef: 'grok:fixture-account',
+				host: { kind: 'local', identity: 'fixture-machine' },
+				cwd: process.cwd(),
+			} as const;
+			function startAcpTurn(sessionId: string, tabId: string) {
+				const result = internals().grokAcpSpawner.spawn({
+					sessionId,
+					tabId,
+					toolType: 'grok',
+					cwd: process.cwd(),
+					command: path.join(process.cwd(), 'fixture-bin', 'grok'),
+					args: [],
+					prompt: `work on ${tabId}`,
+					nativeSessionScope: scope,
+					permission: { requested: 'standard' },
+				} as unknown as ProcessConfig);
+				expect(result.success).toBe(true);
+				return processManager.get(sessionId)!;
+			}
+			const refusedWith = (detail: string | RegExp) => ({
+				type: 'steering',
+				id: expect.any(String),
+				verdict: 'refused',
+				refusal: 'not-running',
+				detail: typeof detail === 'string' ? detail : expect.stringMatching(detail),
+			});
+			const ACP_GAP = /no in-progress input operation/;
+			const NOT_OWNED = /no longer the active Grok turn/;
+			function expectNoSteerSideEffects(started: number) {
+				expect(mockSendSteeringRequest).not.toHaveBeenCalled();
+				expect(grokScript.turns).toHaveLength(started);
+				expect(emitted).not.toContain('steering-verdict');
+			}
+
+			beforeEach(() => {
+				keyCounter += 1;
+				grokScript.enabled = true;
+				grokScript.turns.length = 0;
+				mockSendSteeringRequest.mockReset();
+				emitted = [];
+				const emit = processManager.emit.bind(processManager);
+				vi.spyOn(processManager, 'emit').mockImplementation((event, ...args) => {
+					emitted.push(String(event));
+					return emit(event, ...args);
+				});
+			});
+			afterEach(() => {
+				grokScript.enabled = false;
+				for (const turn of grokScript.turns) turn.settle('cancelled');
+				vi.restoreAllMocks();
+			});
+
+			it('pins the absent operation: an owned ACP turn is still refused, never delivered', () => {
+				// A port that grows a steering operation changes this pin and its delivery together.
+				expect(GROK_ACP_PORT_SUPPORT.steering).toBe(false);
+				expect(grokSteeringAvailability({ route: 'acp-stdio', owned: true })).toMatchObject({
+					ok: false,
+					missing: ['acp-steering'],
+					parityRows: ['P10', 'S21'],
+				});
+				expect(grokSteeringAvailability({ route: 'native-headless', owned: true }).missing).toEqual(
+					['native-steering']
+				);
+				expect(grokSteeringAvailability({ route: 'acp-stdio', owned: false }).missing).toEqual([
+					'steering-not-owned',
+				]);
+			});
+
+			it('refuses each of two active turns by its own key, repeat steers included, leaving both running', async () => {
+				const a = `grok-steer-${keyCounter}-a`;
+				const b = `grok-steer-${keyCounter}-b`;
+				const procA = startAcpTurn(a, 'tab-1');
+				const procB = startAcpTurn(b, 'tab-2');
+				expect(liveTurns()).toBe(2);
+
+				const answers = [
+					await processManager.steer(a, 'go left'),
+					await processManager.steer(b, 'go right'),
+					await processManager.steer(a, 'go left'),
+				];
+
+				for (const answer of answers) expect(answer).toEqual(refusedWith(ACP_GAP));
+				expect(new Set(answers.map((answer) => (answer as { id: string }).id)).size).toBe(3);
+				expect(processManager.get(a)).toBe(procA);
+				expect(processManager.get(b)).toBe(procB);
+				for (const turn of grokScript.turns) {
+					expect(turn.cancel).not.toHaveBeenCalled();
+					expect(turn.terminate).not.toHaveBeenCalled();
+				}
+				expect(liveTurns()).toBe(2);
+				expectNoSteerSideEffects(2);
+			});
+
+			it('answers a Grok record no ACP turn runs as the headless route, and an unknown key as finished', async () => {
+				const live = `grok-steer-${keyCounter}-live`;
+				const headless = `grok-steer-${keyCounter}-headless`;
+				startAcpTurn(live, 'tab-1');
+				const internalsMap = processManager as unknown as {
+					processes: Map<string, ManagedProcess>;
+				};
+				internalsMap.processes.set(headless, {
+					sessionId: headless,
+					toolType: 'grok',
+					cwd: process.cwd(),
+					pid: 4343,
+					isTerminal: false,
+					startTime: 1,
+				});
+
+				expect(await processManager.steer(headless, 'x')).toEqual(refusedWith(/headless route/));
+				expect(await processManager.steer(`grok-steer-${keyCounter}-gone`, 'x')).toEqual(
+					refusedWith(STEERING_TURN_FINISHED_DETAIL)
+				);
+				// The live turn on another key is neither consulted as the owner nor disturbed.
+				expect(await processManager.steer(live, 'x')).toEqual(refusedWith(ACP_GAP));
+				expect(grokScript.turns[0].cancel).not.toHaveBeenCalled();
+				internalsMap.processes.delete(headless);
+				expectNoSteerSideEffects(1);
+			});
+
+			it('refuses a cancelled turn as not owned, then as finished once it exits, with no restart', async () => {
+				const key = `grok-steer-${keyCounter}-cancel`;
+				startAcpTurn(key, 'tab-1');
+				expect(processManager.interrupt(key)).toBe(true);
+				expect(grokScript.turns[0].cancel).toHaveBeenCalledTimes(1);
+
+				expect(await processManager.steer(key, 'too late')).toEqual(refusedWith(NOT_OWNED));
+				grokScript.turns[0].settle('cancelled');
+				await vi.waitFor(() => expect(processManager.get(key)).toBeUndefined());
+
+				expect(liveTurns()).toBe(0);
+				expect(await processManager.steer(key, 'too late')).toEqual(
+					refusedWith(STEERING_TURN_FINISHED_DETAIL)
+				);
+				expect(grokScript.turns[0].cancel).toHaveBeenCalledTimes(1);
+				expectNoSteerSideEffects(1);
+			});
+
+			it('answers a restarted key from the new owner and never from the superseded turn', async () => {
+				const key = `grok-steer-${keyCounter}-restart`;
+				const first = startAcpTurn(key, 'tab-1');
+				const second = startAcpTurn(key, 'tab-1');
+				expect(second).not.toBe(first);
+
+				// The stale record is not the active owner; the key is answered by the new turn.
+				expect(internals().grokAcpSpawner.steer(first, 'stale-id')).toEqual(refusedWith(NOT_OWNED));
+				expect(await processManager.steer(key, 'x')).toEqual(refusedWith(ACP_GAP));
+
+				// A late completion of the superseded turn neither exits nor evicts the new one.
+				grokScript.turns[0].settle('success');
+				await vi.waitFor(() => expect(liveTurns()).toBe(1));
+				expect(processManager.get(key)).toBe(second);
+				expect(emitted).not.toContain('exit');
+
+				// Stop ends the owned turn: refused not owned, then the channel is gone after exit.
+				processManager.kill(key);
+				expect(grokScript.turns[1].terminate).toHaveBeenCalledTimes(1);
+				expect(internals().grokAcpSpawner.steer(second, 'after-stop')).toEqual(
+					refusedWith(NOT_OWNED)
+				);
+				grokScript.turns[1].settle('cancelled');
+				await vi.waitFor(() => expect(liveTurns()).toBe(0));
+				expect(await processManager.steer(key, 'x')).toEqual(
+					refusedWith(STEERING_TURN_FINISHED_DETAIL)
+				);
+				expectNoSteerSideEffects(2);
 			});
 		});
 
