@@ -6,6 +6,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type {
 	AdditionalDirectory,
+	AgentError,
 	AgentSshRemoteConfig,
 	SshRemoteConfig,
 	ToolType,
@@ -576,6 +577,12 @@ export interface AgentResult {
 	 * not retry an `unknown` as if it were an outage.
 	 */
 	managed?: { state: 'denied' | 'unavailable' | 'unknown'; code: ManagedDenialCode };
+	/**
+	 * The classified provider failure (auth, rate limit, quota, context, model,
+	 * network) behind a failed turn, so the Auto Run engine can pause on it and
+	 * tell a limit from a crash. Set only for Grok today (`grokCliFailure`).
+	 */
+	agentError?: AgentError;
 	/**
 	 * How the turn ended, from the shared `resolveTurnOutcome`. `success` is
 	 * derived from it (`completed` and `completed-with-warning` succeed), so
@@ -1680,7 +1687,11 @@ async function spawnJsonLineAgent(
 	// session id announced, and falls back to the streamed text when no result
 	// event carries any. This path settles on the text of `error` events, so the
 	// in-band classifier stays off and its outcomes are what they always were.
-	const capture = new TurnCapture(toolType, parser, { classifyInBandErrors: false });
+	// Grok alone classifies in-band failures, so an auth or rate-limit error
+	// envelope keeps its category (grokCliFailure); everyone else is unchanged.
+	const capture = new TurnCapture(toolType, parser, {
+		classifyInBandErrors: toolType === 'grok',
+	});
 	let stopped = false;
 	let stopReason: string | undefined;
 	const progressSummaries = new Map<string, string>();
@@ -1879,11 +1890,14 @@ async function spawnJsonLineAgent(
 		);
 	}
 
-	// Soft success: agents like Grok may exit non-zero after a full
-	// answer (e.g. --max-turns) with no structured error event. The shared
-	// resolver reports that as `completed-with-warning`, still a success;
-	// the answer is preferred over raw stderr when there is no errorText.
-	return resolveCliTurnResult({
+	// Soft success: a provider that exits non-zero after a full answer with no
+	// structured error event resolves `completed-with-warning`, still a
+	// success; the answer is preferred over raw stderr when there is no
+	// errorText. Not Grok: its native stream proves success only with an
+	// end_turn record (see grokCliFailure), as the desktop's structured
+	// terminal rule does.
+	const grok = toolType === 'grok';
+	const result = resolveCliTurnResult({
 		toolType,
 		provider: parser,
 		exitCode: exit.exitCode,
@@ -1896,17 +1910,63 @@ async function spawnJsonLineAgent(
 			capture.errorText ??
 			(toolType === 'codex' && exit.exitCode === 0 && !codexFinal && !codexCandidate
 				? 'Agent returned no final text'
-				: undefined),
+				: grok && exit.exitCode === 0 && !exit.interrupted && !capture.resultMessageSeen
+					? GROK_NO_TERMINAL_MESSAGE
+					: undefined),
 		answerText: toolType === 'codex' ? codexFinal || codexCandidate : capture.answerText,
 		resultMessageSeen: capture.resultMessageSeen,
 		agentSessionId: capture.sessionId,
 		usageStats: capture.usage,
-		// This path has always accepted a clean exit with no answer, and a
-		// non-zero exit after a full answer (Grok with `--max-turns`).
+		// This path has always accepted a clean exit with no answer.
 		strictEmptyAnswer: toolType === 'codex' || overrides.timeoutMs !== undefined,
-		answerOutranksBareExit: true,
+		answerOutranksBareExit: !grok || capture.resultMessageSeen,
 		droppedOutputBytes: exit.droppedOutputBytes,
 	});
+	return grok ? grokCliFailure(result, capture, parser, exit) : result;
+}
+
+/**
+ * What a Grok CLI turn that wrote no native terminal record reads as. A clean
+ * exit with no `end` record (an empty stdout, a stream cut before its last
+ * line) is never a completed task: the shared parser says the same when it saw
+ * native frames, and this covers the stream that carried none at all.
+ */
+const GROK_NO_TERMINAL_MESSAGE =
+	'Grok exited without a native terminal record. Any response is incomplete.';
+
+/**
+ * Keep a failed Grok turn's failure actionable (GT1-08-05). The in-band error
+ * envelope, or a non-zero exit's stderr, is classified by the Grok parser's
+ * own pattern bank; an auth, rate-limit, quota, context, model or network
+ * category is carried on `agentError` (the Auto Run engine's pause and limit
+ * rules read it) and its message leads `error`, with the provider's own words
+ * kept beside it. An unclassified or generic crash keeps the error it had.
+ * Success, interruption and a managed refusal pass through untouched.
+ */
+function grokCliFailure(
+	result: AgentResult,
+	capture: TurnCapture,
+	parser: NonNullable<ReturnType<typeof createOutputParser>>,
+	exit: { exitCode: number | null; stderrText: string }
+): AgentResult {
+	if (result.success || result.outcome === 'interrupted' || result.managed) return result;
+	const classified =
+		capture.inBandError ??
+		(exit.exitCode !== null && exit.exitCode !== 0
+			? parser.detectErrorFromExit(exit.exitCode, exit.stderrText, '')
+			: null);
+	if (!classified || classified.type === 'unknown' || classified.type === 'agent_crashed') {
+		return result;
+	}
+	const detail = result.error?.trim();
+	return {
+		...result,
+		agentError: classified,
+		error:
+			detail && detail !== classified.message
+				? `${classified.message} (${detail})`
+				: classified.message,
+	};
 }
 
 /**
