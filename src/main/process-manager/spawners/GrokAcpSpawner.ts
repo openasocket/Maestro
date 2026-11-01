@@ -641,8 +641,20 @@ class GrokAcpDesktopTurn {
 			},
 			{
 				onEvent: (event) => {
-					if (!this.isCurrent()) return;
-					this.ctx.stdoutHandler.handleNormalizedEvent(config.sessionId, managedProcess, event);
+					if (this.isCurrent()) {
+						this.ctx.stdoutHandler.handleNormalizedEvent(config.sessionId, managedProcess, event);
+						return;
+					}
+					// A kill removes the process from the map before the driver settles. Spend the
+					// turn already incurred is still its own: only its usage (and the terminal that
+					// marks it partial) is recorded, while no newer process holds the session.
+					if (this.killedAwaitingSettlement() && (event.usage || event.terminal))
+						this.ctx.stdoutHandler.handleNormalizedEvent(config.sessionId, managedProcess, {
+							type: 'usage',
+							sessionId: event.sessionId,
+							usage: event.usage,
+							terminal: event.terminal,
+						});
 				},
 			}
 		);
@@ -772,6 +784,16 @@ class GrokAcpDesktopTurn {
 		return (
 			!this.finished &&
 			this.ctx.processes.get(this.config.sessionId) === this.managedProcess &&
+			!isSupersededGeneration(this.config.sessionId, this.managedProcess.spawnGeneration)
+		);
+	}
+
+	/** Killed by this host, not yet settled, and the session not taken by a newer process. */
+	private killedAwaitingSettlement(): boolean {
+		return (
+			this.stopped &&
+			!this.finished &&
+			!this.ctx.processes.has(this.config.sessionId) &&
 			!isSupersededGeneration(this.config.sessionId, this.managedProcess.spawnGeneration)
 		);
 	}
