@@ -702,6 +702,164 @@ describe('public Grok ACP turn composition', () => {
 		expect(h.onRequestSettlement).toHaveBeenCalledTimes(1);
 	});
 
+	// GT1-10-04B: the unattended contract. maestro-cli host, Cue, runtime and Auto Run turns
+	// all run this driver. A question the turn owns settles at once with its method's own
+	// cancel outcome, and the turn reads the capability gap the desktop tab shows: never an
+	// interruption the caller asked for, never an approval. No answer (first, duplicate,
+	// forged or from another turn) reaches the wire or the effect authority.
+	describe('unattended questions and plans (GT1-10-04B)', () => {
+		const ASK = '_x.ai/ask_user_question';
+		const ELICIT = '_x.ai/mcp/elicit';
+		const ask = (
+			h: { receive(message: object): void },
+			method = ASK,
+			sessionId = 'native-1',
+			id = 'question'
+		) =>
+			h.receive({
+				id,
+				method,
+				params: {
+					sessionId,
+					...(method === ASK
+						? { mode: 'default', questions: [{ question: 'Pick', options: [{ label: 'One' }] }] }
+						: { mode: 'form', message: 'Choose', requestedSchema: { type: 'object' } }),
+				},
+			});
+		const plansOf = (h: {
+			onEvent: { mock: { calls: Array<[{ toolName?: string }, ...unknown[]]> } };
+		}) => h.onEvent.mock.calls.map(([e]) => e).filter((e) => e.toolName === 'update_plan');
+		const settledQuestion = (onQuestion: ReturnType<typeof vi.fn>, index = 0) => {
+			const event = onQuestion.mock.calls[index][0] as Parameters<
+				NonNullable<GrokAcpTurnHandlers['onQuestion']>
+			>[0];
+			if (event.state !== 'settled') throw new Error('Question unexpectedly pending');
+			return event.settlement;
+		};
+
+		it.each([
+			[ASK, 'cancelled', 'a question for you'],
+			[ELICIT, 'cancel', 'an MCP elicitation'],
+		] as const)(
+			'settles a %s the turn owns as a capability gap, not an interruption',
+			async (method, outcome, kind) => {
+				const onQuestion = vi.fn<NonNullable<GrokAcpTurnHandlers['onQuestion']>>();
+				const h = fixture({}, { onQuestion });
+				h.start();
+				const prompt = await h.ready();
+				ask(h, method);
+				await vi.advanceTimersByTimeAsync(0);
+				const wire = () => h.messages.filter((m: AcpMessage) => m.id === 'question');
+				expect(wire()).toEqual([{ jsonrpc: '2.0', id: 'question', result: { outcome } }]);
+				const settlement = settledQuestion(onQuestion);
+				expect(settlement).toMatchObject({ turnId: h.options.turnId, reason: 'unavailable' });
+				// First, duplicate and forged answers are refused with no second wire write.
+				expect(h.run.answerQuestion(settlement.identity, 'One')).toBe('unavailable');
+				expect(h.run.answerQuestion(settlement.identity, 'One')).toBe('unavailable');
+				expect(h.run.answerQuestion({ ...settlement.identity, questionId: 'forged' }, 'One')).toBe(
+					'unavailable'
+				);
+				expect(wire()).toHaveLength(1);
+				h.reply(prompt, { stopReason: 'end_turn' });
+				const done = await h.finish();
+				expect(done.outcome).toBe('crashed');
+				expect(done.terminal).toMatchObject({
+					status: 'cancelled',
+					reason: 'user-input-unavailable',
+				});
+				expect(done.error).toMatchObject({
+					type: 'unknown',
+					recoverable: false,
+					agentId: 'grok',
+					sessionId: 'native-1',
+				});
+				expect(done.error?.message).toContain(`${kind} (${method})`);
+				expect(done.error?.message).toContain('advertises no ask-back capability');
+				expect(done.error?.message).toContain(
+					'no tool was authorized and no permission or policy changed'
+				);
+				expect(h.decide).not.toHaveBeenCalled();
+				expect(onQuestion).toHaveBeenCalledTimes(1);
+			}
+		);
+
+		it('ignores a stale question for another session: the turn keeps its own outcome', async () => {
+			const onQuestion = vi.fn<NonNullable<GrokAcpTurnHandlers['onQuestion']>>();
+			const h = fixture({}, { onQuestion });
+			h.start();
+			const prompt = await h.ready();
+			ask(h, ASK, 'native-other', 'stale');
+			await vi.advanceTimersByTimeAsync(0);
+			for (const [event] of onQuestion.mock.calls) {
+				if (event.state === 'settled') expect(event.settlement.turnId).toBeNull();
+			}
+			h.update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Done' } });
+			h.reply(prompt, { stopReason: 'end_turn' });
+			const done = await h.finish();
+			expect(done).toMatchObject({ outcome: 'completed', answerText: 'Done' });
+			expect(done.terminal.status).toBe('success');
+			expect(done.error).toBeUndefined();
+			expect(h.decide).not.toHaveBeenCalled();
+		});
+
+		it('keeps a user Stop after a settled question an interruption with no question error', async () => {
+			const onQuestion = vi.fn<NonNullable<GrokAcpTurnHandlers['onQuestion']>>();
+			const h = fixture({}, { onQuestion });
+			h.start();
+			const prompt = await h.ready();
+			ask(h);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(settledQuestion(onQuestion).reason).toBe('unavailable');
+			h.run.cancel();
+			expect(h.calls('session/cancel')).toHaveLength(1);
+			h.reply(prompt, { stopReason: 'cancelled' });
+			const done = await h.finish();
+			expect(done.outcome).toBe('interrupted');
+			expect(done.terminal).toMatchObject({ status: 'cancelled', reason: 'host-cancelled' });
+			expect(done.error?.message ?? '').not.toContain('ask-back');
+			expect(h.decide).not.toHaveBeenCalled();
+		});
+
+		it('keeps two concurrent turns apart: the question, its gap and the plan stay with their owner', async () => {
+			const onQuestionA = vi.fn<NonNullable<GrokAcpTurnHandlers['onQuestion']>>();
+			const onQuestionB = vi.fn<NonNullable<GrokAcpTurnHandlers['onQuestion']>>();
+			const a = fixture({}, { onQuestion: onQuestionA });
+			// One account cannot hold the same native session twice, so tab B is another account.
+			const b = fixture({ account: 'fixture-account-b' }, { onQuestion: onQuestionB });
+			a.start();
+			const promptA = await a.ready();
+			b.start();
+			const promptB = await b.ready();
+			// Both peers reuse request id `question` and native session id `native-1`.
+			ask(a);
+			b.update({
+				sessionUpdate: 'plan',
+				entries: [{ content: 'Plan B', priority: 'low', status: 'pending' }],
+			});
+			await vi.advanceTimersByTimeAsync(0);
+			const settlement = settledQuestion(onQuestionA);
+			expect(b.run.answerQuestion(settlement.identity, 'One')).toBe('unavailable');
+			expect(onQuestionB).not.toHaveBeenCalled();
+			expect(b.messages.filter((m: AcpMessage) => m.id === 'question')).toEqual([]);
+			b.reply(promptB, { stopReason: 'end_turn' });
+			a.reply(promptA, { stopReason: 'end_turn' });
+			const [doneA, doneB] = [await a.finish(), await b.finish()];
+			expect(doneA.outcome).toBe('crashed');
+			expect(doneB.outcome).toBe('completed');
+			expect(doneB.error).toBeUndefined();
+			expect(plansOf(a)).toEqual([]);
+			expect(plansOf(b)).toEqual([
+				expect.objectContaining({
+					toolState: expect.objectContaining({
+						planUpdate: expect.objectContaining({ turnId: b.options.turnId }),
+					}),
+				}),
+			]);
+			expect(a.decide).not.toHaveBeenCalled();
+			expect(b.decide).not.toHaveBeenCalled();
+		});
+	});
+
 	it.each(['aborted', 'blank-turn', 'stdin'])(
 		'rejects %s preflight before admission or allocating lifecycle work',
 		(kind) => {
