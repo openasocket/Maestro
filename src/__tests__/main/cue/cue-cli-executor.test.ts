@@ -758,3 +758,135 @@ describe('cue-cli-executor', () => {
 		expect(stopProcess('does-not-exist')).toBe(false);
 	});
 });
+
+/**
+ * A Grok pipeline's nested maestro-cli action (GT1-08-09F). The owner is a
+ * Grok agent and the upstream output is a Grok answer; the courier is the
+ * same mocked child. The courier names the Grok owner as caller, a Cue as the
+ * source and the run's context; a refusal, a stop or a failed courier is never
+ * `completed`.
+ */
+describe('cue-cli-executor with a Grok owner (GT1-08-09F)', () => {
+	const inherited = {
+		[CALLER_AGENT_ID_ENV_VAR]: process.env[CALLER_AGENT_ID_ENV_VAR],
+		[QUERY_SOURCE_ENV_VAR]: process.env[QUERY_SOURCE_ENV_VAR],
+	};
+	const grokSession = (): SessionInfo => ({
+		...createSession(),
+		id: 'grok-1',
+		name: 'Grok Reviewer',
+		toolType: 'grok',
+	});
+	const grokDelegation = (overrides: Partial<ManagedDelegationContext> = {}) =>
+		createDelegation({
+			delegation: {
+				chain: [
+					{ kind: 'service', id: 'cue-subscription:cli-test' },
+					{ kind: 'agent', id: 'grok-1' },
+				],
+				grantRef: null,
+			},
+			...overrides,
+		});
+	const grokConfig = (overrides: Record<string, unknown> = {}) =>
+		createConfig({
+			session: grokSession(),
+			event: createEvent({
+				sourceSession: 'Grok Reviewer',
+				sourceSessionId: 'grok-1',
+				sourceOutput: 'grok answer: all checks pass',
+			}),
+			cli: { command: 'send' as const, target: 'agent-2' },
+			delegation: grokDelegation(),
+			...overrides,
+		});
+	const managedAdmission = (authority: { admit: ReturnType<typeof vi.fn> }) => ({
+		authority,
+		context: {},
+		policy: { sources: [], policyRevision: 7 },
+		account: null,
+	});
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockIsWindows.mockReturnValue(false);
+		process.env[CALLER_AGENT_ID_ENV_VAR] = 'stale-agent';
+		process.env[QUERY_SOURCE_ENV_VAR] = 'user';
+	});
+
+	afterEach(() => {
+		for (const [key, value] of Object.entries(inherited)) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+	});
+
+	it('dispatches the Grok answer with the Grok owner as caller, Cue as source and the run context', async () => {
+		const delegation = grokDelegation();
+		const promise = executeCueCli(grokConfig({ delegation }) as any);
+		await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(1));
+		expect(getProcessList()).toContainEqual(
+			expect.objectContaining({ runId: 'run-1', toolType: 'terminal' })
+		);
+		mockChild.emit('close', 0);
+		const result = await promise;
+
+		expect(result).toMatchObject({ status: 'completed', sessionId: 'grok-1', exitCode: 0 });
+		const args = mockSpawn.mock.calls[0][1] as string[];
+		expect(args.slice(1)).toEqual([
+			'dispatch',
+			'agent-2',
+			'grok answer: all checks pass',
+			'--background',
+		]);
+		const env = spawnedEnv();
+		expect(env[CALLER_AGENT_ID_ENV_VAR]).toBe('grok-1');
+		expect(env[QUERY_SOURCE_ENV_VAR]).toBe('cue');
+		expect(readDelegationContextEnv(env)).toEqual({ status: 'ok', context: delegation });
+		expect(getProcessList()).not.toContainEqual(expect.objectContaining({ runId: 'run-1' }));
+	});
+
+	it('under management the Grok owner nested dispatch is refused unavailable: no courier, no lease', async () => {
+		const authority = { admit: vi.fn() };
+		const result = await executeCueCli(
+			grokConfig({
+				delegation: grokDelegation({ policyRevision: 7 }),
+				admission: managedAdmission(authority),
+			}) as any
+		);
+		expect(mockSpawn).not.toHaveBeenCalled();
+		expect(authority.admit).not.toHaveBeenCalled();
+		expect(result).toMatchObject({
+			status: 'failed',
+			exitCode: null,
+			sessionId: 'grok-1',
+			managed: { state: 'unavailable', code: 'capability-unsupported' },
+		});
+		expect(result.stderr).toContain('nested-dispatch');
+	});
+
+	it('a stopped Grok run spawns no courier', async () => {
+		const controller = new AbortController();
+		controller.abort();
+		const result = await executeCueCli(grokConfig({ signal: controller.signal }) as any);
+		expect(mockSpawn).not.toHaveBeenCalled();
+		expect(result).toMatchObject({ status: 'stopped', exitCode: null, sessionId: 'grok-1' });
+	});
+
+	it('a courier stopped mid-dispatch or refused by the target is failed, never completed', async () => {
+		const stopped = executeCueCli(grokConfig() as any);
+		await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(1));
+		expect(stopProcess('run-1')).toBe(true);
+		expect(mockChild.killed).toBe(true);
+		mockChild.emit('close', null);
+		expect((await stopped).status).not.toBe('completed');
+
+		const refused = executeCueCli(grokConfig({ runId: 'run-2' }) as any);
+		await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalledTimes(2));
+		mockChild.stderr.emit('data', 'agent-2 refused the turn: managed-denied');
+		mockChild.emit('close', 1);
+		const result = await refused;
+		expect(result).toMatchObject({ status: 'failed', exitCode: 1 });
+		expect(result.stderr).toContain('managed-denied');
+	});
+});

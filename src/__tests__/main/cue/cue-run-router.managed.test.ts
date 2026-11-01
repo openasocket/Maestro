@@ -34,6 +34,8 @@ import {
 } from '../../../shared/maestro-lib/managed/delegation';
 import { canonicalJson } from '../../../shared/canonicalJson';
 import type { CueRunResult } from '../../../shared/cue/contracts';
+import { matchesFilter } from '../../../main/cue/cue-filter';
+import { requireEncoreFeature } from '../../../shared/encoreFeatureDefaults';
 
 const SESSION: CueRunSessionRecord = {
 	id: 'agent-1',
@@ -568,5 +570,222 @@ describe('the owner fence claimed per firing (MRC-07-06)', () => {
 		expect(result.managed).toEqual({ state: 'unavailable', code: 'capability-unsupported' });
 		expect(result.stderr).toContain('CP-03');
 		expect(deps.executeCuePrompt).not.toHaveBeenCalled();
+	});
+});
+
+/**
+ * A Grok pipeline through the router (GT1-08-09F). The owning agent is a Grok
+ * agent; the port is the same real headless port; the executors are doubles
+ * that report what they were handed. Each action reaches only its own
+ * executor, on the Grok owner's lineage, and a refusal, a failure or a stop is
+ * never a `completed` result, so no `agent.completed` chain filtered on
+ * `status: completed` starts from it.
+ */
+describe('a Grok pipeline (GT1-08-09F)', () => {
+	const GROK: CueRunSessionRecord = {
+		id: 'grok-1',
+		name: 'Grok Reviewer',
+		toolType: 'grok',
+		projectRoot: '/work/grok',
+		sessionSshRemoteConfig: { enabled: false, remoteId: null },
+		customModel: 'grok-4',
+		customEnvVars: { GROK_HOME: '/home/u/.grok' },
+	};
+	const GROK_CHAIN = [
+		{ kind: 'service', id: 'cue-subscription:nightly' },
+		{ kind: 'agent', id: 'grok-1' },
+	];
+	const CLI_CALL = { command: 'send', target: 'agent-2', message: 'grok said done' };
+	const ACTIONS = {
+		prompt: {},
+		shell: { action: 'command', command: { mode: 'shell', shell: 'make check' } },
+		cli: { action: 'command', command: { mode: 'cli', cli: CLI_CALL } },
+	} as unknown as Record<'prompt' | 'shell' | 'cli', Partial<OnCueRunParams>>;
+
+	function grokDeps(managed?: CueManagedDeps, status: CueRunResult['status'] = 'completed') {
+		const deps = makeDeps(managed);
+		const report = (c: { runId: string }) =>
+			({ ...fakeResult(c.runId), status }) as unknown as CueRunResult;
+		deps.findSession.mockImplementation(((id: string) =>
+			id === GROK.id ? GROK : undefined) as never);
+		deps.resolveAgentPath.mockImplementation(async () => '/detected/grok');
+		deps.executeCuePrompt.mockImplementation(async (c: CueExecutionConfig) => report(c));
+		deps.executeCueShell.mockImplementation(async (c: { runId: string }) => report(c));
+		deps.executeCueCli.mockImplementation(async (c: { runId: string }) => report(c));
+		const reportAuthFailure = vi.fn(async () => undefined);
+		Object.assign(deps, { reportAuthFailure });
+		return { deps, reportAuthFailure };
+	}
+	const grokParams = (overrides: Partial<OnCueRunParams> = {}) =>
+		params({ sessionId: GROK.id, ...overrides });
+	const executorCalls = (deps: ReturnType<typeof makeDeps>) => [
+		deps.executeCuePrompt.mock.calls.length,
+		deps.executeCueShell.mock.calls.length,
+		deps.executeCueCli.mock.calls.length,
+	];
+	/** What a downstream `agent.completed` subscription with `filter: { status: completed }` sees. */
+	const startsSuccessChain = (result: CueRunResult) =>
+		matchesFilter(
+			{ status: result.status, exitCode: result.exitCode ?? null },
+			{
+				status: 'completed',
+			}
+		);
+
+	it('routes each event action to its own executor only, on the Grok owner', async () => {
+		const { deps } = grokDeps();
+		await executeCueRunAction(deps, grokParams());
+		expect(executorCalls(deps)).toEqual([1, 0, 0]);
+		const prompt = deps.executeCuePrompt.mock.calls[0][0];
+		expect(prompt).toMatchObject({
+			toolType: 'grok',
+			customPath: '/detected/grok',
+			customModel: 'grok-4',
+			customEnvVars: { GROK_HOME: '/home/u/.grok' },
+			projectRoot: '/work/grok',
+		});
+		expect(deps.resolveAgentPath).toHaveBeenCalledWith('grok');
+
+		await executeCueRunAction(deps, grokParams({ runId: 'run-s', ...ACTIONS.shell }));
+		expect(executorCalls(deps)).toEqual([1, 1, 0]);
+		const shell = deps.executeCueShell.mock.calls[0][0] as unknown as {
+			shellCommand: string;
+			projectRoot: string;
+			session: { toolType: string };
+		};
+		expect(shell.shellCommand).toBe('make check');
+		expect(shell.projectRoot).toBe('/work/grok');
+		expect(shell).not.toHaveProperty('customPath');
+		expect(shell).not.toHaveProperty('toolType');
+
+		await executeCueRunAction(deps, grokParams({ runId: 'run-c', ...ACTIONS.cli }));
+		expect(executorCalls(deps)).toEqual([1, 1, 1]);
+		const cli = deps.executeCueCli.mock.calls[0][0] as unknown as {
+			cli: unknown;
+			delegation: ManagedDelegationContext;
+		};
+		expect(cli.cli).toEqual(CLI_CALL);
+		expect(cli.delegation.delegation.chain).toEqual(GROK_CHAIN);
+		expect(cli.delegation.workflow).toBeNull();
+		// Neither command action resolved a Grok binary.
+		expect(deps.resolveAgentPath).toHaveBeenCalledTimes(1);
+	});
+
+	it('binds every Grok action on the owner lineage under management, with the verified context the nested CLI carries', async () => {
+		const port = cuePort();
+		const { deps } = grokDeps({
+			port: () => port,
+			workflowFence: () => FENCE,
+			newId: () => 'att-g',
+		});
+		for (const [i, kind] of (['prompt', 'shell', 'cli'] as const).entries()) {
+			await executeCueRunAction(deps, grokParams({ runId: `run-${i}`, ...ACTIONS[kind] }));
+		}
+		const admissions = [
+			deps.executeCuePrompt.mock.calls[0][0].admission,
+			(deps.executeCueShell.mock.calls[0][0] as unknown as CueExecutionConfig).admission,
+			(deps.executeCueCli.mock.calls[0][0] as unknown as CueExecutionConfig).admission,
+		];
+		for (const admission of admissions) {
+			expect(admission?.authority).toBe(port.authority);
+			expect(admission?.context.origin).toBe('cue');
+			expect(admission?.context.actor).toEqual({ kind: 'human', id: 'actor-registered' });
+			expect(admission?.context.delegation.chain).toEqual(GROK_CHAIN);
+			expect(admission?.context.workflow).toMatchObject({ ownerEpoch: 'epoch-3' });
+		}
+		const cli = deps.executeCueCli.mock.calls[0][0] as unknown as {
+			delegation: ManagedDelegationContext;
+		};
+		expect(cli.delegation).toEqual(delegationContextOf(admissions[2]!.context));
+		expect(cli.delegation.identity).toMatchObject({ requestId: 'run-2', attemptId: 'att-g' });
+	});
+
+	it('a workflow held by another owner refuses every Grok action before its executor, and starts no success chain', async () => {
+		const events: CueAdmissionEvent[] = [];
+		const { deps, reportAuthFailure } = grokDeps({
+			port: () => cuePort(),
+			workflowFence: () => ({
+				fence: null,
+				state: 'denied',
+				code: 'policy-denied',
+				message: 'Workflow "cue-pipeline:Nightly QA" is fenced: the registry holds another owner.',
+			}),
+			onAdmission: (event) => events.push(event),
+		});
+		for (const kind of ['prompt', 'shell', 'cli'] as const) {
+			const result = await executeCueRunAction(deps, grokParams(ACTIONS[kind]));
+			expect(result).toMatchObject({
+				status: 'failed',
+				exitCode: null,
+				sessionId: 'grok-1',
+				managed: { state: 'denied', code: 'policy-denied' },
+			});
+			expect(result.stderr).toContain('the registry holds another owner');
+			expect(startsSuccessChain(result)).toBe(false);
+		}
+		expect(executorCalls(deps)).toEqual([0, 0, 0]);
+		expect(reportAuthFailure).not.toHaveBeenCalled();
+		expect(events.map((e) => e.kind)).toEqual(['refused', 'refused', 'refused']);
+		for (const event of events) expect(event.lineage.delegation.chain).toEqual(GROK_CHAIN);
+	});
+
+	it('no owner fence and a port that will not bind are refused for Grok, never run unmanaged', async () => {
+		const unowned = grokDeps({ port: () => cuePort(), workflowFence: () => null }).deps;
+		for (const kind of ['prompt', 'shell', 'cli'] as const) {
+			const result = await executeCueRunAction(unowned, grokParams(ACTIONS[kind]));
+			expect(result.managed).toEqual({ state: 'unavailable', code: 'runtime-unavailable' });
+		}
+		expect(executorCalls(unowned)).toEqual([0, 0, 0]);
+
+		const unbound: CueSpawnAuthorityPort = {
+			...cuePort(),
+			context: () => ({ ok: false, code: 'unauthenticated', problems: ['no verifier bound it'] }),
+		};
+		const denied = grokDeps({ port: () => unbound, workflowFence: () => FENCE }).deps;
+		const result = await executeCueRunAction(denied, grokParams(ACTIONS.shell));
+		expect(result.managed).toEqual({ state: 'denied', code: 'unauthenticated' });
+		expect(executorCalls(denied)).toEqual([0, 0, 0]);
+	});
+
+	it('a stopped Grok run starts no executor and no success chain', async () => {
+		const controller = new AbortController();
+		controller.abort();
+		const { deps } = grokDeps({ port: () => cuePort(), workflowFence: () => FENCE });
+		for (const kind of ['prompt', 'shell', 'cli'] as const) {
+			const result = await executeCueRunAction(
+				deps,
+				grokParams({ ...ACTIONS[kind], signal: controller.signal })
+			);
+			expect(result).toMatchObject({ status: 'stopped', exitCode: null, sessionId: 'grok-1' });
+			expect(startsSuccessChain(result)).toBe(false);
+		}
+		expect(executorCalls(deps)).toEqual([0, 0, 0]);
+		expect(deps.resolveAgentPath).not.toHaveBeenCalled();
+	});
+
+	it('a failed or timed-out Grok result is persisted as it came, reported as Grok, and starts no success chain', async () => {
+		for (const status of ['failed', 'timeout'] as const) {
+			const { deps, reportAuthFailure } = grokDeps(undefined, status);
+			const prompt = await executeCueRunAction(deps, grokParams());
+			const shell = await executeCueRunAction(deps, grokParams(ACTIONS.shell));
+			const cli = await executeCueRunAction(deps, grokParams(ACTIONS.cli));
+			for (const result of [prompt, shell, cli]) {
+				expect(result.status).toBe(status);
+				expect(startsSuccessChain(result)).toBe(false);
+			}
+			expect(reportAuthFailure).toHaveBeenCalledTimes(1);
+			expect(reportAuthFailure).toHaveBeenCalledWith(prompt, 'grok', undefined);
+		}
+		const { deps } = grokDeps();
+		expect(startsSuccessChain(await executeCueRunAction(deps, grokParams()))).toBe(true);
+	});
+
+	it('Cue switched off refuses before any Grok pipeline reaches the router (the handler gate)', () => {
+		const off = { get: () => ({ maestroCue: false }) };
+		const on = { get: () => ({ maestroCue: true }) };
+		expect(() => requireEncoreFeature(off as never, 'maestroCue', 'CueDisabled')).toThrow(
+			'CueDisabled'
+		);
+		expect(() => requireEncoreFeature(on as never, 'maestroCue', 'CueDisabled')).not.toThrow();
 	});
 });

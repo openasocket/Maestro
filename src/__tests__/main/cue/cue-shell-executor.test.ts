@@ -853,3 +853,201 @@ describe('cue-shell-executor', () => {
 		});
 	});
 });
+
+/**
+ * A Grok pipeline's shell action (GT1-08-09F), driven on the executor itself.
+ * The owner is a Grok agent: the command still runs as a terminal child in
+ * the owner's project root, never as a Grok turn, carries the Cue query
+ * source and no Grok env, and is admitted on the Grok owner's lineage. A
+ * refusal, a stop or a non-zero exit is never `completed`.
+ */
+describe('cue-shell-executor with a Grok owner (GT1-08-09F)', () => {
+	let leaseSeq = 0;
+	const grokSession = (): SessionInfo => ({
+		...createSession(),
+		id: 'grok-1',
+		name: 'Grok Reviewer',
+		toolType: 'grok',
+		cwd: '/work/grok',
+		projectRoot: '/work/grok',
+	});
+	const grokConfig = (overrides: Record<string, unknown> = {}) =>
+		createConfig({
+			session: grokSession(),
+			shellCommand: 'make check',
+			subscription: createSubscription({ command: { mode: 'shell', shell: 'make check' } }),
+			projectRoot: '/work/grok',
+			...overrides,
+		});
+
+	/** The real authority and verifier, bound on the Grok owner's lineage. */
+	function grokAdmission(
+		decide: (request: AdmissionRequest) => PolicyDecision,
+		onLease?: (lease: DispatchLease) => void
+	): CueManagedAdmission {
+		const authority = createLocalHostAuthority({
+			authorityId: 'authority-grok',
+			decide,
+			now: () => Date.now(),
+			newId: () => `grok-lease-${++leaseSeq}`,
+		});
+		const verified = createContextVerifier({
+			verifierId: 'test',
+			peer: 'in-process',
+			now: () => Date.now(),
+			accept: () => [],
+		}).verify(
+			inProcessContext({
+				origin: 'cue',
+				installation: { installationId: 'inst-1', runtimeId: 'cue-1', processEpoch: 'e1' },
+				actor: { kind: 'human', id: 'actor-registered' },
+				delegation: {
+					chain: [
+						{ kind: 'service', id: 'cue-subscription:shell-test' },
+						{ kind: 'agent', id: 'grok-1' },
+					],
+					grantRef: null,
+				},
+				identity: {
+					requestId: 'run-1',
+					idempotencyKey: 'run-1',
+					attemptId: 'att-g',
+					runId: 'run-1',
+					rootRunId: 'run-1',
+					parentRunId: null,
+				},
+				policyRevision: 3,
+				workflow: {
+					workflowId: 'cue-pipeline:Grok QA',
+					version: 'v1',
+					triggerEventId: 'time.heartbeat:evt-1',
+					ownerEpoch: 'epoch-g',
+					fencingToken: 'fence-g',
+				},
+				traceId: 'cue:run-1:run-1:att-g',
+				requestedCapabilities: ['runs.submit'],
+			})
+		);
+		if (!verified.ok) throw new Error(verified.problems.join('; '));
+		return {
+			authority,
+			context: verified.context,
+			policy: { sources: [], policyRevision: 3 },
+			account: null,
+			...(onLease ? { onLease } : {}),
+		};
+	}
+	const qualified = (route: CueShellRoute): CueShellRouteSupport => ({
+		route,
+		standalone: 'implemented',
+		managed: 'implemented',
+		note: 'declared test double',
+	});
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		mockIsWindows.mockReturnValue(false);
+		vi.useFakeTimers();
+		vi.stubEnv('GROK_HOME', '');
+	});
+
+	afterEach(() => {
+		vi.unstubAllEnvs();
+		vi.useRealTimers();
+	});
+
+	it('runs the command as a terminal child in the Grok project root with the Cue source and no Grok env', async () => {
+		const promise = executeCueShell(grokConfig() as any);
+		await vi.advanceTimersByTimeAsync(0);
+
+		expect(mockSpawn).toHaveBeenCalledTimes(1);
+		const [command, args, opts] = mockSpawn.mock.calls[0] as [
+			string,
+			string[],
+			{ cwd: string; env: Record<string, string> },
+		];
+		expect(command).toBe('make check');
+		expect(args).toEqual([]);
+		expect(opts.cwd).toBe('/work/grok');
+		expect(opts.env.MAESTRO_QUERY_SOURCE).toBe('cue');
+		expect(opts.env.GROK_HOME ?? '').toBe('');
+		expect(getProcessList()).toContainEqual(
+			expect.objectContaining({ runId: 'run-1', toolType: 'terminal' })
+		);
+
+		mockChild.emit('close', 0);
+		const result = await promise;
+		expect(result).toMatchObject({ status: 'completed', sessionId: 'grok-1', exitCode: 0 });
+		expect(getProcessList()).not.toContainEqual(expect.objectContaining({ runId: 'run-1' }));
+	});
+
+	it('a run already stopped, called on the executor directly, spawns nothing and lists nothing', async () => {
+		const controller = new AbortController();
+		controller.abort();
+		const result = await executeCueShell(grokConfig({ signal: controller.signal }) as any);
+		expect(mockSpawn).not.toHaveBeenCalled();
+		expect(result).toMatchObject({ status: 'stopped', exitCode: null, sessionId: 'grok-1' });
+		expect(getProcessList()).not.toContainEqual(expect.objectContaining({ runId: 'run-1' }));
+	});
+
+	it('under management the Grok-owned command is refused before any lease or spawn', async () => {
+		const decide = vi.fn(() => ({ decision: 'allow', policyRevision: 3 }) as PolicyDecision);
+		const result = await executeCueShell(grokConfig({ admission: grokAdmission(decide) }) as any);
+		expect(mockSpawn).not.toHaveBeenCalled();
+		expect(decide).not.toHaveBeenCalled();
+		expect(result).toMatchObject({
+			status: 'failed',
+			exitCode: null,
+			sessionId: 'grok-1',
+			managed: { state: 'unavailable', code: 'capability-unsupported' },
+		});
+	});
+
+	it('on a qualified route (declared double) the admission names the Grok owner and a denial starts nothing', async () => {
+		const requests: AdmissionRequest[] = [];
+		const result = await executeCueShell(
+			grokConfig({
+				admission: grokAdmission((request) => {
+					requests.push(request);
+					return {
+						decision: 'deny',
+						reason: 'shell actions are not allowed for Grok pipelines',
+						policyRevision: 3,
+						code: 'policy-denied',
+					};
+				}),
+				routeSupport: qualified,
+			}) as any
+		);
+		expect(requests).toHaveLength(1);
+		expect(requests[0].snapshot).toMatchObject({
+			executable: 'make check',
+			provider: 'cue-shell',
+			cwd: '/work/grok',
+			resourceIds: ['dir:/work/grok'],
+		});
+		expect(requests[0].context.delegation.chain).toContainEqual({ kind: 'agent', id: 'grok-1' });
+		expect(mockSpawn).not.toHaveBeenCalled();
+		expect(result.status).toBe('failed');
+		expect(result.managed).toEqual({ state: 'denied', code: 'policy-denied' });
+	});
+
+	it('a non-zero exit or a stop mid-run is never completed', async () => {
+		const failing = executeCueShell(grokConfig() as any);
+		await vi.advanceTimersByTimeAsync(0);
+		mockChild.stderr.emit('data', 'check failed\n');
+		mockChild.emit('close', 3);
+		expect(await failing).toMatchObject({
+			status: 'failed',
+			exitCode: 3,
+			stderr: 'check failed\n',
+		});
+
+		const running = executeCueShell(grokConfig({ runId: 'run-2' }) as any);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(stopProcess('run-2')).toBe(true);
+		expect(mockChild.killed).toBe(true);
+		mockChild.emit('close', null, 'SIGTERM');
+		expect((await running).status).not.toBe('completed');
+	});
+});
