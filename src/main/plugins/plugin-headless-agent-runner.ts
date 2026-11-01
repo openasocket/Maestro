@@ -18,8 +18,13 @@ import {
 } from '../../shared/maestro-lib/managed/delegation';
 import type { AgentResult, SpawnAgentOptions } from '../../cli/services/agent-spawner';
 import type { HeadlessAgentRunner } from './plugin-manager-singleton';
-import { createPluginRunProofFile, removePluginRunProofFile } from './plugin-tool-run-identity';
-import type { PluginToolReceipt } from './plugin-tool-run-identity';
+import {
+	createPluginRunProofFile,
+	pluginToolEvidenceMessage,
+	pluginToolEvidenceProblem,
+	removePluginRunProofFile,
+} from './plugin-tool-run-identity';
+import type { PluginToolReceipt, PluginToolRunEvidence } from './plugin-tool-run-identity';
 import { MCP_CONFIG_BY_AGENT } from '../../shared/plugins/mcp-agent-config';
 import { logger } from '../utils/logger';
 import { captureException } from '../utils/sentry';
@@ -49,6 +54,13 @@ export interface PluginHeadlessRunnerDeps {
 	issueRunToken: (agentId: string, ttlMs: number, receiptToolId?: string) => string;
 	getRunReceipts?: (token: string) => PluginToolReceipt[];
 	hasRunReceiptOverflow?: (token: string) => boolean;
+	/**
+	 * The host-observed record of a run's bridge (GT1-07-06A), read after the
+	 * turn and before the proof is revoked. Required for a required run whose
+	 * provider declares `toolEvidence: 'observed'`; absent, such a run refuses
+	 * before spawn rather than succeeding on what the provider reports.
+	 */
+	getRunEvidence?: (token: string) => PluginToolRunEvidence;
 	revokeRunToken: (token: string) => void;
 	cliScriptPath: () => string;
 	audit: (agentId: string, resumed: boolean) => void;
@@ -165,8 +177,18 @@ export function pluginBoundHeadlessAuthority(
 	};
 }
 
+const EMPTY_RUN_EVIDENCE: PluginToolRunEvidence = {
+	advertisements: 0,
+	advertisedToolIds: [],
+	receipts: [],
+	receiptsOverflowed: false,
+};
+
 /** Build a cancellable host turn using live desktop provider settings and execution mode.
  * Required tools/receipts fail before spawn when no authenticated local MCP bridge exists.
+ * For a provider declaring `toolEvidence: 'observed'`, a required run also fails after
+ * the turn when the host never saw its bridge list the tools or execute the required
+ * one: a failed turn, never a retry without the bridge or a standalone spawn.
  * Every issued proof is revoked in finally, including provider and cleanup failures.
  */
 export function createPluginHeadlessAgentRunner(
@@ -186,10 +208,16 @@ export function createPluginHeadlessAgentRunner(
 		const agent = deps.getAgent(agentId);
 		if (!agent) throw new Error(`agents.send: no agent "${agentId}"`);
 		const local = !agent.sessionSshRemoteConfig?.enabled;
+		const mcpCapability = MCP_CONFIG_BY_AGENT[agent.toolType];
+		const required = !!receiptToolId || requirePluginTools;
+		// A provider whose required runs are proven by host observation alone
+		// (GT1-07-06A): the bridge's listing and executed calls decide.
+		const observedEvidence = required && mcpCapability?.toolEvidence === 'observed';
 		if (
-			(receiptToolId || requirePluginTools) &&
+			required &&
 			(!local ||
-				!MCP_CONFIG_BY_AGENT[agent.toolType]?.verified ||
+				!mcpCapability?.verified ||
+				(observedEvidence && !deps.getRunEvidence) ||
 				(agent.toolType === 'claude-code' && getClaudeTokenMode(agent) !== 'api') ||
 				!deps.hasPluginTools() ||
 				(!!receiptToolId && (!deps.getRunReceipts || !deps.hasRunReceiptOverflow)))
@@ -279,12 +307,24 @@ export function createPluginHeadlessAgentRunner(
 
 			const receiptsOverflowed =
 				!!receiptToolId && !!runToken && deps.hasRunReceiptOverflow!(runToken);
+			// Read before the finally revokes the proof. A run with no proof has no
+			// evidence, so it fails rather than succeeding on the provider's word.
+			const evidenceProblem = observedEvidence
+				? pluginToolEvidenceProblem({
+						requirePluginTools,
+						receiptToolId,
+						agentId: agent.id,
+						evidence: runToken ? deps.getRunEvidence!(runToken) : EMPTY_RUN_EVIDENCE,
+					})
+				: null;
 			const success =
 				result.success &&
 				typeof result.response === 'string' &&
 				result.response.trim().length > 0 &&
 				!signal?.aborted &&
-				!receiptsOverflowed;
+				!receiptsOverflowed &&
+				!evidenceProblem;
+			const providerError = result.error ? `; provider error: ${result.error}` : '';
 			return {
 				success,
 				response: success ? result.response! : null,
@@ -295,8 +335,10 @@ export function createPluginHeadlessAgentRunner(
 					? {}
 					: {
 							error: receiptsOverflowed
-								? `Plugin tool receipt limit exceeded; inspect recorded receipts before retrying${result.error ? `; provider error: ${result.error}` : ''}`
-								: (result.error ?? 'Agent run failed or returned no final text'),
+								? `Plugin tool receipt limit exceeded; inspect recorded receipts before retrying${providerError}`
+								: evidenceProblem
+									? `${pluginToolEvidenceMessage(evidenceProblem, receiptToolId)}${providerError}`
+									: (result.error ?? 'Agent run failed or returned no final text'),
 						}),
 			};
 		} finally {

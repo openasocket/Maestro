@@ -69,6 +69,15 @@ export interface McpConfigCapability {
 	qualifiedVersions?: readonly string[];
 	/** For overlay strategies: the native source revision whose schema the payload follows. */
 	schemaSource?: string;
+	/**
+	 * What proves a run that required plugin tools actually had them (GT1-07-06A).
+	 * `'observed'`: the host's own record of the run's bridge decides, through
+	 * `pluginToolEvidenceProblem()`; a turn whose bridge never listed the tools, or
+	 * listed a required tool it never executed, fails, whatever the provider says.
+	 * Absent: today's semantics (pre-spawn gates, receipts read as returned) until
+	 * that provider has its own evidence.
+	 */
+	toolEvidence?: 'observed';
 }
 
 /**
@@ -315,6 +324,8 @@ export const MCP_CONFIG_BY_AGENT: Record<string, McpConfigCapability> = {
 		fileName: 'config.toml',
 		qualifiedVersions: [],
 		schemaSource: 'xai-org/grok-build@2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8',
+		// A required run is proven only by what the host observed of its bridge.
+		toolEvidence: 'observed',
 	},
 	// hermes / pi: MCP support is unconfirmed. Carried as inert best-guess entries
 	// (the generic `{ mcpServers }` file shape) so the map covers every shipping
