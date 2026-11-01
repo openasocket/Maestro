@@ -19,9 +19,13 @@
  * `StdoutHandler.handleNormalizedEvent`, so streamed answer, thoughts, tools, late
  * native session IDs and usage reach the renderer by the path a parsed line takes.
  *
- * Permission requests are answered by the managed host's effect authority, bound to the
- * admission's lease and actor. A standalone desktop has no consent port for ACP requests
- * yet, so the selector refuses its standard-mode turns (`consent-port`).
+ * Permission requests of a managed turn are answered by the host's effect authority,
+ * bound to the admission's lease and actor. A standalone turn asks the person: the
+ * permission relay's consent session surfaces each request on the existing permission
+ * prompt for the turn's own agent and tab, and only an explicit Allow answers the
+ * request's `allow_once` option. Deny, timeout, Stop, the process exiting and a lost
+ * connection all deny; nothing is auto-approved. With no tab or no prompt surface there
+ * is no consent port, and the selector refuses the turn (`consent-port`).
  */
 
 import { createHash } from 'crypto';
@@ -42,6 +46,12 @@ import {
 	unavailableEffectAuthority,
 	type ManagedEffectAuthority,
 } from '../../../shared/maestro-lib/managed/effects';
+import type { ManagedPrincipalRef } from '../../../shared/maestro-lib/managed/types';
+import {
+	permissionRelayServer,
+	type RelayConsentSession,
+} from '../../permission-relay/PermissionRelayServer';
+import { RELAY_DECISION_TIMEOUT_MS, type RelaySpawnBinding } from '../../permission-relay/types';
 import {
 	beginGrokAcpNegotiation,
 	completeGrokAcpNegotiation,
@@ -73,6 +83,57 @@ const GENERATED_VALUE_FLAGS = new Set([
 	'--reasoning-effort',
 ]);
 const GENERATED_BOOLEAN_FLAGS = new Set(['--always-approve']);
+
+/** Where a standalone turn's consent sessions come from (the permission relay). */
+export interface GrokConsentPort {
+	openConsentSession(binding: RelaySpawnBinding): RelayConsentSession | null;
+}
+
+/** The person at this desktop, the actor of a standalone consent binding. */
+const DESKTOP_PERSON: ManagedPrincipalRef = Object.freeze({ kind: 'human', id: 'desktop-user' });
+
+/** What the permission prompt shows of one ACP permission request: its tool and input. */
+export function describeGrokPermission(request: unknown): {
+	toolName: string;
+	input: Record<string, unknown>;
+} {
+	const tool =
+		request && typeof request === 'object'
+			? (request as { toolCall?: unknown }).toolCall
+			: undefined;
+	const call = tool && typeof tool === 'object' ? (tool as Record<string, unknown>) : {};
+	const name = [call.title, call.kind].find((v) => typeof v === 'string' && v.trim());
+	const raw = call.rawInput;
+	return {
+		toolName: typeof name === 'string' ? name : 'Grok tool',
+		input:
+			raw && typeof raw === 'object' && !Array.isArray(raw)
+				? { ...(raw as Record<string, unknown>) }
+				: { toolCallId: call.toolCallId },
+	};
+}
+
+/**
+ * The effect authority of a standalone turn: each permission request is asked of the
+ * person through the consent session. Only `allow` from the person grants (the driver
+ * then selects the request's `allow_once` option); an Allow that edits the input is not
+ * the request the person was shown and denies, and so does every other effect kind.
+ */
+export function grokConsentAuthority(session: RelayConsentSession): ManagedEffectAuthority {
+	return {
+		authorityId: 'desktop-person-consent',
+		decide: async (effect, _binding, signal) => {
+			if (effect.kind !== 'permissions')
+				return { decision: 'deny', reason: 'Only permission requests are asked of the person.' };
+			const { toolName, input } = describeGrokPermission(effect.permissions.request);
+			const answer = await session.request(toolName, input, signal);
+			if (answer.behavior !== 'allow') return { decision: 'deny', reason: answer.message };
+			if (answer.updatedInput !== undefined)
+				return { decision: 'deny', reason: 'An edited tool input cannot be approved for Grok.' };
+			return { decision: 'allow' };
+		},
+	};
+}
 
 /** A desktop Grok turn whose launch plan asked for the provider's own prompting. */
 export function wantsGrokAcp(config: ProcessConfig): boolean {
@@ -145,6 +206,7 @@ interface SpawnerContext {
 	stdoutHandler: StdoutHandler;
 	exitHandler: ExitHandler;
 	effects: () => ManagedEffectAuthority | null;
+	consent: GrokConsentPort;
 }
 
 export class GrokAcpSpawner {
@@ -154,7 +216,11 @@ export class GrokAcpSpawner {
 		processes: Map<string, ManagedProcess>,
 		emitter: EventEmitter,
 		bufferManager: DataBufferManager,
-		options: { effects?: () => ManagedEffectAuthority | null } = {}
+		options: {
+			effects?: () => ManagedEffectAuthority | null;
+			/** Defaults to the permission relay, the one consent path of the desktop. */
+			consent?: GrokConsentPort;
+		} = {}
 	) {
 		this.ctx = {
 			processes,
@@ -162,6 +228,7 @@ export class GrokAcpSpawner {
 			stdoutHandler: new StdoutHandler({ processes, emitter, bufferManager }),
 			exitHandler: new ExitHandler({ processes, emitter, bufferManager }),
 			effects: options.effects ?? (() => null),
+			consent: options.consent ?? permissionRelayServer,
 		};
 	}
 
@@ -196,19 +263,28 @@ export class GrokAcpSpawner {
 			target: config.sshRemoteId || scope.host.kind !== 'local' ? 'remote' : 'local',
 			native: { qualified: false },
 		};
+		// A standalone turn asks the person on its own tab; without a tab or a prompt
+		// surface there is nobody to ask, and the selector refuses (consent-port).
+		const consentSession =
+			!config.admission && config.tabId
+				? this.ctx.consent.openConsentSession({ sessionId: config.sessionId, tabId: config.tabId })
+				: null;
 		const negotiation = beginGrokAcpNegotiation(
 			{
 				permissionMode: 'standard',
-				consent: config.admission ? 'authority' : 'none',
+				consent: config.admission ? 'authority' : consentSession ? 'interactive' : 'none',
 				imageCount: prompt.imageCount,
 				resume: isResuming,
 				customArgs: native.customArgs,
 			},
 			snapshot
 		);
-		if (!negotiation.ok) return this.refuse(config, negotiation.message, negotiation);
-		if (!('pending' in negotiation))
-			return this.refuse(config, 'The Grok route selector returned no ACP negotiation.');
+		if (!negotiation.ok || !('pending' in negotiation)) {
+			consentSession?.close();
+			return negotiation.ok
+				? this.refuse(config, 'The Grok route selector returned no ACP negotiation.')
+				: this.refuse(config, negotiation.message, negotiation);
+		}
 		try {
 			return new GrokAcpDesktopTurn(this.ctx, config, {
 				negotiation,
@@ -217,8 +293,10 @@ export class GrokAcpSpawner {
 				prompt: prompt.text,
 				model: native.model,
 				effort: native.effort,
+				consentSession,
 			}).start();
 		} catch (error) {
+			consentSession?.close();
 			void captureException(error);
 			return this.refuse(
 				config,
@@ -254,6 +332,8 @@ interface DesktopTurnInput {
 	prompt: string;
 	model?: string;
 	effort?: string;
+	/** The person's consent session of a standalone turn; closed when the turn ends. */
+	consentSession: RelayConsentSession | null;
 }
 
 /** One ACP process and the turn it runs. */
@@ -332,6 +412,10 @@ class GrokAcpDesktopTurn {
 				idleTimeoutMs: GROK_ACP_DESKTOP_IDLE_MS,
 				maxTurnMs: GROK_ACP_DESKTOP_MAX_TURN_MS,
 				stopGraceMs: INTERACTIVE_STOP_GRACE_MS,
+				// A person gets the relay's decision window, not the 30 s machine default; the
+				// adapter's watchdog and the relay's timer both deny when it runs out. The same
+				// value bounds this turn's setup requests; Stop still ends them at once.
+				...(input.consentSession ? { requestTimeoutMs: RELAY_DECISION_TIMEOUT_MS } : {}),
 				permission: admission
 					? {
 							authority:
@@ -339,7 +423,16 @@ class GrokAcpDesktopTurn {
 								unavailableEffectAuthority('This host has no effect authority for managed turns.'),
 							binding: { actor: admission.actor, leaseId: admission.leaseId },
 						}
-					: undefined,
+					: input.consentSession
+						? {
+								authority: grokConsentAuthority(input.consentSession),
+								// Not a lease: the driver joins each answer to this turn and process.
+								binding: {
+									actor: DESKTOP_PERSON,
+									leaseId: `desktop-consent:${config.sessionId}:${generation}`,
+								},
+							}
+						: undefined,
 				qualify: (negotiated) => {
 					if (!negotiated.agentVersion) {
 						this.routeRefusal = 'Grok ACP reported no agent version to bind this turn to.';
@@ -458,6 +551,8 @@ class GrokAcpDesktopTurn {
 	/** Report the turn's exit through ExitHandler, exactly once. */
 	private finish(code: number): void {
 		if (this.finished) return;
+		// Every request still waiting on the person is denied; exit clears the prompt.
+		this.input.consentSession?.close();
 		if (isSupersededGeneration(this.config.sessionId, this.managedProcess.spawnGeneration)) {
 			this.finished = true;
 			return;
