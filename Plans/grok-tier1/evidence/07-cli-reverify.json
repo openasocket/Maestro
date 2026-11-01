@@ -1,0 +1,85 @@
+{
+	"schemaVersion": 1,
+	"taskId": "GT1-07-13",
+	"recordedAt": "2026-11-01",
+	"sourceCommit": "964d7ec7bc87ee5dd1e9c54a9da3769d298bbe5f",
+	"repairCommit": "964d7ec7bc87ee5dd1e9c54a9da3769d298bbe5f",
+	"repairTask": "GT1-07-12",
+	"priorReceipt": {
+		"path": "Plans/grok-tier1/evidence/07-verification.json",
+		"sourceCommit": "1cb47e62b47801731f63d36baaf152b37902d981",
+		"cliFailed": 16
+	},
+	"executionRoot": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
+	"status": "pass",
+	"group": "cli",
+	"command": [
+		"npm",
+		"test",
+		"--",
+		"src/__tests__/cli/services/agent-spawner.test.ts",
+		"src/__tests__/cli/services/turn-result.test.ts",
+		"src/__tests__/cli/services/runtime-host.test.ts",
+		"src/__tests__/cli/commands/host.test.ts",
+		"src/__tests__/cli/services/mcp-bridge.test.ts",
+		"src/__tests__/main/cue/cue-run-router.test.ts",
+		"--maxWorkers=1",
+		"--reporter=json",
+		"--reporter=default",
+		"--outputFile=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-phase07-verify/cli/results.json"
+	],
+	"environment": "isolated TMPDIR/TMP/TEMP, MAESTRO_USER_DATA, XDG_CONFIG_HOME, XDG_CACHE_HOME; GROK_*, CLAUDE_CONFIG_DIR and provider API keys removed",
+	"startedAt": "2026-11-01T13:54:42.638Z",
+	"finishedAt": "2026-11-01T13:54:44.755Z",
+	"durationSeconds": 2.117,
+	"exitCode": 0,
+	"summary": {
+		"files": 6,
+		"passed": 415,
+		"failed": 0,
+		"skipped": 0
+	},
+	"perFile": {
+		"src/__tests__/cli/commands/host.test.ts": {
+			"passed": 38,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/cli/services/agent-spawner.test.ts": {
+			"passed": 281,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/cli/services/mcp-bridge.test.ts": {
+			"passed": 8,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/cli/services/runtime-host.test.ts": {
+			"passed": 15,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/cli/services/turn-result.test.ts": {
+			"passed": 36,
+			"failed": 0,
+			"skipped": 0
+		},
+		"src/__tests__/main/cue/cue-run-router.test.ts": {
+			"passed": 37,
+			"failed": 0,
+			"skipped": 0
+		}
+	},
+	"repairedCases": {
+		"count": 50,
+		"matchedPriorNames": 16,
+		"allPassed": true
+	},
+	"consumers": {
+		"cliBatch": "pass",
+		"cliHost": "pass",
+		"cue": "pass"
+	},
+	"liveCalls": 0
+}

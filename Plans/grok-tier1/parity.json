@@ -3850,7 +3850,7 @@
 			"sourceCommit": "1cb47e62b47801731f63d36baaf152b37902d981",
 			"provenance": "deterministic-fixture-verification-and-reconciliation",
 			"acceptanceRun": false,
-			"status": "fail",
+			"status": "pass",
 			"affectedRows": [
 				"P07",
 				"S31",
@@ -3883,7 +3883,17 @@
 				"P29",
 				"P31"
 			],
-			"scope": "Phase07 transport consumers, native commands, steering, images, plans/questions, compaction, MCP/plugin tools and subagents; whole-row statuses, applicability and Grok beta status preserved; native certification false."
+			"scope": "Phase07 transport consumers, native commands, steering, images, plans/questions, compaction, MCP/plugin tools and subagents; whole-row statuses, applicability and Grok beta status preserved; native certification false. GT1-07-13: CLI batch consumer reads pass after the GT1-07-12 fixture repair; grok-cli-managed-fixture-regression resolved.",
+			"reverifiedBy": "phase07-cli-reverify"
+		},
+		"phase07-cli-reverify": {
+			"path": "Plans/grok-tier1/evidence/07-cli-reverify.json",
+			"sha256": "17f2dd1c4b00cf3a5ff263a6440ee46905f741630b1dbc32d3fddfc9823dcc7a",
+			"sourceCommit": "964d7ec7bc87ee5dd1e9c54a9da3769d298bbe5f",
+			"provenance": "deterministic-fixture-verification",
+			"acceptanceRun": false,
+			"status": "pass",
+			"scope": "GT1-07-13: GT1-07-11 cli group (6 files) re-run at the GT1-07-12 commit: 415 passed, 0 failed, 0 skipped; the 16 managed Grok agent-spawner cases pass. No live calls."
 		}
 	},
 	"sourceCatalog": {
@@ -6331,7 +6341,7 @@
 			},
 			"limitations": [
 				"Registered prompt-file delivery requires ordered embedded image bytes plus explicit EmbeddedImageSupport; absent admission refuses without falling back to tool-read paths. Legacy image flags remain true, not native certification. Portable image consumers remain GT1-07-03D/03E/11; fresh/resumed exact-binary and SSH image behavior remain phase11 not-run. Active additional-root grants safely refuse pending native/managed qualification.",
-				"GT1-07-11 verification: Portable turns carry images as ordered ACP blocks when a host passes embeddedImageSupport; no production host passes it, so real image turns refuse; the standard ACP route refuses acp-images. CLI managed directory-grant cases fail pre-existing (GT1-07-12). Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-07-11 verification: Portable turns carry images as ordered ACP blocks when a host passes embeddedImageSupport; no production host passes it, so real image turns refuse; the standard ACP route refuses acp-images. CLI managed directory-grant cases fail pre-existing (GT1-07-12). Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted. GT1-07-13: repaired by GT1-07-12 (stopReason EndTurn on the two success fixtures); CLI group re-verified at 964d7ec7b, 6 files, 415 passed, 0 failed (phase07-cli-reverify)."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -6383,13 +6393,6 @@
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Active read/write grants and custom --add-dir refuse before prompt preparation in planner, desktop, CLI, Cue and shared turns; empty/inert grants and other-provider builders have scoped deterministic evidence (13/13J), and full completeness passes in 13Q. Public capability remains false and builder absent. Native CLI root grants, symlink containment, managed preventive effects and platforms remain GT1-09-07/08/11/12 and phase11; pinned-source ACP resume roots are unsupported. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
 					"affectedRows": ["P08", "P35", "C-supportsAdditionalDirectories", "REG-DEFINITIONS"]
-				},
-				{
-					"id": "grok-cli-managed-fixture-regression",
-					"code": "regression",
-					"missingPrerequisite": "16 managed Grok cases in agent-spawner.test.ts fail since fdaaa8906 (parser fails closed on an end event without stopReason; fixtures omit it). Bounded repair GT1-07-12, re-verified by GT1-07-13.",
-					"evidenceRef": "phase07-verification",
-					"affectedRows": ["P08"]
 				},
 				{
 					"id": "grok-image-host-bounds-producer-absent",
@@ -15761,13 +15764,6 @@
 					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["C-supportsBatchMode"],
 					"evidenceRef": "phase07-verification"
-				},
-				{
-					"id": "grok-cli-managed-fixture-regression",
-					"code": "regression",
-					"missingPrerequisite": "16 managed Grok cases in agent-spawner.test.ts fail since fdaaa8906 (parser fails closed on an end event without stopReason; fixtures omit it). Bounded repair GT1-07-12, re-verified by GT1-07-13.",
-					"evidenceRef": "phase07-verification",
-					"affectedRows": ["C-supportsBatchMode"]
 				}
 			],
 			"field": "supportsBatchMode",
@@ -17867,7 +17863,7 @@
 			},
 			"limitations": [
 				"Grok prompt-only directory hints are not grants; prove native mechanism or maintain explicit safe refusal for required containment.",
-				"GT1-07-11 verification: CLI managed Grok directory-grant composition cases fail at and before phase07 (parser fail-closed on missing stopReason, fixture regression from fdaaa8906); repair GT1-07-12. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-07-11 verification: CLI managed Grok directory-grant composition cases fail at and before phase07 (parser fail-closed on missing stopReason, fixture regression from fdaaa8906); repair GT1-07-12. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted. GT1-07-13: repaired by GT1-07-12 (stopReason EndTurn on the two success fixtures); CLI group re-verified at 964d7ec7b, 6 files, 415 passed, 0 failed (phase07-cli-reverify)."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -17919,13 +17915,6 @@
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Active read/write grants and custom --add-dir refuse before prompt preparation in planner, desktop, CLI, Cue and shared turns; empty/inert grants and other-provider builders have scoped deterministic evidence (13/13J), and full completeness passes in 13Q. Public capability remains false and builder absent. Native CLI root grants, symlink containment, managed preventive effects and platforms remain GT1-09-07/08/11/12 and phase11; pinned-source ACP resume roots are unsupported. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
 					"affectedRows": ["P08", "P35", "C-supportsAdditionalDirectories", "REG-DEFINITIONS"]
-				},
-				{
-					"id": "grok-cli-managed-fixture-regression",
-					"code": "regression",
-					"missingPrerequisite": "16 managed Grok cases in agent-spawner.test.ts fail since fdaaa8906 (parser fails closed on an end event without stopReason; fixtures omit it). Bounded repair GT1-07-12, re-verified by GT1-07-13.",
-					"evidenceRef": "phase07-verification",
-					"affectedRows": ["C-supportsAdditionalDirectories"]
 				}
 			],
 			"field": "supportsAdditionalDirectories",
@@ -29890,12 +29879,23 @@
 		},
 		"phase07Deterministic": "pass",
 		"repositoryRegression": {
-			"status": "fail",
+			"status": "resolved",
 			"suite": "src/__tests__/cli/services/agent-spawner.test.ts",
 			"failed": 16,
 			"firstBadCommit": "fdaaa89065b5e518a7c948a82c958ecac321e648",
 			"repairTask": "GT1-07-12",
-			"reverifyTask": "GT1-07-13"
+			"reverifyTask": "GT1-07-13",
+			"repairCommit": "964d7ec7bc87ee5dd1e9c54a9da3769d298bbe5f",
+			"reverifiedAt": "964d7ec7bc87ee5dd1e9c54a9da3769d298bbe5f",
+			"reverifyResult": {
+				"group": "cli",
+				"files": 6,
+				"passed": 415,
+				"failed": 0,
+				"skipped": 0,
+				"exitCode": 0
+			},
+			"evidenceRef": "phase07-cli-reverify"
 		},
 		"nativeQualification": "not-run",
 		"nativeCertification": false,
@@ -29905,7 +29905,7 @@
 			"desktop": "pass",
 			"renderer": "pass",
 			"cliHost": "pass",
-			"cliBatch": "fail",
+			"cliBatch": "pass",
 			"cue": "pass",
 			"mcpPlugin": "pass",
 			"subagent": "pass"
@@ -29952,13 +29952,19 @@
 				"sha256": "64f12e9555a3a09ab6e2c47ff161d2727a719f6f8e315efeeda917b02d4c0b63",
 				"sourceCommit": "1cb47e62b47801731f63d36baaf152b37902d981",
 				"status": "fail"
+			},
+			{
+				"path": "Plans/grok-tier1/evidence/07-cli-reverify.json",
+				"sha256": "17f2dd1c4b00cf3a5ff263a6440ee46905f741630b1dbc32d3fddfc9823dcc7a",
+				"sourceCommit": "964d7ec7bc87ee5dd1e9c54a9da3769d298bbe5f",
+				"status": "pass"
 			}
 		],
 		"latestScopedResult": {
 			"receipt": "Plans/grok-tier1/evidence/07-verification.json",
 			"files": 44,
-			"passedTests": 3224,
-			"failedTests": 16,
+			"passedTests": 3240,
+			"failedTests": 0,
 			"skippedTests": 1,
 			"groups": {
 				"library": {
@@ -29984,10 +29990,12 @@
 				},
 				"cli": {
 					"files": 6,
-					"passed": 399,
-					"failed": 16,
+					"passed": 415,
+					"failed": 0,
 					"skipped": 0,
-					"exitCode": 1
+					"exitCode": 0,
+					"receipt": "Plans/grok-tier1/evidence/07-cli-reverify.json",
+					"sourceCommit": "964d7ec7bc87ee5dd1e9c54a9da3769d298bbe5f"
 				},
 				"mcp": {
 					"files": 7,
@@ -30003,7 +30011,8 @@
 					"skipped": 0,
 					"exitCode": 0
 				}
-			}
+			},
+			"note": "cli group from the GT1-07-13 re-verification at 964d7ec7b; other groups from GT1-07-11 at 1cb47e62b (07-12 touched only the cli agent-spawner suite)."
 		},
 		"remainingRealNativeRequirements": [
 			"GT1-11: exact-binary ACP turns on desktop and runtime (stream, consent, cancel, cleanup, usage) on a disposable account.",
@@ -30036,6 +30045,24 @@
 			"wholeRowStatusChanges": false,
 			"applicabilityChanges": false
 		},
-		"imagesAnalyzed": 0
+		"imagesAnalyzed": 0,
+		"blockerUpdates": [
+			{
+				"id": "grok-cli-managed-fixture-regression",
+				"taskId": "GT1-07-13",
+				"change": "resolved-removed",
+				"removedFrom": ["P08", "C-supportsBatchMode", "C-supportsAdditionalDirectories"],
+				"reason": "GT1-07-12 gave the two success fixtures \"stopReason\":\"EndTurn\" (parser unchanged); the cli group passes 415/415 at 964d7ec7b.",
+				"evidenceRef": "phase07-cli-reverify"
+			}
+		],
+		"reverification": {
+			"taskId": "GT1-07-13",
+			"recordedAt": "2026-11-01",
+			"sourceCommit": "964d7ec7bc87ee5dd1e9c54a9da3769d298bbe5f",
+			"groups": ["cli"],
+			"status": "pass",
+			"otherVerdictsChanged": false
+		}
 	}
 }
