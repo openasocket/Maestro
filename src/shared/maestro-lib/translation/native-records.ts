@@ -458,6 +458,24 @@ export function decodeGrokSessionSnapshot(bytes: Buffer): GrokSessionSnapshot {
 	return { summary: null, transcript: bytes };
 }
 
+/** Directory name component limit Grok encodes against (`MAX_DIRNAME_BYTES`). */
+export const GROK_CWD_DIRNAME_MAX_BYTES = 255;
+
+/**
+ * Grok's `encode_cwd_dirname` (xai-grok-config `paths.rs` at the pinned source):
+ * `urlencoding::encode` keeps only ASCII alphanumerics and `-_.~`, so the
+ * characters `encodeURIComponent` leaves bare (`!'()*`) are escaped too. A longer
+ * name switches Grok to a `{slug}-{blake3}` folder plus a `.cwd` file that this
+ * adapter does not reproduce, so it returns `null` and the caller refuses.
+ */
+export function encodeGrokCwdDirname(cwd: string): string | null {
+	const encoded = encodeURIComponent(cwd).replace(
+		/[!'()*]/g,
+		(c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`
+	);
+	return encoded.length <= GROK_CWD_DIRNAME_MAX_BYTES ? encoded : null;
+}
+
 /** Real prompts. Every other `synthetic_reason`, including unknown ones, is runtime context. */
 const GROK_HUMAN_REASONS = new Set([
 	'human',
