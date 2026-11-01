@@ -13,7 +13,12 @@ import {
 	cancelContextCompaction,
 	noteFailedTurnExited,
 	registerBatchResumer,
+	scheduleRetryForError,
+	retryNow,
+	getRetryEntry,
+	getOutage,
 } from '../../../../../renderer/stores/retryStore';
+import { useAgentStore } from '../../../../../renderer/stores/agentStore';
 import { registerContextCompactionSpawner } from '../../../../../renderer/services/contextCompaction';
 import { useAuthOutageStore } from '../../../../../renderer/stores/authOutageStore';
 import * as runtimeContext from '../../../../../renderer/utils/runtimeContext';
@@ -1002,4 +1007,166 @@ describe('useAgentErrorListener', () => {
 			expect(updated.aiTabs[0].agentError?.message).toContain('Unsupported value');
 		});
 	});
+
+	// GT1-10-11A start
+	/**
+	 * GT1-10-11A. Grok errors as the desktop delivers them: the event carries no
+	 * host dispatch facts, so the listener cannot prove a prompt never reached
+	 * Grok and must surface the refusal instead of replaying it. The reset
+	 * estimator is Claude-only, so a Grok limit keeps an unknown reset.
+	 */
+	describe('GT1-10-11A Grok retry and error surfacing', () => {
+		const DEPS = {
+			conductorProfile: '',
+			customAICommands: [],
+			speckitCommands: [],
+			openspecCommands: [],
+		};
+		const PROMPT = 'rerun the flaky suite and report the first failure';
+		const grokError = (partial: Record<string, unknown>) => ({
+			type: 'rate_limited',
+			message: 'Rate limit exceeded. Please try again later.',
+			timestamp: 1700000000000,
+			agentId: 'grok',
+			recoverable: true,
+			...partial,
+		});
+		let processQueuedItem: ReturnType<typeof vi.fn>;
+
+		function setupGrok(id: string) {
+			const tab = createMockAITab({
+				id: 'tab-1',
+				agentSessionId: 'grok-native-11a',
+				logs: [{ id: 'u1', timestamp: 1, source: 'user', text: PROMPT }],
+			});
+			const session = createMockSession({
+				id,
+				toolType: 'grok',
+				customEnvVars: { GROK_HOME: '/accounts/grok-11a' },
+				aiTabs: [tab],
+				activeTabId: 'tab-1',
+			});
+			useSessionStore.setState({ sessions: [session] } as any);
+			noteDispatch(
+				id,
+				{ id: `turn-${id}`, timestamp: 1, tabId: 'tab-1', type: 'message', text: PROMPT },
+				DEPS
+			);
+		}
+
+		beforeEach(() => {
+			processQueuedItem = vi.fn().mockResolvedValue(true);
+			useAgentStore.setState({ processQueuedItem } as any);
+		});
+
+		it('surfaces a Grok rate limit with an unknown reset instead of replaying it', async () => {
+			// Main answers undefined for every provider but Claude Code.
+			const getLimitResetAt = vi.fn().mockResolvedValue(undefined);
+			(window as any).maestro.agents = { getLimitResetAt };
+			setupGrok('grok-a');
+
+			renderHook(() => useAgentErrorListener(makeDeps()));
+			handler!('grok-a-ai-tab-1', grokError({}));
+
+			expect(useRetryStore.getState().retries['grok-a:tab-1']).toBeUndefined();
+			expect(useRetryStore.getState().outages).toEqual({});
+			expect(useModalStore.getState().modals.get('agentError')?.open ?? false).toBe(true);
+			const paused = useSessionStore.getState().sessions[0];
+			expect(paused.state).toBe('error');
+			expect(paused.agentError).toMatchObject({
+				type: 'rate_limited',
+				agentId: 'grok',
+				resumeAttemptCount: 0,
+			});
+			// The original prompt rides on the error for a user-driven resume, on the same tab.
+			const errorLog = paused.aiTabs[0].logs.find((l) => l.source === 'error');
+			expect(errorLog?.recoveryAction).toEqual({ lastUserPrompt: PROMPT, tabId: 'tab-1' });
+			expect(paused.aiTabs[0].agentSessionId).toBe('grok-native-11a');
+			expect(paused.customEnvVars).toEqual({ GROK_HOME: '/accounts/grok-11a' });
+
+			await waitFor(() => expect(getLimitResetAt).toHaveBeenCalledWith('grok'));
+			await Promise.resolve();
+			expect(useSessionStore.getState().sessions[0].agentError?.limitResetAt).toBeUndefined();
+			expect(processQueuedItem).not.toHaveBeenCalled();
+		});
+
+		it('keeps a reset the Grok refusal reported off the estimator stamp', async () => {
+			const getLimitResetAt = vi.fn().mockResolvedValue(undefined);
+			(window as any).maestro.agents = { getLimitResetAt };
+			setupGrok('grok-b');
+
+			renderHook(() => useAgentErrorListener(makeDeps()));
+			handler!(
+				'grok-b-ai-tab-1',
+				grokError({ message: 'Usage limit reached. Retry after 20 seconds.' })
+			);
+
+			await waitFor(() => expect(getLimitResetAt).toHaveBeenCalledTimes(1));
+			await Promise.resolve();
+			const paused = useSessionStore.getState().sessions[0];
+			// The message is kept verbatim for the user; nothing invents a stamp from it.
+			expect(paused.agentError?.message).toBe('Usage limit reached. Retry after 20 seconds.');
+			expect(paused.agentError?.limitResetAt).toBeUndefined();
+			expect(useRetryStore.getState().retries['grok-b:tab-1']).toBeUndefined();
+			expect(processQueuedItem).not.toHaveBeenCalled();
+		});
+
+		it('routes a Grok auth refusal to re-authentication with no retry', () => {
+			setupGrok('grok-c');
+			renderHook(() => useAgentErrorListener(makeDeps()));
+			handler!(
+				'grok-c-ai-tab-1',
+				grokError({ type: 'auth_expired', message: 'Grok credentials have expired.' })
+			);
+
+			const modal = useModalStore.getState();
+			expect(modal.modals.get('agentError')?.open ?? false).toBe(false);
+			expect(modal.modals.get('reauth')?.open).toBe(true);
+			expect(useSessionStore.getState().sessions[0].agentError?.type).toBe('auth_expired');
+			expect(useRetryStore.getState().retries['grok-c:tab-1']).toBeUndefined();
+			expect(useRetryStore.getState().outages).toEqual({});
+			expect(processQueuedItem).not.toHaveBeenCalled();
+		});
+
+		it('surfaces an unavailable Grok provider and keeps its native session', () => {
+			setupGrok('grok-d');
+			renderHook(() => useAgentErrorListener(makeDeps()));
+			handler!(
+				'grok-d-ai-tab-1',
+				grokError({ type: 'agent_crashed', message: 'Grok ACP could not start: spawn grok ENOENT' })
+			);
+
+			const session = useSessionStore.getState().sessions[0];
+			expect(session.state).toBe('error');
+			expect(session.agentError?.type).toBe('agent_crashed');
+			expect(session.aiTabs[0].agentSessionId).toBe('grok-native-11a');
+			expect(useModalStore.getState().modals.get('agentError')?.open ?? false).toBe(true);
+			expect(useRetryStore.getState().retries['grok-d:tab-1']).toBeUndefined();
+			expect(processQueuedItem).not.toHaveBeenCalled();
+		});
+
+		it('ends an in-flight Grok resend on a late error and never sends a second one', () => {
+			setupGrok('grok-e');
+			// A resend already on the wire, scheduled on host facts the desktop event lacks.
+			const notDispatched = {
+				...grokError({}),
+				terminal: { status: 'failed', kind: 'provider', dispatchState: 'not-dispatched' },
+			};
+			expect(scheduleRetryForError('grok-e', 'tab-1', notDispatched as never)).toBe(true);
+			retryNow('grok-e', 'tab-1');
+			expect(processQueuedItem).toHaveBeenCalledTimes(1);
+			const outageId = getRetryEntry('grok-e', 'tab-1')!.outageId;
+
+			renderHook(() => useAgentErrorListener(makeDeps()));
+			handler!('grok-e-ai-tab-1', grokError({}));
+			// The same late error delivered again.
+			handler!('grok-e-ai-tab-1', grokError({}));
+
+			expect(processQueuedItem).toHaveBeenCalledTimes(1);
+			expect(useRetryStore.getState().retries['grok-e:tab-1']).toBeUndefined();
+			expect(getOutage(outageId)?.status).toBe('failed');
+			expect(useSessionStore.getState().sessions[0].agentError?.agentId).toBe('grok');
+		});
+	});
+	// GT1-10-11A end
 });
