@@ -141,6 +141,25 @@ export const AGENT_ARTIFACTS: Partial<Record<ToolType, string[]>> = {
 		'Opus',
 		'Sonnet',
 	],
+	grok: [
+		// Brand references (agentMetadata, provider capabilities)
+		'Grok',
+		'Grok CLI',
+		'xAI',
+		// Model references: only the ids `grok models` listed in the capability notes
+		'grok-4.5',
+		'grok-composer-2.5-fast',
+		// Session and headless-turn terms (provider definition, GrokSessionStorage).
+		// No slash commands: supportsSlashCommands is false and the native catalog is
+		// discovered per session, so there is no fixed list to scrub.
+		'~/.grok',
+		'~/.grok/sessions',
+		'--resume',
+		'--prompt-file',
+		'--always-approve',
+		'--permission-mode plan',
+		'streaming-json',
+	],
 	terminal: [
 		// Terminal has no agent-specific artifacts
 	],
@@ -173,6 +192,14 @@ export const AGENT_TARGET_NOTES: Partial<Record<ToolType, string>> = {
     It supports multiple model providers (Claude, GPT, Gemini).
     It can read and edit files, run commands, search code, and interact with git.
     It has tiered autonomy levels for controlling operation permissions.
+  `,
+	grok: `
+    Grok CLI is xAI's coding agent CLI.
+    Maestro drives it headless: one prompt per turn, chained by resuming the same session.
+    It can read and edit files, run terminal commands, and search code.
+    It accepts images referenced by file path and supports model selection.
+    It has no slash commands, project memory file, or appended system rules here,
+    so put every instruction and piece of context directly in the transferred message.
   `,
 	terminal: `
     Terminal is a raw shell interface.
