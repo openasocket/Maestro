@@ -187,6 +187,10 @@ export interface ProcessRunOptions {
 /** Map of active Cue processes by runId */
 const activeProcesses = new Map<string, CueActiveProcess>();
 
+/** The reason a Grok run that wrote no native terminal record failed (as the CLI words it). */
+const GROK_NO_TERMINAL_MESSAGE =
+	'Grok exited without a native terminal record. Any response is incomplete.';
+
 // ─── Internal Helpers ─────────��──────────────────────────────────────────────
 
 /**
@@ -235,6 +239,14 @@ class CueRunStreamCapture {
 	private readonly resultParts: string[] = [];
 	private readonly assistantTextByMessage = new Map<string, string>();
 	private readonly assistantTextWithoutId: string[] = [];
+	/**
+	 * Grok streams its answer as token-sized `text` deltas that concatenate
+	 * directly (whitespace is in the payload), beside `thought` deltas tagged
+	 * `isReasoning`. Joining the deltas with newlines split words, and keeping
+	 * the thoughts handed the model's reasoning downstream as its answer.
+	 */
+	private readonly concatenatesDeltas: boolean;
+	private deltaText = '';
 	private rawFallback = '';
 	providerSessionId: string | null = null;
 	usage: UsageStats | null = null;
@@ -274,6 +286,7 @@ class CueRunStreamCapture {
 			this.usageAccumulator = new UsageAccumulator({ attachesAbsoluteUsage: true });
 		}
 		this.usageLastWriteWins = toolType === 'claude-code';
+		this.concatenatesDeltas = toolType === 'grok';
 	}
 
 	/** A raw stdout chunk, kept for agents whose output is not parsed. */
@@ -299,6 +312,8 @@ class CueRunStreamCapture {
 		if (event.type === 'result') {
 			this.resultMessageSeen = true;
 			if (event.text) this.resultParts.push(event.text);
+		} else if (this.concatenatesDeltas && event.type === 'text') {
+			if (event.isPartial && event.text && !event.isReasoning) this.deltaText += event.text;
 		} else if (event.type === 'text' && event.isPartial && event.text) {
 			const raw = event.raw as { message?: { id?: string } } | undefined;
 			const msgId = raw?.message?.id;
@@ -351,17 +366,24 @@ class CueRunStreamCapture {
 			const text = this.resultParts.join('\n');
 			if (text.trim()) return text;
 		}
-		const deduped = [...this.assistantTextByMessage.values(), ...this.assistantTextWithoutId];
-		const assistantText = deduped.join('\n');
+		const assistantText = this.assistantText().join('\n');
 		return assistantText.trim() ? assistantText : undefined;
 	}
 
 	/** Clean, human-readable text: prefers result events, then assistant text, then the raw buffer verbatim (plain-text agents, or a parser that never produced either). */
 	getCleanStdout(): string {
 		if (this.resultParts.length > 0) return this.resultParts.join('\n');
-		const deduped = [...this.assistantTextByMessage.values(), ...this.assistantTextWithoutId];
+		const deduped = this.assistantText();
 		if (deduped.length > 0) return deduped.join('\n');
 		return this.rawFallback;
+	}
+
+	private assistantText(): string[] {
+		return [
+			...this.assistantTextByMessage.values(),
+			...this.assistantTextWithoutId,
+			...(this.deltaText ? [this.deltaText] : []),
+		];
 	}
 }
 
@@ -821,12 +843,23 @@ export async function runProcess(
 	);
 	// Cue's two safety rules (a silent non-zero exit, an unrequested signal
 	// kill) live in cueStatusForTurn so the desktop exit listener shares them.
-	const status = cueStatusForTurn({
+	let status = cueStatusForTurn({
 		outcome,
 		exitCode: exit.exitCode,
 		answerCaptured: Boolean(answerText?.trim()),
 		killedBySignal: exit.signal !== null,
 	});
+	// Grok proves a finished turn only with its native success record. A clean
+	// exit that wrote none (an empty stdout, plain text from a CLI that ignored
+	// the streaming flag) reads `completed` to the shared resolver, and a
+	// pipeline would chain off a turn that never answered. The parser already
+	// fails a stream that carried native records and then stopped short.
+	if (toolType === 'grok' && status === 'completed' && !capture.resultMessageSeen) {
+		status = 'failed';
+		if (!stderr.includes(GROK_NO_TERMINAL_MESSAGE)) {
+			stderr += `${stderr ? '\n' : ''}${GROK_NO_TERMINAL_MESSAGE}`;
+		}
+	}
 	// An in-band failure has no stderr of its own, so name it there: that is
 	// where a failed run's reason is read from.
 	const inBandMessage = capture.inBandError?.message;
