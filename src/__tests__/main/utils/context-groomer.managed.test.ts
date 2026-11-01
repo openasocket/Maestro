@@ -352,11 +352,6 @@ describe('groomContext prompt-file requirements under management (GT1-02-10GT)',
 	});
 
 	it.each([
-		{
-			options: { disableTools: true },
-			overrides: { noToolsArgs: undefined },
-			mode: 'disabled tools',
-		},
 		{ options: { readOnlyMode: true }, overrides: { readOnlyArgs: [] }, mode: 'read-only mode' },
 		{
 			options: { readOnlyMode: true },
@@ -383,6 +378,92 @@ describe('groomContext prompt-file requirements under management (GT1-02-10GT)',
 			expect(port.asked).toHaveLength(0);
 			expect(h.spawn).not.toHaveBeenCalled();
 			expect(getActiveGroomingSessionCount()).toBe(0);
+		}
+	);
+
+	// GT1-08-14 / GT1-08-15: best-effort disabled tools falls back to the
+	// CLI-enforced read-only route and that read-only turn is what is admitted;
+	// required no-tools is refused before the authority is asked.
+	it('admits best-effort disabled tools as the enforced read-only route (GT1-08-15)', async () => {
+		const candidate = await selectedDetector.getAgent('grok');
+		vi.mocked(selectedDetector.getAgent)
+			.mockClear()
+			.mockResolvedValue({ ...candidate!, noToolsArgs: undefined });
+		const port = fakeSpawnPort();
+		const h = harness(port);
+		const result = await groomContext(
+			{ ...baseOptions, agentType: 'grok', disableTools: true },
+			h.processManager,
+			selectedDetector
+		);
+		expect(result.response).toBe(ANSWER);
+		expect(port.asked).toHaveLength(1);
+		expect(port.asked[0].snapshot.provider).toBe('grok');
+		const admitted = spawned(h);
+		expect(admitted).toMatchObject({ toolType: 'grok', purpose: 'utility' });
+		expect(admitted.admission).toBeDefined();
+		const at = admitted.args.indexOf('--permission-mode');
+		expect(admitted.args.slice(at, at + 2)).toEqual(['--permission-mode', 'plan']);
+		expect(admitted.args).not.toContain('--always-approve');
+	});
+
+	it('refuses required no-tools before admission (GT1-08-15)', async () => {
+		const port = fakeSpawnPort();
+		const h = harness(port);
+		await expect(
+			groomContext(
+				{ ...baseOptions, agentType: 'grok', requireDisabledTools: true, disableTools: true },
+				h.processManager,
+				selectedDetector
+			)
+		).rejects.toThrow('cannot run this turn with tools disabled');
+		expect(selectedDetector.getAgent).toHaveBeenCalledExactlyOnceWith('grok');
+		expect(port.asked).toHaveLength(0);
+		expect(h.spawn).not.toHaveBeenCalled();
+		expect(getActiveGroomingSessionCount()).toBe(0);
+	});
+
+	// A managed utility authority that cannot answer, or that cannot bind the
+	// actor, refuses the Grok turn: nothing falls back to a standalone spawn and
+	// no other provider is tried.
+	it.each([
+		[
+			'unavailable',
+			{ decide: () => ({ decision: 'unavailable', reason: 'Synthetic authority offline' }) },
+			'Synthetic authority offline',
+			1,
+		],
+		[
+			'unknown',
+			{ decide: () => ({ decision: 'unknown', reason: 'Synthetic outcome lost' }) },
+			'Synthetic outcome lost',
+			1,
+		],
+		[
+			'unbound actor',
+			{ accept: () => ['synthetic actor binding missing'] },
+			'synthetic actor binding missing',
+			0,
+		],
+	] as const)(
+		'refuses a Grok utility turn whose managed authority is %s, with no fallback (GT1-08-15)',
+		async (_label, options, reason, asked) => {
+			const port = fakeSpawnPort(options as never);
+			const h = harness(port);
+			await expect(
+				groomContext(
+					{ ...baseOptions, agentType: 'grok', readOnlyMode: true },
+					h.processManager,
+					selectedDetector
+				)
+			).rejects.toThrow(reason);
+			expect(selectedDetector.getAgent).toHaveBeenCalledExactlyOnceWith('grok');
+			expect(port.asked).toHaveLength(asked);
+			expect(port.asked.every((request) => request.snapshot.provider === 'grok')).toBe(true);
+			expect(h.spawn).not.toHaveBeenCalled();
+			expect(port.authority.live()).toHaveLength(0);
+			expect(getActiveGroomingSessionCount()).toBe(0);
+			expect(h.processManager.listenerCount('data')).toBe(0);
 		}
 	);
 

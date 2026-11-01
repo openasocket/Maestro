@@ -17,6 +17,10 @@ import {
 import { getAgentDefinition } from '../../../shared/maestro-lib/providers/definitions';
 import { resolveSshPath } from '../../../shared/maestro-lib/launch/ssh-path';
 import { cheapTurnSettings } from '../../../shared/modelTiers';
+import {
+	embedSystemPromptInPrompt,
+	hasEmbeddedSystemPrompt,
+} from '../../../shared/embeddedSystemPrompt';
 import type { AgentDetector } from '../../../main/agents';
 import type { AgentConfig } from '../../../main/agents';
 import type { SshRemoteSettingsStore } from '../../../main/utils/ssh-remote-resolver';
@@ -1324,23 +1328,185 @@ describe('groomContext', () => {
 			expect(grok.readOnlyCliEnforced).toBe(true);
 		});
 
+		// GT1-08-14 / GT1-08-15: best-effort `disableTools` with no verified
+		// all-tools-off flag falls back to the CLI-enforced read-only policy;
+		// `requireDisabledTools` is the required contract and is refused.
 		it.each([
 			['no tools', { disableTools: true }],
 			['read-only and no tools (Quick Chat routing)', { disableTools: true, readOnlyMode: true }],
 		] as const)(
-			'refuses %s before spawning instead of trusting the prompt',
+			'falls back to enforced read-only for best-effort %s (GT1-08-15)',
 			async (_label, flags) => {
 				const spawn = vi.spyOn(mockPM, 'spawn');
+				const result = await groomContext(
+					{ projectRoot: '/project', agentType: 'grok', prompt: PROMPT_ONLY_RULE, ...flags },
+					mockPM,
+					createMockAgentDetector(grok)
+				);
+				expect(result.response).toBe('groomed response');
+				expect(spawn).toHaveBeenCalledTimes(1);
+				const config = spawn.mock.calls[0][0];
+				expect(config.toolType).toBe('grok');
+				const args = config.args as string[];
+				const at = args.indexOf('--permission-mode');
+				expect(args.slice(at, at + 2)).toEqual(['--permission-mode', 'plan']);
+				const deny = args.indexOf('--deny');
+				expect(args.slice(deny, deny + 2)).toEqual(['--deny', 'Bash(*)']);
+				expect(args).not.toContain('--always-approve');
+				expect(args).not.toContain('--tools');
+				expect(args).not.toContain('--disallowed-tools');
+				expect(JSON.parse(config.promptArtifact!.content).content[0].text).toBe(PROMPT_ONLY_RULE);
+			}
+		);
+
+		it.each([
+			['required', { requireDisabledTools: true }],
+			[
+				'required plus best effort',
+				{ requireDisabledTools: true, disableTools: true, readOnlyMode: true },
+			],
+		] as const)(
+			'refuses %s no-tools before spawning instead of trusting the prompt (GT1-08-15)',
+			async (_label, flags) => {
+				const spawn = vi.spyOn(mockPM, 'spawn');
+				const detector = createMockAgentDetector(grok);
 				await expect(
 					groomContext(
 						{ projectRoot: '/project', agentType: 'grok', prompt: PROMPT_ONLY_RULE, ...flags },
 						mockPM,
-						createMockAgentDetector(grok)
+						detector
 					)
-				).rejects.toThrow('Prompt-file grooming cannot enforce disabled tools.');
+				).rejects.toThrow(
+					'Grok CLI cannot run this turn with tools disabled: it has no verified all-tools-off flag. Nothing was run.'
+				);
+				expect(detector.getAgent).toHaveBeenCalledExactlyOnceWith('grok');
 				expectNothingSpawned(spawn);
 			}
 		);
+
+		it('refuses the read-only fallback when the CLI cannot enforce read-only (GT1-08-15)', async () => {
+			const spawn = vi.spyOn(mockPM, 'spawn');
+			await expect(
+				groomContext(
+					{
+						projectRoot: '/project',
+						agentType: 'grok',
+						prompt: PROMPT_ONLY_RULE,
+						disableTools: true,
+					},
+					mockPM,
+					createMockAgentDetector({ ...grok, readOnlyCliEnforced: false })
+				)
+			).rejects.toThrow('Prompt-file grooming cannot enforce read-only mode.');
+			expectNothingSpawned(spawn);
+		});
+
+		it.each([
+			['unavailable', (g: AgentConfig): AgentConfig | null => ({ ...g, available: false })],
+			['not detected', (): AgentConfig | null => null],
+		] as const)(
+			'refuses a %s Grok without switching provider (GT1-08-15)',
+			async (_label, detected) => {
+				const spawn = vi.spyOn(mockPM, 'spawn');
+				const detector = createMockAgentDetector(detected(grok));
+				await expect(
+					groomContext(
+						{ projectRoot: '/project', agentType: 'grok', prompt: 'summarize', readOnlyMode: true },
+						mockPM,
+						detector
+					)
+				).rejects.toThrow('Agent grok is not available');
+				expect(detector.getAgent).toHaveBeenCalledExactlyOnceWith('grok');
+				expect(detector.detectAgents).not.toHaveBeenCalled();
+				expect(buildAgentArgs).not.toHaveBeenCalled();
+				expectNothingSpawned(spawn);
+			}
+		);
+
+		it('delivers an embedded system prompt in the prompt file, never as a flag (GT1-08-15)', async () => {
+			const spawn = vi.spyOn(mockPM, 'spawn');
+			const prompt = embedSystemPromptInPrompt('You are a Maestro summarizer.', 'Summarize this.');
+			await groomContext(
+				{ projectRoot: '/project', agentType: 'grok', prompt, readOnlyMode: true },
+				mockPM,
+				createMockAgentDetector(grok)
+			);
+			const config = spawn.mock.calls[0][0];
+			const text = JSON.parse(config.promptArtifact!.content).content[0].text;
+			expect(text).toBe(prompt);
+			expect(hasEmbeddedSystemPrompt(text)).toBe(true);
+			const args = config.args as string[];
+			expect(args.some((a) => /system-prompt/.test(a))).toBe(false);
+			expect(args.join(' ')).not.toContain('Maestro summarizer');
+			expect(config.prompt).toBeUndefined();
+		});
+
+		describe.each([false, true])('selected account/model/host, SSH=%s (GT1-08-15)', (ssh) => {
+			it('inherits the selected account, model and host on the Grok binary', async () => {
+				const spawn = vi.spyOn(mockPM, 'spawn');
+				const result = await groomContext(
+					{
+						projectRoot: '/project',
+						agentType: 'grok',
+						prompt: 'summarize',
+						readOnlyMode: true,
+						sessionCustomPath: '/selected/grok',
+						sessionCustomModel: 'grok-selected',
+						sessionCustomEnvVars: { GROK_HOME: '/accounts/selected' },
+						sessionSshRemoteConfig: { enabled: ssh, remoteId: SSH_REMOTE.id },
+						sshStore: createSshStore(),
+					},
+					mockPM,
+					createMockAgentDetector(grok)
+				);
+				expect(result.response).toBe('groomed response');
+				expect(spawn).toHaveBeenCalledTimes(1);
+				const config = spawn.mock.calls[0][0];
+				expect(config.toolType).toBe('grok');
+				if (ssh) {
+					expect(config.command).toBe('ssh');
+					expect(config.sshRemoteId).toBe(SSH_REMOTE.id);
+					expect(config.sshRemoteHost).toBe(SSH_REMOTE.host);
+					for (const value of ['/selected/grok', 'grok-selected', '/accounts/selected', 'plan'])
+						expect(config.sshStdinScript).toContain(value);
+				} else {
+					expect(config.command).toBe('/selected/grok');
+					expect(config.sshRemoteId).toBeUndefined();
+					expect(config.customEnvVars).toMatchObject({ GROK_HOME: '/accounts/selected' });
+					expect(config.args).toContain('grok-selected');
+				}
+				expect(mockPM.kill).not.toHaveBeenCalled();
+			});
+		});
+
+		it('kills a silent Grok utility turn at its deadline and leaves nothing running (GT1-08-15)', async () => {
+			vi.useFakeTimers();
+			try {
+				const spawn = vi.spyOn(mockPM, 'spawn').mockReturnValue({ pid: 4242, success: true });
+				const pending = groomContext(
+					{
+						projectRoot: '/project',
+						agentType: 'grok',
+						prompt: 'summarize',
+						readOnlyMode: true,
+						timeoutMs: 100,
+					},
+					mockPM,
+					createMockAgentDetector(grok)
+				);
+				const settled = expect(pending).rejects.toThrow('Grooming timed out with no response');
+				await vi.advanceTimersByTimeAsync(150);
+				await settled;
+				const { sessionId } = spawn.mock.calls[0][0] as { sessionId: string };
+				expect(spawn).toHaveBeenCalledTimes(1);
+				expect(mockPM.kill).toHaveBeenCalledExactlyOnceWith(sessionId);
+				for (const handlers of mockPM._handlers.values()) expect(handlers).toHaveLength(0);
+				expect(getActiveGroomingSessionCount()).toBe(0);
+				expect(vi.getTimerCount()).toBe(0);
+			} finally {
+				vi.useRealTimers();
+			}
+		});
 
 		it('enforces read-only through the CLI policy and never auto-approves', async () => {
 			const spawn = vi.spyOn(mockPM, 'spawn');
