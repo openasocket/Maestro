@@ -4482,6 +4482,193 @@ Some text with [x] in it that's not a checkbox
 	 * authority is real with a policy table; the standalone binding is the
 	 * regression.
 	 */
+	// GT1-08-06: headless Grok turns on the fake child above, fed the
+	// streaming-json record shapes captured from real grok (see the parser
+	// fixtures in grok-output-parser.test.ts). Each case is one task turn as the
+	// Auto Run engine sees it: success only on a native `end` record.
+	describe('spawnAgent: Grok headless automation records', () => {
+		isolateAgentEnv(['GROK_HOME', 'GROK_AUTH', 'GROK_AUTH_PATH']);
+		const ACCOUNT = { GROK_HOME: '/accounts/grok-selected' };
+		const line = (record: Record<string, unknown>) => JSON.stringify(record) + '\n';
+		const text = (data: string) => line({ type: 'text', data });
+		const end = (sessionId: string) => line({ type: 'end', stopReason: 'EndTurn', sessionId });
+
+		beforeEach(() => {
+			mockSpawn.mockReturnValue(mockChild);
+			vi.spyOn(fs, 'openSync').mockReturnValue(73);
+			vi.spyOn(fs, 'fstatSync').mockReturnValue({ dev: 1, ino: 73 } as fs.Stats);
+			vi.spyOn(fs, 'lstatSync').mockReturnValue({ dev: 1, ino: 73 } as fs.Stats);
+			vi.spyOn(fs, 'unlinkSync').mockImplementation(() => {});
+			vi.spyOn(fs, 'closeSync').mockImplementation(() => {});
+			vi.mocked(fs.writeFileSync).mockImplementation(() => {});
+		});
+
+		/** One Grok process: wait for the spawn, write stdout/stderr, exit. */
+		async function grokTurn(
+			pending: Promise<AgentResult>,
+			{ stdout = '', stderr = '', code = 0 as number | null, calls = 1 } = {}
+		): Promise<AgentResult> {
+			await waitForSpawnCall(calls);
+			if (stdout) mockStdout.emit('data', stdout);
+			if (stderr) mockStderr.emit('data', stderr);
+			await yieldTick();
+			mockChild.emit('close', code);
+			return pending;
+		}
+
+		it('runs two task turns, the second resuming the first, with model, effort and account on both', async () => {
+			const options = {
+				customModel: 'grok-code-fast-1',
+				customEffort: 'high',
+				customEnvVars: ACCOUNT,
+			};
+			const first = await grokTurn(spawnAgent('grok', '/project', 'task one', undefined, options), {
+				stdout:
+					line({ type: 'thought', data: 'planning' }) +
+					text('one ') +
+					text('done') +
+					end('grok-native-1'),
+			});
+			expect(first).toMatchObject({
+				success: true,
+				outcome: 'completed',
+				response: 'one done',
+				agentSessionId: 'grok-native-1',
+			});
+			// Grok reports no usage or cost: unknown stays unknown.
+			expect(first.usageStats).toBeUndefined();
+
+			const second = await grokTurn(
+				spawnAgent('grok', '/project', 'task two', first.agentSessionId, options),
+				// The final record without a trailing newline is still read.
+				{ stdout: text('two done') + end('grok-native-1').trimEnd(), calls: 2 }
+			);
+			expect(second).toMatchObject({
+				success: true,
+				response: 'two done',
+				agentSessionId: 'grok-native-1',
+			});
+
+			expect(mockSpawn).toHaveBeenCalledTimes(2);
+			mockSpawn.mock.calls.forEach(([, args, spawnOptions], index) => {
+				expect(args[args.indexOf('-m') + 1]).toBe('grok-code-fast-1');
+				expect(args.filter((a: string) => a === '--reasoning-effort')).toHaveLength(1);
+				expect(args[args.indexOf('--reasoning-effort') + 1]).toBe('high');
+				expect(args.includes('--resume')).toBe(index === 1);
+				expect(spawnOptions.env.GROK_HOME).toBe('/accounts/grok-selected');
+			});
+			const resumed = mockSpawn.mock.calls[1][1] as string[];
+			expect(resumed[resumed.indexOf('--resume') + 1]).toBe('grok-native-1');
+			// Options are read, never rewritten.
+			expect(options.customEnvVars).toEqual(ACCOUNT);
+		});
+
+		it.each([
+			['an empty stdout', '', /native terminal record/],
+			[
+				'a stream cut inside its last record',
+				text('partial ') + '{"type":"text","da',
+				/malformed native/,
+			],
+			['a malformed final line', text('partial') + '{not json}\n', /malformed native/],
+			[
+				'thoughts and text with no end record',
+				line({ type: 'thought', data: 'hmm' }) + text('half'),
+				/native terminal record|incomplete/i,
+			],
+		])(
+			'fails a clean exit with %s instead of completing the task',
+			async (_label, stdout, failure) => {
+				const result = await grokTurn(spawnAgent('grok', '/project', 'task'), { stdout });
+				expect(result.success).toBe(false);
+				expect(result.outcome).not.toMatch(/^completed/);
+				expect(result.error).toMatch(failure);
+				expect(result.response ?? '').not.toMatch(/partial|half/);
+				expect(result.agentError).toBeUndefined();
+				expect(result.agentSessionId).toBeUndefined();
+			}
+		);
+
+		it('fails a partial answer that exits non-zero with no end record', async () => {
+			const result = await grokTurn(spawnAgent('grok', '/project', 'task'), {
+				stdout: text('I started the'),
+				stderr: 'worker exited unexpectedly\n',
+				code: 1,
+			});
+			expect(result.success).toBe(false);
+			expect(result.response ?? '').not.toBe('I started the');
+			expect(result.agentError).toBeUndefined();
+		});
+
+		it('fails an unclassified nonzero exit without inventing a category', async () => {
+			const result = await grokTurn(spawnAgent('grok', '/project', 'task'), {
+				stderr: 'thread main panicked at src/run.rs:12\n',
+				code: 101,
+			});
+			expect(result.success).toBe(false);
+			expect(result.agentError).toBeUndefined();
+			expect(result.error).toBeTruthy();
+		});
+
+		it.each([
+			[
+				'an in-band auth error on exit 0',
+				{
+					stdout: line({ type: 'error', message: 'Not authenticated. Run grok login to sign in.' }),
+				},
+				'auth_expired',
+				'Not authenticated',
+			],
+			[
+				'a stderr-only grok login hint on exit 1',
+				{ stderr: 'Error: please run `grok login` first\n', code: 1 },
+				'auth_expired',
+				null,
+			],
+			[
+				'an in-band rate limit on exit 1',
+				{
+					stdout: line({ type: 'error', message: '429 Too Many Requests: rate limit exceeded' }),
+					stderr: 'Error: 429 Too Many Requests: rate limit exceeded\n',
+					code: 1,
+				},
+				'rate_limited',
+				'429 Too Many Requests: rate limit exceeded',
+			],
+		] as const)(
+			'classifies %s for the Auto Run pause rules',
+			async (_label, records, type, providerWords) => {
+				const result = await grokTurn(
+					spawnAgent('grok', '/project', 'task', undefined, { customEnvVars: ACCOUNT }),
+					records
+				);
+				expect(result.success).toBe(false);
+				expect(result.agentError?.type).toBe(type);
+				// The canned, actionable message leads; the provider's words are kept.
+				expect(result.error?.startsWith(result.agentError!.message)).toBe(true);
+				if (providerWords) expect(result.error).toContain(providerWords);
+				expect(spawnCall().options.env.GROK_HOME).toBe('/accounts/grok-selected');
+			}
+		);
+
+		it('reports a cancelled Grok turn as interrupted and stops the child', async () => {
+			const controller = new AbortController();
+			const pending = spawnAgent('grok', '/project', 'long task', undefined, {
+				signal: controller.signal,
+			});
+			await waitForSpawnCall();
+			mockStdout.emit('data', text('working on it'));
+			controller.abort();
+			await yieldTick();
+			mockChild.emit('close', null, 'SIGTERM');
+			const result = await pending;
+			expect(result).toMatchObject({ success: false, outcome: 'interrupted' });
+			expect(result.agentError).toBeUndefined();
+			expect(result.response ?? '').not.toBe('working on it');
+			expect(mockKill).toHaveBeenCalled();
+		});
+	});
+
 	describe('spawnAgent: managed launches', () => {
 		const INSTALLATION = { installationId: 'inst-cli', runtimeId: 'cli-1', processEpoch: 'e1' };
 		const RECORD = {
@@ -4905,6 +5092,35 @@ Some text with [x] in it that's not a checkbox
 			});
 			expect(host.asked[0].context.origin).toBe('cli');
 			expect(host.asked[0].context.actor).toEqual(ACTOR);
+		});
+
+		it('refuses a denied Grok task turn with no prompt file, no spawn and no retry', async () => {
+			const openSync = vi.spyOn(fs, 'openSync');
+			const { host, authority } = managedAuthority(() => ({
+				decision: 'deny',
+				reason: 'grok is not allowed here',
+				policyRevision: 2,
+			}));
+			const result = await spawnAgent('grok', '/p', 'private task', 'grok-native-1', {
+				managed: authority,
+				customModel: 'grok-code-fast-1',
+				customEffort: 'high',
+				customEnvVars: { GROK_HOME: '/accounts/grok-selected' },
+			});
+
+			expect(result).toMatchObject({
+				success: false,
+				managed: { state: 'denied', code: 'policy-denied' },
+			});
+			expect(result.error).toContain('[managed-denied] grok is not allowed here');
+			expect(result.agentError).toBeUndefined();
+			expect(JSON.stringify(result)).not.toContain('private task');
+			expect(mockSpawn).not.toHaveBeenCalled();
+			expect(mockWrapSpawnWithSsh).not.toHaveBeenCalled();
+			expect(openSync).not.toHaveBeenCalled();
+			expect(host.asked).toHaveLength(1);
+			expect(host.asked[0].snapshot).toMatchObject({ provider: 'grok' });
+			expect(host.authority.live()).toHaveLength(0);
 		});
 
 		it('refuses every launch as unavailable on an enrolled machine with no attached host', async () => {

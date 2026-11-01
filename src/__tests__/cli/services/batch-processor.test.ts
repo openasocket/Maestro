@@ -2302,4 +2302,228 @@ describe('batch-processor', () => {
 			expect(synopsisSpawnOpts?.customEffort).toBe('low');
 		});
 	});
+	// GT1-08-06: Grok headless runs through the shared engine. Each record is the
+	// AgentResult the CLI spawner resolves from a fake Grok process (the
+	// streaming-json lines agent-spawner.test.ts drives), so these cases pin what
+	// the engine does with each Grok outcome, not how the stream is parsed.
+	describe('runPlaybook - Grok headless records', () => {
+		const GROK_NO_TERMINAL =
+			'Grok exited without a native terminal record. Any response is incomplete.';
+		const grokAccount = { GROK_HOME: '/accounts/grok-selected' };
+		const grokSession = (overrides: Partial<SessionInfo> = {}) =>
+			mockSession({
+				toolType: 'grok',
+				customModel: 'grok-code-fast-1',
+				customEffort: 'high',
+				customEnvVars: grokAccount,
+				...overrides,
+			});
+		const ok = (sessionId: string, response = 'done') => ({
+			success: true,
+			response,
+			agentSessionId: sessionId,
+			outcome: 'completed' as const,
+		});
+		/** The document keeps one unchecked task whatever the turn did. */
+		const stuckTask = () =>
+			vi.mocked(readDocAndCountTasks).mockReturnValue({
+				content: '- [ ] Grok task',
+				taskCount: 1,
+			});
+		const taskCalls = () => vi.mocked(spawnAgent).mock.calls.filter((c) => c[3] === undefined);
+		const resumeCalls = () => vi.mocked(spawnAgent).mock.calls.filter((c) => c[3] !== undefined);
+
+		it('runs two Grok tasks with the selected model, effort and account, resuming each for its synopsis', async () => {
+			let dispatched = 0;
+			vi.mocked(spawnAgent).mockImplementation(async (_tool, _cwd, _prompt, resume) => {
+				if (resume) return ok(resume, '**Summary:** did it\n**Details:** ok');
+				dispatched++;
+				return ok(`grok-native-${dispatched}`);
+			});
+			vi.mocked(readDocAndCountTasks).mockImplementation(() =>
+				dispatched === 0
+					? { content: '- [ ] One\n- [ ] Two', taskCount: 2 }
+					: dispatched === 1
+						? { content: '- [x] One\n- [ ] Two', taskCount: 1 }
+						: { content: '- [x] One\n- [x] Two', taskCount: 0 }
+			);
+
+			const events = await collectEvents(runPlaybook(grokSession(), mockPlaybook(), '/playbooks'));
+
+			expect(taskCalls()).toHaveLength(2);
+			for (const [tool, cwd, , , options] of taskCalls()) {
+				expect(tool).toBe('grok');
+				expect(cwd).toBe('/path/to/project');
+				expect(options).toMatchObject({
+					customModel: 'grok-code-fast-1',
+					customEffort: 'high',
+					customEnvVars: grokAccount,
+					querySource: 'auto',
+				});
+			}
+			// The synopsis resumes the end-only native id each task returned.
+			expect(resumeCalls().map((c) => c[3])).toEqual(['grok-native-1', 'grok-native-2']);
+			for (const call of resumeCalls()) expect(call[4]?.customEnvVars).toEqual(grokAccount);
+			const completes = events.filter((e) => e.type === 'task_complete');
+			expect(completes.map((e) => [e.success, e.agentSessionId])).toEqual([
+				[true, 'grok-native-1'],
+				[true, 'grok-native-2'],
+			]);
+			expect(completes.map((e) => e.summary)).toEqual(['did it', 'did it']);
+			// Grok reports no usage: nothing is invented for the run totals.
+			expect(completes.every((e) => e.usageStats === undefined)).toBe(true);
+			const complete = events.find((e) => e.type === 'complete');
+			expect(complete).toMatchObject({ success: true, totalTasksCompleted: 2, totalCost: 0 });
+		});
+
+		it('lets the run model and effort win over the Grok agent settings', async () => {
+			let reads = 0;
+			vi.mocked(readDocAndCountTasks).mockImplementation(() =>
+				++reads <= 3 ? { content: '- [ ] T', taskCount: 1 } : { content: '- [x] T', taskCount: 0 }
+			);
+			await collectEvents(
+				runPlaybook(grokSession(), mockPlaybook(), '/playbooks', {
+					model: 'grok-4',
+					effort: 'low',
+					skipSynopsis: true,
+				})
+			);
+			expect(vi.mocked(spawnAgent).mock.calls[0][4]).toMatchObject({
+				customModel: 'grok-4',
+				customEffort: 'low',
+				customEnvVars: grokAccount,
+			});
+		});
+
+		it.each([
+			[
+				'a truncated stream with no end record',
+				{ error: GROK_NO_TERMINAL, response: 'partial ans' },
+			],
+			['an empty stdout on a clean exit', { error: GROK_NO_TERMINAL }],
+			[
+				'a nonzero exit after a partial answer',
+				{ error: 'Process exited with code 1', response: 'half' },
+			],
+		])('keeps the task incomplete after %s', async (_label, failure) => {
+			stuckTask();
+			vi.mocked(spawnAgent).mockResolvedValue({
+				success: false,
+				outcome: 'crashed',
+				...failure,
+			});
+
+			const events = await collectEvents(runPlaybook(grokSession(), mockPlaybook(), '/playbooks'));
+
+			const completes = events.filter((e) => e.type === 'task_complete');
+			expect(completes.length).toBeGreaterThan(0);
+			for (const e of completes) {
+				expect(e.success).toBe(false);
+				expect(e.summary).toBe('[tasks] Task failed');
+				// The failure is the record, never the partial text as a synopsis.
+				expect(e.fullResponse).toBe(failure.error);
+			}
+			// No synopsis resume is spent on a failed turn.
+			expect(resumeCalls()).toHaveLength(0);
+			expect(events.find((e) => e.type === 'document_complete')).toBeUndefined();
+			expect(events.find((e) => e.type === 'document_stalled')?.remainingTasks).toBe(1);
+			expect(events.find((e) => e.type === 'complete')?.totalTasksCompleted).toBe(0);
+			const history = vi.mocked(addHistoryEntry).mock.calls.map((c) => c[0]);
+			const taskRows = history.filter((h) => h.summary === '[tasks] Task failed');
+			expect(taskRows.length).toBe(completes.length);
+			expect(taskRows.every((h) => h.success === false)).toBe(true);
+		});
+
+		it.each([
+			[
+				'auth',
+				{
+					type: 'auth_expired',
+					message: 'Grok authentication is required.',
+					recoverable: true,
+					agentId: 'grok',
+					timestamp: 1,
+				},
+			],
+			[
+				'rate limit',
+				{
+					type: 'rate_limited',
+					message: 'Grok rate limit exceeded. Reset time is unknown unless reported separately.',
+					recoverable: true,
+					agentId: 'grok',
+					timestamp: 1,
+				},
+			],
+		] as const)(
+			'records a classified Grok %s failure without completing the task',
+			async (_label, agentError) => {
+				stuckTask();
+				vi.mocked(spawnAgent).mockResolvedValue({
+					success: false,
+					outcome: 'crashed',
+					agentError: { ...agentError },
+					error: `${agentError.message} (provider words)`,
+				});
+
+				const events = await collectEvents(
+					runPlaybook(grokSession(), mockPlaybook(), '/playbooks')
+				);
+
+				// The CLI has nobody to answer a pause: recorded, then the stall rule ends it.
+				expect(events.find((e) => e.type === 'paused')).toBeUndefined();
+				const failed = events.filter((e) => e.type === 'task_complete');
+				expect(failed.every((e) => e.success === false)).toBe(true);
+				expect(failed[0]?.fullResponse).toBe(`${agentError.message} (provider words)`);
+				expect(events.find((e) => e.type === 'complete')?.totalTasksCompleted).toBe(0);
+				expect(resumeCalls()).toHaveLength(0);
+			}
+		);
+
+		it('stops the run on a cancelled Grok turn without counting the task', async () => {
+			stuckTask();
+			const controller = new AbortController();
+			vi.mocked(spawnAgent).mockImplementation(async (_t, _c, _p, _r, options) => {
+				expect(options?.signal).toBe(controller.signal);
+				controller.abort();
+				return {
+					success: false,
+					outcome: 'interrupted',
+					error: 'Agent run timed out or was cancelled',
+				};
+			});
+
+			const events = await collectEvents(
+				runPlaybook(grokSession(), mockPlaybook(), '/playbooks', { signal: controller.signal })
+			);
+
+			expect(spawnAgent).toHaveBeenCalledTimes(1);
+			const complete = events.find((e) => e.type === 'task_complete');
+			expect(complete).toMatchObject({ success: false, summary: '[tasks] Task interrupted' });
+			expect(events.find((e) => e.type === 'complete')?.totalTasksCompleted).toBe(0);
+			expect(events.find((e) => e.type === 'document_complete')).toBeUndefined();
+		});
+
+		it('records a fake managed refusal as a failed task with no synopsis turn', async () => {
+			stuckTask();
+			vi.mocked(spawnAgent).mockResolvedValue({
+				success: false,
+				managed: { state: 'denied', code: 'policy-denied' },
+				error: '[managed-denied] grok is not allowed here',
+			});
+
+			const events = await collectEvents(runPlaybook(grokSession(), mockPlaybook(), '/playbooks'));
+
+			// Each dispatch is one refused task turn; nothing resumes a refused session.
+			expect(resumeCalls()).toHaveLength(0);
+			const completes = events.filter((e) => e.type === 'task_complete');
+			expect(completes.length).toBe(taskCalls().length);
+			for (const e of completes) {
+				expect(e.success).toBe(false);
+				expect(e.agentSessionId).toBeUndefined();
+				expect(e.fullResponse).toContain('[managed-denied]');
+			}
+			expect(events.find((e) => e.type === 'complete')?.totalTasksCompleted).toBe(0);
+		});
+	});
 });
