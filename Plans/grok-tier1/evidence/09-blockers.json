@@ -1,0 +1,238 @@
+{
+	"schemaVersion": 1,
+	"taskId": "GT1-09-01",
+	"recordedAt": "2026-11-01",
+	"sourceCommit": "03479ec790f6141d2ea9d3fa9bc21dcc279dd5f5",
+	"evidence": "Plans/grok-tier1/evidence/09.md",
+	"containsSecrets": false,
+	"statusSemantics": {
+		"blocked-external": "Needs a capability that does not exist in this repository or on this machine; Maestro keeps refusing.",
+		"fixable-in-maestro": "A named Maestro seam can close it; an owner task is assigned.",
+		"partially-fixable": "Maestro can tighten the refusal; full qualification still needs external evidence.",
+		"refused-safely": "The managed operation is refused before any effect; a safety pass, not functional parity."
+	},
+	"requirements": [
+		{
+			"id": "GT1-09-R01",
+			"requirement": "Per-effect authorization of a running managed Grok turn by a real endpoint authority.",
+			"surface": "desktop process manager, portable runAgentTurn, Cue",
+			"route": ["acp-candidate", "native-headless"],
+			"status": "blocked-external",
+			"reason": "The spawn authority's effects default to unavailableEffectAuthority: the endpoint exposes no per-effect authorization operation in this build. Managed Grok ACP permission requests are all denied; headless Grok asks no one.",
+			"requiredAuthority": "Endpoint per-effect operation (CP-01, CP-03, owner mega-maestro) paired with this host and exercised against an exact Grok binary.",
+			"sourceRefs": [
+				"src/main/enterprise/spawn-authority.ts:179-187",
+				"src/main/process-manager/spawners/GrokAcpSpawner.ts:576-582"
+			],
+			"ownerTasks": ["GT1-09-07", "GT1-09-11", "GT1-11-12"],
+			"parityRows": ["P33", "P34"],
+			"releaseImpact": "Managed standard-mode Grok cannot complete a turn that needs any tool approval; no managed effect-enforcement claim."
+		},
+		{
+			"id": "GT1-09-R02",
+			"requirement": "Preventive control of provider-internal tool, file, shell, network and descendant effects on the managed child-process route.",
+			"surface": "desktop, CLI, Cue headless Grok",
+			"route": ["native-headless"],
+			"status": "partially-fixable",
+			"reason": "The child-process row is managed 'implemented' for launch admission only; headless Grok runs with --always-approve (batchModeArgs equals yoloModeArgs) or plan mode, and resolves its own permission prompts.",
+			"requiredAuthority": "A confinement or per-effect producer for the route; until then Maestro must refuse managed operations whose policy requires preventive control (GT1-09-07).",
+			"sourceRefs": [
+				"src/shared/maestro-lib/providers/capabilities.ts:589-591",
+				"src/shared/maestro-lib/providers/capabilities.ts:632-644",
+				"src/shared/maestro-lib/providers/definitions.ts:898",
+				"src/shared/maestro-lib/providers/definitions.ts:929"
+			],
+			"ownerTasks": ["GT1-09-07", "GT1-09-08", "GT1-11-12"],
+			"parityRows": ["P33", "P34", "P35"],
+			"releaseImpact": "Launch admission is the only managed guarantee on headless Grok."
+		},
+		{
+			"id": "GT1-09-R03",
+			"requirement": "Qualified read-only semantics (files, symlinks, temporary files, shell descendants, network) for Grok.",
+			"surface": "every read-only Grok launch",
+			"route": ["native-headless"],
+			"status": "blocked-external",
+			"reason": "readOnlyCliEnforced is true on the strength of Grok's own --permission-mode plan plus --deny Bash(*); this is provider self-enforcement, not a Maestro sandbox, and is not proven on an exact binary per OS.",
+			"requiredAuthority": "Exact-binary live qualification per OS (phase 11) or a host confinement producer.",
+			"sourceRefs": ["src/shared/maestro-lib/providers/definitions.ts:909-920"],
+			"ownerTasks": ["GT1-09-07", "GT1-11-12", "GT1-11-11D"],
+			"parityRows": ["P35", "C-supportsReadOnlyMode"],
+			"releaseImpact": "Read-only cannot be certified as a security boundary."
+		},
+		{
+			"id": "GT1-09-R04",
+			"requirement": "Proof that Grok ACP permission requests precede every effect class, with a typed effect a policy can decide.",
+			"surface": "Grok ACP driver",
+			"route": ["acp-candidate"],
+			"status": "blocked-external",
+			"reason": "Each request becomes a 'permissions' effect carrying the raw request; title, kind and rawInput are deliberately not trusted as a classifier. Coverage of hooks, subagents, MCP meta-tools and provider network is unproven.",
+			"requiredAuthority": "Live evidence that the exact binary asks before each effect class; a typed mapping only after that evidence exists.",
+			"sourceRefs": [
+				"src/shared/maestro-lib/grok/acp-requests.ts:334-364",
+				"src/shared/maestro-lib/managed/effects.ts:43-50"
+			],
+			"ownerTasks": ["GT1-09-07", "GT1-09-08", "GT1-11-12"],
+			"parityRows": ["P34"],
+			"releaseImpact": "ACP availability is not a policy boundary for Grok."
+		},
+		{
+			"id": "GT1-09-R05",
+			"requirement": "The managed route table names the Grok ACP route and the ACP spawn is held to its own row.",
+			"surface": "providerRouteSupport consumers (process manager, inventory, install policy, probes, cross-agent router)",
+			"route": ["acp-candidate"],
+			"status": "fixable-in-maestro",
+			"reason": "ManagedRoute has no ACP member; a managed ACP turn rides the child-process row and GrokAcpSpawner.spawn does not consult the table. The admitted snapshot names the headless argv while the spawner runs the ACP argv derived from it.",
+			"requiredAuthority": "None for the table; a managed 'implemented' ACP row still needs GT1-09-R01.",
+			"sourceRefs": [
+				"src/shared/maestro-lib/providers/capabilities.ts:564-572",
+				"src/main/process-manager/spawners/GrokAcpSpawner.ts:373-451",
+				"src/main/process-manager/ProcessManager.ts:150-189"
+			],
+			"ownerTasks": ["GT1-09-02", "GT1-09-03"],
+			"parityRows": ["REG-MANAGED-ROUTES", "P33"],
+			"releaseImpact": "Fleet inventory and policy cannot see which Grok route ran."
+		},
+		{
+			"id": "GT1-09-R06",
+			"requirement": "Managed Grok ACP binds to a qualified version range, not to the version the peer reports.",
+			"surface": "Grok route selector, desktop and portable",
+			"route": ["acp-candidate"],
+			"status": "partially-fixable",
+			"reason": "The desktop snapshot starts with agentVersion null and completeGrokAcpNegotiation adopts the peer's reported version; only an absent version is refused.",
+			"requiredAuthority": "A qualified version range from exact-binary live evidence; Maestro can refuse managed ACP until one exists.",
+			"sourceRefs": [
+				"src/main/process-manager/spawners/GrokAcpSpawner.ts:388-397",
+				"src/main/process-manager/spawners/GrokAcpSpawner.ts:593-597",
+				"src/shared/maestro-lib/grok/route.ts:316-324"
+			],
+			"ownerTasks": ["GT1-09-02", "GT1-09-03", "GT1-11-12"],
+			"parityRows": ["P02", "P09", "REG-MANAGED-ROUTES"],
+			"releaseImpact": "A new Grok release would run under management without new qualification."
+		},
+		{
+			"id": "GT1-09-R07",
+			"requirement": "The desktop dispatch snapshot carries the effective Grok model and account so a policy pin can see them.",
+			"surface": "desktop process manager snapshot",
+			"route": ["native-headless", "acp-candidate"],
+			"status": "fixable-in-maestro",
+			"reason": "modelFromArgs reads --model and --model= only; Grok's modelArgs and model argBuilder emit -m <model>, so every Grok desktop snapshot has model null. The snapshot names no account.",
+			"requiredAuthority": "None. The fix lives in src/main/process-manager/ProcessManager.ts, outside GT1-09-02's two named files, so it needs a bounded continuation task.",
+			"sourceRefs": [
+				"src/main/process-manager/ProcessManager.ts:334-340",
+				"src/main/process-manager/ProcessManager.ts:150-189",
+				"src/shared/maestro-lib/providers/definitions.ts:941-961"
+			],
+			"ownerTasks": ["GT1-09-02", "GT1-09-03", "GT1-09-04"],
+			"parityRows": ["P33", "P36"],
+			"releaseImpact": "An enterprise model pin cannot be enforced against a Grok desktop launch from the snapshot."
+		},
+		{
+			"id": "GT1-09-R08",
+			"requirement": "Managed Grok over SSH binds the actual remote target and its endpoint identity.",
+			"surface": "SSH spawns",
+			"route": ["ssh-native-headless", "ssh-acp-candidate"],
+			"status": "partially-fixable",
+			"reason": "Headless over SSH is admitted only with a bound sshRemoteEndpoint; ACP over SSH is refused (GROK_ACP_PORT_SUPPORT.remote false). No paired remote endpoint attestation producer exists here.",
+			"requiredAuthority": "Remote endpoint attestation from an enrolled remote runtime; Maestro lineage and target binding in GT1-09-09.",
+			"sourceRefs": [
+				"src/main/process-manager/spawners/ChildProcessSpawner.ts:75-82",
+				"src/shared/maestro-lib/grok/route.ts:32-35",
+				"src/shared/maestro-lib/grok/route.ts:182"
+			],
+			"ownerTasks": ["GT1-09-09", "GT1-09-10", "GT1-11-12"],
+			"parityRows": ["P15", "P36", "P39"],
+			"releaseImpact": "Managed remote Grok is refused unless a remote endpoint qualifies it."
+		},
+		{
+			"id": "GT1-09-R09",
+			"requirement": "Managed control of Grok MCP servers and MCP meta-tools.",
+			"surface": "MCP overlay, coworking installer",
+			"route": ["native-headless", "acp-candidate"],
+			"status": "blocked-external",
+			"reason": "The Grok MCP entry is verified false with no qualified versions, so production Grok runs uninjected; native trust facts are reported, not enforced.",
+			"requiredAuthority": "Exact-binary MCP loading, trust and disable evidence (phase 11); blocker grok-native-mcp-unqualified.",
+			"sourceRefs": ["Plans/grok-tier1/evidence/07.md"],
+			"ownerTasks": ["GT1-09-07", "GT1-11-12"],
+			"parityRows": ["P34", "P35"],
+			"releaseImpact": "No managed MCP claim for Grok."
+		},
+		{
+			"id": "GT1-09-R10",
+			"requirement": "Native Grok subagent effects governed under management.",
+			"surface": "ACP subagent lineage",
+			"route": ["acp-candidate"],
+			"status": "blocked-external",
+			"reason": "Subagent lineage is synthetic from pinned variants; subagent effects are provider-internal.",
+			"requiredAuthority": "Native subagent evidence and per-effect authority; blocker grok-native-subagent-unqualified.",
+			"sourceRefs": ["Plans/grok-tier1/evidence/07.md"],
+			"ownerTasks": ["GT1-09-07", "GT1-11-12"],
+			"parityRows": ["P34"],
+			"releaseImpact": "No managed subagent claim for Grok."
+		},
+		{
+			"id": "GT1-09-R11",
+			"requirement": "A required no-tools Grok turn.",
+			"surface": "utility turns (context groomer, tab naming)",
+			"route": ["native-headless"],
+			"status": "refused-safely",
+			"reason": "Grok has no verified all-off tool switch (no noToolsArgs); plan mode plus --deny Bash(*) is not no-tools. The groomer refuses requireDisabledTools since GT1-08-14.",
+			"requiredAuthority": "A verified all-off flag on an exact binary.",
+			"sourceRefs": ["src/shared/maestro-lib/providers/definitions.ts:921-928"],
+			"ownerTasks": ["GT1-09-07", "GT1-09-08"],
+			"parityRows": ["P35"],
+			"releaseImpact": "Safety pass; the functional no-tools guarantee stays absent."
+		},
+		{
+			"id": "GT1-09-R12",
+			"requirement": "Pre-effect DLP and control of the provider process's own network.",
+			"surface": "privacy, egress",
+			"route": ["native-headless", "acp-candidate"],
+			"status": "blocked-external",
+			"reason": "Maestro's egress gate governs Maestro-owned fetches only; no DLP producer acts before a Grok effect.",
+			"requiredAuthority": "A DLP and network control producer at a real sink.",
+			"sourceRefs": ["src/main/utils/fetchWithTimeout.ts"],
+			"ownerTasks": ["GT1-09-12", "GT1-09-13"],
+			"parityRows": ["P36"],
+			"releaseImpact": "No DLP or provider-network guarantee for Grok."
+		},
+		{
+			"id": "GT1-09-R13",
+			"requirement": "A real endpoint admission decision for a Grok launch, with audit attribution.",
+			"surface": "host adapter, broker dispatch ledger",
+			"route": ["native-headless", "acp-candidate", "ssh-native-headless", "ssh-acp-candidate"],
+			"status": "blocked-external",
+			"reason": "No enrolled endpoint exists on this machine and this phase enrolls nothing; admissions are exercised only against local or fake authorities.",
+			"requiredAuthority": "Enrolled installation, live endpoint and registered actor (phase 11 GT1-11-12).",
+			"sourceRefs": [
+				"src/main/enterprise/dispatch.ts:264-305",
+				"src/main/enterprise/spawn-authority.ts:138-222"
+			],
+			"ownerTasks": ["GT1-09-12A", "GT1-11-12"],
+			"parityRows": ["P33", "P36"],
+			"releaseImpact": "Fake-authority tests prove client wiring only."
+		}
+	],
+	"notBlockers": [
+		{
+			"id": "GT1-09-N01",
+			"surface": "managed PTY",
+			"verdict": "refused-safely",
+			"sourceRefs": [
+				"src/main/process-manager/spawners/PtySpawner.ts:32-36",
+				"src/shared/maestro-lib/providers/capabilities.ts:622-625"
+			]
+		},
+		{
+			"id": "GT1-09-N02",
+			"surface": "managed native Grok commands",
+			"verdict": "refused-safely (managed-unqualified)",
+			"sourceRefs": ["src/shared/maestro-lib/grok/acp-turn.ts:256"]
+		},
+		{
+			"id": "GT1-09-N03",
+			"surface": "synthetic harness route",
+			"verdict": "qualifies synthetic-harness only, never Grok",
+			"sourceRefs": ["src/shared/maestro-lib/managed/provider-route.ts:182-211"]
+		}
+	]
+}
