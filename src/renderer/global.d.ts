@@ -2095,7 +2095,7 @@ interface MaestroAPI {
 		) => Promise<boolean>;
 		getCustomEnvVars: (agentId: string) => Promise<Record<string, string> | null>;
 		getAllCustomEnvVars: () => Promise<Record<string, Record<string, string>>>;
-		getKnownAuthDirs: () => Promise<{ claudeConfigDirs: string[]; codexHomes: string[] }>;
+		getKnownAuthDirs: () => Promise<import('../shared/authPaths').KnownAuthDirs>;
 		getKnownEnvVarKeys: () => Promise<{
 			byProvider: Record<string, string[]>;
 			global: string[];
