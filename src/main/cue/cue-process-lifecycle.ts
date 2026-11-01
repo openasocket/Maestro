@@ -820,7 +820,7 @@ export async function runProcess(
 	// chat and the CLI on what finished a turn.
 	const answerText = capture.getAnswerText();
 	const parser = capture.parser;
-	const { outcome } = resolveTurnOutcome(
+	const { outcome, error: resolvedError } = resolveTurnOutcome(
 		{
 			exitCode: exit.exitCode,
 			signal: exit.signal,
@@ -865,6 +865,14 @@ export async function runProcess(
 	const inBandMessage = capture.inBandError?.message;
 	if (status === 'failed' && inBandMessage && !stderr.includes(inBandMessage)) {
 		stderr += `${stderr ? '\n' : ''}${inBandMessage}`;
+	}
+	// A native Grok stream that streamed answer deltas and then exited without
+	// its `end` record is failed by the parser, not by the no-terminal rule
+	// above, and carries no stderr of its own. Name the parser's reason (the
+	// resolver already holds it), or the CLI's wording when it supplied none, so
+	// Cue history and the auth classifier read why the turn did not finish.
+	if (toolType === 'grok' && status === 'failed' && !stderr.trim()) {
+		stderr = resolvedError?.message || GROK_NO_TERMINAL_MESSAGE;
 	}
 	return finish(status, exit.exitCode);
 }
