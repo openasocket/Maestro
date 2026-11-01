@@ -385,3 +385,183 @@ describe('PianolaSupervisor on a standalone host: unchanged', () => {
 		bare.stopAll();
 	});
 });
+
+/**
+ * GT1-08-20: supervised children for Grok work. The supervisor launches
+ * maestro-cli, never a provider binary, so a Grok agent's watcher and a plan
+ * of Grok tasks are admitted on the exact CLI spawn with the Grok agent (or
+ * the plan) as the resource, no provider name substituted in the argv; and a
+ * denied, unavailable, or lost answer starts nothing, with no local fallback.
+ */
+describe('PianolaSupervisor under management: Grok targets (GT1-08-20)', () => {
+	const grokWatch = (): PianolaSupervisedTarget => ({
+		id: 'grok-watch',
+		kind: 'watch',
+		enabled: true,
+		createdAt: 0,
+		tabId: 'grok-tab',
+		agentId: 'grok-agent-7',
+		intervalSeconds: 9,
+	});
+	const grokPlan = (): PianolaSupervisedTarget => ({
+		id: 'grok-orch',
+		kind: 'orchestrate',
+		enabled: true,
+		createdAt: 0,
+		planId: 'grok-plan',
+		concurrency: 2,
+	});
+
+	it('admits a Grok agent watcher on the exact CLI spawn with the Grok agent as its resource', async () => {
+		const port = fakeSpawnPort();
+		const sup = makeSupervisor(port);
+		setTargets([grokWatch()]);
+		sup.start();
+		await flush();
+		expect(spawned).toHaveLength(1);
+		const { snapshot, context } = port.asked[0];
+		expect(snapshot).toMatchObject({
+			purpose: 'supervisor',
+			provider: 'maestro-supervisor:pianola',
+			executable: process.execPath,
+			args: [
+				'/fake/maestro-cli.js',
+				'pianola',
+				'watch',
+				'grok-tab',
+				'--agent',
+				'grok-agent-7',
+				'--interval',
+				'9',
+			],
+			shell: false,
+		});
+		expect(snapshot.resourceIds).toEqual(['agent:grok-agent-7', 'pianola-target:grok-watch']);
+		expect(snapshot.args.join(' ')).not.toMatch(/claude|codex/);
+		expect(context.traceId).toBe('pianola-supervisor:grok-watch');
+		expect(port.authority.live()[0].state()).toBe('bound');
+		expect(sup.getHealth()[0]).toMatchObject({ id: 'grok-watch', kind: 'watch', state: 'running' });
+		sup.stopAll();
+	});
+
+	it('admits a plan of Grok tasks as an orchestrate child bound to the plan', async () => {
+		const port = fakeSpawnPort();
+		const sup = makeSupervisor(port);
+		setTargets([grokPlan()]);
+		sup.start();
+		await flush();
+		const { snapshot } = port.asked[0];
+		expect(snapshot.args).toEqual([
+			'/fake/maestro-cli.js',
+			'pianola',
+			'orchestrate',
+			'grok-plan',
+			'--concurrency',
+			'2',
+			'--interval',
+			'5',
+		]);
+		expect(snapshot.resourceIds).toEqual(['pianola-plan:grok-plan', 'pianola-target:grok-orch']);
+		expect(spawned).toHaveLength(1);
+		// A clean orchestrate exit is terminal: the cadence does not relaunch it.
+		spawned[0].exit(0);
+		expect(port.authority.live()).toHaveLength(0);
+		expect(sup.relaunchStale()).toBe(0);
+		expect(port.asked).toHaveLength(1);
+		sup.stopAll();
+	});
+
+	it('a denied Grok watcher starts nothing, names the denial, and never falls back to a local launch', async () => {
+		const port = fakeSpawnPort({ decide: () => deny('Grok supervision is not approved') });
+		const sup = makeSupervisor(port);
+		setTargets([grokWatch(), grokPlan()]);
+		sup.start();
+		await flush();
+		vi.advanceTimersByTime(60 * 60_000);
+		await flush();
+		expect(spawned).toHaveLength(0);
+		expect(spawnOpts).toHaveLength(0);
+		expect(port.asked).toHaveLength(2);
+		for (const health of sup.getHealth()) {
+			expect(health).toMatchObject({ state: 'denied', managed: { code: 'policy-denied' } });
+			expect(health.lastError).toContain('Grok supervision is not approved');
+			expect(health.pid).toBeUndefined();
+		}
+		sup.stopAll();
+	});
+
+	it('a missing authority (unavailable) and a lost answer (unknown) start no Grok child', async () => {
+		const unavailable = fakeSpawnPort({
+			decide: () => ({ decision: 'unavailable', reason: 'endpoint detached' }),
+		});
+		const sup = makeSupervisor(unavailable);
+		setTargets([grokWatch()]);
+		sup.start();
+		await flush();
+		expect(sup.getHealth()[0]).toMatchObject({
+			state: 'denied',
+			managed: { state: 'unavailable' },
+		});
+		sup.stopAll();
+
+		const lostPort = fakeSpawnPort();
+		lostPort.verify = () => {
+			throw new Error('verifier gone');
+		};
+		const lost = makeSupervisor(lostPort);
+		lost.start();
+		await flush();
+		expect(lost.getHealth()[0]).toMatchObject({
+			state: 'denied',
+			managed: { state: 'unknown', code: 'outcome-unknown' },
+		});
+		vi.advanceTimersByTime(60_000);
+		await flush();
+		expect(spawned).toHaveLength(0);
+		lost.stopAll();
+	});
+
+	it('cancelling a running Grok watcher (target removed) kills the child, ends its lease, and never restarts it', async () => {
+		const port = fakeSpawnPort();
+		const sup = makeSupervisor(port);
+		setTargets([grokWatch()]);
+		sup.start();
+		await flush();
+		const [lease] = port.authority.live();
+		setTargets([]);
+		sup.reconcile();
+		expect(spawned[0].killed).toBe(true);
+		spawned[0].exit(null, 'SIGTERM');
+		expect(lease.state()).toBe('released');
+		expect(port.authority.live()).toHaveLength(0);
+		expect(sup.getHealth()).toHaveLength(0);
+		vi.advanceTimersByTime(60 * 60_000);
+		await flush();
+		expect(spawned).toHaveLength(1);
+		expect(port.asked).toHaveLength(1);
+		sup.stopAll();
+	});
+
+	it('switching Pianola off mid-admission starts no Grok child and withdraws the lease unused', async () => {
+		let resolve!: (d: PolicyDecision) => void;
+		const port = fakeSpawnPort({
+			decide: () => new Promise<PolicyDecision>((r) => (resolve = r)),
+		});
+		const sup = makeSupervisor(port);
+		setTargets([grokPlan()]);
+		sup.start();
+		await flush();
+		expect(port.asked).toHaveLength(1);
+		// Switched off before any reconcile ran: the answer itself must be dropped.
+		enabled = false;
+		resolve({ decision: 'allow', policyRevision: 4 });
+		await flush();
+		expect(spawned).toHaveLength(0);
+		expect(spawnOpts).toHaveLength(0);
+		expect(port.authority.live()).toHaveLength(0);
+		expect(sup.getHealth()[0].pid).toBeUndefined();
+		sup.reconcile();
+		expect(sup.getHealth()).toHaveLength(0);
+		sup.stopAll();
+	});
+});
