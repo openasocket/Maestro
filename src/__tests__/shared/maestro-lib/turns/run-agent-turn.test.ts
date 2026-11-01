@@ -2238,12 +2238,13 @@ describe.skipIf(process.platform === 'win32')(
 			const { result } = await done;
 			expect(result.outcome).toBe('crashed');
 			expect(result.exit.signal).toBe('SIGKILL');
-			// Current state, recorded as finding A11-F09 for repair GT1-11-04A: the turn's own
-			// cleanup after the transport loss runs the stop ladder, so the run reads as a caller
-			// stop, and the crash carries no error naming the lost transport.
-			expect(run.stopRequested()).toBe(true);
-			expect(result.exit).toMatchObject({ interrupted: true, stoppedBy: 'caller' });
-			expect(result.error).toBeUndefined();
+			// GT1-11-04A (A11-F09): the driver's own cleanup after the transport loss is no stop
+			// request, and the crash names the lost transport from the session's first failure.
+			expect(run.stopRequested()).toBe(false);
+			expect(result.exit.interrupted).toBe(false);
+			expect(result.exit).not.toHaveProperty('stoppedBy');
+			expect(result.error).toMatchObject({ type: 'agent_crashed', agentId: 'grok' });
+			expect(result.error!.message).toMatch(/\((closed|transport-lost)\)/);
 			// The partial text is kept for display on the crashed outcome, never as a completion.
 			expect(result.answerText).toBe('working');
 			expect(logOf()).not.toContain('session/cancel native-lost');

@@ -10,6 +10,7 @@ import {
 	startTurn,
 	type StartTurnOptions,
 	type TurnHandle,
+	type TurnExit,
 	type TurnHandlers,
 	type TurnProcessSpec,
 } from '../run/start-turn';
@@ -363,6 +364,12 @@ export interface GrokAcpRunningTurn extends Omit<RunningTurn, 'completed'> {
 	answerQuestion: GrokAcpRequestAdapter['answerQuestion'];
 }
 
+/** A process exit as read when the only stop it saw was this driver's own cleanup. */
+function ownedCleanupExit(exit: TurnExit): TurnExit {
+	const { stoppedBy: _cleanup, ...rest } = exit;
+	return { ...rest, interrupted: false };
+}
+
 /**
  * One ACP process per turn, resumed by passing its confirmed native session ID next time.
  * The host supplies the final local ACP process spec from its launch plan (including account,
@@ -414,6 +421,12 @@ export function startGrokAcpTurn(
 	let promptSettled = false;
 	let settled = false;
 	let internalStop = false;
+	/**
+	 * A stop someone outside this driver asked for: the caller (cancel, interrupt, terminate,
+	 * abort) or the authority (revocation). The driver's own cleanup after a lost transport or
+	 * a settled prompt runs the same stop ladder, but it is no stop request and never reads as one.
+	 */
+	let requestedStop = false;
 	let signalling = false;
 	let failure: Exclude<TurnTerminal, { status: 'success' }> | undefined;
 	let requestFailure: Exclude<TurnTerminal, { status: 'success' }> | undefined;
@@ -478,6 +491,7 @@ export function startGrokAcpTurn(
 	};
 	const cancel = (): void => {
 		if (settled || controller.signal.aborted) return;
+		requestedStop = true;
 		if (!session?.error && !promptSettled)
 			failure ??= { status: 'cancelled', origin: 'user', reason: 'host-cancelled' };
 		controller.abort();
@@ -491,7 +505,9 @@ export function startGrokAcpTurn(
 			onStderrBytes: (bytes) => session?.feedStderr(bytes),
 			onStdinError: fault,
 			onStopRequested: (by) => {
-				if (internalStop || settled) return;
+				if (internalStop) return;
+				requestedStop = true;
+				if (settled) return;
 				if (!session?.error && !promptSettled)
 					failure ??=
 						by === 'authority'
@@ -725,7 +741,10 @@ export function startGrokAcpTurn(
 			if (session) session.close();
 			else stopOwnedProcess();
 		}
-		const exit = await handle.done;
+		const processExit = await handle.done;
+		// The driver's own shutdown of a process it no longer needs is no stop the caller or the
+		// authority asked for, so the exit carries no interrupted reading or stopper for it.
+		const exit = requestedStop ? processExit : ownedCleanupExit(processExit);
 		handle.child.stdout?.off('error', fault);
 		handle.child.stderr?.off('error', fault);
 		handle.child.stdout?.off('end', fault);
@@ -736,6 +755,17 @@ export function startGrokAcpTurn(
 					kind: 'missing-terminal',
 					dispatchState: 'unknown',
 				});
+		// A peer that went away with no stop requested (killed, crashed, or closed its pipes
+		// before answering the prompt) is a crash naming the lost transport, taken from the
+		// session's first owned failure. Protocol, timeout, refusal and cancel terminals keep
+		// their own readings.
+		const lostReason = session?.error?.reason;
+		const transportLost =
+			!requestedStop &&
+			terminal.status === 'failed' &&
+			(lostReason === 'closed' || lostReason === 'transport-lost' || lostReason === 'process-lost')
+				? lostReason
+				: undefined;
 		const resolved = resolveTurnOutcome(
 			{
 				// Protocol settlement precedes our intentional process shutdown. Its real exit
@@ -745,7 +775,16 @@ export function startGrokAcpTurn(
 				interrupted: false,
 				stderrText: '',
 				stdoutText: '',
-				explicitError: undefined,
+				explicitError: transportLost
+					? {
+							type: 'agent_crashed',
+							message: `The Grok ACP connection was lost before the turn finished (${transportLost}). No stop was requested; any partial answer is kept for display only.`,
+							recoverable: true,
+							agentId: 'grok',
+							...(session?.sessionId ? { sessionId: session.sessionId } : {}),
+							timestamp: Date.now(),
+						}
+					: undefined,
 				capturedAnswerText: capture?.answerText,
 				resultMessageSeen: capture?.resultMessageSeen ?? false,
 				terminal,
@@ -782,7 +821,13 @@ export function startGrokAcpTurn(
 		};
 	})();
 	return {
-		handle: { ...handle, ...stops, terminateNow: handle.terminateNow },
+		handle: {
+			...handle,
+			...stops,
+			terminateNow: handle.terminateNow,
+			// Only a requested stop counts; the driver's own cleanup ladder is not one.
+			stopRequested: () => requestedStop && handle.stopRequested(),
+		},
 		completed,
 		cancel,
 		answerSoFar: () => capture?.answerText,
