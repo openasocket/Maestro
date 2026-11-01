@@ -80,7 +80,7 @@
 			"requirement": "The managed route table names the Grok ACP route and the ACP spawn is held to its own row.",
 			"surface": "providerRouteSupport consumers (process manager, inventory, install policy, probes, cross-agent router)",
 			"route": ["acp-candidate"],
-			"status": "fixable-in-maestro",
+			"status": "refused-safely",
 			"reason": "ManagedRoute has no ACP member; a managed ACP turn rides the child-process row and GrokAcpSpawner.spawn does not consult the table. The admitted snapshot names the headless argv while the spawner runs the ACP argv derived from it.",
 			"requiredAuthority": "None for the table; a managed 'implemented' ACP row still needs GT1-09-R01.",
 			"sourceRefs": [
@@ -92,9 +92,17 @@
 			"parityRows": ["REG-MANAGED-ROUTES", "P33"],
 			"releaseImpact": "Fleet inventory and policy cannot see which Grok route ran.",
 			"progress": {
-				"task": "GT1-09-02B",
-				"state": "table-rule-and-sink-implemented-tests-pending",
-				"detail": "GT1-09-02 added the 'grok-acp' row and runsOnGrokAcpRoute/managedGrokAcpRefusal (types.ts). GT1-09-02B wires the sink: GrokAcpSpawner.spawn calls managedGrokAcpRefusal first, before consent, env, prompt read or process, and returns { pid: -1, success: false, managed: { state: 'unavailable', code: 'capability-unsupported' } } through its refuse path with no headless reroute; wantsGrokAcp delegates to runsOnGrokAcpRoute. Regression tests are GT1-09-03's."
+				"task": "GT1-09-06",
+				"state": "route-row-and-sink-refusal-verified",
+				"detail": "The 'grok-acp' row is managed unsupported (CP-01/CP-03) and GrokAcpSpawner.spawn calls managedGrokAcpRefusal before consent, env, prompt read or process, returning unavailable/capability-unsupported with no headless reroute. Verified offline: contracts.test.ts asserts the Grok route table, permission-ceiling.test.ts the rule and refusal, spawn-authority.test.ts that an admitted standard turn is refused on ACP with no process, no child spawn and its lease released. A managed 'implemented' ACP row still needs GT1-09-R01; this is a safety pass, not parity."
+			},
+			"verification": {
+				"task": "GT1-09-06",
+				"sourceCommit": "23a35705104026ac02269f02002076f61554d9d7",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json <six suites listed in evidence/09.md GT1-09-06>",
+				"result": "6 files, 210 passed, 0 failed, 0 skipped",
+				"scope": "client integration against synthetic or fake policy answers; not real endpoint or provider qualification",
+				"detail": "contracts.test.ts 2/2 Grok cases, permission-ceiling.test.ts 13/13, spawn-authority.test.ts 13/13."
 			}
 		},
 		{
@@ -114,9 +122,17 @@
 			"parityRows": ["P02", "P09", "REG-MANAGED-ROUTES"],
 			"releaseImpact": "A new Grok release would run under management without new qualification.",
 			"progress": {
-				"task": "GT1-09-02B",
-				"state": "refused-under-management-once-wired",
-				"detail": "The grok-acp managed row stays unsupported because the version is the peer-reported one, so a managed ACP turn is refused before negotiation instead of adopting it (after GT1-09-02B). The standalone selector still adopts the reported version; a qualified range needs GT1-11-12 live evidence. GT1-09-02B: a managed ACP spawn is now refused at the spawner, so no admitted turn adopts a peer-reported version; the qualified range itself remains absent."
+				"task": "GT1-09-06",
+				"state": "managed-acp-refused-verified-qualified-range-absent",
+				"detail": "No admitted turn adopts a peer-reported version: a managed ACP spawn is refused at the spawner (verified by the spawn-authority and permission-ceiling suites). The standalone selector still adopts the reported version. A qualified version range needs GT1-11-12 exact-binary live evidence; status stays partially-fixable."
+			},
+			"verification": {
+				"task": "GT1-09-06",
+				"sourceCommit": "23a35705104026ac02269f02002076f61554d9d7",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json <six suites listed in evidence/09.md GT1-09-06>",
+				"result": "6 files, 210 passed, 0 failed, 0 skipped",
+				"scope": "client integration against synthetic or fake policy answers; not real endpoint or provider qualification",
+				"detail": "Covered by the managed ACP refusal cases in spawn-authority.test.ts and permission-ceiling.test.ts."
 			}
 		},
 		{
@@ -132,13 +148,21 @@
 				"src/main/process-manager/ProcessManager.ts:150-189",
 				"src/shared/maestro-lib/providers/definitions.ts:941-961"
 			],
-			"ownerTasks": ["GT1-09-02", "GT1-09-03", "GT1-09-04"],
+			"ownerTasks": ["GT1-09-02", "GT1-09-03", "GT1-09-04", "GT1-09-02A", "GT1-09-06"],
 			"parityRows": ["P33", "P36"],
-			"releaseImpact": "An enterprise model pin cannot be enforced against a Grok desktop launch from the snapshot.",
+			"releaseImpact": "An enterprise model pin is enforced against a Grok desktop launch through the snapshot and the launch ceiling. A policy keyed on the selected account cannot see it in the Grok desktop snapshot.",
 			"progress": {
-				"task": "GT1-09-02A",
-				"state": "model-implemented-tests-pending-account-gap-open",
-				"detail": "GT1-09-02A: modelFromArgs in ProcessManager.ts reads Grok's -m (and --model, --model=, -m=) from the final argv, which already contains custom args, with the last flag winning, so the desktop snapshot names the effective Grok model. Other providers' snapshots are unchanged. Account remains open: DispatchAttribution.account exists, but ProcessConfig carries no account source, so the snapshot keeps account null. Naming it needs an account reference the spawn handler passes through ProcessConfig, which is a separate bounded change, and no field was invented here. The -m snapshot regression case is GT1-09-03's."
+				"task": "GT1-09-06",
+				"state": "model-verified-account-gap-open",
+				"detail": "Model: verified. spawn-authority.test.ts proves the desktop dispatch snapshot names the last -m of the final argv (custom args included) and that args changed after admission to another model are refused; permission-ceiling.test.ts holds every -m, -m= and --model= spelling to a model pin. Account: still open. DispatchAttribution.account exists but ProcessConfig carries no account source, so the snapshot keeps account null (asserted as the gap, not as a pass). Closing it needs a bounded change that passes an approved account reference from the spawn handler through ProcessConfig into buildSpawnRequestSnapshot; no remaining Phase 09 task names those files (GT1-09-09 covers the portable host adapter, not the desktop snapshot)."
+			},
+			"verification": {
+				"task": "GT1-09-06",
+				"sourceCommit": "23a35705104026ac02269f02002076f61554d9d7",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json <six suites listed in evidence/09.md GT1-09-06>",
+				"result": "6 files, 210 passed, 0 failed, 0 skipped",
+				"scope": "client integration against synthetic or fake policy answers; not real endpoint or provider qualification",
+				"detail": "spawn-authority.test.ts snapshot case (last -m, account null) and the args-changed-after-admission refusal."
 			}
 		},
 		{
@@ -245,9 +269,17 @@
 			"parityRows": ["P33", "P36"],
 			"releaseImpact": "A managed Grok launch no longer inherits GROK_AUTH, GROK_AUTH_PATH, XAI_API_KEY or GROK_HOME, and receives the approved account home. An inherited Grok gateway URL can still route a managed launch to another endpoint; a managed policy cannot pin a Grok gateway or model through the environment.",
 			"progress": {
-				"task": "GT1-09-04A",
-				"state": "write-time-and-launch-credential-strip-implemented-gateway-open-tests-pending",
-				"detail": "GT1-09-04 holds Grok credential, account and endpoint names at managed config write. GT1-09-04A adds PROVIDER_ROUTE_ENV_NAMES.grok { credential: GROK_AUTH, GROK_AUTH_PATH, XAI_API_KEY; baseUrl: null; model: null; accountDir: GROK_HOME } in src/shared/maestro-lib/launch/env.ts. applyManagedEnvCeiling now strips those names from every managed launch and rebinds the approved GROK_HOME. A delivered credential must be a Grok name, and an approved-credential route with none delivered is refused. Standalone is unchanged. Open: the three GROK_*_BASE_URL names are not stripped at launch, and gateway and model pins are refused for Grok. The account is not named in the dispatch snapshot (R07). GT1-09-05 adds the regression cases and GT1-09-06 verifies."
+				"task": "GT1-09-06",
+				"state": "write-time-and-launch-credential-strip-verified-gateway-open",
+				"detail": "Verified offline: settings-policy.test.ts refuses XAI_API_KEY, GROK_AUTH, GROK_AUTH_PATH, GROK_HOME, GROK_MODELS_BASE_URL, --api-key and --base-url as ceiling, locked model/effort/path writes, and a pinning or non-lockable policy document whole; agent-config-writes.test.ts proves refused writes persist nothing and keep no secret through applyAgentConfigWrite under a real createSettingsPolicySource; permission-ceiling.test.ts and context-groomer.managed.test.ts prove the launch ceiling binds the approved GROK_HOME and refuses a gateway, model or foreign credential pin. Open: the three GROK_*_BASE_URL names are not stripped from an inherited shell at launch because ProviderRouteEnvNames holds one baseUrl; the write-time hold covers only provider grok. No remaining Phase 09 task names env.ts; closing it needs a bounded change to the ProviderRouteEnvNames shape."
+			},
+			"verification": {
+				"task": "GT1-09-06",
+				"sourceCommit": "23a35705104026ac02269f02002076f61554d9d7",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json <six suites listed in evidence/09.md GT1-09-06>",
+				"result": "6 files, 210 passed, 0 failed, 0 skipped",
+				"scope": "client integration against synthetic or fake policy answers; not real endpoint or provider qualification",
+				"detail": "settings-policy.test.ts 7/7 Grok cases, agent-config-writes.test.ts 5/5, permission-ceiling.test.ts 13/13, context-groomer.managed.test.ts 5/5."
 			}
 		}
 	],
@@ -273,5 +305,12 @@
 			"verdict": "qualifies synthetic-harness only, never Grok",
 			"sourceRefs": ["src/shared/maestro-lib/managed/provider-route.ts:182-211"]
 		}
-	]
+	],
+	"lastVerification": {
+		"task": "GT1-09-06",
+		"recordedAt": "2026-11-01",
+		"sourceCommit": "23a35705104026ac02269f02002076f61554d9d7",
+		"result": "6 managed route/admission/settings suites, 210 passed, 0 failed",
+		"note": "Passing fake or synthetic authority tests prove client integration only and clear no real endpoint or provider qualification requirement."
+	}
 }
