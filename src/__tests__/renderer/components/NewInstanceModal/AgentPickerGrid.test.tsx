@@ -430,7 +430,7 @@ describe('AgentPickerGrid', () => {
 				'aria-selected',
 				'true'
 			);
-			expect(screen.getByRole('option', { name: /Grok CLI Beta Available/ })).toHaveAttribute(
+			expect(screen.getByRole('option', { name: /Grok CLI\s*Beta Available/ })).toHaveAttribute(
 				'aria-selected',
 				'false'
 			);

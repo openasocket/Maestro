@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { AgentCreationDialog } from '../../../renderer/components/AgentCreationDialog';
 import { LayerStackProvider } from '../../../renderer/contexts/LayerStackContext';
 import { getAgentDefinition } from '../../../shared/maestro-lib/providers/definitions';
@@ -148,7 +147,6 @@ describe('Symphony Grok draft discovery', () => {
 	});
 
 	it('keeps managed Grok fields disabled while allowing creation with inherited config', async () => {
-		const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
 		useSettingsStore.setState({
 			managedLocks: {
 				policyRevision: 7,
@@ -169,7 +167,10 @@ describe('Symphony Grok draft discovery', () => {
 		expect(screen.getByRole('button', { name: 'Add Variable' })).toBeDisabled();
 		for (const key of AGENT_CONFIG_LOCK_KEYS)
 			expect(screen.getByRole('note', { name: `Policy holds ${key}` })).toBeInTheDocument();
-		await user.click(screen.getByRole('button', { name: 'Add Variable' }));
+		act(() => {
+			// Native activation respects the managed panel's disabled fieldset.
+			screen.getByRole('button', { name: 'Add Variable' }).click();
+		});
 		await act(async () => {
 			fireEvent.click(screen.getByRole('button', { name: 'Create Agent' }));
 		});

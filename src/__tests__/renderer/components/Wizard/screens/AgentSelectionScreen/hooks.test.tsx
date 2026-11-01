@@ -830,6 +830,8 @@ describe('AgentSelectionScreen hooks', () => {
 		const showGridView = vi.fn();
 		const announce = vi.fn();
 		const setWizardSessionSshRemoteConfig = vi.fn();
+		// Match useSshRemotes state: the host stays stable during config/model reads.
+		const sshRemoteConfig = { enabled: true, remoteId: 'remote-1' };
 
 		const { result } = renderHook(() =>
 			useAgentConfigurationPanel({
@@ -840,7 +842,7 @@ describe('AgentSelectionScreen hooks', () => {
 						capabilities: { supportsModelSelection: true } as any,
 					}),
 				],
-				sshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+				sshRemoteConfig,
 				configuringAgentId: 'codex',
 				setConfiguringAgentId: vi.fn(),
 				setSelectedAgent: vi.fn(),
