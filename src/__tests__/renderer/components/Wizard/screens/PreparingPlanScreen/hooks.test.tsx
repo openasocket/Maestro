@@ -38,7 +38,7 @@ describe('usePreparingPlanGeneration', () => {
 		vi.useRealTimers();
 	});
 
-	function renderGeneration(overrides: Partial<typeof initialState> = {}) {
+	function renderGeneration(overrides: Partial<typeof initialState> = {}, reactStrictMode = false) {
 		const params = {
 			state: {
 				...initialState,
@@ -56,7 +56,10 @@ describe('usePreparingPlanGeneration', () => {
 			nextStep: vi.fn(),
 		};
 
-		return { params, hook: renderHook(() => usePreparingPlanGeneration(params)) };
+		return {
+			params,
+			hook: renderHook(() => usePreparingPlanGeneration(params), { reactStrictMode }),
+		};
 	}
 
 	it('starts generation on mount, saves documents, records created files, and advances', async () => {
@@ -260,6 +263,74 @@ describe('usePreparingPlanGeneration', () => {
 			expect(original.sessionCustomEnvVars).toEqual({ GROK_HOME: '/accounts/a' });
 		}
 	);
+
+	it('restarts Grok generation after StrictMode cleanup and ignores the obsolete request', async () => {
+		let rejectFirst!: (error: Error) => void;
+		phaseGeneratorMock.generateDocuments
+			.mockImplementationOnce(() => new Promise((_resolve, reject) => (rejectFirst = reject)))
+			.mockImplementation(() => new Promise(() => {}));
+		const { params, hook } = renderGeneration({ selectedAgent: 'grok' }, true);
+		expect(phaseGeneratorMock.abort).toHaveBeenCalledTimes(1);
+		expect(phaseGeneratorMock.generateDocuments).toHaveBeenCalledTimes(2);
+		const stale = phaseGeneratorMock.generateDocuments.mock.calls[0][1];
+		const current = phaseGeneratorMock.generateDocuments.mock.calls[1][1];
+		const documents = [{ filename: 'Phase-01.md', content: '# Plan', taskCount: 2 }];
+		act(() => current.onProgress('Current generation'));
+		const busyCalls = params.setGeneratingDocuments.mock.calls.length;
+		const errorCalls = params.setGenerationError.mock.calls.length;
+		await act(async () => {
+			stale.onStart();
+			stale.onProgress('obsolete progress');
+			stale.onFileCreated({ filename: 'obsolete.md', path: '/project/obsolete.md', size: 1 });
+			stale.onError('obsolete failure');
+			await stale.onComplete({ success: true, documents });
+			rejectFirst(new Error('obsolete rejection'));
+		});
+		expect(hook.result.current.progressMessage).toBe('Current generation');
+		expect(hook.result.current.createdFiles).toEqual([]);
+		expect(params.setGeneratingDocuments).toHaveBeenCalledTimes(busyCalls);
+		expect(params.setGenerationError).toHaveBeenCalledTimes(errorCalls);
+		expect(params.setGeneratedDocuments).not.toHaveBeenCalled();
+		expect(phaseGeneratorMock.saveDocuments).not.toHaveBeenCalled();
+		await act(async () => {
+			await current.onComplete({ success: true, documents, documentsFromDisk: true });
+		});
+		expect(params.setGeneratedDocuments).toHaveBeenCalledExactlyOnceWith(documents);
+		act(() => vi.advanceTimersByTime(500));
+		expect(params.nextStep).toHaveBeenCalledTimes(1);
+		hook.unmount();
+		expect(phaseGeneratorMock.abort).toHaveBeenCalledTimes(2);
+	});
+
+	it('uses replacement completion callbacks on retry without restarting on callback changes', async () => {
+		phaseGeneratorMock.generateDocuments
+			.mockResolvedValueOnce({ success: false, error: 'retry generation' })
+			.mockImplementation(() => new Promise(() => {}));
+		const { params, hook } = renderGeneration({ selectedAgent: 'grok' });
+		await act(async () => {});
+		const original = { ...params };
+		params.setGeneratingDocuments = vi.fn();
+		params.setGeneratedDocuments = vi.fn();
+		params.setGenerationError = vi.fn();
+		params.nextStep = vi.fn();
+		hook.rerender();
+		expect(phaseGeneratorMock.generateDocuments).toHaveBeenCalledTimes(1);
+		act(() => hook.result.current.handleRetry());
+		expect(phaseGeneratorMock.generateDocuments).toHaveBeenCalledTimes(2);
+		const current = phaseGeneratorMock.generateDocuments.mock.calls[1][1];
+		const documents = [{ filename: 'Phase-01.md', content: '# Plan', taskCount: 2 }];
+		await act(async () => {
+			await current.onComplete({ success: true, documents });
+		});
+		expect(phaseGeneratorMock.saveDocuments).toHaveBeenCalledTimes(1);
+		expect(params.setGeneratedDocuments).toHaveBeenCalledExactlyOnceWith(documents);
+		expect(params.setGeneratingDocuments.mock.calls).toEqual([[true], [false]]);
+		expect(params.setGenerationError).toHaveBeenLastCalledWith(null);
+		act(() => vi.advanceTimersByTime(500));
+		expect(params.nextStep).toHaveBeenCalledTimes(1);
+		expect(original.setGeneratedDocuments).not.toHaveBeenCalled();
+		expect(original.nextStep).not.toHaveBeenCalled();
+	});
 
 	it.each(['back', 'unmount'] as const)(
 		'withholds late Grok save completion after %s',
