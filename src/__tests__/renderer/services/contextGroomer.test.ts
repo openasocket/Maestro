@@ -7,6 +7,7 @@ import {
 	getAgentDisplayName,
 	buildContextTransferPrompt,
 	loadContextGroomerPrompts,
+	groomingIdentityOf,
 } from '../../../renderer/services/contextGroomer';
 import type {
 	MergeRequest,
@@ -164,6 +165,73 @@ describe('ContextGroomingService', () => {
 			await vi.waitFor(() => expect(mockGroomContext).toHaveBeenCalled());
 
 			await expect(service.cancelGrooming()).resolves.toBeUndefined();
+		});
+	});
+
+	// GT1-06-02B: a Grok merge grooming call is a restricted turn on the
+	// grooming agent's own account and host, and a refusal is a failed result.
+	describe('Grok merge grooming (GT1-06-02A invariants)', () => {
+		const grokAgent = {
+			customEnvVars: { GROK_HOME: '/accounts/source-home' },
+			customPath: '/bin/grok-source',
+			customArgs: '--source-arg',
+			sessionSshRemoteConfig: {
+				enabled: true,
+				remoteId: 'remote-source',
+				workingDirOverride: '/remote/source',
+			},
+		};
+
+		const grokRequest = (): MergeRequest => ({
+			sources: [
+				createMockContext({ sessionId: 'grok-source', tabId: 'grok-tab', agentType: 'grok' }),
+			],
+			targetAgent: 'grok',
+			targetProjectRoot: '/work/source',
+			...groomingIdentityOf(grokAgent),
+		});
+
+		it('groomingIdentityOf reads the account, binary and host from the session', () => {
+			expect(groomingIdentityOf(grokAgent)).toEqual(
+				expect.objectContaining({
+					customEnvVars: { GROK_HOME: '/accounts/source-home' },
+					customPath: '/bin/grok-source',
+					customArgs: '--source-arg',
+					sshRemoteConfig: grokAgent.sessionSshRemoteConfig,
+				})
+			);
+		});
+
+		it('passes readOnly, the selected account env and SSH config, and no disableTools', async () => {
+			await service.groomContexts(grokRequest(), () => {});
+
+			expect(mockGroomContext).toHaveBeenCalledTimes(1);
+			const [root, agent, , options] = mockGroomContext.mock.calls[0];
+			expect(root).toBe('/work/source');
+			expect(agent).toBe('grok');
+			expect(options.readOnly).toBe(true);
+			expect(options.customEnvVars).toEqual({ GROK_HOME: '/accounts/source-home' });
+			expect(options.sshRemoteConfig).toEqual(grokAgent.sessionSshRemoteConfig);
+			expect(options.customPath).toBe('/bin/grok-source');
+			expect(options.customArgs).toBe('--source-arg');
+			expect(options).not.toHaveProperty('disableTools');
+			expect(options.cheapTurn).toBeUndefined();
+			expect(options.lineage).toEqual({ sessionId: 'grok-source', tabId: 'grok-tab' });
+		});
+
+		it('surfaces a read-only refusal as a failed grooming result with no logs', async () => {
+			mockGroomContext.mockRejectedValueOnce(
+				new Error('grok cannot enforce read-only on this route; grooming refused')
+			);
+			const stages: GroomingProgress[] = [];
+
+			const result = await service.groomContexts(grokRequest(), (p) => stages.push(p));
+
+			expect(result.success).toBe(false);
+			expect(result.groomedLogs).toEqual([]);
+			expect(result.error).toContain('grooming refused');
+			expect(stages.at(-1)?.message).toContain('Grooming failed');
+			expect(service.isGroomingActive()).toBe(false);
 		});
 	});
 
