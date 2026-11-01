@@ -9,14 +9,210 @@
  * See: https://github.com/anthropics/maestro/issues/XXX
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
+	phaseGenerator,
+	type GenerationConfig,
 	parseGeneratedDocuments,
 	splitIntoPhases,
 	countTasks,
 	validateDocuments,
 	sanitizeFilename,
 } from '../../../../../renderer/components/Wizard/services/phaseGenerator';
+import { GROK_WIZARD_GENERATION_ARGS } from '../../../../../renderer/utils/grokWizard';
+
+describe('Grok onboarding generation lifecycle', () => {
+	const config: GenerationConfig = {
+		agentType: 'grok',
+		directoryPath: '/project',
+		projectName: 'Project',
+		conversationHistory: [],
+	};
+	const document =
+		'---BEGIN DOCUMENT---\nFILENAME: Phase-01.md\nCONTENT:\n# Phase 1: Setup\n## Tasks\n- [ ] Build it\n---END DOCUMENT---';
+	const native =
+		JSON.stringify({ type: 'text', data: document }) +
+		'\n{"type":"end","stopReason":"EndTurn","sessionId":"019f47fa-e297-7993-a1f6-adfaf940ba8c","requestId":"req-1"}\n';
+	const ipc = {
+		...window.maestro,
+		agents: { ...window.maestro.agents, get: vi.fn() },
+		process: {
+			...window.maestro.process,
+			spawn: vi.fn(),
+			kill: vi.fn(),
+			onData: vi.fn(),
+			onExit: vi.fn(),
+			onAgentError: vi.fn(),
+		},
+		autorun: {
+			...window.maestro.autorun,
+			watchFolder: vi.fn(),
+			unwatchFolder: vi.fn(),
+			onFileChanged: vi.fn(),
+			listDocs: vi.fn(),
+		},
+	};
+	beforeEach(() => {
+		vi.useFakeTimers();
+		vi.clearAllMocks();
+		vi.stubGlobal('window', { maestro: ipc });
+		ipc.agents.get
+			.mockReset()
+			.mockResolvedValue({ id: 'grok', command: 'grok', args: [], available: true });
+		ipc.process.spawn.mockReset().mockResolvedValue({ success: true });
+		ipc.process.kill.mockReset().mockResolvedValue(undefined);
+		for (const listener of [
+			ipc.process.onData,
+			ipc.process.onExit,
+			ipc.process.onAgentError,
+			ipc.autorun.onFileChanged,
+		]) {
+			listener.mockReset().mockImplementation(() => vi.fn());
+		}
+		ipc.autorun.watchFolder.mockReset().mockResolvedValue({ success: true });
+		ipc.autorun.unwatchFolder.mockReset().mockResolvedValue({ success: true });
+		ipc.autorun.listDocs.mockReset().mockResolvedValue({ success: true, files: [] });
+	});
+	afterEach(() => {
+		phaseGenerator.abort();
+		vi.useRealTimers();
+		vi.unstubAllGlobals();
+		vi.restoreAllMocks();
+	});
+
+	it.each([
+		['grok', document],
+		['grok', native],
+		['claude-code', document],
+		['codex', document],
+		['antigravity', document],
+	] as const)(
+		'generates a plan through the selected %s consumer (%#)',
+		async (agentType, output) => {
+			ipc.agents.get.mockResolvedValue({
+				id: agentType,
+				command: agentType,
+				args: [],
+				available: true,
+			});
+			const onComplete = vi.fn();
+			const pending = phaseGenerator.generateDocuments({ ...config, agentType }, { onComplete });
+			await vi.waitFor(() => expect(ipc.process.spawn).toHaveBeenCalledOnce());
+			const spawn = ipc.process.spawn.mock.calls[0][0];
+			expect(spawn).toMatchObject({
+				toolType: agentType,
+				command: agentType,
+				cwd: config.directoryPath,
+			});
+			if (agentType === 'grok') {
+				expect(spawn.args).toEqual(GROK_WIZARD_GENERATION_ARGS);
+				expect(spawn).toMatchObject({ permissionMode: 'full' });
+			} else expect(spawn.args).not.toContain('--no-subagents');
+			ipc.process.onData.mock.calls[0][0](spawn.sessionId, output);
+			ipc.process.onExit.mock.calls[0][0](spawn.sessionId, 0);
+			expect(await pending).toMatchObject({
+				success: true,
+				documents: [{ filename: 'Phase-01.md', taskCount: 1 }],
+			});
+			expect(onComplete).toHaveBeenCalledOnce();
+			expect(ipc.agents.get).toHaveBeenCalledExactlyOnceWith(agentType);
+			expect(ipc.process.onData.mock.results[0].value).toHaveBeenCalledOnce();
+			expect(vi.getTimerCount()).toBe(0);
+		}
+	);
+
+	it.each(['accepted', 'refused', 'missing', 'rejected'] as const)(
+		'waits for the %s spawn receipt after an early valid exit',
+		async (receipt) => {
+			let resolve!: (value: unknown) => void, reject!: (reason: Error) => void;
+			ipc.process.spawn.mockReturnValue(
+				new Promise((yes, no) => {
+					resolve = yes;
+					reject = no;
+				})
+			);
+			const onComplete = vi.fn();
+			const pending = phaseGenerator.generateDocuments(config, { onComplete });
+			await vi.waitFor(() => expect(ipc.process.spawn).toHaveBeenCalledOnce());
+			const id = ipc.process.spawn.mock.calls[0][0].sessionId;
+			ipc.process.onData.mock.calls[0][0](id, document);
+			ipc.process.onExit.mock.calls[0][0](id, 0);
+			await vi.advanceTimersByTimeAsync(0);
+			expect(onComplete).not.toHaveBeenCalled();
+			expect(phaseGenerator.isGenerationInProgress()).toBe(true);
+			if (receipt === 'rejected') reject(new Error('missing executable'));
+			else resolve(receipt === 'missing' ? {} : { success: receipt === 'accepted' });
+			expect(await pending).toMatchObject({ success: receipt === 'accepted' });
+			expect(onComplete).toHaveBeenCalledTimes(receipt === 'accepted' ? 1 : 0);
+			expect(ipc.process.spawn).toHaveBeenCalledOnce();
+			expect(vi.getTimerCount()).toBe(0);
+		}
+	);
+
+	it.each([
+		['provider error', document, 0, undefined, 'Permission denied'],
+		['nonzero exit', document, 2, undefined, undefined],
+		['signal', document, 0, 15, undefined],
+		[
+			'incomplete native',
+			JSON.stringify({ type: 'text', data: document }),
+			0,
+			undefined,
+			undefined,
+		],
+		['native error', native.replace('EndTurn', 'Error'), 0, undefined, undefined],
+	] as const)(
+		'refuses %s without publishing a plan',
+		async (_name, output, code, signal, error) => {
+			const onComplete = vi.fn(),
+				onError = vi.fn();
+			const pending = phaseGenerator.generateDocuments(config, { onComplete, onError });
+			await vi.waitFor(() => expect(ipc.process.spawn).toHaveBeenCalledOnce());
+			const id = ipc.process.spawn.mock.calls[0][0].sessionId;
+			ipc.process.onAgentError.mock.calls[0][0]('unrelated', { message: 'ignore' });
+			ipc.process.onData.mock.calls[0][0](id, output);
+			if (error) ipc.process.onAgentError.mock.calls[0][0](id, { message: error });
+			ipc.process.onExit.mock.calls[0][0](id, code, signal);
+			const result = await pending;
+			expect(result).toMatchObject({ success: false, error: expect.any(String) });
+			expect(onError).toHaveBeenCalledExactlyOnceWith(result.error);
+			expect(onComplete).not.toHaveBeenCalled();
+			expect(ipc.process.spawn).toHaveBeenCalledOnce();
+			expect(ipc.process.onAgentError.mock.results[0].value).toHaveBeenCalledOnce();
+			expect(vi.getTimerCount()).toBe(0);
+		}
+	);
+
+	it('cancels a pending launch and stops only its owned process after a late receipt', async () => {
+		let release!: (value: { success: boolean }) => void;
+		ipc.process.spawn.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					release = resolve;
+				})
+		);
+		const onComplete = vi.fn(),
+			onError = vi.fn();
+		const pending = phaseGenerator.generateDocuments(config, { onComplete, onError });
+		await vi.waitFor(() => expect(ipc.process.spawn).toHaveBeenCalledOnce());
+		const oldId = ipc.process.spawn.mock.calls[0][0].sessionId;
+		phaseGenerator.abort();
+		expect(await pending).toMatchObject({
+			success: false,
+			error: expect.stringContaining('cancelled'),
+		});
+		release({ success: true });
+		await vi.advanceTimersByTimeAsync(0);
+		ipc.process.onData.mock.calls[0][0](oldId, 'obsolete');
+		ipc.process.onExit.mock.calls[0][0](oldId, 0);
+		expect(onComplete).not.toHaveBeenCalled();
+		expect(onError).not.toHaveBeenCalled();
+		expect(ipc.process.kill.mock.calls).toEqual([[oldId], [oldId]]);
+		expect(phaseGenerator.isGenerationInProgress()).toBe(false);
+		expect(ipc.process.spawn).toHaveBeenCalledOnce();
+		expect(vi.getTimerCount()).toBe(0);
+	});
+});
 
 describe('phaseGenerator', () => {
 	describe('parseGeneratedDocuments', () => {

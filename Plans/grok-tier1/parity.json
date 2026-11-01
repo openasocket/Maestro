@@ -3692,6 +3692,29 @@
 				"Deferred documents/preparation, active configuration changes, stale callbacks/failures/cleanup, replacement sends and stable history/loading rerenders are covered. Existing preview/bootstrap/keyboard coverage is reused.",
 				"GT1-05-12B generation, GT1-05-12C launch acceptance repair, GT1-05-13 execution and native exact-version qualification remain; no capability or beta promotion."
 			]
+		},
+		"phase05-onboarding-generation-tests": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-12b-onboarding-generation-regression-authoring",
+			"sourceCommit": "3f2d197792d9d46bde875660fe5fe08f958cab76",
+			"sourceRevisionScope": "Pre-task HEAD plus test hashes in the task commit containing this entry.",
+			"sourceHashesSha256": {
+				"src/__tests__/renderer/components/Wizard/services/phaseGenerator.test.ts": "87617b34dc4c73c3e61ef1ba93256eb3b96f86ed6a2a594d4305b05c8c4b4ec4",
+				"src/__tests__/renderer/components/Wizard/services/phaseGenerator_ssh.test.ts": "272b259f7bec661909d742dc0d2afe862692bb7cb4e08c6c8367e2bd2bee2d74",
+				"src/__tests__/renderer/components/Wizard/screens/PreparingPlanScreen/hooks.test.tsx": "8525e4cb1580449c7071e97851263b81ad1e2b581bd115df756acd1d32f1c1a2"
+			},
+			"provenance": "test-authoring-and-static-review",
+			"static": "pass",
+			"acceptanceRun": false,
+			"deterministic": "not-run",
+			"live": "not-run",
+			"affectedRows": ["P20", "S05", "C-supportsWizard"],
+			"verificationTask": "GT1-05-13",
+			"continuationTask": "GT1-05-12B1",
+			"limitations": [
+				"28 cases authored in three existing suites and one stale watcher test repaired; no test execution or collection. Formatting, no-dashes lint, syntax and whitespace checks pass.",
+				"Actual generation consumer covers configuration/host and bounded spawn forwarding, native/normalized success, receipt refusal and cancellation; hook tests cover current retry configuration and pending-save cancellation. This does not qualify native Grok or main-process launch validation.",
+				"GT1-05-12B1 owns remaining detailed document/lifecycle cases, GT1-05-12C repairs discovery acceptance ordering, and GT1-05-13 executes all complete suites. Exact-version qualification remains not-run; no capability or beta promotion."
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -8844,7 +8867,8 @@
 					"GT1-05-10B",
 					"GT1-05-12A",
 					"GT1-05-12B",
-					"GT1-05-12A1"
+					"GT1-05-12A1",
+					"GT1-05-12B1"
 				],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-08-21", "GT1-11-11D"],
 				"live": ["GT1-11-11", "GT1-11-11D"],
@@ -8879,7 +8903,8 @@
 				"phase05OnboardingPreviewEvidenceRef": "phase05-onboarding-streaming-preview",
 				"phase05OnboardingTestsEvidenceRef": "phase05-onboarding-discovery-tests",
 				"phase05OnboardingHookTestsEvidenceRef": "phase05-onboarding-hook-tests",
-				"phase05OnboardingSendLifecycleTestsEvidenceRef": "phase05-onboarding-send-lifecycle-tests"
+				"phase05OnboardingSendLifecycleTestsEvidenceRef": "phase05-onboarding-send-lifecycle-tests",
+				"phase05OnboardingGenerationTestsEvidenceRef": "phase05-onboarding-generation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8924,9 +8949,9 @@
 				{
 					"id": "grok-onboarding-callers:P20",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-12/12A/12A1 discovery, readiness, configuration, rendered-preview and detailed send-lifecycle tests are authored, not run. GT1-05-12B generation, GT1-05-12C launch acceptance repair and GT1-05-13 execution remain. Native exact-version qualification is separate.",
+					"missingPrerequisite": "GT1-05-12/12A/12A1/12B discovery, readiness, configuration, preview, send lifecycle and generation tests are authored, not run. GT1-05-12B1 detailed generation document/lifecycle coverage, GT1-05-12C launch acceptance repair and GT1-05-13 execution remain. Native exact-version qualification is separate.",
 					"affectedRows": ["P20"],
-					"evidenceRef": "phase05-onboarding-send-lifecycle-tests"
+					"evidenceRef": "phase05-onboarding-generation-tests"
 				}
 			],
 			"phase": "05",
@@ -16658,7 +16683,8 @@
 					"GT1-05-10B",
 					"GT1-05-12A",
 					"GT1-05-12B",
-					"GT1-05-12A1"
+					"GT1-05-12A1",
+					"GT1-05-12B1"
 				],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-14C", "GT1-11-11D"],
 				"live": ["GT1-11-11", "GT1-11-11D"],
@@ -16694,7 +16720,8 @@
 				"phase05OnboardingPreviewEvidenceRef": "phase05-onboarding-streaming-preview",
 				"phase05OnboardingTestsEvidenceRef": "phase05-onboarding-discovery-tests",
 				"phase05OnboardingHookTestsEvidenceRef": "phase05-onboarding-hook-tests",
-				"phase05OnboardingSendLifecycleTestsEvidenceRef": "phase05-onboarding-send-lifecycle-tests"
+				"phase05OnboardingSendLifecycleTestsEvidenceRef": "phase05-onboarding-send-lifecycle-tests",
+				"phase05OnboardingGenerationTestsEvidenceRef": "phase05-onboarding-generation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16739,9 +16766,9 @@
 				{
 					"id": "grok-onboarding-callers:C-supportsWizard",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-12/12A/12A1 discovery, readiness, configuration, rendered-preview and detailed send-lifecycle tests are authored, not run. GT1-05-12B generation, GT1-05-12C launch acceptance repair and GT1-05-13 execution remain. Native exact-version qualification is separate.",
+					"missingPrerequisite": "GT1-05-12/12A/12A1/12B discovery, readiness, configuration, preview, send lifecycle and generation tests are authored, not run. GT1-05-12B1 detailed generation document/lifecycle coverage, GT1-05-12C launch acceptance repair and GT1-05-13 execution remain. Native exact-version qualification is separate.",
 					"affectedRows": ["C-supportsWizard"],
-					"evidenceRef": "phase05-onboarding-send-lifecycle-tests"
+					"evidenceRef": "phase05-onboarding-generation-tests"
 				}
 			],
 			"field": "supportsWizard",
@@ -20279,7 +20306,14 @@
 					"GT1-05-11C",
 					"GT1-05-11D"
 				],
-				"test": ["GT1-05-12", "GT1-05-02E", "GT1-05-12A", "GT1-05-12B", "GT1-05-12A1"],
+				"test": [
+					"GT1-05-12",
+					"GT1-05-02E",
+					"GT1-05-12A",
+					"GT1-05-12B",
+					"GT1-05-12A1",
+					"GT1-05-12B1"
+				],
 				"verification": ["GT1-05-13", "GT1-05-14", "GT1-11-11D"],
 				"live": ["GT1-11-11", "GT1-11-11D"],
 				"finalAcceptance": ["GT1-12-06"]
@@ -20309,7 +20343,8 @@
 				"phase05OnboardingPreviewEvidenceRef": "phase05-onboarding-streaming-preview",
 				"phase05OnboardingTestsEvidenceRef": "phase05-onboarding-discovery-tests",
 				"phase05OnboardingHookTestsEvidenceRef": "phase05-onboarding-hook-tests",
-				"phase05OnboardingSendLifecycleTestsEvidenceRef": "phase05-onboarding-send-lifecycle-tests"
+				"phase05OnboardingSendLifecycleTestsEvidenceRef": "phase05-onboarding-send-lifecycle-tests",
+				"phase05OnboardingGenerationTestsEvidenceRef": "phase05-onboarding-generation-tests"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20354,9 +20389,9 @@
 				{
 					"id": "grok-onboarding-callers:S05",
 					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-12/12A/12A1 discovery, readiness, configuration, rendered-preview and detailed send-lifecycle tests are authored, not run. GT1-05-12B generation, GT1-05-12C launch acceptance repair and GT1-05-13 execution remain. Native exact-version qualification is separate.",
+					"missingPrerequisite": "GT1-05-12/12A/12A1/12B discovery, readiness, configuration, preview, send lifecycle and generation tests are authored, not run. GT1-05-12B1 detailed generation document/lifecycle coverage, GT1-05-12C launch acceptance repair and GT1-05-13 execution remain. Native exact-version qualification is separate.",
 					"affectedRows": ["S05"],
-					"evidenceRef": "phase05-onboarding-send-lifecycle-tests"
+					"evidenceRef": "phase05-onboarding-generation-tests"
 				}
 			],
 			"branchAuditRefs": ["B15", "B27"]

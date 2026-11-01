@@ -171,4 +171,139 @@ describe('usePreparingPlanGeneration', () => {
 		hook.unmount();
 		expect(phaseGeneratorMock.abort).toHaveBeenCalled();
 	});
+
+	it.each([
+		{ customEnvVars: { GROK_HOME: '/accounts/b' }, plannerModel: 'grok-4.5' },
+		{ customEnvVars: {}, plannerModel: undefined },
+		{ customEnvVars: undefined, plannerModel: 'grok-composer-2.5-fast' },
+		{
+			customEnvVars: { GROK_HOME: '/accounts/a' },
+			plannerModel: undefined,
+			sessionSshRemoteConfig: { enabled: true, remoteId: 'grok-host' },
+		},
+	] satisfies Partial<typeof initialState>[])(
+		'retries Grok using current configuration %j',
+		async (updated) => {
+			phaseGeneratorMock.generateDocuments
+				.mockImplementationOnce(async (_config, callbacks) => {
+					callbacks.onError('Grok launch refused');
+					return { success: false, error: 'Grok launch refused' };
+				})
+				.mockImplementation(() => new Promise(() => {}));
+			const history = [
+				{ id: 'user-1', role: 'user' as const, content: 'Build the plan', timestamp: 1 },
+			];
+			const { params, hook } = renderGeneration({
+				selectedAgent: 'grok',
+				customPath: '/tools/grok-a',
+				customArgs: '--verbose',
+				customEnvVars: { GROK_HOME: '/accounts/a' },
+				conversationHistory: history,
+			});
+			await act(async () => {});
+			expect(params.setGenerationError).toHaveBeenLastCalledWith('Grok launch refused');
+			expect(phaseGeneratorMock.saveDocuments).not.toHaveBeenCalled();
+			expect(params.nextStep).not.toHaveBeenCalled();
+			const [original, stale] = phaseGeneratorMock.generateDocuments.mock.calls[0];
+			expect(original).toMatchObject({
+				agentType: 'grok',
+				sessionCustomPath: '/tools/grok-a',
+				sessionCustomArgs: '--verbose',
+				sessionCustomEnvVars: { GROK_HOME: '/accounts/a' },
+				model: undefined,
+				sshRemoteConfig: undefined,
+				conversationHistory: history,
+			});
+			params.state = {
+				...params.state,
+				customPath: '/tools/grok-b',
+				customArgs: '--debug',
+				...updated,
+			};
+			hook.rerender();
+			expect(phaseGeneratorMock.generateDocuments).toHaveBeenCalledTimes(1);
+			act(() => hook.result.current.handleRetry());
+			const [config, current] = phaseGeneratorMock.generateDocuments.mock.calls[1];
+			expect(config).toMatchObject({
+				agentType: 'grok',
+				sessionCustomPath: '/tools/grok-b',
+				sessionCustomArgs: '--debug',
+				sessionCustomEnvVars: updated.customEnvVars,
+				model: updated.plannerModel,
+				sshRemoteConfig: params.state.sessionSshRemoteConfig,
+				conversationHistory: history,
+			});
+			expect(config).not.toHaveProperty('sessionCustomEffort');
+			const documents = [{ filename: 'Phase-01.md', content: '# Plan', taskCount: 2 }];
+			await act(async () => {
+				stale.onProgress('stale progress');
+				stale.onError('stale failure');
+				await stale.onComplete({ success: true, documents });
+			});
+			expect(params.setGeneratingDocuments).toHaveBeenLastCalledWith(true);
+			expect(params.setGenerationError).toHaveBeenLastCalledWith(null);
+			expect(phaseGeneratorMock.saveDocuments).not.toHaveBeenCalled();
+			expect(hook.result.current.progressMessage).toBe('Generating Auto Run Documents...');
+			await act(async () => {
+				await current.onComplete({ success: true, documents });
+			});
+			expect(phaseGeneratorMock.saveDocuments).toHaveBeenCalledWith(
+				'/project',
+				documents,
+				expect.any(Function),
+				'Initiation',
+				params.state.sessionSshRemoteConfig?.remoteId
+			);
+			expect(params.setGeneratedDocuments).toHaveBeenCalledExactlyOnceWith(documents);
+			act(() => vi.advanceTimersByTime(500));
+			expect(params.nextStep).toHaveBeenCalledTimes(1);
+			expect(original.sessionCustomEnvVars).toEqual({ GROK_HOME: '/accounts/a' });
+		}
+	);
+
+	it.each(['back', 'unmount'] as const)(
+		'withholds late Grok save completion after %s',
+		async (action) => {
+			phaseGeneratorMock.generateDocuments.mockImplementation(() => new Promise(() => {}));
+			let finishSave!: (result: { success: boolean }) => void;
+			phaseGeneratorMock.saveDocuments.mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						finishSave = resolve;
+					})
+			);
+			const { params, hook } = renderGeneration({ selectedAgent: 'grok' });
+			const callbacks = phaseGeneratorMock.generateDocuments.mock.calls[0][1];
+			const documents = [{ filename: 'Phase-01.md', content: '# Plan', taskCount: 2 }];
+			let completion!: Promise<void>;
+			act(() => {
+				completion = callbacks.onComplete({ success: true, documents });
+			});
+			expect(phaseGeneratorMock.saveDocuments).toHaveBeenCalledTimes(1);
+			act(() => {
+				if (action === 'back') hook.result.current.handleGoBack();
+				else hook.unmount();
+			});
+			const busyCalls = params.setGeneratingDocuments.mock.calls.length;
+			const errorCalls = params.setGenerationError.mock.calls.length;
+			await act(async () => {
+				phaseGeneratorMock.saveDocuments.mock.calls[0][2]({
+					filename: 'Phase-01.md',
+					path: '/project/Phase-01.md',
+					size: 10,
+					taskCount: 2,
+				});
+				callbacks.onError('late error');
+				finishSave({ success: true });
+				await completion;
+				vi.advanceTimersByTime(500);
+			});
+			expect(phaseGeneratorMock.abort).toHaveBeenCalledTimes(1);
+			expect(params.setGeneratedDocuments).not.toHaveBeenCalled();
+			expect(params.nextStep).not.toHaveBeenCalled();
+			expect(params.setGeneratingDocuments).toHaveBeenCalledTimes(busyCalls);
+			expect(params.setGenerationError).toHaveBeenCalledTimes(errorCalls);
+			if (action === 'back') expect(hook.result.current.createdFiles).toEqual([]);
+		}
+	);
 });
