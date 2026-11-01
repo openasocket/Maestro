@@ -587,3 +587,280 @@ terminal reason, observed effects and cost provenance. Keep private logs/synthet
 out of Git; durable evidence contains hashes and aliases, never account IDs/tokens. No
 production app instance is instrumented. Every absent prerequisite is a machine-readable
 blocker in run-state; independent fixture work continues while live evidence stays `not-run`.
+
+## GT1-06-03: Native carry-over scope and schema mappings v1
+
+This section is the DESIGN owner for P22, P23 and P24. It defines what GT1-06-04
+through GT1-06-11 may implement and how GT1-06-12 and GT1-11-13 must verify it.
+It certifies nothing: every direction below starts `verification: 'unverified'`,
+and context export, context merge (GT1-06-01/02/02A/02B), native resume (phase 04)
+and native cross-provider translation remain four separate acceptance outcomes.
+Neither prompt-summary transfer, Grok's own picker listing of foreign sessions,
+nor Grok's upstream Claude configuration import is evidence for this outcome.
+
+### Evidence base
+
+| Input                  | Identity                                                                                                                                                                                                                                                   | What it establishes                                                                                                                                                   |
+| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Shared contract        | `src/shared/maestro-lib/translation/{types,registry,support,adapters,native-records}.ts` at `a0beed1`                                                                                                                                                      | `PortableRecord` / `PortableBlock` vocabulary, `planTranslation` block rules, exact version allowlists, Claude file staging and Codex RPC staging.                    |
+| Host service           | `src/main/provider-translation-service.ts` at `a0beed1`                                                                                                                                                                                                    | Account/version/project identity, source lookup, capacity check, commit env key. Contains Claude/Codex-only branches (below).                                         |
+| Grok transcript schema | `tmp/grok-tier1-04-05-schema/xai-grok-sampling-types/src/conversation.rs` (`ConversationItem`, lines 70-490)                                                                                                                                               | Pinned public source `2bdd1d6a6369de0e8c68132ea4539e9abd9e14a8`; retained from GT1-04-05.                                                                             |
+| Grok persistence       | `tmp/grok-tier1-04-05-schema/xai-grok-shell/src/session/persistence.rs` (`CHAT_FORMAT_VERSION`, `Summary`, loss contract) and `.../session/storage/jsonl/mod.rs` (`load_session_without_updates`, `read_chat_history_sync_bounded`, `ensure_chat_history`) | Same pin. Load requires `summary.json` and reads `chat_history.jsonl`; an empty transcript is rebuilt from `updates.jsonl`; unparseable lines are skipped, not fatal. |
+| Grok discovery         | `tmp/grok-tier1-environment/source/crates/codegen/xai-grok-config/src/compat.rs:310-450`                                                                                                                                                                   | Same pin. Instruction names, `skills/` roots, `rules/` roots, and the `[compat]` cells (including foreign session listing).                                           |
+| Maestro Grok reader    | `src/main/storage/grok-session-storage.ts` (`parseChatHistory`, `isSyntheticUserRecord`, `stripUserQueryWrapper`, encoded-cwd resolution, snapshot reads)                                                                                                  | The production read rules the adapter reuses.                                                                                                                         |
+| Antigravity reader     | `src/main/storage/antigravity-session-storage.ts` header and `getSessionPath()` / `deleteMessagePair()`                                                                                                                                                    | Two SQLite WAL stores with protobuf `step_payload`; read-only display reader; no writer.                                                                              |
+| Claude/Codex fixtures  | `src/__tests__/fixtures/provider-translation/{claude,codex}.jsonl` and `README.md`                                                                                                                                                                         | Synthetic extraction fixtures, explicitly not native resume evidence.                                                                                                 |
+| Installed binary       | `grok --version` = `grok 1.0.70 (f50904eaee6c) [stable]`; `/Users/dr3/.grok/downloads/grok-macos-aarch64`, 179,063,008 bytes, sha256 `5c8a688251bf61e35370b828b6a353b0a20fcc3f64000de8a91d426039f29cec`                                                    | An offline observation on the authoring machine only. The binary/source correspondence stays `unknown` (parity `versionProfiles`); this hash qualifies nothing.       |
+
+Not pinned and therefore not usable for a write: `session/info.rs` (`Info`, the
+required `summary.info` object), `PersistedAgentSelection` (flattened into
+`Summary`), the `updates.jsonl` row schema and `chat_rebuild`, the compaction
+summary item shape, the subagent definition directory, and the
+`session_search.sqlite` indexer. Each gap is assigned below.
+
+### Direction scope
+
+Exact versions follow `TRANSLATION_PROVIDER_VERSIONS`. Grok's entry is added by
+GT1-06-04 as `grok: ['1.0.70']` only; the host parses `\d+\.\d+\.\d+` from
+`--version`, so `1.0.70` is the value compared. Any other Grok version plans as
+`unknown-version` (block).
+
+| Direction                           | Declared                                         | Source versions  | Destination versions | Staging mechanism                                                                                                                                                               | Initial status |
+| ----------------------------------- | ------------------------------------------------ | ---------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| grok -> claude-code                 | yes (GT1-06-04 extract + existing `stageClaude`) | 1.0.70           | 2.1.296, 2.1.302     | Existing exclusive-create Claude JSONL                                                                                                                                          | unverified     |
+| grok -> codex                       | yes (GT1-06-04 extract + existing `stageCodex`)  | 1.0.70           | 0.162.1, 0.163.0     | Existing `thread/start` + `thread/inject_items` with durable readback                                                                                                           | unverified     |
+| claude-code -> grok                 | yes, only after GT1-06-05 stages and reads back  | 2.1.296, 2.1.302 | 1.0.70               | New exclusive-create Grok session directory                                                                                                                                     | unverified     |
+| codex -> grok                       | yes, only after GT1-06-05                        | 0.162.1, 0.163.0 | 1.0.70               | Same                                                                                                                                                                            | unverified     |
+| grok -> grok, other account         | no direction needed                              | 1.0.70           | 1.0.70               | `planTranslation` noop rule is provider plus account root; a different `GROK_HOME` is a real move and plans `unsupported-direction` (block) until a separate design declares it | unsupported    |
+| grok <-> antigravity                | no                                               | -                | -                    | none                                                                                                                                                                            | unsupported    |
+| claude-code / codex <-> antigravity | no (unchanged)                                   | -                | -                    | none                                                                                                                                                                            | unsupported    |
+
+A direction is declared only in the same change that makes both its extract and
+stage paths exist; GT1-06-04 declares the two Grok-source rows, GT1-06-05 the two
+Grok-destination rows. Declaring a row before its stage exists is forbidden,
+because the picker (`getDeclaredTranslationDirection`) reads declarations.
+
+### Antigravity: evidence-based outcome
+
+Antigravity has no adapter in `adapters.ts`, no entry in `support.ts`, and no
+portable reader: its storage class projects steps for display only, returns
+`null` from `getSessionPath()` to protect the WAL store, and refuses
+`deleteMessagePair()`. Its stores are SQLite in WAL mode, so a copied `.db`
+without its `-wal` is a stale snapshot, and its step payloads are protobuf with
+a field map Maestro owns only for reading. No writer, import RPC or schema pin
+exists. Outcome: every direction with Antigravity on either side is
+**unsupported**, reported by the existing registry rules
+(`unsupported-provider` and `unsupported-direction`, both block). This is a
+recorded unsupported outcome, not an assumed one; reopening it needs a pinned
+step schema, a WAL-safe snapshot reader and a native write or import path.
+Grok's own `[compat]` session listing covers Cursor, Claude and Codex, not
+Antigravity, so there is no upstream path to lean on either.
+
+### Grok native source layout
+
+`<GROK_HOME>/sessions/<percent-encoded realpath cwd>/<session id>/` holds
+`summary.json` (required by load), `chat_history.jsonl` (the model-visible
+history, format version in `summary.chat_format_version`: absent or 0 is legacy
+`ChatRequestMessage`, 1 is `ConversationItem`), and runtime files: `usage.json`,
+`signals.json`, `updates.jsonl` (UI replay stream), `rewind_points.jsonl`, plan,
+plan-mode, announcement and goal state, `workflows/`, `feedback.jsonl`,
+`btw_history.jsonl`, `compaction_checkpoints/`, `compaction_requests/`,
+`compaction_segments`, and the `summary.json.lock` file. Account-level
+`session_search.sqlite` and `prompt_history.jsonl` sit above the session tree.
+
+Rules the adapter inherits:
+
+1. **Account and project.** The root is the selected agent's resolved
+   `GROK_HOME` (`resolveAgentAccountKey('grok', env)`), never `os.homedir()/.grok`
+   by default when a selection exists, never a process-global value, and never
+   `GROK_AUTH` / `GROK_AUTH_PATH` content. The cwd folder is found with the
+   reader's existing encoded-cwd rules (realpath, macOS `/private` fold).
+   `summary.info.cwd` must resolve to the plan's `projectRoot`
+   (`native-project-root-mismatch`, block) and `summary.info.id` must equal the
+   directory name and the tab's native ID (`native-session-mismatch`, block).
+2. **Snapshot.** Read `summary.json` and `chat_history.jsonl` with the reader's
+   bounded double-sample. Grok replaces the whole transcript on compaction
+   ("Replace the entire chat history"), so line positions are not stable across
+   a compaction. A changed sample is `TranslationSourceBusyError` (defer), not a
+   partial read. Sizes reuse the reader's 64 MiB and 100,000-item ceilings.
+3. **Identity.** `ConversationItem` rows carry no row IDs. `nativeId` is
+   `line:<index>` and the checkpoint records each row's `semanticHash`. When a
+   later plan sees a changed hash at any previously observed index (compaction
+   or rewind rewrote the prefix), it adds `native-history-rewritten` (warning)
+   and stages a **new** destination session from the whole current history;
+   it never appends to the earlier translation by position. Origin account is
+   `translationHash(accountRoot)`, so two homes with the same session ID never
+   collide.
+4. **Only two files are extracted.** `chat_history.jsonl` becomes the
+   `transcript` artifact and `summary.json` is retained in that artifact's
+   `metadata` (bounded, 1 MiB). Every other runtime file is excluded and named
+   in one `grok-runtime-state-not-translated` warning (plan/todo, rewind
+   points, goals, workflows, signals, compaction artifacts, side questions).
+   `usage.json` is never carried: destination usage starts empty and no
+   combined context or cost math is derived from cumulative totals (phase 03).
+
+### Grok to portable mapping (extraction, GT1-06-04)
+
+| Grok row (`type`)                                                                                                                                                                                                                                                                                        | Portable record                                                                                                    | Notes and limitation                                                                                                                                                                                                                                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `system` (`synthetic_reason` absent = primary)                                                                                                                                                                                                                                                           | `role: 'system'`, one `opaque` block                                                                               | Existing rule archives it as `historical-instructions`; never installed as destination instructions.                                                                                                                                                                                                                                                    |
+| `user`, reason absent (human), `interjection`, `parent_human_message`, `direct_bash`                                                                                                                                                                                                                     | `role: 'user'`, `text` blocks with `<user_query>` wrappers stripped (reader's `stripUserQueryWrapper`)             | `interjection` keeps its reason in `native`; mid-turn placement is preserved by order only. `prompt_index`, `prior_turn_interrupt`, `cwd_generation` stay in `native`, never reconstructed.                                                                                                                                                             |
+| `user` whose text starts with `<user_info>` (session prefix)                                                                                                                                                                                                                                             | no role, `opaque`                                                                                                  | Runtime environment block, matching the reader's hidden rule. Destination gets its own environment.                                                                                                                                                                                                                                                     |
+| `user` with `project_instructions`, `system_reminder`, `length_continue`, `auto_continue`, `auto_recovery`, `stop_hook_feedback`, `working_directory_switch`, `goal_*`, `scheduler_fired`, `task_completed`, `subagent_completed`, `notification_drain`, `agent_message`, `session_prefix`, `goal_setup` | no role, `opaque`                                                                                                  | Runtime-authored context, not the user's words. Projecting it would install foreign instructions. `opaque-runtime-state` warning. Project knowledge moves through the resource path instead.                                                                                                                                                            |
+| `user` with `compaction_meta`                                                                                                                                                                                                                                                                            | `role: 'user'`, `text`, `boundary: 'compaction'`                                                                   | The only carrier of pre-compaction context, mirroring how a Claude compact summary is projected. `grok-compacted-history` warning: turns before the compaction are not in the source and are not recovered from `compaction_*` artifacts. The exact compaction item shape is not pinned; GT1-06-08 fixtures must label this mapping as source-inferred. |
+| `user` with an unknown reason (`#[serde(other)]`)                                                                                                                                                                                                                                                        | no role, `opaque`                                                                                                  | Fail safe: an unknown origin is never treated as human input.                                                                                                                                                                                                                                                                                           |
+| `user` image part `{type:'image', url}` with a `data:` URI                                                                                                                                                                                                                                               | `attachment` block plus `attachment` artifact holding the decoded bytes                                            | Reuses the existing base64 validation.                                                                                                                                                                                                                                                                                                                  |
+| `user` image part with any other URL (`file:`, `http(s):`)                                                                                                                                                                                                                                               | `attachment` block, no artifact                                                                                    | Existing `missing-attachment` (block). Never fetched or opened.                                                                                                                                                                                                                                                                                         |
+| `assistant` `content`                                                                                                                                                                                                                                                                                    | `role: 'assistant'`, `text`                                                                                        | `model_id`, `model_fingerprint`, `reasoning_effort` stay in `native`; never copied to the destination as if that model ran there.                                                                                                                                                                                                                       |
+| `assistant` `tool_calls[]` `{id, name, arguments}`                                                                                                                                                                                                                                                       | `tool-call` with `callId = id` verbatim, `name`, `input = arguments` (JSON string)                                 | A row without an ID gets the existing missing-ID treatment; duplicate IDs keep the existing `duplicate-native-id` style block for calls (GT1-06-04 adds a call-ID duplicate check if the generic one does not cover Grok).                                                                                                                              |
+| legacy `assistant` `tool_calls[].function`                                                                                                                                                                                                                                                               | same as above                                                                                                      | Pinned v0 layout.                                                                                                                                                                                                                                                                                                                                       |
+| `tool_result` `{tool_call_id, content, images[]}`                                                                                                                                                                                                                                                        | `role: 'user'`, `tool-result` (`output = content` string), plus `attachment` blocks for data-URI images            | Grok has no error flag, so `isError` stays undefined; nothing is inferred from text.                                                                                                                                                                                                                                                                    |
+| `reasoning` (`rs::ReasoningItem`: `id`, `summary`, `content`, `encrypted_content`) and legacy inline `reasoning` / `reasoning_content` / `raw_output` reasoning                                                                                                                                          | no role, `opaque`                                                                                                  | Never projected: xAI encrypted reasoning is meaningless to Claude and Codex, and Claude thinking signatures cannot be forged. Visible text stays in the archive only.                                                                                                                                                                                   |
+| `backend_tool_call` (`web_search`, `x_search`, `code_interpreter`) and legacy `raw_output` backend items                                                                                                                                                                                                 | no role, `opaque`                                                                                                  | Server-executed with no client-side result row; `grok-backend-tool-context` warning names the loss of search/interpreter context on the destination. Never re-executed and never turned into a fabricated call/result pair.                                                                                                                             |
+| unknown `type`                                                                                                                                                                                                                                                                                           | no role, `opaque`                                                                                                  | `opaque-runtime-state` warning (Grok itself skips such rows on load).                                                                                                                                                                                                                                                                                   |
+| malformed line                                                                                                                                                                                                                                                                                           | `opaque` `{type:'malformed', raw}`                                                                                 | Existing `malformed-native-record` (block).                                                                                                                                                                                                                                                                                                             |
+| `summary.parent_session_id`, `forked_at`, `session_kind` in `fork` / `subagent` / `subagent_fork` / `worktree`, `inherited_prefix_len`                                                                                                                                                                   | `branchId = parent_session_id` on every record; the record at index `inherited_prefix_len` gets `boundary: 'fork'` | Existing `native-boundary` warning. A `subagent*` session selected as a tab adds `grok-subagent-session` (warning). The parent session is not pulled in.                                                                                                                                                                                                |
+| timestamps                                                                                                                                                                                                                                                                                               | `timestamp` undefined on every record                                                                              | Grok rows have none. Claude staging currently substitutes the migration time; GT1-06-05 adds `synthetic-timestamps` (warning) for any source without per-record times, so a destination clock is never presented as the original time.                                                                                                                  |
+
+### Portable to Grok mapping (staging, GT1-06-05)
+
+Only `role: 'user'` and `role: 'assistant'` records are projected (existing rule);
+sidechain records are skipped (existing rule) and keep their branch warning.
+
+| Portable input                                                                                   | Grok row written                                                                                                                                                                     | Notes and limitation                                                                                                                                                                                                                                                                                                      |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| user `text`                                                                                      | `{"type":"user","content":[{"type":"text","text":...}]}`, `synthetic_reason` omitted (human)                                                                                         | No `<user_query>` wrapper is added. Whether the model's behavior depends on the wrapper is a GT1-11-13 live question, recorded as `unverified`.                                                                                                                                                                           |
+| user `attachment`, `image/*` media type, bytes present and hash valid                            | content part `{"type":"image","url":"data:<type>;base64,..."}`                                                                                                                       | Existing missing/corrupt attachment rule throws before any write.                                                                                                                                                                                                                                                         |
+| user `attachment`, non-image media type                                                          | not written                                                                                                                                                                          | `unsupported-attachment-type` (block) for a Grok destination: `ContentPart` has only `text` and `image`.                                                                                                                                                                                                                  |
+| assistant `text` and `tool-call` blocks of one record                                            | one `{"type":"assistant","content":...,"tool_calls":[{"id","name","arguments"}]}`                                                                                                    | `id` is the provider-owned call ID verbatim (`toolu_*`, `call_*`); `arguments` is the input string, or `canonicalJson(input)` for structured input. `model_id`, `model_fingerprint`, `reasoning_effort` are omitted, never fabricated. Whether xAI accepts foreign call-ID formats on replay is a live verification item. |
+| `tool-call` with `custom: true` (Codex custom tools)                                             | ordinary `tool_calls[]` entry, raw input string as `arguments`                                                                                                                       | `custom-tool-flattened` (warning).                                                                                                                                                                                                                                                                                        |
+| `tool-result`                                                                                    | `{"type":"tool_result","tool_call_id":...,"content":<string>}`; Claude array content is split: text parts joined with newlines into `content`, image parts into `images[]` data URIs | `isError: true` adds `tool-error-flag-lost` (warning); no text is prepended to imitate it.                                                                                                                                                                                                                                |
+| assistant `attachment`                                                                           | not written                                                                                                                                                                          | Extend the registry's existing `assistant-attachment-projection` warning to `destination.provider === 'grok'`: `AssistantItem` has no image field.                                                                                                                                                                        |
+| `opaque` (Claude `thinking` / `redacted_thinking`, Codex `reasoning`, compaction state, unknown) | not written                                                                                                                                                                          | Existing `opaque-runtime-state`; no `reasoning` row is ever synthesized for Grok.                                                                                                                                                                                                                                         |
+| `system` / `developer`                                                                           | not written                                                                                                                                                                          | Existing `historical-instructions`.                                                                                                                                                                                                                                                                                       |
+| records with `boundary: 'compaction'` from Claude (compact summary)                              | projected as user text like any user record                                                                                                                                          | Codex `compacted` rows are opaque and are not expanded.                                                                                                                                                                                                                                                                   |
+| tool call with no matching result, or result with no call                                        | written in order                                                                                                                                                                     | `dangling-tool-linkage` (warning). Grok has its own dangling-call repair (`DanglingToolCallReason`); its effect on a foreign history is a live verification item.                                                                                                                                                         |
+
+Destination session layout, written by GT1-06-05:
+
+- New directory `<destination GROK_HOME>/sessions/<encoded realpath cwd>/<new UUID>/`,
+  owner-only (`0700`), created exclusively; an existing directory is a
+  conflict, never reused. `assertTranslationTarget` confines every path to the
+  selected account root before and after `mkdir`.
+- `chat_history.jsonl` first (`wx`, `0600`), then `summary.json` last (`wx`,
+  `0600`). Load requires `summary.json`, so a crash before the summary leaves a
+  directory Grok does not list; recovery removes only files the journal marks
+  `created`. Intent is journaled before the first mutation (existing
+  `recordIntent` contract).
+- `summary.json` is written only from a pinned `Summary` + `Info` +
+  `PersistedAgentSelection` schema: `info` (`id`, `cwd` at least),
+  `session_summary` (empty), `created_at` / `updated_at` (migration time),
+  `num_messages` / `num_chat_messages` (row count), `current_model_id` (the
+  destination agent's selected Grok model; never the source model),
+  `chat_format_version: 1`, `grok_home` (destination root). No
+  `parent_session_id`, `forked_at`, `session_kind`, `fork_*`,
+  `inherited_prefix_len`, `sandbox_profile`, `agent_id` or `attempt_id`: a foreign
+  source is not a Grok parent, and Grok mints its own attempt identity on
+  resume. **Prerequisite:** `Info` and `PersistedAgentSelection` are not in the
+  retained receipts. GT1-06-05 must pin them from the same public commit
+  (static source read, recorded with hashes) before writing a summary; without
+  that pin the Grok destination stays undeclared and plans
+  `unsupported-direction`.
+- Not written: `updates.jsonl` (its row schema and `chat_rebuild` are unpinned;
+  Grok's own TUI replay of the imported turns may therefore be empty,
+  `grok-native-replay-absent` warning; Maestro's History reads
+  `chat_history.jsonl` and is unaffected), `usage.json`, `signals.json`, plan,
+  rewind and goal state. The account-level `session_search.sqlite` is never
+  touched; Grok search may not find the session until Grok reindexes it
+  (`grok-search-index-unaffected`, warning).
+- **Readback before any agent identity changes.** Re-read both files and check
+  their hashes, then parse every transcript line with a strict TypeScript
+  validator of the pinned `ConversationItem` variants used above (closed `type`
+  set, required fields, string `tool_call_id`, `ContentPart` shape). This is
+  required because Grok's own loader **skips** an unparseable line instead of
+  failing, so a byte-level hash alone cannot prove the model will see every row.
+  Lineage maps each written line to its portable origin.
+- `[compat]` sessions listing and remote storage: a Grok configured with remote
+  session storage may upload a staged session after resume; that is the user's
+  own configuration, but the plan reports `grok-remote-session-sync-unverified`
+  (warning) until GT1-11-13 observes the storage mode of the disposable account.
+
+### Resources and knowledge (GT1-06-06)
+
+From `compat.rs` at the pin: instruction file names `Agents.md`, `Claude.md`,
+`CLAUDE.md`, `CLAUDE.local.md`, `AGENT.md`, `AGENTS.md` are always read, plus
+`.claude/CLAUDE.md` and `.claude/CLAUDE.local.md` when `compat.claude.agents` is
+on; skill roots `.grok`, `.agents` always, `.claude` and `.cursor` when their
+`skills` cell is on; rule roots `.grok/rules` always, `.claude/rules` and
+`.cursor/rules` when gated on. Cells default on and can be changed by config or
+`GROK_<VENDOR>_<SURFACE>_ENABLED`.
+
+| Resource                                                            | To Grok                                                                                                                              | From Grok                                                        | Limitation                                                                                                                                                               |
+| ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Project `CLAUDE.md` / `AGENTS.md`                                   | No copy: Grok reads both names natively                                                                                              | Existing collection already reads them                           | Discovery depends on the destination's compat cells, which Maestro does not read; `grok-compat-discovery-unverified` (warning).                                          |
+| Project skills                                                      | Project into `.agents/skills/<name>/` (the only always-on skill root shared with Codex) using existing collision and ownership rules | Collect `.grok/skills/<name>/` in addition to the existing roots | Advisory `allowed-tools` is copied as text and never reported as enforcement (existing `projectResourceDefinition` rule).                                                |
+| `.claude/rules/*.md` <-> `.grok/rules/*.md`                         | Project to `.grok/rules/`                                                                                                            | Collect `.grok/rules/` as `instruction`                          | Rule frontmatter semantics are not pinned; file copy alone is not discovery. Until GT1-06-06 pins the rule loader, rules return an explicit `unsupported` limitation.    |
+| Subagents                                                           | none                                                                                                                                 | none                                                             | Grok's subagent definition directory is not in the receipts (only plugin `agents/*.md` in a builder test). `subagent-discovery-unpinned` (block for selected subagents). |
+| Hooks, MCP servers, plugins                                         | never                                                                                                                                | never                                                            | Executable resources stay declared limitations (existing rule).                                                                                                          |
+| Memory                                                              | Existing knowledge binding (`TRANSLATION_KNOWLEDGE_ENV_VAR`, carried project knowledge directory)                                    | Grok has no Maestro-recognized native memory store               | `knowledge-binding.ts` stays the carrier; no Grok-native memory file is invented.                                                                                        |
+| Account-global config, `auth.json`, `GROK_AUTH*`, `~/.grok/config*` | never                                                                                                                                | never                                                            | Credentials and account-global configuration are excluded by construction; only `selectedUserResources` paths move.                                                      |
+
+### Host service gaps the later owners must close
+
+All found by inspection at `a0beed1`; none is changed by this DESIGN task.
+
+1. `conversation()` locates the source file only for Claude (projects path) or
+   Codex (`CodexSessionStorage.findSessionFile`). Grok needs the encoded-cwd
+   session directory and the two-file snapshot (GT1-06-04 adapter, GT1-06-07 host).
+2. `resolveIdentity` sets `nativeSessionRoot` and memory discovery for Claude only;
+   Grok needs `nativeSessionRoot = <root>/sessions` so `assertTranslationTarget`
+   confines reads and writes to the session tree (GT1-06-07).
+3. The capacity check projects only Claude/Codex; a Grok destination currently
+   yields an empty projection and always passes. It must project Grok rows and
+   use the destination model window, with an unknown window reported, never
+   treated as infinite (GT1-06-07).
+4. `commit` writes `CODEX_HOME` for Codex and otherwise `CLAUDE_CONFIG_DIR`. For a
+   Grok destination that would bind the agent to the wrong account variable. It
+   must write `GROK_HOME` and must not copy any inherited `GROK_AUTH` (GT1-06-07,
+   tested by GT1-06-09).
+5. Rollback: Grok may append to, compact or relock a committed session after
+   resume, and it owns `session_search.sqlite`. Created files are removed only
+   when their hash still matches; otherwise they are retained, and a
+   `provider-owned-indexes` warning is added for Grok as it is for Codex (GT1-06-07).
+6. Remote agents keep the existing `remote-translation` block. No SSH Grok adapter
+   is designed here.
+7. The renderer and CLI must reach the same plan through
+   `getDeclaredTranslationDirection` and the service; changing a stored
+   `toolType` must not bypass a blocked plan (GT1-06-10/11).
+
+### Verification plan per declared direction
+
+Deterministic (GT1-06-08/09/12) proves adapter behavior only. Each direction
+stays `unverified` until GT1-11-13 records, for the **exact** Grok binary (version
+string, sha256, platform) and the exact peer binary, all of the following under
+an authorized disposable account and budget; missing authorization records
+`not-run`.
+
+| Direction                                    | Native resume proof                                                                                                                                                                                                                                     | Round trip                                                                            | Payload classes to cover                                                                                                                                    |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| grok 1.0.70 -> claude-code 2.1.296 / 2.1.302 | `claude --resume <new id>` in the destination account answers a question that needs a fact from the Grok history and cites a prior tool result                                                                                                          | Grok -> Claude -> Grok, repeated twice, with no duplicated session and stable lineage | conversation, tool-call, tool-result, attachment (user data URI), compaction (`compaction_meta`), fork (inherited prefix), opaque (reasoning, backend tool) |
+| grok 1.0.70 -> codex 0.162.1 / 0.163.0       | `codex exec resume <thread>` reads the injected items; durable rollout readback already required by `stageCodex`                                                                                                                                        | Grok -> Codex -> Grok, twice                                                          | same, plus Codex custom-tool flattening on the way back                                                                                                     |
+| claude-code -> grok 1.0.70                   | `grok --resume <new id>` (headless, and the ACP route once phase 04 qualifies its resume) with the destination `GROK_HOME` lists the session, loads every written row (count equals the strict validator's count), and answers from the carried history | Claude -> Grok -> Claude                                                              | conversation, tool linkage with foreign call IDs, user image, tool-result images, tool error flag loss, compact summary                                     |
+| codex -> grok 1.0.70                         | Same as above                                                                                                                                                                                                                                           | Codex -> Grok -> Codex                                                                | conversation, function and custom tool calls, user image, assistant image omission                                                                          |
+
+Each live case also records: that no credential file was read or copied, that
+only the selected account root changed, that rollback after a destination
+append retains the session, and the resume command's exit code and session ID.
+A different Grok release needs a new allowlist entry and new evidence.
+
+### Owner map
+
+| Task                  | Delivers from this design                                                                                                                                                                                                        |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GT1-06-04             | `grok` adapter `extract` per the extraction table; `TRANSLATION_PROVIDER_VERSIONS.grok = ['1.0.70']`; declare grok -> claude-code and grok -> codex (unverified).                                                                |
+| GT1-06-05             | Pin `Info` / `PersistedAgentSelection`; Grok `stage` with strict readback; declare claude-code -> grok and codex -> grok (unverified); `synthetic-timestamps`, `unsupported-attachment-type`, Grok assistant-attachment warning. |
+| GT1-06-06             | `.grok/skills`, `.grok/rules` collection and `.agents/skills` projection; unsupported results for rules and subagents until pinned.                                                                                              |
+| GT1-06-07             | Host gaps 1-5.                                                                                                                                                                                                                   |
+| GT1-06-08 / 09 / 11   | Fixtures and fault cases named in each table row's limitation codes.                                                                                                                                                             |
+| GT1-06-10             | UI/CLI parity and blocked-plan enforcement.                                                                                                                                                                                      |
+| GT1-06-12 / GT1-11-13 | Deterministic accounting, then the live plan above. Native certification stays false until then.                                                                                                                                 |
