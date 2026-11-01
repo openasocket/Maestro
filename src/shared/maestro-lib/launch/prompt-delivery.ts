@@ -80,6 +80,9 @@ export function selectPromptFileDestination(
 	};
 }
 
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f]/;
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
 /** Where the user prompt goes. */
 export type PromptDelivery =
 	/** Nothing to deliver. */
@@ -181,7 +184,9 @@ export function resolvePromptDelivery(input: ResolvePromptDeliveryInput): Prompt
 			(input.sshRemoteId !== undefined && destination.sshRemoteId !== input.sshRemoteId) ||
 			(input.sshRemote && !path.posix.isAbsolute(destination.path)) ||
 			!isAbsolutePath(destination.path) ||
-			destination.path.includes('\0') ||
+			// A control character (NUL, CR, LF, ...) splits the argument a cmd.exe
+			// shim or the SSH script carries; a host-chosen name never needs one.
+			CONTROL_CHARACTER.test(destination.path) ||
 			!destination.path.endsWith(extension)
 		) {
 			return {
@@ -204,6 +209,23 @@ export function resolvePromptDelivery(input: ResolvePromptDeliveryInput): Prompt
 			return {
 				via: 'refused',
 				error: 'Prompt-file delivery conflicts with another prompt source in the launch arguments.',
+			};
+		}
+		// Text the file cannot carry exactly is refused, never repaired: UTF-8
+		// writes a lone surrogate as U+FFFD, and JSON escapes it into a string a
+		// strict native JSON reader rejects after spawn.
+		if (
+			(prompt !== undefined && LONE_SURROGATE.test(prompt)) ||
+			input.promptBlocks?.some(
+				(block) =>
+					block?.type === 'text' &&
+					typeof block.text === 'string' &&
+					LONE_SURROGATE.test(block.text)
+			)
+		) {
+			return {
+				via: 'refused',
+				error: 'Prompt-file text must be well-formed Unicode; it contains an unpaired surrogate.',
 			};
 		}
 		let content = prompt ?? '';
