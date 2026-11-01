@@ -1,7 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { MCP_CONFIG_BY_AGENT } from '../../../shared/plugins/mcp-agent-config';
+import {
+	classifyGrokMcpServer,
+	grokNativeTrustProblem,
+	MCP_CONFIG_BY_AGENT,
+	MCP_SERVER_NAME,
+	readGrokNativeTrust,
+	type GrokMcpServerObservation,
+} from '../../../shared/plugins/mcp-agent-config';
 import * as pathProber from '../../../main/agents/path-prober';
 import * as runIdentity from '../../../main/plugins/plugin-tool-run-identity';
 import { isAgentBusy } from '../../../main/utils/agent-busy';
@@ -1285,6 +1292,124 @@ describe('Grok required plugin-tool runs (GT1-07-07)', () => {
 			await expect(sendWithReceipt(h.run)).rejects.toThrow('spawn failed');
 			expect(h.seen.proofFiles).toHaveLength(1);
 			expectNoLeftovers(h);
+		});
+	});
+
+	// GT1-07-07D: a synthetic native bridge applies its fixture effect (listing
+	// and executing the tool) only when its classified state is usable and the
+	// spawn environment's trust is stated. The provider always claims delivery.
+	describe('synthetic native MCP states (GT1-07-07D)', () => {
+		const ready: GrokMcpServerObservation = {
+			name: MCP_SERVER_NAME,
+			enabled: true,
+			auth: 'none',
+			handshake: 'ok',
+			advertised: true,
+		};
+		function nativeBridge(observation: GrokMcpServerObservation, env: Record<string, string> = {}) {
+			const effects: string[] = [];
+			const bridge: Bridge = (identity, token) => {
+				const outcome = classifyGrokMcpServer(observation);
+				expect(outcome.interactiveLogin).toBe(false);
+				if (!outcome.usable || grokNativeTrustProblem(readGrokNativeTrust(env))) return;
+				effects.push(TOOL);
+				identity.recordAdvertisement(token, [TOOL]);
+				identity.recordReceipt(token, TOOL, { messageIds: ['777'] });
+			};
+			return { bridge, effects };
+		}
+
+		it.each([
+			['a user-disabled bridge', { enabled: false }, {}],
+			['OAuth required', { auth: 'oauth' }, {}],
+			['OAuth pending', { auth: 'oauth', authState: 'pending' }, {}],
+			['OAuth denied', { auth: 'oauth', authState: 'denied' }, {}],
+			['OAuth expired', { auth: 'oauth', authState: 'expired' }, {}],
+			['an undrivable auth channel', { auth: 'device-code' }, {}],
+			['a handshake timeout', { handshake: 'timeout' }, {}],
+			['an ungated folder trust', {}, { GROK_FOLDER_TRUST: '0' }],
+			['an invalid scanner setting', {}, { GROK_CLAUDE_HOOKS_ENABLED: 'later' }],
+		] as const)(
+			'fails with %s: no fixture effect, no receipt, one spawn and no fallback',
+			async (_label, over, env) => {
+				await withVerifiedGrok(async () => {
+					const native = nativeBridge({ ...ready, ...over }, env);
+					const h = grokRunner(native.bridge);
+					const result = await sendWithReceipt(h.run);
+					expect(result).toMatchObject({ success: false, response: null });
+					expect(result.toolReceipts ?? []).toEqual([]);
+					expect(native.effects).toEqual([]);
+					// One Grok spawn: no retry, no other provider, no unrestricted relaunch.
+					expect(h.spawn).toHaveBeenCalledOnce();
+					expect(h.spawn.mock.calls[0][0]).toBe('grok');
+					expect(h.issueRunToken).toHaveBeenCalledOnce();
+					expectNoLeftovers(h);
+				});
+			}
+		);
+
+		it('keeps the handshake failure beside the evidence failure when the provider reports it', async () => {
+			await withVerifiedGrok(async () => {
+				const native = nativeBridge({ ...ready, handshake: 'timeout' });
+				const h = grokRunner(
+					native.bridge,
+					{},
+					{
+						success: false,
+						error: 'MCP server maestro handshake timed out',
+					}
+				);
+				const result = await sendRequiringTools(h.run);
+				expect(result.error).toBe(
+					'The provider never listed Maestro plugin tools from its MCP bridge during this run; provider error: MCP server maestro handshake timed out'
+				);
+				expect(h.spawn).toHaveBeenCalledOnce();
+				expectNoLeftovers(h);
+			});
+		});
+
+		it('cannot pass on an advertisement whose receipt is absent, however the provider words it', async () => {
+			await withVerifiedGrok(async () => {
+				const h = grokRunner(
+					(identity, token) => identity.recordAdvertisement(token, [TOOL]),
+					{},
+					{
+						success: true,
+						response: 'Executed sh.maestro.relay/send: {"messageIds":["777"]}',
+					}
+				);
+				expect(await sendWithReceipt(h.run)).toMatchObject({
+					success: false,
+					response: null,
+					toolReceipts: [],
+				});
+				expectNoLeftovers(h);
+			});
+		});
+
+		it('succeeds on a ready bridge with stated trust, and a stop mid-run still cleans up', async () => {
+			await withVerifiedGrok(async () => {
+				const native = nativeBridge(ready, {
+					GROK_FOLDER_TRUST: '1',
+					GROK_CODEX_MCPS_ENABLED: '0',
+				});
+				const h = grokRunner(native.bridge);
+				expect(await sendWithReceipt(h.run)).toMatchObject({ success: true });
+				expect(native.effects).toEqual([TOOL]);
+				expectNoLeftovers(h);
+
+				const controller = new AbortController();
+				const stopped = grokRunner((identity, token) => {
+					native.bridge(identity, token);
+					controller.abort();
+				});
+				expect(await sendWithReceipt(stopped.run, controller.signal)).toMatchObject({
+					success: false,
+					response: null,
+				});
+				expect(stopped.spawn).toHaveBeenCalledOnce();
+				expectNoLeftovers(stopped);
+			});
 		});
 	});
 });

@@ -7,13 +7,21 @@ import { describe, it, expect } from 'vitest';
 import { parse as parseToml } from 'smol-toml';
 import {
 	buildMcpInjection,
+	classifyGrokMcpServer,
+	GROK_COMPAT_RESOURCES,
+	GROK_COMPAT_VENDORS,
+	grokCompatScannerEnvName,
+	grokNativeTrustProblem,
 	mcpInjectionProblem,
 	mergeMcpInjectionArgs,
 	MCP_CONFIG_BY_AGENT,
 	MCP_SERVER_NAME,
+	readGrokNativeTrust,
+	type GrokMcpServerObservation,
 	type McpConfigCapability,
 	type McpServerSpec,
 } from '../../../shared/plugins/mcp-agent-config';
+import { grokAcpConfigGeneration } from '../../../shared/maestro-lib/grok/route';
 
 const spec: McpServerSpec = {
 	command: '/bin/electron',
@@ -365,6 +373,182 @@ describe('Grok MCP configuration overlay (GT1-07-07)', () => {
 			expect(production.toolEvidence).toBe('observed');
 			for (const [id, cap] of Object.entries(MCP_CONFIG_BY_AGENT)) {
 				if (id !== 'grok') expect(cap.toolEvidence).toBeUndefined();
+			}
+		});
+	});
+});
+
+// GT1-07-07D: synthetic native MCP state and trust fixtures. They pin the
+// contract GT1-07-11 executes; they certify no native Grok behavior (Phase 11).
+describe('Grok native MCP state and trust (GT1-07-07D)', () => {
+	const qualified: McpConfigCapability = {
+		...MCP_CONFIG_BY_AGENT.grok,
+		verified: true,
+		qualifiedVersions: ['0.1.200'],
+	};
+	const read = { disabledServers: [] as string[], projectServers: [] as string[] };
+	const admit = (env: Record<string, string | undefined>, nativeConfig = read) =>
+		mcpInjectionProblem(qualified, { version: '0.1.200', env, nativeConfig });
+	const allScanners = GROK_COMPAT_VENDORS.flatMap((v) =>
+		GROK_COMPAT_RESOURCES.map((r) => grokCompatScannerEnvName(v, r))
+	);
+	const ok: GrokMcpServerObservation = {
+		name: 'fixture',
+		enabled: true,
+		auth: 'none',
+		handshake: 'ok',
+		advertised: true,
+	};
+
+	describe('disabled servers are preserved', () => {
+		it('refuses the overlay rather than re-enabling a user-disabled bridge, from either disable form', () => {
+			expect(admit({}, { ...read, disabledServers: [MCP_SERVER_NAME] })).toBe('server-disabled');
+			expect(admit({}, { ...read, disabledServers: ['other'] })).toBeUndefined();
+			expect(admit({}, { ...read, projectServers: [MCP_SERVER_NAME] })).toBe('server-shadowed');
+			expect(admit({})).toBeUndefined();
+		});
+
+		it('keeps a disabled server disabled whatever it would otherwise report, with no action or login', () => {
+			for (const over of [
+				{},
+				{ executed: true },
+				{ auth: 'oauth', authState: 'required' as const },
+				{ handshake: 'failed' as const },
+			]) {
+				expect(classifyGrokMcpServer({ ...ok, ...over, enabled: false })).toEqual({
+					name: 'fixture',
+					state: 'disabled',
+					usable: false,
+					action: null,
+					interactiveLogin: false,
+				});
+			}
+		});
+	});
+
+	describe('synthetic auth and handshake outcomes are never tool readiness', () => {
+		it.each([
+			['oauth-required', { auth: 'oauth', authState: undefined }],
+			['oauth-required', { auth: 'oauth', authState: 'required' }],
+			['auth-pending', { auth: 'oauth', authState: 'pending' }],
+			['auth-denied', { auth: 'oauth', authState: 'denied' }],
+			['auth-expired', { auth: 'bearer-token', authState: 'expired' }],
+			['auth-unsupported', { auth: 'device-code' }],
+			['handshake-failed', { handshake: 'timeout' }],
+			['handshake-failed', { handshake: 'failed' }],
+		] as const)('%s is unusable even when tools and a receipt are claimed', (state, over) => {
+			const outcome = classifyGrokMcpServer({ ...ok, executed: true, ...over });
+			expect(outcome).toMatchObject({ state, usable: false, interactiveLogin: false });
+			expect(outcome.action).toEqual(expect.any(String));
+			// A bounded line pointing at Grok's own surface: no URL, no login Maestro opens.
+			expect(outcome.action).not.toMatch(/https?:|localhost|device code|maestro-cli/i);
+			if (state.startsWith('oauth') || state.startsWith('auth-')) {
+				expect(outcome.action).toMatch(/\/mcps|Grok directly|bearer_token_file/);
+			}
+		});
+
+		it('requires a host-observed advertisement for ready and a host receipt on top for executed', () => {
+			expect(classifyGrokMcpServer({ ...ok, advertised: false, executed: true })).toMatchObject({
+				state: 'installed',
+				usable: false,
+			});
+			expect(classifyGrokMcpServer({ ...ok, handshake: 'pending' })).toMatchObject({
+				state: 'installed',
+				usable: false,
+			});
+			expect(classifyGrokMcpServer({ ...ok, handshake: undefined })).toMatchObject({
+				state: 'installed',
+				usable: false,
+			});
+			expect(classifyGrokMcpServer(ok)).toMatchObject({ state: 'ready', usable: true });
+			expect(classifyGrokMcpServer({ ...ok, executed: true })).toMatchObject({
+				state: 'executed',
+				usable: true,
+			});
+			expect(
+				classifyGrokMcpServer({ ...ok, auth: 'oauth', authState: 'authorized' })
+			).toMatchObject({ state: 'ready', action: null });
+		});
+
+		it('bounds and sanitizes a hostile server name inside every action line', () => {
+			const name = `evil"\n[mcp_servers.x]${'z'.repeat(200)}`;
+			const { action } = classifyGrokMcpServer({ ...ok, name, handshake: 'timeout' });
+			expect(action).not.toContain('\n');
+			expect(action).not.toContain('[mcp_servers');
+			expect(action!.length).toBeLessThan(400);
+		});
+	});
+
+	describe('trust and disable changes across fresh and resumed turns', () => {
+		const scope = { account: 'fixture-account', host: 'fixture-host' };
+		const generation = (env: Record<string, string>) =>
+			grokAcpConfigGeneration({ command: '/usr/local/bin/grok', cwd: '/repo', env, scope });
+
+		it('states every hooks, MCP (plugin), skills, agents, rules and sessions scanner, blank as native-default', () => {
+			expect(allScanners).toHaveLength(18);
+			const unset = readGrokNativeTrust({});
+			expect(unset.folderTrust).toBe('native');
+			expect(Object.keys(unset.scanners).sort()).toEqual([...allScanners].sort());
+			expect(new Set(Object.values(unset.scanners))).toEqual(new Set(['native-default']));
+			const stated = readGrokNativeTrust({
+				GROK_CLAUDE_HOOKS_ENABLED: '0',
+				GROK_CURSOR_MCPS_ENABLED: 'false',
+				GROK_CODEX_SKILLS_ENABLED: 'TRUE',
+				GROK_CLAUDE_AGENTS_ENABLED: ' 1 ',
+				GROK_CODEX_RULES_ENABLED: '  ',
+			});
+			expect(stated.scanners).toMatchObject({
+				GROK_CLAUDE_HOOKS_ENABLED: 'disabled',
+				GROK_CURSOR_MCPS_ENABLED: 'disabled',
+				GROK_CODEX_SKILLS_ENABLED: 'enabled',
+				GROK_CLAUDE_AGENTS_ENABLED: 'enabled',
+				GROK_CODEX_RULES_ENABLED: 'native-default',
+			});
+			expect(grokNativeTrustProblem(stated)).toBeUndefined();
+		});
+
+		it.each(allScanners)(
+			'moves the bound generation when %s is enabled or disabled between turns',
+			(name) => {
+				const fresh = generation({ PATH: '/bin' });
+				// The resumed turn of an unchanged tab shares the generation, Maestro facts aside.
+				expect(generation({ PATH: '/bin', MAESTRO_TURN: 'resumed' })).toBe(fresh);
+				const off = generation({ PATH: '/bin', [name]: '0' });
+				const on = generation({ PATH: '/bin', [name]: '1' });
+				expect(new Set([fresh, off, on]).size).toBe(3);
+			}
+		);
+
+		it('admits a fresh turn and refuses the resumed one once folder trust is ungated or a cell is invalid', () => {
+			expect(admit({ GROK_CLAUDE_HOOKS_ENABLED: '0' })).toBeUndefined();
+			expect(admit({ GROK_FOLDER_TRUST: '0' })).toBe('folder-trust-ungated');
+			expect(admit({ GROK_FOLDER_TRUST: 'maybe' })).toBe('trust-setting-invalid');
+			expect(admit({ GROK_CODEX_AGENTS_ENABLED: 'yes' })).toBe('trust-setting-invalid');
+			expect(generation({ GROK_FOLDER_TRUST: '0' })).not.toBe(generation({}));
+		});
+
+		it('checks trust before reading native facts, so an untrusted spawn needs no user file read', () => {
+			expect(mcpInjectionProblem(qualified, { version: '0.1.200', env: {} })).toBe(
+				'native-config-unread'
+			);
+			expect(
+				mcpInjectionProblem(qualified, { version: '0.1.200', env: { GROK_FOLDER_TRUST: 'false' } })
+			).toBe('folder-trust-ungated');
+			// A disabled bridge is still refused with trust stated: never re-enabled by an overlay.
+			expect(
+				admit({ GROK_FOLDER_TRUST: '1' }, { ...read, disabledServers: [MCP_SERVER_NAME] })
+			).toBe('server-disabled');
+		});
+
+		it('keeps production Grok refused before any trust or native fact is consulted', () => {
+			for (const env of [{}, { GROK_FOLDER_TRUST: '0' }, { GROK_CLAUDE_MCPS_ENABLED: 'x' }]) {
+				expect(
+					mcpInjectionProblem(MCP_CONFIG_BY_AGENT.grok, {
+						version: '0.1.200',
+						env,
+						nativeConfig: read,
+					})
+				).toBe('unverified');
 			}
 		});
 	});

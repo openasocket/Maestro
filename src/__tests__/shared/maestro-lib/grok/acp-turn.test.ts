@@ -1026,6 +1026,91 @@ describe('public Grok ACP turn composition', () => {
 		expect(h.calls('session/prompt')).toHaveLength(1);
 	});
 
+	// GT1-07-07D: the ACP route delivers no MCP server of its own, never drives a
+	// login, and a stalled native handshake or a stop leaves nothing behind.
+	describe('native MCP and auth boundary (GT1-07-07D)', () => {
+		it('allocates fresh and resumed sessions with no ACP-delivered MCP server', async () => {
+			const fresh = fixture();
+			fresh.start();
+			expect((await fresh.allocation()).params).toEqual({
+				cwd: fresh.options.cwd,
+				mcpServers: [],
+			});
+			const resumed = fixture({ resumeSessionId: 'native-1' });
+			resumed.start();
+			expect((await resumed.allocation()).params).toEqual({
+				cwd: resumed.options.cwd,
+				mcpServers: [],
+				sessionId: 'native-1',
+			});
+		});
+
+		it('fails a handshake that never answers, with no login, allocation, prompt or retry', async () => {
+			const h = fixture();
+			h.start();
+			await h.next('initialize');
+			await vi.advanceTimersByTimeAsync(h.options.requestTimeoutMs!);
+			const result = await h.finish();
+			expect(result.outcome).not.toBe('completed');
+			expect(result.terminal).toMatchObject({ status: 'failed', dispatchState: 'not-dispatched' });
+			expect(h.calls('initialize')).toHaveLength(1);
+			for (const method of ['authenticate', 'session/new', 'session/prompt']) {
+				expect(h.calls(method)).toHaveLength(0);
+			}
+			expect(childProcess.spawn).toHaveBeenCalledOnce();
+			expect(h.released).toHaveBeenCalledTimes(1);
+			expect(h.unsubscribe).toHaveBeenCalledTimes(1);
+		});
+
+		it.each(['required', 'pending', 'denied', 'expired'])(
+			'refuses an allocation whose auth is %s without authenticate or a relaunch',
+			async (state) => {
+				const h = fixture();
+				h.start();
+				h.reply(await h.next('initialize'), {
+					protocolVersion: 1,
+					agentCapabilities: { loadSession: true },
+					authMethods: [{ id: 'oauth', name: 'Sign in with X' }],
+				});
+				const allocation = await h.next('session/new');
+				h.receive({
+					id: allocation.id,
+					error: { code: -32000, message: `Authentication ${state}`, data: { state } },
+				});
+				const result = await h.finish();
+				expect(result.terminal).toMatchObject({
+					status: 'failed',
+					dispatchState: 'not-dispatched',
+				});
+				expect(h.calls('authenticate')).toHaveLength(0);
+				expect(h.calls('session/prompt')).toHaveLength(0);
+				expect(childProcess.spawn).toHaveBeenCalledOnce();
+				expect(h.released).toHaveBeenCalledTimes(1);
+			}
+		);
+
+		it.each(['cancel', 'terminate'] as const)(
+			'a %s while the handshake is pending leaves no process, timer or lease',
+			async (stop) => {
+				const h = fixture();
+				h.start();
+				await h.next('initialize');
+				if (stop === 'cancel') h.run.cancel();
+				else h.run.handle.terminate();
+				const result = await h.finish();
+				expect(result.terminal).toMatchObject({
+					status: 'cancelled',
+					dispatchState: 'not-dispatched',
+				});
+				expect(h.calls('session/new')).toHaveLength(0);
+				expect(h.calls('session/prompt')).toHaveLength(0);
+				expect(h.released).toHaveBeenCalledTimes(1);
+				expect(h.unsubscribe).toHaveBeenCalledTimes(1);
+				expect(vi.getTimerCount()).toBe(0);
+			}
+		);
+	});
+
 	describe('qualified process accounting', () => {
 		const extensions = { agentVersion: 'fixture-version', sessionUsage: true, promptId: true };
 		const meta = { grokShell: true, agentVersion: extensions.agentVersion };
