@@ -16,6 +16,13 @@
  *   Missing bytes or support refuse in the planner, never falling back to tool-read files.
  * - Standard permission mode on a Claude Code API turn (PA11). The permission relay lives in
  *   the desktop; without it Claude aborts on the first tool call.
+ * - A standard-mode Grok turn the negotiated route selector (`grok/route.ts`) cannot carry.
+ *   Such a turn needs a host round trip for every permission request, so it runs on the shared
+ *   ACP driver (`startGrokAcpTurn`), the same route the desktop's `GrokAcpSpawner` takes, or not
+ *   at all; it never falls back to output-only headless execution, which answers native
+ *   permission prompts by itself. A managed turn's requests go to `managed.effects` (an
+ *   authority that can ask nobody denies each one); an unmanaged turn has no consent port here
+ *   and is refused (`consent-port`). Full-access and read-only Grok turns keep the headless CLI.
  *
  * Completion is the caller's policy (decision D2): the exit facts go through
  * `resolveTurnOutcome`, and the session id is the first one the provider announced (D4).
@@ -65,6 +72,22 @@ import {
 import type { AgentOutputParser, ParsedEvent } from '../parsers/agent-output-parser';
 import { createOutputParser } from '../parsers/parser-factory';
 import { removeTempFiles } from '../run/pipe-spawn';
+import { generateUUID } from '../../uuid';
+import { startGrokAcpTurn } from '../grok/acp-turn';
+import {
+	beginGrokAcpNegotiation,
+	completeGrokAcpNegotiation,
+	grokAcpConfigGeneration,
+	grokAcpProcessSpec,
+	grokAcpPromptOf,
+	parseGrokNativeArgs,
+	GROK_ACP_TURN_IDLE_MS,
+	GROK_ACP_TURN_MAX_MS,
+	type GrokAcpNegotiation,
+	type GrokRouteRequirements,
+	type GrokRouteSnapshot,
+} from '../grok/route';
+import { unavailableEffectAuthority, type ManagedEffectAuthority } from '../managed/effects';
 import {
 	buildDispatchSnapshot,
 	type DispatchLease,
@@ -97,6 +120,12 @@ export type RunAgentTurnRefusal =
 	| 'grok-directory-grants-refused'
 	/** Native resume ownership or selectors could not be verified. Nothing was started. */
 	| 'grok-native-session-refused'
+	/**
+	 * The negotiated Grok route selector cannot carry this turn (a consent port, a remote
+	 * target, images, custom argv, unbound ownership). Nothing was started, and no other
+	 * route was tried in its place.
+	 */
+	| 'grok-route-refused'
 	/** The prompt cannot be delivered as requested. Nothing was started. */
 	| 'prompt-delivery-refused'
 	/** The turn carries images without an explicit file route (CH-8). */
@@ -154,6 +183,12 @@ export interface ManagedTurnAuthority {
 	launch?: ManagedLaunchInput;
 	/** The lease, once admitted, so the caller can journal its id and hear its end. */
 	onLease?(lease: DispatchLease): void;
+	/**
+	 * Who decides each effect a running turn asks for before acting (a Grok ACP permission
+	 * request), bound to this turn's lease and actor. Absent: an authority that can ask nobody,
+	 * so every such request is refused, never approved.
+	 */
+	effects?: ManagedEffectAuthority;
 }
 
 export interface RunAgentTurnOptions {
@@ -529,6 +564,60 @@ export async function runAgentTurn(
 			);
 	}
 
+	// A Grok turn that asked for the provider's own prompting runs on the negotiated ACP route
+	// or not at all. Every gap no advertisement could close (consent, remote target, images,
+	// custom argv) refuses here, before any SSH wrap, observation, admission or process.
+	let grokAcp:
+		| {
+				requirements: GrokRouteRequirements;
+				prompt: string;
+				model?: string;
+				effort?: string;
+				negotiation?: GrokAcpNegotiation;
+				snapshot?: GrokRouteSnapshot;
+		  }
+		| undefined;
+	const grokPlatform = `${process.platform}-${process.arch}`;
+	// The tab's resolved mode is the request: this launch input names none, so the plan's
+	// own default reads `standard` for a Full Access tab too, whose argv approves natively.
+	if (
+		providerId === 'grok' &&
+		turn.permissionMode === 'standard' &&
+		plan.permission.requested === 'standard'
+	) {
+		const native = parseGrokNativeArgs(nativeArgs);
+		const planned = grokAcpPromptOf(
+			{
+				prompt: plan.prompt.via === 'file' ? undefined : launch.prompt,
+				promptArtifact: plan.prompt.via === 'file' ? plan.prompt.artifact : undefined,
+				images: turn.entry.images,
+			},
+			native.prompt
+		);
+		if (!planned)
+			return abandon('prompt-delivery-refused', 'The planned Grok prompt could not be read.');
+		const requirements: GrokRouteRequirements = {
+			permissionMode: 'standard',
+			consent: options.managed ? 'authority' : 'none',
+			imageCount: Math.max(planned.imageCount, hasImages ? 1 : 0),
+			resume: requestedNativeSessionId !== undefined,
+			customArgs: native.customArgs,
+		};
+		const preliminary = beginGrokAcpNegotiation(requirements, {
+			executable: { path: plan.command },
+			agentVersion: null,
+			platform: grokPlatform,
+			account: 'unobserved',
+			host: 'unobserved',
+			configGeneration: 'unobserved',
+			target: plan.target.kind,
+			native: { qualified: false },
+		});
+		if (!preliminary.ok)
+			return abandon('grok-route-refused', `${preliminary.message} Nothing was started.`);
+		grokAcp = { requirements, prompt: planned.text, model: native.model, effort: native.effort };
+	}
+
 	// The process to start.
 	let spec: TurnProcessSpec;
 	let remote: RemoteAgentTarget | undefined;
@@ -666,6 +755,57 @@ export async function runAgentTurn(
 			throw error;
 		}
 	}
+	if (grokAcp) {
+		const scope = nativeObservation?.scope;
+		if (scope?.state !== 'bound' || plan.target.kind !== 'local' || plan.env === undefined)
+			return abandon(
+				'grok-route-refused',
+				'Grok account and host ownership is unknown, so the ACP route cannot bind this turn. Nothing was started.'
+			);
+		const snapshot: GrokRouteSnapshot = {
+			executable: { path: plan.command },
+			agentVersion: null,
+			platform: grokPlatform,
+			account: scope.accountRef,
+			host: scope.host.identity,
+			configGeneration: grokAcpConfigGeneration({
+				command: plan.command,
+				cwd: plan.cwd,
+				env: plan.env,
+				scope,
+			}),
+			target: scope.host.kind === 'local' ? 'local' : 'remote',
+			native: { qualified: false },
+		};
+		const negotiation = beginGrokAcpNegotiation(grokAcp.requirements, snapshot);
+		if (!negotiation.ok)
+			return abandon('grok-route-refused', `${negotiation.message} Nothing was started.`);
+		if (!('pending' in negotiation))
+			return abandon(
+				'grok-route-refused',
+				'The Grok route selector returned no ACP negotiation. Nothing was started.'
+			);
+		try {
+			// The same final plan's executable, cwd and complete environment; only the argv changes.
+			spec = grokAcpProcessSpec(
+				negotiation,
+				{
+					command: plan.command,
+					cwd: plan.cwd,
+					env: plan.env,
+					target: plan.target,
+					permission: plan.permission,
+				},
+				snapshot
+			);
+		} catch (error) {
+			return abandon(
+				'grok-route-refused',
+				`${error instanceof Error ? error.message : String(error)} Nothing was started.`
+			);
+		}
+		grokAcp = { ...grokAcp, negotiation, snapshot };
+	}
 
 	const claudeResume = readClaudeResumeBaseline({
 		providerId,
@@ -692,6 +832,7 @@ export async function runAgentTurn(
 	};
 	let admission: { gate: DispatchAdmission; attribution: typeof attribution } | undefined;
 	let unusedLease: DispatchLease | undefined;
+	let admittedLease: DispatchLease | undefined;
 	if (options.managed) {
 		try {
 			const managed = options.managed;
@@ -704,6 +845,7 @@ export async function runAgentTurn(
 				return abandon(`managed-${admitted.state}`, admitted.message);
 			const lease = admitted.lease;
 			unusedLease = lease;
+			admittedLease = lease;
 			managed.onLease?.(lease);
 			admission = { gate: leaseAdmission(managed.authority, lease), attribution };
 		} catch (error) {
@@ -716,6 +858,8 @@ export async function runAgentTurn(
 	const stopGraceMs = options.stopGraceMs ?? INTERACTIVE_STOP_GRACE_MS;
 	const stream = new EventStream<ParsedEvent>();
 	let running: RunningTurn;
+	// Set only for a routed Grok turn: protocol cancel first, then the driver's stop ladder.
+	let acpCancel: (() => void) | undefined;
 	let spawnAttempted = false;
 	try {
 		if (providerId === 'grok') {
@@ -734,18 +878,68 @@ export async function runAgentTurn(
 			}
 		}
 		spawnAttempted = true;
-		running = runTurn(
-			spec,
-			{
-				agentId: providerId,
-				sessionId: options.sessionId,
-				stopGraceMs,
-				signal: options.signal,
-				outcome: options.outcome,
-				...(admission ? { admission } : {}),
-			},
-			{ onEvent: (event) => stream.push(event) }
-		);
+		if (grokAcp?.negotiation && grokAcp.snapshot) {
+			const { negotiation, snapshot } = grokAcp;
+			const managedEffects = options.managed?.effects;
+			const acp = startGrokAcpTurn(
+				spec,
+				{
+					turnId: `${options.sessionId}:${generateUUID()}`,
+					processGeneration: generateUUID(),
+					prompt: grokAcp.prompt,
+					cwd: plan.cwd,
+					account: snapshot.account,
+					host: snapshot.host,
+					model: grokAcp.model,
+					effort: grokAcp.effort,
+					resumeSessionId: requestedNativeSessionId,
+					idleTimeoutMs: GROK_ACP_TURN_IDLE_MS,
+					maxTurnMs: GROK_ACP_TURN_MAX_MS,
+					stopGraceMs,
+					signal: options.signal,
+					...(admission ? { admission } : {}),
+					permission: admittedLease
+						? {
+								authority:
+									managedEffects ??
+									unavailableEffectAuthority(
+										'This host has no effect authority for managed Grok turns.'
+									),
+								binding: { actor: admittedLease.actor, leaseId: admittedLease.leaseId },
+							}
+						: undefined,
+					// No prompt before the process proves what it negotiated.
+					qualify: (negotiated) => {
+						if (!negotiated.agentVersion) return 'acp-version-unbound';
+						const decision = completeGrokAcpNegotiation(negotiation, {
+							protocolVersion: negotiated.protocolVersion,
+							agentVersion: negotiated.agentVersion,
+							loadSession: negotiated.loadSession,
+							// The port carries no images or native commands here (GROK_ACP_PORT_SUPPORT).
+							images: false,
+							commands: false,
+						});
+						return decision.ok ? undefined : decision.missing.join(',');
+					},
+				},
+				{ onEvent: (event) => stream.push(event) }
+			);
+			running = acp;
+			acpCancel = () => acp.cancel();
+		} else {
+			running = runTurn(
+				spec,
+				{
+					agentId: providerId,
+					sessionId: options.sessionId,
+					stopGraceMs,
+					signal: options.signal,
+					outcome: options.outcome,
+					...(admission ? { admission } : {}),
+				},
+				{ onEvent: (event) => stream.push(event) }
+			);
+		}
 		unusedLease = undefined; // startTurn owns binding and release from here.
 	} catch (error) {
 		unusedLease?.release({ outcome: 'spawn-failed', message: 'The process was not started.' });
@@ -764,12 +958,24 @@ export async function runAgentTurn(
 	}
 	// Before the first line is read, which is on a later tick.
 	primeClaudeResume(running.handle.parser, claudeResume);
-	const stops = guardTurn(running.handle, {
-		sessionId: options.sessionId,
-		graceMs: stopGraceMs,
-		remote,
-		signal: options.signal,
-	});
+	const stops = acpCancel
+		? {
+				interrupt: acpCancel,
+				terminate: () => {
+					acpCancel!();
+					running.handle.terminate();
+				},
+				terminateNow: () => {
+					acpCancel!();
+					running.handle.terminateNow();
+				},
+			}
+		: guardTurn(running.handle, {
+				sessionId: options.sessionId,
+				graceMs: stopGraceMs,
+				remote,
+				signal: options.signal,
+			});
 
 	const result = running.completed.then((completed) => {
 		stream.close();

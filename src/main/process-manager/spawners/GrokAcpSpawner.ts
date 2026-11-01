@@ -40,7 +40,6 @@
  * started for the exact selection, never from a probe, a cache or the disk.
  */
 
-import { createHash } from 'crypto';
 import type { EventEmitter } from 'events';
 import * as path from 'path';
 import { logger } from '../../utils/logger';
@@ -61,7 +60,6 @@ import type {
 } from '../../agents/grok-skills';
 import { isSupersededGeneration, nextSpawnGeneration } from '../generation';
 import { DEFAULT_QUERY_SOURCE } from '../../../shared/querySource';
-import { canonicalJson } from '../../../shared/canonicalJson';
 import { INTERACTIVE_STOP_GRACE_MS } from '../../../shared/maestro-lib/control/termination';
 import {
 	unavailableEffectAuthority,
@@ -76,7 +74,12 @@ import { RELAY_DECISION_TIMEOUT_MS, type RelaySpawnBinding } from '../../permiss
 import {
 	beginGrokAcpNegotiation,
 	completeGrokAcpNegotiation,
+	grokAcpConfigGeneration,
 	grokAcpProcessSpec,
+	grokAcpPromptOf,
+	parseGrokNativeArgs,
+	GROK_ACP_TURN_IDLE_MS,
+	GROK_ACP_TURN_MAX_MS,
 	type GrokAcpNegotiation,
 	type GrokRouteRefusal,
 	type GrokRouteSnapshot,
@@ -92,21 +95,9 @@ import {
 const LOG_CONTEXT = 'GrokAcpSpawner';
 
 /** Silence budget of a desktop ACP turn (reset by any output, including setup). */
-export const GROK_ACP_DESKTOP_IDLE_MS = 30 * 60_000;
+export const GROK_ACP_DESKTOP_IDLE_MS = GROK_ACP_TURN_IDLE_MS;
 /** Hard ceiling of one desktop ACP prompt. */
-export const GROK_ACP_DESKTOP_MAX_TURN_MS = 12 * 60 * 60_000;
-
-/** Native flags the desktop launch builder generates; anything else is user argv. */
-const GENERATED_VALUE_FLAGS = new Set([
-	'--output-format',
-	'--prompt-file',
-	'-p',
-	'--cwd',
-	'--resume',
-	'-m',
-	'--reasoning-effort',
-]);
-const GENERATED_BOOLEAN_FLAGS = new Set(['--always-approve']);
+export const GROK_ACP_DESKTOP_MAX_TURN_MS = GROK_ACP_TURN_MAX_MS;
 
 /** Where a standalone turn's consent sessions come from (the permission relay). */
 export interface GrokConsentPort {
@@ -225,66 +216,6 @@ export function grokNativeCommandSpawnProblem(
 	return undefined;
 }
 
-interface ParsedNativeArgs {
-	model?: string;
-	effort?: string;
-	/** `-p` value, when the prompt rode in argv rather than a prompt file. */
-	prompt?: string;
-	customArgs: boolean;
-}
-
-/** Read the generated native argv back into protocol options; unknown argv is custom. */
-export function parseGrokNativeArgs(args: readonly string[]): ParsedNativeArgs {
-	const parsed: ParsedNativeArgs = { customArgs: false };
-	for (let i = 0; i < args.length; i++) {
-		const arg = args[i];
-		if (GENERATED_BOOLEAN_FLAGS.has(arg)) continue;
-		if (!GENERATED_VALUE_FLAGS.has(arg) || i + 1 >= args.length) {
-			parsed.customArgs = true;
-			continue;
-		}
-		const value = args[++i];
-		if (arg === '-m') parsed.model = value;
-		else if (arg === '--reasoning-effort') parsed.effort = value;
-		else if (arg === '-p') parsed.prompt = value;
-	}
-	return parsed;
-}
-
-/** Text and image count of the planned prompt; an unreadable artifact is null. */
-export function grokAcpPromptOf(
-	config: Pick<ProcessConfig, 'prompt' | 'promptArtifact' | 'images'>,
-	argvPrompt?: string
-): { text: string; imageCount: number } | null {
-	const images = config.images?.length ?? 0;
-	const artifact = config.promptArtifact;
-	if (!artifact) {
-		const text = config.prompt ?? argvPrompt;
-		return typeof text === 'string' ? { text, imageCount: images } : null;
-	}
-	let blocks: unknown;
-	try {
-		const value: unknown = JSON.parse(artifact.content);
-		blocks =
-			value && typeof value === 'object' && !Array.isArray(value)
-				? (value as { type?: unknown; content?: unknown }).type === 'acp'
-					? (value as { content?: unknown }).content
-					: undefined
-				: value;
-	} catch {
-		return null;
-	}
-	if (!Array.isArray(blocks)) return null;
-	let text = '';
-	let imageCount = images;
-	for (const block of blocks as { type?: unknown; text?: unknown }[]) {
-		if (block?.type === 'text' && typeof block.text === 'string') text += block.text;
-		else if (block?.type === 'image') imageCount += 1;
-		else return null;
-	}
-	return { text, imageCount };
-}
-
 function grokAcpDesktopEnv(config: ProcessConfig): NodeJS.ProcessEnv {
 	return buildChildProcessEnv(
 		config.customEnvVars,
@@ -296,24 +227,9 @@ function grokAcpDesktopEnv(config: ProcessConfig): NodeJS.ProcessEnv {
 }
 
 /**
- * The effective launch environment a Grok ACP process is configured by: the complete child
- * environment without Maestro's own per-spawn facts (the `MAESTRO_` namespace: resume marker,
- * query source, caller identity, acting user, delegation context). Those differ between two
- * turns of the same tab and configure nothing of the provider; every inherited, global,
- * provider and agent layer (auth, endpoint, PATH and the executable's directory) stays in.
- */
-function grokAcpLaunchEnvProjection(env: NodeJS.ProcessEnv): Record<string, string> {
-	const projected: Record<string, string> = {};
-	for (const [key, value] of Object.entries(env)) {
-		if (value === undefined || key.toUpperCase().startsWith('MAESTRO_')) continue;
-		projected[key] = value;
-	}
-	return projected;
-}
-
-/**
  * Opaque fingerprint of everything a desktop ACP launch depends on (executable, cwd, the
- * effective launch environment, bound account/host scope); never persisted or shown. A native
+ * effective launch environment, bound account/host scope; `grokAcpConfigGeneration`);
+ * never persisted or shown. A native
  * command intent must carry the generation of the launch it will run under, so a catalog
  * projection stamps this same value, and any change refuses `config-changed`. Hashing the
  * projection (not the raw environment) is what lets a catalog read on one turn bind the
@@ -323,16 +239,12 @@ export function grokAcpDesktopConfigGeneration(
 	config: ProcessConfig,
 	env: NodeJS.ProcessEnv = grokAcpDesktopEnv(config)
 ): string {
-	return createHash('sha256')
-		.update(
-			canonicalJson({
-				command: config.command,
-				cwd: config.cwd,
-				env: grokAcpLaunchEnvProjection(env),
-				scope: config.nativeSessionScope,
-			})
-		)
-		.digest('hex');
+	return grokAcpConfigGeneration({
+		command: config.command,
+		cwd: config.cwd,
+		env,
+		scope: config.nativeSessionScope,
+	});
 }
 
 /** What `agents:discoverSlashCommands` asks the route owner for. */

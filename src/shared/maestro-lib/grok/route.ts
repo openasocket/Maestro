@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { canonicalJson } from '../../canonicalJson';
 import type { LaunchPermissionMode } from '../launch/env';
 import {
@@ -379,4 +380,118 @@ export function grokAcpRouteOptions(
 		host: decision.facts.host,
 		agentVersion: decision.facts.agentVersion,
 	};
+}
+
+/** Silence budget of one ACP turn (reset by any output, including setup). */
+export const GROK_ACP_TURN_IDLE_MS = 30 * 60_000;
+/** Hard ceiling of one ACP prompt. */
+export const GROK_ACP_TURN_MAX_MS = 12 * 60 * 60_000;
+
+/** Native flags the launch builders generate; anything else is user argv. */
+const GENERATED_VALUE_FLAGS = new Set([
+	'--output-format',
+	'--prompt-file',
+	'-p',
+	'--cwd',
+	'--resume',
+	'-m',
+	'--reasoning-effort',
+]);
+const GENERATED_BOOLEAN_FLAGS = new Set(['--always-approve']);
+
+/** The planned native argv read back into protocol options. */
+export interface GrokNativeArgsReading {
+	model?: string;
+	effort?: string;
+	/** `-p` value, when the prompt rode in argv rather than a prompt file. */
+	prompt?: string;
+	/** Any argv the launch builders do not generate. It has no meaning on ACP. */
+	customArgs: boolean;
+}
+
+/**
+ * Read the generated native argv of a final launch plan back into protocol options, so the
+ * ACP route carries exactly the model and effort the planner resolved. Unknown argv is
+ * custom, which the selector refuses (`acp-custom-args`) rather than drop.
+ */
+export function parseGrokNativeArgs(args: readonly string[]): GrokNativeArgsReading {
+	const parsed: GrokNativeArgsReading = { customArgs: false };
+	for (let i = 0; i < args.length; i++) {
+		const arg = args[i];
+		if (GENERATED_BOOLEAN_FLAGS.has(arg)) continue;
+		if (!GENERATED_VALUE_FLAGS.has(arg) || i + 1 >= args.length) {
+			parsed.customArgs = true;
+			continue;
+		}
+		const value = args[++i];
+		if (arg === '-m') parsed.model = value;
+		else if (arg === '--reasoning-effort') parsed.effort = value;
+		else if (arg === '-p') parsed.prompt = value;
+	}
+	return parsed;
+}
+
+/**
+ * Text and image count of a planned prompt: the planner's ACP prompt artifact when there
+ * is one (its text blocks concatenated, each image block counted), else the plain text.
+ * An unreadable artifact or an unknown block is null; the caller refuses, never guesses.
+ */
+export function grokAcpPromptOf(
+	planned: {
+		prompt?: string;
+		promptArtifact?: { content: string };
+		images?: readonly unknown[];
+	},
+	argvPrompt?: string
+): { text: string; imageCount: number } | null {
+	const images = planned.images?.length ?? 0;
+	const artifact = planned.promptArtifact;
+	if (!artifact) {
+		const text = planned.prompt ?? argvPrompt;
+		return typeof text === 'string' ? { text, imageCount: images } : null;
+	}
+	let blocks: unknown;
+	try {
+		const value: unknown = JSON.parse(artifact.content);
+		blocks =
+			value && typeof value === 'object' && !Array.isArray(value)
+				? (value as { type?: unknown; content?: unknown }).type === 'acp'
+					? (value as { content?: unknown }).content
+					: undefined
+				: value;
+	} catch {
+		return null;
+	}
+	if (!Array.isArray(blocks)) return null;
+	let text = '';
+	let imageCount = images;
+	for (const block of blocks as { type?: unknown; text?: unknown }[]) {
+		if (block?.type === 'text' && typeof block.text === 'string') text += block.text;
+		else if (block?.type === 'image') imageCount += 1;
+		else return null;
+	}
+	return { text, imageCount };
+}
+
+/**
+ * Opaque fingerprint of everything an ACP launch depends on: the executable, cwd, the
+ * effective launch environment without Maestro's own per-spawn facts (the `MAESTRO_`
+ * namespace, which differs between two turns of one tab and configures nothing of the
+ * provider), and the bound account/host scope. Never persisted or shown; it is the
+ * `configGeneration` of a route snapshot, so any user, provider or inherited change moves it.
+ */
+export function grokAcpConfigGeneration(launch: {
+	command: string;
+	cwd: string;
+	env: NodeJS.ProcessEnv;
+	scope: unknown;
+}): string {
+	const env: Record<string, string> = {};
+	for (const [key, value] of Object.entries(launch.env)) {
+		if (value === undefined || key.toUpperCase().startsWith('MAESTRO_')) continue;
+		env[key] = value;
+	}
+	return createHash('sha256')
+		.update(canonicalJson({ command: launch.command, cwd: launch.cwd, env, scope: launch.scope }))
+		.digest('hex');
 }
