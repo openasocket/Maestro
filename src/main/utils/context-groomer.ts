@@ -230,11 +230,23 @@ export interface GroomContextOptions {
 	 *
 	 * Set it for pure text transforms. Without it, a task-shaped prompt makes the
 	 * model run a full agentic session - reading files, grepping - instead of
-	 * answering, which blows the timeout and returns nothing. Agents that define
-	 * no `noToolsArgs` are left untouched on legacy routes; an explicit prompt-file
-	 * route refuses when it cannot enforce the requested restriction.
+	 * answering, which blows the timeout and returns nothing.
+	 *
+	 * Best effort: an agent with `noToolsArgs` gets them. An agent that defines
+	 * none is left untouched on a legacy route; on a prompt-file route (Grok) the
+	 * turn falls back to the provider's CLI-enforced read-only arguments, and
+	 * refuses when those are not enforced. Tools stay available on that fallback
+	 * (Grok has no verified all-tools-off flag; `--tools ""` is ignored and a
+	 * `--disallowed-tools` list is never invented). A caller that cannot accept
+	 * tools at all sets `requireDisabledTools` instead.
 	 */
 	disableTools?: boolean;
+	/**
+	 * The turn MUST run with every tool disabled. Refused before any spawn for an
+	 * agent with no verified `noToolsArgs`, on every route; never downgraded to
+	 * the read-only fallback `disableTools` takes.
+	 */
+	requireDisabledTools?: boolean;
 	/** Agent-level config values (from agent config store) for override resolution */
 	agentConfigValues?: Record<string, any>;
 	/**
@@ -387,7 +399,7 @@ async function groomContextOnce(
 		agentType,
 		prompt,
 		agentSessionId,
-		readOnlyMode = false,
+		readOnlyMode: requestedReadOnly = false,
 		modelId,
 		timeoutMs = DEFAULT_GROOMING_TIMEOUT_MS,
 		sessionSshRemoteConfig,
@@ -398,6 +410,7 @@ async function groomContextOnce(
 		sessionCustomModel,
 		sessionCustomEffort,
 		disableTools = false,
+		requireDisabledTools = false,
 		agentConfigValues,
 		claudeTokenSource,
 		onProgress,
@@ -424,8 +437,23 @@ async function groomContextOnce(
 	if (!agent || !agent.available) {
 		throw new Error(`Agent ${agentType} is not available`);
 	}
-	if (agent.promptFile && disableTools && !agent.noToolsArgs?.length) {
-		throw new Error('Prompt-file grooming cannot enforce disabled tools.');
+	const canDisableTools = !!agent.noToolsArgs?.length;
+	if (requireDisabledTools && !canDisableTools) {
+		throw new Error(
+			`${agent.name} cannot run this turn with tools disabled: it has no verified all-tools-off flag. Nothing was run.`
+		);
+	}
+	// Best-effort `disableTools` on a prompt-file route with no all-off flag
+	// falls back to enforced read-only (checked just below) instead of
+	// refusing; a legacy route is left as it always was.
+	const readOnlyFallback =
+		disableTools && !requireDisabledTools && !canDisableTools && !!agent.promptFile;
+	const readOnlyMode = requestedReadOnly || readOnlyFallback;
+	if (readOnlyFallback && !requestedReadOnly) {
+		logger.info('Tools cannot be disabled; grooming falls back to read-only', LOG_CONTEXT, {
+			groomerSessionId,
+			agentType,
+		});
 	}
 	if (
 		agent.promptFile &&
@@ -465,7 +493,7 @@ async function groomContextOnce(
 		readOnlyMode,
 	});
 	const toolArgs =
-		disableTools && agent.noToolsArgs?.length
+		(disableTools || requireDisabledTools) && agent.noToolsArgs?.length
 			? [...configResolution.args, ...agent.noToolsArgs]
 			: configResolution.args;
 
