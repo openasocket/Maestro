@@ -24,7 +24,7 @@
 				"src/main/enterprise/spawn-authority.ts:179-187",
 				"src/main/process-manager/spawners/GrokAcpSpawner.ts:576-582"
 			],
-			"ownerTasks": ["GT1-09-07", "GT1-09-11", "GT1-11-12"],
+			"ownerTasks": ["GT1-09-07", "GT1-09-11", "GT1-11-12", "GT1-09-13"],
 			"parityRows": ["P33", "P34"],
 			"releaseImpact": "Managed standard-mode Grok cannot complete a turn that needs any tool approval; no managed effect-enforcement claim.",
 			"effectQualification": {
@@ -46,7 +46,8 @@
 					"present": false,
 					"requiredProof": "a live endpoint decides a Grok effect and its receipt joins the lease, GT1-11-12 exact-binary live scenario against an enrolled installation and a live endpoint"
 				}
-			]
+			],
+			"phase11Scenarios": ["GT1-11-12"]
 		},
 		{
 			"id": "GT1-09-R02",
@@ -62,7 +63,7 @@
 				"src/shared/maestro-lib/providers/definitions.ts:898",
 				"src/shared/maestro-lib/providers/definitions.ts:929"
 			],
-			"ownerTasks": ["GT1-09-07", "GT1-09-08", "GT1-11-12", "GT1-09-11"],
+			"ownerTasks": ["GT1-09-07", "GT1-09-08", "GT1-11-12", "GT1-09-11", "GT1-09-13"],
 			"parityRows": ["P33", "P34", "P35"],
 			"releaseImpact": "Launch admission is the only managed guarantee on headless Grok.",
 			"effectQualification": {
@@ -90,7 +91,8 @@
 					"present": false,
 					"requiredProof": "files, shell, network and descendants held before the effect, GT1-11-12 exact-binary live scenario against an enrolled installation and a live endpoint"
 				}
-			]
+			],
+			"phase11Scenarios": ["GT1-11-12"]
 		},
 		{
 			"id": "GT1-09-R03",
@@ -101,9 +103,10 @@
 			"reason": "readOnlyCliEnforced is true on the strength of Grok's own --permission-mode plan plus --deny Bash(*); this is provider self-enforcement, not a Maestro sandbox, and is not proven on an exact binary per OS.",
 			"requiredAuthority": "Exact-binary live qualification per OS (phase 11) or a host confinement producer.",
 			"sourceRefs": ["src/shared/maestro-lib/providers/definitions.ts:909-920"],
-			"ownerTasks": ["GT1-09-07", "GT1-11-12", "GT1-11-11D"],
+			"ownerTasks": ["GT1-09-07", "GT1-11-12", "GT1-11-11D", "GT1-09-13"],
 			"parityRows": ["P35", "C-supportsReadOnlyMode"],
-			"releaseImpact": "Read-only cannot be certified as a security boundary."
+			"releaseImpact": "Read-only cannot be certified as a security boundary.",
+			"phase11Scenarios": ["GT1-11-11D", "GT1-11-12"]
 		},
 		{
 			"id": "GT1-09-R04",
@@ -117,7 +120,7 @@
 				"src/shared/maestro-lib/grok/acp-requests.ts:334-364",
 				"src/shared/maestro-lib/managed/effects.ts:43-50"
 			],
-			"ownerTasks": ["GT1-09-07", "GT1-09-08", "GT1-11-12", "GT1-09-11"],
+			"ownerTasks": ["GT1-09-07", "GT1-09-08", "GT1-11-12", "GT1-09-11", "GT1-09-13"],
 			"parityRows": ["P34"],
 			"releaseImpact": "ACP availability is not a policy boundary for Grok.",
 			"effectQualification": {
@@ -139,7 +142,8 @@
 					"present": false,
 					"requiredProof": "per-class request ordering captured live before a kind joins GROK_PRE_EFFECT_QUALIFIED_KINDS, GT1-11-12 exact-binary live scenario against an enrolled installation and a live endpoint"
 				}
-			]
+			],
+			"phase11Scenarios": ["GT1-11-12"]
 		},
 		{
 			"id": "GT1-09-R05",
@@ -154,7 +158,7 @@
 				"src/main/process-manager/spawners/GrokAcpSpawner.ts:373-451",
 				"src/main/process-manager/ProcessManager.ts:150-189"
 			],
-			"ownerTasks": ["GT1-09-02", "GT1-09-02B", "GT1-09-03"],
+			"ownerTasks": ["GT1-09-02", "GT1-09-02B", "GT1-09-03", "GT1-09-13"],
 			"parityRows": ["REG-MANAGED-ROUTES", "P33"],
 			"releaseImpact": "Fleet inventory and policy cannot see which Grok route ran.",
 			"progress": {
@@ -169,7 +173,8 @@
 				"result": "6 files, 210 passed, 0 failed, 0 skipped",
 				"scope": "client integration against synthetic or fake policy answers; not real endpoint or provider qualification",
 				"detail": "contracts.test.ts 2/2 Grok cases, permission-ceiling.test.ts 13/13, spawn-authority.test.ts 13/13."
-			}
+			},
+			"phase11Scenarios": ["GT1-11-12"]
 		},
 		{
 			"id": "GT1-09-R06",
@@ -184,7 +189,7 @@
 				"src/main/process-manager/spawners/GrokAcpSpawner.ts:593-597",
 				"src/shared/maestro-lib/grok/route.ts:316-324"
 			],
-			"ownerTasks": ["GT1-09-02", "GT1-09-02B", "GT1-09-03", "GT1-11-12"],
+			"ownerTasks": ["GT1-09-02", "GT1-09-02B", "GT1-09-03", "GT1-11-12", "GT1-09-13"],
 			"parityRows": ["P02", "P09", "REG-MANAGED-ROUTES"],
 			"releaseImpact": "A new Grok release would run under management without new qualification.",
 			"progress": {
@@ -199,7 +204,8 @@
 				"result": "6 files, 210 passed, 0 failed, 0 skipped",
 				"scope": "client integration against synthetic or fake policy answers; not real endpoint or provider qualification",
 				"detail": "Covered by the managed ACP refusal cases in spawn-authority.test.ts and permission-ceiling.test.ts."
-			}
+			},
+			"phase11Scenarios": ["GT1-11-10"]
 		},
 		{
 			"id": "GT1-09-R07",
@@ -214,7 +220,7 @@
 				"src/main/process-manager/ProcessManager.ts:150-189",
 				"src/shared/maestro-lib/providers/definitions.ts:941-961"
 			],
-			"ownerTasks": ["GT1-09-02", "GT1-09-03", "GT1-09-04", "GT1-09-02A", "GT1-09-06"],
+			"ownerTasks": ["GT1-09-02", "GT1-09-03", "GT1-09-04", "GT1-09-02A", "GT1-09-06", "GT1-09-13"],
 			"parityRows": ["P33", "P36"],
 			"releaseImpact": "An enterprise model pin is enforced against a Grok desktop launch through the snapshot and the launch ceiling. A policy keyed on the selected account cannot see it in the Grok desktop snapshot.",
 			"progress": {
@@ -235,6 +241,14 @@
 				"state": "account-absent-asserted",
 				"detail": "The host adapter execution payload for every Grok origin (ux, cli, cue, headless) names provider grok and the -m model and has no account field; the local lease still binds the snapshot account, so a changed account is a snapshot-mismatch at the gate.",
 				"sourceRefs": ["src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts"]
+			},
+			"phase11Scenarios": ["GT1-11-11A"],
+			"phaseEnd": {
+				"task": "GT1-09-13",
+				"ownedByRemainingPhase09Task": false,
+				"boundedChange": "Carry an approved account reference from the spawn handler through ProcessConfig into buildSpawnRequestSnapshot (DispatchAttribution.account already exists).",
+				"releaseImpact": "No managed Grok desktop launch is account-attributed.",
+				"note": "Fixable in Maestro; must not be marked passing without this change."
 			}
 		},
 		{
@@ -250,7 +264,7 @@
 				"src/shared/maestro-lib/grok/route.ts:32-35",
 				"src/shared/maestro-lib/grok/route.ts:182"
 			],
-			"ownerTasks": ["GT1-09-09", "GT1-09-10", "GT1-11-12", "GT1-09-11"],
+			"ownerTasks": ["GT1-09-09", "GT1-09-10", "GT1-11-12", "GT1-09-11", "GT1-09-13"],
 			"parityRows": ["P15", "P36", "P39"],
 			"releaseImpact": "Managed remote Grok is refused unless a remote endpoint qualifies it.",
 			"progress": {
@@ -287,7 +301,8 @@
 					"present": false,
 					"requiredProof": "a remote runtime attests its endpoint identity for a Grok ssh launch, GT1-11-12 exact-binary live scenario against an enrolled installation and a live endpoint"
 				}
-			]
+			],
+			"phase11Scenarios": ["GT1-11-11A", "GT1-11-12"]
 		},
 		{
 			"id": "GT1-09-R09",
@@ -298,7 +313,7 @@
 			"reason": "The Grok MCP entry is verified false with no qualified versions, so production Grok runs uninjected; native trust facts are reported, not enforced.",
 			"requiredAuthority": "Exact-binary MCP loading, trust and disable evidence (phase 11); blocker grok-native-mcp-unqualified.",
 			"sourceRefs": ["Plans/grok-tier1/evidence/07.md"],
-			"ownerTasks": ["GT1-09-07", "GT1-11-12", "GT1-09-11"],
+			"ownerTasks": ["GT1-09-07", "GT1-11-12", "GT1-09-11", "GT1-09-13"],
 			"parityRows": ["P34", "P35"],
 			"releaseImpact": "No managed MCP claim for Grok.",
 			"effectQualification": {
@@ -320,7 +335,8 @@
 					"present": false,
 					"requiredProof": "MCP calls asked before execution and decided by a live authority, GT1-11-12 exact-binary live scenario against an enrolled installation and a live endpoint"
 				}
-			]
+			],
+			"phase11Scenarios": ["GT1-11-11B", "GT1-11-12"]
 		},
 		{
 			"id": "GT1-09-R10",
@@ -331,7 +347,7 @@
 			"reason": "Subagent lineage is synthetic from pinned variants; subagent effects are provider-internal.",
 			"requiredAuthority": "Native subagent evidence and per-effect authority; blocker grok-native-subagent-unqualified.",
 			"sourceRefs": ["Plans/grok-tier1/evidence/07.md"],
-			"ownerTasks": ["GT1-09-07", "GT1-11-12", "GT1-09-11"],
+			"ownerTasks": ["GT1-09-07", "GT1-11-12", "GT1-09-11", "GT1-09-13"],
 			"parityRows": ["P34"],
 			"releaseImpact": "No managed subagent claim for Grok.",
 			"effectQualification": {
@@ -353,7 +369,8 @@
 					"present": false,
 					"requiredProof": "subagent tool calls asked and decided before execution, GT1-11-12 exact-binary live scenario against an enrolled installation and a live endpoint"
 				}
-			]
+			],
+			"phase11Scenarios": ["GT1-11-12"]
 		},
 		{
 			"id": "GT1-09-R11",
@@ -364,7 +381,7 @@
 			"reason": "Grok has no verified all-off tool switch (no noToolsArgs); plan mode plus --deny Bash(*) is not no-tools. The groomer refuses requireDisabledTools since GT1-08-14.",
 			"requiredAuthority": "A verified all-off flag on an exact binary.",
 			"sourceRefs": ["src/shared/maestro-lib/providers/definitions.ts:921-928"],
-			"ownerTasks": ["GT1-09-07", "GT1-09-08", "GT1-09-11"],
+			"ownerTasks": ["GT1-09-07", "GT1-09-08", "GT1-09-11", "GT1-09-13"],
 			"parityRows": ["P35"],
 			"releaseImpact": "Safety pass; the functional no-tools guarantee stays absent.",
 			"effectQualification": {
@@ -378,7 +395,8 @@
 				"result": "6 files, 151 passed, 0 failed, 0 skipped",
 				"scope": "client wiring against declared doubles (allow-everything producer, synthetic table, local lease authority, labeled fake endpoint); not real endpoint, provider or producer qualification",
 				"detail": "context-groomer.managed.test.ts: required no-tools refused before admission even with an allow-everything effect authority composed; a tool_call streamed after execution admits nothing."
-			}
+			},
+			"phase11Scenarios": ["GT1-11-11D"]
 		},
 		{
 			"id": "GT1-09-R12",
@@ -418,6 +436,15 @@
 				"task": "GT1-09-12",
 				"state": "maestro-owned-egress-and-redaction-tested-provider-network-open",
 				"detail": "egress-policy.test.ts: a Maestro-owned Grok provider-account request to api.x.ai is held by destination, then by an opaque managedAccountRef('grok', GROK_HOME); a denied request throws EgressDeniedError before fetch is called and the hold ledger keeps the origin only; no receipt, message or hold carries path, query, key or account directory. No Grok source file calls fetchWithTimeout, holdEgress or fetch, so the grok process's own network never passes the ceiling: Maestro fetch gating does not constrain it. Status unchanged."
+			},
+			"phase11Scenarios": ["GT1-11-12"],
+			"finalVerification": {
+				"task": "GT1-09-13",
+				"sourceCommit": "54139affe2c690924f55d186b1f0b244b2166825",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json redaction-canaries, sanitization, egress-policy (GT1-09-12)",
+				"result": "3 files, 117 passed, 0 failed, 0 skipped (10 GT1-09-12 cases)",
+				"scope": "offline deterministic wiring against synthetic canaries and the labeled fake endpoint; not real endpoint, provider or producer qualification",
+				"detail": "Support package, sanitizer and Maestro-owned egress hold Grok canaries (keys, paths, gateway, prompt/output/thought/tool text); a denied Maestro request throws before fetch with an origin-only hold. Maestro fetch gating does not constrain the provider process network, and no pre-effect DLP producer exists; status unchanged."
 			}
 		},
 		{
@@ -432,7 +459,7 @@
 				"src/main/enterprise/dispatch.ts:264-305",
 				"src/main/enterprise/spawn-authority.ts:138-222"
 			],
-			"ownerTasks": ["GT1-09-12A", "GT1-11-12", "GT1-09-11"],
+			"ownerTasks": ["GT1-09-12A", "GT1-11-12", "GT1-09-11", "GT1-09-13"],
 			"parityRows": ["P33", "P36"],
 			"releaseImpact": "Fake-authority tests prove client wiring only.",
 			"verification": {
@@ -455,6 +482,15 @@
 				"task": "GT1-09-12A",
 				"state": "wiring-tested-against-labeled-double-real-endpoint-absent",
 				"detail": "offline-recovery.test.ts over the real createEnterpriseService composition and the labeled fake endpoint: a Grok snapshot (provider grok, model grok-4, opaque managedAccountRef account, an inline xai- canary in its env) is unavailable while enrolled but unregistered with no execution sent; once the test plays the actor's registration it is admitted and the endpoint's execution request and the dispatch receipt name grok, grok-4, the request, attempt and run ids, the lease actor and the registration, with neither the key nor the account home on the socket or anywhere in the data directory; a dropped daemon refuses on the last policy with no execution, a revoked registration is asked and answers unauthenticated with no decision, receipt or lease, and a restart must register again before Grok is admitted. credentials.test.ts: an approved XAI_API_KEY reference is delivered while the agent's GROK_AUTH is removed and the shell's GROK_AUTH/XAI_API_KEY are never used; revoked, expired-before-launch, forged and missing-secret references refuse with no plan. credential-custody.test.ts: every untrusted or unprotected-with-file identity read stays managed and refuses a GROK_AUTH or XAI_API_KEY environment custody; the custody ceiling holds no Grok credential of its own (MANAGED_CREDENTIALS has none). Passing doubles prove wiring only; status unchanged."
+			},
+			"phase11Scenarios": ["GT1-11-11A", "GT1-11-12"],
+			"finalVerification": {
+				"task": "GT1-09-13",
+				"sourceCommit": "54139affe2c690924f55d186b1f0b244b2166825",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json credential-custody, credentials, offline-recovery (GT1-09-12A)",
+				"result": "3 files, 45 passed, 0 failed, 0 skipped (15 GT1-09-12A cases)",
+				"scope": "offline deterministic wiring against synthetic canaries and the labeled fake endpoint; not real endpoint, provider or producer qualification",
+				"detail": "Real createEnterpriseService composition over the labeled fake endpoint: unregistered, dropped daemon and revoked registration refuse with no receipt, lease or child; restart must register again; the receipt names provider, model, ids, actor and registration without the key or account home. Wiring only; status unchanged."
 			}
 		},
 		{
@@ -472,7 +508,7 @@
 				"src/shared/providerProfiles.ts (PROVIDER_PROFILE_CONFIGS.grok)",
 				"src/shared/agentEnvironment.ts (isSecretEnvKey)"
 			],
-			"ownerTasks": ["GT1-09-04", "GT1-09-04A", "GT1-09-05", "GT1-09-06"],
+			"ownerTasks": ["GT1-09-04", "GT1-09-04A", "GT1-09-05", "GT1-09-06", "GT1-09-13"],
 			"parityRows": ["P33", "P36"],
 			"releaseImpact": "A managed Grok launch no longer inherits GROK_AUTH, GROK_AUTH_PATH, XAI_API_KEY or GROK_HOME, and receives the approved account home. An inherited Grok gateway URL can still route a managed launch to another endpoint; a managed policy cannot pin a Grok gateway or model through the environment.",
 			"progress": {
@@ -487,6 +523,14 @@
 				"result": "6 files, 210 passed, 0 failed, 0 skipped",
 				"scope": "client integration against synthetic or fake policy answers; not real endpoint or provider qualification",
 				"detail": "settings-policy.test.ts 7/7 Grok cases, agent-config-writes.test.ts 5/5, permission-ceiling.test.ts 13/13, context-groomer.managed.test.ts 5/5."
+			},
+			"phase11Scenarios": ["GT1-11-11A"],
+			"phaseEnd": {
+				"task": "GT1-09-13",
+				"ownedByRemainingPhase09Task": false,
+				"boundedChange": "Let ProviderRouteEnvNames hold several base-URL names so env.ts strips GROK_*_BASE_URL inherited from the shell at a managed launch.",
+				"releaseImpact": "A shell-inherited Grok gateway URL reaches a managed launch.",
+				"note": "Fixable in Maestro; must not be marked passing without this change."
 			}
 		},
 		{
@@ -510,6 +554,15 @@
 				"task": "GT1-09-12B",
 				"state": "fixed",
 				"detail": "redaction-canaries.test.ts flips the pinned gap: GROK_AUTH=xai-... and a bare xai- key are absent from logs.json in a real generateDebugPackage() write, replaced by [REDACTED_API_KEY]. redactSecrets.test.ts adds the GROK_AUTH, error-line and JSON-value shapes, non-key twins (xai-sdk, xai-grok-cli-integration-tests, xai-key, a 16-character run) left untouched, and two 64 KB ReDoS inputs. With the rule removed the four new key cases fail; the 22 redaction consumer suites otherwise match HEAD. No Grok bypass, no second redactor. GT1-09-13 executes the verification."
+			},
+			"phase11Scenarios": [],
+			"verification": {
+				"task": "GT1-09-13",
+				"sourceCommit": "54139affe2c690924f55d186b1f0b244b2166825",
+				"command": "node node_modules/vitest/vitest.mjs run --reporter=json redactSecrets.test.ts plus the 22 redactSecrets consumer suites (GT1-09-12B)",
+				"result": "redactSecrets.test.ts 72/72; 22 consumer files 1135/1135, 0 failed, 0 skipped",
+				"scope": "offline deterministic wiring against synthetic canaries and the labeled fake endpoint; not real endpoint, provider or producer qualification",
+				"detail": "Fix verified on this revision: GROK_AUTH=xai-..., a bare xai- key and a JSON xai- value are redacted; the flipped redaction-canaries case asserts the key is absent from a real generateDebugPackage() write."
 			}
 		}
 	],
@@ -537,10 +590,123 @@
 		}
 	],
 	"lastVerification": {
-		"task": "GT1-09-11",
+		"task": "GT1-09-13",
 		"recordedAt": "2026-11-01",
-		"sourceCommit": "4dbb7ec14b8f46928864a025ed0ac5097fc7b5fd",
-		"result": "6 effect and lineage suites, 151 passed, 0 failed, 0 skipped",
-		"note": "Mock authorities, the synthetic Node permission harness, Grok plan-mode prompts and streamed tool records clear no dependency; every requirement above keeps its status."
+		"sourceCommit": "54139affe2c690924f55d186b1f0b244b2166825",
+		"result": "privacy 117/117, custody 45/45, redactSecrets 72/72, 22 redaction consumers 1135/1135; tsc main and cli 0 errors",
+		"note": "Synthetic canaries and the labeled fake endpoint clear no external dependency; only R15 changed standing (fixed-in-maestro, now verified)."
+	},
+	"finalVerdict": {
+		"task": "GT1-09-13",
+		"recordedAt": "2026-11-01",
+		"sourceCommit": "54139affe2c690924f55d186b1f0b244b2166825",
+		"legend": {
+			"pass-deterministic": "offline wiring against declared doubles; not real endpoint, binary or producer qualification",
+			"refused-safely": "correct refusal of an unsupported managed operation; safety pass, not functional parity",
+			"not-run": "absent real producer, endpoint or platform evidence; blocks the required outcome"
+		},
+		"routes": {
+			"local-headless": {
+				"launchAdmission": "pass-deterministic; real endpoint not-run",
+				"internalEffects": "not-run (provider-internal, no producer)",
+				"modelAccount": "model pass-deterministic; account not-run (R07 open)",
+				"privacy": "pass-deterministic (redaction incl. xai-, env ceiling, custody)",
+				"protocol": "headless stream, no effect protocol",
+				"dlp": "not-run",
+				"network": "Maestro-owned egress pass-deterministic; provider network not-run",
+				"requirements": ["GT1-09-R02", "GT1-09-R07", "GT1-09-R12", "GT1-09-R13", "GT1-09-R14"]
+			},
+			"local-acp": {
+				"launchAdmission": "refused-safely",
+				"internalEffects": "refused-safely (every kind unavailable before any producer)",
+				"modelAccount": "not reached",
+				"privacy": "pass-deterministic (redaction incl. xai-, env ceiling, custody)",
+				"protocol": "managed refused; standalone adopts peer version (not-run)",
+				"dlp": "not-run",
+				"network": "not reached",
+				"requirements": ["GT1-09-R01", "GT1-09-R04", "GT1-09-R05", "GT1-09-R06"]
+			},
+			"ssh-headless": {
+				"launchAdmission": "pass-deterministic only with endpoint ref and current policy, else refused-safely",
+				"internalEffects": "not-run",
+				"modelAccount": "remote account not-run",
+				"privacy": "pass-deterministic (redaction incl. xai-, env ceiling, custody)",
+				"protocol": "headless stream",
+				"dlp": "not-run",
+				"network": "provider network not-run",
+				"requirements": ["GT1-09-R02", "GT1-09-R07", "GT1-09-R08"]
+			},
+			"ssh-acp": {
+				"launchAdmission": "refused-safely",
+				"internalEffects": "refused-safely",
+				"modelAccount": "not reached",
+				"privacy": "pass-deterministic (redaction incl. xai-, env ceiling, custody)",
+				"protocol": "refused",
+				"dlp": "not-run",
+				"network": "not reached",
+				"requirements": []
+			},
+			"pty": {
+				"launchAdmission": "refused-safely",
+				"internalEffects": "not reached",
+				"modelAccount": "not reached",
+				"privacy": "pass-deterministic (redaction incl. xai-, env ceiling, custody)",
+				"protocol": "not reached",
+				"dlp": "not-run",
+				"network": "not reached",
+				"requirements": ["GT1-09-N01"]
+			},
+			"read-only": {
+				"launchAdmission": "pass-deterministic (launch only)",
+				"internalEffects": "not-run (provider self-enforcement)",
+				"modelAccount": "as local-headless",
+				"privacy": "pass-deterministic (redaction incl. xai-, env ceiling, custody)",
+				"protocol": "headless stream",
+				"dlp": "not-run",
+				"network": "provider network not-run",
+				"requirements": ["GT1-09-R03"]
+			},
+			"required-no-tools": {
+				"launchAdmission": "refused-safely",
+				"internalEffects": "not reached",
+				"modelAccount": "not reached",
+				"privacy": "pass-deterministic (redaction incl. xai-, env ceiling, custody)",
+				"protocol": "not reached",
+				"dlp": "not-run",
+				"network": "not reached",
+				"requirements": ["GT1-09-R11"]
+			},
+			"mcp-and-subagents": {
+				"launchAdmission": "uninjected or refused-safely",
+				"internalEffects": "refused-safely",
+				"modelAccount": "n/a",
+				"privacy": "pass-deterministic (redaction incl. xai-, env ceiling, custody)",
+				"protocol": "n/a",
+				"dlp": "not-run",
+				"network": "n/a",
+				"requirements": ["GT1-09-R09", "GT1-09-R10"]
+			},
+			"managed-native-commands": {
+				"launchAdmission": "refused-safely",
+				"internalEffects": "not reached",
+				"modelAccount": "not reached",
+				"privacy": "pass-deterministic (redaction incl. xai-, env ceiling, custody)",
+				"protocol": "not reached",
+				"dlp": "not-run",
+				"network": "not reached",
+				"requirements": ["GT1-09-N02"]
+			},
+			"synthetic-harness": {
+				"launchAdmission": "qualifies synthetic-harness only, never Grok",
+				"internalEffects": "n/a",
+				"modelAccount": "n/a",
+				"privacy": "n/a",
+				"protocol": "n/a",
+				"dlp": "n/a",
+				"network": "n/a",
+				"requirements": ["GT1-09-N03"]
+			}
+		},
+		"phaseVerdict": "Deterministic verification complete; no managed Grok route functionally certified. Security parity rows P28, P33, P34, P35, P36, S23 stay pending / not-run with a phase 09 blocker."
 	}
 }

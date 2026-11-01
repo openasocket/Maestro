@@ -10380,7 +10380,9 @@
 				"phase07DeterministicEvidenceRef": "phase07-verification",
 				"phase07ReconciliationRef": "phase07-reconciliation",
 				"phase08DeterministicEvidenceRef": "phase08-verification",
-				"phase08ReconciliationRef": "phase08-reconciliation"
+				"phase08ReconciliationRef": "phase08-reconciliation",
+				"phase09VerificationPath": "Plans/grok-tier1/evidence/09.md",
+				"phase09BlockersPath": "Plans/grok-tier1/evidence/09-blockers.json"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -10421,6 +10423,15 @@
 					"missingPrerequisite": "Grok MCP config is verified false with qualifiedVersions []; production Grok runs uninjected. Exact-binary MCP loading, trust/disable enforcement, coworking entry loading and real tool calls need phase11 evidence.",
 					"evidenceRef": "phase07-verification",
 					"affectedRows": ["P28"]
+				},
+				{
+					"id": "phase09-managed-security:P28",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-09-13 (54139affe): phase 09 offline suites pass as refusal and wiring evidence only; correct refusals are safety passes, not parity. Open: GT1-09-R09, GT1-09-R10 (see finalVerdict in 09-blockers.json). Qualify through GT1-11-11B, GT1-11-12.",
+					"affectedRows": ["P28"],
+					"evidencePath": "Plans/grok-tier1/evidence/09.md",
+					"requirements": ["GT1-09-R09", "GT1-09-R10"],
+					"phase11Scenarios": ["GT1-11-11B", "GT1-11-12"]
 				}
 			],
 			"phase": "07",
@@ -11297,7 +11308,9 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase07DeterministicEvidenceRef": "phase07-verification",
-				"phase07ReconciliationRef": "phase07-reconciliation"
+				"phase07ReconciliationRef": "phase07-reconciliation",
+				"phase09VerificationPath": "Plans/grok-tier1/evidence/09.md",
+				"phase09BlockersPath": "Plans/grok-tier1/evidence/09-blockers.json"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11345,6 +11358,15 @@
 					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P33"],
 					"evidenceRef": "phase07-verification"
+				},
+				{
+					"id": "phase09-managed-security:P33",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-09-13 (54139affe): phase 09 offline suites pass as refusal and wiring evidence only; correct refusals are safety passes, not parity. Open: GT1-09-R07, GT1-09-R13, GT1-09-R14 (see finalVerdict in 09-blockers.json). Qualify through GT1-11-11A, GT1-11-12.",
+					"affectedRows": ["P33"],
+					"evidencePath": "Plans/grok-tier1/evidence/09.md",
+					"requirements": ["GT1-09-R07", "GT1-09-R13", "GT1-09-R14"],
+					"phase11Scenarios": ["GT1-11-11A", "GT1-11-12"]
 				}
 			],
 			"phase": "09",
@@ -11528,7 +11550,9 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase07DeterministicEvidenceRef": "phase07-verification",
-				"phase07ReconciliationRef": "phase07-reconciliation"
+				"phase07ReconciliationRef": "phase07-reconciliation",
+				"phase09VerificationPath": "Plans/grok-tier1/evidence/09.md",
+				"phase09BlockersPath": "Plans/grok-tier1/evidence/09-blockers.json"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11597,6 +11621,15 @@
 					"missingPrerequisite": "Cue AI assist has no tab, so a Grok standard active tab yields no consent port and the host refuses (consent-port); full and read-only run. Needs a consent channel for tabless assist turns.",
 					"evidenceRef": "phase07-verification",
 					"affectedRows": ["P34"]
+				},
+				{
+					"id": "phase09-managed-security:P34",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-09-13 (54139affe): phase 09 offline suites pass as refusal and wiring evidence only; correct refusals are safety passes, not parity. Open: GT1-09-R01, GT1-09-R04, GT1-09-R05 (see finalVerdict in 09-blockers.json). Qualify through GT1-11-12.",
+					"affectedRows": ["P34"],
+					"evidencePath": "Plans/grok-tier1/evidence/09.md",
+					"requirements": ["GT1-09-R01", "GT1-09-R04", "GT1-09-R05"],
+					"phase11Scenarios": ["GT1-11-12"]
 				}
 			],
 			"phase": "09",
@@ -11780,7 +11813,9 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase08DeterministicEvidenceRef": "phase08-verification",
-				"phase08ReconciliationRef": "phase08-reconciliation"
+				"phase08ReconciliationRef": "phase08-reconciliation",
+				"phase09VerificationPath": "Plans/grok-tier1/evidence/09.md",
+				"phase09BlockersPath": "Plans/grok-tier1/evidence/09-blockers.json"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -11841,6 +11876,15 @@
 					"missingPrerequisite": "requireDisabledTools is refused before spawn and best-effort disableTools runs as enforced read-only with read and MCP tools available (GT1-08-15 passes in GT1-08-21). Claude Code has noToolsArgs. Needs a qualified all-tools-off flag (GT1-11-11D).",
 					"affectedRows": ["S19", "P20", "P32", "P35", "META-03"],
 					"evidenceRef": "phase08-reconciliation"
+				},
+				{
+					"id": "phase09-managed-security:P35",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-09-13 (54139affe): phase 09 offline suites pass as refusal and wiring evidence only; correct refusals are safety passes, not parity. Open: GT1-09-R02, GT1-09-R03, GT1-09-R11 (see finalVerdict in 09-blockers.json). Qualify through GT1-11-11D, GT1-11-12.",
+					"affectedRows": ["P35"],
+					"evidencePath": "Plans/grok-tier1/evidence/09.md",
+					"requirements": ["GT1-09-R02", "GT1-09-R03", "GT1-09-R11"],
+					"phase11Scenarios": ["GT1-11-11D", "GT1-11-12"]
 				}
 			],
 			"phase": "09",
@@ -12032,7 +12076,9 @@
 				"phase03AcpPromptUsageEvidenceRef": "phase03-acp-prompt-usage",
 				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase09VerificationPath": "Plans/grok-tier1/evidence/09.md",
+				"phase09BlockersPath": "Plans/grok-tier1/evidence/09-blockers.json"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -12080,6 +12126,15 @@
 					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["P36"],
 					"evidenceRef": "phase07-verification"
+				},
+				{
+					"id": "phase09-managed-security:P36",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-09-13 (54139affe): phase 09 offline suites pass as refusal and wiring evidence only; correct refusals are safety passes, not parity. Open: GT1-09-R12, GT1-09-R13, GT1-09-R14 (see finalVerdict in 09-blockers.json). Qualify through GT1-11-11A, GT1-11-12.",
+					"affectedRows": ["P36"],
+					"evidencePath": "Plans/grok-tier1/evidence/09.md",
+					"requirements": ["GT1-09-R12", "GT1-09-R13", "GT1-09-R14"],
+					"phase11Scenarios": ["GT1-11-11A", "GT1-11-12"]
 				}
 			],
 			"phase": "09",
@@ -23003,7 +23058,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase09VerificationPath": "Plans/grok-tier1/evidence/09.md",
+				"phase09BlockersPath": "Plans/grok-tier1/evidence/09-blockers.json"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23037,6 +23094,15 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S23"]
+				},
+				{
+					"id": "phase09-managed-security:S23",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-09-13 (54139affe): phase 09 offline suites pass as refusal and wiring evidence only; correct refusals are safety passes, not parity. Open: GT1-09-R01, GT1-09-R02, GT1-09-R08, GT1-09-R13 (see finalVerdict in 09-blockers.json). Qualify through GT1-11-10, GT1-11-11A, GT1-11-12.",
+					"affectedRows": ["S23"],
+					"evidencePath": "Plans/grok-tier1/evidence/09.md",
+					"requirements": ["GT1-09-R01", "GT1-09-R02", "GT1-09-R08", "GT1-09-R13"],
+					"phase11Scenarios": ["GT1-11-10", "GT1-11-11A", "GT1-11-12"]
 				}
 			],
 			"branchAuditRefs": ["B06", "B11", "B40"]
