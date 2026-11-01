@@ -11,7 +11,10 @@ import type {
 import { GrokOutputParser } from '../../../../shared/maestro-lib/parsers/grok-output-parser';
 import { TurnCapture } from '../../../../shared/maestro-lib/run/turn-capture';
 import { resolveTurnOutcome } from '../../../../shared/maestro-lib/streaming/turn-outcome';
-import { createTurnEventMapper } from '../../../../shared/maestro-lib/turns/turn-events';
+import {
+	createTurnEventMapper,
+	subagentToolCallId,
+} from '../../../../shared/maestro-lib/turns/turn-events';
 
 // Synthetic fixtures follow pinned ACP schema 0.11.4, not native streaming-json.
 const identity = { sessionId: 'native-session', turnId: 'capture', promptId: 'prompt' };
@@ -1297,4 +1300,315 @@ describe('Grok ACP event fixtures', () => {
 			expect(f.events.filter((e) => e.terminal)).toHaveLength(1);
 		}
 	);
+});
+
+// GT1-07-10. Synthetic lineage following the pinned _x.ai subagent notification
+// variants; it proves the capture and the shared mapper, never native behavior.
+describe('Grok ACP subagent lifecycle through the shared mapper (synthetic)', () => {
+	type Fixture = ReturnType<typeof fixture>;
+	type Detail = Record<string, any>;
+	const spawn = (
+		child: string,
+		extra: Record<string, unknown> = {},
+		parent: string = identity.sessionId
+	) => ({
+		sessionUpdate: 'subagent_spawned',
+		parent_session_id: parent,
+		parent_prompt_id: 'prompt',
+		child_session_id: child,
+		...extra,
+	});
+	const progress = (child: string, extra: Record<string, unknown> = {}) => ({
+		sessionUpdate: 'subagent_progress',
+		parent_session_id: identity.sessionId,
+		child_session_id: child,
+		...extra,
+	});
+	const finish = (child: string, status: string, extra: Record<string, unknown> = {}) => ({
+		sessionUpdate: 'subagent_finished',
+		child_session_id: child,
+		status,
+		...extra,
+	});
+	const childTool = (id: string, status: string, extra: Record<string, unknown> = {}) => ({
+		sessionUpdate: status === 'pending' ? 'tool_call' : 'tool_call_update',
+		toolCallId: id,
+		title: 'Bash',
+		status,
+		...extra,
+	});
+	const on = (
+		channel: string,
+		update: Record<string, unknown>,
+		method = '_x.ai/session/update'
+	): AcpCall => ({ jsonrpc: '2.0', method, params: { sessionId: channel, update } });
+	const sendOn = (f: Fixture, channel: string, update: Record<string, unknown>, method?: string) =>
+		f.accept(f.adapter.notification(on(channel, update, method), context));
+	const tools = (f: Fixture) =>
+		f.output.flatMap((e) => (e.kind === 'tool' && e.tool.name !== 'Subagent' ? [e.tool] : []));
+	const entries = (f: Fixture, child?: string) =>
+		f.output.flatMap((e) =>
+			e.kind === 'tool' &&
+			e.tool.name === 'Subagent' &&
+			(child === undefined || e.tool.id === subagentToolCallId(child))
+				? [{ ...e.tool, detail: e.tool.detail as Detail }]
+				: []
+		);
+	const last = (f: Fixture, child: string) => entries(f, child).at(-1);
+
+	it('keeps overlapping children, their colliding native tool IDs and their results apart', () => {
+		const f = fixture();
+		f.send(spawn('child-a', { subagent_type: 'explore', model: 'grok-child-a' }));
+		f.send(spawn('child-b', { subagent_type: 'review' }));
+		f.send(childTool('call_1', 'pending', { title: 'Read' }), 'session/update');
+		sendOn(f, 'child-a', childTool('call_1', 'pending'), 'session/update');
+		sendOn(f, 'child-b', childTool('call_1', 'pending'), 'session/update');
+		// A finish for child-b reported on child-a's channel is not child-b's.
+		const [stolen] = sendOn(f, 'child-a', finish('child-b', 'completed', { output: 'stolen' }));
+		expect(stolen.sessionRelation?.child).toBeUndefined();
+		sendOn(
+			f,
+			'child-b',
+			childTool('call_1', 'completed', {
+				content: [{ type: 'content', content: { type: 'text', text: 'B out' } }],
+			}),
+			'session/update'
+		);
+		sendOn(f, 'child-a', childTool('call_1', 'failed'), 'session/update');
+		sendOn(
+			f,
+			'child-a',
+			{ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'A prose' } },
+			'session/update'
+		);
+		f.send(finish('child-b', 'completed', { output: 'B result' }));
+		f.send(finish('child-a', 'failed', { error: 'A broke' }));
+		f.accept(f.adapter.settle({ stopReason: 'end_turn', _meta: { usage: promptUsage } }));
+
+		const a = `grok-child-tool:${JSON.stringify(['child-a', 'call_1'])}`;
+		const b = `grok-child-tool:${JSON.stringify(['child-b', 'call_1'])}`;
+		expect(tools(f).map((t) => [t.id, t.parentId, t.status])).toEqual([
+			['call_1', undefined, 'running'],
+			[a, subagentToolCallId('child-a'), 'running'],
+			[b, subagentToolCallId('child-b'), 'running'],
+			[b, subagentToolCallId('child-b'), 'completed'],
+			[a, subagentToolCallId('child-a'), 'error'],
+		]);
+		expect(tools(f).find((t) => t.id === b && t.status === 'completed')?.detail).toMatchObject({
+			providerToolCallId: 'call_1',
+			output: 'B out',
+		});
+		expect(last(f, 'child-a')).toMatchObject({
+			status: 'error',
+			detail: { outcome: 'failed', output: 'A broke', input: { model: 'grok-child-a' } },
+		});
+		expect(last(f, 'child-b')).toMatchObject({
+			status: 'completed',
+			detail: { outcome: 'completed', output: 'B result', input: { agentType: 'review' } },
+		});
+		expect(entries(f).filter((t) => t.detail.output === 'stolen')).toEqual([]);
+		expect(entries(f, 'child-b').every((t) => t.detail.input.model === undefined)).toBe(true);
+		// Children of the turn itself nest under nothing: no spawning call was reported.
+		expect(entries(f).every((t) => t.parentId === undefined)).toBe(true);
+		// Child prose is never the parent's answer or a transcript line.
+		expect(JSON.stringify(f.output)).not.toContain('A prose');
+		expect(f.capture.answerText ?? '').not.toContain('A prose');
+	});
+
+	it('admits a child only on complete lineage and names what the provider never reported', () => {
+		const f = fixture();
+		const opaque = [
+			{ sessionUpdate: 'subagent_spawned', parent_session_id: identity.sessionId },
+			spawn('   '),
+			spawn(identity.sessionId),
+			{ sessionUpdate: 'subagent_spawned', child_session_id: 'no-parent' },
+			spawn('elsewhere', {}, 'other-session'),
+			spawn('stale-prompt', { parent_prompt_id: 'older-prompt' }),
+			{ sessionUpdate: 'subagent_progress', child_session_id: 'progress-only' },
+		];
+		for (const update of opaque) expect(f.send(update)[0].sessionRelation?.child).toBeUndefined();
+		// Work on a channel no admitted child owns is dropped whole.
+		for (const channel of ['elsewhere', 'no-parent', 'stale-prompt', 'progress-only'])
+			expect(
+				f.adapter.notification(
+					on(channel, childTool('call_1', 'pending'), 'session/update'),
+					context
+				)
+			).toEqual([]);
+		expect(entries(f)).toEqual([]);
+
+		// A finish with no spawn is admitted on the parent's channel, its gaps named.
+		const [late] = f.send(finish('late-child', 'completed', { output: 'late out' }));
+		expect(late.sessionRelation?.child?.unavailable).toEqual([
+			'parentToolCallId',
+			'cost',
+			'spawn',
+			'model',
+			'parentTurnId',
+		]);
+		const [entry] = entries(f);
+		expect(entries(f)).toHaveLength(1);
+		expect(entry).toMatchObject({ id: subagentToolCallId('late-child'), status: 'completed' });
+		expect(entry.parentId).toBeUndefined();
+		expect(entry.detail.input).toEqual({ childSessionId: 'late-child' });
+		expect(entry.detail.unavailable).toEqual(late.sessionRelation?.child?.unavailable);
+		expect(entry.detail).not.toHaveProperty('cost');
+		expect(entry.detail).not.toHaveProperty('model');
+		expect(late.parentToolUseId).toBeUndefined();
+	});
+
+	it('words failed, cancelled and unrecognized finishes as not succeeded', () => {
+		const f = fixture();
+		for (const child of ['bare-fail', 'cancelled', 'odd']) f.send(spawn(child));
+		f.send(finish('bare-fail', 'failed'));
+		f.send(finish('cancelled', 'cancelled', { error: 'provider stop' }));
+		f.send(finish('odd', 'exploded'));
+		// Monotonic: a late progress or a second finish never reopens or rewrites a child.
+		f.send(progress('bare-fail', { turn_count: 9 }));
+		f.send(finish('cancelled', 'completed', { output: 'too late' }));
+		expect(last(f, 'bare-fail')).toMatchObject({
+			status: 'error',
+			detail: { outcome: 'failed', output: 'Subagent failed.', lifecycle: 'finished' },
+		});
+		expect(last(f, 'bare-fail')?.detail.input.turns).toBeUndefined();
+		expect(last(f, 'cancelled')).toMatchObject({
+			status: 'error',
+			detail: { outcome: 'cancelled', output: 'Subagent cancelled: provider stop' },
+		});
+		expect(last(f, 'odd')).toMatchObject({
+			status: 'error',
+			detail: {
+				outcome: 'unknown',
+				output: 'Subagent finished with an unrecognized status (exploded).',
+			},
+		});
+	});
+
+	it('closes every running child with the parent and lets no child speak after settlement', () => {
+		const f = fixture();
+		for (const child of ['done', 'running-1', 'running-2', 'cancelled']) f.send(spawn(child));
+		f.send(finish('done', 'completed', { output: 'ok' }));
+		f.send(finish('cancelled', 'cancelled'));
+		f.send(progress('running-1', { turn_count: 2 }));
+		sendOn(f, 'running-2', spawn('grandchild', {}, 'running-2'));
+		const before = entries(f, 'done').length;
+		f.accept(
+			f.adapter.settle({ stopReason: 'cancelled' }, { status: 'cancelled', origin: 'user' })
+		);
+
+		expect(f.adapter.terminal).toMatchObject({ status: 'cancelled', origin: 'user' });
+		const closed = f.events.filter(
+			(e) => e.sessionRelation?.child?.lifecycle === 'closed-with-parent'
+		);
+		expect(closed.map((e) => e.sessionRelation?.childSessionId)).toEqual([
+			'running-1',
+			'running-2',
+			'grandchild',
+		]);
+		for (const e of closed) {
+			expect(e.sessionRelation?.child?.status).toBe('unknown');
+			expect(e.sessionRelation?.child?.unavailable).toContain('nativeStatus');
+		}
+		// The closing reports precede the terminal, so no consumer sees a child outlive it.
+		const terminalAt = f.events.findIndex((e) => e.terminal);
+		const childAt = f.events.map((e, i) => (e.sessionRelation?.child ? i : -1));
+		expect(Math.max(...childAt)).toBeLessThan(terminalAt);
+		expect(Math.max(...childAt)).toBeGreaterThan(-1);
+		for (const child of ['done', 'running-1', 'running-2', 'cancelled', 'grandchild'])
+			expect(last(f, child)?.status).not.toBe('running');
+		expect(last(f, 'running-1')).toMatchObject({
+			status: 'error',
+			detail: {
+				outcome: 'unknown',
+				lifecycle: 'closed-with-parent',
+				output: 'Subagent closed with the parent turn; its outcome was not reported.',
+				input: { turns: 2 },
+			},
+		});
+		expect(last(f, 'grandchild')?.parentId).toBe(subagentToolCallId('running-2'));
+		expect(entries(f, 'done')).toHaveLength(before);
+		// Nothing the provider says after settlement reaches the capture.
+		expect(sendOn(f, 'running-1', childTool('call_2', 'pending'), 'session/update')).toEqual([]);
+		expect(f.send(finish('running-1', 'completed'))).toEqual([]);
+		expect(f.send(spawn('after'))).toEqual([]);
+		expect(f.adapter.settle({ stopReason: 'end_turn' })).toEqual([]);
+	});
+
+	it('ignores a superseded attempt, replayed history and another capture after a reconnect', () => {
+		const f = fixture();
+		f.send(spawn('child', { attempt_id: 'a1' }));
+		f.send(spawn('child', { attempt_id: 'a2', model: 'grok-retry' }));
+		const [stale] = f.send(finish('child', 'failed', { attempt_id: 'a1', error: 'old attempt' }));
+		expect(stale.sessionRelation).toMatchObject({ attemptId: 'a1' });
+		expect(stale.sessionRelation?.child).toBeUndefined();
+		expect(last(f, 'child')).toMatchObject({ status: 'running' });
+		const replayed = notification(finish('child', 'failed', { attempt_id: 'a2' }));
+		expect(f.adapter.notification(replayed, { replay: true, turnId: identity.turnId })).toEqual([]);
+		expect(f.adapter.notification(replayed, { replay: false, turnId: 'other-capture' })).toEqual(
+			[]
+		);
+		f.send(finish('child', 'completed', { attempt_id: 'a2', output: 'retry out' }));
+		expect(last(f, 'child')).toMatchObject({
+			status: 'completed',
+			detail: { output: 'retry out', input: { model: 'grok-retry' } },
+		});
+		expect(entries(f).filter((t) => t.detail.output === 'old attempt')).toEqual([]);
+		f.accept(f.adapter.settle({ stopReason: 'end_turn' }));
+
+		// A fresh capture after the reconnect knows no child of the old one.
+		const next = new GrokAcpEventAdapter({ ...identity, turnId: 'capture-2' });
+		const nextContext = { replay: false, turnId: 'capture-2' };
+		expect(
+			next.notification(on('child', childTool('call_1', 'pending'), 'session/update'), nextContext)
+		).toEqual([]);
+	});
+
+	it('keeps child spend raw, the parent total single and per-child detail unknown', () => {
+		const base = fixture();
+		base.accept(base.adapter.settle({ stopReason: 'end_turn', _meta: { usage: promptUsage } }));
+
+		const f = fixture();
+		for (const child of ['finished', 'failed', 'open']) f.send(spawn(child));
+		sendOn(f, 'finished', {
+			sessionUpdate: 'response_started',
+			message_id: 'c1',
+			model: 'grok-child',
+			...responseUsage,
+		});
+		sendOn(f, 'finished', {
+			sessionUpdate: 'response_completed',
+			message_id: 'c1',
+			usage: responseUsage,
+		});
+		sendOn(f, 'finished', { sessionUpdate: 'turn_usage', usage: responseUsage });
+		f.send(progress('finished', { tokens_used: 50000 }));
+		expect(f.capture.usage).toBeUndefined();
+		expect(f.output.filter((e) => e.kind === 'usage')).toEqual([]);
+		f.send(finish('finished', 'completed'));
+		f.send(finish('failed', 'failed'));
+		f.accept(f.adapter.settle({ stopReason: 'end_turn', _meta: { usage: promptUsage } }));
+
+		// The child's own model is attributed to the child, never to the parent.
+		expect(last(f, 'finished')?.detail.input.model).toBe('grok-child');
+		const { children, ...accounting } = f.capture.usage!.accounting!;
+		expect(base.capture.usage!.accounting!.children).toBeUndefined();
+		expect({ ...f.capture.usage, accounting }).toEqual({
+			...base.capture.usage,
+			accounting: { ...base.capture.usage!.accounting!, childCompleteness: 'partial' },
+		});
+		const tokens = (x: Fixture) =>
+			x.output.flatMap((e) =>
+				e.kind === 'usage'
+					? [[e.usage.inputTokens, e.usage.outputTokens, e.usage.totalCostUsd]]
+					: []
+			);
+		expect(tokens(f)).toEqual(tokens(base));
+		expect(tokens(f)).toHaveLength(1);
+		const unknown = { completeness: 'unknown', cost: { status: 'unknown' } };
+		expect(children).toEqual([
+			{ providerSessionId: 'finished', status: 'completed', includedInParent: true, ...unknown },
+			{ providerSessionId: 'failed', status: 'failed', includedInParent: 'unknown', ...unknown },
+			{ providerSessionId: 'open', status: 'unknown', includedInParent: 'unknown', ...unknown },
+		]);
+	});
 });
