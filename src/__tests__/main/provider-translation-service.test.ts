@@ -856,3 +856,289 @@ describe('provider translation Grok host', () => {
 		}
 	});
 });
+
+// Grok carry-over boundary (GT1-06-11): the one plan UI and CLI both reach, through
+// the real prepare() on synthetic accounts. Deterministic tests, not native qualification.
+describe('provider translation Grok boundary', () => {
+	const grokVersion = TRANSLATION_PROVIDER_VERSIONS.grok[0];
+	const claudeVersion = TRANSLATION_PROVIDER_VERSIONS['claude-code'][0];
+
+	async function claudeToGrok(options: { grokAccount?: boolean; grokBinary?: string } = {}) {
+		const root = await fs.realpath(
+			await fs.mkdtemp(path.join(os.tmpdir(), 'translation-grok-boundary-'))
+		);
+		const claudeAccount = path.join(root, 'claude');
+		const grokAccount = path.join(root, 'grok');
+		const projectRoot = path.join(root, 'project');
+		await fs.mkdir(projectRoot);
+		if (options.grokAccount !== false) await fs.mkdir(grokAccount);
+		const transcript = path.join(
+			claudeAccount,
+			'projects',
+			encodeClaudeProjectPath(projectRoot),
+			'native-one.jsonl'
+		);
+		await fs.mkdir(path.dirname(transcript), { recursive: true });
+		await fs.writeFile(
+			transcript,
+			[
+				{
+					type: 'user',
+					uuid: 'u1',
+					timestamp: '2026-01-01T00:00:00Z',
+					message: { role: 'user', content: 'SYNTHETIC-question' },
+				},
+				{
+					type: 'assistant',
+					uuid: 'a1',
+					parentUuid: 'u1',
+					timestamp: '2026-01-01T00:00:01Z',
+					message: { role: 'assistant', content: [{ type: 'text', text: 'SYNTHETIC-answer' }] },
+				},
+			]
+				.map((row) => JSON.stringify(row))
+				.join('\n') + '\n'
+		);
+		let stored = [
+			createMockSession({
+				id: 'agent',
+				toolType: 'claude-code',
+				cwd: projectRoot,
+				projectRoot,
+				customEnvVars: { CLAUDE_CONFIG_DIR: claudeAccount },
+				activeTabId: 'tab',
+				aiTabs: [createMockAITab({ id: 'tab', agentSessionId: 'native-one', inputValue: 'draft' })],
+			}),
+		];
+		const sessionsStore = {
+			get: vi.fn(() => stored),
+			set: vi.fn((_key: string, next: typeof stored) => {
+				stored = next;
+			}),
+		};
+		vi.mocked(execFileNoThrow).mockImplementation(async (binary: string) => ({
+			exitCode: 0,
+			stdout: binary.endsWith('grok') ? (options.grokBinary ?? grokVersion) : claudeVersion,
+			stderr: '',
+		}));
+		vi.mocked(execGitReadOnly).mockResolvedValue({ exitCode: 1, stdout: '', stderr: '' });
+		vi.mocked(getHistoryManager).mockReturnValue({ getEntries: vi.fn(async () => []) } as any);
+		// The archive lives in the app's data folder; here it is an in-memory map.
+		const journals = new Map<string, TranslationJournal>();
+		vi.spyOn(TranslationArchive.prototype, 'checkpoint').mockResolvedValue(undefined);
+		vi.spyOn(TranslationArchive.prototype, 'write').mockImplementation(async (journal) => {
+			journals.set(journal.plan.id, structuredClone(journal));
+		});
+		vi.spyOn(TranslationArchive.prototype, 'markLatest').mockResolvedValue(undefined);
+		vi.spyOn(TranslationArchive.prototype, 'read').mockImplementation(async (_agent, id) => {
+			const journal = journals.get(id);
+			if (!journal) throw new Error('No journal');
+			return structuredClone(journal);
+		});
+		const service = new ProviderTranslationService({
+			sessionsStore,
+			settingsStore: { get: vi.fn(() => ({})) },
+			agentConfigsStore: {
+				get: vi.fn(() => ({
+					grok: { model: 'grok-synthetic-model', customEnvVars: { GROK_HOME: grokAccount } },
+				})),
+			},
+			getAgentDetector: () => ({
+				getAgent: async (provider: string) => ({ path: `/isolated/bin/${provider}` }),
+			}),
+			getProcessManager: () => ({ get: () => undefined }),
+		} as unknown as ProviderTranslationDependencies);
+		return {
+			transcript,
+			service,
+			sessionsStore,
+			stored: () => stored[0],
+			setStored: (next: (typeof stored)[0]) => {
+				stored = [next];
+			},
+			cleanup: () => fs.rm(root, { recursive: true, force: true }),
+		};
+	}
+
+	/** The service's own gate is under test here, so the real transaction runs. */
+	async function realApply() {
+		const actual = await vi.importActual<
+			typeof import('../../shared/maestro-lib/translation/transaction')
+		>('../../shared/maestro-lib/translation/transaction');
+		vi.mocked(applyTranslation).mockReset().mockImplementation(actual.applyTranslation);
+	}
+
+	it('plans Claude to Grok as ready but unverified, lists the Grok warnings and changes nothing', async () => {
+		const fixture = await claudeToGrok();
+		try {
+			const report = await fixture.service.run({
+				agentId: 'agent',
+				destination: 'grok',
+				action: 'plan',
+			});
+			expect(report.success).toBe(true);
+			const plan = report.plan!;
+			expect(plan.status).toBe('ready');
+			expect(plan.verification).toBe('unverified');
+			expect(plan.source.provider).toBe('claude-code');
+			expect(plan.destination).toMatchObject({ provider: 'grok', version: grokVersion });
+			expect(plan.limitations.map((l) => l.code)).toEqual(
+				expect.arrayContaining([
+					'unverified-native-resume',
+					'grok-native-replay-absent',
+					'grok-search-index-unaffected',
+					'context-capacity-unknown',
+				])
+			);
+			expect(plan.limitations.every((l) => l.severity === 'warning')).toBe(true);
+			expect(plan.tabs).toEqual([expect.objectContaining({ tabId: 'tab', records: 2 })]);
+			// A plan is a preview: the stored agent is never switched by it.
+			expect(fixture.sessionsStore.set).not.toHaveBeenCalled();
+			expect(fixture.stored().toolType).toBe('claude-code');
+		} finally {
+			await fixture.cleanup();
+		}
+	});
+
+	it('refuses an unaccepted Grok plan and reaches staging only with explicit acceptance', async () => {
+		const fixture = await claudeToGrok();
+		try {
+			await realApply();
+			const refused = await fixture.service.run({
+				agentId: 'agent',
+				destination: 'grok',
+				action: 'apply',
+			});
+			expect(refused.success).toBe(false);
+			expect(refused.result?.state).toBe('refused');
+			expect(refused.error).toContain('Grok');
+			expect(fixture.sessionsStore.set).not.toHaveBeenCalled();
+			// Acceptance passes the gate; the first effect past it is the agent lock.
+			vi.spyOn(TranslationArchive.prototype, 'lock').mockRejectedValue(
+				new Error('SYNTHETIC-LOCK-REACHED')
+			);
+			const accepted = await fixture.service.run({
+				agentId: 'agent',
+				destination: 'grok',
+				action: 'apply',
+				acceptLimitations: true,
+			});
+			expect(accepted.success).toBe(false);
+			expect(accepted.error).toContain('SYNTHETIC-LOCK-REACHED');
+			expect(fixture.stored().toolType).toBe('claude-code');
+		} finally {
+			await fixture.cleanup();
+		}
+	});
+
+	it.each([
+		{ name: 'a never-used Grok account', code: 'destination-account-missing', grokAccount: false },
+		{ name: 'an unqualified Grok version', code: 'unknown-version', grokBinary: '9.9.9' },
+	])('blocks $name, and acceptance cannot apply it', async ({ code, ...options }) => {
+		const fixture = await claudeToGrok(options);
+		try {
+			await realApply();
+			const report = await fixture.service.run({
+				agentId: 'agent',
+				destination: 'grok',
+				action: 'plan',
+			});
+			expect(report.plan?.status).toBe('blocked');
+			expect(report.plan?.limitations).toContainEqual(
+				expect.objectContaining({ code, severity: 'block' })
+			);
+			const lock = vi.spyOn(TranslationArchive.prototype, 'lock');
+			const applied = await fixture.service.run({
+				agentId: 'agent',
+				destination: 'grok',
+				action: 'apply',
+				planId: report.plan!.id,
+				acceptLimitations: true,
+			});
+			expect(applied.success).toBe(false);
+			expect(applied.result?.state).toBe('refused');
+			expect(lock).not.toHaveBeenCalled();
+			expect(fixture.sessionsStore.set).not.toHaveBeenCalled();
+			expect(fixture.stored().toolType).toBe('claude-code');
+		} finally {
+			await fixture.cleanup();
+		}
+	});
+
+	it('refuses a stale reviewed Grok plan after the source history moves', async () => {
+		const fixture = await claudeToGrok();
+		try {
+			const reviewed = await fixture.service.run({
+				agentId: 'agent',
+				destination: 'grok',
+				action: 'plan',
+			});
+			await fs.appendFile(
+				fixture.transcript,
+				JSON.stringify({
+					type: 'user',
+					uuid: 'u2',
+					parentUuid: 'a1',
+					message: { role: 'user', content: 'SYNTHETIC-later-turn' },
+				}) + '\n'
+			);
+			vi.mocked(applyTranslation).mockReset();
+			const report = await fixture.service.run({
+				agentId: 'agent',
+				destination: 'grok',
+				action: 'apply',
+				planId: reviewed.plan!.id,
+				acceptLimitations: true,
+			});
+			expect(report).toMatchObject({
+				success: false,
+				error: 'Preflight changed. Review the new plan before apply.',
+			});
+			expect(report.plan?.tabs[0].records).toBe(3);
+			expect(applyTranslation).not.toHaveBeenCalled();
+			expect(fixture.sessionsStore.set).not.toHaveBeenCalled();
+		} finally {
+			await fixture.cleanup();
+		}
+	});
+
+	it('cannot be bypassed by editing the stored toolType to Grok after review', async () => {
+		const fixture = await claudeToGrok();
+		try {
+			const reviewed = await fixture.service.run({
+				agentId: 'agent',
+				destination: 'grok',
+				action: 'plan',
+			});
+			fixture.setStored({ ...fixture.stored(), toolType: 'grok' });
+			vi.mocked(applyTranslation).mockReset();
+			const report = await fixture.service.run({
+				agentId: 'agent',
+				destination: 'grok',
+				action: 'apply',
+				planId: reviewed.plan!.id,
+				acceptLimitations: true,
+			});
+			expect(report.success).toBe(false);
+			expect(report.error).toBe('Preflight changed. Review the new plan before apply.');
+			// The edited agent reads as Grok on its default account, not the selected one,
+			// so the fresh plan is the undeclared Grok to Grok move and reads no native records.
+			expect(report.plan?.status).toBe('blocked');
+			expect(report.plan?.limitations).toContainEqual(
+				expect.objectContaining({ code: 'unsupported-direction', severity: 'block' })
+			);
+			expect(report.plan?.counts.records).toBe(0);
+			expect(applyTranslation).not.toHaveBeenCalled();
+			// The reviewed journal itself refuses to stage against the edited agent.
+			const journal = await new TranslationArchive('/unused').read('agent', reviewed.plan!.id);
+			await expect(
+				(fixture.service as any).host(journal).assertSourceUnchanged(journal)
+			).rejects.toThrow('Source provider changed since preflight');
+			// The field edit gave no tab a Grok session and recorded no migration.
+			expect(fixture.stored().aiTabs[0].agentSessionId).toBe('native-one');
+			expect(fixture.stored().providerMigration).toBeUndefined();
+		} finally {
+			await fixture.cleanup();
+		}
+	});
+});
