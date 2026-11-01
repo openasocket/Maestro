@@ -13,7 +13,7 @@
  * resumed, stopped), which the second describe block below replays.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'events';
 
 vi.mock('../../../../main/utils/logger', () => ({
@@ -58,6 +58,13 @@ import { RECORDINGS, type TurnRecording } from './fixtures';
 import { DOCUMENTED_ANSWER, DOCUMENTED_RECORDINGS, DOCUMENTED_SESSION_IDS } from './documented';
 import { PICKABLE_AGENT_IDS } from '../../../../shared/agentMetadata';
 import { CAPTURED_CLAUDE_CODE_SESSION_ID, CAPTURED_OPENCODE_SESSION_ID } from './captured';
+import {
+	GROK_SYNTHETIC_ROUNDS,
+	GROK_SYNTHETIC_SESSION_ID,
+	grokSyntheticStream,
+	rechunk,
+	type GrokSyntheticStream,
+} from '../../../helpers/grokSyntheticStream';
 
 interface CapturedEvents {
 	sessionIds: string[];
@@ -66,6 +73,8 @@ interface CapturedEvents {
 	agentErrors: AgentError[];
 	exits: number[];
 	settlements: Array<TurnSettlement | undefined>;
+	thinking: string[];
+	tools: Array<{ toolName: string; state?: { status?: string }; toolCallId?: string }>;
 }
 
 function createManagedProcess(sessionId: string, recording: TurnRecording): ManagedProcess {
@@ -96,7 +105,14 @@ function createManagedProcess(sessionId: string, recording: TurnRecording): Mana
 	} as ManagedProcess;
 }
 
-async function runRecording(recording: TurnRecording): Promise<CapturedEvents> {
+async function runRecording(
+	recording: TurnRecording,
+	inspect?: (state: {
+		emitter: EventEmitter;
+		processes: Map<string, ManagedProcess>;
+		managedProcess: ManagedProcess;
+	}) => void
+): Promise<CapturedEvents> {
 	const processes = new Map<string, ManagedProcess>();
 	const emitter = new EventEmitter();
 	const bufferManager = new DataBufferManager(processes, emitter);
@@ -118,10 +134,16 @@ async function runRecording(recording: TurnRecording): Promise<CapturedEvents> {
 		agentErrors: [],
 		exits: [],
 		settlements: [],
+		thinking: [],
+		tools: [],
 	};
 	emitter.on('session-id', (_sid: string, id: string) => captured.sessionIds.push(id));
 	emitter.on('usage', (_sid: string, usage: UsageStats) => captured.usages.push(usage));
 	emitter.on('data', (_sid: string, text: string) => captured.data.push(text));
+	emitter.on('thinking-chunk', (_sid: string, text: string) => captured.thinking.push(text));
+	emitter.on('tool-execution', (_sid: string, tool: CapturedEvents['tools'][number]) =>
+		captured.tools.push(tool)
+	);
 	emitter.on('agent-error', (_sid: string, error: AgentError) => captured.agentErrors.push(error));
 	emitter.on(
 		'exit',
@@ -145,6 +167,7 @@ async function runRecording(recording: TurnRecording): Promise<CapturedEvents> {
 		recording.exitSignal ?? null
 	);
 
+	inspect?.({ emitter, processes, managedProcess });
 	return captured;
 }
 
@@ -504,5 +527,173 @@ describe('documented-format turns (providers with no captured turn yet)', () => 
 		);
 
 		expect([...documented].sort()).toEqual([...expected].sort());
+	});
+});
+
+function grokRecording(
+	name: string,
+	chunks: string[],
+	extra: Partial<TurnRecording> = {}
+): TurnRecording {
+	return {
+		name,
+		description: 'Synthetic bounded Grok streaming-json turn (not captured).',
+		toolType: 'grok',
+		chunks,
+		exitCode: 0,
+		...extra,
+	};
+}
+
+type RetainedState = ReturnType<typeof retainedStateOf>;
+
+function retainedStateOf(state: {
+	emitter: EventEmitter;
+	processes: Map<string, ManagedProcess>;
+	managedProcess: ManagedProcess;
+}) {
+	const parser = state.managedProcess.outputParser as unknown as {
+		toolNamesById: Map<string, string>;
+	};
+	return {
+		listenerCounts: Object.fromEntries(
+			state.emitter.eventNames().map((event) => [String(event), state.emitter.listenerCount(event)])
+		),
+		processesLeft: state.processes.size,
+		jsonBuffer: state.managedProcess.jsonBuffer ?? '',
+		openToolNames: parser.toolNamesById.size,
+		streamedTextLength: state.managedProcess.streamedText?.length ?? 0,
+	};
+}
+
+describe('bounded synthetic Grok stream (many updates, cancellation, usage, identity)', () => {
+	beforeEach(() => {
+		resetSpawnGenerationsForTest();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	it('emits each delta once, so emitted bytes grow with the stream rather than its square', async () => {
+		const stream = grokSyntheticStream(GROK_SYNTHETIC_ROUNDS);
+		let retained: RetainedState | undefined;
+		const events = await runRecording(grokRecording('grok-synthetic-normal', stream.lines), (s) => {
+			retained = retainedStateOf(s);
+		});
+
+		// Stable final text: the answer is shown once, whole, in delta order.
+		expect(events.data.join('')).toBe(stream.answer);
+		expect(events.data).toHaveLength(1);
+		// One thinking chunk per thought delta, never the accumulated reasoning
+		// re-sent on every delta (which would emit about rounds^2 / 2 bytes).
+		expect(events.thinking).toHaveLength(stream.rounds);
+		expect(events.thinking.join('').length).toBe(stream.thoughtBytes);
+		// Two badge events per call (running, then completed), keyed by id.
+		expect(events.tools).toHaveLength(2 * stream.rounds);
+		expect(new Set(events.tools.map((tool) => tool.toolCallId)).size).toBe(stream.rounds);
+		expect(events.tools.filter((tool) => tool.state?.status === 'completed')).toHaveLength(
+			stream.rounds
+		);
+		expect(events.tools.every((tool) => tool.toolName === 'read_file')).toBe(true);
+
+		// Native session identity arrives once, from the end event.
+		expect(events.sessionIds).toEqual([GROK_SYNTHETIC_SESSION_ID]);
+		// Final usage is the end event's turn total, reported once.
+		expect(events.usages).toHaveLength(1);
+		expect(events.usages[0]).toMatchObject({
+			inputTokens: 100 * stream.rounds,
+			outputTokens: 20 * stream.rounds,
+			cacheReadInputTokens: 50 * stream.rounds,
+		});
+		expect(events.usages[0].totalCostUsd).toBeCloseTo(0.25, 10);
+		expect(events.agentErrors).toEqual([]);
+		expect(events.exits).toEqual([0]);
+		expect(events.settlements).toEqual([{ outcome: 'completed', answerCaptured: true }]);
+
+		// Bounded retention: one listener per subscribed event (the handlers add
+		// none per delta), no buffered remainder, no unsettled tool names, the
+		// process released, and the retained answer exactly the answer.
+		expect(retained).toBeDefined();
+		expect(Object.values(retained!.listenerCounts).every((count) => count === 1)).toBe(true);
+		expect(retained!.jsonBuffer).toBe('');
+		expect(retained!.openToolNames).toBe(0);
+		expect(retained!.processesLeft).toBe(0);
+		expect(retained!.streamedTextLength).toBe(stream.answer.length);
+	});
+
+	it('doubling the rounds doubles every emitted count and byte total (linear aggregation)', async () => {
+		const small = grokSyntheticStream(GROK_SYNTHETIC_ROUNDS / 2);
+		const large = grokSyntheticStream(GROK_SYNTHETIC_ROUNDS);
+		const smallEvents = await runRecording(grokRecording('grok-synthetic-small', small.lines));
+		resetSpawnGenerationsForTest();
+		const largeEvents = await runRecording(grokRecording('grok-synthetic-large', large.lines));
+
+		const emitted = (events: CapturedEvents) =>
+			events.data.join('').length + events.thinking.join('').length;
+		const inputBytes = (stream: GrokSyntheticStream) => stream.answer.length + stream.thoughtBytes;
+		expect(emitted(smallEvents)).toBe(inputBytes(small));
+		expect(emitted(largeEvents)).toBe(inputBytes(large));
+		expect(largeEvents.thinking.length).toBe(2 * smallEvents.thinking.length);
+		expect(largeEvents.tools.length).toBe(2 * smallEvents.tools.length);
+	});
+
+	it('fragmented delivery across line boundaries produces the identical turn', async () => {
+		const stream = grokSyntheticStream(GROK_SYNTHETIC_ROUNDS);
+		const whole = await runRecording(grokRecording('grok-synthetic-lines', stream.lines));
+		resetSpawnGenerationsForTest();
+		const cut = await runRecording(grokRecording('grok-synthetic-cut', rechunk(stream.lines, 97)));
+
+		expect(cut.data.join('')).toBe(whole.data.join(''));
+		expect(cut.thinking.join('')).toBe(whole.thinking.join(''));
+		expect(cut.tools).toHaveLength(whole.tools.length);
+		expect(cut.sessionIds).toEqual(whole.sessionIds);
+		expect(cut.usages).toEqual(whole.usages);
+		expect(cut.settlements).toEqual(whole.settlements);
+	});
+
+	it('Stop mid-stream settles as a quiet interrupt on the next microtask, with the partial answer', async () => {
+		const stream = grokSyntheticStream(GROK_SYNTHETIC_ROUNDS / 2, { end: null });
+		vi.useFakeTimers();
+		let retained: RetainedState | undefined;
+		let settled = false;
+		const pending = runRecording(
+			grokRecording('grok-synthetic-stopped', stream.lines, {
+				exitCode: null,
+				exitSignal: 'SIGINT',
+				interrupted: true,
+			}),
+			(s) => {
+				retained = retainedStateOf(s);
+			}
+		).then((events) => {
+			settled = true;
+			return events;
+		});
+		// Responsive: no timer has to fire for the stop to settle.
+		await vi.advanceTimersByTimeAsync(0);
+		expect(settled).toBe(true);
+		const events = await pending;
+
+		expect(events.agentErrors).toEqual([]);
+		expect(events.data.join('')).toBe(stream.answer);
+		expect(events.usages).toEqual([]);
+		// No end event, so no native id was ever reported.
+		expect(events.sessionIds).toEqual([]);
+		expect(events.settlements).toEqual([{ outcome: 'interrupted', answerCaptured: true }]);
+		expect(retained!.processesLeft).toBe(0);
+		expect(retained!.jsonBuffer).toBe('');
+	});
+
+	it('a cancelled end under Stop is still quiet, and keeps the native session identity', async () => {
+		const stream = grokSyntheticStream(GROK_SYNTHETIC_ROUNDS / 2, { end: 'cancelled' });
+		const events = await runRecording(
+			grokRecording('grok-synthetic-cancelled', stream.lines, { interrupted: true })
+		);
+
+		expect(events.agentErrors).toEqual([]);
+		expect(events.data.join('')).toBe(stream.answer);
+		expect(events.sessionIds).toEqual([GROK_SYNTHETIC_SESSION_ID]);
+		expect(events.settlements).toEqual([{ outcome: 'interrupted', answerCaptured: true }]);
 	});
 });
