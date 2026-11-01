@@ -25,7 +25,11 @@
  * `spawnAgent` and the desktop's `spawnAgentForSession` do. The effort an Auto Run sends usually
  * came off Maestro's static ladder (a document hint, the synopsis pin), and a provider can retire
  * a rung without notice: failing every task on a value nobody typed is the wrong outcome. The
- * refusal is noted (by `runAgentTurn`), so later turns stop asking for the value.
+ * refusal is noted (by `runAgentTurn`), so later turns stop asking for the value. A turn that
+ * ran on Grok is never retried: the request proves no automatic-hint provenance and clearing the
+ * effort validates no distinct fallback for the selected model, account, host and version (the
+ * agent's own value may be the refused one, or an explicit choice), so its first failure stands,
+ * as in the CLI's `spawnAgent` and the context groomer.
  *
  * Under management every attempt carries the run's lineage (`autorun/attribution.ts`): the
  * workflow (the playbook, its version, what triggered it), the Auto Run's run id, the task's
@@ -184,7 +188,7 @@ function watchdogLimits(paths: Pick<MaestroPaths, 'settingsFile'>): {
 
 const failure = (error: string): AutoRunTurnResult => ({ success: false, error });
 
-/** One attempt's result, and whether it failed on a refused effort. */
+/** One attempt's result, and whether it failed on a refused effort it may retry without. */
 interface AutoRunAttempt {
 	result: AutoRunTurnResult;
 	effortRefused: boolean;
@@ -509,7 +513,8 @@ export function createAutoRunTurnRunner(options: AutoRunTurnRunnerOptions): Auto
 			});
 		}
 		return {
-			effortRefused: effortRefusalOf(completed) !== null,
+			// Keyed on the provider that ran, not the one requested; see the header on Grok.
+			effortRefused: provider !== 'grok' && effortRefusalOf(completed) !== null,
 			result: {
 				success: finishedWell,
 				outcome: completed.outcome,

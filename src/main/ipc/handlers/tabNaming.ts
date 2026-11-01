@@ -687,7 +687,17 @@ export async function generateTabName(
 				// the tab unnamed. Only when THIS attempt sent the cheap effort,
 				// so a refusal of the agent's own configured value cannot loop.
 				const rejection = effortRejection ?? parseEffortRejection(output);
-				if (rejection && cheapNaming.effort !== undefined) {
+				// Grok is keyed on the provider that actually ran, not the one the
+				// request named. This turn carries no automatic-hint provenance and
+				// clearing the effort validates no distinct fallback for the selected
+				// model/account/host/version: the agent's own value may be the refused
+				// one, or an explicit choice. So the first failure stands (as in
+				// spawnAgent and the context groomer); the error listener records it.
+				if (rejection && effectiveAgentType === 'grok') {
+					logger.warn('Tab naming effort rejected by Grok; keeping the failure', LOG_CONTEXT, {
+						sessionId,
+					});
+				} else if (rejection && cheapNaming.effort !== undefined) {
 					resolved = true;
 					cleanup();
 					logger.warn(
