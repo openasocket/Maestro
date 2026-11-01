@@ -1320,6 +1320,126 @@ describe('cue-process-lifecycle', () => {
 			});
 		});
 
+		// A Grok Cue turn read through the real parser: what {{CUE_SOURCE_OUTPUT}}
+		// hands the next agent, the session a chain resumes, and the status that
+		// decides whether a success chain fires.
+		describe('Grok Cue turn text and status', () => {
+			afterEach(() => mockGetOutputParser.mockReturnValue(null));
+
+			const line = (record: Record<string, unknown>) => JSON.stringify(record) + '\n';
+			const end = line({
+				type: 'end',
+				stopReason: 'end_turn',
+				sessionId: 'grok-chain-session',
+				usage: { input_tokens: 30, output_tokens: 6 },
+			});
+
+			async function runGrok(chunks: string[], exitCode: number | null, options = {}) {
+				mockGetOutputParser.mockReturnValue(new GrokOutputParser());
+				const pending = runProcess(
+					'grok-run',
+					createSpec({ command: 'grok', args: ['--prompt-file', '/tmp/prompt.json'] }),
+					createOptions({ toolType: 'grok', ...options })
+				);
+				await vi.advanceTimersByTimeAsync(0);
+				for (const chunk of chunks) mockChild.stdout.emit('data', chunk);
+				return { pending, close: () => mockChild.emit('close', exitCode) };
+			}
+
+			it('joins split-word deltas, drops thoughts and keeps the final session and usage', async () => {
+				const { pending, close } = await runGrok(
+					[
+						line({ type: 'thought', data: 'The user wants a greeting.' }),
+						line({ type: 'text', data: 'Hel' }),
+						// A chunk boundary inside one record must not split the word either.
+						'{"type":"text","da',
+						'ta":"lo wor"}\n',
+						line({ type: 'thought', data: 'Add punctuation.' }),
+						line({ type: 'text', data: 'ld!' }),
+						end,
+					],
+					0
+				);
+				close();
+				const result = await pending;
+
+				expect(result.status).toBe('completed');
+				expect(result.stdout).toBe('Hello world!');
+				expect(result.stdout).not.toContain('greeting');
+				expect(result.providerSessionId).toBe('grok-chain-session');
+				expect(result.usage).toMatchObject({
+					inputTokens: 30,
+					outputTokens: 6,
+					accounting: { providerId: 'grok', final: true },
+				});
+			});
+
+			it.each([
+				['empty stdout', []],
+				['plain text from a CLI that ignored the stream flag', ['pong\n']],
+			] as const)('fails a clean exit with %s and names why', async (_label, chunks) => {
+				const { pending, close } = await runGrok([...chunks], 0);
+				close();
+				const result = await pending;
+
+				expect(result.status).toBe('failed');
+				expect(result.stderr).toContain('Grok exited without a native terminal record.');
+			});
+
+			// The parser fails a native stream that stopped short of its terminal
+			// record, so no success chain fires. Its reason is not yet named in
+			// stderr (continuation GT1-08-09G); only the status is pinned here.
+			it('fails answer deltas that never reached a terminal record', async () => {
+				const { pending, close } = await runGrok([line({ type: 'text', data: 'pong' })], 0);
+				close();
+				const result = await pending;
+
+				expect(result.status).toBe('failed');
+				expect(result.providerSessionId).toBeNull();
+			});
+
+			it('fails an in-band auth error and names it in stderr for the auth classifier', async () => {
+				const { pending, close } = await runGrok(
+					[line({ type: 'error', message: 'Not authenticated. Run grok login.' })],
+					0
+				);
+				close();
+				const result = await pending;
+
+				expect(result.status).toBe('failed');
+				expect(result.stderr).toContain('Grok authentication is required or failed.');
+			});
+
+			it('fails a stderr-only auth rejection on a non-zero exit', async () => {
+				const { pending } = await runGrok([], 1);
+				mockChild.stderr.emit('data', 'Error: authentication required\n');
+				mockChild.emit('close', 1);
+				const result = await pending;
+
+				expect(result.status).toBe('failed');
+				expect(result.stderr).toContain('authentication required');
+			});
+
+			it('stops a Grok turn mid-stream as stopped, never completed', async () => {
+				const { pending } = await runGrok([line({ type: 'text', data: 'partial ' })], null);
+				expect(stopProcess('grok-run')).toBe(true);
+				mockChild.emit('close', null, 'SIGTERM');
+				const result = await pending;
+
+				expect(result.status).toBe('stopped');
+				expect(getActiveProcessMap().has('grok-run')).toBe(false);
+			});
+
+			it('times a silent Grok turn out instead of waiting forever', async () => {
+				const { pending } = await runGrok([], null, { timeoutMs: 5000 });
+				await vi.advanceTimersByTimeAsync(5000);
+				mockChild.emit('close', null, 'SIGTERM');
+				const result = await pending;
+
+				expect(result.status).toBe('timeout');
+			});
+		});
+
 		describe('stderr cleaning (benign noise filter)', () => {
 			it('strips "Reading additional input from stdin..." from Codex stderr', async () => {
 				const resultPromise = runProcess(

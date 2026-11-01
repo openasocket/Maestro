@@ -1132,6 +1132,101 @@ describe('cue-spawn-builder', () => {
 			expect(result.spec.args).not.toContain('--append-system-prompt');
 		});
 	});
+	// Desktop and standalone Cue both reach the executor with a
+	// CueExecutionConfig and build the spawn here, on the shared launch plan.
+	// These run the real Grok definition, argument builder and overrides.
+	describe('Grok Cue turns through real launch composition', () => {
+		isolateAgentEnv();
+		let actualArgs: typeof AgentArgs;
+		beforeEach(async () => {
+			actualArgs = await vi.importActual<typeof AgentArgs>(
+				'../../../shared/maestro-lib/launch/agent-args'
+			);
+			mockGetAgentDefinition.mockReturnValue(realDefinition('grok'));
+			const fallback = mockGetAgentCapabilities();
+			mockGetAgentCapabilities.mockImplementation(() => ({
+				...fallback,
+				...realCapabilities('grok'),
+			}));
+			mockBuildAgentArgs.mockImplementation(actualArgs.buildAgentArgs);
+			mockApplyOverrides.mockImplementation(actualArgs.applyAgentConfigOverrides);
+		});
+		afterEach(() => {
+			mockGetAgentCapabilities.mockReset();
+			mockBuildAgentArgs.mockReset();
+			mockApplyOverrides.mockReset();
+		});
+
+		const grokConfig = (overrides: Partial<CueExecutionConfig> = {}) =>
+			createConfig({
+				toolType: 'grok',
+				session: { ...createConfig().session, toolType: 'grok' },
+				customModel: 'grok-fixture-model',
+				customEnvVars: { GROK_HOME: '/fixture/grok-account-b' },
+				...overrides,
+			});
+		const acpPrompt = (text: string) =>
+			JSON.stringify({ type: 'acp', content: [{ type: 'text', text }] });
+
+		it.each([
+			['prompt', 'Review the change'],
+			['output-prompt', 'Summarize\n\n---\n\nContext from completed task:\nleft  right'],
+			['fan-in', 'Merge these:\nleft\n---\nright'],
+		])('builds a fresh %s turn on the selected model and account', async (_label, prompt) => {
+			const config = grokConfig();
+			const result = await buildSpawnSpec(config, prompt);
+			if (!result.ok) throw new Error(result.message);
+			const { spec } = result;
+
+			expect(spec.command).toBe('grok');
+			expect(spec.args).toEqual(
+				expect.arrayContaining(['--always-approve', '--output-format', 'streaming-json'])
+			);
+			expect(spec.args.join(' ')).toContain('-m grok-fixture-model');
+			expect(spec.args).not.toContain('--resume');
+			// The prompt travels whole in the ACP prompt file, never on argv.
+			expect(spec.promptArtifact).toMatchObject({ owner: 'local', content: acpPrompt(prompt) });
+			expect(spec.args.slice(-2)).toEqual(['--prompt-file', spec.promptArtifact!.path]);
+			expect(spec.args).not.toContain(prompt);
+			expect(spec.env).toMatchObject({
+				GROK_HOME: '/fixture/grok-account-b',
+				MAESTRO_QUERY_SOURCE: 'cue',
+			});
+		});
+
+		it('takes the subscription effort beside the model through the shared overrides', async () => {
+			const result = await buildSpawnSpec(grokConfig({ customEffort: 'high' }), 'Think hard');
+			if (!result.ok) throw new Error(result.message);
+			const overrides = mockApplyOverrides.mock.lastCall![2];
+			expect(overrides).toMatchObject({
+				sessionCustomModel: 'grok-fixture-model',
+				sessionCustomEffort: 'high',
+				sessionCustomEnvVars: { GROK_HOME: '/fixture/grok-account-b' },
+			});
+		});
+
+		it('builds the same Grok spawn whichever host constructed the config', async () => {
+			// The desktop passes a transcript sink; the standalone runner does not.
+			// Neither may change what the provider is asked to run.
+			const prompt = 'Same contract';
+			const desktop = await buildSpawnSpec(
+				grokConfig({ runId: 'run-same', onRunTranscript: vi.fn() } as never),
+				prompt
+			);
+			const standalone = await buildSpawnSpec(grokConfig({ runId: 'run-same' }), prompt);
+			if (!desktop.ok || !standalone.ok) throw new Error('spawn refused');
+			const shape = (spec: typeof desktop.spec) => ({
+				command: spec.command,
+				args: spec.args.slice(0, -1),
+				cwd: spec.cwd,
+				env: spec.env,
+				artifact: { ...spec.promptArtifact, path: undefined },
+			});
+
+			expect(shape(desktop.spec)).toEqual(shape(standalone.spec));
+		});
+	});
+
 	describe('Grok directory grants through real launch composition', () => {
 		isolateAgentEnv();
 		const privateRoot = '/PRIVATE outside λ';
