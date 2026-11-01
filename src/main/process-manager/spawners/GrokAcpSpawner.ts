@@ -45,7 +45,14 @@ import * as path from 'path';
 import { logger } from '../../utils/logger';
 import { captureException } from '../../utils/sentry';
 import { createOutputParser } from '../../parsers';
-import type { AgentError, ManagedProcess, ProcessConfig, SpawnResult } from '../types';
+import {
+	managedGrokAcpRefusal,
+	runsOnGrokAcpRoute,
+	type AgentError,
+	type ManagedProcess,
+	type ProcessConfig,
+	type SpawnResult,
+} from '../types';
 import type { SteeringResultFrame } from '../../../shared/chatSteering';
 import type { DataBufferManager } from '../handlers/DataBufferManager';
 import { StdoutHandler } from '../handlers/StdoutHandler';
@@ -196,12 +203,10 @@ export function grokConsentAuthority(session: RelayConsentSession): ManagedEffec
  * A desktop Grok turn whose launch plan asked for the provider's own prompting, or any
  * spawn carrying a native command: only this spawner submits one, and it refuses every
  * native command it cannot carry, so none can reach another spawner as an ordinary prompt.
+ * The rule itself is `runsOnGrokAcpRoute`, the one the managed refusal reads too.
  */
 export function wantsGrokAcp(config: ProcessConfig): boolean {
-	return (
-		config.grokNativeCommand !== undefined ||
-		(config.toolType === 'grok' && config.permission?.requested === 'standard')
-	);
+	return runsOnGrokAcpRoute(config);
 }
 
 /** Pre-process refusals of a forwarded native command (the driver adds the live catalog). */
@@ -371,6 +376,15 @@ export class GrokAcpSpawner {
 	}
 
 	spawn(config: ProcessConfig): SpawnResult {
+		// An admitted (managed) spawn is refused before any consent session, env, prompt
+		// read or process when the grok-acp route is not managed-qualified; it is never
+		// rerouted to the headless spawner (GT1-09-R05, R06).
+		const managedRefusal = managedGrokAcpRefusal(config);
+		if (managedRefusal)
+			return this.refuse(config, managedRefusal.message, undefined, {
+				state: managedRefusal.state,
+				code: managedRefusal.code,
+			});
 		const nativeCommand = config.grokNativeCommand;
 		if (nativeCommand !== undefined && config.toolType !== 'grok')
 			return this.refuseNativeCommand(config, 'not-grok');
@@ -458,13 +472,21 @@ export class GrokAcpSpawner {
 	}
 
 	/** Nothing was started: the tab is told why, and the result says so. */
-	private refuse(config: ProcessConfig, message: string, refusal?: GrokRouteRefusal): SpawnResult {
+	private refuse(
+		config: ProcessConfig,
+		message: string,
+		refusal?: GrokRouteRefusal,
+		managed?: SpawnResult['managed']
+	): SpawnResult {
 		logger.warn('[GrokAcpSpawner] Grok ACP turn refused', LOG_CONTEXT, {
 			sessionId: config.sessionId,
 			missing: refusal?.missing,
 			parityRows: refusal?.parityRows,
+			managed,
 		});
-		const text = `${message} Nothing was started.`;
+		const text = message.endsWith('Nothing was started.')
+			? message
+			: `${message} Nothing was started.`;
 		this.ctx.emitter.emit('agent-error', config.sessionId, {
 			type: 'permission_denied',
 			message: text,
@@ -473,7 +495,7 @@ export class GrokAcpSpawner {
 			sessionId: config.sessionId,
 			timestamp: Date.now(),
 		} satisfies AgentError);
-		return { pid: -1, success: false, error: text };
+		return { pid: -1, success: false, error: text, ...(managed ? { managed } : {}) };
 	}
 }
 

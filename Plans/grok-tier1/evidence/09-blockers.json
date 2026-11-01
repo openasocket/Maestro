@@ -92,9 +92,9 @@
 			"parityRows": ["REG-MANAGED-ROUTES", "P33"],
 			"releaseImpact": "Fleet inventory and policy cannot see which Grok route ran.",
 			"progress": {
-				"task": "GT1-09-02",
-				"state": "table-and-rule-implemented-sink-unwired",
-				"detail": "ManagedRoute and MANAGED_ROUTES gain 'grok-acp' (capabilities.ts): standalone implemented for grok and unsupported for every other provider, managed unsupported with the R01/R06 gap as its note. src/main/process-manager/types.ts adds runsOnGrokAcpRoute(config) (the same rule as wantsGrokAcp) and managedGrokAcpRefusal(config) (an admitted ACP spawn returns { state: 'unavailable', code: 'capability-unsupported' } from the table, no fallback to headless). GrokAcpSpawner.spawn does not call it yet; continuation GT1-09-02B wires it. Fleet inventory now reports the grok-acp row for every provider through MANAGED_ROUTES."
+				"task": "GT1-09-02B",
+				"state": "table-rule-and-sink-implemented-tests-pending",
+				"detail": "GT1-09-02 added the 'grok-acp' row and runsOnGrokAcpRoute/managedGrokAcpRefusal (types.ts). GT1-09-02B wires the sink: GrokAcpSpawner.spawn calls managedGrokAcpRefusal first, before consent, env, prompt read or process, and returns { pid: -1, success: false, managed: { state: 'unavailable', code: 'capability-unsupported' } } through its refuse path with no headless reroute; wantsGrokAcp delegates to runsOnGrokAcpRoute. Regression tests are GT1-09-03's."
 			}
 		},
 		{
@@ -114,9 +114,9 @@
 			"parityRows": ["P02", "P09", "REG-MANAGED-ROUTES"],
 			"releaseImpact": "A new Grok release would run under management without new qualification.",
 			"progress": {
-				"task": "GT1-09-02",
+				"task": "GT1-09-02B",
 				"state": "refused-under-management-once-wired",
-				"detail": "The grok-acp managed row stays unsupported because the version is the peer-reported one, so a managed ACP turn is refused before negotiation instead of adopting it (after GT1-09-02B). The standalone selector still adopts the reported version; a qualified range needs GT1-11-12 live evidence."
+				"detail": "The grok-acp managed row stays unsupported because the version is the peer-reported one, so a managed ACP turn is refused before negotiation instead of adopting it (after GT1-09-02B). The standalone selector still adopts the reported version; a qualified range needs GT1-11-12 live evidence. GT1-09-02B: a managed ACP spawn is now refused at the spawner, so no admitted turn adopts a peer-reported version; the qualified range itself remains absent."
 			}
 		},
 		{
