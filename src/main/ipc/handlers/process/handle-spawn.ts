@@ -1471,9 +1471,9 @@ async function handleProcessSpawnImpl(
 	const {
 		dispatchTicket: _claimedTicket,
 		expectedGrokSpawnSelection: _checkedGrokSelection,
-		// Never spread into an ordinary launch: a request that still carries one
-		// here was refused above (host forwarding is GT1-07-02D).
-		grokNativeCommand: _nativeCommand,
+		// A native command passed the request checks above and is forwarded:
+		// ProcessManager routes it to GrokAcpSpawner, which submits it through the
+		// ACP driver after revalidating it against the new process, or refuses.
 		...spawnConfig
 	} = config;
 	if (promptArtifact) delete spawnConfig.appendSystemPrompt;
@@ -1860,8 +1860,7 @@ export type GrokNativeCommandRequestProblem =
 	| 'not-grok'
 	| 'prompt-mismatch'
 	| 'images-unsupported'
-	| 'route-unavailable'
-	| 'forwarding-unavailable';
+	| 'route-unavailable';
 
 /**
  * Check a `process:spawn` request carrying `grokNativeCommand` against what the
@@ -1902,9 +1901,9 @@ export function grokNativeCommandRequestProblem(
 	// requests are planned onto the native headless CLI.
 	if (config.permissionMode !== undefined && config.permissionMode !== 'standard')
 		return 'route-unavailable';
-	// Host forwarding to the ACP driver lands with GT1-07-02D; until then nothing
-	// reaches ProcessManager with a native command.
-	return 'forwarding-unavailable';
+	// Forwarded: GrokAcpSpawner refuses any plan that is not standard, and the
+	// driver checks catalog, config and process generation before submission.
+	return undefined;
 }
 
 function spawnTabId(config: Pick<SpawnProcessConfig, 'sessionId' | 'tabId'>): string | undefined {

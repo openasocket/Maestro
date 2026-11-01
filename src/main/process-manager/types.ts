@@ -9,6 +9,7 @@ import type { CodexTransport } from '../../shared/codexTransport';
 import type { CodexAppServerSshLaunch } from '../codex-app-server/ssh-launch';
 import type { CodexAppServerProcessHandle } from '../codex-app-server/protocol';
 import type { NativeSessionBinding } from '../../shared/maestro-lib/agents/providerSwap';
+import type { GrokAcpNativeCommandIntent } from '../../shared/maestro-lib/grok/acp-turn';
 import type { SshRemoteEndpointIdentity } from '../../shared/maestro-lib/launch/ssh-remote-resolver';
 import type {
 	ContextVerification,
@@ -597,6 +598,11 @@ export interface ProcessConfig {
 	nativeSessionScope?: NativeSessionLaunchScope;
 	/** Retained owner/tab binding that a Grok resume must match. */
 	nativeSessionBinding?: NativeSessionBinding;
+	/** One ACP-advertised native Grok command (GT1-07-02B intent), forwarded by the
+	 *  spawn handler after its request checks. Any spawn carrying it is routed to
+	 *  `GrokAcpSpawner`, which submits it through the shared ACP driver or refuses;
+	 *  it never reaches an ordinary prompt or the headless CLI. */
+	grokNativeCommand?: GrokAcpNativeCommandIntent;
 	/** Resolved Codex transport for this turn (`resolveCodexTransport`). Set by
 	 *  the desktop spawn handler from the persisted agent record; anything other
 	 *  than `'app-server'` (including absent) means `codex exec`. A preference:

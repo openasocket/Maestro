@@ -26,6 +26,13 @@
  * request's `allow_once` option. Deny, timeout, Stop, the process exiting and a lost
  * connection all deny; nothing is auto-approved. With no tab or no prompt surface there
  * is no consent port, and the selector refuses the turn (`consent-port`).
+ *
+ * A spawn carrying a native command (`grokNativeCommand`) always comes here. Everything
+ * this host already knows is checked before any process (provider, standard plan, exact
+ * prompt text, tab, cwd, account, host, model/effort, resumed session, current config
+ * generation, no admission); the selector then requires native command support, and the
+ * driver revalidates the intent against the new process's own catalog immediately before
+ * submission. Any refusal is final: never an ordinary prompt, never the headless CLI.
  */
 
 import { createHash } from 'crypto';
@@ -62,7 +69,10 @@ import {
 } from '../../../shared/maestro-lib/grok/route';
 import {
 	startGrokAcpTurn,
+	validateGrokNativeCommand,
+	type GrokAcpNativeCommandIntent,
 	type GrokAcpRunningTurn,
+	type GrokNativeCommandRefusal,
 } from '../../../shared/maestro-lib/grok/acp-turn';
 
 const LOG_CONTEXT = 'GrokAcpSpawner';
@@ -135,9 +145,70 @@ export function grokConsentAuthority(session: RelayConsentSession): ManagedEffec
 	};
 }
 
-/** A desktop Grok turn whose launch plan asked for the provider's own prompting. */
+/**
+ * A desktop Grok turn whose launch plan asked for the provider's own prompting, or any
+ * spawn carrying a native command: only this spawner submits one, and it refuses every
+ * native command it cannot carry, so none can reach another spawner as an ordinary prompt.
+ */
 export function wantsGrokAcp(config: ProcessConfig): boolean {
-	return config.toolType === 'grok' && config.permission?.requested === 'standard';
+	return (
+		config.grokNativeCommand !== undefined ||
+		(config.toolType === 'grok' && config.permission?.requested === 'standard')
+	);
+}
+
+/** Pre-process refusals of a forwarded native command (the driver adds the live catalog). */
+export type GrokNativeCommandSpawnProblem =
+	| GrokNativeCommandRefusal
+	| 'not-grok'
+	| 'route-unavailable'
+	| 'prompt-mismatch';
+
+/**
+ * Everything a forwarded native command can be refused on before any process starts: the
+ * provider and plan (only a standard-mode turn runs on ACP), the exact prompt text, and
+ * `validateGrokNativeCommand()` without a catalog against this host's own facts (tab,
+ * current config generation, resumed session, admission), plus the bound account, host,
+ * cwd and requested model/effort the new process will be started with. Undefined when
+ * only the new process's advertisement is left to check.
+ */
+export function grokNativeCommandSpawnProblem(
+	config: ProcessConfig,
+	intent: GrokAcpNativeCommandIntent,
+	facts: {
+		promptText: string;
+		configGeneration: string;
+		account: string;
+		host: string;
+		model?: string;
+		effort?: string;
+	}
+): GrokNativeCommandSpawnProblem | undefined {
+	if (config.toolType !== 'grok') return 'not-grok';
+	if (config.permission?.requested !== 'standard') return 'route-unavailable';
+	const checked = validateGrokNativeCommand(intent, undefined, {
+		tabId: config.tabId ?? '',
+		configGeneration: facts.configGeneration,
+		processGeneration: '',
+		resumeSessionId: config.agentSessionId,
+		managed: config.admission !== undefined,
+		cancelled: false,
+	});
+	if (checked.ok) return 'invalid-intent';
+	if (checked.reason !== 'catalog-unavailable') return checked.reason;
+	const { binding } = intent;
+	if (
+		!config.tabId ||
+		config.tabId !== binding.tabId ||
+		config.cwd !== binding.cwd ||
+		facts.account !== binding.account ||
+		facts.host !== binding.host
+	)
+		return 'scope-mismatch';
+	if (facts.model !== binding.model || facts.effort !== binding.effort) return 'selection-mismatch';
+	const text = intent.arguments ? `/${intent.name} ${intent.arguments}` : `/${intent.name}`;
+	if (facts.promptText !== text) return 'prompt-mismatch';
+	return undefined;
 }
 
 interface ParsedNativeArgs {
@@ -200,6 +271,38 @@ export function grokAcpPromptOf(
 	return { text, imageCount };
 }
 
+function grokAcpDesktopEnv(config: ProcessConfig): NodeJS.ProcessEnv {
+	return buildChildProcessEnv(
+		config.customEnvVars,
+		!!config.agentSessionId,
+		config.shellEnvVars,
+		config.extraPathDirs,
+		config.querySource
+	);
+}
+
+/**
+ * Opaque fingerprint of everything a desktop ACP launch depends on (executable, cwd, the
+ * complete child environment, bound account/host scope); never persisted or shown. A native
+ * command intent must carry the generation of the launch it will run under, so a catalog
+ * projection stamps this same value, and any change refuses `config-changed`.
+ */
+export function grokAcpDesktopConfigGeneration(
+	config: ProcessConfig,
+	env: NodeJS.ProcessEnv = grokAcpDesktopEnv(config)
+): string {
+	return createHash('sha256')
+		.update(
+			canonicalJson({
+				command: config.command,
+				cwd: config.cwd,
+				env,
+				scope: config.nativeSessionScope,
+			})
+		)
+		.digest('hex');
+}
+
 interface SpawnerContext {
 	processes: Map<string, ManagedProcess>;
 	emitter: EventEmitter;
@@ -233,6 +336,9 @@ export class GrokAcpSpawner {
 	}
 
 	spawn(config: ProcessConfig): SpawnResult {
+		const nativeCommand = config.grokNativeCommand;
+		if (nativeCommand !== undefined && config.toolType !== 'grok')
+			return this.refuseNativeCommand(config, 'not-grok');
 		const native = parseGrokNativeArgs(config.sshRemoteId ? [] : config.args);
 		const prompt = grokAcpPromptOf(config, native.prompt);
 		if (!prompt) return this.refuse(config, 'The planned Grok prompt could not be read.');
@@ -243,26 +349,28 @@ export class GrokAcpSpawner {
 				'Grok account and host ownership is unknown, so the ACP route cannot bind this turn.'
 			);
 		const isResuming = !!config.agentSessionId;
-		const env = buildChildProcessEnv(
-			config.customEnvVars,
-			isResuming,
-			config.shellEnvVars,
-			config.extraPathDirs,
-			config.querySource
-		);
+		const env = grokAcpDesktopEnv(config);
 		const snapshot: GrokRouteSnapshot = {
 			executable: { path: config.command },
 			agentVersion: null,
 			platform: `${process.platform}-${process.arch}`,
 			account: scope.accountRef,
 			host: scope.host.identity,
-			// Opaque fingerprint of everything the launch depends on; never persisted.
-			configGeneration: createHash('sha256')
-				.update(canonicalJson({ command: config.command, cwd: config.cwd, env, scope }))
-				.digest('hex'),
+			configGeneration: grokAcpDesktopConfigGeneration(config, env),
 			target: config.sshRemoteId || scope.host.kind !== 'local' ? 'remote' : 'local',
 			native: { qualified: false },
 		};
+		if (nativeCommand !== undefined) {
+			const problem = grokNativeCommandSpawnProblem(config, nativeCommand, {
+				promptText: prompt.text,
+				configGeneration: snapshot.configGeneration,
+				account: snapshot.account,
+				host: snapshot.host,
+				model: native.model,
+				effort: native.effort,
+			});
+			if (problem) return this.refuseNativeCommand(config, problem);
+		}
 		// A standalone turn asks the person on its own tab; without a tab or a prompt
 		// surface there is nobody to ask, and the selector refuses (consent-port).
 		const consentSession =
@@ -276,6 +384,7 @@ export class GrokAcpSpawner {
 				imageCount: prompt.imageCount,
 				resume: isResuming,
 				customArgs: native.customArgs,
+				nativeCommand: nativeCommand !== undefined,
 			},
 			snapshot
 		);
@@ -294,6 +403,7 @@ export class GrokAcpSpawner {
 				model: native.model,
 				effort: native.effort,
 				consentSession,
+				nativeCommand,
 			}).start();
 		} catch (error) {
 			consentSession?.close();
@@ -303,6 +413,13 @@ export class GrokAcpSpawner {
 				`Grok ACP turn could not start: ${error instanceof Error ? error.message : String(error)}`
 			);
 		}
+	}
+
+	private refuseNativeCommand(
+		config: ProcessConfig,
+		problem: GrokNativeCommandSpawnProblem
+	): SpawnResult {
+		return this.refuse(config, `Native Grok command refused (native-command-${problem}).`);
 	}
 
 	/** Nothing was started: the tab is told why, and the result says so. */
@@ -334,6 +451,8 @@ interface DesktopTurnInput {
 	effort?: string;
 	/** The person's consent session of a standalone turn; closed when the turn ends. */
 	consentSession: RelayConsentSession | null;
+	/** A forwarded native command, revalidated by the driver against this process. */
+	nativeCommand?: GrokAcpNativeCommandIntent;
 }
 
 /** One ACP process and the turn it runs. */
@@ -442,14 +561,26 @@ class GrokAcpDesktopTurn {
 						protocolVersion: negotiated.protocolVersion,
 						agentVersion: negotiated.agentVersion,
 						loadSession: negotiated.loadSession,
-						// The port carries neither yet (GROK_ACP_PORT_SUPPORT); never claimed.
+						// The port carries no images yet (GROK_ACP_PORT_SUPPORT); never claimed.
 						images: false,
-						commands: false,
+						// ACP advertises commands by notification, not in `initialize`: the
+						// driver proves this process's catalog before submission, and a turn
+						// whose catalog never arrives is refused (catalog-unavailable).
+						commands: input.nativeCommand !== undefined,
 					});
 					if (decision.ok) return undefined;
 					this.routeRefusal = decision.message;
 					return decision.missing.join(',');
 				},
+				...(input.nativeCommand
+					? {
+							nativeCommand: {
+								intent: input.nativeCommand,
+								tabId: config.tabId ?? '',
+								configGeneration: input.snapshot.configGeneration,
+							},
+						}
+					: {}),
 			},
 			{
 				onEvent: (event) => {
