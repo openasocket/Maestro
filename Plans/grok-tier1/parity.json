@@ -3756,6 +3756,55 @@
 				"Only conversationManager.ts production code changed. Existing manager regressions are reused without authoring, running or collecting tests. Scoped formatting, ESLint, syntax and independent static review pass; renderer type-check results are recorded separately in the evidence.",
 				"Synthetic receipt permutations are defensive contract coverage, not a reproduced managed-policy bypass. GT1-05-13 execution and native exact-version qualification remain pending; no capability or beta promotion."
 			]
+		},
+		"phase05-selected-verification": {
+			"path": "Plans/grok-tier1/evidence/05-verification.json",
+			"sha256": "ce59d950e2ded76d12cf5d6324bc239e20e4de01450b21eaacfdb1a897ed52a2",
+			"sourceCommit": "c49299230115746ce54b85d943c26c3b88a7a7e8",
+			"provenance": "deterministic-fixture-verification",
+			"acceptanceRun": false,
+			"status": "fail",
+			"scope": "Original GT1-05-13 run: 43 files, 3257 passed, 52 failed, one collection failure. Preserved unchanged; failures repaired by GT1-05-13A/B/C fixture tasks."
+		},
+		"phase05-reverification": {
+			"path": "Plans/grok-tier1/evidence/05-reverification.json",
+			"sha256": "5655b202422a8803d517a444b166f31906756b5e448e43f7d9b4942f543bb329",
+			"sourceCommit": "4e89e0ad8a0f487100cb76cd19144d4312f897c9",
+			"provenance": "deterministic-fixture-verification",
+			"acceptanceRun": false,
+			"status": "pass",
+			"scope": "GT1-05-13D: 43 complete files, 3331 passed, zero failed/skipped/collection failures; main/CLI tsc pass, renderer tsc exit 2 on the known baseline RequestInit.dispatcher diagnostic only. No live calls."
+		},
+		"phase05-reconciliation": {
+			"path": "Plans/grok-tier1/evidence/05.md#gt1-05-14-phase-05-reconciliation",
+			"sourceCommit": "7b6a702615bdd015782ac29aa1379a440dc6a7f2",
+			"provenance": "source-and-recorded-receipt-reconciliation",
+			"acceptanceRun": false,
+			"status": "pass",
+			"affectedRows": [
+				"C-supportsProjectMemory",
+				"C-supportsSlashCommands",
+				"C-supportsWizard",
+				"META-01",
+				"META-03",
+				"META-04",
+				"META-06",
+				"P04",
+				"P07",
+				"P17",
+				"P18",
+				"P19",
+				"P20",
+				"S01",
+				"S02",
+				"S03",
+				"S04",
+				"S05",
+				"S29",
+				"S30",
+				"S31"
+			],
+			"scope": "Scoped phase05 outcomes and remaining blockers; whole-row statuses, applicability, capability flags and beta status preserved."
 		}
 	},
 	"sourceCatalog": {
@@ -5391,7 +5440,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Canonical Grok account roots and environment precedence, explicit blank default selection and host separation have deterministic coverage. Phase04 selected-root history/usage wiring and discovery tests pass. Root grouping is not billing proof; fallback/inline/gateway/deployment/independent auth identities remain withheld. Current managed account-path wiring/custody and live account isolation remain phase09/11 work."
+				"Canonical Grok account roots and environment precedence, explicit blank default selection and host separation have deterministic coverage. Phase04 selected-root history/usage wiring and discovery tests pass. Root grouping is not billing proof; fallback/inline/gateway/deployment/independent auth identities remain withheld. Current managed account-path wiring/custody and live account isolation remain phase09/11 work.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -5423,7 +5473,9 @@
 				"phase05WorktreeLaunchTestsEvidenceRef": "phase05-worktree-launch-tests",
 				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation",
 				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests",
-				"phase05CreationConsumerTestsEvidenceRef": "phase05-creation-consumer-tests"
+				"phase05CreationConsumerTestsEvidenceRef": "phase05-creation-consumer-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6005,7 +6057,8 @@
 				"GT1-05-06A1T authors 62 main-entry, discovery, SSH preparation, observation and managed admission regression cases in the two existing main suites. Static checks pass; execution remains not-run for GT1-05-13. Renderer forwarding/hash coverage remains GT1-05-06B1. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests.",
 				"GT1-05-06B authors 26 producer/template regressions and repairs four obsolete remote macro assertions in three existing suites. Static checks pass; execution stays not-run for GT1-05-13. GT1-05-06B1/B2 retain final queue and system-context/new-tab coverage; GT1-05-06A3/B3 own the demonstrated composer image omission. See Plans/grok-tier1/evidence/05.md#gt1-05-06b-custom-command-producer-and-template-tests.",
 				"GT1-05-06B3 extends the existing producer matrix to 12 idle/busy local/SSH staged/explicit/empty-image cases and three missing-target cases (10 additional cases). Exact copied image lists, pinned tab/raw arguments, one queue handoff, acceptance-before-clear and draft retention are authored in useInputProcessing.test.ts. Static checks pass; tests remain not-run for GT1-05-13. GT1-05-06B1 owns final queued spawn delivery and managed refusal; GT1-05-06B retains remote macro attachment refusal. See Plans/grok-tier1/evidence/05.md#gt1-05-06b3-custom-command-attachment-regression-tests.",
-				"GT1-05-06B2 authors 32 additional system-context/new-tab cases in the two assigned existing renderer suites. Configured local/SSH Git and plugin context, selected native identity and legacy aliases, literal macro arguments/delegation/tickets, fresh-tab ownership, native refusal before creation and truthful queue/failure receipts are covered. Scoped static checks and independent review pass; tests remain not-run for GT1-05-13. Reuses GT1-05-06B/B1 admission and remote-handler coverage; no native capability or parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06b2-system-context-and-new-tab-regression-tests."
+				"GT1-05-06B2 authors 32 additional system-context/new-tab cases in the two assigned existing renderer suites. Configured local/SSH Git and plugin context, selected native identity and legacy aliases, literal macro arguments/delegation/tickets, fresh-tab ownership, native refusal before creation and truthful queue/failure receipts are covered. Scoped static checks and independent review pass; tests remain not-run for GT1-05-13. Reuses GT1-05-06B/B1 admission and remote-handler coverage; no native capability or parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06b2-system-context-and-new-tab-regression-tests.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -6015,7 +6068,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -6052,15 +6107,17 @@
 				},
 				{
 					"id": "queued-command-main-entry-race",
-					"code": "verification-pending",
-					"missingPrerequisite": "GT1-05-06A1C/H implement enqueue-to-main comparisons; GT1-05-06A1T now authors main-entry/preparation/native-observation/managed-admission regressions, including fresh/resumed and reference-provider controls. GT1-05-06B1 now authors renderer fingerprint forwarding, selection/configuration preparation races, cancellation and refusal recovery. GT1-05-13 must execute both main suites plus all three B1 suites; authored tests remain not-run. Authoring and static checks do not certify the guarded route. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests.",
-					"affectedRows": ["P07", "S31"]
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-06A1C/H enqueue-to-main comparisons and their GT1-05-06A1T/06B1 regressions pass in GT1-05-13D (phase05-reverification). Remaining: managed effect qualification (phase09), SSH/headless hosts (phase10) and exact-binary live dispatch (phase11).",
+					"affectedRows": ["P07", "S31"],
+					"evidenceRef": "phase05-reconciliation"
 				},
 				{
 					"id": "composer-command-images-omitted",
-					"code": "verification-pending",
-					"missingPrerequisite": "GT1-05-06A3 implements effectiveImages forwarding and staged-image clearing after queue acceptance. GT1-05-06B3 authors staged/explicit/empty-image, idle/busy, pinned-target and missing-target producer regressions with passing static checks. GT1-05-06B1 now authors exact final queued spawn attachments and literal arguments, plus thrown/returned managed refusal with queue and live-owner recovery. GT1-05-13 must execute the complete producer and queue suites; test authoring is not behavioral verification. Behavioral and native qualification remain not-run; remote macro attachment refusal is unchanged. See Plans/grok-tier1/evidence/05.md#gt1-05-06b3-custom-command-attachment-regression-tests.",
-					"affectedRows": ["P07", "S31"]
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-06A3 attachment forwarding and its GT1-05-06B3/06B1 regressions pass in GT1-05-13D. Remaining: remote macro attachments stay explicitly unsupported; native image handling on a real binary is phase11.",
+					"affectedRows": ["P07", "S31"],
+					"evidenceRef": "phase05-reconciliation"
 				}
 			],
 			"phase": "02",
@@ -8401,7 +8458,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok already has a beta picker entry. Installed/custom-path/account/model/effort and unsupported-mode consumer behavior needs end-to-end proof. Grok has a dedicated shared discovery-args branch and text extraction. Account/model, unavailable binary, resume and error handling need consumer evidence. Grok reaches provider-neutral builder, but account/model/effort/route settings and local/remote isolation need explicit consumer assertions. Phase05/10 owners are provisional; GT1-01-07 must add bounded owner task coverage if current wording cannot cover these files. Grok uses generic creation; verify duplicated profile/effort, custom executable availability and no fallback provider. No separate agent-template registry was found in bounded symbol search; prompt templates are a distinct surface. GT1-01-07 must reconcile task scope for AgentCreationDialog coverage."
+				"Grok already has a beta picker entry. Installed/custom-path/account/model/effort and unsupported-mode consumer behavior needs end-to-end proof. Grok has a dedicated shared discovery-args branch and text extraction. Account/model, unavailable binary, resume and error handling need consumer evidence. Grok reaches provider-neutral builder, but account/model/effort/route settings and local/remote isolation need explicit consumer assertions. Phase05/10 owners are provisional; GT1-01-07 must add bounded owner task coverage if current wording cannot cover these files. Grok uses generic creation; verify duplicated profile/effort, custom executable availability and no fallback provider. No separate agent-template registry was found in bounded symbol search; prompt templates are a distinct surface. GT1-01-07 must reconcile task scope for AgentCreationDialog coverage.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8421,7 +8479,9 @@
 				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation",
 				"phase05DuplicatePermissionsEvidenceRef": "phase05-duplicate-permissions",
 				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests",
-				"phase05CreationConsumerTestsEvidenceRef": "phase05-creation-consumer-tests"
+				"phase05CreationConsumerTestsEvidenceRef": "phase05-creation-consumer-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8446,17 +8506,17 @@
 				},
 				{
 					"id": "wizard-config-focus-before-remount:P17",
-					"code": "focus-repair-awaiting-regression",
-					"missingPrerequisite": "GT1-05-02E1 queues provider identity and restores focus after the grid commits. Static checks pass; GT1-05-13 must execute the existing GT1-05-02E real-screen regression. No behavioral run performed.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-02E1 repair and the GT1-05-02E real-screen regression pass in GT1-05-13D. Remaining: none for this focus boundary beyond whole-row live/platform qualification.",
 					"affectedRows": ["P17"],
-					"evidenceRef": "phase05-config-focus-repair"
+					"evidenceRef": "phase05-reconciliation"
 				},
 				{
 					"id": "duplicate-permission-handoff:P17",
-					"code": "verification-pending",
-					"missingPrerequisite": "GT1-05-02C1 implemented permission handoff; GT1-05-02D/D1 authored component and real creation-consumer assertions. GT1-05-13 must execute all three existing suites; no behavioral pass claimed.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-02C1 handoff and its GT1-05-02D/02D1 component and creation-consumer regressions pass in GT1-05-13D. Standard stays unsupported and refuses; real readonly enforcement is phase09/11.",
 					"affectedRows": ["P17"],
-					"evidenceRef": "phase05-creation-consumer-tests"
+					"evidenceRef": "phase05-reconciliation"
 				}
 			],
 			"phase": "05",
@@ -8543,7 +8603,8 @@
 			"limitations": [
 				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B exposes the canonical request/result via preload and renderer overloads; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements.",
 				"GT1-05-05 implements only scoped slash refusals in the composer/queue and excludes stale provider prompt bodies. GT1-05-05A adds ephemeral discovery and completion metadata with no selectable native entries; admitted invocation with a fresh catalog on each new ACP process remains GT1-07-02. No native skill expansion, TUI action, CLI subcommand or headless command execution is certified.",
-				"GT1-05-05A refreshes advisory discovery on selected context, settings, focus and completion changes, with a finite receipt lifetime. Main-only revisions still require fresh admitted-sink validation; no native command is selectable or executed. GT1-05-06C/13 own completion regression coverage/execution."
+				"GT1-05-05A refreshes advisory discovery on selected context, settings, focus and completion changes, with a finite receipt lifetime. Main-only revisions still require fresh admitted-sink validation; no native command is selectable or executed. GT1-05-06C/13 own completion regression coverage/execution.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8552,7 +8613,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8767,7 +8830,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GT1-05-07 provides a truthful native-memory refusal and preserves explicit Maestro-bound knowledge with configured-host, entry-path and redacted-error guards; native discovery/binding and deterministic/live qualification remain pending."
+				"GT1-05-07 provides a truthful native-memory refusal and preserves explicit Maestro-bound knowledge with configured-host, entry-path and redacted-error guards; native discovery/binding and deterministic/live qualification remain pending.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8778,7 +8842,9 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase05NativeMemoryBoundaryEvidenceRef": "phase05-native-memory-boundary",
-				"phase05MemoryBoundaryTestEvidenceRef": "phase05-memory-boundary-tests"
+				"phase05MemoryBoundaryTestEvidenceRef": "phase05-memory-boundary-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8921,7 +8987,8 @@
 			},
 			"limitations": [
 				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. GT1-05-09A implements selected-tab model/effort capture and conversation handoff. GT1-05-09B implements per-tab generation cancellation and captured effort forwarding; tests are not run and native continuation remains unqualified.",
-				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. GT1-05-11A/B/C/D implement selected configuration, account/host readiness, generation and streaming preview with static checks only. Tests/verification and native qualification remain required; no onboarding parity claim."
+				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. GT1-05-11A/B/C/D implement selected configuration, account/host readiness, generation and streaming preview with static checks only. Tests/verification and native qualification remain required; no onboarding parity claim.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8946,7 +9013,9 @@
 				"phase05OnboardingHookTestsEvidenceRef": "phase05-onboarding-hook-tests",
 				"phase05OnboardingSendLifecycleTestsEvidenceRef": "phase05-onboarding-send-lifecycle-tests",
 				"phase05OnboardingGenerationTestsEvidenceRef": "phase05-onboarding-generation-tests",
-				"phase05OnboardingGenerationLifecycleTestsEvidenceRef": "phase05-onboarding-generation-lifecycle-tests"
+				"phase05OnboardingGenerationLifecycleTestsEvidenceRef": "phase05-onboarding-generation-lifecycle-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -8983,17 +9052,17 @@
 				},
 				{
 					"id": "grok-inline-wizard-callers:P20",
-					"code": "caller-verification-pending",
-					"missingPrerequisite": "GT1-05-10/10B service and GT1-05-10A caller regressions are authored, not run. GT1-05-13 execution and exact-version live qualification remain. Ephemeral wizard continuation is full history replay without native ownership certification.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-10/10A/10B service and caller regressions pass in GT1-05-13D. Remaining: a real exact-version Grok wizard flow (phase11); continuation remains full history replay without native ownership.",
 					"affectedRows": ["P20"],
-					"evidenceRef": "phase05-inline-wizard-caller-tests"
+					"evidenceRef": "phase05-reconciliation"
 				},
 				{
 					"id": "grok-onboarding-callers:P20",
-					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-12/12A/12A1/12B/12B1 discovery, readiness, configuration, preview, send/generation lifecycle and document tests are authored, not run. GT1-05-12C repaired launch acceptance ordering; GT1-05-13 execution remains pending. Native exact-version qualification is separate.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-12/12A/12A1/12B/12B1 regressions pass after the GT1-05-12C repair in GT1-05-13D. Remaining: a real exact-version onboarding flow (phase11).",
 					"affectedRows": ["P20"],
-					"evidenceRef": "phase05-onboarding-launch-acceptance"
+					"evidenceRef": "phase05-reconciliation"
 				}
 			],
 			"phase": "05",
@@ -14510,7 +14579,8 @@
 			"limitations": [
 				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B exposes the canonical request/result via preload and renderer overloads; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements.",
 				"GT1-05-05 implements only scoped slash refusals in the composer/queue and excludes stale provider prompt bodies. GT1-05-05A adds ephemeral discovery and completion metadata with no selectable native entries; admitted invocation with a fresh catalog on each new ACP process remains GT1-07-02. No native skill expansion, TUI action, CLI subcommand or headless command execution is certified.",
-				"GT1-05-05A refreshes advisory discovery on selected context, settings, focus and completion changes, with a finite receipt lifetime. Main-only revisions still require fresh admitted-sink validation; no native command is selectable or executed. GT1-05-06C/13 own completion regression coverage/execution."
+				"GT1-05-05A refreshes advisory discovery on selected context, settings, focus and completion changes, with a finite receipt lifetime. Main-only revisions still require fresh admitted-sink validation; no native command is selectable or executed. GT1-05-06C/13 own completion regression coverage/execution.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -14519,7 +14589,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16739,7 +16811,8 @@
 			"limitations": [
 				"Existing Grok wizard adapter needs malformed/partial JSON, tool failures, reset/resume and read-only utility coverage.",
 				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. GT1-05-09A implements selected-tab model/effort capture and conversation handoff. GT1-05-09B implements per-tab generation cancellation and captured effort forwarding; tests are not run and native continuation remains unqualified.",
-				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. GT1-05-11A/B/C/D implement selected configuration, account/host readiness, generation and streaming preview with static checks only. Tests/verification and native qualification remain required; no onboarding parity claim."
+				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. GT1-05-11A/B/C/D implement selected configuration, account/host readiness, generation and streaming preview with static checks only. Tests/verification and native qualification remain required; no onboarding parity claim.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -16764,7 +16837,9 @@
 				"phase05OnboardingHookTestsEvidenceRef": "phase05-onboarding-hook-tests",
 				"phase05OnboardingSendLifecycleTestsEvidenceRef": "phase05-onboarding-send-lifecycle-tests",
 				"phase05OnboardingGenerationTestsEvidenceRef": "phase05-onboarding-generation-tests",
-				"phase05OnboardingGenerationLifecycleTestsEvidenceRef": "phase05-onboarding-generation-lifecycle-tests"
+				"phase05OnboardingGenerationLifecycleTestsEvidenceRef": "phase05-onboarding-generation-lifecycle-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -16801,17 +16876,17 @@
 				},
 				{
 					"id": "grok-inline-wizard-callers:C-supportsWizard",
-					"code": "caller-verification-pending",
-					"missingPrerequisite": "GT1-05-10/10B service and GT1-05-10A caller regressions are authored, not run. GT1-05-13 execution and exact-version live qualification remain. Ephemeral wizard continuation is full history replay without native ownership certification.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-10/10A/10B service and caller regressions pass in GT1-05-13D. Remaining: a real exact-version Grok wizard flow (phase11); continuation remains full history replay without native ownership.",
 					"affectedRows": ["C-supportsWizard"],
-					"evidenceRef": "phase05-inline-wizard-caller-tests"
+					"evidenceRef": "phase05-reconciliation"
 				},
 				{
 					"id": "grok-onboarding-callers:C-supportsWizard",
-					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-12/12A/12A1/12B/12B1 discovery, readiness, configuration, preview, send/generation lifecycle and document tests are authored, not run. GT1-05-12C repaired launch acceptance ordering; GT1-05-13 execution remains pending. Native exact-version qualification is separate.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-12/12A/12A1/12B/12B1 regressions pass after the GT1-05-12C repair in GT1-05-13D. Remaining: a real exact-version onboarding flow (phase11).",
 					"affectedRows": ["C-supportsWizard"],
-					"evidenceRef": "phase05-onboarding-launch-acceptance"
+					"evidenceRef": "phase05-reconciliation"
 				}
 			],
 			"field": "supportsWizard",
@@ -17379,7 +17454,8 @@
 			},
 			"limitations": [
 				"Distinguish Grok native rules/memory from Maestro bound project knowledge; false flag is not universal memory absence.",
-				"GT1-05-07 provides a truthful native-memory refusal and preserves explicit Maestro-bound knowledge with configured-host, entry-path and redacted-error guards; native discovery/binding and deterministic/live qualification remain pending."
+				"GT1-05-07 provides a truthful native-memory refusal and preserves explicit Maestro-bound knowledge with configured-host, entry-path and redacted-error guards; native discovery/binding and deterministic/live qualification remain pending.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -17390,7 +17466,9 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase05NativeMemoryBoundaryEvidenceRef": "phase05-native-memory-boundary",
-				"phase05MemoryBoundaryTestEvidenceRef": "phase05-memory-boundary-tests"
+				"phase05MemoryBoundaryTestEvidenceRef": "phase05-memory-boundary-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19804,7 +19882,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok already has a beta picker entry. Installed/custom-path/account/model/effort and unsupported-mode consumer behavior needs end-to-end proof."
+				"Grok already has a beta picker entry. Installed/custom-path/account/model/effort and unsupported-mode consumer behavior needs end-to-end proof.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -19817,7 +19896,9 @@
 				"phase05ControlsEvidenceRef": "phase05-controls",
 				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
 				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests",
-				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair"
+				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -19842,10 +19923,10 @@
 				},
 				{
 					"id": "wizard-config-focus-before-remount:S01",
-					"code": "focus-repair-awaiting-regression",
-					"missingPrerequisite": "GT1-05-02E1 queues provider identity and restores focus after the grid commits. Static checks pass; GT1-05-13 must execute the existing GT1-05-02E real-screen regression. No behavioral run performed.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-02E1 repair and the GT1-05-02E real-screen regression pass in GT1-05-13D. Remaining: none for this focus boundary beyond whole-row live/platform qualification.",
 					"affectedRows": ["S01"],
-					"evidenceRef": "phase05-config-focus-repair"
+					"evidenceRef": "phase05-reconciliation"
 				}
 			],
 			"branchAuditRefs": ["B06", "B14", "B15", "B18", "B29"]
@@ -19915,7 +19996,8 @@
 			"limitations": [
 				"GT1-05-03 adds a scoped read-only ACP catalog consumer and typed IPC branch, not working production discovery. GT1-05-03A adds bounded detached native capture with lifecycle/config invalidation; GT1-05-03B exposes the canonical request/result via preload and renderer overloads; GT1-07-02 must supply the admitted live local ProcessManager reader. Legacy Grok discovery returns null; absent owner, remote and managed routes are unavailable. GT1-05-05/06 still own autocomplete, collision/argument behavior and route-bound dispatch. Native CLI/TUI commands and headless -p invocation are not certified by ACP advertisements.",
 				"GT1-05-05 implements only scoped slash refusals in the composer/queue and excludes stale provider prompt bodies. GT1-05-05A adds ephemeral discovery and completion metadata with no selectable native entries; admitted invocation with a fresh catalog on each new ACP process remains GT1-07-02. No native skill expansion, TUI action, CLI subcommand or headless command execution is certified.",
-				"GT1-05-05A refreshes advisory discovery on selected context, settings, focus and completion changes, with a finite receipt lifetime. Main-only revisions still require fresh admitted-sink validation; no native command is selectable or executed. GT1-05-06C/13 own completion regression coverage/execution."
+				"GT1-05-05A refreshes advisory discovery on selected context, settings, focus and completion changes, with a finite receipt lifetime. Main-only revisions still require fresh admitted-sink validation; no native command is selectable or executed. GT1-05-06C/13 own completion regression coverage/execution.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -19924,7 +20006,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20126,7 +20210,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GT1-05-07 provides a truthful native-memory refusal and preserves explicit Maestro-bound knowledge with configured-host, entry-path and redacted-error guards; native discovery/binding and deterministic/live qualification remain pending."
+				"GT1-05-07 provides a truthful native-memory refusal and preserves explicit Maestro-bound knowledge with configured-host, entry-path and redacted-error guards; native discovery/binding and deterministic/live qualification remain pending.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20137,7 +20222,9 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase05NativeMemoryBoundaryEvidenceRef": "phase05-native-memory-boundary",
-				"phase05MemoryBoundaryTestEvidenceRef": "phase05-memory-boundary-tests"
+				"phase05MemoryBoundaryTestEvidenceRef": "phase05-memory-boundary-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20231,7 +20318,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. GT1-05-09A implements selected-tab model/effort capture and conversation handoff. GT1-05-09B implements per-tab generation cancellation and captured effort forwarding; tests are not run and native continuation remains unqualified."
+				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. GT1-05-09A implements selected-tab model/effort capture and conversation handoff. GT1-05-09B implements per-tab generation cancellation and captured effort forwarding; tests are not run and native continuation remains unqualified.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20246,7 +20334,9 @@
 				"phase05InlineWizardGenerationHandoffEvidenceRef": "phase05-inline-wizard-generation-handoff",
 				"phase05InlineWizardServiceTestsEvidenceRef": "phase05-inline-wizard-service-tests",
 				"phase05GenerationCancellationTestsEvidenceRef": "phase05-generation-cancellation-tests",
-				"phase05InlineWizardCallerTestsEvidenceRef": "phase05-inline-wizard-caller-tests"
+				"phase05InlineWizardCallerTestsEvidenceRef": "phase05-inline-wizard-caller-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20283,10 +20373,10 @@
 				},
 				{
 					"id": "grok-inline-wizard-callers:S04",
-					"code": "caller-verification-pending",
-					"missingPrerequisite": "GT1-05-10/10B service and GT1-05-10A caller regressions are authored, not run. GT1-05-13 execution and exact-version live qualification remain. Ephemeral wizard continuation is full history replay without native ownership certification.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-10/10A/10B service and caller regressions pass in GT1-05-13D. Remaining: a real exact-version Grok wizard flow (phase11); continuation remains full history replay without native ownership.",
 					"affectedRows": ["S04"],
-					"evidenceRef": "phase05-inline-wizard-caller-tests"
+					"evidenceRef": "phase05-reconciliation"
 				}
 			],
 			"branchAuditRefs": ["B27"]
@@ -20367,7 +20457,8 @@
 			},
 			"limitations": [
 				"Grok has a dedicated shared discovery-args branch and text extraction. Account/model, unavailable binary, resume and error handling need consumer evidence.",
-				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. GT1-05-11A/B/C/D implement selected configuration, account/host readiness, generation and streaming preview with static checks only. Tests/verification and native qualification remain required; no onboarding parity claim."
+				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. GT1-05-11A/B/C/D implement selected configuration, account/host readiness, generation and streaming preview with static checks only. Tests/verification and native qualification remain required; no onboarding parity claim.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20388,7 +20479,9 @@
 				"phase05OnboardingHookTestsEvidenceRef": "phase05-onboarding-hook-tests",
 				"phase05OnboardingSendLifecycleTestsEvidenceRef": "phase05-onboarding-send-lifecycle-tests",
 				"phase05OnboardingGenerationTestsEvidenceRef": "phase05-onboarding-generation-tests",
-				"phase05OnboardingGenerationLifecycleTestsEvidenceRef": "phase05-onboarding-generation-lifecycle-tests"
+				"phase05OnboardingGenerationLifecycleTestsEvidenceRef": "phase05-onboarding-generation-lifecycle-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -20425,17 +20518,17 @@
 				},
 				{
 					"id": "wizard-config-focus-before-remount:S05",
-					"code": "focus-repair-awaiting-regression",
-					"missingPrerequisite": "GT1-05-02E1 queues provider identity and restores focus after the grid commits. Static checks pass; GT1-05-13 must execute the existing GT1-05-02E real-screen regression. No behavioral run performed.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-02E1 repair and the GT1-05-02E real-screen regression pass in GT1-05-13D. Remaining: none for this focus boundary beyond whole-row live/platform qualification.",
 					"affectedRows": ["S05"],
-					"evidenceRef": "phase05-config-focus-repair"
+					"evidenceRef": "phase05-reconciliation"
 				},
 				{
 					"id": "grok-onboarding-callers:S05",
-					"code": "consumer-and-verification-pending",
-					"missingPrerequisite": "GT1-05-12/12A/12A1/12B/12B1 discovery, readiness, configuration, preview, send/generation lifecycle and document tests are authored, not run. GT1-05-12C repaired launch acceptance ordering; GT1-05-13 execution remains pending. Native exact-version qualification is separate.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-12/12A/12A1/12B/12B1 regressions pass after the GT1-05-12C repair in GT1-05-13D. Remaining: a real exact-version onboarding flow (phase11).",
 					"affectedRows": ["S05"],
-					"evidenceRef": "phase05-onboarding-launch-acceptance"
+					"evidenceRef": "phase05-reconciliation"
 				}
 			],
 			"branchAuditRefs": ["B15", "B27"]
@@ -22961,7 +23054,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok reaches provider-neutral builder, but account/model/effort/route settings and local/remote isolation need explicit consumer assertions. Phase05/10 owners are provisional; GT1-01-07 must add bounded owner task coverage if current wording cannot cover these files."
+				"Grok reaches provider-neutral builder, but account/model/effort/route settings and local/remote isolation need explicit consumer assertions. Phase05/10 owners are provisional; GT1-01-07 must add bounded owner task coverage if current wording cannot cover these files.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22973,7 +23067,9 @@
 				"evidenceRef": "phase01-audit",
 				"phase05WorktreeConfigurationEvidenceRef": "phase05-worktree-configuration",
 				"phase05WorktreeTestsEvidenceRef": "phase05-worktree-tests",
-				"phase05WorktreeLaunchTestsEvidenceRef": "phase05-worktree-launch-tests"
+				"phase05WorktreeLaunchTestsEvidenceRef": "phase05-worktree-launch-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23068,7 +23164,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok uses generic creation; verify duplicated profile/effort, custom executable availability and no fallback provider. No separate agent-template registry was found in bounded symbol search; prompt templates are a distinct surface. GT1-01-07 must reconcile task scope for AgentCreationDialog coverage."
+				"Grok uses generic creation; verify duplicated profile/effort, custom executable availability and no fallback provider. No separate agent-template registry was found in bounded symbol search; prompt templates are a distinct surface. GT1-01-07 must reconcile task scope for AgentCreationDialog coverage.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23081,7 +23178,9 @@
 				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation",
 				"phase05DuplicatePermissionsEvidenceRef": "phase05-duplicate-permissions",
 				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests",
-				"phase05CreationConsumerTestsEvidenceRef": "phase05-creation-consumer-tests"
+				"phase05CreationConsumerTestsEvidenceRef": "phase05-creation-consumer-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23118,10 +23217,10 @@
 				},
 				{
 					"id": "duplicate-permission-handoff:S30",
-					"code": "verification-pending",
-					"missingPrerequisite": "GT1-05-02C1 implemented permission handoff; GT1-05-02D/D1 authored component and real creation-consumer assertions. GT1-05-13 must execute all three existing suites; no behavioral pass claimed.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-02C1 handoff and its GT1-05-02D/02D1 component and creation-consumer regressions pass in GT1-05-13D. Standard stays unsupported and refuses; real readonly enforcement is phase09/11.",
 					"affectedRows": ["S30"],
-					"evidenceRef": "phase05-creation-consumer-tests"
+					"evidenceRef": "phase05-reconciliation"
 				}
 			],
 			"ownerScopeReview": {
@@ -23214,7 +23313,8 @@
 				"GT1-05-06A1T authors 62 main-entry, discovery, SSH preparation, observation and managed admission regression cases in the two existing main suites. Static checks pass; execution remains not-run for GT1-05-13. Renderer forwarding/hash coverage remains GT1-05-06B1. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests.",
 				"GT1-05-06B authors 26 producer/template regressions and repairs four obsolete remote macro assertions in three existing suites. Static checks pass; execution stays not-run for GT1-05-13. GT1-05-06B1/B2 retain final queue and system-context/new-tab coverage; GT1-05-06A3/B3 own the demonstrated composer image omission. See Plans/grok-tier1/evidence/05.md#gt1-05-06b-custom-command-producer-and-template-tests.",
 				"GT1-05-06B3 extends the existing producer matrix to 12 idle/busy local/SSH staged/explicit/empty-image cases and three missing-target cases (10 additional cases). Exact copied image lists, pinned tab/raw arguments, one queue handoff, acceptance-before-clear and draft retention are authored in useInputProcessing.test.ts. Static checks pass; tests remain not-run for GT1-05-13. GT1-05-06B1 owns final queued spawn delivery and managed refusal; GT1-05-06B retains remote macro attachment refusal. See Plans/grok-tier1/evidence/05.md#gt1-05-06b3-custom-command-attachment-regression-tests.",
-				"GT1-05-06B2 authors 32 additional system-context/new-tab cases in the two assigned existing renderer suites. Configured local/SSH Git and plugin context, selected native identity and legacy aliases, literal macro arguments/delegation/tickets, fresh-tab ownership, native refusal before creation and truthful queue/failure receipts are covered. Scoped static checks and independent review pass; tests remain not-run for GT1-05-13. Reuses GT1-05-06B/B1 admission and remote-handler coverage; no native capability or parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06b2-system-context-and-new-tab-regression-tests."
+				"GT1-05-06B2 authors 32 additional system-context/new-tab cases in the two assigned existing renderer suites. Configured local/SSH Git and plugin context, selected native identity and legacy aliases, literal macro arguments/delegation/tickets, fresh-tab ownership, native refusal before creation and truthful queue/failure receipts are covered. Scoped static checks and independent review pass; tests remain not-run for GT1-05-13. Reuses GT1-05-06B/B1 admission and remote-handler coverage; no native capability or parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06b2-system-context-and-new-tab-regression-tests.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23223,7 +23323,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23260,15 +23362,17 @@
 				},
 				{
 					"id": "queued-command-main-entry-race",
-					"code": "verification-pending",
-					"missingPrerequisite": "GT1-05-06A1C/H implement enqueue-to-main comparisons; GT1-05-06A1T now authors main-entry/preparation/native-observation/managed-admission regressions, including fresh/resumed and reference-provider controls. GT1-05-06B1 now authors renderer fingerprint forwarding, selection/configuration preparation races, cancellation and refusal recovery. GT1-05-13 must execute both main suites plus all three B1 suites; authored tests remain not-run. Authoring and static checks do not certify the guarded route. See Plans/grok-tier1/evidence/05.md#gt1-05-06a1t-enqueue-fingerprint-regression-tests.",
-					"affectedRows": ["P07", "S31"]
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-06A1C/H enqueue-to-main comparisons and their GT1-05-06A1T/06B1 regressions pass in GT1-05-13D (phase05-reverification). Remaining: managed effect qualification (phase09), SSH/headless hosts (phase10) and exact-binary live dispatch (phase11).",
+					"affectedRows": ["P07", "S31"],
+					"evidenceRef": "phase05-reconciliation"
 				},
 				{
 					"id": "composer-command-images-omitted",
-					"code": "verification-pending",
-					"missingPrerequisite": "GT1-05-06A3 implements effectiveImages forwarding and staged-image clearing after queue acceptance. GT1-05-06B3 authors staged/explicit/empty-image, idle/busy, pinned-target and missing-target producer regressions with passing static checks. GT1-05-06B1 now authors exact final queued spawn attachments and literal arguments, plus thrown/returned managed refusal with queue and live-owner recovery. GT1-05-13 must execute the complete producer and queue suites; test authoring is not behavioral verification. Behavioral and native qualification remain not-run; remote macro attachment refusal is unchanged. See Plans/grok-tier1/evidence/05.md#gt1-05-06b3-custom-command-attachment-regression-tests.",
-					"affectedRows": ["P07", "S31"]
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-06A3 attachment forwarding and its GT1-05-06B3/06B1 regressions pass in GT1-05-13D. Remaining: remote macro attachments stay explicitly unsupported; native image handling on a real binary is phase11.",
+					"affectedRows": ["P07", "S31"],
+					"evidenceRef": "phase05-reconciliation"
 				}
 			],
 			"ownerScopeReview": {
@@ -23363,7 +23467,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Verify installed/unavailable states and all picker surfaces, not merely registry membership."
+				"Verify installed/unavailable states and all picker surfaces, not merely registry membership.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23379,7 +23484,9 @@
 				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests",
 				"phase05ConfigFocusRepairEvidenceRef": "phase05-config-focus-repair",
 				"phase05CustomDuplicateCreationEvidenceRef": "phase05-custom-duplicate-creation",
-				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests"
+				"phase05CreationDialogTestsEvidenceRef": "phase05-creation-dialog-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23404,10 +23511,10 @@
 				},
 				{
 					"id": "wizard-config-focus-before-remount:META-01",
-					"code": "focus-repair-awaiting-regression",
-					"missingPrerequisite": "GT1-05-02E1 queues provider identity and restores focus after the grid commits. Static checks pass; GT1-05-13 must execute the existing GT1-05-02E real-screen regression. No behavioral run performed.",
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"missingPrerequisite": "GT1-05-02E1 repair and the GT1-05-02E real-screen regression pass in GT1-05-13D. Remaining: none for this focus boundary beyond whole-row live/platform qualification.",
 					"affectedRows": ["META-01"],
-					"evidenceRef": "phase05-config-focus-repair"
+					"evidenceRef": "phase05-reconciliation"
 				}
 			],
 			"symbols": ["AGENT_DISPLAY_NAMES", "AGENT_PICKER_META", "PICKABLE_AGENT_IDS"],
@@ -23517,7 +23624,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok label claims no writes despite route-specific containment unqualified."
+				"Grok label claims no writes despite route-specific containment unqualified.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23538,7 +23646,9 @@
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase05ControlsEvidenceRef": "phase05-controls",
 				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
-				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests"
+				"phase05InteractionTestsEvidenceRef": "phase05-interaction-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23659,7 +23769,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Intentional preference differs from support; moderation backend still rejects Grok."
+				"Intentional preference differs from support; moderation backend still rejects Grok.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23671,7 +23782,9 @@
 				"evidenceRef": "phase01-audit",
 				"observation": "Claude then Codex then Antigravity; Grok absent and falls back to alphabetical picker if necessary.",
 				"phase05ControlsEvidenceRef": "phase05-controls",
-				"phase05ControlTestsEvidenceRef": "phase05-control-tests"
+				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -24004,7 +24117,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok context must follow selected model/account/route, not stale fallback or inconsistent combined flag/set."
+				"Grok context must follow selected model/account/route, not stale fallback or inconsistent combined flag/set.",
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -24021,7 +24135,9 @@
 				"phase03AcpComposedTestsEvidenceRef": "phase03-acp-composed-tests",
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
-				"phase05ControlTestsEvidenceRef": "phase05-control-tests"
+				"phase05ControlTestsEvidenceRef": "phase05-control-tests",
+				"phase05DeterministicEvidenceRef": "phase05-reverification",
+				"phase05ReconciliationRef": "phase05-reconciliation"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -28829,6 +28945,339 @@
 			"diffExitCode": 0,
 			"independentReview": "pass",
 			"reviewScope": "Independent source/parity and receipt applicability reviews; corrected explicit blank root semantics and replaced stale limitations. No remaining substantive findings."
+		}
+	},
+	"phase05Reconciliation": {
+		"taskId": "GT1-05-14",
+		"recordedAt": "2026-11-01",
+		"sourceCommit": "7b6a702615bdd015782ac29aa1379a440dc6a7f2",
+		"evidenceRef": "phase05-reconciliation",
+		"baseObservation": {
+			"ref": "feature/mega-maestro-v1.1.0-rc",
+			"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
+			"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
+			"aheadBehind": [344, 10],
+			"baseIsAncestorOfSource": false,
+			"sourceIsAncestorOfBase": false
+		},
+		"artifactReconciliation": "pass",
+		"phase05Deterministic": "pass",
+		"nativeQualification": "not-run",
+		"productAcceptance": "not-run",
+		"repositoryValidation": "fail",
+		"repositoryValidationReason": "Renderer tsc retains the known baseline src/main/plugins/plugin-host-handlers.ts TS2339 RequestInit.dispatcher diagnostic (P46, GT1-12-03); not a phase05 regression.",
+		"scope": "Only evidence/05.md and parity.json changed. Whole-row statuses, applicability, required scope, capability flags and beta status unchanged. Six phase05 verification blocker families now name remaining obligations. No tests, compilers or provider calls ran in this task.",
+		"capabilityState": {
+			"supportsSlashCommands": false,
+			"supportsProjectMemory": false,
+			"supportsWizard": true,
+			"supportsWizardNote": "Pre-existing declaration, not certified by phase05. Its source comment (capabilities.ts line 524) still describes always-approve discovery; the wizard now uses canonical readonly spawn intent. Correction belongs to the capability review in GROK-TIER1-11/12, not this evidence task."
+		},
+		"outcomes": [
+			{
+				"id": "provider-controls",
+				"outcome": "Provider pickers, configuration panel and MainPanel header controls",
+				"status": "pass",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["P17", "S01", "META-01", "META-04", "META-06", "P04"],
+				"scope": "Registry-derived picker order/default preference, installed/missing/custom-path states, logo/beta labels, model/effort/account controls with inherited versus explicit values, managed disabled controls, keyboard traversal and configuration-close focus restoration pass renderer fixtures. No new settings screen, capability or default-provider change."
+			},
+			{
+				"id": "permission-modes",
+				"outcome": "Readonly versus Full Access permission controls (desktop and phone)",
+				"status": "pass",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["META-03", "S01", "P17"],
+				"scope": "Full-to-readonly-to-full cycling updates the exact selected session/tab; stale Standard values normalize and unavailable readonly controls stay disabled. Real enforcement of the readonly route by the binary is a live claim (phase09/11)."
+			},
+			{
+				"id": "standard-permission-mode",
+				"outcome": "Standard (ACP approval) permission mode",
+				"status": "unsupported",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["META-03", "S01", "S30", "P17"],
+				"scope": "No selectable Standard/ACP option on desktop or phone; duplicate creation refuses unsupported Standard requests instead of escalating to Full Access. Production ACP approvals are phase07."
+			},
+			{
+				"id": "worktree-creation",
+				"outcome": "General agent worktree creation with inherited configuration",
+				"status": "pass",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["S29", "P17", "P04"],
+				"scope": "Session/tab model and effort, permissions, two account env maps, custom executable and local/SSH cwd survive creation with fresh native identity; real turn assembly reaches admitted fake-process execution or explicit route/policy refusal without fallback. Auto Run worktree ownership is phase08 and production ACP route selection phase07."
+			},
+			{
+				"id": "custom-duplicate-creation",
+				"outcome": "Custom and duplicate agent creation",
+				"status": "pass",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["S30", "P17", "P04"],
+				"scope": "Duplicate model/effort/account/env (absent versus explicit empty), draft immutability, host-scoped detection, the source tab effective permission and fresh Maestro/tab identities with no native ID pass component and real useSessionCrud fixtures. A typed custom path is not executable certification. Symphony selection is phase08."
+			},
+			{
+				"id": "native-command-discovery",
+				"outcome": "Native slash command and skill discovery",
+				"status": "not-run",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["P18", "S02", "C-supportsSlashCommands"],
+				"scope": "Bounded read-only ACP advertisement consumer, typed IPC/preload API and ephemeral selected-tab completion metadata pass fixtures (account/cwd isolation, precedence, malformed/hidden/disabled catalogs, stale/expired replies, remote/managed refusal, no execution, no secrets). Production capture needs the admitted live ProcessManager reader from GT1-07-02; until then discovery is unavailable and no native entry is selectable."
+			},
+			{
+				"id": "native-command-invocation",
+				"outcome": "Native skill, TUI-only and CLI subcommand invocation",
+				"status": "unsupported",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["P18", "S02", "C-supportsSlashCommands"],
+				"scope": "Composer, queue, remote handler and new-tab producer refuse unresolved native/TUI/CLI slash commands explicitly and never send them as ordinary chat. supportsSlashCommands stays false. Admitted native invocation with current-process revalidation is GT1-07-02."
+			},
+			{
+				"id": "maestro-custom-commands",
+				"outcome": "Maestro custom AI commands and prompt-template dispatch",
+				"status": "pass",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["S31", "P07"],
+				"scope": "Canonical queue receipts bind selected tab/provider/account/cwd/host; enqueue fingerprint is compared at main entry, preparation and beforeSpawn; literal dollar arguments, single-pass literal template insertion, configured local/SSH system context and composer attachments reach one admitted spawn; stale ownership and managed refusal keep or release the right item. Local desktop adapter boundary only; managed effects phase09, SSH/headless phase10."
+			},
+			{
+				"id": "remote-macro-attachments",
+				"outcome": "Remote (web/Lite) custom command attachments",
+				"status": "unsupported",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["S31"],
+				"scope": "The remote handler refuses macro attachments explicitly until command-queue attachment delivery is qualified; no silent image loss. Composer attachments are supported separately."
+			},
+			{
+				"id": "native-project-memory",
+				"outcome": "Native Grok project memory",
+				"status": "unsupported",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["P19", "S03", "C-supportsProjectMemory"],
+				"scope": "All eight memory handlers return the truthful native refusal; supportsProjectMemory stays false. Native memory exists upstream but selected account/workspace/storage binding is unverified. A rules file does not certify persistent memory. Translation/knowledge binding is GT1-06-06."
+			},
+			{
+				"id": "bound-project-knowledge",
+				"outcome": "Explicitly bound Maestro project knowledge for Grok agents",
+				"status": "pass",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["P19", "S03"],
+				"scope": "Existing bound knowledge keeps working with configured-SSH refusal, canonical entry-path validation, traversal/symlink refusal, no-follow writes, unchanged global files, two-account isolation and redacted errors. This is Maestro storage, not native memory."
+			},
+			{
+				"id": "inline-wizard",
+				"outcome": "Inline discovery and document wizard",
+				"status": "not-run",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["P20", "S04", "C-supportsWizard"],
+				"scope": "Canonical readonly discovery, bounded generation, thinking excluded from final answers, strict structured/document validation, selected-tab model/effort handoff, per-tab cancellation and inactivity bounds pass service and caller fixtures. A real Grok wizard flow has not run."
+			},
+			{
+				"id": "onboarding-wizard",
+				"outcome": "Onboarding provider discovery and plan generation wizard",
+				"status": "not-run",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["P20", "S05", "C-supportsWizard"],
+				"scope": "Detection-backed readiness, selected path/args/env/planner model/SSH forwarding, stale config/detection/document isolation, normalized and native streaming preview, launch-acceptance ordering, cancellation/timeouts and strict generation pass fixtures. A real onboarding flow has not run."
+			},
+			{
+				"id": "wizard-native-resume",
+				"outcome": "Wizard native session resume",
+				"status": "unsupported",
+				"deterministic": "pass",
+				"live": "not-run",
+				"affectedRows": ["P20", "S04", "S05"],
+				"scope": "Ephemeral wizard launches lack the persisted ownership binding, so bare Grok native IDs are withheld and continuation is full history replay. Not a native continuation claim."
+			}
+		],
+		"explicitUnsupported": [
+			"standard-permission-mode",
+			"native-command-invocation",
+			"remote-macro-attachments",
+			"native-project-memory",
+			"wizard-native-resume"
+		],
+		"liveCertificationRequired": [
+			{
+				"row": "C-supportsSlashCommands",
+				"reason": "Flag stays false; needs GT1-07-02 admitted invocation plus exact-binary native skill/command receipts before any change."
+			},
+			{
+				"row": "C-supportsProjectMemory",
+				"reason": "Flag stays false; needs a verified selected-account/workspace native memory binding and live receipts."
+			},
+			{
+				"row": "C-supportsWizard",
+				"reason": "Pre-existing true declaration is not certified by phase05; inline and onboarding flows need exact-binary live runs. The capabilities.ts supportsWizard comment still describes always-approve discovery, while source now uses canonical readonly spawn intent."
+			},
+			{
+				"row": "P17",
+				"reason": "Picker/configuration fixtures pass; installed-binary detection and platform behavior need exact-version receipts."
+			},
+			{
+				"row": "P18",
+				"reason": "Discovery/invocation unavailable in production until GT1-07-02; live catalog and invocation receipts required."
+			},
+			{
+				"row": "P19",
+				"reason": "Native memory unsupported; any enablement needs live binding evidence."
+			},
+			{
+				"row": "P20",
+				"reason": "Both wizard paths have deterministic evidence only."
+			},
+			{
+				"row": "S01",
+				"reason": "Readonly enforcement and account selection must be observed on a real binary."
+			},
+			{
+				"row": "S02",
+				"reason": "Same as P18."
+			},
+			{
+				"row": "S03",
+				"reason": "Same as P19."
+			},
+			{
+				"row": "S04",
+				"reason": "Inline wizard live flow not run."
+			},
+			{
+				"row": "S05",
+				"reason": "Onboarding live flow not run."
+			},
+			{
+				"row": "S29",
+				"reason": "Worktree child launch through a real binary and SSH host not run."
+			},
+			{
+				"row": "S30",
+				"reason": "Created agents have not launched a real binary."
+			},
+			{
+				"row": "S31",
+				"reason": "Custom command dispatch reached only fake processes."
+			},
+			{
+				"row": "META-03",
+				"reason": "Readonly label must match enforced binary behavior."
+			},
+			{
+				"row": "P04",
+				"reason": "Two-account selection proven by fixtures only."
+			},
+			{
+				"row": "P07",
+				"reason": "Template/argument delivery proven by fixtures only."
+			}
+		],
+		"receipts": [
+			{
+				"path": "Plans/grok-tier1/evidence/05-verification.json",
+				"sha256": "ce59d950e2ded76d12cf5d6324bc239e20e4de01450b21eaacfdb1a897ed52a2",
+				"sourceCommit": "c49299230115746ce54b85d943c26c3b88a7a7e8",
+				"status": "fail"
+			},
+			{
+				"path": "Plans/grok-tier1/evidence/05-reverification.json",
+				"sha256": "5655b202422a8803d517a444b166f31906756b5e448e43f7d9b4942f543bb329",
+				"sourceCommit": "4e89e0ad8a0f487100cb76cd19144d4312f897c9",
+				"status": "pass"
+			}
+		],
+		"latestScopedResult": {
+			"receipt": "Plans/grok-tier1/evidence/05-reverification.json",
+			"files": 43,
+			"passedTests": 3331,
+			"failedTests": 0,
+			"skippedTests": 0,
+			"collectionFailedFiles": 0,
+			"groups": {
+				"controls": {
+					"files": 14,
+					"passed": 962
+				},
+				"commands-memory": {
+					"files": 16,
+					"passed": 1587
+				},
+				"wizards": {
+					"files": 13,
+					"passed": 782
+				}
+			},
+			"typeChecks": {
+				"renderer": 2,
+				"main": 0,
+				"cli": 0
+			},
+			"sourceChangesSinceVerifiedCommit": "Only evidence files (05.md, 05-reverification.json) between 4e89e0ad8 and 7b6a70261; no rerun needed."
+		},
+		"blockerUpdates": 16,
+		"remainingOwners": {
+			"nativeCommandCaptureAndInvocation": "GT1-07-02",
+			"nativeCommandTransportTests": "GT1-07-04",
+			"productionAcp": "GROK-TIER1-07",
+			"autoRunWorktreesAndSymphony": "GROK-TIER1-08",
+			"managedAccountsAndEffects": "GROK-TIER1-09",
+			"sshAndHeadlessHosts": "GROK-TIER1-10",
+			"memoryTranslationAndKnowledgeBinding": "GT1-06-06",
+			"exactBinaryLiveQualification": "GROK-TIER1-11",
+			"repositoryValidation": "GT1-12-03",
+			"finalAcceptance": "GT1-12-06"
+		},
+		"liveBoundary": {
+			"status": "not-run",
+			"providerCalls": 0,
+			"budgetUsd": 0,
+			"authorizedEndpoints": [],
+			"authorizedSshTargets": [],
+			"required": "Explicit disposable account/endpoint authorization, exact binary/hash/version, positive finite spend/call/time limits and route/OS/SSH receipts. No installed account reads or credentials used."
+		},
+		"promotion": {
+			"grokRemainsBeta": true,
+			"capabilityChanges": false,
+			"wholeRowStatusChanges": false,
+			"applicabilityChanges": false
+		},
+		"imagesAnalyzed": 0,
+		"artifactChecks": {
+			"status": "pass",
+			"sourceCommit": "7b6a702615bdd015782ac29aa1379a440dc6a7f2",
+			"environment": "macOS arm64; installed pinned Node/npm tools; offline artifact checks only; npm cache under tmp/grok-tier1-phase05-reconcile/npm-cache; HOME/CODEX_HOME unchanged",
+			"reconcileCommand": ["node", "tmp/grok-tier1-phase05-reconcile/reconcile.mjs"],
+			"reconcileScriptSha256": "a401cb422e705aca0e8608f12a0bf011f0a4bde44b95895e5ca56f25db62b565",
+			"command": ["node", "tmp/grok-tier1-phase05-reconcile/check.mjs"],
+			"scriptSha256": "c02191835410b0627585937a2077c4b5819fb96122df9691d6c3d67a3e190d09",
+			"exitCode": 0,
+			"assertion": "All 134 rows keep required/kind/implementation/static/deterministic/live/applicability/ownerTasks/routes/platforms/versions and blocker ids versus the saved pre-task parity; all prior top-level sections and catalog entries unchanged; outcome statuses limited to pass/fail/not-run/unsupported with live not-run; receipt hashes match; no verification-pending or awaiting-regression blocker remains; Grok capability flags and BETA_AGENTS membership unchanged; evidence section and wiki-links present without em/en dashes.",
+			"formatCommand": [
+				"node",
+				"node_modules/prettier/bin/prettier.cjs",
+				"--check",
+				"Plans/grok-tier1/evidence/05.md",
+				"Plans/grok-tier1/parity.json"
+			],
+			"formatExitCode": 0,
+			"docsCommand": ["npm", "run", "docs:verify"],
+			"docsExitCode": 0,
+			"docsAssertedPaths": 1183,
+			"docsIndexEntries": 392,
+			"docsFindings": 0,
+			"diffCommand": ["git", "diff", "--check"],
+			"diffExitCode": 0,
+			"productTestsRun": false
 		}
 	}
 }
