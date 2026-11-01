@@ -668,13 +668,16 @@ describe('Grok ACP event fixtures', () => {
 				attempt_id: 'attempt',
 				tokens_used: 9000,
 			});
-			expect(event.sessionRelation).toEqual({
-				parentSessionId,
+			// A finish (no parent field) arrives on the parent's channel and is admitted
+			// under it; a parent naming another session stays reported, never adopted.
+			expect(event.sessionRelation).toMatchObject({
+				parentSessionId: parentSessionId ?? identity.sessionId,
 				parentTurnId,
 				childSessionId: 'child',
 				subagentId: 'worker',
 				attemptId: 'attempt',
 			});
+			expect(event.sessionRelation?.child === undefined).toBe(parentSessionId !== undefined);
 			expect(event.parentToolUseId).toBeUndefined();
 			expect(event.usage).toBeUndefined();
 			expect(f.capture.usage).toBeUndefined();

@@ -5,7 +5,12 @@ import {
 	compactToolOutput,
 	MAX_PERSISTED_TOOL_OUTPUT_CHARS,
 } from '../../toolOutput';
-import type { ParsedEvent, ParsedPlanEntry, ParsedPlanState } from '../parsers/agent-output-parser';
+import type {
+	ParsedEvent,
+	ParsedPlanEntry,
+	ParsedPlanState,
+	ParsedSubagentState,
+} from '../parsers/agent-output-parser';
 import { parsedUsageToStats, usageCostUsd } from '../streaming/usage-totals';
 import type { TurnTerminal } from '../streaming/turn-outcome';
 import type { AcpCall } from './acp-protocol';
@@ -32,6 +37,25 @@ function text(value: unknown): string | undefined {
 function count(value: unknown): number | undefined {
 	return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 }
+function identity(value: unknown): string | undefined {
+	return typeof value === 'string' && value.trim() && value.length <= 1024 ? value : undefined;
+}
+
+/** Children one capture tracks; further lineage stays opaque rather than unbounded. */
+const MAX_CHILDREN = 256;
+/** The pinned subagent schema carries no parent tool call and no per-child bill. */
+const NEVER_REPORTED = ['parentToolCallId', 'cost'];
+
+interface GrokChild {
+	id: string;
+	/** The session whose channel announced it, which the pinned schema makes the parent. */
+	parentSessionId: string;
+	parentTurnId?: string;
+	subagentId?: string;
+	attemptId?: string;
+	spawned: boolean;
+	state: Omit<ParsedSubagentState, 'unavailable'>;
+}
 
 /** One ordered capture per dispatched turn. No I/O, permission decisions or replay. */
 export class GrokAcpEventAdapter {
@@ -54,6 +78,7 @@ export class GrokAcpEventAdapter {
 	private readonly planEventIds = new Set<string>();
 	private planFingerprint?: string;
 	private planRevision = 0;
+	private readonly children = new Map<string, GrokChild>();
 
 	constructor(options: GrokAcpEventOptions) {
 		if (!options.sessionId?.trim() || !options.turnId?.trim())
@@ -69,12 +94,19 @@ export class GrokAcpEventAdapter {
 	notification(message: AcpCall, context: { replay: boolean; turnId: string }): ParsedEvent[] {
 		if (this.settlement || context.replay || context.turnId !== this.options.turnId) return [];
 		const params = record(message.params);
+		// Only a child this capture admitted may speak on another session's channel.
+		const child =
+			typeof params?.sessionId === 'string' && params.sessionId !== this.options.sessionId
+				? this.children.get(params.sessionId)
+				: undefined;
 		if (
 			message.id !== undefined ||
-			(params?.sessionId !== undefined && params.sessionId !== this.options.sessionId)
+			(params?.sessionId !== undefined && params.sessionId !== this.options.sessionId && !child)
 		)
 			return [];
+		// Child events keep the parent's session ID: the child is lineage, not a new session.
 		const event: ParsedEvent = { type: 'system', sessionId: this.options.sessionId, raw: message };
+		if (child) return this.childNotification(message, record(params?.update), child, event);
 		const update = params?.sessionId === this.options.sessionId ? record(params.update) : undefined;
 		if (!update) return [event];
 		if (message.method === 'session/update') {
@@ -162,14 +194,8 @@ export class GrokAcpEventAdapter {
 			case 'subagent_spawned':
 			case 'subagent_progress':
 			case 'subagent_finished':
-				event.sessionRelation = {
-					parentSessionId: text(update.parent_session_id),
-					parentTurnId: text(update.parent_prompt_id),
-					childSessionId: text(update.child_session_id),
-					subagentId: text(update.subagent_id),
-					attemptId: text(update.attempt_id),
-				};
 				// Child tokens_used is occupancy, not spend; no additional parent usage.
+				this.subagent(update, this.options.sessionId, event);
 				break;
 		}
 		if (event.usage) event.type = 'usage';
@@ -233,6 +259,19 @@ export class GrokAcpEventAdapter {
 			...(stop || durableStop ? { providerStopReason: stop || durableStop } : {}),
 		};
 		const events: ParsedEvent[] = [];
+		// The owned process ends with the turn, so no child outlives it. A child with
+		// no reported finish is closed here with its native outcome left unknown.
+		let unfinished = false;
+		for (const child of this.children.values()) {
+			if (child.state.status !== 'running') continue;
+			unfinished = true;
+			child.state = { ...child.state, lifecycle: 'closed-with-parent', status: 'unknown' };
+			events.push({
+				type: 'system',
+				sessionId: this.options.sessionId,
+				sessionRelation: this.relationOf(child, false),
+			});
+		}
 		const fallback = !this.answerSeen ? text(this.durable?.agent_result) : undefined;
 		if (fallback && this.settlement.status !== 'success')
 			events.push({
@@ -241,6 +280,27 @@ export class GrokAcpEventAdapter {
 				text: fallback,
 				isPartial: true,
 			});
+		const usage = this.usage(
+			(mismatch ? undefined : meta?.usage) ?? this.durable?.usage,
+			'turn',
+			true,
+			true
+		);
+		if (usage?.accounting && this.children.size) {
+			// Detail of the parent total, never added to it. The pinned prompt usage
+			// folds in completed children only, and no per-child bill is reported.
+			usage.accounting.children = [...this.children.values()].map((child) => ({
+				providerSessionId: child.id,
+				status: child.state.status === 'running' ? 'unknown' : child.state.status,
+				includedInParent:
+					child.state.status === 'completed' && usage.accounting!.childInclusion === 'completed'
+						? true
+						: 'unknown',
+				completeness: 'unknown',
+				cost: { status: 'unknown' },
+			}));
+			if (unfinished) usage.accounting.childCompleteness = 'partial';
+		}
 		events.push({
 			type: this.settlement.status === 'success' ? 'result' : 'error',
 			// A result is a snapshot for capture; the shared mapper suppresses it after streamed text.
@@ -250,15 +310,11 @@ export class GrokAcpEventAdapter {
 				: {}),
 			sessionId: this.options.sessionId,
 			terminal: { ...this.settlement },
-			usage: this.usage(
-				(mismatch ? undefined : meta?.usage) ?? this.durable?.usage,
-				'turn',
-				true,
-				true
-			),
+			usage,
 			raw: value,
 		});
 		this.tools.clear();
+		this.children.clear();
 		this.anonymousResponseIds.clear();
 		this.response = undefined;
 		this.durable = undefined;
@@ -372,8 +428,216 @@ export class GrokAcpEventAdapter {
 		}
 	}
 
-	private tool(update: Record<string, unknown>, event: ParsedEvent): ParsedEvent {
-		const id = text(update.toolCallId);
+	/** Work a tracked child emitted on its own channel, routed under its lineage. */
+	private childNotification(
+		message: AcpCall,
+		update: Record<string, unknown> | undefined,
+		child: GrokChild,
+		event: ParsedEvent
+	): ParsedEvent[] {
+		if (update && message.method === '_x.ai/session/update') {
+			if (update.sessionUpdate === 'response_started' && !child.state.model)
+				child.state.model = identity(update.model);
+			if (
+				update.sessionUpdate === 'subagent_spawned' ||
+				update.sessionUpdate === 'subagent_progress' ||
+				update.sessionUpdate === 'subagent_finished'
+			) {
+				// A grandchild announced on the child's channel names the child as parent.
+				this.subagent(update, child.id, event);
+				return [event];
+			}
+			// Child response, turn and durable usage stay raw: the parent's prompt usage
+			// already folds in completed children, so adding them would count twice.
+		}
+		if (
+			update &&
+			message.method === 'session/update' &&
+			(update.sessionUpdate === 'tool_call' || update.sessionUpdate === 'tool_call_update')
+		) {
+			const id = text(update.toolCallId);
+			// Native tool IDs are unique per session only. The owner-scoped key is a
+			// display identity like the plan's; the native ID stays in the state.
+			if (id) {
+				const routed = this.tool(update, event, `grok-child-tool:${canonicalJson([child.id, id])}`);
+				routed.sessionRelation = this.relationOf(child, true);
+				return [routed];
+			}
+		}
+		event.sessionRelation = this.relationOf(child, true);
+		const content = record(update?.content);
+		if (
+			message.method === 'session/update' &&
+			(update?.sessionUpdate === 'agent_message_chunk' ||
+				update?.sessionUpdate === 'agent_thought_chunk') &&
+			content?.type === 'text' &&
+			typeof content.text === 'string'
+		) {
+			// Stays a system event: child prose is observable but never the parent's answer.
+			event.text = content.text;
+			event.isReasoning = update.sessionUpdate === 'agent_thought_chunk';
+		}
+		return [event];
+	}
+
+	/** Admit or advance one reported child from a lifecycle notification on `channel`. */
+	private subagent(update: Record<string, unknown>, channel: string, event: ParsedEvent): void {
+		const kind = update.sessionUpdate;
+		const reported = {
+			parentSessionId: text(update.parent_session_id),
+			parentTurnId: text(update.parent_prompt_id),
+			childSessionId: text(update.child_session_id),
+			subagentId: text(update.subagent_id),
+			attemptId: text(update.attempt_id),
+		};
+		event.sessionRelation = reported;
+		const id = identity(reported.childSessionId);
+		// Lineage must name the channel it arrived on and this prompt when both are
+		// known; anything else stays opaque so one child cannot adopt another's work.
+		if (
+			!id ||
+			id === this.options.sessionId ||
+			id === channel ||
+			(reported.parentSessionId !== undefined && reported.parentSessionId !== channel) ||
+			(kind !== 'subagent_finished' && reported.parentSessionId === undefined) ||
+			(channel === this.options.sessionId &&
+				reported.parentTurnId !== undefined &&
+				this.options.promptId !== undefined &&
+				reported.parentTurnId !== this.options.promptId)
+		)
+			return;
+		let child = this.children.get(id);
+		if (child && child.parentSessionId !== channel) return;
+		if (!child) {
+			if (this.children.size >= MAX_CHILDREN) return;
+			child = {
+				id,
+				parentSessionId: channel,
+				spawned: false,
+				state: { lifecycle: 'progress', status: 'running' },
+			};
+			this.children.set(id, child);
+		}
+		const retry =
+			kind === 'subagent_spawned' &&
+			reported.attemptId !== undefined &&
+			reported.attemptId !== child.attemptId;
+		// A report from a superseded attempt stays opaque: it cannot finish the retry.
+		if (
+			!retry &&
+			reported.attemptId !== undefined &&
+			child.attemptId !== undefined &&
+			reported.attemptId !== child.attemptId
+		)
+			return;
+		child.parentTurnId ??= identity(reported.parentTurnId);
+		child.subagentId ??= identity(reported.subagentId);
+		if (retry || child.attemptId === undefined) child.attemptId = identity(reported.attemptId);
+		const counters = (keys: Record<string, string>) =>
+			Object.fromEntries(
+				Object.entries(keys).flatMap(([to, from]) =>
+					count(update[from]) === undefined ? [] : [[to, count(update[from])]]
+				)
+			);
+		if (kind === 'subagent_spawned') {
+			if (child.state.status !== 'running' && !retry) {
+				event.sessionRelation = this.relationOf(child, false);
+				return;
+			}
+			child.spawned = true;
+			child.state = {
+				lifecycle: 'spawned',
+				status: 'running',
+				agentType: identity(update.subagent_type),
+				description: text(update.description) && cleanToolOutputText(text(update.description)!),
+				model: identity(update.model) ?? child.state.model,
+				persona: identity(update.persona),
+				role: identity(update.role),
+				capabilityMode: identity(update.capability_mode),
+				contextSource: identity(update.effective_context_source),
+				resumedFrom: identity(update.resumed_from),
+				...(child.state.progress ? { progress: child.state.progress } : {}),
+			};
+		} else if (kind === 'subagent_progress') {
+			// Monotonic: a late progress report never reopens a finished child.
+			if (child.state.status !== 'running') {
+				event.sessionRelation = this.relationOf(child, false);
+				return;
+			}
+			const toolsUsed = Array.isArray(update.tools_used)
+				? update.tools_used.flatMap((name) => identity(name) ?? []).slice(0, 64)
+				: undefined;
+			child.state = {
+				...child.state,
+				lifecycle: 'progress',
+				progress: {
+					...counters({
+						durationMs: 'duration_ms',
+						turnCount: 'turn_count',
+						toolCallCount: 'tool_call_count',
+						contextTokens: 'tokens_used',
+						contextWindowTokens: 'context_window_tokens',
+						errorCount: 'error_count',
+					}),
+					...(toolsUsed ? { toolsUsed } : {}),
+				},
+			};
+		} else {
+			if (child.state.status !== 'running') {
+				event.sessionRelation = this.relationOf(child, false);
+				return;
+			}
+			const status = text(update.status);
+			child.state = {
+				...child.state,
+				lifecycle: 'finished',
+				status:
+					status === 'completed' || status === 'failed' || status === 'cancelled'
+						? status
+						: 'unknown',
+				providerStatus: status,
+				error: text(update.error) && cleanToolOutputText(text(update.error)!),
+				output: text(update.output) && cleanToolOutputText(text(update.output)!),
+				progress: {
+					...child.state.progress,
+					...counters({
+						durationMs: 'duration_ms',
+						turnCount: 'turns',
+						toolCallCount: 'tool_calls',
+						contextTokens: 'tokens_used',
+					}),
+				},
+			};
+		}
+		event.sessionRelation = this.relationOf(child, false);
+	}
+
+	private relationOf(
+		child: GrokChild,
+		nested: boolean
+	): NonNullable<ParsedEvent['sessionRelation']> {
+		const unavailable = [...NEVER_REPORTED];
+		if (!child.spawned) unavailable.push('spawn');
+		if (!child.state.model) unavailable.push('model');
+		if (!child.parentTurnId) unavailable.push('parentTurnId');
+		if (child.state.lifecycle === 'closed-with-parent') unavailable.push('nativeStatus');
+		const state: ParsedSubagentState = { ...structuredClone(child.state), unavailable };
+		for (const key of Object.keys(state) as Array<keyof ParsedSubagentState>)
+			if (state[key] === undefined) delete state[key];
+		return {
+			parentSessionId: child.parentSessionId,
+			parentTurnId: child.parentTurnId,
+			childSessionId: child.id,
+			subagentId: child.subagentId,
+			attemptId: child.attemptId,
+			...(nested ? { nested: true } : {}),
+			child: state,
+		};
+	}
+
+	private tool(update: Record<string, unknown>, event: ParsedEvent, key?: string): ParsedEvent {
+		const providerToolCallId = text(update.toolCallId);
+		const id = providerToolCallId && (key ?? providerToolCallId);
 		if (!id) return event;
 		const previous = this.tools.get(id);
 		const name = text(update.title) || previous?.name || text(update.kind);
@@ -423,6 +687,7 @@ export class GrokAcpEventAdapter {
 		}
 		const state = {
 			...previous?.state,
+			...(key ? { providerToolCallId } : {}),
 			status,
 			providerStatus: update.status ?? previous?.state.providerStatus,
 			...(update.rawInput !== undefined
