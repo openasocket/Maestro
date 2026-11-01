@@ -65,6 +65,11 @@ export interface TurnProcessSpec {
 	 * sets it, with the command and args prepared for that shell.
 	 */
 	shell?: boolean | string;
+	/**
+	 * A bidirectional protocol process (`grokAcpProcessSpec`). Only its protocol driver
+	 * may start it: open stdin, no prompt bytes, no output-only parser.
+	 */
+	transport?: 'acp-stdio';
 }
 
 export interface WindowsShellRulesOptions {
@@ -377,6 +382,18 @@ export function startTurn(
 			env: { ...spec.env },
 			promptArtifact: { ...spec.promptArtifact },
 		};
+	}
+	// A routed ACP process started as a one-shot turn would get a closed stdin and an
+	// output-only parser: a parallel unmanaged run that silently drops its interactions.
+	if (
+		spec.transport === 'acp-stdio' &&
+		(!options.keepStdinOpen ||
+			spec.stdin !== undefined ||
+			spec.promptArtifact ||
+			options.parser ||
+			options.agentId)
+	) {
+		throw new Error('An ACP process can only be started by its protocol driver.');
 	}
 	const artifact = spec.promptArtifact;
 	let artifactFd: number | undefined;

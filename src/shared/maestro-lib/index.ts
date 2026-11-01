@@ -334,6 +334,7 @@ export * from './run/turn-capture';
 export * from './run/session';
 export * from './run/run-to-completion';
 export * from './grok/acp-turn';
+export * from './grok/route';
 export type {
 	GrokAcpQuestionEvent,
 	GrokAcpQuestionIdentity,
