@@ -2283,6 +2283,39 @@ describe.skipIf(process.platform === 'win32')(
 				'session/prompt native-hold',
 			]);
 		});
+
+		// GT1-11-04B pins GT1-11-04A: only a stop someone asked for reads as one.
+		it('reads a peer exiting 0 before the prompt answer as a crash, never a completion (GT1-11-04B)', async () => {
+			const { turn, scope } = grokTurn({ FAKE_MODE: 'vanish', FAKE_SESSION: 'native-vanish' });
+			const run = await start(turn, managedOptions(scope).options);
+			const { events, result } = await finished(run);
+			expect(result.outcome).toBe('crashed');
+			expect(result.exit).toMatchObject({ exitCode: 0, signal: null, interrupted: false });
+			expect(result.exit).not.toHaveProperty('stoppedBy');
+			expect(run.stopRequested()).toBe(false);
+			expect(result.error).toMatchObject({ type: 'agent_crashed', agentId: 'grok' });
+			expect(result.error!.message).toMatch(/\((closed|transport-lost|process-lost)\)/);
+			// No terminal usage was ever reported, so nothing reads as a final completed turn.
+			expect(usageOf(events)).toEqual([]);
+			expect(logOf()).not.toContain('session/cancel native-vanish');
+			expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+		});
+
+		it('keeps a caller interrupt an interruption, with session/cancel before any signal (GT1-11-04B)', async () => {
+			const { turn, scope } = grokTurn({ FAKE_MODE: 'hold', FAKE_SESSION: 'native-stop' });
+			const run = await start(turn, managedOptions(scope).options);
+			const done = finished(run);
+			await waitUntil(() => logOf().some((line) => line.startsWith('prompt')));
+			run.interrupt();
+			const { result } = await done;
+			expect(run.stopRequested()).toBe(true);
+			expect(result.outcome).toBe('interrupted');
+			expect(result.exit).toMatchObject({ interrupted: true, stoppedBy: 'caller' });
+			expect(result.error).toBeUndefined();
+			// The live peer received the protocol cancel before the stop ladder signalled it.
+			expect(logOf().slice(-1)).toEqual(['session/cancel native-stop']);
+			expect(runToCompletion.runTurn).not.toHaveBeenCalled();
+		});
 	}
 );
 

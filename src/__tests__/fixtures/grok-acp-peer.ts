@@ -9,7 +9,8 @@
  *
  * - `FAKE_MODE`: `ok` (default) answers each prompt; `permission` asks one
  *   `session/request_permission` (`perm-1`) and answers by the selected option; `hold` keeps
- *   the prompt open until `session/cancel`; `noversion` reports no agent version; `question`
+ *   the prompt open until `session/cancel`; `vanish` (GT1-11-04B) sends one chunk and exits 0
+ *   with the prompt unanswered; `noversion` reports no agent version; `question`
  *   (GT1-07-04B) sends a `plan` update (`FAKE_PLAN` entries, default one in-progress step)
  *   and then one reverse request `q-1` of method `FAKE_QMETHOD` (default
  *   `_x.ai/ask_user_question`) for session `FAKE_QSESSION` (default its own), with params
@@ -70,6 +71,7 @@ process.stdin.on('data', (d) => {
 				options: [{ optionId: 'yes', name: 'Allow', kind: 'allow_once' },
 					{ optionId: 'no', name: 'Deny', kind: 'reject_once' }] } });
 			else if (env.FAKE_MODE === 'hold') chunk('working');
+			else if (env.FAKE_MODE === 'vanish') { chunk('working'); process.stdout.write('', () => process.exit(0)); }
 			else if (env.FAKE_MODE === 'question') ask();
 			else { chunk('Hello from ACP'); finish(m.id, 'end_turn', env.FAKE_TICKS ? { costUsdTicks: env.FAKE_TICKS } : {}); }
 		} else if (m.id === 'q-1' && !m.method) {
