@@ -30,6 +30,7 @@ import { getProviderProfileConfig, resolveAgentAccountKey } from '../shared/prov
 import { buildAgentEnvironment } from '../shared/maestro-lib/launch/env';
 import { expandTilde, encodeClaudeProjectPath } from '../shared/pathUtils';
 import { AGENT_IDS } from '../shared/agentIds';
+import { getAgentDisplayName } from '../shared/agentMetadata';
 import { canonicalJson } from '../shared/canonicalJson';
 import { isPathAtOrUnderRoot } from '../shared/worktreePaths';
 import { createKeyedWriteQueue } from '../shared/keyedWriteQueue';
@@ -272,6 +273,22 @@ export class ProviderTranslationService {
 				severity: 'block',
 				message:
 					'Remote native translation requires an SSH adapter; local roots cannot stand in for remote accounts.',
+			});
+		// Maestro writes a Claude or Grok destination under the account folder itself
+		// and never creates that folder, so an account the provider has never used is
+		// refused here by name rather than by a symlink-escape error at staging.
+		if (
+			source.provider !== destination.provider &&
+			destination.nativeSessionRoot &&
+			!(await fs.stat(destination.accountRoot).then(
+				(stat) => stat.isDirectory(),
+				() => false
+			))
+		)
+			limitations.push({
+				code: 'destination-account-missing',
+				severity: 'block',
+				message: `The selected ${getAgentDisplayName(destination.provider)} account folder does not exist yet. Run ${getAgentDisplayName(destination.provider)} once with this account, then plan the migration again.`,
 			});
 		const tabs = translationSessionTabs(session);
 		const conversations: PortableConversation[] = [];
