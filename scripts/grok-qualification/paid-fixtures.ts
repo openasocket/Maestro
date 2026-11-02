@@ -754,7 +754,18 @@ export const POLICY_LEGS: readonly PolicyLegSpec[] = Object.freeze([
 	).map((id): PolicyLegSpec => ({ id, kind: 'authority', turns: [], maxTurns: 0 })),
 ]);
 
-/** Every production direction with Grok on one side; each runs its `translate-resume` leg (GT1-11-13B). */
+/** How many times the Grok-peer-Grok round trip repeats after the reverse leg (GT1-11-13B2). */
+export const TRANSLATION_ROUND_TRIPS = 2;
+/** The ledger leg of one hop of the nth round trip, on the direction the hop travels. */
+export const translationRoundTripLeg = (n: number) => `round-trip-${n}`;
+
+/**
+ * Every production direction with Grok on one side; each runs its
+ * `translate-resume` leg (GT1-11-13B). A peer-to-Grok direction also runs the
+ * `reverse` leg (the peer session the Grok-to-peer leg resumed, translated
+ * back to Grok), and both directions one hop of each round trip (GT1-11-13B2):
+ * every hop is one leg on the direction it travels, billed to its destination.
+ */
 export const CROSS_PROVIDER_DIRECTIONS: readonly CrossProviderDirectionSpec[] = Object.freeze(
 	TRANSLATION_DIRECTIONS.filter((d) => (d.source === 'grok') !== (d.destination === 'grok')).map(
 		(d): CrossProviderDirectionSpec => ({
@@ -764,7 +775,13 @@ export const CROSS_PROVIDER_DIRECTIONS: readonly CrossProviderDirectionSpec[] = 
 			peer: (d.source === 'grok' ? d.destination : d.source) as CrossProviderPeer,
 			sourceVersions: [...d.sourceVersions],
 			destinationVersions: [...d.destinationVersions],
-			legs: ['translate-resume'],
+			legs: [
+				'translate-resume',
+				...(d.destination === 'grok' ? ['reverse'] : []),
+				...Array.from({ length: TRANSLATION_ROUND_TRIPS }, (_, i) =>
+					translationRoundTripLeg(i + 1)
+				),
+			],
 			maxTurns: 1,
 		})
 	)
@@ -876,6 +893,36 @@ export const TRANSLATION_LEG_ASSERTIONS = Object.freeze([
 	'projected-skill',
 	'projected-rule',
 	'memory-recalled',
+	'carried-tool-not-executed',
+	'no-duplicate-session',
+	'source-unchanged',
+	'owned-roots-only',
+] as const);
+
+/**
+ * The one resumed turn of a reverse or round-trip hop (GT1-11-13B2): the fact
+ * nonce is its token and the tool nonce its citation, recalled from the carried
+ * history on every hop. The resources are the translate-resume leg's.
+ */
+export const TRANSLATION_HOP_TURN: PaidFixtureTurn = Object.freeze({
+	prompt:
+		'Do not run any command and do not change any file. Using the earlier messages of this ' +
+		'conversation, reply on one line with the synthetic fact I asked you to remember, a space, ' +
+		'and the exact token the earlier tool result returned.',
+	expect: TRANSLATION_NONCES.fact,
+	alsoExpect: [TRANSLATION_NONCES.toolResult],
+});
+
+/** The assertions a reverse or round-trip hop must evaluate; a hop missing one cannot pass. */
+export const TRANSLATION_HOP_ASSERTIONS = Object.freeze([
+	'hop-reconciled',
+	'lineage-stable',
+	'staged-rows-validated',
+	'resume-exit-clean',
+	'resume-session-id',
+	'loaded-rows',
+	'fact-nonce',
+	'tool-result-nonce',
 	'carried-tool-not-executed',
 	'no-duplicate-session',
 	'source-unchanged',
@@ -1129,18 +1176,9 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 		[{ id: 'negative-policy', detail: 'denied effects', owner: 'GT1-11-12' }],
 		{ policyLegs: [...POLICY_LEGS] }
 	),
-	E11: fixture(
-		'E11',
-		[turn('E11', 1), turn('E11', 2)],
-		[
-			{
-				id: 'cross-provider-round-trip',
-				detail: 'the reverse leg and two Grok-Claude-Grok and Grok-Codex-Grok round trips',
-				owner: 'GT1-11-13B2',
-			},
-		],
-		{ crossProvider: [...CROSS_PROVIDER_DIRECTIONS] }
-	),
+	E11: fixture('E11', [turn('E11', 1), turn('E11', 2)], [], {
+		crossProvider: [...CROSS_PROVIDER_DIRECTIONS],
+	}),
 	E12: fixture(
 		'E12',
 		[turn('E12', 1)],

@@ -303,6 +303,8 @@ import {
 } from '../../src/shared/maestro-lib/translation/native-records';
 import { planTranslation } from '../../src/shared/maestro-lib/translation/registry';
 import { applyTranslation } from '../../src/shared/maestro-lib/translation/transaction';
+import { reconcileConversation } from '../../src/shared/maestro-lib/translation/reconcile';
+import { nativeRecordKey, recordKey } from '../../src/shared/maestro-lib/translation/identity';
 import { collectTranslationResources } from '../../src/shared/maestro-lib/translation/resources';
 import { planResourceProjections } from '../../src/shared/maestro-lib/translation/resource-projections';
 import { bindTranslationKnowledge } from '../../src/shared/maestro-lib/translation/knowledge-binding';
@@ -314,6 +316,7 @@ import {
 } from '../../src/shared/maestro-lib/translation/archive';
 import type {
 	PortableConversation,
+	TranslationCheckpoint,
 	TranslationIdentity,
 } from '../../src/shared/maestro-lib/translation/types';
 import { encodeClaudeProjectPath } from '../../src/shared/pathUtils';
@@ -418,11 +421,15 @@ import {
 	type SessionLegId,
 	type SessionLegSpec,
 	type SyntheticResourceSet,
+	TRANSLATION_HOP_ASSERTIONS,
+	TRANSLATION_HOP_TURN,
 	TRANSLATION_LEG_ASSERTIONS,
 	TRANSLATION_NONCES,
 	TRANSLATION_RESOURCE_NONCES,
 	TRANSLATION_RESUME_TURN,
+	TRANSLATION_ROUND_TRIPS,
 	translationResourceSeeds,
+	translationRoundTripLeg,
 	translationSeedRows,
 	type UtilityLegId,
 	type WorkflowLegId,
@@ -14471,7 +14478,76 @@ export const CROSS_PROVIDER_ROUND_TRIP_OWNER = 'GT1-11-13B2';
 /** No task resumes a staged Grok session through ACP `session/load`; an ACP case resumes only a peer destination. */
 export const ACP_TRANSLATION_RESUME_OWNER = 'unassigned-acp-translation-resume';
 
-type TranslationAssertionId = (typeof TRANSLATION_LEG_ASSERTIONS)[number];
+type TranslationAssertionId =
+	| (typeof TRANSLATION_LEG_ASSERTIONS)[number]
+	| (typeof TRANSLATION_HOP_ASSERTIONS)[number];
+
+/** The assertions a leg must evaluate: a translate-resume leg's, or a reverse or round-trip hop's. */
+const translationLegAssertions = (leg: string): readonly TranslationAssertionId[] =>
+	leg === 'translate-resume' || leg.endsWith(':translate-resume')
+		? TRANSLATION_LEG_ASSERTIONS
+		: TRANSLATION_HOP_ASSERTIONS;
+
+/**
+ * One Grok-peer round-trip chain (GT1-11-13B2): started by the Grok-to-peer
+ * translate-resume leg, continued by the reverse leg and every round-trip hop,
+ * all under one translation agent, archive and tab, so the production checkpoint
+ * the previous hop committed is what the next hop reconciles against.
+ */
+interface TranslationChain {
+	tabId: string;
+	agentId: string;
+	archiveDir: string;
+	/** The original Grok seed's record origins: every later hop's conversation must begin with them. */
+	seedOrigins: string[];
+	/** The session the last hop staged and resumed, on its destination. */
+	latest: { provider: ProviderId; sessionId: string; files: string[] } | null;
+	/** Whether the last chained leg passed; a hop never continues a failed or unrun one. */
+	ok: boolean;
+	lastLeg: string;
+}
+
+/** The translation agent, archive and tab of a translate-resume leg (and of the chain it starts). */
+const translationChainNames = (w: AccountingLegContext, specId: string) => ({
+	tabId: `qualify-${specId}`,
+	agentId: `qualify-${w.c.caseId}-${specId}`,
+	archiveDir: path.join(w.accountRoot!, 'qualify-e11-archive', specId),
+});
+
+/**
+ * The order the E11 legs run in: every direction's translate-resume first, then
+ * per peer the reverse leg and the round trips, each hop on the direction it
+ * travels (Grok-to-peer, then peer-to-Grok). A declared leg the schedule does
+ * not know runs last and is refused by name.
+ */
+export function crossProviderLegSchedule(
+	specs: readonly CrossProviderDirectionSpec[]
+): Array<{ spec: CrossProviderDirectionSpec; leg: string }> {
+	const out = specs
+		.filter((spec) => spec.legs.includes('translate-resume'))
+		.map((spec) => ({ spec, leg: 'translate-resume' }));
+	for (const forward of specs.filter((s) => s.source === 'grok')) {
+		const back = specs.find((s) => s.source === forward.peer && s.destination === 'grok');
+		if (!back) continue;
+		const hops = [{ spec: back, leg: 'reverse' }];
+		for (let n = 1; n <= TRANSLATION_ROUND_TRIPS; n++)
+			hops.push(
+				{ spec: forward, leg: translationRoundTripLeg(n) },
+				{ spec: back, leg: translationRoundTripLeg(n) }
+			);
+		out.push(...hops.filter((h) => h.spec.legs.includes(h.leg)));
+	}
+	for (const spec of specs)
+		for (const leg of spec.legs)
+			if (!out.some((x) => x.spec === spec && x.leg === leg)) out.push({ spec, leg });
+	return out;
+}
+
+const KNOWN_TRANSLATION_LEGS = new Set([
+	'translate-resume',
+	'reverse',
+	...Array.from({ length: TRANSLATION_ROUND_TRIPS }, (_, i) => translationRoundTripLeg(i + 1)),
+]);
 
 export interface CrossProviderLegReceipt {
 	leg: string;
@@ -14504,6 +14580,17 @@ export interface CrossProviderLegReceipt {
 		loadedRows: number;
 		toolEvents: number;
 		sessionsAdded: number;
+	} | null;
+	/**
+	 * A reverse or round-trip hop (GT1-11-13B2): the session it carried on, the
+	 * records the previous hop's checkpoint held, the records the source appended
+	 * since (reconciled as new), and the records the reconciled conversation holds.
+	 */
+	hop: {
+		sourceSessionId: string;
+		previousRecords: number;
+		newRecords: number;
+		records: number;
 	} | null;
 	turns: PaidTurnResult[];
 	assertions: PaidAssertionOutcome[];
@@ -14677,92 +14764,54 @@ function destinationSessions(dest: TranslationIdentity): string[] {
 	}
 }
 
-/**
- * One translate-resume leg: the synthetic source history extracted, planned and
- * applied by production code into the owned destination, then the destination
- * CLI resuming the staged id with one turn counted on the leg's reservation.
- * Returns why the turn left an effect uncertain (null when it did not).
- */
-async function runTranslateResumeLeg(
+/** The exact binary tuple of each side of a leg: provider, declared version and pinned sha256. */
+function translationBinaries(
 	w: AccountingLegContext,
-	r: CrossProviderLegReceipt,
-	spec: CrossProviderDirectionSpec,
 	peer: PeerPreflight,
-	reservation: SpendReservation
-): Promise<string | null> {
-	const project = fs.realpathSync(w.cwd);
-	const src = translationIdentity(spec.source, w, peer, project);
-	const dest = translationIdentity(spec.destination, w, peer, project);
+	spec: CrossProviderDirectionSpec
+): NonNullable<CrossProviderLegReceipt['binaries']> {
 	const side = (p: ProviderId) =>
 		p === 'grok'
 			? { provider: p, version: w.config.binary.version, sha256: w.config.binary.sha256 }
 			: { provider: p, version: peer.binary.version, sha256: peer.binary.sha256 };
-	r.binaries = { source: side(spec.source), destination: side(spec.destination) };
-	const failures: string[] = [];
-	const check = (id: TranslationAssertionId, ok: boolean, detail: string) => {
-		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
-		if (!ok) failures.push(id);
-	};
-	const sentinel = path.join(project, TRANSLATION_NONCES.toolSentinel);
-	if (fs.existsSync(sentinel)) throw new Error('tool-sentinel-present-before-leg');
-	// A peer destination's launch environment (owned home, credential by reference) is
-	// settled before anything is written: a refusal leaves the leg not-run.
-	const toPeer = dest.provider !== 'grok';
-	let launchEnv: Record<string, string> = {};
-	if (toPeer) {
-		const env = peerLaunchEnv(w, peer);
-		if ('refused' in env) {
-			r.reasons.push(translationReason(env.refused, env.detail));
-			return null;
-		}
-		launchEnv = env.env;
-	}
+	return { source: side(spec.source), destination: side(spec.destination) };
+}
 
-	const seeded = await seedTranslationSource(src, `qualify-${spec.id}`);
-	const digest = () => seeded.files.map((f) => sha256Of(fs.readFileSync(f))).join(',');
-	const sourceDigest = digest();
-	const conv = seeded.conversation;
-	r.payloadClasses = [
-		...new Set([
-			...conv.records.flatMap((x) => x.blocks.map((b) => b.kind)),
-			...conv.artifacts.map((a) => `artifact:${a.kind}`),
-		]),
-	].sort();
-	// The resource sentinels go through the plan's resource scope and the production projections.
-	const seededResources = await seedTranslationResources(src);
-	const resources = seededResources.resources.artifacts;
-	const projections = await planResourceProjections(resources, dest);
-	const registry = createTranslationRegistry();
-	const plan = planTranslation({
-		agentId: `qualify-${w.c.caseId}-${spec.id}`,
-		source: src,
-		destination: dest,
-		scope: { projectKnowledge: true, selectedUserResources: seededResources.selected },
-		conversations: [conv],
-		registry,
-		limitations: [...seededResources.resources.limitations, ...projections.limitations],
-		resources,
-	});
-	r.plan = {
-		status: plan.status,
-		verification: plan.verification,
-		limitations: plan.limitations.map((l) => `${l.severity}:${l.code}`),
-	};
-	const journal: TranslationJournal = {
-		schemaVersion: 1,
-		plan,
-		state: 'planned',
-		conversations: [conv],
-		resources,
-		projections: projections.projections,
-		mappings: [],
-		resourceWrites: [],
-	};
+type TranslationCheck = (id: TranslationAssertionId, ok: boolean, detail: string) => void;
+
+/** What one production apply staged at the destination, read back from disk. */
+interface StagedTranslation {
+	result: Awaited<ReturnType<typeof applyTranslation>>;
+	mapping: TranslationJournal['mappings'][number] | undefined;
+	stagedId: string | null;
+	transcript: string;
+	stagedLines: string[];
+	rows: number;
+}
+
+/**
+ * Stage one planned journal into the owned destination through production
+ * `applyTranslation` (the source re-hashed before every mutation), then check
+ * the strict row count read back and that only the owned roots were written.
+ * A Codex destination stages through the production app-server import channel
+ * of the pinned binary under the owned CODEX_HOME (no exec fallback): one
+ * spawn, never a paid request, closed whatever the apply did.
+ */
+async function stageTranslationJournal(
+	w: AccountingLegContext,
+	r: CrossProviderLegReceipt,
+	peer: PeerPreflight,
+	dest: TranslationIdentity,
+	project: string,
+	launchEnv: Record<string, string>,
+	archive: TranslationArchive,
+	registry: ReturnType<typeof createTranslationRegistry>,
+	journal: TranslationJournal,
+	sourceUnchanged: () => boolean,
+	check: TranslationCheck
+): Promise<StagedTranslation> {
 	r.channel = TRANSLATION_STAGING_CHANNELS[dest.provider as 'grok' | CrossProviderPeer];
 	let committed = false;
-	// A Codex destination stages through the production app-server import channel of
-	// the pinned binary under the owned CODEX_HOME (no exec fallback). It calls no
-	// model: one spawn, never a paid request, closed whatever the apply did.
 	let codex: Awaited<ReturnType<typeof openCodexTranslationConnection>> | undefined;
 	if (dest.provider === 'codex') {
 		r.spawned++;
@@ -14775,12 +14824,12 @@ async function runTranslateResumeLeg(
 	let result: Awaited<ReturnType<typeof applyTranslation>>;
 	try {
 		result = await applyTranslation(
-			new TranslationArchive(path.join(w.accountRoot!, 'qualify-e11-archive', spec.id)),
+			archive,
 			registry,
 			journal,
 			{
 				assertSourceUnchanged: async () => {
-					if (digest() !== sourceDigest) throw new Error('synthetic source changed');
+					if (!sourceUnchanged()) throw new Error('synthetic source changed');
 				},
 				setMigration: async () => {},
 				commit: async () => {
@@ -14821,15 +14870,6 @@ async function runTranslateResumeLeg(
 			(dest.provider === 'codex' ? readbackRows >= rows : readbackRows === rows),
 		`${result.state}; ${rows} rows staged, ${readbackRows} read back${result.error ? `; ${result.error}` : ''}`
 	);
-	const projectedFiles = new Set(projections.projections.map((p) => p.path));
-	r.resources = {
-		kinds: [...new Set(resources.map((a) => a.kind))].sort(),
-		projected: journal.resourceWrites
-			.filter((x) => projectedFiles.has(x.path))
-			.map((x) => path.relative(project, x.path))
-			.sort(),
-		knowledgeBound: Boolean(journal.knowledgeDirectory),
-	};
 	const owned = [w.accountRoot!, project, peer.home!];
 	const writes = [
 		...(mapping?.artifacts ?? []).map((a) => a.path),
@@ -14841,12 +14881,27 @@ async function runTranslateResumeLeg(
 		writes.length > 0 && !stray.length,
 		stray.join(',') || `${writes.length} writes`
 	);
-	if (!stagedId || result.state !== 'committed') {
-		check('source-unchanged', digest() === sourceDigest, 'after apply');
-		return null;
-	}
+	return { result, mapping, stagedId, transcript, stagedLines, rows };
+}
 
-	// The destination resumes the staged id: one counted turn, its own binary and home.
+/**
+ * The destination CLI resuming a staged id with one turn counted on the leg's
+ * reservation: a peer from its pinned binary and owned home through its
+ * production parser, Grok through the production native argv. Counts the tool
+ * events that replay the carried call (they name its sentinel).
+ */
+async function resumeTranslatedSession(
+	w: AccountingLegContext,
+	r: CrossProviderLegReceipt,
+	dest: TranslationIdentity,
+	peer: PeerPreflight,
+	reservation: SpendReservation,
+	launchEnv: Record<string, string>,
+	project: string,
+	stagedId: string,
+	turn: PaidFixtureTurn
+): Promise<{ sent: Awaited<ReturnType<typeof sendSessionTurn>>; toolEvents: number }> {
+	const toPeer = dest.provider !== 'grok';
 	const codexDef = dest.provider === 'codex' ? getAgentDefinition('codex') : undefined;
 	/** `codex [-C dir] exec --json --sandbox read-only ... -m <model> resume <id> -- <prompt>`, from the production definition. */
 	const codexArgv = (prompt: string, id: string | null) => [
@@ -14888,21 +14943,9 @@ async function runTranslateResumeLeg(
 				}
 			: {}),
 	};
-	const sessionsBefore = destinationSessions(dest);
-	// The memory sentinel reaches the destination only through the bound knowledge
-	// index, delivered on the continuation as production launches deliver it.
-	const turn: PaidFixtureTurn = journal.knowledgeDirectory
-		? {
-				...TRANSLATION_RESUME_TURN,
-				prompt:
-					bindTranslationKnowledge(TRANSLATION_RESUME_TURN.prompt, journal.knowledgeDirectory) ??
-					TRANSLATION_RESUME_TURN.prompt,
-			}
-		: TRANSLATION_RESUME_TURN;
-	/** Tool events that replay the carried call (they name its sentinel); reading the memory is allowed. */
 	let toolEvents = 0;
 	const receipt: TurnBearingReceipt = {
-		leg: translationLegName(spec.id, 'translate-resume'),
+		leg: r.leg,
 		reasons: r.reasons,
 		turns: r.turns,
 		spawned: 0,
@@ -14917,11 +14960,194 @@ async function runTranslateResumeLeg(
 	});
 	r.spawned += receipt.spawned;
 	r.paidRequests += receipt.paidRequests;
+	return { sent, toolEvents };
+}
+
+/**
+ * The checks every resumed turn makes: a clean exit, the staged id reported,
+ * the staged lines intact under it, the fact nonce and the tool-result nonce.
+ * Returns the reply's citation test for the caller's own checks.
+ */
+function checkResumedTurn(
+	run: NonNullable<Awaited<ReturnType<typeof sendSessionTurn>>['run']>,
+	staged: StagedTranslation,
+	check: TranslationCheck
+): { loaded: number; cited: (token: string) => boolean } {
+	const after = linesOf(staged.transcript);
+	let loaded = 0;
+	while (loaded < staged.stagedLines.length && after[loaded] === staged.stagedLines[loaded])
+		loaded++;
+	check(
+		'resume-exit-clean',
+		run.turn.exitCode === 0 && run.turn.terminal === 'success' && !run.turn.timedOut,
+		`exit ${run.turn.exitCode}, terminal ${run.turn.terminal}`
+	);
+	check(
+		'resume-session-id',
+		run.sessionIds.length > 0 && run.sessionIds.every((x) => x === staged.stagedId),
+		run.sessionIds.join(',') || 'no session id reported'
+	);
+	check(
+		'loaded-rows',
+		staged.stagedLines.length > 0 && loaded === staged.stagedLines.length,
+		`${loaded} of ${staged.stagedLines.length} staged lines (${staged.rows} rows) intact under the resumed session`
+	);
+	const cited = (token: string) => run.turn.reply.tokens?.[token] === true;
+	check('fact-nonce', run.turn.reply.tokenSeen, 'the staged fact nonce in the reply');
+	check(
+		'tool-result-nonce',
+		cited(TRANSLATION_NONCES.toolResult),
+		'the staged tool-result nonce cited in the reply'
+	);
+	return { loaded, cited };
+}
+
+/** A failure-collecting check that records each assertion on the receipt. */
+const translationCheck =
+	(r: CrossProviderLegReceipt): TranslationCheck =>
+	(id, ok, detail) => {
+		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+	};
+
+/**
+ * A peer destination's launch environment (owned home, credential by
+ * reference), settled before anything is written: a refusal leaves the leg
+ * not-run (null). A Grok destination needs none.
+ */
+function destinationLaunchEnv(
+	w: AccountingLegContext,
+	r: CrossProviderLegReceipt,
+	dest: TranslationIdentity,
+	peer: PeerPreflight
+): Record<string, string> | null {
+	if (dest.provider === 'grok') return {};
+	const env = peerLaunchEnv(w, peer);
+	if ('refused' in env) {
+		r.reasons.push(translationReason(env.refused, env.detail));
+		return null;
+	}
+	return env.env;
+}
+
+/**
+ * One translate-resume leg: the synthetic source history extracted, planned and
+ * applied by production code into the owned destination, then the destination
+ * CLI resuming the staged id with one turn counted on the leg's reservation.
+ * A Grok source starts the round-trip chain the later hops continue.
+ * Returns why the turn left an effect uncertain (null when it did not).
+ */
+async function runTranslateResumeLeg(
+	w: AccountingLegContext,
+	r: CrossProviderLegReceipt,
+	spec: CrossProviderDirectionSpec,
+	peer: PeerPreflight,
+	reservation: SpendReservation,
+	chain?: TranslationChain
+): Promise<string | null> {
+	const project = fs.realpathSync(w.cwd);
+	const names = translationChainNames(w, spec.id);
+	const src = translationIdentity(spec.source, w, peer, project);
+	const dest = translationIdentity(spec.destination, w, peer, project);
+	r.binaries = translationBinaries(w, peer, spec);
+	const check = translationCheck(r);
+	const sentinel = path.join(project, TRANSLATION_NONCES.toolSentinel);
+	if (fs.existsSync(sentinel)) throw new Error('tool-sentinel-present-before-leg');
+	const launchEnv = destinationLaunchEnv(w, r, dest, peer);
+	if (!launchEnv) return null;
+
+	const seeded = await seedTranslationSource(src, names.tabId);
+	const digest = () => seeded.files.map((f) => sha256Of(fs.readFileSync(f))).join(',');
+	const sourceDigest = digest();
+	const conv = seeded.conversation;
+	r.payloadClasses = [
+		...new Set([
+			...conv.records.flatMap((x) => x.blocks.map((b) => b.kind)),
+			...conv.artifacts.map((a) => `artifact:${a.kind}`),
+		]),
+	].sort();
+	// The resource sentinels go through the plan's resource scope and the production projections.
+	const seededResources = await seedTranslationResources(src);
+	const resources = seededResources.resources.artifacts;
+	const projections = await planResourceProjections(resources, dest);
+	const registry = createTranslationRegistry();
+	const plan = planTranslation({
+		agentId: names.agentId,
+		source: src,
+		destination: dest,
+		scope: { projectKnowledge: true, selectedUserResources: seededResources.selected },
+		conversations: [conv],
+		registry,
+		limitations: [...seededResources.resources.limitations, ...projections.limitations],
+		resources,
+	});
+	r.plan = {
+		status: plan.status,
+		verification: plan.verification,
+		limitations: plan.limitations.map((l) => `${l.severity}:${l.code}`),
+	};
+	const journal: TranslationJournal = {
+		schemaVersion: 1,
+		plan,
+		state: 'planned',
+		conversations: [conv],
+		resources,
+		projections: projections.projections,
+		mappings: [],
+		resourceWrites: [],
+	};
+	const staged = await stageTranslationJournal(
+		w,
+		r,
+		peer,
+		dest,
+		project,
+		launchEnv,
+		new TranslationArchive(names.archiveDir),
+		registry,
+		journal,
+		() => digest() === sourceDigest,
+		check
+	);
+	const projectedFiles = new Set(projections.projections.map((p) => p.path));
+	r.resources = {
+		kinds: [...new Set(resources.map((a) => a.kind))].sort(),
+		projected: journal.resourceWrites
+			.filter((x) => projectedFiles.has(x.path))
+			.map((x) => path.relative(project, x.path))
+			.sort(),
+		knowledgeBound: Boolean(journal.knowledgeDirectory),
+	};
+	const stagedId = staged.stagedId;
+	if (!stagedId || staged.result.state !== 'committed') {
+		check('source-unchanged', digest() === sourceDigest, 'after apply');
+		return null;
+	}
+
+	const sessionsBefore = destinationSessions(dest);
+	// The memory sentinel reaches the destination only through the bound knowledge
+	// index, delivered on the continuation as production launches deliver it.
+	const turn: PaidFixtureTurn = journal.knowledgeDirectory
+		? {
+				...TRANSLATION_RESUME_TURN,
+				prompt:
+					bindTranslationKnowledge(TRANSLATION_RESUME_TURN.prompt, journal.knowledgeDirectory) ??
+					TRANSLATION_RESUME_TURN.prompt,
+			}
+		: TRANSLATION_RESUME_TURN;
+	const { sent, toolEvents } = await resumeTranslatedSession(
+		w,
+		r,
+		dest,
+		peer,
+		reservation,
+		launchEnv,
+		project,
+		stagedId,
+		turn
+	);
 	const run = sent.run;
 	if (!run || run.neverRan) return sent.uncertainWhy;
-	const after = linesOf(transcript);
-	let loaded = 0;
-	while (loaded < stagedLines.length && after[loaded] === stagedLines[loaded]) loaded++;
+	const { loaded, cited } = checkResumedTurn(run, staged, check);
 	const sessionsAfter = destinationSessions(dest);
 	const added = sessionsAfter.filter((x) => !sessionsBefore.includes(x)).length;
 	r.resumed = {
@@ -14931,28 +15157,6 @@ async function runTranslateResumeLeg(
 		toolEvents,
 		sessionsAdded: added,
 	};
-	check(
-		'resume-exit-clean',
-		run.turn.exitCode === 0 && run.turn.terminal === 'success' && !run.turn.timedOut,
-		`exit ${run.turn.exitCode}, terminal ${run.turn.terminal}`
-	);
-	check(
-		'resume-session-id',
-		run.sessionIds.length > 0 && run.sessionIds.every((x) => x === stagedId),
-		run.sessionIds.join(',') || 'no session id reported'
-	);
-	check(
-		'loaded-rows',
-		stagedLines.length > 0 && loaded === stagedLines.length,
-		`${loaded} of ${stagedLines.length} staged lines (${rows} rows) intact under the resumed session`
-	);
-	const cited = (token: string) => run.turn.reply.tokens?.[token] === true;
-	check('fact-nonce', run.turn.reply.tokenSeen, 'the staged fact nonce in the reply');
-	check(
-		'tool-result-nonce',
-		cited(TRANSLATION_NONCES.toolResult),
-		'the staged tool-result nonce cited in the reply'
-	);
 	// The skill and rule must sit where the destination natively discovers them AND be reported.
 	const R = TRANSLATION_RESOURCE_NONCES;
 	const skillFile = path.join(
@@ -14998,6 +15202,203 @@ async function runTranslateResumeLeg(
 	);
 	check('no-duplicate-session', added === 0, `${added} sessions added by the resume`);
 	check('source-unchanged', digest() === sourceDigest, `${seeded.files.length} source files`);
+	// A Grok source starts the chain: the peer session it resumed is the reverse leg's source.
+	if (chain && spec.source === 'grok')
+		Object.assign(chain, {
+			...names,
+			seedOrigins: conv.records.map((x) => recordKey(x.origin)),
+			latest: {
+				provider: dest.provider,
+				sessionId: stagedId,
+				files: (staged.mapping?.artifacts ?? []).map((a) => a.path),
+			},
+		});
+	return sent.uncertainWhy;
+}
+
+/** A native session read back through the production extractor, as the next hop's source. */
+async function readTranslatedConversation(
+	src: TranslationIdentity,
+	tabId: string,
+	sessionId: string,
+	files: string[]
+): Promise<PortableConversation> {
+	if (src.provider === 'grok')
+		return extractGrokConversation(
+			src,
+			tabId,
+			sessionId,
+			(await readGrokSessionSnapshot(src, sessionId)).bytes
+		);
+	return extractNativeConversation(src, tabId, sessionId, fs.readFileSync(files[0]));
+}
+
+/**
+ * One reverse or round-trip hop (GT1-11-13B2): the session the previous hop
+ * staged and resumed (including the turn its destination appended) read back
+ * through the production extractor, reconciled against the checkpoint the
+ * previous hop committed (rows already staged come back as their original
+ * lineage, only the appended turn is new), planned and applied by production
+ * code into the other side's owned home, then resumed there with one counted
+ * turn: the nonces recalled, no carried tool call executed, exactly one session
+ * added (the staged one) and the source unchanged. Advances the chain.
+ */
+async function runTranslationHop(
+	w: AccountingLegContext,
+	r: CrossProviderLegReceipt,
+	spec: CrossProviderDirectionSpec,
+	peer: PeerPreflight,
+	reservation: SpendReservation,
+	chain: TranslationChain
+): Promise<string | null> {
+	const project = fs.realpathSync(w.cwd);
+	const latest = chain.latest!;
+	if (latest.provider !== spec.source) throw new Error(`chain-at-${latest.provider}`);
+	const src = translationIdentity(spec.source, w, peer, project);
+	const dest = translationIdentity(spec.destination, w, peer, project);
+	r.binaries = translationBinaries(w, peer, spec);
+	const check = translationCheck(r);
+	const sentinel = path.join(project, TRANSLATION_NONCES.toolSentinel);
+	if (fs.existsSync(sentinel)) throw new Error('tool-sentinel-present-before-leg');
+	const launchEnv = destinationLaunchEnv(w, r, dest, peer);
+	if (!launchEnv) return null;
+
+	const digest = () => latest.files.map((f) => sha256Of(fs.readFileSync(f))).join(',');
+	const sourceDigest = digest();
+	const native = await readTranslatedConversation(src, chain.tabId, latest.sessionId, latest.files);
+	const archive = new TranslationArchive(chain.archiveDir);
+	const checkpoint: TranslationCheckpoint | undefined = await archive.checkpoint(chain.agentId);
+	const previous = checkpoint?.conversations.find((c) => c.tabId === chain.tabId)?.records ?? [];
+	const reconciled = reconcileConversation(native, checkpoint);
+	const conv = reconciled.conversation;
+	r.hop = {
+		sourceSessionId: latest.sessionId,
+		previousRecords: previous.length,
+		newRecords: reconciled.newRecords,
+		records: conv.records.length,
+	};
+	r.payloadClasses = [
+		...new Set([
+			...conv.records.flatMap((x) => x.blocks.map((b) => b.kind)),
+			...conv.artifacts.map((a) => `artifact:${a.kind}`),
+		]),
+	].sort();
+	// Rows the previous hop staged carry its lineage; only what the source appended is unlinked.
+	const unlinked = native.records.filter(
+		(x) => !checkpoint?.lineage[nativeRecordKey(src, latest.sessionId, x.nativeId)]
+	).length;
+	const staged = native.records.length - unlinked;
+	check(
+		'hop-reconciled',
+		!!checkpoint && staged > 0 && unlinked > 0 && reconciled.newRecords === unlinked,
+		`${staged} staged rows reconciled to their lineage, ${unlinked} appended, ${reconciled.newRecords} new${checkpoint ? '' : '; no checkpoint'}`
+	);
+	const origins = conv.records.map((x) => recordKey(x.origin));
+	const before = previous.map((x) => recordKey(x.origin));
+	const prefix = (keys: string[]) => keys.length > 0 && keys.every((k, i) => origins[i] === k);
+	const unique = new Set(origins).size === origins.length;
+	check(
+		'lineage-stable',
+		prefix(chain.seedOrigins) && prefix(before) && unique,
+		`${origins.length} records; seed ${prefix(chain.seedOrigins) ? 'kept' : 'lost'}, previous ${prefix(before) ? 'kept' : 'lost'}, ${unique ? 'no duplicate origin' : 'duplicate origins'}`
+	);
+	const blocked = reconciled.limitations.filter((l) => l.severity === 'block');
+	if (!checkpoint || blocked.length) {
+		r.reasons.push(
+			...blocked.map((l) => translationReason(l.code, l.message, CROSS_PROVIDER_ROUND_TRIP_OWNER))
+		);
+		return null;
+	}
+	// The source's observed rows join the checkpoint the apply commits, as the production switch does.
+	const nextCheckpoint = structuredClone(checkpoint);
+	for (const record of native.records)
+		nextCheckpoint.observed[nativeRecordKey(src, latest.sessionId, record.nativeId)] =
+			record.semanticHash;
+	const registry = createTranslationRegistry();
+	// The resources are the translate-resume leg's, already projected and owned by the checkpoint.
+	const plan = planTranslation({
+		agentId: chain.agentId,
+		source: src,
+		destination: dest,
+		scope: { projectKnowledge: true, selectedUserResources: [] },
+		conversations: [conv],
+		registry,
+		limitations: [],
+		resources: [],
+	});
+	r.plan = {
+		status: plan.status,
+		verification: plan.verification,
+		limitations: plan.limitations.map((l) => `${l.severity}:${l.code}`),
+	};
+	const journal: TranslationJournal = {
+		schemaVersion: 1,
+		plan,
+		state: 'planned',
+		conversations: [conv],
+		resources: [],
+		projections: [],
+		mappings: [],
+		resourceWrites: [],
+		checkpoint: nextCheckpoint,
+	};
+	const sessionsBefore = destinationSessions(dest);
+	const stagedHop = await stageTranslationJournal(
+		w,
+		r,
+		peer,
+		dest,
+		project,
+		launchEnv,
+		archive,
+		registry,
+		journal,
+		() => digest() === sourceDigest,
+		check
+	);
+	const stagedId = stagedHop.stagedId;
+	if (!stagedId || stagedHop.result.state !== 'committed') {
+		check('source-unchanged', digest() === sourceDigest, 'after apply');
+		return null;
+	}
+	const { sent, toolEvents } = await resumeTranslatedSession(
+		w,
+		r,
+		dest,
+		peer,
+		reservation,
+		launchEnv,
+		project,
+		stagedId,
+		TRANSLATION_HOP_TURN
+	);
+	const run = sent.run;
+	if (!run || run.neverRan) return sent.uncertainWhy;
+	const { loaded } = checkResumedTurn(run, stagedHop, check);
+	const added = destinationSessions(dest).filter((x) => !sessionsBefore.includes(x));
+	r.resumed = {
+		sessionIds: run.sessionIds,
+		exitCode: run.turn.exitCode,
+		loadedRows: loaded,
+		toolEvents,
+		sessionsAdded: added.length,
+	};
+	check(
+		'carried-tool-not-executed',
+		!fs.existsSync(sentinel) && toolEvents === 0,
+		`${toolEvents} tool events; sentinel ${fs.existsSync(sentinel) ? 'present' : 'absent'}`
+	);
+	check(
+		'no-duplicate-session',
+		added.length === 1,
+		`${added.length} sessions added by the hop (the staged one only)`
+	);
+	check('source-unchanged', digest() === sourceDigest, `${latest.files.length} source files`);
+	chain.latest = {
+		provider: dest.provider as ProviderId,
+		sessionId: stagedId,
+		files: (stagedHop.mapping?.artifacts ?? []).map((a) => a.path),
+	};
 	return sent.uncertainWhy;
 }
 
@@ -15005,13 +15406,14 @@ function settleCrossProviderLeg(
 	r: CrossProviderLegReceipt,
 	problems: string[]
 ): CrossProviderLegReceipt {
+	const required = translationLegAssertions(r.leg);
 	const all = [
 		...r.reasons.map((x) => x.id),
 		...problems,
 		...r.assertions.filter((a) => a.outcome === 'failed').map((a) => `failed:${a.id}`),
-		...TRANSLATION_LEG_ASSERTIONS.filter((id) => !r.assertions.some((a) => a.id === id)).map(
-			(id) => `assertion-not-evaluated:${id}`
-		),
+		...required
+			.filter((id) => !r.assertions.some((a) => a.id === id))
+			.map((id) => `assertion-not-evaluated:${id}`),
 	];
 	const notRun =
 		r.reasons.length > 0 && r.spawned === 0 && !r.assertions.length && !problems.length;
@@ -15026,18 +15428,19 @@ function settleCrossProviderLeg(
 		: {
 				id: r.leg,
 				outcome: all.length ? 'failed' : 'passed',
-				detail: all.join('; ') || `${TRANSLATION_LEG_ASSERTIONS.length} assertions passed`,
+				detail: all.join('; ') || `${required.length} assertions passed`,
 			};
 	return r;
 }
 
 /**
- * Every declared E11 direction's legs, in order, each on its own
- * `translation:<direction>:<leg>` reservation billed to the destination
- * (spend, calls and the case deadline shared). A direction the preflight did
- * not pass stays not-run with its own reasons; an ACP Grok resume is an honest
- * gap with an owner. Never after an uncertain effect,
- * never twice, local only.
+ * Every declared E11 direction's legs, in `crossProviderLegSchedule` order,
+ * each on its own `translation:<direction>:<leg>` reservation billed to the
+ * destination (spend, calls and the case deadline shared). A direction the
+ * preflight did not pass stays not-run with its own reasons; an ACP Grok
+ * resume is an honest gap with an owner. A reverse or round-trip hop continues
+ * its peer's chain only when the chained leg before it passed. Never after an
+ * uncertain effect, never twice, local only.
  */
 async function runCrossProviderLegs(w: AccountingLegContext): Promise<{
 	legs: CrossProviderLegReceipt[];
@@ -15053,110 +15456,136 @@ async function runCrossProviderLegs(w: AccountingLegContext): Promise<{
 		workspace: w.workspace,
 		operatorHome: w.operatorHome,
 	});
-	for (const spec of w.fixture.crossProvider ?? [])
-		for (const leg of spec.legs) {
-			const name = translationLegName(spec.id, leg);
-			const r: CrossProviderLegReceipt = {
-				leg: name,
-				direction: spec.id,
-				source: spec.source,
-				destination: spec.destination,
-				status: 'not-run',
-				reasons: [],
-				reservationId: null,
-				settlement: null,
-				binaries: null,
-				payloadClasses: [],
-				plan: null,
-				channel: null,
-				resources: null,
-				staged: null,
-				resumed: null,
-				turns: [],
-				assertions: [],
-				openGaps: [
-					{
-						id: 'round-trip',
-						detail: 'the reverse leg and the two repeated round trips with stable lineage',
-						owner: CROSS_PROVIDER_ROUND_TRIP_OWNER,
-					},
-				],
-				assertion: {
-					id: name,
-					outcome: 'not-evaluated',
-					detail: '',
-					owner: CROSS_PROVIDER_LEGS_OWNER,
-				},
-				spawned: 0,
-				paidRequests: 0,
-			};
-			const reason = (id: string, detail: string) => r.reasons.push(translationReason(id, detail));
-			const gap = (detail: string, owner: string) => {
-				r.status = 'not-evaluated';
-				r.assertion = { id: name, outcome: 'not-evaluated', detail, owner };
-			};
-			const d = preflight.directions.find((x) => x.id === spec.id);
-			const peer = preflight.peers.find((p) => p.provider === spec.peer);
-			const uncertain = w.uncertain ?? uncertainWhy;
-			const prior = w.ledger.reservations.filter(
-				(x) => x.caseId === w.c.caseId && x.leg === name && x.state !== 'released'
+	/** One round-trip chain per peer, started by its Grok-to-peer translate-resume leg. */
+	const chains = new Map<CrossProviderPeer, TranslationChain>();
+	for (const { spec, leg } of crossProviderLegSchedule(w.fixture.crossProvider ?? [])) {
+		const name = translationLegName(spec.id, leg);
+		const hop = leg !== 'translate-resume';
+		const starts = !hop && spec.source === 'grok';
+		const chain = chains.get(spec.peer);
+		const r: CrossProviderLegReceipt = {
+			leg: name,
+			direction: spec.id,
+			source: spec.source,
+			destination: spec.destination,
+			status: 'not-run',
+			reasons: [],
+			reservationId: null,
+			settlement: null,
+			binaries: null,
+			payloadClasses: [],
+			plan: null,
+			channel: null,
+			resources: null,
+			staged: null,
+			resumed: null,
+			hop: null,
+			turns: [],
+			assertions: [],
+			openGaps: [],
+			assertion: {
+				id: name,
+				outcome: 'not-evaluated',
+				detail: '',
+				owner: CROSS_PROVIDER_LEGS_OWNER,
+			},
+			spawned: 0,
+			paidRequests: 0,
+		};
+		/** A chained leg records its outcome, so the next hop never continues a failed or unrun one. */
+		const chained = (x: CrossProviderLegReceipt) => {
+			if (hop && chain) Object.assign(chain, { ok: x.status === 'passed', lastLeg: name });
+			return x;
+		};
+		const reason = (id: string, detail: string) => r.reasons.push(translationReason(id, detail));
+		const gap = (detail: string, owner: string) => {
+			r.status = 'not-evaluated';
+			r.assertion = { id: name, outcome: 'not-evaluated', detail, owner };
+		};
+		const d = preflight.directions.find((x) => x.id === spec.id);
+		const peer = preflight.peers.find((p) => p.provider === spec.peer);
+		const uncertain = w.uncertain ?? uncertainWhy;
+		const prior = w.ledger.reservations.filter(
+			(x) => x.caseId === w.c.caseId && x.leg === name && x.state !== 'released'
+		);
+		if (!w.capabilities.crossProviderLegs) reason('cross-provider-legs-unimplemented', name);
+		else if (w.blocked) reason(w.blocked, name);
+		else if (uncertain) reason('uncertain-prior-effect', uncertain);
+		else if (prior.some((x) => x.state === 'uncertain' || x.uncertainEffect))
+			reason('uncertain-prior-effect', name);
+		else if (prior.length) reason('leg-already-run', name);
+		else if (!d || !peer) reason('translation-direction-unknown', spec.id);
+		else if (d.status !== 'pass') r.reasons.push(...d.reasons.map((x) => ({ ...x })));
+		else if (!KNOWN_TRANSLATION_LEGS.has(leg)) reason('translation-leg-unknown', leg);
+		else if (spec.destination === 'grok' && w.c.route !== 'native-headless')
+			gap(
+				'a staged Grok session is resumed through the native headless route only',
+				ACP_TRANSLATION_RESUME_OWNER
 			);
-			if (!w.capabilities.crossProviderLegs) reason('cross-provider-legs-unimplemented', name);
-			else if (w.blocked) reason(w.blocked, name);
-			else if (uncertain) reason('uncertain-prior-effect', uncertain);
-			else if (prior.some((x) => x.state === 'uncertain' || x.uncertainEffect))
-				reason('uncertain-prior-effect', name);
-			else if (prior.length) reason('leg-already-run', name);
-			else if (!d || !peer) reason('translation-direction-unknown', spec.id);
-			else if (d.status !== 'pass') r.reasons.push(...d.reasons.map((x) => ({ ...x })));
-			else if (leg !== 'translate-resume') reason('translation-leg-unknown', leg);
-			else if (spec.destination === 'grok' && w.c.route !== 'native-headless')
-				gap(
-					'a staged Grok session is resumed through the native headless route only',
-					ACP_TRANSLATION_RESUME_OWNER
-				);
-			else if (!w.accountRoot) reason('account-root-unknown', name);
-			if (r.reasons.length || r.status !== 'not-run') {
-				legs.push(r.reasons.length ? settleCrossProviderLeg(r, []) : r);
-				continue;
-			}
-			const reserved = reserveTranslationLeg(
-				w.ledger,
-				w.config,
-				w.c,
-				preflight,
-				{ direction: spec.id, leg, grokModel: w.model, plan: w.plan },
-				w.now()
+		else if (hop && !(chain?.ok && chain.latest?.provider === spec.source))
+			r.reasons.push(
+				translationReason(
+					'round-trip-chain-unavailable',
+					`${spec.peer}: ${chain ? `${chain.lastLeg} did not pass` : 'no Grok-to-peer leg passed'}`,
+					CROSS_PROVIDER_ROUND_TRIP_OWNER
+				)
 			);
-			if (!reserved.ok) {
-				r.reasons.push(...reserved.reasons);
-				legs.push(settleCrossProviderLeg(r, []));
-				continue;
-			}
-			r.reservationId = reserved.reservation.id;
-			const problems: string[] = [];
-			let why: string | null = null;
-			try {
-				why = await runTranslateResumeLeg(w, r, spec, peer!, reserved.reservation);
-			} catch (e) {
-				problems.push(`${spec.id}-threw: ${errorText(e)}`);
-			}
-			// Whatever happened, the reservation is closed exactly once.
-			if (reserved.reservation.state === 'held')
-				r.settlement = settleLegReservation(
-					w.ledger,
-					reserved.reservation,
-					r.paidRequests,
-					r.turns,
-					why ?? (problems.length ? 'translation-leg-threw' : null),
-					w.now
-				);
-			settleCrossProviderLeg(r, problems);
-			spawned += r.spawned;
-			sent += r.paidRequests;
-			if (why) uncertainWhy = why;
-			legs.push(r);
+		else if (!w.accountRoot) reason('account-root-unknown', name);
+		if (r.reasons.length || r.status !== 'not-run') {
+			legs.push(chained(r.reasons.length ? settleCrossProviderLeg(r, []) : r));
+			continue;
 		}
+		const reserved = reserveTranslationLeg(
+			w.ledger,
+			w.config,
+			w.c,
+			preflight,
+			{ direction: spec.id, leg, grokModel: w.model, plan: w.plan },
+			w.now()
+		);
+		if (!reserved.ok) {
+			r.reasons.push(...reserved.reasons);
+			legs.push(chained(settleCrossProviderLeg(r, [])));
+			continue;
+		}
+		r.reservationId = reserved.reservation.id;
+		const started: TranslationChain | undefined = starts
+			? {
+					tabId: '',
+					agentId: '',
+					archiveDir: '',
+					seedOrigins: [],
+					latest: null,
+					ok: false,
+					lastLeg: name,
+				}
+			: undefined;
+		const problems: string[] = [];
+		let why: string | null = null;
+		try {
+			why = hop
+				? await runTranslationHop(w, r, spec, peer!, reserved.reservation, chain!)
+				: await runTranslateResumeLeg(w, r, spec, peer!, reserved.reservation, started);
+		} catch (e) {
+			problems.push(`${spec.id}-threw: ${errorText(e)}`);
+		}
+		// Whatever happened, the reservation is closed exactly once.
+		if (reserved.reservation.state === 'held')
+			r.settlement = settleLegReservation(
+				w.ledger,
+				reserved.reservation,
+				r.paidRequests,
+				r.turns,
+				why ?? (problems.length ? 'translation-leg-threw' : null),
+				w.now
+			);
+		const settled = chained(settleCrossProviderLeg(r, problems));
+		if (started?.latest) chains.set(spec.peer, { ...started, ok: settled.status === 'passed' });
+		spawned += r.spawned;
+		sent += r.paidRequests;
+		if (why) uncertainWhy = why;
+		legs.push(r);
+	}
 	return { legs, spawned, sent, uncertainWhy };
 }
 
