@@ -220,7 +220,18 @@ import {
 } from '../../../main/storage';
 import { resolveUserDataDir } from '../../../shared/userDataDir';
 import { AGENT_IDS } from '../../../shared/agentIds';
-import { GROK_DIRECTORY_GRANT_SUPPORT } from '../../../shared/maestro-lib/providers/capabilities';
+import {
+	GROK_CAPABILITY_EVIDENCE,
+	GROK_DIRECTORY_GRANT_SUPPORT,
+} from '../../../shared/maestro-lib/providers/capabilities';
+import {
+	GROK_ACP_PORT_SUPPORT,
+	isGrokRouteDecisionCurrent,
+	selectGrokRoute,
+	type GrokRouteSnapshot,
+} from '../../../shared/maestro-lib/grok/route';
+import { GROK_ACP_PROTOCOL_VERSION } from '../../../shared/maestro-lib/grok/acp-protocol';
+import { buildAcpPromptFileContent } from '../../../shared/maestro-lib/launch/image-refs';
 import {
 	AGENT_AUTOSELECT_ORDER,
 	AGENT_PICKER_META,
@@ -243,7 +254,7 @@ import {
 } from '../../../shared/providerProfiles';
 import { PROVIDER_ROUTE_ENV_NAMES } from '../../../shared/maestro-lib/launch/env';
 import { PROVIDER_ENV_VAR_SUGGESTIONS } from '../../../shared/envVarCatalog';
-import { MCP_CONFIG_BY_AGENT } from '../../../shared/plugins/mcp-agent-config';
+import { MCP_CONFIG_BY_AGENT, mcpInjectionProblem } from '../../../shared/plugins/mcp-agent-config';
 import { resolveAgentAccountDir } from '../../../shared/agentAccountDir';
 import {
 	resolveTierModel,
@@ -749,6 +760,136 @@ describe('Agent Completeness', () => {
 			expect(routes.ssh.standalone).toBe('unverified');
 			expect(routes['codex-app-server'].standalone).toBe('unsupported');
 			expect(routes['opencode-server'].standalone).toBe('unsupported');
+		});
+
+		// GT1-11-14B: the route selector over the finalized registry. `native.qualified`
+		// is derived from the recorded qualified versions, never forced, so a version only
+		// becomes native-routable when evidence names it.
+		describe('route selection over the finalized registry (GT1-11-14B)', () => {
+			const caps = getAgentCapabilities('grok');
+			const versions = [
+				GROK_CAPABILITY_EVIDENCE.candidateVersion,
+				'1.0.41',
+				'1.0.5',
+				'0.2.93',
+				null,
+			] as const;
+			const snapshotFor = (
+				version: string | null,
+				overrides: Partial<GrokRouteSnapshot> = {}
+			): GrokRouteSnapshot => ({
+				executable: { path: '/synthetic/grok' },
+				agentVersion: version,
+				platform: 'synthetic-arch',
+				account: 'account-a',
+				host: 'host-a',
+				configGeneration: 'gen-1',
+				target: 'local',
+				native: {
+					qualified:
+						version !== null &&
+						(GROK_CAPABILITY_EVIDENCE.qualifiedVersions as readonly string[]).includes(version),
+				},
+				...overrides,
+			});
+			const negotiated = (version: string) => ({
+				protocolVersion: GROK_ACP_PROTOCOL_VERSION,
+				agentVersion: version,
+				loadSession: true,
+				images: true,
+				commands: true,
+			});
+
+			it.each(versions)('refuses the native headless route for binary %s', (version) => {
+				const result = selectGrokRoute(
+					{ permissionMode: 'readonly', consent: 'none' },
+					snapshotFor(version)
+				);
+				expect(result.ok).toBe(false);
+				if (result.ok) return;
+				expect(result.route).toBe('native-headless');
+				expect(result.missing).toContain('native-unqualified');
+			});
+
+			it('binds ACP to the version the process negotiated, never an older binary', () => {
+				const req = { permissionMode: 'standard', consent: 'interactive' } as const;
+				for (const version of versions) {
+					if (version === null) continue;
+					const ok = selectGrokRoute(req, snapshotFor(version, { acp: negotiated(version) }));
+					expect(ok.ok, version).toBe(true);
+				}
+				// An older binary carrying the candidate's advertisement proves nothing about itself.
+				const older = selectGrokRoute(
+					req,
+					snapshotFor('1.0.5', { acp: negotiated(GROK_CAPABILITY_EVIDENCE.candidateVersion) })
+				);
+				expect(older.ok).toBe(false);
+				if (!older.ok) expect(older.missing).toContain('acp-version-unbound');
+				const unknown = selectGrokRoute(req, snapshotFor(null, { acp: negotiated('1.0.70') }));
+				expect(unknown.ok).toBe(false);
+				if (!unknown.ok) expect(unknown.missing).toContain('acp-version-unbound');
+				// No SSH owner for ACP: a remote target refuses rather than running locally.
+				const remote = selectGrokRoute(
+					req,
+					snapshotFor('1.0.70', { target: 'remote', acp: negotiated('1.0.70') })
+				);
+				expect(remote.ok).toBe(false);
+				if (!remote.ok) expect(remote.missing).toContain('acp-remote-route');
+			});
+
+			it('binds a decision to the selected profile and invalidates it when that changes', () => {
+				const snapshot = snapshotFor('1.0.70', { acp: negotiated('1.0.70') });
+				const decision = selectGrokRoute(
+					{ permissionMode: 'standard', consent: 'interactive' },
+					snapshot
+				);
+				expect(decision.ok).toBe(true);
+				if (!decision.ok) return;
+				expect(decision.facts).toMatchObject({ account: 'account-a', agentVersion: '1.0.70' });
+				expect(isGrokRouteDecisionCurrent(decision, snapshot)).toBe(true);
+				for (const change of [
+					{ account: 'account-b' },
+					{ configGeneration: 'gen-2' },
+					{ agentVersion: '1.0.71', acp: negotiated('1.0.71') },
+					{ executable: { path: '/synthetic/other/grok' } },
+				] satisfies Partial<GrokRouteSnapshot>[]) {
+					expect(isGrokRouteDecisionCurrent(decision, { ...snapshot, ...change })).toBe(false);
+				}
+			});
+
+			it('refuses withheld features safely instead of advertising them', () => {
+				// Images: the flag, the ACP port and the prompt-file encoder agree.
+				expect(caps.supportsImageInput).toBe(false);
+				expect(caps.supportsImageInputOnResume).toBe(false);
+				expect(GROK_ACP_PORT_SUPPORT.images).toBe(false);
+				const image = selectGrokRoute(
+					{ permissionMode: 'standard', consent: 'interactive', imageCount: 1 },
+					snapshotFor('1.0.70', { acp: negotiated('1.0.70') })
+				);
+				expect(image.ok).toBe(false);
+				if (!image.ok) expect(image.missing).toEqual(['acp-images']);
+				// No host producer of image bounds: an image block without them refuses the prompt.
+				expect(
+					buildAcpPromptFileContent([
+						{ type: 'text', text: 'describe' },
+						{ type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' },
+					])
+				).toEqual({
+					ok: false,
+					error: 'Embedded images require explicit support and bounded image limits.',
+				});
+				// Steering has no pinned input operation.
+				expect(GROK_ACP_PORT_SUPPORT.steering).toBe(false);
+				// MCP injection is version-scoped by the same (empty) evidence and injects nothing.
+				const mcp = MCP_CONFIG_BY_AGENT.grok;
+				expect(mcp?.qualifiedVersions).toEqual(GROK_CAPABILITY_EVIDENCE.qualifiedVersions);
+				for (const version of versions) {
+					expect(
+						mcpInjectionProblem(mcp, { version: version ?? undefined }),
+						String(version)
+					).toBeDefined();
+				}
+			});
 		});
 
 		it('exports one provider table from the shared library and the main process', () => {
