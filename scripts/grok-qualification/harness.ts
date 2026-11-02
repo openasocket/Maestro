@@ -317,6 +317,27 @@ import {
 	grokLaunchArgsProblem,
 } from '../../src/shared/maestro-lib/launch/agent-args';
 import { buildAgentLaunchPlan } from '../../src/shared/maestro-lib/launch/launch-plan';
+import { wrapManagedSpawnWithSsh } from '../../src/shared/maestro-lib/launch/ssh-spawn-wrapper';
+import type { SshRemoteEndpointIdentity } from '../../src/shared/maestro-lib/launch/ssh-remote-resolver';
+import { buildDispatchSnapshot } from '../../src/shared/maestro-lib/managed/authority';
+import {
+	createHeadlessSpawnAuthority,
+	createManagedHostAdapter,
+	installationIdentity,
+	managedAuthorityId,
+	ownRunIdentity,
+} from '../../src/shared/maestro-lib/managed/host-adapter';
+import {
+	LOCAL_ENDPOINT_PROTOCOL,
+	type EndpointPort,
+	type EndpointStatus,
+} from '../../src/shared/maestro-lib/managed/endpoint-port';
+import { MANAGED_CONTRACT_VERSION } from '../../src/shared/maestro-lib/managed/types';
+import {
+	createEnterpriseIdentityStore,
+	publicEnterpriseIdentity,
+} from '../../src/main/enterprise/identity-store';
+import { createEnrollmentLifecycle } from '../../src/main/enterprise/enrollment';
 import type { NativeSessionBinding } from '../../src/shared/maestro-lib/agents/providerSwap';
 /** The renderer context extractor, loaded only when a handoff leg runs (its store graph reads `window` at load). */
 type ContextExtractorModule = typeof import('../../src/renderer/utils/contextExtractor');
@@ -12768,8 +12789,17 @@ export const POLICY_STAND_IN = Object.freeze({
 	tool: 'record_sentinel',
 });
 
+/** The route and authority legs (GT1-11-12C). */
+export const POLICY_AUTHORITY_LEGS_OWNER = 'GT1-11-12C';
+/** Audit attribution needs a real authority the run-state names; none does, and a synthetic endpoint never qualifies it. */
+export const REAL_AUTHORITY_ABSENT = 'real-authority-absent';
+
 const policyOwnerOf = (kind: PolicyLegKind) =>
-	kind === 'effect' ? POLICY_LEGS_OWNER : POLICY_SURFACE_LEGS_OWNER;
+	kind === 'effect'
+		? POLICY_LEGS_OWNER
+		: kind === 'authority'
+			? POLICY_AUTHORITY_LEGS_OWNER
+			: POLICY_SURFACE_LEGS_OWNER;
 
 /**
  * The answer a policy leg gives a `session/request_permission`: the request's
@@ -12815,9 +12845,26 @@ export const POLICY_STAND_IN_ASSERTIONS: readonly string[] = Object.freeze([
 	'stand-in-sentinel-empty',
 ]);
 
+/**
+ * A route or authority leg (GT1-11-12C) sends no turn: the production refusal
+ * must name the leg's own cause, the same launch without the defect must be
+ * accepted (so the refusal is the defect's, not the composition's), nothing may
+ * reach the spawn sink, the owned loopback (gateway, SSH remote port) must stay
+ * silent and the synthetic endpoint must be asked to execute nothing.
+ */
+export const POLICY_AUTHORITY_ASSERTIONS: readonly string[] = Object.freeze([
+	'refused-by-production',
+	'refusal-names-cause',
+	'control-accepted',
+	'zero-spawns',
+	'loopback-silent',
+	'endpoint-silent',
+]);
+
 /** The assertions a leg of this kind must evaluate; a refusal leg sends no turn and reads only the refusal. */
 export function policyAssertionsFor(kind: PolicyLegKind): readonly string[] {
 	if (kind === 'refusal') return ['refused-before-spawn'];
+	if (kind === 'authority') return POLICY_AUTHORITY_ASSERTIONS;
 	return kind === 'tool-surface'
 		? [...POLICY_ASSERTIONS, ...POLICY_STAND_IN_ASSERTIONS]
 		: POLICY_ASSERTIONS;
@@ -12868,6 +12915,17 @@ export interface PolicyLegReceipt {
 	revocations: number | null;
 	/** A tool-surface leg's stand-in records; null when the leg declares no stand-in. */
 	standIn: { starts: number; files: string[]; sentinels: number } | null;
+	/**
+	 * A route or authority leg's production answers: the refusal of the defective
+	 * launch, the control's answer, what reached the spawn sink and how often the
+	 * synthetic endpoint was asked to execute; null for every other kind.
+	 */
+	authority: {
+		refusal: string | null;
+		control: string | null;
+		spawnAttempts: number;
+		endpointCalls: number;
+	} | null;
 	/** What a pass of this leg does not prove (an unqualified declaration shape, a kept blocker). */
 	notes: string[];
 	/** Owned paths whose bytes changed, appeared or vanished (`project/`, `outside/`, `tmp/` prefixed). */
@@ -13316,6 +13374,398 @@ async function runPolicyRefusalLeg(w: PolicyLegContext, r: PolicyLegReceipt): Pr
 	});
 }
 
+/** The synthetic enterprise of the route and authority legs; a remote enrolled elsewhere is a substitute. */
+export const POLICY_AUTHORITY_TENANT = Object.freeze({
+	tenantId: 'qualify-e10-tenant',
+	orgId: 'qualify-e10-org',
+	substitute: 'qualify-e10-substituted-tenant',
+	unapprovedModel: 'qualify-e10-unapproved-model',
+});
+
+/** What a route or authority leg's refusal must name: the leg's own defect, never another refusal. */
+const POLICY_AUTHORITY_CAUSES: Partial<Record<PolicyLegId, RegExp>> = {
+	'model-unapproved': new RegExp(
+		`names ${POLICY_AUTHORITY_TENANT.unapprovedModel} but the policy pins`
+	),
+	'gateway-unapproved': /--base-url is not allowed under management/,
+	'endpoint-substituted': new RegExp(`enrolled with tenant ${POLICY_AUTHORITY_TENANT.substitute}`),
+	'custody-refused': /offers no encryption/,
+	'custody-offline': /No endpoint connection is open/,
+	'enrollment-revoked': /The record is revoked/,
+	'enrollment-expired': /registration has lapsed/,
+};
+
+/** One ask of production: its refusal (null when it accepted) and how often the synthetic endpoint was asked to execute. */
+interface AuthorityAnswer {
+	refused: string | null;
+	endpointCalls: number;
+}
+
+/**
+ * An in-process endpoint stand-in: it attaches as `managed` with a redeemed
+ * registration and counts every execution request, answering none. No socket.
+ */
+function syntheticEndpointPort(socketPath: string, calls: { n: number }): EndpointPort {
+	const status: EndpointStatus = {
+		outcome: 'attached',
+		protocol: LOCAL_ENDPOINT_PROTOCOL,
+		capabilities: [],
+		management: 'managed',
+		desiredPolicyRevision: 1,
+		appliedPolicyRevision: 1,
+		connectivity: 'online',
+		collectionProfile: 'metadata',
+	};
+	let closed = false;
+	const none = async () => ({
+		status: 'unknown' as const,
+		message: 'qualify-e10: the synthetic endpoint answers nothing but an attachment',
+	});
+	return {
+		socketPath,
+		state: () => ({ connection: 1, attached: !closed, status, registration: 'registered', closed }),
+		compatibility: none,
+		attach: async () => ({ status: 'ok', payload: status }),
+		invoke: async () => {
+			calls.n++;
+			return { status: 'unknown', message: 'qualify-e10: the synthetic endpoint decides nothing' };
+		},
+		registration: { challenge: none, redeem: none },
+		redial: () => {},
+		close: async () => {
+			closed = true;
+		},
+	};
+}
+
+/**
+ * The Grok launch plan of a route leg under a managed route with no gateway;
+ * `pinModel` pins the approved model (the model leg only). A remote plan sends
+ * no prompt, since its prompt file would land on the remote.
+ */
+function planPolicyRoute(
+	w: PolicyLegContext,
+	dir: string,
+	extraArgs: string[],
+	ssh: { port: number } | null,
+	managed = true,
+	pinModel = false
+) {
+	const def = getAgentDefinition('grok');
+	const model = w.config.allowedModels[0] ?? 'qualify-e10-approved-model';
+	const remote = ssh && {
+		id: 'qualify-e10-remote',
+		name: 'qualify-e10-remote',
+		host: '127.0.0.1',
+		port: ssh.port,
+		username: 'qualify-e10',
+		privateKeyPath: path.join(dir, 'absent-key'),
+		enabled: true,
+	};
+	const sshRemoteConfig = remote ? { enabled: true, remoteId: remote.id } : null;
+	const sshStore = { getSshRemotes: () => (remote ? [remote] : []) };
+	const planned = buildAgentLaunchPlan({
+		surface: 'cli',
+		agent: def,
+		command: w.binaryPath,
+		args: [...(def?.readOnlyArgs ?? []), '--model', model, ...extraArgs],
+		cwd: w.cwd,
+		...(remote
+			? {}
+			: {
+					prompt: 'QUALIFY-E10-ROUTE',
+					promptFileDestination: { owner: 'local' as const, path: path.join(dir, 'prompt.json') },
+				}),
+		readOnlyMode: true,
+		isWindowsHost: isWindows(),
+		sshRemoteConfig,
+		sshStore,
+		...(managed
+			? {
+					managed: {
+						route: {
+							providerId: 'grok',
+							model: pinModel ? model : null,
+							baseUrl: null,
+							accountDir: w.accountRoot,
+							login: 'provider-login' as const,
+							permissionMode: null,
+						},
+					},
+				}
+			: {}),
+	});
+	return { planned, model, def, sshRemoteConfig, sshStore };
+}
+
+/** A route leg: the plan under the managed route, then (SSH) the managed wrap against the remote's attestation. */
+async function askPolicyRoute(
+	leg: PolicyLegId,
+	w: PolicyLegContext,
+	dir: string,
+	port: number,
+	defect: boolean
+): Promise<AuthorityAnswer> {
+	const extra =
+		leg === 'model-unapproved' && defect
+			? ['--model', POLICY_AUTHORITY_TENANT.unapprovedModel]
+			: leg === 'gateway-unapproved' && defect
+				? ['--base-url', `http://127.0.0.1:${port}/`]
+				: [];
+	const ssh = leg === 'endpoint-substituted' ? { port } : null;
+	const { planned, def, sshRemoteConfig, sshStore } = planPolicyRoute(
+		w,
+		dir,
+		extra,
+		ssh,
+		// Production refuses a managed route on any SSH remote; the remote is qualified by the managed wrap.
+		!ssh,
+		leg === 'model-unapproved'
+	);
+	if (!planned.ok) return { refused: `${planned.reason}: ${planned.error}`, endpointCalls: 0 };
+	if (!ssh) return { refused: null, endpointCalls: 0 };
+	const identity: SshRemoteEndpointIdentity = {
+		contractVersion: MANAGED_CONTRACT_VERSION,
+		installationId: 'qualify-e10-remote-installation',
+		runtimeId: 'qualify-e10-remote-runtime',
+		processEpoch: 'qualify-e10-remote-epoch',
+		tenantId: defect ? POLICY_AUTHORITY_TENANT.substitute : POLICY_AUTHORITY_TENANT.tenantId,
+		orgId: POLICY_AUTHORITY_TENANT.orgId,
+		authorityId: 'qualify-e10-remote-authority',
+		policyRevision: 1,
+		authority: 'registered',
+		routes: [{ providerId: 'grok', route: 'ssh', managed: 'implemented' }],
+	};
+	const { plan } = planned;
+	const wrapped = await wrapManagedSpawnWithSsh(
+		{ command: plan.command, args: plan.args, cwd: plan.cwd, agentBinaryName: def?.binaryName },
+		sshRemoteConfig ?? undefined,
+		sshStore,
+		{
+			expect: {
+				tenantId: POLICY_AUTHORITY_TENANT.tenantId,
+				orgId: POLICY_AUTHORITY_TENANT.orgId,
+				providerId: 'grok',
+				policyRevision: 1,
+			},
+			// The attestation is handed over in process: the remote is never dialed.
+			readEndpoint: async () => ({ status: 'attested', identity, via: 'qualify-e10-synthetic' }),
+		}
+	);
+	return { refused: wrapped.ok ? null : `${wrapped.reason}: ${wrapped.message}`, endpointCalls: 0 };
+}
+
+/**
+ * A standing leg over owned synthetic custody: a sealed identity record in an
+ * owned directory (a plaintext seal that says it is OS-held, an in-memory
+ * anchor), the production enrollment lifecycle over the in-process endpoint
+ * stand-in, and the production host adapter asked for a lease on the planned
+ * launch. The defect is the leg's own: custody refused after the write, the
+ * endpoint offline, the record revoked, the registration lapsed.
+ */
+async function askPolicyStanding(
+	leg: PolicyLegId,
+	w: PolicyLegContext,
+	dir: string,
+	defect: boolean
+): Promise<AuthorityAnswer> {
+	const sub = fs.mkdtempSync(path.join(dir, 'custody-'));
+	const seal = { open: true };
+	let anchor: { installSecret: string; epoch: number } | null = null;
+	const store = createEnterpriseIdentityStore({
+		file: path.join(sub, 'identity.sealed'),
+		seal: {
+			available: () => seal.open,
+			seal: (text) => Buffer.from(text, 'utf8'),
+			unseal: (blob) => blob.toString('utf8'),
+			custody: () => ({ kind: 'os-keystore', backend: 'qualify-e10-synthetic' }),
+		},
+		anchor: {
+			available: () => true,
+			read: () => anchor,
+			write: (a) => {
+				anchor = a;
+			},
+			clear: () => {
+				anchor = null;
+			},
+		},
+	});
+	const now = Date.now();
+	const iso = (ms: number) => new Date(ms).toISOString();
+	const installation = installationIdentity({
+		hostname: 'qualify-e10',
+		productionDataDir: sub,
+		mode: 'qualify',
+		pid: process.pid,
+		startedAt: iso(now),
+	});
+	const socketPath = path.join(sub, 'endpoint.sock');
+	const binding = 'qualify-e10-binding';
+	const written = await store.write({
+		installationId: installation.installationId,
+		tenantId: POLICY_AUTHORITY_TENANT.tenantId,
+		orgId: POLICY_AUTHORITY_TENANT.orgId,
+		enrollmentId: null,
+		endpoint: { socketPath, bindingDigest: binding, trustRootDigest: null },
+		management: defect && leg === 'enrollment-revoked' ? 'revoked' : 'enrolled',
+		registration: {
+			challengeId: 'qualify-e10-challenge',
+			actorId: null,
+			runtimeId: installation.runtimeId,
+			processEpoch: installation.processEpoch,
+			bindingDigest: binding,
+			processBirthDigest: null,
+			challengeDigest: 'qualify-e10-challenge-digest',
+			expiresAt: iso(defect && leg === 'enrollment-expired' ? now - 60_000 : now + 3_600_000),
+			registeredAt: iso(now - 120_000),
+		},
+		policy: { desiredRevision: 1, appliedRevision: 1, observedAt: iso(now) },
+		enrolledAt: iso(now - 120_000),
+	});
+	const calls = { n: 0 };
+	const offline = defect && leg === 'custody-offline';
+	const port = syntheticEndpointPort(socketPath, calls);
+	const lifecycle = createEnrollmentLifecycle({
+		identity: store,
+		openPort: () => {
+			if (offline) throw new Error('qualify-e10: the synthetic endpoint is offline');
+			return port;
+		},
+		installation,
+		components: [],
+		capabilities: { supported: [], required: [] },
+	});
+	try {
+		await lifecycle.connect();
+		if (defect && leg === 'custody-refused') seal.open = false;
+		const adapter = createManagedHostAdapter({
+			installation,
+			identity: { read: () => publicEnterpriseIdentity(store.read()) },
+			endpoint: offline ? null : port,
+			status: () => lifecycle.status(),
+		});
+		const authorityId = managedAuthorityId(written);
+		const headless = createHeadlessSpawnAuthority({
+			installation,
+			binding: {
+				state: 'enrolled',
+				record: {
+					contractVersion: MANAGED_CONTRACT_VERSION,
+					installationId: installation.installationId,
+					authorityId,
+					endpointRef: socketPath,
+					enrolledAt: written.enrolledAt,
+					policySources: [],
+					policyRevision: 1,
+					digest: 'qualify-e10-synthetic',
+				},
+				file: path.join(sub, 'binding.json'),
+			},
+			host: adapter,
+			origin: 'cli',
+			actor: { kind: 'service', id: 'qualify-e10' },
+		});
+		const verified = headless.context({
+			identity: ownRunIdentity(),
+			traceId: `qualify-e10-${leg}`,
+			policyRevision: 1,
+		});
+		if (!verified.ok) throw new Error(`context-refused: ${verified.problems.join('; ')}`);
+		const { planned, model } = planPolicyRoute(w, dir, [], null, false);
+		if (!planned.ok) throw new Error(`plan-refused: ${planned.reason}`);
+		const p = planned.plan;
+		// The adapter's own authority decides (the headless host lends exactly it); asked once.
+		const outcome = await adapter.authority.admit({
+			context: verified.context,
+			snapshot: buildDispatchSnapshot(
+				{ command: p.command, args: p.args, cwd: p.cwd, env: p.envVars ?? {} },
+				{ provider: 'grok', model, origin: 'cli' }
+			),
+			policy: { sources: [], policyRevision: 1 },
+		});
+		if (outcome.state === 'admitted')
+			outcome.lease.release({ outcome: 'spawn-failed', message: 'qualify-e10' });
+		return {
+			refused: outcome.state === 'admitted' ? null : outcome.message,
+			endpointCalls: calls.n,
+		};
+	} finally {
+		await lifecycle.close();
+	}
+}
+
+/**
+ * One route or authority leg (GT1-11-12C), turnless and unreserved: the
+ * defective launch is asked of production, then the same launch without the
+ * defect (the control). The leg passes only when the defect is refused by name,
+ * the control is accepted (a route control plans; a standing control reaches
+ * the endpoint), nothing reaches the spawn sink, the owned loopback (the
+ * gateway URL and the SSH remote port) accepts nothing and the defect asks the
+ * endpoint nothing. No Grok binary runs: an accepted defect reaches a sink that
+ * counts and refuses.
+ */
+async function runPolicyAuthorityLeg(w: PolicyLegContext, r: PolicyLegReceipt): Promise<void> {
+	const a: NonNullable<PolicyLegReceipt['authority']> = {
+		refusal: null,
+		control: null,
+		spawnAttempts: 0,
+		endpointCalls: 0,
+	};
+	r.authority = a;
+	const connections = { n: 0 };
+	const server = net.createServer((socket) => {
+		connections.n++;
+		socket.destroy();
+	});
+	await new Promise<void>((resolve, reject) => {
+		server.once('error', reject);
+		server.listen(0, '127.0.0.1', () => resolve());
+	});
+	const port = (server.address() as net.AddressInfo).port;
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qualify-e10-authority-'));
+	const route = ['model-unapproved', 'gateway-unapproved', 'endpoint-substituted'].includes(r.leg);
+	const ask = (defect: boolean) =>
+		route ? askPolicyRoute(r.leg, w, dir, port, defect) : askPolicyStanding(r.leg, w, dir, defect);
+	try {
+		const defect = await ask(true);
+		// An accepted defect would launch here: the sink counts it and runs nothing.
+		if (defect.refused === null) a.spawnAttempts++;
+		a.refusal = defect.refused;
+		a.endpointCalls = defect.endpointCalls;
+		const control = await ask(false);
+		const accepted = control.refused === null || control.endpointCalls > 0;
+		a.control =
+			control.refused === null ? 'accepted' : accepted ? 'endpoint-asked' : control.refused;
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		r.loopbackConnections = connections.n;
+		const cause = POLICY_AUTHORITY_CAUSES[r.leg];
+		const check = (id: string, ok: boolean, detail: string) =>
+			r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+		check('refused-by-production', defect.refused !== null, defect.refused ?? 'accepted');
+		check(
+			'refusal-names-cause',
+			!!cause && !!defect.refused && cause.test(defect.refused),
+			`expects ${cause?.source ?? 'no cause'}`
+		);
+		check('control-accepted', accepted, a.control);
+		check('zero-spawns', a.spawnAttempts === 0 && r.spawned === 0, `attempts=${a.spawnAttempts}`);
+		check('loopback-silent', connections.n === 0, `connections=${connections.n}`);
+		check('endpoint-silent', defect.endpointCalls === 0, `executions=${defect.endpointCalls}`);
+		if (r.leg === 'gateway-unapproved')
+			r.notes.push(
+				'only the --base-url flag is refused: the Grok endpoint variables (GROK_MODELS_BASE_URL, GROK_CLI_CHAT_PROXY_BASE_URL, GROK_XAI_API_BASE_URL) are not on the managed ceiling (GT1-09-R14 stays open)'
+			);
+		if (!route)
+			r.notes.push(
+				'synthetic custody and an in-process endpoint stand-in: a pass proves the production refusal of this standing, never a real enrollment or authority'
+			);
+	} finally {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+}
+
 /** One policy leg's turns and effect checks (native or ACP route); returns the uncertainty its turns left. */
 async function runPolicyLeg(
 	spec: PolicyLegSpec,
@@ -13431,6 +13881,7 @@ async function runPolicyLegs(w: PolicyLegContext): Promise<{
 			replays: null,
 			revocations: null,
 			standIn: null,
+			authority: null,
 			notes: [],
 			changed: [],
 			sandbox: policySandboxNote(),
@@ -13471,6 +13922,12 @@ async function runPolicyLegs(w: PolicyLegContext): Promise<{
 				NATIVE_APPROVAL_CHANNEL_OWNER,
 				'unsupported'
 			);
+		// The run-state names no real management authority, and a synthetic endpoint never qualifies one.
+		else if (spec.id === 'audit-attribution')
+			gap(
+				`${REAL_AUTHORITY_ABSENT}: audit attribution bound to the actual Grok account, actor and turn needs a real authority the run-state names; none is named, and a synthetic endpoint never qualifies it`,
+				REAL_AUTHORITY_ABSENT
+			);
 		else if (w.c.target === 'ssh')
 			gap('the sentinels, listener and tree checks are local', SSH_POLICY_LEGS_OWNER);
 		else if (!w.accountRoot) reason('account-root-unknown', spec.id);
@@ -13484,7 +13941,7 @@ async function runPolicyLegs(w: PolicyLegContext): Promise<{
 			reason('policy-resources-not-synthetic-owned', 'isolation.resources.mcp,hooks');
 		else if (
 			spec.turns.length !== spec.maxTurns ||
-			(spec.kind === 'refusal'
+			(spec.kind === 'refusal' || spec.kind === 'authority'
 				? spec.maxTurns !== 0
 				: spec.maxTurns < 1 || spec.maxTurns > (w.c.route === 'acp-stdio' ? 2 : 1))
 		)
@@ -13497,11 +13954,10 @@ async function runPolicyLegs(w: PolicyLegContext): Promise<{
 			continue;
 		}
 		// A refusal leg sends no turn, so it holds no reservation: the production refusal is its run.
-		if (spec.kind === 'refusal') {
+		if (spec.kind === 'refusal' || spec.kind === 'authority') {
 			const problems: string[] = [];
-			await runPolicyRefusalLeg(w, r).catch((e: unknown) =>
-				problems.push(`${spec.id}-threw: ${errorText(e)}`)
-			);
+			const run = spec.kind === 'refusal' ? runPolicyRefusalLeg : runPolicyAuthorityLeg;
+			await run(w, r).catch((e: unknown) => problems.push(`${spec.id}-threw: ${errorText(e)}`));
 			legs.push(settlePolicyLeg(r, problems));
 			continue;
 		}

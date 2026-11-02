@@ -581,6 +581,15 @@ const FAULT_RETRY_LEG: AccountingLegSpec = {
  * revocation before the tool call (`approval`: unsupported on native, where no
  * approval channel exists); and the production refusal of a required no-tools
  * turn before any spawn (`refusal`: turnless, no reservation).
+ *
+ * Route and authority legs (GT1-11-12C, `authority`: turnless, no reservation):
+ * a model and a gateway outside the approved set and a substituted SSH endpoint,
+ * each planned through the production launch plan under a managed route; and
+ * custody refused, an offline endpoint, a revoked and an expired enrollment over
+ * owned synthetic custody, each asked of the production host authority. Each
+ * passes only on the production refusal with zero spawns and a silent loopback.
+ * Audit attribution is `not-evaluated` (`real-authority-absent`): a synthetic
+ * endpoint never qualifies it.
  */
 export type PolicyLegId =
 	| 'sentinel-write'
@@ -595,9 +604,17 @@ export type PolicyLegId =
 	| 'unknown-effect'
 	| 'approval-replay'
 	| 'revocation'
-	| 'no-tools-refused';
+	| 'no-tools-refused'
+	| 'model-unapproved'
+	| 'gateway-unapproved'
+	| 'endpoint-substituted'
+	| 'custody-refused'
+	| 'custody-offline'
+	| 'enrollment-revoked'
+	| 'enrollment-expired'
+	| 'audit-attribution';
 
-export type PolicyLegKind = 'effect' | 'tool-surface' | 'approval' | 'refusal';
+export type PolicyLegKind = 'effect' | 'tool-surface' | 'approval' | 'refusal' | 'authority';
 
 export const POLICY_PLACEHOLDERS = Object.freeze({
 	write: '{{WRITE_SENTINEL}}',
@@ -691,6 +708,18 @@ export const POLICY_LEGS: readonly PolicyLegSpec[] = Object.freeze([
 		'approval'
 	),
 	{ id: 'no-tools-refused', kind: 'refusal', turns: [], maxTurns: 0 },
+	...(
+		[
+			'model-unapproved',
+			'gateway-unapproved',
+			'endpoint-substituted',
+			'custody-refused',
+			'custody-offline',
+			'enrollment-revoked',
+			'enrollment-expired',
+			'audit-attribution',
+		] as const
+	).map((id): PolicyLegSpec => ({ id, kind: 'authority', turns: [], maxTurns: 0 })),
 ]);
 
 const turn = (family: string, n: number, extra = ''): PaidFixtureTurn => {
