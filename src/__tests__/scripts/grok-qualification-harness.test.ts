@@ -30,6 +30,17 @@
  * ids pass isolated and fail on a planted record, binary resolution refuses any
  * other or fallback install, E07 effort and gateway mismatches fail, and an
  * unresolved SSH remote refuses with zero spawn and never runs locally.
+ *
+ * GT1-11-11B3 adds the E08 resource and consumer legs (GT1-11-11B1..B2): a
+ * native Grok stand-in that reads the owned resource config and really starts
+ * the harness's MCP stand-ins (never a real Grok, credential or home). The
+ * resources live only under owned roots with their digests; the leg passes
+ * only from the stand-ins' own records, and execution that differs from the
+ * advertised catalog, a sentinel of an unselected resource, a started disabled
+ * entry, a retried OAuth entry and a re-enable across the resume each fail
+ * their assertion. The installer leg refuses a target outside the owned home
+ * before any write, and the bundle leg fails on a crossed credential body or a
+ * forbidden entry.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -54,6 +65,7 @@ import {
 	createBudgetLedger,
 	createCaseLifetime,
 	defaultConfigFromRunState,
+	evaluateResourceAssertion,
 	executeDiscoveryCase,
 	executeOfflineLeg,
 	executePaidCase,
@@ -70,6 +82,7 @@ import {
 	preflightCase,
 	productionCapabilityDigest,
 	redactDeep,
+	runConsumerLegs,
 	runQualification,
 	validateConfig,
 	validateLaunchEnvironment,
@@ -82,6 +95,7 @@ import {
 import { PAID_FIXTURES, fixtureTurnsFor } from '../../../scripts/grok-qualification/paid-fixtures';
 import { getAgentCapabilities } from '../../../src/shared/maestro-lib/providers/capabilities';
 import { buildAgentEnvironment } from '../../../src/shared/maestro-lib/launch/env';
+import { grokInstaller } from '../../../src/main/coworking/installers/grok';
 
 /** Pass-through spies on every child_process entry point (vitest folds both specifiers into one module), so a test can prove none ran. */
 const childProcess = vi.hoisted(() => {
@@ -116,6 +130,54 @@ vi.mock('../../../src/shared/maestro-lib/launch/ssh-path', async (importOriginal
 	...(await importOriginal<typeof import('../../../src/shared/maestro-lib/launch/ssh-path')>()),
 	resolveSshPath: async () => sshPath.current ?? 'ssh',
 }));
+/**
+ * Pass-through bundle consumers a GT1-11-11B3 case can bend: after the real
+ * import, copy the source project's credential file into the imported workspace
+ * (`project-credential`) or its body into another imported file (`stray-file`),
+ * or make the harness's `isForbiddenBundleEntry()` name one more entry.
+ */
+const bundleTamper = vi.hoisted(() => ({
+	leak: null as 'project-credential' | 'stray-file' | null,
+	forbid: null as string | null,
+}));
+vi.mock('../../../src/main/cue/bundle/cue-bundle-importer', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('../../../src/main/cue/bundle/cue-bundle-importer')>();
+	return {
+		...actual,
+		importCueBundle: async (...args: Parameters<typeof actual.importCueBundle>) => {
+			const result = await actual.importCueBundle(...args);
+			if (bundleTamper.leak) {
+				const opts = args[0];
+				const from = path.join(
+					path.dirname(opts.bundlePath),
+					'source',
+					'app',
+					'.grok',
+					'auth.json'
+				);
+				const ws = Object.values(opts.workspaces ?? {})[0] as string;
+				const to =
+					bundleTamper.leak === 'project-credential'
+						? path.join(ws, '.grok', 'auth.json')
+						: path.join(ws, 'notes', 'imported.txt');
+				fs.mkdirSync(path.dirname(to), { recursive: true });
+				fs.copyFileSync(from, to);
+			}
+			return result;
+		},
+	};
+});
+vi.mock('../../../src/main/cue/bundle/cue-bundle-exporter', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('../../../src/main/cue/bundle/cue-bundle-exporter')>();
+	return {
+		...actual,
+		isForbiddenBundleEntry: (name: string) =>
+			(bundleTamper.forbid !== null && name.endsWith(bundleTamper.forbid)) ||
+			actual.isForbiddenBundleEntry(name),
+	};
+});
 
 const WORKSPACE = path.resolve(__dirname, '../../..');
 const RUN_STATE = JSON.parse(
@@ -134,6 +196,8 @@ const ALL_CAPS: HarnessCapabilities = {
 	discoveryExecutor: false,
 	// Off: SSH legs run in their own block (GT1-11-11A4); here an SSH leg stays GT1-11-11A3's gap.
 	sshExecutor: false,
+	// Off: the consumer legs run in their own block (GT1-11-11B3); these suites decide admission only.
+	consumerLegs: false,
 };
 /** A secret-shaped value the shared redactor recognizes; synthetic, never a credential. */
 const FAKE_TOKEN = `ghp_${'A1b2C3d4E5'.repeat(4).slice(0, 36)}`;
@@ -3272,4 +3336,466 @@ describe('GT1-11-09 qualification harness', () => {
 			});
 		}
 	);
+	describe.skipIf(process.platform === 'win32')('resource and consumer legs (GT1-11-11B3)', () => {
+		const REL = `${RUNS_ROOT}/gt1-11-11b3-${process.pid}`;
+		const ROOT = path.join(WORKSPACE, REL);
+		const BIN = path.join(ROOT, 'bin', 'grok');
+		/** The stand-in reads its mode from here, so its bytes (and the pin) are the same in every mode. */
+		const MODE_FILE = path.join(ROOT, 'mode');
+		const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-11b3-operator-${process.pid}`);
+		/** A directory outside every owned root, standing for another Grok home on the machine. */
+		const ELSEWHERE = path.join(os.tmpdir(), `gt1-11-11b3-elsewhere-${process.pid}`);
+		const MODEL = 'claude-haiku-4-5';
+		const SECRET = (name: string) => `synthetic-xai-${name}-value`;
+		type Mode =
+			| 'ok'
+			| 'silent'
+			| 'noinput'
+			| 'wrongarg'
+			| 'unselected'
+			| 'disabled'
+			| 'retry'
+			| 'reenable';
+		/**
+		 * The native Grok stand-in (never a real Grok): it reads the account
+		 * config `GROK_CONFIG_PATH` names, advertises the enabled skills from
+		 * their SKILL.md files, starts every enabled MCP entry through its
+		 * declared command (the harness's own stdio stand-in), runs the invoked
+		 * skill's tool call, closes every child, then replies with the turn
+		 * token and the token the project rule in its cwd names. A mode bends
+		 * exactly one of those behaviours.
+		 */
+		const standIn = (mode: Mode): string => {
+			fs.writeFileSync(MODE_FILE, mode);
+			if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+			const src = [
+				`#!${process.execPath}`,
+				"const fs = process.getBuiltinModule('fs');",
+				"const path = process.getBuiltinModule('path');",
+				"const cp = process.getBuiltinModule('child_process');",
+				`const toml = process.getBuiltinModule('module').createRequire(${JSON.stringify(path.join(WORKSPACE, 'package.json'))})('smol-toml');`,
+				`const MODE = fs.readFileSync(${JSON.stringify(MODE_FILE)}, 'utf8').trim();`,
+				'const argv = process.argv.slice(2);',
+				'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
+				"const prompt = at('-p') || '';",
+				'const turn = Number((prompt.match(/QUALIFY-E08-T([0-9]+)-OK/) || [0, 0])[1]);',
+				'const invoke = prompt.match(/^\\/(\\S+) (\\S+)/);',
+				"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
+				"const config = toml.parse(fs.readFileSync(process.env.GROK_CONFIG_PATH, 'utf8'));",
+				'const servers = config.mcp_servers || {};',
+				'const skillsDir = config.skills.paths[0];',
+				'const off = config.skills.disabled || [];',
+				"const skillBody = (n) => fs.readFileSync(path.join(skillsDir, n, 'SKILL.md'), 'utf8');",
+				'const catalog = fs.readdirSync(skillsDir).filter((n) => !off.includes(n)).sort().map((name) => {',
+				'  const hint = (skillBody(name).match(/argument-hint: "([^"]*)"/) || [])[1];',
+				"  const entry = { name, description: 'synthetic' };",
+				"  if (hint && MODE !== 'noinput') entry.input = { hint };",
+				'  return entry;',
+				'});',
+				'const connect = (name) => {',
+				'  const s = servers[name];',
+				"  const child = cp.spawn(s.command, s.args, { stdio: ['pipe', 'pipe', 'ignore'] });",
+				"  child.stdin.on('error', () => {});",
+				"  let buf = ''; let seq = 0; let exited = false; const waiting = new Map();",
+				"  child.stdout.on('data', (d) => { buf += d; let k; while ((k = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, k); buf = buf.slice(k + 1); let m; try { m = JSON.parse(line); } catch (e) { continue; } const w = waiting.get(m.id); if (w) { waiting.delete(m.id); w(m); } } });",
+				"  const done = new Promise((r) => child.on('exit', () => { exited = true; for (const w of waiting.values()) w(null); waiting.clear(); r(); }));",
+				"  const request = (method, params) => new Promise((r) => { if (exited) return r(null); const id = ++seq; waiting.set(id, r); child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\\n'); });",
+				'  const close = () => { child.stdin.end(); return done; };',
+				'  return { request, close };',
+				'};',
+				'(async () => {',
+				'  const sessions = [];',
+				'  const notes = [];',
+				"  if (MODE !== 'silent') {",
+				"    out({ type: 'available_commands_update', availableCommands: catalog });",
+				'    const names = Object.keys(servers).filter((n) => servers[n].enabled !== false);',
+				"    if (MODE === 'disabled' || (MODE === 'reenable' && turn > 1)) names.push(...Object.keys(servers).filter((n) => servers[n].enabled === false));",
+				'    for (const name of names) {',
+				"      const tries = MODE === 'retry' && servers[name].oauth_client_id ? 2 : 1;",
+				'      for (let i = 0; i < tries; i++) {',
+				'        const c = connect(name);',
+				"        const init = await c.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'grok-stand-in', version: '0' } });",
+				"        if (!init || init.error) { await c.close(); notes.push({ type: 'mcp_status', server: name, status: init ? 'unauthorized' : 'handshake-failed' }); continue; }",
+				"        await c.request('tools/list', {});",
+				'        sessions.push({ name, c });',
+				'        break;',
+				'      }',
+				'    }',
+				'    if (invoke) {',
+				'      const [, command, argument] = invoke;',
+				'      const body = skillBody(command);',
+				'      const server = (body.match(/of the `([^`]+)` MCP server/) || [])[1];',
+				'      const tool = (body.match(/Call the `([^`]+)` tool/) || [])[1];',
+				'      const s = sessions.find((x) => x.name === server);',
+				"      const value = MODE === 'wrongarg' ? argument + '-ALTERED' : argument;",
+				'      if (s) {',
+				"        await s.c.request('tools/call', { name: tool, arguments: { source: command, value } });",
+				"        if (MODE === 'unselected') await s.c.request('tools/call', { name: tool, arguments: { source: 'qualify-unselected', value: 'implicit' } });",
+				'      }',
+				'    }',
+				'    for (const s of sessions) await s.c.close();',
+				'  }',
+				'  for (const n of notes) out(n);',
+				"  const rules = path.join(process.cwd(), '.grok', 'rules');",
+				"  const ruleTokens = MODE === 'silent' ? [] : fs.readdirSync(rules).map((f) => (fs.readFileSync(path.join(rules, f), 'utf8').match(/own line: (\\S+)/) || [])[1]).filter(Boolean);",
+				"  out({ type: 'text', data: ['QUALIFY-E08-T' + turn + '-OK', ...ruleTokens].join('\\n') });",
+				'  out({',
+				"    type: 'end', stopReason: 'end_turn', requestId: 'req-synthetic', sessionId: 'gt1-11-11b3-native', total_cost_usd: 0.001,",
+				'    usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_tokens: 0 },',
+				"    modelUsage: { [at('-m')]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.001 } },",
+				'  });',
+				'})();',
+				'',
+			].join('\n');
+			fs.writeFileSync(BIN, src);
+			fs.chmodSync(BIN, 0o555);
+			return createHash('sha256').update(fs.readFileSync(BIN)).digest('hex');
+		};
+		const isolation = (resources: 'synthetic-owned' | 'empty'): IsolationDeclaration => ({
+			boundary: {
+				kind: 'disposable-os-account',
+				reference: 'boundary:synthetic',
+				actualHome: `${REL}/home`,
+				productionHomeMounted: false,
+				operatorCredentialsReadable: false,
+			},
+			accountRoots: { A: `${REL}/grok-a`, B: `${REL}/grok-b` },
+			remoteRoots: {},
+			policy: {
+				systemPolicyInspected: true,
+				managedPolicy: 'absent',
+				requiredPolicyCompatible: true,
+			},
+			resources: { hooks: resources, mcp: resources, plugins: resources, envrc: 'disabled' },
+			egress: {
+				kind: 'operation-aware',
+				reference: 'egress:synthetic',
+				suppression: {
+					update: 'flags-only',
+					telemetry: 'flags-only',
+					backgroundUpload: 'unknown',
+				},
+			},
+			path: ['/usr/bin', '/bin', path.join(ROOT, 'bin')],
+		});
+		const resourceConfig = (
+			sha: string,
+			resources: 'synthetic-owned' | 'empty' = 'synthetic-owned'
+		): QualificationConfig => ({
+			...liveConfig({
+				allowedRoots: [REL],
+				allowedModels: [MODEL],
+				binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
+			}),
+			isolation: isolation(resources),
+		});
+		const E08 = () => expandCases(FAMILIES, ['E08:native-headless:local'])[0];
+		const CAPS: HarnessCapabilities = {
+			...ALL_CAPS,
+			discoveryExecutor: true,
+			sshExecutor: true,
+			consumerLegs: true,
+		};
+		let ledgerSeq = 0;
+		const run = async (mode: Mode, resources: 'synthetic-owned' | 'empty' = 'synthetic-owned') => {
+			const sha = standIn(mode);
+			const cfg = resourceConfig(sha, resources);
+			const ledger = createBudgetLedger(cfg, `gt1-11-11b3-${process.pid}-${++ledgerSeq}`, NOW);
+			ledger.authorizedCaseIds.push(E08().caseId);
+			const lifetime = createCaseLifetime(1);
+			const legs = await executePaidCase(E08(), cfg, {
+				workspace: WORKSPACE,
+				operatorHome: OPERATOR_HOME,
+				ledger,
+				lifetime,
+				problems: validateConfig(cfg, WORKSPACE),
+				capabilities: CAPS,
+				now: clock,
+				resolveSecret: SECRET,
+			});
+			await lifetime.cleanup();
+			expect(legs).toHaveLength(1);
+			return { leg: legs[0], ledger };
+		};
+		type Leg = Awaited<ReturnType<typeof run>>['leg'];
+		const verdict = (leg: Leg, id: string) => leg.assertions.find((a) => a.id === id);
+		const outcomes = (leg: Leg) =>
+			Object.fromEntries(
+				[
+					'advertised-matches-executed',
+					'rule-applied',
+					'mcp-paths',
+					'no-implicit-effect',
+					'resume-trust-state',
+				].map((id) => [id, verdict(leg, id)?.outcome ?? 'absent'])
+			);
+		const PASSING = {
+			'advertised-matches-executed': 'passed',
+			'rule-applied': 'passed',
+			'mcp-paths': 'passed',
+			'no-implicit-effect': 'passed',
+			'resume-trust-state': 'passed',
+		};
+		const consumerConfig = (
+			resources: 'synthetic-owned' | 'empty' = 'synthetic-owned'
+		): QualificationConfig => ({
+			...liveConfig({ allowedRoots: [REL] }),
+			isolation: isolation(resources),
+		});
+		const consumers = (cfg: QualificationConfig = consumerConfig()) =>
+			runConsumerLegs(E08(), cfg, [], CAPS, {
+				workspace: WORKSPACE,
+				operatorHome: OPERATOR_HOME,
+				now: NOW,
+			});
+		const operatorHomeUntouched = () =>
+			expect(fs.existsSync(OPERATOR_HOME) ? fs.readdirSync(OPERATOR_HOME) : []).toEqual([]);
+
+		beforeAll(() => {
+			for (const d of ['home', 'grok-a', 'grok-b', 'bin', path.join('cache', 'tmp')])
+				fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+			fs.mkdirSync(ELSEWHERE, { recursive: true });
+		});
+		afterAll(() => {
+			if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+			fs.rmSync(ROOT, { recursive: true, force: true });
+			fs.rmSync(ELSEWHERE, { recursive: true, force: true });
+			fs.rmSync(OPERATOR_HOME, { recursive: true, force: true });
+		});
+		beforeEach(() => {
+			spawnSpies.forEach((s) => s.mockClear());
+			fetchSpy.mockClear();
+			bundleTamper.leak = null;
+			bundleTamper.forbid = null;
+		});
+		afterEach(() => {
+			vi.restoreAllMocks();
+		});
+
+		describe('E08 resource leg', () => {
+			it('materializes every resource under the owned roots, hashes it, and passes only from what the stand-ins recorded', async () => {
+				const { leg, ledger } = await run('ok');
+				expect(outcomes(leg), JSON.stringify(leg.assertions)).toEqual(PASSING);
+				expect(leg.status, JSON.stringify(leg.reasons)).toBe('passed');
+				const res = leg.resources!;
+				const manifest = res.manifest;
+				expect(manifest.root.startsWith(path.join(ROOT, 'synthetic-resources') + path.sep)).toBe(
+					true
+				);
+				expect(manifest.configPath).toBe(path.join(ROOT, 'grok-a', 'qualify-resources.toml'));
+				expect(manifest.entries.map((e) => e.id).sort()).toEqual(
+					[
+						'config:account',
+						'mcp:qualify-disabled',
+						'mcp:qualify-failing',
+						'mcp:qualify-oauth',
+						'mcp:qualify-tool',
+						'mcp:stand-in',
+						'rule:qualify-rule.md',
+						'skill:qualify-disabled-skill',
+						'skill:qualify-sentinel',
+						'skill:qualify-unselected',
+					].sort()
+				);
+				for (const e of manifest.entries) {
+					expect(e.path.startsWith(ROOT + path.sep), e.id).toBe(true);
+					expect(e.sha256, e.id).toMatch(/^[0-9a-f]{64}$/);
+					// The account config is the one file outside the leg's own directory: removed after the leg.
+					if (e.kind === 'config' || e.kind === 'mcp-server') {
+						expect(fs.existsSync(e.path), e.id).toBe(false);
+						continue;
+					}
+					expect(e.path.startsWith(manifest.root + path.sep), e.id).toBe(true);
+					expect(createHash('sha256').update(fs.readFileSync(e.path)).digest('hex'), e.id).toBe(
+						e.sha256
+					);
+				}
+				// What passed it: the stand-ins' own records, one sentinel per turn, every MCP child reaped.
+				expect(res.turns.map((t) => t.sentinels.map((s) => `${s.source}|${s.value}`))).toEqual([
+					['qualify-sentinel|QUALIFY-E08-ARG-T1'],
+					['qualify-sentinel|QUALIFY-E08-ARG-T2'],
+				]);
+				expect(res.reaped.pids.length).toBe(6);
+				expect(res.reaped.alive).toEqual([]);
+				expect(res.strayFiles).toEqual([]);
+				expect(res.mutated).toEqual([]);
+				expect(ledger.reservations).toHaveLength(1);
+				operatorHomeUntouched();
+			});
+
+			it('cannot pass from the declaration and fixture alone: a stand-in that runs nothing fails', async () => {
+				const { leg } = await run('silent');
+				expect(leg.status).toBe('failed');
+				expect(verdict(leg, 'advertised-matches-executed')).toMatchObject({ outcome: 'failed' });
+				expect(verdict(leg, 'advertised-matches-executed')?.detail).toContain(
+					'catalog-unobserved:T1'
+				);
+				expect(verdict(leg, 'rule-applied')?.detail).toContain('rule-token-missing:T1');
+				expect(verdict(leg, 'mcp-paths')?.detail).toContain('enabled-not-called:qualify-tool');
+				expect(verdict(leg, 'mcp-paths')?.detail).toContain('refusal-not-visible:qualify-oauth');
+				// And with no observation at all, every resource assertion fails.
+				for (const id of [
+					'advertised-matches-executed',
+					'rule-applied',
+					'mcp-paths',
+					'no-implicit-effect',
+					'resume-trust-state',
+				] as const)
+					expect(
+						evaluateResourceAssertion(id, PAID_FIXTURES.E08, {
+							route: 'native-headless',
+							turns: [],
+							resources: null,
+						})
+					).toMatchObject({ outcome: 'failed', detail: 'resources-unobserved' });
+			});
+
+			it('fails advertised-matches-executed when execution differs from the advertised entry', async () => {
+				const noInput = (await run('noinput')).leg;
+				expect(verdict(noInput, 'advertised-matches-executed')).toMatchObject({
+					outcome: 'failed',
+				});
+				expect(verdict(noInput, 'advertised-matches-executed')?.detail).toContain(
+					'argument-semantics:qualify-sentinel:T1'
+				);
+				expect(noInput.status).toBe('failed');
+				const altered = (await run('wrongarg')).leg;
+				expect(verdict(altered, 'advertised-matches-executed')?.detail).toContain(
+					'sentinel-value:T1'
+				);
+				expect(altered.status).toBe('failed');
+			});
+
+			it('fails no-implicit-effect on a sentinel an unselected resource wrote', async () => {
+				const { leg } = await run('unselected');
+				expect(verdict(leg, 'no-implicit-effect')).toMatchObject({ outcome: 'failed' });
+				expect(verdict(leg, 'no-implicit-effect')?.detail).toContain(
+					'unselected-resource-ran:qualify-unselected'
+				);
+				expect(verdict(leg, 'advertised-matches-executed')?.outcome).toBe('passed');
+				expect(leg.status).toBe('failed');
+			});
+
+			it('fails mcp-paths when the disabled entry starts or the OAuth entry is retried', async () => {
+				const disabled = (await run('disabled')).leg;
+				expect(verdict(disabled, 'mcp-paths')?.detail).toContain(
+					'disabled-started:qualify-disabled'
+				);
+				expect(disabled.status).toBe('failed');
+				const retried = (await run('retry')).leg;
+				expect(verdict(retried, 'mcp-paths')).toMatchObject({ outcome: 'failed' });
+				expect(verdict(retried, 'mcp-paths')?.detail).toContain('retried:qualify-oauth');
+				expect(verdict(retried, 'resume-trust-state')?.outcome).toBe('passed');
+				expect(retried.status).toBe('failed');
+			});
+
+			it('fails resume-trust-state when a disabled resource is re-enabled on the resumed turn', async () => {
+				const { leg } = await run('reenable');
+				expect(verdict(leg, 'resume-trust-state')).toMatchObject({ outcome: 'failed' });
+				expect(verdict(leg, 'resume-trust-state')?.detail).toContain(
+					're-enabled-after-resume:mcp:qualify-disabled:T2'
+				);
+				expect(verdict(leg, 'resume-trust-state')?.detail).not.toContain(
+					'restricted-state-absent-T1'
+				);
+				expect(leg.status).toBe('failed');
+			});
+
+			it('refuses before any write, spawn or reservation when the resources are not synthetic-owned', async () => {
+				const legDir = path.join(ROOT, 'synthetic-resources', 'E08_native-headless_local-main');
+				fs.rmSync(legDir, { recursive: true, force: true });
+				const { leg, ledger } = await run('ok', 'empty');
+				expect(leg.reasons.map((r) => r.id)).toEqual(['resources-not-synthetic-owned']);
+				expect(leg).toMatchObject({
+					status: 'not-run',
+					spawned: 0,
+					reservationId: null,
+					resources: null,
+				});
+				expect(ledger.reservations).toEqual([]);
+				expect(fs.existsSync(legDir)).toBe(false);
+				for (const s of spawnSpies) expect(s).not.toHaveBeenCalled();
+				expect(fetchSpy).not.toHaveBeenCalled();
+			});
+		});
+
+		describe('E08 consumer legs', () => {
+			it('both legs pass on owned roots with no spawn and no network, and the operator home is untouched', async () => {
+				const legs = await consumers();
+				expect(legs.map((l) => [l.leg, l.status])).toEqual([
+					['coworking-installer', 'passed'],
+					['bundle-portability', 'passed'],
+				]);
+				for (const l of legs) {
+					expect(l.root?.startsWith(fs.realpathSync(ROOT) + path.sep), l.leg).toBe(true);
+					expect(l.problems, l.leg).toEqual([]);
+					expect(
+						l.assertions.every((a) => a.outcome === 'passed'),
+						JSON.stringify(l)
+					).toBe(true);
+					expect([l.spawned, l.networkContacts]).toEqual([0, 0]);
+				}
+				for (const s of spawnSpies) expect(s).not.toHaveBeenCalled();
+				expect(fetchSpy).not.toHaveBeenCalled();
+				operatorHomeUntouched();
+			});
+
+			it('the installer leg refuses a target outside the owned home before anything is written', async () => {
+				const outside = path.join(ELSEWHERE, 'config.toml');
+				vi.spyOn(grokInstaller, 'configPath').mockReturnValue(outside);
+				const install = vi.spyOn(grokInstaller, 'install');
+				const [installer] = await consumers();
+				expect(installer.status).toBe('failed');
+				expect(installer.assertions).toEqual([
+					{ id: 'owned-target', outcome: 'failed', detail: outside },
+				]);
+				expect(installer.problems).toContain('installer-target-outside-owned-home');
+				expect(install).not.toHaveBeenCalled();
+				expect(fs.existsSync(outside)).toBe(false);
+			});
+
+			it('the bundle leg fails names-only when a credential body crosses into the import', async () => {
+				for (const [leak, projectCredential] of [
+					['project-credential', false],
+					['stray-file', true],
+				] as const) {
+					bundleTamper.leak = leak;
+					const [, bundle] = await consumers();
+					expect(bundle.status, leak).toBe('failed');
+					const names = bundle.assertions.find((a) => a.id === 'names-only');
+					expect(names?.outcome, leak).toBe('failed');
+					expect(names?.detail, leak).toContain('bodyImported=1');
+					expect(names?.detail, leak).toContain(`projectCredential=${projectCredential}`);
+					// The body itself is never recorded.
+					expect(JSON.stringify(bundle), leak).not.toMatch(/ghp_[0-9a-f]{36}/);
+				}
+			});
+
+			it('the bundle leg fails forbidden-entries on an archive entry isForbiddenBundleEntry names', async () => {
+				bundleTamper.forbid = 'qualify-sentinel/SKILL.md';
+				const [, bundle] = await consumers();
+				expect(bundle.status).toBe('failed');
+				const forbidden = bundle.assertions.find((a) => a.id === 'forbidden-entries');
+				expect(forbidden?.outcome).toBe('failed');
+				expect(forbidden?.detail).toContain('qualify-sentinel/SKILL.md');
+			});
+
+			it('a declaration without synthetic-owned resources, or without the capability, writes nothing', async () => {
+				fs.rmSync(path.join(ROOT, 'consumer-legs'), { recursive: true, force: true });
+				const refused = await consumers(consumerConfig('empty'));
+				expect(refused.map((l) => l.status)).toEqual(['not-run', 'not-run']);
+				expect(refused[0].reasons.map((r) => r.id)).toContain('resources-not-synthetic-owned');
+				const off = await runConsumerLegs(
+					E08(),
+					consumerConfig(),
+					[],
+					{ ...CAPS, consumerLegs: false },
+					{ workspace: WORKSPACE, operatorHome: OPERATOR_HOME, now: NOW }
+				);
+				expect(off.map((l) => l.status)).toEqual(['not-run', 'not-run']);
+				expect(off[0].reasons.map((r) => r.id)).toContain('consumer-legs-unimplemented');
+				expect(fs.existsSync(path.join(ROOT, 'consumer-legs'))).toBe(false);
+			});
+		});
+	});
 });

@@ -18,6 +18,9 @@
  * GT1-11-11A4 adds the GT1-11-11A1..A3 legs to the same ledger: a discovery leg
  * never reserves or charges, and an E07 leg with no selected effort or an SSH
  * leg whose remote does not resolve refuses before any reservation.
+ *
+ * GT1-11-11B3: an E08 resource leg whose isolation does not declare its
+ * resources synthetic-owned refuses before any write, spawn or reservation.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -116,6 +119,8 @@ const ALL_CAPS: HarnessCapabilities = {
 	discoveryExecutor: false,
 	// Off: SSH legs run in their own block (GT1-11-11A4); these suites decide admission only.
 	sshExecutor: false,
+	// Off: the consumer legs run in their own block (GT1-11-11B3); these suites decide admission only.
+	consumerLegs: false,
 };
 
 /** The fake budget provider: a fully authorized worst-case-reservation config. */
@@ -880,6 +885,41 @@ describe('GT1-11-09 qualification spend admission', () => {
 				expect(listed.spawned, JSON.stringify(listed.reasons)).toBe(1);
 				expect(listed.paidRequests).toBe(0);
 				expect(snapshot(discoveryLedger)).toBe(discoveryBefore);
+			});
+
+			it('an E08 resource leg whose isolation does not own its resources refuses before any reservation (GT1-11-11B3)', async () => {
+				const [e08] = expandCases([
+					{
+						id: 'E08',
+						requirementIds: ['R-E08'],
+						ownerTasks: ['GT1-11-11B3'],
+						expectedInvariant: 'synthetic',
+						blockerIds: [],
+					},
+				]).filter((c) => c.caseId === 'E08:native-headless:local');
+				const config = paidConfig();
+				const ledger = ledgerFor(config, e08);
+				const before = snapshot(ledger);
+				const [leg] = await executePaidCase(e08, config, {
+					workspace: WORKSPACE,
+					operatorHome: OPERATOR_HOME,
+					ledger,
+					lifetime: createCaseLifetime(1),
+					problems: [],
+					capabilities: { ...ALL_CAPS, consumerLegs: true },
+					now: () => NOW,
+				});
+				expect(ids(leg.reasons)).toEqual(['resources-not-synthetic-owned']);
+				expect(leg).toMatchObject({
+					status: 'not-run',
+					spawned: 0,
+					paidRequests: 0,
+					reservationId: null,
+					resources: null,
+				});
+				expect(snapshot(ledger)).toBe(before);
+				expect(fs.existsSync(path.join(ROOT, 'synthetic-resources'))).toBe(false);
+				expectNothingStarted();
 			});
 		}
 	);
