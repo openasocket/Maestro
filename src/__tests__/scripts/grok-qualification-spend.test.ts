@@ -52,6 +52,15 @@
  * authority legs hold none; a second run on the same ledger reserves and
  * starts nothing; flags off reserve nothing; and a run turn limit the
  * earlier legs exhausted refuses the next leg unsent and uncounted.
+ *
+ * GT1-11-13D: the E11 cross-provider legs (GT1-11-13A..13C) on the same
+ * ledger: each leg holds one `translation:<direction>:<leg>` reservation
+ * billed to its destination on its own endpoint and model, a resuming leg
+ * is counted before its child and a turnless fault leg releases its turn;
+ * an open reservation refuses its leg and the chain after it; a second run
+ * on the same ledger reserves and starts nothing; flags off reserve
+ * nothing; and a run turn limit the earlier legs exhausted refuses the
+ * next leg unsent and uncounted.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -61,11 +70,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 
 import {
 	CONFIG_SCHEMA,
+	CROSS_PROVIDER_LEGS_OWNER,
+	CROSS_PROVIDER_PREFLIGHT_OWNER,
 	HARNESS_CEILINGS,
 	RUNS_ROOT,
 	admitCase,
 	createBudgetLedger,
 	createCaseLifetime,
+	crossProviderLegSchedule,
 	executeDiscoveryCase,
 	executePaidCase,
 	expandCases,
@@ -73,11 +85,14 @@ import {
 	paidCallsPerTurn,
 	planCaseReservation,
 	preflightCase,
+	preflightCrossProvider,
 	recordBillableCall,
 	recordUserTurn,
 	releaseReservation,
 	reserveSpend,
+	reserveTranslationLeg,
 	settleReservation,
+	translationLegName,
 	type BudgetLedger,
 	type CaseFamily,
 	type HarnessCapabilities,
@@ -85,7 +100,11 @@ import {
 	type QualificationConfig,
 	type ReservationRequest,
 } from '../../../scripts/grok-qualification/harness';
-import { POLICY_LEGS } from '../../../scripts/grok-qualification/paid-fixtures';
+import {
+	CROSS_PROVIDER_DIRECTIONS,
+	POLICY_LEGS,
+} from '../../../scripts/grok-qualification/paid-fixtures';
+import { TRANSLATION_PROVIDER_VERSIONS } from '../../../src/shared/maestro-lib/translation/support';
 
 /** Pass-through spies on every child_process entry point, so a test can prove none ran. */
 const childProcess = vi.hoisted(() => {
@@ -2238,6 +2257,497 @@ describe('GT1-11-09 qualification spend admission', () => {
 					`policy:${TURN_LEGS[0]}`,
 					`policy:${TURN_LEGS[1]}`,
 				]);
+			}, 120_000);
+		}
+	);
+
+	describe.skipIf(process.platform === 'win32')(
+		'cross-provider legs on the shared ledger (GT1-11-13D)',
+		() => {
+			const REL = `${RUNS_ROOT}/gt1-11-13d-spend-${process.pid}`;
+			const ROOT = path.join(WORKSPACE, REL);
+			const BIN = path.join(ROOT, 'bin', 'grok');
+			const CLAUDE = path.join(ROOT, 'bin', 'claude');
+			const CODEX = path.join(ROOT, 'bin', 'codex');
+			const MODE_FILE = path.join(ROOT, 'mode');
+			const LOG = path.join(ROOT, 'log', 'turns.jsonl');
+			const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-13d-spend-operator-${process.pid}`);
+			const PEER_MODEL = 'claude-sonnet-4-5';
+			const E11N = expandCases([
+				{
+					id: 'E11',
+					requirementIds: ['R-E11'],
+					ownerTasks: ['GT1-11-13D'],
+					expectedInvariant: 'synthetic',
+					blockerIds: [],
+				},
+			]).find((c) => c.caseId === 'E11:native-headless:local')!;
+			const sha: Record<string, string> = {};
+			/** The obeying Grok, Claude and Codex stand-ins of the harness suite's GT1-11-13D block (mode `ok`). */
+			const COMMON = [
+				`#!${process.execPath}`,
+				"const fs = process.getBuiltinModule('fs');",
+				"const path = process.getBuiltinModule('path');",
+				`const MODE = fs.readFileSync(${JSON.stringify(MODE_FILE)}, 'utf8').trim();`,
+				'const argv = process.argv.slice(2);',
+				'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
+				"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
+				"const tokenOf = (p) => { const t = (p || '').match(/QUALIFY-[A-Z0-9-]+-OK/g) || []; return t.length ? t[t.length - 1] : ''; };",
+				`fs.appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ bin: path.basename(process.argv[1]), argv: argv.map((a) => a.length > 50 ? a.slice(0, 50) + '...' : a) }) + '\\n');`,
+				'const find = (root, name) => { const hits = []; const walk = (d) => { let es = []; try { es = fs.readdirSync(d, { withFileTypes: true }); } catch {} for (const e of es) { const p = path.join(d, e.name); if (e.isDirectory()) walk(p); else if (p.endsWith(name)) hits.push(p); } }; walk(root); return hits; };',
+				"const recall = (file, prompt, cwd, rules, skillRoots) => {   const t = fs.readFileSync(file, 'utf8'); const f = (t.match(/QUALIFY-E11-FACT-[A-Z0-9]+/) || [''])[0]; const k = (t.match(/QUALIFY-E11-TOOL-[A-Z0-9]+/) || [''])[0];   if (MODE === 'forget' || (MODE === 'forget2' && !String(prompt || '').includes('qualification skill'))) return 'I do not remember.';   const skill = MODE === 'noskill' ? '' : skillRoots.flatMap((r) => { try { return fs.readdirSync(path.join(cwd, r)).filter((n) => n.startsWith('qualify-e11-skill-')); } catch { return []; } })[0] || '';   const rule = MODE === 'norule' ? '' : rules.map((n) => { try { return (fs.readFileSync(path.join(cwd, n), 'utf8').match(/QUALIFY-E11-RULE-[A-Z0-9]+/) || [''])[0]; } catch { return ''; } }).find(Boolean) || '';   const memFile = ((prompt || '').match(/^memory: (.+)$/m) || [])[1];   const mem = MODE === 'nomem' || !memFile ? '' : (fs.readFileSync(memFile.trim(), 'utf8').match(/QUALIFY-E11-MEMORY-[A-Z0-9]+/) || [''])[0];   return f + ' ' + k + '\\n' + [skill, rule, mem].join(' '); };",
+				`const LEAK = () => { if (MODE === 'userhome') fs.writeFileSync(path.join(${JSON.stringify(OPERATOR_HOME)}, '.claude', 'leak-' + process.pid), 'X'); };`,
+				"const DUP = (file, n) => MODE === 'dup' || (MODE === 'dup2' && fs.readFileSync(file, 'utf8').split('\\n').length > n); const sideEffects = (cwd, prompt) => { LEAK(); if (MODE === 'tool' || (MODE === 'tool2' && !String(prompt || '').includes('qualification skill'))) fs.writeFileSync(path.join(cwd, 'qualify-e11-tool-sentinel'), 'X'); };",
+			];
+			const GROK = [
+				...COMMON,
+				"(() => { if (!argv.includes('stdio')) {",
+				"  const model = at('-m'); const prompt = at('-p') || ''; const rid = at('--resume');",
+				"  let text = tokenOf(prompt); let sid = rid || 'e11-native-session';",
+				"  if (rid && prompt.includes('synthetic fact')) {",
+				"    const file = find(path.join(process.env.GROK_HOME, 'sessions'), path.join(rid, 'chat_history.jsonl'))[0];",
+				"    text = file ? recall(file, prompt, process.cwd(), ['AGENTS.md', 'CLAUDE.md'], ['.agents/skills']) : 'missing';",
+				"    if (file && MODE === 'reject') { process.stderr.write('session schema rejected'); process.exit(2); }",
+				"    if (file) fs.appendFileSync(file, JSON.stringify({ type: 'assistant', content: text }) + '\\n');",
+				"    sideEffects(process.cwd(), prompt); if (DUP(file, 10)) sid = 'grok-duplicate-session';",
+				'  }',
+				"  out({ type: 'text', data: text });",
+				"  out({ type: 'end', stopReason: 'end_turn', requestId: 'req-synthetic', sessionId: sid, total_cost_usd: 0.001,",
+				'    usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 3, cache_creation_input_tokens: 2, reasoning_tokens: 1 },',
+				'    modelUsage: { [model]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 3, cacheCreationInputTokens: 2, costUSD: 0.001 } } });',
+				'} else {',
+				"  const sid = 'e11-acp-session'; let buf = '';",
+				"  const reply = (id, result) => out({ jsonrpc: '2.0', id, result });",
+				'  const handle = (m) => {',
+				"    if (m.method === 'initialize') reply(m.id, { protocolVersion: 1 });",
+				"    else if (m.method === 'session/new') reply(m.id, { sessionId: sid, models: { currentModelId: m.params._meta.modelId } });",
+				"    else if (m.method === 'session/prompt') {",
+				"      out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: tokenOf(m.params.prompt[0].text) } } } });",
+				"      reply(m.id, { stopReason: 'end_turn', _meta: { usage: { inputTokens: 20, outputTokens: 9, cachedReadTokens: 3, cacheCreationTokens: 2, reasoningTokens: 0, costUsdTicks: '10000000' } } });",
+				"    } else if (m.id !== undefined) out({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'Method not found' } });",
+				'  };',
+				"  process.stdin.on('data', (d) => { buf += d; let k; while ((k = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, k); buf = buf.slice(k + 1); if (line.trim()) handle(JSON.parse(line)); } });",
+				"  process.stdin.on('end', () => process.exit(0));",
+				'} })();',
+				'',
+			].join('\n');
+			const CLAUDE_SRC = [
+				...COMMON,
+				"const rid = at('--resume'); const model = at('--model');",
+				"const file = find(path.join(process.env.CLAUDE_CONFIG_DIR, 'projects'), rid + '.jsonl')[0];",
+				"if (!file || MODE === 'reject') { process.stderr.write('No conversation found with session ID: ' + rid); process.exit(1); }",
+				"const text = recall(file, at('-p'), process.cwd(), ['CLAUDE.md'], ['.claude/skills']); const dup = DUP(file, 8); const sid = dup ? 'claude-duplicate-session' : rid;",
+				"if (dup) fs.writeFileSync(path.join(path.dirname(file), sid + '.jsonl'), '');",
+				"fs.appendFileSync(file, JSON.stringify({ type: 'assistant', uuid: 'later', message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\\n');",
+				"sideEffects(process.cwd(), at('-p'));",
+				"out({ type: 'system', subtype: 'init', session_id: sid, model });",
+				"out({ type: 'assistant', session_id: sid, message: { role: 'assistant', model, content: [{ type: 'text', text }] } });",
+				"out({ type: 'result', subtype: 'success', is_error: false, result: text, session_id: sid, total_cost_usd: 0.002, usage: { input_tokens: 30, output_tokens: 8 }, modelUsage: { [model]: { inputTokens: 30, outputTokens: 8, costUSD: 0.002 } } });",
+				'',
+			].join('\n');
+			const CODEX_SRC = [
+				...COMMON,
+				"(() => { if (argv[0] === 'app-server') {",
+				"  let buf = ''; const reply = (id, result) => out({ id, result });",
+				'  const handle = (m) => {',
+				"    if (m.method === 'initialize') reply(m.id, { codexHome: process.env.CODEX_HOME });",
+				"    else if (m.method === 'thread/start') { const id = '0199e11c-0000-7000-8000-' + String(Date.now()).slice(-12).padStart(12, '0'); const dir = path.join(process.env.CODEX_HOME, 'sessions', '2026', '11', '02'); fs.mkdirSync(dir, { recursive: true }); const p = path.join(dir, 'rollout-2026-11-02T00-00-00-' + id + '.jsonl'); fs.writeFileSync(p, JSON.stringify({ timestamp: 't', type: 'session_meta', payload: { id, cwd: m.params.cwd } }) + '\\n'); reply(m.id, { thread: { id, path: p } }); }",
+				"    else if (m.method === 'thread/inject_items') { const p = find(path.join(process.env.CODEX_HOME, 'sessions'), m.params.threadId + '.jsonl')[0]; for (const it of m.params.items) fs.appendFileSync(p, JSON.stringify({ timestamp: 't', type: 'response_item', payload: it }) + '\\n'); reply(m.id, {}); }",
+				"    else if (m.id !== undefined) out({ id: m.id, error: { code: -32601, message: 'Method not found' } });",
+				'  };',
+				"  process.stdin.on('data', (d) => { buf += d; let k; while ((k = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, k); buf = buf.slice(k + 1); if (line.trim()) handle(JSON.parse(line)); } });",
+				"  process.stdin.on('end', () => process.exit(0));",
+				'} else {',
+				"  const ri = argv.indexOf('resume'); const rid = argv[ri + 1]; const prompt = argv[argv.length - 1]; const cwd = at('-C') || process.cwd();",
+				"  const file = find(path.join(process.env.CODEX_HOME, 'sessions'), rid + '.jsonl')[0];",
+				"  if (!file || MODE === 'reject') { process.stderr.write('no rollout for ' + rid); process.exit(1); }",
+				"  const text = recall(file, prompt, cwd, ['AGENTS.md'], ['.agents/skills']); const dup = DUP(file, 10); const sid = dup ? 'codex-duplicate-session' : rid;",
+				"  if (dup) fs.writeFileSync(path.join(path.dirname(file), 'rollout-dup-' + sid + '.jsonl'), '');",
+				"  fs.appendFileSync(file, JSON.stringify({ timestamp: 't', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text }] } }) + '\\n');",
+				'  sideEffects(cwd, prompt);',
+				"  out({ type: 'thread.started', thread_id: sid }); out({ type: 'turn.started' });",
+				"  out({ type: 'item.completed', item: { id: 'item_0', type: 'agent_message', text } });",
+				"  out({ type: 'turn.completed', usage: { input_tokens: 30, cached_input_tokens: 0, output_tokens: 8 } });",
+				'} })();',
+				'',
+			].join('\n');
+			const translationConfig = (maxTurns: number): QualificationConfig =>
+				liveConfig({
+					providers: ['grok', 'claude-code', 'codex'],
+					credentialReferences: [
+						{ provider: 'grok', account: 'A', kind: 'secret-name', name: 'GROK_QUAL_ACCOUNT_A' },
+						{ provider: 'grok', account: 'B', kind: 'secret-name', name: 'GROK_QUAL_ACCOUNT_B' },
+						{
+							provider: 'claude-code',
+							account: 'A',
+							kind: 'secret-name',
+							name: 'GT13D_SPEND_CLAUDE_A',
+						},
+						{ provider: 'codex', account: 'A', kind: 'secret-name', name: 'GT13D_SPEND_CODEX_A' },
+					],
+					allowedRoots: [REL],
+					allowedEndpoints: [ENDPOINT, 'https://api.anthropic.com', 'https://api.openai.com'],
+					allowedModels: [PRICED, PEER_MODEL],
+					binary: {
+						path: `${REL}/bin/grok`,
+						sha256: sha.grok,
+						version: TRANSLATION_PROVIDER_VERSIONS.grok[0],
+					},
+					spendBounds: {
+						perCall: {
+							inputTokens: 1000,
+							outputTokens: 500,
+							cacheReadTokens: 0,
+							cacheCreationTokens: 0,
+						},
+						perTurnCalls: { modelRounds: 2, children: 1, retries: 0, sideModels: 0, compaction: 0 },
+						sideModels: [],
+					},
+					limits: {
+						budgetUsd: 10,
+						maxCalls: 400,
+						maxTurns,
+						maxWallClockSeconds: 600,
+						perCase: {
+							budgetUsd: 2,
+							maxCalls: 300,
+							maxTurns: Math.min(10, maxTurns),
+							maxWallClockSeconds: 120,
+						},
+						cleanupSeconds: 1,
+					},
+					crossProvider: {
+						'claude-code': {
+							home: `${REL}/claude`,
+							endpoint: 'https://api.anthropic.com',
+							model: PEER_MODEL,
+							binary: {
+								path: `${REL}/bin/claude`,
+								sha256: sha.claude,
+								version: TRANSLATION_PROVIDER_VERSIONS['claude-code'][0],
+							},
+						},
+						codex: {
+							home: `${REL}/codex`,
+							endpoint: 'https://api.openai.com',
+							model: PRICED,
+							binary: {
+								path: `${REL}/bin/codex`,
+								sha256: sha.codex,
+								version: TRANSLATION_PROVIDER_VERSIONS.codex[0],
+							},
+						},
+					},
+					isolation: {
+						boundary: {
+							kind: 'disposable-os-account',
+							reference: 'boundary:synthetic',
+							actualHome: `${REL}/home`,
+							productionHomeMounted: false,
+							operatorCredentialsReadable: false,
+						},
+						accountRoots: { A: `${REL}/grok-a`, B: `${REL}/grok-b` },
+						remoteRoots: {},
+						policy: {
+							systemPolicyInspected: true,
+							managedPolicy: 'absent',
+							requiredPolicyCompatible: true,
+						},
+						resources: { hooks: 'empty', mcp: 'empty', plugins: 'empty', envrc: 'disabled' },
+						egress: {
+							kind: 'operation-aware',
+							reference: 'egress:synthetic',
+							suppression: {
+								update: 'flags-only',
+								telemetry: 'flags-only',
+								backgroundUpload: 'unknown',
+							},
+						},
+						path: ['/usr/bin', '/bin', path.join(ROOT, 'bin')],
+					},
+				});
+			/** Every E11 leg in schedule order; the Codex rollback is an owned gap that holds nothing. */
+			const ORDER = crossProviderLegSchedule(CROSS_PROVIDER_DIRECTIONS).map((s) =>
+				translationLegName(s.spec.id, s.leg)
+			);
+			const GAP = translationLegName('grok-to-codex', 'interrupt-rollback');
+			const TURNLESS = ORDER.filter(
+				(l) => (l.endsWith(':interrupt-rollback') || l.endsWith(':unowned-target')) && l !== GAP
+			);
+			const destinationOf = (leg: string) => leg.split(':')[1].split('-to-')[1];
+			const run = async (
+				opts: { maxTurns?: number; crossProviderLegs?: boolean; ledger?: BudgetLedger } = {}
+			) => {
+				fs.writeFileSync(MODE_FILE, 'ok');
+				for (const d of ['grok-a', 'claude', 'codex', 'home']) {
+					fs.rmSync(path.join(ROOT, d), { recursive: true, force: true });
+					fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+				}
+				const config = translationConfig(opts.maxTurns ?? 60);
+				const ledger = opts.ledger ?? ledgerFor(config, E11N);
+				// What the ledger held at every start of a pinned stand-in: a turn is counted before its child.
+				const actual =
+					await vi.importActual<typeof import('node:child_process')>('node:child_process');
+				const atSpawn: Array<{
+					bin: string;
+					resume: boolean;
+					held: Array<[string | null, number]>;
+				}> = [];
+				spawnSpies[0].mockImplementation(((...a: Parameters<typeof actual.spawn>) => {
+					if ([BIN, CLAUDE, CODEX].includes(String(a[0]))) {
+						const argv = (a[1] ?? []) as string[];
+						atSpawn.push({
+							bin: path.basename(String(a[0])),
+							resume: argv.includes('--resume') || argv.includes('resume'),
+							held: ledger.reservations
+								.filter((r) => r.state === 'held')
+								.map((r) => [r.leg ?? null, r.turnsUsed]),
+						});
+					}
+					return actual.spawn(...a);
+				}) as never);
+				const lifetime = createCaseLifetime(1);
+				try {
+					const [leg] = await executePaidCase(E11N, config, {
+						workspace: WORKSPACE,
+						operatorHome: OPERATOR_HOME,
+						ledger,
+						lifetime,
+						problems: [],
+						capabilities: { ...ALL_CAPS, crossProviderLegs: opts.crossProviderLegs ?? true },
+						now: () => NOW,
+						resolveSecret: (name) => `synthetic-xai-${name}-value`,
+					});
+					await lifetime.cleanup();
+					return { leg, ledger, atSpawn, config };
+				} finally {
+					spawnSpies[0].mockImplementation(actual.spawn as never);
+				}
+			};
+
+			beforeAll(() => {
+				for (const d of [
+					'home',
+					'grok-a',
+					'grok-b',
+					'claude',
+					'codex',
+					'bin',
+					'log',
+					path.join('cache', 'tmp'),
+				])
+					fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+				fs.mkdirSync(OPERATOR_HOME, { recursive: true });
+				fs.writeFileSync(MODE_FILE, 'ok');
+				for (const [file, src, key] of [
+					[BIN, GROK, 'grok'],
+					[CLAUDE, CLAUDE_SRC, 'claude'],
+					[CODEX, CODEX_SRC, 'codex'],
+				] as const) {
+					fs.writeFileSync(file, src);
+					fs.chmodSync(file, 0o555);
+					sha[key] = createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+				}
+				process.env.GT13D_SPEND_CLAUDE_A = 'synthetic-claude-key';
+				process.env.GT13D_SPEND_CODEX_A = 'synthetic-codex-key';
+			});
+			afterAll(() => {
+				for (const f of [BIN, CLAUDE, CODEX]) if (fs.existsSync(f)) fs.chmodSync(f, 0o755);
+				fs.rmSync(ROOT, { recursive: true, force: true });
+				fs.rmSync(OPERATOR_HOME, { recursive: true, force: true });
+				delete process.env.GT13D_SPEND_CLAUDE_A;
+				delete process.env.GT13D_SPEND_CODEX_A;
+			});
+			beforeEach(() => {
+				spawnSpies.forEach((s) => s.mockClear());
+			});
+
+			it('reserveTranslationLeg bills the destination on its own endpoint and model, once per leg, and refuses an unknown or unready leg without a reservation', () => {
+				const config = translationConfig(60);
+				const ctx = { workspace: WORKSPACE, operatorHome: OPERATOR_HOME };
+				const preflight = preflightCrossProvider(E11N, config, ctx);
+				const plan = planCaseReservation(E11N, config, { peersPerDirection: true });
+				const ledger = ledgerFor(config, E11N);
+				const reserve = (direction: string, leg: string, p = preflight) =>
+					reserveTranslationLeg(
+						ledger,
+						config,
+						E11N,
+						p,
+						{ direction, leg, grokModel: PRICED, plan },
+						NOW
+					);
+				const toClaude = held(reserve('grok-to-claude-code', 'translate-resume'));
+				expect(toClaude).toMatchObject({
+					caseId: E11N.caseId,
+					leg: 'translation:grok-to-claude-code:translate-resume',
+					provider: 'claude-code',
+					endpoint: 'https://api.anthropic.com',
+					models: [PEER_MODEL],
+					turnAllowance: 1,
+					state: 'held',
+				});
+				const toGrok = held(reserve('claude-code-to-grok', 'reverse'));
+				expect(toGrok).toMatchObject({ provider: 'grok', endpoint: ENDPOINT, models: [PRICED] });
+				expect(held(reserve('grok-to-codex', 'round-trip-1'))).toMatchObject({
+					provider: 'codex',
+					endpoint: 'https://api.openai.com',
+					models: [PRICED],
+				});
+				expect(ledger.byProvider['claude-code'].reservedUsd).toBe(toClaude.holdUsd);
+				expect(toGrok.deadlineAt).toBe(toClaude.deadlineAt);
+				// The same leg again is refused while its reservation is open; a released one may be reserved again.
+				const again = reserve('grok-to-claude-code', 'translate-resume');
+				expect(refusal(again)).toEqual(['leg-already-run']);
+				expect(again.ok ? null : again.reasons[0].owner).toBe(CROSS_PROVIDER_PREFLIGHT_OWNER);
+				releaseReservation(ledger, toClaude.id, NOW);
+				held(reserve('grok-to-claude-code', 'translate-resume'));
+				const before = ledger.reservations.length;
+				expect(refusal(reserve('grok-to-grok', 'translate-resume'))).toEqual([
+					'translation-direction-unknown',
+				]);
+				expect(refusal(reserve('grok-to-claude-code', 'reverse'))).toEqual([
+					'translation-leg-unknown',
+				]);
+				const noCodex = translationConfig(60);
+				noCodex.crossProvider = { 'claude-code': noCodex.crossProvider!['claude-code'] };
+				expect(
+					refusal(
+						reserve('codex-to-grok', 'translate-resume', preflightCrossProvider(E11N, noCodex, ctx))
+					)
+				).toEqual(['peer-declaration-absent']);
+				expect(ledger.reservations).toHaveLength(before);
+				for (const s of spawnSpies) expect(s).not.toHaveBeenCalled();
+			});
+
+			it('every E11 leg holds one translation reservation of its own on the shared ledger, billed to its destination; a resuming leg is counted before its child, a turnless one releases its turn', async () => {
+				const { leg, ledger, atSpawn } = await run();
+				expect(
+					leg.crossProviderLegs.map((l) => [l.leg, l.status]),
+					JSON.stringify(leg.crossProviderLegs.map((l) => [l.leg, l.assertion.detail]))
+				).toEqual(ORDER.map((l) => [l, l === GAP ? 'not-evaluated' : 'passed']));
+				expect(ledger.reservations.map((r) => r.leg)).toEqual([
+					null,
+					...ORDER.filter((l) => l !== GAP),
+				]);
+				for (const l of leg.crossProviderLegs) {
+					const res = ledger.reservations.filter((r) => r.leg === l.leg);
+					if (l.leg === GAP) {
+						expect(res).toEqual([]);
+						expect(l.reservationId).toBeNull();
+						continue;
+					}
+					expect(res, l.leg).toHaveLength(1);
+					expect(res[0].id, l.leg).toBe(l.reservationId);
+					expect(res[0].caseId, l.leg).toBe(E11N.caseId);
+					expect(res[0].provider, l.leg).toBe(destinationOf(l.leg));
+					expect(res[0].turnAllowance, l.leg).toBe(1);
+					expect(res[0].turnsUsed, l.leg).toBe(TURNLESS.includes(l.leg) ? 0 : 1);
+					expect(res[0].state, l.leg).not.toBe('held');
+					if (TURNLESS.includes(l.leg)) expect(res[0].state, l.leg).toBe('released');
+					expect(l.settlement?.state, l.leg).toBe(res[0].state);
+				}
+				expect(ledger.turns).toBe(ledger.reservations.reduce((n, r) => n + r.turnsUsed, 0));
+				expect(ledger.turns).toBe(2 + ORDER.length - TURNLESS.length - 1);
+				expect(ledger.reservedUsd).toBe(0);
+				// Every stand-in started while exactly one reservation was open; every resume after its turn was counted.
+				expect(atSpawn.length).toBeGreaterThan(0);
+				for (const s of atSpawn) {
+					expect(s.held, JSON.stringify(s)).toHaveLength(1);
+					if (s.resume) expect(s.held[0][1], JSON.stringify(s)).toBeGreaterThan(0);
+				}
+				const peerSpawns = atSpawn.filter((s) => s.bin !== 'grok' || s.resume);
+				for (const s of peerSpawns.filter((x) => x.bin !== 'grok'))
+					expect(String(s.held[0][0]), JSON.stringify(s)).toMatch(/^translation:grok-to-/);
+				expect(atSpawn.filter((s) => s.bin === 'claude')).toHaveLength(4);
+				expect(atSpawn.filter((s) => s.bin === 'codex')).toHaveLength(8);
+			}, 120_000);
+
+			it('a second run on the same ledger reserves nothing more and starts nothing: no E11 leg runs twice', async () => {
+				const first = await run();
+				const before = first.ledger.reservations.length;
+				const turns = first.ledger.turns;
+				const again = await run({ ledger: first.ledger });
+				expect(again.atSpawn).toEqual([]);
+				expect(again.ledger.reservations).toHaveLength(before);
+				expect(again.ledger.turns).toBe(turns);
+				for (const l of again.leg.crossProviderLegs) {
+					expect(l.status, l.leg).not.toBe('passed');
+					expect(l.spawned + l.paidRequests, l.leg).toBe(0);
+				}
+			}, 120_000);
+
+			it('a translation reservation already held for a leg refuses that leg (leg-already-run) and the chain after it; the other directions still run', async () => {
+				const config = translationConfig(60);
+				const ledger = ledgerFor(config, E11N);
+				const first = translationLegName('grok-to-claude-code', 'translate-resume');
+				held(
+					reserveTranslationLeg(
+						ledger,
+						config,
+						E11N,
+						preflightCrossProvider(E11N, config, {
+							workspace: WORKSPACE,
+							operatorHome: OPERATOR_HOME,
+						}),
+						{
+							direction: 'grok-to-claude-code',
+							leg: 'translate-resume',
+							grokModel: PRICED,
+							plan: planCaseReservation(E11N, config, { peersPerDirection: true }),
+						},
+						NOW
+					)
+				);
+				const { leg, atSpawn } = await run({ ledger });
+				const of = (id: string) => leg.crossProviderLegs.find((l) => l.leg === id)!;
+				expect(of(first).status).toBe('not-run');
+				expect(of(first).reasons.map((r) => r.id)).toEqual(['leg-already-run']);
+				// Refused by the executor's own guard, before any reservation is attempted.
+				expect(of(first).reasons[0].owner).toBe(CROSS_PROVIDER_LEGS_OWNER);
+				expect(of(first).reservationId).toBeNull();
+				expect(ledger.reservations.filter((r) => r.leg === first)).toHaveLength(1);
+				const claudeChain = ORDER.filter(
+					(l) => /:(reverse|round-trip-\d)$/.test(l) && l.includes('claude-code')
+				);
+				for (const id of claudeChain) {
+					expect(of(id).status, id).toBe('not-run');
+					expect(
+						of(id).reasons.map((r) => r.id),
+						id
+					).toEqual(['round-trip-chain-unavailable']);
+				}
+				for (const id of ORDER.filter((l) => l !== first && !claudeChain.includes(l) && l !== GAP))
+					expect(of(id).status, id).toBe('passed');
+				// The Claude destination ran only its recover leg.
+				expect(atSpawn.filter((s) => s.bin === 'claude')).toHaveLength(1);
+			}, 120_000);
+
+			it('flags off: no E11 leg reserves, counts or spawns', async () => {
+				const { leg, ledger, atSpawn } = await run({ crossProviderLegs: false });
+				expect(leg.status).toBe('not-run');
+				expect(leg.crossProviderLegs).toEqual([]);
+				expect(ledger.reservations).toEqual([]);
+				expect(ledger.turns).toBe(0);
+				expect(atSpawn).toEqual([]);
+			}, 120_000);
+
+			it('a run turn limit the earlier legs exhausted refuses the next translation reservation: unsent, uncounted, nothing spawned', async () => {
+				const { leg, ledger, atSpawn } = await run({ maxTurns: 4 });
+				const [a, b, c] = ORDER.map((id) => leg.crossProviderLegs.find((l) => l.leg === id)!);
+				expect(a.status, a.assertion.detail).toBe('passed');
+				expect(b.status, b.assertion.detail).toBe('passed');
+				expect(c.status).toBe('not-run');
+				expect(c.reservationId).toBeNull();
+				expect(c.reasons.length).toBeGreaterThan(0);
+				expect(c.spawned + c.paidRequests).toBe(0);
+				expect(ledger.turns).toBe(4);
+				expect(ledger.reservations.map((r) => r.leg)).toEqual([null, ORDER[0], ORDER[1]]);
+				for (const l of leg.crossProviderLegs.slice(2)) {
+					expect(l.status, l.leg).not.toBe('passed');
+					expect(l.spawned + l.paidRequests, l.leg).toBe(0);
+				}
+				expect(atSpawn.filter((s) => s.bin !== 'grok')).toHaveLength(3);
 			}, 120_000);
 		}
 	);
