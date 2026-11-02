@@ -139,7 +139,7 @@ describe('selectAgentForTask with Grok candidates (GT1-08-20)', () => {
 
 	it('keeps Grok for required flags its registry record supports', () => {
 		const sel = selectAgentForTask(task(), [claude({ inFlight: 1 }), grok({ inFlight: 0 })], {
-			required: ['supportsBatchMode', 'supportsImageInput', 'supportsResume', 'supportsJsonOutput'],
+			required: ['supportsBatchMode', 'supportsUsageStats', 'supportsResume', 'supportsJsonOutput'],
 		});
 		expect(sel).toEqual({ agentId: 'grok' });
 	});

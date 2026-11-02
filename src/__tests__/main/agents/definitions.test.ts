@@ -330,9 +330,12 @@ describe('agent-definitions', () => {
 					'Use these attached images as context:\n/tmp/a.png\n/tmp/b.jpg\n\n'
 				);
 				expect(agent?.imagePromptBuilder?.([])).toBe('');
+				// Grok keeps the legacy builder but withholds the flags (GT1-11-14A): its
+				// prompt-file plan refuses image turns until a host image-bounds producer exists.
+				const advertised = agentId !== 'grok';
 				expect(getAgentCapabilities(agentId)).toMatchObject({
-					supportsImageInput: true,
-					supportsImageInputOnResume: true,
+					supportsImageInput: advertised,
+					supportsImageInputOnResume: advertised,
 				});
 			}
 		);

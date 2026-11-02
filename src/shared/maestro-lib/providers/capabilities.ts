@@ -34,6 +34,42 @@ export const GROK_DIRECTORY_GRANT_SUPPORT = {
 } as const;
 
 /**
+ * What each true Grok capability rests on (GT1-11-14A, A11-F36). Investigation
+ * evidence, not qualification: no Grok binary is qualified (`qualifiedVersions`
+ * is empty, the pinned candidate 1.0.70 has no native case run), so a true flag
+ * here means the production builder and consumers exist and the behavior was
+ * observed on an earlier binary or pinned by deterministic suites, never that
+ * the feature is certified. The version difference is not expressed by the
+ * public boolean: the route selector refuses an unqualified or unbound version
+ * (`selectGrokRoute`, `native.qualified`), managed hosts refuse every Grok
+ * effect, and readiness stays false while Grok is in BETA_AGENTS. A capability
+ * whose production path refuses, or that rests on nothing but a provisional
+ * claim, is false in AGENT_CAPABILITIES.grok and listed under `withheld`.
+ */
+export const GROK_CAPABILITY_EVIDENCE = Object.freeze({
+	candidateVersion: '1.0.70',
+	qualifiedVersions: Object.freeze([] as string[]),
+	retained: Object.freeze({
+		supportsReadOnlyMode:
+			'readOnlyArgs plan + deny Bash(*) observed on 1.0.5; containment unqualified (A11-F05). readOnlyCliEnforced stays true because false would keep --always-approve in CLI read-only runs (resolveCliBatchModeArgs); managed read-only refuses Grok',
+		supportsCostTracking: 'end.total_cost_usd observed on 1.0.41; unknown cost stays unknown',
+		supportsUsageStats: 'per-call usage and end totals observed on 1.0.41',
+		supportsContextExport:
+			'GrokSessionStorage reads chat_history.jsonl; scoped extraction pinned by phase04 fixtures',
+		supportsWizard:
+			'streaming-json text deltas carry the structured reply; phase05 deterministic suites, native wizard cases not-run',
+	}),
+	withheld: Object.freeze({
+		supportsImageInput:
+			'no host producer of EmbeddedImageSupport: the desktop prompt-file plan refuses every Grok image turn (grok-image-host-bounds-producer-absent)',
+		supportsImageInputOnResume:
+			'same refusal as supportsImageInput; resume image delivery never observed',
+		supportsContextMerge:
+			'PROVISIONAL since GT1-06-01: deterministic only, grooming relies on unqualified read-only enforcement, every phase 11 native case not-run',
+	}),
+});
+
+/**
  * Capability definitions for each supported agent.
  *
  * NOTE: These are the current known capabilities. As agents evolve,
@@ -505,8 +541,8 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 		supportsReadOnlyMode: true, // Verified: --permission-mode plan (grok --help v0.2.93)
 		supportsJsonOutput: true, // Verified: --output-format streaming-json emits one JSON object per line
 		supportsSessionId: true, // Verified: camelCase sessionId (UUIDv7) on the final end event (no init event exists)
-		supportsImageInput: true, // Verified (grok 1.0.41): image path in the prompt, opened with read_file
-		supportsImageInputOnResume: true, // Verified: same prompt path works with --resume <id>
+		supportsImageInput: false, // Withheld (GROK_CAPABILITY_EVIDENCE): no host image-bounds producer, so the prompt-file plan refuses image turns
+		supportsImageInputOnResume: false, // Withheld with supportsImageInput
 		supportsSlashCommands: false, // Conservative default: not investigated in headless mode
 		supportsSessionStorage: true, // Verified: GrokSessionStorage reads ~/.grok/sessions/<percent-encoded-cwd>/<session-uuid>/
 		supportsCostTracking: true, // Verified (grok 1.0.41): end.total_cost_usd per turn; usage.json costUsdTicks per session
@@ -519,7 +555,7 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 		supportsStreamJsonInput: false, // Conservative default: no --input-format stream-json equivalent in grok --help
 		supportsPromptViaStdin: false, // Pinned native source has no raw-stdin prompt reader; use the owned JSON prompt file
 		supportsThinkingDisplay: true, // Verified: thought delta events precede text deltas
-		supportsContextMerge: true, // PROVISIONAL (GT1-06-01): receives merged context as prompt text through the shared formatter (order, tools vs prose, no notices, bounded by the known window or a fixed bound); unqualified until GT1-06-02 tests and phase 11 live evidence
+		supportsContextMerge: false, // Withheld (GT1-11-14A): the GT1-06-01 merge formatter is pinned deterministically only; phase 11 live evidence is not-run
 		supportsContextExport: true, // Verified: session storage reads full transcripts (chat_history.jsonl), same export path as siblings
 		supportsWizard: true, // Streaming-json text deltas carry structured JSON wizard replies; discovery uses --always-approve + --max-turns 8 + --no-subagents (not plan - plan blocks read/fetch needed for discovery)
 		supportsGroupChatModeration: false, // Conservative default: moderation flow not yet exercised
