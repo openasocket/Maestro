@@ -13698,45 +13698,6 @@
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-unassigned",
 					"taskId": "GT1-11-14",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md"
-				},
-				{
-					"id": "group-chat-router-failures-unexplained",
-					"code": "deterministic-failure",
-					"missingPrerequisite": "group-chat-router.test.ts fails 4 of 118 at HEAD (readOnlyMode propagation for moderator and participants, SSH wrapping for a moderator-mention participant); GT1-11-11E left the suite out without a record. GT1-11-14P3 establishes the result at the merge base and repairs a branch-introduced regression.",
-					"ownerTask": "GT1-11-14P3A",
-					"affectedRows": ["S14", "P31"],
-					"taskId": "GT1-11-14",
-					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"status": "explained-test-drift",
-					"verifiedBy": "GT1-11-14P3",
-					"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
-					"mergeBaseResult": "118/118 passed",
-					"headResult": "114/118 passed at f84cfc45f",
-					"cause": [
-						{
-							"tests": [
-								"read-only mode propagation moderator spawns with readOnlyMode: true",
-								"read-only mode propagation participants spawn with readOnlyMode matching the readOnly flag",
-								"read-only mode propagation participants spawn with readOnlyMode: false when readOnly is not set"
-							],
-							"commit": "2368082fa",
-							"change": "spawnGroupChatAgent.ts stopped copying the readOnlyMode boolean into the final ProcessConfig (GT1-02-13B). ProcessConfig has no readOnlyMode member at the merge base or HEAD and ProcessManager never read it; read-only is enforced by the readOnlyArgs the canonical argument builder composes, which are unchanged.",
-							"anchor": "src/main/group-chat/spawnGroupChatAgent.ts:340"
-						},
-						{
-							"tests": [
-								"SSH remote participant support moderator-mention participant spawn applies SSH wrapping"
-							],
-							"commit": "a6085dc",
-							"change": "prepareGroupChatSpawn hands wrapSpawnWithSsh a store pinned to the one remote it selected (a structuredClone snapshot) instead of the live settings store, so the assertion on the store identity fails. The fixture remote also lacks enabled: true, which getSshRemoteConfig requires, so the pinned store is empty in the fixture; with an enabled remote it returns that remote.",
-							"anchor": "src/shared/maestro-lib/groupchat/spawn.ts:234"
-						}
-					],
-					"probe": "Throwaway probe (copy of the suite, deleted): mock agent given readOnlyArgs [--permission-mode, plan], the 3 read-only cases assert the composed args (moderator and readOnly participant carry plan, non-readOnly participant does not), the SSH case asserts one wrapper call with the session SSH config and a store returning the enabled fixture remote. Merge base 118/118, HEAD 118/118.",
-					"regression": "none: read-only args and SSH wrapping reach the sink identically at the merge base and HEAD",
-					"residual": [
-						"GT1-11-14P3A (realign the 4 router assertions to the composed readOnlyArgs and the pinned SSH store contents; the suite stays 4/118 failing until then)"
-					]
 				}
 			],
 			"phase": "08",
@@ -27469,45 +27430,6 @@
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-unassigned",
 					"taskId": "GT1-11-14",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md"
-				},
-				{
-					"id": "group-chat-router-failures-unexplained",
-					"code": "deterministic-failure",
-					"missingPrerequisite": "group-chat-router.test.ts fails 4 of 118 at HEAD (readOnlyMode propagation for moderator and participants, SSH wrapping for a moderator-mention participant); GT1-11-11E left the suite out without a record. GT1-11-14P3 establishes the result at the merge base and repairs a branch-introduced regression.",
-					"ownerTask": "GT1-11-14P3A",
-					"affectedRows": ["S14", "P31"],
-					"taskId": "GT1-11-14",
-					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"status": "explained-test-drift",
-					"verifiedBy": "GT1-11-14P3",
-					"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
-					"mergeBaseResult": "118/118 passed",
-					"headResult": "114/118 passed at f84cfc45f",
-					"cause": [
-						{
-							"tests": [
-								"read-only mode propagation moderator spawns with readOnlyMode: true",
-								"read-only mode propagation participants spawn with readOnlyMode matching the readOnly flag",
-								"read-only mode propagation participants spawn with readOnlyMode: false when readOnly is not set"
-							],
-							"commit": "2368082fa",
-							"change": "spawnGroupChatAgent.ts stopped copying the readOnlyMode boolean into the final ProcessConfig (GT1-02-13B). ProcessConfig has no readOnlyMode member at the merge base or HEAD and ProcessManager never read it; read-only is enforced by the readOnlyArgs the canonical argument builder composes, which are unchanged.",
-							"anchor": "src/main/group-chat/spawnGroupChatAgent.ts:340"
-						},
-						{
-							"tests": [
-								"SSH remote participant support moderator-mention participant spawn applies SSH wrapping"
-							],
-							"commit": "a6085dc",
-							"change": "prepareGroupChatSpawn hands wrapSpawnWithSsh a store pinned to the one remote it selected (a structuredClone snapshot) instead of the live settings store, so the assertion on the store identity fails. The fixture remote also lacks enabled: true, which getSshRemoteConfig requires, so the pinned store is empty in the fixture; with an enabled remote it returns that remote.",
-							"anchor": "src/shared/maestro-lib/groupchat/spawn.ts:234"
-						}
-					],
-					"probe": "Throwaway probe (copy of the suite, deleted): mock agent given readOnlyArgs [--permission-mode, plan], the 3 read-only cases assert the composed args (moderator and readOnly participant carry plan, non-readOnly participant does not), the SSH case asserts one wrapper call with the session SSH config and a store returning the enabled fixture remote. Merge base 118/118, HEAD 118/118.",
-					"regression": "none: read-only args and SSH wrapping reach the sink identically at the merge base and HEAD",
-					"residual": [
-						"GT1-11-14P3A (realign the 4 router assertions to the composed readOnlyArgs and the pinned SSH store contents; the suite stays 4/118 failing until then)"
-					]
 				}
 			],
 			"branchAuditRefs": ["B14", "B39"]
@@ -43588,9 +43510,9 @@
 				"consequence": "group-chat-router fails 4/118 at HEAD and GT1-11-11E excluded it silently; every harness and spend leg block is describe.skipIf(win32), so the harness has no Windows coverage, which no receipt said.",
 				"repairTask": "GT1-11-14P3",
 				"routerResolution": {
-					"taskId": "GT1-11-14P3",
-					"status": "explained",
-					"note": "The 4 router failures are branch-introduced assertion drift against two deliberate production changes (2368082fa, a6085dc), not a read-only or SSH regression; test realignment owned by GT1-11-14P3A. The Windows skipIf half stays with GT1-11-14P4."
+					"taskId": "GT1-11-14P3A",
+					"status": "resolved",
+					"note": "The 4 router assertions now pin read-only and SSH propagation by what reaches the provider (composed readOnlyArgs, pinned SSH store contents); suite 118/118. Explained at GT1-11-14P3 as drift against 2368082fa and a6085dc. The Windows skipIf half stays with GT1-11-14P4."
 				}
 			},
 			{
@@ -43996,8 +43918,7 @@
 				"C-supportsContextMerge",
 				"C-supportsContextExport",
 				"C-supportsWizard"
-			],
-			"group-chat-router-failures-unexplained": ["S14", "P31"]
+			]
 		},
 		"staleBlockersReconciled": 121,
 		"corrections": [
@@ -44028,6 +43949,40 @@
 		],
 		"liveCalls": 0,
 		"imagesAnalyzed": 0,
-		"readiness": false
+		"readiness": false,
+		"blockerUpdates": [
+			{
+				"id": "group-chat-router-failures-unexplained",
+				"taskId": "GT1-11-14P3A",
+				"change": "cleared",
+				"removedFrom": ["P31", "S14"],
+				"result": "group-chat-router.test.ts 118/118 passed (base 0cd535bb4 plus the realigned suite)",
+				"mechanism": "The 3 read-only cases assert the composed args (mock agent readOnlyArgs [--permission-mode, plan]: moderator and readOnly participant carry them, a participant without readOnly does not); the SSH case asserts one wrapSpawnWithSsh call with the session SSH config and a pinned store whose getSshRemotes() returns the enabled fixture remote.",
+				"mutants": [
+					{
+						"name": "readOnlyMode-dropped-from-argument-build",
+						"killed": false,
+						"cases": 0,
+						"note": "equivalent: the ProcessConfig readOnlyMode passthrough is the inert boolean GT1-11-14P3 showed nothing reads; the args are composed in the router (killed by the two router mutants)"
+					},
+					{
+						"name": "moderator-readOnly-dropped",
+						"killed": true,
+						"cases": 1
+					},
+					{
+						"name": "participant-readOnly-dropped",
+						"killed": true,
+						"cases": 1
+					},
+					{
+						"name": "ssh-wrapper-empty-store",
+						"killed": true,
+						"cases": 1
+					}
+				],
+				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
+			}
+		]
 	}
 }

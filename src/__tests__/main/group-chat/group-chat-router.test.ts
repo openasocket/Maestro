@@ -167,6 +167,7 @@ describe('group-chat-router', () => {
 				binaryName: 'claude',
 				command: 'claude',
 				args: ['--print', '--verbose', '--output-format', 'stream-json'],
+				readOnlyArgs: ['--permission-mode', 'plan'],
 				available: true,
 				path: '/usr/local/bin/claude',
 				capabilities: {},
@@ -1422,17 +1423,17 @@ describe('group-chat-router', () => {
 	// Test 5.6: Read-only mode propagation
 	// ===========================================================================
 	describe('read-only mode propagation', () => {
-		it('moderator spawns with readOnlyMode: true', async () => {
+		it('moderator spawns with the provider read-only args', async () => {
 			const chat = await createTestChatWithModerator('Moderator ReadOnly Test');
 
 			await routeUserMessage(chat.id, 'Hello', mockProcessManager, mockAgentDetector);
 
-			// Moderator should always be spawned with readOnlyMode: true
-			expect(mockProcessManager.spawn).toHaveBeenCalledWith(
-				expect.objectContaining({
-					readOnlyMode: true,
-				})
+			// The moderator always runs read-only: the composed args carry the provider readOnlyArgs
+			const modCall = mockProcessManager.spawn.mock.calls.find((call) =>
+				call[0].sessionId?.includes('moderator')
 			);
+			expect(modCall).toBeDefined();
+			expect(modCall?.[0].args).toEqual(expect.arrayContaining(['--permission-mode', 'plan']));
 		});
 
 		it('includes READ-ONLY MODE in prompt when readOnly flag is set', async () => {
@@ -1511,7 +1512,7 @@ describe('group-chat-router', () => {
 			expect(spawnCall?.[0].prompt).not.toContain('READ-ONLY MODE');
 		});
 
-		it('participants spawn with readOnlyMode matching the readOnly flag', async () => {
+		it('readOnly participants spawn with the provider read-only args', async () => {
 			const chat = await createTestChatWithModerator('Participant ReadOnly Test');
 			await addParticipant(chat.id, 'Client', 'claude-code', mockProcessManager);
 
@@ -1527,15 +1528,17 @@ describe('group-chat-router', () => {
 				true // readOnly flag
 			);
 
-			// Participant should be spawned with readOnlyMode matching the flag
+			// A readOnly participant carries the provider readOnlyArgs in the composed args
 			const participantSpawnCall = mockProcessManager.spawn.mock.calls.find((call) =>
 				call[0].sessionId?.includes('participant')
 			);
 			expect(participantSpawnCall).toBeDefined();
-			expect(participantSpawnCall?.[0].readOnlyMode).toBe(true);
+			expect(participantSpawnCall?.[0].args).toEqual(
+				expect.arrayContaining(['--permission-mode', 'plan'])
+			);
 		});
 
-		it('participants spawn with readOnlyMode: false when readOnly is not set', async () => {
+		it('participants spawn without read-only args when readOnly is not set', async () => {
 			const chat = await createTestChatWithModerator('Participant No ReadOnly Test');
 			await addParticipant(chat.id, 'Client', 'claude-code', mockProcessManager);
 
@@ -1551,12 +1554,12 @@ describe('group-chat-router', () => {
 				// no readOnly flag = false
 			);
 
-			// Participant should be spawned with readOnlyMode: false
+			// A participant without readOnly carries no read-only args
 			const participantSpawnCall = mockProcessManager.spawn.mock.calls.find((call) =>
 				call[0].sessionId?.includes('participant')
 			);
 			expect(participantSpawnCall).toBeDefined();
-			expect(participantSpawnCall?.[0].readOnlyMode).toBe(false);
+			expect(participantSpawnCall?.[0].args).not.toContain('plan');
 		});
 
 		it('auto-added participants are only started once for a moderator handoff', async () => {
@@ -2072,7 +2075,7 @@ describe('group-chat-router', () => {
 			getSshRemotes: vi
 				.fn()
 				.mockReturnValue([
-					{ id: 'remote-1', name: 'PedTome', host: 'pedtome.local', user: 'user' },
+					{ id: 'remote-1', name: 'PedTome', host: 'pedtome.local', user: 'user', enabled: true },
 				]),
 		};
 
@@ -2168,14 +2171,13 @@ describe('group-chat-router', () => {
 				mockAgentDetector
 			);
 
-			expect(mockWrapSpawnWithSsh).toHaveBeenCalledWith(
-				expect.objectContaining({
-					command: expect.any(String),
-					agentBinaryName: 'claude',
-				}),
-				sshRemoteConfig,
-				mockSshStore
+			expect(mockWrapSpawnWithSsh).toHaveBeenCalledTimes(1);
+			const [wrapConfig, wrapSsh, wrapStore] = mockWrapSpawnWithSsh.mock.calls[0];
+			expect(wrapConfig).toEqual(
+				expect.objectContaining({ command: expect.any(String), agentBinaryName: 'claude' })
 			);
+			expect(wrapSsh).toEqual(sshRemoteConfig);
+			expect(wrapStore.getSshRemotes()).toEqual(mockSshStore.getSshRemotes());
 		});
 
 		it('does not apply SSH wrapping for non-SSH sessions', async () => {
