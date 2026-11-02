@@ -334,12 +334,27 @@ const FEEDBACK_INTERVIEW_LEG: UtilityLegSpec = {
  *   control; the child is gone, the document unchanged, no retry.
  * - `autorun-goal`: one bounded goal iteration through the library `runGoal`;
  *   the run completes only on the goal verdict.
+ * - `cue-prompt-desktop` / `cue-prompt-headless` (GT1-11-11E2): an owned cue.yaml
+ *   pipeline whose prompt subscription targets the Grok agent, fired once through
+ *   the production run router and process lifecycle (desktop) or the standalone
+ *   engine (headless), beside a shell and a CLI action of the same pipeline and a
+ *   stop subscription. `prompts` is the event prompt and the stop prompt.
+ * - `groupchat-participant` (GT1-11-11E2): two rounds to a Grok participant
+ *   through the production group chat engine, the second resuming the first's
+ *   native session, then a third round cancelled mid-turn. `prompts` is one
+ *   request per round.
+ * - `groupchat-moderator-refused` (GT1-11-11E2): a Grok moderator refused by the
+ *   production capability flag before any spawn; no turn, so `maxTurns` is 0.
  */
 export type WorkflowLegId =
 	| 'autorun-document'
 	| 'autorun-failed-turn'
 	| 'autorun-cancel'
-	| 'autorun-goal';
+	| 'autorun-goal'
+	| 'cue-prompt-desktop'
+	| 'cue-prompt-headless'
+	| 'groupchat-participant'
+	| 'groupchat-moderator-refused';
 
 export interface WorkflowLegSpec {
 	id: WorkflowLegId;
@@ -349,6 +364,8 @@ export interface WorkflowLegSpec {
 	goal: { goal: string; exitCriteria: string } | null;
 	/** The most turns the leg may dispatch: its workflow reservation's turn allowance. */
 	maxTurns: number;
+	/** The prompts a Cue or group chat leg sends, in order (see `WorkflowLegId`). */
+	prompts?: string[];
 }
 
 const AUTORUN_DOCUMENT_LEG: WorkflowLegSpec = {
@@ -388,6 +405,50 @@ const AUTORUN_GOAL_LEG: WorkflowLegSpec = {
 			'The goal is reached as soon as you have read this sentence: report progress 100 and mark the goal complete.',
 	},
 	maxTurns: 1,
+};
+
+const CUE_STOP_PROMPT =
+	'Do not use any tool. Write the numbers from 1 to 400, one per line, and nothing else.';
+
+const CUE_PROMPT_DESKTOP_LEG: WorkflowLegSpec = {
+	id: 'cue-prompt-desktop',
+	tasks: [],
+	goal: null,
+	maxTurns: 2,
+	prompts: [
+		'Do not use any tool. Reply with exactly this token and nothing else: QUALIFY-E09-CUE-DESKTOP-OK',
+		CUE_STOP_PROMPT,
+	],
+};
+
+const CUE_PROMPT_HEADLESS_LEG: WorkflowLegSpec = {
+	id: 'cue-prompt-headless',
+	tasks: [],
+	goal: null,
+	maxTurns: 2,
+	prompts: [
+		'Do not use any tool. Reply with exactly this token and nothing else: QUALIFY-E09-CUE-HEADLESS-OK',
+		CUE_STOP_PROMPT,
+	],
+};
+
+const GROUPCHAT_PARTICIPANT_LEG: WorkflowLegSpec = {
+	id: 'groupchat-participant',
+	tasks: [],
+	goal: null,
+	maxTurns: 3,
+	prompts: [
+		'Do not use any tool. Reply with exactly this token and nothing else: QUALIFY-E09-GC-R1-OK',
+		'Do not use any tool. Reply with exactly this token and nothing else: QUALIFY-E09-GC-R2-OK',
+		'Do not use any tool. Write the numbers from 1 to 400, one per line, and nothing else.',
+	],
+};
+
+const GROUPCHAT_MODERATOR_REFUSED_LEG: WorkflowLegSpec = {
+	id: 'groupchat-moderator-refused',
+	tasks: [],
+	goal: null,
+	maxTurns: 0,
 };
 
 const turn = (family: string, n: number, extra = ''): PaidFixtureTurn => {
@@ -535,6 +596,10 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 				AUTORUN_FAILED_TURN_LEG,
 				AUTORUN_CANCEL_LEG,
 				AUTORUN_GOAL_LEG,
+				CUE_PROMPT_DESKTOP_LEG,
+				CUE_PROMPT_HEADLESS_LEG,
+				GROUPCHAT_PARTICIPANT_LEG,
+				GROUPCHAT_MODERATOR_REFUSED_LEG,
 			],
 		}
 	),

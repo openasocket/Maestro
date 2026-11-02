@@ -328,6 +328,17 @@ import type {
 } from '../../src/shared/maestro-lib/autorun/engine-types';
 import type { AgentError, AgentErrorType, HistoryEntry, SessionInfo } from '../../src/shared/types';
 import { QUERY_SOURCE_ENV_VAR, type QuerySource } from '../../src/shared/querySource';
+import { readDelegationContextEnv } from '../../src/shared/maestro-lib/managed/delegation';
+import type { CueRunResult } from '../../src/shared/cue/contracts';
+import type { GroupChatState } from '../../src/shared/group-chat-types';
+import type { AgentConfig } from '../../src/shared/maestro-lib/providers/definitions';
+import type {
+	GroupChatEventSink,
+	GroupChatLauncher,
+	GroupChatSessionInfo,
+	GroupChatSpawn,
+	GroupChatTurnStart,
+} from '../../src/shared/maestro-lib/groupchat/types';
 import { countMarkdownTasks } from '../../src/shared/markdownTaskScan';
 import { parseGoalMarkers } from '../../src/shared/goalDriven/goalMarkers';
 import { evaluateGoalExit } from '../../src/shared/goalDriven/goalExitEvaluator';
@@ -450,6 +461,14 @@ export const HARNESS_CAPABILITIES = {
 	 * each is not-run.
 	 */
 	workflowLegs: true,
+	/**
+	 * The E09 orchestration legs (GT1-11-11E2): a Cue prompt subscription fired
+	 * through the production run router (desktop) and the standalone engine
+	 * (headless), a Grok group chat participant over two resumed rounds and a
+	 * cancelled third, and a Grok moderator refused by the production flag. Each
+	 * holds a workflow reservation of its own. Off, each is not-run.
+	 */
+	orchestrationLegs: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
 
@@ -1939,9 +1958,11 @@ export const HARNESS_CEILINGS = {
 	 * Turns one workflow leg may dispatch (GT1-11-11E1). Each workflow leg holds
 	 * a reservation of its own under this ceiling (a leg is its own subcase for
 	 * turns, as an E11 leg is); spend, calls and the deadline stay shared with
-	 * the case, so E09's ten turns are never widened.
+	 * the case, so E09's ten turns are never widened. Three since GT1-11-11E2:
+	 * the group chat participant leg runs two resumed rounds and a cancelled
+	 * third; every other workflow leg asks for two at most.
 	 */
-	workflowTurnsPerLeg: 2,
+	workflowTurnsPerLeg: 3,
 	caseSeconds: 120,
 	discoverySeconds: 30,
 	/** Wall-clock bound of one offline probe (GT1-11-10A). */
@@ -7397,6 +7418,7 @@ const SESSION_CONSUMER_LEG_IDS: readonly string[] = SESSION_CONSUMER_LEGS.map((l
  * leg, GT1-11-11C1 otherwise.
  */
 function ownerOfLeg(leg: string): string {
+	if (ORCHESTRATION_LEG_IDS.includes(leg)) return ORCHESTRATION_LEGS_OWNER;
 	if (WORKFLOW_LEG_IDS.includes(leg)) return 'GT1-11-11E1';
 	if (CHEAP_UTILITY_LEG_IDS.includes(leg)) return 'GT1-11-11D2';
 	if (UTILITY_LEG_IDS.includes(leg)) return 'GT1-11-11D1';
@@ -10183,6 +10205,17 @@ export const WORKFLOW_QUERY_SOURCE: QuerySource = 'auto';
 /** The most engine events a workflow leg keeps in memory. */
 const WORKFLOW_EVENT_CAP = 500;
 
+/** What both Cue legs must show (GT1-11-11E2). */
+const CUE_LEG_ASSERTIONS: readonly string[] = [
+	'single-dispatch',
+	'planned-launch',
+	'attribution',
+	'completion-recorded',
+	'stop-reaps-child',
+	'no-duplicate-on-restart',
+	'actions-attributed-no-spawn',
+];
+
 /** The assertions each workflow leg must evaluate; a leg missing one cannot pass. */
 export const WORKFLOW_ASSERTIONS: Readonly<Record<WorkflowLegId, readonly string[]>> =
 	Object.freeze({
@@ -10202,6 +10235,18 @@ export const WORKFLOW_ASSERTIONS: Readonly<Record<WorkflowLegId, readonly string
 			'children-reaped',
 		],
 		'autorun-cancel': ['stopped-mid-turn', 'child-gone', 'document-unchanged', 'no-retry'],
+		'cue-prompt-desktop': CUE_LEG_ASSERTIONS,
+		'cue-prompt-headless': CUE_LEG_ASSERTIONS,
+		'groupchat-participant': [
+			'two-rounds',
+			'resumed-same-session',
+			'reply-routed-once',
+			'no-text-after-terminal',
+			'cancel-reaps-child',
+			'planned-launch',
+			'moderator-not-spawned',
+		],
+		'groupchat-moderator-refused': ['refused-by-flag', 'zero-children', 'zero-billable-calls'],
 		'autorun-goal': [
 			'single-iteration',
 			'planned-launch',
@@ -10619,7 +10664,7 @@ function settleWorkflowLeg(r: WorkflowLegReceipt, problems: string[]): WorkflowL
 			id: r.leg,
 			outcome: 'not-evaluated',
 			detail: r.reasons.map((x) => x.id).join('; '),
-			owner: 'GT1-11-11E1',
+			owner: ownerOfLeg(r.leg),
 		};
 		return r;
 	}
@@ -11177,7 +11222,9 @@ async function runWorkflowLegs(w: WorkflowLegContext): Promise<{
 	let sent = 0;
 	let uncertainWhy: string | null = null;
 	for (const spec of w.fixture.workflowLegs ?? []) {
-		const owner = 'GT1-11-11E1';
+		const orchestration = ORCHESTRATION_LEG_IDS.includes(spec.id);
+		const owner = ownerOfLeg(spec.id);
+		const minTurns = REFUSAL_LEG_IDS.includes(spec.id) ? 0 : 1;
 		const r: WorkflowLegReceipt = {
 			leg: spec.id,
 			status: 'not-run',
@@ -11205,6 +11252,8 @@ async function runWorkflowLegs(w: WorkflowLegContext): Promise<{
 		);
 		if (!w.capabilities.workflowLegs)
 			r.reasons.push(workflowReason('workflow-legs-unimplemented', spec.id, owner));
+		else if (orchestration && !w.capabilities.orchestrationLegs)
+			r.reasons.push(workflowReason('orchestration-legs-unimplemented', spec.id, owner));
 		else if (w.blocked) r.reasons.push(workflowReason(w.blocked, spec.id, owner));
 		else if (uncertain) r.reasons.push(workflowReason('uncertain-prior-effect', uncertain, owner));
 		else if (prior.some((x) => x.state === 'uncertain' || x.uncertainEffect))
@@ -11221,11 +11270,11 @@ async function runWorkflowLegs(w: WorkflowLegContext): Promise<{
 				ACP_WORKFLOW_LEGS_OWNER
 			);
 		else if (!w.accountRoot) r.reasons.push(workflowReason('account-root-unknown', spec.id, owner));
-		else if (spec.maxTurns < 1 || spec.maxTurns > HARNESS_CEILINGS.workflowTurnsPerLeg)
+		else if (spec.maxTurns < minTurns || spec.maxTurns > HARNESS_CEILINGS.workflowTurnsPerLeg)
 			r.reasons.push(
 				workflowReason(
 					'workflow-turns-outside-ceiling',
-					`${spec.maxTurns} not in 1..${HARNESS_CEILINGS.workflowTurnsPerLeg}`,
+					`${spec.maxTurns} not in ${minTurns}..${HARNESS_CEILINGS.workflowTurnsPerLeg}`,
 					owner
 				)
 			);
@@ -11241,7 +11290,9 @@ async function runWorkflowLegs(w: WorkflowLegContext): Promise<{
 		const problems: string[] = [];
 		let why: string | null = null;
 		try {
-			why = await runWorkflowLeg(spec, w, r, problems);
+			why = orchestration
+				? await runOrchestrationLeg(spec, w, r, problems)
+				: await runWorkflowLeg(spec, w, r, problems);
 		} catch (e) {
 			problems.push(`${spec.id}-threw: ${errorText(e)}`);
 		}
@@ -11252,6 +11303,1538 @@ async function runWorkflowLegs(w: WorkflowLegContext): Promise<{
 		legs.push(r);
 	}
 	return { legs, spawned, sent, uncertainWhy };
+}
+
+// ---------------------------------------------------------------------------
+// Cue and group chat workflow legs (GT1-11-11E2)
+// ---------------------------------------------------------------------------
+
+/** The task that implements the Cue and group chat workflow legs. */
+export const ORCHESTRATION_LEGS_OWNER = 'GT1-11-11E2';
+/** The workflow legs GT1-11-11E2 owns: Cue desktop and headless, and the two group chat legs. */
+const ORCHESTRATION_LEG_IDS: readonly string[] = [
+	'cue-prompt-desktop',
+	'cue-prompt-headless',
+	'groupchat-participant',
+	'groupchat-moderator-refused',
+];
+/** Legs whose whole verdict is a refusal before any spawn: they hold no reservation and send nothing. */
+const REFUSAL_LEG_IDS: readonly string[] = ['groupchat-moderator-refused'];
+
+/** The pipeline every Cue leg fires: a prompt, a shell and a maestro-cli action on one trigger. */
+export const CUE_PIPELINE = 'qualify-e09-cue';
+/** The subscriptions of a Cue leg's owned cue.yaml (the stop subscription is its own pipeline). */
+export const CUE_SUBSCRIPTIONS = Object.freeze({
+	prompt: 'qualify-e09-cue-prompt',
+	shell: 'qualify-e09-cue-shell',
+	cli: 'qualify-e09-cue-cli',
+	stop: 'qualify-e09-cue-stop',
+});
+/** What the shell action prints, with the query source its environment carried. */
+export const CUE_SHELL_TOKEN = 'QUALIFY-E09-CUE-SHELL';
+/** The message the maestro-cli action hands its courier. */
+export const CUE_CLI_MESSAGE = 'QUALIFY-E09-CUE-CLI';
+/** How long a restarted engine is watched for a duplicate dispatch. */
+const CUE_RESTART_SETTLE_MS = 500;
+/** The name the Grok participant answers to in the owned room. */
+export const GROUPCHAT_PARTICIPANT_NAME = 'QualifyGrok';
+/** The provider the owned room names as moderator; its turns are scripted, never spawned. */
+export const GROUPCHAT_MODERATOR_PROVIDER = 'claude-code';
+/** What the scripted moderator says when it closes a round. */
+const GROUPCHAT_SYNTHESIS = 'Round closed by the qualification moderator.';
+
+/**
+ * The maestro-cli courier a Cue `mode: cli` action spawns, as an owned stand-in
+ * (`process.resourcesPath/maestro-cli.js`, the first place the production
+ * resolver looks). It records the verb, the target and the attribution the
+ * executor stamped, then exits: it never reads a discovery file and never
+ * contacts a desktop, so the action cannot reach a running Maestro or start a
+ * provider turn behind the leg's back.
+ */
+const COURIER_STAND_IN_SOURCE = [
+	"'use strict';",
+	"const fs = require('fs');",
+	"const path = require('path');",
+	"const keys = ['MAESTRO_QUERY_SOURCE', 'MAESTRO_CALLER_AGENT_ID', 'MAESTRO_DELEGATION_CONTEXT', 'MAESTRO_USER_DATA'];",
+	'const env = {};',
+	'for (const k of keys) env[k] = process.env[k] === undefined ? null : process.env[k];',
+	'const line = JSON.stringify({ verb: process.argv[2] || null, target: process.argv[3] || null, env });',
+	"fs.appendFileSync(path.join(__dirname, 'courier.jsonl'), line + '\\n');",
+	'',
+].join('\n');
+
+/** A dispatch record with nothing observed yet. */
+function blankDispatch(purpose: string): WorkflowDispatch {
+	return {
+		purpose,
+		turn: null,
+		unsent: null,
+		planned: {
+			ok: false,
+			reason: null,
+			args: [],
+			account: null,
+			permission: null,
+			promptVia: null,
+			target: null,
+			querySource: null,
+			model: null,
+			effort: null,
+			resumed: false,
+		},
+		nativeId: null,
+		exitCode: null,
+		stopRequested: false,
+		descendants: [],
+		survivors: [],
+		clean: false,
+		checkedBefore: null,
+		checkedAfter: null,
+		outcome: null,
+	};
+}
+
+/** Poll until `pred` holds or `ms` passes; whether it held. */
+async function waitUntil(pred: () => boolean, ms: number, stepMs = 25): Promise<boolean> {
+	const until = Date.now() + Math.max(0, ms);
+	while (!pred()) {
+		if (Date.now() >= until) return false;
+		await new Promise((resolve) => setTimeout(resolve, stepMs));
+	}
+	return true;
+}
+
+/**
+ * Run `fn` with this process's environment replaced by the leg's planned one
+ * (owned HOME, GROK_HOME, temp dir and Maestro data dir) and the courier
+ * stand-in where the production resolver looks first. Both are restored,
+ * whatever `fn` does. A Cue run inherits this process's environment, so this is
+ * how an owned launch is guaranteed without touching the production code.
+ */
+async function withLegProcess<T>(
+	env: Record<string, string>,
+	resourcesPath: string,
+	fn: () => Promise<T>
+): Promise<T> {
+	const proc = process as unknown as Record<string, unknown>;
+	const savedEnv = { ...process.env };
+	const hadResources = Object.prototype.hasOwnProperty.call(proc, 'resourcesPath');
+	const savedResources = proc.resourcesPath;
+	for (const k of Object.keys(process.env)) delete process.env[k];
+	Object.assign(process.env, env);
+	proc.resourcesPath = resourcesPath;
+	try {
+		return await fn();
+	} finally {
+		for (const k of Object.keys(process.env)) delete process.env[k];
+		Object.assign(process.env, savedEnv);
+		if (hadResources) proc.resourcesPath = savedResources;
+		else delete proc.resourcesPath;
+	}
+}
+
+/** The Cue run facts a leg keeps (never stdout beyond the shell token check). */
+type CueRunFacts = Pick<
+	CueRunResult,
+	| 'runId'
+	| 'sessionId'
+	| 'subscriptionName'
+	| 'pipelineName'
+	| 'status'
+	| 'exitCode'
+	| 'durationMs'
+	| 'providerSessionId'
+>;
+
+const cueRunFacts = (x: CueRunResult): CueRunFacts => ({
+	runId: x.runId,
+	sessionId: x.sessionId,
+	subscriptionName: x.subscriptionName,
+	pipelineName: x.pipelineName,
+	status: x.status,
+	exitCode: x.exitCode,
+	durationMs: x.durationMs,
+	providerSessionId: x.providerSessionId ?? null,
+});
+
+/** One Cue prompt run as a turn of the leg: its charge from the run's own usage, its reply from its text. */
+function turnOfCueRun(
+	n: number,
+	result: CueRunResult,
+	expect: string,
+	calls: Record<BillableCallKind, number>
+): PaidTurnResult {
+	const out = streamDigest();
+	out.push(Buffer.from(result.stdout ?? '', 'utf8'));
+	const err = streamDigest();
+	err.push(Buffer.from(result.stderr ?? '', 'utf8'));
+	const reply = replyCollector(expect);
+	if (result.stdout) reply.push(result.stdout);
+	const usage = nativeUsageOf(
+		result.usage
+			? { costUsd: result.usage.totalCostUsd, accounting: result.usage.accounting }
+			: null
+	);
+	return {
+		turn: n,
+		argv: [`<cue:${result.subscriptionName}>`],
+		exitCode: result.exitCode,
+		signal: null,
+		durationMs: result.durationMs,
+		timedOut: result.status === 'timeout',
+		spawnError: null,
+		stdout: out.result(),
+		stderr: err.result(),
+		sessionId: result.providerSessionId ?? null,
+		terminal:
+			result.status === 'completed' && result.exitCode === 0
+				? 'success'
+				: result.status === 'stopped'
+					? 'none'
+					: 'failure',
+		reply: reply.result(),
+		model: null,
+		effort: null,
+		usage: { costUsd: usage.costUsd, status: usage.status },
+		callsRecorded: calls,
+	};
+}
+
+/** The owned cue.yaml: one pipeline of three actions on one manual trigger, and a stop subscription. */
+function cueYamlFor(agentId: string, eventPrompt: string, stopPrompt: string): string {
+	const q = (s: string) => JSON.stringify(s);
+	const head = (name: string, pipeline: string) => [
+		`  - name: ${q(name)}`,
+		`    event: ${q('cli.trigger')}`,
+		`    pipeline_name: ${q(pipeline)}`,
+		`    agent_id: ${q(agentId)}`,
+	];
+	return [
+		'subscriptions:',
+		...head(CUE_SUBSCRIPTIONS.prompt, CUE_PIPELINE),
+		`    prompt: ${q(eventPrompt)}`,
+		...head(CUE_SUBSCRIPTIONS.shell, CUE_PIPELINE),
+		`    action: ${q('command')}`,
+		'    command:',
+		`      mode: ${q('shell')}`,
+		`      shell: ${q(`printf '${CUE_SHELL_TOKEN} qs=%s\\n' "$MAESTRO_QUERY_SOURCE"`)}`,
+		...head(CUE_SUBSCRIPTIONS.cli, CUE_PIPELINE),
+		`    action: ${q('command')}`,
+		'    command:',
+		`      mode: ${q('cli')}`,
+		'      cli:',
+		`        command: ${q('send')}`,
+		`        target: ${q(agentId)}`,
+		`        message: ${q(CUE_CLI_MESSAGE)}`,
+		...head(CUE_SUBSCRIPTIONS.stop, CUE_SUBSCRIPTIONS.stop),
+		`    prompt: ${q(stopPrompt)}`,
+		'',
+	].join('\n');
+}
+
+/** The persisted agent record both Cue runners read for the leg's Grok agent. */
+function cueAgentRecord(w: WorkflowLegContext, project: string) {
+	const envVar = getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME';
+	return {
+		id: WORKFLOW_AGENT_ID,
+		name: 'Qualify E09 Workflow',
+		toolType: 'grok' as const,
+		cwd: project,
+		projectRoot: project,
+		fullPath: project,
+		customPath: w.binaryPath,
+		customModel: w.model,
+		...(w.effort ? { customEffort: w.effort } : {}),
+		customEnvVars: { [envVar]: w.accountRoot! },
+	};
+}
+
+/**
+ * One Cue leg: the production `CueEngine` over an owned project, data dir and
+ * account home, with the desktop's run router and executors
+ * (`cue-prompt-desktop`) or the standalone engine's own dependencies
+ * (`cue-prompt-headless`). The pipeline trigger is fired once (prompt, shell
+ * and maestro-cli action), then the stop subscription is fired and stopped
+ * mid-turn through the engine, then the engine is stopped and a fresh one
+ * started over the same data dir. Every prompt dispatch is counted on the leg's
+ * workflow reservation before it may run; a refused one never reaches the
+ * executor. Returns the uncertainty a run left (null when none did).
+ */
+async function runCueLeg(
+	spec: WorkflowLegSpec,
+	w: WorkflowLegContext,
+	r: WorkflowLegReceipt,
+	problems: string[]
+): Promise<string | null> {
+	const assert = (id: string, ok: boolean, detail: string): boolean => {
+		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+		return ok;
+	};
+	const headless = spec.id === 'cue-prompt-headless';
+	const [eventPrompt, stopPrompt] = spec.prompts ?? [];
+	if (!eventPrompt || !stopPrompt) {
+		r.reasons.push(workflowReason('cue-prompts-absent', spec.id, ORCHESTRATION_LEGS_OWNER));
+		return null;
+	}
+	const expect = /QUALIFY-[A-Z0-9-]+-OK/.exec(eventPrompt)?.[0] ?? '';
+	const made = prepareConsumerRoot(w.c, w.config, `workflow-${spec.id}`, {
+		workspace: w.workspace,
+		operatorHome: w.operatorHome,
+	});
+	if ('refused' in made) {
+		r.reasons.push(workflowReason(made.refused, made.detail, ORCHESTRATION_LEGS_OWNER));
+		return null;
+	}
+	r.root = made.root;
+	const project = path.join(made.root, 'project');
+	const dataDir = path.join(made.root, 'maestro-data');
+	const courier = path.join(made.root, 'courier');
+	const tmp = path.join(made.root, 'tmp');
+	for (const dir of [project, path.join(project, '.maestro'), dataDir, courier, tmp])
+		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const yamlText = cueYamlFor(WORKFLOW_AGENT_ID, eventPrompt, stopPrompt);
+	writeOwned(path.join(project, '.maestro', 'cue.yaml'), yamlText);
+	writeOwned(path.join(courier, 'maestro-cli.js'), COURIER_STAND_IN_SOURCE, 0o700);
+	writeOwned(path.join(courier, 'package.json'), '{"type":"commonjs"}\n');
+	r.digests.cueYaml = sha256Of(Buffer.from(yamlText));
+	const record = cueAgentRecord(w, project);
+	await writeSessionsStoreFile(dataDir, { sessions: [record] } as unknown as SessionsStoreData);
+	const built = await w.launcher([]);
+	if ('refused' in built) {
+		r.reasons.push(workflowReason(built.refused, built.detail, ORCHESTRATION_LEGS_OWNER));
+		return null;
+	}
+	const legEnv: Record<string, string> = {
+		...built.env,
+		MAESTRO_USER_DATA: dataDir,
+		TMPDIR: tmp,
+		TMP: tmp,
+		TEMP: tmp,
+	};
+
+	const legName = `workflow:${spec.id}`;
+	const reserved = reserveSpend(
+		w.ledger,
+		w.config,
+		{
+			caseId: w.c.caseId,
+			leg: legName,
+			provider: 'grok',
+			account: w.account,
+			endpoint: w.config.allowedEndpoints[0] ?? '',
+			models: [...new Set([w.model, ...(w.config.spendBounds?.sideModels ?? [])])],
+			target: w.c.target,
+			sshTarget: null,
+			plan: workflowReservationPlan(w.plan, spec.maxTurns),
+		},
+		w.now()
+	);
+	if (!reserved.ok) {
+		r.reasons.push(...reserved.reasons);
+		return null;
+	}
+	const reservation = reserved.reservation;
+	r.reservationId = reservation.id;
+	const ceilingMs = HARNESS_CEILINGS.caseSeconds * 1000;
+	const turnMs = () =>
+		Math.min(
+			positiveFinite(w.turnTimeoutMs) ? w.turnTimeoutMs : ceilingMs,
+			ceilingMs,
+			Date.parse(reservation.deadlineAt) - w.now().getTime()
+		);
+
+	let uncertainWhy: string | null = null;
+	let turnNo = 0;
+	const promptRuns: Array<{ dispatch: WorkflowDispatch; result: CueRunFacts | null }> = [];
+	const actionRuns: CueRunFacts[] = [];
+	const logLines: string[] = [];
+	const onLog = (level: string, message: string) => {
+		if (logLines.length < WORKFLOW_EVENT_CAP) logLines.push(`${level}: ${message.slice(0, 200)}`);
+	};
+
+	try {
+		await withLegProcess(legEnv, courier, async () => {
+			const [
+				engineModule,
+				router,
+				executor,
+				shellExec,
+				cliExec,
+				lifecycle,
+				agentBinary,
+				builder,
+				settings,
+				parsers,
+				standalone,
+			] = await Promise.all([
+				import('../../src/main/cue/cue-engine'),
+				import('../../src/main/cue/cue-run-router'),
+				import('../../src/main/cue/cue-executor'),
+				import('../../src/main/cue/cue-shell-executor'),
+				import('../../src/main/cue/cue-cli-executor'),
+				import('../../src/main/cue/cue-process-lifecycle'),
+				import('../../src/main/cue/cue-agent-binary'),
+				import('../../src/main/cue/cue-spawn-builder'),
+				import('../../src/shared/cue/turn-settings'),
+				import('../../src/shared/maestro-lib/parsers'),
+				import('../../src/cli/services/cue-standalone-engine'),
+			]);
+			// The desktop registers every output parser at boot; the standalone engine does it on its first run.
+			parsers.initializeOutputParsers();
+			type ExecutionConfig = Parameters<typeof executor.executeCuePrompt>[0];
+			type RunParams = Parameters<typeof router.executeCueRunAction>[1];
+
+			/** The launch the production spawn builder plans for one prompt run (what the executor spawns). */
+			const planLaunch = async (config: ExecutionConfig, d: WorkflowDispatch) => {
+				try {
+					const plannedSpec = await builder.buildSpawnSpec(config, config.promptPath);
+					if (!plannedSpec.ok) {
+						d.planned.reason = plannedSpec.message;
+						return;
+					}
+					const s = plannedSpec.spec;
+					const envVar = getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME';
+					d.planned = {
+						ok: true,
+						reason: null,
+						args: [...s.args],
+						account: s.env[envVar] ?? null,
+						permission: null,
+						promptVia: s.promptArtifact ? 'file' : 'argv',
+						target: s.sshRemoteUsed ? 'remote' : 'local',
+						querySource: s.env[QUERY_SOURCE_ENV_VAR] ?? null,
+						model: argValue(s.args, '-m'),
+						effort: argValue(s.args, '--reasoning-effort'),
+						resumed: s.args.includes('--resume'),
+					};
+				} catch (e) {
+					d.planned.reason = `plan-threw:${errorText(e)}`;
+				}
+			};
+
+			/** The executor config the router builds for a prompt run, from the record it reads (headless). */
+			const headlessConfig = (p: RunParams): ExecutionConfig => {
+				const turn = settings.resolveCueTurnSettings(
+					'grok',
+					p.turnSettings,
+					record.customModel,
+					record.customEffort
+				);
+				return {
+					runId: p.runId,
+					session: {
+						id: record.id,
+						name: record.name,
+						toolType: record.toolType,
+						cwd: project,
+						projectRoot: project,
+					} as ExecutionConfig['session'],
+					subscription: {
+						name: p.subscriptionName,
+						event: p.event.type,
+						enabled: true,
+						prompt: p.prompt,
+					},
+					event: p.event,
+					promptPath: p.prompt,
+					toolType: 'grok',
+					projectRoot: project,
+					templateContext: {
+						session: {
+							id: record.id,
+							name: record.name,
+							toolType: 'grok',
+							cwd: project,
+							projectRoot: project,
+						},
+					} as ExecutionConfig['templateContext'],
+					timeoutMs: p.timeoutMs,
+					customPath: record.customPath,
+					customEnvVars: record.customEnvVars,
+					customModel: turn.model,
+					customEffort: turn.effort,
+					onLog,
+					sshStore: { getSshRemotes: () => [] },
+					agentConfigValues: {},
+				} as ExecutionConfig;
+			};
+
+			/**
+			 * Count one prompt dispatch on the reservation before it may run: past the
+			 * leg's turns, after an uncertain effect, or on a refused draw it never
+			 * reaches the executor and the run fails with the reason.
+			 */
+			const admitPrompt = (
+				p: { runId: string; subscriptionName: string; event: RunParams['event'] },
+				d: WorkflowDispatch
+			): { refusal: CueRunResult } | { n: number; calls: Record<BillableCallKind, number> } => {
+				const refuse = (why: string) => {
+					d.unsent = why;
+					d.outcome = 'refused';
+					const at = new Date().toISOString();
+					return {
+						refusal: {
+							runId: p.runId,
+							sessionId: record.id,
+							sessionName: record.name,
+							subscriptionName: p.subscriptionName,
+							event: p.event,
+							status: 'failed' as const,
+							stdout: '',
+							stderr: `The qualification refused the dispatch: ${why}`,
+							exitCode: null,
+							durationMs: 0,
+							startedAt: at,
+							endedAt: at,
+						},
+					};
+				};
+				if (promptRuns.length > spec.maxTurns)
+					return refuse(`leg-turns-exhausted:${promptRuns.length}>${spec.maxTurns}`);
+				if (uncertainWhy) return refuse(`uncertain-prior-effect:${uncertainWhy}`);
+				const n = ++turnNo;
+				const drawn = drawReservedTurn({
+					ledger: w.ledger,
+					reservation,
+					config: w.config,
+					now: w.now,
+					turnMs,
+					pinnedFile: w.binaryPath,
+					n,
+				});
+				if (!drawn.ok) {
+					r.reasons.push(drawn.reason);
+					return refuse('turn-refused');
+				}
+				d.turn = n;
+				return { n, calls: drawn.draws };
+			};
+
+			/** Record what a prompt run that was let through did. */
+			const recordPrompt = (
+				d: WorkflowDispatch,
+				slot: { result: CueRunFacts | null },
+				n: number,
+				calls: Record<BillableCallKind, number>,
+				result: CueRunResult,
+				expectToken: string
+			) => {
+				slot.result = cueRunFacts(result);
+				const ran =
+					result.exitCode !== null ||
+					result.status === 'stopped' ||
+					result.status === 'timeout' ||
+					!!result.providerSessionId;
+				d.nativeId = result.providerSessionId ?? null;
+				d.exitCode = result.exitCode;
+				d.clean = result.status === 'completed' && result.exitCode === 0;
+				d.outcome = result.status;
+				if (!ran) {
+					d.unsent = 'never-spawned';
+					return;
+				}
+				r.spawned++;
+				r.paidRequests++;
+				const turn = turnOfCueRun(n, result, expectToken, calls);
+				r.turns.push(turn);
+				if (turn.timedOut) uncertainWhy ??= 'turn-timeout';
+				if (turn.stdout.truncated || turn.stderr.truncated)
+					uncertainWhy ??= 'turn-output-unbounded';
+			};
+
+			const gatePrompt = async (
+				p: { runId: string; subscriptionName: string; event: RunParams['event'] },
+				config: ExecutionConfig,
+				run: () => Promise<CueRunResult>
+			): Promise<CueRunResult> => {
+				const d = blankDispatch(`cue:${p.subscriptionName}`);
+				const slot = { dispatch: d, result: null as CueRunFacts | null };
+				promptRuns.push(slot);
+				r.dispatches.push(d);
+				const admitted = admitPrompt(p, d);
+				if ('refusal' in admitted) return admitted.refusal;
+				await planLaunch(config, d);
+				const result = await run();
+				const token = p.subscriptionName === CUE_SUBSCRIPTIONS.prompt ? expect : '';
+				recordPrompt(d, slot, admitted.n, admitted.calls, result, token);
+				return result;
+			};
+
+			// The engine's dependencies: the desktop's router over the production executors, or the
+			// standalone engine's own, each with the prompt gate in front of the provider spawn.
+			const engineDeps = (): ConstructorParameters<typeof engineModule.CueEngine>[0] => {
+				if (headless) {
+					const deps = standalone.buildStandaloneCueEngineDeps({ onLog });
+					return {
+						...deps,
+						onCueRun: async (p) => {
+							const promptAction = !p.action || p.action === 'prompt';
+							const result = promptAction
+								? await gatePrompt(p, headlessConfig(p), () => deps.onCueRun(p))
+								: await deps.onCueRun(p);
+							if (!promptAction) actionRuns.push(cueRunFacts(result));
+							return result;
+						},
+					};
+				}
+				const actionDeps: Parameters<typeof router.executeCueRunAction>[0] = {
+					executeCuePrompt: (config) =>
+						gatePrompt(
+							{
+								runId: config.runId,
+								subscriptionName: config.subscription.name,
+								event: config.event,
+							},
+							config,
+							() => executor.executeCuePrompt(config)
+						),
+					executeCueShell: async (config) => {
+						const result = await shellExec.executeCueShell(config);
+						actionRuns.push(cueRunFacts(result));
+						return result;
+					},
+					executeCueCli: async (config) => {
+						const result = await cliExec.executeCueCli(config);
+						actionRuns.push(cueRunFacts(result));
+						return result;
+					},
+					stopCueRun: executor.stopCueRun,
+					findSession: (id) => (id === record.id ? record : undefined),
+					resolveAgentBinary: ({ session }) =>
+						agentBinary.resolveCueAgentBinary({
+							sessionCustomPath: session.customPath,
+							providerCustomPath: undefined,
+							sshEnabled: false,
+							getDetectedPath: async () => undefined,
+						}),
+					sshStore: { getSshRemotes: () => [] },
+					getAgentConfigValues: () => ({}),
+					onLog,
+					onNotify: async () => {
+						throw new Error('The qualification pipeline has no notify action.');
+					},
+					isServerMode: false,
+				};
+				return {
+					getSessions: () => [record as unknown as SessionInfo],
+					onCueRun: (p) => router.executeCueRunAction(actionDeps, p),
+					onStopCueRun: (runId) => executor.stopCueRun(runId),
+					onLog: (level, message) => onLog(level, message),
+					runnerMode: 'desktop',
+					getUsageStatsEnabled: () => true,
+				};
+			};
+
+			const engine = new engineModule.CueEngine(engineDeps());
+			let restarted: InstanceType<typeof engineModule.CueEngine> | null = null;
+			try {
+				engine.start('user-toggle');
+				const started = engine.isEnabled();
+				// One event: the pipeline trigger fires the prompt, the shell and the maestro-cli action.
+				const fired = started && engine.triggerSubscription(CUE_SUBSCRIPTIONS.prompt);
+				const settled = (names: readonly string[]) => () => {
+					const log = engine.getActivityLog();
+					return names.every((n) => log.some((x) => x.subscriptionName === n));
+				};
+				await waitUntil(
+					settled([CUE_SUBSCRIPTIONS.prompt, CUE_SUBSCRIPTIONS.shell, CUE_SUBSCRIPTIONS.cli]),
+					turnMs()
+				);
+				// A second event: the stop subscription, stopped mid-turn through the engine.
+				let stopSnapshot: { pid: number | null; descendants: number[]; stopped: boolean } = {
+					pid: null,
+					descendants: [],
+					stopped: false,
+				};
+				const stopFired = fired && engine.triggerSubscription(CUE_SUBSCRIPTIONS.stop);
+				if (stopFired) {
+					let target: { runId: string; pid: number } | null = null;
+					await waitUntil(() => {
+						const active = engine
+							.getActiveRuns()
+							.find((x) => x.subscriptionName === CUE_SUBSCRIPTIONS.stop);
+						if (!active) return false;
+						const proc = lifecycle.getActiveProcessMap().get(active.runId);
+						if (!proc?.child.pid || proc.toolType !== 'grok') return false;
+						// Stop only once the turn has produced output: a stop before that is a stop of a launch.
+						if (!proc.getStdout()) return false;
+						target = { runId: active.runId, pid: proc.child.pid };
+						return true;
+					}, turnMs());
+					if (target) {
+						const t: { runId: string; pid: number } = target;
+						const descendants = snapshotProcessTree(t.pid).descendants.map((x) => x.pid);
+						stopSnapshot = { pid: t.pid, descendants, stopped: engine.stopRun(t.runId) };
+					}
+					await waitUntil(settled([CUE_SUBSCRIPTIONS.stop]), turnMs());
+				}
+				const stopSurvivors =
+					stopSnapshot.pid !== null
+						? await survivorsAfter([stopSnapshot.pid, ...stopSnapshot.descendants], w.graceMs)
+						: [];
+				const firstLog = engine.getActivityLog().map(cueRunFacts);
+				// The shell's own output names the query source its environment carried (never kept past this check).
+				const shellOut = (
+					engine.getActivityLog().find((x) => x.subscriptionName === CUE_SUBSCRIPTIONS.shell)
+						?.stdout ?? ''
+				).slice(0, 512);
+				const eventsBefore = engine.getEventCount();
+				const dispatchesBefore = promptRuns.length;
+				const actionsBefore = actionRuns.length;
+				engine.stop();
+
+				// The restart: a fresh engine over the same data dir dispatches nothing again.
+				restarted = new engineModule.CueEngine(engineDeps());
+				restarted.start('system-boot');
+				const restartStarted = restarted.isEnabled();
+				await new Promise((resolve) => setTimeout(resolve, CUE_RESTART_SETTLE_MS));
+				const eventsAfter = restartStarted ? restarted.getEventCount() : -1;
+				const hydrated = restartStarted ? restarted.getActivityLog().map(cueRunFacts) : [];
+				restarted.stop();
+				restarted = null;
+
+				uncertainWhy = uncertainWhy ?? null;
+				const courierLines = fs.existsSync(path.join(courier, 'courier.jsonl'))
+					? fs
+							.readFileSync(path.join(courier, 'courier.jsonl'), 'utf8')
+							.split('\n')
+							.filter(Boolean)
+							.map(
+								(l) =>
+									JSON.parse(l) as {
+										verb: string | null;
+										target: string | null;
+										env: Record<string, string | null>;
+									}
+							)
+					: [];
+				const nativeIds = listNativeSessionIds(w.accountRoot);
+				const byName = (n: string) => firstLog.filter((x) => x.subscriptionName === n);
+				const promptRun = byName(CUE_SUBSCRIPTIONS.prompt)[0];
+				const shellRun = byName(CUE_SUBSCRIPTIONS.shell)[0];
+				const cliRun = byName(CUE_SUBSCRIPTIONS.cli)[0];
+				const stopRun = byName(CUE_SUBSCRIPTIONS.stop)[0];
+				const shellResult = actionRuns.find((x) => x.subscriptionName === CUE_SUBSCRIPTIONS.shell);
+				r.observed = {
+					started,
+					fired,
+					stopFired,
+					restartStarted,
+					runs: firstLog,
+					hydrated: hydrated.length,
+					eventsBefore,
+					eventsAfter,
+					actions: actionRuns,
+					courier: courierLines.map((l) => ({ verb: l.verb, target: l.target })),
+					nativeIds: nativeIds.ids.length,
+					stop: { ...stopSnapshot, survivors: stopSurvivors },
+					log: logLines.slice(-20),
+				};
+
+				const sent = promptRuns.filter((x) => x.dispatch.turn !== null);
+				assert(
+					'single-dispatch',
+					fired &&
+						stopFired &&
+						promptRuns.length === 2 &&
+						sent.length === 2 &&
+						byName(CUE_SUBSCRIPTIONS.prompt).length === 1 &&
+						byName(CUE_SUBSCRIPTIONS.stop).length === 1,
+					`fired=${fired}/${stopFired} dispatches=${promptRuns.length} sent=${sent.length} promptRuns=${byName(CUE_SUBSCRIPTIONS.prompt).length} stopRuns=${byName(CUE_SUBSCRIPTIONS.stop).length}`
+				);
+				const first = promptRuns[0]?.dispatch;
+				const badPlan: string[] = [];
+				if (!first?.planned.ok) badPlan.push(`plan:${first?.planned.reason ?? 'none'}`);
+				if (first && first.planned.target !== 'local') badPlan.push('target');
+				if (first && !sameOwnedAccountDir(w.accountRoot, first.planned.account))
+					badPlan.push('account');
+				if (first && first.planned.model !== w.model) badPlan.push('model');
+				if (first && first.planned.effort !== w.effort) badPlan.push('effort');
+				if (promptRun?.providerSessionId && !nativeIds.ids.includes(promptRun.providerSessionId))
+					badPlan.push('native-session-outside-owned-home');
+				assert(
+					'planned-launch',
+					!!first && badPlan.length === 0 && !!promptRun?.providerSessionId,
+					badPlan.join(',') ||
+						`planned on the owned account, model ${w.model}, effort ${String(w.effort)}`
+				);
+				const delegation = courierLines[0]?.env.MAESTRO_DELEGATION_CONTEXT
+					? readDelegationContextEnv({
+							MAESTRO_DELEGATION_CONTEXT:
+								courierLines[0].env.MAESTRO_DELEGATION_CONTEXT ?? undefined,
+						})
+					: null;
+				const chain = delegation?.status === 'ok' ? delegation.context.delegation.chain : [];
+				const pipelineOf = (x: CueRunFacts | undefined) => x?.pipelineName ?? null;
+				assert(
+					'attribution',
+					!!promptRun &&
+						promptRun.sessionId === WORKFLOW_AGENT_ID &&
+						pipelineOf(promptRun) === CUE_PIPELINE &&
+						pipelineOf(shellRun) === CUE_PIPELINE &&
+						pipelineOf(cliRun) === CUE_PIPELINE &&
+						first?.planned.querySource === 'cue' &&
+						!!shellResult &&
+						actionRuns.length >= 2,
+					`owner=${promptRun?.sessionId ?? 'none'} pipelines=${pipelineOf(promptRun)}/${pipelineOf(shellRun)}/${pipelineOf(cliRun)} querySource=${first?.planned.querySource ?? 'none'}`
+				);
+				assert(
+					'completion-recorded',
+					promptRun?.status === 'completed' &&
+						promptRun.exitCode === 0 &&
+						!!first?.clean &&
+						eventsBefore >= 4,
+					`status=${promptRun?.status ?? 'none'} exit=${String(promptRun?.exitCode)} events=${eventsBefore}`
+				);
+				assert(
+					'stop-reaps-child',
+					stopSnapshot.stopped &&
+						stopRun?.status === 'stopped' &&
+						stopSurvivors.length === 0 &&
+						!promptRuns[1]?.dispatch.clean,
+					`stopped=${stopSnapshot.stopped} status=${stopRun?.status ?? 'none'} pid=${String(stopSnapshot.pid)} descendants=${stopSnapshot.descendants.length} survivors=${stopSurvivors.length}`
+				);
+				assert(
+					'no-duplicate-on-restart',
+					restartStarted &&
+						promptRuns.length === dispatchesBefore &&
+						actionRuns.length === actionsBefore &&
+						eventsAfter === eventsBefore,
+					`restart=${restartStarted} dispatches=${dispatchesBefore}->${promptRuns.length} actions=${actionsBefore}->${actionRuns.length} events=${eventsBefore}->${eventsAfter}`
+				);
+				const courierCall = courierLines[0];
+				assert(
+					'actions-attributed-no-spawn',
+					shellRun?.status === 'completed' &&
+						shellOut.includes(`${CUE_SHELL_TOKEN} qs=cue`) &&
+						cliRun?.status === 'completed' &&
+						courierLines.length === 1 &&
+						courierCall?.verb === 'dispatch' &&
+						courierCall?.target === WORKFLOW_AGENT_ID &&
+						courierCall?.env.MAESTRO_QUERY_SOURCE === 'cue' &&
+						courierCall?.env.MAESTRO_CALLER_AGENT_ID === WORKFLOW_AGENT_ID &&
+						chain.some((x) => x.id === `cue-subscription:${CUE_SUBSCRIPTIONS.cli}`) &&
+						reservation.turnsUsed === sent.length &&
+						r.spawned === sent.length,
+					`shell=${shellRun?.status ?? 'none'} qs=${shellOut.includes('qs=cue')} cli=${cliRun?.status ?? 'none'} courier=${courierLines.length} verb=${courierCall?.verb ?? 'none'} qsCli=${courierCall?.env.MAESTRO_QUERY_SOURCE ?? 'none'} chain=${chain.map((x) => x.id).join('>')} turns=${reservation.turnsUsed} spawned=${r.spawned}`
+				);
+			} finally {
+				if (restarted) restarted.stop();
+				if (engine.isEnabled()) engine.stop();
+				// Nothing the leg started may outlive it.
+				lifecycle.stopAllProcesses();
+			}
+		});
+	} catch (e) {
+		problems.push(`${spec.id}-engine-threw: ${errorText(e)}`);
+	} finally {
+		r.settlement = settleLegReservation(
+			w.ledger,
+			reservation,
+			r.paidRequests,
+			r.turns,
+			uncertainWhy,
+			w.now
+		);
+	}
+	return uncertainWhy;
+}
+
+/** What a group chat leg's event sink saw: room states and every line routed into the room. */
+interface GroupChatSeen {
+	states: string[];
+	messages: Array<{ from: string; bytes: number }>;
+}
+
+/**
+ * The production group chat engine and store over an owned chats dir, with
+ * the leg's launcher. The directory offers the leg's one Grok agent; the
+ * prompts are the bundled ones (the owned data dir holds no customizations).
+ */
+async function ownedGroupChat(a: {
+	workspace: string;
+	dataDir: string;
+	chatsDir: string;
+	directory: GroupChatSessionInfo[];
+	providerConfig: Record<string, unknown>;
+	launcher: () => GroupChatLauncher;
+	seen: GroupChatSeen;
+}) {
+	const [storage, router, chatOps, turnMetrics, sleep, prompts] = await Promise.all([
+		import('../../src/shared/maestro-lib/groupchat/storage'),
+		import('../../src/shared/maestro-lib/groupchat/router'),
+		import('../../src/shared/maestro-lib/groupchat/chat-ops'),
+		import('../../src/shared/maestro-lib/groupchat/turn-metrics'),
+		import('../../src/shared/sleepTracking'),
+		import('../../src/shared/maestro-lib/prompts/load'),
+	]);
+	const store = storage.createGroupChatStore({ groupChatsDir: () => a.chatsDir });
+	const loader = prompts.createPromptLoader({
+		bundledPromptsDir: path.join(a.workspace, 'src', 'prompts'),
+		customizationsFile: path.join(a.dataDir, 'core-prompts-customizations.json'),
+	});
+	const tracker = sleep.createSleepTracker();
+	const state: { current: GroupChatState } = { current: 'idle' };
+	const events: GroupChatEventSink = {
+		message: (_chatId, message) => {
+			if (a.seen.messages.length < WORKFLOW_EVENT_CAP)
+				a.seen.messages.push({
+					from: message.from,
+					bytes: Buffer.byteLength(message.content ?? ''),
+				});
+		},
+		stateChange: (_chatId, s) => {
+			state.current = s;
+			if (a.seen.states.length < WORKFLOW_EVENT_CAP) a.seen.states.push(s);
+		},
+		participantsChanged: () => undefined,
+		moderatorUsage: () => undefined,
+		historyEntry: () => undefined,
+		participantState: () => undefined,
+		moderatorSessionIdChanged: () => undefined,
+		autoRunTriggered: () => undefined,
+		autoRunBatchComplete: () => undefined,
+		participantLiveOutput: () => undefined,
+	};
+	const engine = router.createGroupChatEngine({
+		store,
+		events,
+		agents: {
+			list: () => a.directory,
+			providerConfig: (providerId) => (providerId === 'grok' ? a.providerConfig : {}),
+			providerEnvVars: () => undefined,
+			conductorProfile: () => '',
+			sshStore: () => null,
+		},
+		prompts: {
+			get: (id) => {
+				const text = loader.get(id);
+				if (text === undefined) throw new Error(`The prompt "${id}" could not be loaded.`);
+				return text;
+			},
+		},
+		power: { block: () => undefined, unblock: () => undefined },
+		metrics: turnMetrics.createGroupChatTurnMetrics({
+			spans: { begin: tracker.beginSpan, elapsedMs: tracker.elapsedMs },
+		}),
+	});
+	const operations = chatOps.createGroupChatOperations({
+		store,
+		engine,
+		launcher: a.launcher,
+		events,
+		chatState: () => state.current,
+	});
+	return { store, engine, operations, state };
+}
+
+/**
+ * `groupchat-moderator-refused`: creating a room moderated by Grok through the
+ * production operations. The production flag (`supportsGroupChatModeration`
+ * false for Grok) must refuse it before anything is written or started: no
+ * chat directory, no start on the launcher, nothing counted on the ledger.
+ */
+async function runModeratorRefusedLeg(
+	spec: WorkflowLegSpec,
+	w: WorkflowLegContext,
+	r: WorkflowLegReceipt,
+	problems: string[]
+): Promise<null> {
+	const assert = (id: string, ok: boolean, detail: string): boolean => {
+		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+		return ok;
+	};
+	const made = prepareConsumerRoot(w.c, w.config, `workflow-${spec.id}`, {
+		workspace: w.workspace,
+		operatorHome: w.operatorHome,
+	});
+	if ('refused' in made) {
+		r.reasons.push(workflowReason(made.refused, made.detail, ORCHESTRATION_LEGS_OWNER));
+		return null;
+	}
+	r.root = made.root;
+	const dataDir = path.join(made.root, 'maestro-data');
+	const chatsDir = path.join(dataDir, 'group-chats');
+	fs.mkdirSync(chatsDir, { recursive: true, mode: 0o700 });
+	const before = {
+		turns: w.ledger.turns,
+		calls: w.ledger.calls,
+		reservations: w.ledger.reservations.length,
+	};
+	const starts: string[] = [];
+	const seen: GroupChatSeen = { states: [], messages: [] };
+	const launcher: GroupChatLauncher = {
+		runner: {
+			start: async (s) => {
+				starts.push(s.processId);
+				return { success: false, error: 'The qualification starts nothing in a refused room.' };
+			},
+			stop: () => undefined,
+		},
+		resolveAgent: async () => null,
+	};
+	try {
+		const room = await ownedGroupChat({
+			workspace: w.workspace,
+			dataDir,
+			chatsDir,
+			directory: [],
+			providerConfig: {},
+			launcher: () => launcher,
+			seen,
+		});
+		let refusal: string | null = null;
+		let created = false;
+		try {
+			await room.operations.createChat({
+				name: 'Qualify E09 moderator',
+				moderatorProvider: 'grok',
+			});
+			created = true;
+		} catch (e) {
+			refusal = errorText(e);
+		}
+		const entries = fs.readdirSync(chatsDir);
+		r.observed = { created, refusal: refusal?.slice(0, 200) ?? null, entries: entries.length };
+		const flag = getAgentCapabilities('grok').supportsGroupChatModeration;
+		assert(
+			'refused-by-flag',
+			!created && flag === false && /does not support group chat moderation/i.test(refusal ?? ''),
+			`created=${created} flag=${String(flag)} refusal=${refusal ? 'yes' : 'none'}`
+		);
+		assert(
+			'zero-children',
+			starts.length === 0 && entries.length === 0 && r.spawned === 0,
+			`starts=${starts.length} chatDirs=${entries.length} spawned=${r.spawned}`
+		);
+		assert(
+			'zero-billable-calls',
+			w.ledger.turns === before.turns &&
+				w.ledger.calls === before.calls &&
+				w.ledger.reservations.length === before.reservations &&
+				r.paidRequests === 0,
+			`turns=${before.turns}->${w.ledger.turns} calls=${before.calls}->${w.ledger.calls} reservations=${before.reservations}->${w.ledger.reservations.length}`
+		);
+	} catch (e) {
+		problems.push(`${spec.id}-threw: ${errorText(e)}`);
+	}
+	return null;
+}
+
+/**
+ * `groupchat-participant`: three rounds in an owned room through the
+ * production group chat engine, store and operations. The moderator's turns
+ * are scripted by the leg (a non-Grok moderator is another provider's process,
+ * GT1-11-13's, so none is started); each round's moderator answer mentions the
+ * Grok participant, whose turn is planned by the production spawn
+ * (`deliverSystemPrompt()`, `prepareGroupChatSpawn()`), counted on the leg's
+ * workflow reservation, run with the exact planned argv against the owned
+ * account, parsed by the production Grok parser and reported to the engine
+ * (`sessionAnnounced`, `turnEnded` through `turnEndOf()`). Rounds one and two
+ * must each route one reply, the second resuming the first's native session;
+ * round three is stopped mid-turn through the production `stopAll` and its
+ * child must be gone.
+ */
+async function runGroupChatParticipantLeg(
+	spec: WorkflowLegSpec,
+	w: WorkflowLegContext,
+	r: WorkflowLegReceipt,
+	problems: string[]
+): Promise<string | null> {
+	const assert = (id: string, ok: boolean, detail: string): boolean => {
+		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+		return ok;
+	};
+	const requests = spec.prompts ?? [];
+	if (requests.length !== 3) {
+		r.reasons.push(workflowReason('groupchat-prompts-absent', spec.id, ORCHESTRATION_LEGS_OWNER));
+		return null;
+	}
+	const tokens = requests.map((p) => /QUALIFY-[A-Z0-9-]+-OK/.exec(p)?.[0] ?? '');
+	const made = prepareConsumerRoot(w.c, w.config, `workflow-${spec.id}`, {
+		workspace: w.workspace,
+		operatorHome: w.operatorHome,
+	});
+	if ('refused' in made) {
+		r.reasons.push(workflowReason(made.refused, made.detail, ORCHESTRATION_LEGS_OWNER));
+		return null;
+	}
+	r.root = made.root;
+	const project = path.join(made.root, 'project');
+	const dataDir = path.join(made.root, 'maestro-data');
+	const chatsDir = path.join(dataDir, 'group-chats');
+	for (const dir of [project, chatsDir]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+
+	const legName = `workflow:${spec.id}`;
+	const reserved = reserveSpend(
+		w.ledger,
+		w.config,
+		{
+			caseId: w.c.caseId,
+			leg: legName,
+			provider: 'grok',
+			account: w.account,
+			endpoint: w.config.allowedEndpoints[0] ?? '',
+			models: [...new Set([w.model, ...(w.config.spendBounds?.sideModels ?? [])])],
+			target: w.c.target,
+			sshTarget: null,
+			plan: workflowReservationPlan(w.plan, spec.maxTurns),
+		},
+		w.now()
+	);
+	if (!reserved.ok) {
+		r.reasons.push(...reserved.reasons);
+		return null;
+	}
+	const reservation = reserved.reservation;
+	r.reservationId = reservation.id;
+	const ceilingMs = HARNESS_CEILINGS.caseSeconds * 1000;
+	const turnMs = () =>
+		Math.min(
+			positiveFinite(w.turnTimeoutMs) ? w.turnTimeoutMs : ceilingMs,
+			ceilingMs,
+			Date.parse(reservation.deadlineAt) - w.now().getTime()
+		);
+	let drawn = emptyCalls();
+	let turnNo = 0;
+	let currentCwd = project;
+	const s: SessionLegContext = {
+		c: w.c,
+		fixture: w.fixture,
+		capabilities: w.capabilities,
+		blocked: null,
+		cwd: project,
+		accountRoot: w.accountRoot,
+		mainTurns: [],
+		nextTurn: () => ++turnNo,
+		admit: (n, as) => {
+			const d = drawReservedTurn({
+				ledger: w.ledger,
+				reservation,
+				config: w.config,
+				now: w.now,
+				turnMs,
+				pinnedFile: w.binaryPath,
+				n,
+				as,
+			});
+			if (!d.ok) {
+				r.reasons.push(d.reason);
+				return false;
+			}
+			drawn = d.draws;
+			return true;
+		},
+		remainingTurns: () =>
+			Math.min(
+				reservation.turnAllowance - reservation.turnsUsed,
+				w.ledger.limitTurns - w.ledger.turns
+			),
+		callsByKind: () => ({ ...reservation.callsByKind }),
+		callsDrawn: () => drawn,
+		baselineCalls: () => paidCallsPerTurn(w.config, reservation),
+		// The child runs in the directory the production spawn planned.
+		launcher: async (argv) => {
+			const built = await w.launcher(argv);
+			if ('refused' in built) return built;
+			return { ...built, cwd: currentCwd };
+		},
+		nativeArgv: () => [],
+		turnMs,
+		graceMs: w.graceMs,
+		lifetime: w.lifetime,
+	};
+
+	const envVar = getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME';
+	const def = getAgentDefinition('grok');
+	const moderatorDef = getAgentDefinition(GROUPCHAT_MODERATOR_PROVIDER);
+	const seen: GroupChatSeen = { states: [], messages: [] };
+	const moderatorScript: string[] = [];
+	const moderatorStarts: string[] = [];
+	const stopRequested = new Set<string>();
+	const jobs: Promise<void>[] = [];
+	const extras: Array<{ textAfterTerminal: number; terminals: number; answered: boolean }> = [];
+	let uncertainWhy: string | null = null;
+	let chatId: string | null = null;
+	let room: Awaited<ReturnType<typeof ownedGroupChat>> | null = null;
+	let launcher: GroupChatLauncher | null = null;
+
+	try {
+		const [spawnModule, sessionIds, turnArgs, interactive, windowsSpawn, turnEnd, logModule] =
+			await Promise.all([
+				import('../../src/shared/maestro-lib/groupchat/spawn'),
+				import('../../src/shared/maestro-lib/groupchat/session-ids'),
+				import('../../src/shared/maestro-lib/turns/args'),
+				import('../../src/shared/maestro-lib/launch/interactive-mode'),
+				import('../../src/shared/maestro-lib/groupchat/windows-spawn'),
+				import('../../src/shared/maestro-lib/groupchat/turn-end'),
+				import('../../src/shared/maestro-lib/groupchat/log'),
+			]);
+		const spawnDeps: Parameters<typeof spawnModule.prepareGroupChatSpawn>[1] = {
+			sshStore: null,
+			resolveClaudeSpawnMode: (input) =>
+				interactive.resolveClaudeSpawnModeCore(
+					input,
+					interactive.createStandaloneClaudeSpawnCoreDeps({ getMaestroPBinPath: () => null })
+				),
+			windowsSpawnConfig: (agentId, ssh) =>
+				windowsSpawn.getWindowsSpawnConfig(agentId, ssh ?? undefined, {}),
+			beginTurn: () => undefined,
+		};
+
+		/** One participant turn: planned by the production spawn, counted, run with the exact argv, reported. */
+		const startParticipant = async (spawnReq: GroupChatSpawn): Promise<GroupChatTurnStart> => {
+			const index = r.dispatches.length;
+			const d = blankDispatch('groupchat-participant');
+			r.dispatches.push(d);
+			const refuse = (why: string): GroupChatTurnStart => {
+				d.unsent = why;
+				d.outcome = 'refused';
+				return { success: false, error: `The qualification refused the participant turn: ${why}` };
+			};
+			if (index >= spec.maxTurns)
+				return refuse(`leg-turns-exhausted:${index + 1}>${spec.maxTurns}`);
+			if (uncertainWhy) return refuse(`uncertain-prior-effect:${uncertainWhy}`);
+			if (s.remainingTurns() < 1) return refuse('turn-allowance-exhausted');
+			let prepared: Awaited<ReturnType<typeof spawnModule.prepareGroupChatSpawn>>;
+			try {
+				const delivered = await turnArgs.deliverSystemPrompt({
+					args: spawnReq.args,
+					prompt: spawnReq.prompt,
+					systemPrompt: spawnReq.appendSystemPrompt,
+					supportsAppendSystemPrompt: !!spawnReq.agent.capabilities?.supportsAppendSystemPrompt,
+					isResume: !!spawnReq.isResume,
+					isSshSession: false,
+					sessionId: spawnReq.processId,
+					agentId: spawnReq.providerId,
+				});
+				prepared = await spawnModule.prepareGroupChatSpawn(
+					{
+						...spawnReq,
+						args: delivered.args,
+						prompt: delivered.prompt,
+						promptFileDestination: {
+							owner: 'local',
+							path: path.join(
+								made.root,
+								'prompts',
+								`maestro-prompt-${randomUUID()}${def?.promptFile?.format === 'acp-json' ? '.json' : '.txt'}`
+							),
+						},
+					},
+					spawnDeps
+				);
+			} catch (e) {
+				return refuse(`plan-threw:${errorText(e)}`);
+			}
+			const artifact = prepared.promptDelivery?.artifact;
+			d.planned = {
+				ok: true,
+				reason: null,
+				args: [...prepared.args],
+				account: prepared.customEnvVars?.[envVar] ?? null,
+				permission: null,
+				promptVia: artifact ? 'file' : 'argv',
+				target: 'local',
+				querySource: null,
+				model: argValue(prepared.args, '-m'),
+				effort: argValue(prepared.args, '--reasoning-effort'),
+				resumed: !!spawnReq.isResume,
+			};
+			if (path.resolve(prepared.command) !== path.resolve(w.binaryPath))
+				return refuse('command-not-the-pinned-binary');
+			if (
+				!artifact ||
+				artifact.owner !== 'local' ||
+				!isPathAtOrUnderRoot(normalizeFor('local', artifact.path), normalizeFor('local', made.root))
+			)
+				return refuse('prompt-file-outside-root');
+			try {
+				fs.mkdirSync(path.dirname(artifact.path), { recursive: true, mode: 0o700 });
+				fs.writeFileSync(artifact.path, artifact.content, {
+					encoding: artifact.encoding,
+					mode: artifact.mode,
+					flag: artifact.flag,
+				});
+			} catch (e) {
+				return refuse(`prompt-file-unwritable:${errorText(e)}`);
+			}
+			const extra = { textAfterTerminal: 0, terminals: 0, answered: false };
+			extras[index] = extra;
+			const processId = spawnReq.processId;
+			const job = (async () => {
+				currentCwd = prepared.cwd;
+				const text: string[] = [];
+				let textChars = 0;
+				let streamed = false;
+				let sent: Awaited<ReturnType<typeof sendSessionTurn>>;
+				try {
+					sent = await sendSessionTurn(s, r, { prompt: '', expect: tokens[index] ?? '' }, null, {
+						argv: prepared.args,
+						onEvent: (ev) => {
+							if ((ev.type === 'result' || ev.type === 'error') && ev.terminal) extra.terminals++;
+							if (!streamed && streaming(ev)) {
+								streamed = true;
+								// Round three is stopped through the room's own Stop once its turn streams.
+								if (index === 2 && chatId && room) {
+									const id = chatId;
+									const ops = room.operations;
+									setTimeout(() => void ops.stopAll(id), 0);
+								}
+							}
+							if (ev.type !== 'text' || ev.isReasoning || !ev.text) return;
+							if (extra.terminals > 0) {
+								extra.textAfterTerminal += ev.text.length;
+								return;
+							}
+							if (textChars >= UTILITY_REPLY_MAX_CHARS) return;
+							const piece = ev.text.slice(0, UTILITY_REPLY_MAX_CHARS - textChars);
+							text.push(piece);
+							textChars += piece.length;
+						},
+						// The room's Stop (the runner's stop of this process id) is the only stop.
+						stopWhen: () => stopRequested.has(processId),
+					});
+				} finally {
+					fs.rmSync(artifact.path, { force: true });
+				}
+				if (sent.uncertainWhy) uncertainWhy ??= sent.uncertainWhy;
+				extra.answered = textChars > 0;
+				const turn = sent.run;
+				if (!turn) {
+					d.unsent = 'turn-unsent';
+					d.outcome = 'refused';
+				} else {
+					d.turn = turn.turn.turn;
+					d.nativeId = turn.turn.sessionId;
+					d.exitCode = turn.turn.exitCode;
+					d.stopRequested = turn.stopRequested;
+					d.descendants = [...turn.descendants];
+					d.survivors = await survivorsAfter(turn.descendants, w.graceMs);
+					d.clean =
+						!turn.neverRan &&
+						!turn.stopRequested &&
+						!turn.turn.timedOut &&
+						!turn.turn.spawnError &&
+						turn.turn.exitCode === 0 &&
+						turn.turn.terminal === 'success';
+					d.outcome = turn.stopRequested ? 'interrupted' : d.clean ? 'completed' : 'crashed';
+				}
+				const engine = room?.engine;
+				if (!engine) return;
+				if (turn?.turn.sessionId) await engine.sessionAnnounced(processId, turn.turn.sessionId);
+				await engine.turnEnded(
+					turnEnd.turnEndOf(
+						processId,
+						{
+							answerText: text.join(''),
+							exit: { exitCode: turn?.turn.exitCode ?? null, stdoutText: '', stderrText: '' },
+						},
+						'grok'
+					),
+					launcher ?? undefined
+				);
+			})();
+			jobs.push(job.catch((e) => void problems.push(`participant-turn-threw: ${errorText(e)}`)));
+			return { success: true };
+		};
+
+		launcher = {
+			runner: {
+				start: async (spawnReq) => {
+					if (sessionIds.parseModeratorSessionId(spawnReq.processId) !== null) {
+						// The scripted moderator: no process, its answer handed to the engine as a turn end.
+						moderatorStarts.push(spawnReq.processId);
+						const text = moderatorScript.shift() ?? GROUPCHAT_SYNTHESIS;
+						const processId = spawnReq.processId;
+						setTimeout(() => {
+							void room?.engine
+								.turnEnded({ processId, text, rawOutput: text, exitCode: 0 }, launcher ?? undefined)
+								.catch((e) => void problems.push(`moderator-turn-threw: ${errorText(e)}`));
+						}, 0);
+						return { success: true };
+					}
+					if (spawnReq.providerId !== 'grok') {
+						return {
+							success: false,
+							error: `The qualification runs no ${spawnReq.providerId} turn.`,
+						};
+					}
+					return startParticipant(spawnReq);
+				},
+				stop: (processId) => {
+					stopRequested.add(processId);
+				},
+			},
+			resolveAgent: async (providerId) => {
+				const base =
+					providerId === 'grok'
+						? def
+						: providerId === GROUPCHAT_MODERATOR_PROVIDER
+							? moderatorDef
+							: undefined;
+				if (!base) return null;
+				return {
+					...base,
+					available: true,
+					// The moderator path names no real file: its turns are scripted and never spawned.
+					path: providerId === 'grok' ? w.binaryPath : path.join(made.root, 'no-moderator-binary'),
+					capabilities: getAgentCapabilities(providerId),
+				} as unknown as AgentConfig;
+			},
+		};
+		const activeLauncher = launcher;
+		room = await ownedGroupChat({
+			workspace: w.workspace,
+			dataDir,
+			chatsDir,
+			directory: [
+				{
+					id: WORKFLOW_AGENT_ID,
+					name: GROUPCHAT_PARTICIPANT_NAME,
+					toolType: 'grok',
+					cwd: project,
+					customModel: w.model,
+					customEnvVars: { [envVar]: w.accountRoot! },
+					isBusy: false,
+				},
+			],
+			// The agent-level effort the desktop holds for Grok (the participant record carries no effort).
+			providerConfig: w.effort ? { reasoningEffort: w.effort } : {},
+			launcher: () => activeLauncher,
+			seen,
+		});
+		const chat = await room.operations.createChat({
+			name: 'Qualify E09 room',
+			moderatorProvider: GROUPCHAT_MODERATOR_PROVIDER,
+		});
+		chatId = chat.id;
+		const activeRoom = room;
+		/** One round: the moderator mentions the participant, then closes the round. */
+		const round = async (k: number) => {
+			moderatorScript.push(`@${GROUPCHAT_PARTICIPANT_NAME} ${requests[k]}`, GROUPCHAT_SYNTHESIS);
+			const idleBefore = seen.states.filter((x) => x === 'idle').length;
+			const jobsBefore = jobs.length;
+			await activeRoom.operations.sendUserMessage(chat.id, `Qualification round ${k + 1}.`);
+			await waitUntil(
+				() =>
+					seen.states.filter((x) => x === 'idle').length > idleBefore && jobs.length > jobsBefore,
+				turnMs()
+			);
+			await Promise.all(jobs);
+			moderatorScript.length = 0;
+		};
+		for (let k = 0; k < 3 && !uncertainWhy; k++) await round(k);
+		await Promise.all(jobs);
+		await room.engine.drainUsageUpdates();
+
+		const logged = await logModule.readLog(chat.logPath);
+		const participantLines = logged.filter((m) => m.from === GROUPCHAT_PARTICIPANT_NAME);
+		const [d1, d2, d3] = r.dispatches;
+		r.observed = {
+			moderatorTurns: moderatorStarts.length,
+			states: seen.states,
+			participantLines: participantLines.length,
+			lines: logged.length,
+			dispatches: r.dispatches.map((d) => d.outcome),
+			extras,
+		};
+		const withToken = (t: string) =>
+			participantLines.filter((m) => !!t && m.content.includes(t)).length;
+		assert(
+			'two-rounds',
+			!!d1?.clean &&
+				!!d2?.clean &&
+				r.turns[0]?.reply.tokenSeen === true &&
+				r.turns[1]?.reply.tokenSeen === true,
+			`round1=${d1?.outcome ?? 'none'} round2=${d2?.outcome ?? 'none'} tokens=${String(r.turns[0]?.reply.tokenSeen)}/${String(r.turns[1]?.reply.tokenSeen)}`
+		);
+		const resumedId = d2 ? argValue(d2.planned.args, '--resume') : null;
+		assert(
+			'resumed-same-session',
+			!!d1?.nativeId &&
+				!!d2?.planned.resumed &&
+				resumedId === d1.nativeId &&
+				d2.nativeId === d1.nativeId,
+			`first=${d1?.nativeId ? 'set' : 'none'} resumed=${String(d2?.planned.resumed)} resumeArg=${resumedId === d1?.nativeId ? 'first' : 'other'} second=${d2?.nativeId === d1?.nativeId ? 'same' : 'other'}`
+		);
+		// A stopped turn still reports its end (background-turns), so a cancelled round that
+		// streamed text routes that text once too: one line per turn that answered, never two.
+		const answered = extras.filter((x) => x?.answered).length;
+		assert(
+			'reply-routed-once',
+			participantLines.length === answered &&
+				withToken(tokens[0]) === 1 &&
+				withToken(tokens[1]) === 1,
+			`participantLines=${participantLines.length} answeredTurns=${answered} round1=${withToken(tokens[0])} round2=${withToken(tokens[1])}`
+		);
+		assert(
+			'no-text-after-terminal',
+			extras.length >= 2 &&
+				extras.slice(0, 2).every((x) => x && x.terminals === 1 && x.textAfterTerminal === 0),
+			extras
+				.map((x, i) => `turn${i + 1}:terminals=${x?.terminals}/after=${x?.textAfterTerminal}`)
+				.join(',')
+		);
+		assert(
+			'cancel-reaps-child',
+			!!d3 &&
+				d3.stopRequested &&
+				d3.outcome === 'interrupted' &&
+				d3.survivors.length === 0 &&
+				r.turns[2]?.terminal === 'none' &&
+				seen.states[seen.states.length - 1] === 'idle',
+			`outcome=${d3?.outcome ?? 'none'} stop=${String(d3?.stopRequested)} descendants=${d3?.descendants.length ?? 0} survivors=${d3?.survivors.length ?? 0} final=${seen.states[seen.states.length - 1] ?? 'none'}`
+		);
+		const planned = [d1, d2].filter((d): d is WorkflowDispatch => !!d);
+		const bad = planned.flatMap((d, i) => {
+			const out: string[] = [];
+			if (!sameOwnedAccountDir(w.accountRoot, d.planned.account)) out.push('account');
+			if (d.planned.model !== w.model) out.push('model');
+			if (d.planned.effort !== w.effort) out.push('effort');
+			if (d.planned.promptVia !== 'file') out.push('prompt-via');
+			return out.map((x) => `turn${i + 1}:${x}`);
+		});
+		assert(
+			'planned-launch',
+			planned.length === 2 && bad.length === 0,
+			bad.join(',') || `planned on the owned account, model ${w.model}, effort ${String(w.effort)}`
+		);
+		assert(
+			'moderator-not-spawned',
+			moderatorStarts.length >= 4 &&
+				r.spawned === r.dispatches.filter((d) => d.turn !== null).length,
+			`moderatorTurns=${moderatorStarts.length} spawned=${r.spawned} participantTurns=${r.dispatches.filter((d) => d.turn !== null).length}`
+		);
+	} catch (e) {
+		problems.push(`${spec.id}-engine-threw: ${errorText(e)}`);
+	} finally {
+		// Whatever the room left running is stopped before the reservation settles.
+		if (room && chatId) await room.operations.stopAll(chatId).catch(() => undefined);
+		await Promise.all(jobs);
+		r.settlement = settleLegReservation(
+			w.ledger,
+			reservation,
+			r.paidRequests,
+			r.turns,
+			uncertainWhy,
+			w.now
+		);
+	}
+	return uncertainWhy;
+}
+
+/** Route one orchestration leg to its runner. */
+function runOrchestrationLeg(
+	spec: WorkflowLegSpec,
+	w: WorkflowLegContext,
+	r: WorkflowLegReceipt,
+	problems: string[]
+): Promise<string | null> {
+	if (spec.id === 'cue-prompt-desktop' || spec.id === 'cue-prompt-headless')
+		return runCueLeg(spec, w, r, problems);
+	if (spec.id === 'groupchat-participant') return runGroupChatParticipantLeg(spec, w, r, problems);
+	return runModeratorRefusedLeg(spec, w, r, problems);
 }
 
 export const HOME_SCAN_LIMITS = Object.freeze({ entries: 4096, bytes: 16 * 1024 * 1024 });
