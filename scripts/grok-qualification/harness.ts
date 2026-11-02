@@ -95,6 +95,30 @@
  * skill imported as archived, and each unportable native resource listed as
  * unsupported and warned in the import plan rather than dropped silently.
  *
+ * Session legs (GT1-11-11C1): after an E04/E05 leg's fixture turns passed, its
+ * session legs run on the same reservation against the owned account home and
+ * project only, every turn counted before it is sent and none replayed after
+ * an uncertain effect. E04: `cancellation` stops a streaming turn through the
+ * production `stopProcess` (descendants recorded by the production process-tree
+ * snapshot first) and requires one terminal outcome, no surviving descendant
+ * and no write to the owned home after the close, then resumes the same native
+ * id; `invalid-resume` must be refused with no token, no substituted id and no
+ * new session; `steering-refused` asks `grokSteeringAvailability()` while the
+ * turn streams, holds the refused input (the child has no input channel) and
+ * sends it only after the turn ended as one turn; `compaction-retry` hands a
+ * context-limit refusal to `getContextCompactCommand()`: a command is sent once
+ * and the turn retried once, each drawn as a `compaction` / `retry` call, a
+ * second refusal stops, and with no command (Grok today) the recorded blocker
+ * declines and nothing more is sent. E05: `native-mutation-refused` (fork
+ * through `grokLaunchArgsProblem()`, delete through `GrokSessionStorage`, the
+ * owned home byte-unchanged), `export-payload` (the storage's export view
+ * carries every fixture prompt and reply token in order, digest recorded) and
+ * `exact-continuation` (the session reloaded through `listSessions()` is
+ * resumed under the same id). Turn-bearing legs on the ACP route and every SSH
+ * session leg are not evaluated with explicit `unassigned-*` owners; a live
+ * turn that never hits the context limit leaves `compaction-retry` unevaluated
+ * (`unassigned-native-context-limit-induction`).
+ *
  * Offline inspection (GT1-11-10A): the offline-inspection leg of a case (E02)
  * is admitted and recorded as its own receipt entry, independently of
  * discovery. It needs the pinned binary, disabled auto-update, owned roots, the
@@ -184,7 +208,14 @@ import {
 	GrokAcpRequestError,
 	GrokAcpTransportError,
 } from '../../src/shared/maestro-lib/grok/acp-protocol';
-import { GROK_ACP_ARGS } from '../../src/shared/maestro-lib/grok/route';
+import { GROK_ACP_ARGS, grokSteeringAvailability } from '../../src/shared/maestro-lib/grok/route';
+import { grokLaunchArgsProblem } from '../../src/shared/maestro-lib/launch/agent-args';
+import {
+	getContextCompactCommand,
+	getContextCompactionBlocker,
+} from '../../src/shared/contextCompaction';
+import { snapshotProcessTree } from '../../src/shared/maestro-lib/control/process-tree';
+import { GrokSessionStorage } from '../../src/main/storage/grok-session-storage';
 import { checkCustomPath } from '../../src/shared/maestro-lib/launch/path-prober';
 import {
 	resolveSshLaunchTarget,
@@ -200,6 +231,9 @@ import {
 	fixtureTurnsFor,
 	PAID_FIXTURES,
 	type PaidFixture,
+	type PaidFixtureTurn,
+	type SessionLegId,
+	type SessionLegSpec,
 	type SyntheticResourceSet,
 } from './paid-fixtures';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
@@ -274,6 +308,13 @@ export const HARNESS_CAPABILITIES = {
 	 * No spawn, no network, no credential. Off, both legs stay not-run.
 	 */
 	consumerLegs: true,
+	/**
+	 * The E04/E05 session legs (GT1-11-11C1): cancellation, invalid resume,
+	 * steering refusal, compaction retry, refused native mutation, export payload
+	 * and exact continuation, run after the fixture turns on the same
+	 * reservation. Off, every session leg is recorded not-run.
+	 */
+	sessionLegs: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
 
@@ -1752,7 +1793,13 @@ export function preflightCase(
  */
 export const HARNESS_CEILINGS = {
 	concurrentCases: 1,
-	turnsPerCase: 2,
+	/**
+	 * The largest fixture's turns plus its session legs' bound (E04: 2 fixture
+	 * turns + 8 session-leg turns, GT1-11-11C1). The per-case authorization
+	 * still decides: a run that authorizes fewer turns leaves the session legs
+	 * that do not fit not-run (`session-leg-turns-unavailable`).
+	 */
+	turnsPerCase: 10,
 	caseSeconds: 120,
 	discoverySeconds: 30,
 	/** Wall-clock bound of one offline probe (GT1-11-10A). */
@@ -4315,6 +4362,8 @@ export interface PaidLegReceipt {
 	remote: SshLegObservation | null;
 	/** The synthetic resources a resource leg materialized and what it observed of them; null otherwise. */
 	resources: ResourceLegReceipt | null;
+	/** The session legs of an E04/E05 fixture (GT1-11-11C1), each its own entry; empty otherwise. */
+	sessionLegs: SessionLegReceipt[];
 }
 
 export interface PaidExecutionContext {
@@ -5406,6 +5455,7 @@ async function runPaidLeg(
 		paidRequests: 0,
 		remote: null,
 		resources: null,
+		sessionLegs: [],
 	};
 	const refuse = (id: string, detail: string, owner?: string) => {
 		receipt.reasons.push(paidReason(id, detail, owner));
@@ -5571,8 +5621,14 @@ async function runPaidLeg(
 	let uncertainWhy: string | null = null;
 	let callsDrawn = emptyCalls();
 
-	/** Count the turn and every call it may make before it is sent; false refuses it unsent. */
-	const admitTurn = (n: number): boolean => {
+	/**
+	 * Count the turn and every call it may make before it is sent; false refuses
+	 * it unsent. A session leg's compaction or retry turn (`as`) draws one of its
+	 * model rounds as that kind instead, so it is counted under its own kind
+	 * within the same per-turn bound (and a retry after an uncertain effect is
+	 * refused by the ledger itself).
+	 */
+	const admitTurn = (n: number, as?: 'compaction' | 'retry'): boolean => {
 		if (turnMs() <= 0) {
 			receipt.reasons.push(paidReason('reservation-deadline-passed', `turn ${n}`));
 			return false;
@@ -5593,10 +5649,20 @@ async function runPaidLeg(
 			receipt.reasons.push(paidReason('turn-allowance-exhausted', `turn ${n}`));
 			return false;
 		}
+		const draws = { ...perTurn };
+		if (as) {
+			draws['model-round']--;
+			draws[as]++;
+		}
+		// Checked before anything is recorded: a refused retry leaves the ledger untouched.
+		if (as === 'retry' && reservation.uncertainEffect) {
+			receipt.reasons.push(paidReason('turn-allowance-refused', 'retry after an uncertain effect'));
+			return false;
+		}
 		try {
 			recordUserTurn(ledger, reservation.id, ctx.now());
-			for (const kind of Object.keys(perTurn) as BillableCallKind[])
-				for (let i = 0; i < perTurn[kind]; i++)
+			for (const kind of Object.keys(draws) as BillableCallKind[])
+				for (let i = 0; i < draws[kind]; i++)
 					recordBillableCall(
 						ledger,
 						reservation.id,
@@ -5607,16 +5673,27 @@ async function runPaidLeg(
 			receipt.reasons.push(paidReason('turn-allowance-refused', (e as Error).message));
 			return false;
 		}
-		callsDrawn = perTurn;
+		callsDrawn = draws;
 		return true;
 	};
 
+	const def = getAgentDefinition('grok');
+	// The definition's own effort builder (`--reasoning-effort <level>`), never a hand-rolled flag.
+	const effortOption = def?.configOptions?.find((o) => o.key === 'reasoningEffort');
+	const effortArgs =
+		effort && effortOption?.type === 'text' ? (effortOption.argBuilder?.(effort) ?? []) : [];
+	/** The native argv of one turn, built from the production definition only. */
+	const nativeArgv = (prompt: string, resumeId: string | null) => [
+		...(def?.jsonOutputArgs ?? []),
+		...(def?.readOnlyArgs ?? []),
+		...(def?.modelArgs?.(primary) ?? []),
+		...effortArgs,
+		...(def?.workingDirArgs?.(cwd) ?? []),
+		...(resumeId ? (def?.resumeArgs?.(resumeId) ?? []) : []),
+		...(def?.promptArgs?.(prompt) ?? []),
+	];
+
 	if (c.route === 'native-headless') {
-		const def = getAgentDefinition('grok');
-		// The definition's own effort builder (`--reasoning-effort <level>`), never a hand-rolled flag.
-		const effortOption = def?.configOptions?.find((o) => o.key === 'reasoningEffort');
-		const effortArgs =
-			effort && effortOption?.type === 'text' ? (effortOption.argBuilder?.(effort) ?? []) : [];
 		for (let i = 0; i < legTurns.length; i++) {
 			const n = i + 1;
 			const t = legTurns[i];
@@ -5625,15 +5702,7 @@ async function runPaidLeg(
 				receipt.reasons.push(paidReason('session-id-missing', `turn ${n}`));
 				break;
 			}
-			const argvFor = (prompt: string) => [
-				...(def?.jsonOutputArgs ?? []),
-				...(def?.readOnlyArgs ?? []),
-				...(def?.modelArgs?.(primary) ?? []),
-				...effortArgs,
-				...(def?.workingDirArgs?.(cwd) ?? []),
-				...(resumeId ? (def?.resumeArgs?.(resumeId) ?? []) : []),
-				...(def?.promptArgs?.(prompt) ?? []),
-			];
+			const argvFor = (prompt: string) => nativeArgv(prompt, resumeId ?? null);
 			// Built before the turn is counted: a refused wrap leaves the turn unsent and uncounted.
 			const spec = await launcher(argvFor(t.prompt));
 			if ('refused' in spec) {
@@ -5766,8 +5835,47 @@ async function runPaidLeg(
 		uncertainWhy = run.uncertainWhy;
 	}
 
+	// Session legs (E04/E05): only after every fixture turn ran cleanly, on the same reservation.
+	if (fixture.sessionLegs?.length) {
+		const ready = !receipt.reasons.length && !uncertainWhy;
+		const run = await runSessionLegs({
+			c,
+			fixture,
+			capabilities: ctx.capabilities,
+			blocked: ready ? null : 'fixture-turns-not-passed',
+			cwd,
+			accountRoot: receipt.accountRoot,
+			mainTurns: receipt.turns,
+			nextTurn: (() => {
+				let n = receipt.turns.length;
+				return () => ++n;
+			})(),
+			admit: admitTurn,
+			remainingTurns: () =>
+				Math.min(
+					reservation.turnAllowance - reservation.turnsUsed,
+					ledger.limitTurns - ledger.turns
+				),
+			callsByKind: () => ({ ...reservation.callsByKind }),
+			callsDrawn: () => callsDrawn,
+			launcher,
+			nativeArgv,
+			turnMs,
+			graceMs,
+			lifetime: ctx.lifetime,
+		});
+		receipt.sessionLegs = run.legs;
+		receipt.spawned += run.spawned;
+		receipt.paidRequests += run.sent;
+		if (run.uncertainWhy) {
+			uncertainWhy = run.uncertainWhy;
+			receipt.reasons.push(paidReason(run.uncertainWhy, 'session leg', 'GT1-11-11C1'));
+		}
+	}
+
 	// Settle or release exactly once: an unknown or partial charge stays uncertain, never zero.
 	const sentTurns = receipt.paidRequests;
+	const allTurns = [...receipt.turns, ...receipt.sessionLegs.flatMap((l) => l.turns)];
 	let settled: SpendReservation;
 	if (reservation.turnsUsed === 0 && reservation.callsUsed === 0 && !reservation.uncertainEffect)
 		settled = releaseReservation(ledger, reservation.id, ctx.now());
@@ -5779,12 +5887,12 @@ async function runPaidLeg(
 			ctx.now()
 		);
 	else {
-		const known = receipt.turns.map((t) => t.usage.costUsd).filter((n): n is number => n !== null);
+		const known = allTurns.map((t) => t.usage.costUsd).filter((n): n is number => n !== null);
 		const partialUsd = known.length ? known.reduce((a, b) => a + b, 0) : undefined;
 		const exact =
 			!uncertainWhy &&
-			receipt.turns.length === sentTurns &&
-			receipt.turns.every((t) => t.usage.status === 'exact' && t.usage.costUsd !== null);
+			allTurns.length === sentTurns &&
+			allTurns.every((t) => t.usage.status === 'exact' && t.usage.costUsd !== null);
 		if (exact)
 			settled = settleReservation(
 				ledger,
@@ -5840,7 +5948,9 @@ async function runPaidLeg(
 	receipt.status =
 		receipt.spawned === 0
 			? 'not-run'
-			: receipt.reasons.length || receipt.assertions.some((a) => a.outcome === 'failed')
+			: receipt.reasons.length ||
+				  receipt.assertions.some((a) => a.outcome === 'failed') ||
+				  receipt.sessionLegs.some((l) => l.status === 'failed')
 				? 'failed'
 				: 'passed';
 	return receipt;
@@ -6091,6 +6201,781 @@ async function runAcpPaidTurns(args: {
 	return { turns, reasons, spawned: 1, sent, uncertainWhy };
 }
 
+// ---------------------------------------------------------------------------
+// Session legs (GT1-11-11C1)
+// ---------------------------------------------------------------------------
+
+/** No playbook task owns the ACP route's turn-bearing session legs (session/cancel, session/load, a held steer). */
+export const ACP_SESSION_LEGS_OWNER = 'unassigned-acp-session-legs';
+/** No playbook task owns session legs against a remote home: storage reads and the orphan check are local. */
+export const SSH_SESSION_LEGS_OWNER = 'unassigned-ssh-session-legs';
+/** A live turn cannot be driven into the context limit within a bounded synthetic budget. */
+export const CONTEXT_LIMIT_INDUCTION_OWNER = 'unassigned-native-context-limit-induction';
+/** The production steering decision offering delivery would need a delivery this harness does not have. */
+export const STEERING_DELIVERY_OWNER = 'unassigned-grok-steering-delivery';
+
+export interface SessionLegReceipt {
+	leg: SessionLegId;
+	/** not-run: refused before any turn; not-evaluated: an honest gap with an owner; failed / passed: evaluated. */
+	status: 'not-run' | 'not-evaluated' | 'passed' | 'failed';
+	reasons: AdmissionReason[];
+	turns: PaidTurnResult[];
+	assertion: PaidAssertionOutcome;
+	/** What the leg observed beyond its turns (decisions, digests, ids, pids); never transcript text. */
+	observed: Record<string, unknown>;
+	spawned: number;
+	paidRequests: number;
+}
+
+interface SessionLegContext {
+	c: QualificationCase;
+	fixture: PaidFixture;
+	capabilities: HarnessCapabilities;
+	/** Why no session leg may run (the fixture turns did not pass); null when they may. */
+	blocked: string | null;
+	cwd: string;
+	accountRoot: string | null;
+	/** The fixture turns of the leg, all passed. */
+	mainTurns: PaidTurnResult[];
+	nextTurn: () => number;
+	/** The leg's own pre-send admission: counts the turn and its calls before anything is sent. */
+	admit: (n: number, as?: 'compaction' | 'retry') => boolean;
+	remainingTurns: () => number;
+	callsByKind: () => Record<BillableCallKind, number>;
+	callsDrawn: () => Record<BillableCallKind, number>;
+	launcher: LegLauncher;
+	nativeArgv: (prompt: string, resumeId: string | null) => string[];
+	turnMs: () => number;
+	graceMs: number;
+	lifetime: CaseLifetime;
+}
+
+type ParsedGrokEvent = NonNullable<ReturnType<GrokOutputParser['parseJsonLine']>>;
+
+interface SessionTurnRun {
+	turn: PaidTurnResult;
+	neverRan: boolean;
+	/** Terminal records (success or failure) the stream carried. */
+	terminals: number;
+	/** Every distinct native id the stream named. */
+	sessionIds: string[];
+	/** True once the turn was stopped mid-stream through `stopProcess`. */
+	stopRequested: boolean;
+	/** Descendant pids the production process-tree snapshot saw at the stop. */
+	descendants: number[];
+	/** The canonical Grok error type of a failed turn; null when none was classified. */
+	errorType: string | null;
+}
+
+const sessionReason = (id: string, detail: string, owner = 'GT1-11-11C1') =>
+	paidReason(id, detail, owner);
+
+/** True while a pid names a live process (EPERM: alive but not ours to signal). */
+function pidAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (e) {
+		return (e as NodeJS.ErrnoException).code === 'EPERM';
+	}
+}
+
+/**
+ * One native turn of a session leg: an owned child with a wall-clock bound
+ * whose stream is parsed line by line. With `stopWhen`, the turn is stopped
+ * through the production `stopProcess` (user Stop: from `interrupt`) the first
+ * time a parsed event satisfies it before any terminal record, after the
+ * production process-tree snapshot recorded its descendants. Never throws.
+ */
+function runNativeSessionTurn(a: {
+	n: number;
+	expect: string;
+	recordedArgv: string[];
+	spec: SpawnSpec;
+	timeoutMs: number;
+	graceMs: number;
+	lifetime: CaseLifetime;
+	calls: Record<BillableCallKind, number>;
+	stopWhen?: (ev: ParsedGrokEvent) => boolean;
+	/** Called once, on the first parsed event, while the turn is running. */
+	onRunning?: () => void;
+}): Promise<SessionTurnRun> {
+	return new Promise((resolve) => {
+		const started = Date.now();
+		const out = streamDigest();
+		const err = streamDigest();
+		const parser = new GrokOutputParser();
+		const reply = replyCollector(a.expect);
+		const decoder = new StringDecoder('utf8');
+		const ids = new Set<string>();
+		const seen: Pick<PaidTurnResult, 'sessionId' | 'terminal' | 'usage' | 'model' | 'effort'> = {
+			sessionId: null,
+			terminal: 'none',
+			usage: { costUsd: null, status: 'absent' },
+			model: null,
+			effort: null,
+		};
+		const state = {
+			pending: '',
+			terminals: 0,
+			errorType: null as string | null,
+			stopRequested: false,
+			descendants: [] as number[],
+			running: false,
+			timedOut: false,
+			spawnError: null as string | null,
+			settled: false,
+		};
+		const timers: { turn?: NodeJS.Timeout } = {};
+		let child: ChildProcess;
+		const classify = (line: string) => {
+			if (state.errorType) return;
+			const e = parser.detectErrorFromLine(line);
+			if (e) state.errorType = e.type;
+		};
+		const onLine = (line: string) => {
+			const ev = parser.parseJsonLine(line);
+			classify(line);
+			if (!ev) return;
+			if (!state.running) {
+				state.running = true;
+				a.onRunning?.();
+			}
+			if (ev.sessionId) {
+				ids.add(ev.sessionId);
+				if (!seen.sessionId) seen.sessionId = ev.sessionId;
+			}
+			if (ev.type === 'text' && !ev.isReasoning && ev.text) reply.push(ev.text);
+			if ((ev.type === 'result' || ev.type === 'error') && ev.terminal) {
+				state.terminals++;
+				seen.effort = reportedEffortOf(line);
+				seen.terminal = ev.type === 'result' ? 'success' : 'failure';
+				if (ev.usage) {
+					const u = nativeUsageOf(ev.usage);
+					seen.usage = { costUsd: u.costUsd, status: u.status };
+					seen.model = u.model;
+				}
+			}
+			if (!state.stopRequested && state.terminals === 0 && a.stopWhen?.(ev)) {
+				state.stopRequested = true;
+				state.descendants = child.pid
+					? snapshotProcessTree(child.pid).descendants.map((d) => d.pid)
+					: [];
+				stopProcess({ child }, { from: 'interrupt', graceMs: a.graceMs });
+			}
+		};
+		const finish = (exitCode: number | null, signal: string | null) => {
+			if (state.settled) return;
+			state.settled = true;
+			if (timers.turn) clearTimeout(timers.turn);
+			state.pending += decoder.end();
+			if (state.pending.trim()) onLine(state.pending);
+			const stderrHead = err.head();
+			for (const line of stderrHead.split(/\r?\n/)) classify(line);
+			if (!state.errorType && exitCode !== null && exitCode !== 0 && !state.stopRequested)
+				state.errorType =
+					parser.detectErrorFromExit(exitCode, stderrHead, out.head())?.type ?? null;
+			resolve({
+				turn: {
+					turn: a.n,
+					argv: a.recordedArgv,
+					exitCode,
+					signal,
+					durationMs: Date.now() - started,
+					timedOut: state.timedOut,
+					spawnError: state.spawnError,
+					stdout: out.result(),
+					stderr: err.result(),
+					...seen,
+					reply: reply.result(),
+					callsRecorded: a.calls,
+				},
+				neverRan: state.spawnError !== null && NEVER_RAN_SPAWN_ERRORS.has(state.spawnError),
+				terminals: state.terminals,
+				sessionIds: [...ids],
+				stopRequested: state.stopRequested,
+				descendants: state.descendants,
+				errorType: state.errorType,
+			});
+		};
+		try {
+			child = spawn(a.spec.command, [...a.spec.args], {
+				cwd: a.spec.cwd,
+				env: a.spec.env,
+				shell: false,
+				// No input channel: nothing can be written into a running turn.
+				stdio: ['ignore', 'pipe', 'pipe'],
+				windowsHide: true,
+			});
+		} catch (e) {
+			state.spawnError = (e as NodeJS.ErrnoException).code ?? 'spawn-threw';
+			finish(null, null);
+			return;
+		}
+		a.lifetime.own(child);
+		const stop = () => stopProcess({ child }, { from: 'terminate', graceMs: a.graceMs });
+		timers.turn = setTimeout(
+			() => {
+				state.timedOut = true;
+				stop();
+			},
+			Math.max(1, a.timeoutMs)
+		);
+		child.stdout?.on('data', (d: Buffer) => {
+			if (out.push(d)) stop();
+			state.pending += decoder.write(d);
+			let k: number;
+			while ((k = state.pending.indexOf('\n')) >= 0) {
+				const line = state.pending.slice(0, k);
+				state.pending = state.pending.slice(k + 1);
+				onLine(line);
+			}
+		});
+		child.stderr?.on('data', (d: Buffer) => {
+			if (err.push(d)) stop();
+		});
+		child.on('error', (e: NodeJS.ErrnoException) => {
+			state.spawnError = e.code ?? 'spawn-error';
+			if (child.pid === undefined) finish(null, null);
+		});
+		child.on('close', (code, signal) => finish(code, signal));
+	});
+}
+
+/** Send one session-leg turn: built, then counted, then spawned; never sent when refused. */
+async function sendSessionTurn(
+	s: SessionLegContext,
+	r: SessionLegReceipt,
+	t: PaidFixtureTurn,
+	resumeId: string | null,
+	opts: {
+		as?: 'compaction' | 'retry';
+		stopWhen?: (ev: ParsedGrokEvent) => boolean;
+		onRunning?: () => void;
+	} = {}
+): Promise<{ run: SessionTurnRun | null; uncertainWhy: string | null }> {
+	const n = s.nextTurn();
+	const spec = await s.launcher(s.nativeArgv(t.prompt, resumeId));
+	if ('refused' in spec) {
+		r.reasons.push(sshReason(spec.refused, spec.detail, 'paid-execution'));
+		return { run: null, uncertainWhy: null };
+	}
+	if (!s.admit(n, opts.as)) {
+		r.reasons.push(sessionReason('session-turn-refused', `turn ${n}`));
+		return { run: null, uncertainWhy: null };
+	}
+	const run = await runNativeSessionTurn({
+		n,
+		expect: t.expect,
+		recordedArgv: s.nativeArgv(`<fixture:${s.fixture.family}:${r.leg}:turn-${n}>`, resumeId),
+		spec,
+		timeoutMs: s.turnMs(),
+		graceMs: s.graceMs,
+		lifetime: s.lifetime,
+		calls: s.callsDrawn(),
+		stopWhen: opts.stopWhen,
+		onRunning: opts.onRunning,
+	});
+	r.spawned++;
+	if (!run.neverRan) r.paidRequests++;
+	r.turns.push(run.turn);
+	if (run.neverRan) {
+		r.reasons.push(sessionReason('paid-spawn-failed', run.turn.spawnError ?? ''));
+		return { run, uncertainWhy: null };
+	}
+	const why = run.turn.timedOut
+		? 'turn-timeout'
+		: run.turn.spawnError
+			? 'turn-spawn-error-after-start'
+			: run.turn.stdout.truncated || run.turn.stderr.truncated
+				? 'turn-output-unbounded'
+				: null;
+	if (why) r.reasons.push(sessionReason(why, `turn ${n}`));
+	return { run, uncertainWhy: why };
+}
+
+/** A turn that ran to a clean, successful end with its token. */
+const turnSucceeded = (run: SessionTurnRun | null): boolean =>
+	Boolean(
+		run &&
+		!run.neverRan &&
+		!run.turn.timedOut &&
+		!run.turn.spawnError &&
+		run.turn.exitCode === 0 &&
+		run.turn.terminal === 'success' &&
+		run.turn.reply.tokenSeen
+	);
+
+/** Close a leg: reasons and failures fail it; with neither, it passes with `detail`. */
+function settleSessionLeg(
+	r: SessionLegReceipt,
+	failures: string[],
+	detail: string
+): SessionLegReceipt {
+	const all = [...r.reasons.map((x) => x.id), ...failures];
+	if (all.length && r.spawned === 0 && !failures.length) {
+		r.status = 'not-run';
+		r.assertion = {
+			id: r.leg,
+			outcome: 'not-evaluated',
+			detail: all.join('; '),
+			owner: 'GT1-11-11C1',
+		};
+		return r;
+	}
+	r.status = all.length ? 'failed' : 'passed';
+	r.assertion = {
+		id: r.leg,
+		outcome: all.length ? 'failed' : 'passed',
+		detail: all.join('; ') || detail,
+	};
+	return r;
+}
+
+/** Settle a leg and hand back the uncertainty its last turn left (null when none). */
+function closeLeg(
+	r: SessionLegReceipt,
+	failures: string[],
+	detail: string,
+	uncertainWhy: string | null
+): string | null {
+	settleSessionLeg(r, failures, detail);
+	return uncertainWhy;
+}
+
+/** Owned-tree paths that differ between two `listTree` snapshots. */
+function treeChanges(a: Map<string, string>, b: Map<string, string>): string[] {
+	const out: string[] = [];
+	for (const [p, d] of b) if (a.get(p) !== d) out.push(p);
+	for (const p of a.keys()) if (!b.has(p)) out.push(p);
+	return out.sort();
+}
+
+function safeTree(dir: string): Map<string, string> | null {
+	try {
+		return listTree(dir);
+	} catch {
+		return null;
+	}
+}
+
+/** First event that proves the turn is streaming: a native id or answer text. */
+const streaming = (ev: ParsedGrokEvent) =>
+	Boolean(ev.sessionId) || (ev.type === 'text' && !ev.isReasoning && Boolean(ev.text));
+
+type SessionLegRunner = (
+	spec: SessionLegSpec,
+	s: SessionLegContext,
+	r: SessionLegReceipt,
+	home: string
+) => Promise<string | null>;
+
+const runCancellationLeg: SessionLegRunner = async (spec, s, r, home) => {
+	const [t1, t2] = spec.turns;
+	const failures: string[] = [];
+	const idsBefore = listNativeSessionIds(home);
+	const first = await sendSessionTurn(s, r, t1, null, { stopWhen: streaming });
+	if (!first.run || first.uncertainWhy || first.run.neverRan) {
+		settleSessionLeg(r, failures, '');
+		return first.uncertainWhy;
+	}
+	const run = first.run;
+	// The ladder has finished once the child closed; let any straggler show itself.
+	await delay(s.graceMs);
+	const orphans = run.descendants.filter(pidAlive);
+	const settledTree = safeTree(home);
+	await delay(s.graceMs);
+	const laterTree = safeTree(home);
+	const lateWrites = settledTree && laterTree ? treeChanges(settledTree, laterTree) : null;
+	// A stream stopped before it named its session: the one session the turn added to the owned home.
+	const idsAfter = listNativeSessionIds(home);
+	const added = idsAfter.ids.filter((x) => !idsBefore.ids.includes(x));
+	const id =
+		run.turn.sessionId ??
+		(!idsBefore.problem && !idsAfter.problem && added.length === 1 ? added[0] : null);
+	r.observed = {
+		stopRequested: run.stopRequested,
+		terminalRecords: run.terminals,
+		terminal: run.turn.terminal,
+		signal: run.turn.signal,
+		descendants: run.descendants.length,
+		orphans,
+		lateWrites,
+		sessionIds: run.sessionIds,
+		resumedId: id,
+		idSource: run.turn.sessionId ? 'stream' : id ? 'owned-home' : null,
+	};
+	if (!run.stopRequested) failures.push('not-stopped-mid-stream');
+	if (run.terminals > 1) failures.push(`terminal-outcomes:${run.terminals}`);
+	if (run.stopRequested && run.turn.terminal === 'success' && run.turn.reply.tokenSeen)
+		failures.push('completed-despite-stop');
+	if (orphans.length) failures.push(`orphan-child:${orphans.length}`);
+	if (lateWrites === null) failures.push('home-unreadable');
+	else if (lateWrites.length) failures.push(`write-after-close:${lateWrites.length}`);
+	if (run.sessionIds.length > 1) failures.push('session-ids-diverged');
+	if (!id) failures.push(added.length > 1 ? 'session-id-ambiguous' : 'session-id-missing');
+	if (failures.length) return closeLeg(r, failures, '', null);
+	const restart = await sendSessionTurn(s, r, t2, id);
+	if (restart.run) {
+		if (!turnSucceeded(restart.run)) failures.push('restart-failed');
+		if (restart.run.turn.sessionId !== id || restart.run.sessionIds.some((x) => x !== id))
+			failures.push('restart-not-same-session');
+	}
+	settleSessionLeg(r, failures, `stopped mid-stream, one terminal outcome, resumed ${id}`);
+	return restart.uncertainWhy;
+};
+
+const runInvalidResumeLeg: SessionLegRunner = async (spec, s, r, home) => {
+	const failures: string[] = [];
+	const unknown = randomUUID();
+	const before = listNativeSessionIds(home);
+	const sent = await sendSessionTurn(s, r, spec.turns[0], unknown);
+	const after = listNativeSessionIds(home);
+	if (!sent.run || sent.run.neverRan) return closeLeg(r, failures, '', sent.uncertainWhy);
+	const run = sent.run;
+	const created = after.ids.filter((x) => !before.ids.includes(x));
+	r.observed = {
+		requested: unknown,
+		exitCode: run.turn.exitCode,
+		terminal: run.turn.terminal,
+		errorType: run.errorType,
+		sessionIds: run.sessionIds,
+		created,
+	};
+	if (before.problem || after.problem)
+		failures.push(`home-unreadable:${before.problem ?? after.problem}`);
+	if (run.turn.exitCode === 0 && run.turn.terminal !== 'failure') failures.push('not-refused');
+	if (run.turn.reply.tokenSeen) failures.push('reply-token-produced');
+	if (run.sessionIds.some((x) => x !== unknown)) failures.push('session-substituted');
+	if (created.length) failures.push(`session-created:${created.length}`);
+	settleSessionLeg(r, failures, `resume of ${unknown} refused (${run.errorType ?? 'exit'})`);
+	return sent.uncertainWhy;
+};
+
+const runSteeringLeg: SessionLegRunner = async (spec, s, r) => {
+	const [t1, t2] = spec.turns;
+	const failures: string[] = [];
+	const id = s.mainTurns[0]?.sessionId ?? null;
+	if (!id) return closeLeg(r, ['session-id-missing'], '', null);
+	let midDecision: ReturnType<typeof grokSteeringAvailability> | null = null;
+	const first = await sendSessionTurn(s, r, t1, id, {
+		// The steer arrives while the turn streams; the production decision answers it.
+		onRunning: () => {
+			midDecision = grokSteeringAvailability({ route: 'native-headless', owned: true });
+		},
+	});
+	if (!first.run || first.uncertainWhy || first.run.neverRan)
+		return closeLeg(r, failures, '', first.uncertainWhy);
+	const run = first.run;
+	const decision = midDecision as ReturnType<typeof grokSteeringAvailability> | null;
+	const after = grokSteeringAvailability({ route: 'native-headless', owned: false });
+	r.observed = {
+		midTurn: decision
+			? { ok: decision.ok, reason: decision.reason, missing: decision.missing }
+			: null,
+		afterTurn: { ok: after.ok, reason: after.reason, missing: after.missing },
+		parityRows: decision?.parityRows ?? after.parityRows,
+		heldUntilClose: true,
+		writesToRunningChild: 0,
+		terminalRecords: run.terminals,
+		sessionIds: run.sessionIds,
+	};
+	if (!decision) failures.push('no-running-window');
+	else if ((decision as { ok: boolean }).ok) {
+		r.status = 'not-evaluated';
+		r.assertion = {
+			id: r.leg,
+			outcome: 'not-evaluated',
+			detail: 'the production decision offered steering; this harness has no delivery for it',
+			owner: STEERING_DELIVERY_OWNER,
+		};
+		return null;
+	}
+	if (run.terminals > 1 || run.sessionIds.length > 1) failures.push('second-turn-mid-stream');
+	else if (!turnSucceeded(run)) failures.push('running-turn-failed');
+	if (!after.missing.includes('steering-not-owned')) failures.push('finished-turn-still-owned');
+	if (failures.length) return closeLeg(r, failures, '', null);
+	// The held input goes out only now, as the next turn of the same session.
+	const held = await sendSessionTurn(s, r, t2, id);
+	if (held.run) {
+		if (!turnSucceeded(held.run)) failures.push('held-turn-failed');
+		if (held.run.turn.sessionId !== id) failures.push('held-turn-not-same-session');
+	}
+	settleSessionLeg(
+		r,
+		failures,
+		`steer refused (${decision?.missing.join(',') ?? ''}), held, sent after the turn on ${id}`
+	);
+	return held.uncertainWhy;
+};
+
+const runCompactionLeg: SessionLegRunner = async (spec, s, r) => {
+	const t = spec.turns[0];
+	const failures: string[] = [];
+	const id = s.mainTurns[0]?.sessionId ?? null;
+	if (!id) return closeLeg(r, ['session-id-missing'], '', null);
+	const first = await sendSessionTurn(s, r, t, id);
+	if (!first.run || first.uncertainWhy || first.run.neverRan)
+		return closeLeg(r, failures, '', first.uncertainWhy);
+	const command = getContextCompactCommand('grok') ?? null;
+	const blocker = getContextCompactionBlocker('grok');
+	const observed: Record<string, unknown> = {
+		firstAttempt: { errorType: first.run.errorType, terminal: first.run.turn.terminal },
+		command: command ? { sha256: sha256Of(command) } : null,
+		blocker: blocker ? { feature: blocker.feature, parityRows: [...blocker.parityRows] } : null,
+		compactionSends: 0,
+		retrySends: 0,
+		callsByKind: [s.callsByKind()],
+	};
+	r.observed = observed;
+	if (first.run.errorType !== 'token_exhaustion') {
+		if (turnSucceeded(first.run)) {
+			r.status = 'not-evaluated';
+			r.assertion = {
+				id: r.leg,
+				outcome: 'not-evaluated',
+				detail: 'no context-limit refusal was observed; the compaction path was not reached',
+				owner: CONTEXT_LIMIT_INDUCTION_OWNER,
+			};
+			return null;
+		}
+		return closeLeg(r, [`first-attempt-failed:${first.run.errorType ?? 'unclassified'}`], '', null);
+	}
+	if (!command) {
+		// The production rule declines: nothing is compacted and nothing is resent.
+		return closeLeg(
+			r,
+			blocker ? [] : ['compaction-declined-without-blocker'],
+			`refusal surfaced; compaction declined by ${blocker?.feature ?? 'no command'}, no retry`,
+			null
+		);
+	}
+	const draws = (before: Record<BillableCallKind, number>, kind: BillableCallKind) =>
+		s.callsByKind()[kind] - before[kind];
+	const k0 = s.callsByKind();
+	const compaction = await sendSessionTurn(s, r, { prompt: command, expect: '' }, id, {
+		as: 'compaction',
+	});
+	observed.compactionSends = compaction.run ? 1 : 0;
+	(observed.callsByKind as unknown[]).push(s.callsByKind());
+	if (!compaction.run || compaction.uncertainWhy)
+		return closeLeg(r, failures, '', compaction.uncertainWhy);
+	if (draws(k0, 'compaction') !== 1) failures.push('compaction-uncounted');
+	if (compaction.run.turn.exitCode !== 0 || compaction.run.turn.terminal !== 'success')
+		failures.push('compaction-failed');
+	if (compaction.run.turn.sessionId && compaction.run.turn.sessionId !== id)
+		failures.push('compaction-not-same-session');
+	if (failures.length) return closeLeg(r, failures, '', null);
+	const k1 = s.callsByKind();
+	const retry = await sendSessionTurn(s, r, t, id, { as: 'retry' });
+	observed.retrySends = retry.run ? 1 : 0;
+	(observed.callsByKind as unknown[]).push(s.callsByKind());
+	if (!retry.run || retry.uncertainWhy) return closeLeg(r, failures, '', retry.uncertainWhy);
+	if (draws(k1, 'retry') !== 1) failures.push('retry-uncounted');
+	const refusedAgain = retry.run.errorType === 'token_exhaustion';
+	if (!refusedAgain && !turnSucceeded(retry.run)) failures.push('retry-failed');
+	if (retry.run.turn.sessionId && retry.run.turn.sessionId !== id)
+		failures.push('retry-not-same-session');
+	settleSessionLeg(
+		r,
+		failures,
+		refusedAgain
+			? 'compacted once, retried once, second refusal stopped'
+			: 'compacted once, retried once'
+	);
+	return null;
+};
+
+const runMutationRefusedLeg: SessionLegRunner = async (_spec, s, r, home) => {
+	const failures: string[] = [];
+	const id = s.mainTurns[0]?.sessionId ?? null;
+	if (!id) return closeLeg(r, ['session-id-missing'], '', null);
+	const listed = listNativeSessionIds(home);
+	const before = safeTree(home);
+	const fork = grokLaunchArgsProblem(['--fork-session', id], undefined, s.cwd) ?? null;
+	let deletion: { refused: boolean; detail: string };
+	try {
+		const result = await new GrokSessionStorage(home).deleteMessagePair(s.cwd, id, 'grok-line-1');
+		deletion = { refused: !result.success, detail: result.error ?? '' };
+	} catch (e) {
+		deletion = { refused: true, detail: `threw: ${(e as Error).message}` };
+	}
+	const after = safeTree(home);
+	const changed = before && after ? treeChanges(before, after) : null;
+	r.observed = {
+		sessionId: id,
+		fork: { refused: fork !== null, detail: fork ?? '' },
+		delete: deletion,
+		titleChange: { evaluated: false, owner: 'unassigned-grok-title-ipc-leg' },
+		files: before?.size ?? null,
+		historySha256: before ? sha256Of(canonicalJson(Object.fromEntries(before))) : null,
+		changed,
+	};
+	if (listed.problem) failures.push(`home-unreadable:${listed.problem}`);
+	else if (!listed.ids.includes(id)) failures.push('session-not-in-home');
+	if (!fork) failures.push('fork-not-refused');
+	if (!deletion.refused) failures.push('delete-not-refused');
+	if (changed === null) failures.push('home-unreadable');
+	else if (changed.length) failures.push(`history-changed:${changed.length}`);
+	return closeLeg(
+		r,
+		failures,
+		`fork and delete refused, ${before?.size ?? 0} owned files unchanged`,
+		null
+	);
+};
+
+const runExportPayloadLeg: SessionLegRunner = async (_spec, s, r, home) => {
+	const failures: string[] = [];
+	const id = s.mainTurns[0]?.sessionId ?? null;
+	if (!id) return closeLeg(r, ['session-id-missing'], '', null);
+	let messages: Array<{ role: string; content: string }> = [];
+	let source: string | null = null;
+	let hasMore = false;
+	try {
+		const result = await new GrokSessionStorage(home).readSessionMessages(s.cwd, id, {
+			includeNativeRecords: true,
+			limit: 1000,
+		});
+		messages = result.messages.map((m) => ({ role: m.role ?? 'unknown', content: m.content }));
+		source = result.source?.status ?? null;
+		hasMore = result.hasMore;
+	} catch (e) {
+		failures.push(`export-threw:${(e as Error).name}`);
+	}
+	const digest = sha256Of(canonicalJson(messages));
+	const turns = fixtureTurnsFor(s.fixture, 'A');
+	const found: Array<{ turn: number; prompt: number; reply: number }> = [];
+	let at = 0;
+	turns.forEach((t, i) => {
+		const prompt = messages.findIndex(
+			(m, k) => k >= at && m.role === 'user' && m.content.trim() === t.prompt.trim()
+		);
+		const reply =
+			prompt < 0
+				? -1
+				: messages.findIndex(
+						(m, k) => k > prompt && m.role !== 'user' && m.content.includes(t.expect)
+					);
+		if (prompt < 0) failures.push(`turn-${i + 1}-prompt-absent`);
+		else if (reply < 0) failures.push(`turn-${i + 1}-reply-absent`);
+		else {
+			found.push({ turn: i + 1, prompt, reply });
+			at = reply + 1;
+		}
+	});
+	r.observed = { sessionId: id, sha256: digest, messages: messages.length, source, hasMore, found };
+	if (source !== 'available' && !failures.length)
+		failures.push(`export-source:${source ?? 'none'}`);
+	if (hasMore) failures.push('export-truncated');
+	return closeLeg(
+		r,
+		failures,
+		`export ${digest.slice(0, 12)} carries ${found.length} turns in order`,
+		null
+	);
+};
+
+const runContinuationLeg: SessionLegRunner = async (spec, s, r, home) => {
+	const failures: string[] = [];
+	const id = s.mainTurns[0]?.sessionId ?? null;
+	if (!id) return closeLeg(r, ['session-id-missing'], '', null);
+	let reloaded: string | null = null;
+	try {
+		const listed = await new GrokSessionStorage(home).listSessions(s.cwd);
+		reloaded = listed.find((x) => x.sessionId === id)?.sessionId ?? null;
+	} catch (e) {
+		failures.push(`reload-threw:${(e as Error).name}`);
+	}
+	if (!reloaded) {
+		if (!failures.length) failures.push('session-not-reloaded');
+		return closeLeg(r, failures, '', null);
+	}
+	const before = listNativeSessionIds(home);
+	const sent = await sendSessionTurn(s, r, spec.turns[0], reloaded);
+	const after = listNativeSessionIds(home);
+	if (!sent.run) return closeLeg(r, failures, '', sent.uncertainWhy);
+	const created = after.ids.filter((x) => !before.ids.includes(x));
+	r.observed = { reloaded, sessionIds: sent.run.sessionIds, created };
+	if (!turnSucceeded(sent.run)) failures.push('continuation-failed');
+	if (sent.run.turn.sessionId !== reloaded || sent.run.sessionIds.some((x) => x !== reloaded))
+		failures.push('new-native-id');
+	if (created.length) failures.push(`session-created:${created.length}`);
+	settleSessionLeg(r, failures, `reloaded ${reloaded} from disk and continued it`);
+	return sent.uncertainWhy;
+};
+
+const SESSION_LEG_RUNNERS: Record<SessionLegId, SessionLegRunner> = {
+	cancellation: runCancellationLeg,
+	'invalid-resume': runInvalidResumeLeg,
+	'steering-refused': runSteeringLeg,
+	'compaction-retry': runCompactionLeg,
+	'native-mutation-refused': runMutationRefusedLeg,
+	'export-payload': runExportPayloadLeg,
+	'exact-continuation': runContinuationLeg,
+};
+
+/**
+ * The session legs of an E04/E05 leg, in fixture order, after its fixture turns
+ * passed. Each runs against the leg's owned account home and project only; an
+ * uncertain effect stops every later leg (nothing is replayed).
+ */
+async function runSessionLegs(s: SessionLegContext): Promise<{
+	legs: SessionLegReceipt[];
+	spawned: number;
+	sent: number;
+	uncertainWhy: string | null;
+}> {
+	const legs: SessionLegReceipt[] = [];
+	let spawned = 0;
+	let sent = 0;
+	let uncertainWhy: string | null = null;
+	for (const spec of s.fixture.sessionLegs ?? []) {
+		const r: SessionLegReceipt = {
+			leg: spec.id,
+			status: 'not-run',
+			reasons: [],
+			turns: [],
+			assertion: { id: spec.id, outcome: 'not-evaluated', detail: '', owner: 'GT1-11-11C1' },
+			observed: {},
+			spawned: 0,
+			paidRequests: 0,
+		};
+		const gap = (detail: string, owner: string) => {
+			r.status = 'not-evaluated';
+			r.assertion = { id: spec.id, outcome: 'not-evaluated', detail, owner };
+		};
+		if (!s.capabilities.sessionLegs)
+			r.reasons.push(sessionReason('session-legs-unimplemented', spec.id));
+		else if (s.blocked) r.reasons.push(sessionReason(s.blocked, spec.id));
+		else if (uncertainWhy) r.reasons.push(sessionReason('uncertain-prior-effect', uncertainWhy));
+		else if (s.c.target === 'ssh')
+			gap('session legs read and watch a local owned home only', SSH_SESSION_LEGS_OWNER);
+		else if (spec.sends && s.c.route !== 'native-headless')
+			gap('the ACP route has no turn-bearing session leg', ACP_SESSION_LEGS_OWNER);
+		else if (!s.accountRoot) r.reasons.push(sessionReason('account-root-unknown', spec.id));
+		else if (spec.maxTurns > s.remainingTurns())
+			r.reasons.push(
+				sessionReason('session-leg-turns-unavailable', `${spec.maxTurns} > ${s.remainingTurns()}`)
+			);
+		if (r.reasons.length) {
+			r.assertion.detail = r.reasons.map((x) => x.id).join('; ');
+			legs.push(r);
+			continue;
+		}
+		if (r.status === 'not-evaluated') {
+			legs.push(r);
+			continue;
+		}
+		const why = await SESSION_LEG_RUNNERS[spec.id](spec, s, r, s.accountRoot!);
+		spawned += r.spawned;
+		sent += r.paidRequests;
+		if (why) uncertainWhy = why;
+		legs.push(r);
+	}
+	return { legs, spawned, sent, uncertainWhy };
+}
+
 /** Bounds of one owned-home inspection; past either, the home cannot be vouched for and the verdict fails. */
 export const HOME_SCAN_LIMITS = Object.freeze({ entries: 4096, bytes: 16 * 1024 * 1024 });
 
@@ -6301,6 +7186,7 @@ export async function executePaidCase(
 		paidRequests: 0,
 		remote: null,
 		resources: null,
+		sessionLegs: [],
 	});
 	if (reasons.length || !fixture) return accounts.map(refused);
 	// What each owned home listed before the legs: the colliding-ID verdict judges only what they added.

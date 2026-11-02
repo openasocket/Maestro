@@ -18,6 +18,12 @@
  * (`SYNTHETIC_RESOURCES`) and materialized by the harness inside the case's
  * owned roots only; their five assertions are evaluated from what the leg
  * observed (catalog, reply, the stand-in's own logs, the reaped children).
+ *
+ * E04 and E05 (GT1-11-11C1) also name session legs (`SessionLegSpec`): bounded
+ * synthetic turns for cancellation, invalid resume, steering refusal and
+ * compaction retry (E04), and the turnless refused-mutation and export legs
+ * plus one continuation turn (E05). The harness runs them after the fixture
+ * turns on the same reservation, each within its own `maxTurns`.
  */
 
 export const PAID_FIXTURE_SCHEMA = 'grok-paid-fixture/v1';
@@ -142,8 +148,120 @@ export interface PaidFixture {
 	assertions: PaidAssertionId[];
 	/** The synthetic resources the harness must materialize before the leg (resource fixtures only). */
 	resources?: SyntheticResourceSet;
+	/** Session legs the harness runs after the fixture turns, on the same reservation (E04, E05). */
+	sessionLegs?: SessionLegSpec[];
 	unevaluated: Array<{ id: string; detail: string; owner: string }>;
 }
+
+/**
+ * Session legs (GT1-11-11C1). Each runs after a family's fixture turns passed,
+ * against the leg's owned account home and project only, on the same
+ * reservation; every turn it sends is counted before it is sent.
+ *
+ * - `cancellation`: turn 1 is stopped mid-stream through the production
+ *   `stopProcess`; exactly one terminal outcome, no surviving descendant and no
+ *   write to the owned home after the close; turn 2 resumes the same native id
+ *   and replies with its token.
+ * - `invalid-resume`: resuming a native id nobody created is an honest refusal
+ *   or error, with no reply token, no other id substituted and no new session
+ *   in the owned home.
+ * - `steering-refused`: a steering input during a running turn goes through the
+ *   production Grok steering decision; refused, it is held by the caller, the
+ *   running turn ends as exactly one turn, and only then is the held input sent
+ *   as the next resumed turn.
+ * - `compaction-retry`: a context-limit refusal is handed to the production
+ *   compaction rule: a provider command is sent once and the turn retried once
+ *   (each drawn as a `compaction` / `retry` call first), a second refusal stops;
+ *   a provider with no command declines with its recorded blocker and sends
+ *   nothing more.
+ * - `native-mutation-refused`: fork, delete and title change of the owned
+ *   session through the production consumers are refused, owned home unchanged.
+ * - `export-payload`: the production export view of the owned session carries
+ *   every fixture turn's exact prompt and its reply token, in order.
+ * - `exact-continuation`: the session reloaded from disk through the production
+ *   storage is resumed, and the turn continues that same native id.
+ */
+export type SessionLegId =
+	| 'cancellation'
+	| 'invalid-resume'
+	| 'steering-refused'
+	| 'compaction-retry'
+	| 'native-mutation-refused'
+	| 'export-payload'
+	| 'exact-continuation';
+
+export interface SessionLegSpec {
+	id: SessionLegId;
+	/** The prompts the leg sends in order (a retry resends the first; a compaction sends the provider command). */
+	turns: PaidFixtureTurn[];
+	/** The most user turns the leg may send; the leg refuses unsent when the reservation cannot cover them. */
+	maxTurns: number;
+	/** True when the leg sends turns (and so needs a local native-headless launch). */
+	sends: boolean;
+}
+
+/** A turn long enough to be stopped mid-stream before its token. */
+const longTurn = (label: string): PaidFixtureTurn => {
+	const token = `QUALIFY-${label}-OK`;
+	return {
+		prompt:
+			'Do not use any tool. Write the numbers from 1 to 400, one per line, ' +
+			`and only after the last number reply with this token: ${token}`,
+		expect: token,
+	};
+};
+
+const sessionTurn = (label: string): PaidFixtureTurn => {
+	const token = `QUALIFY-${label}-OK`;
+	return {
+		prompt: `Do not use any tool. Reply with exactly this token and nothing else: ${token}`,
+		expect: token,
+	};
+};
+
+const CANCELLATION_LEG: SessionLegSpec = {
+	id: 'cancellation',
+	turns: [longTurn('E04-CANCEL-T1'), sessionTurn('E04-CANCEL-T2')],
+	maxTurns: 2,
+	sends: true,
+};
+const INVALID_RESUME_LEG: SessionLegSpec = {
+	id: 'invalid-resume',
+	turns: [sessionTurn('E04-INVALID-T1')],
+	maxTurns: 1,
+	sends: true,
+};
+const STEERING_LEG: SessionLegSpec = {
+	id: 'steering-refused',
+	turns: [longTurn('E04-STEER-T1'), sessionTurn('E04-STEER-T2')],
+	maxTurns: 2,
+	sends: true,
+};
+/** The first attempt, then at most the compaction command and one retry. */
+const COMPACTION_LEG: SessionLegSpec = {
+	id: 'compaction-retry',
+	turns: [sessionTurn('E04-COMPACT-T1')],
+	maxTurns: 3,
+	sends: true,
+};
+const MUTATION_REFUSED_LEG: SessionLegSpec = {
+	id: 'native-mutation-refused',
+	turns: [],
+	maxTurns: 0,
+	sends: false,
+};
+const EXPORT_PAYLOAD_LEG: SessionLegSpec = {
+	id: 'export-payload',
+	turns: [],
+	maxTurns: 0,
+	sends: false,
+};
+const CONTINUATION_LEG: SessionLegSpec = {
+	id: 'exact-continuation',
+	turns: [sessionTurn('E05-RELOAD-T1')],
+	maxTurns: 1,
+	sends: true,
+};
 
 const turn = (family: string, n: number, extra = ''): PaidFixtureTurn => {
 	const token = `QUALIFY-${family}-T${n}-OK`;
@@ -202,6 +320,7 @@ const fixture = (
 		assertions?: PaidAssertionId[];
 		accountTurns?: PaidFixture['accountTurns'];
 		resources?: SyntheticResourceSet;
+		sessionLegs?: SessionLegSpec[];
 	} = {}
 ): PaidFixture => ({
 	schema: PAID_FIXTURE_SCHEMA,
@@ -210,6 +329,7 @@ const fixture = (
 	...(extra.accountTurns ? { accountTurns: extra.accountTurns } : {}),
 	assertions: [...(turns.length > 1 ? RESUMED : BASE), ...(extra.assertions ?? [])],
 	...(extra.resources ? { resources: extra.resources } : {}),
+	...(extra.sessionLegs ? { sessionLegs: extra.sessionLegs } : {}),
 	unevaluated,
 });
 
@@ -239,18 +359,21 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 			},
 		]
 	),
-	E04: fixture(
-		'E04',
-		[turn('E04', 1), turn('E04', 2)],
-		[
-			{ id: 'cancellation', detail: 'mid-turn cancel and restart', owner: 'GT1-11-11C' },
-			{ id: 'invalid-resume', detail: 'resume of an unknown session', owner: 'GT1-11-11C' },
-		]
-	),
+	E04: fixture('E04', [turn('E04', 1), turn('E04', 2)], [], {
+		sessionLegs: [CANCELLATION_LEG, INVALID_RESUME_LEG, STEERING_LEG, COMPACTION_LEG],
+	}),
 	E05: fixture(
 		'E05',
 		[turn('E05', 1), turn('E05', 2)],
-		[{ id: 'reload-fork-export', detail: 'native reload, fork, export', owner: 'GT1-11-11C' }]
+		[
+			{
+				id: 'native-title-change',
+				detail:
+					'the native title-change refusal lives in the Electron agentSessions IPC handler, which a script cannot register',
+				owner: 'unassigned-grok-title-ipc-leg',
+			},
+		],
+		{ sessionLegs: [MUTATION_REFUSED_LEG, EXPORT_PAYLOAD_LEG, CONTINUATION_LEG] }
 	),
 	E06: fixture(
 		'E06',
