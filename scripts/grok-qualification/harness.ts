@@ -11659,6 +11659,12 @@ export interface AccountingUsageRecord {
 	childFrames: number;
 	/** The provider's own prompt usage of an ACP turn (output, cache read), for the once-only check; null otherwise. */
 	promptUsage: { output: number | null; cacheRead: number | null } | null;
+	/**
+	 * Cache buckets a native terminal the production parser marked incomplete
+	 * never carried (the parser fills them with 0; the record keeps them null).
+	 * Present only when such a bucket exists (A11-F27).
+	 */
+	uncarriedBuckets?: Array<'cacheRead' | 'cacheWrite'>;
 }
 
 /** A fault a fixture process induced; never a provider observation. */
@@ -11749,6 +11755,31 @@ function costOf(final: ParsedUsage | undefined): AccountingUsageRecord['cost'] {
 	return { status: 'unknown', costUsd: null };
 }
 
+/**
+ * The cache buckets a native terminal never carried, read from its raw
+ * record: only when the production parser marked the usage incomplete
+ * (`completeness: 'partial'`), since it then fills an unreported count with 0.
+ * A complete record and every ACP record carry none (A11-F27).
+ */
+function uncarriedNativeCacheBuckets(
+	route: Route,
+	final: ParsedUsage | undefined,
+	raw: unknown
+): Array<'cacheRead' | 'cacheWrite'> {
+	if (route !== 'native-headless' || !final) return [];
+	if (final.accounting?.completeness !== 'partial') return [];
+	const msg = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+	const row =
+		msg.usage && typeof msg.usage === 'object' && !Array.isArray(msg.usage)
+			? (msg.usage as Record<string, unknown>)
+			: {};
+	const carried = (v: unknown) => typeof v === 'number' && Number.isSafeInteger(v) && v >= 0;
+	const out: Array<'cacheRead' | 'cacheWrite'> = [];
+	if (!carried(row.cache_read_input_tokens)) out.push('cacheRead');
+	if (!carried(row.cache_creation_input_tokens)) out.push('cacheWrite');
+	return out;
+}
+
 /** One turn's record from its terminal usage and what the tracker saw of the stream. */
 function accountingUsageRecord(a: {
 	turn: number;
@@ -11758,11 +11789,14 @@ function accountingUsageRecord(a: {
 	acknowledged: string | null;
 	childFrames: number;
 	promptUsage: AccountingUsageRecord['promptUsage'];
+	/** The raw native terminal record the final usage was parsed from; absent on ACP. */
+	finalRaw?: unknown;
 }): AccountingUsageRecord {
 	const total = a.final ? parsedUsageToStats(a.final) : undefined;
 	const model = a.final?.model ?? a.acknowledged;
 	const provenance = describeUsageProvenance(a.tracker.summary(), total, model);
 	const counts = provenance.counts;
+	const uncarried = uncarriedNativeCacheBuckets(a.route, a.final, a.finalRaw);
 	return {
 		turn: a.turn,
 		route: a.route,
@@ -11771,8 +11805,10 @@ function accountingUsageRecord(a: {
 		buckets: {
 			input: counts?.inputTokens ?? null,
 			output: counts?.outputTokens ?? null,
-			cacheRead: counts?.cacheReadInputTokens ?? null,
-			cacheWrite: counts?.cacheCreationInputTokens ?? null,
+			cacheRead: uncarried.includes('cacheRead') ? null : (counts?.cacheReadInputTokens ?? null),
+			cacheWrite: uncarried.includes('cacheWrite')
+				? null
+				: (counts?.cacheCreationInputTokens ?? null),
 			reasoning: counts?.reasoningTokens ?? null,
 		},
 		cost: costOf(a.final),
@@ -11785,6 +11821,7 @@ function accountingUsageRecord(a: {
 		})),
 		childFrames: a.childFrames,
 		promptUsage: a.promptUsage,
+		...(uncarried.length ? { uncarriedBuckets: uncarried } : {}),
 	};
 }
 
@@ -12009,6 +12046,7 @@ async function sendAccountingNativeTurn(
 }> {
 	const tracker = new UsageProvenanceTracker({ reporting: 'turn-total' });
 	let final: ParsedUsage | undefined;
+	let finalRaw: unknown;
 	const receipt: TurnBearingReceipt = {
 		leg: `accounting:${r.leg}`,
 		reasons: r.reasons,
@@ -12022,7 +12060,10 @@ async function sendAccountingNativeTurn(
 		onEvent: (ev) => {
 			if (!ev.usage) return;
 			tracker.observe(ev.usage as UsageReport);
-			if ((ev.type === 'result' || ev.type === 'error') && ev.terminal) final = ev.usage;
+			if ((ev.type === 'result' || ev.type === 'error') && ev.terminal) {
+				final = ev.usage;
+				finalRaw = ev.raw;
+			}
 		},
 	});
 	r.spawned += receipt.spawned;
@@ -12036,6 +12077,7 @@ async function sendAccountingNativeTurn(
 		acknowledged: null,
 		childFrames: 0,
 		promptUsage: null,
+		finalRaw,
 	});
 	// The turn's charge is the record's: the same status, never a figure for an unknown cost.
 	sent.run.turn.usage = turnUsageOf(rec);
@@ -12068,7 +12110,10 @@ function assertUsageRecord(
 	assert(
 		'cache-buckets',
 		rec.buckets.cacheRead !== null && rec.buckets.cacheWrite !== null,
-		`cacheRead=${rec.buckets.cacheRead ?? 'unreported'}; cacheWrite=${rec.buckets.cacheWrite ?? 'unreported'}`
+		`cacheRead=${rec.buckets.cacheRead ?? 'unreported'}; cacheWrite=${rec.buckets.cacheWrite ?? 'unreported'}` +
+			(rec.uncarriedBuckets
+				? `; native usage incomplete, never carried: ${rec.uncarriedBuckets.join(', ')}`
+				: '')
 	);
 	assert('model-acknowledged', rec.model === model, `${rec.model ?? 'unreported'} vs ${model}`);
 	const p = rec.provenance;
