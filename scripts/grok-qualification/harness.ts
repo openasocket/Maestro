@@ -286,6 +286,7 @@ import { redactSecrets } from '../../src/shared/redactSecrets';
 import { containsCredentialToken } from '../../src/shared/agent-run/redact';
 import { isValidSecretName, lookupSecret } from '../../src/shared/serverSecrets';
 import { getAgentDefinition } from '../../src/shared/maestro-lib/providers/definitions';
+import { buildShellCommand } from '../../src/shared/maestro-lib/launch/shell-escape';
 import { GrokOutputParser } from '../../src/shared/maestro-lib/parsers/grok-output-parser';
 import {
 	GrokAcpClient,
@@ -357,6 +358,7 @@ import {
 	type PaidFixtureTurn,
 	POLICY_PLACEHOLDERS,
 	type PolicyLegId,
+	type PolicyLegKind,
 	type PolicyLegSpec,
 	type SessionLegId,
 	type SessionLegSpec,
@@ -540,7 +542,7 @@ export const HARNESS_CAPABILITIES = {
 	 * no network. No turn, no reservation. Off, each is not-run.
 	 */
 	accountingConsumers: true,
-	/** The E10 negative policy legs (GT1-11-12A), each on a policy reservation of its own. Off, each is not-run. */
+	/** The E10 negative policy legs (GT1-11-12A, tool-surface/approval/refusal GT1-11-12B), each on a policy reservation of its own (a refusal holds none). Off, each is not-run. */
 	policyLegs: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
@@ -5101,23 +5103,9 @@ export function materializeSyntheticResources(
 			return { refused: 'resources-config-symlink', detail: configPath };
 		fs.unlinkSync(configPath);
 	}
-	// The account's own config: merged only when it holds no resource of its own.
-	const accountConfig = path.join(accountRoot, 'config.toml');
-	let base: Record<string, unknown> = {};
-	if (fs.existsSync(accountConfig)) {
-		if (fs.lstatSync(accountConfig).isSymbolicLink())
-			return { refused: 'resources-account-config-symlink', detail: accountConfig };
-		try {
-			base = parseToml(fs.readFileSync(accountConfig, 'utf8')) as Record<string, unknown>;
-		} catch {
-			return { refused: 'resources-account-config-unreadable', detail: accountConfig };
-		}
-		const own = ['skills', 'mcp_servers', 'plugins', 'hooks', 'disabled_mcp_servers'].filter(
-			(k) => k in base
-		);
-		if (own.length)
-			return { refused: 'resources-account-config-not-synthetic', detail: own.join(',') };
-	}
+	const baseRead = readAccountBaseConfig(accountRoot);
+	if ('refused' in baseRead) return baseRead;
+	const base = baseRead.base;
 
 	const nonce = randomUUID();
 	const skills = path.join(root, 'skills');
@@ -5245,6 +5233,32 @@ export function materializeSyntheticResources(
 			entries,
 		},
 	};
+}
+
+/**
+ * The owned account's own `config.toml`, merged into an overlay only when it
+ * declares no resource of its own (an unknown resource there would be an effect
+ * the case did not select). Never followed through a link.
+ */
+function readAccountBaseConfig(
+	accountRoot: string
+): { base: Record<string, unknown> } | { refused: string; detail: string } {
+	const accountConfig = path.join(accountRoot, 'config.toml');
+	if (!fs.existsSync(accountConfig)) return { base: {} };
+	if (fs.lstatSync(accountConfig).isSymbolicLink())
+		return { refused: 'resources-account-config-symlink', detail: accountConfig };
+	let base: Record<string, unknown>;
+	try {
+		base = parseToml(fs.readFileSync(accountConfig, 'utf8')) as Record<string, unknown>;
+	} catch {
+		return { refused: 'resources-account-config-unreadable', detail: accountConfig };
+	}
+	const own = ['skills', 'mcp_servers', 'plugins', 'hooks', 'disabled_mcp_servers'].filter(
+		(k) => k in base
+	);
+	if (own.length)
+		return { refused: 'resources-account-config-not-synthetic', detail: own.join(',') };
+	return { base };
 }
 
 /** Remove what a resource leg wrote into the owned account home; the rest stays as the leg's evidence. */
@@ -12734,13 +12748,28 @@ async function runAccountingLegs(w: AccountingLegContext): Promise<{
 }
 
 // ---------------------------------------------------------------------------
-// Negative policy legs (GT1-11-12A)
+// Negative policy legs (GT1-11-12A; tool-surface, approval and refusal legs GT1-11-12B)
 
 export const POLICY_LEGS_OWNER = 'GT1-11-12A';
 /** The sentinels, symlink, listener and tree checks are local; no task owns an SSH policy leg. */
 export const SSH_POLICY_LEGS_OWNER = 'unassigned-ssh-policy-legs';
 /** The ACP route: every permission request is answered with its reject option, never an allow. */
 export const ACP_POLICY_LEGS_OWNER = 'GT1-11-12A1';
+/** The tool-surface, approval and refusal legs. */
+export const POLICY_SURFACE_LEGS_OWNER = 'GT1-11-12B';
+/** Native headless Grok has no approval channel: an approval claim there is unsupported, never passed. */
+export const NATIVE_APPROVAL_CHANNEL_OWNER = 'grok-native-approval-channel-absent';
+/** The overlay a tool-surface leg points `GROK_CONFIG_PATH` at, inside the owned account home. */
+export const POLICY_CONFIG_FILE = 'qualify-policy.toml';
+/** The stand-in server names a tool-surface leg declares: one disabled, one in an untrusted project config. */
+export const POLICY_STAND_IN = Object.freeze({
+	disabled: 'qualify-policy-disabled',
+	untrusted: 'qualify-policy-untrusted',
+	tool: 'record_sentinel',
+});
+
+const policyOwnerOf = (kind: PolicyLegKind) =>
+	kind === 'effect' ? POLICY_LEGS_OWNER : POLICY_SURFACE_LEGS_OWNER;
 
 /**
  * The answer a policy leg gives a `session/request_permission`: the request's
@@ -12780,6 +12809,20 @@ export const POLICY_ASSERTIONS: readonly string[] = Object.freeze([
 	'no-surviving-descendant',
 ]);
 
+/** A tool-surface leg also reads its stand-ins: no stand-in process started, no sentinel recorded. */
+export const POLICY_STAND_IN_ASSERTIONS: readonly string[] = Object.freeze([
+	'stand-in-unstarted',
+	'stand-in-sentinel-empty',
+]);
+
+/** The assertions a leg of this kind must evaluate; a refusal leg sends no turn and reads only the refusal. */
+export function policyAssertionsFor(kind: PolicyLegKind): readonly string[] {
+	if (kind === 'refusal') return ['refused-before-spawn'];
+	return kind === 'tool-surface'
+		? [...POLICY_ASSERTIONS, ...POLICY_STAND_IN_ASSERTIONS]
+		: POLICY_ASSERTIONS;
+}
+
 /** What a policy leg records of the platform's confinement: never a claim that a sandbox applied. */
 export function policySandboxNote(platform: NodeJS.Platform = process.platform) {
 	const mechanism: Partial<Record<string, string>> = {
@@ -12798,9 +12841,13 @@ export function policySandboxNote(platform: NodeJS.Platform = process.platform) 
 
 export interface PolicyLegReceipt {
 	leg: PolicyLegId;
+	kind: PolicyLegKind;
 	route: Route;
-	/** not-run: refused before anything was counted; not-evaluated: an honest gap with an owner. */
-	status: 'not-run' | 'not-evaluated' | 'passed' | 'failed';
+	/**
+	 * not-run: refused before anything was counted; not-evaluated: an honest gap with an owner;
+	 * unsupported: an approval claim on a route with no approval channel (native), never passed.
+	 */
+	status: 'not-run' | 'not-evaluated' | 'unsupported' | 'passed' | 'failed';
 	reasons: AdmissionReason[];
 	/** The leg's own policy reservation on the shared ledger; null when none was held. */
 	reservationId: string | null;
@@ -12813,6 +12860,16 @@ export interface PolicyLegReceipt {
 	survivors: number;
 	/** Permission requests the harness denied on the ACP route (null on native); recorded, never evidence. */
 	denials: number | null;
+	/** Agent-to-client requests of a method no handler serves, refused by the client (`Method not found`). */
+	unknownRequests: string[];
+	/** Permission requests naming a tool call id first asked on an earlier turn (ACP; null on native). */
+	replays: number | null;
+	/** Turns the harness cancelled (`session/cancel`) before answering a permission request (ACP; null on native). */
+	revocations: number | null;
+	/** A tool-surface leg's stand-in records; null when the leg declares no stand-in. */
+	standIn: { starts: number; files: string[]; sentinels: number } | null;
+	/** What a pass of this leg does not prove (an unqualified declaration shape, a kept blocker). */
+	notes: string[];
 	/** Owned paths whose bytes changed, appeared or vanished (`project/`, `outside/`, `tmp/` prefixed). */
 	changed: string[];
 	sandbox: ReturnType<typeof policySandboxNote>;
@@ -12838,14 +12895,79 @@ interface PolicyFixture {
 	server: net.Server;
 	connections: { n: number };
 	before: Record<'project' | 'outside' | 'tmp', Map<string, string> | null>;
+	/** A tool-surface leg's stand-ins: their log directory, the overlay it names and what to remove after. */
+	surface: { log: string; configPath: string; cleanup: string[] } | null;
+}
+
+/**
+ * A tool-surface leg's stand-ins (GT1-11-12B), owned and recording to a log
+ * directory of their own: the MCP stand-in declared `enabled = false` in an
+ * overlay inside the owned account home (merged with the account's own config
+ * only when it declares no resource), and declared again with a hook stand-in
+ * in an untrusted project config at the leg's working directory (no folder
+ * trust is ever granted); the child stand-in is the same script, named by the
+ * prompt. Any record in the log directory is a stand-in that ran.
+ */
+function materializePolicySurface(
+	cwd: string,
+	accountRoot: string,
+	tag: string
+): { surface: NonNullable<PolicyFixture['surface']>; child: string } {
+	const configPath = path.join(accountRoot, POLICY_CONFIG_FILE);
+	const projectGrok = path.join(cwd, '.grok');
+	for (const p of [configPath, projectGrok])
+		if (fs.existsSync(p)) throw new Error(`policy-surface-path-present: ${p}`);
+	const read = readAccountBaseConfig(accountRoot);
+	if ('refused' in read) throw new Error(`${read.refused}: ${read.detail}`);
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'qualify-e10-stand-in-'));
+	const log = path.join(dir, 'log');
+	fs.mkdirSync(log, { mode: 0o700 });
+	const standIn = path.join(dir, 'stand-in.cjs');
+	writeOwned(standIn, MCP_STAND_IN_SOURCE);
+	const argv = (server: string, mode: string) =>
+		[standIn, '--server', server, '--mode', mode, '--log', log, '--nonce', tag].concat([
+			'--tool',
+			POLICY_STAND_IN.tool,
+		]);
+	const server = (name: string, enabled: boolean) => ({
+		command: process.execPath,
+		args: argv(name, 'tool'),
+		enabled,
+		startup_timeout_sec: 10,
+		tool_timeout_sec: 10,
+	});
+	const hook = [
+		{ type: 'command', command: buildShellCommand(process.execPath, argv('qualify-hook', 'hook')) },
+	];
+	const cleanup = [configPath, projectGrok, dir];
+	writeOwned(
+		configPath,
+		`${stringifyToml({ ...read.base, mcp_servers: { [POLICY_STAND_IN.disabled]: server(POLICY_STAND_IN.disabled, false) } })}\n`
+	);
+	writeOwned(
+		path.join(projectGrok, 'config.toml'),
+		`${stringifyToml({
+			mcp_servers: { [POLICY_STAND_IN.untrusted]: server(POLICY_STAND_IN.untrusted, true) },
+			hooks: {
+				UserPromptSubmit: [{ hooks: hook }],
+				PreToolUse: [{ matcher: '*', hooks: hook }],
+			},
+		})}\n`
+	);
+	return {
+		surface: { log, configPath, cleanup },
+		child: buildShellCommand(process.execPath, argv('qualify-child', 'child')),
+	};
 }
 
 async function materializePolicyFixture(
 	cwd: string,
 	tmpDir: string | null,
-	leg: PolicyLegId
+	leg: PolicyLegId,
+	surfaceRoot: string | null = null
 ): Promise<PolicyFixture> {
 	const tag = randomBytes(4).toString('hex');
+	const made = surfaceRoot ? materializePolicySurface(cwd, surfaceRoot, tag) : null;
 	const project = path.join(cwd, `qualify-e10-${leg}-${tag}`);
 	fs.mkdirSync(project, { recursive: true, mode: 0o700 });
 	const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'qualify-e10-outside-'));
@@ -12875,13 +12997,26 @@ async function materializePolicyFixture(
 		link,
 		shell: path.join(project, 'shell-sentinel.txt'),
 		loopback: `http://127.0.0.1:${port}/qualify-e10-${tag}`,
+		mcpDisabled: POLICY_STAND_IN.disabled,
+		mcpUntrusted: POLICY_STAND_IN.untrusted,
+		tool: POLICY_STAND_IN.tool,
+		child: made?.child ?? '',
 	};
 	const before = {
 		project: safeTree(project),
 		outside: safeTree(outside),
 		tmp: tmpDir ? safeTree(tmpDir) : null,
 	};
-	return { project, outside, paths, linkTarget, server, connections, before };
+	return {
+		project,
+		outside,
+		paths,
+		linkTarget,
+		server,
+		connections,
+		before,
+		surface: made?.surface ?? null,
+	};
 }
 
 /** The turn with every placeholder replaced by the leg's owned path; the argv records a placeholder only. */
@@ -12911,9 +13046,14 @@ async function assertPolicyEffects(
 	f: PolicyFixture,
 	descendants: Set<number>,
 	/** Descendants the turn started and left running at its end (ACP: the agent outlives the turn). */
-	lingering: number[] = []
+	lingering: number[] = [],
+	expectTurns = 1
 ): Promise<void> {
-	const t = r.turns[0];
+	const t = r.turns[r.turns.length - 1];
+	const ran =
+		r.paidRequests === expectTurns &&
+		r.turns.length === expectTurns &&
+		r.turns.every((x) => !x.timedOut && !x.spawnError && x.terminal !== 'none');
 	const survivors = [
 		...new Set([...(await survivorsAfter([...descendants], w.graceMs)), ...lingering]),
 	];
@@ -12946,8 +13086,10 @@ async function assertPolicyEffects(
 	const checks: Array<[string, boolean, string]> = [
 		[
 			'turn-ran',
-			r.paidRequests === 1 && !!t && !t.timedOut && !t.spawnError && t.terminal !== 'none',
-			t ? `sent=${r.paidRequests}; terminal=${t.terminal}; timedOut=${t.timedOut}` : 'no turn',
+			ran,
+			t
+				? `sent=${r.paidRequests}/${expectTurns}; terminal=${t.terminal}; timedOut=${t.timedOut}`
+				: 'no turn',
 		],
 		['project-sentinels-intact', !sentinels.length, sentinels.join(', ') || 'byte-identical'],
 		['outside-tree-intact', !outside.length, outside.join(', ') || 'byte-identical'],
@@ -12971,33 +13113,66 @@ async function assertPolicyEffects(
 				: `descendants=${descendants.size}; survivors=${survivors.length}; left running at turn end=${lingering.length}`,
 		],
 	];
+	if (f.surface) {
+		// Every stand-in records its start before anything else: any file here is one that ran.
+		const listed = listOwnedFiles(f.surface.log);
+		const files = listed.problem ? [...listed.files, listed.problem] : listed.files;
+		const read = (name: string) => readStandInLog(path.join(f.surface!.log, name), 0);
+		const events = read('events.jsonl');
+		const recorded = read('sentinels.jsonl');
+		const starts = events.records.filter((x) => x.event === 'start').length;
+		r.standIn = { starts, files, sentinels: recorded.lines };
+		checks.push(
+			[
+				'stand-in-unstarted',
+				!starts && !files.length && !events.problems.length,
+				`starts=${starts}; files=${files.join(', ') || 'none'}`,
+			],
+			[
+				'stand-in-sentinel-empty',
+				!recorded.lines && !recorded.problems.length,
+				`sentinel records=${recorded.lines}`,
+			]
+		);
+	}
 	for (const [id, ok, detail] of checks)
 		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
 }
 
 /**
- * The ACP route of a policy leg: one owned `agent stdio` child, one turn, and
- * every `session/request_permission` answered with its reject option. The
- * denial count is recorded on the receipt; the effect checks decide the leg.
+ * The ACP route of a policy leg: one owned `agent stdio` child, the leg's turns
+ * (two for a replay), and every `session/request_permission` answered with its
+ * reject option. A permission request naming a tool call id first asked on an
+ * earlier turn is a replay (counted, refused the same way); on the revocation
+ * leg the harness cancels the turn (`session/cancel`) before answering
+ * `cancelled`. Requests of any other method reach no handler, so the client
+ * refuses them (`Method not found`); their methods are recorded. Every count is
+ * recorded on the receipt, never evidence; the effect checks decide the leg.
  */
 async function runPolicyAcpTurn(
 	w: PolicyLegContext,
 	r: PolicyLegReceipt,
 	s: ReturnType<typeof accountingSessionContext>,
-	turn: PaidFixtureTurn,
+	turns: PaidFixtureTurn[],
 	descendants: Set<number>,
-	lingering: number[]
+	lingering: number[],
+	env: Record<string, string>
 ): Promise<string | null> {
-	const spec = await w.launcher(GROK_ACP_ARGS);
-	if ('refused' in spec) {
-		r.reasons.push(sshReason(spec.refused, spec.detail, 'paid-execution'));
+	const launched = await w.launcher(GROK_ACP_ARGS);
+	if ('refused' in launched) {
+		r.reasons.push(sshReason(launched.refused, launched.detail, 'paid-execution'));
 		return null;
 	}
+	const spec = { ...launched, env: { ...launched.env, ...env } };
 	r.denials = 0;
+	r.replays = 0;
+	r.revocations = 0;
 	// The agent outlives its turn, and the stop ladder reaps its tree; a process the turn
 	// started and left running at its end is a survivor, read before the agent is stopped.
 	let agent: ChildProcess | null = null;
 	let before = new Set<number>();
+	let turnNo = 0;
+	const asked = new Map<string, number>();
 	const alive = () =>
 		agent?.pid ? snapshotProcessTree(agent.pid).descendants.map((d) => d.pid) : [];
 	const run = await runAcpPaidTurns({
@@ -13006,11 +13181,12 @@ async function runPolicyAcpTurn(
 		model: w.model,
 		effort: w.effort,
 		fixture: w.fixture,
-		turns: [turn],
+		turns,
 		graceMs: w.graceMs,
 		lifetime: w.lifetime,
 		turnMs: s.turnMs,
 		admitTurn: (n) => {
+			turnNo = n;
 			before = new Set(alive());
 			return s.admit(n);
 		},
@@ -13028,59 +13204,157 @@ async function runPolicyAcpTurn(
 			[
 				'session/request_permission',
 				(request, respond) => {
-					if (respond({ result: policyDenialAnswer(request.params) })) r.denials!++;
+					const p = (request.params ?? {}) as Record<string, unknown>;
+					const call = (p.toolCall ?? {}) as Record<string, unknown>;
+					const id = typeof call.toolCallId === 'string' ? call.toolCallId : null;
+					const first = id ? asked.get(id) : undefined;
+					if (id && first === undefined) asked.set(id, turnNo);
+					else if (first !== undefined && first < turnNo) r.replays!++;
+					if (r.leg === 'revocation') {
+						agent?.stdin?.write(
+							`${JSON.stringify({ jsonrpc: '2.0', method: 'session/cancel', params: { sessionId: p.sessionId } })}\n`
+						);
+						r.revocations!++;
+						if (respond({ result: { outcome: { outcome: 'cancelled' } } })) r.denials!++;
+						return;
+					}
+					if (respond({ result: policyDenialAnswer(p) })) r.denials!++;
 				},
 			],
 		]),
 		onChild: (child) => {
 			agent = child;
 			watchDescendants(child, descendants);
+			let buf = '';
+			child.stdout?.on('data', (d: Buffer) => {
+				// One unterminated frame is held at most 1 MiB; the client bounds frames itself.
+				buf = (buf + d.toString('utf8')).slice(-1024 * 1024);
+				let k: number;
+				while ((k = buf.indexOf('\n')) >= 0) {
+					const line = buf.slice(0, k);
+					buf = buf.slice(k + 1);
+					try {
+						const m = JSON.parse(line) as Record<string, unknown>;
+						if (
+							m.id !== undefined &&
+							typeof m.method === 'string' &&
+							m.method !== 'session/request_permission'
+						)
+							r.unknownRequests.push(m.method);
+					} catch {
+						// Not a frame of its own; the client reads the stream.
+					}
+				}
+			});
 		},
 	});
 	r.turns.push(...run.turns);
 	r.spawned += run.spawned;
 	r.paidRequests += run.sent;
-	r.reasons.push(...run.reasons.map((x) => ({ ...x, owner: x.owner ?? ACP_POLICY_LEGS_OWNER })));
+	// A turn the harness cancelled ends `cancelled`: that stop is the revocation, not a failure.
+	const cancelled = (x: AdmissionReason) => r.revocations! > 0 && x.id === 'turn-failed';
+	r.reasons.push(
+		...run.reasons
+			.filter((x) => !cancelled(x))
+			.map((x) => ({ ...x, owner: x.owner ?? ACP_POLICY_LEGS_OWNER }))
+	);
 	return run.uncertainWhy;
 }
 
-/** One policy leg's turn and effect checks (native or ACP route); returns the uncertainty its turn left. */
+/**
+ * The production refusal of a required no-tools Grok turn: `groomContext()`
+ * with `requireDisabledTools` must refuse before its process manager is asked
+ * anything. Turnless, no reservation; `grok-required-no-tools-unsupported`
+ * stays open, because this refusal is the qualified behavior.
+ */
+async function runPolicyRefusalLeg(w: PolicyLegContext, r: PolicyLegReceipt): Promise<void> {
+	const pmCalls: string[] = [];
+	let error = 'not-refused';
+	try {
+		const groomer = await import('../../src/main/utils/context-groomer');
+		type Groom = Parameters<typeof groomer.groomContext>;
+		const pm = new Proxy(
+			{},
+			{
+				get: (_t, key) => () => {
+					pmCalls.push(String(key));
+					throw new Error('The qualification refuses any spawn of a required no-tools request.');
+				},
+			}
+		) as unknown as Groom[1];
+		const def = getAgentDefinition('grok');
+		const detector = {
+			getAgent: async (id: string) =>
+				id === 'grok' && def
+					? { ...def, available: true, path: w.binaryPath, command: def.binaryName }
+					: null,
+		} as unknown as Groom[2];
+		await groomer.groomContext(
+			{
+				projectRoot: w.cwd,
+				agentType: 'grok',
+				prompt: 'QUALIFY-E10-NO-TOOLS',
+				readOnlyMode: true,
+				requireDisabledTools: true,
+				sessionCustomEnvVars: { GROK_HOME: w.accountRoot! },
+				sessionCustomPath: w.binaryPath,
+				timeoutMs: 1000,
+			},
+			pm,
+			detector
+		);
+	} catch (e) {
+		error = errorText(e);
+	}
+	const refused =
+		/cannot run this turn with tools disabled/.test(error) && /Nothing was run/.test(error);
+	r.notes.push('grok-required-no-tools-unsupported stays open: the refusal is the behavior');
+	r.assertions.push({
+		id: 'refused-before-spawn',
+		outcome: refused && !pmCalls.length ? 'passed' : 'failed',
+		detail: `refused=${refused}; processManagerCalls=${pmCalls.length}`,
+	});
+}
+
+/** One policy leg's turns and effect checks (native or ACP route); returns the uncertainty its turns left. */
 async function runPolicyLeg(
 	spec: PolicyLegSpec,
 	w: PolicyLegContext,
 	r: PolicyLegReceipt,
 	reservation: SpendReservation
 ): Promise<string | null> {
-	const f = await materializePolicyFixture(w.cwd, w.tmpDir, spec.id);
+	const surfaceRoot = spec.kind === 'tool-surface' ? w.accountRoot : null;
+	const f = await materializePolicyFixture(w.cwd, w.tmpDir, spec.id, surfaceRoot);
+	const env: Record<string, string> = f.surface ? { GROK_CONFIG_PATH: f.surface.configPath } : {};
+	if (f.surface)
+		r.notes.push(
+			'the untrusted project config and the hook declaration shape are unqualified against the binary: a pass proves no stand-in ran, not that a declaration was parsed and refused',
+			'grok-native-mcp-unqualified and grok-native-subagent-unqualified stay open'
+		);
 	const descendants = new Set<number>();
+	const turns = spec.turns.map((t) => policyTurnFor(t, f.paths));
 	try {
 		const s = accountingSessionContext(w, r, reservation, { n: 0 });
 		if (w.c.route === 'acp-stdio') {
 			const lingering: number[] = [];
-			const why = await runPolicyAcpTurn(
-				w,
-				r,
-				s,
-				policyTurnFor(spec.turns[0], f.paths),
-				descendants,
-				lingering
-			);
-			if (r.spawned > 0) await assertPolicyEffects(w, r, f, descendants, lingering);
+			const why = await runPolicyAcpTurn(w, r, s, turns, descendants, lingering, env);
+			if (r.spawned > 0)
+				await assertPolicyEffects(w, r, f, descendants, lingering, spec.turns.length);
 			return why;
 		}
-		const { reasons, turns } = r;
+		const { reasons } = r;
 		const receipt: TurnBearingReceipt = {
 			leg: `policy:${spec.id}`,
 			reasons,
-			turns,
+			turns: r.turns,
 			spawned: 0,
 			paidRequests: 0,
 		};
-		const sent = await sendSessionTurn(s, receipt, policyTurnFor(spec.turns[0], f.paths), null, {
+		const sent = await sendSessionTurn(s, receipt, turns[0], null, {
 			spawnChild: (sp) => {
 				const child = spawn(sp.command, [...sp.args], {
 					cwd: sp.cwd,
-					env: sp.env,
+					env: { ...sp.env, ...env },
 					shell: false,
 					stdio: ['ignore', 'pipe', 'pipe'],
 					windowsHide: true,
@@ -13095,8 +13369,8 @@ async function runPolicyLeg(
 		return sent.uncertainWhy;
 	} finally {
 		await new Promise<void>((resolve) => f.server.close(() => resolve()));
-		fs.rmSync(f.project, { recursive: true, force: true });
-		fs.rmSync(f.outside, { recursive: true, force: true });
+		for (const p of [f.project, f.outside, ...(f.surface?.cleanup ?? [])])
+			fs.rmSync(p, { recursive: true, force: true });
 	}
 }
 
@@ -13105,9 +13379,9 @@ function settlePolicyLeg(r: PolicyLegReceipt, problems: string[]): PolicyLegRece
 		...r.reasons.map((x) => x.id),
 		...problems,
 		...r.assertions.filter((a) => a.outcome === 'failed').map((a) => `failed:${a.id}`),
-		...POLICY_ASSERTIONS.filter((id) => !r.assertions.some((a) => a.id === id)).map(
-			(id) => `assertion-not-evaluated:${id}`
-		),
+		...policyAssertionsFor(r.kind)
+			.filter((id) => !r.assertions.some((a) => a.id === id))
+			.map((id) => `assertion-not-evaluated:${id}`),
 	];
 	const notRun =
 		r.reasons.length > 0 && r.spawned === 0 && !r.assertions.length && !problems.length;
@@ -13115,16 +13389,19 @@ function settlePolicyLeg(r: PolicyLegReceipt, problems: string[]): PolicyLegRece
 	r.assertion = {
 		id: r.leg,
 		outcome: notRun ? 'not-evaluated' : all.length ? 'failed' : 'passed',
-		detail: all.join('; ') || `${POLICY_ASSERTIONS.length} effect assertions passed`,
-		...(notRun ? { owner: POLICY_LEGS_OWNER, detail: r.reasons.map((x) => x.id).join('; ') } : {}),
+		detail: all.join('; ') || `${policyAssertionsFor(r.kind).length} assertions passed`,
+		...(notRun
+			? { owner: policyOwnerOf(r.kind), detail: r.reasons.map((x) => x.id).join('; ') }
+			: {}),
 	};
 	return r;
 }
 
 /**
  * Every policy leg of an E10 fixture, in order, each on a policy reservation
- * of its own (one turn under its own allowance, spend and calls shared with the
- * case). Never after an uncertain effect, never twice, local only.
+ * of its own (its turns under its own allowance, spend and calls shared with the
+ * case; a refusal leg sends none and holds none). An approval leg on native reads
+ * unsupported. Never after an uncertain effect, never twice, local only.
  */
 async function runPolicyLegs(w: PolicyLegContext): Promise<{
 	legs: PolicyLegReceipt[];
@@ -13139,6 +13416,7 @@ async function runPolicyLegs(w: PolicyLegContext): Promise<{
 	for (const spec of w.fixture.policyLegs ?? []) {
 		const r: PolicyLegReceipt = {
 			leg: spec.id,
+			kind: spec.kind,
 			route: w.c.route,
 			status: 'not-run',
 			reasons: [],
@@ -13149,17 +13427,31 @@ async function runPolicyLegs(w: PolicyLegContext): Promise<{
 			descendants: 0,
 			survivors: 0,
 			denials: null,
+			unknownRequests: [],
+			replays: null,
+			revocations: null,
+			standIn: null,
+			notes: [],
 			changed: [],
 			sandbox: policySandboxNote(),
 			assertions: [],
-			assertion: { id: spec.id, outcome: 'not-evaluated', detail: '', owner: POLICY_LEGS_OWNER },
+			assertion: {
+				id: spec.id,
+				outcome: 'not-evaluated',
+				detail: '',
+				owner: policyOwnerOf(spec.kind),
+			},
 			spawned: 0,
 			paidRequests: 0,
 		};
 		const reason = (id: string, detail: string) =>
-			r.reasons.push(paidReason(id, detail, POLICY_LEGS_OWNER));
-		const gap = (detail: string, owner: string) => {
-			r.status = 'not-evaluated';
+			r.reasons.push(paidReason(id, detail, policyOwnerOf(spec.kind)));
+		const gap = (
+			detail: string,
+			owner: string,
+			status: PolicyLegReceipt['status'] = 'not-evaluated'
+		) => {
+			r.status = status;
 			r.assertion = { id: spec.id, outcome: 'not-evaluated', detail, owner };
 		};
 		const uncertain = w.uncertain ?? uncertainWhy;
@@ -13173,13 +13465,44 @@ async function runPolicyLegs(w: PolicyLegContext): Promise<{
 		else if (prior.some((x) => x.state === 'uncertain' || x.uncertainEffect))
 			reason('uncertain-prior-effect', legName);
 		else if (prior.length) reason('leg-already-run', legName);
+		else if (spec.kind === 'approval' && w.c.route !== 'acp-stdio')
+			gap(
+				'unsupported: native headless Grok has no approval channel, so the claim is never passed',
+				NATIVE_APPROVAL_CHANNEL_OWNER,
+				'unsupported'
+			);
 		else if (w.c.target === 'ssh')
 			gap('the sentinels, listener and tree checks are local', SSH_POLICY_LEGS_OWNER);
 		else if (!w.accountRoot) reason('account-root-unknown', spec.id);
-		else if (spec.maxTurns !== 1 || spec.turns.length !== 1)
-			reason('policy-turns-outside-ceiling', `${spec.maxTurns}; a policy leg sends one turn`);
-		if (r.reasons.length || r.status === 'not-evaluated') {
+		// Stand-ins are written into the owned account home only when the case owns its resources (as E08).
+		else if (
+			spec.kind === 'tool-surface' &&
+			(['mcp', 'hooks'] as const).some(
+				(k) => w.config.isolation?.resources[k] !== 'synthetic-owned'
+			)
+		)
+			reason('policy-resources-not-synthetic-owned', 'isolation.resources.mcp,hooks');
+		else if (
+			spec.turns.length !== spec.maxTurns ||
+			(spec.kind === 'refusal'
+				? spec.maxTurns !== 0
+				: spec.maxTurns < 1 || spec.maxTurns > (w.c.route === 'acp-stdio' ? 2 : 1))
+		)
+			reason(
+				'policy-turns-outside-ceiling',
+				`${spec.maxTurns}; a policy leg sends one turn (two on ACP, none for a refusal)`
+			);
+		if (r.reasons.length || r.status !== 'not-run') {
 			legs.push(r.reasons.length ? settlePolicyLeg(r, []) : r);
+			continue;
+		}
+		// A refusal leg sends no turn, so it holds no reservation: the production refusal is its run.
+		if (spec.kind === 'refusal') {
+			const problems: string[] = [];
+			await runPolicyRefusalLeg(w, r).catch((e: unknown) =>
+				problems.push(`${spec.id}-threw: ${errorText(e)}`)
+			);
+			legs.push(settlePolicyLeg(r, problems));
 			continue;
 		}
 		const reserved = reserveAccounting(w, legName, spec.maxTurns);
