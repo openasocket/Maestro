@@ -7535,6 +7535,8 @@ async function runAcpSessionTurn(a: {
 	stopWhen?: (ev: ParsedGrokEvent) => boolean;
 	onRunning?: () => void;
 	onEvent?: (ev: ParsedGrokEvent) => void;
+	/** Every frame written to the child, in order (the prompt a consumer leg handed is one). */
+	onFrame?: (frame: string) => void;
 }): Promise<SessionTurnRun> {
 	const started = Date.now();
 	const out = streamDigest();
@@ -7546,6 +7548,7 @@ async function runAcpSessionTurn(a: {
 	let descendants: number[] = [];
 	let spawnError: string | null = null;
 	let answer: Record<string, unknown> | null = null;
+	let acknowledged: string | null = null;
 	let failure: GrokAcpSessionError | null = null;
 	let child: ChildProcess | null = null;
 	let session: GrokAcpSession | null = null;
@@ -7579,6 +7582,7 @@ async function runAcpSessionTurn(a: {
 				host: 'qualify-local-host',
 				write: (frame) => {
 					if (st.running) st.writes++;
+					a.onFrame?.(Buffer.from(frame).toString('utf8'));
 					owned.stdin?.write(frame);
 				},
 				requestTimeoutMs: Math.max(1, Math.min(HARNESS_CEILINGS.discoverySeconds * 1000, bound)),
@@ -7631,6 +7635,8 @@ async function runAcpSessionTurn(a: {
 			st.begun = true;
 			st.prompting = true;
 			answer = await acp.prompt(a.prompt);
+			// What the session acknowledged (session/new or a model_changed update), read before close clears it.
+			acknowledged = acp.configuration.model ?? null;
 		} catch (e) {
 			if (e instanceof GrokAcpSessionError && e.reason === 'cancelled') answer = e.response ?? null;
 			else
@@ -7659,7 +7665,7 @@ async function runAcpSessionTurn(a: {
 			sessionId: session?.sessionId ?? null,
 			terminal: answer ? (answer.stopReason === 'end_turn' ? 'success' : 'failure') : 'none',
 			reply: reply.result(),
-			model: answer ? a.model : null,
+			model: answer ? acknowledged : null,
 			effort: answer ? a.effort : null,
 			usage: st.begun
 				? usage.end(a.n, answer, failure !== null)
@@ -7707,6 +7713,8 @@ async function sendSessionTurn(
 		spawnChild?: (spec: SpawnSpec) => ChildProcess;
 		/** Another provider's production parser (see `runNativeSessionTurn`). */
 		parser?: TurnParser | null;
+		/** ACP: every frame written to the child (see `runAcpSessionTurn`). */
+		onFrame?: (frame: string) => void;
 	} = {}
 ): Promise<{ run: SessionTurnRun | null; uncertainWhy: string | null }> {
 	const n = s.nextTurn();
@@ -7749,6 +7757,7 @@ async function sendSessionTurn(
 				model: s.model ?? '',
 				effort: s.effort ?? null,
 				resumeId,
+				onFrame: opts.onFrame,
 			})
 		: await runNativeSessionTurn({
 				...common,
@@ -8283,8 +8292,6 @@ async function runSessionLegs(s: SessionLegContext): Promise<{
 export const SESSION_CONSUMER_FAMILIES: readonly string[] = Object.freeze(['E05']);
 /** No playbook task owns the consumer legs against a remote home: the storage read, data dir and worktree are local. */
 export const SSH_SESSION_CONSUMER_LEGS_OWNER = 'grok-harness-ssh-target-absent';
-/** Turn-bearing consumer legs on the ACP route (one stdio child per leg, no fresh argv turn): GT1-11-14P4C. */
-export const ACP_SESSION_CONSUMER_LEGS_OWNER = 'GT1-11-14P4C';
 /** The desktop's worktree dispatch (`spawnWorktreeAgentAndDispatch`) runs over Electron IPC a script cannot register. */
 export const WORKTREE_SPAWN_IPC_OWNER = 'grok-harness-desktop-host-absent';
 /** The owner agent id the context-handoff leg reads the history as. */
@@ -8922,7 +8929,11 @@ const runAgentCreationLeg: SessionConsumerRunner = async (s, r, _id, problems) =
 		return null;
 	}
 	const planModel = plans.find((p) => p.record === 'worktree')?.model ?? null;
-	const argvModel = argValue(s.nativeArgv(AGENT_CREATION_PROMPT, null), '-m');
+	// The model the turn asks for: the native argv's `-m`, or the selection an ACP session/new carries.
+	const argvModel =
+		s.c.route === 'acp-stdio'
+			? (s.model ?? null)
+			: argValue(s.nativeArgv(AGENT_CREATION_PROMPT, null), '-m');
 	const sent = await sendSessionTurn(
 		s,
 		r,
@@ -8997,9 +9008,16 @@ const runTemplateDispatchLeg: SessionConsumerRunner = async (s, r) => {
 		[commandText, commandToken],
 		[templateText, templateToken],
 	] as const) {
+		const frames: string[] = [];
+		const sent = await sendSessionTurn(s, r, { prompt: text, expect: token }, null, {
+			onFrame: (f) => frames.push(f),
+		});
 		const argv = s.nativeArgv(text, null);
-		const handed = argv.includes(text) && !argv.some((a) => UNEXPANDED_VARIABLE.test(a));
-		const sent = await sendSessionTurn(s, r, { prompt: text, expect: token }, null);
+		const prompts = acpPromptTexts(frames);
+		const handed =
+			s.c.route === 'acp-stdio'
+				? prompts.length === 1 && prompts[0] === text
+				: argv.includes(text) && !argv.some((a) => UNEXPANDED_VARIABLE.test(a));
 		if (!sent.run || sent.run.neverRan) {
 			why = sent.uncertainWhy;
 			received.push('not-sent');
@@ -9022,6 +9040,27 @@ const runTemplateDispatchLeg: SessionConsumerRunner = async (s, r) => {
 	);
 	return why;
 };
+
+/** The text of each session/prompt frame written to an ACP child, in order. */
+function acpPromptTexts(frames: readonly string[]): string[] {
+	const texts: string[] = [];
+	for (const frame of frames)
+		for (const line of frame.split('\n')) {
+			let m: { method?: unknown; params?: { prompt?: unknown } } | null = null;
+			try {
+				m = line.trim() ? JSON.parse(line) : null;
+			} catch {
+				m = null;
+			}
+			if (m?.method !== 'session/prompt' || !Array.isArray(m.params?.prompt)) continue;
+			texts.push(
+				(m.params.prompt as Array<{ text?: unknown }>)
+					.map((p) => (typeof p.text === 'string' ? p.text : ''))
+					.join('')
+			);
+		}
+	return texts;
+}
 
 const SESSION_CONSUMER_RUNNERS: Record<SessionConsumerLegId, SessionConsumerRunner> = {
 	'context-handoff': runContextHandoffLeg,
@@ -9106,8 +9145,6 @@ async function runSessionConsumerLegs(s: SessionConsumerContext): Promise<{
 				'consumer legs read a local owned home and write a local data dir and worktree only',
 				SSH_SESSION_CONSUMER_LEGS_OWNER
 			);
-		else if (s.c.route !== 'native-headless')
-			gap('the ACP route has no turn-bearing consumer leg', ACP_SESSION_CONSUMER_LEGS_OWNER);
 		else if (!s.accountRoot) r.reasons.push(consumerLegReason('account-root-unknown', spec.id));
 		else if (!sessionId) r.reasons.push(consumerLegReason('session-id-missing', spec.id));
 		else if (spec.maxTurns > s.remainingTurns())

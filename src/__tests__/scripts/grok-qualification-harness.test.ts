@@ -212,6 +212,7 @@ import { TRANSLATION_PROVIDER_VERSIONS } from '../../../src/shared/maestro-lib/t
 import { buildAgentEnvironment } from '../../../src/shared/maestro-lib/launch/env';
 import { grokInstaller } from '../../../src/main/coworking/installers/grok';
 import { GrokSessionStorage } from '../../../src/main/storage/grok-session-storage';
+import { GrokAcpSession } from '../../../src/shared/maestro-lib/grok/acp-session';
 
 /** Pass-through spies on every child_process entry point (vitest folds both specifiers into one module), so a test can prove none ran. */
 const childProcess = vi.hoisted(() => {
@@ -4815,7 +4816,11 @@ describe('GT1-11-09 qualification harness', () => {
 				'    }',
 				"    if (text.includes('E04-STEER-T1')) for (let i = 1; i <= 5; i++) update(sid, 'agent_message_chunk', String(i) + '\\n');",
 				"    if (MODE === 'violate' && text.includes('E04-STEER-T1')) update(randomUUID(), 'agent_message_chunk', token);",
-				"    update(to, 'agent_message_chunk', token); keep(to, 'assistant', token); end(m.id, 'end_turn');",
+				"    const handoff = text.includes('final OK with HANDOFF'); let said = handoff ? token.slice(0, -2) + 'HANDOFF' : token;",
+				"    if (MODE === 'violate' && handoff) for (const other of fs.readdirSync(path.dirname(dir(sid)))) if (other !== sid) update(other, 'agent_message_chunk', '');",
+				"    if (MODE === 'violate' && text.includes('QUALIFY-E05-AGENT-OK')) out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: { sessionUpdate: 'model_changed', model_id: 'grok-other' } } });",
+				"    if (MODE === 'violate' && text.includes('-TPL-OK')) said = 'QUALIFY-UNEXPANDED-OK';",
+				"    update(to, 'agent_message_chunk', said); keep(to, 'assistant', said); end(m.id, 'end_turn');",
 				"  } else if (m.id !== undefined && m.method) out({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'Method not found' } });",
 				'};',
 				"process.stdin.on('data', (d) => { buf += d; let k; while ((k = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, k); buf = buf.slice(k + 1); if (line.trim()) handle(JSON.parse(line)); } });",
@@ -4925,6 +4930,65 @@ describe('GT1-11-09 qualification harness', () => {
 				for (const f of ['new-native-id', 'session-created:1'])
 					expect(cont.assertion.detail, f).toContain(f);
 			}, 60_000);
+
+			describe('ACP session consumer legs (GT1-11-14P4C)', () => {
+				const CONSUMERS = ['context-handoff', 'agent-creation', 'template-dispatch'];
+				it('E05: handoff, agent creation and template dispatch pass over one ACP child per turn', async () => {
+					const leg = await acp('E05', 'ok');
+					const id = leg.turns[0].sessionId;
+					expect(leg.sessionConsumers.map((l) => l.assertion.owner)).not.toContain('GT1-11-14P4C');
+					for (const name of CONSUMERS) {
+						const r = consumer(leg, name);
+						expect(r.status, JSON.stringify(r)).toBe('passed');
+						expect(r.assertions.every((a) => a.outcome === 'passed')).toBe(true);
+						// Every consumer turn opened a fresh session on its own child; none was resumed.
+						for (const t of r.turns) expect(t.argv).toContain('<session/new>');
+					}
+					const handoff = consumer(leg, 'context-handoff');
+					expect(handoff.digests.export).toBe(handoff.digests.handoff);
+					expect(handoff.observed.handoffSession).not.toBe(id);
+					expect(promptsWith('final OK with HANDOFF')).toHaveLength(1);
+					// The model is the one session/new acknowledged.
+					expect(consumer(leg, 'agent-creation').turns[0].model).toBe(MODEL);
+					expect(consumer(leg, 'template-dispatch').turns).toHaveLength(2);
+					expect(promptsWith('-TPL-OK')).toHaveLength(1);
+					operatorHomeUntouched();
+				}, 45_000);
+
+				it('violate: a handoff on the source session, a switched model and an unexpanded reply each fail', async () => {
+					const leg = await acp('E05', 'violate');
+					const handoff = consumer(leg, 'context-handoff');
+					expect(handoff.status).toBe('failed');
+					expect(assertionOf(handoff, 'consumed')?.detail).toContain('session=resumed-source');
+					expect(assertionOf(handoff, 'digest-matches-export')?.outcome).toBe('passed');
+					const created = consumer(leg, 'agent-creation');
+					expect(created.status).toBe('failed');
+					expect(assertionOf(created, 'model-acknowledged')).toMatchObject({ outcome: 'failed' });
+					expect(assertionOf(created, 'model-acknowledged')?.detail).toContain(
+						'acknowledged=grok-other'
+					);
+					const dispatched = consumer(leg, 'template-dispatch');
+					expect(dispatched.status).toBe('failed');
+					expect(assertionOf(dispatched, 'prompt-received')?.detail).toContain('replied=false');
+					expect(leg.status).toBe('failed');
+				}, 45_000);
+
+				it('fails template-dispatch when the prompt the port wrote is not the expanded text', async () => {
+					const original = GrokAcpSession.prototype.prompt;
+					vi.spyOn(GrokAcpSession.prototype, 'prompt').mockImplementation(function (
+						this: GrokAcpSession,
+						text: string,
+						...rest: [AbortSignal?, string?]
+					) {
+						return original.call(this, `${text} `, ...rest);
+					});
+					const dispatched = consumer(await acp('E05', 'ok'), 'template-dispatch');
+					expect(dispatched.status).toBe('failed');
+					expect(assertionOf(dispatched, 'prompt-received')?.detail).toContain(
+						'handed=false replied=true exit=0'
+					);
+				}, 45_000);
+			});
 		});
 
 		describe('E05 session legs and consumers', () => {
