@@ -248,6 +248,7 @@ import {
 } from '../../src/shared/agentEnvironment';
 import {
 	ALL_ROUTE_ENV_NAMES,
+	fullAccessFlagsOf,
 	PROVIDER_ROUTE_ENV_NAMES,
 	resolveAgentEnvVars,
 } from '../../src/shared/maestro-lib/launch/env';
@@ -315,7 +316,22 @@ import {
 	type SessionLegSpec,
 	type SyntheticResourceSet,
 	type UtilityLegId,
+	type WorkflowLegId,
+	type WorkflowLegSpec,
 } from './paid-fixtures';
+import type {
+	AutoRunController,
+	AutoRunDeps,
+	AutoRunEvent,
+	AutoRunTurnRequest,
+	AutoRunTurnResult,
+} from '../../src/shared/maestro-lib/autorun/engine-types';
+import type { AgentError, AgentErrorType, HistoryEntry, SessionInfo } from '../../src/shared/types';
+import { QUERY_SOURCE_ENV_VAR, type QuerySource } from '../../src/shared/querySource';
+import { countMarkdownTasks } from '../../src/shared/markdownTaskScan';
+import { parseGoalMarkers } from '../../src/shared/goalDriven/goalMarkers';
+import { evaluateGoalExit } from '../../src/shared/goalDriven/goalExitEvaluator';
+import type { GoalRunConfig } from '../../src/shared/goalDriven/types';
 import {
 	buildFeedbackAccountCandidates,
 	feedbackInterviewRouteProblem,
@@ -427,6 +443,13 @@ export const HARNESS_CAPABILITIES = {
 	 * reservation. Off, each is not-run.
 	 */
 	cheapUtilityLegs: true,
+	/**
+	 * The E09 workflow legs (GT1-11-11E1): the library Auto Run engine
+	 * (`runPlaybook`, `runGoal`) over Grok with the production run control,
+	 * after the leg settled, each on a workflow reservation of its own. Off,
+	 * each is not-run.
+	 */
+	workflowLegs: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
 
@@ -1912,6 +1935,13 @@ export const HARNESS_CEILINGS = {
 	 * that do not fit not-run (`session-leg-turns-unavailable`).
 	 */
 	turnsPerCase: 10,
+	/**
+	 * Turns one workflow leg may dispatch (GT1-11-11E1). Each workflow leg holds
+	 * a reservation of its own under this ceiling (a leg is its own subcase for
+	 * turns, as an E11 leg is); spend, calls and the deadline stay shared with
+	 * the case, so E09's ten turns are never widened.
+	 */
+	workflowTurnsPerLeg: 2,
 	caseSeconds: 120,
 	discoverySeconds: 30,
 	/** Wall-clock bound of one offline probe (GT1-11-10A). */
@@ -4480,6 +4510,8 @@ export interface PaidLegReceipt {
 	sessionConsumers: SessionConsumerReceipt[];
 	/** The utility consumer legs of an E09 fixture (GT1-11-11D1), each its own entry; empty otherwise. */
 	utilityLegs: UtilityLegReceipt[];
+	/** The workflow legs of an E09 fixture (GT1-11-11E1), each on its own reservation; empty otherwise. */
+	workflowLegs: WorkflowLegReceipt[];
 }
 
 export interface PaidExecutionContext {
@@ -5522,6 +5554,127 @@ function resolveLaunchCredential(
  * reservation is held; every turn is counted before it is sent and the leg
  * always settles or releases what it reserved.
  */
+/**
+ * Count one user turn and every billable call it may make on a held
+ * reservation, before the turn is sent: false refuses it unsent. A compaction
+ * or retry turn (`as`) draws one of its model rounds as that kind instead, and
+ * a retry after an uncertain effect is refused before anything is recorded.
+ * Shared by the paid leg and every workflow leg, so neither has its own rule.
+ */
+function drawReservedTurn(a: {
+	ledger: BudgetLedger;
+	reservation: SpendReservation;
+	config: QualificationConfig;
+	now: () => Date;
+	turnMs: () => number;
+	/** A local leg's pinned file, re-hashed per turn; null on an SSH leg (verified before and after it). */
+	pinnedFile: string | null;
+	n: number;
+	as?: 'compaction' | 'retry';
+}): { ok: true; draws: Record<BillableCallKind, number> } | { ok: false; reason: AdmissionReason } {
+	const { ledger, reservation, config, n, as } = a;
+	if (a.turnMs() <= 0)
+		return { ok: false, reason: paidReason('reservation-deadline-passed', `turn ${n}`) };
+	if (a.pinnedFile !== null && inspectExecutable(a.pinnedFile).sha256 !== config.binary.sha256)
+		return { ok: false, reason: paidReason('binary-hash-mismatch-at-spawn', `turn ${n}`) };
+	const perTurn = paidCallsPerTurn(config, reservation);
+	const needed = Object.values(perTurn).reduce((x, y) => x + y, 0);
+	if (
+		reservation.turnsUsed >= reservation.turnAllowance ||
+		ledger.turns >= ledger.limitTurns ||
+		reservation.callsUsed + needed > reservation.callAllowance ||
+		ledger.calls + needed > ledger.limitCalls
+	)
+		return { ok: false, reason: paidReason('turn-allowance-exhausted', `turn ${n}`) };
+	const draws = { ...perTurn };
+	if (as) {
+		draws['model-round']--;
+		draws[as]++;
+	}
+	// Checked before anything is recorded: a refused retry leaves the ledger untouched.
+	if (as === 'retry' && reservation.uncertainEffect)
+		return {
+			ok: false,
+			reason: paidReason('turn-allowance-refused', 'retry after an uncertain effect'),
+		};
+	const primary = config.allowedModels[0];
+	const side = config.spendBounds?.sideModels?.[0] ?? primary;
+	try {
+		recordUserTurn(ledger, reservation.id, a.now());
+		for (const kind of Object.keys(draws) as BillableCallKind[])
+			for (let i = 0; i < draws[kind]; i++)
+				recordBillableCall(
+					ledger,
+					reservation.id,
+					{ kind, model: kind === 'model-round' || kind === 'retry' ? primary : side },
+					a.now()
+				);
+	} catch (e) {
+		return { ok: false, reason: paidReason('turn-allowance-refused', (e as Error).message) };
+	}
+	return { ok: true, draws };
+}
+
+/**
+ * Settle or release a leg's reservation exactly once: nothing counted
+ * releases it, counted but never sent settles at zero, and only an exact
+ * observed charge for every sent turn settles; anything else (an unknown or
+ * partial charge, an uncertain end) stays uncertain, never zero.
+ */
+function settleLegReservation(
+	ledger: BudgetLedger,
+	reservation: SpendReservation,
+	sentTurns: number,
+	allTurns: readonly PaidTurnResult[],
+	uncertainWhy: string | null,
+	now: () => Date
+): NonNullable<PaidLegReceipt['settlement']> {
+	let settled: SpendReservation;
+	if (reservation.turnsUsed === 0 && reservation.callsUsed === 0 && !reservation.uncertainEffect)
+		settled = releaseReservation(ledger, reservation.id, now());
+	else if (sentTurns === 0)
+		settled = settleReservation(
+			ledger,
+			reservation.id,
+			{ kind: 'settled', actualUsd: 0, reason: 'counted-but-never-sent' },
+			now()
+		);
+	else {
+		const known = allTurns.map((t) => t.usage.costUsd).filter((n): n is number => n !== null);
+		const partialUsd = known.length ? known.reduce((a, b) => a + b, 0) : undefined;
+		const exact =
+			!uncertainWhy &&
+			allTurns.length === sentTurns &&
+			allTurns.every((t) => t.usage.status === 'exact' && t.usage.costUsd !== null);
+		if (exact)
+			settled = settleReservation(
+				ledger,
+				reservation.id,
+				{ kind: 'settled', actualUsd: partialUsd ?? 0, reason: 'observed-exact-usage' },
+				now()
+			);
+		else {
+			markUncertainEffect(ledger, reservation.id);
+			settled = settleReservation(
+				ledger,
+				reservation.id,
+				{
+					kind: 'uncertain',
+					...(partialUsd !== undefined ? { partialUsd } : {}),
+					reason: uncertainWhy ?? 'charge-unknown',
+				},
+				now()
+			);
+		}
+	}
+	return {
+		state: settled.state,
+		settledUsd: settled.settledUsd,
+		uncertainUsd: settled.uncertainUsd,
+		reason: settled.settlement?.reason ?? '',
+	};
+}
+
 async function executePaidLeg(
 	c: QualificationCase,
 	config: QualificationConfig,
@@ -5574,6 +5727,7 @@ async function runPaidLeg(
 		sessionLegs: [],
 		sessionConsumers: [],
 		utilityLegs: [],
+		workflowLegs: [],
 	};
 	const refuse = (id: string, detail: string, owner?: string) => {
 		receipt.reasons.push(paidReason(id, detail, owner));
@@ -5704,7 +5858,6 @@ async function runPaidLeg(
 
 	// Reserve before any dispatch.
 	const primary = config.allowedModels[0];
-	const side = config.spendBounds?.sideModels?.[0] ?? primary;
 	const models = [...new Set([primary, ...(config.spendBounds?.sideModels ?? [])])];
 	const reserved = reserveSpend(
 		ledger,
@@ -5747,51 +5900,22 @@ async function runPaidLeg(
 	 * refused by the ledger itself).
 	 */
 	const admitTurn = (n: number, as?: 'compaction' | 'retry'): boolean => {
-		if (turnMs() <= 0) {
-			receipt.reasons.push(paidReason('reservation-deadline-passed', `turn ${n}`));
+		const drawn = drawReservedTurn({
+			ledger,
+			reservation,
+			config,
+			now: ctx.now,
+			turnMs,
+			// Local: re-hashed per turn. SSH: the remote was verified read-only and pinned before the leg and is re-verified after it.
+			pinnedFile: ssh ? null : file,
+			n,
+			as,
+		});
+		if (!drawn.ok) {
+			receipt.reasons.push(drawn.reason);
 			return false;
 		}
-		// Local: re-hashed per turn. SSH: the remote was verified read-only and pinned before the leg and is re-verified after it.
-		if (!ssh && inspectExecutable(file).sha256 !== config.binary.sha256) {
-			receipt.reasons.push(paidReason('binary-hash-mismatch-at-spawn', `turn ${n}`));
-			return false;
-		}
-		const perTurn = paidCallsPerTurn(config, reservation);
-		const needed = Object.values(perTurn).reduce((a, b) => a + b, 0);
-		if (
-			reservation.turnsUsed >= reservation.turnAllowance ||
-			ledger.turns >= ledger.limitTurns ||
-			reservation.callsUsed + needed > reservation.callAllowance ||
-			ledger.calls + needed > ledger.limitCalls
-		) {
-			receipt.reasons.push(paidReason('turn-allowance-exhausted', `turn ${n}`));
-			return false;
-		}
-		const draws = { ...perTurn };
-		if (as) {
-			draws['model-round']--;
-			draws[as]++;
-		}
-		// Checked before anything is recorded: a refused retry leaves the ledger untouched.
-		if (as === 'retry' && reservation.uncertainEffect) {
-			receipt.reasons.push(paidReason('turn-allowance-refused', 'retry after an uncertain effect'));
-			return false;
-		}
-		try {
-			recordUserTurn(ledger, reservation.id, ctx.now());
-			for (const kind of Object.keys(draws) as BillableCallKind[])
-				for (let i = 0; i < draws[kind]; i++)
-					recordBillableCall(
-						ledger,
-						reservation.id,
-						{ kind, model: kind === 'model-round' || kind === 'retry' ? primary : side },
-						ctx.now()
-					);
-		} catch (e) {
-			receipt.reasons.push(paidReason('turn-allowance-refused', (e as Error).message));
-			return false;
-		}
-		callsDrawn = draws;
+		callsDrawn = drawn.draws;
 		return true;
 	};
 
@@ -6069,50 +6193,14 @@ async function runPaidLeg(
 		...receipt.sessionConsumers.flatMap((l) => l.turns),
 		...receipt.utilityLegs.flatMap((l) => l.turns),
 	];
-	let settled: SpendReservation;
-	if (reservation.turnsUsed === 0 && reservation.callsUsed === 0 && !reservation.uncertainEffect)
-		settled = releaseReservation(ledger, reservation.id, ctx.now());
-	else if (sentTurns === 0)
-		settled = settleReservation(
-			ledger,
-			reservation.id,
-			{ kind: 'settled', actualUsd: 0, reason: 'counted-but-never-sent' },
-			ctx.now()
-		);
-	else {
-		const known = allTurns.map((t) => t.usage.costUsd).filter((n): n is number => n !== null);
-		const partialUsd = known.length ? known.reduce((a, b) => a + b, 0) : undefined;
-		const exact =
-			!uncertainWhy &&
-			allTurns.length === sentTurns &&
-			allTurns.every((t) => t.usage.status === 'exact' && t.usage.costUsd !== null);
-		if (exact)
-			settled = settleReservation(
-				ledger,
-				reservation.id,
-				{ kind: 'settled', actualUsd: partialUsd ?? 0, reason: 'observed-exact-usage' },
-				ctx.now()
-			);
-		else {
-			markUncertainEffect(ledger, reservation.id);
-			settled = settleReservation(
-				ledger,
-				reservation.id,
-				{
-					kind: 'uncertain',
-					...(partialUsd !== undefined ? { partialUsd } : {}),
-					reason: uncertainWhy ?? 'charge-unknown',
-				},
-				ctx.now()
-			);
-		}
-	}
-	receipt.settlement = {
-		state: settled.state,
-		settledUsd: settled.settledUsd,
-		uncertainUsd: settled.uncertainUsd,
-		reason: settled.settlement?.reason ?? '',
-	};
+	receipt.settlement = settleLegReservation(
+		ledger,
+		reservation,
+		sentTurns,
+		allTurns,
+		uncertainWhy,
+		ctx.now
+	);
 
 	if (!reverify) receipt.binary.sha256After = inspectExecutable(file).sha256;
 	else {
@@ -6125,6 +6213,41 @@ async function runPaidLeg(
 		receipt.reasons.push(paidReason('binary-changed-during-leg', 'binary.path'));
 	// Every child of the leg has been stopped: reaping, stray files and changed resources.
 	if (observer) await observer.finish(graceMs);
+
+	// Workflow legs (E09): after the leg settled, each on a workflow reservation of its own.
+	if (fixture.workflowLegs?.length) {
+		const run = await runWorkflowLegs({
+			c,
+			config,
+			fixture,
+			capabilities: ctx.capabilities,
+			ledger,
+			plan,
+			account,
+			now: ctx.now,
+			workspace: ctx.workspace,
+			operatorHome: ctx.operatorHome,
+			binaryPath: file,
+			accountRoot: receipt.accountRoot,
+			launcher,
+			graceMs,
+			lifetime: ctx.lifetime,
+			turnTimeoutMs: ctx.turnTimeoutMs,
+			model: primary,
+			effort: (config.selection?.effort?.trim() ?? '') || null,
+			blocked: !fixtureTurnsPassed
+				? 'fixture-turns-not-passed'
+				: receipt.reasons.length
+					? 'leg-not-clean'
+					: null,
+			uncertain: uncertainWhy,
+		});
+		receipt.workflowLegs = run.legs;
+		receipt.spawned += run.spawned;
+		receipt.paidRequests += run.sent;
+		if (run.uncertainWhy)
+			receipt.reasons.push(paidReason(run.uncertainWhy, 'workflow leg', 'GT1-11-11E1'));
+	}
 	receipt.assertions = evaluatePaidAssertions(fixture, {
 		route: c.route,
 		turns: receipt.turns,
@@ -6145,7 +6268,8 @@ async function runPaidLeg(
 				  receipt.assertions.some((a) => a.outcome === 'failed') ||
 				  receipt.sessionLegs.some((l) => l.status === 'failed') ||
 				  receipt.sessionConsumers.some((l) => l.status === 'failed') ||
-				  receipt.utilityLegs.some((l) => l.status === 'failed')
+				  receipt.utilityLegs.some((l) => l.status === 'failed') ||
+				  receipt.workflowLegs.some((l) => l.status === 'failed')
 				? 'failed'
 				: 'passed';
 	return receipt;
@@ -7273,6 +7397,7 @@ const SESSION_CONSUMER_LEG_IDS: readonly string[] = SESSION_CONSUMER_LEGS.map((l
  * leg, GT1-11-11C1 otherwise.
  */
 function ownerOfLeg(leg: string): string {
+	if (WORKFLOW_LEG_IDS.includes(leg)) return 'GT1-11-11E1';
 	if (CHEAP_UTILITY_LEG_IDS.includes(leg)) return 'GT1-11-11D2';
 	if (UTILITY_LEG_IDS.includes(leg)) return 'GT1-11-11D1';
 	return SESSION_CONSUMER_LEG_IDS.includes(leg) ? 'GT1-11-11C2' : 'GT1-11-11C1';
@@ -8593,17 +8718,21 @@ const bridgedTurnClean = (
 	);
 };
 
-const utilitySameAccount = (s: SessionConsumerContext) => (dir: string | null) => {
-	if (!dir || !s.accountRoot) return false;
+/** Whether a planned account dir is the leg's owned account home (real paths compared). */
+function sameOwnedAccountDir(accountRoot: string | null, dir: string | null): boolean {
+	if (!dir || !accountRoot) return false;
 	try {
 		return (
 			normalizeFor('local', fs.realpathSync(dir)) ===
-			normalizeFor('local', fs.realpathSync(s.accountRoot))
+			normalizeFor('local', fs.realpathSync(accountRoot))
 		);
 	} catch {
 		return false;
 	}
-};
+}
+
+const utilitySameAccount = (s: SessionConsumerContext) => (dir: string | null) =>
+	sameOwnedAccountDir(s.accountRoot, dir);
 
 /**
  * wizard-structured: the production onboarding conversation manager and the
@@ -10032,6 +10161,1099 @@ async function runUtilityLegs(s: SessionConsumerContext): Promise<{
 }
 
 /** Bounds of one owned-home inspection; past either, the home cannot be vouched for and the verdict fails. */
+// ---------------------------------------------------------------------------
+// Workflow legs (GT1-11-11E1)
+// ---------------------------------------------------------------------------
+
+/** No task owns workflow legs against a remote home: documents, History and the reaping check are local. */
+export const SSH_WORKFLOW_LEGS_OWNER = 'unassigned-ssh-workflow-legs';
+/** The Auto Run turn port launches native headless prompt-file turns; no task owns an ACP workflow leg. */
+export const ACP_WORKFLOW_LEGS_OWNER = 'unassigned-acp-workflow-legs';
+/** The synthetic Grok agent every workflow leg runs as (History, activity and stats are keyed by it). */
+export const WORKFLOW_AGENT_ID = 'qualify-e09-workflow';
+/** A task leg's synthetic document: `<project>/.maestro/playbooks/<name>.md`. */
+export const WORKFLOW_DOCUMENT = 'qualify-autorun';
+/**
+ * The query source every Auto Run turn must carry. The task text says
+ * `auto-run`; the production vocabulary (`QuerySource`, a stable external
+ * contract read by tooling outside Maestro) names Auto Run `auto`, and that is
+ * what the planner stamps, so that is what is asserted.
+ */
+export const WORKFLOW_QUERY_SOURCE: QuerySource = 'auto';
+/** The most engine events a workflow leg keeps in memory. */
+const WORKFLOW_EVENT_CAP = 500;
+
+/** The assertions each workflow leg must evaluate; a leg missing one cannot pass. */
+export const WORKFLOW_ASSERTIONS: Readonly<Record<WorkflowLegId, readonly string[]>> =
+	Object.freeze({
+		'autorun-document': [
+			'tasks-ticked-after-success',
+			'planned-launch',
+			'query-source',
+			'progress-counts',
+			'history-entry',
+			'children-reaped',
+		],
+		'autorun-failed-turn': [
+			'turn-failed',
+			'document-restored',
+			'completed-zero',
+			'single-dispatch',
+			'children-reaped',
+		],
+		'autorun-cancel': ['stopped-mid-turn', 'child-gone', 'document-unchanged', 'no-retry'],
+		'autorun-goal': [
+			'single-iteration',
+			'planned-launch',
+			'query-source',
+			'completed-on-verdict',
+			'history-entry',
+			'children-reaped',
+		],
+	});
+
+const WORKFLOW_LEG_IDS: readonly string[] = Object.keys(WORKFLOW_ASSERTIONS);
+
+/** One turn the engine asked the turn port for, and what became of it (never prompt text). */
+export interface WorkflowDispatch {
+	purpose: string;
+	/** The leg-local turn number; null when the dispatch was never sent. */
+	turn: number | null;
+	/** Why the dispatch was never sent; null when it was. */
+	unsent: string | null;
+	planned: {
+		ok: boolean;
+		reason: string | null;
+		args: string[];
+		/** The account dir the plan hands the child (`GROK_HOME`). */
+		account: string | null;
+		permission: string | null;
+		promptVia: string | null;
+		target: string | null;
+		/** `MAESTRO_QUERY_SOURCE` in the planned environment. */
+		querySource: string | null;
+		model: string | null;
+		effort: string | null;
+		/** True when the plan resumes a native id (the forced failure resumes one nobody created). */
+		resumed: boolean;
+	};
+	nativeId: string | null;
+	exitCode: number | null;
+	stopRequested: boolean;
+	/** Descendant pids the production process-tree snapshot saw at a stop. */
+	descendants: number[];
+	/** Descendants still alive after the stop grace; empty when every one is gone. */
+	survivors: number[];
+	/** Whether the turn ran to a clean, successful end. */
+	clean: boolean;
+	/** Checked tasks of the leg's document just before the turn and just after it closed (task legs). */
+	checkedBefore: number | null;
+	checkedAfter: number | null;
+	outcome: string | null;
+}
+
+export interface WorkflowLegReceipt {
+	leg: WorkflowLegId;
+	/** not-run: refused before anything was written or sent; not-evaluated: an honest gap with an owner. */
+	status: 'not-run' | 'not-evaluated' | 'passed' | 'failed';
+	reasons: AdmissionReason[];
+	/** The leg's own workflow reservation on the shared ledger; null when none was held. */
+	reservationId: string | null;
+	settlement: PaidLegReceipt['settlement'];
+	turns: PaidTurnResult[];
+	dispatches: WorkflowDispatch[];
+	assertions: ConsumerAssertion[];
+	assertion: PaidAssertionOutcome;
+	/** Engine event counts and outcomes; never transcript text. */
+	observed: Record<string, unknown>;
+	/** sha256 of the document at dispatch and at the end, and of the History the leg wrote. */
+	digests: Record<string, string | null>;
+	/** The owned root (project, Maestro data dir, prompt files); null when nothing was written. */
+	root: string | null;
+	spawned: number;
+	paidRequests: number;
+}
+
+interface WorkflowLegContext {
+	c: QualificationCase;
+	config: QualificationConfig;
+	fixture: PaidFixture;
+	capabilities: HarnessCapabilities;
+	ledger: BudgetLedger;
+	/** The case plan each workflow leg's own plan is cut from. */
+	plan: ReservationPlan;
+	account: 'A' | 'B';
+	now: () => Date;
+	workspace: string;
+	operatorHome: string;
+	/** The pinned binary every launch plan names, re-hashed per turn. */
+	binaryPath: string;
+	accountRoot: string | null;
+	launcher: LegLauncher;
+	graceMs: number;
+	lifetime: CaseLifetime;
+	turnTimeoutMs?: number;
+	model: string;
+	effort: string | null;
+	/** Why no workflow leg may run (the leg's own turns did not pass cleanly); null when they may. */
+	blocked: string | null;
+	/** Why the leg left an effect uncertain; null when it did not. */
+	uncertain: string | null;
+}
+
+const workflowReason = (id: string, detail: string, owner = 'GT1-11-11E1') =>
+	paidReason(id, detail, owner);
+
+/**
+ * The reservation plan of one workflow leg: the case plan cut to the leg's own
+ * turns, its calls and worst case scaled with them. The leg reserves it under
+ * its own leg name, so its turns are its own subcase while spend, calls and the
+ * deadline stay shared with the case (and are checked against what the case
+ * already committed).
+ */
+export function workflowReservationPlan(plan: ReservationPlan, turns: number): ReservationPlan {
+	const scale = plan.turns > 0 ? turns / plan.turns : 0;
+	const worstCaseUsd = plan.worstCaseUsd === null ? null : roundUsd(plan.worstCaseUsd * scale);
+	const holdUsd =
+		plan.guarantee === 'worst-case-reservation'
+			? (worstCaseUsd ?? 0)
+			: worstCaseUsd !== null
+				? Math.min(worstCaseUsd, plan.effectiveLimits.budgetUsd)
+				: plan.effectiveLimits.budgetUsd;
+	return {
+		...plan,
+		turns,
+		calls: plan.callsPerTurn === null ? null : plan.callsPerTurn * turns,
+		worstCaseUsd,
+		holdUsd,
+	};
+}
+
+/** The agent error a failed workflow turn hands the engine, so a run that can pause parks on it. */
+function workflowAgentError(type: string | null, message: string): AgentError {
+	const known: readonly string[] = [
+		'auth_expired',
+		'token_exhaustion',
+		'rate_limited',
+		'network_error',
+		'agent_crashed',
+		'permission_denied',
+		'session_not_found',
+		'unknown',
+	];
+	return {
+		type: (type && known.includes(type) ? type : 'agent_crashed') as AgentErrorType,
+		message,
+		recoverable: false,
+		agentId: 'grok',
+		sessionId: WORKFLOW_AGENT_ID,
+		timestamp: Date.now(),
+	};
+}
+
+/** Checked tasks of a document on disk; null when it cannot be read. */
+function checkedTasksOf(file: string | null): number | null {
+	if (!file) return null;
+	try {
+		return countMarkdownTasks(fs.readFileSync(file, 'utf8')).checked;
+	} catch {
+		return null;
+	}
+}
+
+/** Wait (bounded) for every pid to be gone; the ones still alive after the grace. */
+async function survivorsAfter(pids: readonly number[], graceMs: number): Promise<number[]> {
+	const until = Date.now() + Math.max(0, graceMs);
+	let alive = pids.filter(pidAlive);
+	while (alive.length && Date.now() < until) {
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		alive = alive.filter(pidAlive);
+	}
+	return alive;
+}
+
+/**
+ * The engine's turn port over Grok. Each request is planned the way the CLI
+ * plans an Auto Run turn (the definition's batch and JSON args, the agent's
+ * model, effort and account through `applyAgentConfigOverrides()`, then
+ * `buildAgentLaunchPlan()` on the `cli` surface with the `auto` query source
+ * and the CLI's unattended permission rule), its prompt file written under the
+ * leg's owned root, and the exact planned argv sent through the leg's launcher
+ * in the owned project, counted first on the leg's workflow reservation. A
+ * dispatch past the leg's turns, of a purpose the leg does not run, or after an
+ * uncertain effect is refused unsent (and handed back as an agent error, so a
+ * run that pauses parks on it instead of dispatching again). A turn is stopped
+ * mid-stream only through the request's AbortSignal (the run control).
+ */
+function createWorkflowTurnPort(
+	w: WorkflowLegContext,
+	s: SessionLegContext,
+	r: WorkflowLegReceipt,
+	spec: WorkflowLegSpec,
+	roots: { root: string; project: string; document: string | null },
+	opts: {
+		purposes: readonly AutoRunTurnRequest['purpose'][];
+		/** Resume a native id nobody created, so the turn fails natively (autorun-failed-turn). */
+		forceFailure: boolean;
+		/** Called on the first streaming event of a turn (autorun-cancel stops the run there). */
+		onStreaming?: () => void;
+		/** Called after a refused dispatch, so the run can be stopped from outside. */
+		onRefused?: () => void;
+		/** The query source the launcher stamps into the child (set per dispatch from the plan). */
+		querySource: { value: string | null };
+	}
+) {
+	const def = getAgentDefinition('grok');
+	const envVar = getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME';
+	const control = { uncertainWhy: null as string | null };
+	let lastResponse = '';
+
+	const run = async (request: AutoRunTurnRequest): Promise<AutoRunTurnResult> => {
+		const d: WorkflowDispatch = {
+			purpose: request.purpose,
+			turn: null,
+			unsent: null,
+			planned: {
+				ok: false,
+				reason: null,
+				args: [],
+				account: null,
+				permission: null,
+				promptVia: null,
+				target: null,
+				querySource: null,
+				model: null,
+				effort: null,
+				resumed: false,
+			},
+			nativeId: null,
+			exitCode: null,
+			stopRequested: false,
+			descendants: [],
+			survivors: [],
+			clean: false,
+			checkedBefore: null,
+			checkedAfter: null,
+			outcome: null,
+		};
+		r.dispatches.push(d);
+		const refuse = (why: string): AutoRunTurnResult => {
+			d.unsent = why;
+			d.outcome = 'refused';
+			opts.onRefused?.();
+			return {
+				success: false,
+				error: `The qualification refused the dispatch: ${why}`,
+				outcome: 'crashed',
+				agentError: workflowAgentError('unknown', `qualification refused: ${why}`),
+			};
+		};
+		if (r.dispatches.length > spec.maxTurns)
+			return refuse(`leg-turns-exhausted:${r.dispatches.length}>${spec.maxTurns}`);
+		if (!opts.purposes.includes(request.purpose)) return refuse(`purpose-${request.purpose}`);
+		if (control.uncertainWhy) return refuse(`uncertain-prior-effect:${control.uncertainWhy}`);
+		if (!def || !w.accountRoot) return refuse('definition-or-account-absent');
+		const resumeId = opts.forceFailure ? randomUUID() : (request.resumeSessionId ?? null);
+		let planned: ReturnType<typeof buildAgentLaunchPlan>;
+		try {
+			const base = [
+				...(def.batchModePrefix ?? []),
+				...(def.batchModeArgs ?? []),
+				...(def.jsonOutputArgs ?? []),
+				...(resumeId && def.resumeArgs ? def.resumeArgs(resumeId) : []),
+			];
+			// The agent's own model, effort and account, never the operator's agent config.
+			const resolution = applyAgentConfigOverrides(def, base, {
+				agentConfigValues: {},
+				sessionCustomModel: request.model,
+				sessionCustomEffort: request.effort,
+				sessionCustomEnvVars: { [envVar]: w.accountRoot },
+				readOnlyMode: false,
+			});
+			// The CLI's unattended rule (`cliRequestedPermissionMode`): full where a full-access flag is carried.
+			const fullAccess = fullAccessFlagsOf('grok');
+			planned = buildAgentLaunchPlan({
+				surface: 'cli',
+				agent: { ...def, capabilities: getAgentCapabilities('grok') },
+				command: w.binaryPath,
+				args: resolution.args,
+				cwd: roots.project,
+				prompt: request.prompt,
+				// The prompt file lands in the leg's owned root, never the shared tmpdir.
+				promptFileDestination: {
+					owner: 'local',
+					path: path.join(roots.root, 'prompts', `maestro-prompt-${randomUUID()}.json`),
+				},
+				sessionCustomEnvVars: resolution.effectiveCustomEnvVars,
+				readOnlyMode: false,
+				permissionMode: resolution.args.some((a) => fullAccess.has(a)) ? 'full' : 'standard',
+				batchMode: true,
+				isResuming: !!resumeId,
+				querySource: WORKFLOW_QUERY_SOURCE,
+				isWindowsHost: isWindows(),
+			});
+		} catch (e) {
+			return refuse(`plan-threw:${errorText(e)}`);
+		}
+		if (!planned.ok) {
+			d.planned.reason = planned.reason;
+			return refuse(planned.reason);
+		}
+		const plan = planned.plan;
+		d.planned = {
+			ok: true,
+			reason: null,
+			args: [...plan.args],
+			account: plan.envVars?.[envVar] ?? null,
+			permission: plan.permission.requested ?? null,
+			promptVia: plan.prompt.via,
+			target: plan.target.kind,
+			querySource: plan.env?.[QUERY_SOURCE_ENV_VAR] ?? null,
+			model: argValue(plan.args, '-m'),
+			effort: argValue(plan.args, '--reasoning-effort'),
+			resumed: !!resumeId,
+		};
+		if (plan.target.kind !== 'local') return refuse('plan-not-local');
+		if (plan.prompt.via !== 'file') return refuse(`prompt-via-${plan.prompt.via}`);
+		const artifact = plan.prompt.artifact;
+		if (
+			artifact.owner !== 'local' ||
+			!isPathAtOrUnderRoot(normalizeFor('local', artifact.path), normalizeFor('local', roots.root))
+		)
+			return refuse('prompt-file-outside-root');
+		try {
+			fs.mkdirSync(path.dirname(artifact.path), { recursive: true, mode: 0o700 });
+			fs.writeFileSync(artifact.path, artifact.content, {
+				encoding: artifact.encoding,
+				mode: artifact.mode,
+				flag: artifact.flag,
+			});
+		} catch (e) {
+			return refuse(`prompt-file-unwritable:${errorText(e)}`);
+		}
+		d.checkedBefore = checkedTasksOf(roots.document);
+		const text: string[] = [];
+		let textChars = 0;
+		let streamed = false;
+		opts.querySource.value = d.planned.querySource;
+		let sent: Awaited<ReturnType<typeof sendSessionTurn>>;
+		try {
+			sent = await sendSessionTurn(s, r, { prompt: request.prompt, expect: '' }, resumeId, {
+				argv: plan.args,
+				onEvent: (ev) => {
+					if (!streamed && streaming(ev)) {
+						streamed = true;
+						opts.onStreaming?.();
+					}
+					if (ev.type !== 'text' || ev.isReasoning || !ev.text) return;
+					if (textChars >= UTILITY_REPLY_MAX_CHARS) return;
+					const piece = ev.text.slice(0, UTILITY_REPLY_MAX_CHARS - textChars);
+					text.push(piece);
+					textChars += piece.length;
+				},
+				// The run control's signal is the only stop: never a stop of the harness's own choosing.
+				stopWhen: () => request.signal?.aborted === true,
+			});
+		} finally {
+			fs.rmSync(artifact.path, { force: true });
+			opts.querySource.value = null;
+		}
+		d.checkedAfter = checkedTasksOf(roots.document);
+		if (sent.uncertainWhy) control.uncertainWhy ??= sent.uncertainWhy;
+		const turn = sent.run;
+		if (!turn) {
+			d.unsent = 'turn-unsent';
+			d.outcome = 'refused';
+			return {
+				success: false,
+				error: 'The qualification turn was not sent.',
+				outcome: 'crashed',
+				agentError: workflowAgentError('unknown', 'qualification turn unsent'),
+			};
+		}
+		d.turn = turn.turn.turn;
+		d.nativeId = turn.turn.sessionId;
+		d.exitCode = turn.turn.exitCode;
+		d.stopRequested = turn.stopRequested;
+		d.descendants = [...turn.descendants];
+		d.survivors = await survivorsAfter(turn.descendants, w.graceMs);
+		d.clean =
+			!turn.neverRan &&
+			!turn.stopRequested &&
+			!turn.turn.timedOut &&
+			!turn.turn.spawnError &&
+			turn.turn.exitCode === 0 &&
+			turn.turn.terminal === 'success' &&
+			!turn.turn.stdout.truncated &&
+			!turn.turn.stderr.truncated;
+		const response = text.join('');
+		lastResponse = response;
+		const agentSessionId = turn.turn.sessionId ?? undefined;
+		if (turn.stopRequested) {
+			d.outcome = 'interrupted';
+			return { success: false, response, agentSessionId, outcome: 'interrupted' };
+		}
+		if (d.clean) {
+			d.outcome = 'completed';
+			return { success: true, response, agentSessionId, outcome: 'completed' };
+		}
+		d.outcome = 'crashed';
+		const why = turn.errorType ?? (turn.turn.timedOut ? 'turn-timeout' : 'turn-failed');
+		return {
+			success: false,
+			response,
+			agentSessionId,
+			error: `The Grok turn failed: ${why}`,
+			outcome: 'crashed',
+			agentError: workflowAgentError(turn.errorType, `Grok turn failed: ${why}`),
+		};
+	};
+	return { run, control, lastResponse: () => lastResponse };
+}
+
+/** Close a workflow leg: passed only when every required assertion was evaluated and passed. */
+function settleWorkflowLeg(r: WorkflowLegReceipt, problems: string[]): WorkflowLegReceipt {
+	if (r.reasons.length && r.spawned === 0 && !r.assertions.length && !problems.length) {
+		r.status = 'not-run';
+		r.assertion = {
+			id: r.leg,
+			outcome: 'not-evaluated',
+			detail: r.reasons.map((x) => x.id).join('; '),
+			owner: 'GT1-11-11E1',
+		};
+		return r;
+	}
+	const required = WORKFLOW_ASSERTIONS[r.leg];
+	const all = [
+		...r.reasons.map((x) => x.id),
+		...problems,
+		...r.assertions.filter((a) => a.outcome === 'failed').map((a) => `failed:${a.id}`),
+		...required
+			.filter((id) => !r.assertions.some((a) => a.id === id))
+			.map((id) => `assertion-not-evaluated:${id}`),
+	];
+	r.status = all.length ? 'failed' : 'passed';
+	r.assertion = {
+		id: r.leg,
+		outcome: all.length ? 'failed' : 'passed',
+		detail: all.join('; ') || `${required.length} assertions passed`,
+	};
+	return r;
+}
+
+/**
+ * One workflow leg: owned roots, its own workflow reservation, the library
+ * engine with the production run control over the turn port, then every
+ * assertion from what the engine, the documents, History and the turns show.
+ * The reservation is settled exactly once whatever happens. Returns the
+ * uncertainty a turn left (null when none did).
+ */
+async function runWorkflowLeg(
+	spec: WorkflowLegSpec,
+	w: WorkflowLegContext,
+	r: WorkflowLegReceipt,
+	problems: string[]
+): Promise<string | null> {
+	const assert = (id: string, ok: boolean, detail: string): boolean => {
+		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+		return ok;
+	};
+	const made = prepareConsumerRoot(w.c, w.config, `workflow-${spec.id}`, {
+		workspace: w.workspace,
+		operatorHome: w.operatorHome,
+	});
+	if ('refused' in made) {
+		r.reasons.push(workflowReason(made.refused, made.detail));
+		return null;
+	}
+	r.root = made.root;
+	const project = path.join(made.root, 'project');
+	const dataDir = path.join(made.root, 'maestro-data');
+	const folder = path.join(project, '.maestro', 'playbooks');
+	for (const dir of [project, dataDir, folder]) fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const documentFile = spec.goal ? null : path.join(folder, `${WORKFLOW_DOCUMENT}.md`);
+	let dispatchContent = '';
+	if (documentFile) {
+		dispatchContent = [
+			'# Qualify E09 Auto Run',
+			'',
+			'Synthetic qualification document. Work only inside the working directory.',
+			'',
+			...spec.tasks.map((t) => `- [ ] ${t}`),
+			'',
+		].join('\n');
+		writeOwned(documentFile, dispatchContent);
+		r.digests.documentAtDispatch = sha256Of(Buffer.from(dispatchContent));
+	}
+
+	// The leg's own workflow reservation: its turns under the per-leg ceiling, spend and calls shared with the case.
+	const legName = `workflow:${spec.id}`;
+	const reserved = reserveSpend(
+		w.ledger,
+		w.config,
+		{
+			caseId: w.c.caseId,
+			leg: legName,
+			provider: 'grok',
+			account: w.account,
+			endpoint: w.config.allowedEndpoints[0] ?? '',
+			models: [...new Set([w.model, ...(w.config.spendBounds?.sideModels ?? [])])],
+			target: w.c.target,
+			sshTarget: null,
+			plan: workflowReservationPlan(w.plan, spec.maxTurns),
+		},
+		w.now()
+	);
+	if (!reserved.ok) {
+		r.reasons.push(...reserved.reasons);
+		return null;
+	}
+	const reservation = reserved.reservation;
+	r.reservationId = reservation.id;
+	const ceilingMs = HARNESS_CEILINGS.caseSeconds * 1000;
+	const turnMs = () =>
+		Math.min(
+			positiveFinite(w.turnTimeoutMs) ? w.turnTimeoutMs : ceilingMs,
+			ceilingMs,
+			Date.parse(reservation.deadlineAt) - w.now().getTime()
+		);
+	let drawn = emptyCalls();
+	let turnNo = 0;
+	const querySource = { value: null as string | null };
+	const s: SessionLegContext = {
+		c: w.c,
+		fixture: w.fixture,
+		capabilities: w.capabilities,
+		blocked: null,
+		cwd: project,
+		accountRoot: w.accountRoot,
+		mainTurns: [],
+		nextTurn: () => ++turnNo,
+		admit: (n, as) => {
+			const d = drawReservedTurn({
+				ledger: w.ledger,
+				reservation,
+				config: w.config,
+				now: w.now,
+				turnMs,
+				pinnedFile: w.binaryPath,
+				n,
+				as,
+			});
+			if (!d.ok) {
+				r.reasons.push(d.reason);
+				return false;
+			}
+			drawn = d.draws;
+			return true;
+		},
+		remainingTurns: () =>
+			Math.min(
+				reservation.turnAllowance - reservation.turnsUsed,
+				w.ledger.limitTurns - w.ledger.turns
+			),
+		callsByKind: () => ({ ...reservation.callsByKind }),
+		callsDrawn: () => drawn,
+		baselineCalls: () => paidCallsPerTurn(w.config, reservation),
+		// The child runs in the owned project and carries the planned query source.
+		launcher: async (argv) => {
+			const built = await w.launcher(argv);
+			if ('refused' in built) return built;
+			return {
+				...built,
+				cwd: project,
+				env: {
+					...built.env,
+					...(querySource.value ? { [QUERY_SOURCE_ENV_VAR]: querySource.value } : {}),
+				},
+			};
+		},
+		// Never used: every workflow turn carries the argv its launch plan built.
+		nativeArgv: () => [],
+		turnMs,
+		graceMs: w.graceMs,
+		lifetime: w.lifetime,
+	};
+
+	let uncertainWhy: string | null = null;
+	try {
+		const [playbookEngine, goalEngine, runControl, policies, selection, localDocuments, prompts] =
+			await Promise.all([
+				import('../../src/shared/maestro-lib/autorun/run-playbook'),
+				import('../../src/shared/maestro-lib/autorun/run-goal'),
+				import('../../src/shared/maestro-lib/autorun/run-control'),
+				import('../../src/shared/maestro-lib/autorun/policy'),
+				import('../../src/shared/maestro-lib/autorun/task-selection'),
+				import('../../src/shared/maestro-lib/runtime/local-documents'),
+				import('../../src/shared/maestro-lib/prompts/load'),
+			]);
+		const abort = new AbortController();
+		const rc = runControl.createRunController({
+			clock: { now: () => Date.now() },
+			autoResume: null,
+		});
+		const pauses: string[] = [];
+		// Nobody waits on a qualification run: a pause is answered `abort` at once, never left waiting.
+		const controller: AutoRunController = {
+			stopRequested: () => rc.stopRequested(),
+			pausedMs: () => rc.pausedMs(),
+			awaitResolution: (pause) => {
+				pauses.push(pause.kind);
+				const answer = rc.awaitResolution(pause);
+				rc.resolve('abort');
+				return answer;
+			},
+		};
+		const stopRun = () => {
+			rc.requestStop();
+			abort.abort();
+		};
+		const port = createWorkflowTurnPort(
+			w,
+			s,
+			r,
+			spec,
+			{ root: made.root, project, document: documentFile },
+			{
+				purposes: spec.goal ? ['goal-iteration'] : ['task'],
+				forceFailure: spec.id === 'autorun-failed-turn',
+				onStreaming: spec.id === 'autorun-cancel' ? stopRun : undefined,
+				// A refused dispatch past the leg's turns stops the run; it never spins.
+				onRefused: () => {
+					if (r.dispatches.length > spec.maxTurns) rc.requestStop();
+				},
+				querySource,
+			}
+		);
+		const loader = prompts.createPromptLoader({
+			bundledPromptsDir: path.join(w.workspace, 'src', 'prompts'),
+			// The owned data dir holds no customizations, so every prompt is the bundled one.
+			customizationsFile: path.join(dataDir, 'core-prompts-customizations.json'),
+		});
+		const loadPrompt = async (id: string): Promise<string> => {
+			const text = loader.get(id);
+			if (text === undefined) throw new Error(`The prompt "${id}" could not be loaded.`);
+			return text;
+		};
+		const documents = localDocuments.createLocalDocuments();
+		const history: HistoryEntry[] = [];
+		const historyFile = path.join(dataDir, 'history', `${WORKFLOW_AGENT_ID}.jsonl`);
+		const statsRuns: Array<{
+			id: string;
+			tasksTotal: number;
+			ended: number | null;
+			tasks: number;
+		}> = [];
+		const activity: string[] = [];
+		const ownedFolder = (dir: string) =>
+			isPathAtOrUnderRoot(normalizeFor('local', path.resolve(dir)), normalizeFor('local', project));
+		const deps: AutoRunDeps = {
+			turns: { run: port.run },
+			documents: {
+				read: (dir, name) =>
+					ownedFolder(dir) ? documents.read(dir, name) : { content: '', unchecked: 0, checked: 0 },
+				readTasks: (dir, name) =>
+					ownedFolder(dir) ? documents.readTasks(dir, name) : { content: '', tasks: [] },
+				write: (dir, file, content) => {
+					if (!ownedFolder(path.join(dir, file)))
+						throw new Error('The qualification writes only inside the owned project.');
+					documents.write(dir, file, content);
+				},
+				uncheckAll: documents.uncheckAll,
+			},
+			stats: {
+				startRun: (run) => {
+					const id = `qualify-stats-${statsRuns.length + 1}`;
+					statsRuns.push({ id, tasksTotal: run.tasksTotal, ended: null, tasks: 0 });
+					return id;
+				},
+				recordTask: (id) => {
+					const run = statsRuns.find((x) => x.id === id);
+					if (run) run.tasks++;
+				},
+				endRun: (id, _ms, completed) => {
+					const run = statsRuns.find((x) => x.id === id);
+					if (run) run.ended = completed;
+				},
+			},
+			history: {
+				append: (entry) => {
+					history.push(entry);
+					fs.mkdirSync(path.dirname(historyFile), { recursive: true, mode: 0o700 });
+					fs.appendFileSync(historyFile, `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+				},
+				readAll: (agentId) => history.filter((e) => e.sessionId === agentId),
+			},
+			prompts: {
+				get: (id) => loadPrompt(id),
+				taskSelectionBlock: (mode, segment) =>
+					selection.buildTaskSelectionBlock(loadPrompt, mode, segment),
+			},
+			environment: {
+				gitBranch: () => undefined,
+				isGitRepo: () => false,
+				groupName: () => undefined,
+			},
+			activity: {
+				begin: (entry) => activity.push(`begin:${entry.agentId}`),
+				end: (agentId) => activity.push(`end:${agentId}`),
+			},
+			clock: { now: () => Date.now() },
+			log: { autorun: () => undefined, warn: () => undefined },
+			// The desktop rules with nobody to wait for: an error parks the run and is answered abort.
+			policy: { ...policies.DESKTOP_AUTORUN_POLICY, autoResume: null, checkpointCommits: false },
+			controller,
+		};
+		const envVar = getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME';
+		const session: SessionInfo = {
+			id: WORKFLOW_AGENT_ID,
+			name: 'Qualify E09 Workflow',
+			toolType: 'grok',
+			cwd: project,
+			projectRoot: project,
+			autoRunFolderPath: folder,
+			customModel: w.model,
+			...(w.effort ? { customEffort: w.effort } : {}),
+			customEnvVars: { [envVar]: w.accountRoot! },
+		};
+		const events: AutoRunEvent[] = [];
+		const collect = async (stream: AsyncGenerator<AutoRunEvent>) => {
+			for await (const ev of stream) if (events.length < WORKFLOW_EVENT_CAP) events.push(ev);
+		};
+		const goalConfig: GoalRunConfig | null = spec.goal
+			? { goal: spec.goal.goal, exitCriteria: spec.goal.exitCriteria, maxIterations: 1 }
+			: null;
+		if (goalConfig)
+			await collect(
+				goalEngine.runGoal(session, goalConfig, { writeHistory: true, signal: abort.signal }, deps)
+			);
+		else
+			await collect(
+				playbookEngine.runPlaybook(
+					session,
+					{
+						id: `qualify-${spec.id}`,
+						name: `Qualify ${spec.id}`,
+						createdAt: 0,
+						updatedAt: 0,
+						documents: [{ filename: WORKFLOW_DOCUMENT, resetOnCompletion: false }],
+						loopEnabled: false,
+						prompt: '',
+					},
+					folder,
+					// Desktop policy reads the History line from the task's own answer: no synopsis turn.
+					{ writeHistory: true, signal: abort.signal },
+					deps
+				)
+			);
+		uncertainWhy = port.control.uncertainWhy;
+
+		// What the engine, the document, History and the turns show.
+		const count = (type: string) => events.filter((e) => e.type === type).length;
+		const last = (type: string) => [...events].reverse().find((e) => e.type === type);
+		const finalContent = documentFile ? fs.readFileSync(documentFile, 'utf8') : null;
+		const finalCounts = finalContent === null ? null : countMarkdownTasks(finalContent);
+		r.digests.documentFinal = finalContent === null ? null : sha256Of(Buffer.from(finalContent));
+		r.digests.history = fs.existsSync(historyFile) ? sha256Of(fs.readFileSync(historyFile)) : null;
+		const sentDispatches = r.dispatches.filter((d) => d.turn !== null);
+		const nativeIds = sentDispatches.map((d) => d.nativeId).filter((x): x is string => !!x);
+		const complete = last('complete') ?? last('goal_complete');
+		r.observed = {
+			events: Object.fromEntries([...new Set(events.map((e) => e.type))].map((t) => [t, count(t)])),
+			pauses,
+			activity,
+			stats: statsRuns,
+			history: history.length,
+			complete: complete
+				? {
+						success: complete.success ?? null,
+						totalTasksCompleted: complete.totalTasksCompleted ?? null,
+						stopped: complete.stopped ?? null,
+						exitReason: complete.exitReason ?? null,
+					}
+				: null,
+			finalCounts,
+		};
+		const reaped = r.turns.every((t) => !t.timedOut && (t.exitCode !== null || t.signal !== null));
+		const survivors = r.dispatches.flatMap((d) => d.survivors);
+		const childrenReaped = () =>
+			assert(
+				'children-reaped',
+				reaped && !survivors.length && sentDispatches.length > 0,
+				`turns=${r.turns.length} closed=${reaped} survivors=${survivors.length}`
+			);
+		const plannedLaunch = () => {
+			const bad = sentDispatches.flatMap((d) => {
+				const out: string[] = [];
+				if (!d.planned.ok) out.push('plan');
+				if (d.planned.target !== 'local') out.push('target');
+				if (d.planned.promptVia !== 'file') out.push('prompt-via');
+				if (!sameOwnedAccountDir(w.accountRoot, d.planned.account)) out.push('account');
+				if (d.planned.model !== w.model) out.push('model');
+				if (d.planned.effort !== w.effort) out.push('effort');
+				if (d.planned.permission !== 'full') out.push('permission');
+				return out.map((x) => `turn${d.turn}:${x}`);
+			});
+			assert(
+				'planned-launch',
+				sentDispatches.length > 0 && !bad.length,
+				bad.join(',') || `${sentDispatches.length} planned on the owned account, model and effort`
+			);
+			assert(
+				'query-source',
+				sentDispatches.length > 0 &&
+					sentDispatches.every((d) => d.planned.querySource === WORKFLOW_QUERY_SOURCE),
+				sentDispatches.map((d) => `turn${d.turn}=${d.planned.querySource ?? 'none'}`).join(',')
+			);
+		};
+
+		if (spec.id === 'autorun-document') {
+			const ticks = sentDispatches.map((d) =>
+				d.checkedBefore === null || d.checkedAfter === null
+					? null
+					: d.checkedAfter - d.checkedBefore
+			);
+			const tickedOnlyOnSuccess = sentDispatches.every((d, i) => ticks[i] === (d.clean ? 1 : 0));
+			assert(
+				'tasks-ticked-after-success',
+				r.dispatches.length === spec.tasks.length &&
+					sentDispatches.length === spec.tasks.length &&
+					sentDispatches.every((d) => d.clean) &&
+					tickedOnlyOnSuccess &&
+					finalCounts?.checked === spec.tasks.length &&
+					finalCounts?.unchecked === 0,
+				`dispatches=${r.dispatches.length} clean=${sentDispatches.filter((d) => d.clean).length} ticks=${ticks.join('/')} final=${finalCounts?.checked}/${finalCounts?.unchecked}`
+			);
+			plannedLaunch();
+			const taskCompletes = events.filter((e) => e.type === 'task_complete');
+			assert(
+				'progress-counts',
+				count('document_start') === 1 &&
+					last('document_start')?.taskCount === spec.tasks.length &&
+					taskCompletes.length === spec.tasks.length &&
+					taskCompletes.every((e) => e.success === true) &&
+					complete?.success === true &&
+					complete?.totalTasksCompleted === spec.tasks.length &&
+					statsRuns.length === 1 &&
+					statsRuns[0].ended === spec.tasks.length,
+				`taskCompletes=${taskCompletes.length} total=${String(complete?.totalTasksCompleted)} stats=${statsRuns[0]?.ended ?? 'none'}`
+			);
+			const taskEntries = history.filter(
+				(e) => !!e.agentSessionId && nativeIds.includes(e.agentSessionId)
+			);
+			assert(
+				'history-entry',
+				nativeIds.length === spec.tasks.length &&
+					taskEntries.length === spec.tasks.length &&
+					taskEntries.every((e) => e.success !== false && e.sessionId === WORKFLOW_AGENT_ID),
+				`entries=${history.length} taskEntries=${taskEntries.length}`
+			);
+			childrenReaped();
+		} else if (spec.id === 'autorun-failed-turn') {
+			const only = sentDispatches[0];
+			assert(
+				'turn-failed',
+				sentDispatches.length === 1 && !!only && !only.clean && !only.stopRequested,
+				`sent=${sentDispatches.length} outcome=${only?.outcome ?? 'none'} exit=${String(only?.exitCode)} resumed=${String(only?.planned.resumed)}`
+			);
+			assert(
+				'document-restored',
+				r.digests.documentFinal === r.digests.documentAtDispatch,
+				`final=${finalCounts?.checked}/${finalCounts?.unchecked}`
+			);
+			const taskCompletes = events.filter((e) => e.type === 'task_complete');
+			assert(
+				'completed-zero',
+				complete?.totalTasksCompleted === 0 &&
+					taskCompletes.length === 1 &&
+					taskCompletes[0].success === false &&
+					(statsRuns[0]?.ended ?? 0) === 0,
+				`total=${String(complete?.totalTasksCompleted)} taskCompletes=${taskCompletes.length}`
+			);
+			assert(
+				'single-dispatch',
+				r.dispatches.length === 1,
+				`dispatches=${r.dispatches.length} pauses=${pauses.join(',')}`
+			);
+			childrenReaped();
+		} else if (spec.id === 'autorun-cancel') {
+			const only = sentDispatches[0];
+			assert(
+				'stopped-mid-turn',
+				sentDispatches.length === 1 &&
+					!!only &&
+					only.stopRequested &&
+					only.outcome === 'interrupted' &&
+					r.turns[0]?.terminal === 'none' &&
+					complete?.stopped === true,
+				`sent=${sentDispatches.length} stop=${String(only?.stopRequested)} terminal=${r.turns[0]?.terminal ?? 'none'} stopped=${String(complete?.stopped)}`
+			);
+			assert(
+				'child-gone',
+				!!only && reaped && only.survivors.length === 0,
+				`closed=${reaped} descendants=${only?.descendants.length ?? 0} survivors=${only?.survivors.length ?? 0}`
+			);
+			assert(
+				'document-unchanged',
+				r.digests.documentFinal === r.digests.documentAtDispatch,
+				`final=${finalCounts?.checked}/${finalCounts?.unchecked}`
+			);
+			assert('no-retry', r.dispatches.length === 1, `dispatches=${r.dispatches.length}`);
+		} else {
+			const only = sentDispatches[0];
+			assert(
+				'single-iteration',
+				r.dispatches.length === 1 &&
+					sentDispatches.length === 1 &&
+					only?.purpose === 'goal-iteration' &&
+					count('goal_iteration_start') === 1,
+				`dispatches=${r.dispatches.map((d) => d.purpose).join(',')} iterations=${count('goal_iteration_start')}`
+			);
+			plannedLaunch();
+			// The verdict recomputed from the turn's own answer with the production rules.
+			const goal = goalConfig!;
+			const markers = parseGoalMarkers(port.lastResponse());
+			const verdict = only?.clean
+				? evaluateGoalExit(
+						[
+							{
+								iteration: 1,
+								progress: markers.progress ?? 0,
+								rationale: markers.rationale,
+								complete: markers.complete,
+								deadlock: markers.deadlock,
+								deadlockReason: markers.deadlockReason,
+							},
+						],
+						goal
+					)
+				: null;
+			const verdictReason = verdict?.action === 'stop' ? verdict.reason : 'none';
+			assert(
+				'completed-on-verdict',
+				verdictReason === 'completed' &&
+					complete?.exitReason === 'completed' &&
+					complete?.success === true,
+				`verdict=${verdictReason} exitReason=${String(complete?.exitReason)} success=${String(complete?.success)}`
+			);
+			const iterationEntries = history.filter(
+				(e) => !!e.agentSessionId && nativeIds.includes(e.agentSessionId)
+			);
+			assert(
+				'history-entry',
+				iterationEntries.length === 1 && history.length >= 3,
+				`entries=${history.length} iterationEntries=${iterationEntries.length}`
+			);
+			childrenReaped();
+		}
+	} catch (e) {
+		problems.push(`${spec.id}-engine-threw: ${errorText(e)}`);
+	} finally {
+		r.settlement = settleLegReservation(
+			w.ledger,
+			reservation,
+			r.paidRequests,
+			r.turns,
+			uncertainWhy,
+			w.now
+		);
+	}
+	return uncertainWhy;
+}
+
+/**
+ * The workflow legs of an E09 leg, after the leg settled, each on a workflow
+ * reservation of its own on the shared ledger, against owned roots only. An
+ * uncertain effect stops every later leg; a leg already run is never re-run.
+ */
+async function runWorkflowLegs(w: WorkflowLegContext): Promise<{
+	legs: WorkflowLegReceipt[];
+	spawned: number;
+	sent: number;
+	uncertainWhy: string | null;
+}> {
+	const legs: WorkflowLegReceipt[] = [];
+	let spawned = 0;
+	let sent = 0;
+	let uncertainWhy: string | null = null;
+	for (const spec of w.fixture.workflowLegs ?? []) {
+		const owner = 'GT1-11-11E1';
+		const r: WorkflowLegReceipt = {
+			leg: spec.id,
+			status: 'not-run',
+			reasons: [],
+			reservationId: null,
+			settlement: null,
+			turns: [],
+			dispatches: [],
+			assertions: [],
+			assertion: { id: spec.id, outcome: 'not-evaluated', detail: '', owner },
+			observed: {},
+			digests: {},
+			root: null,
+			spawned: 0,
+			paidRequests: 0,
+		};
+		const gap = (detail: string, gapOwner: string) => {
+			r.status = 'not-evaluated';
+			r.assertion = { id: spec.id, outcome: 'not-evaluated', detail, owner: gapOwner };
+		};
+		const uncertain = w.uncertain ?? uncertainWhy;
+		const legName = `workflow:${spec.id}`;
+		const prior = w.ledger.reservations.filter(
+			(x) => x.caseId === w.c.caseId && x.leg === legName && x.state !== 'released'
+		);
+		if (!w.capabilities.workflowLegs)
+			r.reasons.push(workflowReason('workflow-legs-unimplemented', spec.id, owner));
+		else if (w.blocked) r.reasons.push(workflowReason(w.blocked, spec.id, owner));
+		else if (uncertain) r.reasons.push(workflowReason('uncertain-prior-effect', uncertain, owner));
+		else if (prior.some((x) => x.state === 'uncertain' || x.uncertainEffect))
+			r.reasons.push(workflowReason('uncertain-prior-effect', legName, owner));
+		else if (prior.length) r.reasons.push(workflowReason('leg-already-run', legName, owner));
+		else if (w.c.target === 'ssh')
+			gap(
+				'the Auto Run documents, History and reaping checks are local; no task owns an SSH workflow leg',
+				SSH_WORKFLOW_LEGS_OWNER
+			);
+		else if (w.c.route !== 'native-headless')
+			gap(
+				'the Auto Run turn port launches native headless prompt-file turns only',
+				ACP_WORKFLOW_LEGS_OWNER
+			);
+		else if (!w.accountRoot) r.reasons.push(workflowReason('account-root-unknown', spec.id, owner));
+		else if (spec.maxTurns < 1 || spec.maxTurns > HARNESS_CEILINGS.workflowTurnsPerLeg)
+			r.reasons.push(
+				workflowReason(
+					'workflow-turns-outside-ceiling',
+					`${spec.maxTurns} not in 1..${HARNESS_CEILINGS.workflowTurnsPerLeg}`,
+					owner
+				)
+			);
+		if (r.reasons.length) {
+			r.assertion.detail = r.reasons.map((x) => x.id).join('; ');
+			legs.push(r);
+			continue;
+		}
+		if (r.status === 'not-evaluated') {
+			legs.push(r);
+			continue;
+		}
+		const problems: string[] = [];
+		let why: string | null = null;
+		try {
+			why = await runWorkflowLeg(spec, w, r, problems);
+		} catch (e) {
+			problems.push(`${spec.id}-threw: ${errorText(e)}`);
+		}
+		settleWorkflowLeg(r, problems);
+		spawned += r.spawned;
+		sent += r.paidRequests;
+		if (why) uncertainWhy = why;
+		legs.push(r);
+	}
+	return { legs, spawned, sent, uncertainWhy };
+}
+
 export const HOME_SCAN_LIMITS = Object.freeze({ entries: 4096, bytes: 16 * 1024 * 1024 });
 
 /**
@@ -10244,6 +11466,7 @@ export async function executePaidCase(
 		sessionLegs: [],
 		sessionConsumers: [],
 		utilityLegs: [],
+		workflowLegs: [],
 	});
 	if (reasons.length || !fixture) return accounts.map(refused);
 	// What each owned home listed before the legs: the colliding-ID verdict judges only what they added.

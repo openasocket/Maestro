@@ -157,6 +157,8 @@ export interface PaidFixture {
 	sessionLegs?: SessionLegSpec[];
 	/** Utility consumer legs the harness runs after the fixture turns, on the same reservation (E09). */
 	utilityLegs?: UtilityLegSpec[];
+	/** Workflow legs the harness runs after the leg settled, each on a workflow reservation of its own (E09). */
+	workflowLegs?: WorkflowLegSpec[];
 	unevaluated: Array<{ id: string; detail: string; owner: string }>;
 }
 
@@ -315,6 +317,79 @@ const FEEDBACK_INTERVIEW_LEG: UtilityLegSpec = {
 	maxTurns: 1,
 };
 
+/**
+ * Workflow legs (GT1-11-11E1): the production Auto Run engine over Grok, after
+ * E09's leg settled, each on a workflow reservation of its own (its own turn
+ * allowance under the per-leg ceiling, spend and calls shared with the case),
+ * against an owned project, account home and Maestro data dir only.
+ *
+ * - `autorun-document`: a synthetic document with `tasks` unchecked tasks run
+ *   through the library `runPlaybook`; each task ticked only by a turn that
+ *   succeeded, the selected account, model and effort in every planned launch,
+ *   the `auto` query source, progress counts, a History entry, children reaped.
+ * - `autorun-failed-turn`: one task whose only turn is forced to fail (a resume
+ *   of a native id nobody created); the document is left byte-identical to its
+ *   dispatch content, the completed count is 0 and nothing is dispatched again.
+ * - `autorun-cancel`: one task stopped mid-turn through the production run
+ *   control; the child is gone, the document unchanged, no retry.
+ * - `autorun-goal`: one bounded goal iteration through the library `runGoal`;
+ *   the run completes only on the goal verdict.
+ */
+export type WorkflowLegId =
+	| 'autorun-document'
+	| 'autorun-failed-turn'
+	| 'autorun-cancel'
+	| 'autorun-goal';
+
+export interface WorkflowLegSpec {
+	id: WorkflowLegId;
+	/** The unchecked tasks of the leg's synthetic document (none for the goal leg). */
+	tasks: string[];
+	/** The goal and exit criteria of a goal leg; null otherwise. */
+	goal: { goal: string; exitCriteria: string } | null;
+	/** The most turns the leg may dispatch: its workflow reservation's turn allowance. */
+	maxTurns: number;
+}
+
+const AUTORUN_DOCUMENT_LEG: WorkflowLegSpec = {
+	id: 'autorun-document',
+	tasks: [
+		'Append the line QUALIFY-E09-AUTORUN-T1-OK to the file qualify-autorun.txt in the working directory (create it if absent), then mark this task complete.',
+		'Append the line QUALIFY-E09-AUTORUN-T2-OK to the file qualify-autorun.txt in the working directory, then mark this task complete.',
+	],
+	goal: null,
+	maxTurns: 2,
+};
+
+const AUTORUN_FAILED_TURN_LEG: WorkflowLegSpec = {
+	id: 'autorun-failed-turn',
+	tasks: [
+		'Append the line QUALIFY-E09-FAILED-OK to the file qualify-failed.txt in the working directory, then mark this task complete.',
+	],
+	goal: null,
+	maxTurns: 1,
+};
+
+const AUTORUN_CANCEL_LEG: WorkflowLegSpec = {
+	id: 'autorun-cancel',
+	tasks: [
+		'Do not use any tool. Write the numbers from 1 to 400, one per line, and only after the last number mark this task complete.',
+	],
+	goal: null,
+	maxTurns: 1,
+};
+
+const AUTORUN_GOAL_LEG: WorkflowLegSpec = {
+	id: 'autorun-goal',
+	tasks: [],
+	goal: {
+		goal: 'Confirm that the synthetic qualification goal QUALIFY-E09-GOAL is reached. Do not read, write or run anything.',
+		exitCriteria:
+			'The goal is reached as soon as you have read this sentence: report progress 100 and mark the goal complete.',
+	},
+	maxTurns: 1,
+};
+
 const turn = (family: string, n: number, extra = ''): PaidFixtureTurn => {
 	const token = `QUALIFY-${family}-T${n}-OK`;
 	return {
@@ -374,6 +449,7 @@ const fixture = (
 		resources?: SyntheticResourceSet;
 		sessionLegs?: SessionLegSpec[];
 		utilityLegs?: UtilityLegSpec[];
+		workflowLegs?: WorkflowLegSpec[];
 	} = {}
 ): PaidFixture => ({
 	schema: PAID_FIXTURE_SCHEMA,
@@ -384,6 +460,7 @@ const fixture = (
 	...(extra.resources ? { resources: extra.resources } : {}),
 	...(extra.sessionLegs ? { sessionLegs: extra.sessionLegs } : {}),
 	...(extra.utilityLegs ? { utilityLegs: extra.utilityLegs } : {}),
+	...(extra.workflowLegs ? { workflowLegs: extra.workflowLegs } : {}),
 	unevaluated,
 });
 
@@ -451,7 +528,15 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 		'E09',
 		[turn('E09', 1)],
 		[{ id: 'consumers', detail: 'desktop/library/CLI/workflow consumers', owner: 'GT1-11-11E' }],
-		{ utilityLegs: [WIZARD_STRUCTURED_LEG, FEEDBACK_INTERVIEW_LEG] }
+		{
+			utilityLegs: [WIZARD_STRUCTURED_LEG, FEEDBACK_INTERVIEW_LEG],
+			workflowLegs: [
+				AUTORUN_DOCUMENT_LEG,
+				AUTORUN_FAILED_TURN_LEG,
+				AUTORUN_CANCEL_LEG,
+				AUTORUN_GOAL_LEG,
+			],
+		}
 	),
 	E10: fixture(
 		'E10',
