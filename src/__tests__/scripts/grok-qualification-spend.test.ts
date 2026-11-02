@@ -31,6 +31,12 @@
  * wizard retry is drawn once as a retry before its spawn, a resend answered
  * malformed again draws no second retry, and a utility turn that times out
  * keeps its charge uncertain and refuses every later utility turn.
+ *
+ * GT1-11-11E4: the E09 Auto Run workflow legs (GT1-11-11E1) on the same
+ * ledger: each leg holds a workflow reservation of its own whose turns are
+ * the leg allowance, every workflow turn draws its whole per-turn allowance
+ * (the retry included) before its child starts, and a run turn limit the
+ * earlier legs exhausted refuses the next leg unsent and uncounted.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -151,6 +157,10 @@ const ALL_CAPS: HarnessCapabilities = {
 	// Off: the utility consumer legs run in their own block (GT1-11-11D3).
 	utilityLegs: false,
 	cheapUtilityLegs: false,
+	// Off: the workflow legs run in their own blocks (GT1-11-11E4).
+	workflowLegs: false,
+	orchestrationLegs: false,
+	contributionLegs: false,
 };
 
 /** The fake budget provider: a fully authorized worst-case-reservation config. */
@@ -1485,6 +1495,240 @@ describe('GT1-11-09 qualification spend admission', () => {
 				expect(ledger.turns).toBe(2);
 				expect(leg.utilityLegs.slice(1).map((l) => l.status)).toEqual(Array(5).fill('not-run'));
 			}, 60_000);
+		}
+	);
+
+	describe.skipIf(process.platform === 'win32')(
+		'workflow legs on the shared ledger (GT1-11-11E4)',
+		() => {
+			const REL = `${RUNS_ROOT}/gt1-11-11e4-spend-${process.pid}`;
+			const ROOT = path.join(WORKSPACE, REL);
+			const BIN = path.join(ROOT, 'bin', 'grok');
+			const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-11e4-spend-operator-${process.pid}`);
+			const E09 = expandCases([
+				{
+					id: 'E09',
+					requirementIds: ['R-E09'],
+					ownerTasks: ['GT1-11-11E4'],
+					expectedInvariant: 'synthetic',
+					blockerIds: [],
+				},
+			]).find((c) => c.caseId === 'E09:native-headless:local')!;
+			/** The Auto Run legs and the turns each may dispatch (`paid-fixtures.ts`). */
+			const AUTORUN = [
+				['autorun-document', 2],
+				['autorun-failed-turn', 1],
+				['autorun-cancel', 1],
+				['autorun-goal', 1],
+			] as const;
+			let sha = '';
+			/**
+			 * A native stand-in (never a real Grok) for the E09 fixture turn and the
+			 * Auto Run legs: history under the owned GROK_HOME, `--resume` of an
+			 * unknown id refused, a task turn ticks its box in the document the
+			 * engine prompt names, the counting task streams slowly (the cancel leg
+			 * stops it mid-turn), the goal turn reports its verdict, else the reply
+			 * token.
+			 */
+			const SOURCE = [
+				`#!${process.execPath}`,
+				"const fs = process.getBuiltinModule('fs');",
+				"const path = process.getBuiltinModule('path');",
+				"const { randomUUID } = process.getBuiltinModule('crypto');",
+				'const argv = process.argv.slice(2);',
+				'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
+				"const file = at('--prompt-file');",
+				'const texts = (v, acc) => { if (Array.isArray(v)) v.forEach((x) => texts(x, acc)); else if (v && typeof v === "object") { if (typeof v.text === "string") acc.push(v.text); for (const k of Object.keys(v)) if (k !== "text") texts(v[k], acc); } return acc; };',
+				"const prompt = file ? texts(JSON.parse(fs.readFileSync(file, 'utf8')), []).join('') : (at('-p') || '');",
+				"const resume = at('--resume');",
+				"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
+				"const dirFor = (id) => path.join(process.env.GROK_HOME, 'sessions', encodeURIComponent(fs.realpathSync(at('--cwd') || process.cwd())), id);",
+				'if (resume && !fs.existsSync(dirFor(resume))) process.exit(1);',
+				'const sid = resume || randomUUID();',
+				'fs.mkdirSync(dirFor(sid), { recursive: true });',
+				"fs.appendFileSync(path.join(dirFor(sid), 'chat_history.jsonl'), JSON.stringify({ type: 'user', content: prompt.slice(0, 200) }) + '\\n');",
+				'const end = () => out({',
+				"  type: 'end', stopReason: 'end_turn', sessionId: sid, total_cost_usd: 0.001,",
+				'  usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_tokens: 0 },',
+				"  modelUsage: { [at('-m')]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.001 } },",
+				'});',
+				'const doc = (prompt.match(/\\/[^\\s`\'"]*qualify-autorun\\.md/) || [])[0];',
+				"const tick = () => { const c = fs.readFileSync(doc, 'utf8'); fs.writeFileSync(doc, c.replace('- [ ]', '- [x]')); };",
+				"if (doc && fs.readFileSync(doc, 'utf8').includes('numbers from 1 to 400')) { out({ type: 'text', data: 'counting' }); let k = 0; const t = setInterval(() => { out({ type: 'text', data: String(++k) + '\\n' }); if (k >= 400) { clearInterval(t); tick(); end(); } }, 100); }",
+				"else if (doc) { tick(); out({ type: 'text', data: '**Summary:** Ticked one synthetic task.' }); end(); }",
+				"else if (prompt.includes('QUALIFY-E09-GOAL')) { out({ type: 'text', data: 'Goal reached.\\n<!-- maestro:progress 100 | reached -->\\n<!-- maestro:goal-complete -->' }); end(); }",
+				"else { const t = prompt.match(/QUALIFY-[A-Z0-9-]+-OK/g) || []; if (t.length) out({ type: 'text', data: t[t.length - 1] }); end(); }",
+				'',
+			].join('\n');
+			const workflowConfig = (limits: {
+				maxTurns: number;
+				perCaseTurns: number;
+			}): QualificationConfig =>
+				liveConfig({
+					allowedRoots: [REL],
+					binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
+					selection: { effort: 'high' } as never,
+					spendBounds: {
+						perCall: {
+							inputTokens: 1000,
+							outputTokens: 500,
+							cacheReadTokens: 0,
+							cacheCreationTokens: 0,
+						},
+						// A retry allowance on every turn: the workflow legs must draw it too.
+						perTurnCalls: { modelRounds: 2, children: 1, retries: 1, sideModels: 0, compaction: 0 },
+						sideModels: [],
+					},
+					limits: {
+						budgetUsd: 10,
+						maxCalls: 80,
+						maxTurns: limits.maxTurns,
+						maxWallClockSeconds: 600,
+						perCase: {
+							budgetUsd: 2,
+							maxCalls: 60,
+							maxTurns: limits.perCaseTurns,
+							maxWallClockSeconds: 120,
+						},
+						cleanupSeconds: 1,
+					},
+					isolation: {
+						boundary: {
+							kind: 'disposable-os-account',
+							reference: 'boundary:synthetic',
+							actualHome: `${REL}/home`,
+							productionHomeMounted: false,
+							operatorCredentialsReadable: false,
+						},
+						accountRoots: { A: `${REL}/grok-a`, B: `${REL}/grok-b` },
+						remoteRoots: {},
+						policy: {
+							systemPolicyInspected: true,
+							managedPolicy: 'absent',
+							requiredPolicyCompatible: true,
+						},
+						resources: { hooks: 'empty', mcp: 'empty', plugins: 'empty', envrc: 'disabled' },
+						egress: {
+							kind: 'operation-aware',
+							reference: 'egress:synthetic',
+							suppression: {
+								update: 'flags-only',
+								telemetry: 'flags-only',
+								backgroundUpload: 'unknown',
+							},
+						},
+						path: ['/usr/bin', '/bin'],
+					},
+				});
+			const run = async (limits: { maxTurns: number; perCaseTurns: number }) => {
+				fs.rmSync(path.join(ROOT, 'grok-a'), { recursive: true, force: true });
+				fs.mkdirSync(path.join(ROOT, 'grok-a'), { recursive: true });
+				const config = workflowConfig(limits);
+				const ledger = ledgerFor(config, E09);
+				// The ledger's turn count at every start of the pinned stand-in: a turn is counted before its child.
+				const actual =
+					await vi.importActual<typeof import('node:child_process')>('node:child_process');
+				const atSpawn: number[] = [];
+				spawnSpies[0].mockImplementation(((...a: Parameters<typeof actual.spawn>) => {
+					if (a[0] === BIN) atSpawn.push(ledger.turns);
+					return actual.spawn(...a);
+				}) as never);
+				const lifetime = createCaseLifetime(1);
+				try {
+					const [leg] = await executePaidCase(E09, config, {
+						workspace: WORKSPACE,
+						operatorHome: OPERATOR_HOME,
+						ledger,
+						lifetime,
+						problems: [],
+						// Only the Auto Run legs: the orchestration and contribution legs stay not-run and hold nothing.
+						capabilities: { ...ALL_CAPS, workflowLegs: true },
+						now: () => NOW,
+						resolveSecret: (name) => `synthetic-xai-${name}-value`,
+					});
+					await lifetime.cleanup();
+					return { leg, ledger, config, atSpawn };
+				} finally {
+					spawnSpies[0].mockImplementation(actual.spawn as never);
+				}
+			};
+			const KINDS = ['model-round', 'child', 'retry', 'side-model', 'compaction'];
+
+			beforeAll(() => {
+				for (const d of ['home', 'grok-a', 'grok-b', 'bin', path.join('cache', 'tmp')])
+					fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+				fs.writeFileSync(BIN, SOURCE);
+				fs.chmodSync(BIN, 0o555);
+				sha = createHash('sha256').update(fs.readFileSync(BIN)).digest('hex');
+			});
+			afterAll(() => {
+				if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+				fs.rmSync(ROOT, { recursive: true, force: true });
+				fs.rmSync(OPERATOR_HOME, { recursive: true, force: true });
+			});
+			beforeEach(() => {
+				spawnSpies.forEach((s) => s.mockClear());
+			});
+
+			it('every workflow turn and its retry allowance is drawn on the shared ledger, before its spawn, within the leg allowance', async () => {
+				const { leg, ledger, config, atSpawn } = await run({ maxTurns: 20, perCaseTurns: 10 });
+				expect(
+					leg.workflowLegs.slice(0, 4).map((l) => [l.leg, l.status]),
+					JSON.stringify(leg.workflowLegs.map((l) => l.reasons))
+				).toEqual(AUTORUN.map(([id]) => [id, 'passed']));
+				// Orchestration and contribution legs: off, so not-run with no reservation.
+				expect(
+					leg.workflowLegs.slice(4).every((l) => l.status === 'not-run' && !l.reservationId)
+				).toBe(true);
+				const main = ledger.reservations.find((x) => x.leg === null)!;
+				const perKind = paidCallsPerTurn(config, main) as unknown as Record<string, number>;
+				const perTurn = Object.values(perKind).reduce((n, x) => n + x, 0);
+				expect(perKind.retry).toBe(1);
+				expect(perTurn).toBe(4);
+				expect(ledger.reservations.map((x) => x.leg)).toEqual([
+					null,
+					...AUTORUN.map(([id]) => `workflow:${id}`),
+				]);
+				for (const [id, maxTurns] of AUTORUN) {
+					const r = ledger.reservations.find((x) => x.leg === `workflow:${id}`)!;
+					const l = leg.workflowLegs.find((x) => x.leg === id)!;
+					expect(l.reservationId, id).toBe(r.id);
+					expect(r.turnAllowance, id).toBe(maxTurns);
+					expect(r.callAllowance, id).toBe(perTurn * maxTurns);
+					expect(r.turnsUsed, id).toBe(l.turns.length);
+					expect(r.turnsUsed, id).toBeLessThanOrEqual(maxTurns);
+					// Every turn draws its whole per-turn allowance, the retry included, never more.
+					expect(r.callsUsed, id).toBe(r.turnsUsed * perTurn);
+					expect(r.callsByKind.retry, id).toBe(r.turnsUsed);
+					const rows = l.turns.map((t) => t.callsRecorded as unknown as Record<string, number>);
+					for (const kind of KINDS)
+						expect(
+							rows.reduce((n, x) => n + x[kind], 0),
+							`${id} ${kind}`
+						).toBe((r.callsByKind as Record<string, number>)[kind]);
+					expect(['settled', 'uncertain']).toContain(r.state);
+				}
+				expect(ledger.turns).toBe(ledger.reservations.reduce((n, x) => n + x.turnsUsed, 0));
+				expect(ledger.calls).toBe(ledger.reservations.reduce((n, x) => n + x.callsUsed, 0));
+				expect(ledger.turns).toBe(1 + 2 + 1 + 1 + 1);
+				// The k-th child of the pinned stand-in started after the k-th turn was counted.
+				expect(atSpawn).toEqual([1, 2, 3, 4, 5, 6]);
+			}, 120_000);
+
+			it('a run turn limit the earlier legs exhausted refuses the next workflow reservation: nothing more spawned or counted', async () => {
+				const { leg, ledger, atSpawn } = await run({ maxTurns: 3, perCaseTurns: 3 });
+				const [doc, ...rest] = leg.workflowLegs.slice(0, 4);
+				expect(doc.status, JSON.stringify(doc.reasons)).toBe('passed');
+				for (const l of rest) {
+					expect(l.status, l.leg).toBe('not-run');
+					expect(l.spawned, l.leg).toBe(0);
+					expect(l.reservationId, l.leg).toBeNull();
+					expect(l.reasons.length, l.leg).toBeGreaterThan(0);
+				}
+				expect(ledger.turns).toBe(3);
+				expect(atSpawn).toEqual([1, 2, 3]);
+				expect(ledger.reservations.map((x) => x.leg)).toEqual([null, 'workflow:autorun-document']);
+			}, 120_000);
 		}
 	);
 });

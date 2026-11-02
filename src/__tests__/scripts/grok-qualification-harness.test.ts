@@ -60,6 +60,18 @@
  * `requireDisabledTools`, a sentinel write, a non-cheap model, an unbounded
  * name, a synopsis on a new native id and a stand-in waiting for stdin each
  * fail their leg; flags or a fixture alone pass nothing.
+ *
+ * GT1-11-11E4 adds the E09 workflow legs (GT1-11-11E1..E3): the same kind of
+ * native Grok stand-in in owned temp roots (never a real Grok, credential,
+ * home or data dir) driven by the production Auto Run engine, Cue engine,
+ * group chat engine, Symphony runner and Pianola supervisor and learner.
+ * Every leg passes on a well-behaved stand-in and stays not-run with no spawn
+ * when its flag is off or the fixture turn did not pass. A failed or cancelled
+ * turn that leaves a task ticked, a cancelled turn that leaves a child alive,
+ * a goal with no verdict, a Cue event dispatched twice, a participant reply
+ * routed twice or a round on a new native id, a spawned moderator, a Symphony
+ * network effect, an orphaned Pianola child and a transcript read outside
+ * the owned home each fail their leg.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -388,6 +400,96 @@ vi.mock('../../../src/shared/modelTiers', async (importOriginal) => {
 				: actual.cheapTurnSettings(...args),
 	};
 });
+/**
+ * Pass-through production consumers a GT1-11-11E4 case can bend: the Auto Run
+ * engine's failed-turn checkbox restore turned into a no-op (`noRestore`, so a
+ * tick a failed or stopped turn left reaches the document), one Cue event fired
+ * twice (`cueDouble`), every participant reply appended to the room log twice
+ * (`routeTwice`), a moderator started on the launcher before a Grok room is
+ * created (`moderatorSpawn`), and a goal run that reports completion whatever
+ * its turn answered (`goalForce`). Off, each is the production function.
+ */
+const workflowTamper = vi.hoisted(() => ({
+	noRestore: false,
+	cueDouble: false,
+	routeTwice: false,
+	moderatorSpawn: false,
+	goalForce: false,
+}));
+vi.mock('../../../src/shared/markdownTaskScan', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../../src/shared/markdownTaskScan')>();
+	return {
+		...actual,
+		restoreTasksCheckedByFailedTurn: (
+			...args: Parameters<typeof actual.restoreTasksCheckedByFailedTurn>
+		) =>
+			workflowTamper.noRestore
+				? { content: args[1], restored: 0, unmatched: 0 }
+				: actual.restoreTasksCheckedByFailedTurn(...args),
+	};
+});
+vi.mock('../../../src/main/cue/cue-engine', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../../src/main/cue/cue-engine')>();
+	class CueEngine extends actual.CueEngine {
+		override triggerSubscription(
+			...args: Parameters<InstanceType<typeof actual.CueEngine>['triggerSubscription']>
+		) {
+			const fired = super.triggerSubscription(...args);
+			// The same event dispatched a second time.
+			if (fired && workflowTamper.cueDouble && args[0] === 'qualify-e09-cue-prompt')
+				super.triggerSubscription(...args);
+			return fired;
+		}
+	}
+	return { ...actual, CueEngine };
+});
+vi.mock('../../../src/shared/maestro-lib/groupchat/log', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('../../../src/shared/maestro-lib/groupchat/log')>();
+	return {
+		...actual,
+		appendToLog: async (...args: Parameters<typeof actual.appendToLog>) => {
+			await actual.appendToLog(...args);
+			if (workflowTamper.routeTwice && args[1] === 'QualifyGrok') await actual.appendToLog(...args);
+		},
+	};
+});
+vi.mock('../../../src/shared/maestro-lib/groupchat/chat-ops', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('../../../src/shared/maestro-lib/groupchat/chat-ops')>();
+	return {
+		...actual,
+		createGroupChatOperations: (...args: Parameters<typeof actual.createGroupChatOperations>) => {
+			const ops = actual.createGroupChatOperations(...args);
+			return {
+				...ops,
+				createChat: async (input: Parameters<typeof ops.createChat>[0]) => {
+					if (!workflowTamper.moderatorSpawn || input.moderatorProvider !== 'grok')
+						return ops.createChat(input);
+					// A Grok moderator started before the production refusal is reached.
+					await args[0].launcher()?.runner.start({
+						processId: 'group-chat-qualify-moderator-0',
+						providerId: 'grok',
+					} as never);
+					return ops.createChat(input);
+				},
+			};
+		},
+	};
+});
+vi.mock('../../../src/shared/maestro-lib/autorun/run-goal', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('../../../src/shared/maestro-lib/autorun/run-goal')>();
+	return {
+		...actual,
+		runGoal: async function* (...args: Parameters<typeof actual.runGoal>) {
+			for await (const ev of actual.runGoal(...args))
+				yield workflowTamper.goalForce && ev.type === 'goal_complete'
+					? ({ ...ev, success: true, exitReason: 'completed' } as typeof ev)
+					: ev;
+		},
+	};
+});
 const WORKSPACE = path.resolve(__dirname, '../../..');
 const RUN_STATE = JSON.parse(
 	fs.readFileSync(path.join(WORKSPACE, 'Plans/grok-tier1/run-state.json'), 'utf8')
@@ -413,6 +515,10 @@ const ALL_CAPS: HarnessCapabilities = {
 	// Off: the utility consumer legs run in their own block (GT1-11-11D3).
 	utilityLegs: false,
 	cheapUtilityLegs: false,
+	// Off: the workflow legs run in their own block (GT1-11-11E4).
+	workflowLegs: false,
+	orchestrationLegs: false,
+	contributionLegs: false,
 };
 /** A secret-shaped value the shared redactor recognizes; synthetic, never a credential. */
 const FAKE_TOKEN = `ghp_${'A1b2C3d4E5'.repeat(4).slice(0, 36)}`;
@@ -5151,5 +5257,557 @@ describe('GT1-11-09 qualification harness', () => {
 			expect(alive(sent[1].pid)).toBe(false);
 			expect(elapsedMs).toBeLessThan(30_000);
 		}, 60_000);
+	});
+
+	describe.skipIf(process.platform === 'win32')('workflow legs (GT1-11-11E4)', () => {
+		const REL = `${RUNS_ROOT}/gt1-11-11e4-${process.pid}`;
+		const ROOT = path.join(WORKSPACE, REL);
+		const BIN = path.join(ROOT, 'bin', 'grok');
+		const HOME_A = path.join(ROOT, 'grok-a');
+		const HOME_B = path.join(ROOT, 'grok-b');
+		/** The stand-in reads its mode from here, so its bytes (and the pin) are the same in every mode. */
+		const MODE_FILE = path.join(ROOT, 'mode');
+		/** One line per stand-in process: what it was asked, never a credential. */
+		const LOG = path.join(ROOT, 'log', 'turns.jsonl');
+		/** Pids of the detached children an `orphan` mode leaves behind, killed after each test. */
+		const ORPHANS = path.join(ROOT, 'log', 'orphans');
+		const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-11e4-operator-${process.pid}`);
+		/** A transcript outside every owned root (the `pianola-learn` tamper reads it). */
+		const OUTSIDE = path.join(os.tmpdir(), `gt1-11-11e4-outside-${process.pid}`);
+		const OUTSIDE_TRANSCRIPT = path.join(
+			OUTSIDE,
+			'sessions',
+			'elsewhere',
+			'other-id',
+			'chat_history.jsonl'
+		);
+		const MODEL = 'claude-haiku-4-5';
+		const SECRET = (name: string) => `synthetic-xai-${name}-value`;
+		type Mode =
+			| 'ok'
+			| 'nofixture'
+			| 'tickfail'
+			| 'canceltick'
+			| 'cancelorphan'
+			| 'nogoal'
+			| 'newid'
+			| 'netleak'
+			| 'orphan';
+		let sha = '';
+		/**
+		 * The native Grok stand-in (never a real Grok): it reads its prompt from
+		 * `-p` or the JSON `--prompt-file` the production planners write, keeps
+		 * its history under the owned GROK_HOME where the production Grok session
+		 * storage reads it, refuses `--resume` of an id it does not hold, and
+		 * answers each workflow consumer: an Auto Run task turn ticks its box in
+		 * the document the engine prompt names, the counting prompts stream slowly
+		 * (so a stop lands mid-turn), the goal turn reports its verdict, anything
+		 * else replies the last token its prompt carries. A mode bends exactly one
+		 * behaviour.
+		 */
+		const SOURCE = [
+			`#!${process.execPath}`,
+			"const fs = process.getBuiltinModule('fs');",
+			"const path = process.getBuiltinModule('path');",
+			"const { randomUUID } = process.getBuiltinModule('crypto');",
+			"const cp = process.getBuiltinModule('child_process');",
+			`const MODE = fs.readFileSync(${JSON.stringify(MODE_FILE)}, 'utf8').trim();`,
+			'const argv = process.argv.slice(2);',
+			'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
+			"const file = at('--prompt-file');",
+			'const texts = (v, acc) => { if (Array.isArray(v)) v.forEach((x) => texts(x, acc)); else if (v && typeof v === "object") { if (typeof v.text === "string") acc.push(v.text); for (const k of Object.keys(v)) if (k !== "text") texts(v[k], acc); } return acc; };',
+			"const prompt = file ? texts(JSON.parse(fs.readFileSync(file, 'utf8')), []).join('') : (at('-p') || '');",
+			"const model = at('-m');",
+			"const resume = at('--resume');",
+			"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
+			`fs.appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ pid: process.pid, viaFile: !!file, resume, qs: process.env.MAESTRO_QUERY_SOURCE || null, home: process.env.GROK_HOME }) + '\\n');`,
+			// A detached child that outlives this process (its own process group, never stopped with it).
+			`const orphan = () => { const c = cp.spawn('/bin/sleep', ['60'], { detached: true, stdio: 'ignore' }); c.unref(); fs.appendFileSync(${JSON.stringify(ORPHANS)}, c.pid + '\\n'); };`,
+			'const end = (sid) => ({',
+			"  type: 'end', stopReason: 'end_turn', requestId: 'req-synthetic', sessionId: sid, total_cost_usd: 0.001,",
+			'  usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_tokens: 0 },',
+			'  modelUsage: { [model]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.001 } },',
+			'});',
+			'const home = process.env.GROK_HOME;',
+			"const dirFor = (id) => path.join(home, 'sessions', encodeURIComponent(fs.realpathSync(at('--cwd') || process.cwd())), id);",
+			'const doc = (prompt.match(/\\/[^\\s`\'"]*qualify-autorun\\.md/) || [])[0];',
+			"const tick = () => { const c = fs.readFileSync(doc, 'utf8'); fs.writeFileSync(doc, c.replace('- [ ]', '- [x]')); };",
+			"if (resume && !fs.existsSync(dirFor(resume))) { if (MODE === 'tickfail' && doc) tick(); process.stderr.write('unknown session\\n'); process.exit(1); }",
+			// newid: a resume answered on a fresh native session.
+			"const sid = resume && MODE !== 'newid' ? resume : randomUUID();",
+			'fs.mkdirSync(dirFor(sid), { recursive: true });',
+			"fs.appendFileSync(path.join(dirFor(sid), 'chat_history.jsonl'), JSON.stringify({ type: 'user', content: prompt.slice(0, 200) }) + '\\n');",
+			"const count = (onEnd) => { out({ type: 'text', data: 'counting' }); let k = 0; const t = setInterval(() => { out({ type: 'text', data: String(++k) + '\\n' }); if (k >= 400) { clearInterval(t); onEnd(); out(end(sid)); } }, 100); };",
+			"if (doc && fs.readFileSync(doc, 'utf8').includes('numbers from 1 to 400')) {",
+			"  if (MODE === 'canceltick') tick();",
+			"  if (MODE === 'cancelorphan') orphan();",
+			'  count(() => tick());',
+			"} else if (doc) { tick(); out({ type: 'text', data: '**Summary:** Ticked one synthetic task.\\n\\n**Details:** Nothing else.' }); out(end(sid)); }",
+			"else if (prompt.includes('numbers from 1 to 400')) count(() => {});",
+			"else if (prompt.includes('QUALIFY-E09-GOAL')) { out({ type: 'text', data: MODE === 'nogoal' ? 'Working on it.\\n<!-- maestro:progress 40 | partway -->' : 'Goal reached.\\n<!-- maestro:progress 100 | reached -->\\n<!-- maestro:goal-complete -->' }); out(end(sid)); }",
+			'else {',
+			// netleak: the contribution turn pushes to the owned upstream (a network effect in a real clone).
+			"  if (MODE === 'netleak' && prompt.includes('QUALIFY-E09-SYMPHONY-OK')) { try { cp.execFileSync('/usr/bin/git', ['push', '-q', 'origin', 'HEAD:refs/heads/qualify-leak'], { stdio: 'ignore' }); } catch {} }",
+			"  if (MODE === 'orphan' && prompt.includes('QUALIFY-E09-PIANOLA-OK')) orphan();",
+			'  const t = prompt.match(/QUALIFY-[A-Z0-9-]+-OK/g) || [];',
+			// nofixture: the E09 fixture turn itself fails (no terminal, exit 1).
+			"  if (MODE === 'nofixture' && prompt.includes('QUALIFY-E09-T1-OK')) { process.stderr.write('synthetic failure\\n'); process.exit(1); }",
+			"  const reply = t.length ? t[t.length - 1] : '';",
+			"  if (reply) out({ type: 'text', data: reply });",
+			// orphan: the turn stays open a moment after its reply, so its detached child is in the tree it is seen with.
+			"  if (MODE === 'orphan') setTimeout(() => out(end(sid)), 500); else out(end(sid));",
+			'}',
+			'',
+		].join('\n');
+		const turnsLogged = (): Array<{
+			pid: number;
+			viaFile: boolean;
+			resume: string | null;
+			qs: string | null;
+			home: string;
+		}> =>
+			fs.existsSync(LOG)
+				? fs
+						.readFileSync(LOG, 'utf8')
+						.trim()
+						.split('\n')
+						.filter(Boolean)
+						.map((l) => JSON.parse(l))
+				: [];
+		/** A complete synthetic paid declaration whose bounds fit the E09 fixture turn and every workflow leg. */
+		const workflowConfig = (): QualificationConfig => ({
+			...liveConfig({
+				allowedRoots: [REL],
+				allowedModels: [MODEL],
+				binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
+				selection: { effort: 'high' } as never,
+				spendBounds: {
+					perCall: {
+						inputTokens: 1000,
+						outputTokens: 500,
+						cacheReadTokens: 0,
+						cacheCreationTokens: 0,
+					},
+					perTurnCalls: { modelRounds: 2, children: 1, retries: 0, sideModels: 0, compaction: 0 },
+					sideModels: [],
+				},
+				limits: {
+					budgetUsd: 10,
+					maxCalls: 120,
+					maxTurns: 20,
+					maxWallClockSeconds: 600,
+					perCase: { budgetUsd: 2, maxCalls: 60, maxTurns: 10, maxWallClockSeconds: 300 },
+					cleanupSeconds: 1,
+				},
+			}),
+			isolation: {
+				boundary: {
+					kind: 'disposable-os-account',
+					reference: 'boundary:synthetic',
+					actualHome: `${REL}/home`,
+					productionHomeMounted: false,
+					operatorCredentialsReadable: false,
+				},
+				accountRoots: { A: `${REL}/grok-a`, B: `${REL}/grok-b` },
+				remoteRoots: {},
+				policy: {
+					systemPolicyInspected: true,
+					managedPolicy: 'absent',
+					requiredPolicyCompatible: true,
+				},
+				resources: { hooks: 'empty', mcp: 'empty', plugins: 'empty', envrc: 'disabled' },
+				egress: {
+					kind: 'operation-aware',
+					reference: 'egress:synthetic',
+					suppression: {
+						update: 'flags-only',
+						telemetry: 'flags-only',
+						backgroundUpload: 'unknown',
+					},
+				},
+				path: ['/usr/bin', '/bin', path.join(ROOT, 'bin')],
+			},
+		});
+		const CAPS: HarnessCapabilities = {
+			...ALL_CAPS,
+			workflowLegs: true,
+			orchestrationLegs: true,
+			contributionLegs: true,
+		};
+		const AUTORUN_LEGS = [
+			'autorun-document',
+			'autorun-failed-turn',
+			'autorun-cancel',
+			'autorun-goal',
+		];
+		const ORCHESTRATION_LEGS = [
+			'cue-prompt-desktop',
+			'cue-prompt-headless',
+			'groupchat-participant',
+			'groupchat-moderator-refused',
+		];
+		const CONTRIBUTION_LEGS = ['symphony-local', 'pianola-dispatch', 'pianola-learn'];
+		const WORKFLOW_LEGS = [...AUTORUN_LEGS, ...ORCHESTRATION_LEGS, ...CONTRIBUTION_LEGS];
+		const E09_FIXTURE = PAID_FIXTURES.E09 as {
+			workflowLegs?: Array<{ id: string; maxTurns: number }>;
+		};
+		const FULL_LEGS = [...(E09_FIXTURE.workflowLegs ?? [])];
+		let ledgerSeq = 0;
+		/**
+		 * One E09 case. `legs` narrows the fixture's workflow legs to the ones a
+		 * case is about (the rest of the fixture is untouched and the full list is
+		 * restored after), so a tamper case runs only the leg it breaks.
+		 */
+		const execute = async (
+			mode: Mode,
+			opts: { caps?: HarnessCapabilities; legs?: string[]; turnTimeoutMs?: number } = {}
+		) => {
+			fs.writeFileSync(MODE_FILE, mode);
+			for (const home of [HOME_A, HOME_B]) {
+				fs.rmSync(home, { recursive: true, force: true });
+				fs.mkdirSync(home, { recursive: true });
+			}
+			fs.rmSync(LOG, { force: true });
+			const cfg = workflowConfig();
+			const c = expandCases(FAMILIES, ['E09:native-headless:local'])[0];
+			const ledger = createBudgetLedger(cfg, `gt1-11-11e4-${process.pid}-${++ledgerSeq}`, NOW);
+			ledger.authorizedCaseIds.push(c.caseId);
+			const lifetime = createCaseLifetime(1);
+			if (opts.legs) E09_FIXTURE.workflowLegs = FULL_LEGS.filter((l) => opts.legs!.includes(l.id));
+			try {
+				const legs = await executePaidCase(c, cfg, {
+					workspace: WORKSPACE,
+					operatorHome: OPERATOR_HOME,
+					ledger,
+					lifetime,
+					problems: validateConfig(cfg, WORKSPACE),
+					capabilities: opts.caps ?? CAPS,
+					now: clock,
+					resolveSecret: SECRET,
+					turnTimeoutMs: opts.turnTimeoutMs,
+				});
+				await lifetime.cleanup();
+				expect(legs).toHaveLength(1);
+				return { leg: legs[0], ledger };
+			} finally {
+				E09_FIXTURE.workflowLegs = [...FULL_LEGS];
+			}
+		};
+		type Leg = Awaited<ReturnType<typeof execute>>['leg'];
+		const workflow = (leg: Leg, id: string) => {
+			const found = leg.workflowLegs.find((l) => l.leg === id);
+			expect(found, id).toBeDefined();
+			return found!;
+		};
+		const assertionOf = (
+			r: { assertions: Array<{ id: string; outcome: string; detail: string }> },
+			id: string
+		) => r.assertions.find((a) => a.id === id);
+		const outcomes = (leg: Leg) => leg.workflowLegs.map((l) => [l.leg, l.status]);
+		const operatorHomeUntouched = () =>
+			expect(fs.existsSync(OPERATOR_HOME) ? fs.readdirSync(OPERATOR_HOME) : []).toEqual([]);
+		const orphanPids = () =>
+			fs.existsSync(ORPHANS)
+				? fs.readFileSync(ORPHANS, 'utf8').split('\n').filter(Boolean).map(Number)
+				: [];
+		const reservationOf = (ledger: ReturnType<typeof createBudgetLedger>, id: string) =>
+			ledger.reservations.filter((x) => x.leg === `workflow:${id}`);
+		/**
+		 * A stop that fails to reap: every signal to a detached child the stand-in
+		 * left is swallowed (a liveness probe, signal 0, still answers), so the
+		 * production stop ladder leaves it alive and only the leg's own survivor
+		 * check can see it.
+		 */
+		const swallowSignalsToOrphans = () => {
+			const real = process.kill.bind(process);
+			vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+				if (signal !== 0 && orphanPids().includes(Math.abs(pid))) return true;
+				return real(pid, signal);
+			}) as typeof process.kill);
+		};
+		let restoreExecFileCustom: (() => void) | null = null;
+
+		beforeAll(async () => {
+			// The suite's execFile spy drops util.promisify.custom, which the production
+			// execFileNoThrow (the Symphony runner's git) reads for {stdout, stderr}.
+			const cpMod = (await import('node:child_process')) as unknown as Record<
+				string,
+				Record<symbol, unknown>
+			>;
+			const real = (await vi.importActual('node:child_process')) as unknown as Record<
+				string,
+				Record<symbol, unknown>
+			>;
+			const { promisify } = await import('node:util');
+			const before = cpMod.execFile[promisify.custom];
+			cpMod.execFile[promisify.custom] = real.execFile[promisify.custom];
+			restoreExecFileCustom = () => {
+				cpMod.execFile[promisify.custom] = before;
+			};
+			for (const d of ['home', 'grok-a', 'grok-b', 'bin', 'log', path.join('cache', 'tmp')])
+				fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+			fs.writeFileSync(MODE_FILE, 'ok');
+			fs.writeFileSync(BIN, SOURCE);
+			fs.chmodSync(BIN, 0o555);
+			sha = createHash('sha256').update(fs.readFileSync(BIN)).digest('hex');
+			fs.mkdirSync(path.dirname(OUTSIDE_TRANSCRIPT), { recursive: true });
+			fs.writeFileSync(
+				OUTSIDE_TRANSCRIPT,
+				`${JSON.stringify({ type: 'user', content: 'a transcript outside the owned home' })}\n`
+			);
+		});
+		afterAll(() => {
+			restoreExecFileCustom?.();
+			if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+			fs.rmSync(ROOT, { recursive: true, force: true });
+			fs.rmSync(OPERATOR_HOME, { recursive: true, force: true });
+			fs.rmSync(OUTSIDE, { recursive: true, force: true });
+		});
+		beforeEach(() => {
+			spawnSpies.forEach((s) => s.mockClear());
+			fetchSpy.mockClear();
+			workflowTamper.noRestore = false;
+			workflowTamper.cueDouble = false;
+			workflowTamper.routeTwice = false;
+			workflowTamper.moderatorSpawn = false;
+			workflowTamper.goalForce = false;
+			fs.rmSync(ORPHANS, { force: true });
+		});
+		afterEach(() => {
+			vi.restoreAllMocks();
+			for (const pid of orphanPids()) {
+				try {
+					process.kill(pid, 'SIGKILL');
+				} catch {
+					// Already gone.
+				}
+			}
+		});
+
+		it('every workflow leg passes from its production consumer on the owned stand-in, each turn on its own workflow reservation', async () => {
+			const { leg, ledger } = await execute('ok');
+			expect(outcomes(leg)).toEqual([
+				...AUTORUN_LEGS.map((id) => [id, 'passed']),
+				...ORCHESTRATION_LEGS.map((id) => [id, 'passed']),
+				// Every assertion held; the open blockers keep them honest gaps, never passes.
+				['symphony-local', 'not-evaluated'],
+				['pianola-dispatch', 'not-evaluated'],
+				['pianola-learn', 'passed'],
+			]);
+			for (const r of leg.workflowLegs)
+				expect(
+					r.assertions.length > 0 && r.assertions.every((a) => a.outcome === 'passed'),
+					`${r.leg} ${JSON.stringify(r.assertions)}`
+				).toBe(true);
+			expect(workflow(leg, 'symphony-local').assertion.owner).toBe(
+				'symphony-selected-config-handoff-pending'
+			);
+			expect(workflow(leg, 'pianola-dispatch').openGaps).toEqual([
+				'pianola-fresh-session-config-absent',
+				'grok-permission-decisions-unrecorded',
+			]);
+			// Auto Run turns carry the `auto` query source, Cue prompt turns `cue`, all on the owned account A.
+			const sent = turnsLogged();
+			for (const t of sent) expect(fs.realpathSync(t.home)).toBe(fs.realpathSync(HOME_A));
+			expect(sent.filter((t) => t.qs === 'auto').length).toBeGreaterThanOrEqual(5);
+			expect(sent.filter((t) => t.qs === 'cue')).toHaveLength(4);
+			// Each spawning leg on a workflow reservation of its own, within its turns; the refusal and learn legs hold none.
+			for (const spec of FULL_LEGS) {
+				const held = reservationOf(ledger, spec.id);
+				if (spec.maxTurns === 0) {
+					expect(held, spec.id).toEqual([]);
+					continue;
+				}
+				expect(held, spec.id).toHaveLength(1);
+				expect(held[0].turnAllowance, spec.id).toBe(spec.maxTurns);
+				expect(held[0].turnsUsed, spec.id).toBeLessThanOrEqual(spec.maxTurns);
+				expect(held[0].turnsUsed, spec.id).toBe(workflow(leg, spec.id).turns.length);
+				expect(['settled', 'uncertain']).toContain(held[0].state);
+			}
+			const workflowTurns = leg.workflowLegs.reduce((n, l) => n + l.turns.length, 0);
+			expect(ledger.turns).toBe(leg.turns.length + workflowTurns);
+			expect(ledger.turns).toBe(15);
+			expect(leg.status, JSON.stringify(leg.reasons)).toBe('passed');
+			expect(fetchSpy).not.toHaveBeenCalled();
+			operatorHomeUntouched();
+		}, 400_000);
+
+		it('cannot pass from a flag or a fixture alone: flags off leave every leg not-run with 0 spawns, an unpassed fixture turn blocks them all', async () => {
+			const off = await execute('ok', { caps: { ...CAPS, workflowLegs: false } });
+			expect(
+				off.leg.workflowLegs.map((l) => [l.leg, l.status, l.spawned, l.reservationId])
+			).toEqual(WORKFLOW_LEGS.map((id) => [id, 'not-run', 0, null]));
+			expect(off.leg.workflowLegs.map((l) => l.assertion.owner)).toEqual([
+				...AUTORUN_LEGS.map(() => 'GT1-11-11E1'),
+				...ORCHESTRATION_LEGS.map(() => 'GT1-11-11E2'),
+				...CONTRIBUTION_LEGS.map(() => 'GT1-11-11E3'),
+			]);
+			// Only the fixture turn ran.
+			expect(turnsLogged()).toHaveLength(1);
+			expect(off.ledger.reservations).toHaveLength(1);
+			const partial = await execute('ok', {
+				caps: { ...CAPS, orchestrationLegs: false, contributionLegs: false },
+				legs: [...ORCHESTRATION_LEGS, ...CONTRIBUTION_LEGS],
+			});
+			expect(
+				partial.leg.workflowLegs.map((l) => [l.leg, l.status, l.spawned, l.assertion.detail])
+			).toEqual([
+				...ORCHESTRATION_LEGS.map((id) => [id, 'not-run', 0, 'orchestration-legs-unimplemented']),
+				...CONTRIBUTION_LEGS.map((id) => [id, 'not-run', 0, 'contribution-legs-unimplemented']),
+			]);
+			expect(turnsLogged()).toHaveLength(1);
+			const blocked = await execute('nofixture', {
+				legs: ['autorun-document', 'cue-prompt-desktop', 'pianola-learn'],
+			});
+			expect(
+				blocked.leg.workflowLegs.map((l) => [l.leg, l.status, l.spawned, l.assertion.detail])
+			).toEqual([
+				['autorun-document', 'not-run', 0, 'fixture-turns-not-passed'],
+				['cue-prompt-desktop', 'not-run', 0, 'fixture-turns-not-passed'],
+				['pianola-learn', 'not-run', 0, 'fixture-turns-not-passed'],
+			]);
+			expect(turnsLogged()).toHaveLength(1);
+			expect(blocked.ledger.reservations).toHaveLength(1);
+			expect(fetchSpy).not.toHaveBeenCalled();
+		}, 120_000);
+
+		describe('Auto Run legs', () => {
+			it('a failed turn whose task stays ticked fails autorun-failed-turn; the production restore alone keeps it passing', async () => {
+				const control = await execute('tickfail', { legs: ['autorun-failed-turn'] });
+				expect(workflow(control.leg, 'autorun-failed-turn').status).toBe('passed');
+				workflowTamper.noRestore = true;
+				const { leg, ledger } = await execute('tickfail', { legs: ['autorun-failed-turn'] });
+				const r = workflow(leg, 'autorun-failed-turn');
+				expect(r.status).toBe('failed');
+				expect(assertionOf(r, 'document-restored')).toMatchObject({ outcome: 'failed' });
+				expect(r.digests.documentFinal).not.toBe(r.digests.documentAtDispatch);
+				// Still one dispatch: a failed turn is never re-sent.
+				expect(assertionOf(r, 'single-dispatch')?.outcome).toBe('passed');
+				expect(reservationOf(ledger, 'autorun-failed-turn')[0].turnsUsed).toBe(1);
+			}, 60_000);
+
+			it('a cancelled turn that ticks its task fails autorun-cancel', async () => {
+				workflowTamper.noRestore = true;
+				const { leg } = await execute('canceltick', { legs: ['autorun-cancel'] });
+				const r = workflow(leg, 'autorun-cancel');
+				expect(r.status).toBe('failed');
+				expect(assertionOf(r, 'document-unchanged')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(r, 'stopped-mid-turn')?.outcome).toBe('passed');
+				expect(assertionOf(r, 'no-retry')?.outcome).toBe('passed');
+			}, 60_000);
+
+			it('a cancelled turn that leaves a child alive fails autorun-cancel', async () => {
+				swallowSignalsToOrphans();
+				const { leg } = await execute('cancelorphan', { legs: ['autorun-cancel'] });
+				const r = workflow(leg, 'autorun-cancel');
+				expect(orphanPids()).toHaveLength(1);
+				expect(r.status).toBe('failed');
+				expect(assertionOf(r, 'child-gone')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(r, 'document-unchanged')?.outcome).toBe('passed');
+			}, 60_000);
+
+			it('a goal turn with no completion verdict fails autorun-goal', async () => {
+				const { leg } = await execute('nogoal', { legs: ['autorun-goal'] });
+				const r = workflow(leg, 'autorun-goal');
+				expect(r.status).toBe('failed');
+				expect(assertionOf(r, 'completed-on-verdict')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(r, 'single-iteration')?.outcome).toBe('passed');
+			}, 60_000);
+
+			it('an engine completion the turn answer gives no verdict for fails autorun-goal', async () => {
+				workflowTamper.goalForce = true;
+				const { leg } = await execute('nogoal', { legs: ['autorun-goal'] });
+				const r = workflow(leg, 'autorun-goal');
+				expect(r.observed.complete).toMatchObject({ exitReason: 'completed', success: true });
+				expect(r.status).toBe('failed');
+				expect(assertionOf(r, 'completed-on-verdict')).toMatchObject({ outcome: 'failed' });
+				// The production rule over the turn answer stops on the iteration bound, never on completion.
+				expect(assertionOf(r, 'completed-on-verdict')?.detail).toContain(
+					'verdict=max-iterations exitReason=completed'
+				);
+			}, 60_000);
+		});
+
+		describe('Cue and group chat legs', () => {
+			it('a second dispatch of one Cue event fails both Cue legs', async () => {
+				workflowTamper.cueDouble = true;
+				// A short turn bound: the refused stop run never starts, so its wait ends at the bound.
+				const { leg } = await execute('ok', {
+					legs: ['cue-prompt-desktop', 'cue-prompt-headless'],
+					turnTimeoutMs: 5_000,
+				});
+				for (const id of ['cue-prompt-desktop', 'cue-prompt-headless']) {
+					const r = workflow(leg, id);
+					expect(r.status, id).toBe('failed');
+					expect(assertionOf(r, 'single-dispatch'), id).toMatchObject({ outcome: 'failed' });
+				}
+			}, 120_000);
+
+			it('a participant reply routed twice fails groupchat-participant', async () => {
+				workflowTamper.routeTwice = true;
+				const { leg } = await execute('ok', { legs: ['groupchat-participant'] });
+				const r = workflow(leg, 'groupchat-participant');
+				expect(r.status).toBe('failed');
+				expect(assertionOf(r, 'reply-routed-once')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(r, 'resumed-same-session')?.outcome).toBe('passed');
+			}, 60_000);
+
+			it('a second round answered on a new native id fails groupchat-participant', async () => {
+				const { leg } = await execute('newid', { legs: ['groupchat-participant'] });
+				const r = workflow(leg, 'groupchat-participant');
+				expect(r.status).toBe('failed');
+				expect(assertionOf(r, 'resumed-same-session')).toMatchObject({ outcome: 'failed' });
+			}, 60_000);
+
+			it('a spawned moderator fails groupchat-moderator-refused, and nothing is counted on the ledger', async () => {
+				workflowTamper.moderatorSpawn = true;
+				const { leg, ledger } = await execute('ok', { legs: ['groupchat-moderator-refused'] });
+				const r = workflow(leg, 'groupchat-moderator-refused');
+				expect(r.status).toBe('failed');
+				expect(assertionOf(r, 'zero-children')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(r, 'zero-billable-calls')?.outcome).toBe('passed');
+				expect(ledger.reservations).toHaveLength(1);
+			}, 60_000);
+		});
+
+		describe('Symphony and Pianola legs', () => {
+			it('a Symphony turn with a network effect fails symphony-local (never the honest gap)', async () => {
+				const { leg } = await execute('netleak', { legs: ['symphony-local'] });
+				const r = workflow(leg, 'symphony-local');
+				expect(r.status).toBe('failed');
+				expect(assertionOf(r, 'zero-network')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(r, 'zero-network')?.detail).toContain('upstream=moved');
+			}, 120_000);
+
+			it('an orphaned Pianola child fails pianola-dispatch (never the honest gap)', async () => {
+				swallowSignalsToOrphans();
+				const { leg } = await execute('orphan', { legs: ['pianola-dispatch'] });
+				const r = workflow(leg, 'pianola-dispatch');
+				expect(orphanPids()).toHaveLength(1);
+				expect(r.status).toBe('failed');
+				expect(assertionOf(r, 'cleanup-reaps-child')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(r, 'task-done')?.outcome).toBe('passed');
+			}, 120_000);
+
+			it('a transcript read outside the owned home fails pianola-learn', async () => {
+				const real = fs.readFileSync;
+				vi.spyOn(fs, 'readFileSync').mockImplementation(function (this: unknown, ...a: unknown[]) {
+					const p = a[0];
+					// Each owned transcript read also reads one transcript elsewhere.
+					if (
+						typeof p === 'string' &&
+						p.endsWith('chat_history.jsonl') &&
+						p.includes(`${path.sep}grok-a${path.sep}`)
+					)
+						(fs.readFileSync as (f: string, e: string) => string)(OUTSIDE_TRANSCRIPT, 'utf8');
+					return (real as (...x: unknown[]) => unknown).apply(this, a);
+				} as never);
+				const { leg } = await execute('ok', { legs: ['pianola-learn'] });
+				const r = workflow(leg, 'pianola-learn');
+				expect(r.status).toBe('failed');
+				expect(assertionOf(r, 'owned-home-only')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(r, 'attributed-to-grok')?.outcome).toBe('passed');
+			}, 120_000);
+		});
 	});
 });
