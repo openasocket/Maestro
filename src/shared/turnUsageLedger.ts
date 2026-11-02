@@ -144,7 +144,8 @@ export function turnUsageStatsFields(usage: TurnUsage | null): {
  * The Auto Run path keeps its own per-task accumulator (it subscribes to
  * `onUsage` locally and resets between tasks), so it has the delta in hand and
  * does not need the ledger. This converts that value to the same field names
- * without a second accumulation path.
+ * without a second accumulation path. A value whose accounting says the cost is
+ * not known omits `costUsd`, so the row stores NULL rather than a fabricated $0.
  */
 export function usageStatsToTurnFields(usage: UsageStats | undefined): {
 	inputTokens?: number;
@@ -159,7 +160,9 @@ export function usageStatsToTurnFields(usage: UsageStats | undefined): {
 		outputTokens: usage.outputTokens || 0,
 		cacheReadTokens: usage.cacheReadInputTokens || 0,
 		cacheCreationTokens: usage.cacheCreationInputTokens || 0,
-		costUsd: usage.totalCostUsd || 0,
+		// An unknown (or partial-without-figure) charge leaves the column NULL, the same
+		// rule the ledger applies at drain; `totalCostUsd` is then only a display 0.
+		...(reportsUnknownCost(usage) ? {} : { costUsd: usage.totalCostUsd || 0 }),
 	};
 }
 
