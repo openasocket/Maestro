@@ -7926,7 +7926,8 @@
 				"Context occupancy and native/ACP input semantics remain distinct; declared capability semantics still require native agreement.",
 				"GT1-07-11 verification: ACP usage reaches the desktop through per-process TurnCapture (exact ticks, partial upper bound on lowered buckets, cost NULL when unknown); child usage stays raw. Native StdoutHandler eager JSON parsing is unchanged. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: token buckets counted once per native lifetime; cache read/creation disjoint; exact/partial/unknown cost kept apart; Grok cost reads partial until a verified cross-file snapshot exists. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). The library recorder and dashboard aggregation write an unknown cost as 0 (A11-F25, A11-F26). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8077,6 +8078,20 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-unknown-cost-written-as-zero",
+					"code": "consumer-defect",
+					"missingPrerequisite": "The library turn recorder and the dashboard aggregation must keep an unknown or partial-without-figure charge unknown instead of writing or summing 0 (A11-F25, A11-F26). The E06 consumer legs turn-recorder and stats-readers fail their cost-label assertion until then, so no zero-cost or aggregate-cost claim may rest on them. Unowned repair; GT1-11-14 audits it.",
+					"affectedRows": [
+						"P11",
+						"C-supportsCostTracking",
+						"C-supportsUsageStats",
+						"REG-USAGE",
+						"S26"
+					],
+					"ownerTask": "GT1-11-14",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-accounting.md"
 				}
 			],
 			"phase": "03",
@@ -8269,7 +8284,8 @@
 				"Native GrokOutputParser and the separate shared ACP client/session/event/request/turn stack are implemented and covered by the 26-file GT1-03-13E matrix. Structured terminal/partial usage and raw exact ticks are retained at parser boundaries. Production ACP callers, raw desktop native decoding and end-to-end native terminal propagation remain incomplete; historical native fixture versions are not binary qualification. Canonical native/ACP errors and conservative retry guards pass GT1-03-13E fixtures. Automatic replay requires settled host-owned failed/provider/not-dispatched facts. Native terminal propagation and all real consumer paths remain phase07/08/10 work; real-provider error/recovery qualification remains phase11. startTurn comments explicitly say buffering is unlimited absent options. Grok burst streams, listener cleanup, persistence privacy and cancellation require bounded workload evidence. Existing Grok NDJSON parser is not an ACP transport; registration does not prove current release protocol compatibility. Shared ACP interleaving, cancellation and bounded framing pass GT1-03-13E fixtures. Real consumer buffering, native protocol compliance and platform behavior remain unqualified. Preserve actual terminal outcome/error contract; success must not follow merely from process exit or an end-shaped event. Reasoning summaries must retain source tags and never be fabricated; qualify Grok ACP/native interleaving and tool suppression.",
 				"GT1-07-11 verification: Tool, thought and child-tool rendering pass split and concurrent synthetic children; a child tool still running at parent settlement is closed only by renderer exit cleanup. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups recordings pass 37/37; performance pass 21/21. Parity against the comparator baseline: split chunks, cancellation and final usage stable under the synthetic stream; linear frames/bytes. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -9408,7 +9424,8 @@
 				"Completed children already folded into lifetime totals are not added again. Native child lifecycle/completeness remains unknown without provider proof. Display grouping still supports one parentToolUseId level; deeper/orphan children remain flat and this phase does not qualify their orchestration.",
 				"GT1-07-11 verification: Child usage is reported raw and parent totals equal a childless turn; aggregate children accounting is completed-included or unknown with partial completeness. Synthetic only. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: resumed cumulative ledgers replace rather than sum; a child whose parent is in the same pool keeps no parent-attributed tokens. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -15440,7 +15457,8 @@
 				"Quota has no Grok provider/view entry; absent quota stays unknown, never zero/unlimited or budget certification. Conservative error/retry fixtures do not prove all real consumer recovery paths. Broader streaming burst/memory bounds, listener cleanup, persistence privacy and cancellation workload evidence remain with later phases.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; quota pass 21/21; nativeQuota unsupported; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; recordings pass 37/37; performance pass 21/21; retry pass 158/158; launch pass 276/276; nativePlatformLaunch not-run. Parity against the comparator baseline: bounded buffers, lazy history, concurrency and dashboards verified deterministically; performance measured without wall-clock thresholds. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-11F, GT1-11-07, GT1-11-11A, GT1-11-10 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
 				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
-				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -15866,7 +15884,8 @@
 				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md.",
 				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md.",
 				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md.",
-				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -18292,7 +18311,8 @@
 			"limitations": [
 				"Exact tick precision, partial/unreported cost and stream/final/disk reconciliation still require qualification.",
 				"Current phase04 evidence: selected account discovery, lifetime/child accounting, dashboard, CLI/export and Cue consumers pass deterministic regression checks; historical phase03 limitations above are superseded only for these tested boundaries. Live billing/child completeness, managed account paths and broader route qualification remain pending.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: cost tracked as exact ticks or partial/unknown with coverage; never priced from tokens for Grok; Claude reports, Codex estimates. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: cost tracked as exact ticks or partial/unknown with coverage; never priced from tokens for Grok; Claude reports, Codex estimates. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). The library recorder and dashboard aggregation write an unknown cost as 0 (A11-F25, A11-F26). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -18394,6 +18414,20 @@
 					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established. GT1-10-16: phase 10 consumers now pass at HEAD (accessor, Cue accessor, legend, Agent Runs, global stats, About and share image); Grok cost reads partial or unknown, never complete, until a verified cross-file snapshot exists; real billing and live/disk convergence remain GT1-11-11F.",
 					"affectedRows": ["C-supportsCostTracking"],
 					"evidenceRef": "phase04-reconciliation"
+				},
+				{
+					"id": "grok-unknown-cost-written-as-zero",
+					"code": "consumer-defect",
+					"missingPrerequisite": "The library turn recorder and the dashboard aggregation must keep an unknown or partial-without-figure charge unknown instead of writing or summing 0 (A11-F25, A11-F26). The E06 consumer legs turn-recorder and stats-readers fail their cost-label assertion until then, so no zero-cost or aggregate-cost claim may rest on them. Unowned repair; GT1-11-14 audits it.",
+					"affectedRows": [
+						"P11",
+						"C-supportsCostTracking",
+						"C-supportsUsageStats",
+						"REG-USAGE",
+						"S26"
+					],
+					"ownerTask": "GT1-11-14",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-accounting.md"
 				}
 			],
 			"field": "supportsCostTracking",
@@ -18531,7 +18565,8 @@
 			"limitations": [
 				"Shared native uncached-input and ACP full-input buckets, cache/model scopes and child non-additivity pass GT1-03-13E fixtures; persistence, UI, native lifetime reconciliation and real-provider agreement remain unqualified.",
 				"Current phase04 evidence: selected account discovery, lifetime/child accounting, dashboard, CLI/export and Cue consumers pass deterministic regression checks; historical phase03 limitations above are superseded only for these tested boundaries. Live billing/child completeness, managed account paths and broader route qualification remain pending.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: usage stats reach accessor, Cue accessor, legend, Agent Runs, global stats and About through the same accessors as the comparators. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: usage stats reach accessor, Cue accessor, legend, Agent Runs, global stats and About through the same accessors as the comparators. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). The library recorder and dashboard aggregation write an unknown cost as 0 (A11-F25, A11-F26). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -18633,6 +18668,20 @@
 					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established. GT1-10-16: phase 10 consumers now pass at HEAD (accessor, Cue accessor, legend, Agent Runs, global stats, About and share image); Grok cost reads partial or unknown, never complete, until a verified cross-file snapshot exists; real billing and live/disk convergence remain GT1-11-11F.",
 					"affectedRows": ["C-supportsUsageStats"],
 					"evidenceRef": "phase04-reconciliation"
+				},
+				{
+					"id": "grok-unknown-cost-written-as-zero",
+					"code": "consumer-defect",
+					"missingPrerequisite": "The library turn recorder and the dashboard aggregation must keep an unknown or partial-without-figure charge unknown instead of writing or summing 0 (A11-F25, A11-F26). The E06 consumer legs turn-recorder and stats-readers fail their cost-label assertion until then, so no zero-cost or aggregate-cost claim may rest on them. Unowned repair; GT1-11-14 audits it.",
+					"affectedRows": [
+						"P11",
+						"C-supportsCostTracking",
+						"C-supportsUsageStats",
+						"REG-USAGE",
+						"S26"
+					],
+					"ownerTask": "GT1-11-14",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-accounting.md"
 				}
 			],
 			"field": "supportsUsageStats",
@@ -20656,7 +20705,8 @@
 			},
 			"limitations": [
 				"Grok uses false conservatively; ACP/native accounting needs verified semantics and agreement with static set.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: context window rows unchanged by phase 10; usage accessors keep input/cache buckets disjoint. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: context window rows unchanged by phase 10; usage accessors keep input/cache buckets disjoint. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22143,7 +22193,8 @@
 			},
 			"limitations": [
 				"Phase03/04 fixtures preserve exact decimal ticks, unknown/partial cost, per-model identity, separate cache buckets and once-only turn/session totals. Phase04 selected-account disk reads, accessors, dashboard, CLI/export and Cue consumers pass deterministic regressions. Unknown Grok models never borrow unrelated prices. Real billing, running-child completeness, live/disk agreement and broader ACP/SSH consumer propagation remain phase07/10/11 qualification; managed account-path wiring remains phase09.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: usage normalization registered through the shared accessors and stats cache contract; no Grok pricing table. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: usage normalization registered through the shared accessors and stats cache contract; no Grok pricing table. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). The library recorder and dashboard aggregation write an unknown cost as 0 (A11-F25, A11-F26). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22245,6 +22296,20 @@
 					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established. GT1-10-16: phase 10 consumers now pass at HEAD (accessor, Cue accessor, legend, Agent Runs, global stats, About and share image); Grok cost reads partial or unknown, never complete, until a verified cross-file snapshot exists; real billing and live/disk convergence remain GT1-11-11F.",
 					"affectedRows": ["REG-USAGE"],
 					"evidenceRef": "phase04-reconciliation"
+				},
+				{
+					"id": "grok-unknown-cost-written-as-zero",
+					"code": "consumer-defect",
+					"missingPrerequisite": "The library turn recorder and the dashboard aggregation must keep an unknown or partial-without-figure charge unknown instead of writing or summing 0 (A11-F25, A11-F26). The E06 consumer legs turn-recorder and stats-readers fail their cost-label assertion until then, so no zero-cost or aggregate-cost claim may rest on them. Unowned repair; GT1-11-14 audits it.",
+					"affectedRows": [
+						"P11",
+						"C-supportsCostTracking",
+						"C-supportsUsageStats",
+						"REG-USAGE",
+						"S26"
+					],
+					"ownerTask": "GT1-11-14",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-accounting.md"
 				}
 			],
 			"branchAuditRefs": ["B12", "B32", "B35", "B38", "B42", "B43"]
@@ -22820,7 +22885,8 @@
 			},
 			"limitations": [
 				"Grok quota is absent. Contract permits native quota unavailability, but requires truthful unavailable/unknown display and no invented unlimited/zero balances; absence is not cost-budget correctness. No endpoint or quota probe was run.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups quota pass 21/21; nativeQuota unsupported; launch pass 276/276; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: unavailable quota presentation passes (no tab, no HTTP call, no zero/unlimited inference); Claude Code and Codex have native quota views; native Grok quota unsupported, optional per the contract. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-10, GT1-11-11A, GT1-11-07 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups quota pass 21/21; nativeQuota unsupported; launch pass 276/276; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: unavailable quota presentation passes (no tab, no HTTP call, no zero/unlimited inference); Claude Code and Codex have native quota views; native Grok quota unsupported, optional per the contract. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-10, GT1-11-11A, GT1-11-07 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -26779,7 +26845,8 @@
 			"limitations": [
 				"Phase04 accessors now retain partial/unknown completeness instead of declaring Grok full coverage unconditionally. Reconcile partial/unknown cost, cache, child totals, profiles and rate-limit accounting against normalized evidence.",
 				"Current phase04 evidence: selected account discovery, lifetime/child accounting, dashboard, CLI/export and Cue consumers pass deterministic regression checks; historical phase03 limitations above are superseded only for these tested boundaries. Live billing/child completeness, managed account paths and broader route qualification remain pending.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; storedHistory pass 441/441; aboutShare pass 66/66; launch pass 276/276; agentRuns pass 139/139; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: dashboard and Cue attribution match; unknown Grok spend never shown as zero; tokens never rendered as money. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-11A, GT1-11-10 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; storedHistory pass 441/441; aboutShare pass 66/66; launch pass 276/276; agentRuns pass 139/139; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: dashboard and Cue attribution match; unknown Grok spend never shown as zero; tokens never rendered as money. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-11A, GT1-11-10 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). The library recorder and dashboard aggregation write an unknown cost as 0 (A11-F25, A11-F26). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -26839,6 +26906,20 @@
 					"missingPrerequisite": "Phase04 accessor, dashboard, CLI/export, Cue and canonical account-discovery regression suites now pass. Exact/partial/unknown cost, per-model identity and once-only lifetime totals are preserved. Managed account-path wiring remains phase09; real billing, running-child completeness and live/disk convergence remain phase07/10/11 qualification. No common cross-file native epoch is established. GT1-10-16: phase 10 consumers now pass at HEAD (accessor, Cue accessor, legend, Agent Runs, global stats, About and share image); Grok cost reads partial or unknown, never complete, until a verified cross-file snapshot exists; real billing and live/disk convergence remain GT1-11-11F.",
 					"affectedRows": ["S26"],
 					"evidenceRef": "phase04-reconciliation"
+				},
+				{
+					"id": "grok-unknown-cost-written-as-zero",
+					"code": "consumer-defect",
+					"missingPrerequisite": "The library turn recorder and the dashboard aggregation must keep an unknown or partial-without-figure charge unknown instead of writing or summing 0 (A11-F25, A11-F26). The E06 consumer legs turn-recorder and stats-readers fail their cost-label assertion until then, so no zero-cost or aggregate-cost claim may rest on them. Unowned repair; GT1-11-14 audits it.",
+					"affectedRows": [
+						"P11",
+						"C-supportsCostTracking",
+						"C-supportsUsageStats",
+						"REG-USAGE",
+						"S26"
+					],
+					"ownerTask": "GT1-11-14",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-accounting.md"
 				}
 			],
 			"branchAuditRefs": ["B23", "B32", "B43"]
@@ -26898,7 +26979,8 @@
 			},
 			"limitations": [
 				"Grok has no quota provider/view entry; native quota absence may remain unavailable, but unknown cannot mean zero/unlimited or certify budget enforcement.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups quota pass 21/21; nativeQuota unsupported; retry pass 158/158; launch pass 276/276; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; nativePlatformLaunch not-run. Parity against the comparator baseline: unavailable quota presentation passes and stays distinct from usage/cost support; native Grok quota endpoint unqualified, so no balance, budget or reset time is shown. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups quota pass 21/21; nativeQuota unsupported; retry pass 158/158; launch pass 276/276; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; nativePlatformLaunch not-run. Parity against the comparator baseline: unavailable quota presentation passes and stays distinct from usage/cost support; native Grok quota endpoint unqualified, so no balance, budget or reset time is shown. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -27017,7 +27099,8 @@
 			},
 			"limitations": [
 				"startTurn comments explicitly say buffering is unlimited absent options. Grok burst streams, listener cleanup, persistence privacy and cancellation require bounded workload evidence.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups recordings pass 37/37; performance pass 21/21. Parity against the comparator baseline: retained output bounded after exit; one frame and one commit per round; cancellation synchronous. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups recordings pass 37/37; performance pass 21/21. Parity against the comparator baseline: retained output bounded after exit; one frame and one commit per round; cancellation synchronous. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -28350,7 +28433,8 @@
 				"Grok context must follow selected model/account/route, not stale fallback or inconsistent combined flag/set.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
 				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; cli pass 81/81; quota pass 21/21; nativeQuota unsupported; recordings pass 37/37; performance pass 21/21; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; retry pass 158/158; nativePlatformLaunch not-run; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: context window constants unchanged by phase 10; usage and stream consumers verified. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-11C, GT1-11-10, GT1-11-11A, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; cli pass 81/81; quota pass 21/21; nativeQuota unsupported; recordings pass 37/37; performance pass 21/21; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; retry pass 158/158; nativePlatformLaunch not-run; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: context window constants unchanged by phase 10; usage and stream consumers verified. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-11C, GT1-11-10, GT1-11-11A, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -28532,7 +28616,8 @@
 				"Shared defaults do not prove Grok document-mode selection or quota retry correctness.",
 				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; usage pass 91/91; quota pass 21/21; nativeQuota unsupported; recordings pass 37/37; performance pass 21/21; retry pass 158/158; web pass 427/427; interaction pass 137/137; liteNative not-run; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; nativePlatformLaunch not-run. Parity against the comparator baseline: threshold constants unchanged by phase 10; retry surfaces unknown Grok resets without the Claude-only estimator. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11E, GT1-11-11F, GT1-11-07, GT1-11-11C, GT1-11-12, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
-				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md.",
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -38950,6 +39035,555 @@
 					"META-07"
 				],
 				"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
+			}
+		],
+		"liveCalls": 0,
+		"readiness": false
+	},
+	"phase11NativeAccounting": {
+		"taskId": "GT1-11-11F",
+		"recordedAt": "2026-11-02",
+		"sourceCommit": "72630fa551ce67a49291d847e6866b4da73db951",
+		"branch": "auto-run-feature/grok-cli-integration",
+		"evidenceRef": "Plans/grok-tier1/evidence/11-native-accounting.md",
+		"previousRun": {
+			"sourceCommit": "f8c46adfc",
+			"outcome": "left unchecked",
+			"findings": ["A11-F23", "A11-F24"]
+		},
+		"prerequisites": {
+			"missing": [
+				"live.enabled false",
+				"live.credentialsReference null",
+				"live.authorizationReference null",
+				"live.budgetUsd 0",
+				"live.maxCalls 0",
+				"live.maxTurns 0",
+				"live.maxWallClockSeconds 0",
+				"live.allowedEndpoints empty",
+				"selectedBinaryPath null",
+				"selectedBinarySha256 null",
+				"selectedLiveModels empty",
+				"authorization.configurationReference null",
+				"authorization.expiresAt null",
+				"authorization.isolationReceipt null",
+				"authorization.allowedRoots empty",
+				"no provider cap or worst-case reservation",
+				"authorization.sharedBudgetLedgerReference null"
+			],
+			"configFiles": [],
+			"requiredLiveBlockers": [
+				"live-authorization-absent",
+				"binary-unpinned",
+				"host-isolation-unqualified",
+				"background-egress-unqualified",
+				"discovery-authorization-absent",
+				"live-limits-unset",
+				"spend-guarantee-absent"
+			]
+		},
+		"configurationSelectionFiles": [],
+		"suites": {
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/scripts/grok-qualification-spend.test.ts src/__tests__/scripts/grok-qualification-harness.test.ts src/__tests__/main/parsers/grok-output-parser.test.ts src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts src/__tests__/shared/maestro-lib/grok/acp-events.test.ts src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts src/shared/maestro-lib/streaming/__tests__/turn-outcome.test.ts src/__tests__/shared/maestro-lib/turns/record-turn.test.ts src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts src/__tests__/main/process-manager/recordings/turn-recordings.test.ts src/__tests__/cli/services/turn-recordings.cli.test.ts src/main/process-listeners/__tests__/usage-listener.test.ts src/__tests__/main/stats/token-usage/token-usage-accessor.test.ts src/__tests__/main/stats/usage-export.test.ts src/__tests__/main/utils/statsCache.test.ts src/__tests__/cli/commands/stats.test.ts src/__tests__/main/web-server/handlers/tokenUsageHandler.test.ts src/__tests__/renderer/components/UsageDashboard/AgentOverviewCards.test.tsx src/__tests__/renderer/components/UsageDashboard/TokenStatsLegend.test.tsx src/__tests__/renderer/components/UsageDashboard/UsageDashboardModalHooks.test.tsx src/__tests__/renderer/components/UsageDashboard/useQuotaRefresh.test.tsx src/__tests__/renderer/components/UsageDashboard/quotaLastRefreshed.test.ts src/__tests__/main/cue/cue-stats-query.test.ts src/__tests__/main/cue/cue-token-accessor.test.ts src/__tests__/renderer/utils/contextUsage.test.ts src/__tests__/renderer/utils/contextWindowResolver.test.ts src/__tests__/shared/maestro-lib/turns/context.test.ts src/__tests__/main/stores/quotaAccountsStore.test.ts src/__tests__/shared/usageQuota.test.ts src/__tests__/shared/quotaLimitDetail.test.ts src/__tests__/shared/modelPricing.test.ts src/__tests__/performance/ThinkingStreamPerformance.test.tsx",
+			"exit": 0,
+			"total": 1462,
+			"passed": 1462,
+			"failed": 0,
+			"files": [
+				{
+					"file": "src/__tests__/renderer/utils/contextUsage.test.ts",
+					"passed": 72,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/utils/contextWindowResolver.test.ts",
+					"passed": 27,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/UsageDashboard/AgentOverviewCards.test.tsx",
+					"passed": 89,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/UsageDashboard/TokenStatsLegend.test.tsx",
+					"passed": 19,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/UsageDashboard/UsageDashboardModalHooks.test.tsx",
+					"passed": 14,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/UsageDashboard/quotaLastRefreshed.test.ts",
+					"passed": 6,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/UsageDashboard/useQuotaRefresh.test.tsx",
+					"passed": 7,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-harness.test.ts",
+					"passed": 124,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-spend.test.ts",
+					"passed": 40,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/modelPricing.test.ts",
+					"passed": 29,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/quotaLimitDetail.test.ts",
+					"passed": 15,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/usageQuota.test.ts",
+					"passed": 11,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/cli/services/turn-recordings.cli.test.ts",
+					"passed": 34,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/cli/commands/stats.test.ts",
+					"passed": 16,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/cue/cue-stats-query.test.ts",
+					"passed": 39,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/cue/cue-token-accessor.test.ts",
+					"passed": 26,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/parsers/grok-output-parser.test.ts",
+					"passed": 123,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/stats/usage-export.test.ts",
+					"passed": 23,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/stores/quotaAccountsStore.test.ts",
+					"passed": 10,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/utils/statsCache.test.ts",
+					"passed": 25,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/main/process-listeners/__tests__/usage-listener.test.ts",
+					"passed": 7,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/process-manager/recordings/turn-recordings.test.ts",
+					"passed": 48,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/stats/token-usage/token-usage-accessor.test.ts",
+					"passed": 46,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/web-server/handlers/tokenUsageHandler.test.ts",
+					"passed": 5,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-events.test.ts",
+					"passed": 146,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts",
+					"passed": 102,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/turns/context.test.ts",
+					"passed": 31,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/turns/record-turn.test.ts",
+					"passed": 31,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts",
+					"passed": 189,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/shared/maestro-lib/streaming/__tests__/turn-outcome.test.ts",
+					"passed": 52,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/shared/maestro-lib/streaming/__tests__/usage-accumulator.test.ts",
+					"passed": 35,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/shared/maestro-lib/streaming/__tests__/usage-totals.test.ts",
+					"passed": 21,
+					"failed": 0,
+					"skipped": 0
+				}
+			]
+		},
+		"harness": {
+			"command": "node scripts/grok-qualification.mjs --json --no-write",
+			"exit": 0,
+			"configSource": "default-run-state",
+			"totals": {
+				"cases": 48,
+				"admitted": 0,
+				"notRun": 48,
+				"spawned": 0,
+				"paidRequests": 0,
+				"networkContacts": 0
+			},
+			"capabilities": {
+				"isolationPreflight": true,
+				"atomicSpendAdmission": true,
+				"offlineExecutor": true,
+				"caseExecutor": true,
+				"discoveryExecutor": true,
+				"sshExecutor": true,
+				"consumerLegs": true,
+				"sessionLegs": true,
+				"sessionConsumers": true,
+				"utilityLegs": true,
+				"cheapUtilityLegs": true,
+				"workflowLegs": true,
+				"orchestrationLegs": true,
+				"contributionLegs": true,
+				"accountingLegs": true,
+				"accountingConsumers": true
+			}
+		},
+		"cases": [
+			{
+				"caseId": "E06:native-headless:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"notEvaluatedIfAdmitted": [
+					{
+						"id": "child-usage",
+						"owner": "grok-native-subagent-unqualified"
+					},
+					{
+						"id": "stats-cli",
+						"owner": "unassigned-stats-cli-desktop-bridge"
+					}
+				]
+			},
+			{
+				"caseId": "E06:native-headless:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"notEvaluatedIfAdmitted": [
+					{
+						"id": "accounting-legs",
+						"owner": "unassigned-ssh-accounting-legs"
+					},
+					{
+						"id": "accounting-consumers",
+						"owner": "unassigned-ssh-accounting-consumers"
+					}
+				]
+			},
+			{
+				"caseId": "E06:acp-stdio:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"notEvaluatedIfAdmitted": [
+					{
+						"id": "fault-retry",
+						"owner": "unassigned-acp-fault-legs"
+					},
+					{
+						"id": "accounting-consumers",
+						"owner": "unassigned-acp-accounting-consumers"
+					},
+					{
+						"id": "usage-reported (base paid assertion)",
+						"owner": "GT1-11-11F (stale, A11-F28)"
+					}
+				]
+			},
+			{
+				"caseId": "E06:acp-stdio:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"notEvaluatedIfAdmitted": [
+					{
+						"id": "accounting-legs",
+						"owner": "unassigned-ssh-accounting-legs"
+					},
+					{
+						"id": "accounting-consumers",
+						"owner": "unassigned-ssh-accounting-consumers"
+					}
+				]
+			}
+		],
+		"claims": [
+			{
+				"claim": "Native turn usage and cost provenance (unknown, partial, exact; cache buckets; per-model identity)",
+				"rows": ["P11", "C-supportsCostTracking", "REG-USAGE"],
+				"cases": "E06 accounting leg usage-capture (GT1-11-11F1, F3A)",
+				"implemented": "usage-capture runs one turn on an `accounting:usage-capture` reservation and must evaluate usage-captured, cache-buckets, model-acknowledged, cost-provenance, no-zero-substitution and settled-by-status; on ACP the paid turn feeds the usage hook into GrokAcpEventAdapter; a cache bucket the native stream never carried stays unreported and fails cache-buckets, never 0 (A11-F27, repaired in F3A); pinned by the harness suite (F3, F3B) with Node stand-ins only",
+				"gap": "a native observation under run-state live inputs; SSH tuples have no accounting leg (unassigned-ssh-accounting-legs)",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Exactly-once parent/child accounting (native subagent usage)",
+				"rows": ["P12", "P16", "P40", "S26"],
+				"cases": "E06 accounting leg child-usage (GT1-11-11F1)",
+				"implemented": "child-usage must evaluate child-reported, child-settled-once, lifetime-once, no-zero-substitution and settled-by-status; it is reachable on ACP only: on native headless the stream carries no child record, so the leg reads not-evaluated with owner grok-native-subagent-unqualified, never passed",
+				"gap": "a native child turn (blocker grok-native-subagent-unqualified stays open); the ACP child leg under live inputs",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Turn recordings and stream bounds over native turns",
+				"rows": ["P11", "S28", "META-06"],
+				"cases": "E06 consumer legs turn-recorder, desktop-recording (GT1-11-11F2)",
+				"implemented": "turn-recorder replays the captured native stream through the library createTurnRecorder (recorder-row-once, recorder-tokens, recorder-cost-label); desktop-recording replays it through the desktop stdout/exit handlers and stats:record-query into an owned database (desktop-usage-once, desktop-stream-bound, desktop-row-once, desktop-cost-label); a capture over 4 MiB is not replayed (capture-unbounded); native headless local only (ACP keeps no stream, SSH unowned)",
+				"gap": "a native observation; the library recorder writes 0 for an unknown or partial-without-figure charge and fails recorder-cost-label (A11-F25)",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Usage dashboards, stats CLI/export and Cue cost attribution",
+				"rows": ["C-supportsUsageStats", "REG-USAGE", "S26"],
+				"cases": "E06 consumer legs stats-readers, cue-attribution (GT1-11-11F2)",
+				"implemented": "stats-readers reads the owned database through the dashboard aggregation, the token-usage accessor and the usage export with 4 concurrent readers under a 30 s deadline (aggregation-once, aggregation-cost-label, token-accessor, export-rows, readers-bounded); cue-attribution files one run under pipeline qualify-e06-cue (cue-pipeline-once, cue-tokens, cue-cost-label, cue-native-partial); `maestro-cli stats-tokens` needs a running desktop and stays an open gap (unassigned-stats-cli-desktop-bridge)",
+				"gap": "a native observation; the dashboard aggregation sums an unknown row as a priced 0 and fails aggregation-cost-label (A11-F26); the stats CLI desktop bridge",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Context and combined-window displays",
+				"rows": ["C-usesCombinedContextWindow", "META-06", "META-07"],
+				"cases": "E06 consumer leg context-window (GT1-11-11F2)",
+				"implemented": "context-window resolves the captured turn usage through the production context resolver (combined-rule, displayed-fraction, unknown-window: an unknown window stays unknown)",
+				"gap": "a native observation of the reported window",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Quota discovery and unavailable presentation",
+				"rows": ["REG-QUOTA", "S27"],
+				"cases": "E06 consumer leg quota-unavailable (GT1-11-11F2)",
+				"implemented": "quota-unavailable arms the quota consumers over the owned Grok account with network refused and must evaluate quota-not-sampled, quota-zero-network and budget-not-reset; it presents Grok as unavailable while grok-native-quota-unavailable stays open; no rate-limit request is made",
+				"gap": "a qualified native quota contract (blocker grok-native-quota-unavailable stays open); an available-quota claim stays refused",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Error and retry classification of accounted turns",
+				"rows": ["P11", "P40"],
+				"cases": "E06 accounting leg fault-retry (GT1-11-11F1)",
+				"implemented": "fault-retry runs rate-limit, auth and transport faults from a harness-owned Node fixture process (never the pinned binary, never a provider request), labeled fixture-induced, and must evaluate faults-classified (rate_limited, auth_expired, network_error), faults-labeled, retry-billed-once and uncertain-not-refunded; the transport fault leaves its reservation uncertain; native headless only (unassigned-acp-fault-legs)",
+				"gap": "fixture faults are never native observations; a native rate-limit may not be induced",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Qualification harness completeness (P43)",
+				"rows": ["P43"],
+				"cases": "all families",
+				"implemented": "the no-config harness loads under plain Node again (A11-F24 repaired in F0, pinned by F0A) and enumerates 48 cases with accountingLegs and accountingConsumers true; E06 carries 3 accounting legs and 6 consumer legs",
+				"gap": "live run-state inputs",
+				"outcome": "not-run"
+			}
+		],
+		"observed": {
+			"turnRecordings": [],
+			"streamBounds": [],
+			"usageRows": [],
+			"costProvenance": [],
+			"parentChildSettlements": [],
+			"dashboardTotals": [],
+			"cueCostAttributions": [],
+			"contextWindows": [],
+			"quotaPresentations": [],
+			"errorClassifications": [],
+			"retriesBilled": [],
+			"fixtureInducedFaults": []
+		},
+		"claimsMade": {
+			"aggregate": [],
+			"zeroCost": [],
+			"availableQuota": []
+		},
+		"budgetsReset": 0,
+		"rateLimitCallsManufactured": 0,
+		"productionInstall": {
+			"sha256": "5c8a688251bf61e35370b828b6a353b0a20fcc3f64000de8a91d426039f29cec",
+			"executed": false,
+			"modified": false
+		},
+		"findings": [
+			{
+				"id": "A11-F23",
+				"classification": "harness-gap",
+				"status": "repaired",
+				"consequence": "Found by run 1 at f8c46adfc: the accounting case logic was missing. Repaired by GT1-11-11F1 (2c9caa515, E06 accounting legs), GT1-11-11F2 (65fff6dcc, consumer legs) and pinned by GT1-11-11F3 (44d10a6fd); blocker grok-accounting-consumer-cases-unimplemented was never written and is not added.",
+				"repairTasks": ["GT1-11-11F1", "GT1-11-11F2", "GT1-11-11F3"]
+			},
+			{
+				"id": "A11-F24",
+				"classification": "regression",
+				"status": "repaired",
+				"consequence": "Found by run 1: the no-config harness exited 1 at load (an electron named import hoisted into the bundle through the lazy cue-standalone-engine import, since GT1-11-11E2). Repaired by GT1-11-11F0 (6ec0acafe), pinned by GT1-11-11F0A (97bc01fb1); this run exits 0.",
+				"repairTasks": ["GT1-11-11F0", "GT1-11-11F0A"]
+			},
+			{
+				"id": "A11-F25",
+				"classification": "consumer-defect",
+				"status": "open",
+				"anchors": [
+					"scripts/grok-qualification/harness.ts:13149",
+					"src/__tests__/scripts/grok-qualification-harness.test.ts:6214"
+				],
+				"consequence": "The library turn recorder (createTurnRecorder) writes a 0 cost for an unknown or partial-without-figure charge; the turn-recorder consumer leg fails recorder-cost-label on such a turn (fixture-induced in the harness suite, stand-in mode nocost). A Grok turn whose cost is unknown would be recorded as free.",
+				"blocker": "grok-unknown-cost-written-as-zero"
+			},
+			{
+				"id": "A11-F26",
+				"classification": "consumer-defect",
+				"status": "open",
+				"anchors": [
+					"scripts/grok-qualification/harness.ts:13275",
+					"src/__tests__/scripts/grok-qualification-harness.test.ts:6236"
+				],
+				"consequence": "The dashboard aggregation sums an unknown-cost row as a priced 0; the stats-readers consumer leg fails aggregation-cost-label (fixture-induced, stand-in mode nocost). The desktop ledger, the usage export and the Cue pipeline keep it unknown.",
+				"blocker": "grok-unknown-cost-written-as-zero"
+			},
+			{
+				"id": "A11-F28",
+				"classification": "owner-drift",
+				"status": "open",
+				"anchors": ["scripts/grok-qualification/harness.ts:4809"],
+				"consequence": "The base paid assertion usage-reported on the ACP route still reads not-evaluated with owner GT1-11-11F, a VERIFY packet that may not own case logic. For E06 the accounting leg usage-capture reads ACP usage through the usage hook, so no accounting claim depends on it; for the other ACP paid families the assertion stays not-evaluated under a stale owner. No blocker; referred to the GT1-11-14 audit."
+			}
+		],
+		"blockerUpdates": [
+			{
+				"id": "grok-unknown-cost-written-as-zero",
+				"findings": ["A11-F25", "A11-F26"],
+				"taskId": "GT1-11-11F",
+				"change": "added",
+				"addedTo": ["P11", "C-supportsCostTracking", "C-supportsUsageStats", "REG-USAGE", "S26"],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-native-accounting.md"
 			}
 		],
 		"liveCalls": 0,
