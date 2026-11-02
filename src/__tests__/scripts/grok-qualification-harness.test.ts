@@ -117,13 +117,14 @@ import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { GROK_ACP_ARGS } from '../../../src/shared/maestro-lib/grok/route';
 
 import {
 	ACCOUNTING_CONSUMER_ASSERTIONS,
 	ACCOUNTING_CONSUMER_READERS,
 	ACCOUNTING_FAULT_EXPECTED,
 	ACP_ACCOUNTING_CONSUMERS_OWNER,
-	ACP_FAULT_LEGS_OWNER,
+	ACP_ACCOUNTING_FAULT_EXPECTED,
 	ACP_TRANSLATION_RESUME_OWNER,
 	CANDIDATE_CAPABILITIES,
 	CODEX_STAGED_ROLLBACK_OWNER,
@@ -572,6 +573,38 @@ vi.mock('../../../src/shared/maestro-lib/autorun/run-goal', async (importOrigina
 				yield workflowTamper.goalForce && ev.type === 'goal_complete'
 					? ({ ...ev, success: true, exitReason: 'completed' } as typeof ev)
 					: ev;
+		},
+	};
+});
+/**
+ * GT1-11-14P4D: stands in for a repaired production ACP error mapping. When set,
+ * a fault fixture turn's completed error type is rewritten per fixture kind
+ * (read from the fixture's own JSON argument); null passes every turn through.
+ */
+const acpFaultTamper = vi.hoisted(() => ({
+	types: null as Record<string, string> | null,
+}));
+vi.mock('../../../src/shared/maestro-lib/grok/acp-turn', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('../../../src/shared/maestro-lib/grok/acp-turn')>();
+	return {
+		...actual,
+		startGrokAcpTurn: (...args: Parameters<typeof actual.startGrokAcpTurn>) => {
+			const running = actual.startGrokAcpTurn(...args);
+			const types = acpFaultTamper.types;
+			if (!types) return running;
+			const f = JSON.parse(args[0].args[args[0].args.length - 1]) as {
+				error?: { code: number };
+				chunk?: string;
+			};
+			const kind = f.chunk ? 'transport' : f.error?.code === -32000 ? 'auth' : 'rate-limit';
+			return {
+				...running,
+				completed: running.completed.then((done) => ({
+					...done,
+					error: { ...(done.error ?? { message: '', recoverable: true }), type: types[kind] },
+				})) as typeof running.completed,
+			};
 		},
 	};
 });
@@ -6716,14 +6749,18 @@ describe('GT1-11-09 qualification harness', () => {
 					cost: { status: 'exact', costUsd: 0.002 },
 				});
 				expect(child.settlement).toMatchObject({ state: 'settled', settledUsd: 0.001 });
-				// The fault fixtures speak the native shape only; the consumers replay a native stream only.
-				expect(acc('fault-retry').status).toBe('not-evaluated');
-				expect(acc('fault-retry').assertion.owner).toBe(ACP_FAULT_LEGS_OWNER);
+				// The consumers replay a native stream only (the ACP fault leg is pinned below).
 				for (const id of CONSUMERS) {
 					expect(con(id).status, id).toBe('not-evaluated');
 					expect(con(id).assertion.owner, id).toBe(ACP_ACCOUNTING_CONSUMERS_OWNER);
 				}
-				expect(leg.status).toBe('passed');
+				// Only the ACP fault leg fails (A11-F42, pinned below); the usage legs pass.
+				expect(verdicts(leg.accountingLegs)).toEqual([
+					['usage-capture', 'passed'],
+					['child-usage', 'passed'],
+					['fault-retry', 'failed'],
+				]);
+				expect(leg.status).toBe('failed');
 				expect(standInRuns().map((r) => r.route)).toEqual(['acp', 'acp', 'acp']);
 			}, 120_000);
 
@@ -6745,6 +6782,91 @@ describe('GT1-11-09 qualification harness', () => {
 					costUsd: null,
 				});
 			}, 120_000);
+
+			describe('ACP fault legs (GT1-11-14P4D)', () => {
+				afterEach(() => {
+					acpFaultTamper.types = null;
+				});
+				const labelled = (fault: ReturnType<Awaited<ReturnType<typeof execute>>['acc']>) => {
+					expect(fault.faults.map((f) => f.kind)).toEqual(['rate-limit', 'auth', 'transport']);
+					for (const f of fault.faults) {
+						expect(f.fixtureInduced, f.kind).toBe(true);
+						expect(f.sent, f.kind).toBe(false);
+						expect(f.command, f.kind).toBe(process.execPath);
+						expect(f.command, f.kind).not.toBe(BIN);
+						expect(f.envKeys, f.kind).toEqual([]);
+						expect(f.expected, f.kind).toBe(ACP_ACCOUNTING_FAULT_EXPECTED[f.kind]);
+					}
+					expect(fault.faults.map((f) => f.counted)).toEqual([true, false, true]);
+					expect(fault.fixtureSpawned).toBe(3);
+					expect(fault.assertion.owner).not.toBe('GT1-11-14P4D');
+					expect(outcome(fault, 'faults-labeled')).toBe('passed');
+				};
+				const transportKept = (ledger: Awaited<ReturnType<typeof execute>>['ledger']) => {
+					const t = ledger.reservations.find((x) => x.leg === 'accounting:fault-retry:transport')!;
+					expect(t.state).toBe('uncertain');
+					expect(t.uncertainEffect).toBe(true);
+					expect(t.settledUsd).toBe(0);
+					expect(t.uncertainUsd).toBe(t.holdUsd);
+					expect(t.uncertainUsd).toBeGreaterThan(0);
+					expect(() => releaseReservation(ledger, t.id, NOW)).toThrow();
+				};
+
+				it('the production ACP mapping reads a JSON-RPC rate limit and auth refusal as a lost connection (A11-F42): both classified agent_crashed, no retry sent, the lost peer uncertain and never refunded', async () => {
+					const { ledger, acc } = await execute('acp-stdio', 'ok');
+					const fault = acc('fault-retry');
+					labelled(fault);
+					// A11-F42: the JSON-RPC error message is discarded and the failure read as transport-lost.
+					expect(fault.faults.map((f) => [f.kind, f.classified, f.terminal])).toEqual([
+						['rate-limit', 'agent_crashed', 'none'],
+						['auth', 'agent_crashed', 'none'],
+						['transport', 'agent_crashed', 'none'],
+					]);
+					expect(fault.status).toBe('failed');
+					expect(failedIds(fault)).toEqual(['faults-classified', 'retry-billed-once']);
+					expect(outcome(fault, 'uncertain-not-refunded')).toBe('passed');
+					// A misread rate limit is never retried: nothing reached the pinned binary.
+					expect(fault.paidRequests).toBe(0);
+					expect(fault.turns).toEqual([]);
+					transportKept(ledger);
+				}, 120_000);
+
+				it('with the mapping repaired, every ACP fault reads its type, the rate limit is retried once over ACP as a retry call, and the leg passes', async () => {
+					acpFaultTamper.types = { ...ACP_ACCOUNTING_FAULT_EXPECTED };
+					const { ledger, acc } = await execute('acp-stdio', 'ok');
+					const fault = acc('fault-retry');
+					expect(fault.status, fault.assertions.map((a) => `${a.id}:${a.outcome}`).join(',')).toBe(
+						'passed'
+					);
+					labelled(fault);
+					expect(fault.faults.map((f) => [f.kind, f.classified])).toEqual(
+						Object.entries(ACP_ACCOUNTING_FAULT_EXPECTED)
+					);
+					// One billed send, over ACP: the retry alone, numbered after the attempt it retries.
+					expect(fault.paidRequests).toBe(1);
+					expect(fault.spawned).toBe(1);
+					expect(fault.turns.map((t) => [t.turn, t.terminal, t.reply.tokenSeen])).toEqual([
+						[2, 'success', true],
+					]);
+					expect(fault.turns[0].argv.slice(0, GROK_ACP_ARGS.length)).toEqual([...GROK_ACP_ARGS]);
+					const own = ledger.reservations.find((x) => x.leg === 'accounting:fault-retry')!;
+					expect(own.turnsUsed).toBe(2);
+					expect(own.callsByKind.retry).toBe(1);
+					expect(own.state).toBe('settled');
+					transportKept(ledger);
+					expect(standInRuns().map((r) => r.route)).toEqual(['acp', 'acp', 'acp', 'acp']);
+				}, 120_000);
+
+				it('a repaired mapping that misreads one ACP fault fails faults-classified, and a rate limit read as anything else is never retried', async () => {
+					acpFaultTamper.types = { ...ACP_ACCOUNTING_FAULT_EXPECTED, auth: 'agent_crashed' };
+					const auth = (await execute('acp-stdio', 'ok')).acc('fault-retry');
+					expect(failedIds(auth)).toEqual(['faults-classified']);
+					acpFaultTamper.types = { ...ACP_ACCOUNTING_FAULT_EXPECTED, 'rate-limit': 'unknown' };
+					const rate = (await execute('acp-stdio', 'ok')).acc('fault-retry');
+					expect(failedIds(rate)).toEqual(['faults-classified', 'retry-billed-once']);
+					expect(rate.paidRequests).toBe(0);
+				}, 120_000);
+			});
 
 			it('flags off: the accounting legs are not-run with nothing spawned or reserved, and the consumers are not-run without the consumer flag', async () => {
 				const off = await execute('native-headless', 'ok', ALL_CAPS);

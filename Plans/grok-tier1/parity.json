@@ -6887,12 +6887,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -7952,12 +7952,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -8298,12 +8298,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -8648,12 +8648,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -9302,12 +9302,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -9874,12 +9874,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -10943,12 +10943,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -11225,12 +11225,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -11456,12 +11456,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -11698,12 +11698,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -11924,12 +11924,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -13174,12 +13174,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -13402,12 +13402,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -13741,12 +13741,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -13994,12 +13994,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -15023,12 +15023,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -16000,12 +16000,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -16712,12 +16712,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -17285,12 +17285,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -18051,12 +18051,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -19841,12 +19841,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				},
 				{
@@ -20138,12 +20138,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				},
 				{
@@ -20353,12 +20353,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -21538,12 +21538,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				},
 				{
@@ -21746,12 +21746,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				},
 				{
@@ -21997,12 +21997,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				},
 				{
@@ -22189,12 +22189,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -22475,12 +22475,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -22778,12 +22778,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -23701,6 +23701,23 @@
 					"reason": "no-owned-ssh-target",
 					"closesWhen": "run-state live.allowedSshTargets names an owned target with its own Grok home",
 					"formerId": "grok-harness-ssh-legs-unassigned"
+				},
+				{
+					"id": "grok-acp-provider-error-read-as-lost-transport",
+					"code": "production-defect",
+					"missingPrerequisite": "The production ACP route must classify a provider JSON-RPC error on session/prompt by its own content (rate_limited, auth_expired, the shared Grok error patterns) and keep it distinct from a lost peer, on the library driver and the desktop spawner alike (A11-F42). Until then the GT1-11-14P4D ACP fault leg fails faults-classified and retry-billed-once, and no ACP error-classification, retry or login-guidance claim may rest on it. Repair GT1-11-14P4D1, test GT1-11-14P4D2.",
+					"affectedRows": ["REG-ERRORS", "REG-AUTH"],
+					"routes": ["acp-candidate", "ssh-acp-candidate"],
+					"ownerTask": "GT1-11-14P4D1",
+					"testTask": "GT1-11-14P4D2",
+					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
+					"productionAnchors": [
+						"src/shared/maestro-lib/grok/acp-client.ts:183",
+						"src/shared/maestro-lib/grok/acp-session.ts:456",
+						"src/shared/maestro-lib/grok/acp-turn.ts:762",
+						"src/main/process-manager/spawners/GrokAcpSpawner.ts:683"
+					],
+					"status": "open"
 				}
 			],
 			"branchAuditRefs": ["B06"]
@@ -24174,12 +24191,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -24606,12 +24623,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -24777,12 +24794,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -24900,12 +24917,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -25241,6 +25258,23 @@
 					"missingPrerequisite": "Canonical errors and Auto Run/coordinator guards pass GT1-03-13E. Replay requires host-owned failed/provider/not-dispatched facts; uncertain post-dispatch failures never replay automatically. Phase07/08/10 must propagate settled facts through all real callers and phase11 must qualify native recovery.",
 					"affectedRows": ["REG-ERRORS"],
 					"evidenceRef": "phase03-reconciliation"
+				},
+				{
+					"id": "grok-acp-provider-error-read-as-lost-transport",
+					"code": "production-defect",
+					"missingPrerequisite": "The production ACP route must classify a provider JSON-RPC error on session/prompt by its own content (rate_limited, auth_expired, the shared Grok error patterns) and keep it distinct from a lost peer, on the library driver and the desktop spawner alike (A11-F42). Until then the GT1-11-14P4D ACP fault leg fails faults-classified and retry-billed-once, and no ACP error-classification, retry or login-guidance claim may rest on it. Repair GT1-11-14P4D1, test GT1-11-14P4D2.",
+					"affectedRows": ["REG-ERRORS", "REG-AUTH"],
+					"routes": ["acp-candidate", "ssh-acp-candidate"],
+					"ownerTask": "GT1-11-14P4D1",
+					"testTask": "GT1-11-14P4D2",
+					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
+					"productionAnchors": [
+						"src/shared/maestro-lib/grok/acp-client.ts:183",
+						"src/shared/maestro-lib/grok/acp-session.ts:456",
+						"src/shared/maestro-lib/grok/acp-turn.ts:762",
+						"src/main/process-manager/spawners/GrokAcpSpawner.ts:683"
+					],
+					"status": "open"
 				}
 			]
 		},
@@ -26016,12 +26050,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -26213,12 +26247,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -26399,12 +26433,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -26562,12 +26596,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -26974,12 +27008,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -27132,12 +27166,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -27291,12 +27325,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -27449,12 +27483,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -27608,12 +27642,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -27761,12 +27795,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -27914,12 +27948,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -28073,12 +28107,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -28220,12 +28254,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -28437,12 +28471,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -28717,12 +28751,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -29450,12 +29484,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -29573,12 +29607,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -29708,12 +29742,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -29884,12 +29918,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -30075,12 +30109,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -30303,12 +30337,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -30852,12 +30886,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -31257,12 +31291,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -31494,12 +31528,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -33164,12 +33198,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -33351,12 +33385,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -33694,12 +33728,12 @@
 				{
 					"id": "grok-harness-acp-legs-owned",
 					"code": "harness-gap",
-					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: fault legs GT1-11-14P4D, accounting consumers 14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
-					"ownerTask": "GT1-11-14P4D",
+					"missingPrerequisite": "ACP harness legs are owned by bounded tasks: accounting consumers GT1-11-14P4E (paid executor usage-reported closed by GT1-11-14P4A, session legs by GT1-11-14P4B, session consumer legs by GT1-11-14P4C, fault legs by GT1-11-14P4D). ACP utility, workflow and translation-resume legs are not-applicable (grok-acp-route-not-produced: production runs them native only). An ACP tuple stays not-run until those tasks land and live inputs exist.",
+					"ownerTask": "GT1-11-14P4E",
 					"affectedRowsRef": "phase11Audit.blockerRows.grok-harness-acp-legs-owned",
 					"taskId": "GT1-11-14P4",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"ownerTasks": ["GT1-11-14P4D", "GT1-11-14P4E"],
+					"ownerTasks": ["GT1-11-14P4E"],
 					"formerId": "grok-harness-acp-legs-unassigned"
 				}
 			],
@@ -43814,6 +43848,22 @@
 				"resolvedBy": "GT1-11-14P4A",
 				"resolution": "The paid executor hands each ACP turn to the production GrokAcpEventAdapter usage hook (acpAccountingCapture, the GT1-11-11F1 capture) and evaluates usage-reported on both routes: passed when every turn carried usage, failed on absent usage; an unknown charge is usage with costUsd null, never 0. An exact ACP charge now settles the reservation (observed-exact-usage).",
 				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
+			},
+			{
+				"id": "A11-F42",
+				"class": "production-defect",
+				"status": "open",
+				"anchors": [
+					"src/shared/maestro-lib/grok/acp-client.ts:183",
+					"src/shared/maestro-lib/grok/acp-session.ts:456",
+					"src/shared/maestro-lib/grok/acp-turn.ts:762",
+					"src/main/process-manager/spawners/GrokAcpSpawner.ts:683"
+				],
+				"consequence": "On acp-stdio a session/prompt answered with a JSON-RPC error (a rate limit, an auth refusal) is read as a lost connection: the client keeps only the error code (GrokAcpRequestError), GrokAcpSession.prompt fails the session as transport-lost, and startGrokAcpTurn reports agent_crashed (\"connection was lost\", dispatch unknown); the desktop GrokAcpSpawner maps every non-refused ACP terminal to agent_crashed. So an ACP rate limit is never rate_limited (no retry or backoff policy applies) and an ACP auth refusal is never auth_expired (no login guidance), and both read as a possibly-run prompt. Observed by the GT1-11-14P4D fault leg on fixture peers only (no provider call).",
+				"repairTask": "GT1-11-14P4D1",
+				"testTask": "GT1-11-14P4D2",
+				"foundBy": "GT1-11-14P4D",
+				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
 			}
 		],
 		"rejectedChallenges": [
@@ -43843,7 +43893,9 @@
 				"recordedInParityBeforeAudit": true,
 				"triageTask": "GT1-11-14P4",
 				"resolvedOwner": "GT1-11-14P4D",
-				"resolution": "task"
+				"resolution": "task",
+				"closedBy": "GT1-11-14P4D",
+				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
 			},
 			{
 				"owner": "unassigned-acp-session-consumer-legs",
@@ -44406,6 +44458,29 @@
 					"killed": 8,
 					"total": 8
 				},
+				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
+			},
+			{
+				"id": "grok-harness-acp-legs-owned",
+				"taskId": "GT1-11-14P4D",
+				"change": "owner-closed",
+				"rows": 60,
+				"closedOwner": "GT1-11-14P4D",
+				"ownerTasks": ["GT1-11-14P4E"],
+				"residualsClosed": 0,
+				"mutants": {
+					"killed": 8,
+					"total": 8
+				},
+				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
+			},
+			{
+				"id": "grok-acp-provider-error-read-as-lost-transport",
+				"taskId": "GT1-11-14P4D",
+				"change": "added",
+				"rows": 2,
+				"finding": "A11-F42",
+				"ownerTasks": ["GT1-11-14P4D1", "GT1-11-14P4D2"],
 				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
 			}
 		],

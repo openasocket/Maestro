@@ -332,6 +332,7 @@ import {
 } from '../../src/shared/maestro-lib/grok/acp-client';
 import { GrokAcpEventAdapter } from '../../src/shared/maestro-lib/grok/acp-events';
 import { GrokAcpSession, GrokAcpSessionError } from '../../src/shared/maestro-lib/grok/acp-session';
+import { startGrokAcpTurn } from '../../src/shared/maestro-lib/grok/acp-turn';
 import type { AcpCall } from '../../src/shared/maestro-lib/grok/acp-protocol';
 import {
 	describeUsageProvenance,
@@ -12361,8 +12362,6 @@ export const ACCOUNTING_LEGS_OWNER = 'GT1-11-11F1';
 export const NATIVE_SUBAGENT_OWNER = 'grok-native-subagent-unqualified';
 /** The accounting legs read the owned home and the ledger locally; no task owns an SSH accounting leg. */
 export const SSH_ACCOUNTING_LEGS_OWNER = 'grok-harness-ssh-target-absent';
-/** The fault fixtures write the native stream shape; ACP-framed fault fixtures are GT1-11-14P4D's. */
-export const ACP_FAULT_LEGS_OWNER = 'GT1-11-14P4D';
 
 /** The assertions each accounting leg must evaluate; a leg missing one cannot pass. */
 export const ACCOUNTING_ASSERTIONS: Readonly<Record<AccountingLegId, readonly string[]>> =
@@ -12432,6 +12431,66 @@ const FAULT_FIXTURE_SOURCE = [
 	"for (const l of f.stdout) process.stdout.write(l + '\\n');",
 	"process.stderr.write(f.stderr + '\\n');",
 	'process.exitCode = 1;',
+].join('\n');
+
+/**
+ * The ACP-framed faults (GT1-11-14P4D): what a Grok `agent stdio` peer writes
+ * for each failure, from a harness-owned process speaking ACP (never the pinned
+ * binary, never a provider request). Rate limit and auth answer session/prompt
+ * with a JSON-RPC error; transport starts a reply and the peer goes away before
+ * the prompt settles, so its completion is uncertain.
+ */
+export const ACP_ACCOUNTING_FAULT_FIXTURES: Readonly<
+	Record<
+		AccountingFaultKind,
+		{ error?: { code: number; message: string }; chunk?: string; stderr: string }
+	>
+> = Object.freeze({
+	'rate-limit': {
+		error: {
+			code: -32603,
+			message: 'Rate limit exceeded: too many requests (qualification fixture)',
+		},
+		stderr: 'Error: Rate limit exceeded: too many requests (qualification fixture)',
+	},
+	auth: {
+		error: {
+			code: -32000,
+			message: 'Authentication required: invalid API key (qualification fixture)',
+		},
+		stderr: 'Error: Invalid API key (qualification fixture)',
+	},
+	transport: {
+		chunk: 'QUALIFY-E06-FIXTURE-PARTIAL',
+		stderr: 'Error: connection reset (ECONNRESET) (qualification fixture)',
+	},
+});
+
+/** The production error type each ACP fixture fault must read as; a lost peer is a crash naming the lost transport. */
+export const ACP_ACCOUNTING_FAULT_EXPECTED: Readonly<Record<AccountingFaultKind, string>> =
+	Object.freeze({
+		'rate-limit': 'rate_limited',
+		auth: 'auth_expired',
+		transport: 'agent_crashed',
+	});
+
+/** The ACP fixture peer: initialize, session/new acknowledging the asked model, the fault on session/prompt. */
+const ACP_FAULT_FIXTURE_SOURCE = [
+	'const f = JSON.parse(process.argv[process.argv.length - 1]);',
+	"const sid = 'qualify-fault-session';",
+	"const out = (o, done) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...o }) + '\\n', done);",
+	'const handle = (m) => {',
+	"  if (m.method === 'initialize') out({ id: m.id, result: { protocolVersion: 1 } });",
+	"  else if (m.method === 'session/new') out({ id: m.id, result: { sessionId: sid, models: { currentModelId: (m.params._meta || {}).modelId } } });",
+	"  else if (m.method === 'session/prompt') {",
+	"    process.stderr.write(f.stderr + '\\n');",
+	'    if (f.error) out({ id: m.id, error: f.error });',
+	"    else out({ method: 'session/update', params: { sessionId: sid, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: f.chunk } } } }, () => process.exit(1));",
+	"  } else if (m.id !== undefined) out({ id: m.id, error: { code: -32601, message: 'Method not found' } });",
+	'};',
+	"let buf = '';",
+	"process.stdin.on('data', (d) => { buf += d; let k; while ((k = buf.indexOf('\\n')) >= 0) { const l = buf.slice(0, k); buf = buf.slice(k + 1); if (l.trim()) handle(JSON.parse(l)); } });",
+	"process.stdin.on('end', () => process.exit(1));",
 ].join('\n');
 
 /** One turn's usage as the leg captured it; never transcript text. */
@@ -13052,7 +13111,9 @@ async function runAccountingAcpTurns(
 	w: AccountingLegContext,
 	r: AccountingLegReceipt,
 	s: SessionLegContext & { drawn: () => Record<BillableCallKind, number> },
-	turns: PaidFixtureTurn[]
+	turns: PaidFixtureTurn[],
+	/** A fault leg's retry: drawn as a retry call, numbered after the attempt it retries. */
+	retry?: { as: 'retry'; base: number }
 ): Promise<{ uncertainWhy: string | null; finals: Array<UsageStats | undefined> }> {
 	const spec = await w.launcher(GROK_ACP_ARGS);
 	if ('refused' in spec) {
@@ -13070,10 +13131,11 @@ async function runAccountingAcpTurns(
 		graceMs: w.graceMs,
 		lifetime: w.lifetime,
 		turnMs: s.turnMs,
-		admitTurn: (n) => s.admit(n),
+		admitTurn: (n) => s.admit((retry?.base ?? 0) + n, retry?.as),
 		calls: () => s.drawn(),
 		usage: capture.hook,
 	});
+	if (retry) for (const t of run.turns) t.turn += retry.base;
 	r.turns.push(...run.turns);
 	r.spawned += run.spawned;
 	r.paidRequests += run.sent;
@@ -13196,6 +13258,74 @@ async function runFaultFixture(
 }
 
 /**
+ * Run one ACP fault fixture through the production ACP turn driver
+ * (`startGrokAcpTurn`, the desktop's and the library's): the error type is the
+ * one the completed turn carries, never one the harness assigns.
+ */
+async function runAcpFaultFixture(
+	w: AccountingLegContext,
+	r: AccountingLegReceipt,
+	kind: AccountingFaultKind,
+	counted: boolean
+): Promise<AccountingFaultRecord> {
+	const env: Record<string, string> = {};
+	const bound = HARNESS_CEILINGS.offlineProbeSeconds * 1000;
+	const record: AccountingFaultRecord = {
+		kind,
+		fixtureInduced: true,
+		expected: ACP_ACCOUNTING_FAULT_EXPECTED[kind],
+		classified: null,
+		command: process.execPath,
+		envKeys: Object.keys(env),
+		exitCode: null,
+		terminal: 'none',
+		counted,
+		sent: false,
+	};
+	r.fixtureSpawned++;
+	try {
+		const running = startGrokAcpTurn(
+			{
+				command: process.execPath,
+				args: ['-e', ACP_FAULT_FIXTURE_SOURCE, JSON.stringify(ACP_ACCOUNTING_FAULT_FIXTURES[kind])],
+				cwd: w.cwd,
+				env,
+				transport: 'acp-stdio',
+			},
+			{
+				turnId: `qualify-fault:${kind}:${randomUUID()}`,
+				processGeneration: randomUUID(),
+				prompt: 'QUALIFY-FIXTURE-NEVER-REPLIES',
+				cwd: w.cwd,
+				account: 'qualify-account',
+				host: 'qualify-local-host',
+				model: w.model,
+				idleTimeoutMs: bound,
+				maxTurnMs: bound,
+				requestTimeoutMs: bound,
+				cancelGraceMs: Math.max(1, w.graceMs),
+				stopGraceMs: w.graceMs,
+			}
+		);
+		w.lifetime.own(running.handle.child);
+		const done = await running.completed;
+		record.classified = done.error?.type ?? null;
+		record.exitCode = done.exit.exitCode;
+		// No prompt response: the peer went away (or was read as gone) before the prompt settled.
+		record.terminal =
+			done.terminal.status === 'success'
+				? 'success'
+				: done.terminal.providerStopReason
+					? 'failure'
+					: 'none';
+	} catch (e) {
+		r.reasons.push(accountingReason('acp-fault-fixture-threw', `${kind}: ${errorText(e)}`));
+	}
+	r.faults.push(record);
+	return record;
+}
+
+/**
  * The fault leg: a rate-limited attempt counted and retried once against the
  * pinned binary (the one billed send), an auth fault classified and never
  * retried, and a transport fault on a reservation of its own left uncertain:
@@ -13213,6 +13343,13 @@ async function runFaultRetryLeg(
 	const assert = (id: string, ok: boolean, detail: string) =>
 		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
 	const perTurn = paidCallsPerTurn(w.config, reservation);
+	// ACP (GT1-11-14P4D): ACP-framed fixtures through the production ACP turn driver, the retry over ACP.
+	const acp = w.c.route === 'acp-stdio';
+	const expected = acp ? ACP_ACCOUNTING_FAULT_EXPECTED : ACCOUNTING_FAULT_EXPECTED;
+	const fixture = async (kind: AccountingFaultKind, n: number, counted: boolean) =>
+		acp
+			? await runAcpFaultFixture(w, r, kind, counted)
+			: (await runFaultFixture(w, r, kind, n, counted)).record;
 	let uncertainWhy: string | null = null;
 	let retried: PaidTurnResult | null = null;
 	let retrySends = 0;
@@ -13223,17 +13360,29 @@ async function runFaultRetryLeg(
 			const n = turnNo.n + 1;
 			if (!s.admit(n)) break;
 			turnNo.n = n;
-			const { record } = await runFaultFixture(w, r, kind, n, true);
-			if (record.classified !== ACCOUNTING_FAULT_EXPECTED[kind]) continue;
+			const record = await fixture(kind, n, true);
+			if (record.classified !== expected[kind]) continue;
 			const sentBefore = r.paidRequests;
-			const sent = await sendAccountingNativeTurn(s, r, spec.turns[0], { as: 'retry' });
+			if (acp) {
+				const turnsBefore = r.turns.length;
+				const run = await runAccountingAcpTurns(w, r, s, spec.turns.slice(0, 1), {
+					as: 'retry',
+					base: turnNo.n,
+				});
+				uncertainWhy = run.uncertainWhy;
+				retried = r.turns.length > turnsBefore ? r.turns[r.turns.length - 1] : null;
+				const rec = retried ? (r.usage[r.usage.length - 1] ?? null) : null;
+				if (rec && run.finals[0]) settleIntoLifetime(life, rec, run.finals[0]);
+			} else {
+				const sent = await sendAccountingNativeTurn(s, r, spec.turns[0], { as: 'retry' });
+				uncertainWhy = sent.uncertainWhy;
+				retried = sent.run?.turn ?? null;
+				if (sent.rec) settleIntoLifetime(life, sent.rec, sent.final);
+			}
 			retrySends = r.paidRequests - sentBefore;
-			uncertainWhy = sent.uncertainWhy;
-			retried = sent.run?.turn ?? null;
-			if (sent.rec) settleIntoLifetime(life, sent.rec, sent.final);
 		} else if (kind === 'auth') {
 			// Auth is not retried and nothing is counted: the fixture is classified alone.
-			await runFaultFixture(w, r, kind, turnNo.n + 1, false);
+			await fixture(kind, turnNo.n + 1, false);
 		} else {
 			const own = reserveAccounting(w, `accounting:${spec.id}:transport`, 2);
 			if (!own.ok) {
@@ -13244,9 +13393,9 @@ async function runFaultRetryLeg(
 			transport.reservationId = b.id;
 			const bs = accountingSessionContext(w, r, b, { n: 0 });
 			if (!bs.admit(1)) continue;
-			const { run } = await runFaultFixture(w, r, kind, 1, true);
+			const record = await fixture(kind, 1, true);
 			// Started and lost before any terminal: whether it reached a provider is unknown, so the effect is uncertain.
-			const lost = run.turn.terminal === 'none';
+			const lost = record.terminal === 'none';
 			if (lost) markUncertainEffect(w.ledger, b.id);
 			const reasonsBefore = r.reasons.length;
 			const retryAdmitted = bs.admit(2, 'retry');
@@ -13286,7 +13435,7 @@ async function runFaultRetryLeg(
 		'faults-classified',
 		expectedKinds.length > 0 &&
 			expectedKinds.every((k) =>
-				r.faults.some((f) => f.kind === k && f.classified === ACCOUNTING_FAULT_EXPECTED[k])
+				r.faults.some((f) => f.kind === k && f.classified === expected[k])
 			),
 		r.faults.map((f) => `${f.kind}:${f.classified ?? 'unclassified'}`).join(', ') || 'no fault ran'
 	);
@@ -13308,8 +13457,9 @@ async function runFaultRetryLeg(
 	assert(
 		'retry-billed-once',
 		retried !== null &&
+			// An ACP prompt settles on its response, with no process exit of its own.
 			turnSucceeded({
-				turn: retried,
+				turn: acp && retried.exitCode === null ? { ...retried, exitCode: 0 } : retried,
 				neverRan: false,
 				terminals: 1,
 				sessionIds: [],
@@ -13424,8 +13574,6 @@ async function runAccountingLegs(w: AccountingLegContext): Promise<{
 				'the native headless stream carries no child record (childCompleteness unknown); no native child turn is qualified',
 				NATIVE_SUBAGENT_OWNER
 			);
-		else if (spec.id === 'fault-retry' && w.c.route !== 'native-headless')
-			gap('the fault fixtures write the native stream shape only', ACP_FAULT_LEGS_OWNER);
 		else if (!w.accountRoot) r.reasons.push(accountingReason('account-root-unknown', spec.id));
 		else if (
 			spec.maxTurns < minTurns ||
