@@ -222,7 +222,10 @@
  * production flag are recorded per case as a frozen harness-only snapshot
  * (route, version basis, implementing tasks, consumer seam). A snapshot never
  * changes admission, never touches a policy-bearing flag, and is a copy: the
- * run fails if the production Grok registry entry changes underneath it.
+ * run fails if the production Grok registry entry changes underneath it. The
+ * production candidate list is empty since GT1-11-14C1 (A11-F43): the
+ * finalized registry keeps the former candidates false, so no receipt carries
+ * an override.
  *
  * Reuse: `canonicalJson` for the config digest, `redactSecrets` /
  * `containsCredentialToken` so nothing secret-shaped is accepted or written,
@@ -1307,41 +1310,16 @@ export interface CandidateCapability {
 }
 
 /**
- * Implemented behind a false production flag. Each entry names the work that
- * implemented it and the consumers that would read it. Being listed is not
- * availability: production keeps `false` until GT1-11-14A finalizes the
- * registry from observed evidence.
+ * Candidate capabilities the harness evaluates outside production selection.
+ * Empty: GT1-11-14A finalized the Grok registry from phase 11 evidence and
+ * kept `supportsSlashCommands` and `supportsGroupChatModeration` false, so a
+ * candidate override for either would evaluate a flag production never
+ * selects (A11-F43, retired by GT1-11-14C1). Every case therefore builds no
+ * snapshot and every leg selects through the production registry. A future
+ * candidate needs its own task naming its evidence; it is never a harness
+ * default.
  */
-export const CANDIDATE_CAPABILITIES: readonly CandidateCapability[] = Object.freeze([
-	{
-		flag: 'supportsSlashCommands',
-		candidateValue: true,
-		routes: ['acp-stdio', 'native-headless'],
-		families: ['E08'],
-		parityRows: ['P18', 'C-supportsSlashCommands'],
-		implementedBy: ['GT1-05-03', 'GT1-05-03A', 'GT1-05-03B'],
-		consumers: [
-			{ path: 'src/renderer/App.tsx', seam: 'capabilities-parameter' },
-			{
-				path: 'src/renderer/components/QuickActionsModal/commands/featureCommands.ts',
-				seam: 'capabilities-parameter',
-			},
-		],
-		basis:
-			'Session-scoped ACP available_commands catalog and bounded detached native capture; execution semantics unobserved on a pinned binary',
-	},
-	{
-		flag: 'supportsGroupChatModeration',
-		candidateValue: true,
-		routes: ['acp-stdio', 'native-headless'],
-		families: ['E09'],
-		parityRows: ['C-supportsGroupChatModeration'],
-		implementedBy: ['GT1-08-12'],
-		consumers: [{ path: 'src/shared/maestro-lib/groupchat/storage.ts', seam: 'global-registry' }],
-		basis:
-			'Host orchestration with qualified participant/synthesis turns passes deterministically; moderator creation is refused by the production flag',
-	},
-]);
+export const CANDIDATE_CAPABILITIES: readonly CandidateCapability[] = Object.freeze([]);
 
 /** Production-false flags that are NOT candidates, and why forcing them would misstate the product. */
 export const NON_CANDIDATE_CAPABILITIES: ReadonlyArray<{
