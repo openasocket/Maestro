@@ -1,14 +1,14 @@
 {
 	"schemaVersion": 1,
 	"generator": "scripts/verify-grok-tier1.mjs",
-	"sourceCommit": "cf698109554527ba804a2fe1719d9ca86e0c53b9",
+	"sourceCommit": "1f5c23ee3490551502382e2113a37a097f6a5b93",
 	"behavioralFingerprint": "ffacd32a8547de4d94530e6f606519bc75b4daca358134679f6a27fa068a2928",
 	"inputsSha256": {
-		"Plans/grok-tier1/parity.json": "090320d8fdac813a6d7d0eec7c42d30e92c71b5b0eeb7ea2af5dbef49a498204",
+		"Plans/grok-tier1/parity.json": "0d633188cf5af5fe6fd94b252dc23db62dc993c0a7c405936a3673b401b016ab",
 		"Plans/grok-tier1/run-state.json": "7b1502912e0b36dd91d3797660e2f1ff1426f2fd486fcac89f8c94b043a5a064",
 		"Plans/grok-tier1/evidence/01-task-coverage.json": "08c202157f57ad00701402755c20810324b28f1c4b8fd33ad9b86eb4f1acb3c4",
 		"Plans/grok-tier1/evidence/01-baseline-checks.json": "d4dd07afa31b9e9a5b98cda47e155cbcf059d0d6d0fbb9e8b9fb7cdd2dbbe64d",
-		"Plans/grok-tier1/evidence/12-checks.json": "e243d956da86b287e84d930ee549558c8a515cfe24e6bd3cf1fb004f694cfa25"
+		"Plans/grok-tier1/evidence/12-checks.json": "9577bb54335b997a8ce47c12de1b1b5cd3285c7b838c1fb60e56ed7ac31d0d56"
 	},
 	"tier1Ready": false,
 	"deliveryComplete": false,
@@ -1984,8 +1984,8 @@
 			"implementation:pending",
 			"static:not-run"
 		],
-		"P47": ["blocker:gap:P47", "deterministic:not-run", "implementation:pending", "static:not-run"],
-		"P48": ["blocker:gap:P48", "deterministic:not-run", "implementation:pending", "static:not-run"],
+		"P47": ["blocker:gap:P47", "deterministic:not-run", "static:not-run"],
+		"P48": ["blocker:gap:P48", "deterministic:not-run", "static:not-run"],
 		"REG-AUTH": [
 			"blocker:gap:REG-AUTH",
 			"blocker:grok-acp-provider-error-read-as-lost-transport",

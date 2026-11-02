@@ -4172,6 +4172,14 @@
 				"S36",
 				"S37"
 			]
+		},
+		"phase12-delivery": {
+			"path": "Plans/grok-tier1/evidence/12.md#gt1-12-10-verify-delivery-row-reconciliation",
+			"sourceCommit": "1f5c23ee3490551502382e2113a37a097f6a5b93",
+			"provenance": "delivery-reconciliation",
+			"acceptanceRun": false,
+			"status": "not-certified",
+			"affectedRows": ["P47", "P48"]
 		}
 	},
 	"sourceCatalog": {
@@ -18011,7 +18019,7 @@
 			"limitations": [
 				"The required audit, validation, documentation or delivery decision belongs to the listed later tasks; no passing claim is inferred from this inventory."
 			],
-			"implementation": "pending",
+			"implementation": "implemented",
 			"static": "not-run",
 			"deterministic": "not-run",
 			"live": "not-run",
@@ -18019,7 +18027,10 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"observation": "Grok and Antigravity beta; Claude/Codex absent. Do not remove Grok until evidence-led tier1Ready."
+				"observation": "Grok and Antigravity beta; Claude/Codex absent. Do not remove Grok until evidence-led tier1Ready.",
+				"implementationEvidenceRef": "phase12-delivery",
+				"phase12EvidenceRef": "phase12-delivery",
+				"decision": "beta-preserved-not-certified"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18039,8 +18050,10 @@
 				{
 					"id": "gap:P47",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
-					"affectedRows": ["P47"]
+					"missingPrerequisite": "GT1-12-07 decided the promotion: withheld, because readiness.json reads tier1Ready false (pending-qualification, 22 global gates); grok stays in BETA_AGENTS (src/shared/agentMetadata.ts) and every provider doc labels it beta. GT1-12-08 verified the label/doc agreement (8 suites 383/383) and GT1-12-10 re-derived readiness at the current fingerprint with the same verdict. The decision is made and current; the row stays incomplete because its static and deterministic lanes have no acceptance run and a promotion can only follow tier1Ready true. To close: clear the 22 global gates (qualified binary and platforms, live authorization, current phase-11 audits, lint and unit checks), regenerate readiness true, then rerun GT1-12-07 and GT1-12-08.",
+					"affectedRows": ["P47"],
+					"evidenceRef": "phase12-delivery",
+					"reconciledBy": "GT1-12-10"
 				}
 			],
 			"phase": "12",
@@ -18096,14 +18109,17 @@
 			"limitations": [
 				"The required audit, validation, documentation or delivery decision belongs to the listed later tasks; no passing claim is inferred from this inventory."
 			],
-			"implementation": "pending",
+			"implementation": "implemented",
 			"static": "not-run",
 			"deterministic": "not-run",
 			"live": "not-run",
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"implementationEvidenceRef": "phase12-delivery",
+				"phase12EvidenceRef": "phase12-delivery",
+				"decision": "handoff-delivered-not-certified"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18123,8 +18139,10 @@
 				{
 					"id": "gap:P48",
 					"code": "implementation-or-evidence-pending",
-					"missingPrerequisite": "Resolve limitations and verify this required outcome through ownerTasks.",
-					"affectedRows": ["P48"]
+					"missingPrerequisite": "GT1-12-09 delivered Plans/grok-tier1/HANDOFF.md (status, source identity, changed modules, support, every global gate with its smallest external input) and reconciled DESIGN.md; GT1-12-10 checked that HANDOFF.md and readiness.json agree on tier1Ready, deliveryComplete, implementationComplete, testComplete, liveComplete, outcome, the global gates and the blocker count. The report is complete and current and states the non-certified outcome; the row stays incomplete because its lanes have no acceptance run and deliveryComplete requires tier1Ready by contract. To close: the same external gates as P47, then regenerate readiness and HANDOFF.md.",
+					"affectedRows": ["P48"],
+					"evidenceRef": "phase12-delivery",
+					"reconciledBy": "GT1-12-10"
 				}
 			],
 			"phase": "12",
@@ -46179,5 +46197,29 @@
 			"testCorrections": 19,
 			"evidenceRef": "phase12-repository-checks"
 		}
+	},
+	"phase12Delivery": {
+		"taskId": "GT1-12-10",
+		"recordedAt": "2026-11-02",
+		"sourceCommit": "1f5c23ee3490551502382e2113a37a097f6a5b93",
+		"behavioralFingerprint": "ffacd32a8547de4d94530e6f606519bc75b4daca358134679f6a27fa068a2928",
+		"evidenceRef": "phase12-delivery",
+		"command": "node scripts/verify-grok-tier1.mjs --write",
+		"decisions": {
+			"P47": {
+				"decision": "promotion-withheld",
+				"decidedBy": "GT1-12-07",
+				"verifiedBy": ["GT1-12-08", "GT1-12-10"],
+				"sourceLabel": "grok in BETA_AGENTS (src/shared/agentMetadata.ts)"
+			},
+			"P48": {
+				"decision": "handoff-delivered",
+				"deliveredBy": "GT1-12-09",
+				"verifiedBy": ["GT1-12-10"],
+				"report": "Plans/grok-tier1/HANDOFF.md"
+			}
+		},
+		"outcome": "not-certified",
+		"note": "implementation is implemented for both delivery rows (the decision and the report exist at the current fingerprint); no lane passes because no acceptance run exists, and deliveryComplete stays false because tier1Ready is false. Nothing is waived."
 	}
 }
