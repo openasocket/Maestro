@@ -5811,3 +5811,46 @@ describe('GT1-11-09 qualification harness', () => {
 		});
 	});
 });
+
+/**
+ * GT1-11-11F0A pins GT1-11-11F0 (A11-F24): the launcher, run as a plain Node
+ * child with no vitest electron mock, builds the harness bundle and loads it.
+ * Every case above imports harness.ts through vitest, whose electron mock hid
+ * an electron named import hoisted into the bundle; only a real load sees it.
+ */
+describe('launcher bundle loads under plain Node (GT1-11-11F0A)', () => {
+	it('builds the bundle, exits 0 and plans 48 not-run cases with no spawn', async () => {
+		const { spawnSync: realSpawnSync } =
+			await vi.importActual<typeof import('node:child_process')>('node:child_process');
+		const r = realSpawnSync(
+			process.execPath,
+			['scripts/grok-qualification.mjs', '--json', '--no-write'],
+			{
+				cwd: WORKSPACE,
+				encoding: 'utf8',
+				timeout: 90_000,
+				maxBuffer: 64 << 20,
+				env: { PATH: process.env.PATH ?? '', HOME: os.tmpdir() },
+			}
+		);
+		expect(r.stderr).not.toMatch(/SyntaxError|does not provide an export|ERR_/);
+		expect(r.status).toBe(0);
+		const report = JSON.parse(r.stdout) as {
+			configSource: unknown;
+			totals: Record<string, number>;
+		};
+		expect(report.totals).toEqual({
+			cases: 48,
+			admitted: 0,
+			notRun: 48,
+			spawned: 0,
+			paidRequests: 0,
+			networkContacts: 0,
+		});
+		const bundle = fs.readFileSync(
+			path.join(WORKSPACE, 'tmp', 'grok-tier1-environment', 'harness', 'harness.mjs'),
+			'utf8'
+		);
+		expect(bundle).not.toMatch(/^import[^;]*from\s*["']electron["']/m);
+	}, 120_000);
+});
