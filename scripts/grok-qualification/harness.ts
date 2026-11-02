@@ -7,8 +7,8 @@
  * case and writes one structured receipt per run. It never reads a credential
  * and never contacts an endpoint. A case is only ever handed to an executor
  * after every admission input is present AND every harness capability it needs
- * is implemented; the discovery executor is not yet (GT1-11-11A) and neither is
- * an SSH or cross-provider paid leg, so those record `not-run` with
+ * is implemented; an SSH leg (GT1-11-11A3 for discovery) and a cross-provider
+ * paid leg have no executor yet, so those record `not-run` with
  * machine-readable reasons. Default execution, with no configuration,
  * therefore makes zero spawns, zero paid requests and zero network contacts.
  *
@@ -22,6 +22,18 @@
  * Each child is owned by the case lifetime under the reservation deadline;
  * each leg records the synthetic fixture's sha256 (`paid-fixtures.ts`) and the
  * assertions it evaluated with their outcomes.
+ *
+ * Discovery (GT1-11-11A1): an admitted local E02/E07 case first runs its
+ * discovery leg through `executeDiscoveryCase`, which re-checks admission and
+ * preflight, re-hashes the pinned binary before every spawn and launches only
+ * the planned isolated environment with the selected account's credential
+ * reference. It runs only the authorized `DISCOVERY_OPERATIONS` of the case
+ * route (ACP initialize, session/new without a prompt, the model/effort menus
+ * session/new reported; the native model listing) and never a prompt, counts
+ * every network contact, bounds the leg by `HARNESS_CEILINGS.discoverySeconds`
+ * and records what the peer advertised verbatim, beside an auth outcome
+ * classified by the canonical Grok error patterns (never a login, a retry or
+ * another account). An E07 paid leg runs only after its discovery leg passed.
  *
  * Offline inspection (GT1-11-10A): the offline-inspection leg of a case (E02)
  * is admitted and recorded as its own receipt entry, independently of
@@ -108,12 +120,22 @@ import { isValidSecretName, lookupSecret } from '../../src/shared/serverSecrets'
 import { getAgentDefinition } from '../../src/shared/maestro-lib/providers/definitions';
 import { GrokOutputParser } from '../../src/shared/maestro-lib/parsers/grok-output-parser';
 import { GrokAcpClient } from '../../src/shared/maestro-lib/grok/acp-client';
-import { GrokAcpTransportError } from '../../src/shared/maestro-lib/grok/acp-protocol';
+import {
+	GrokAcpRequestError,
+	GrokAcpTransportError,
+} from '../../src/shared/maestro-lib/grok/acp-protocol';
 import { GROK_ACP_ARGS } from '../../src/shared/maestro-lib/grok/route';
 import { PAID_FIXTURES, type PaidFixture } from './paid-fixtures';
 import { isPathAtOrUnderRoot } from '../../src/shared/worktreePaths';
 import { stopProcess } from '../../src/shared/maestro-lib/control/termination';
 import { getAgentCapabilities } from '../../src/shared/maestro-lib/providers/capabilities';
+import { getErrorPatterns, matchErrorPattern } from '../../src/shared/agentErrorPatterns';
+import {
+	classifyCredentialKind,
+	credentialKindBlocksLogin,
+	type CredentialKind,
+} from '../../src/shared/providerAuthIdentity';
+import { formatAgentLoginCommand, getAgentLoginCommand } from '../../src/shared/agentMetadata';
 import type { AgentCapabilities } from '../../src/shared/types';
 
 export const CONFIG_SCHEMA = 'grok-qualification-config/v1';
@@ -135,10 +157,16 @@ export const HARNESS_CAPABILITIES = {
 	offlineExecutor: true,
 	/**
 	 * The paid executor bound to an admitted tuple (GT1-11-11P1). It covers the
-	 * native-headless and ACP legs of a local Grok-only paid case; discovery
-	 * (GT1-11-11A), SSH and cross-provider legs stay `case-executor-unimplemented`.
+	 * native-headless and ACP legs of a local Grok-only paid case; SSH and
+	 * cross-provider legs stay `case-executor-unimplemented`.
 	 */
 	caseExecutor: true,
+	/**
+	 * The local discovery executor (GT1-11-11A1): only the authorized
+	 * `DISCOVERY_OPERATIONS` of the case route, never a prompt. An SSH discovery
+	 * leg stays `case-executor-unimplemented` (GT1-11-11A3).
+	 */
+	discoveryExecutor: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
 
@@ -251,6 +279,7 @@ export interface AdmissionReason {
 		| 'isolation-preflight'
 		| 'spend-admission'
 		| 'offline-execution'
+		| 'discovery-execution'
 		| 'paid-execution';
 	detail: string;
 	owner?: string;
@@ -300,8 +329,92 @@ export interface CaseReceipt {
 	 * spawns. Null when the case has no offline-inspection class.
 	 */
 	offlineLeg: OfflineLegReceipt | null;
+	/** Discovery legs the executor ran or refused (one per account); empty when the case was not admitted. */
+	discoveryLegs: DiscoveryLegReceipt[];
 	/** Paid legs the executor ran or refused (one per account); empty when the case was not admitted. */
 	paidLegs: PaidLegReceipt[];
+}
+
+/**
+ * How the selected credential fared in a discovery leg. Classified only by the
+ * canonical Grok error patterns over what the leg observed; the guidance is an
+ * instruction for a person and is never acted on (no login, retry or account switch).
+ */
+export type DiscoveryAuthStatus =
+	| 'ok'
+	| 'missing'
+	| 'expired'
+	| 'restricted'
+	| 'unclassified-failure'
+	| 'not-observed';
+
+export interface DiscoveryAuthOutcome {
+	status: DiscoveryAuthStatus;
+	/** The canonical Grok error type the evidence matched; null when nothing matched. */
+	errorType: string | null;
+	message: string | null;
+	/** The credential the leg presented, classified from its planned env by name (never a value). */
+	credentialKind: CredentialKind;
+	credentialEnvVar: string | null;
+	/** An actionable re-auth instruction for missing/expired/restricted, else null. */
+	guidance: string | null;
+}
+
+/** One authorized discovery operation and what the peer reported for it. */
+export interface DiscoveryOperationResult {
+	operation: string;
+	outcome: 'passed' | 'failed' | 'not-run';
+	detail: string;
+	durationMs: number;
+}
+
+/**
+ * An advertised catalog exactly as reported. Protocol-defined fields are
+ * copied verbatim and stay null when absent; nothing is inferred (a context
+ * window is whatever per-model field the peer itself reported inside `models`).
+ */
+export interface DiscoveryCatalog {
+	operation: string;
+	models: unknown;
+	currentModel: unknown;
+	modelMenu: unknown;
+	effortMenu: unknown;
+	/** The whole reported payload when bounded (JSON, or the text lines of a native listing), else null. */
+	raw: unknown;
+	format: 'json' | 'text';
+	sha256: string;
+	bytes: number;
+	truncated: boolean;
+}
+
+export interface DiscoveryLegReceipt {
+	leg: 'discovery';
+	account: 'A' | 'B';
+	route: Route;
+	target: Target;
+	/** The executing host: `local`, or the approved SSH target. */
+	host: string;
+	/** The selected account's credential reference (a secret name or a file path, never a value). */
+	credential: { kind: CredentialReference['kind']; reference: string } | null;
+	/** not-run: refused before spawn; failed: an operation, auth or identity check failed; passed: otherwise. */
+	status: 'not-run' | 'passed' | 'failed';
+	reasons: AdmissionReason[];
+	/** The authorized operations this leg ran, in order. */
+	operations: DiscoveryOperationResult[];
+	catalogs: DiscoveryCatalog[];
+	/** The ACP initialize result as negotiated; null on the native route or when it never answered. */
+	initialization: unknown;
+	auth: DiscoveryAuthOutcome | null;
+	binary: { sha256Pinned: string | null; sha256AtSpawn: string | null; sha256After: string | null };
+	/** Names only (never values) of the validated child environment. */
+	launch: { credentialMode: CredentialMode; keys: string[] } | null;
+	/** Each owned child: argv, exit and stream digests. */
+	spawns: OfflineProbeResult[];
+	spawned: number;
+	/** Requests handed to a running child; each may reach the endpoint. */
+	networkContacts: number;
+	/** Always 0: discovery never sends a prompt. */
+	paidRequests: 0;
 }
 
 /** One credential-free offline probe of the pinned binary; output is kept as digests only. */
@@ -1993,11 +2106,18 @@ export function paidExecutorGaps(
 	capabilities: HarnessCapabilities
 ): Array<{ detail: string; owner: string }> {
 	const gaps: Array<{ detail: string; owner: string }> = [];
-	if (c.classes.includes('discovery'))
-		gaps.push({
-			detail: 'no discovery executor is bound to an admitted tuple yet',
-			owner: 'GT1-11-11A',
-		});
+	if (c.classes.includes('discovery')) {
+		if (!capabilities.discoveryExecutor)
+			gaps.push({
+				detail: 'no discovery executor is bound to an admitted tuple',
+				owner: 'GT1-11-11A1',
+			});
+		else if (c.target !== 'local')
+			gaps.push({
+				detail: 'the discovery executor launches local legs only',
+				owner: 'GT1-11-11A3',
+			});
+	}
 	if (c.classes.includes('paid')) {
 		if (!capabilities.caseExecutor)
 			gaps.push({ detail: 'no paid executor is bound to an admitted tuple', owner: 'GT1-11-11P1' });
@@ -2132,9 +2252,9 @@ export function admitCase(
 				owner: 'GT1-11-08C',
 			});
 	}
-	// The offline-inspection leg has its own executor (runOfflineLeg). The paid
-	// executor (GT1-11-11P1) covers local Grok-only legs; discovery is GT1-11-11A's,
-	// an SSH paid leg has no executor yet, and a cross-provider leg is GT1-11-13's.
+	// The offline-inspection leg has its own executor (runOfflineLeg). The discovery
+	// (GT1-11-11A1) and paid (GT1-11-11P1) executors cover local Grok-only legs; an
+	// SSH leg has no executor yet, and a cross-provider leg is GT1-11-13's.
 	const gaps = paidExecutorGaps(c, capabilities);
 	if (gaps.length)
 		add({
@@ -2271,7 +2391,7 @@ function runOfflineProbe(
 	lifetime: CaseLifetime,
 	/** Every stdout chunk, in order, for a caller that parses the stream (the paid native turn). */
 	onStdout?: (chunk: Buffer) => void
-): Promise<{ result: OfflineProbeResult; stdoutHead: string }> {
+): Promise<{ result: OfflineProbeResult; stdoutHead: string; stderrHead: string }> {
 	return new Promise((resolve) => {
 		const started = Date.now();
 		const out = streamDigest();
@@ -2297,6 +2417,7 @@ function runOfflineProbe(
 					stderr: err.result(),
 				},
 				stdoutHead: out.head(),
+				stderrHead: err.head(),
 			});
 		};
 		let child: ChildProcess;
@@ -2496,6 +2617,625 @@ export async function runOfflineLeg(
 }
 
 // ---------------------------------------------------------------------------
+// Discovery executor (GT1-11-11A1)
+// ---------------------------------------------------------------------------
+
+/**
+ * The native model listing: the only argv the native discovery leg may run.
+ * The pinned source names it (`grok models`, the Grok invalid-model error and
+ * the capability note); there is no prompt and no model preselection.
+ */
+export const NATIVE_MODEL_CATALOG_ARGV: readonly string[] = Object.freeze(['models']);
+
+/**
+ * What each discovery operation needs to have run first on the same child. A
+ * run that authorizes an operation without its prerequisite is refused before
+ * spawn; the executor never widens the authorized set.
+ */
+export const DISCOVERY_OPERATION_REQUIRES: Readonly<Record<string, string | null>> = Object.freeze({
+	'acp-initialize': null,
+	'acp-session-new': 'acp-initialize',
+	'acp-model-catalog': 'acp-session-new',
+	'native-model-catalog': null,
+});
+
+/** The ACP spec's reserved `auth_required` error code; its meaning is protocol-defined, not inferred. */
+const ACP_AUTH_REQUIRED_CODE = -32000;
+/**
+ * Within the canonical `auth_expired` type, the evidence that says no usable
+ * credential was presented at all (as opposed to one that was rejected). It
+ * only splits a line the canonical patterns already classified as auth.
+ */
+const MISSING_CREDENTIAL_EVIDENCE =
+	/\bmissing\b|not authenticated|not logged in|authentication required|auth(?:entication)? required|set XAI_API_KEY|grok\s+login/i;
+/** Reported catalog bytes kept verbatim in the receipt; beyond this only the digest is kept. */
+const DISCOVERY_RAW_BYTES = 64 * 1024;
+
+const discoveryReason = (id: string, detail: string, owner = 'GT1-11-11A1'): AdmissionReason => ({
+	id,
+	kind: 'discovery-execution',
+	detail,
+	owner,
+});
+
+export interface DiscoveryExecutionContext extends Omit<
+	PaidExecutionContext,
+	'turnTimeoutMs' | 'precondition'
+> {
+	/** Whole-leg bound; clamped to `HARNESS_CEILINGS.discoverySeconds`. */
+	timeoutMs?: number;
+}
+
+/** A catalog record from a reported payload, keeping protocol fields verbatim and nothing inferred. */
+function discoveryCatalog(
+	operation: string,
+	payload: unknown,
+	format: 'json' | 'text',
+	fields: Pick<DiscoveryCatalog, 'models' | 'currentModel' | 'modelMenu' | 'effortMenu'>
+): DiscoveryCatalog {
+	const text = format === 'json' ? canonicalJson(payload) : String(payload);
+	const bytes = Buffer.byteLength(text, 'utf8');
+	const truncated = bytes > DISCOVERY_RAW_BYTES;
+	return {
+		operation,
+		...fields,
+		raw: truncated
+			? null
+			: format === 'json'
+				? payload
+				: text.split(/\r?\n/).filter((l) => l.trim()),
+		format,
+		sha256: createHash('sha256').update(text).digest('hex'),
+		bytes,
+		truncated,
+	};
+}
+
+/**
+ * Classify a discovery leg's credential outcome through the canonical Grok
+ * error patterns (`matchErrorPattern`, which drops structured JSON lines) and
+ * `classifyCredentialKind` over the PLANNED env (secret references, never a
+ * value). An auth or policy hit wins over any other match; a leg that ran a
+ * credentialed operation cleanly is `ok`; one that never exercised the
+ * credential is `not-observed`.
+ */
+export function classifyDiscoveryAuth(args: {
+	evidence: string[];
+	plannedEnv: Record<string, string>;
+	account: 'A' | 'B';
+	target: Target;
+	failed: boolean;
+	credentialExercised: boolean;
+}): DiscoveryAuthOutcome {
+	const credential = classifyCredentialKind('grok', args.plannedEnv);
+	const patterns = getErrorPatterns('grok');
+	let hit: ReturnType<typeof matchErrorPattern> = null;
+	let hitLine = '';
+	for (const line of args.evidence.flatMap((e) => e.split(/\r?\n/))) {
+		const m = matchErrorPattern(patterns, line);
+		if (!m) continue;
+		if (m.type === 'auth_expired' || m.type === 'permission_denied') {
+			hit = m;
+			hitLine = line;
+			break;
+		}
+		if (!hit) {
+			hit = m;
+			hitLine = line;
+		}
+	}
+	const status: DiscoveryAuthStatus =
+		hit?.type === 'auth_expired'
+			? MISSING_CREDENTIAL_EVIDENCE.test(hitLine)
+				? 'missing'
+				: 'expired'
+			: hit?.type === 'permission_denied'
+				? 'restricted'
+				: args.failed
+					? 'unclassified-failure'
+					: args.credentialExercised
+						? 'ok'
+						: 'not-observed';
+	let guidance: string | null = null;
+	if (status === 'missing' || status === 'expired' || status === 'restricted') {
+		const blocked = credentialKindBlocksLogin(credential, 'Grok CLI');
+		const login = getAgentLoginCommand('grok', undefined, { remote: args.target === 'ssh' });
+		guidance =
+			blocked ??
+			`Re-authenticate Grok account ${args.account} out of band${
+				login ? ` with \`${formatAgentLoginCommand(login)}\`` : ''
+			} under that account's own GROK_HOME, then start a new run; the harness never logs in, retries or switches accounts.`;
+		if (status === 'restricted')
+			guidance = `${hit?.message ?? 'Grok denied the request.'} Ask the account or model policy owner to grant account ${args.account} the discovery operations, or select another approved account in a new run.`;
+	}
+	return {
+		status,
+		errorType: hit?.type ?? null,
+		message: hit?.message ?? null,
+		credentialKind: credential.kind,
+		credentialEnvVar: credential.envVarName ?? null,
+		guidance,
+	};
+}
+
+/**
+ * The authorized operations of one case route, in dependency order, or the
+ * refusals that stop the leg before spawn.
+ */
+export function plannedDiscoveryOperations(
+	c: QualificationCase,
+	config: QualificationConfig
+): { operations: string[]; reasons: AdmissionReason[] } {
+	const reasons: AdmissionReason[] = [];
+	const authorized = new Set(config.discovery.operations);
+	const operations = Object.keys(DISCOVERY_OPERATIONS).filter(
+		(op) => authorized.has(op) && DISCOVERY_OPERATIONS[op].route === c.route
+	);
+	for (const op of config.discovery.operations)
+		if (!(op in DISCOVERY_OPERATIONS))
+			reasons.push(discoveryReason('discovery-operation-unknown', op));
+	if (!operations.length)
+		reasons.push(discoveryReason('discovery-operation-unauthorized', c.route));
+	for (const op of operations) {
+		const needs = DISCOVERY_OPERATION_REQUIRES[op];
+		if (needs && !authorized.has(needs))
+			reasons.push(
+				discoveryReason('discovery-operation-prerequisite-unauthorized', `${op} needs ${needs}`)
+			);
+	}
+	return { operations, reasons };
+}
+
+/** A not-run discovery leg naming the account, target and credential reference it would use. */
+function discoveryLegShell(
+	c: QualificationCase,
+	config: QualificationConfig,
+	account: 'A' | 'B'
+): DiscoveryLegReceipt {
+	const ref = config.credentialReferences.find(
+		(r) => r.provider === 'grok' && r.account === account
+	);
+	return {
+		leg: 'discovery',
+		account,
+		route: c.route,
+		target: c.target,
+		host: c.target === 'local' ? 'local' : (config.allowedSshTargets[0] ?? ''),
+		credential: ref
+			? { kind: ref.kind, reference: ref.kind === 'secret-name' ? ref.name : ref.path }
+			: null,
+		status: 'not-run',
+		reasons: [],
+		operations: [],
+		catalogs: [],
+		initialization: null,
+		auth: null,
+		binary: { sha256Pinned: config.binary.sha256, sha256AtSpawn: null, sha256After: null },
+		launch: null,
+		spawns: [],
+		spawned: 0,
+		networkContacts: 0,
+		paidRequests: 0,
+	};
+}
+
+/**
+ * One discovery leg (one account) of an admitted case. Nothing spawns until
+ * the binary re-hashes to the pin and the credentialed launch validates; the
+ * leg makes no prompt, no retry and no login, and contacts nothing but the
+ * child it owns.
+ */
+async function executeDiscoveryLeg(
+	c: QualificationCase,
+	config: QualificationConfig,
+	ctx: DiscoveryExecutionContext,
+	account: 'A' | 'B',
+	operations: string[]
+): Promise<DiscoveryLegReceipt> {
+	const receipt = discoveryLegShell(c, config, account);
+	const refuse = (id: string, detail: string) => {
+		receipt.reasons.push(discoveryReason(id, detail));
+		return receipt;
+	};
+	if (c.target !== 'local') return refuse('discovery-executor-local-only', c.target);
+
+	// The planned isolated launch with the selected account's credential reference only.
+	const launch = planIsolatedLaunch(
+		c,
+		config,
+		account,
+		'credentialed',
+		ctx.workspace,
+		ctx.operatorHome
+	);
+	if (!launch || launch.credentialMode === 'none')
+		return refuse('discovery-launch-unplannable', account);
+	const credential = resolveLaunchCredential(launch, config, account, ctx.resolveSecret);
+	if ('refused' in credential) return refuse(credential.refused, credential.detail);
+	const env = credential.env;
+	const report = validateLaunchEnvironment(env, launch.expectation);
+	if (report.reasons.length) {
+		receipt.reasons.push(...report.reasons);
+		return receipt;
+	}
+	receipt.launch = { credentialMode: launch.credentialMode, keys: report.keys };
+	const cwd = launch.expectation.home;
+	if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
+		return refuse('discovery-home-absent', 'isolation.boundary.actualHome');
+
+	// The immutable pinned binary, re-hashed immediately before the spawn.
+	const file = path.resolve(ctx.workspace, config.binary.path ?? '');
+	const atSpawn = inspectExecutable(file);
+	receipt.binary.sha256AtSpawn = atSpawn.sha256;
+	if (!config.binary.path || !atSpawn.regular) return refuse('binary-unreadable', 'binary.path');
+	if (atSpawn.sha256 !== config.binary.sha256)
+		return refuse('binary-hash-mismatch-at-spawn', 'binary.sha256');
+	if (!atSpawn.readOnly) return refuse('binary-mutable', 'binary.path');
+	fs.mkdirSync(env.TMPDIR, { recursive: true, mode: 0o700 });
+
+	const real = fs.realpathSync(file);
+	const graceMs = Math.max(1, Math.min(config.limits.cleanupSeconds, 5)) * 1000;
+	const ceilingMs = HARNESS_CEILINGS.discoverySeconds * 1000;
+	const legMs = positiveFinite(ctx.timeoutMs) ? Math.min(ctx.timeoutMs, ceilingMs) : ceilingMs;
+	const evidence: string[] = [];
+	let credentialExercised = false;
+
+	if (c.route === 'native-headless') {
+		const started = Date.now();
+		const { result, stdoutHead, stderrHead } = await runOfflineProbe(
+			'native-model-catalog',
+			real,
+			NATIVE_MODEL_CATALOG_ARGV,
+			env,
+			cwd,
+			legMs,
+			graceMs,
+			ctx.lifetime
+		);
+		receipt.spawned++;
+		receipt.spawns.push(result);
+		const ran = !(result.spawnError !== null && NEVER_RAN_SPAWN_ERRORS.has(result.spawnError));
+		// A child that ran may have reached the endpoint for the listing.
+		if (ran) receipt.networkContacts++;
+		evidence.push(stderrHead, stdoutHead);
+		let failure: string | null = null;
+		if (!ran) failure = 'discovery-spawn-failed';
+		else if (result.timedOut) failure = 'discovery-timeout';
+		else if (result.spawnError) failure = 'discovery-spawn-error-after-start';
+		else if (result.stdout.truncated || result.stderr.truncated)
+			failure = 'discovery-output-unbounded';
+		else if (result.exitCode !== 0) failure = 'discovery-exit-nonzero';
+		if (failure) receipt.reasons.push(discoveryReason(failure, 'native-model-catalog'));
+		else {
+			credentialExercised = true;
+			let parsed: unknown = undefined;
+			try {
+				parsed = JSON.parse(stdoutHead);
+			} catch {
+				parsed = undefined;
+			}
+			receipt.catalogs.push(
+				parsed === undefined
+					? discoveryCatalog('native-model-catalog', stdoutHead, 'text', {
+							models: null,
+							currentModel: null,
+							modelMenu: null,
+							effortMenu: null,
+						})
+					: discoveryCatalog('native-model-catalog', parsed, 'json', {
+							models: null,
+							currentModel: null,
+							modelMenu: null,
+							effortMenu: null,
+						})
+			);
+		}
+		receipt.operations.push({
+			operation: 'native-model-catalog',
+			outcome: failure ? 'failed' : 'passed',
+			detail: failure ?? `exit ${result.exitCode}`,
+			durationMs: Date.now() - started,
+		});
+	} else {
+		const run = await runAcpDiscovery({
+			file: real,
+			env,
+			cwd,
+			operations,
+			graceMs,
+			legMs,
+			lifetime: ctx.lifetime,
+		});
+		receipt.spawned += run.spawned;
+		receipt.networkContacts += run.networkContacts;
+		receipt.spawns.push(...run.spawns);
+		receipt.operations.push(...run.operations);
+		receipt.catalogs.push(...run.catalogs);
+		receipt.initialization = run.initialization;
+		receipt.reasons.push(...run.reasons);
+		evidence.push(...run.evidence);
+		credentialExercised = run.credentialExercised;
+	}
+
+	receipt.binary.sha256After = inspectExecutable(file).sha256;
+	if (receipt.binary.sha256After !== config.binary.sha256)
+		receipt.reasons.push(discoveryReason('binary-changed-during-leg', 'binary.path'));
+	receipt.auth = classifyDiscoveryAuth({
+		evidence,
+		plannedEnv: launch.env,
+		account,
+		target: c.target,
+		failed: receipt.reasons.length > 0,
+		credentialExercised,
+	});
+	const a = receipt.auth;
+	if (a.status === 'missing' || a.status === 'expired' || a.status === 'restricted')
+		receipt.reasons.push(discoveryReason(`discovery-auth-${a.status}`, a.guidance ?? ''));
+	receipt.status = receipt.spawned === 0 ? 'not-run' : receipt.reasons.length ? 'failed' : 'passed';
+	return receipt;
+}
+
+/**
+ * The ACP route of a discovery leg: one owned `agent stdio` child, then only
+ * the authorized operations in dependency order: initialize, session/new with
+ * no prompt and no model preselection, and the model/effort menus session/new
+ * reported. Every request is counted as a network contact before it is
+ * written; `session/prompt` is never sent. The leg deadline stops the child.
+ */
+async function runAcpDiscovery(args: {
+	file: string;
+	env: Record<string, string>;
+	cwd: string;
+	operations: string[];
+	graceMs: number;
+	legMs: number;
+	lifetime: CaseLifetime;
+}): Promise<{
+	spawns: OfflineProbeResult[];
+	operations: DiscoveryOperationResult[];
+	catalogs: DiscoveryCatalog[];
+	initialization: unknown;
+	reasons: AdmissionReason[];
+	evidence: string[];
+	spawned: number;
+	networkContacts: number;
+	credentialExercised: boolean;
+}> {
+	const operations: DiscoveryOperationResult[] = [];
+	const catalogs: DiscoveryCatalog[] = [];
+	const reasons: AdmissionReason[] = [];
+	const evidence: string[] = [];
+	let networkContacts = 0;
+	let credentialExercised = false;
+	let initialization: unknown = null;
+	const started = Date.now();
+	const out = streamDigest();
+	const err = streamDigest();
+	let child: ChildProcess;
+	try {
+		child = spawn(args.file, [...GROK_ACP_ARGS], {
+			cwd: args.cwd,
+			env: args.env,
+			shell: false,
+			stdio: ['pipe', 'pipe', 'pipe'],
+			windowsHide: true,
+		});
+	} catch (e) {
+		reasons.push(
+			discoveryReason('discovery-spawn-failed', (e as NodeJS.ErrnoException).code ?? 'spawn-threw')
+		);
+		return {
+			spawns: [],
+			operations,
+			catalogs,
+			initialization,
+			reasons,
+			evidence,
+			spawned: 0,
+			networkContacts,
+			credentialExercised,
+		};
+	}
+	args.lifetime.own(child);
+	let spawnError: string | null = null;
+	let unbounded = false;
+	let timedOut = false;
+	let exit: { code: number | null; signal: string | null } = { code: null, signal: null };
+	const exited = new Promise<void>((resolve) =>
+		child.on('close', (code, signal) => {
+			exit = { code, signal };
+			resolve();
+		})
+	);
+	const stop = () => stopProcess({ child }, { from: 'terminate', graceMs: args.graceMs });
+	const remaining = () => Math.max(1, args.legMs - (Date.now() - started));
+	const client = new GrokAcpClient({
+		write: (frame) => {
+			child.stdin?.write(frame);
+		},
+		requestTimeoutMs: remaining(),
+	});
+	const deadline = setTimeout(() => {
+		timedOut = true;
+		client.close('timeout');
+		stop();
+	}, args.legMs);
+	deadline.unref();
+	child.stdout?.on('data', (d: Buffer) => {
+		if (out.push(d)) {
+			unbounded = true;
+			client.close('frame-too-large');
+			stop();
+		}
+		client.feedStdout(d);
+	});
+	child.stderr?.on('data', (d: Buffer) => {
+		if (err.push(d)) {
+			unbounded = true;
+			stop();
+		}
+		client.feedStderr(d);
+	});
+	child.stdin?.on('error', () => client.close('write'));
+	child.on('error', (e: NodeJS.ErrnoException) => {
+		spawnError = e.code ?? 'spawn-error';
+		client.close('closed');
+	});
+	child.on('close', () => client.close('closed'));
+
+	const failureOf = (e: unknown): string => {
+		if (e instanceof GrokAcpRequestError) {
+			// The ACP spec reserves -32000 for auth_required: protocol meaning, not inference.
+			if (e.code === ACP_AUTH_REQUIRED_CODE) evidence.push('Grok authentication required');
+			return `request-error:${e.code}`;
+		}
+		if (e instanceof GrokAcpTransportError) return `transport:${e.reason}`;
+		return spawnError ?? 'request-error';
+	};
+	let opened: Record<string, unknown> | null = null;
+	for (const op of args.operations) {
+		const t0 = Date.now();
+		let failure: string | null = null;
+		try {
+			if (op === 'acp-initialize') {
+				networkContacts++;
+				initialization = await client.initialize();
+			} else if (op === 'acp-session-new') {
+				networkContacts++;
+				const answer = (await client.request(
+					'session/new',
+					{ cwd: args.cwd, mcpServers: [] },
+					{ timeoutMs: remaining() }
+				)) as Record<string, unknown> | null;
+				opened = answer && typeof answer === 'object' ? answer : null;
+				const id = opened?.sessionId;
+				if (typeof id !== 'string' || !id.trim()) failure = 'session-id-missing';
+				else credentialExercised = true;
+			} else if (op === 'acp-model-catalog') {
+				// The menus session/new reported: no further request, so no further contact.
+				if (!opened) failure = 'session-absent';
+				else {
+					const options = Array.isArray(opened.configOptions) ? opened.configOptions : null;
+					const menu = (id: string) =>
+						options?.find(
+							(o) => o && typeof o === 'object' && (o as Record<string, unknown>).id === id
+						) ?? null;
+					const models = (opened.models ?? null) as Record<string, unknown> | null;
+					catalogs.push(
+						discoveryCatalog(
+							op,
+							{ models: opened.models ?? null, configOptions: opened.configOptions ?? null },
+							'json',
+							{
+								models: models?.availableModels ?? null,
+								currentModel: models?.currentModelId ?? null,
+								modelMenu: menu('model'),
+								effortMenu: menu('reasoning_effort'),
+							}
+						)
+					);
+					if (models?.availableModels === undefined && !menu('model'))
+						failure = 'model-catalog-unreported';
+				}
+			}
+		} catch (e) {
+			failure = failureOf(e);
+		}
+		operations.push({
+			operation: op,
+			outcome: failure ? 'failed' : 'passed',
+			detail: failure ?? 'ok',
+			durationMs: Date.now() - t0,
+		});
+		if (failure) {
+			reasons.push(
+				discoveryReason(
+					timedOut || failure === 'transport:timeout'
+						? 'discovery-timeout'
+						: unbounded
+							? 'discovery-output-unbounded'
+							: 'discovery-operation-failed',
+					`${op}: ${failure}`
+				)
+			);
+			break;
+		}
+	}
+	for (const op of args.operations.slice(operations.length))
+		operations.push({
+			operation: op,
+			outcome: 'not-run',
+			detail: 'an earlier operation failed',
+			durationMs: 0,
+		});
+	clearTimeout(deadline);
+	client.close('closed');
+	stop();
+	await Promise.race([exited, delay(args.graceMs + 1000)]);
+	evidence.push(err.head());
+	return {
+		spawns: [
+			{
+				probe: 'acp-discovery',
+				argv: [...GROK_ACP_ARGS],
+				exitCode: exit.code,
+				signal: exit.signal,
+				durationMs: Date.now() - started,
+				timedOut,
+				spawnError,
+				stdout: out.result(),
+				stderr: err.result(),
+			},
+		],
+		operations,
+		catalogs,
+		initialization,
+		reasons,
+		evidence,
+		spawned: 1,
+		networkContacts,
+		credentialExercised,
+	};
+}
+
+/**
+ * Execute the discovery legs of one admitted case (one per account).
+ * Admission and preflight are re-checked here, so a caller that skipped them
+ * still cannot spawn; a refusal returns not-run legs with zero spawns.
+ */
+export async function executeDiscoveryCase(
+	c: QualificationCase,
+	config: QualificationConfig,
+	ctx: DiscoveryExecutionContext
+): Promise<DiscoveryLegReceipt[]> {
+	const accounts: Array<'A' | 'B'> = c.family === 'E01' ? ['A', 'B'] : ['A'];
+	const reasons = admitCase(c, config, ctx.problems, ctx.capabilities, ctx.now());
+	reasons.push(
+		...preflightCase(c, config, { workspace: ctx.workspace, operatorHome: ctx.operatorHome })
+			.reasons
+	);
+	if (!c.classes.includes('discovery'))
+		reasons.push(discoveryReason('discovery-leg-absent', c.caseId));
+	if (!ctx.capabilities.discoveryExecutor)
+		reasons.push(discoveryReason('discovery-executor-unimplemented', c.caseId));
+	if (!ctx.ledger.authorizedCaseIds.includes(c.caseId))
+		reasons.push(discoveryReason('case-not-admitted', c.caseId));
+	const planned = plannedDiscoveryOperations(c, config);
+	reasons.push(...planned.reasons);
+	const legs: DiscoveryLegReceipt[] = [];
+	for (const account of accounts) {
+		if (reasons.length) {
+			const refused = discoveryLegShell(c, config, account);
+			refused.reasons.push(...reasons);
+			legs.push(refused);
+			continue;
+		}
+		legs.push(await executeDiscoveryLeg(c, config, ctx, account, planned.operations));
+	}
+	return legs;
+}
+
+// ---------------------------------------------------------------------------
 // Paid-case executor (GT1-11-11P1)
 // ---------------------------------------------------------------------------
 
@@ -2582,6 +3322,8 @@ export interface PaidExecutionContext {
 	turnTimeoutMs?: number;
 	/** Resolve a secret-name credential reference at spawn; defaults to `lookupSecret`. */
 	resolveSecret?: (name: string) => string | null;
+	/** Refusals an earlier leg of the same case raised (an E07 discovery leg that did not pass). */
+	precondition?: AdmissionReason[];
 }
 
 /** sha256 of the canonical fixture entry a leg runs. */
@@ -2763,6 +3505,40 @@ const delay = (ms: number) =>
 	});
 
 /**
+ * The child environment of a credentialed launch: the planned env with a
+ * secret-name reference resolved at spawn (the value never leaves this env),
+ * or a file reference checked for existence only (never read).
+ */
+function resolveLaunchCredential(
+	launch: PlannedLaunch,
+	config: QualificationConfig,
+	account: 'A' | 'B',
+	resolveSecret: ((name: string) => string | null) | undefined
+): { env: Record<string, string> } | { refused: string; detail: string } {
+	const env: Record<string, string> = { ...launch.env };
+	const ref = config.credentialReferences.find(
+		(r) => r.provider === 'grok' && r.account === account
+	);
+	if (launch.credentialMode === 'secret-name' && ref?.kind === 'secret-name') {
+		const resolve =
+			resolveSecret ??
+			((name: string) => {
+				const found = lookupSecret(name);
+				return found.status === 'found' ? found.value : null;
+			});
+		const value = resolve(ref.name);
+		if (!value) return { refused: 'credential-unresolvable', detail: ref.name };
+		env.XAI_API_KEY = value;
+	} else if (launch.credentialMode === 'file') {
+		const authPath = launch.expectation.authPath;
+		// Existence only: the harness never reads a credential file.
+		if (!authPath || !fs.existsSync(authPath) || !fs.statSync(authPath).isFile())
+			return { refused: 'credential-file-absent', detail: 'GROK_AUTH_PATH' };
+	}
+	return { env };
+}
+
+/**
  * One paid leg (one account) of an admitted case. Nothing spawns until the
  * binary re-hashes to the pin, the credentialed launch validates and the
  * reservation is held; every turn is counted before it is sent and the leg
@@ -2827,26 +3603,9 @@ async function executePaidLeg(
 	);
 	if (!launch || launch.credentialMode === 'none')
 		return refuse('paid-launch-unplannable', account);
-	const env: Record<string, string> = { ...launch.env };
-	const ref = config.credentialReferences.find(
-		(r) => r.provider === 'grok' && r.account === account
-	);
-	if (launch.credentialMode === 'secret-name' && ref?.kind === 'secret-name') {
-		const resolve =
-			ctx.resolveSecret ??
-			((name: string) => {
-				const found = lookupSecret(name);
-				return found.status === 'found' ? found.value : null;
-			});
-		const value = resolve(ref.name);
-		if (!value) return refuse('credential-unresolvable', ref.name);
-		env.XAI_API_KEY = value;
-	} else if (launch.credentialMode === 'file') {
-		const authPath = launch.expectation.authPath;
-		// Existence only: the harness never reads a credential file.
-		if (!authPath || !fs.existsSync(authPath) || !fs.statSync(authPath).isFile())
-			return refuse('credential-file-absent', 'GROK_AUTH_PATH');
-	}
+	const credential = resolveLaunchCredential(launch, config, account, ctx.resolveSecret);
+	if ('refused' in credential) return refuse(credential.refused, credential.detail);
+	const env = credential.env;
 	const report = validateLaunchEnvironment(env, launch.expectation);
 	if (report.reasons.length) {
 		receipt.reasons.push(...report.reasons);
@@ -3320,6 +4079,7 @@ export async function executePaidCase(
 			.reasons
 	);
 	if (!c.classes.includes('paid')) reasons.push(paidReason('paid-leg-absent', c.caseId));
+	reasons.push(...(ctx.precondition ?? []));
 	if (!ctx.ledger.authorizedCaseIds.includes(c.caseId))
 		reasons.push(paidReason('case-not-admitted', c.caseId));
 	if (!fixture) reasons.push(paidReason('fixture-absent', c.family));
@@ -3425,6 +4185,8 @@ export interface RunOptions {
 	write?: boolean;
 	/** Per-probe wall-clock bound of the offline leg; clamped to `HARNESS_CEILINGS.offlineProbeSeconds`. */
 	offlineProbeTimeoutMs?: number;
+	/** Whole-leg bound of a discovery leg; clamped to `HARNESS_CEILINGS.discoverySeconds`. */
+	discoveryTimeoutMs?: number;
 	/** Per-turn bound of a paid leg; clamped to `HARNESS_CEILINGS.caseSeconds` and the reservation deadline. */
 	paidTurnTimeoutMs?: number;
 	/** Resolve a secret-name credential reference at spawn (defaults to `lookupSecret`); the value is never recorded. */
@@ -3479,9 +4241,28 @@ export async function runQualification(options: RunOptions): Promise<{
 		// Only an admitted case may reserve, and only the paid executor reserves for it.
 		// A case with any reason is recorded and never started.
 		if (!reasons.length) ledger.authorizedCaseIds.push(c.caseId);
+		let discoveryLegs: DiscoveryLegReceipt[] = [];
 		let paidLegs: PaidLegReceipt[] = [];
 		let cleanup = { ownedProcesses: 0, stopped: 0 };
 		try {
+			// Discovery first: an E07 paid leg runs only after its discovery leg passed.
+			if (!reasons.length && c.classes.includes('discovery'))
+				discoveryLegs = await executeDiscoveryCase(c, config, {
+					workspace: options.workspace,
+					operatorHome,
+					ledger,
+					lifetime,
+					problems,
+					capabilities,
+					now,
+					timeoutMs: options.discoveryTimeoutMs,
+					resolveSecret: options.resolveSecret,
+				});
+			const discoveryBlocked = discoveryLegs
+				.filter((l) => l.status !== 'passed')
+				.map((l) =>
+					paidReason('discovery-leg-not-passed', `${l.account}: ${l.status}`, 'GT1-11-11A1')
+				);
 			if (!reasons.length && c.classes.includes('paid'))
 				paidLegs = await executePaidCase(c, config, {
 					workspace: options.workspace,
@@ -3493,6 +4274,7 @@ export async function runQualification(options: RunOptions): Promise<{
 					now,
 					turnTimeoutMs: options.paidTurnTimeoutMs,
 					resolveSecret: options.resolveSecret,
+					precondition: discoveryBlocked,
 				});
 		} finally {
 			cleanup = await lifetime.cleanup();
@@ -3520,10 +4302,14 @@ export async function runQualification(options: RunOptions): Promise<{
 			...c,
 			status: reasons.length ? 'not-run' : 'admitted',
 			reasons,
-			spawned: paidLegs.reduce((n, l) => n + l.spawned, 0),
+			spawned:
+				discoveryLegs.reduce((n, l) => n + l.spawned, 0) +
+				paidLegs.reduce((n, l) => n + l.spawned, 0),
 			paidRequests: paidLegs.reduce((n, l) => n + l.paidRequests, 0),
-			// A lower bound: each request a running child was handed reaches the provider at least once.
-			networkContacts: paidLegs.reduce((n, l) => n + l.paidRequests, 0),
+			// A lower bound: each request a running child was handed may reach the provider.
+			networkContacts:
+				discoveryLegs.reduce((n, l) => n + l.networkContacts, 0) +
+				paidLegs.reduce((n, l) => n + l.paidRequests, 0),
 			pricing: c.classes.includes('paid') ? config.allowedModels.map(pricingProvenance) : [],
 			budget: {
 				reservedUsd: held.reduce((s, r) => s + (r.state === 'held' ? r.holdUsd : 0), 0),
@@ -3537,6 +4323,7 @@ export async function runQualification(options: RunOptions): Promise<{
 			candidateSnapshot: buildCandidateSnapshot(c, config),
 			preflight,
 			offlineLeg,
+			discoveryLegs,
 			paidLegs,
 		});
 	}

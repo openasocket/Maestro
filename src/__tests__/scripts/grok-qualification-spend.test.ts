@@ -107,6 +107,8 @@ const ALL_CAPS: HarnessCapabilities = {
 	// Off: these suites decide admission only; the offline executor has its own block (GT1-11-10B).
 	offlineExecutor: false,
 	caseExecutor: true,
+	// Off: discovery runs in its own block (GT1-11-11A4); these suites decide admission only.
+	discoveryExecutor: false,
 };
 
 /** The fake budget provider: a fully authorized worst-case-reservation config. */

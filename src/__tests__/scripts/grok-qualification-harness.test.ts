@@ -111,6 +111,8 @@ const ALL_CAPS: HarnessCapabilities = {
 	// Off: these suites decide admission only; the offline executor has its own block (GT1-11-10B).
 	offlineExecutor: false,
 	caseExecutor: true,
+	// Off: discovery runs in its own block (GT1-11-11A4); these suites decide admission only.
+	discoveryExecutor: false,
 };
 /** A secret-shaped value the shared redactor recognizes; synthetic, never a credential. */
 const FAKE_TOKEN = `ghp_${'A1b2C3d4E5'.repeat(4).slice(0, 36)}`;
@@ -181,9 +183,8 @@ describe('GT1-11-09 qualification harness', () => {
 					expect(r.id).toMatch(/^[a-z0-9:-]+$/);
 					expect(r.kind).toBeTruthy();
 				}
-				// The paid executor (GT1-11-11P1) covers local Grok-only paid legs; the rest stay unimplemented.
-				const uncovered =
-					c.classes.includes('discovery') || c.target === 'ssh' || c.family === 'E11';
+				// The discovery (GT1-11-11A1) and paid (GT1-11-11P1) executors cover local Grok-only legs; the rest stay unimplemented.
+				const uncovered = c.target === 'ssh' || c.family === 'E11';
 				if (uncovered) expect(c.reasons.map((r) => r.id)).toContain('case-executor-unimplemented');
 				else expect(c.reasons.map((r) => r.id)).not.toContain('case-executor-unimplemented');
 				expect([c.spawned, c.paidRequests, c.networkContacts]).toEqual([0, 0, 0]);
@@ -1220,10 +1221,8 @@ describe('GT1-11-09 qualification harness', () => {
 			});
 			expect(receipt.totals).toMatchObject({ spawned: 0, paidRequests: 0, networkContacts: 0 });
 			const owners: Record<string, string> = {
-				'E02:local': 'GT1-11-11A',
-				'E02:ssh': 'GT1-11-11A',
-				'E07:local': 'GT1-11-11A',
-				'E07:ssh': 'GT1-11-11A/unassigned-ssh-paid-executor',
+				'E02:ssh': 'GT1-11-11A3',
+				'E07:ssh': 'GT1-11-11A3/unassigned-ssh-paid-executor',
 				'E03:ssh': 'unassigned-ssh-paid-executor',
 				'E11:local': 'GT1-11-13',
 			};
@@ -1231,7 +1230,8 @@ describe('GT1-11-09 qualification harness', () => {
 				const executor = c.reasons.find((r) => r.id === 'case-executor-unimplemented');
 				const key = `${c.family}:${c.target}`;
 				if (owners[key]) expect(executor?.owner, c.caseId).toBe(owners[key]);
-				if (key === 'E03:local') expect(executor, c.caseId).toBeUndefined();
+				if (['E02:local', 'E03:local', 'E07:local'].includes(key))
+					expect(executor, c.caseId).toBeUndefined();
 				expect(executor?.owner).not.toBe('GT1-11-10');
 				if (c.family !== 'E02') {
 					expect(c.offlineLeg).toBeNull();
@@ -1310,12 +1310,10 @@ describe('GT1-11-09 qualification harness', () => {
 			expect(JSON.stringify(receipt)).not.toContain('synthetic stand-in');
 			expect(c.status).toBe('not-run');
 			expect(c.spawned).toBe(0);
-			expect(ids(c)).toEqual(
-				expect.arrayContaining(['discovery-authorization-absent', 'case-executor-unimplemented'])
-			);
-			expect(c.reasons.find((r) => r.id === 'case-executor-unimplemented')?.owner).toBe(
-				'GT1-11-11A'
-			);
+			expect(ids(c)).toEqual(expect.arrayContaining(['discovery-authorization-absent']));
+			// A local discovery leg has its executor (GT1-11-11A1); only the missing inputs refuse it.
+			expect(ids(c)).not.toContain('case-executor-unimplemented');
+			expect(c.discoveryLegs).toEqual([]);
 			expect(receipt.totals).toMatchObject({ spawned: 2, paidRequests: 0, networkContacts: 0 });
 
 			// What the harness handed the OS: the resolved pinned file, two argv, no shell, the planned env only.
@@ -2336,8 +2334,8 @@ describe('GT1-11-09 qualification harness', () => {
 			const owners: Record<string, string> = {
 				'E03:native-headless:ssh': 'unassigned-ssh-paid-executor',
 				'E03:acp-stdio:ssh': 'unassigned-ssh-paid-executor',
-				'E07:native-headless:local': 'GT1-11-11A',
-				'E02:acp-stdio:local': 'GT1-11-11A',
+				'E07:native-headless:local': 'GT1-11-11A1',
+				'E02:acp-stdio:local': 'GT1-11-11A1',
 			};
 			expect(receipt.cases.map((c) => c.caseId).sort()).toEqual([...selected].sort());
 			for (const c of receipt.cases) {
