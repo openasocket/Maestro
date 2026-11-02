@@ -290,7 +290,9 @@ vi.mock('../../../src/shared/maestro-lib/launch/agent-args', async (importOrigin
  * function.
  */
 const utilityTamper = vi.hoisted(() => ({
-	wizard: null as 'swallow' | 'resend' | null,
+	wizard: null as 'swallow' | 'resend' | 'resend-after' | null,
+	/** resend-after: a malformed answer was returned, so the next success is the counted retry. */
+	sawMalformed: false,
 	feedback: null as { account?: string; writable?: true } | null,
 	dropNoTools: false,
 	cheapModel: null as string | null,
@@ -306,6 +308,15 @@ vi.mock('../../../src/renderer/services/inlineWizardConversation', async (import
 		...actual,
 		sendWizardMessage: async (...args: Parameters<typeof actual.sendWizardMessage>) => {
 			const result = await actual.sendWizardMessage(...args);
+			if (utilityTamper.wizard === 'resend-after') {
+				// The consumer resends the message once more after the counted retry succeeded.
+				if (malformed(result)) utilityTamper.sawMalformed = true;
+				else if (utilityTamper.sawMalformed) {
+					utilityTamper.sawMalformed = false;
+					await actual.sendWizardMessage(...args);
+				}
+				return result;
+			}
 			if (!utilityTamper.wizard || !malformed(result)) return result;
 			if (utilityTamper.wizard === 'swallow')
 				return { success: true, response: { message: 'ok', confidence: 50, ready: false } };
@@ -4864,6 +4875,7 @@ describe('GT1-11-09 qualification harness', () => {
 			spawnSpies.forEach((s) => s.mockClear());
 			fetchSpy.mockClear();
 			utilityTamper.wizard = null;
+			utilityTamper.sawMalformed = false;
 			utilityTamper.feedback = null;
 			utilityTamper.dropNoTools = false;
 			utilityTamper.cheapModel = null;
@@ -4883,6 +4895,10 @@ describe('GT1-11-09 qualification harness', () => {
 			const wizard = utility(leg, 'wizard-structured');
 			expect(wizard.observed.reset).toMatchObject({ parsed: true, fresh: true });
 			expect(wizard.observed.launches).toEqual(['1:ok', '2:ok', '3:ok', '4:ok', '5:ok']);
+			// The forced send and its one counted retry, adjacent: exactly two sends of the malformed message.
+			expect(assertionOf(wizard, 'malformed-retried-once')?.detail).toContain(
+				'sends=2 adjacent=true'
+			);
 			expect(utility(leg, 'feedback-interview').observed.selected).toMatchObject({
 				source: 'agent',
 				account: 'owned-account',
@@ -4978,21 +4994,46 @@ describe('GT1-11-09 qualification harness', () => {
 				expect(ledger.reservations[0].callsByKind.retry).toBe(0);
 			}, 60_000);
 
-			it('a consumer that resends the malformed message on its own, beside the counted retry, is observed (verdict: A11-F21, GT1-11-11D3A)', async () => {
+			it('fails when the consumer resends the malformed message on its own beside the counted retry, and cannot spend another leg turn (A11-F21, GT1-11-11D3A)', async () => {
 				utilityTamper.wizard = 'resend';
 				const { leg, ledger } = await execute('ok');
 				const wizard = utility(leg, 'wizard-structured');
+				expect(wizard.status).toBe('failed');
 				// Three sends of the second message: the forced one, the consumer's own (uncounted) and the harness retry.
 				expect(Number(fs.readFileSync(COUNT_FILE, 'utf8'))).toBe(3);
-				expect(wizard.turns).toHaveLength(6);
-				expect(assertionOf(wizard, 'malformed-retried-once')?.detail).toContain('retriesDrawn=1');
+				const retried = assertionOf(wizard, 'malformed-retried-once');
+				expect(retried).toMatchObject({ outcome: 'failed' });
+				expect(retried?.detail).toContain('sends=3');
+				expect(retried?.detail).toContain('adjacent=false');
+				expect(retried?.detail).toContain('retriesDrawn=1');
+				// Six spawn requests against its five turns: the problem fails the leg, the sixth is refused unsent.
+				expect(wizard.assertion?.detail).toContain('wizard-turns-exceeded: 6 > 5');
+				expect(wizard.turns).toHaveLength(5);
 				expect(ledger.reservations[0].callsByKind.retry).toBe(1);
-				// Six wizard turns against its five: the E09 ceiling leaves the synopsis no turn.
-				expect(utility(leg, 'synopsis').reasons.map((x) => x.id)).toEqual([
-					'utility-turns-unavailable',
-				]);
-				// GT1-11-11D3A must fail wizard-structured here (a second send of the malformed message);
-				// GT1-11-11D3B flips this case to assert that verdict.
+				// The refused request spent no turn of the next legs: the synopsis still runs and passes.
+				expect(utility(leg, 'synopsis').status).toBe('passed');
+				expect(ledger.turns).toBe(10);
+				expect(leg.status).toBe('failed');
+			}, 60_000);
+
+			it('fails when the consumer resends once more after the counted retry: adjacent, but a third send (A11-F21, GT1-11-11D3A)', async () => {
+				utilityTamper.wizard = 'resend-after';
+				const { leg, ledger } = await execute('ok');
+				const wizard = utility(leg, 'wizard-structured');
+				expect(wizard.status).toBe('failed');
+				// The forced send, the counted retry right after it, then the consumer's own third send.
+				expect(Number(fs.readFileSync(COUNT_FILE, 'utf8'))).toBe(3);
+				const retried = assertionOf(wizard, 'malformed-retried-once');
+				expect(retried).toMatchObject({ outcome: 'failed' });
+				expect(retried?.detail).toContain('parsed=true');
+				expect(retried?.detail).toContain('retrySpawns=1');
+				expect(retried?.detail).toContain('sends=3 adjacent=true');
+				// Its fifth spawn took the reset's turn: the reset request is refused unsent, the leg is over budget.
+				expect(wizard.assertion?.detail).toContain('wizard-turns-exceeded: 6 > 5');
+				expect(wizard.turns).toHaveLength(5);
+				expect(ledger.reservations[0].callsByKind.retry).toBe(1);
+				expect(utility(leg, 'synopsis').status).toBe('passed');
+				expect(leg.status).toBe('failed');
 			}, 60_000);
 
 			it('fails reset-fresh-session when the reset keeps the old native id', async () => {
