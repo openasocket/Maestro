@@ -676,6 +676,50 @@ describe('public Grok ACP turn composition', () => {
 		}
 	);
 
+	it.each([
+		['rate-limit', 'rate_limited'],
+		['auth', 'auth_expired'],
+		['unclassified', 'unknown'],
+		['peer-loss', 'agent_crashed'],
+	] as const)(
+		'reads a %s on session/prompt by its own content, keeping a JSON-RPC answer apart from a lost peer (GT1-11-14P4D1)',
+		async (cause, type) => {
+			const h = fixture();
+			h.start();
+			const prompt = await h.ready();
+			if (cause === 'peer-loss') h.child.emit('exit', 1, null);
+			else
+				h.receive({
+					id: prompt.id,
+					error: {
+						code: cause === 'auth' ? -32000 : -32603,
+						message:
+							cause === 'rate-limit'
+								? 'Rate limit exceeded: too many requests PRIVATE-PROVIDER-TEXT'
+								: 'PRIVATE-PROVIDER-TEXT',
+					},
+				});
+			const result = await h.finish();
+			expect(result.outcome).toBe('crashed');
+			expect(result.error).toMatchObject({ type, agentId: 'grok', recoverable: true });
+			expect(result.terminal).toMatchObject(
+				cause === 'peer-loss'
+					? { status: 'failed', kind: 'process', dispatchState: 'unknown' }
+					: {
+							status: 'failed',
+							kind: 'provider',
+							reason: 'provider-error',
+							dispatchState: 'dispatched',
+						}
+			);
+			expect(JSON.stringify([result.error, result.terminal, h.onEvent.mock.calls])).not.toContain(
+				'PRIVATE-PROVIDER-TEXT'
+			);
+			expect(h.calls('session/prompt')).toHaveLength(1);
+			expect(h.released).toHaveBeenCalledTimes(1);
+		}
+	);
+
 	it('settles unavailable questions without granting effects or fabricating an answer', async () => {
 		const onQuestion = vi.fn<NonNullable<GrokAcpTurnHandlers['onQuestion']>>();
 		const h = fixture({}, { onQuestion });

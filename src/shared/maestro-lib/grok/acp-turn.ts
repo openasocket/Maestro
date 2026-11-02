@@ -1,6 +1,6 @@
 import { canonicalJson } from '../../canonicalJson';
 import { sha256Hex } from '../managed/authority';
-import type { UsageStats } from '../../types';
+import type { AgentErrorType, UsageStats } from '../../types';
 import { generateUUID } from '../../uuid';
 import { guardTurn } from '../control/turn-guard';
 import { GrokOutputParser } from '../parsers/grok-output-parser';
@@ -321,6 +321,20 @@ export function grokQuestionGapOf(
 	return settlement.turnId === turnId && settlement.reason !== 'stale-request'
 		? settlement
 		: undefined;
+}
+
+/**
+ * What a caller reads when Grok answered the prompt with its own JSON-RPC error. Fixed words
+ * keyed by the classified type only; the provider's message is never interpolated.
+ */
+export function grokAcpProviderErrorMessage(type: AgentErrorType): string {
+	const what =
+		type === 'rate_limited'
+			? 'a rate limit'
+			: type === 'auth_expired'
+				? 'that authentication is required or has failed'
+				: `an error (${type})`;
+	return `Grok reported ${what} in answer to the prompt. The prompt was delivered and is not resent automatically.`;
 }
 
 /**
@@ -713,14 +727,19 @@ export function startGrokAcpTurn(
 												? 'process'
 												: reason === 'transport-lost'
 													? 'transport'
-													: 'protocol',
+													: reason === 'provider-error'
+														? 'provider'
+														: 'protocol',
 									} as const)),
 					reason,
+					// Grok answered the prompt with its own error: it was delivered, never uncertain.
 					dispatchState:
-						session?.promptDispatched ||
-						(error instanceof GrokAcpSessionError && error.dispatchMayHaveOccurred)
-							? 'unknown'
-							: 'not-dispatched',
+						reason === 'provider-error'
+							? 'dispatched'
+							: session?.promptDispatched ||
+								  (error instanceof GrokAcpSessionError && error.dispatchMayHaveOccurred)
+								? 'unknown'
+								: 'not-dispatched',
 				};
 		} finally {
 			endRequests?.();
@@ -766,6 +785,13 @@ export function startGrokAcpTurn(
 			(lostReason === 'closed' || lostReason === 'transport-lost' || lostReason === 'process-lost')
 				? lostReason
 				: undefined;
+		// Grok's own JSON-RPC answer to the prompt, classified at the client boundary. Only the
+		// type survives; the provider's message is never carried. A dispatched prompt is never
+		// replayed on this reading (retryClassification refuses a dispatched Grok terminal).
+		const providerErrorType =
+			!requestedStop && terminal.status === 'failed' && lostReason === 'provider-error'
+				? (session?.error?.errorType ?? 'unknown')
+				: undefined;
 		const resolved = resolveTurnOutcome(
 			{
 				// Protocol settlement precedes our intentional process shutdown. Its real exit
@@ -784,7 +810,16 @@ export function startGrokAcpTurn(
 							...(session?.sessionId ? { sessionId: session.sessionId } : {}),
 							timestamp: Date.now(),
 						}
-					: undefined,
+					: providerErrorType
+						? {
+								type: providerErrorType,
+								message: grokAcpProviderErrorMessage(providerErrorType),
+								recoverable: true,
+								agentId: 'grok',
+								...(session?.sessionId ? { sessionId: session.sessionId } : {}),
+								timestamp: Date.now(),
+							}
+						: undefined,
 				capturedAnswerText: capture?.answerText,
 				resultMessageSeen: capture?.resultMessageSeen ?? false,
 				terminal,

@@ -3,6 +3,7 @@ import { canonicalJson } from '../../canonicalJson';
 import { createIdleWatchdog, type IdleWatchdog } from '../control/idle-watchdog';
 import { stopProcess, BACKGROUND_STOP_GRACE_MS } from '../control/termination';
 import type { SessionTurnRequest } from '../run/session';
+import type { AgentErrorType } from '../../types';
 import { GrokAcpClient, type GrokAcpClientOptions } from './acp-client';
 import {
 	GrokAcpRequestError,
@@ -78,11 +79,15 @@ export interface GrokAcpCommandCatalog {
 
 /** Lifecycle facts only; protocol terminal/usage normalization belongs to the event adapter. */
 export class GrokAcpSessionError extends Error {
+	/** The classified type of a provider's JSON-RPC error (`provider-error`), never its message. */
+	readonly errorType?: AgentErrorType;
 	constructor(
 		readonly reason:
 			| 'closed'
 			| 'process-lost'
 			| 'transport-lost'
+			/** The peer answered the prompt with a JSON-RPC error: delivered, then refused by Grok. */
+			| 'provider-error'
 			| 'cancelled'
 			| 'idle-timeout'
 			| 'turn-timeout'
@@ -106,6 +111,7 @@ export class GrokAcpSessionError extends Error {
 		super(`Grok ACP session: ${reason}`);
 		// Preserve Error options' non-enumerable cause without requiring ES2022.
 		Object.defineProperty(this, 'cause', { value: cause, writable: true, configurable: true });
+		this.errorType = cause instanceof GrokAcpRequestError ? cause.errorType : undefined;
 		this.name = 'GrokAcpSessionError';
 	}
 }
@@ -461,7 +467,10 @@ export class GrokAcpSession {
 						? error.reason
 						: error instanceof GrokAcpTransportError && error.reason === 'timeout'
 							? 'turn-timeout'
-							: 'transport-lost',
+							: // The peer answered: a provider failure on a delivered prompt, not a lost peer.
+								error instanceof GrokAcpRequestError
+								? 'provider-error'
+								: 'transport-lost',
 					error
 				);
 			throw this.failure;

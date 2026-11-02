@@ -1,4 +1,5 @@
 import { preserveJsonNumberTokens } from '../../jsonUtils';
+import type { AgentErrorType } from '../../types';
 
 /** Grok's pinned ACP wire v1 (schema 0.11.4): UTF-8 JSON-RPC lines, not Content-Length. */
 export const GROK_ACP_PROTOCOL_VERSION = 1;
@@ -46,8 +47,15 @@ export class GrokAcpTransportError extends Error {
 	}
 }
 
+/**
+ * A JSON-RPC error the peer answered with. Only the numeric code and the error type it was
+ * classified as at the client boundary are kept; the provider's message never is.
+ */
 export class GrokAcpRequestError extends Error {
-	constructor(readonly code: number) {
+	constructor(
+		readonly code: number,
+		readonly errorType?: AgentErrorType
+	) {
 		super(`Grok ACP request failed (${code})`);
 		this.name = 'GrokAcpRequestError';
 	}

@@ -4,9 +4,13 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
 	GrokAcpSession,
+	GrokAcpSessionError,
 	type GrokAcpSessionOptions,
 } from '../../../../shared/maestro-lib/grok/acp-session';
-import type { AcpCall } from '../../../../shared/maestro-lib/grok/acp-protocol';
+import {
+	GrokAcpRequestError,
+	type AcpCall,
+} from '../../../../shared/maestro-lib/grok/acp-protocol';
 
 describe('GrokAcpSession lifecycle over fake ACP bytes', () => {
 	const fixtures: ReturnType<typeof harness>[] = [];
@@ -1269,12 +1273,46 @@ describe('GrokAcpSession lifecycle over fake ACP bytes', () => {
 				h.receive({ id: request.id, error: { code: -32603, message: 'private remote error' } });
 			if (mode === 'disconnect') h.session.transportLost();
 			const error = await failed;
-			expect(error).toMatchObject({ reason: 'transport-lost', dispatchMayHaveOccurred: true });
+			// A JSON-RPC answer is Grok's own failure of a delivered prompt, not a lost peer.
+			expect(error).toMatchObject({
+				reason: mode === 'remote' ? 'provider-error' : 'transport-lost',
+				dispatchMayHaveOccurred: true,
+			});
 			h.reply(request, { stopReason: 'end_turn' });
 			await expect(h.session.prompt('retry')).rejects.toBe(error);
 			expect(h.sent('session/prompt')).toHaveLength(1);
 			expect(h.terminate).toHaveBeenCalledTimes(1);
 			expect(vi.getTimerCount()).toBe(0);
+		}
+	);
+
+	it.each([
+		[
+			'rate-limit',
+			-32603,
+			'Rate limit exceeded: too many requests PRIVATE-PROVIDER-TEXT',
+			'rate_limited',
+		],
+		['auth', -32000, 'PRIVATE-PROVIDER-TEXT', 'auth_expired'],
+		['unclassified', -32603, 'PRIVATE-PROVIDER-TEXT', undefined],
+	] as const)(
+		'classifies a %s JSON-RPC answer to the prompt by its content and keeps only the type (GT1-11-14P4D1)',
+		async (_name, code, message, errorType) => {
+			const h = harness();
+			await h.ready();
+			const failed = h.session.prompt('side effect').catch((error: unknown) => error);
+			const request = await h.next('session/prompt');
+			h.receive({ id: request.id, error: { code, message, data: message } });
+			const error = (await failed) as GrokAcpSessionError;
+			expect(error).toMatchObject({
+				reason: 'provider-error',
+				dispatchMayHaveOccurred: true,
+				errorType,
+			});
+			expect((error.cause as GrokAcpRequestError).errorType).toBe(errorType);
+			for (const text of [error.message, String(error.cause), JSON.stringify(error)])
+				expect(text).not.toContain('PRIVATE-PROVIDER-TEXT');
+			expect(h.sent('session/prompt')).toHaveLength(1);
 		}
 	);
 });

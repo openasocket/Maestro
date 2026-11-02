@@ -680,6 +680,17 @@ class GrokAcpDesktopTurn {
 			this.finish(1);
 			return;
 		}
+		// Grok answered the prompt with its own error: the driver's classified type and fixed
+		// words (never the provider's message), not a crash of the connection.
+		if (terminal.status === 'failed' && terminal.kind === 'provider' && completed.error) {
+			this.emitAgentError(
+				completed.error.message,
+				completed.error.type,
+				completed.error.recoverable
+			);
+			this.finish(1);
+			return;
+		}
 		const unknown = terminal.dispatchState === 'unknown' ? ' The prompt may have run.' : '';
 		this.emitAgentError(
 			`Grok ACP turn ${terminal.status}${terminal.reason ? ` (${terminal.reason})` : ''}.${unknown}`,

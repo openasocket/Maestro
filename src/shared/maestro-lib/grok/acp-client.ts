@@ -12,6 +12,22 @@ import {
 	type AcpMessage,
 	type AcpRequestId,
 } from './acp-protocol';
+import { getErrorPatterns, matchErrorPattern } from '../parsers/error-patterns';
+import type { AgentErrorType } from '../../types';
+
+/** The ACP schema reserves -32000 for auth_required: a protocol meaning, not an inference. */
+export const ACP_AUTH_REQUIRED_CODE = -32000;
+
+/**
+ * Classify a peer's JSON-RPC error once, here, so nothing downstream needs its message: the
+ * ACP auth code first, then the shared Grok error bank over the message text. Only the type
+ * leaves this function; the message is dropped with the frame.
+ */
+function classifyAcpRequestError(code: number, message: unknown): AgentErrorType | undefined {
+	if (code === ACP_AUTH_REQUIRED_CODE) return 'auth_expired';
+	if (typeof message !== 'string') return undefined;
+	return matchErrorPattern(getErrorPatterns('grok'), message)?.type;
+}
 
 export interface GrokAcpClientOptions {
 	/** Writes one complete UTF-8 frame including LF. Async pipe failures must call close('write'). */
@@ -182,7 +198,8 @@ export class GrokAcpClient {
 		if (typeof message.id !== 'number') return;
 		if (message.error) {
 			const code = message.error.code;
-			this.requests.reject(message.id, () => new GrokAcpRequestError(code));
+			const errorType = classifyAcpRequestError(code, message.error.message);
+			this.requests.reject(message.id, () => new GrokAcpRequestError(code, errorType));
 		} else this.requests.resolve(message.id, message.result);
 	}
 

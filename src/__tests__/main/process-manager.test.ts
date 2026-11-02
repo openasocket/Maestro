@@ -1239,6 +1239,42 @@ describe('process-manager.ts', () => {
 					expect(consent.closed).toEqual(['acp-ok-tab']);
 				});
 
+				it.each([
+					[
+						'rate-limit',
+						{
+							code: -32603,
+							message: 'Rate limit exceeded: too many requests PRIVATE-PROVIDER-TEXT',
+						},
+						'rate_limited',
+					],
+					['auth', { code: -32000, message: 'PRIVATE-PROVIDER-TEXT' }, 'auth_expired'],
+					['peer-loss', undefined, 'agent_crashed'],
+				] as const)(
+					'reads a %s answer to the prompt as its own agent-error type, never the provider message (GT1-11-14P4D1)',
+					async (name, rpcError, type) => {
+						const key = `acp-error-${name}`;
+						processManager.spawn(
+							config(
+								key,
+								rpcError
+									? { FAKE_MODE: 'rpcerror', FAKE_RPCERROR: JSON.stringify(rpcError) }
+									: { FAKE_MODE: 'vanish' }
+							)
+						);
+						await exited(key);
+						const errors = of('agent-error', key);
+						expect(errors).toHaveLength(1);
+						expect(errors[0][2]).toMatchObject({ type, agentId: 'grok' });
+						expect(JSON.stringify([errors, of('data', key)])).not.toContain(
+							'PRIVATE-PROVIDER-TEXT'
+						);
+						expect(exitCodes(key)).toEqual([1]);
+						expect(logOf(key).filter((line) => line.startsWith('session/prompt'))).toHaveLength(1);
+						expect(headless).not.toHaveBeenCalled();
+					}
+				);
+
 				it('keeps a Full Access turn on the headless route and never starts the ACP peer', () => {
 					processManager.spawn(config('full', {}, { permission: { requested: 'full' } } as never));
 					expect(headless).toHaveBeenCalledTimes(1);
