@@ -158,6 +158,25 @@
  * read-only args applied, owned sentinels unchanged, the reply bounded. SSH and
  * ACP utility legs are not evaluated with explicit `unassigned-*` owners.
  *
+ * Cheap utility legs (GT1-11-11D2): four more E09 legs on the same
+ * reservation, each through production code. `no-tools-refused` hands
+ * `groomContext()` a `requireDisabledTools` turn and must see it refused with
+ * no spawn request, no child and no billable call. `grooming-read-only` goes
+ * through the desktop's `context:groomContext` handler with `cheapTurn`,
+ * `readOnly` and best-effort `disableTools`; `tab-naming` through the main
+ * process `generateTabName()`. Both main modules import Electron, so the
+ * qualification bundles them from the checkout at run time with an Electron
+ * stand-in (`ipcMain` records handlers, `app.getPath` names an owned dir) and
+ * answers their process manager with an adapter that writes the planned prompt
+ * file under the leg's owned root (the leg points the temp dir there) and runs
+ * exactly the planned argv on the shared reservation. `synopsis` resolves the
+ * provider through `resolveSynopsisProvider()` (explicit and auto), then
+ * resumes the E09 fixture session through `groomContext()` read-only at
+ * `cheapResumeTurnSettings()`: the resumed native id must be the parent's and
+ * no session may be added to the owned home. Every launch is checked for the
+ * cheap tier (`cheapTurnSettings()`), the enforced read-only args and the owned
+ * account; every consumer is bounded by a deadline past the per-turn timeout.
+ *
  * Offline inspection (GT1-11-10A): the offline-inspection leg of a case (E02)
  * is admitted and recorded as its own receipt entry, independently of
  * discovery. It needs the pinned binary, disabled auto-update, owned roots, the
@@ -218,6 +237,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import { EventEmitter } from 'node:events';
+import { pathToFileURL } from 'node:url';
 
 import { canonicalJson } from '../../src/shared/canonicalJson';
 import {
@@ -294,7 +315,6 @@ import {
 	type SessionLegSpec,
 	type SyntheticResourceSet,
 	type UtilityLegId,
-	type UtilityLegSpec,
 } from './paid-fixtures';
 import {
 	buildFeedbackAccountCandidates,
@@ -306,6 +326,8 @@ import {
 import { MAX_FEEDBACK_FIELD_LENGTH } from '../../src/shared/feedback';
 import { isWindows } from '../../src/shared/platformDetection';
 import { GROK_WIZARD_DISCOVERY_ARGS } from '../../src/renderer/utils/grokWizard';
+import { cheapResumeTurnSettings, cheapTurnSettings } from '../../src/shared/modelTiers';
+import { isFailedSynopsisResponse, parseSynopsis } from '../../src/shared/synopsis';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { isPathAtOrUnderRoot } from '../../src/shared/worktreePaths';
 import { stopProcess } from '../../src/shared/maestro-lib/control/termination';
@@ -398,6 +420,13 @@ export const HARNESS_CAPABILITIES = {
 	 * is not-run.
 	 */
 	utilityLegs: true,
+	/**
+	 * The E09 cheap utility legs (GT1-11-11D2): the required no-tools refusal,
+	 * read-only cheap grooming, tab naming and the synopsis resume, through
+	 * their production consumers after the GT1-11-11D1 legs on the same
+	 * reservation. Off, each is not-run.
+	 */
+	cheapUtilityLegs: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
 
@@ -6012,7 +6041,7 @@ async function runPaidLeg(
 	}
 
 	// Utility consumer legs (E09): after the fixture turn, on the same reservation, never after an uncertain effect.
-	if (fixture.utilityLegs?.length) {
+	if (utilityLegSpecsOf(fixture).length) {
 		const run = await runUtilityLegs({
 			...sessionContext(),
 			config,
@@ -7239,10 +7268,12 @@ const AGENT_CREATION_PROMPT = `Reply with only this token: ${AGENT_CREATION_TOKE
 const SESSION_CONSUMER_LEG_IDS: readonly string[] = SESSION_CONSUMER_LEGS.map((l) => l.id);
 
 /**
- * The task that owns a turn-bearing leg's reasons: GT1-11-11D1 for a utility
- * leg, GT1-11-11C2 for a consumer leg, GT1-11-11C1 otherwise.
+ * The task that owns a turn-bearing leg's reasons: GT1-11-11D2 for a cheap
+ * utility leg, GT1-11-11D1 for another utility leg, GT1-11-11C2 for a consumer
+ * leg, GT1-11-11C1 otherwise.
  */
 function ownerOfLeg(leg: string): string {
+	if (CHEAP_UTILITY_LEG_IDS.includes(leg)) return 'GT1-11-11D2';
 	if (UTILITY_LEG_IDS.includes(leg)) return 'GT1-11-11D1';
 	return SESSION_CONSUMER_LEG_IDS.includes(leg) ? 'GT1-11-11C2' : 'GT1-11-11C1';
 }
@@ -8061,29 +8092,110 @@ export const UTILITY_REPLY_MAX_CHARS = 32_000;
 /** What the bridge hands a consumer in place of a forced malformed answer: no brace, so no JSON. */
 const MALFORMED_ANSWER_PREFIX = 'QUALIFY-MALFORMED-ANSWER';
 
+/**
+ * The cheap utility legs (GT1-11-11D2), bound to E09 after its GT1-11-11D1
+ * legs (`utilityLegSpecsOf`). Each drives production code over Grok:
+ * - `no-tools-refused`: `groomContext()` with `requireDisabledTools` refuses
+ *   before any spawn request (no turn, no billable call).
+ * - `grooming-read-only`: the desktop `context:groomContext` handler with
+ *   `cheapTurn`, `readOnly` and best-effort `disableTools`, one turn.
+ * - `tab-naming`: the main process `generateTabName()`, one turn.
+ * - `synopsis`: `resolveSynopsisProvider()` picks Grok, then one read-only
+ *   `groomContext()` resume of the E09 fixture session at
+ *   `cheapResumeTurnSettings()`.
+ */
+export type CheapUtilityLegId =
+	| 'no-tools-refused'
+	| 'grooming-read-only'
+	| 'tab-naming'
+	| 'synopsis';
+export type AnyUtilityLegId = UtilityLegId | CheapUtilityLegId;
+/** A utility leg's spec: a fixture's own (`UtilityLegSpec`) or a cheap leg's. */
+export interface AnyUtilityLegSpec {
+	id: AnyUtilityLegId;
+	messages: string[];
+	maxTurns: number;
+}
+/** The reply token the cheap grooming turn is asked for. */
+export const CHEAP_GROOM_TOKEN = 'QUALIFY-E09-GROOM-OK';
+export const CHEAP_UTILITY_LEGS: readonly AnyUtilityLegSpec[] = Object.freeze(
+	(
+		[
+			{
+				id: 'no-tools-refused',
+				messages: [
+					'Synthetic qualification text to summarize: alpha, beta, gamma. ' +
+						'Do not read, write or run anything.',
+				],
+				maxTurns: 0,
+			},
+			{
+				id: 'grooming-read-only',
+				messages: [
+					`Reply with only this token: ${CHEAP_GROOM_TOKEN}. Do not read, write or run anything.`,
+				],
+				maxTurns: 1,
+			},
+			{
+				id: 'tab-naming',
+				messages: [
+					'Synthetic qualification message: plan a tiny checklist of alpha, beta and gamma. ' +
+						'Do not read, write or run anything.',
+				],
+				maxTurns: 1,
+			},
+			{ id: 'synopsis', messages: [], maxTurns: 1 },
+		] as AnyUtilityLegSpec[]
+	).map((l) => Object.freeze({ ...l, messages: Object.freeze([...l.messages]) as string[] }))
+);
+const CHEAP_UTILITY_LEG_IDS: readonly string[] = CHEAP_UTILITY_LEGS.map((l) => l.id);
+
+/** The utility legs a fixture runs: its own, then (E09 only) the cheap legs. */
+export function utilityLegSpecsOf(fixture: PaidFixture): AnyUtilityLegSpec[] {
+	const own: AnyUtilityLegSpec[] = [...(fixture.utilityLegs ?? [])];
+	return fixture.family === 'E09' ? [...own, ...CHEAP_UTILITY_LEGS] : own;
+}
+
 /** The assertions each utility leg must evaluate; a leg missing one cannot pass. */
-export const UTILITY_ASSERTIONS: Readonly<Record<UtilityLegId, readonly string[]>> = Object.freeze({
-	'wizard-structured': [
-		'onboarding-structured',
-		'inline-structured',
-		'read-only-launch',
-		'malformed-retried-once',
-		'reset-fresh-session',
-	],
-	'feedback-interview': [
-		'account-selected',
-		'no-tools-refused',
-		'account-env',
-		'read-only-args',
-		'sentinels-unchanged',
-		'reply-bounded',
-	],
-});
+export const UTILITY_ASSERTIONS: Readonly<Record<AnyUtilityLegId, readonly string[]>> =
+	Object.freeze({
+		'wizard-structured': [
+			'onboarding-structured',
+			'inline-structured',
+			'read-only-launch',
+			'malformed-retried-once',
+			'reset-fresh-session',
+		],
+		'feedback-interview': [
+			'account-selected',
+			'no-tools-refused',
+			'account-env',
+			'read-only-args',
+			'sentinels-unchanged',
+			'reply-bounded',
+		],
+		'no-tools-refused': ['refused-before-spawn', 'zero-children', 'zero-billable-calls'],
+		'grooming-read-only': [
+			'cheap-tier',
+			'enforced-read-only',
+			'sentinels-unchanged',
+			'bounded-completion',
+		],
+		'tab-naming': ['cheap-tier', 'read-only-launch', 'name-bounded'],
+		synopsis: [
+			'grok-selected',
+			'cheap-tier',
+			'read-only-launch',
+			'resumed-parent',
+			'no-new-session',
+			'bounded-completion',
+		],
+	});
 
 const UTILITY_LEG_IDS: readonly string[] = Object.keys(UTILITY_ASSERTIONS);
 
 export interface UtilityLegReceipt extends Omit<SessionConsumerReceipt, 'leg'> {
-	leg: UtilityLegId;
+	leg: AnyUtilityLegId;
 }
 
 const utilityLegReason = (id: string, detail: string, owner = 'GT1-11-11D1') =>
@@ -8447,14 +8559,17 @@ function utilityLaunchProblems(
 }
 
 type UtilityLegRunner = (
-	spec: UtilityLegSpec,
+	spec: AnyUtilityLegSpec,
 	s: SessionConsumerContext,
 	r: UtilityLegReceipt,
 	problems: string[]
 ) => Promise<string | null>;
 
 /** A turn a bridged spawn ran to a clean, successful end. */
-const bridgedTurnClean = (rec: UtilitySpawnRecord | undefined, r: UtilityLegReceipt): boolean => {
+const bridgedTurnClean = (
+	rec: Pick<UtilitySpawnRecord, 'turn'> | undefined,
+	r: UtilityLegReceipt
+): boolean => {
 	if (!rec || rec.turn === null) return false;
 	const t = r.turns.find((x) => x.turn === rec.turn);
 	return Boolean(
@@ -8911,9 +9026,864 @@ const runFeedbackInterviewLeg: UtilityLegRunner = async (spec, s, r, problems) =
 	return bridge.control.uncertainWhy;
 };
 
-const UTILITY_RUNNERS: Record<UtilityLegId, UtilityLegRunner> = {
+// ---------------------------------------------------------------------------
+// Cheap utility legs (GT1-11-11D2)
+// ---------------------------------------------------------------------------
+
+/**
+ * The pid the utility process manager reports for a turn it accepted. The
+ * consumers read a spawn result's pid only as "a process stands behind this
+ * turn" (`pid > 0`); the real child is spawned asynchronously by the leg
+ * launcher, which owns and bounds it. No consumer signals a pid, and this one
+ * names no live process.
+ */
+const UTILITY_SYNTHETIC_PID = 0x7ffffffe;
+/** The longest tab name the leg accepts (the full-length cap of the production extractor). */
+export const UTILITY_TAB_NAME_MAX_CHARS = 80;
+
+/** One spawn a main-process consumer requested from the utility process manager. */
+interface MainSpawnRecord {
+	sessionId: string;
+	command: string;
+	args: string[];
+	cwd: string;
+	/** The account dir the consumer's env names (`GROK_HOME`); null when it names none. */
+	account: string | null;
+	artifactPath: string | null;
+	agentSessionId: string | null;
+	/** In memory only; the receipt carries its digest. */
+	prompt: string;
+	unsent: string | null;
+	turn: number | null;
+	nativeId: string | null;
+	sessionIds: string[];
+	/** The answer text handed to the consumer's data listeners (memory only). */
+	delivered: string;
+	exitCode: number | null;
+}
+
+/** The spawn config a grooming or naming consumer hands its process manager (the fields read here). */
+interface MainSpawnConfig {
+	sessionId?: string;
+	toolType?: string;
+	cwd?: string;
+	command?: string;
+	args?: string[];
+	prompt?: string;
+	agentSessionId?: string;
+	customEnvVars?: Record<string, string>;
+	sshRemoteId?: string;
+	sshStdinScript?: string;
+	promptArtifact?: {
+		owner: string;
+		path: string;
+		content: string;
+		encoding?: BufferEncoding;
+		mode?: number;
+		flag?: string;
+	};
+}
+
+/** True when two paths name the same file (both must exist). */
+function sameFile(a: string | undefined, b: string): boolean {
+	if (!a) return false;
+	try {
+		return normalizeFor('local', fs.realpathSync(a)) === normalizeFor('local', fs.realpathSync(b));
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * The process manager the main-process consumers (`groomContext()`,
+ * `generateTabName()`) spawn through. A spawn is checked (Grok, local, the
+ * pinned binary, a prompt file under the leg's owned root), its prompt file
+ * written, and exactly its argv run through the leg launcher on the shared
+ * reservation; data events carry answer text and an exit follows the turn, as
+ * the desktop's do. With `send: false` (a consumer that must refuse first) any
+ * spawn request is recorded and refused unsent. Kill is a no-op: every turn is
+ * bounded by the leg's own deadline.
+ */
+function createUtilityProcessManager(
+	s: SessionConsumerContext,
+	r: UtilityLegReceipt,
+	root: string,
+	opts: { send: boolean }
+) {
+	const emitter = new EventEmitter();
+	emitter.setMaxListeners(0);
+	const spawns: MainSpawnRecord[] = [];
+	const inflight: Promise<void>[] = [];
+	const control = {
+		/** The reply token the next turn is asked for ('' when none). */
+		expect: '',
+		uncertainWhy: null as string | null,
+	};
+	const envVar = getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME';
+	const spawnTurn = (raw: unknown): { pid: number; success: boolean } => {
+		const config = (raw ?? {}) as MainSpawnConfig;
+		const record: MainSpawnRecord = {
+			sessionId: String(config.sessionId ?? ''),
+			command: String(config.command ?? ''),
+			args: [...(config.args ?? [])],
+			cwd: String(config.cwd ?? ''),
+			account: config.customEnvVars?.[envVar] ?? null,
+			artifactPath: config.promptArtifact?.path ?? null,
+			agentSessionId: config.agentSessionId ?? null,
+			prompt: config.promptArtifact?.content ?? '',
+			unsent: null,
+			turn: null,
+			nativeId: null,
+			sessionIds: [],
+			delivered: '',
+			exitCode: null,
+		};
+		spawns.push(record);
+		const id = record.sessionId;
+		const refuse = (why: string) => {
+			record.unsent = why;
+			queueMicrotask(() => emitter.emit('agent-error', id, { message: why }));
+			return { pid: 0, success: false };
+		};
+		if (!opts.send) return refuse('spawn-requested-where-refusal-required');
+		if (config.toolType !== 'grok') return refuse('not-grok');
+		if (config.sshRemoteId || config.sshStdinScript) return refuse('remote-requested');
+		if (control.uncertainWhy) return refuse(`uncertain-prior-effect:${control.uncertainWhy}`);
+		if (!sameFile(config.command, s.binaryPath)) return refuse('command-not-pinned-binary');
+		if (config.prompt !== undefined) return refuse('prompt-not-in-file');
+		const artifact = config.promptArtifact;
+		if (!artifact || artifact.owner !== 'local') return refuse('prompt-artifact-absent');
+		if (!isPathAtOrUnderRoot(normalizeFor('local', artifact.path), normalizeFor('local', root)))
+			return refuse('prompt-file-outside-root');
+		try {
+			fs.mkdirSync(path.dirname(artifact.path), { recursive: true, mode: 0o700 });
+			fs.writeFileSync(artifact.path, artifact.content, {
+				encoding: artifact.encoding ?? 'utf8',
+				mode: artifact.mode ?? 0o600,
+				flag: artifact.flag ?? 'wx',
+			});
+		} catch (e) {
+			return refuse(`prompt-file-unwritable:${errorText(e)}`);
+		}
+		const expect = control.expect;
+		control.expect = '';
+		const turn = (async () => {
+			let exitCode = 1;
+			let problem: string | null = null;
+			try {
+				const sent = await sendSessionTurn(s, r, { prompt: record.prompt, expect }, null, {
+					argv: record.args,
+					onEvent: (ev) => {
+						if (ev.type !== 'text' || ev.isReasoning || !ev.text) return;
+						record.delivered += ev.text;
+						emitter.emit('data', id, ev.text);
+					},
+				});
+				if (sent.uncertainWhy) control.uncertainWhy ??= sent.uncertainWhy;
+				const run = sent.run;
+				if (!run) {
+					record.unsent = 'turn-unsent';
+					problem = 'The qualification turn was not sent.';
+				} else {
+					record.turn = run.turn.turn;
+					record.nativeId = run.turn.sessionId;
+					record.sessionIds = [...run.sessionIds];
+					record.exitCode = run.turn.exitCode;
+					exitCode = run.turn.exitCode ?? 1;
+					if (run.errorType) problem = run.errorType;
+				}
+			} catch (e) {
+				problem = `bridge-threw:${errorText(e)}`;
+			} finally {
+				fs.rmSync(artifact.path, { force: true });
+			}
+			if (problem) emitter.emit('agent-error', id, { message: problem });
+			emitter.emit('exit', id, exitCode);
+		})();
+		inflight.push(turn);
+		return { pid: UTILITY_SYNTHETIC_PID, success: true };
+	};
+	const pm = {
+		spawn: spawnTurn,
+		on: (event: string, handler: (...args: unknown[]) => void) => {
+			emitter.on(event, handler);
+		},
+		off: (event: string, handler: (...args: unknown[]) => void) => {
+			emitter.off(event, handler);
+		},
+		kill: () => undefined,
+	};
+	return {
+		pm,
+		spawns,
+		control,
+		/** Wait for every accepted turn to close. */
+		settle: async () => {
+			await Promise.all(inflight);
+		},
+	};
+}
+
+/** The agent the consumers detect: the pinned binary, available, with nothing else detected. */
+function utilityAgentDetector(s: SessionConsumerContext) {
+	const def = getAgentDefinition('grok');
+	const grok = def
+		? {
+				...def,
+				available: true,
+				path: s.binaryPath,
+				command: def.binaryName,
+				customPath: s.binaryPath,
+			}
+		: null;
+	return {
+		getAgent: async (id: string) => (id === 'grok' ? grok : null),
+		// Auto selection must land on Grok because nothing ahead of it is installed here.
+		detectAgents: async () => [{ id: 'claude-code', available: false }, ...(grok ? [grok] : [])],
+		getCustomPaths: () => ({ grok: s.binaryPath }),
+	};
+}
+
+/** A read-only stand-in for an electron-store: the values given, defaults otherwise. */
+function utilityStore(values: Record<string, unknown>) {
+	return {
+		get: (key: string, fallback?: unknown) =>
+			Object.prototype.hasOwnProperty.call(values, key) ? structuredClone(values[key]) : fallback,
+	};
+}
+
+/** The agent-level configuration a desktop holds for the leg's Grok agent: its model and effort. */
+function utilityAgentConfigs(s: SessionConsumerContext) {
+	return {
+		configs: { grok: { model: s.model, ...(s.effort ? { reasoningEffort: s.effort } : {}) } },
+	};
+}
+
+/** Run `fn` with the platform temp dir pointed at `dir`, so a prompt file the planner places lands there. */
+async function withTempDir<T>(dir: string, fn: () => Promise<T>): Promise<T> {
+	const keys = ['TMPDIR', 'TMP', 'TEMP'] as const;
+	const before = keys.map((k) => [k, process.env[k]] as const);
+	for (const k of keys) process.env[k] = dir;
+	try {
+		return await fn();
+	} finally {
+		for (const [k, v] of before) {
+			if (v === undefined) delete process.env[k];
+			else process.env[k] = v;
+		}
+	}
+}
+
+/** Await `p` for at most `ms`; a consumer that has not settled by then is reported stalled. */
+async function withDeadline<T>(
+	p: Promise<T>,
+	ms: number
+): Promise<{ value: T } | { stalled: true }> {
+	let timer: NodeJS.Timeout | undefined;
+	const stall = new Promise<{ stalled: true }>((resolve) => {
+		timer = setTimeout(() => resolve({ stalled: true }), Math.max(1, ms));
+	});
+	try {
+		return await Promise.race([p.then((value) => ({ value })), stall]);
+	} finally {
+		if (timer) clearTimeout(timer);
+	}
+}
+
+/** How long a consumer may take: past the per-turn timeout and its grace, so the turn's own bound fires first. */
+const consumerDeadlineMs = (s: SessionConsumerContext, turns: number) =>
+	Math.max(1, turns) * (s.turnMs() + 2 * s.graceMs) + 10_000;
+
+/** The production main-process utility consumers, bundled from the checkout with an Electron stand-in. */
+interface MainUtilityConsumers {
+	generateTabName: (deps: unknown, config: unknown, signal?: AbortSignal) => Promise<string | null>;
+	registerContextHandlers: (deps: unknown) => void;
+	initializePrompts: () => Promise<void>;
+	getPrompt: (id: string) => string;
+	/** The IPC handlers the consumers registered on the stand-in `ipcMain`. */
+	handlers: Map<string, (...args: unknown[]) => Promise<unknown>>;
+	dispose: () => void;
+}
+
+/**
+ * Load the desktop's tab naming and context IPC modules and its prompt manager
+ * as they are in the checkout. They import Electron, which plain Node cannot
+ * link, so they are bundled at run time (esbuild, packages external, as the
+ * launcher bundles this harness) with one substitution: `electron` becomes a
+ * stand-in whose `ipcMain.handle` records handlers and whose `app` is an
+ * unpackaged app with `userData` at an owned dir (no prompt customizations).
+ * `__dirname` is pinned so the prompt manager reads the checkout's
+ * `src/prompts`. The bundle file is written beside the harness bundle and
+ * removed once loaded; nothing else is substituted.
+ */
+async function loadMainUtilityConsumers(
+	workspace: string,
+	userData: string
+): Promise<MainUtilityConsumers> {
+	const { build } = await import('esbuild');
+	const key = `__qualifyElectron_${randomUUID().replace(/-/g, '')}`;
+	const state = { handlers: new Map<string, (...args: unknown[]) => Promise<unknown>>(), userData };
+	const g = globalThis as unknown as Record<string, unknown>;
+	g[key] = state;
+	const dir = path.join(workspace, 'tmp', 'grok-tier1-environment', 'harness');
+	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const out = path.join(dir, `main-utility-${randomUUID()}.mjs`);
+	const src = (rel: string) => JSON.stringify(path.join(workspace, 'src', 'main', rel));
+	const shim = [
+		`const s = globalThis[${JSON.stringify(key)}];`,
+		'const handle = (channel, fn) => { s.handlers.set(channel, fn); };',
+		'export const ipcMain = { handle, removeHandler: () => {}, on: () => {} };',
+		'export const app = { isPackaged: false, getPath: () => s.userData, getVersion: () => "0.0.0", on: () => {} };',
+		'export const BrowserWindow = { getAllWindows: () => [] };',
+		'export default { ipcMain, app, BrowserWindow };',
+	].join('\n');
+	try {
+		await build({
+			stdin: {
+				contents: [
+					`export { generateTabName } from ${src('ipc/handlers/tabNaming.ts')};`,
+					`export { registerContextHandlers } from ${src('ipc/handlers/context.ts')};`,
+					`export { initializePrompts, getPrompt } from ${src('prompt-manager.ts')};`,
+					`export { logger } from ${src('utils/logger.ts')};`,
+				].join('\n'),
+				resolveDir: workspace,
+				sourcefile: 'qualify-main-utility.ts',
+				loader: 'ts',
+			},
+			outfile: out,
+			bundle: true,
+			platform: 'node',
+			target: 'node22',
+			format: 'esm',
+			packages: 'external',
+			logLevel: 'silent',
+			define: { __dirname: JSON.stringify(path.join(workspace, 'dist', 'main')) },
+			plugins: [
+				{
+					name: 'qualify-electron-stand-in',
+					setup(b) {
+						b.onResolve({ filter: /^electron$/ }, () => ({
+							path: 'electron',
+							namespace: 'qualify',
+						}));
+						b.onLoad({ filter: /.*/, namespace: 'qualify' }, () => ({
+							contents: shim,
+							loader: 'js',
+						}));
+					},
+				},
+			],
+		});
+		const mod = (await import(pathToFileURL(out).href)) as Omit<
+			MainUtilityConsumers,
+			'handlers' | 'dispose'
+		> & { logger: { setLogLevel: (level: 'error') => void } };
+		// The consumers' own info logging would interleave with the run's output.
+		mod.logger.setLogLevel('error');
+		return {
+			generateTabName: mod.generateTabName,
+			registerContextHandlers: mod.registerContextHandlers,
+			initializePrompts: mod.initializePrompts,
+			getPrompt: mod.getPrompt,
+			handlers: state.handlers,
+			dispose: () => {
+				delete g[key];
+			},
+		};
+	} catch (e) {
+		delete g[key];
+		throw e;
+	} finally {
+		fs.rmSync(out, { force: true });
+	}
+}
+
+/** The model and effort a cheap utility launch must carry: the cheap tier, else the agent's own. */
+function cheapLaunchExpectation(s: SessionConsumerContext): {
+	model: string | null;
+	effort: string | null;
+} {
+	const cheap = cheapTurnSettings('grok');
+	return { model: cheap.model ?? s.model, effort: cheap.effort ?? s.effort ?? null };
+}
+
+/** Where a launch's model or effort strays from what it must carry. */
+function cheapTierProblems(
+	rec: MainSpawnRecord | undefined,
+	want: { model: string | null; effort: string | null }
+): string[] {
+	if (!rec) return ['no-spawn'];
+	const out: string[] = [];
+	if (argValue(rec.args, '-m') !== want.model) out.push('model');
+	if (argValue(rec.args, '--reasoning-effort') !== want.effort) out.push('effort');
+	return out;
+}
+
+/** Where a utility launch is not the enforced read-only Grok launch on the owned account. */
+function utilityReadOnlyProblems(
+	rec: MainSpawnRecord | undefined,
+	s: SessionConsumerContext,
+	resumeId: string | null
+): string[] {
+	if (!rec) return ['no-spawn'];
+	const def = getAgentDefinition('grok');
+	const a = rec.args;
+	const out: string[] = [];
+	if (rec.unsent) out.push(`unsent:${rec.unsent}`);
+	if (!def?.readOnlyArgs?.length || !def.readOnlyCliEnforced || !hasRun(a, def.readOnlyArgs))
+		out.push('read-only-args');
+	const approve = new Set([...(def?.batchModeArgs ?? []), ...(def?.yoloModeArgs ?? [])]);
+	if (a.some((x) => approve.has(x))) out.push('approve-args');
+	if (argValue(a, '--prompt-file') !== rec.artifactPath) out.push('prompt-file');
+	if (resumeId === null ? a.includes('--resume') : argValue(a, '--resume') !== resumeId)
+		out.push('resume');
+	if (!utilitySameAccount(s)(rec.account)) out.push('account');
+	return out;
+}
+
+/** Sum of a reservation's drawn calls. */
+const callTotal = (calls: Record<BillableCallKind, number>) =>
+	Object.values(calls).reduce((a, b) => a + b, 0);
+
+/** Prepare a cheap leg's owned root: a project, an owned temp dir and an owned `userData`. */
+function prepareCheapRoot(
+	s: SessionConsumerContext,
+	r: UtilityLegReceipt,
+	leg: CheapUtilityLegId,
+	sentinels: boolean
+): { root: string; project: string; tmp: string; userData: string } | null {
+	const made = prepareConsumerRoot(s.c, s.config, leg, {
+		workspace: s.workspace,
+		operatorHome: s.operatorHome,
+	});
+	if ('refused' in made) {
+		r.reasons.push(utilityLegReason(made.refused, made.detail, ownerOfLeg(leg)));
+		return null;
+	}
+	r.root = made.root;
+	const project = path.join(made.root, 'project');
+	writeOwned(path.join(project, 'README.md'), 'Synthetic qualification project.\n');
+	if (sentinels)
+		for (const name of UTILITY_SENTINELS)
+			writeOwned(path.join(project, name), `sentinel ${randomBytes(8).toString('hex')}\n`);
+	const tmp = path.join(made.root, 'tmp');
+	const userData = path.join(made.root, 'user-data');
+	fs.mkdirSync(tmp, { recursive: true, mode: 0o700 });
+	fs.mkdirSync(userData, { recursive: true, mode: 0o700 });
+	return { root: made.root, project: fs.realpathSync(project), tmp, userData };
+}
+
+/**
+ * no-tools-refused: the production grooming path handed a turn that must run
+ * with every tool off. Grok has no verified all-tools-off flag, so it must
+ * refuse before asking for any process: the process manager sees no spawn
+ * request, no child runs, the owned temp dir stays empty and the shared
+ * reservation draws nothing.
+ */
+const runNoToolsRefusedLeg: UtilityLegRunner = async (spec, s, r) => {
+	const assert = assertionOn(r as unknown as SessionConsumerReceipt);
+	const made = prepareCheapRoot(s, r, 'no-tools-refused', false);
+	if (!made) return null;
+	const envVar = getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME';
+	const bridge = createUtilityProcessManager(s, r, made.root, { send: false });
+	const spawnedBefore = r.spawned;
+	const callsBefore = callTotal(s.callsByKind());
+	const turnsBefore = s.remainingTurns();
+	let error = '';
+	try {
+		const groomer = await import('../../src/main/utils/context-groomer');
+		const out = await withTempDir(made.tmp, () =>
+			withDeadline(
+				groomer.groomContext(
+					{
+						projectRoot: made.project,
+						agentType: 'grok',
+						prompt: spec.messages[0] ?? '',
+						readOnlyMode: true,
+						requireDisabledTools: true,
+						sessionCustomEnvVars: { [envVar]: s.accountRoot! },
+						sessionCustomPath: s.binaryPath,
+						timeoutMs: s.turnMs(),
+					},
+					bridge.pm as unknown as Parameters<typeof groomer.groomContext>[1],
+					utilityAgentDetector(s) as unknown as Parameters<typeof groomer.groomContext>[2]
+				),
+				consumerDeadlineMs(s, 1)
+			)
+		);
+		error = 'stalled' in out ? 'consumer-stalled' : 'not-refused';
+	} catch (e) {
+		error = errorText(e);
+	}
+	await bridge.settle();
+	const refused =
+		/cannot run this turn with tools disabled/.test(error) && /Nothing was run/.test(error);
+	const tmpEntries = safeTree(made.tmp)?.size ?? -1;
+	r.observed.noTools = {
+		refused,
+		spawnRequests: bridge.spawns.length,
+		tempEntries: tmpEntries,
+	};
+	assert(
+		'refused-before-spawn',
+		refused && bridge.spawns.length === 0,
+		`refused=${refused} spawnRequests=${bridge.spawns.length}`
+	);
+	assert(
+		'zero-children',
+		bridge.spawns.length === 0 &&
+			r.spawned === spawnedBefore &&
+			!r.turns.length &&
+			tmpEntries === 0,
+		`spawnRequests=${bridge.spawns.length} spawned=${r.spawned - spawnedBefore} ` +
+			`turns=${r.turns.length} tempEntries=${tmpEntries}`
+	);
+	const callsDrawn = callTotal(s.callsByKind()) - callsBefore;
+	assert(
+		'zero-billable-calls',
+		callsDrawn === 0 && s.remainingTurns() === turnsBefore && r.paidRequests === 0,
+		`calls=${callsDrawn} turns=${turnsBefore - s.remainingTurns()} paid=${r.paidRequests}`
+	);
+	return null;
+};
+
+/**
+ * grooming-read-only: the desktop's `context:groomContext` handler (as
+ * `window.maestro.context.groomContext()` reaches it) with `cheapTurn`,
+ * `readOnly` and best-effort `disableTools`. Grok has no all-tools-off flag,
+ * so the turn must run as the enforced read-only launch at the cheap tier,
+ * leave the owned project's sentinels untouched and complete within bounds.
+ */
+const runGroomingReadOnlyLeg: UtilityLegRunner = async (spec, s, r, problems) => {
+	const assert = assertionOn(r as unknown as SessionConsumerReceipt);
+	const made = prepareCheapRoot(s, r, 'grooming-read-only', true);
+	if (!made) return null;
+	const envVar = getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME';
+	const bridge = createUtilityProcessManager(s, r, made.root, { send: true });
+	const consumers = await loadMainUtilityConsumers(s.workspace, made.userData);
+	let response: string | null = null;
+	let failure: string | null = null;
+	const treeBefore = safeTree(made.project);
+	try {
+		consumers.registerContextHandlers({
+			getProcessManager: () => bridge.pm,
+			getAgentDetector: () => utilityAgentDetector(s),
+			agentConfigsStore: utilityStore(utilityAgentConfigs(s)),
+			settingsStore: utilityStore({}),
+		});
+		const handler = consumers.handlers.get('context:groomContext');
+		if (!handler) {
+			problems.push('groom-handler-unregistered');
+			return null;
+		}
+		bridge.control.expect = CHEAP_GROOM_TOKEN;
+		try {
+			const out = await withTempDir(made.tmp, () =>
+				withDeadline(
+					handler(null, made.project, 'grok', spec.messages[0] ?? '', {
+						customPath: s.binaryPath,
+						customEnvVars: { [envVar]: s.accountRoot! },
+						cheapTurn: true,
+						readOnly: true,
+						disableTools: true,
+						timeoutMs: s.turnMs() + s.graceMs + 5_000,
+					}),
+					consumerDeadlineMs(s, 1)
+				)
+			);
+			if ('stalled' in out) failure = 'consumer-stalled';
+			else response = typeof out.value === 'string' ? out.value : '';
+		} catch (e) {
+			failure = errorText(e);
+		}
+		await bridge.settle();
+	} finally {
+		consumers.dispose();
+	}
+	const treeAfter = safeTree(made.project);
+	const rec = bridge.spawns[0];
+	const turn = rec?.turn !== null ? r.turns.find((t) => t.turn === rec?.turn) : undefined;
+	const want = cheapLaunchExpectation(s);
+	const tier = cheapTierProblems(rec, want);
+	const readOnly = utilityReadOnlyProblems(rec, s, null);
+	const changed = treeBefore && treeAfter ? treeChanges(treeBefore, treeAfter) : null;
+	r.digests.groomPrompt = rec ? sha256Of(rec.prompt) : null;
+	r.observed.grooming = {
+		spawns: bridge.spawns.length,
+		failure,
+		nativeId: rec?.nativeId ?? null,
+		changed: changed ?? 'unreadable',
+	};
+	assert(
+		'cheap-tier',
+		bridge.spawns.length === 1 && !tier.length,
+		`spawns=${bridge.spawns.length} ${tier.join(',') || 'ok'}`
+	);
+	assert(
+		'enforced-read-only',
+		bridge.spawns.length === 1 && !readOnly.length,
+		readOnly.join(',') || 'ok'
+	);
+	assert(
+		'sentinels-unchanged',
+		!!changed && !changed.length && (treeBefore?.size ?? 0) >= UTILITY_SENTINELS.length,
+		`changed=${changed ? changed.length : 'unreadable'} entries=${treeBefore?.size ?? 'none'}`
+	);
+	const chars = response?.length ?? 0;
+	assert(
+		'bounded-completion',
+		!failure &&
+			bridge.spawns.length === 1 &&
+			bridgedTurnClean(rec, r) &&
+			!!turn?.reply.tokenSeen &&
+			chars > 0 &&
+			chars <= UTILITY_REPLY_MAX_CHARS,
+		`failure=${failure ?? 'none'} clean=${bridgedTurnClean(rec, r)} ` +
+			`replied=${!!turn?.reply.tokenSeen} chars=${chars}`
+	);
+	return bridge.control.uncertainWhy;
+};
+
+/**
+ * tab-naming: the main process `generateTabName()` (the shared naming turn
+ * behind `window.maestro.tabNaming.generateTabName()`) for a synthetic first
+ * message on the leg's Grok agent. The name must come back bounded from one
+ * launch at the cheap tier that is the enforced read-only launch.
+ */
+const runTabNamingLeg: UtilityLegRunner = async (spec, s, r) => {
+	const assert = assertionOn(r as unknown as SessionConsumerReceipt);
+	const made = prepareCheapRoot(s, r, 'tab-naming', false);
+	if (!made) return null;
+	const envVar = getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME';
+	const bridge = createUtilityProcessManager(s, r, made.root, { send: true });
+	const consumers = await loadMainUtilityConsumers(s.workspace, made.userData);
+	let name: string | null = null;
+	let failure: string | null = null;
+	try {
+		await consumers.initializePrompts();
+		const deps = {
+			getProcessManager: () => bridge.pm,
+			getAgentDetector: () => utilityAgentDetector(s),
+			agentConfigsStore: utilityStore(utilityAgentConfigs(s)),
+			settingsStore: utilityStore({}),
+		};
+		try {
+			const out = await withTempDir(made.tmp, () =>
+				withDeadline(
+					consumers.generateTabName(deps, {
+						userMessage: spec.messages[0] ?? '',
+						agentType: 'grok',
+						cwd: made.project,
+						sessionCustomEnvVars: { [envVar]: s.accountRoot! },
+						useUtilityAgent: false,
+					}),
+					consumerDeadlineMs(s, 1)
+				)
+			);
+			if ('stalled' in out) failure = 'consumer-stalled';
+			else name = out.value;
+		} catch (e) {
+			failure = errorText(e);
+		}
+		await bridge.settle();
+	} finally {
+		consumers.dispose();
+	}
+	const rec = bridge.spawns[0];
+	const want = cheapLaunchExpectation(s);
+	const tier = cheapTierProblems(rec, want);
+	const readOnly = utilityReadOnlyProblems(rec, s, null);
+	r.digests.namingPrompt = rec ? sha256Of(rec.prompt) : null;
+	r.observed.naming = {
+		spawns: bridge.spawns.length,
+		failure,
+		named: name !== null,
+		nameChars: name?.length ?? 0,
+		nativeId: rec?.nativeId ?? null,
+	};
+	assert(
+		'cheap-tier',
+		bridge.spawns.length === 1 && !tier.length,
+		`spawns=${bridge.spawns.length} ${tier.join(',') || 'ok'}`
+	);
+	assert(
+		'read-only-launch',
+		bridge.spawns.length === 1 && !readOnly.length,
+		readOnly.join(',') || 'ok'
+	);
+	const trimmed = name?.trim() ?? '';
+	assert(
+		'name-bounded',
+		!failure &&
+			bridge.spawns.length === 1 &&
+			bridgedTurnClean(rec, r) &&
+			trimmed.length >= 2 &&
+			trimmed.length <= UTILITY_TAB_NAME_MAX_CHARS &&
+			!/[\r\n]/.test(trimmed),
+		`failure=${failure ?? 'none'} clean=${bridgedTurnClean(rec, r)} nameChars=${trimmed.length}`
+	);
+	return bridge.control.uncertainWhy;
+};
+
+/**
+ * synopsis: `resolveSynopsisProvider()` must select Grok for an explicit pick
+ * and for auto selection with nothing ahead of it installed; then the E09
+ * fixture session is summarized as the synopsis turns summarize a finished
+ * turn: the production synopsis prompt through `groomContext()` resuming that
+ * session read-only at `cheapResumeTurnSettings()`. The resumed native id must
+ * be the parent's, the owned home may gain no session, and the synopsis must
+ * be a bounded, usable answer by the production synopsis rules.
+ */
+const runSynopsisLeg: UtilityLegRunner = async (_spec, s, r, problems) => {
+	const assert = assertionOn(r as unknown as SessionConsumerReceipt);
+	const made = prepareCheapRoot(s, r, 'synopsis', false);
+	if (!made) return null;
+	const envVar = getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME';
+	const detector = utilityAgentDetector(s);
+	const parent = [...s.mainTurns].reverse().find((t) => t.sessionId)?.sessionId ?? null;
+
+	// 1. The provider, as Director's Notes and the synopsis surfaces resolve it.
+	const dn = await import('../../src/main/utils/director-notes-provider');
+	const asDetector = detector as unknown as Parameters<typeof dn.resolveSynopsisProvider>[1];
+	const explicit = await dn.resolveSynopsisProvider('grok', asDetector);
+	const auto = await dn.resolveSynopsisProvider('auto', asDetector);
+	const pick = (x: typeof explicit) =>
+		'error' in x ? 'error' : `${x.provider}:${x.auto ? 'auto' : 'explicit'}`;
+	r.observed.provider = { explicit: pick(explicit), auto: pick(auto) };
+	const selected =
+		!('error' in explicit) &&
+		explicit.provider === 'grok' &&
+		!explicit.auto &&
+		!('error' in auto) &&
+		auto.provider === 'grok' &&
+		auto.auto;
+	assert('grok-selected', selected, `explicit=${pick(explicit)} auto=${pick(auto)}`);
+	if (!selected) return null;
+	if (!parent) {
+		assert('resumed-parent', false, 'not sent: the E09 fixture turn named no native session');
+		return null;
+	}
+
+	// 2. The synopsis turn: the production prompt, a read-only cheap resume of the parent.
+	const consumers = await loadMainUtilityConsumers(s.workspace, made.userData);
+	let prompt = '';
+	try {
+		await consumers.initializePrompts();
+		prompt = consumers.getPrompt('autorun-synopsis');
+	} finally {
+		consumers.dispose();
+	}
+	if (!prompt.trim()) {
+		problems.push('synopsis-prompt-empty');
+		return null;
+	}
+	const turnSettings = cheapResumeTurnSettings('grok', {
+		model: s.model,
+		effort: s.effort ?? undefined,
+	});
+	const bridge = createUtilityProcessManager(s, r, made.root, { send: true });
+	const idsBefore = listNativeSessionIds(s.accountRoot);
+	let response: string | null = null;
+	let failure: string | null = null;
+	try {
+		const groomer = await import('../../src/main/utils/context-groomer');
+		const out = await withTempDir(made.tmp, () =>
+			withDeadline(
+				groomer.groomContext(
+					{
+						projectRoot: s.cwd,
+						agentType: 'grok',
+						prompt,
+						agentSessionId: parent,
+						readOnlyMode: true,
+						sessionCustomModel: turnSettings.model,
+						sessionCustomEffort: turnSettings.effort,
+						sessionCustomEnvVars: { [envVar]: s.accountRoot! },
+						sessionCustomPath: s.binaryPath,
+						timeoutMs: s.turnMs() + s.graceMs + 5_000,
+					},
+					bridge.pm as unknown as Parameters<typeof groomer.groomContext>[1],
+					detector as unknown as Parameters<typeof groomer.groomContext>[2]
+				),
+				consumerDeadlineMs(s, 1)
+			)
+		);
+		if ('stalled' in out) failure = 'consumer-stalled';
+		else response = out.value.response;
+	} catch (e) {
+		failure = errorText(e);
+	}
+	await bridge.settle();
+	const idsAfter = listNativeSessionIds(s.accountRoot);
+	const rec = bridge.spawns[0];
+	r.digests.synopsisPrompt = rec ? sha256Of(rec.prompt) : null;
+	const tier = cheapTierProblems(rec, {
+		model: turnSettings.model ?? null,
+		effort: turnSettings.effort ?? null,
+	});
+	const readOnly = utilityReadOnlyProblems(rec, s, parent);
+	const added = idsAfter.ids.filter((id) => !idsBefore.ids.includes(id));
+	r.observed.synopsis = {
+		spawns: bridge.spawns.length,
+		failure,
+		resumedParent: rec?.nativeId === parent,
+		streamIds: rec?.sessionIds.length ?? 0,
+		added: added.length,
+	};
+	assert(
+		'cheap-tier',
+		bridge.spawns.length === 1 && !tier.length,
+		`spawns=${bridge.spawns.length} ${tier.join(',') || 'ok'}`
+	);
+	assert(
+		'read-only-launch',
+		bridge.spawns.length === 1 && !readOnly.length,
+		readOnly.join(',') || 'ok'
+	);
+	const resumed =
+		bridge.spawns.length === 1 &&
+		!!rec &&
+		rec.agentSessionId === parent &&
+		argValue(rec.args, '--resume') === parent &&
+		rec.nativeId === parent &&
+		rec.sessionIds.length > 0 &&
+		rec.sessionIds.every((id) => id === parent);
+	assert(
+		'resumed-parent',
+		resumed,
+		`planned=${rec?.agentSessionId === parent} argv=${argValue(rec?.args ?? [], '--resume') === parent} ` +
+			`streamed=${rec?.nativeId === parent} otherIds=${rec?.sessionIds.filter((id) => id !== parent).length ?? 0}`
+	);
+	assert(
+		'no-new-session',
+		!idsBefore.problem && !idsAfter.problem && idsBefore.ids.includes(parent) && !added.length,
+		`before=${idsBefore.problem ?? idsBefore.ids.length} after=${idsAfter.problem ?? idsAfter.ids.length} ` +
+			`parentListed=${idsBefore.ids.includes(parent)} added=${added.length}`
+	);
+	const text = response ?? '';
+	const usable = !!text.trim() && !isFailedSynopsisResponse(text, 'grok');
+	const parsed = usable ? parseSynopsis(text) : null;
+	assert(
+		'bounded-completion',
+		!failure &&
+			bridgedTurnClean(rec, r) &&
+			usable &&
+			text.length <= UTILITY_REPLY_MAX_CHARS &&
+			!!parsed &&
+			(parsed.nothingToReport || !!parsed.shortSummary.trim()),
+		`failure=${failure ?? 'none'} clean=${bridgedTurnClean(rec, r)} usable=${usable} chars=${text.length} ` +
+			`summary=${parsed ? (parsed.nothingToReport ? 'nothing-to-report' : parsed.shortSummary.trim().length) : 'none'}`
+	);
+	return bridge.control.uncertainWhy;
+};
+
+const UTILITY_RUNNERS: Record<AnyUtilityLegId, UtilityLegRunner> = {
 	'wizard-structured': runWizardStructuredLeg,
 	'feedback-interview': runFeedbackInterviewLeg,
+	'no-tools-refused': runNoToolsRefusedLeg,
+	'grooming-read-only': runGroomingReadOnlyLeg,
+	'tab-naming': runTabNamingLeg,
+	synopsis: runSynopsisLeg,
 };
 
 /** Close a utility leg: passed only when every required assertion passed with no reason or problem. */
@@ -8924,7 +9894,7 @@ function settleUtilityLeg(r: UtilityLegReceipt, problems: string[]): UtilityLegR
 			id: r.leg,
 			outcome: 'not-evaluated',
 			detail: r.reasons.map((x) => x.id).join('; '),
-			owner: 'GT1-11-11D1',
+			owner: ownerOfLeg(r.leg),
 		};
 		return r;
 	}
@@ -8964,14 +9934,16 @@ async function runUtilityLegs(s: SessionConsumerContext): Promise<{
 	// The paid leg files these receipts only after the run: number the turns here so none repeats.
 	let turnNo = s.nextTurn() - 1;
 	s = { ...s, nextTurn: () => ++turnNo };
-	for (const spec of s.fixture.utilityLegs ?? []) {
+	for (const spec of utilityLegSpecsOf(s.fixture)) {
+		const owner = ownerOfLeg(spec.id);
+		const cheap = CHEAP_UTILITY_LEG_IDS.includes(spec.id);
 		const r: UtilityLegReceipt = {
 			leg: spec.id,
 			status: 'not-run',
 			reasons: [],
 			turns: [],
 			assertions: [],
-			assertion: { id: spec.id, outcome: 'not-evaluated', detail: '', owner: 'GT1-11-11D1' },
+			assertion: { id: spec.id, outcome: 'not-evaluated', detail: '', owner },
 			observed: {},
 			digests: {},
 			root: null,
@@ -8984,9 +9956,12 @@ async function runUtilityLegs(s: SessionConsumerContext): Promise<{
 		};
 		const uncertain = s.uncertain ?? uncertainWhy;
 		if (!s.capabilities.utilityLegs)
-			r.reasons.push(utilityLegReason('utility-legs-unimplemented', spec.id));
-		else if (s.blocked) r.reasons.push(utilityLegReason(s.blocked, spec.id));
-		else if (uncertain) r.reasons.push(utilityLegReason('uncertain-prior-effect', uncertain));
+			r.reasons.push(utilityLegReason('utility-legs-unimplemented', spec.id, owner));
+		else if (cheap && !s.capabilities.cheapUtilityLegs)
+			r.reasons.push(utilityLegReason('cheap-utility-legs-unimplemented', spec.id, owner));
+		else if (s.blocked) r.reasons.push(utilityLegReason(s.blocked, spec.id, owner));
+		else if (uncertain)
+			r.reasons.push(utilityLegReason('uncertain-prior-effect', uncertain, owner));
 		else if (s.c.target === 'ssh')
 			gap(
 				'the bridge plans and spawns local launches against a local owned home only',
@@ -8994,13 +9969,18 @@ async function runUtilityLegs(s: SessionConsumerContext): Promise<{
 			);
 		else if (s.c.route !== 'native-headless')
 			gap(
-				'the wizard and feedback consumers launch native headless turns only',
+				'the utility consumers launch native headless prompt-file turns only',
 				ACP_UTILITY_LEGS_OWNER
 			);
-		else if (!s.accountRoot) r.reasons.push(utilityLegReason('account-root-unknown', spec.id));
+		else if (!s.accountRoot)
+			r.reasons.push(utilityLegReason('account-root-unknown', spec.id, owner));
 		else if (spec.maxTurns > s.remainingTurns())
 			r.reasons.push(
-				utilityLegReason('utility-turns-unavailable', `${spec.maxTurns} > ${s.remainingTurns()}`)
+				utilityLegReason(
+					'utility-turns-unavailable',
+					`${spec.maxTurns} > ${s.remainingTurns()}`,
+					owner
+				)
 			);
 		if (r.reasons.length) {
 			r.assertion.detail = r.reasons.map((x) => x.id).join('; ');
