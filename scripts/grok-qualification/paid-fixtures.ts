@@ -754,7 +754,7 @@ export const POLICY_LEGS: readonly PolicyLegSpec[] = Object.freeze([
 	).map((id): PolicyLegSpec => ({ id, kind: 'authority', turns: [], maxTurns: 0 })),
 ]);
 
-/** Every production direction with Grok on one side; the legs that run on it are GT1-11-13B's. */
+/** Every production direction with Grok on one side; each runs its `translate-resume` leg (GT1-11-13B). */
 export const CROSS_PROVIDER_DIRECTIONS: readonly CrossProviderDirectionSpec[] = Object.freeze(
 	TRANSLATION_DIRECTIONS.filter((d) => (d.source === 'grok') !== (d.destination === 'grok')).map(
 		(d): CrossProviderDirectionSpec => ({
@@ -769,6 +769,125 @@ export const CROSS_PROVIDER_DIRECTIONS: readonly CrossProviderDirectionSpec[] = 
 		})
 	)
 );
+
+/**
+ * The nonces an E11 translation leg seeds into its synthetic source history
+ * (GT1-11-13B). Fixed, so the fixture digest covers them; the prompt never
+ * repeats either nonce, so a reply carrying one can only come from the staged
+ * history. `toolSentinel` is the file the carried tool call would create in the
+ * owned project: it must stay absent, since a carried call is never replayed.
+ */
+export const TRANSLATION_NONCES = Object.freeze({
+	fact: 'QUALIFY-E11-FACT-7Q4K',
+	toolResult: 'QUALIFY-E11-TOOL-3M8P',
+	callId: 'call_qualify_e11_sentinel',
+	toolSentinel: 'qualify-e11-tool-sentinel',
+});
+
+/** The one resumed turn of a translate-resume leg: the fact nonce is its token, the tool nonce its citation. */
+export const TRANSLATION_RESUME_TURN: PaidFixtureTurn = Object.freeze({
+	prompt:
+		'Do not use any tool and do not run anything. Using only the earlier messages of this ' +
+		'conversation, reply on one line with the synthetic fact I asked you to remember, a space, ' +
+		'and the exact token the earlier tool result returned.',
+	expect: TRANSLATION_NONCES.fact,
+	alsoExpect: [TRANSLATION_NONCES.toolResult],
+});
+
+/** The assertions a translate-resume leg must evaluate; a leg missing one cannot pass. */
+export const TRANSLATION_LEG_ASSERTIONS = Object.freeze([
+	'staged-rows-validated',
+	'resume-exit-clean',
+	'resume-session-id',
+	'loaded-rows',
+	'fact-nonce',
+	'tool-result-nonce',
+	'carried-tool-not-executed',
+	'no-duplicate-session',
+	'source-unchanged',
+	'owned-roots-only',
+] as const);
+
+/**
+ * The synthetic source history of one translation leg as native rows of the
+ * source provider: a user turn carrying the fact nonce, an assistant tool call
+ * (a shell command that would create the tool sentinel), its result carrying
+ * the tool nonce, and a closing assistant reply. Data only: the harness writes
+ * the rows into the source's owned home and the production extractor reads them.
+ */
+export function translationSeedRows(
+	provider: 'grok' | CrossProviderPeer,
+	sessionId: string,
+	cwd: string
+): Record<string, unknown>[] {
+	const n = TRANSLATION_NONCES;
+	const ask = `Remember this synthetic fact for later: ${n.fact}. Then run the tool.`;
+	const command = `touch ${n.toolSentinel}`;
+	if (provider === 'grok')
+		return [
+			{ type: 'user', content: [{ type: 'text', text: ask }] },
+			{
+				type: 'assistant',
+				content: 'Running the tool.',
+				tool_calls: [{ id: n.callId, name: 'bash', arguments: JSON.stringify({ command }) }],
+			},
+			{ type: 'tool_result', tool_call_id: n.callId, content: n.toolResult },
+			{ type: 'assistant', content: 'Noted.' },
+		];
+	if (provider === 'claude-code') {
+		const row = (uuid: string, parentUuid: string | null, message: Record<string, unknown>) => ({
+			type: message.role,
+			uuid,
+			parentUuid,
+			sessionId,
+			cwd,
+			timestamp: '2026-11-02T00:00:00.000Z',
+			message,
+		});
+		return [
+			row('qualify-u1', null, { role: 'user', content: ask }),
+			row('qualify-a1', 'qualify-u1', {
+				role: 'assistant',
+				content: [
+					{ type: 'text', text: 'Running the tool.' },
+					{ type: 'tool_use', id: n.callId, name: 'Bash', input: { command } },
+				],
+			}),
+			row('qualify-u2', 'qualify-a1', {
+				role: 'user',
+				content: [{ type: 'tool_result', tool_use_id: n.callId, content: n.toolResult }],
+			}),
+			row('qualify-a2', 'qualify-u2', {
+				role: 'assistant',
+				content: [{ type: 'text', text: 'Noted.' }],
+			}),
+		];
+	}
+	const item = (payload: Record<string, unknown>) => ({ type: 'response_item', payload });
+	return [
+		{ type: 'session_meta', payload: { id: sessionId, cwd } },
+		item({
+			type: 'message',
+			id: 'qualify-m1',
+			role: 'user',
+			content: [{ type: 'input_text', text: ask }],
+		}),
+		item({
+			type: 'function_call',
+			id: 'qualify-f1',
+			call_id: n.callId,
+			name: 'shell',
+			arguments: JSON.stringify({ command: ['bash', '-lc', command] }),
+		}),
+		item({ type: 'function_call_output', call_id: n.callId, output: n.toolResult }),
+		item({
+			type: 'message',
+			id: 'qualify-m2',
+			role: 'assistant',
+			content: [{ type: 'output_text', text: 'Noted.' }],
+		}),
+	];
+}
 
 const turn = (family: string, n: number, extra = ''): PaidFixtureTurn => {
 	const token = `QUALIFY-${family}-T${n}-OK`;
@@ -939,7 +1058,19 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 	E11: fixture(
 		'E11',
 		[turn('E11', 1), turn('E11', 2)],
-		[{ id: 'cross-provider', detail: 'Claude and Codex legs', owner: 'GT1-11-13B' }],
+		[
+			{
+				id: 'cross-provider-resources',
+				detail:
+					'projected skill, rule and memory sentinels, and the Codex destination import channel',
+				owner: 'GT1-11-13B1',
+			},
+			{
+				id: 'cross-provider-round-trip',
+				detail: 'the reverse leg and two Grok-Claude-Grok and Grok-Codex-Grok round trips',
+				owner: 'GT1-11-13B2',
+			},
+		],
 		{ crossProvider: [...CROSS_PROVIDER_DIRECTIONS] }
 	),
 	E12: fixture(

@@ -648,8 +648,8 @@ describe('GT1-11-09 qualification harness', () => {
 					expect(r.kind).toBeTruthy();
 				}
 				// The discovery (GT1-11-11A1) and paid (GT1-11-11P1) executors cover Grok-only legs, local and
-				// SSH (GT1-11-11A3); the cross-provider and SSH two-account identity legs stay unimplemented.
-				const uncovered = c.family === 'E11' || (c.target === 'ssh' && c.family === 'E01');
+				// SSH (GT1-11-11A3), and the E11 translation legs (GT1-11-13B); the SSH two-account identity leg stays unimplemented.
+				const uncovered = c.target === 'ssh' && c.family === 'E01';
 				if (uncovered) expect(c.reasons.map((r) => r.id)).toContain('case-executor-unimplemented');
 				else expect(c.reasons.map((r) => r.id)).not.toContain('case-executor-unimplemented');
 				expect([c.spawned, c.paidRequests, c.networkContacts]).toEqual([0, 0, 0]);
@@ -1690,14 +1690,24 @@ describe('GT1-11-09 qualification harness', () => {
 			expect(receipt.totals).toMatchObject({ spawned: 0, paidRequests: 0, networkContacts: 0 });
 			const owners: Record<string, string> = {
 				'E01:ssh': 'unassigned-ssh-identity-inspection',
-				'E11:local': 'GT1-11-13B',
 			};
 			for (const c of receipt.cases) {
 				const executor = c.reasons.find((r) => r.id === 'case-executor-unimplemented');
 				const key = `${c.family}:${c.target}`;
 				if (owners[key]) expect(executor?.owner, c.caseId).toBe(owners[key]);
 				// The SSH legs have their executor (GT1-11-11A3); only the missing inputs refuse them.
-				if (['E02:local', 'E03:local', 'E07:local', 'E02:ssh', 'E03:ssh', 'E07:ssh'].includes(key))
+				if (
+					[
+						'E02:local',
+						'E03:local',
+						'E07:local',
+						'E11:local',
+						'E02:ssh',
+						'E03:ssh',
+						'E07:ssh',
+						'E11:ssh',
+					].includes(key)
+				)
 					expect(executor, c.caseId).toBeUndefined();
 				expect(executor?.owner).not.toBe('GT1-11-10');
 				if (c.family !== 'E02') {
