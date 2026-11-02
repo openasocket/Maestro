@@ -768,21 +768,80 @@ describe('GT1-11-09 qualification harness', () => {
 
 	describe('candidate capability snapshots', () => {
 		const e08 = expandCases(FAMILIES, ['E08:native-headless:local'])[0];
+		// Every E08/E09 tuple: the families that once carried slash-command and
+		// moderation candidates (GT1-11-08A), retired by GT1-11-14C1 (A11-F43).
+		const retiredFamilies = expandCases(FAMILIES, ['E08', 'E09']);
+		const boundConfig = () =>
+			liveConfig({
+				binary: { path: '/opt/grok/bin/grok', sha256: 'a'.repeat(64), version: '1.0.70' },
+			});
+		// A hand-passed candidate, never the production list: what a future task
+		// naming its own evidence would hand the builder.
+		const handCandidate = (patch: Partial<CandidateCapability> = {}): CandidateCapability => ({
+			flag: 'supportsSlashCommands',
+			candidateValue: true,
+			routes: ['native-headless'],
+			families: ['E08'],
+			parityRows: ['C-supportsSlashCommands'],
+			implementedBy: ['test fixture'],
+			consumers: [{ path: 'test fixture', seam: 'capabilities-parameter' }],
+			basis: 'GT1-11-14C2 hand-passed fixture',
+			...patch,
+		});
 
-		it('are frozen harness-only copies that never become production availability', async () => {
+		it('build no snapshot from the production list on any E08/E09 case (GT1-11-14C2)', async () => {
 			const before = productionCapabilityDigest();
+			expect(CANDIDATE_CAPABILITIES).toEqual([]);
+			expect(Object.isFrozen(CANDIDATE_CAPABILITIES)).toBe(true);
 			const production = getAgentCapabilities('grok');
 			expect(production.supportsSlashCommands).toBe(false);
-			const snapshot = buildCandidateSnapshot(
-				e08,
-				liveConfig({ binary: { path: null, sha256: null, version: null } })
+			expect(production.supportsGroupChatModeration).toBe(false);
+
+			expect(retiredFamilies.map((c) => c.family).sort()).toEqual(
+				expect.arrayContaining(['E08', 'E09'])
 			);
+			expect(new Set(retiredFamilies.map((c) => c.route))).toEqual(
+				new Set(['native-headless', 'acp-stdio'])
+			);
+			for (const c of retiredFamilies) {
+				// Unbound and pinned binaries alike: the default list overrides nothing.
+				expect(buildCandidateSnapshot(c, liveConfig())).toBeNull();
+				expect(buildCandidateSnapshot(c, boundConfig())).toBeNull();
+			}
+			expect(getAgentCapabilities('grok')).toEqual(production);
+			expect(productionCapabilityDigest()).toBe(before);
+
+			// A run records no snapshot and no candidate, and leaves the registry as it was.
+			const { receipt } = await runQualification({
+				workspace: WORKSPACE,
+				runState: RUN_STATE,
+				selectedCases: ['E08', 'E09'],
+				now: clock,
+				runId: runId(),
+			});
+			expect(receipt.cases).toHaveLength(retiredFamilies.length);
+			expect(receipt.candidateCapabilities.candidates).toEqual([]);
+			expect(receipt.candidateCapabilities.snapshots).toBe(0);
+			expect(receipt.candidateCapabilities.productionDigestBefore).toBe(before);
+			expect(receipt.candidateCapabilities.productionDigestAfter).toBe(before);
+			for (const c of receipt.cases) {
+				expect(c.candidateSnapshot).toBeNull();
+				expect(c.status).toBe('not-run');
+			}
+		});
+
+		it('a hand-passed candidate stays a frozen harness-only copy on its own route', () => {
+			const before = productionCapabilityDigest();
+			const production = getAgentCapabilities('grok');
+			const unbound = liveConfig({ binary: { path: null, sha256: null, version: null } });
+			const snapshot = buildCandidateSnapshot(e08, unbound, [handCandidate()]);
 			expect(snapshot).toMatchObject({
 				scope: 'qualification-harness-only',
 				productionAvailability: false,
 				policyWaiver: false,
 				caseId: e08.caseId,
 				versionBasis: { state: 'unbound', supportedRange: null },
+				productionDigest: before,
 			});
 			expect(snapshot!.capabilities.supportsSlashCommands).toBe(true);
 			expect(Object.isFrozen(snapshot!.capabilities)).toBe(true);
@@ -790,50 +849,44 @@ describe('GT1-11-09 qualification harness', () => {
 				(snapshot!.capabilities as { supportsSlashCommands: boolean }).supportsSlashCommands =
 					false;
 			}).toThrow(TypeError);
-			// Policy-bearing flags are copied from production, never overridden.
 			for (const flag of POLICY_BEARING_FLAGS)
 				expect(snapshot!.capabilities[flag]).toBe(production[flag]);
+			// A route or family the candidate does not name never receives it.
+			const acp08 = retiredFamilies.find((c) => c.family === 'E08' && c.route === 'acp-stdio')!;
+			const e09 = retiredFamilies.find((c) => c.family === 'E09')!;
+			expect(buildCandidateSnapshot(acp08, liveConfig(), [handCandidate()])).toBeNull();
+			expect(buildCandidateSnapshot(e09, liveConfig(), [handCandidate()])).toBeNull();
 			expect(getAgentCapabilities('grok').supportsSlashCommands).toBe(false);
 			expect(productionCapabilityDigest()).toBe(before);
-
-			// A run records the snapshot but admits nothing because of it.
-			const { receipt } = await runQualification({
-				workspace: WORKSPACE,
-				runState: RUN_STATE,
-				selectedCases: ['E08'],
-				now: clock,
-				runId: runId(),
-			});
-			expect(receipt.candidateCapabilities.snapshots).toBe(4);
-			expect(receipt.candidateCapabilities.productionDigestAfter).toBe(before);
-			for (const c of receipt.cases) {
-				expect(c.candidateSnapshot?.productionAvailability).toBe(false);
-				expect(c.status).toBe('not-run');
-			}
 		});
 
 		it('do not change admission', () => {
 			const config = liveConfig();
-			const withCandidate = admitCase(e08, config, [], ALL_CAPS, NOW);
 			const e03 = expandCases(FAMILIES, ['E03:native-headless:local'])[0];
 			expect(buildCandidateSnapshot(e03, config)).toBeNull();
+			expect(buildCandidateSnapshot(e08, config)).toBeNull();
 			// E08 and E03 are both paid Grok cases: the same inputs, the same reasons.
-			expect(withCandidate.map((r) => r.id)).toEqual(
+			expect(admitCase(e08, config, [], ALL_CAPS, NOW).map((r) => r.id)).toEqual(
 				admitCase(e03, config, [], ALL_CAPS, NOW).map((r) => r.id)
 			);
 		});
 
 		it('cannot waive policy or force a non-candidate flag', () => {
+			const before = productionCapabilityDigest();
 			const config = liveConfig();
-			for (const flag of POLICY_BEARING_FLAGS) {
-				const waiver = { ...CANDIDATE_CAPABILITIES[0], flag } as CandidateCapability;
-				expect(() => buildCandidateSnapshot(e08, config, [waiver])).toThrow(/policy-bearing/);
-			}
-			const forced = {
-				...CANDIDATE_CAPABILITIES[0],
-				flag: 'supportsProjectMemory',
-			} as CandidateCapability;
-			expect(() => buildCandidateSnapshot(e08, config, [forced])).toThrow(/not an implemented/);
+			for (const flag of POLICY_BEARING_FLAGS)
+				expect(() => buildCandidateSnapshot(e08, config, [handCandidate({ flag })])).toThrow(
+					/policy-bearing/
+				);
+			// A flag with no implementation behind it throws on every route, even one
+			// the candidate does not name, before any route filter runs.
+			for (const c of retiredFamilies)
+				expect(() =>
+					buildCandidateSnapshot(c, config, [
+						handCandidate({ flag: 'supportsProjectMemory', routes: [] }),
+					])
+				).toThrow(/not an implemented/);
+			expect(productionCapabilityDigest()).toBe(before);
 		});
 	});
 

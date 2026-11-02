@@ -10413,7 +10413,12 @@
 					"affectedRows": ["P18", "C-supportsSlashCommands", "C-supportsGroupChatModeration"],
 					"taskId": "GT1-11-14C",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"finding": "A11-F43"
+					"finding": "A11-F43",
+					"status": "implementation-repaired",
+					"repairedBy": ["GT1-11-14C1", "GT1-11-14C2"],
+					"repairCommit": "d83f2967c",
+					"reobserved": "GT1-11-14C2: every E08/E09 tuple (native-headless and acp-stdio, local and ssh) builds no snapshot from the production list on unbound and pinned binaries; an E08+E09 run records 0 snapshots, no candidates, digest unchanged",
+					"residual": ["live-authorization-absent (run-state live inputs; every case not-run)"]
 				}
 			],
 			"phase": "05",
@@ -19461,7 +19466,12 @@
 					"affectedRows": ["P18", "C-supportsSlashCommands", "C-supportsGroupChatModeration"],
 					"taskId": "GT1-11-14C",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"finding": "A11-F43"
+					"finding": "A11-F43",
+					"status": "implementation-repaired",
+					"repairedBy": ["GT1-11-14C1", "GT1-11-14C2"],
+					"repairCommit": "d83f2967c",
+					"reobserved": "GT1-11-14C2: every E08/E09 tuple (native-headless and acp-stdio, local and ssh) builds no snapshot from the production list on unbound and pinned binaries; an E08+E09 run records 0 snapshots, no candidates, digest unchanged",
+					"residual": ["live-authorization-absent (run-state live inputs; every case not-run)"]
 				}
 			],
 			"field": "supportsSlashCommands",
@@ -22430,7 +22440,12 @@
 					"affectedRows": ["P18", "C-supportsSlashCommands", "C-supportsGroupChatModeration"],
 					"taskId": "GT1-11-14C",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"finding": "A11-F43"
+					"finding": "A11-F43",
+					"status": "implementation-repaired",
+					"repairedBy": ["GT1-11-14C1", "GT1-11-14C2"],
+					"repairCommit": "d83f2967c",
+					"reobserved": "GT1-11-14C2: every E08/E09 tuple (native-headless and acp-stdio, local and ssh) builds no snapshot from the production list on unbound and pinned binaries; an E08+E09 run records 0 snapshots, no candidates, digest unchanged",
+					"residual": ["live-authorization-absent (run-state live inputs; every case not-run)"]
 				}
 			],
 			"field": "supportsGroupChatModeration",
@@ -44412,7 +44427,7 @@
 			{
 				"id": "A11-F43",
 				"class": "harness-defect",
-				"status": "open",
+				"status": "resolved",
 				"anchors": [
 					"scripts/grok-qualification/harness.ts:1314",
 					"scripts/grok-qualification/harness.ts:1438",
@@ -44422,7 +44437,10 @@
 				"repairTask": "GT1-11-14C1",
 				"testTask": "GT1-11-14C2",
 				"foundBy": "GT1-11-14C",
-				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
+				"evidenceRef": "Plans/grok-tier1/evidence/11.md",
+				"resolvedBy": "GT1-11-14C2",
+				"repairCommit": "d83f2967c",
+				"resolution": "CANDIDATE_CAPABILITIES is an empty frozen list, so buildCandidateSnapshot returns null for every case on the production list and no receipt carries an override; the run receipt records no candidate and 0 snapshots, and the production Grok digest is identical before and after. The builder keeps its refusals (a policy-bearing flag, a non-candidate flag on any route before the route filter) for a hand-passed list, which a future candidate must arrive through its own task. supportsSlashCommands and supportsGroupChatModeration are judged only through production selection, where the finalized registry keeps them false."
 			}
 		],
 		"rejectedChallenges": [
@@ -45133,6 +45151,20 @@
 				"rows": ["P18", "C-supportsSlashCommands", "C-supportsGroupChatModeration"],
 				"owner": "GT1-11-14C1",
 				"finding": "A11-F43",
+				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
+			},
+			{
+				"id": "grok-candidate-snapshot-outlives-registry",
+				"taskId": "GT1-11-14C2",
+				"change": "implementation-repaired",
+				"rows": 3,
+				"finding": "A11-F43",
+				"repairedBy": ["GT1-11-14C1", "GT1-11-14C2"],
+				"repairCommit": "d83f2967c",
+				"mutants": {
+					"killed": 8,
+					"total": 8
+				},
 				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
 			}
 		],
