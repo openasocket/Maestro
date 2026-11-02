@@ -5211,7 +5211,8 @@
 			},
 			"limitations": [
 				"Grok identity already exists. Official-versus-community identity, unsupported versions, selected-account snapshots, SSH/platform isolation and exact candidate binary/source relationship are unqualified.",
-				"GT1-11-10 verification at ba5db25c2: E02 offline version/help, ACP initialize and model discovery not-run (no selected isolated binary, no discovery authorization, no executor; A11-F14). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-10 verification at ba5db25c2: E02 offline version/help, ACP initialize and model discovery not-run (no selected isolated binary, no discovery authorization, no executor; A11-F14). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -5251,6 +5252,27 @@
 					"affectedRows": ["P01"],
 					"ownerTask": "GT1-11-10A",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-identity-discovery-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded identity/discovery case logic: a local discovery executor with auth-outcome classification (GT1-11-11A1), cross-account, binary-resolution and effort/gateway assertions (GT1-11-11A2), SSH legs that refuse local fallback (GT1-11-11A3), pinned by GT1-11-11A4; then live run-state inputs.",
+					"affectedRows": [
+						"P01",
+						"P03",
+						"P04",
+						"P05",
+						"P06",
+						"P09",
+						"P13",
+						"P15",
+						"P33",
+						"P36",
+						"P39",
+						"P43"
+					],
+					"ownerTask": "GT1-11-11A1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
 				}
 			],
 			"phase": "01",
@@ -5496,7 +5518,8 @@
 				"Grok identity already exists. Official-versus-community identity, unsupported versions, selected-account snapshots, SSH/platform isolation and exact candidate binary/source relationship are unqualified.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups launch pass 276/276; nativePlatformLaunch not-run; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158. Parity against the comparator baseline: launch plans match the shared planner the comparators use; native local/custom/PATH/SSH discovery not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11A, GT1-11-10, GT1-11-07, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
 				"GT1-11-01 audit at 808b92608: A11-F03 (accidental-exclusion) No Grok known install locations on Windows or Unix; discovery off PATH relies on which/where alone. See Plans/grok-tier1/evidence/11-static.md.",
-				"GT1-11-03 verification at d84638bfc: A11-F03 repaired by GT1-11-01C (50d4f4b48), pinned by GT1-11-01E/02; blocker grok-known-install-paths-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-03 verification at d84638bfc: A11-F03 repaired by GT1-11-01C (50d4f4b48), pinned by GT1-11-01E/02; blocker grok-known-install-paths-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -5619,6 +5642,27 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-identity-discovery-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded identity/discovery case logic: a local discovery executor with auth-outcome classification (GT1-11-11A1), cross-account, binary-resolution and effort/gateway assertions (GT1-11-11A2), SSH legs that refuse local fallback (GT1-11-11A3), pinned by GT1-11-11A4; then live run-state inputs.",
+					"affectedRows": [
+						"P01",
+						"P03",
+						"P04",
+						"P05",
+						"P06",
+						"P09",
+						"P13",
+						"P15",
+						"P33",
+						"P36",
+						"P39",
+						"P43"
+					],
+					"ownerTask": "GT1-11-11A1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
 				}
 			],
 			"phase": "02",
@@ -5744,7 +5788,8 @@
 				"GT1-11-01 audit at 808b92608: A11-F01 (accidental-exclusion) KnownAuthDirs has no Grok homes; GROK_HOME gets no known-account suggestions. See Plans/grok-tier1/evidence/11-static.md.",
 				"GT1-11-03 verification at d84638bfc: A11-F01 repaired by GT1-11-01B/01B1 (aa24f2557, b8edde38f), pinned by GT1-11-01E/02; blocker grok-known-auth-dirs-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md.",
 				"GT1-11-10 verification at ba5db25c2: E02 offline version/help, ACP initialize and model discovery not-run (no selected isolated binary, no discovery authorization, no executor; A11-F14). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -5880,6 +5925,27 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-identity-discovery-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded identity/discovery case logic: a local discovery executor with auth-outcome classification (GT1-11-11A1), cross-account, binary-resolution and effort/gateway assertions (GT1-11-11A2), SSH legs that refuse local fallback (GT1-11-11A3), pinned by GT1-11-11A4; then live run-state inputs.",
+					"affectedRows": [
+						"P01",
+						"P03",
+						"P04",
+						"P05",
+						"P06",
+						"P09",
+						"P13",
+						"P15",
+						"P33",
+						"P36",
+						"P39",
+						"P43"
+					],
+					"ownerTask": "GT1-11-11A1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
 				}
 			],
 			"phase": "02",
@@ -5983,7 +6049,8 @@
 			},
 			"limitations": [
 				"Credential-aware login guidance, masked disclosure and neutral canonical stderr/exit remedies have scoped deterministic evidence, including GT1-03-13E error/retry tests. Actual credential-file precedence, selected-model billing identity, login and recovery remain unqualified under phase11.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -6096,6 +6163,27 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-identity-discovery-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded identity/discovery case logic: a local discovery executor with auth-outcome classification (GT1-11-11A1), cross-account, binary-resolution and effort/gateway assertions (GT1-11-11A2), SSH legs that refuse local fallback (GT1-11-11A3), pinned by GT1-11-11A4; then live run-state inputs.",
+					"affectedRows": [
+						"P01",
+						"P03",
+						"P04",
+						"P05",
+						"P06",
+						"P09",
+						"P13",
+						"P15",
+						"P33",
+						"P36",
+						"P39",
+						"P43"
+					],
+					"ownerTask": "GT1-11-11A1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
 				}
 			],
 			"phase": "02",
@@ -6236,7 +6324,8 @@
 			"limitations": [
 				"Selected-context discovery and acknowledged ACP configuration/model observations pass scoped synthetic tests, including GT1-03-13E. The detector has no production supplier of owned ACP receipts; real exec discovery still refuses uncontained probes and remote/managed receipt discovery is unavailable. Host wiring/invalidation belongs to GT1-07-01 and phase10; exact binary/platform/managed qualification remains phase09/11.",
 				"GT1-08-21 verification: phase 08 packets utilityEffortRetry; verdicts GT1-08-21 tab naming (14F) pass; GT1-08-21 headless Auto Run retry (14F) pass. Parity against the comparator baseline: no Grok effort retry (gap retained). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -6360,6 +6449,27 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-identity-discovery-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded identity/discovery case logic: a local discovery executor with auth-outcome classification (GT1-11-11A1), cross-account, binary-resolution and effort/gateway assertions (GT1-11-11A2), SSH legs that refuse local fallback (GT1-11-11A3), pinned by GT1-11-11A4; then live run-state inputs.",
+					"affectedRows": [
+						"P01",
+						"P03",
+						"P04",
+						"P05",
+						"P06",
+						"P09",
+						"P13",
+						"P15",
+						"P33",
+						"P36",
+						"P39",
+						"P43"
+					],
+					"ownerTask": "GT1-11-11A1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
 				}
 			],
 			"phase": "02",
@@ -7078,7 +7188,8 @@
 				"Native GrokOutputParser and the separate shared ACP client/session/event/request/turn stack are implemented and covered by the 26-file GT1-03-13E matrix. Structured terminal/partial usage and raw exact ticks are retained at parser boundaries. Production ACP callers, raw desktop native decoding and end-to-end native terminal propagation remain incomplete; historical native fixture versions are not binary qualification. ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. startGrokAcpTurn is exported and tested but has no production caller. Desktop, runtime, CLI and automation must wire the shared port with explicit refusal of unsafe fallback. Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work. Existing Grok NDJSON parser is not an ACP transport; registration does not prove current release protocol compatibility. Shared ACP interleaving, cancellation and bounded framing pass GT1-03-13E fixtures. Real consumer buffering, native protocol compliance and platform behavior remain unqualified. Preserve actual terminal outcome/error contract; success must not follow merely from process exit or an end-shaped event. Reasoning summaries must retain source tags and never be fabricated; qualify Grok ACP/native interleaving and tool suppression.",
 				"GT1-07-11 verification: Desktop and runtime ACP turns stream answer, thoughts, tools, notices, plans and late session IDs through the shared mapper and recorders against synthetic peers. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups interaction pass 137/137; cli pass 81/81; web pass 427/427; liteNative not-run. Parity against the comparator baseline: ACP correlation and plan updates pass through real consumers; gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-07, GT1-11-12, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
-				"GT1-11-10 verification at ba5db25c2: E02 offline version/help, ACP initialize and model discovery not-run (no selected isolated binary, no discovery authorization, no executor; A11-F14). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-10 verification at ba5db25c2: E02 offline version/help, ACP initialize and model discovery not-run (no selected isolated binary, no discovery authorization, no executor; A11-F14). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -7186,6 +7297,27 @@
 					"missingPrerequisite": "Native terminal, partial usage, exact ticks, cache/model detail and failed-tool fixtures pass GT1-03-13E. Phase07/10 must bypass eager native JSON coercion, propagate structured terminal through runTurn/recorders/UI, distinguish malformed stdout from stderr and identify empty native streams without failing ACP/bridge callers. Native/platform/policy qualification remains not-run.",
 					"affectedRows": ["P09"],
 					"evidenceRef": "phase03-reconciliation"
+				},
+				{
+					"id": "grok-identity-discovery-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded identity/discovery case logic: a local discovery executor with auth-outcome classification (GT1-11-11A1), cross-account, binary-resolution and effort/gateway assertions (GT1-11-11A2), SSH legs that refuse local fallback (GT1-11-11A3), pinned by GT1-11-11A4; then live run-state inputs.",
+					"affectedRows": [
+						"P01",
+						"P03",
+						"P04",
+						"P05",
+						"P06",
+						"P09",
+						"P13",
+						"P15",
+						"P33",
+						"P36",
+						"P39",
+						"P43"
+					],
+					"ownerTask": "GT1-11-11A1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
 				}
 			],
 			"phase": "03",
@@ -8337,7 +8469,8 @@
 			},
 			"limitations": [
 				"Phase04 implements selected-account local/SSH list/read/search/path consistency, bounded current/legacy transcript normalization and observed scoped read receipts. Explicit account absence never falls back; observed account/cwd/native-ID/host mismatches refuse. Cross-file summary/transcript/usage views remain partial without a shared native generation. Deterministic adapter/IPC tests pass; actual Grok versions, OS tuples, SSH hosts/reconnects and native continuation remain not-run. Unbound browsing is not observed resume authority.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8443,6 +8576,27 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-identity-discovery-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded identity/discovery case logic: a local discovery executor with auth-outcome classification (GT1-11-11A1), cross-account, binary-resolution and effort/gateway assertions (GT1-11-11A2), SSH legs that refuse local fallback (GT1-11-11A3), pinned by GT1-11-11A4; then live run-state inputs.",
+					"affectedRows": [
+						"P01",
+						"P03",
+						"P04",
+						"P05",
+						"P06",
+						"P09",
+						"P13",
+						"P15",
+						"P33",
+						"P36",
+						"P39",
+						"P43"
+					],
+					"ownerTask": "GT1-11-11A1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
 				}
 			],
 			"phase": "04",
@@ -8865,7 +9019,8 @@
 			},
 			"limitations": [
 				"Phase04 implements selected-account local/SSH list/read/search/path consistency, bounded current/legacy transcript normalization and observed scoped read receipts. Explicit account absence never falls back; observed account/cwd/native-ID/host mismatches refuse. Cross-file summary/transcript/usage views remain partial without a shared native generation. Deterministic adapter/IPC tests pass; actual Grok versions, OS tuples, SSH hosts/reconnects and native continuation remain not-run. Unbound browsing is not observed resume authority.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8983,6 +9138,27 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-identity-discovery-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded identity/discovery case logic: a local discovery executor with auth-outcome classification (GT1-11-11A1), cross-account, binary-resolution and effort/gateway assertions (GT1-11-11A2), SSH legs that refuse local fallback (GT1-11-11A3), pinned by GT1-11-11A4; then live run-state inputs.",
+					"affectedRows": [
+						"P01",
+						"P03",
+						"P04",
+						"P05",
+						"P06",
+						"P09",
+						"P13",
+						"P15",
+						"P33",
+						"P36",
+						"P39",
+						"P43"
+					],
+					"ownerTask": "GT1-11-11A1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
 				}
 			],
 			"phase": "04",
@@ -12807,7 +12983,8 @@
 			"limitations": [
 				"ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal.",
 				"GT1-07-11 verification: Spawn admission and permission-mode naming are preserved on the ACP route; managed effect qualification is phase09. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12930,6 +13107,27 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-identity-discovery-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded identity/discovery case logic: a local discovery executor with auth-outcome classification (GT1-11-11A1), cross-account, binary-resolution and effort/gateway assertions (GT1-11-11A2), SSH legs that refuse local fallback (GT1-11-11A3), pinned by GT1-11-11A4; then live run-state inputs.",
+					"affectedRows": [
+						"P01",
+						"P03",
+						"P04",
+						"P05",
+						"P06",
+						"P09",
+						"P13",
+						"P15",
+						"P33",
+						"P36",
+						"P39",
+						"P43"
+					],
+					"ownerTask": "GT1-11-11A1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
 				}
 			],
 			"phase": "09",
@@ -13719,7 +13917,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Grok absent from profile registry despite GROK_HOME storage support. resolveAgentAccountDir returns undefined; account enumerator returns []; token collector does one default-account pass. Multiple Grok accounts and same-ID local/remote sessions cannot be attributed by the shared account machinery. Grok also falls through to oauth; XAI_API_KEY, GROK_AUTH, GROK_AUTH_PATH, per-model overrides and gateway precedence remain unrepresented. No real credential files inspected; upstream precedence in REFERENCE is a lead for exact-version qualification. ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal."
+				"Grok absent from profile registry despite GROK_HOME storage support. resolveAgentAccountDir returns undefined; account enumerator returns []; token collector does one default-account pass. Multiple Grok accounts and same-ID local/remote sessions cannot be attributed by the shared account machinery. Grok also falls through to oauth; XAI_API_KEY, GROK_AUTH, GROK_AUTH_PATH, per-model overrides and gateway precedence remain unrepresented. No real credential files inspected; upstream precedence in REFERENCE is a lead for exact-version qualification. ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal.",
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -13842,6 +14041,27 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-identity-discovery-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded identity/discovery case logic: a local discovery executor with auth-outcome classification (GT1-11-11A1), cross-account, binary-resolution and effort/gateway assertions (GT1-11-11A2), SSH legs that refuse local fallback (GT1-11-11A3), pinned by GT1-11-11A4; then live run-state inputs.",
+					"affectedRows": [
+						"P01",
+						"P03",
+						"P04",
+						"P05",
+						"P06",
+						"P09",
+						"P13",
+						"P15",
+						"P33",
+						"P36",
+						"P39",
+						"P43"
+					],
+					"ownerTask": "GT1-11-11A1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
 				}
 			],
 			"phase": "09",
@@ -14463,7 +14683,8 @@
 			"limitations": [
 				"Owned ACP JSON prompt-file delivery, host-local materialization/cleanup, consumer handoffs including tab naming, and first-turn system embedding/resume skipping have scoped deterministic evidence. Raw prompt stdin and native append/rules are disabled. Exact-binary text/system behavior, real SSH cleanup, Linux-only skipped shell cases and Windows permissions remain unqualified. Template/command integration remains GT1-05-05/06/06A/06B/13/14; utility retries remain GT1-08-14E/14F/21; native/platform qualification remains phase10/11.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups launch pass 276/276; nativePlatformLaunch not-run; usage pass 91/91; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158. Parity against the comparator baseline: fake-platform plans match Claude Code and Codex on quoting, Unicode, long input, env unsets and SSH; native Windows/macOS/Linux and SSH process smokes not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11A, GT1-11-10, GT1-11-07, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -14563,6 +14784,27 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-identity-discovery-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded identity/discovery case logic: a local discovery executor with auth-outcome classification (GT1-11-11A1), cross-account, binary-resolution and effort/gateway assertions (GT1-11-11A2), SSH legs that refuse local fallback (GT1-11-11A3), pinned by GT1-11-11A4; then live run-state inputs.",
+					"affectedRows": [
+						"P01",
+						"P03",
+						"P04",
+						"P05",
+						"P06",
+						"P09",
+						"P13",
+						"P15",
+						"P33",
+						"P36",
+						"P39",
+						"P43"
+					],
+					"ownerTask": "GT1-11-11A1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
 				}
 			],
 			"phase": "10",
@@ -15202,7 +15444,8 @@
 			},
 			"limitations": [
 				"The required audit, validation, documentation or delivery decision belongs to the listed later tasks; no passing claim is inferred from this inventory.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -15292,6 +15535,27 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-identity-discovery-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded identity/discovery case logic: a local discovery executor with auth-outcome classification (GT1-11-11A1), cross-account, binary-resolution and effort/gateway assertions (GT1-11-11A2), SSH legs that refuse local fallback (GT1-11-11A3), pinned by GT1-11-11A4; then live run-state inputs.",
+					"affectedRows": [
+						"P01",
+						"P03",
+						"P04",
+						"P05",
+						"P06",
+						"P09",
+						"P13",
+						"P15",
+						"P33",
+						"P36",
+						"P39",
+						"P43"
+					],
+					"ownerTask": "GT1-11-11A1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
 				}
 			],
 			"phase": "11",
@@ -34742,6 +35006,650 @@
 					"P43"
 				],
 				"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+			}
+		],
+		"liveCalls": 0,
+		"readiness": false
+	},
+	"phase11NativeIdentity": {
+		"taskId": "GT1-11-11A",
+		"recordedAt": "2026-11-01",
+		"sourceCommit": "7d3ae20bbb2626047183897044bf019a74b64b4e",
+		"branch": "auto-run-feature/grok-cli-integration",
+		"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md",
+		"prerequisites": {
+			"missing": [
+				"live.enabled false",
+				"live.credentialsReference null",
+				"live.authorizationReference null",
+				"live.budgetUsd 0",
+				"live.maxCalls 0",
+				"live.maxTurns 0",
+				"live.maxWallClockSeconds 0",
+				"live.allowedEndpoints empty",
+				"selectedBinaryPath null",
+				"selectedBinarySha256 null",
+				"selectedLiveModels empty",
+				"authorization.configurationReference null",
+				"authorization.expiresAt null",
+				"authorization.isolationReceipt null",
+				"authorization.allowedRoots empty",
+				"no provider cap or worst-case reservation",
+				"authorization.sharedBudgetLedgerReference null"
+			],
+			"configFiles": [],
+			"requiredLiveBlockers": [
+				"live-authorization-absent",
+				"binary-unpinned",
+				"host-isolation-unqualified",
+				"background-egress-unqualified",
+				"discovery-authorization-absent",
+				"live-limits-unset",
+				"spend-guarantee-absent"
+			]
+		},
+		"configurationSelectionFiles": [],
+		"suites": {
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/scripts/grok-qualification-spend.test.ts src/__tests__/scripts/grok-qualification-harness.test.ts src/__tests__/main/agents/detector.test.ts src/__tests__/main/agents/path-prober.test.ts src/__tests__/main/agents/provider-account-dirs.test.ts src/__tests__/main/parsers/error-patterns.test.ts src/__tests__/shared/providerAuthIdentity.test.ts src/__tests__/shared/providerProfiles.test.ts src/__tests__/renderer/hooks/agent/useKnownAuthDirs.test.ts src/__tests__/renderer/components/ReauthModal.test.tsx src/__tests__/renderer/components/ModelEffortModal.test.tsx",
+			"exit": 0,
+			"total": 851,
+			"passed": 851,
+			"failed": 0,
+			"files": [
+				{
+					"file": "src/__tests__/renderer/components/ModelEffortModal.test.tsx",
+					"passed": 32,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/ReauthModal.test.tsx",
+					"passed": 79,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/agent/useKnownAuthDirs.test.ts",
+					"passed": 1,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-harness.test.ts",
+					"passed": 39,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-spend.test.ts",
+					"passed": 24,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/providerAuthIdentity.test.ts",
+					"passed": 74,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/providerProfiles.test.ts",
+					"passed": 53,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/agents/detector.test.ts",
+					"passed": 148,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/agents/path-prober.test.ts",
+					"passed": 52,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/agents/provider-account-dirs.test.ts",
+					"passed": 93,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/parsers/error-patterns.test.ts",
+					"passed": 256,
+					"failed": 0,
+					"skipped": 0
+				}
+			]
+		},
+		"harness": {
+			"command": "node scripts/grok-qualification.mjs --json --no-write",
+			"exit": 0,
+			"configSource": "default-run-state",
+			"totals": {
+				"cases": 48,
+				"admitted": 0,
+				"notRun": 48,
+				"spawned": 0,
+				"paidRequests": 0,
+				"networkContacts": 0
+			},
+			"capabilities": {
+				"isolationPreflight": true,
+				"atomicSpendAdmission": true,
+				"offlineExecutor": true,
+				"caseExecutor": true
+			}
+		},
+		"cases": [
+			{
+				"caseId": "E01:native-headless:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"executorOwner": null,
+				"offlineLegReasons": null
+			},
+			{
+				"caseId": "E01:native-headless:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"case-executor-unimplemented",
+					"isolation-undeclared"
+				],
+				"executorOwner": "unassigned-ssh-paid-executor",
+				"offlineLegReasons": null
+			},
+			{
+				"caseId": "E01:acp-stdio:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"executorOwner": null,
+				"offlineLegReasons": null
+			},
+			{
+				"caseId": "E01:acp-stdio:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"case-executor-unimplemented",
+					"isolation-undeclared"
+				],
+				"executorOwner": "unassigned-ssh-paid-executor",
+				"offlineLegReasons": null
+			},
+			{
+				"caseId": "E02:native-headless:local",
+				"classes": ["offline-inspection", "discovery"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"discovery-authorization-absent",
+					"case-executor-unimplemented",
+					"discovery-operation-unauthorized",
+					"isolation-undeclared"
+				],
+				"executorOwner": "GT1-11-11A",
+				"offlineLegReasons": [
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"isolation-undeclared"
+				]
+			},
+			{
+				"caseId": "E02:native-headless:ssh",
+				"classes": ["offline-inspection", "discovery"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"discovery-authorization-absent",
+					"case-executor-unimplemented",
+					"discovery-operation-unauthorized",
+					"isolation-undeclared"
+				],
+				"executorOwner": "GT1-11-11A",
+				"offlineLegReasons": [
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"offline-executor-local-only",
+					"isolation-undeclared"
+				]
+			},
+			{
+				"caseId": "E02:acp-stdio:local",
+				"classes": ["offline-inspection", "discovery"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"discovery-authorization-absent",
+					"case-executor-unimplemented",
+					"discovery-operation-unauthorized",
+					"isolation-undeclared"
+				],
+				"executorOwner": "GT1-11-11A",
+				"offlineLegReasons": [
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"isolation-undeclared"
+				]
+			},
+			{
+				"caseId": "E02:acp-stdio:ssh",
+				"classes": ["offline-inspection", "discovery"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"discovery-authorization-absent",
+					"case-executor-unimplemented",
+					"discovery-operation-unauthorized",
+					"isolation-undeclared"
+				],
+				"executorOwner": "GT1-11-11A",
+				"offlineLegReasons": [
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"offline-executor-local-only",
+					"isolation-undeclared"
+				]
+			},
+			{
+				"caseId": "E07:native-headless:local",
+				"classes": ["discovery", "paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"discovery-authorization-absent",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"case-executor-unimplemented",
+					"discovery-operation-unauthorized",
+					"isolation-undeclared"
+				],
+				"executorOwner": "GT1-11-11A",
+				"offlineLegReasons": null
+			},
+			{
+				"caseId": "E07:native-headless:ssh",
+				"classes": ["discovery", "paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"discovery-authorization-absent",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"case-executor-unimplemented",
+					"discovery-operation-unauthorized",
+					"isolation-undeclared"
+				],
+				"executorOwner": "GT1-11-11A/unassigned-ssh-paid-executor",
+				"offlineLegReasons": null
+			},
+			{
+				"caseId": "E07:acp-stdio:local",
+				"classes": ["discovery", "paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"discovery-authorization-absent",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"case-executor-unimplemented",
+					"discovery-operation-unauthorized",
+					"isolation-undeclared"
+				],
+				"executorOwner": "GT1-11-11A",
+				"offlineLegReasons": null
+			},
+			{
+				"caseId": "E07:acp-stdio:ssh",
+				"classes": ["discovery", "paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"discovery-authorization-absent",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"case-executor-unimplemented",
+					"discovery-operation-unauthorized",
+					"isolation-undeclared"
+				],
+				"executorOwner": "GT1-11-11A/unassigned-ssh-paid-executor",
+				"offlineLegReasons": null
+			},
+			{
+				"caseId": "E12:native-headless:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"executorOwner": null,
+				"offlineLegReasons": null
+			},
+			{
+				"caseId": "E12:native-headless:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"case-executor-unimplemented",
+					"isolation-undeclared"
+				],
+				"executorOwner": "unassigned-ssh-paid-executor",
+				"offlineLegReasons": null
+			},
+			{
+				"caseId": "E12:acp-stdio:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"executorOwner": null,
+				"offlineLegReasons": null
+			},
+			{
+				"caseId": "E12:acp-stdio:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"case-executor-unimplemented",
+					"isolation-undeclared"
+				],
+				"executorOwner": "unassigned-ssh-paid-executor",
+				"offlineLegReasons": null
+			}
+		],
+		"claims": [
+			{
+				"claim": "Local pinned-binary discovery",
+				"rows": ["P03"],
+				"cases": "E02 local (offline leg + discovery leg)",
+				"implemented": "offline leg executor (GT1-11-10A); discovery leg has no executor",
+				"gap": "discovery executor",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Custom-path and PATH discovery through the production detector",
+				"rows": ["P03"],
+				"cases": "none",
+				"implemented": "no harness case drives the detector/path-prober over the pinned binary; deterministic detector and path-prober suites only",
+				"gap": "binary-resolution leg",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "SSH discovery, history and execution host",
+				"rows": ["P03", "P15", "P39"],
+				"cases": "E02/E07/E12 ssh",
+				"implemented": "none: offline executor is local only (owner GT1-11-11A), discovery has no executor, the paid executor is local only (owner unassigned-ssh-paid-executor)",
+				"gap": "SSH legs",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Two disposable profiles with colliding native session IDs; history isolation",
+				"rows": ["P04", "P13", "P36"],
+				"cases": "E01 local (accounts A and B)",
+				"implemented": "paid executor runs one leg per account; assertion colliding-native-ids is not-evaluated (owner GT1-11-11A)",
+				"gap": "cross-account inspection",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Selected-account credential precedence (no fallback to another account)",
+				"rows": ["P04", "P36"],
+				"cases": "E01 local",
+				"implemented": "paid executor plans only the selected account source (pinned by GT1-11-11P2 with a stand-in); no native observation",
+				"gap": "none in code; needs live inputs",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Allowed model, effort and context discovery; acknowledged model",
+				"rows": ["P05", "P06", "P33"],
+				"cases": "E07 local (discovery + paid)",
+				"implemented": "paid leg records the acknowledged model per turn; catalog discovery has no executor; effort-and-gateway is not-evaluated (owner GT1-11-11A); no context-window case",
+				"gap": "discovery executor; effort/gateway/context assertions",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Missing, expired and restricted authentication; API-key/OAuth/device states; safe re-auth guidance",
+				"rows": ["P05"],
+				"cases": "none",
+				"implemented": "no harness case classifies an observed native auth outcome; deterministic Grok error patterns, providerAuthIdentity and ReauthModal suites only",
+				"gap": "auth-state classification",
+				"outcome": "not-run"
+			}
+		],
+		"observed": {
+			"selectedProfile": null,
+			"host": null,
+			"acknowledgedModel": null,
+			"authVariants": []
+		},
+		"fixtures": {
+			"materialized": 0,
+			"hashes": [],
+			"assertionsEvaluated": 0
+		},
+		"productionInstall": {
+			"sha256": "5c8a688251bf61e35370b828b6a353b0a20fcc3f64000de8a91d426039f29cec",
+			"executed": false,
+			"modified": false
+		},
+		"findings": [
+			{
+				"id": "A11-F16",
+				"classification": "harness-gap",
+				"anchors": [
+					"scripts/grok-qualification/harness.ts:1996",
+					"scripts/grok-qualification/harness.ts:2201",
+					"scripts/grok-qualification/paid-fixtures.ts:94"
+				],
+				"consequence": "The identity and discovery cases this VERIFY must observe are not implemented: no discovery executor (E02/E07 discovery legs, owner GT1-11-11A), no binary-resolution leg for custom/PATH discovery through the production detector, no SSH leg for any class (offline executor local only, owner GT1-11-11A), the E01 colliding-native-ids and E07 effort-and-gateway assertions are not-evaluated with owner GT1-11-11A, and no case classifies an observed missing/expired/restricted auth outcome. GT1-11-11A is a VERIFY packet and may not add harness code, so even with every run-state prerequisite these claims could not be observed.",
+				"rows": [
+					"P01",
+					"P03",
+					"P04",
+					"P05",
+					"P06",
+					"P09",
+					"P13",
+					"P15",
+					"P33",
+					"P36",
+					"P39",
+					"P43"
+				],
+				"blocker": "grok-identity-discovery-cases-unimplemented",
+				"repairTasks": ["GT1-11-11A1", "GT1-11-11A2", "GT1-11-11A3", "GT1-11-11A4"]
+			}
+		],
+		"blockerUpdates": [
+			{
+				"id": "grok-identity-discovery-cases-unimplemented",
+				"finding": "A11-F16",
+				"taskId": "GT1-11-11A",
+				"change": "added",
+				"addedTo": [
+					"P01",
+					"P03",
+					"P04",
+					"P05",
+					"P06",
+					"P09",
+					"P13",
+					"P15",
+					"P33",
+					"P36",
+					"P39",
+					"P43"
+				],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
 			}
 		],
 		"liveCalls": 0,
