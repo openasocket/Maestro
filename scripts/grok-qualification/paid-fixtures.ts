@@ -760,6 +760,20 @@ export const TRANSLATION_ROUND_TRIPS = 2;
 export const translationRoundTripLeg = (n: number) => `round-trip-${n}`;
 
 /**
+ * The E11 fault legs every direction runs after its round trips (GT1-11-13C),
+ * each turnless but `interrupt-recover` (one resumed turn): an apply
+ * interrupted between journal stages, recovered to committed or rolled back,
+ * and a leg whose destination is a history the harness does not own, refused
+ * before any write.
+ */
+export const TRANSLATION_FAULT_LEGS = Object.freeze([
+	'interrupt-recover',
+	'interrupt-rollback',
+	'unowned-target',
+] as const);
+export type TranslationFaultLeg = (typeof TRANSLATION_FAULT_LEGS)[number];
+
+/**
  * Every production direction with Grok on one side; each runs its
  * `translate-resume` leg (GT1-11-13B). A peer-to-Grok direction also runs the
  * `reverse` leg (the peer session the Grok-to-peer leg resumed, translated
@@ -781,6 +795,7 @@ export const CROSS_PROVIDER_DIRECTIONS: readonly CrossProviderDirectionSpec[] = 
 				...Array.from({ length: TRANSLATION_ROUND_TRIPS }, (_, i) =>
 					translationRoundTripLeg(i + 1)
 				),
+				...TRANSLATION_FAULT_LEGS,
 			],
 			maxTurns: 1,
 		})
@@ -928,6 +943,46 @@ export const TRANSLATION_HOP_ASSERTIONS = Object.freeze([
 	'source-unchanged',
 	'owned-roots-only',
 ] as const);
+
+/**
+ * The assertions each E11 fault leg must evaluate (GT1-11-13C); a leg missing
+ * one cannot pass. `interrupt-recover`: the apply stopped after the journal
+ * reached committing, recovered from the archived journal to committed, the
+ * destination resumed (it appends a turn) and a rollback then refused with the
+ * session retained. `interrupt-rollback`: the apply stopped after staging,
+ * rolled back from the archived journal, the destination history byte-identical
+ * to its pre-apply snapshot. `unowned-target`: a destination outside the owned
+ * homes refused before any write. Every fault leg hashes the user's own
+ * provider homes against the snapshot taken before the first E11 leg.
+ */
+export const TRANSLATION_FAULT_ASSERTIONS = Object.freeze({
+	'interrupt-recover': [
+		'interrupted',
+		'recovered-committed',
+		'resume-exit-clean',
+		'resume-session-id',
+		'loaded-rows',
+		'fact-nonce',
+		'tool-result-nonce',
+		'carried-tool-not-executed',
+		'no-duplicate-session',
+		'rollback-after-append-refused',
+		'session-retained',
+		'source-unchanged',
+		'owned-roots-only',
+		'user-homes-unchanged',
+	],
+	'interrupt-rollback': [
+		'interrupted',
+		'rolled-back',
+		'destination-snapshot-identical',
+		'no-session-added',
+		'source-unchanged',
+		'owned-roots-only',
+		'user-homes-unchanged',
+	],
+	'unowned-target': ['unowned-target-refused', 'source-unchanged', 'user-homes-unchanged'],
+} as const satisfies Record<TranslationFaultLeg, readonly string[]>);
 
 /**
  * The synthetic source history of one translation leg as native rows of the

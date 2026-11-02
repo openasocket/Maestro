@@ -302,7 +302,10 @@ import {
 	extractNativeConversation,
 } from '../../src/shared/maestro-lib/translation/native-records';
 import { planTranslation } from '../../src/shared/maestro-lib/translation/registry';
-import { applyTranslation } from '../../src/shared/maestro-lib/translation/transaction';
+import {
+	applyTranslation,
+	recoverTranslation,
+} from '../../src/shared/maestro-lib/translation/transaction';
 import { reconcileConversation } from '../../src/shared/maestro-lib/translation/reconcile';
 import { nativeRecordKey, recordKey } from '../../src/shared/maestro-lib/translation/identity';
 import { collectTranslationResources } from '../../src/shared/maestro-lib/translation/resources';
@@ -421,6 +424,8 @@ import {
 	type SessionLegId,
 	type SessionLegSpec,
 	type SyntheticResourceSet,
+	TRANSLATION_FAULT_ASSERTIONS,
+	TRANSLATION_FAULT_LEGS,
 	TRANSLATION_HOP_ASSERTIONS,
 	TRANSLATION_HOP_TURN,
 	TRANSLATION_LEG_ASSERTIONS,
@@ -431,6 +436,7 @@ import {
 	translationResourceSeeds,
 	translationRoundTripLeg,
 	translationSeedRows,
+	type TranslationFaultLeg,
 	type UtilityLegId,
 	type WorkflowLegId,
 	type WorkflowLegSpec,
@@ -14477,16 +14483,30 @@ export const TRANSLATION_STAGING_CHANNELS: Record<'grok' | CrossProviderPeer, st
 export const CROSS_PROVIDER_ROUND_TRIP_OWNER = 'GT1-11-13B2';
 /** No task resumes a staged Grok session through ACP `session/load`; an ACP case resumes only a peer destination. */
 export const ACP_TRANSLATION_RESUME_OWNER = 'unassigned-acp-translation-resume';
+/**
+ * Production stages a Codex thread through the app-server and journals its
+ * rollout `cleanup: 'retain'`, so a rollback keeps it: no Codex destination
+ * history can be byte-identical after one, and no task deletes the thread.
+ */
+export const CODEX_STAGED_ROLLBACK_OWNER = 'unassigned-codex-staged-thread-rollback';
 
 type TranslationAssertionId =
 	| (typeof TRANSLATION_LEG_ASSERTIONS)[number]
-	| (typeof TRANSLATION_HOP_ASSERTIONS)[number];
+	| (typeof TRANSLATION_HOP_ASSERTIONS)[number]
+	| (typeof TRANSLATION_FAULT_ASSERTIONS)[TranslationFaultLeg][number];
 
-/** The assertions a leg must evaluate: a translate-resume leg's, or a reverse or round-trip hop's. */
-const translationLegAssertions = (leg: string): readonly TranslationAssertionId[] =>
-	leg === 'translate-resume' || leg.endsWith(':translate-resume')
+/** The fault leg a ledger or schedule leg name is (GT1-11-13C), or null. */
+const translationFaultLeg = (leg: string): TranslationFaultLeg | null =>
+	TRANSLATION_FAULT_LEGS.find((x) => leg === x || leg.endsWith(`:${x}`)) ?? null;
+
+/** The assertions a leg must evaluate: a translate-resume leg's, a reverse or round-trip hop's, or a fault leg's. */
+const translationLegAssertions = (leg: string): readonly TranslationAssertionId[] => {
+	const fault = translationFaultLeg(leg);
+	if (fault) return TRANSLATION_FAULT_ASSERTIONS[fault];
+	return leg === 'translate-resume' || leg.endsWith(':translate-resume')
 		? TRANSLATION_LEG_ASSERTIONS
 		: TRANSLATION_HOP_ASSERTIONS;
+};
 
 /**
  * One Grok-peer round-trip chain (GT1-11-13B2): started by the Grok-to-peer
@@ -14517,8 +14537,9 @@ const translationChainNames = (w: AccountingLegContext, specId: string) => ({
 /**
  * The order the E11 legs run in: every direction's translate-resume first, then
  * per peer the reverse leg and the round trips, each hop on the direction it
- * travels (Grok-to-peer, then peer-to-Grok). A declared leg the schedule does
- * not know runs last and is refused by name.
+ * travels (Grok-to-peer, then peer-to-Grok), then every direction's fault
+ * legs (GT1-11-13C). A declared leg the schedule does not know runs last and is
+ * refused by name.
  */
 export function crossProviderLegSchedule(
 	specs: readonly CrossProviderDirectionSpec[]
@@ -14538,6 +14559,8 @@ export function crossProviderLegSchedule(
 		out.push(...hops.filter((h) => h.spec.legs.includes(h.leg)));
 	}
 	for (const spec of specs)
+		for (const leg of TRANSLATION_FAULT_LEGS) if (spec.legs.includes(leg)) out.push({ spec, leg });
+	for (const spec of specs)
 		for (const leg of spec.legs)
 			if (!out.some((x) => x.spec === spec && x.leg === leg)) out.push({ spec, leg });
 	return out;
@@ -14547,6 +14570,7 @@ const KNOWN_TRANSLATION_LEGS = new Set([
 	'translate-resume',
 	'reverse',
 	...Array.from({ length: TRANSLATION_ROUND_TRIPS }, (_, i) => translationRoundTripLeg(i + 1)),
+	...TRANSLATION_FAULT_LEGS,
 ]);
 
 export interface CrossProviderLegReceipt {
@@ -14591,6 +14615,20 @@ export interface CrossProviderLegReceipt {
 		previousRecords: number;
 		newRecords: number;
 		records: number;
+	} | null;
+	/**
+	 * A fault leg (GT1-11-13C): the journal stage the apply was stopped at and
+	 * the failure phase it recorded, what recovery made of it, the rollback's
+	 * destination snapshot, the user provider homes hashed, and the refusal of
+	 * a non-owned destination.
+	 */
+	fault: {
+		interruptedAt: string | null;
+		failurePhase: string | null;
+		recovery: string | null;
+		snapshot: { roots: string[]; files: number; identical: boolean } | null;
+		userHomes: string[];
+		refusal: string | null;
 	} | null;
 	turns: PaidTurnResult[];
 	assertions: PaidAssertionOutcome[];
@@ -14742,6 +14780,15 @@ async function seedTranslationResources(src: TranslationIdentity): Promise<{
 	return { selected, resources };
 }
 
+/** Portable block and artifact kinds a conversation carries (never content). */
+const translationPayloadClasses = (conv: PortableConversation): string[] =>
+	[
+		...new Set([
+			...conv.records.flatMap((x) => x.blocks.map((b) => b.kind)),
+			...conv.artifacts.map((a) => `artifact:${a.kind}`),
+		]),
+	].sort();
+
 /** The native sessions a destination lists for the project, to prove a resume added none. */
 function destinationSessions(dest: TranslationIdentity): string[] {
 	if (dest.provider === 'grok') return listNativeSessionIds(dest.accountRoot).ids;
@@ -14795,7 +14842,10 @@ interface StagedTranslation {
  * the strict row count read back and that only the owned roots were written.
  * A Codex destination stages through the production app-server import channel
  * of the pinned binary under the owned CODEX_HOME (no exec fallback): one
- * spawn, never a paid request, closed whatever the apply did.
+ * spawn, never a paid request, closed whatever the apply did. A destination
+ * outside the owned homes is refused before anything (GT1-11-13C). A fault leg
+ * stops the apply once at `fault`: after the journal reached staged, or inside
+ * the commit; it checks the staged rows itself after recovery.
  */
 async function stageTranslationJournal(
 	w: AccountingLegContext,
@@ -14808,8 +14858,15 @@ async function stageTranslationJournal(
 	registry: ReturnType<typeof createTranslationRegistry>,
 	journal: TranslationJournal,
 	sourceUnchanged: () => boolean,
-	check: TranslationCheck
+	check: TranslationCheck,
+	fault?: 'staged' | 'commit'
 ): Promise<StagedTranslation> {
+	const refusal = translationTargetRefusal(
+		dest,
+		[w.accountRoot!, project, peer.home!],
+		w.operatorHome
+	);
+	if (refusal) throw new TranslationTargetRefused(refusal);
 	r.channel = TRANSLATION_STAGING_CHANNELS[dest.provider as 'grok' | CrossProviderPeer];
 	let committed = false;
 	let codex: Awaited<ReturnType<typeof openCodexTranslationConnection>> | undefined;
@@ -14828,11 +14885,14 @@ async function stageTranslationJournal(
 			registry,
 			journal,
 			{
-				assertSourceUnchanged: async () => {
+				assertSourceUnchanged: async (j) => {
 					if (!sourceUnchanged()) throw new Error('synthetic source changed');
+					if (fault === 'staged' && j.state === 'staged')
+						throw new Error('qualify-e11-interrupted-after-staged');
 				},
 				setMigration: async () => {},
 				commit: async () => {
+					if (fault === 'commit') throw new Error('qualify-e11-interrupted-in-commit');
 					committed = true;
 				},
 				isCommitted: async () => committed,
@@ -14862,14 +14922,15 @@ async function stageTranslationJournal(
 				}).length
 			: stagedLines.length;
 	r.staged = { sessionId: stagedId, state: result.state, rows, readbackRows };
-	check(
-		'staged-rows-validated',
-		result.state === 'committed' &&
-			!!stagedId &&
-			rows > 0 &&
-			(dest.provider === 'codex' ? readbackRows >= rows : readbackRows === rows),
-		`${result.state}; ${rows} rows staged, ${readbackRows} read back${result.error ? `; ${result.error}` : ''}`
-	);
+	if (!fault)
+		check(
+			'staged-rows-validated',
+			result.state === 'committed' &&
+				!!stagedId &&
+				rows > 0 &&
+				(dest.provider === 'codex' ? readbackRows >= rows : readbackRows === rows),
+			`${result.state}; ${rows} rows staged, ${readbackRows} read back${result.error ? `; ${result.error}` : ''}`
+		);
 	const owned = [w.accountRoot!, project, peer.home!];
 	const writes = [
 		...(mapping?.artifacts ?? []).map((a) => a.path),
@@ -15059,12 +15120,7 @@ async function runTranslateResumeLeg(
 	const digest = () => seeded.files.map((f) => sha256Of(fs.readFileSync(f))).join(',');
 	const sourceDigest = digest();
 	const conv = seeded.conversation;
-	r.payloadClasses = [
-		...new Set([
-			...conv.records.flatMap((x) => x.blocks.map((b) => b.kind)),
-			...conv.artifacts.map((a) => `artifact:${a.kind}`),
-		]),
-	].sort();
+	r.payloadClasses = translationPayloadClasses(conv);
 	// The resource sentinels go through the plan's resource scope and the production projections.
 	const seededResources = await seedTranslationResources(src);
 	const resources = seededResources.resources.artifacts;
@@ -15402,6 +15458,433 @@ async function runTranslationHop(
 	return sent.uncertainWhy;
 }
 
+/** Thrown before any write when a leg's destination is not a history the harness owns (GT1-11-13C). */
+class TranslationTargetRefused extends Error {}
+
+/**
+ * Why a translation destination is not the harness's to write (null when it
+ * is): every root the apply writes under (account, native sessions, project)
+ * must sit under an owned root, and none may overlap the user's own provider
+ * homes. Checked before anything is staged, on every leg.
+ */
+export function translationTargetRefusal(
+	dest: TranslationIdentity,
+	owned: string[],
+	operatorHome: string
+): string | null {
+	const userHomes = USER_PROVIDER_HOMES.map((h) => path.join(operatorHome, h));
+	for (const root of [dest.accountRoot, dest.nativeSessionRoot, dest.projectRoot]) {
+		if (!root) continue;
+		if (!underAny('local', root, owned)) return `translation-target-not-owned: ${root}`;
+		if (userHomes.some((h) => overlaps('local', root, h)))
+			return `translation-target-user-home: ${root}`;
+	}
+	return null;
+}
+
+/** The user's own provider home a non-owned destination of each provider names. */
+const USER_PROVIDER_HOME_OF: Record<'grok' | CrossProviderPeer, string> = {
+	grok: '.grok',
+	'claude-code': '.claude',
+	codex: '.codex',
+};
+
+/**
+ * A digest per user provider home (`~/.claude`, `~/.codex`, `~/.grok` under the
+ * operator's home): every entry's relative path, mode, size and mtime, symlinks
+ * never followed, `absent` when the home does not exist. Metadata, not content:
+ * the homes may be large, and any write changes a file's size or mtime and its
+ * directory's mtime. Read only.
+ */
+export function userProviderHomesDigest(operatorHome: string): Record<string, string> {
+	const out: Record<string, string> = {};
+	for (const name of USER_PROVIDER_HOMES) {
+		const root = path.join(operatorHome, name);
+		let top: fs.Stats;
+		try {
+			top = fs.lstatSync(root);
+		} catch {
+			out[name] = 'absent';
+			continue;
+		}
+		const lines = [`.\t${top.mode}\t${top.size}\t${top.mtimeMs}`];
+		const walk = (dir: string) => {
+			let entries: fs.Dirent[];
+			try {
+				entries = fs.readdirSync(dir, { withFileTypes: true });
+			} catch (e) {
+				lines.push(`${path.relative(root, dir)}\tunreadable:${(e as NodeJS.ErrnoException).code}`);
+				return;
+			}
+			for (const e of entries) {
+				const p = path.join(dir, e.name);
+				try {
+					const st = fs.lstatSync(p);
+					lines.push(`${path.relative(root, p)}\t${st.mode}\t${st.size}\t${st.mtimeMs}`);
+					if (st.isDirectory()) walk(p);
+				} catch {
+					lines.push(`${path.relative(root, p)}\tvanished`);
+				}
+			}
+		};
+		if (top.isDirectory()) walk(root);
+		out[name] = sha256Of(lines.sort().join('\n'));
+	}
+	return out;
+}
+
+/** The native history roots of a destination: what a rollback must leave byte-identical. */
+function destinationHistoryRoots(dest: TranslationIdentity): string[] {
+	if (dest.provider === 'grok')
+		return [dest.nativeSessionRoot ?? path.join(dest.accountRoot, 'sessions')];
+	return [path.join(dest.accountRoot, dest.provider === 'codex' ? 'sessions' : 'projects')];
+}
+
+/** Every file under the roots with the sha256 of its bytes. */
+function historySnapshot(roots: string[]): Map<string, string> {
+	const out = new Map<string, string>();
+	for (const root of roots) {
+		let names: string[];
+		try {
+			names = fs.readdirSync(root, { recursive: true }) as string[];
+		} catch {
+			continue;
+		}
+		for (const name of names) {
+			const p = path.join(root, name);
+			try {
+				if (fs.lstatSync(p).isFile()) out.set(p, sha256Of(fs.readFileSync(p)));
+			} catch {
+				// vanished between the listing and the read: absent from the snapshot
+			}
+		}
+	}
+	return out;
+}
+
+/** The host a recovery runs on: the source re-hashed, the commit recorded. */
+function recoveryHost(sourceUnchanged: () => boolean) {
+	let committed = false;
+	return {
+		committed: () => committed,
+		host: {
+			assertSourceUnchanged: async () => {
+				if (!sourceUnchanged()) throw new Error('synthetic source changed');
+			},
+			setMigration: async () => {},
+			commit: async () => {
+				committed = true;
+			},
+			isCommitted: async () => committed,
+		},
+	};
+}
+
+/**
+ * One E11 fault leg (GT1-11-13C), on its own seeded source, translation agent
+ * and archive, with no resources (the staged session is the destination
+ * history under test; project knowledge stays in scope, as production
+ * requires, so the apply also writes its empty knowledge index):
+ * - `interrupt-rollback`: the apply stops after the journal reached staged (the
+ *   staged session on disk, nothing committed); the journal is read back from
+ *   the archive, as a restarted host would, and rolled back by production
+ *   `recoverTranslation`; the destination history is byte-identical to its
+ *   pre-apply snapshot and no session is added.
+ * - `interrupt-recover`: the apply stops inside the commit (the journal at
+ *   committing); recovery from the archived journal commits it, the
+ *   destination resumes the staged session with one counted turn (it appends
+ *   its reply), and a rollback asked for after that is refused with the session
+ *   kept byte for byte.
+ * - `unowned-target`: the destination names the user's own provider home; the
+ *   staging entry refuses it before anything is written (no journal, no
+ *   archive, no spawn).
+ * Every fault leg hashes the user provider homes against the digest taken
+ * before the first E11 leg ran.
+ */
+async function runTranslationFaultLeg(
+	w: AccountingLegContext,
+	r: CrossProviderLegReceipt,
+	spec: CrossProviderDirectionSpec,
+	peer: PeerPreflight,
+	reservation: SpendReservation,
+	leg: TranslationFaultLeg,
+	userHomesBefore: Record<string, string>
+): Promise<string | null> {
+	const project = fs.realpathSync(w.cwd);
+	const tabId = `qualify-${spec.id}-${leg}`;
+	const agentId = `qualify-${w.c.caseId}-${spec.id}-${leg}`;
+	const archiveDir = path.join(w.accountRoot!, 'qualify-e11-archive', `${spec.id}-${leg}`);
+	const src = translationIdentity(spec.source, w, peer, project);
+	const ownedDest = translationIdentity(spec.destination, w, peer, project);
+	const userRoot = path.join(
+		w.operatorHome,
+		USER_PROVIDER_HOME_OF[spec.destination as 'grok' | CrossProviderPeer]
+	);
+	const dest: TranslationIdentity =
+		leg === 'unowned-target'
+			? {
+					...ownedDest,
+					accountRoot: userRoot,
+					...(spec.destination === 'grok'
+						? { nativeSessionRoot: path.join(userRoot, 'sessions') }
+						: {}),
+				}
+			: ownedDest;
+	r.binaries = translationBinaries(w, peer, spec);
+	const check = translationCheck(r);
+	const fault: NonNullable<CrossProviderLegReceipt['fault']> = {
+		interruptedAt: null,
+		failurePhase: null,
+		recovery: null,
+		snapshot: null,
+		userHomes: [],
+		refusal: null,
+	};
+	r.fault = fault;
+	const userHomesUnchanged = () => {
+		const after = userProviderHomesDigest(w.operatorHome);
+		const changed = Object.keys(after).filter((k) => after[k] !== userHomesBefore[k]);
+		fault.userHomes = Object.keys(after);
+		check(
+			'user-homes-unchanged',
+			changed.length === 0,
+			changed.length
+				? `changed since the first E11 leg: ${changed.join(',')}`
+				: `${fault.userHomes.join(',')} unchanged`
+		);
+	};
+	const sentinel = path.join(project, TRANSLATION_NONCES.toolSentinel);
+	if (fs.existsSync(sentinel)) throw new Error('tool-sentinel-present-before-leg');
+	const launchEnv = leg === 'unowned-target' ? {} : destinationLaunchEnv(w, r, dest, peer);
+	if (!launchEnv) return null;
+
+	const seeded = await seedTranslationSource(src, tabId);
+	const digest = () => seeded.files.map((f) => sha256Of(fs.readFileSync(f))).join(',');
+	const sourceDigest = digest();
+	const sourceUnchanged = () => digest() === sourceDigest;
+	const sourceCheck = () =>
+		check('source-unchanged', sourceUnchanged(), `${seeded.files.length} source files`);
+	const conv = seeded.conversation;
+	r.payloadClasses = translationPayloadClasses(conv);
+	const registry = createTranslationRegistry();
+	const plan = planTranslation({
+		agentId,
+		source: src,
+		destination: dest,
+		scope: { projectKnowledge: true, selectedUserResources: [] },
+		conversations: [conv],
+		registry,
+		limitations: [],
+		resources: [],
+	});
+	r.plan = {
+		status: plan.status,
+		verification: plan.verification,
+		limitations: plan.limitations.map((l) => `${l.severity}:${l.code}`),
+	};
+	const journal: TranslationJournal = {
+		schemaVersion: 1,
+		plan,
+		state: 'planned',
+		conversations: [conv],
+		resources: [],
+		projections: [],
+		mappings: [],
+		resourceWrites: [],
+	};
+	const archive = new TranslationArchive(archiveDir);
+
+	if (leg === 'unowned-target') {
+		try {
+			await stageTranslationJournal(
+				w,
+				r,
+				peer,
+				dest,
+				project,
+				launchEnv,
+				archive,
+				registry,
+				journal,
+				sourceUnchanged,
+				check
+			);
+		} catch (e) {
+			if (!(e instanceof TranslationTargetRefused)) throw e;
+			fault.refusal = e.message;
+		}
+		const archived = fs.existsSync(archiveDir);
+		check(
+			'unowned-target-refused',
+			!!fault.refusal &&
+				journal.state === 'planned' &&
+				!journal.mappings.length &&
+				!journal.resourceWrites.length &&
+				!archived &&
+				r.spawned === 0,
+			`${fault.refusal ?? 'not refused'}; journal ${journal.state}, ${journal.mappings.length} mappings, archive ${archived ? 'written' : 'absent'}`
+		);
+		sourceCheck();
+		userHomesUnchanged();
+		return null;
+	}
+
+	const rollback = leg === 'interrupt-rollback';
+	const roots = destinationHistoryRoots(dest);
+	const before = rollback ? historySnapshot(roots) : null;
+	const sessionsBefore = destinationSessions(dest);
+	fault.interruptedAt = rollback ? 'staged' : 'committing';
+	const staged = await stageTranslationJournal(
+		w,
+		r,
+		peer,
+		dest,
+		project,
+		launchEnv,
+		archive,
+		registry,
+		journal,
+		sourceUnchanged,
+		check,
+		rollback ? 'staged' : 'commit'
+	);
+	fault.failurePhase = journal.failurePhase ?? null;
+	const artifacts = (staged.mapping?.artifacts ?? []).map((a) => a.path);
+	const onDisk = artifacts.filter((f) => fs.existsSync(f)).length;
+	check(
+		'interrupted',
+		staged.result.state === 'failed' &&
+			journal.failurePhase === fault.interruptedAt &&
+			!!staged.stagedId &&
+			onDisk > 0 &&
+			onDisk === artifacts.length,
+		`${staged.result.state} at ${journal.failurePhase ?? 'no phase'}; ${onDisk} of ${artifacts.length} staged artifacts on disk`
+	);
+	if (!staged.stagedId || staged.result.state !== 'failed') {
+		sourceCheck();
+		userHomesUnchanged();
+		return null;
+	}
+
+	// Recovery reads the journal the interrupted apply left in the archive, as a restarted host does.
+	const recovery = recoveryHost(sourceUnchanged);
+	let recovered: Awaited<ReturnType<typeof recoverTranslation>> | null = null;
+	try {
+		recovered = await recoverTranslation(
+			archive,
+			await archive.read(agentId, plan.id),
+			recovery.host,
+			rollback
+		);
+		fault.recovery = recovered.state;
+	} catch (e) {
+		fault.recovery = `threw: ${errorText(e)}`;
+	}
+	const archivedState = async () => (await archive.read(agentId, plan.id)).state;
+
+	if (rollback) {
+		const after = historySnapshot(roots);
+		const differ = [...new Set([...before!.keys(), ...after.keys()])].filter(
+			(k) => before!.get(k) !== after.get(k)
+		);
+		fault.snapshot = {
+			roots: roots.map((x) => path.relative(dest.accountRoot, x) || '.'),
+			files: before!.size,
+			identical: differ.length === 0,
+		};
+		const state = await archivedState();
+		check(
+			'rolled-back',
+			recovered?.state === 'rolled-back' && recovered.success && state === 'rolled-back',
+			`${fault.recovery}; archived journal ${state}`
+		);
+		check(
+			'destination-snapshot-identical',
+			differ.length === 0,
+			differ.length
+				? `${differ.length} files differ: ${differ
+						.slice(0, 3)
+						.map((x) => path.relative(dest.accountRoot, x))
+						.join(',')}`
+				: `${before!.size} files byte-identical`
+		);
+		const added = destinationSessions(dest).filter((x) => !sessionsBefore.includes(x)).length;
+		check('no-session-added', added === 0, `${added} sessions added`);
+		sourceCheck();
+		userHomesUnchanged();
+		return null;
+	}
+
+	const state = await archivedState();
+	check(
+		'recovered-committed',
+		recovered?.state === 'committed' &&
+			recovered.success &&
+			state === 'committed' &&
+			recovery.committed(),
+		`${fault.recovery}; archived journal ${state}`
+	);
+	if (state !== 'committed') {
+		sourceCheck();
+		userHomesUnchanged();
+		return null;
+	}
+	const sessionsBeforeResume = destinationSessions(dest);
+	const { sent, toolEvents } = await resumeTranslatedSession(
+		w,
+		r,
+		dest,
+		peer,
+		reservation,
+		launchEnv,
+		project,
+		staged.stagedId,
+		TRANSLATION_HOP_TURN
+	);
+	const run = sent.run;
+	if (!run || run.neverRan) return sent.uncertainWhy;
+	const { loaded } = checkResumedTurn(run, staged, check);
+	const added = destinationSessions(dest).filter((x) => !sessionsBeforeResume.includes(x)).length;
+	r.resumed = {
+		sessionIds: run.sessionIds,
+		exitCode: run.turn.exitCode,
+		loadedRows: loaded,
+		toolEvents,
+		sessionsAdded: added,
+	};
+	check(
+		'carried-tool-not-executed',
+		!fs.existsSync(sentinel) && toolEvents === 0,
+		`${toolEvents} tool events; sentinel ${fs.existsSync(sentinel) ? 'present' : 'absent'}`
+	);
+	check('no-duplicate-session', added === 0, `${added} sessions added by the resume`);
+	// The destination appended its turn: a rollback asked for now is refused and the session kept.
+	const held = () =>
+		artifacts.map((f) => (fs.existsSync(f) ? sha256Of(fs.readFileSync(f)) : 'absent')).join(',');
+	const appended = linesOf(staged.transcript).length > staged.stagedLines.length;
+	const beforeRollback = held();
+	let refused: string | null = null;
+	try {
+		await recoverTranslation(archive, await archive.read(agentId, plan.id), recovery.host, true);
+	} catch (e) {
+		refused = errorText(e);
+	}
+	const kept = held();
+	check(
+		'rollback-after-append-refused',
+		!!refused,
+		refused ?? 'a rollback ran on the committed migration'
+	);
+	check(
+		'session-retained',
+		appended && !kept.includes('absent') && kept === beforeRollback,
+		`${appended ? 'the destination appended its turn' : 'no turn appended'}; ${kept === beforeRollback ? 'session kept byte for byte' : 'session changed by the rollback'}`
+	);
+	sourceCheck();
+	userHomesUnchanged();
+	return sent.uncertainWhy;
+}
+
 function settleCrossProviderLeg(
 	r: CrossProviderLegReceipt,
 	problems: string[]
@@ -15439,7 +15922,9 @@ function settleCrossProviderLeg(
  * destination (spend, calls and the case deadline shared). A direction the
  * preflight did not pass stays not-run with its own reasons; an ACP Grok
  * resume is an honest gap with an owner. A reverse or round-trip hop continues
- * its peer's chain only when the chained leg before it passed. Never after an
+ * its peer's chain only when the chained leg before it passed. The fault legs
+ * (GT1-11-13C) run last, each on its own source, against the user provider
+ * homes digest taken before the first leg that reserves. Never after an
  * uncertain effect, never twice, local only.
  */
 async function runCrossProviderLegs(w: AccountingLegContext): Promise<{
@@ -15458,9 +15943,14 @@ async function runCrossProviderLegs(w: AccountingLegContext): Promise<{
 	});
 	/** One round-trip chain per peer, started by its Grok-to-peer translate-resume leg. */
 	const chains = new Map<CrossProviderPeer, TranslationChain>();
+	/** The user provider homes before the first E11 leg wrote anything; every fault leg compares with it. */
+	let userHomes: Record<string, string> | null = null;
 	for (const { spec, leg } of crossProviderLegSchedule(w.fixture.crossProvider ?? [])) {
 		const name = translationLegName(spec.id, leg);
-		const hop = leg !== 'translate-resume';
+		const fault = translationFaultLeg(leg);
+		const hop = !fault && leg !== 'translate-resume';
+		/** A turnless fault leg resumes nothing, so the ACP Grok-resume gap is not its. */
+		const resumes = !fault || fault === 'interrupt-recover';
 		const starts = !hop && spec.source === 'grok';
 		const chain = chains.get(spec.peer);
 		const r: CrossProviderLegReceipt = {
@@ -15480,6 +15970,7 @@ async function runCrossProviderLegs(w: AccountingLegContext): Promise<{
 			staged: null,
 			resumed: null,
 			hop: null,
+			fault: null,
 			turns: [],
 			assertions: [],
 			openGaps: [],
@@ -15517,7 +16008,12 @@ async function runCrossProviderLegs(w: AccountingLegContext): Promise<{
 		else if (!d || !peer) reason('translation-direction-unknown', spec.id);
 		else if (d.status !== 'pass') r.reasons.push(...d.reasons.map((x) => ({ ...x })));
 		else if (!KNOWN_TRANSLATION_LEGS.has(leg)) reason('translation-leg-unknown', leg);
-		else if (spec.destination === 'grok' && w.c.route !== 'native-headless')
+		else if (fault === 'interrupt-rollback' && spec.destination === 'codex')
+			gap(
+				"a Codex thread staged through the app-server is journaled cleanup 'retain', so a rollback keeps it",
+				CODEX_STAGED_ROLLBACK_OWNER
+			);
+		else if (resumes && spec.destination === 'grok' && w.c.route !== 'native-headless')
 			gap(
 				'a staged Grok session is resumed through the native headless route only',
 				ACP_TRANSLATION_RESUME_OWNER
@@ -15535,6 +16031,7 @@ async function runCrossProviderLegs(w: AccountingLegContext): Promise<{
 			legs.push(chained(r.reasons.length ? settleCrossProviderLeg(r, []) : r));
 			continue;
 		}
+		userHomes ??= userProviderHomesDigest(w.operatorHome);
 		const reserved = reserveTranslationLeg(
 			w.ledger,
 			w.config,
@@ -15563,9 +16060,11 @@ async function runCrossProviderLegs(w: AccountingLegContext): Promise<{
 		const problems: string[] = [];
 		let why: string | null = null;
 		try {
-			why = hop
-				? await runTranslationHop(w, r, spec, peer!, reserved.reservation, chain!)
-				: await runTranslateResumeLeg(w, r, spec, peer!, reserved.reservation, started);
+			why = fault
+				? await runTranslationFaultLeg(w, r, spec, peer!, reserved.reservation, fault, userHomes)
+				: hop
+					? await runTranslationHop(w, r, spec, peer!, reserved.reservation, chain!)
+					: await runTranslateResumeLeg(w, r, spec, peer!, reserved.reservation, started);
 		} catch (e) {
 			problems.push(`${spec.id}-threw: ${errorText(e)}`);
 		}
