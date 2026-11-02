@@ -5244,19 +5244,14 @@ export function evaluatePaidAssertions(
 				);
 				break;
 			case 'usage-reported':
-				if (observed.route === 'acp-stdio')
-					out.push({
-						id,
-						outcome: 'not-evaluated',
-						detail: 'the paid executor reads no ACP usage; the charge stays uncertain',
-						owner: 'GT1-11-14P4A',
-					});
-				else
-					verdict(
-						id,
-						all((t) => t.usage.status !== 'absent'),
-						ran
-					);
+				// Both routes: a turn whose terminal carried no usage fails; an unknown charge is
+				// reported usage with no figure, never read as 0 (the ACP turn through the
+				// production adapter's usage hook, GT1-11-14P4A).
+				verdict(
+					id,
+					all((t) => t.usage.status !== 'absent'),
+					`${ran}; ${turns.map((t) => t.usage.status).join(',') || 'no-turn'}`
+				);
 				break;
 			case 'binary-unchanged':
 				verdict(
@@ -6624,6 +6619,8 @@ async function runPaidLeg(
 						admitTurn,
 						calls: () => callsDrawn,
 						observe: observer,
+						// The production adapter's usage hook, as the accounting capture leg reads it.
+						usage: acpAccountingCapture('acp-stdio', () => null).hook,
 					});
 		receipt.turns = run.turns;
 		receipt.spawned = run.spawned;

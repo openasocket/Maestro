@@ -2088,7 +2088,16 @@ describe('GT1-11-09 qualification harness', () => {
 		const MODEL = 'claude-haiku-4-5';
 		/** Synthetic secret values the injected resolver hands out; never a credential. */
 		const SECRET = (name: string) => `synthetic-xai-${name}-value`;
-		type Mode = 'ok' | 'sleep' | 'nocost' | 'big' | 'mutate' | 'chmod' | 'vanish' | 'wrongmodel';
+		type Mode =
+			| 'ok'
+			| 'sleep'
+			| 'nocost'
+			| 'nousage'
+			| 'big'
+			| 'mutate'
+			| 'chmod'
+			| 'vanish'
+			| 'wrongmodel';
 		/**
 		 * The stand-in: a Node script (never a real Grok) that logs its argv, env and
 		 * pid, then answers the native streaming-json or the ACP stdio protocol with
@@ -2146,7 +2155,10 @@ describe('GT1-11-09 qualification harness', () => {
 				'      keep(sid, m.params.prompt[0].text);',
 				"      if (MODE === 'sleep') return;",
 				"      out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: tokenOf(m.params.prompt[0].text) } } } });",
-				"      reply(m.id, { stopReason: 'end_turn' });",
+				// The prompt settles with its usage (ticks: 10000000 is 0.001 USD); nocost carries no charge, nousage nothing.
+				'      const usage = { inputTokens: 10, outputTokens: 5, cachedReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0 };',
+				"      if (MODE !== 'nocost') usage.costUsdTicks = '10000000';",
+				"      reply(m.id, MODE === 'nousage' ? { stopReason: 'end_turn' } : { stopReason: 'end_turn', _meta: { usage } });",
 				"    } else if (m.id !== undefined) out({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'Method not found' } });",
 				'  };',
 				"  process.stdin.on('data', (d) => {",
@@ -2759,7 +2771,7 @@ describe('GT1-11-09 qualification harness', () => {
 			expect(alive(runs()[0].pid)).toBe(false);
 		});
 
-		it('an ACP leg runs one owned child, prompts only after the model is acknowledged and keeps the charge uncertain', async () => {
+		it('an ACP leg runs one owned child, prompts only after the model is acknowledged and settles the charge it reported', async () => {
 			const sha = standIn('ok');
 			const id = 'E03:acp-stdio:local';
 			const cfg = paidConfig(sha);
@@ -2792,21 +2804,18 @@ describe('GT1-11-09 qualification harness', () => {
 				['success', true, MODEL, 'gt1-11-11p2-acp-session'],
 				['success', true, MODEL, 'gt1-11-11p2-acp-session'],
 			]);
-			// ACP reports no settled charge: usage is not evaluated, and the hold stays uncertain.
+			// The prompt's usage, read through the production adapter's usage hook (GT1-11-14P4A).
+			expect(leg.turns.map((t) => t.usage)).toEqual([
+				{ costUsd: 0.001, status: 'exact' },
+				{ costUsd: 0.001, status: 'exact' },
+			]);
 			expect(leg.assertions).toContainEqual(
-				expect.objectContaining({
-					id: 'usage-reported',
-					outcome: 'not-evaluated',
-					owner: 'GT1-11-14P4A',
-				})
+				expect.objectContaining({ id: 'usage-reported', outcome: 'passed' })
 			);
 			expect(leg.assertions.filter((a) => a.outcome === 'failed')).toEqual([]);
-			expect(leg.settlement).toMatchObject({ state: 'uncertain', reason: 'charge-unknown' });
-			expect(ledger.reservations[0]).toMatchObject({
-				state: 'uncertain',
-				uncertainEffect: true,
-				turnsUsed: 2,
-			});
+			expect(leg.settlement).toMatchObject({ state: 'settled', reason: 'observed-exact-usage' });
+			expect(leg.settlement!.settledUsd).toBeCloseTo(0.002, 9);
+			expect(ledger.reservations[0]).toMatchObject({ state: 'settled', turnsUsed: 2 });
 			// The leg stopped its own child before cleanup had anything left to stop.
 			expect(cleanup).toEqual({ ownedProcesses: 1, stopped: 0 });
 			expect(alive(runs()[0].pid)).toBe(false);
@@ -2820,6 +2829,36 @@ describe('GT1-11-09 qualification harness', () => {
 			expect([wrong.ledger.turns, wrong.ledger.calls]).toEqual([0, 0]);
 			expect(prompts()).toBe(0);
 			expect(alive(runs()[0].pid)).toBe(false);
+		});
+
+		it('an ACP charge reported without a figure stays unknown and uncertain, never 0; no usage at all fails usage-reported', async () => {
+			const id = 'E03:acp-stdio:local';
+			const usageVerdict = (leg: { assertions: Array<{ id: string }> }) =>
+				leg.assertions.find((a) => a.id === 'usage-reported');
+			const unknown = await execute(id, paidConfig(standIn('nocost')));
+			expect(unknown.legs[0].turns.map((t) => t.usage)).toEqual([
+				{ costUsd: null, status: 'unknown' },
+				{ costUsd: null, status: 'unknown' },
+			]);
+			expect(usageVerdict(unknown.legs[0])).toMatchObject({ outcome: 'passed' });
+			expect(unknown.legs[0].settlement).toMatchObject({
+				state: 'uncertain',
+				settledUsd: 0,
+				reason: 'charge-unknown',
+			});
+			expect(unknown.ledger.settledUsd).toBe(0);
+			expect(unknown.ledger.uncertainUsd).toBe(unknown.ledger.reservations[0].holdUsd);
+
+			spawnSpies.forEach((s) => s.mockClear());
+			const absent = await execute(id, paidConfig(standIn('nousage')));
+			expect(absent.legs[0].turns.map((t) => t.usage.status)).toEqual(['absent', 'absent']);
+			expect(usageVerdict(absent.legs[0])).toMatchObject({
+				outcome: 'failed',
+				detail: '2/2 turns; absent,absent',
+			});
+			expect(usageVerdict(absent.legs[0])).not.toHaveProperty('owner');
+			expect(absent.legs[0].status).toBe('failed');
+			expect(absent.legs[0].settlement).toMatchObject({ state: 'uncertain', settledUsd: 0 });
 		});
 
 		it('an ACP turn past its bound stops the owned child, stays uncertain and sends no second prompt', async () => {
@@ -2982,7 +3021,7 @@ describe('GT1-11-09 qualification harness', () => {
 					"      log('prompts', 'acp');",
 					'      keep(sid, m.params.prompt[0].text);',
 					"      out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: tokenOf(m.params.prompt[0].text) } } } });",
-					"      reply(m.id, { stopReason: 'end_turn' });",
+					"      reply(m.id, { stopReason: 'end_turn', _meta: { usage: { inputTokens: 10, outputTokens: 5, cachedReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0, costUsdTicks: '10000000' } } });",
 					"    } else if (m.id !== undefined) out({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'Method not found' } });",
 					'  };',
 					"  process.stdin.on('data', (d) => { buf += d; let k; while ((k = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, k); buf = buf.slice(k + 1); if (line.trim()) handle(JSON.parse(line)); } });",
