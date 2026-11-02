@@ -80,6 +80,21 @@
  * not-run (`unassigned-ssh-resource-legs`); Maestro plugin broker dispatch of
  * a native tool stays unevaluated (`unassigned-plugin-broker-native-leg`).
  *
+ * Consumer legs (GT1-11-11B2): an E08 receipt also carries two no-network,
+ * no-credential, no-spawn legs with their own admission (live authorization,
+ * owned allowed roots, resources declared `synthetic-owned`, a local target).
+ * The installer leg runs the production Grok coworking installer (its install
+ * holds the entry through `holdMcpServerWrite`) against a fresh owned
+ * GROK_HOME, refuses a target outside it before any write, and must write only
+ * the declared entry, read it back through `isInstalled`, reinstall
+ * byte-identically and uninstall to the seed bytes. The bundle leg packs a
+ * synthetic Grok agent and workspace through the real exporter and imports it
+ * into an owned data dir through `planCueBundleImport()`/`importCueBundle()`:
+ * no `isForbiddenBundleEntry()` entry, a planted credential-shaped body
+ * nowhere on either side with only its secret name required, the portable
+ * skill imported as archived, and each unportable native resource listed as
+ * unsupported and warned in the import plan rather than dropped silently.
+ *
  * Offline inspection (GT1-11-10A): the offline-inspection leg of a case (E02)
  * is admitted and recorded as its own receipt entry, independently of
  * discovery. It needs the pinned binary, disabled auto-update, owned roots, the
@@ -134,7 +149,7 @@
  * `isPathAtOrUnderRoot` for every root check.
  */
 
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -199,6 +214,25 @@ import {
 } from '../../src/shared/providerAuthIdentity';
 import { formatAgentLoginCommand, getAgentLoginCommand } from '../../src/shared/agentMetadata';
 import type { AgentCapabilities } from '../../src/shared/types';
+import { getProviderProfileConfig } from '../../src/shared/providerProfiles';
+import { grokInstaller } from '../../src/main/coworking/installers/grok';
+import {
+	COWORKING_MCP_SERVER_NAME,
+	type CoworkingMcpServerSpec,
+} from '../../src/main/coworking/coworking-types';
+import {
+	exportCueBundle,
+	isForbiddenBundleEntry,
+} from '../../src/main/cue/bundle/cue-bundle-exporter';
+import {
+	importCueBundle,
+	planCueBundleImport,
+} from '../../src/main/cue/bundle/cue-bundle-importer';
+import { readZipArchive } from '../../src/main/utils/zip-archive';
+import {
+	CUE_BUNDLE_MANIFEST_PATH,
+	type CueBundleManifest,
+} from '../../src/shared/cue-bundle-types';
 
 export const CONFIG_SCHEMA = 'grok-qualification-config/v1';
 export const RECEIPT_SCHEMA = 'grok-qualification-receipt/v1';
@@ -234,6 +268,12 @@ export const HARNESS_CAPABILITIES = {
 	 * fallback. Off, every SSH leg stays not-run owned by GT1-11-11A3.
 	 */
 	sshExecutor: true,
+	/**
+	 * The E08 consumer legs (GT1-11-11B2): the production Grok coworking
+	 * installer and the real Cue bundle exporter/importer against owned roots.
+	 * No spawn, no network, no credential. Off, both legs stay not-run.
+	 */
+	consumerLegs: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
 
@@ -378,7 +418,8 @@ export interface AdmissionReason {
 		| 'spend-admission'
 		| 'offline-execution'
 		| 'discovery-execution'
-		| 'paid-execution';
+		| 'paid-execution'
+		| 'consumer-execution';
 	detail: string;
 	owner?: string;
 }
@@ -433,6 +474,11 @@ export interface CaseReceipt {
 	discoveryLegs: DiscoveryLegReceipt[];
 	/** Paid legs the executor ran or refused (one per account); empty when the case was not admitted. */
 	paidLegs: PaidLegReceipt[];
+	/**
+	 * The installer and bundle consumer legs (GT1-11-11B2), each its own entry
+	 * with its own admission; empty for a family that carries none.
+	 */
+	consumerLegs: ConsumerLegReceipt[];
 }
 
 /**
@@ -6407,6 +6453,12 @@ export async function runQualification(options: RunOptions): Promise<{
 					operatorHome,
 				})
 			: null;
+		// The consumer legs beside them: owned files only, no spawn, no credential, no network.
+		const consumerLegs = await runConsumerLegs(c, config, problems, capabilities, {
+			workspace: options.workspace,
+			operatorHome,
+			now: now(),
+		});
 		const reasons = admitCase(c, config, problems, capabilities, now());
 		const needsBinary = c.classes.some((k) => k !== 'deterministic');
 		// Pre-spawn: every binary case is held to the isolation preflight first.
@@ -6511,6 +6563,7 @@ export async function runQualification(options: RunOptions): Promise<{
 			resolutionLeg,
 			discoveryLegs,
 			paidLegs,
+			consumerLegs,
 		});
 	}
 	const productionDigestAfter = productionCapabilityDigest();
@@ -6571,6 +6624,623 @@ export async function runQualification(options: RunOptions): Promise<{
 		});
 	}
 	return { receipt, receiptPath };
+}
+
+// ---------------------------------------------------------------------------
+// Consumer legs (GT1-11-11B2)
+// ---------------------------------------------------------------------------
+
+/** Case families whose receipt carries the consumer legs: the resource family. */
+export const CONSUMER_LEG_FAMILIES: readonly string[] = Object.freeze(['E08']);
+/** No playbook task owns running the installer or the bundle consumers against an owned remote root. */
+export const SSH_CONSUMER_LEGS_OWNER = 'unassigned-ssh-consumer-legs';
+/** The secret name the bundle leg's synthetic MCP server reads; only this name may cross. */
+export const CONSUMER_BUNDLE_SECRET = 'QUALIFY_MCP_TOKEN';
+/** Bounds of the post-import tree scan; past either, the leg cannot vouch that no body crossed. */
+export const CONSUMER_SCAN_LIMITS = Object.freeze({ entries: 4096, bytes: 8 * 1024 * 1024 });
+
+/** The assertions each consumer leg must evaluate; a leg missing one cannot pass. */
+export const CONSUMER_LEG_ASSERTIONS = Object.freeze({
+	'coworking-installer': [
+		'owned-target',
+		'declared-entry-only',
+		'read-back',
+		'idempotent',
+		'removed',
+	],
+	'bundle-portability': ['forbidden-entries', 'names-only', 'resource-imported', 'limits-reported'],
+} as const);
+
+export type ConsumerLegName = keyof typeof CONSUMER_LEG_ASSERTIONS;
+
+export interface ConsumerAssertion {
+	id: string;
+	outcome: 'passed' | 'failed';
+	detail: string;
+}
+
+export interface ConsumerLegReceipt {
+	leg: ConsumerLegName;
+	/** not-run: refused before any write; failed: an assertion failed or the consumer threw; passed: every assertion passed. */
+	status: 'not-run' | 'passed' | 'failed';
+	reasons: AdmissionReason[];
+	/** The owned directory the leg wrote under; null when it was refused. */
+	root: string | null;
+	assertions: ConsumerAssertion[];
+	/** sha256 of each file state the leg observed (seed, installed, archive, imported, ...). */
+	digests: Record<string, string | null>;
+	problems: string[];
+	/** Always 0: both consumers are file operations in the harness process. */
+	spawned: 0;
+	networkContacts: 0;
+}
+
+const consumerReason = (id: string, detail: string, owner = 'GT1-11-11B2'): AdmissionReason => ({
+	id,
+	kind: 'consumer-execution',
+	detail,
+	owner,
+});
+
+/**
+ * Admission of the consumer legs. They need no binary, credential, endpoint or
+ * spend input (they spawn nothing and contact nothing), but they write files,
+ * so they need a live authorization, owned allowed roots, isolation declaring
+ * the resources `synthetic-owned`, a local target and the capability.
+ */
+export function admitConsumerLegs(
+	c: QualificationCase,
+	config: QualificationConfig,
+	problems: ConfigProblem[],
+	capabilities: HarnessCapabilities,
+	now: Date
+): AdmissionReason[] {
+	const reasons: AdmissionReason[] = [];
+	if (!capabilities.consumerLegs)
+		reasons.push({
+			id: 'consumer-legs-unimplemented',
+			kind: 'harness-capability',
+			detail: 'the coworking installer and Cue bundle consumer legs',
+			owner: 'GT1-11-11B2',
+		});
+	if (!CONSUMER_LEG_FAMILIES.includes(c.family))
+		reasons.push(consumerReason('consumer-legs-absent', c.family));
+	for (const p of problems)
+		reasons.push({ id: `config:${p.code}`, kind: 'config-problem', detail: p.field });
+	if (!config.authorizationReference)
+		reasons.push({
+			id: 'live-authorization-absent',
+			kind: 'admission-input',
+			detail: 'authorizationReference',
+		});
+	else if (!config.expiresAt || Date.parse(config.expiresAt) <= now.getTime())
+		reasons.push({
+			id: 'live-authorization-expired',
+			kind: 'admission-input',
+			detail: 'expiresAt',
+		});
+	if (!config.providers.includes('grok'))
+		reasons.push({ id: 'provider-not-authorized', kind: 'admission-input', detail: 'grok' });
+	if (!config.allowedRoots.length)
+		reasons.push({ id: 'allowed-roots-absent', kind: 'admission-input', detail: 'allowedRoots' });
+	const notOwned = (['mcp', 'plugins', 'hooks'] as const).filter(
+		(k) => config.isolation?.resources[k] !== 'synthetic-owned'
+	);
+	if (notOwned.length)
+		reasons.push(
+			consumerReason(
+				'resources-not-synthetic-owned',
+				notOwned.map((k) => `isolation.resources.${k}`).join(',')
+			)
+		);
+	if (c.target !== 'local')
+		reasons.push(
+			consumerReason(
+				'consumer-legs-local-only',
+				'the installer and bundle consumers run on local owned roots only',
+				SSH_CONSUMER_LEGS_OWNER
+			)
+		);
+	return reasons;
+}
+
+/**
+ * The owned directory one consumer leg writes under: a fresh directory below
+ * the first allowed root, which must exist and resolve inside it, and which
+ * must not hold the operator's home, the boundary home, an account home or the
+ * production Grok home. A previous run's leftovers are removed whole, never
+ * followed through a link.
+ */
+function prepareConsumerRoot(
+	c: QualificationCase,
+	config: QualificationConfig,
+	leg: ConsumerLegName,
+	ctx: { workspace: string; operatorHome: string }
+): { root: string } | { refused: string; detail: string } {
+	const roots = config.allowedRoots.map((r) => path.resolve(ctx.workspace, r));
+	if (!roots.length || !fs.existsSync(roots[0]))
+		return { refused: 'consumer-root-absent', detail: 'allowedRoots' };
+	const root = path.join(
+		roots[0],
+		'consumer-legs',
+		`${c.caseId.replace(/[^A-Za-z0-9._-]/g, '_')}-${leg}`
+	);
+	const iso = config.isolation;
+	const guarded: Array<[string | undefined, string]> = [
+		[ctx.operatorHome, 'operator-home'],
+		[
+			path.join(ctx.operatorHome, getProviderProfileConfig('grok')?.defaultSubdir ?? '.grok'),
+			'production-grok-home',
+		],
+		[
+			iso?.boundary?.actualHome ? path.resolve(ctx.workspace, iso.boundary.actualHome) : undefined,
+			'boundary-home',
+		],
+		[
+			iso?.accountRoots.A ? path.resolve(ctx.workspace, iso.accountRoots.A) : undefined,
+			'account-home',
+		],
+		[
+			iso?.accountRoots.B ? path.resolve(ctx.workspace, iso.accountRoots.B) : undefined,
+			'account-home',
+		],
+	];
+	for (const [p, why] of guarded) {
+		if (!p) continue;
+		// A home inside the leg root would be written; an account or the production Grok home may not overlap it at all.
+		const hit =
+			why === 'operator-home' || why === 'boundary-home'
+				? isPathAtOrUnderRoot(normalizeFor('local', p), normalizeFor('local', root))
+				: overlaps('local', p, root);
+		if (hit) return { refused: 'consumer-root-overlaps', detail: why };
+	}
+	const prior = fs.existsSync(root) ? fs.lstatSync(root) : null;
+	if (prior?.isSymbolicLink()) return { refused: 'consumer-root-symlink', detail: root };
+	if (prior) fs.rmSync(root, { recursive: true, force: true });
+	fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+	const realRoot = fs.realpathSync(root);
+	if (
+		!isPathAtOrUnderRoot(
+			normalizeFor('local', realRoot),
+			normalizeFor('local', fs.realpathSync(roots[0]))
+		)
+	)
+		return { refused: 'consumer-root-escapes', detail: root };
+	return { root: realRoot };
+}
+
+function consumerReceipt(leg: ConsumerLegName, reasons: AdmissionReason[]): ConsumerLegReceipt {
+	return {
+		leg,
+		status: 'not-run',
+		reasons,
+		root: null,
+		assertions: [],
+		digests: {},
+		problems: [],
+		spawned: 0,
+		networkContacts: 0,
+	};
+}
+
+/** passed only when every required assertion was evaluated, each passed, and nothing went wrong. */
+function settleConsumerLeg(receipt: ConsumerLegReceipt): ConsumerLegReceipt {
+	const required = CONSUMER_LEG_ASSERTIONS[receipt.leg] as readonly string[];
+	const missing = required.filter((id) => !receipt.assertions.some((a) => a.id === id));
+	for (const id of missing) receipt.problems.push(`assertion-not-evaluated:${id}`);
+	receipt.status =
+		!receipt.problems.length &&
+		receipt.assertions.length > 0 &&
+		receipt.assertions.every((a) => a.outcome === 'passed')
+			? 'passed'
+			: 'failed';
+	return receipt;
+}
+
+const errorText = (e: unknown) => redactSecrets(e instanceof Error ? e.message : String(e)).text;
+
+function digestOrNull(file: string): string | null {
+	try {
+		return sha256Of(fs.readFileSync(file));
+	} catch {
+		return null;
+	}
+}
+
+/** Names and digests of every regular file under a directory, bounded. */
+function listTree(dir: string): Map<string, string> {
+	const out = new Map<string, string>();
+	const walk = (d: string) => {
+		for (const name of fs.readdirSync(d)) {
+			if (out.size >= CONSUMER_SCAN_LIMITS.entries) throw new Error(`tree past bound: ${dir}`);
+			const p = path.join(d, name);
+			const st = fs.lstatSync(p);
+			if (st.isDirectory()) walk(p);
+			else out.set(path.relative(dir, p), st.isFile() ? sha256Of(fs.readFileSync(p)) : 'non-file');
+		}
+	};
+	if (fs.existsSync(dir)) walk(dir);
+	return out;
+}
+
+/** The user tables of a parsed Grok config with the coworking entry (and an emptied mcp_servers) taken out. */
+function withoutCoworkingEntry(config: Record<string, unknown>): Record<string, unknown> {
+	const out = { ...config };
+	const servers = { ...((out.mcp_servers as Record<string, unknown> | undefined) ?? {}) };
+	delete servers[COWORKING_MCP_SERVER_NAME];
+	if (Object.keys(servers).length) out.mcp_servers = servers;
+	else delete out.mcp_servers;
+	return out;
+}
+
+const INSTALLER_SEED_CONFIG = [
+	'# Synthetic Grok account config owned by the qualification run (GT1-11-11B2).',
+	'model = "qualify-synthetic-model"',
+	'',
+	'[mcp_servers.qualify-user]',
+	'command = "qualify-user-server"',
+	'args = ["--synthetic"]',
+	'',
+].join('\n');
+
+/**
+ * Installer leg: the production Grok coworking installer (`grokInstaller`,
+ * whose `install` holds the entry through `holdMcpServerWrite` first) runs
+ * against a fresh owned GROK_HOME selected the way the desktop selects it (the
+ * Grok profile's env var), never the operator's or an account's home. It must
+ * resolve its target inside the owned home before anything is written, write
+ * exactly the declared entry beside the seeded user tables (the user's bytes,
+ * comments and keys kept), read it back through the same configuration reader
+ * (`isInstalled`), leave the file byte-identical on a second install, and its
+ * uninstall must restore the seed bytes. The coworking server script is a
+ * synthetic owned file that is never run.
+ */
+export async function runInstallerLeg(
+	c: QualificationCase,
+	config: QualificationConfig,
+	reasons: AdmissionReason[],
+	ctx: { workspace: string; operatorHome: string }
+): Promise<ConsumerLegReceipt> {
+	const receipt = consumerReceipt('coworking-installer', [...reasons]);
+	if (receipt.reasons.length) return receipt;
+	const made = prepareConsumerRoot(c, config, 'coworking-installer', ctx);
+	if ('refused' in made) {
+		receipt.reasons.push(consumerReason(made.refused, made.detail));
+		return receipt;
+	}
+	receipt.root = made.root;
+	const home = path.join(made.root, 'grok-home');
+	const configFile = path.join(home, 'config.toml');
+	const script = path.join(made.root, 'coworking-stand-in.cjs');
+	writeOwned(
+		script,
+		"'use strict';\n// Synthetic coworking server; never run by the qualification.\n"
+	);
+	receipt.digests.seed = writeOwned(configFile, INSTALLER_SEED_CONFIG);
+	const spec: CoworkingMcpServerSpec = {
+		command: process.execPath,
+		args: [script],
+		env: { QUALIFY_COWORKING: 'synthetic' },
+	};
+	const assert = (id: string, ok: boolean, detail: string) =>
+		receipt.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+	const envVar = getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME';
+	const previous = Object.prototype.hasOwnProperty.call(process.env, envVar)
+		? process.env[envVar]
+		: undefined;
+	process.env[envVar] = home;
+	try {
+		// The target first: a path outside the owned home is refused before any write.
+		const target = path.resolve(grokInstaller.configPath());
+		const owned =
+			isPathAtOrUnderRoot(normalizeFor('local', target), normalizeFor('local', home)) &&
+			normalizeFor('local', target) === normalizeFor('local', configFile);
+		assert('owned-target', owned, owned ? 'config.toml in the owned home' : target);
+		if (!owned) {
+			receipt.problems.push('installer-target-outside-owned-home');
+			return settleConsumerLeg(receipt);
+		}
+		const before = listTree(home);
+		const seed = parseToml(INSTALLER_SEED_CONFIG) as Record<string, unknown>;
+		await grokInstaller.install(spec);
+		const installed = fs.readFileSync(configFile, 'utf8');
+		receipt.digests.installed = sha256Of(installed);
+		const parsed = parseToml(installed) as Record<string, unknown>;
+		const entry = (parsed.mcp_servers as Record<string, unknown> | undefined)?.[
+			COWORKING_MCP_SERVER_NAME
+		] as { command?: unknown; args?: unknown } | undefined;
+		const after = listTree(home);
+		const changed = [...new Set([...before.keys(), ...after.keys()])].filter(
+			(k) => before.get(k) !== after.get(k)
+		);
+		const userKept = canonicalJson(withoutCoworkingEntry(parsed)) === canonicalJson(seed);
+		const entryMatches =
+			!!entry &&
+			entry.command === spec.command &&
+			canonicalJson(entry.args) === canonicalJson(spec.args);
+		const seedBytesKept = installed.startsWith(INSTALLER_SEED_CONFIG);
+		const onlyConfig = changed.length === 1 && changed[0] === 'config.toml';
+		assert(
+			'declared-entry-only',
+			userKept && entryMatches && seedBytesKept && onlyConfig,
+			`userTablesKept=${userKept} entryMatchesSpec=${entryMatches} seedBytesKept=${seedBytesKept} changedFiles=${changed.join(',') || 'none'}`
+		);
+		const readBack = await grokInstaller.isInstalled();
+		assert('read-back', readBack, `isInstalled=${readBack}`);
+		await grokInstaller.install(spec);
+		receipt.digests.reinstalled = digestOrNull(configFile);
+		assert(
+			'idempotent',
+			receipt.digests.reinstalled === receipt.digests.installed,
+			receipt.digests.reinstalled === receipt.digests.installed ? 'byte-identical' : 'changed'
+		);
+		await grokInstaller.uninstall();
+		receipt.digests.removed = digestOrNull(configFile);
+		const gone = !(await grokInstaller.isInstalled());
+		const restored = receipt.digests.removed === receipt.digests.seed;
+		const leftover = [...listTree(home).keys()].filter((k) => !before.has(k));
+		assert(
+			'removed',
+			gone && restored && !leftover.length,
+			`isInstalled=${!gone} seedRestored=${restored} leftover=${leftover.join(',') || 'none'}`
+		);
+	} catch (e) {
+		receipt.problems.push(`installer-error: ${errorText(e)}`);
+	} finally {
+		if (previous === undefined) delete process.env[envVar];
+		else process.env[envVar] = previous;
+	}
+	return settleConsumerLeg(receipt);
+}
+
+/** A credential-shaped body the bundle leg plants; it must cross nowhere. Fresh per leg, never recorded. */
+function plantedCredentialBody(): string {
+	return `ghp_${randomBytes(18).toString('hex')}`;
+}
+
+/** Every regular file under the roots that contains the body (bounded). */
+function filesContaining(roots: string[], body: string): string[] {
+	const hits: string[] = [];
+	let bytes = 0;
+	for (const r of roots)
+		for (const [rel] of listTree(r)) {
+			const p = path.join(r, rel);
+			if (!fs.lstatSync(p).isFile()) continue;
+			const data = fs.readFileSync(p);
+			bytes += data.length;
+			if (bytes > CONSUMER_SCAN_LIMITS.bytes) throw new Error('scan past bound');
+			if (data.includes(body)) hits.push(p);
+		}
+	return hits;
+}
+
+/** The synthetic Grok project resources the bundle leg seeds: one portable, two the bundle cannot carry. */
+export const CONSUMER_BUNDLE_RESOURCES = Object.freeze({
+	portableSkill: '.grok/skills/qualify-sentinel',
+	unportable: ['.grok/rules', '.grok/agents'] as readonly string[],
+	projectCredential: '.grok/auth.json',
+});
+
+/**
+ * Bundle leg: a synthetic Grok agent working in an owned workspace that holds
+ * a portable native skill, two native resources the bundle format cannot carry
+ * (rules, subagents), a project credential file, and a `.mcp.json` server whose
+ * environment carries a credential-shaped body under a secret name. The real
+ * exporter packs it, the archive is read back (`readZipArchive`), and the real
+ * importer plans and applies it into an owned data dir and workspace. Passing
+ * needs: no archive entry `isForbiddenBundleEntry()` names; the body nowhere
+ * in the archive, the imported data dir or the imported workspace, with the
+ * secret NAME required by the manifest, the import plan and the imported agent;
+ * the portable skill imported byte-for-byte as archived; each unportable
+ * resource listed by the exporter as unsupported, surfaced in the import plan's
+ * warnings, and absent from both sides (never dropped silently).
+ */
+export async function runBundleLeg(
+	c: QualificationCase,
+	config: QualificationConfig,
+	reasons: AdmissionReason[],
+	ctx: { workspace: string; operatorHome: string }
+): Promise<ConsumerLegReceipt> {
+	const receipt = consumerReceipt('bundle-portability', [...reasons]);
+	if (receipt.reasons.length) return receipt;
+	let runningVersion: string | null = null;
+	try {
+		const pkg = JSON.parse(fs.readFileSync(path.join(ctx.workspace, 'package.json'), 'utf8'));
+		runningVersion = typeof pkg.version === 'string' ? pkg.version : null;
+	} catch {
+		runningVersion = null;
+	}
+	if (!runningVersion) {
+		receipt.reasons.push(consumerReason('running-version-unknown', 'package.json version'));
+		return receipt;
+	}
+	const made = prepareConsumerRoot(c, config, 'bundle-portability', ctx);
+	if ('refused' in made) {
+		receipt.reasons.push(consumerReason(made.refused, made.detail));
+		return receipt;
+	}
+	receipt.root = made.root;
+	const assert = (id: string, ok: boolean, detail: string) =>
+		receipt.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+	const body = plantedCredentialBody();
+	const R = CONSUMER_BUNDLE_RESOURCES;
+	const sourceWs = path.join(made.root, 'source', 'app');
+	const sourceData = path.join(made.root, 'source-data');
+	const account = path.join(made.root, 'grok-account');
+	const claudeDir = path.join(made.root, 'claude-config');
+	const targetData = path.join(made.root, 'target-data');
+	const targetWs = path.join(made.root, 'target', 'app');
+	const bundle = path.join(made.root, 'qualify-bundle.zip');
+	const agentId = 'qualify-grok-agent';
+	try {
+		fs.mkdirSync(claudeDir, { recursive: true, mode: 0o700 });
+		fs.mkdirSync(targetWs, { recursive: true, mode: 0o700 });
+		// The account home exists with a credential; the exporter must never read it.
+		writeOwned(path.join(account, 'auth.json'), JSON.stringify({ token: body }));
+		writeOwned(
+			path.join(sourceWs, R.portableSkill, 'SKILL.md'),
+			`---\nname: qualify-sentinel\ndescription: Synthetic qualification skill.\n---\n\nSynthetic body. Token ${body}\n`
+		);
+		writeOwned(path.join(sourceWs, R.unportable[0], 'qualify-rule.md'), 'Synthetic rule.\n');
+		writeOwned(path.join(sourceWs, R.unportable[1], 'qualify-helper.md'), 'Synthetic subagent.\n');
+		writeOwned(path.join(sourceWs, R.projectCredential), JSON.stringify({ token: body }));
+		writeOwned(
+			path.join(sourceWs, '.mcp.json'),
+			JSON.stringify({
+				mcpServers: {
+					'qualify-tool': {
+						command: 'qualify-mcp-stand-in',
+						env: { [CONSUMER_BUNDLE_SECRET]: body },
+					},
+				},
+			})
+		);
+		writeOwned(
+			path.join(sourceWs, '.maestro', 'cue.yaml'),
+			[
+				'subscriptions:',
+				'  - name: qualify-heartbeat',
+				'    event: time.heartbeat',
+				`    agent_id: ${agentId}`,
+				'    interval_minutes: 60',
+				'    prompt: synthetic',
+				'    pipeline_name: Qualify',
+				'',
+			].join('\n')
+		);
+		writeOwned(
+			path.join(sourceData, 'maestro-sessions.json'),
+			JSON.stringify({
+				sessions: [
+					{
+						id: agentId,
+						name: 'Qualify Grok',
+						toolType: 'grok',
+						cwd: sourceWs,
+						projectRoot: sourceWs,
+						customEnvVars: { GROK_HOME: account },
+					},
+				],
+			})
+		);
+		const env = { SOURCE_DATE_EPOCH: '1767225600', CLAUDE_CONFIG_DIR: claudeDir };
+		await exportCueBundle({
+			dataDir: sourceData,
+			agentId,
+			outputPath: bundle,
+			env,
+			claudeConfigDir: claudeDir,
+			agentConfigsDir: sourceData,
+		});
+		receipt.digests.archive = digestOrNull(bundle);
+		const archive = readZipArchive(bundle);
+		const entries = archive.getEntries().filter((e) => !e.isDirectory);
+		const forbidden = entries.filter((e) => isForbiddenBundleEntry(e.entryName));
+		assert(
+			'forbidden-entries',
+			entries.length > 0 && !forbidden.length,
+			`${entries.length} entries, forbidden=${forbidden.map((e) => e.entryName).join(',') || 'none'}`
+		);
+		const manifestEntry = archive.getEntry(CUE_BUNDLE_MANIFEST_PATH);
+		if (!manifestEntry) throw new Error('bundle carries no manifest');
+		const manifest = JSON.parse(manifestEntry.getData().toString('utf8')) as CueBundleManifest;
+		const ws = manifest.workspaces.find((w) => w.grok) ?? manifest.workspaces[0];
+		if (!ws) throw new Error('bundle carries no workspace');
+		const prefix = `workspaces/${ws.key}/`;
+		const archived = (rel: string) =>
+			entries.filter(
+				(e) => e.entryName === prefix + rel || e.entryName.startsWith(`${prefix}${rel}/`)
+			);
+		const archiveHits = entries.filter((e) => e.getData().includes(body)).map((e) => e.entryName);
+		const opts = {
+			bundlePath: bundle,
+			dataDir: targetData,
+			workspaces: { [ws.key]: targetWs },
+			runningVersion,
+			env: {},
+			runSecretsDir: null,
+			claudeConfigDir: claudeDir,
+		};
+		const plan = await planCueBundleImport(opts);
+		await importCueBundle(opts);
+		const importedHits = filesContaining([targetData, targetWs], body);
+		const secretPlanned = plan.secrets.find((s) => s.name === CONSUMER_BUNDLE_SECRET);
+		const store = JSON.parse(
+			fs.readFileSync(path.join(targetData, 'maestro-sessions.json'), 'utf8')
+		) as { sessions?: Array<{ toolType?: string; requiredSecrets?: string[] }> };
+		const agent = (store.sessions ?? []).find((s) => s.toolType === 'grok');
+		const mcpImported = fs.existsSync(path.join(targetWs, '.mcp.json'))
+			? fs.readFileSync(path.join(targetWs, '.mcp.json'), 'utf8')
+			: '';
+		const nameChecks = {
+			manifest: manifest.requirements.secrets.includes(CONSUMER_BUNDLE_SECRET),
+			plan: !!secretPlanned && secretPlanned.set === false,
+			agent: !!agent?.requiredSecrets?.includes(CONSUMER_BUNDLE_SECRET),
+			reference: mcpImported.includes(`\${${CONSUMER_BUNDLE_SECRET}}`),
+			projectCredential:
+				!archived(R.projectCredential).length &&
+				!fs.existsSync(path.join(targetWs, R.projectCredential)),
+			accountHome: !entries.some((e) => e.getData().includes(account)),
+		};
+		assert(
+			'names-only',
+			!archiveHits.length && !importedHits.length && Object.values(nameChecks).every(Boolean),
+			`bodyInArchive=${archiveHits.length} bodyImported=${importedHits.length} ` +
+				Object.entries(nameChecks)
+					.map(([k, v]) => `${k}=${v}`)
+					.join(' ')
+		);
+		const skillFile = `${R.portableSkill}/SKILL.md`;
+		const skillEntry = archive.getEntry(prefix + skillFile);
+		const importedSkill = path.join(targetWs, skillFile);
+		receipt.digests.archivedSkill = skillEntry ? sha256Of(skillEntry.getData()) : null;
+		receipt.digests.importedSkill = digestOrNull(importedSkill);
+		const listed = !!ws.grok?.resources.some(
+			(r) => r.kind === 'skill' && r.path === R.portableSkill
+		);
+		assert(
+			'resource-imported',
+			listed &&
+				!!receipt.digests.archivedSkill &&
+				receipt.digests.importedSkill === receipt.digests.archivedSkill,
+			`listed=${listed} archived=${!!receipt.digests.archivedSkill} importedMatches=${receipt.digests.importedSkill === receipt.digests.archivedSkill}`
+		);
+		const limits = R.unportable.map((rel) => {
+			const unsupported = (ws.grok?.unsupported ?? []).find((u) => u.path === rel);
+			return {
+				rel,
+				listed: !!unsupported?.code && !!unsupported.reason,
+				warned: plan.warnings.some((w) => w.includes(`${rel}:`)),
+				carried: archived(rel).length > 0 || fs.existsSync(path.join(targetWs, rel)),
+			};
+		});
+		assert(
+			'limits-reported',
+			limits.every((l) => l.listed && l.warned && !l.carried),
+			limits
+				.map((l) => `${l.rel} listed=${l.listed} warned=${l.warned} carried=${l.carried}`)
+				.join('; ')
+		);
+	} catch (e) {
+		receipt.problems.push(`bundle-error: ${errorText(e).split(body).join('[planted-body]')}`);
+	}
+	return settleConsumerLeg(receipt);
+}
+
+/** Both consumer legs of a case, each its own entry; empty for a family that carries none. */
+export async function runConsumerLegs(
+	c: QualificationCase,
+	config: QualificationConfig,
+	problems: ConfigProblem[],
+	capabilities: HarnessCapabilities,
+	ctx: { workspace: string; operatorHome: string; now: Date }
+): Promise<ConsumerLegReceipt[]> {
+	if (!CONSUMER_LEG_FAMILIES.includes(c.family)) return [];
+	const reasons = admitConsumerLegs(c, config, problems, capabilities, ctx.now);
+	return [
+		await runInstallerLeg(c, config, reasons, ctx),
+		await runBundleLeg(c, config, reasons, ctx),
+	];
 }
 
 /** Read a configuration file from inside the checkout's runs root. */
