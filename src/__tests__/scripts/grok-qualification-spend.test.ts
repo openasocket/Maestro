@@ -37,6 +37,14 @@
  * the leg allowance, every workflow turn draws its whole per-turn allowance
  * (the retry included) before its child starts, and a run turn limit the
  * earlier legs exhausted refuses the next leg unsent and uncounted.
+ *
+ * GT1-11-11F3: the E06 accounting legs (GT1-11-11F1) on the same ledger:
+ * each holds an accounting reservation of its own, every turn is counted
+ * before its child, the retried send draws one retry beyond its allowance,
+ * a fixture fault counts a turn but never starts the pinned binary, the lost
+ * transport hold stays uncertain and unrefundable, an unknown charge settles
+ * nothing, the consumers (GT1-11-11F2) reserve nothing, and a run turn limit
+ * the earlier legs exhausted refuses the next leg unsent and uncounted.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -161,6 +169,9 @@ const ALL_CAPS: HarnessCapabilities = {
 	workflowLegs: false,
 	orchestrationLegs: false,
 	contributionLegs: false,
+	// Off: the accounting legs and consumers run in their own block (GT1-11-11F3).
+	accountingLegs: false,
+	accountingConsumers: false,
 };
 
 /** The fake budget provider: a fully authorized worst-case-reservation config. */
@@ -1728,6 +1739,249 @@ describe('GT1-11-09 qualification spend admission', () => {
 				expect(ledger.turns).toBe(3);
 				expect(atSpawn).toEqual([1, 2, 3]);
 				expect(ledger.reservations.map((x) => x.leg)).toEqual([null, 'workflow:autorun-document']);
+			}, 120_000);
+		}
+	);
+
+	describe.skipIf(process.platform === 'win32')(
+		'accounting legs on the shared ledger (GT1-11-11F3)',
+		() => {
+			const REL = `${RUNS_ROOT}/gt1-11-11f3-spend-${process.pid}`;
+			const ROOT = path.join(WORKSPACE, REL);
+			const BIN = path.join(ROOT, 'bin', 'grok');
+			const MODE_FILE = path.join(ROOT, 'mode');
+			const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-11f3-spend-operator-${process.pid}`);
+			const E06 = expandCases([
+				{
+					id: 'E06',
+					requirementIds: ['R-E06'],
+					ownerTasks: ['GT1-11-11F3'],
+					expectedInvariant: 'synthetic',
+					blockerIds: [],
+				},
+			]).find((c) => c.caseId === 'E06:native-headless:local')!;
+			let sha = '';
+			/**
+			 * A native stand-in (never a real Grok): the reply token, then one `end`
+			 * record with usage buckets and an exact charge (`nocost`: no charge),
+			 * history under the owned GROK_HOME.
+			 */
+			const SOURCE = [
+				`#!${process.execPath}`,
+				"const fs = process.getBuiltinModule('fs');",
+				"const path = process.getBuiltinModule('path');",
+				`const MODE = fs.readFileSync(${JSON.stringify(MODE_FILE)}, 'utf8').trim();`,
+				'const argv = process.argv.slice(2);',
+				'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
+				"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
+				"const t = (at('-p') || '').match(/QUALIFY-[A-Z0-9-]+-OK/g) || [];",
+				"if (t.length) out({ type: 'text', data: t[t.length - 1] });",
+				"const dir = path.join(process.env.GROK_HOME, 'sessions', encodeURIComponent(fs.realpathSync(at('--cwd') || process.cwd())), 'f3-spend-session');",
+				'fs.mkdirSync(dir, { recursive: true });',
+				"fs.appendFileSync(path.join(dir, 'chat_history.jsonl'), JSON.stringify({ type: 'user', content: 'q' }) + '\\n');",
+				"const end = { type: 'end', stopReason: 'end_turn', sessionId: 'f3-spend-session',",
+				'  usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 3, cache_creation_input_tokens: 2, reasoning_tokens: 1 },',
+				"  modelUsage: { [at('-m')]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 3, cacheCreationInputTokens: 2, costUSD: 0.001 } } };",
+				"if (MODE !== 'nocost') end.total_cost_usd = 0.001;",
+				'out(end);',
+				'',
+			].join('\n');
+			const accountingConfig = (limits: {
+				maxTurns: number;
+				perCaseTurns: number;
+			}): QualificationConfig =>
+				liveConfig({
+					allowedRoots: [REL],
+					binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
+					spendBounds: {
+						perCall: {
+							inputTokens: 1000,
+							outputTokens: 500,
+							cacheReadTokens: 0,
+							cacheCreationTokens: 0,
+						},
+						// A retry allowance on every turn: each accounting turn draws it, the retried send once more.
+						perTurnCalls: { modelRounds: 2, children: 1, retries: 1, sideModels: 0, compaction: 0 },
+						sideModels: [],
+					},
+					limits: {
+						budgetUsd: 10,
+						maxCalls: 80,
+						maxTurns: limits.maxTurns,
+						maxWallClockSeconds: 600,
+						perCase: {
+							budgetUsd: 2,
+							maxCalls: 60,
+							maxTurns: limits.perCaseTurns,
+							maxWallClockSeconds: 120,
+						},
+						cleanupSeconds: 1,
+					},
+					isolation: {
+						boundary: {
+							kind: 'disposable-os-account',
+							reference: 'boundary:synthetic',
+							actualHome: `${REL}/home`,
+							productionHomeMounted: false,
+							operatorCredentialsReadable: false,
+						},
+						accountRoots: { A: `${REL}/grok-a`, B: `${REL}/grok-b` },
+						remoteRoots: {},
+						policy: {
+							systemPolicyInspected: true,
+							managedPolicy: 'absent',
+							requiredPolicyCompatible: true,
+						},
+						resources: { hooks: 'empty', mcp: 'empty', plugins: 'empty', envrc: 'disabled' },
+						egress: {
+							kind: 'operation-aware',
+							reference: 'egress:synthetic',
+							suppression: {
+								update: 'flags-only',
+								telemetry: 'flags-only',
+								backgroundUpload: 'unknown',
+							},
+						},
+						path: ['/usr/bin', '/bin'],
+					},
+				});
+			const run = async (
+				mode: 'ok' | 'nocost',
+				limits: { maxTurns: number; perCaseTurns: number }
+			) => {
+				fs.writeFileSync(MODE_FILE, mode);
+				fs.rmSync(path.join(ROOT, 'grok-a'), { recursive: true, force: true });
+				fs.mkdirSync(path.join(ROOT, 'grok-a'), { recursive: true });
+				const config = accountingConfig(limits);
+				const ledger = ledgerFor(config, E06);
+				// The ledger's turn count at every start of the pinned stand-in: a turn is counted before its child.
+				const actual =
+					await vi.importActual<typeof import('node:child_process')>('node:child_process');
+				const atSpawn: number[] = [];
+				spawnSpies[0].mockImplementation(((...a: Parameters<typeof actual.spawn>) => {
+					if (a[0] === BIN) atSpawn.push(ledger.turns);
+					return actual.spawn(...a);
+				}) as never);
+				const lifetime = createCaseLifetime(1);
+				try {
+					const [leg] = await executePaidCase(E06, config, {
+						workspace: WORKSPACE,
+						operatorHome: OPERATOR_HOME,
+						ledger,
+						lifetime,
+						problems: [],
+						capabilities: { ...ALL_CAPS, accountingLegs: true, accountingConsumers: true },
+						now: () => NOW,
+						resolveSecret: (name) => `synthetic-xai-${name}-value`,
+					});
+					await lifetime.cleanup();
+					return { leg, ledger, config, atSpawn };
+				} finally {
+					spawnSpies[0].mockImplementation(actual.spawn as never);
+				}
+			};
+			const byLeg = (ledger: BudgetLedger, leg: string | null) => {
+				const r = ledger.reservations.find((x) => x.leg === leg);
+				if (!r) throw new Error(`no reservation ${leg}`);
+				return r;
+			};
+
+			beforeAll(() => {
+				for (const d of ['home', 'grok-a', 'grok-b', 'bin', path.join('cache', 'tmp')])
+					fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+				fs.writeFileSync(MODE_FILE, 'ok');
+				fs.writeFileSync(BIN, SOURCE);
+				fs.chmodSync(BIN, 0o555);
+				sha = createHash('sha256').update(fs.readFileSync(BIN)).digest('hex');
+			});
+			afterAll(() => {
+				if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+				fs.rmSync(ROOT, { recursive: true, force: true });
+				fs.rmSync(OPERATOR_HOME, { recursive: true, force: true });
+			});
+			beforeEach(() => {
+				spawnSpies.forEach((s) => s.mockClear());
+			});
+
+			it('each accounting leg holds a reservation of its own; every turn is counted before its child, the retried send draws one retry beyond its allowance, a fault counts a turn but never starts the pinned binary, and the consumers hold nothing', async () => {
+				const { leg, ledger, config, atSpawn } = await run('ok', {
+					maxTurns: 20,
+					perCaseTurns: 10,
+				});
+				expect(
+					leg.accountingLegs.map((l) => [l.leg, l.status]),
+					JSON.stringify(leg.accountingLegs.map((l) => l.reasons))
+				).toEqual([
+					['usage-capture', 'passed'],
+					['child-usage', 'not-evaluated'],
+					['fault-retry', 'passed'],
+				]);
+				expect(leg.accountingConsumers.every((l) => l.status === 'passed')).toBe(true);
+				// The consumers send nothing and reserve nothing.
+				expect(ledger.reservations.map((x) => x.leg)).toEqual([
+					null,
+					'accounting:usage-capture',
+					'accounting:fault-retry',
+					'accounting:fault-retry:transport',
+				]);
+				const main = byLeg(ledger, null);
+				const perKind = paidCallsPerTurn(config, main) as unknown as Record<string, number>;
+				const perTurn = Object.values(perKind).reduce((n, x) => n + x, 0);
+				expect(perKind.retry).toBe(1);
+				const usage = byLeg(ledger, 'accounting:usage-capture');
+				expect(usage.id).toBe(leg.accountingLegs[0].reservationId);
+				expect(usage.turnAllowance).toBe(1);
+				expect(usage.turnsUsed).toBe(1);
+				expect(usage.callsUsed).toBe(perTurn);
+				expect(usage).toMatchObject({ state: 'settled', settledUsd: 0.001, uncertainUsd: 0 });
+				const retry = byLeg(ledger, 'accounting:fault-retry');
+				expect(retry.turnAllowance).toBe(HARNESS_CEILINGS.accountingTurnsPerLeg);
+				// The counted rate-limit attempt and the one retried send.
+				expect(retry.turnsUsed).toBe(2);
+				expect(retry.callsByKind.retry).toBe(perKind.retry * 2 + 1);
+				expect(retry).toMatchObject({ state: 'settled', settledUsd: 0.001, uncertainUsd: 0 });
+				const transport = byLeg(ledger, 'accounting:fault-retry:transport');
+				expect(transport.turnsUsed).toBe(1);
+				expect(transport.state).toBe('uncertain');
+				expect(transport.uncertainEffect).toBe(true);
+				expect(transport.settledUsd).toBe(0);
+				expect(transport.uncertainUsd).toBe(transport.holdUsd);
+				expect(() => releaseReservation(ledger, transport.id, NOW)).toThrow();
+				expect(ledger.turns).toBe(ledger.reservations.reduce((n, x) => n + x.turnsUsed, 0));
+				expect(ledger.turns).toBe(1 + 1 + 2 + 1);
+				expect(ledger.uncertainUsd).toBe(transport.uncertainUsd);
+				expect(ledger.settledUsd).toBeCloseTo(0.003, 9);
+				// The pinned binary: the fixture turn, the usage turn, the retry. The faults (turns 3 and 5) never.
+				expect(atSpawn).toEqual([1, 2, 4]);
+			}, 120_000);
+
+			it('an unknown charge settles nothing: every reservation that sent a turn stays uncertain, never settled at 0', async () => {
+				const { leg, ledger } = await run('nocost', { maxTurns: 20, perCaseTurns: 10 });
+				expect(leg.accountingLegs[0].status).toBe('passed');
+				for (const r of ledger.reservations) {
+					expect(r.state, r.leg ?? 'main').toBe('uncertain');
+					expect(r.settledUsd, r.leg ?? 'main').toBe(0);
+					expect(r.uncertainUsd, r.leg ?? 'main').toBeGreaterThan(0);
+				}
+				expect(ledger.settledUsd).toBe(0);
+				expect(ledger.uncertainUsd).toBeCloseTo(
+					ledger.reservations.reduce((n, x) => n + x.uncertainUsd, 0),
+					9
+				);
+			}, 120_000);
+
+			it('a run turn limit the earlier legs exhausted refuses the next accounting reservation: no fixture, no spawn, nothing counted', async () => {
+				const { leg, ledger, atSpawn } = await run('ok', { maxTurns: 2, perCaseTurns: 2 });
+				const [usage, , fault] = leg.accountingLegs;
+				expect(usage.status, JSON.stringify(usage.reasons)).toBe('passed');
+				expect(fault.status).toBe('not-run');
+				expect(fault.reservationId).toBeNull();
+				expect(fault.reasons.length).toBeGreaterThan(0);
+				expect(fault.spawned + fault.fixtureSpawned + fault.paidRequests).toBe(0);
+				expect(fault.faults).toEqual([]);
+				expect(ledger.turns).toBe(2);
+				expect(atSpawn).toEqual([1, 2]);
+				expect(ledger.reservations.map((x) => x.leg)).toEqual([null, 'accounting:usage-capture']);
 			}, 120_000);
 		}
 	);

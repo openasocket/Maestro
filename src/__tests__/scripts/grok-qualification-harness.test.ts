@@ -72,6 +72,17 @@
  * routed twice or a round on a new native id, a spawned moderator, a Symphony
  * network effect, an orphaned Pianola child and a transcript read outside
  * the owned home each fail their leg.
+ *
+ * GT1-11-11F3 adds the E06 accounting legs and consumers (GT1-11-11F1..F2):
+ * a Grok stand-in in owned temp roots (never a real Grok, credential, home or
+ * data dir) that reports native and ACP usage exact, partial, unknown or
+ * absent, with or without cache buckets and a child. Every label survives to
+ * the receipt and every consumer; an unknown charge is never 0; a child is
+ * counted once inside its parent; the retried send is billed once; the lost
+ * transport hold is never refunded; fixture faults are labelled and never
+ * run the pinned binary. The consumers that write 0 for an unknown charge
+ * (A11-F25, A11-F26) and the native cache buckets read as 0 (A11-F27) are
+ * pinned as the harness sees them today.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -81,18 +92,27 @@ import fs from 'node:fs';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
+	ACCOUNTING_CONSUMER_ASSERTIONS,
+	ACCOUNTING_CONSUMER_READERS,
+	ACCOUNTING_FAULT_EXPECTED,
+	ACP_ACCOUNTING_CONSUMERS_OWNER,
+	ACP_FAULT_LEGS_OWNER,
 	CANDIDATE_CAPABILITIES,
 	CONFIG_SCHEMA,
 	GROK_CONTROL_ENV,
+	GROK_QUOTA_BLOCKER,
 	HARNESS_CAPABILITIES,
 	HARNESS_CEILINGS,
+	NATIVE_SUBAGENT_OWNER,
 	OFFLINE_OUTPUT_CAP_BYTES,
 	OFFLINE_PROBES,
 	POLICY_BEARING_FLAGS,
 	RUNS_ROOT,
+	STATS_CLI_OWNER,
 	admitCase,
 	buildCandidateSnapshot,
 	buildSshSpawn,
+	consumerCostLabelOk,
 	createBudgetLedger,
 	createCaseLifetime,
 	defaultConfigFromRunState,
@@ -113,6 +133,7 @@ import {
 	preflightCase,
 	productionCapabilityDigest,
 	redactDeep,
+	releaseReservation,
 	runConsumerLegs,
 	runQualification,
 	validateConfig,
@@ -519,6 +540,9 @@ const ALL_CAPS: HarnessCapabilities = {
 	workflowLegs: false,
 	orchestrationLegs: false,
 	contributionLegs: false,
+	// Off: the accounting legs and consumers run in their own block (GT1-11-11F3).
+	accountingLegs: false,
+	accountingConsumers: false,
 };
 /** A secret-shaped value the shared redactor recognizes; synthetic, never a credential. */
 const FAKE_TOKEN = `ghp_${'A1b2C3d4E5'.repeat(4).slice(0, 36)}`;
@@ -5810,6 +5834,596 @@ describe('GT1-11-09 qualification harness', () => {
 			}, 120_000);
 		});
 	});
+
+	describe.skipIf(process.platform === 'win32')(
+		'accounting legs and consumers (GT1-11-11F3)',
+		() => {
+			const REL = `${RUNS_ROOT}/gt1-11-11f3-${process.pid}`;
+			const ROOT = path.join(WORKSPACE, REL);
+			const BIN = path.join(ROOT, 'bin', 'grok');
+			const HOME_A = path.join(ROOT, 'grok-a');
+			/** The stand-in reads its mode from here, so its bytes (and the pin) are the same in every mode. */
+			const MODE_FILE = path.join(ROOT, 'mode');
+			/** One line per stand-in process: its route and whether it was a prompt turn, never a credential. */
+			const LOG = path.join(ROOT, 'log', 'turns.jsonl');
+			const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-11f3-operator-${process.pid}`);
+			const MODEL = 'claude-haiku-4-5';
+			type Mode = 'ok' | 'nocost' | 'partial' | 'partialnone' | 'absent' | 'nocache' | 'nochild';
+			let sha = '';
+			/**
+			 * The Grok stand-in (never a real Grok): native streaming-json with `-p`,
+			 * ACP over `agent stdio`. A native turn ends on one `end` record carrying
+			 * usage with cache-read/cache-write/reasoning buckets and an exact charge,
+			 * and keeps its history under the owned GROK_HOME where the production
+			 * token accessor reads it. An ACP prompt answers with `_meta.usage`
+			 * (ticks); a prompt naming a subagent first reports one child on the
+			 * parent channel and the child's own usage frame on the child channel.
+			 * A mode bends exactly one fact: no charge, a partial charge with or
+			 * without a figure, no usage at all, no cache buckets, no child.
+			 */
+			const SOURCE = [
+				`#!${process.execPath}`,
+				"const fs = process.getBuiltinModule('fs');",
+				"const path = process.getBuiltinModule('path');",
+				`const MODE = fs.readFileSync(${JSON.stringify(MODE_FILE)}, 'utf8').trim();`,
+				'const argv = process.argv.slice(2);',
+				'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
+				"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
+				"const tokenOf = (p) => { const t = (p || '').match(/QUALIFY-[A-Z0-9-]+-OK/g) || []; return t.length ? t[t.length - 1] : ''; };",
+				"const noCharge = ['nocost', 'partialnone', 'absent'].includes(MODE);",
+				"const acp = argv.includes('stdio');",
+				`fs.appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ route: acp ? 'acp' : 'native', pid: process.pid }) + '\\n');`,
+				'if (!acp) {',
+				"  const model = at('-m');",
+				"  out({ type: 'text', data: tokenOf(at('-p')) });",
+				"  const end = { type: 'end', stopReason: 'end_turn', requestId: 'req-synthetic', sessionId: 'f3-native-session',",
+				'    usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 3, cache_creation_input_tokens: 2, reasoning_tokens: 1 },',
+				'    modelUsage: { [model]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 3, cacheCreationInputTokens: 2, costUSD: 0.001 } } };',
+				'  if (!noCharge) end.total_cost_usd = 0.001;',
+				"  if (MODE === 'partial' || MODE === 'partialnone') end.cost_is_partial = true;",
+				"  if (MODE === 'absent') { delete end.usage; delete end.modelUsage; }",
+				"  if (MODE === 'nocache') { delete end.usage.cache_read_input_tokens; delete end.usage.cache_creation_input_tokens; }",
+				"  const dir = path.join(process.env.GROK_HOME || '', 'sessions', encodeURIComponent(fs.realpathSync(at('--cwd') || process.cwd())), 'f3-native-session');",
+				'  fs.mkdirSync(dir, { recursive: true });',
+				"  fs.appendFileSync(path.join(dir, 'chat_history.jsonl'), JSON.stringify({ type: 'user', content: 'q' }) + '\\n' + JSON.stringify({ type: 'assistant', content: 'a' }) + '\\n');",
+				'  out(end);',
+				'} else {',
+				"  const sid = 'f3-acp-session';",
+				"  let buf = '';",
+				"  const reply = (id, result) => out({ jsonrpc: '2.0', id, result });",
+				"  const xai = (sessionId, update) => out({ jsonrpc: '2.0', method: '_x.ai/session/update', params: { sessionId, update } });",
+				'  const handle = (m) => {',
+				"    if (m.method === 'initialize') reply(m.id, { protocolVersion: 1 });",
+				"    else if (m.method === 'session/new') reply(m.id, { sessionId: sid, models: { currentModelId: m.params._meta.modelId } });",
+				"    else if (m.method === 'session/prompt') {",
+				'      const text = m.params.prompt[0].text;',
+				"      if (text.includes('subagent') && MODE !== 'nochild') {",
+				"        xai(sid, { sessionUpdate: 'subagent_spawned', parent_session_id: sid, child_session_id: 'f3-child', subagent_id: 'sub-1', model: 'grok-child' });",
+				"        xai('f3-child', { sessionUpdate: 'response_completed', message_id: 'c1', usage: { input_tokens: 7, output_tokens: 4, cache_read_input_tokens: 1, cache_creation_input_tokens: 0, reasoning_tokens: 0 } });",
+				"        xai(sid, { sessionUpdate: 'subagent_finished', parent_session_id: sid, child_session_id: 'f3-child', status: 'completed' });",
+				'      }',
+				"      out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: tokenOf(text) } } } });",
+				"      if (MODE === 'absent') { reply(m.id, { stopReason: 'end_turn' }); return; }",
+				'      const usage = { inputTokens: 20, outputTokens: 9, cachedReadTokens: 3, cacheCreationTokens: 2, reasoningTokens: 0 };',
+				"      if (!noCharge) usage.costUsdTicks = '10000000';",
+				"      if (MODE === 'nocache') { delete usage.cachedReadTokens; delete usage.cacheCreationTokens; }",
+				"      reply(m.id, { stopReason: 'end_turn', _meta: { usage } });",
+				"    } else if (m.id !== undefined) out({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'Method not found' } });",
+				'  };',
+				"  process.stdin.on('data', (d) => { buf += d; let k; while ((k = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, k); buf = buf.slice(k + 1); if (line.trim()) handle(JSON.parse(line)); } });",
+				"  process.stdin.on('end', () => process.exit(0));",
+				'}',
+				'',
+			].join('\n');
+			const standInRuns = (): Array<{ route: string; pid: number }> =>
+				fs.existsSync(LOG)
+					? fs
+							.readFileSync(LOG, 'utf8')
+							.trim()
+							.split('\n')
+							.filter(Boolean)
+							.map((l) => JSON.parse(l))
+					: [];
+			/** A complete synthetic paid declaration whose bounds fit the E06 fixture turn and every accounting leg. */
+			const accountingConfig = (): QualificationConfig => ({
+				...liveConfig({
+					allowedRoots: [REL],
+					allowedModels: [MODEL],
+					binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
+					spendBounds: {
+						perCall: {
+							inputTokens: 1000,
+							outputTokens: 500,
+							cacheReadTokens: 0,
+							cacheCreationTokens: 0,
+						},
+						perTurnCalls: { modelRounds: 2, children: 1, retries: 0, sideModels: 0, compaction: 0 },
+						sideModels: [],
+					},
+					limits: {
+						budgetUsd: 10,
+						maxCalls: 120,
+						maxTurns: 20,
+						maxWallClockSeconds: 600,
+						perCase: { budgetUsd: 2, maxCalls: 60, maxTurns: 10, maxWallClockSeconds: 120 },
+						cleanupSeconds: 1,
+					},
+				}),
+				isolation: {
+					boundary: {
+						kind: 'disposable-os-account',
+						reference: 'boundary:synthetic',
+						actualHome: `${REL}/home`,
+						productionHomeMounted: false,
+						operatorCredentialsReadable: false,
+					},
+					accountRoots: { A: `${REL}/grok-a`, B: `${REL}/grok-b` },
+					remoteRoots: {},
+					policy: {
+						systemPolicyInspected: true,
+						managedPolicy: 'absent',
+						requiredPolicyCompatible: true,
+					},
+					resources: { hooks: 'empty', mcp: 'empty', plugins: 'empty', envrc: 'disabled' },
+					egress: {
+						kind: 'operation-aware',
+						reference: 'egress:synthetic',
+						suppression: {
+							update: 'flags-only',
+							telemetry: 'flags-only',
+							backgroundUpload: 'unknown',
+						},
+					},
+					path: ['/usr/bin', '/bin', path.join(ROOT, 'bin')],
+				},
+			});
+			const CAPS: HarnessCapabilities = {
+				...ALL_CAPS,
+				accountingLegs: true,
+				accountingConsumers: true,
+			};
+			const CONSUMERS = [
+				'turn-recorder',
+				'desktop-recording',
+				'stats-readers',
+				'cue-attribution',
+				'context-window',
+				'quota-unavailable',
+			];
+			let ledgerSeq = 0;
+			const execute = async (
+				route: 'native-headless' | 'acp-stdio',
+				mode: Mode,
+				caps: HarnessCapabilities = CAPS
+			) => {
+				fs.writeFileSync(MODE_FILE, mode);
+				fs.rmSync(HOME_A, { recursive: true, force: true });
+				fs.mkdirSync(HOME_A, { recursive: true });
+				fs.rmSync(LOG, { force: true });
+				const cfg = accountingConfig();
+				const c = expandCases(FAMILIES, [`E06:${route}:local`])[0];
+				const ledger = createBudgetLedger(cfg, `gt1-11-11f3-${process.pid}-${++ledgerSeq}`, NOW);
+				ledger.authorizedCaseIds.push(c.caseId);
+				const lifetime = createCaseLifetime(1);
+				const legs = await executePaidCase(c, cfg, {
+					workspace: WORKSPACE,
+					operatorHome: OPERATOR_HOME,
+					ledger,
+					lifetime,
+					problems: validateConfig(cfg, WORKSPACE),
+					capabilities: caps,
+					now: clock,
+					resolveSecret: (name: string) => `synthetic-xai-${name}-value`,
+				});
+				await lifetime.cleanup();
+				expect(legs).toHaveLength(1);
+				const leg = legs[0];
+				const acc = (id: string) => {
+					const l = leg.accountingLegs.find((x) => x.leg === id);
+					if (!l) throw new Error(`no accounting leg ${id}`);
+					return l;
+				};
+				const con = (id: string) => {
+					const l = leg.accountingConsumers.find((x) => x.leg === id);
+					if (!l) throw new Error(`no consumer leg ${id}`);
+					return l;
+				};
+				return { leg, ledger, acc, con };
+			};
+			const failedIds = (x: { assertions: Array<{ id: string; outcome: string }> }) =>
+				x.assertions.filter((a) => a.outcome === 'failed').map((a) => a.id);
+			const outcome = (x: { assertions: Array<{ id: string; outcome: string }> }, id: string) =>
+				x.assertions.find((a) => a.id === id)?.outcome;
+			const verdicts = (xs: Array<{ leg: string; status: string }>) =>
+				xs.map((x) => [x.leg, x.status]);
+
+			beforeAll(() => {
+				for (const d of ['home', 'grok-a', 'grok-b', 'bin', 'log', path.join('cache', 'tmp')])
+					fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+				fs.writeFileSync(MODE_FILE, 'ok');
+				fs.writeFileSync(BIN, SOURCE);
+				fs.chmodSync(BIN, 0o555);
+				sha = createHash('sha256').update(fs.readFileSync(BIN)).digest('hex');
+			});
+			afterAll(() => {
+				if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+				fs.rmSync(ROOT, { recursive: true, force: true });
+				fs.rmSync(OPERATOR_HOME, { recursive: true, force: true });
+			});
+
+			it('an exact native turn: buckets, model, provenance and the exact charge survive to the receipt, the lifetime and every consumer', async () => {
+				const { leg, acc, con } = await execute('native-headless', 'ok');
+				expect(leg.status, leg.assertions.map((a) => `${a.id}:${a.outcome}`).join(',')).toBe(
+					'passed'
+				);
+				const usage = acc('usage-capture');
+				expect(usage.status, usage.assertion.detail).toBe('passed');
+				const rec = usage.usage[0];
+				expect(usage.usage).toHaveLength(1);
+				expect(rec.final).toBe(true);
+				expect(rec.reports).toBe(1);
+				expect(rec.buckets).toEqual({
+					input: 10,
+					output: 5,
+					cacheRead: 3,
+					cacheWrite: 2,
+					reasoning: 1,
+				});
+				expect(rec.cost).toEqual({ status: 'exact', costUsd: 0.001 });
+				expect(rec.model).toBe(MODEL);
+				expect(rec.provenance).toMatchObject({
+					provenance: 'estimated',
+					tokens: 'provider-stream',
+					cost: 'reported',
+					costUsd: 0.001,
+				});
+				expect(usage.turns[0].usage).toEqual({ costUsd: 0.001, status: 'exact' });
+				expect(usage.settlement).toMatchObject({
+					state: 'settled',
+					settledUsd: 0.001,
+					uncertainUsd: 0,
+				});
+				// The lifetime grew by the turn total once.
+				expect(usage.lifetime).toEqual({
+					before: null,
+					after: { input: 10, output: 5, cacheRead: 3, cacheWrite: 2 },
+					cost: { status: 'exact', costUsd: 0.001 },
+				});
+				// The native stream carries no child record: an honest gap with its owner, nothing sent.
+				const child = acc('child-usage');
+				expect(child.status).toBe('not-evaluated');
+				expect(child.assertion.owner).toBe(NATIVE_SUBAGENT_OWNER);
+				expect(child.spawned + child.paidRequests + child.fixtureSpawned).toBe(0);
+				// Every consumer passed every one of its required assertions.
+				expect(verdicts(leg.accountingConsumers)).toEqual(CONSUMERS.map((id) => [id, 'passed']));
+				for (const l of leg.accountingConsumers)
+					expect(l.assertions.map((a) => a.id).sort(), l.leg).toEqual(
+						[...ACCOUNTING_CONSUMER_ASSERTIONS[l.leg]].sort()
+					);
+				expect(con('turn-recorder').observed).toMatchObject({ rows: 1, rowCost: 0.001 });
+				expect(con('desktop-recording').observed).toMatchObject({
+					exits: 1,
+					settlements: 1,
+					usageEvents: 1,
+					ledgerEvents: 1,
+					bufferAfter: 0,
+					released: true,
+					costUnknown: false,
+					rows: 1,
+				});
+				const stats = con('stats-readers');
+				expect(stats.observed).toMatchObject({
+					grokQueries: 2,
+					desktopPriced: 1,
+					dashboardCost: 0.001,
+					readers: ACCOUNTING_CONSUMER_READERS,
+				});
+				// The stats CLI needs a running desktop: an open gap with an owner, never a pass.
+				expect(stats.openGaps).toEqual([
+					expect.objectContaining({ id: 'stats-cli', owner: STATS_CLI_OWNER }),
+				]);
+				// The Cue run counted once to its pipeline, with the exact charge.
+				expect(con('cue-attribution').observed).toEqual({
+					runs: 1,
+					pipelineRuns: 1,
+					pipelineCost: 0.001,
+					nativeCoverage: 'partial',
+				});
+				// Grok is not a combined-window agent; the shown fraction is the reported tokens over the reported window.
+				const ctx = con('context-window').observed as {
+					combined: boolean;
+					tokens: number;
+					reportedWindow: number;
+					shownPercent: number | null;
+				};
+				expect(ctx.combined).toBe(false);
+				expect(ctx.tokens).toBe(10 + 3 + 2);
+				expect(ctx.reportedWindow).toBeGreaterThan(0);
+				expect(ctx.shownPercent).toBe(Math.round((ctx.tokens / ctx.reportedWindow) * 100));
+				// Quota: nothing armed or touched, no network attempt, the ledger unchanged.
+				expect(con('quota-unavailable').observed).toEqual({
+					armed: [],
+					touches: 0,
+					blocker: GROK_QUOTA_BLOCKER,
+				});
+				expect(outcome(con('quota-unavailable'), 'quota-zero-network')).toBe('passed');
+				expect(outcome(con('quota-unavailable'), 'budget-not-reset')).toBe('passed');
+				// The pinned stand-in ran for the fixture turn, the usage capture and the retry only.
+				expect(standInRuns().map((r) => r.route)).toEqual(['native', 'native', 'native']);
+			}, 120_000);
+
+			it('fixture faults: labelled fixture-induced, classified by the production parser, never the pinned binary; the retried send billed once; the lost transport reservation uncertain and never refunded', async () => {
+				const { ledger, acc } = await execute('native-headless', 'ok');
+				const fault = acc('fault-retry');
+				expect(fault.status, fault.assertion.detail).toBe('passed');
+				expect(fault.faults.map((f) => [f.kind, f.classified])).toEqual(
+					Object.entries(ACCOUNTING_FAULT_EXPECTED)
+				);
+				for (const f of fault.faults) {
+					expect(f.fixtureInduced, f.kind).toBe(true);
+					expect(f.sent, f.kind).toBe(false);
+					expect(f.command, f.kind).toBe(process.execPath);
+					expect(f.command, f.kind).not.toBe(BIN);
+					expect(f.envKeys, f.kind).toEqual([]);
+					expect(f.exitCode, f.kind).toBe(1);
+				}
+				expect(fault.faults.map((f) => f.counted)).toEqual([true, false, true]);
+				expect(fault.fixtureSpawned).toBe(3);
+				// One billed send: the retry alone, drawn once as a retry call.
+				expect(fault.paidRequests).toBe(1);
+				expect(fault.spawned).toBe(1);
+				expect(fault.turns).toHaveLength(1);
+				const own = ledger.reservations.find((x) => x.leg === 'accounting:fault-retry')!;
+				expect(own.id).toBe(fault.reservationId);
+				expect(own.turnsUsed).toBe(2);
+				expect(own.callsByKind.retry).toBe(1);
+				expect(own.state).toBe('settled');
+				// The lost transport attempt: its own reservation, uncertain, its whole hold kept, retry and release refused.
+				const transport = ledger.reservations.find(
+					(x) => x.leg === 'accounting:fault-retry:transport'
+				)!;
+				expect(transport.state).toBe('uncertain');
+				expect(transport.uncertainEffect).toBe(true);
+				expect(transport.settledUsd).toBe(0);
+				expect(transport.uncertainUsd).toBe(transport.holdUsd);
+				expect(transport.uncertainUsd).toBeGreaterThan(0);
+				expect(transport.turnsUsed).toBe(1);
+				expect(fault.observed.transport).toMatchObject({
+					lost: true,
+					retryAdmitted: false,
+					retryRefusal: ['turn-allowance-refused'],
+					releaseRefused: true,
+					state: 'uncertain',
+				});
+				expect(() => releaseReservation(ledger, transport.id, NOW)).toThrow();
+				expect(ledger.uncertainUsd).toBeGreaterThanOrEqual(transport.uncertainUsd);
+			}, 120_000);
+
+			it('an unknown native charge stays unknown on the receipt and every labelled consumer; the library recorder and the dashboard writing 0 fail their leg (A11-F25, A11-F26)', async () => {
+				const { leg, acc, con } = await execute('native-headless', 'nocost');
+				const usage = acc('usage-capture');
+				expect(usage.status, usage.assertion.detail).toBe('passed');
+				expect(usage.usage[0].cost).toEqual({ status: 'unknown', costUsd: null });
+				expect(usage.usage[0].provenance.cost).not.toBe('reported');
+				expect(usage.turns[0].usage).toEqual({ costUsd: null, status: 'unknown' });
+				// Never settled at 0: the reservation stays uncertain.
+				expect(usage.settlement).toMatchObject({ state: 'uncertain', settledUsd: 0 });
+				expect(usage.settlement!.uncertainUsd).toBeGreaterThan(0);
+				expect(usage.lifetime!.cost).toEqual({ status: 'unknown', costUsd: null });
+				expect(verdicts(leg.accountingConsumers)).toEqual([
+					['turn-recorder', 'failed'],
+					['desktop-recording', 'passed'],
+					['stats-readers', 'failed'],
+					['cue-attribution', 'passed'],
+					['context-window', 'passed'],
+					['quota-unavailable', 'passed'],
+				]);
+				// A11-F25: the library recorder writes 0 for an unknown charge.
+				expect(failedIds(con('turn-recorder'))).toEqual(['recorder-cost-label']);
+				expect(con('turn-recorder').observed).toMatchObject({ rows: 1, rowCost: 0 });
+				// A11-F26: the dashboard aggregation sums the unknown row as a priced 0.
+				expect(failedIds(con('stats-readers'))).toEqual(['aggregation-cost-label']);
+				expect(con('stats-readers').observed).toMatchObject({ dashboardCost: 0 });
+				// The desktop ledger, the export and the Cue pipeline keep it unknown.
+				expect(con('desktop-recording').observed).toMatchObject({ costUnknown: true, rows: 1 });
+				expect(outcome(con('stats-readers'), 'export-rows')).toBe('passed');
+				expect(con('cue-attribution').observed).toMatchObject({
+					pipelineRuns: 1,
+					pipelineCost: null,
+				});
+				expect(leg.status).toBe('failed');
+			}, 120_000);
+
+			it('a partial native charge keeps its label and figure through every consumer; with no figure the same two consumers write 0 and fail', async () => {
+				const withFigure = await execute('native-headless', 'partial');
+				const u = withFigure.acc('usage-capture');
+				expect(u.status, u.assertion.detail).toBe('passed');
+				expect(u.usage[0].cost).toEqual({ status: 'partial', costUsd: 0.001 });
+				expect(u.turns[0].usage).toEqual({ costUsd: 0.001, status: 'partial' });
+				// Not exact: the reported part is settled, the rest stays uncertain.
+				expect(u.settlement).toMatchObject({ state: 'uncertain', settledUsd: 0.001 });
+				expect(u.settlement!.uncertainUsd).toBeGreaterThan(0);
+				expect(u.lifetime!.cost).toEqual({ status: 'partial', costUsd: 0.001 });
+				expect(verdicts(withFigure.leg.accountingConsumers)).toEqual(
+					CONSUMERS.map((id) => [id, 'passed'])
+				);
+				const none = await execute('native-headless', 'partialnone');
+				const n = none.acc('usage-capture');
+				expect(n.status, n.assertion.detail).toBe('passed');
+				expect(n.usage[0].cost).toEqual({ status: 'partial', costUsd: null });
+				expect(n.turns[0].usage).toEqual({ costUsd: null, status: 'partial' });
+				expect(n.settlement).toMatchObject({ state: 'uncertain', settledUsd: 0 });
+				expect(failedIds(none.con('turn-recorder'))).toEqual(['recorder-cost-label']);
+				expect(failedIds(none.con('stats-readers'))).toEqual(['aggregation-cost-label']);
+				for (const id of [
+					'desktop-recording',
+					'cue-attribution',
+					'context-window',
+					'quota-unavailable',
+				])
+					expect(none.con(id).status, id).toBe('passed');
+				expect(none.con('cue-attribution').observed).toMatchObject({ pipelineCost: null });
+			}, 120_000);
+
+			it('usage absent: usage capture fails on every usage fact, the turn reads absent (never 0), and no consumer runs', async () => {
+				const { leg, acc } = await execute('native-headless', 'absent');
+				const usage = acc('usage-capture');
+				expect(usage.status).toBe('failed');
+				expect(failedIds(usage)).toEqual([
+					'usage-captured',
+					'cache-buckets',
+					'model-acknowledged',
+					'cost-provenance',
+					'no-zero-substitution',
+				]);
+				expect(usage.usage[0].final).toBe(false);
+				expect(usage.usage[0].buckets).toEqual({
+					input: null,
+					output: null,
+					cacheRead: null,
+					cacheWrite: null,
+					reasoning: null,
+				});
+				expect(usage.turns[0].usage).toEqual({ costUsd: null, status: 'absent' });
+				expect(usage.settlement).toMatchObject({ state: 'uncertain', settledUsd: 0 });
+				for (const l of leg.accountingConsumers) {
+					expect(l.status, l.leg).toBe('not-run');
+					expect(
+						l.reasons.map((x) => x.id),
+						l.leg
+					).toEqual(['usage-capture-not-passed']);
+					expect(l.assertions, l.leg).toEqual([]);
+				}
+				expect(leg.status).toBe('failed');
+			}, 120_000);
+
+			it('cache buckets: an ACP turn without them fails cache-buckets with both unreported; a native one reads them as 0 and passes (A11-F27, flipped by GT1-11-11F3B)', async () => {
+				const viaAcp = await execute('acp-stdio', 'nocache');
+				const a = viaAcp.acc('usage-capture');
+				expect(failedIds(a)).toEqual(['cache-buckets']);
+				expect(a.usage[0].buckets.cacheRead).toBeNull();
+				expect(a.usage[0].buckets.cacheWrite).toBeNull();
+				expect(a.usage[0].cost.status).toBe('partial');
+				const viaNative = await execute('native-headless', 'nocache');
+				const n = viaNative.acc('usage-capture');
+				// A11-F27: the production parser fills the unreported buckets with 0 and the leg cannot tell.
+				expect(n.status, n.assertion.detail).toBe('passed');
+				expect(outcome(n, 'cache-buckets')).toBe('passed');
+				expect(n.usage[0].buckets).toMatchObject({ cacheRead: 0, cacheWrite: 0 });
+				// Only the charge says the usage was incomplete.
+				expect(n.usage[0].cost).toEqual({ status: 'partial', costUsd: 0.001 });
+			}, 120_000);
+
+			it('an ACP child is parent detail: reported completed and included, its own usage frame counted and never added, the lifetime grown by the parent once', async () => {
+				const { leg, acc, con } = await execute('acp-stdio', 'ok');
+				const usage = acc('usage-capture');
+				expect(usage.status, usage.assertion.detail).toBe('passed');
+				expect(usage.usage[0].buckets).toEqual({
+					input: 15,
+					output: 9,
+					cacheRead: 3,
+					cacheWrite: 2,
+					reasoning: 0,
+				});
+				expect(usage.usage[0].cost).toEqual({ status: 'exact', costUsd: 0.001 });
+				const child = acc('child-usage');
+				expect(child.status, child.assertion.detail).toBe('passed');
+				const rec = child.usage[0];
+				expect(rec.children).toEqual([
+					{ providerSessionId: 'f3-child', status: 'completed', includedInParent: true },
+				]);
+				expect(rec.childFrames).toBe(1);
+				// The parent total is the provider's own prompt usage: the child's 4 output tokens are not added.
+				expect(rec.promptUsage).toEqual({ output: 9, cacheRead: 3 });
+				expect(rec.buckets.output).toBe(9);
+				expect(child.lifetime).toEqual({
+					before: { input: 15, output: 9, cacheRead: 3, cacheWrite: 2 },
+					after: { input: 30, output: 18, cacheRead: 6, cacheWrite: 4 },
+					cost: { status: 'exact', costUsd: 0.002 },
+				});
+				expect(child.settlement).toMatchObject({ state: 'settled', settledUsd: 0.001 });
+				// The fault fixtures speak the native shape only; the consumers replay a native stream only.
+				expect(acc('fault-retry').status).toBe('not-evaluated');
+				expect(acc('fault-retry').assertion.owner).toBe(ACP_FAULT_LEGS_OWNER);
+				for (const id of CONSUMERS) {
+					expect(con(id).status, id).toBe('not-evaluated');
+					expect(con(id).assertion.owner, id).toBe(ACP_ACCOUNTING_CONSUMERS_OWNER);
+				}
+				expect(leg.status).toBe('passed');
+				expect(standInRuns().map((r) => r.route)).toEqual(['acp', 'acp', 'acp']);
+			}, 120_000);
+
+			it('an ACP turn whose child never reports fails child-reported; an unknown ACP charge stays unknown on both legs and the lifetime', async () => {
+				const missing = await execute('acp-stdio', 'nochild');
+				expect(missing.acc('child-usage').status).toBe('failed');
+				expect(failedIds(missing.acc('child-usage'))).toEqual(['child-reported']);
+				expect(missing.acc('child-usage').usage[0].childFrames).toBe(0);
+				const unknown = await execute('acp-stdio', 'nocost');
+				for (const id of ['usage-capture', 'child-usage']) {
+					const l = unknown.acc(id);
+					expect(l.status, `${id}: ${l.assertion.detail}`).toBe('passed');
+					expect(l.usage[0].cost, id).toEqual({ status: 'unknown', costUsd: null });
+					expect(l.turns[0].usage, id).toEqual({ costUsd: null, status: 'unknown' });
+					expect(l.settlement, id).toMatchObject({ state: 'uncertain', settledUsd: 0 });
+				}
+				expect(unknown.acc('child-usage').lifetime!.cost).toEqual({
+					status: 'unknown',
+					costUsd: null,
+				});
+			}, 120_000);
+
+			it('flags off: the accounting legs are not-run with nothing spawned or reserved, and the consumers are not-run without the consumer flag', async () => {
+				const off = await execute('native-headless', 'ok', ALL_CAPS);
+				expect(off.leg.status).toBe('passed');
+				for (const l of off.leg.accountingLegs) {
+					expect(l.status, l.leg).toBe('not-run');
+					expect(
+						l.reasons.map((x) => x.id),
+						l.leg
+					).toEqual(['accounting-legs-unimplemented']);
+					expect(l.spawned + l.fixtureSpawned + l.paidRequests, l.leg).toBe(0);
+					expect(l.reservationId, l.leg).toBeNull();
+				}
+				for (const l of off.leg.accountingConsumers) {
+					expect(l.status, l.leg).toBe('not-run');
+					expect(
+						l.reasons.map((x) => x.id),
+						l.leg
+					).toEqual(['accounting-consumers-unimplemented']);
+				}
+				expect(off.ledger.reservations.map((x) => x.leg)).toEqual([null]);
+				expect(standInRuns()).toHaveLength(1);
+				const legsOnly = await execute('native-headless', 'ok', {
+					...ALL_CAPS,
+					accountingLegs: true,
+				});
+				expect(legsOnly.acc('usage-capture').status).toBe('passed');
+				for (const l of legsOnly.leg.accountingConsumers) {
+					expect(l.status, l.leg).toBe('not-run');
+					expect(
+						l.reasons.map((x) => x.id),
+						l.leg
+					).toEqual(['accounting-consumers-unimplemented']);
+					expect(l.assertions, l.leg).toEqual([]);
+				}
+			}, 120_000);
+
+			it('consumerCostLabelOk: an exact charge only as its figure, an unknown one only as no figure (never 0), a partial one as no figure or its own', () => {
+				expect(consumerCostLabelOk({ status: 'exact', costUsd: 0.001 }, 0.001)).toBe(true);
+				expect(consumerCostLabelOk({ status: 'exact', costUsd: 0.001 }, 0.002)).toBe(false);
+				expect(consumerCostLabelOk({ status: 'exact', costUsd: 0.001 }, null)).toBe(false);
+				expect(consumerCostLabelOk({ status: 'unknown', costUsd: null }, null)).toBe(true);
+				expect(consumerCostLabelOk({ status: 'unknown', costUsd: null }, undefined)).toBe(true);
+				expect(consumerCostLabelOk({ status: 'unknown', costUsd: null }, 0)).toBe(false);
+				expect(consumerCostLabelOk({ status: 'partial', costUsd: null }, 0)).toBe(false);
+				expect(consumerCostLabelOk({ status: 'partial', costUsd: null }, null)).toBe(true);
+				expect(consumerCostLabelOk({ status: 'partial', costUsd: 0.001 }, 0.001)).toBe(true);
+				expect(consumerCostLabelOk({ status: 'partial', costUsd: 0.001 }, null)).toBe(true);
+				expect(consumerCostLabelOk({ status: 'partial', costUsd: 0.001 }, 0)).toBe(false);
+				expect(consumerCostLabelOk({ status: 'exact', costUsd: 0.001 }, Number.NaN)).toBe(false);
+			});
+		}
+	);
 });
 
 /**
