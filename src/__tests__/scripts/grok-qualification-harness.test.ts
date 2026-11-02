@@ -168,7 +168,11 @@ describe('GT1-11-09 qualification harness', () => {
 					expect(r.id).toMatch(/^[a-z0-9:-]+$/);
 					expect(r.kind).toBeTruthy();
 				}
-				expect(c.reasons.map((r) => r.id)).toContain('case-executor-unimplemented');
+				// The paid executor (GT1-11-11P1) covers local Grok-only paid legs; the rest stay unimplemented.
+				const uncovered =
+					c.classes.includes('discovery') || c.target === 'ssh' || c.family === 'E11';
+				if (uncovered) expect(c.reasons.map((r) => r.id)).toContain('case-executor-unimplemented');
+				else expect(c.reasons.map((r) => r.id)).not.toContain('case-executor-unimplemented');
 				expect([c.spawned, c.paidRequests, c.networkContacts]).toEqual([0, 0, 0]);
 				expect(c.budget.reservations).toEqual([]);
 			}
@@ -526,7 +530,8 @@ describe('GT1-11-09 qualification harness', () => {
 				runState: RUN_STATE,
 				config: full(),
 				selectedCases: ['E02:acp-stdio:local', 'E03:acp-stdio:local', 'E07:native-headless:ssh'],
-				capabilities: ALL_CAPS,
+				// Admission only: the paid executor (GT1-11-11P1) is off so an admitted case is not run.
+				capabilities: { ...ALL_CAPS, caseExecutor: false },
 				now: clock,
 				runId: runId(),
 				operatorHome: OPERATOR_HOME,
@@ -1193,7 +1198,7 @@ describe('GT1-11-09 qualification harness', () => {
 		});
 
 		it('the default no-config run spawns nothing and records every E02 offline leg as refused', async () => {
-			expect(HARNESS_CAPABILITIES).toMatchObject({ offlineExecutor: true, caseExecutor: false });
+			expect(HARNESS_CAPABILITIES).toMatchObject({ offlineExecutor: true, caseExecutor: true });
 			const { receipt } = await runQualification({
 				workspace: WORKSPACE,
 				runState: RUN_STATE,
@@ -1202,13 +1207,18 @@ describe('GT1-11-09 qualification harness', () => {
 			});
 			expect(receipt.totals).toMatchObject({ spawned: 0, paidRequests: 0, networkContacts: 0 });
 			const owners: Record<string, string> = {
-				E02: 'GT1-11-11A',
-				E07: 'GT1-11-11A/GT1-11-11',
-				E03: 'GT1-11-11',
+				'E02:local': 'GT1-11-11A',
+				'E02:ssh': 'GT1-11-11A',
+				'E07:local': 'GT1-11-11A',
+				'E07:ssh': 'GT1-11-11A/unassigned-ssh-paid-executor',
+				'E03:ssh': 'unassigned-ssh-paid-executor',
+				'E11:local': 'GT1-11-13',
 			};
 			for (const c of receipt.cases) {
 				const executor = c.reasons.find((r) => r.id === 'case-executor-unimplemented');
-				if (owners[c.family]) expect(executor?.owner, c.caseId).toBe(owners[c.family]);
+				const key = `${c.family}:${c.target}`;
+				if (owners[key]) expect(executor?.owner, c.caseId).toBe(owners[key]);
+				if (key === 'E03:local') expect(executor, c.caseId).toBeUndefined();
 				expect(executor?.owner).not.toBe('GT1-11-10');
 				if (c.family !== 'E02') {
 					expect(c.offlineLeg).toBeNull();

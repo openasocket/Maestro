@@ -7,10 +7,21 @@
  * case and writes one structured receipt per run. It never reads a credential
  * and never contacts an endpoint. A case is only ever handed to an executor
  * after every admission input is present AND every harness capability it needs
- * is implemented; the discovery/paid executor is not yet (GT1-11-11 /
- * GT1-11-11A), so those legs record `not-run` with machine-readable reasons.
- * Default execution, with no configuration, therefore makes zero spawns, zero
- * paid requests and zero network contacts.
+ * is implemented; the discovery executor is not yet (GT1-11-11A) and neither is
+ * an SSH or cross-provider paid leg, so those record `not-run` with
+ * machine-readable reasons. Default execution, with no configuration,
+ * therefore makes zero spawns, zero paid requests and zero network contacts.
+ *
+ * Paid execution (GT1-11-11P1): an admitted local Grok-only paid case is
+ * handed to `executePaidCase`, which re-checks admission and preflight,
+ * re-hashes the pinned binary before every spawn, reserves on the shared
+ * ledger before any dispatch, launches only the planned isolated environment
+ * with the selected credential reference resolved at spawn, counts every user
+ * turn and billable call before it is sent, and settles with the observed
+ * usage or keeps the charge uncertain (an uncertain effect is never retried).
+ * Each child is owned by the case lifetime under the reservation deadline;
+ * each leg records the synthetic fixture's sha256 (`paid-fixtures.ts`) and the
+ * assertions it evaluated with their outcomes.
  *
  * Offline inspection (GT1-11-10A): the offline-inspection leg of a case (E02)
  * is admitted and recorded as its own receipt entry, independently of
@@ -71,6 +82,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 
 import { canonicalJson } from '../../src/shared/canonicalJson';
 import {
@@ -92,7 +104,13 @@ import {
 } from '../../src/shared/modelPricing';
 import { redactSecrets } from '../../src/shared/redactSecrets';
 import { containsCredentialToken } from '../../src/shared/agent-run/redact';
-import { isValidSecretName } from '../../src/shared/serverSecrets';
+import { isValidSecretName, lookupSecret } from '../../src/shared/serverSecrets';
+import { getAgentDefinition } from '../../src/shared/maestro-lib/providers/definitions';
+import { GrokOutputParser } from '../../src/shared/maestro-lib/parsers/grok-output-parser';
+import { GrokAcpClient } from '../../src/shared/maestro-lib/grok/acp-client';
+import { GrokAcpTransportError } from '../../src/shared/maestro-lib/grok/acp-protocol';
+import { GROK_ACP_ARGS } from '../../src/shared/maestro-lib/grok/route';
+import { PAID_FIXTURES, type PaidFixture } from './paid-fixtures';
 import { isPathAtOrUnderRoot } from '../../src/shared/worktreePaths';
 import { stopProcess } from '../../src/shared/maestro-lib/control/termination';
 import { getAgentCapabilities } from '../../src/shared/maestro-lib/providers/capabilities';
@@ -115,8 +133,12 @@ export const HARNESS_CAPABILITIES = {
 	atomicSpendAdmission: true,
 	/** The bounded offline-inspection executor: version/help of the pinned binary (GT1-11-10A). */
 	offlineExecutor: true,
-	/** A discovery or paid executor bound to the admitted tuple (GT1-11-11 / GT1-11-11A). */
-	caseExecutor: false,
+	/**
+	 * The paid executor bound to an admitted tuple (GT1-11-11P1). It covers the
+	 * native-headless and ACP legs of a local Grok-only paid case; discovery
+	 * (GT1-11-11A), SSH and cross-provider legs stay `case-executor-unimplemented`.
+	 */
+	caseExecutor: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
 
@@ -228,7 +250,8 @@ export interface AdmissionReason {
 		| 'pricing'
 		| 'isolation-preflight'
 		| 'spend-admission'
-		| 'offline-execution';
+		| 'offline-execution'
+		| 'paid-execution';
 	detail: string;
 	owner?: string;
 }
@@ -277,6 +300,8 @@ export interface CaseReceipt {
 	 * spawns. Null when the case has no offline-inspection class.
 	 */
 	offlineLeg: OfflineLegReceipt | null;
+	/** Paid legs the executor ran or refused (one per account); empty when the case was not admitted. */
+	paidLegs: PaidLegReceipt[];
 }
 
 /** One credential-free offline probe of the pinned binary; output is kept as digests only. */
@@ -1956,6 +1981,39 @@ export function releaseReservation(
 	return r;
 }
 
+/** No playbook task owns an SSH paid executor yet; a later IMPLEMENT takes this owner over. */
+export const SSH_PAID_EXECUTOR_OWNER = 'unassigned-ssh-paid-executor';
+
+/**
+ * The legs of a case no bound executor covers, each with its owner. The paid
+ * executor covers local Grok-only paid legs over either route; nothing else.
+ */
+export function paidExecutorGaps(
+	c: QualificationCase,
+	capabilities: HarnessCapabilities
+): Array<{ detail: string; owner: string }> {
+	const gaps: Array<{ detail: string; owner: string }> = [];
+	if (c.classes.includes('discovery'))
+		gaps.push({
+			detail: 'no discovery executor is bound to an admitted tuple yet',
+			owner: 'GT1-11-11A',
+		});
+	if (c.classes.includes('paid')) {
+		if (!capabilities.caseExecutor)
+			gaps.push({ detail: 'no paid executor is bound to an admitted tuple', owner: 'GT1-11-11P1' });
+		else {
+			if (c.target !== 'local')
+				gaps.push({
+					detail: 'the paid executor launches local legs only',
+					owner: SSH_PAID_EXECUTOR_OWNER,
+				});
+			if (c.providers.some((p) => p !== 'grok'))
+				gaps.push({ detail: 'the paid executor runs Grok legs only', owner: 'GT1-11-13' });
+		}
+	}
+	return gaps;
+}
+
 /** Decide one case. Every applicable missing input is listed; nothing short-circuits. */
 export function admitCase(
 	c: QualificationCase,
@@ -2074,16 +2132,16 @@ export function admitCase(
 				owner: 'GT1-11-08C',
 			});
 	}
-	// The offline-inspection leg has its own executor (runOfflineLeg); this one is discovery/paid.
-	if (!capabilities.caseExecutor)
+	// The offline-inspection leg has its own executor (runOfflineLeg). The paid
+	// executor (GT1-11-11P1) covers local Grok-only legs; discovery is GT1-11-11A's,
+	// an SSH paid leg has no executor yet, and a cross-provider leg is GT1-11-13's.
+	const gaps = paidExecutorGaps(c, capabilities);
+	if (gaps.length)
 		add({
 			id: 'case-executor-unimplemented',
 			kind: 'harness-capability',
-			detail: 'no discovery or paid executor is bound to an admitted tuple yet',
-			owner: [
-				...(c.classes.includes('discovery') ? ['GT1-11-11A'] : []),
-				...(paid ? ['GT1-11-11'] : []),
-			].join('/'),
+			detail: gaps.map((g) => g.detail).join('; '),
+			owner: gaps.map((g) => g.owner).join('/'),
 		});
 	return reasons;
 }
@@ -2210,7 +2268,9 @@ function runOfflineProbe(
 	cwd: string,
 	timeoutMs: number,
 	graceMs: number,
-	lifetime: CaseLifetime
+	lifetime: CaseLifetime,
+	/** Every stdout chunk, in order, for a caller that parses the stream (the paid native turn). */
+	onStdout?: (chunk: Buffer) => void
 ): Promise<{ result: OfflineProbeResult; stdoutHead: string }> {
 	return new Promise((resolve) => {
 		const started = Date.now();
@@ -2261,6 +2321,7 @@ function runOfflineProbe(
 			stop();
 		}, timeoutMs);
 		child.stdout?.on('data', (d: Buffer) => {
+			onStdout?.(d);
 			if (out.push(d)) stop();
 		});
 		child.stderr?.on('data', (d: Buffer) => {
@@ -2434,6 +2495,874 @@ export async function runOfflineLeg(
 	return receipt;
 }
 
+// ---------------------------------------------------------------------------
+// Paid-case executor (GT1-11-11P1)
+// ---------------------------------------------------------------------------
+
+/** Reply bytes of one turn kept in memory for the token check; never written anywhere. */
+const PAID_REPLY_BYTES = 64 * 1024;
+/** Spawn failures that prove the child never ran, so nothing reached the provider. */
+const NEVER_RAN_SPAWN_ERRORS = new Set(['ENOENT', 'EACCES', 'ENOEXEC', 'EPERM', 'spawn-threw']);
+
+const paidReason = (id: string, detail: string, owner = 'GT1-11-11P1'): AdmissionReason => ({
+	id,
+	kind: 'paid-execution',
+	detail,
+	owner,
+});
+
+/** How a turn's charge was observed: only `exact` settles; everything else stays uncertain. */
+export type PaidCostStatus = 'exact' | 'partial' | 'unknown' | 'absent';
+
+export interface PaidTurnResult {
+	turn: number;
+	/** argv with the prompt replaced by its fixture reference; the prompt is covered by the fixture digest. */
+	argv: string[];
+	exitCode: number | null;
+	signal: string | null;
+	durationMs: number;
+	timedOut: boolean;
+	/** A spawn or transport failure (`transport:<reason>` on ACP); null when the turn ran to its end. */
+	spawnError: string | null;
+	stdout: { sha256: string; bytes: number; truncated: boolean };
+	stderr: { sha256: string; bytes: number; truncated: boolean };
+	sessionId: string | null;
+	terminal: 'success' | 'failure' | 'none';
+	/** The reply is kept as a digest; only whether the expected token appeared is recorded. */
+	reply: { sha256: string; bytes: number; tokenSeen: boolean };
+	/** The model the turn reported (native usage) or the session acknowledged (ACP). */
+	model: string | null;
+	usage: { costUsd: number | null; status: PaidCostStatus };
+	/** Billable calls drawn from the reservation before the turn was sent. */
+	callsRecorded: Record<BillableCallKind, number>;
+}
+
+export interface PaidAssertionOutcome {
+	id: string;
+	outcome: 'passed' | 'failed' | 'not-evaluated';
+	detail: string;
+	owner?: string;
+}
+
+export interface PaidLegReceipt {
+	/** `account-A` / `account-B` for a two-account case, else `main`. */
+	leg: string;
+	account: 'A' | 'B';
+	route: Route;
+	/** not-run: refused before spawn; failed: a turn, assertion or check failed; passed: every evaluated assertion passed. */
+	status: 'not-run' | 'passed' | 'failed';
+	reasons: AdmissionReason[];
+	reservationId: string | null;
+	fixture: { schema: string; family: string; sha256: string } | null;
+	binary: { sha256Pinned: string | null; sha256AtSpawn: string | null; sha256After: string | null };
+	/** Names only (never values) of the validated child environment. */
+	launch: { credentialMode: CredentialMode; keys: string[] } | null;
+	turns: PaidTurnResult[];
+	assertions: PaidAssertionOutcome[];
+	settlement: {
+		state: SpendReservation['state'];
+		settledUsd: number;
+		uncertainUsd: number;
+		reason: string;
+	} | null;
+	spawned: number;
+	/** Turns handed to a running child; each is at least one provider request. */
+	paidRequests: number;
+}
+
+export interface PaidExecutionContext {
+	workspace: string;
+	operatorHome: string;
+	ledger: BudgetLedger;
+	lifetime: CaseLifetime;
+	problems: ConfigProblem[];
+	capabilities: HarnessCapabilities;
+	now: () => Date;
+	/** Per-turn bound; clamped to the case ceiling and the reservation deadline. */
+	turnTimeoutMs?: number;
+	/** Resolve a secret-name credential reference at spawn; defaults to `lookupSecret`. */
+	resolveSecret?: (name: string) => string | null;
+}
+
+/** sha256 of the canonical fixture entry a leg runs. */
+export function paidFixtureDigest(fixture: PaidFixture): string {
+	return createHash('sha256').update(canonicalJson(fixture)).digest('hex');
+}
+
+const emptyCalls = (): Record<BillableCallKind, number> => ({
+	'model-round': 0,
+	child: 0,
+	retry: 0,
+	'side-model': 0,
+	compaction: 0,
+});
+
+/**
+ * The billable calls one user turn may make, by kind: the declared per-turn
+ * bounds, or (a covering cap with no bounds) an even share of the call
+ * allowance as model rounds. All of them are drawn before the turn is sent,
+ * so a child can never make a call the ledger did not count.
+ */
+export function paidCallsPerTurn(
+	config: QualificationConfig,
+	reservation: Pick<SpendReservation, 'callAllowance' | 'turnAllowance'>
+): Record<BillableCallKind, number> {
+	const calls = emptyCalls();
+	const bounds = config.spendBounds?.perTurnCalls;
+	if (bounds)
+		for (const kind of Object.keys(CALL_KINDS) as BillableCallKind[])
+			calls[kind] = bounds[CALL_KINDS[kind]];
+	else
+		calls['model-round'] = Math.max(
+			1,
+			Math.floor(reservation.callAllowance / Math.max(1, reservation.turnAllowance))
+		);
+	return calls;
+}
+
+/** Bounded reply text plus a digest of all of it; the text never leaves memory. */
+function replyCollector(expect: string) {
+	const hash = createHash('sha256');
+	let bytes = 0;
+	let kept = '';
+	return {
+		push(text: string) {
+			const b = Buffer.from(text, 'utf8');
+			hash.update(b);
+			bytes += b.length;
+			if (kept.length < PAID_REPLY_BYTES) kept += text.slice(0, PAID_REPLY_BYTES - kept.length);
+		},
+		result: () => ({ sha256: hash.digest('hex'), bytes, tokenSeen: kept.includes(expect) }),
+	};
+}
+
+/** Usage facts of a native terminal event, read loosely: the parser owns validation. */
+function nativeUsageOf(usage: unknown): {
+	costUsd: number | null;
+	status: PaidCostStatus;
+	model: string | null;
+} {
+	const u = (usage ?? {}) as {
+		costUsd?: unknown;
+		model?: unknown;
+		accounting?: { cost?: { status?: unknown } };
+	};
+	const raw = u.accounting?.cost?.status;
+	const status: PaidCostStatus = raw === 'exact' || raw === 'partial' ? raw : 'unknown';
+	const costUsd = typeof u.costUsd === 'number' && Number.isFinite(u.costUsd) ? u.costUsd : null;
+	return {
+		costUsd,
+		status: status === 'exact' && costUsd === null ? 'partial' : status,
+		model: typeof u.model === 'string' ? u.model : null,
+	};
+}
+
+/** Evaluate a fixture's assertions against what the leg observed. */
+export function evaluatePaidAssertions(
+	fixture: PaidFixture,
+	observed: {
+		route: Route;
+		turns: PaidTurnResult[];
+		model: string;
+		sha256Pinned: string | null;
+		sha256After: string | null;
+	}
+): PaidAssertionOutcome[] {
+	const { turns } = observed;
+	const complete = turns.length === fixture.turns.length;
+	const all = (pred: (t: PaidTurnResult) => boolean) => complete && turns.every(pred);
+	const out: PaidAssertionOutcome[] = [];
+	const verdict = (id: string, ok: boolean, detail: string) =>
+		out.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+	const ran = `${turns.length}/${fixture.turns.length} turns`;
+	for (const id of fixture.assertions) {
+		switch (id) {
+			case 'exit-clean':
+				verdict(
+					id,
+					all(
+						(t) =>
+							!t.timedOut &&
+							!t.spawnError &&
+							!t.stdout.truncated &&
+							!t.stderr.truncated &&
+							(observed.route === 'acp-stdio' || t.exitCode === 0)
+					),
+					ran
+				);
+				break;
+			case 'terminal-success':
+				verdict(
+					id,
+					all((t) => t.terminal === 'success'),
+					ran
+				);
+				break;
+			case 'session-id':
+				verdict(
+					id,
+					all((t) => Boolean(t.sessionId)),
+					ran
+				);
+				break;
+			case 'session-continuity':
+				verdict(
+					id,
+					all((t) => Boolean(t.sessionId) && t.sessionId === turns[0].sessionId) &&
+						turns.length > 1,
+					ran
+				);
+				break;
+			case 'reply-token':
+				verdict(
+					id,
+					all((t) => t.reply.tokenSeen),
+					ran
+				);
+				break;
+			case 'model-acknowledged':
+				verdict(
+					id,
+					all((t) => t.model === observed.model),
+					observed.model
+				);
+				break;
+			case 'usage-reported':
+				if (observed.route === 'acp-stdio')
+					out.push({
+						id,
+						outcome: 'not-evaluated',
+						detail: 'the paid executor reads no ACP usage; the charge stays uncertain',
+						owner: 'GT1-11-11F',
+					});
+				else
+					verdict(
+						id,
+						all((t) => t.usage.status !== 'absent'),
+						ran
+					);
+				break;
+			case 'binary-unchanged':
+				verdict(
+					id,
+					Boolean(observed.sha256Pinned) && observed.sha256After === observed.sha256Pinned,
+					'sha256 after the leg'
+				);
+				break;
+		}
+	}
+	for (const u of fixture.unevaluated)
+		out.push({ id: u.id, outcome: 'not-evaluated', detail: u.detail, owner: u.owner });
+	return out;
+}
+
+/** A bounded wait that never keeps the process alive on its own. */
+const delay = (ms: number) =>
+	new Promise<void>((resolve) => {
+		setTimeout(resolve, ms).unref();
+	});
+
+/**
+ * One paid leg (one account) of an admitted case. Nothing spawns until the
+ * binary re-hashes to the pin, the credentialed launch validates and the
+ * reservation is held; every turn is counted before it is sent and the leg
+ * always settles or releases what it reserved.
+ */
+async function executePaidLeg(
+	c: QualificationCase,
+	config: QualificationConfig,
+	ctx: PaidExecutionContext,
+	account: 'A' | 'B',
+	legName: string | null,
+	fixture: PaidFixture,
+	plan: ReservationPlan
+): Promise<PaidLegReceipt> {
+	const { ledger } = ctx;
+	const receipt: PaidLegReceipt = {
+		leg: legName ?? 'main',
+		account,
+		route: c.route,
+		status: 'not-run',
+		reasons: [],
+		reservationId: null,
+		fixture: { schema: fixture.schema, family: fixture.family, sha256: paidFixtureDigest(fixture) },
+		binary: { sha256Pinned: config.binary.sha256, sha256AtSpawn: null, sha256After: null },
+		launch: null,
+		turns: [],
+		assertions: [],
+		settlement: null,
+		spawned: 0,
+		paidRequests: 0,
+	};
+	const refuse = (id: string, detail: string) => {
+		receipt.reasons.push(paidReason(id, detail));
+		return receipt;
+	};
+
+	// Never a retry: a leg whose earlier reservation left an effect uncertain, or already ran, refuses.
+	const prior = ledger.reservations.filter(
+		(r) => r.caseId === c.caseId && r.leg === legName && r.state !== 'released'
+	);
+	if (prior.some((r) => r.state === 'uncertain' || r.uncertainEffect))
+		return refuse('uncertain-prior-effect', receipt.leg);
+	if (prior.length) return refuse('leg-already-run', receipt.leg);
+
+	// The immutable pinned binary, re-hashed before anything is reserved or spawned.
+	const file = path.resolve(ctx.workspace, config.binary.path ?? '');
+	const atSpawn = inspectExecutable(file);
+	receipt.binary.sha256AtSpawn = atSpawn.sha256;
+	if (!config.binary.path || !atSpawn.regular) return refuse('binary-unreadable', 'binary.path');
+	if (atSpawn.sha256 !== config.binary.sha256)
+		return refuse('binary-hash-mismatch-at-spawn', 'binary.sha256');
+	if (!atSpawn.readOnly) return refuse('binary-mutable', 'binary.path');
+
+	// The planned isolated launch with the selected account's credential reference only.
+	const launch = planIsolatedLaunch(
+		c,
+		config,
+		account,
+		'credentialed',
+		ctx.workspace,
+		ctx.operatorHome
+	);
+	if (!launch || launch.credentialMode === 'none')
+		return refuse('paid-launch-unplannable', account);
+	const env: Record<string, string> = { ...launch.env };
+	const ref = config.credentialReferences.find(
+		(r) => r.provider === 'grok' && r.account === account
+	);
+	if (launch.credentialMode === 'secret-name' && ref?.kind === 'secret-name') {
+		const resolve =
+			ctx.resolveSecret ??
+			((name: string) => {
+				const found = lookupSecret(name);
+				return found.status === 'found' ? found.value : null;
+			});
+		const value = resolve(ref.name);
+		if (!value) return refuse('credential-unresolvable', ref.name);
+		env.XAI_API_KEY = value;
+	} else if (launch.credentialMode === 'file') {
+		const authPath = launch.expectation.authPath;
+		// Existence only: the harness never reads a credential file.
+		if (!authPath || !fs.existsSync(authPath) || !fs.statSync(authPath).isFile())
+			return refuse('credential-file-absent', 'GROK_AUTH_PATH');
+	}
+	const report = validateLaunchEnvironment(env, launch.expectation);
+	if (report.reasons.length) {
+		receipt.reasons.push(...report.reasons);
+		return receipt;
+	}
+	receipt.launch = { credentialMode: launch.credentialMode, keys: report.keys };
+	const cwd = launch.expectation.home;
+	if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
+		return refuse('paid-home-absent', 'isolation.boundary.actualHome');
+	fs.mkdirSync(env.TMPDIR, { recursive: true, mode: 0o700 });
+
+	// Reserve before any dispatch.
+	const primary = config.allowedModels[0];
+	const side = config.spendBounds?.sideModels?.[0] ?? primary;
+	const models = [...new Set([primary, ...(config.spendBounds?.sideModels ?? [])])];
+	const reserved = reserveSpend(
+		ledger,
+		config,
+		{
+			caseId: c.caseId,
+			leg: legName,
+			provider: 'grok',
+			account,
+			endpoint: config.allowedEndpoints[0] ?? '',
+			models,
+			target: c.target,
+			plan,
+		},
+		ctx.now()
+	);
+	if (!reserved.ok) {
+		receipt.reasons.push(...reserved.reasons);
+		return receipt;
+	}
+	const reservation = reserved.reservation;
+	receipt.reservationId = reservation.id;
+
+	const real = fs.realpathSync(file);
+	const graceMs = Math.max(1, Math.min(config.limits.cleanupSeconds, 5)) * 1000;
+	const ceilingMs = HARNESS_CEILINGS.caseSeconds * 1000;
+	const turnMs = () =>
+		Math.min(
+			positiveFinite(ctx.turnTimeoutMs) ? ctx.turnTimeoutMs : ceilingMs,
+			ceilingMs,
+			Date.parse(reservation.deadlineAt) - ctx.now().getTime()
+		);
+	let uncertainWhy: string | null = null;
+	let callsDrawn = emptyCalls();
+
+	/** Count the turn and every call it may make before it is sent; false refuses it unsent. */
+	const admitTurn = (n: number): boolean => {
+		if (turnMs() <= 0) {
+			receipt.reasons.push(paidReason('reservation-deadline-passed', `turn ${n}`));
+			return false;
+		}
+		if (inspectExecutable(file).sha256 !== config.binary.sha256) {
+			receipt.reasons.push(paidReason('binary-hash-mismatch-at-spawn', `turn ${n}`));
+			return false;
+		}
+		const perTurn = paidCallsPerTurn(config, reservation);
+		const needed = Object.values(perTurn).reduce((a, b) => a + b, 0);
+		if (
+			reservation.turnsUsed >= reservation.turnAllowance ||
+			ledger.turns >= ledger.limitTurns ||
+			reservation.callsUsed + needed > reservation.callAllowance ||
+			ledger.calls + needed > ledger.limitCalls
+		) {
+			receipt.reasons.push(paidReason('turn-allowance-exhausted', `turn ${n}`));
+			return false;
+		}
+		try {
+			recordUserTurn(ledger, reservation.id, ctx.now());
+			for (const kind of Object.keys(perTurn) as BillableCallKind[])
+				for (let i = 0; i < perTurn[kind]; i++)
+					recordBillableCall(
+						ledger,
+						reservation.id,
+						{ kind, model: kind === 'model-round' || kind === 'retry' ? primary : side },
+						ctx.now()
+					);
+		} catch (e) {
+			receipt.reasons.push(paidReason('turn-allowance-refused', (e as Error).message));
+			return false;
+		}
+		callsDrawn = perTurn;
+		return true;
+	};
+
+	if (c.route === 'native-headless') {
+		const def = getAgentDefinition('grok');
+		for (let i = 0; i < fixture.turns.length; i++) {
+			const n = i + 1;
+			const t = fixture.turns[i];
+			const resumeId = i > 0 ? receipt.turns[0]?.sessionId : null;
+			if (i > 0 && !resumeId) {
+				receipt.reasons.push(paidReason('session-id-missing', `turn ${n}`));
+				break;
+			}
+			const argvFor = (prompt: string) => [
+				...(def?.jsonOutputArgs ?? []),
+				...(def?.readOnlyArgs ?? []),
+				...(def?.modelArgs?.(primary) ?? []),
+				...(def?.workingDirArgs?.(cwd) ?? []),
+				...(resumeId ? (def?.resumeArgs?.(resumeId) ?? []) : []),
+				...(def?.promptArgs?.(prompt) ?? []),
+			];
+			if (!admitTurn(n)) break;
+			const parser = new GrokOutputParser();
+			const reply = replyCollector(t.expect);
+			const decoder = new StringDecoder('utf8');
+			let pending = '';
+			// One object, so the closure's writes are not narrowed away at the reads below.
+			const seen: Pick<PaidTurnResult, 'sessionId' | 'terminal' | 'usage' | 'model'> = {
+				sessionId: null,
+				terminal: 'none',
+				usage: { costUsd: null, status: 'absent' },
+				model: null,
+			};
+			const onLine = (line: string) => {
+				const ev = parser.parseJsonLine(line);
+				if (!ev) return;
+				if (ev.sessionId && !seen.sessionId) seen.sessionId = ev.sessionId;
+				if (ev.type === 'text' && !ev.isReasoning && ev.text) reply.push(ev.text);
+				if ((ev.type === 'result' || ev.type === 'error') && ev.terminal) {
+					seen.terminal = ev.type === 'result' ? 'success' : 'failure';
+					if (ev.usage) {
+						const u = nativeUsageOf(ev.usage);
+						seen.usage = { costUsd: u.costUsd, status: u.status };
+						seen.model = u.model;
+					}
+				}
+			};
+			const { result } = await runOfflineProbe(
+				`turn-${n}`,
+				real,
+				argvFor(t.prompt),
+				env,
+				cwd,
+				turnMs(),
+				graceMs,
+				ctx.lifetime,
+				(d) => {
+					pending += decoder.write(d);
+					let k: number;
+					while ((k = pending.indexOf('\n')) >= 0) {
+						onLine(pending.slice(0, k));
+						pending = pending.slice(k + 1);
+					}
+				}
+			);
+			pending += decoder.end();
+			if (pending.trim()) onLine(pending);
+			receipt.spawned++;
+			const neverRan = result.spawnError !== null && NEVER_RAN_SPAWN_ERRORS.has(result.spawnError);
+			if (!neverRan) receipt.paidRequests++;
+			receipt.turns.push({
+				turn: n,
+				argv: argvFor(`<fixture:${fixture.family}:turn-${n}>`),
+				exitCode: result.exitCode,
+				signal: result.signal,
+				durationMs: result.durationMs,
+				timedOut: result.timedOut,
+				spawnError: result.spawnError,
+				stdout: result.stdout,
+				stderr: result.stderr,
+				...seen,
+				reply: reply.result(),
+				callsRecorded: callsDrawn,
+			});
+			if (neverRan) {
+				receipt.reasons.push(paidReason('paid-spawn-failed', result.spawnError ?? ''));
+				break;
+			}
+			if (result.timedOut) uncertainWhy = 'turn-timeout';
+			else if (result.spawnError) uncertainWhy = 'turn-spawn-error-after-start';
+			else if (result.stdout.truncated || result.stderr.truncated)
+				uncertainWhy = 'turn-output-unbounded';
+			if (uncertainWhy) {
+				receipt.reasons.push(paidReason(uncertainWhy, `turn ${n}`));
+				break;
+			}
+			if (result.exitCode !== 0 || seen.terminal !== 'success') {
+				receipt.reasons.push(paidReason('turn-failed', `turn ${n}`));
+				break;
+			}
+		}
+	} else {
+		const run = await runAcpPaidTurns({
+			file: real,
+			env,
+			cwd,
+			model: primary,
+			fixture,
+			graceMs,
+			lifetime: ctx.lifetime,
+			turnMs,
+			admitTurn,
+			calls: () => callsDrawn,
+		});
+		receipt.turns = run.turns;
+		receipt.spawned = run.spawned;
+		receipt.paidRequests = run.sent;
+		receipt.reasons.push(...run.reasons);
+		uncertainWhy = run.uncertainWhy;
+	}
+
+	// Settle or release exactly once: an unknown or partial charge stays uncertain, never zero.
+	const sentTurns = receipt.paidRequests;
+	let settled: SpendReservation;
+	if (reservation.turnsUsed === 0 && reservation.callsUsed === 0 && !reservation.uncertainEffect)
+		settled = releaseReservation(ledger, reservation.id, ctx.now());
+	else if (sentTurns === 0)
+		settled = settleReservation(
+			ledger,
+			reservation.id,
+			{ kind: 'settled', actualUsd: 0, reason: 'counted-but-never-sent' },
+			ctx.now()
+		);
+	else {
+		const known = receipt.turns.map((t) => t.usage.costUsd).filter((n): n is number => n !== null);
+		const partialUsd = known.length ? known.reduce((a, b) => a + b, 0) : undefined;
+		const exact =
+			!uncertainWhy &&
+			receipt.turns.length === sentTurns &&
+			receipt.turns.every((t) => t.usage.status === 'exact' && t.usage.costUsd !== null);
+		if (exact)
+			settled = settleReservation(
+				ledger,
+				reservation.id,
+				{ kind: 'settled', actualUsd: partialUsd ?? 0, reason: 'observed-exact-usage' },
+				ctx.now()
+			);
+		else {
+			markUncertainEffect(ledger, reservation.id);
+			settled = settleReservation(
+				ledger,
+				reservation.id,
+				{
+					kind: 'uncertain',
+					...(partialUsd !== undefined ? { partialUsd } : {}),
+					reason: uncertainWhy ?? 'charge-unknown',
+				},
+				ctx.now()
+			);
+		}
+	}
+	receipt.settlement = {
+		state: settled.state,
+		settledUsd: settled.settledUsd,
+		uncertainUsd: settled.uncertainUsd,
+		reason: settled.settlement?.reason ?? '',
+	};
+
+	receipt.binary.sha256After = inspectExecutable(file).sha256;
+	if (receipt.binary.sha256After !== config.binary.sha256)
+		receipt.reasons.push(paidReason('binary-changed-during-leg', 'binary.path'));
+	receipt.assertions = evaluatePaidAssertions(fixture, {
+		route: c.route,
+		turns: receipt.turns,
+		model: primary,
+		sha256Pinned: config.binary.sha256,
+		sha256After: receipt.binary.sha256After,
+	});
+	receipt.status =
+		receipt.spawned === 0
+			? 'not-run'
+			: receipt.reasons.length || receipt.assertions.some((a) => a.outcome === 'failed')
+				? 'failed'
+				: 'passed';
+	return receipt;
+}
+
+/**
+ * The ACP route of a paid leg: one owned `agent stdio` child for every turn of
+ * the leg, initialize and session/new with the selected model (an
+ * unacknowledged model stops the leg before any prompt), then one
+ * session/prompt per fixture turn, each counted before it is written. ACP
+ * reports no settled charge here, so a sent turn's cost stays unknown.
+ */
+async function runAcpPaidTurns(args: {
+	file: string;
+	env: Record<string, string>;
+	cwd: string;
+	model: string;
+	fixture: PaidFixture;
+	graceMs: number;
+	lifetime: CaseLifetime;
+	turnMs: () => number;
+	admitTurn: (n: number) => boolean;
+	calls: () => Record<BillableCallKind, number>;
+}): Promise<{
+	turns: PaidTurnResult[];
+	reasons: AdmissionReason[];
+	spawned: number;
+	sent: number;
+	uncertainWhy: string | null;
+}> {
+	const turns: PaidTurnResult[] = [];
+	const reasons: AdmissionReason[] = [];
+	let sent = 0;
+	let uncertainWhy: string | null = null;
+	let child: ChildProcess;
+	try {
+		child = spawn(args.file, [...GROK_ACP_ARGS], {
+			cwd: args.cwd,
+			env: args.env,
+			shell: false,
+			stdio: ['pipe', 'pipe', 'pipe'],
+			windowsHide: true,
+		});
+	} catch (e) {
+		reasons.push(
+			paidReason('paid-spawn-failed', (e as NodeJS.ErrnoException).code ?? 'spawn-threw')
+		);
+		return { turns, reasons, spawned: 0, sent, uncertainWhy };
+	}
+	args.lifetime.own(child);
+	let spawnError: string | null = null;
+	let window = { out: streamDigest(), err: streamDigest(), started: Date.now() };
+	let reply: ReturnType<typeof replyCollector> | null = null;
+	let sessionId: string | null = null;
+	let unbounded = false;
+	const exited = new Promise<void>((resolve) => child.on('close', () => resolve()));
+	const stop = () => stopProcess({ child }, { from: 'terminate', graceMs: args.graceMs });
+	const client = new GrokAcpClient({
+		write: (frame) => {
+			child.stdin?.write(frame);
+		},
+		requestTimeoutMs: Math.max(
+			1,
+			Math.min(HARNESS_CEILINGS.discoverySeconds * 1000, Math.floor(args.turnMs()))
+		),
+		onNotification: (message) => {
+			const params = (message.params ?? {}) as Record<string, unknown>;
+			if (message.method !== 'session/update' || !sessionId || params.sessionId !== sessionId)
+				return;
+			const update = (params.update ?? {}) as Record<string, unknown>;
+			const content = (update.content ?? {}) as Record<string, unknown>;
+			if (
+				update.sessionUpdate === 'agent_message_chunk' &&
+				content.type === 'text' &&
+				typeof content.text === 'string'
+			)
+				reply?.push(content.text);
+		},
+	});
+	child.stdout?.on('data', (d: Buffer) => {
+		if (window.out.push(d)) {
+			unbounded = true;
+			stop();
+		}
+		client.feedStdout(d);
+	});
+	child.stderr?.on('data', (d: Buffer) => {
+		if (window.err.push(d)) {
+			unbounded = true;
+			stop();
+		}
+		client.feedStderr(d);
+	});
+	child.stdin?.on('error', () => client.close('write'));
+	child.on('error', (e: NodeJS.ErrnoException) => {
+		spawnError = e.code ?? 'spawn-error';
+		client.close('closed');
+	});
+	child.on('close', () => client.close('closed'));
+
+	let acknowledged: string | null = null;
+	try {
+		await client.initialize();
+		const opened = (await client.request('session/new', {
+			cwd: args.cwd,
+			mcpServers: [],
+			_meta: { modelId: args.model },
+		})) as Record<string, unknown> | null;
+		const id = opened?.sessionId;
+		if (typeof id === 'string' && id.trim()) sessionId = id;
+		const models = (opened?.models ?? {}) as Record<string, unknown>;
+		const options = Array.isArray(opened?.configOptions) ? opened.configOptions : [];
+		const modelOption = options.find(
+			(o) => o && typeof o === 'object' && (o as Record<string, unknown>).id === 'model'
+		) as Record<string, unknown> | undefined;
+		const current = models.currentModelId ?? modelOption?.currentValue;
+		acknowledged = typeof current === 'string' ? current : null;
+	} catch (e) {
+		reasons.push(
+			paidReason(
+				'acp-setup-failed',
+				e instanceof GrokAcpTransportError ? e.reason : (spawnError ?? 'request-error')
+			)
+		);
+	}
+	if (!reasons.length && !sessionId) reasons.push(paidReason('session-id-missing', 'session/new'));
+	if (!reasons.length && acknowledged !== args.model)
+		reasons.push(paidReason('model-unacknowledged', args.model));
+
+	for (let i = 0; !reasons.length && i < args.fixture.turns.length; i++) {
+		const n = i + 1;
+		const t = args.fixture.turns[i];
+		if (!args.admitTurn(n)) break;
+		if (i > 0) window = { out: streamDigest(), err: streamDigest(), started: Date.now() };
+		reply = replyCollector(t.expect);
+		let stopReason: unknown = null;
+		let failure: string | null = null;
+		let timedOut = false;
+		sent++;
+		try {
+			const answer = (await client.request(
+				'session/prompt',
+				{ sessionId, prompt: [{ type: 'text', text: t.prompt }] },
+				{ timeoutMs: Math.max(1, Math.floor(args.turnMs())) }
+			)) as Record<string, unknown> | null;
+			stopReason = answer?.stopReason ?? null;
+		} catch (e) {
+			failure = e instanceof GrokAcpTransportError ? `transport:${e.reason}` : 'request-error';
+			timedOut = e instanceof GrokAcpTransportError && e.reason === 'timeout';
+		}
+		turns.push({
+			turn: n,
+			argv: [...GROK_ACP_ARGS, `<fixture:${args.fixture.family}:turn-${n}>`],
+			exitCode: null,
+			signal: null,
+			durationMs: Date.now() - window.started,
+			timedOut,
+			spawnError: failure,
+			stdout: window.out.result(),
+			stderr: window.err.result(),
+			sessionId,
+			terminal: stopReason === 'end_turn' ? 'success' : stopReason ? 'failure' : 'none',
+			reply: reply.result(),
+			model: acknowledged,
+			// ACP returns no settled charge on this route; the cost stays unknown.
+			usage: { costUsd: null, status: 'absent' },
+			callsRecorded: args.calls(),
+		});
+		if (failure || unbounded) {
+			uncertainWhy = timedOut
+				? 'turn-timeout'
+				: unbounded
+					? 'turn-output-unbounded'
+					: 'turn-transport-lost';
+			reasons.push(paidReason(uncertainWhy, `turn ${n}`));
+			break;
+		}
+		if (stopReason !== 'end_turn') {
+			reasons.push(paidReason('turn-failed', `turn ${n}`));
+			break;
+		}
+	}
+	client.close('closed');
+	stop();
+	await Promise.race([exited, delay(args.graceMs + 1000)]);
+	return { turns, reasons, spawned: 1, sent, uncertainWhy };
+}
+
+/**
+ * Execute the paid legs of one admitted case (one per account). Admission and
+ * preflight are re-checked here, so a caller that skipped them still cannot
+ * spawn; a refusal returns not-run legs with zero spawns and no reservation.
+ */
+export async function executePaidCase(
+	c: QualificationCase,
+	config: QualificationConfig,
+	ctx: PaidExecutionContext
+): Promise<PaidLegReceipt[]> {
+	const accounts: Array<'A' | 'B'> = c.family === 'E01' ? ['A', 'B'] : ['A'];
+	const fixture = PAID_FIXTURES[c.family];
+	const reasons = admitCase(c, config, ctx.problems, ctx.capabilities, ctx.now());
+	reasons.push(
+		...preflightCase(c, config, { workspace: ctx.workspace, operatorHome: ctx.operatorHome })
+			.reasons
+	);
+	if (!c.classes.includes('paid')) reasons.push(paidReason('paid-leg-absent', c.caseId));
+	if (!ctx.ledger.authorizedCaseIds.includes(c.caseId))
+		reasons.push(paidReason('case-not-admitted', c.caseId));
+	if (!fixture) reasons.push(paidReason('fixture-absent', c.family));
+	const plan = planCaseReservation(c, config);
+	if (fixture && fixture.turns.length > plan.turns)
+		reasons.push(
+			paidReason('fixture-exceeds-turn-allowance', `${fixture.turns.length} > ${plan.turns}`)
+		);
+	const refused = (account: 'A' | 'B'): PaidLegReceipt => ({
+		leg: accounts.length > 1 ? `account-${account}` : 'main',
+		account,
+		route: c.route,
+		status: 'not-run',
+		reasons: [...reasons],
+		reservationId: null,
+		fixture: fixture
+			? { schema: fixture.schema, family: fixture.family, sha256: paidFixtureDigest(fixture) }
+			: null,
+		binary: { sha256Pinned: config.binary.sha256, sha256AtSpawn: null, sha256After: null },
+		launch: null,
+		turns: [],
+		assertions: [],
+		settlement: null,
+		spawned: 0,
+		paidRequests: 0,
+	});
+	if (reasons.length || !fixture) return accounts.map(refused);
+	const legs: PaidLegReceipt[] = [];
+	for (const account of accounts)
+		legs.push(
+			await executePaidLeg(
+				c,
+				config,
+				ctx,
+				account,
+				accounts.length > 1 ? `account-${account}` : null,
+				fixture,
+				plan
+			)
+		);
+	return legs;
+}
+
 /**
  * Owned processes of one case, stopped through the shared termination ladder.
  * Nothing registers here until an executor exists; cleanup is still the only
@@ -2496,6 +3425,10 @@ export interface RunOptions {
 	write?: boolean;
 	/** Per-probe wall-clock bound of the offline leg; clamped to `HARNESS_CEILINGS.offlineProbeSeconds`. */
 	offlineProbeTimeoutMs?: number;
+	/** Per-turn bound of a paid leg; clamped to `HARNESS_CEILINGS.caseSeconds` and the reservation deadline. */
+	paidTurnTimeoutMs?: number;
+	/** Resolve a secret-name credential reference at spawn (defaults to `lookupSecret`); the value is never recorded. */
+	resolveSecret?: (name: string) => string | null;
 }
 
 /**
@@ -2543,9 +3476,27 @@ export async function runQualification(options: RunOptions): Promise<{
 				: null;
 		if (preflight) reasons.push(...preflight.reasons);
 		const lifetime = createCaseLifetime(config.limits.cleanupSeconds);
-		// No discovery/paid executor exists yet: an admitted case would be handed to one here.
+		// Only an admitted case may reserve, and only the paid executor reserves for it.
 		// A case with any reason is recorded and never started.
-		const cleanup = await lifetime.cleanup();
+		if (!reasons.length) ledger.authorizedCaseIds.push(c.caseId);
+		let paidLegs: PaidLegReceipt[] = [];
+		let cleanup = { ownedProcesses: 0, stopped: 0 };
+		try {
+			if (!reasons.length && c.classes.includes('paid'))
+				paidLegs = await executePaidCase(c, config, {
+					workspace: options.workspace,
+					operatorHome,
+					ledger,
+					lifetime,
+					problems,
+					capabilities,
+					now,
+					turnTimeoutMs: options.paidTurnTimeoutMs,
+					resolveSecret: options.resolveSecret,
+				});
+		} finally {
+			cleanup = await lifetime.cleanup();
+		}
 		// The pinned binary must be byte-identical after the case as before it.
 		if (
 			preflight?.binary.state === 'local' &&
@@ -2562,8 +3513,6 @@ export async function runQualification(options: RunOptions): Promise<{
 				reasons.push(changed);
 			}
 		}
-		// Only an admitted case may reserve; the executor (not yet bound) is the one that would.
-		if (!reasons.length) ledger.authorizedCaseIds.push(c.caseId);
 		const paid = c.classes.includes('paid');
 		const plan = paid && capabilities.atomicSpendAdmission ? planCaseReservation(c, config) : null;
 		const held = ledger.reservations.filter((r) => r.caseId === c.caseId);
@@ -2571,9 +3520,10 @@ export async function runQualification(options: RunOptions): Promise<{
 			...c,
 			status: reasons.length ? 'not-run' : 'admitted',
 			reasons,
-			spawned: 0,
-			paidRequests: 0,
-			networkContacts: 0,
+			spawned: paidLegs.reduce((n, l) => n + l.spawned, 0),
+			paidRequests: paidLegs.reduce((n, l) => n + l.paidRequests, 0),
+			// A lower bound: each request a running child was handed reaches the provider at least once.
+			networkContacts: paidLegs.reduce((n, l) => n + l.paidRequests, 0),
 			pricing: c.classes.includes('paid') ? config.allowedModels.map(pricingProvenance) : [],
 			budget: {
 				reservedUsd: held.reduce((s, r) => s + (r.state === 'held' ? r.holdUsd : 0), 0),
@@ -2587,6 +3537,7 @@ export async function runQualification(options: RunOptions): Promise<{
 			candidateSnapshot: buildCandidateSnapshot(c, config),
 			preflight,
 			offlineLeg,
+			paidLegs,
 		});
 	}
 	const productionDigestAfter = productionCapabilityDigest();
@@ -2624,8 +3575,8 @@ export async function runQualification(options: RunOptions): Promise<{
 			admitted: receipts.filter((r) => r.status === 'admitted').length,
 			notRun: receipts.filter((r) => r.status === 'not-run').length,
 			spawned: receipts.reduce((n, r) => n + r.spawned + (r.offlineLeg?.spawned ?? 0), 0),
-			paidRequests: 0,
-			networkContacts: 0,
+			paidRequests: receipts.reduce((n, r) => n + r.paidRequests, 0),
+			networkContacts: receipts.reduce((n, r) => n + r.networkContacts, 0),
 		},
 		cases: receipts,
 	});
