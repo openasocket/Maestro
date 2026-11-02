@@ -9,6 +9,10 @@
  * GT1-11-09A adds the pre-spawn isolation preflight rejections: every
  * GT1-11-08B isolation or control guard broken in turn on a synthetic owned
  * fixture, with child_process and fetch spied to prove nothing starts.
+ *
+ * GT1-11-10B adds the offline-inspection leg (GT1-11-10A): a synthetic shell
+ * stand-in, never a real Grok, run only with `--version` / `--help` under the
+ * credential-free planned env, and every admission and executor guard.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -21,15 +25,23 @@ import {
 	CANDIDATE_CAPABILITIES,
 	CONFIG_SCHEMA,
 	GROK_CONTROL_ENV,
+	HARNESS_CAPABILITIES,
+	HARNESS_CEILINGS,
+	OFFLINE_OUTPUT_CAP_BYTES,
+	OFFLINE_PROBES,
 	POLICY_BEARING_FLAGS,
 	RUNS_ROOT,
 	admitCase,
 	buildCandidateSnapshot,
 	createCaseLifetime,
 	defaultConfigFromRunState,
+	executeOfflineLeg,
 	expandCases,
 	main,
+	offlineLegCase,
+	parseProbeVersion,
 	planIsolatedLaunch,
+	runOfflineLeg,
 	preflightCase,
 	productionCapabilityDigest,
 	redactDeep,
@@ -83,6 +95,8 @@ const clock = () => NOW;
 const ALL_CAPS: HarnessCapabilities = {
 	isolationPreflight: true,
 	atomicSpendAdmission: true,
+	// Off: these suites decide admission only; the offline executor has its own block (GT1-11-10B).
+	offlineExecutor: false,
 	caseExecutor: true,
 };
 /** A secret-shaped value the shared redactor recognizes; synthetic, never a credential. */
@@ -1047,6 +1061,470 @@ describe('GT1-11-09 qualification harness', () => {
 			expect(ids(pf('E07:acp-stdio:local', none))).toEqual(['discovery-operation-unauthorized']);
 			// A paid case without discovery is not widened by an authorized catalog operation.
 			expect(pf('E03:acp-stdio:local', acpOnly).operations.discovery).toEqual([]);
+		});
+	});
+
+	/**
+	 * GT1-11-10B: the offline-inspection leg and its bounded executor
+	 * (GT1-11-10A). The pinned binary is a synthetic POSIX shell stand-in written
+	 * into an owned temp dir under the runs root, never a real Grok; each mode
+	 * records the argv, environment and pid it actually saw into an owned log
+	 * directory. The spawn spy stays pass-through, so it proves exactly which
+	 * file, argv and env the harness handed the OS.
+	 */
+	describe.skipIf(process.platform === 'win32')('offline-inspection leg (GT1-11-10B)', () => {
+		const REL = `${RUNS_ROOT}/gt1-11-10b-${process.pid}`;
+		const ROOT = path.join(WORKSPACE, REL);
+		const BIN = path.join(ROOT, 'bin', 'grok');
+		const LOG = path.join(ROOT, 'log');
+		const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-10b-operator-${process.pid}`);
+		const OFFLINE_CAPS: HarnessCapabilities = { ...HARNESS_CAPABILITIES };
+		type Mode = 'ok' | 'sleep' | 'big' | 'fail' | 'mutate' | 'noversion';
+		const BODY: Record<Mode, string> = {
+			ok: '[ "$p" = version ] && echo "grok-cli v1.2.3 (synthetic stand-in)"\n[ "$p" = help ] && echo "usage: grok [options]"\nexit 0',
+			sleep: 'exec sleep 30',
+			// Past the cap it keeps running, so only the cap itself can stop it in time.
+			big: 'head -c 1200000 /dev/zero\nexec sleep 30',
+			noversion: 'echo "grok (development build)"\nexit 0',
+			fail: 'echo "grok 1.2.3"\nexit 3',
+			mutate:
+				'if [ "$p" = version ]; then chmod u+w "$0"; printf "\\n# changed\\n" >> "$0"; fi\necho "grok 1.2.3"\nexit 0',
+		};
+		/** Write the stand-in for one mode (read-only, like a pinned install) and return its sha256. */
+		const standIn = (mode: Mode): string => {
+			if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+			fs.rmSync(LOG, { recursive: true, force: true });
+			fs.mkdirSync(LOG, { recursive: true });
+			fs.writeFileSync(
+				BIN,
+				[
+					'#!/bin/sh',
+					`LOG='${LOG}'`,
+					'case "$1" in --version) p=version;; --help) p=help;; *) p=other;; esac',
+					'printf "%s\\n" "$#" "$@" > "$LOG/$p.argv"',
+					'env > "$LOG/$p.env"',
+					'echo $$ > "$LOG/$p.pid"',
+					BODY[mode],
+					'',
+				].join('\n')
+			);
+			fs.chmodSync(BIN, 0o555);
+			return createHash('sha256').update(fs.readFileSync(BIN)).digest('hex');
+		};
+		const logged = (p: string, kind: 'argv' | 'env' | 'pid') => {
+			const file = path.join(LOG, `${p}.${kind}`);
+			return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+		};
+		/** Only the offline inputs: no credential, endpoint, discovery, model or spend input at all. */
+		const offlineConfig = (
+			sha: string,
+			version = '1.2.3'
+		): QualificationConfig & { isolation: IsolationDeclaration } => ({
+			...defaultConfigFromRunState({}),
+			allowedRoots: [REL],
+			binary: { path: `${REL}/bin/grok`, sha256: sha, version },
+			autoUpdateDisabled: true,
+			isolationReceipt: 'isolation:synthetic',
+			isolation: {
+				boundary: {
+					kind: 'disposable-os-account' as const,
+					reference: 'boundary:synthetic',
+					actualHome: `${REL}/home`,
+					productionHomeMounted: false,
+					operatorCredentialsReadable: false,
+				},
+				accountRoots: { A: `${REL}/grok-a` },
+				remoteRoots: {},
+				policy: {
+					systemPolicyInspected: true,
+					managedPolicy: 'absent' as const,
+					requiredPolicyCompatible: true,
+				},
+				resources: {
+					hooks: 'empty' as const,
+					mcp: 'empty' as const,
+					plugins: 'empty' as const,
+					envrc: 'disabled' as const,
+				},
+				egress: {
+					kind: 'deny-all' as const,
+					reference: 'egress:synthetic',
+					suppression: {
+						update: 'flags-only' as const,
+						telemetry: 'verified' as const,
+						backgroundUpload: 'verified' as const,
+					},
+				},
+				path: ['/usr/bin', '/bin'],
+			} satisfies IsolationDeclaration,
+		});
+		const caseOf = (id: string) => expandCases(FAMILIES, [id])[0];
+		const ids = (r: { reasons: Array<{ id: string }> }) => r.reasons.map((x) => x.id);
+		const leg = (cfg: QualificationConfig, caps = OFFLINE_CAPS, id = 'E02:acp-stdio:local') =>
+			runOfflineLeg(caseOf(id), cfg, validateConfig(cfg, WORKSPACE), caps, {
+				workspace: WORKSPACE,
+				operatorHome: OPERATOR_HOME,
+				timeoutMs: 5000,
+			});
+		const exec = (cfg: QualificationConfig, id = 'E02:acp-stdio:local') =>
+			executeOfflineLeg(offlineLegCase(caseOf(id)), cfg, {
+				workspace: WORKSPACE,
+				operatorHome: OPERATOR_HOME,
+				timeoutMs: 5000,
+				lifetime: createCaseLifetime(1),
+			});
+		const spawnCalls = () => spawnSpies[0].mock.calls as unknown as Array<[string, string[], any]>;
+		const expectNoSpawn = () => {
+			for (const s of spawnSpies) expect(s).not.toHaveBeenCalled();
+			expect(fetchSpy).not.toHaveBeenCalled();
+		};
+
+		beforeAll(() => {
+			for (const d of ['home', 'grok-a', 'bin', 'log'])
+				fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+		});
+		afterAll(() => {
+			if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+			fs.rmSync(ROOT, { recursive: true, force: true });
+		});
+		beforeEach(() => {
+			spawnSpies.forEach((s) => s.mockClear());
+			fetchSpy.mockClear();
+		});
+
+		it('the default no-config run spawns nothing and records every E02 offline leg as refused', async () => {
+			expect(HARNESS_CAPABILITIES).toMatchObject({ offlineExecutor: true, caseExecutor: false });
+			const { receipt } = await runQualification({
+				workspace: WORKSPACE,
+				runState: RUN_STATE,
+				now: clock,
+				runId: runId(),
+			});
+			expect(receipt.totals).toMatchObject({ spawned: 0, paidRequests: 0, networkContacts: 0 });
+			const owners: Record<string, string> = {
+				E02: 'GT1-11-11A',
+				E07: 'GT1-11-11A/GT1-11-11',
+				E03: 'GT1-11-11',
+			};
+			for (const c of receipt.cases) {
+				const executor = c.reasons.find((r) => r.id === 'case-executor-unimplemented');
+				if (owners[c.family]) expect(executor?.owner, c.caseId).toBe(owners[c.family]);
+				expect(executor?.owner).not.toBe('GT1-11-10');
+				if (c.family !== 'E02') {
+					expect(c.offlineLeg).toBeNull();
+					continue;
+				}
+				expect(c.offlineLeg).toMatchObject({
+					leg: 'offline-inspection',
+					status: 'not-run',
+					spawned: 0,
+					probes: [],
+					networkContacts: 0,
+				});
+				expect(ids(c.offlineLeg!)).toEqual(
+					expect.arrayContaining(['binary-unpinned', 'auto-update-not-disabled'])
+				);
+			}
+			expectNoSpawn();
+		});
+
+		it('admits the offline leg with no discovery input and runs only --version and --help, credential-free', async () => {
+			const sha = standIn('ok');
+			const cfg = offlineConfig(sha);
+			expect(cfg.credentialReferences).toEqual([]);
+			expect(cfg.allowedEndpoints).toEqual([]);
+			expect(cfg.discovery).toEqual({ authorizationReference: null, operations: [] });
+			const saved = { xai: process.env.XAI_API_KEY, auth: process.env.GROK_AUTH_PATH };
+			process.env.XAI_API_KEY = 'SENTINEL-AMBIENT-XAI';
+			process.env.GROK_AUTH_PATH = '/SENTINEL/auth.json';
+			let receipt: Awaited<ReturnType<typeof runQualification>>['receipt'];
+			try {
+				({ receipt } = await runQualification({
+					workspace: WORKSPACE,
+					runState: RUN_STATE,
+					config: cfg,
+					selectedCases: ['E02:acp-stdio:local'],
+					capabilities: OFFLINE_CAPS,
+					now: clock,
+					runId: runId(),
+					operatorHome: OPERATOR_HOME,
+				}));
+			} finally {
+				for (const [k, v] of [
+					['XAI_API_KEY', saved.xai],
+					['GROK_AUTH_PATH', saved.auth],
+				] as const)
+					if (v === undefined) delete process.env[k];
+					else process.env[k] = v;
+			}
+			const [c] = receipt.cases;
+			// Two separate entries: the offline leg ran, the discovery leg did not.
+			expect(c.offlineLeg).toMatchObject({
+				status: 'passed',
+				reasons: [],
+				spawned: 2,
+				networkContacts: 0,
+				binary: {
+					sha256Pinned: sha,
+					sha256AtSpawn: sha,
+					sha256After: sha,
+					versionPinned: '1.2.3',
+					versionObserved: '1.2.3',
+				},
+				cleanup: { ownedProcesses: 2, stopped: 0 },
+			});
+			expect(c.offlineLeg!.probes.map((p) => [p.probe, p.argv, p.exitCode, p.timedOut])).toEqual([
+				['version', ['--version'], 0, false],
+				['help', ['--help'], 0, false],
+			]);
+			// Output is kept as digests only, never as text.
+			const versionOut = 'grok-cli v1.2.3 (synthetic stand-in)\n';
+			expect(c.offlineLeg!.probes[0].stdout).toEqual({
+				sha256: createHash('sha256').update(versionOut).digest('hex'),
+				bytes: Buffer.byteLength(versionOut),
+				truncated: false,
+			});
+			expect(JSON.stringify(receipt)).not.toContain('synthetic stand-in');
+			expect(c.status).toBe('not-run');
+			expect(c.spawned).toBe(0);
+			expect(ids(c)).toEqual(
+				expect.arrayContaining(['discovery-authorization-absent', 'case-executor-unimplemented'])
+			);
+			expect(c.reasons.find((r) => r.id === 'case-executor-unimplemented')?.owner).toBe(
+				'GT1-11-11A'
+			);
+			expect(receipt.totals).toMatchObject({ spawned: 2, paidRequests: 0, networkContacts: 0 });
+
+			// What the harness handed the OS: the resolved pinned file, two argv, no shell, the planned env only.
+			const plan = planIsolatedLaunch(
+				offlineLegCase(caseOf('E02:acp-stdio:local')),
+				cfg,
+				'A',
+				'offline',
+				WORKSPACE,
+				OPERATOR_HOME
+			)!;
+			const calls = spawnCalls();
+			expect(calls.map(([file, argv]) => [file, argv])).toEqual([
+				[fs.realpathSync(BIN), [...OFFLINE_PROBES.version]],
+				[fs.realpathSync(BIN), [...OFFLINE_PROBES.help]],
+			]);
+			for (const [, , opts] of calls) {
+				expect(opts.shell).toBe(false);
+				expect(opts.env).toEqual(plan.env);
+				expect(opts.cwd).toBe(path.join(ROOT, 'home'));
+			}
+			for (const s of spawnSpies.slice(1)) expect(s).not.toHaveBeenCalled();
+			expect(fetchSpy).not.toHaveBeenCalled();
+
+			// What the stand-in actually saw: its argv, every control var, no credential, no ambient secret.
+			expect(logged('version', 'argv')).toBe('1\n--version\n');
+			expect(logged('help', 'argv')).toBe('1\n--help\n');
+			expect(logged('other', 'argv')).toBeNull();
+			const seen = Object.fromEntries(
+				logged('version', 'env')!
+					.trim()
+					.split('\n')
+					.map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1)])
+			);
+			for (const [k, v] of Object.entries(GROK_CONTROL_ENV)) expect(seen[k], k).toBe(v);
+			expect(seen.GROK_AUTH_PATH).toBeUndefined();
+			expect(seen.XAI_API_KEY).toBeUndefined();
+			expect(seen.HOME).toBe(path.join(ROOT, 'home'));
+			const shellOwn = new Set(['PWD', 'OLDPWD', 'SHLVL', '_']);
+			for (const k of Object.keys(seen))
+				if (!shellOwn.has(k)) expect(Object.keys(plan.env), k).toContain(k);
+			expect(logged('version', 'env')).not.toContain('SENTINEL');
+		});
+
+		it('is still refused without pin, isolation, disabled update or a local deny-all boundary, with zero spawns', async () => {
+			const sha = standIn('ok');
+			const flips: Array<
+				[
+					string,
+					(c: ReturnType<typeof offlineConfig>) => void,
+					string,
+					string?,
+					HarnessCapabilities?,
+				]
+			> = [
+				['no path', (c) => (c.binary.path = null), 'binary-unpinned'],
+				['no sha', (c) => (c.binary.sha256 = null), 'binary-unpinned'],
+				['no version', (c) => (c.binary.version = null), 'binary-unpinned'],
+				['update on', (c) => (c.autoUpdateDisabled = false), 'auto-update-not-disabled'],
+				['no roots', (c) => (c.allowedRoots = []), 'allowed-roots-absent'],
+				['no receipt', (c) => (c.isolationReceipt = null), 'host-isolation-unqualified'],
+				[
+					'no isolation',
+					(c) => ((c as QualificationConfig).isolation = null),
+					'isolation-undeclared',
+				],
+				[
+					'egress open',
+					(c) => (c.isolation.egress.kind = 'operation-aware' as never),
+					'offline-egress-not-denied',
+				],
+				['not grok', (c) => (c.providers = ['codex' as never]), 'provider-not-authorized'],
+				['wrong pin', (c) => (c.binary.sha256 = 'b'.repeat(64)), 'binary-hash-mismatch'],
+				['ssh', () => undefined, 'offline-executor-local-only', 'E02:acp-stdio:ssh'],
+				['not E02', () => undefined, 'offline-leg-absent', 'E03:acp-stdio:local'],
+				[
+					'executor off',
+					() => undefined,
+					'offline-executor-unimplemented',
+					undefined,
+					{ ...OFFLINE_CAPS, offlineExecutor: false },
+				],
+				[
+					'preflight off',
+					() => undefined,
+					'isolation-preflight-unimplemented',
+					undefined,
+					{ ...OFFLINE_CAPS, isolationPreflight: false },
+				],
+			];
+			// The fixture itself is admitted, so every refusal below is the flip's own.
+			expect(ids(await leg(offlineConfig(sha)))).toEqual([]);
+			// A fresh log and spy record (same bytes, same pin): the flips below must leave both empty.
+			expect(standIn('ok')).toBe(sha);
+			spawnSpies.forEach((s) => s.mockClear());
+			for (const [label, flip, want, id, caps] of flips) {
+				const cfg = offlineConfig(sha);
+				flip(cfg);
+				const r = await leg(cfg, caps, id);
+				expect(ids(r), label).toContain(want);
+				expect(r.status, label).toBe('not-run');
+				expect(r.spawned, label).toBe(0);
+				expect(r.probes, label).toEqual([]);
+			}
+			expectNoSpawn();
+			expect(logged('version', 'argv')).toBeNull();
+		});
+
+		it('the executor re-checks before spawn: a hash mismatch, unpinned, updated, remote or mutable binary never starts', async () => {
+			const sha = standIn('ok');
+			const checks: Array<
+				[string, (c: ReturnType<typeof offlineConfig>) => void, string, string?]
+			> = [
+				['hash', (c) => (c.binary.sha256 = 'c'.repeat(64)), 'binary-hash-mismatch-at-spawn'],
+				['unpinned', (c) => (c.binary.version = null), 'binary-unpinned'],
+				['update', (c) => (c.autoUpdateDisabled = false), 'auto-update-not-disabled'],
+				['ssh', () => undefined, 'offline-executor-local-only', 'E02:acp-stdio:ssh'],
+				['absent', (c) => (c.binary.path = `${REL}/bin/absent`), 'binary-unreadable'],
+				[
+					'no isolation',
+					(c) => ((c as QualificationConfig).isolation = null),
+					'offline-launch-unplannable',
+				],
+				[
+					'path under operator home',
+					(c) => (c.isolation.path = [path.join(OPERATOR_HOME, 'bin'), '/usr/bin', '/bin']),
+					'env-path-under-operator-home',
+				],
+				[
+					'home absent',
+					(c) => (c.isolation.boundary!.actualHome = `${REL}/no-home`),
+					'offline-home-absent',
+				],
+			];
+			for (const [label, flip, want, id] of checks) {
+				const cfg = offlineConfig(sha);
+				flip(cfg);
+				const r = await exec(cfg, id);
+				expect(ids(r), label).toEqual([want]);
+				expect([r.spawned, r.probes.length], label).toEqual([0, 0]);
+			}
+			fs.chmodSync(BIN, 0o755);
+			try {
+				expect(ids(await exec(offlineConfig(sha)))).toEqual(['binary-mutable']);
+			} finally {
+				fs.chmodSync(BIN, 0o555);
+			}
+			expectNoSpawn();
+			expect(logged('version', 'argv')).toBeNull();
+		});
+
+		it('a credential reference in the config never reaches the offline child', async () => {
+			const sha = standIn('ok');
+			fs.mkdirSync(path.join(ROOT, 'auth'), { recursive: true });
+			fs.writeFileSync(path.join(ROOT, 'auth', 'a.json'), '{}');
+			const refs: QualificationConfig['credentialReferences'] = [
+				{ provider: 'grok', account: 'A', kind: 'file', path: `${REL}/auth/a.json` },
+				{ provider: 'grok', account: 'A', kind: 'secret-name', name: 'GROK_QUAL_ACCOUNT_A' },
+			];
+			for (const ref of refs) {
+				spawnSpies.forEach((s) => s.mockClear());
+				const cfg = offlineConfig(sha);
+				cfg.credentialReferences = [ref];
+				const r = await leg(cfg);
+				expect(r.status, ref.kind).toBe('passed');
+				expect(spawnCalls(), ref.kind).toHaveLength(2);
+				for (const [, , opts] of spawnCalls()) {
+					expect(opts.env.GROK_AUTH_PATH, ref.kind).toBeUndefined();
+					expect(opts.env.XAI_API_KEY, ref.kind).toBeUndefined();
+				}
+				expect(logged('version', 'env'), ref.kind).not.toMatch(
+					/GROK_AUTH_PATH|XAI_API_KEY|a\.json/
+				);
+			}
+		});
+
+		it('a probe that outlives its bound is stopped as an owned child and fails the leg', async () => {
+			const sha = standIn('sleep');
+			const cfg = offlineConfig(sha);
+			const started = Date.now();
+			const { receipt } = await runQualification({
+				workspace: WORKSPACE,
+				runState: RUN_STATE,
+				config: cfg,
+				selectedCases: ['E02:acp-stdio:local'],
+				capabilities: OFFLINE_CAPS,
+				now: clock,
+				runId: runId(),
+				operatorHome: OPERATOR_HOME,
+				offlineProbeTimeoutMs: 300,
+			});
+			expect(Date.now() - started).toBeLessThan(HARNESS_CEILINGS.offlineProbeSeconds * 1000);
+			const off = receipt.cases[0].offlineLeg!;
+			expect(off.status).toBe('failed');
+			expect(ids(off)).toEqual(['probe-timeout']);
+			// The help probe never starts after a failed version probe.
+			expect(off.probes).toHaveLength(1);
+			expect(off.probes[0]).toMatchObject({ probe: 'version', timedOut: true, signal: 'SIGTERM' });
+			expect(off.probes[0].durationMs).toBeGreaterThanOrEqual(250);
+			expect(off.cleanup).toEqual({ ownedProcesses: 1, stopped: 0 });
+			const pid = Number(logged('version', 'pid'));
+			expect(pid).toBeGreaterThan(0);
+			expect(() => process.kill(pid, 0)).toThrow();
+			expect(spawnCalls()).toHaveLength(1);
+		});
+
+		it('a version that differs from the pin, a failing, unbounded or self-changing probe fails the leg', async () => {
+			const cases: Array<[Mode, string, string[], number, string | null]> = [
+				['ok', '9.9.9', ['binary-version-mismatch'], 2, '1.2.3'],
+				['fail', '1.2.3', ['probe-exit-nonzero'], 1, '1.2.3'],
+				['big', '1.2.3', ['probe-output-unbounded'], 1, null],
+				['mutate', '1.2.3', ['binary-changed-during-probe'], 1, '1.2.3'],
+				['noversion', '1.2.3', ['binary-version-unparsed'], 2, null],
+			];
+			for (const [mode, version, want, spawned, observed] of cases) {
+				const sha = standIn(mode);
+				const r = await leg(offlineConfig(sha, version));
+				expect(ids(r), mode).toEqual(want);
+				expect(r.status, mode).toBe('failed');
+				expect(r.spawned, mode).toBe(spawned);
+				expect(r.binary.versionObserved, mode).toBe(observed);
+				expect(r.binary.versionPinned, mode).toBe(version);
+			}
+			const big = standIn('big');
+			const r = await leg(offlineConfig(big));
+			expect(r.probes[0].stdout.truncated).toBe(true);
+			expect(r.probes[0].stdout.bytes).toBeGreaterThan(OFFLINE_OUTPUT_CAP_BYTES);
+			// A leading v in the pin is the same version; an unparsable output is not a match.
+			expect((await leg(offlineConfig(standIn('ok'), 'v1.2.3'))).status).toBe('passed');
+			expect(parseProbeVersion('grok-cli v1.2.3-rc.1+abc (build)')).toBe('1.2.3-rc.1+abc');
+			expect(parseProbeVersion('grok 2.0.10')).toBe('2.0.10');
+			expect(parseProbeVersion('grok build x1.2.3 or 20261101')).toBeNull();
 		});
 	});
 });

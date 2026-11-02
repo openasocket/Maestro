@@ -63,6 +63,8 @@ const E11 = caseOf('E11:acp-stdio:local');
 const ALL_CAPS: HarnessCapabilities = {
 	isolationPreflight: true,
 	atomicSpendAdmission: true,
+	// Off: these suites decide admission only; the offline executor has its own block (GT1-11-10B).
+	offlineExecutor: false,
 	caseExecutor: true,
 };
 
