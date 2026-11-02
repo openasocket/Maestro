@@ -239,9 +239,30 @@ import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { EventEmitter } from 'node:events';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { syncBuiltinESMExports } from 'node:module';
+import { createRequire, syncBuiltinESMExports } from 'node:module';
+import http from 'node:http';
+import https from 'node:https';
 
 import { canonicalJson } from '../../src/shared/canonicalJson';
+import {
+	createTurnRecorder,
+	type RecordedTurn,
+	type TurnRecorderOptions,
+} from '../../src/shared/maestro-lib/turns/record-turn';
+import type { StatsConnectionConstructor } from '../../src/shared/maestro-lib/turns/stats';
+import { resolveMaestroPaths } from '../../src/shared/maestro-lib/paths/resolve';
+import {
+	drainTurnUsage,
+	recordTurnUsage,
+	turnUsageStatsFields,
+} from '../../src/shared/turnUsageLedger';
+import {
+	calculateContextTokens,
+	estimateContextUsage,
+} from '../../src/shared/maestro-lib/parsers/usage-aggregator';
+import { COMBINED_CONTEXT_AGENTS, getContextWindowForAgent } from '../../src/shared/agentConstants';
+import { resolveContextWindow } from '../../src/renderer/utils/contextWindowPrecedence';
+import { createOutputParser } from '../../src/shared/maestro-lib/parsers/parser-factory';
 import {
 	isBlankEnvValue,
 	isSecretEnvKey,
@@ -504,6 +525,14 @@ export const HARNESS_CAPABILITIES = {
 	 * accounting reservation of its own. Off, each is not-run.
 	 */
 	accountingLegs: true,
+	/**
+	 * The E06 accounting consumer legs (GT1-11-11F2): the usage capture turn
+	 * through the library recorder and the desktop recording path into an owned
+	 * stats database, read back by the dashboard, export and Cue readers, the
+	 * context resolver, and the quota scheduler presenting Grok unavailable with
+	 * no network. No turn, no reservation. Off, each is not-run.
+	 */
+	accountingConsumers: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
 
@@ -4576,6 +4605,8 @@ export interface PaidLegReceipt {
 	workflowLegs: WorkflowLegReceipt[];
 	/** The accounting legs of an E06 fixture (GT1-11-11F1), each on its own reservation; empty otherwise. */
 	accountingLegs: AccountingLegReceipt[];
+	/** The accounting consumer legs of an E06 fixture (GT1-11-11F2), each its own entry; empty otherwise. */
+	accountingConsumers: AccountingConsumerReceipt[];
 }
 
 export interface PaidExecutionContext {
@@ -5793,6 +5824,7 @@ async function runPaidLeg(
 		utilityLegs: [],
 		workflowLegs: [],
 		accountingLegs: [],
+		accountingConsumers: [],
 	};
 	const refuse = (id: string, detail: string, owner?: string) => {
 		receipt.reasons.push(paidReason(id, detail, owner));
@@ -6344,6 +6376,7 @@ async function runPaidLeg(
 			uncertain: uncertainWhy,
 		});
 		receipt.accountingLegs = run.legs;
+		receipt.accountingConsumers = run.consumers;
 		receipt.spawned += run.spawned;
 		receipt.paidRequests += run.sent;
 		if (run.uncertainWhy)
@@ -6371,7 +6404,8 @@ async function runPaidLeg(
 				  receipt.sessionConsumers.some((l) => l.status === 'failed') ||
 				  receipt.utilityLegs.some((l) => l.status === 'failed') ||
 				  receipt.workflowLegs.some((l) => l.status === 'failed') ||
-				  receipt.accountingLegs.some((l) => l.status === 'failed')
+				  receipt.accountingLegs.some((l) => l.status === 'failed') ||
+				  receipt.accountingConsumers.some((l) => l.status === 'failed')
 				? 'failed'
 				: 'passed';
 	return receipt;
@@ -6743,6 +6777,8 @@ function runNativeSessionTurn(a: {
 	onRunning?: () => void;
 	/** Called with every parsed event, in stream order (a utility leg's bridge hands answer text on). */
 	onEvent?: (ev: ParsedGrokEvent) => void;
+	/** Called with every stdout chunk as bytes, in order (the accounting consumers replay the stream). */
+	onChunk?: (chunk: Buffer) => void;
 	/**
 	 * Makes the child from the exact spec, in place of a bare spawn (the Pianola
 	 * leg hands it to the production supervisor). Must spawn `spec` itself with
@@ -6878,6 +6914,7 @@ function runNativeSessionTurn(a: {
 		const bytes = (d: Buffer | string) => (typeof d === 'string' ? Buffer.from(d, 'utf8') : d);
 		child.stdout?.on('data', (raw: Buffer | string) => {
 			const d = bytes(raw);
+			a.onChunk?.(d);
 			if (out.push(d)) stop();
 			state.pending += decoder.write(d);
 			let k: number;
@@ -6917,6 +6954,8 @@ async function sendSessionTurn(
 		stopWhen?: (ev: ParsedGrokEvent) => boolean;
 		onRunning?: () => void;
 		onEvent?: (ev: ParsedGrokEvent) => void;
+		/** Every stdout chunk as bytes (see `runNativeSessionTurn`). */
+		onChunk?: (chunk: Buffer) => void;
 		/** The argv a production launch plan built (a utility leg); absent, the definition's own native argv. */
 		argv?: string[];
 		/** Who makes the child from the built spec (see `runNativeSessionTurn`); absent, a bare spawn. */
@@ -6948,6 +6987,7 @@ async function sendSessionTurn(
 		stopWhen: opts.stopWhen,
 		onRunning: opts.onRunning,
 		onEvent: opts.onEvent,
+		onChunk: opts.onChunk,
 		spawnChild: opts.spawnChild,
 	});
 	r.spawned++;
@@ -11684,6 +11724,8 @@ type ParsedUsage = NonNullable<ParsedGrokEvent['usage']>;
 /** The lifetime total the legs settle into: the production totals, one parent total per turn. */
 interface AccountingLifetime {
 	total: UsageStats | undefined;
+	/** The usage capture leg's native turn as its stream carried it, for the consumer legs (GT1-11-11F2). */
+	capture?: AccountingTurnCapture;
 }
 
 const lifetimeTokens = (t: UsageStats | undefined) =>
@@ -11958,7 +12000,7 @@ async function sendAccountingNativeTurn(
 	s: SessionLegContext,
 	r: AccountingLegReceipt,
 	t: PaidFixtureTurn,
-	opts: { as?: 'retry' } = {}
+	opts: { as?: 'retry'; onChunk?: (chunk: Buffer) => void } = {}
 ): Promise<{
 	run: SessionTurnRun | null;
 	uncertainWhy: string | null;
@@ -11976,6 +12018,7 @@ async function sendAccountingNativeTurn(
 	};
 	const sent = await sendSessionTurn(s, receipt, t, null, {
 		as: opts.as,
+		onChunk: opts.onChunk,
 		onEvent: (ev) => {
 			if (!ev.usage) return;
 			tracker.observe(ev.usage as UsageReport);
@@ -12101,11 +12144,29 @@ async function runUsageCaptureLeg(
 	let turn: PaidTurnResult | null = null;
 	r.lifetime = { before: lifetimeTokens(life.total), after: null, cost: null };
 	if (w.c.route === 'native-headless') {
-		const sent = await sendAccountingNativeTurn(s, r, spec.turns[0]);
+		// The stream is kept in memory for the consumer legs, bounded; it never reaches a receipt.
+		const kept = { chunks: [] as Buffer[], bytes: 0, truncated: false };
+		const startedAt = Date.now();
+		const sent = await sendAccountingNativeTurn(s, r, spec.turns[0], {
+			onChunk: (d) => {
+				kept.bytes += d.length;
+				if (kept.bytes > ACCOUNTING_CAPTURE_MAX_BYTES) kept.truncated = true;
+				else kept.chunks.push(Buffer.from(d));
+			},
+		});
 		uncertainWhy = sent.uncertainWhy;
 		rec = sent.rec;
 		turn = sent.run?.turn ?? null;
 		if (rec) settleIntoLifetime(life, rec, sent.final);
+		if (rec && turn)
+			life.capture = {
+				...kept,
+				rec,
+				turn,
+				final: sent.final,
+				startedAt,
+				endedAt: Date.now(),
+			};
 	} else {
 		const run = await runAccountingAcpTurns(w, r, s, spec.turns.slice(0, 1));
 		uncertainWhy = run.uncertainWhy;
@@ -12447,6 +12508,7 @@ const ACCOUNTING_RUNNERS: Record<
  */
 async function runAccountingLegs(w: AccountingLegContext): Promise<{
 	legs: AccountingLegReceipt[];
+	consumers: AccountingConsumerReceipt[];
 	spawned: number;
 	sent: number;
 	uncertainWhy: string | null;
@@ -12560,7 +12622,1049 @@ async function runAccountingLegs(w: AccountingLegContext): Promise<{
 		if (why) uncertainWhy = why;
 		legs.push(r);
 	}
-	return { legs, spawned, sent, uncertainWhy };
+	// The consumers read what the usage capture leg already paid for: no turn, no reservation.
+	const consumers = await runAccountingConsumers(
+		w,
+		life.capture ?? null,
+		legs.find((l) => l.leg === 'usage-capture')
+	);
+	return { legs, consumers, spawned, sent, uncertainWhy };
+}
+
+// ---------------------------------------------------------------------------
+// Accounting consumer legs (GT1-11-11F2)
+// ---------------------------------------------------------------------------
+
+/** The task that implements the E06 accounting consumer legs. */
+export const ACCOUNTING_CONSUMERS_OWNER = 'GT1-11-11F2';
+/** The consumers replay the captured native stream locally; no task owns an SSH consumer leg. */
+export const SSH_ACCOUNTING_CONSUMERS_OWNER = 'unassigned-ssh-accounting-consumers';
+/** The consumers replay a native headless stream; the ACP route keeps no stream to replay. */
+export const ACP_ACCOUNTING_CONSUMERS_OWNER = 'unassigned-acp-accounting-consumers';
+/** `maestro-cli stats-tokens` reads a running desktop over its socket; no owned desktop is started. */
+export const STATS_CLI_OWNER = 'unassigned-stats-cli-desktop-bridge';
+/** The blocker a quota leg keeps open: Grok has no qualified quota contract. */
+export const GROK_QUOTA_BLOCKER = 'grok-native-quota-unavailable';
+/** The pipeline and subscription the Cue attribution leg files its one run under. */
+export const ACCOUNTING_CUE_PIPELINE = 'qualify-e06-cue';
+export const ACCOUNTING_CUE_SUBSCRIPTION = 'qualify-e06-cue-prompt';
+/** Readers the bounded-concurrency check starts at once, and how long all of them may take. */
+export const ACCOUNTING_CONSUMER_READERS = 4;
+const ACCOUNTING_CONSUMER_DEADLINE_MS = 30_000;
+/** Stdout a consumer replay may carry; a larger capture is not replayed. */
+export const ACCOUNTING_CAPTURE_MAX_BYTES = 4 * 1024 * 1024;
+
+export type AccountingConsumerId =
+	| 'turn-recorder'
+	| 'desktop-recording'
+	| 'stats-readers'
+	| 'cue-attribution'
+	| 'context-window'
+	| 'quota-unavailable';
+
+/** The consumer legs, in the order they run (the stats readers read what the two writers wrote). */
+export const ACCOUNTING_CONSUMER_IDS: readonly AccountingConsumerId[] = Object.freeze([
+	'turn-recorder',
+	'desktop-recording',
+	'stats-readers',
+	'cue-attribution',
+	'context-window',
+	'quota-unavailable',
+]);
+
+/** The assertions each consumer leg must evaluate; a leg missing one cannot pass. */
+export const ACCOUNTING_CONSUMER_ASSERTIONS: Readonly<
+	Record<AccountingConsumerId, readonly string[]>
+> = Object.freeze({
+	'turn-recorder': ['recorder-row-once', 'recorder-tokens', 'recorder-cost-label'],
+	'desktop-recording': [
+		'desktop-usage-once',
+		'desktop-stream-bound',
+		'desktop-row-once',
+		'desktop-cost-label',
+	],
+	'stats-readers': [
+		'aggregation-once',
+		'aggregation-cost-label',
+		'token-accessor',
+		'export-rows',
+		'readers-bounded',
+	],
+	'cue-attribution': ['cue-pipeline-once', 'cue-tokens', 'cue-cost-label', 'cue-native-partial'],
+	'context-window': ['combined-rule', 'displayed-fraction', 'unknown-window'],
+	'quota-unavailable': ['quota-not-sampled', 'quota-zero-network', 'budget-not-reset'],
+});
+
+/** What the usage capture leg kept of its native turn for the consumers: bytes in memory, never on a receipt. */
+interface AccountingTurnCapture {
+	chunks: Buffer[];
+	bytes: number;
+	truncated: boolean;
+	rec: AccountingUsageRecord;
+	turn: PaidTurnResult;
+	final: UsageStats | undefined;
+	startedAt: number;
+	endedAt: number;
+}
+
+export interface AccountingConsumerReceipt {
+	leg: AccountingConsumerId;
+	/** not-run: refused before any consumer ran; not-evaluated: an honest gap with an owner. */
+	status: 'not-run' | 'not-evaluated' | 'passed' | 'failed';
+	reasons: AdmissionReason[];
+	assertions: ConsumerAssertion[];
+	assertion: PaidAssertionOutcome;
+	/** Parts of the leg no script can reach, each with an owner; they never pass. */
+	openGaps: Array<{ id: string; detail: string; owner: string }>;
+	/** Counts, labels and digests the consumers returned; never transcript text. */
+	observed: Record<string, unknown>;
+}
+
+const accountingConsumerReason = (id: string, detail: string, owner = ACCOUNTING_CONSUMERS_OWNER) =>
+	paidReason(id, detail, owner);
+
+/** The production main-process consumers of a turn's usage, bundled from the checkout with an Electron stand-in. */
+interface MainAccountingConsumers {
+	initializeStatsDB: () => void;
+	closeStatsDB: () => void;
+	getStatsDB: () => {
+		recordSessionCreated: (e: {
+			sessionId: string;
+			agentType: string;
+			projectPath?: string;
+			createdAt: number;
+			isRemote?: boolean;
+		}) => string;
+	};
+	registerStatsHandlers: (deps: unknown) => void;
+	flushQueryEventsSync: () => void;
+	invalidateTokenUsageMemo: () => void;
+	initializeSessionStorages: () => void;
+	StdoutHandler: new (deps: unknown) => { handleData: (sid: string, text: string) => void };
+	ExitHandler: new (deps: unknown) => {
+		handleExit: (sid: string, code: number, _x: unknown, signal: string | null) => Promise<void>;
+	};
+	DataBufferManager: new (processes: unknown, emitter: EventEmitter) => unknown;
+	nextSpawnGeneration: (sid: string) => number;
+	initCueDb: (onLog?: unknown, dbPath?: string) => void;
+	closeCueDb: () => void;
+	recordCueEvent: (e: Record<string, unknown>) => void;
+	updateCueEventStatus: (
+		id: string,
+		status: string,
+		providerSessionId?: string | null,
+		completion?: Record<string, unknown>
+	) => void;
+	getCueStatsAggregation: (
+		range: string,
+		options: { subscriptionToPipeline?: Map<string, string> }
+	) => Promise<{
+		totals: { occurrences: number };
+		byPipeline: Array<{
+			key: string;
+			totals: {
+				occurrences: number;
+				totalInputTokens: number;
+				totalOutputTokens: number;
+				totalCacheReadTokens: number;
+				totalCacheCreationTokens: number;
+				totalCostUsd: number | null;
+			};
+		}>;
+	}>;
+	getSessionTokenSummaries: (
+		lookups: Array<{ maestroSessionId: string; providerSessionId: string }>
+	) => Promise<
+		Map<
+			string,
+			{ coverage: string; costUsd: number | null; inputTokens: number; outputTokens: number }
+		>
+	>;
+	sessionTokenLookupKey: (maestroSessionId: string, providerSessionId: string) => string;
+	_resetCueTokenAccessorCache: () => void;
+	UsageRefreshScheduler: new (deps: unknown) => {
+		start: () => void;
+		stop: () => void;
+	};
+	logger: { setLogLevel: (level: 'error') => void };
+	handlers: Map<string, (...args: unknown[]) => Promise<unknown>>;
+	dispose: () => void;
+}
+
+/** Load the stats, desktop recording, Cue and quota modules as they are in the checkout (see `bundleMainEntry`). */
+async function loadMainAccountingConsumers(
+	workspace: string,
+	userData: string
+): Promise<MainAccountingConsumers> {
+	const src = (rel: string) => JSON.stringify(path.join(workspace, 'src', 'main', rel));
+	const loaded = await bundleMainEntry<Omit<MainAccountingConsumers, 'handlers' | 'dispose'>>(
+		workspace,
+		userData,
+		'qualify-main-accounting.ts',
+		[
+			`export { initializeStatsDB, getStatsDB, closeStatsDB } from ${src('stats/singleton.ts')};`,
+			`export { registerStatsHandlers } from ${src('ipc/handlers/stats.ts')};`,
+			`export { flushQueryEventsSync } from ${src('stats/query-events-buffer.ts')};`,
+			`export { invalidateTokenUsageMemo } from ${src('stats/token-usage/token-usage-accessor.ts')};`,
+			`export { initializeSessionStorages } from ${src('storage/index.ts')};`,
+			`export { StdoutHandler } from ${src('process-manager/handlers/StdoutHandler.ts')};`,
+			`export { ExitHandler } from ${src('process-manager/handlers/ExitHandler.ts')};`,
+			`export { DataBufferManager } from ${src('process-manager/handlers/DataBufferManager.ts')};`,
+			`export { nextSpawnGeneration } from ${src('process-manager/generation.ts')};`,
+			`export { initCueDb, closeCueDb, recordCueEvent, updateCueEventStatus } from ${src('cue/cue-db.ts')};`,
+			`export { getCueStatsAggregation } from ${src('cue/stats/cue-stats-query.ts')};`,
+			`export { getSessionTokenSummaries, sessionTokenLookupKey, _resetCueTokenAccessorCache } from ${src('cue/stats/cue-token-accessor.ts')};`,
+			`export { UsageRefreshScheduler } from ${src('agents/usage-refresh-scheduler.ts')};`,
+			`export { logger } from ${src('utils/logger.ts')};`,
+		]
+	);
+	loaded.mod.logger.setLogLevel('error');
+	return { ...loaded.mod, handlers: loaded.handlers, dispose: loaded.dispose };
+}
+
+/**
+ * Refuse every outbound request for the duration of the consumer legs and count
+ * the attempts: no consumer of a turn's usage (least of all the quota path) may
+ * reach a network. Restored exactly as found.
+ */
+function guardConsumerNetwork(): { attempts: string[]; restore: () => void } {
+	const attempts: string[] = [];
+	const refuse = (what: string): never => {
+		attempts.push(what);
+		throw new Error(`qualification: ${what} refused during the accounting consumer legs`);
+	};
+	const g = globalThis as unknown as Record<string, unknown>;
+	const savedFetch = g.fetch;
+	g.fetch = async () => refuse('fetch');
+	const mods = [http, https] as unknown as Array<Record<string, unknown>>;
+	const saved = mods.map((m) => ({ request: m.request, get: m.get }));
+	for (const m of mods) {
+		m.request = () => refuse('request');
+		m.get = () => refuse('get');
+	}
+	syncBuiltinESMExports();
+	return {
+		attempts,
+		restore: () => {
+			g.fetch = savedFetch;
+			mods.forEach((m, i) => {
+				m.request = saved[i].request;
+				m.get = saved[i].get;
+			});
+			syncBuiltinESMExports();
+		},
+	};
+}
+
+/** Set environment variables for the consumer block; returns the restore. */
+function swapEnv(vars: Record<string, string | undefined>): () => void {
+	const before = Object.keys(vars).map((k) => [k, process.env[k]] as const);
+	for (const [k, v] of Object.entries(vars)) {
+		if (v === undefined) delete process.env[k];
+		else process.env[k] = v;
+	}
+	return () => {
+		for (const [k, v] of before) {
+			if (v === undefined) delete process.env[k];
+			else process.env[k] = v;
+		}
+	};
+}
+
+/** The checkout's own better-sqlite3, the loader the CLI hands the library recorder. */
+function loadWorkspaceSqlite(workspace: string): StatsConnectionConstructor {
+	return createRequire(path.join(workspace, 'package.json'))(
+		'better-sqlite3'
+	) as StatsConnectionConstructor;
+}
+
+interface QueryRow {
+	input: number | null;
+	output: number | null;
+	cacheRead: number | null;
+	cacheWrite: number | null;
+	costUsd: number | null;
+}
+
+/** The usage rows the owned stats database holds for one agent, read straight from its file. */
+function readQueryRows(workspace: string, statsFile: string, sessionId: string): QueryRow[] {
+	const Database = loadWorkspaceSqlite(workspace) as unknown as new (
+		file: string,
+		opts: { readonly: boolean; fileMustExist: boolean }
+	) => {
+		prepare: (sql: string) => { all: (...p: unknown[]) => unknown[] };
+		close: () => void;
+	};
+	const db = new Database(statsFile, { readonly: true, fileMustExist: true });
+	try {
+		return db
+			.prepare(
+				'SELECT input_tokens AS input, output_tokens AS output, cache_read_tokens AS cacheRead, cache_creation_tokens AS cacheWrite, cost_usd AS costUsd FROM query_events WHERE session_id = ?'
+			)
+			.all(sessionId) as QueryRow[];
+	} finally {
+		db.close();
+	}
+}
+
+/** True when shown token counts are the record's buckets (a bucket the stream never carried reads 0 in a row). */
+function tokensMatch(
+	rec: AccountingUsageRecord,
+	t: {
+		input: number | null;
+		output: number | null;
+		cacheRead: number | null;
+		cacheWrite: number | null;
+	}
+): boolean {
+	const b = rec.buckets;
+	return (
+		(t.input ?? 0) === (b.input ?? 0) &&
+		(t.output ?? 0) === (b.output ?? 0) &&
+		(t.cacheRead ?? 0) === (b.cacheRead ?? 0) &&
+		(t.cacheWrite ?? 0) === (b.cacheWrite ?? 0)
+	);
+}
+
+/**
+ * Whether a consumer shows the turn's charge with its own label: an exact
+ * charge as its figure, an unknown one as no figure at all (never 0), a
+ * partial one as no figure or the partial figure.
+ */
+export function consumerCostLabelOk(
+	cost: AccountingUsageRecord['cost'],
+	shown: number | null | undefined
+): boolean {
+	const v = typeof shown === 'number' && Number.isFinite(shown) ? shown : null;
+	const same = (a: number, b: number) => Math.abs(a - b) < 1e-9;
+	if (cost.status === 'exact') return v !== null && cost.costUsd !== null && same(v, cost.costUsd);
+	if (cost.costUsd === null) return v === null;
+	return v === null || same(v, cost.costUsd);
+}
+
+const shownCost = (v: number | null | undefined) =>
+	typeof v === 'number' && Number.isFinite(v) ? String(v) : 'none';
+
+interface DesktopReplay {
+	usages: UsageStats[];
+	exits: number;
+	settlements: unknown[];
+	agentErrors: number;
+	jsonBufferAfter: number;
+	released: boolean;
+	replayedBytes: number;
+}
+
+/**
+ * Replay the captured native stream through the desktop's own stdout and exit
+ * handlers (the turn-recordings path): chunks in the order the child wrote
+ * them, then the exit the child reported.
+ */
+async function replayDesktopTurn(
+	mod: MainAccountingConsumers,
+	capture: AccountingTurnCapture,
+	sid: string,
+	cwd: string
+): Promise<DesktopReplay> {
+	const processes = new Map<string, Record<string, unknown>>();
+	const emitter = new EventEmitter();
+	const bufferManager = new mod.DataBufferManager(processes, emitter);
+	const stdout = new mod.StdoutHandler({ processes, emitter, bufferManager });
+	const exit = new mod.ExitHandler({ processes, emitter, bufferManager });
+	const proc: Record<string, unknown> = {
+		sessionId: sid,
+		toolType: 'grok',
+		cwd,
+		pid: 0,
+		isTerminal: false,
+		startTime: capture.startedAt,
+		isStreamJsonMode: true,
+		isBatchMode: false,
+		jsonBuffer: '',
+		stdoutBuffer: '',
+		stderrBuffer: '',
+		contextWindow: 0,
+		sessionIdEmitted: false,
+		resultEmitted: false,
+		errorEmitted: false,
+		outputParser: createOutputParser('grok'),
+		interrupted: false,
+		streamedText: '',
+	};
+	processes.set(sid, proc);
+	proc.spawnGeneration = mod.nextSpawnGeneration(sid);
+	const out: DesktopReplay = {
+		usages: [],
+		exits: 0,
+		settlements: [],
+		agentErrors: 0,
+		jsonBufferAfter: 0,
+		released: false,
+		replayedBytes: 0,
+	};
+	emitter.on('usage', (_s: string, u: UsageStats) => out.usages.push(u));
+	emitter.on('agent-error', () => out.agentErrors++);
+	emitter.on('exit', (_s: string, _code: number, _signal?: string, settlement?: unknown) => {
+		out.exits++;
+		out.settlements.push(settlement);
+	});
+	const decoder = new StringDecoder('utf8');
+	for (const chunk of capture.chunks) {
+		out.replayedBytes += chunk.length;
+		const text = decoder.write(chunk);
+		if (text) stdout.handleData(sid, text);
+	}
+	const tail = decoder.end();
+	if (tail) stdout.handleData(sid, tail);
+	await exit.handleExit(sid, capture.turn.exitCode || 0, undefined, capture.turn.signal ?? null);
+	out.jsonBufferAfter = String(proc.jsonBuffer ?? '').length;
+	out.released = !processes.has(sid);
+	return out;
+}
+
+interface ConsumerContext {
+	w: AccountingLegContext;
+	capture: AccountingTurnCapture;
+	mod: MainAccountingConsumers;
+	userData: string;
+	statsFile: string;
+	recorderAgent: string;
+	desktopAgent: string;
+	network: { attempts: string[] };
+	ledgerBefore: string;
+	/** The desktop's own usage objects for the turn (the stream's production conversion). */
+	desktopUsage: UsageStats | undefined;
+}
+
+type ConsumerRunner = (x: ConsumerContext, r: AccountingConsumerReceipt) => Promise<void>;
+
+const consumerAssert =
+	(r: AccountingConsumerReceipt) => (id: string, ok: boolean, detail: string) =>
+		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+
+/** turn-recorder: the library recorder writes the turn once into the owned data dir, its charge labelled as reported. */
+const runTurnRecorderConsumer: ConsumerRunner = async (x, r) => {
+	const assert = consumerAssert(r);
+	const paths = resolveMaestroPaths({ env: { MAESTRO_USER_DATA: x.userData } });
+	let transcriptWrites = 0;
+	const tab = { id: 'qualify-e06-tab', name: 'Qualify E06', saveToHistory: true };
+	const agent = { id: x.recorderAgent, cwd: x.w.cwd, toolType: 'grok', aiTabs: [tab] };
+	const recorder = createTurnRecorder({
+		paths,
+		loadSqlite: () => loadWorkspaceSqlite(x.w.workspace),
+		repository: {
+			getAgent: (id: string) => (id === agent.id ? agent : undefined),
+			getTab: (id: string, tabId: string) =>
+				id === agent.id && tabId === tab.id ? tab : undefined,
+			appendTranscript: async () => {
+				transcriptWrites++;
+				return { ok: true as const, value: undefined };
+			},
+		} as unknown as TurnRecorderOptions['repository'],
+	});
+	const result = await recorder.recordTurn({
+		agentId: agent.id,
+		tabId: tab.id,
+		scope: { projectPath: x.w.cwd, isRemote: false, isWorktree: false },
+		assembled: {
+			entry: { text: `<fixture:${x.w.fixture.family}:accounting:usage-capture>` },
+			settings: { provider: 'grok' },
+		} as unknown as RecordedTurn['assembled'],
+		completed: {
+			outcome: 'completed',
+			answerText: 'qualification answer (token withheld)',
+			sessionId: x.capture.turn.sessionId ?? undefined,
+			usage: x.capture.final,
+			error: undefined,
+			exit: { exitCode: x.capture.turn.exitCode, signal: x.capture.turn.signal, stderrText: '' },
+		} as unknown as RecordedTurn['completed'],
+		startedAt: x.capture.startedAt,
+		endedAt: x.capture.endedAt,
+		userEntryWritten: true,
+	});
+	const rows = readQueryRows(x.w.workspace, x.statsFile, x.recorderAgent);
+	r.observed = {
+		statsOk: result.stats.ok,
+		historyOk: result.history.ok,
+		transcriptWrites,
+		rows: rows.length,
+		rowCost: rows[0]?.costUsd ?? null,
+	};
+	assert(
+		'recorder-row-once',
+		result.stats.ok && rows.length === 1,
+		`stats ${result.stats.ok ? 'ok' : (result.stats as { reason?: string }).reason}; rows ${rows.length}`
+	);
+	assert(
+		'recorder-tokens',
+		rows.length === 1 && tokensMatch(x.capture.rec, rows[0]),
+		`row ${rows[0] ? `${rows[0].input}/${rows[0].output}/${rows[0].cacheRead}/${rows[0].cacheWrite}` : 'none'}`
+	);
+	assert(
+		'recorder-cost-label',
+		rows.length === 1 && consumerCostLabelOk(x.capture.rec.cost, rows[0].costUsd),
+		`${x.capture.rec.cost.status}; row cost ${shownCost(rows[0]?.costUsd)}`
+	);
+};
+
+/**
+ * desktop-recording: the captured stream through the desktop stdout/exit
+ * handlers, the per-turn ledger, and the `stats:record-query` handler into the
+ * owned database: one exit, one settlement, the buffer drained, one row.
+ */
+const runDesktopRecordingConsumer: ConsumerRunner = async (x, r) => {
+	const assert = consumerAssert(r);
+	const sid = `${x.desktopAgent}-ai-qualify-e06-tab`;
+	const replay = await replayDesktopTurn(x.mod, x.capture, sid, x.w.cwd);
+	x.desktopUsage = replay.usages[replay.usages.length - 1];
+	for (const u of replay.usages) recordTurnUsage(sid, u);
+	const drained = drainTurnUsage(sid);
+	const handler = x.mod.handlers.get('stats:record-query');
+	let rowId: unknown = null;
+	if (handler)
+		rowId = await handler(null, {
+			sessionId: x.desktopAgent,
+			agentType: 'grok',
+			source: 'user',
+			startTime: x.capture.startedAt,
+			duration: x.capture.endedAt - x.capture.startedAt,
+			projectPath: x.w.cwd,
+			tabId: 'qualify-e06-tab',
+			isRemote: false,
+			...turnUsageStatsFields(drained),
+		});
+	x.mod.flushQueryEventsSync();
+	const rows = readQueryRows(x.w.workspace, x.statsFile, x.desktopAgent);
+	r.observed = {
+		usageEvents: replay.usages.length,
+		exits: replay.exits,
+		settlements: replay.settlements.length,
+		agentErrors: replay.agentErrors,
+		replayedBytes: replay.replayedBytes,
+		bufferAfter: replay.jsonBufferAfter,
+		released: replay.released,
+		ledgerEvents: drained?.events ?? 0,
+		costUnknown: drained?.costUnknown === true,
+		handler: Boolean(handler),
+		rowId: typeof rowId === 'string',
+		rows: rows.length,
+	};
+	assert(
+		'desktop-usage-once',
+		replay.exits === 1 &&
+			replay.settlements.length === 1 &&
+			replay.usages.length >= 1 &&
+			drained !== null &&
+			drained.events === replay.usages.length &&
+			tokensMatch(x.capture.rec, {
+				input: drained.inputTokens,
+				output: drained.outputTokens,
+				cacheRead: drained.cacheReadTokens,
+				cacheWrite: drained.cacheCreationTokens,
+			}),
+		`exits ${replay.exits}; settlements ${replay.settlements.length}; usage events ${replay.usages.length}; ledger ${drained ? `${drained.inputTokens}/${drained.outputTokens}/${drained.cacheReadTokens}/${drained.cacheCreationTokens}` : 'none'}`
+	);
+	assert(
+		'desktop-stream-bound',
+		!x.capture.truncated &&
+			replay.replayedBytes === x.capture.bytes &&
+			replay.replayedBytes <= ACCOUNTING_CAPTURE_MAX_BYTES &&
+			replay.jsonBufferAfter === 0 &&
+			replay.released &&
+			replay.agentErrors === 0,
+		`replayed ${replay.replayedBytes}/${x.capture.bytes}; buffer ${replay.jsonBufferAfter}; released ${replay.released}; errors ${replay.agentErrors}`
+	);
+	assert(
+		'desktop-row-once',
+		Boolean(handler) && typeof rowId === 'string' && rows.length === 1,
+		`handler ${handler ? 'registered' : 'missing'}; rows ${rows.length}`
+	);
+	assert(
+		'desktop-cost-label',
+		rows.length === 1 && consumerCostLabelOk(x.capture.rec.cost, rows[0].costUsd),
+		`${x.capture.rec.cost.status}; row cost ${shownCost(rows[0]?.costUsd)}`
+	);
+};
+
+/**
+ * stats-readers: the owned database read back through the dashboard handlers
+ * (aggregation and token usage), the usage export handler, and readers started
+ * together under one deadline. The stats CLI needs a running desktop: a gap.
+ */
+const runStatsReadersConsumer: ConsumerRunner = async (x, r) => {
+	const assert = consumerAssert(r);
+	const call = async (channel: string, ...args: unknown[]) => {
+		const h = x.mod.handlers.get(channel);
+		if (!h) throw new Error(`${channel} unregistered`);
+		return h(null, ...args);
+	};
+	const rec = x.capture.rec;
+	const agg = (await call('stats:get-aggregation', 'day')) as {
+		byAgent: Record<string, { count: number }>;
+		bySessionTokens: Record<
+			string,
+			{
+				inputTokens: number;
+				outputTokens: number;
+				cacheReadTokens: number;
+				cacheCreationTokens: number;
+				costUsd: number;
+				pricedQueries: number;
+			}
+		>;
+	};
+	const desk = agg.bySessionTokens[x.desktopAgent];
+	assert(
+		'aggregation-once',
+		(agg.byAgent.grok?.count ?? 0) === 2 &&
+			desk?.pricedQueries === 1 &&
+			tokensMatch(rec, {
+				input: desk.inputTokens,
+				output: desk.outputTokens,
+				cacheRead: desk.cacheReadTokens,
+				cacheWrite: desk.cacheCreationTokens,
+			}),
+		`grok queries ${agg.byAgent.grok?.count ?? 0}/2; desktop priced ${desk?.pricedQueries ?? 0}`
+	);
+	assert(
+		'aggregation-cost-label',
+		Boolean(desk) && consumerCostLabelOk(rec.cost, desk.costUsd),
+		`${rec.cost.status}; dashboard cost ${shownCost(desk?.costUsd)}`
+	);
+	x.mod.invalidateTokenUsageMemo();
+	const tokens = (await call('stats:get-token-usage', {}, true)) as {
+		byAgent: Array<{
+			key: string;
+			sessionCount: number;
+			costUsd: number;
+			accounting?: { cost?: { status?: string } };
+		}>;
+	};
+	const grok = tokens.byAgent.find((g) => g.key === 'grok');
+	const groupExact = grok?.accounting?.cost?.status === 'exact';
+	assert(
+		'token-accessor',
+		Boolean(grok) && grok!.sessionCount >= 1 && !(rec.cost.status !== 'exact' && groupExact),
+		`grok sessions ${grok?.sessionCount ?? 0}; group cost ${grok?.accounting?.cost?.status ?? 'unlabelled'}; turn ${rec.cost.status}`
+	);
+	const exportFile = path.join(x.userData, 'qualify-usage-export.json');
+	const exported = (await call('stats:export', 'day', 'json', exportFile)) as {
+		rowCounts?: Record<string, number>;
+	};
+	const bundle = JSON.parse(fs.readFileSync(exportFile, 'utf8')) as {
+		queryEvents: Array<{ sessionId: string; costUsd?: number | null }>;
+	};
+	const mine = bundle.queryEvents.filter(
+		(e) => e.sessionId === x.recorderAgent || e.sessionId === x.desktopAgent
+	);
+	const deskRow = mine.find((e) => e.sessionId === x.desktopAgent);
+	assert(
+		'export-rows',
+		mine.length === 2 && Boolean(deskRow) && consumerCostLabelOk(rec.cost, deskRow?.costUsd),
+		`exported rows ${mine.length}/2; desktop cost ${shownCost(deskRow?.costUsd)}`
+	);
+	const readers = [
+		...Array.from({ length: ACCOUNTING_CONSUMER_READERS / 2 }, () =>
+			call('stats:get-token-usage', {}, true)
+		),
+		...Array.from({ length: ACCOUNTING_CONSUMER_READERS / 2 }, () =>
+			call('stats:get-aggregation', 'day')
+		),
+	];
+	const started = Date.now();
+	const settled = await withDeadline(Promise.allSettled(readers), ACCOUNTING_CONSUMER_DEADLINE_MS);
+	const elapsedMs = Date.now() - started;
+	const values = 'stalled' in settled ? [] : settled.value;
+	const ok = values.filter((v) => v.status === 'fulfilled') as Array<
+		PromiseFulfilledResult<unknown>
+	>;
+	const half = ACCOUNTING_CONSUMER_READERS / 2;
+	const same = (vs: unknown[], pick: (v: never) => unknown) =>
+		vs.length > 0 &&
+		vs.every((v) => canonicalJson(pick(v as never)) === canonicalJson(pick(vs[0] as never)));
+	const agreed =
+		ok.length === ACCOUNTING_CONSUMER_READERS &&
+		same(
+			ok.slice(0, half).map((v) => v.value),
+			(v: { totals: unknown }) => v.totals
+		) &&
+		same(
+			ok.slice(half).map((v) => v.value),
+			(v: { bySessionTokens: unknown }) => v.bySessionTokens
+		);
+	assert(
+		'readers-bounded',
+		!('stalled' in settled) && agreed && elapsedMs <= ACCOUNTING_CONSUMER_DEADLINE_MS,
+		`${'stalled' in settled ? 'stalled' : `${ok.length}/${ACCOUNTING_CONSUMER_READERS} settled`}; agreed ${agreed}; ${elapsedMs} ms`
+	);
+	r.openGaps.push({
+		id: 'stats-cli',
+		detail:
+			'maestro-cli stats-tokens reads a running desktop over its socket; no owned desktop is started',
+		owner: STATS_CLI_OWNER,
+	});
+	r.observed = {
+		grokQueries: agg.byAgent.grok?.count ?? 0,
+		desktopPriced: desk?.pricedQueries ?? 0,
+		dashboardCost: desk?.costUsd ?? null,
+		tokenSessions: grok?.sessionCount ?? 0,
+		tokenCostStatus: grok?.accounting?.cost?.status ?? null,
+		exportRows: exported.rowCounts ?? null,
+		readers: ok.length,
+		readersMs: elapsedMs,
+	};
+};
+
+/**
+ * cue-attribution: the turn filed as one Cue run (its stream usage on the row,
+ * as the executor stamps it) and read back by the Cue dashboard query: once to
+ * its pipeline, the tokens as reported, the charge labelled; the native
+ * lifetime lookup stays partial for Grok.
+ */
+const runCueAttributionConsumer: ConsumerRunner = async (x, r) => {
+	const assert = consumerAssert(r);
+	const rec = x.capture.rec;
+	x.mod.initCueDb(undefined, path.join(x.userData, 'cue.db'));
+	const id = randomUUID();
+	x.mod.recordCueEvent({
+		id,
+		type: 'time.heartbeat',
+		triggerName: ACCOUNTING_CUE_SUBSCRIPTION,
+		sessionId: x.desktopAgent,
+		subscriptionName: ACCOUNTING_CUE_SUBSCRIPTION,
+		status: 'running',
+		pipelineId: ACCOUNTING_CUE_PIPELINE,
+	});
+	x.mod.updateCueEventStatus(id, 'completed', x.capture.turn.sessionId, {
+		exitCode: x.capture.turn.exitCode,
+		errorMessage: null,
+		streamUsageJson: x.desktopUsage ? JSON.stringify(x.desktopUsage) : null,
+	});
+	const agg = await x.mod.getCueStatsAggregation('day', {
+		subscriptionToPipeline: new Map([[ACCOUNTING_CUE_SUBSCRIPTION, ACCOUNTING_CUE_PIPELINE]]),
+	});
+	const pipe = agg.byPipeline.find((p) => p.key === ACCOUNTING_CUE_PIPELINE);
+	const t = pipe?.totals;
+	assert(
+		'cue-pipeline-once',
+		agg.totals.occurrences === 1 && t?.occurrences === 1 && agg.byPipeline.length === 1,
+		`runs ${agg.totals.occurrences}; pipeline ${t?.occurrences ?? 0}; pipelines ${agg.byPipeline.length}`
+	);
+	assert(
+		'cue-tokens',
+		Boolean(t) &&
+			tokensMatch(rec, {
+				input: t!.totalInputTokens,
+				output: t!.totalOutputTokens,
+				cacheRead: t!.totalCacheReadTokens,
+				cacheWrite: t!.totalCacheCreationTokens,
+			}),
+		t
+			? `${t.totalInputTokens}/${t.totalOutputTokens}/${t.totalCacheReadTokens}/${t.totalCacheCreationTokens}`
+			: 'no pipeline'
+	);
+	assert(
+		'cue-cost-label',
+		Boolean(t) && consumerCostLabelOk(rec.cost, t!.totalCostUsd),
+		`${rec.cost.status}; pipeline cost ${shownCost(t?.totalCostUsd)}`
+	);
+	const native = x.capture.turn.sessionId;
+	x.mod._resetCueTokenAccessorCache();
+	const summaries = native
+		? await x.mod.getSessionTokenSummaries([
+				{ maestroSessionId: x.desktopAgent, providerSessionId: native },
+			])
+		: new Map();
+	const s = native ? summaries.get(x.mod.sessionTokenLookupKey(x.desktopAgent, native)) : undefined;
+	assert(
+		'cue-native-partial',
+		Boolean(s) && s!.coverage === 'partial' && s!.costUsd === null,
+		s ? `coverage ${s.coverage}; cost ${shownCost(s.costUsd)}` : 'no summary'
+	);
+	r.observed = {
+		runs: agg.totals.occurrences,
+		pipelineRuns: t?.occurrences ?? 0,
+		pipelineCost: t?.totalCostUsd ?? null,
+		nativeCoverage: s?.coverage ?? null,
+	};
+};
+
+/**
+ * context-window: the production context resolver over the turn's usage. The
+ * combined-window rule is the capability flag and the shared set agreeing; the
+ * displayed fraction is the reported tokens over the reported window, and with
+ * no reported window the display is unknown, never 0% or a fallback window.
+ */
+const runContextWindowConsumer: ConsumerRunner = async (x, r) => {
+	const assert = consumerAssert(r);
+	const u = x.desktopUsage ?? x.capture.final;
+	if (!u) {
+		r.assertions.push({ id: 'combined-rule', outcome: 'failed', detail: 'no usage' });
+		return;
+	}
+	const combined = getAgentCapabilities('grok').usesCombinedContextWindow === true;
+	const tokens = calculateContextTokens(u, 'grok');
+	const expected = combined
+		? u.inputTokens + (u.cacheCreationInputTokens || 0) + u.outputTokens
+		: u.inputTokens + (u.cacheReadInputTokens || 0) + (u.cacheCreationInputTokens || 0);
+	assert(
+		'combined-rule',
+		COMBINED_CONTEXT_AGENTS.has('grok') === combined && tokens === expected,
+		`combined ${combined}; set ${COMBINED_CONTEXT_AGENTS.has('grok')}; tokens ${tokens}/${expected}`
+	);
+	const reported = typeof u.contextWindow === 'number' && u.contextWindow > 0 ? u.contextWindow : 0;
+	const resolved = resolveContextWindow({
+		reportedWindow: reported,
+		reportedResolved: reported > 0,
+	});
+	const pct = estimateContextUsage(u, 'grok');
+	const fractionOk =
+		reported > 0
+			? resolved.source === 'provider' &&
+				resolved.window === reported &&
+				(tokens > reported ? pct === null : pct === Math.round((tokens / reported) * 100))
+			: resolved.source === 'none' && resolved.window === 0 && pct === null;
+	assert(
+		'displayed-fraction',
+		fractionOk,
+		`window ${reported || 'unreported'} (${resolved.source}); shown ${pct === null ? 'unknown' : `${pct}%`}`
+	);
+	const stripped = { ...u, contextWindow: 0 };
+	const unknownPct = estimateContextUsage(stripped, 'grok');
+	const none = resolveContextWindow({});
+	assert(
+		'unknown-window',
+		unknownPct === null && none.source === 'none' && getContextWindowForAgent('grok') === 0,
+		`without a window: ${unknownPct === null ? 'unknown' : `${unknownPct}%`}; resolver ${none.source}; table ${getContextWindowForAgent('grok')}`
+	);
+	r.observed = { combined, tokens, reportedWindow: reported, shownPercent: pct };
+};
+
+/**
+ * quota-unavailable: the desktop's quota refresh scheduler handed a Grok
+ * interval over the owned account must sample nothing (no timer, no detector,
+ * no store read): Grok presents as quota unavailable. No consumer touched a
+ * network, and the run's budget ledger is exactly as it was.
+ */
+const runQuotaUnavailableConsumer: ConsumerRunner = async (x, r) => {
+	const assert = consumerAssert(r);
+	const touches: string[] = [];
+	const watched = (name: string) =>
+		new Proxy(
+			{},
+			{
+				get: (_t, p) => {
+					touches.push(`${name}.${String(p)}`);
+					return () => undefined;
+				},
+			}
+		);
+	const settings = {
+		get: (key: string) =>
+			key === 'usageRefreshIntervals' ? { grok: 60_000, 'claude-code': 0, codex: 0 } : undefined,
+		onDidChange: () => () => undefined,
+	};
+	const sched = new x.mod.UsageRefreshScheduler({
+		sessionsStore: watched('sessionsStore'),
+		agentConfigsStore: watched('agentConfigsStore'),
+		settingsStore: settings,
+		agentDetector: watched('agentDetector'),
+	});
+	const internals = sched as unknown as {
+		timers: Map<string, unknown>;
+		tick: (providerId: string) => Promise<void>;
+	};
+	sched.start();
+	const armed = [...internals.timers.keys()];
+	await internals.tick('grok');
+	sched.stop();
+	assert(
+		'quota-not-sampled',
+		armed.length === 0 && touches.length === 0,
+		`armed ${armed.join(',') || 'none'}; touched ${touches.join(',') || 'nothing'}; presents unavailable (${GROK_QUOTA_BLOCKER} open)`
+	);
+	assert(
+		'quota-zero-network',
+		x.network.attempts.length === 0,
+		`network attempts ${x.network.attempts.length}`
+	);
+	const after = canonicalJson(x.w.ledger);
+	assert(
+		'budget-not-reset',
+		after === x.ledgerBefore,
+		after === x.ledgerBefore ? 'ledger unchanged' : 'ledger changed during the consumer legs'
+	);
+	r.observed = { armed, touches: touches.length, blocker: GROK_QUOTA_BLOCKER };
+};
+
+const CONSUMER_RUNNERS: Record<AccountingConsumerId, ConsumerRunner> = {
+	'turn-recorder': runTurnRecorderConsumer,
+	'desktop-recording': runDesktopRecordingConsumer,
+	'stats-readers': runStatsReadersConsumer,
+	'cue-attribution': runCueAttributionConsumer,
+	'context-window': runContextWindowConsumer,
+	'quota-unavailable': runQuotaUnavailableConsumer,
+};
+
+function settleAccountingConsumer(r: AccountingConsumerReceipt, problems: string[]): void {
+	if (r.reasons.length && !r.assertions.length && !problems.length) {
+		r.status = 'not-run';
+		r.assertion = {
+			id: r.leg,
+			outcome: 'not-evaluated',
+			detail: r.reasons.map((x) => x.id).join('; '),
+			owner: ACCOUNTING_CONSUMERS_OWNER,
+		};
+		return;
+	}
+	const required = ACCOUNTING_CONSUMER_ASSERTIONS[r.leg];
+	const all = [
+		...r.reasons.map((x) => x.id),
+		...problems,
+		...r.assertions.filter((a) => a.outcome === 'failed').map((a) => `failed:${a.id}`),
+		...required
+			.filter((id) => !r.assertions.some((a) => a.id === id))
+			.map((id) => `assertion-not-evaluated:${id}`),
+	];
+	r.status = all.length ? 'failed' : 'passed';
+	r.assertion = {
+		id: r.leg,
+		outcome: all.length ? 'failed' : 'passed',
+		detail:
+			all.join('; ') ||
+			`${required.length} assertions passed${r.openGaps.length ? `; open: ${r.openGaps.map((g) => g.id).join(', ')}` : ''}`,
+	};
+}
+
+/**
+ * The accounting consumer legs of an E06 fixture: after its accounting legs,
+ * the usage capture turn handed to the production consumers over an owned
+ * data dir (stats database, Cue database, token cache, export), with the home
+ * and Grok home pointed at owned dirs and every network request refused. No
+ * turn is sent and no reservation is held: they read what the usage capture
+ * leg already paid for.
+ */
+async function runAccountingConsumers(
+	w: AccountingLegContext,
+	capture: AccountingTurnCapture | null,
+	usageLeg: AccountingLegReceipt | undefined
+): Promise<AccountingConsumerReceipt[]> {
+	if (!w.fixture.accountingLegs?.length) return [];
+	const legs: AccountingConsumerReceipt[] = ACCOUNTING_CONSUMER_IDS.map((leg) => ({
+		leg,
+		status: 'not-run',
+		reasons: [],
+		assertions: [],
+		assertion: { id: leg, outcome: 'not-evaluated', detail: '', owner: ACCOUNTING_CONSUMERS_OWNER },
+		openGaps: [],
+		observed: {},
+	}));
+	const refuseAll = (id: string, detail: string) => {
+		for (const r of legs) r.reasons.push(accountingConsumerReason(id, detail));
+	};
+	const gapAll = (detail: string, owner: string) => {
+		for (const r of legs) {
+			r.status = 'not-evaluated';
+			r.assertion = { id: r.leg, outcome: 'not-evaluated', detail, owner };
+		}
+	};
+	if (!w.capabilities.accountingConsumers)
+		refuseAll('accounting-consumers-unimplemented', 'accountingConsumers');
+	else if (w.c.target === 'ssh') {
+		gapAll(
+			'the consumers replay the captured stream and read owned databases locally; no task owns an SSH consumer leg',
+			SSH_ACCOUNTING_CONSUMERS_OWNER
+		);
+		return legs;
+	} else if (w.c.route !== 'native-headless') {
+		gapAll(
+			'the consumers replay a captured native headless stream; the ACP route keeps none',
+			ACP_ACCOUNTING_CONSUMERS_OWNER
+		);
+		return legs;
+	} else if (usageLeg?.status !== 'passed' || !capture)
+		refuseAll('usage-capture-not-passed', usageLeg?.status ?? 'absent');
+	else if (capture.truncated)
+		refuseAll('capture-unbounded', `${capture.bytes} > ${ACCOUNTING_CAPTURE_MAX_BYTES}`);
+	if (legs[0].reasons.length) {
+		for (const r of legs) settleAccountingConsumer(r, []);
+		return legs;
+	}
+	const made = prepareConsumerRoot(w.c, w.config, 'accounting-consumers', {
+		workspace: w.workspace,
+		operatorHome: w.operatorHome,
+	});
+	if ('refused' in made) {
+		refuseAll(made.refused, made.detail);
+		for (const r of legs) settleAccountingConsumer(r, []);
+		return legs;
+	}
+	const userData = path.join(made.root, 'user-data');
+	const home = path.join(made.root, 'home');
+	fs.mkdirSync(userData, { recursive: true, mode: 0o700 });
+	fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+	const slug = w.c.caseId.replace(/[^A-Za-z0-9._-]/g, '_');
+	const ledgerBefore = canonicalJson(w.ledger);
+	const network = guardConsumerNetwork();
+	const restoreEnv = swapEnv({
+		HOME: home,
+		USERPROFILE: home,
+		GROK_HOME: w.accountRoot ?? undefined,
+		MAESTRO_USER_DATA: userData,
+	});
+	let mod: MainAccountingConsumers | null = null;
+	try {
+		try {
+			mod = await loadMainAccountingConsumers(w.workspace, userData);
+			mod.initializeSessionStorages();
+			mod.initializeStatsDB();
+			mod.registerStatsHandlers({ getMainWindow: () => null });
+		} catch (e) {
+			for (const r of legs) settleAccountingConsumer(r, [`consumer-load-failed: ${errorText(e)}`]);
+			return legs;
+		}
+		const x: ConsumerContext = {
+			w,
+			capture: capture!,
+			mod,
+			userData,
+			statsFile: path.join(userData, 'stats.db'),
+			recorderAgent: `qualify-e06-recorder-${slug}`,
+			desktopAgent: `qualify-e06-desktop-${slug}`,
+			network,
+			ledgerBefore,
+			desktopUsage: undefined,
+		};
+		// The dashboard's token readers find a project through the lifecycle table, as the desktop records it.
+		for (const sessionId of [x.recorderAgent, x.desktopAgent])
+			mod.getStatsDB().recordSessionCreated({
+				sessionId,
+				agentType: 'grok',
+				projectPath: w.cwd,
+				createdAt: capture!.startedAt,
+				isRemote: false,
+			});
+		for (const r of legs) {
+			const problems: string[] = [];
+			try {
+				await CONSUMER_RUNNERS[r.leg](x, r);
+			} catch (e) {
+				problems.push(`${r.leg}-threw: ${errorText(e)}`);
+			}
+			settleAccountingConsumer(r, problems);
+		}
+		return legs;
+	} finally {
+		try {
+			mod?.closeCueDb();
+			mod?.closeStatsDB();
+		} catch {
+			// Closing an owned database cannot change a verdict already settled.
+		}
+		mod?.dispose();
+		restoreEnv();
+		network.restore();
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -15491,6 +16595,7 @@ export async function executePaidCase(
 		utilityLegs: [],
 		workflowLegs: [],
 		accountingLegs: [],
+		accountingConsumers: [],
 	});
 	if (reasons.length || !fixture) return accounts.map(refused);
 	// What each owned home listed before the legs: the colliding-ID verdict judges only what they added.
