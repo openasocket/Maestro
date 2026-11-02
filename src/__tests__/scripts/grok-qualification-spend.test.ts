@@ -45,6 +45,13 @@
  * transport hold stays uncertain and unrefundable, an unknown charge settles
  * nothing, the consumers (GT1-11-11F2) reserve nothing, and a run turn limit
  * the earlier legs exhausted refuses the next leg unsent and uncounted.
+ *
+ * GT1-11-12D: the E10 negative policy legs (GT1-11-12A..12C) on the same
+ * ledger: each turn-bearing leg holds one policy reservation of its own,
+ * counted before its child and settled once; approval, refusal and
+ * authority legs hold none; a second run on the same ledger reserves and
+ * starts nothing; flags off reserve nothing; and a run turn limit the
+ * earlier legs exhausted refuses the next leg unsent and uncounted.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -78,6 +85,7 @@ import {
 	type QualificationConfig,
 	type ReservationRequest,
 } from '../../../scripts/grok-qualification/harness';
+import { POLICY_LEGS } from '../../../scripts/grok-qualification/paid-fixtures';
 
 /** Pass-through spies on every child_process entry point, so a test can prove none ran. */
 const childProcess = vi.hoisted(() => {
@@ -172,6 +180,8 @@ const ALL_CAPS: HarnessCapabilities = {
 	// Off: the accounting legs and consumers run in their own block (GT1-11-11F3).
 	accountingLegs: false,
 	accountingConsumers: false,
+	// Off: the negative policy legs run in their own block (GT1-11-12D).
+	policyLegs: false,
 };
 
 /** The fake budget provider: a fully authorized worst-case-reservation config. */
@@ -1982,6 +1992,251 @@ describe('GT1-11-09 qualification spend admission', () => {
 				expect(ledger.turns).toBe(2);
 				expect(atSpawn).toEqual([1, 2]);
 				expect(ledger.reservations.map((x) => x.leg)).toEqual([null, 'accounting:usage-capture']);
+			}, 120_000);
+		}
+	);
+
+	describe.skipIf(process.platform === 'win32')(
+		'negative policy legs on the shared ledger (GT1-11-12D)',
+		() => {
+			const REL = `${RUNS_ROOT}/gt1-11-12d-spend-${process.pid}`;
+			const ROOT = path.join(WORKSPACE, REL);
+			const BIN = path.join(ROOT, 'bin', 'grok');
+			const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-12d-spend-operator-${process.pid}`);
+			const E10 = expandCases([
+				{
+					id: 'E10',
+					requirementIds: ['R-E10'],
+					ownerTasks: ['GT1-11-12D'],
+					expectedInvariant: 'synthetic',
+					blockerIds: [],
+				},
+			]).find((c) => c.caseId === 'E10:native-headless:local')!;
+			let sha = '';
+			/**
+			 * An obeying native stand-in (never a real Grok): the reply token, then
+			 * one `end` record with usage and an exact charge. It touches nothing.
+			 */
+			const SOURCE = [
+				`#!${process.execPath}`,
+				'const argv = process.argv.slice(2);',
+				'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
+				"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
+				"const t = (at('-p') || '').match(/QUALIFY-[A-Z0-9-]+-(OK|DONE)/g) || [];",
+				"if (t.length) out({ type: 'text', data: t[t.length - 1] });",
+				"out({ type: 'end', stopReason: 'end_turn', sessionId: '12d-spend-session', total_cost_usd: 0.001,",
+				'  usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 3, cache_creation_input_tokens: 2, reasoning_tokens: 1 },',
+				"  modelUsage: { [at('-m')]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 3, cacheCreationInputTokens: 2, costUSD: 0.001 } } });",
+				'',
+			].join('\n');
+			const policyConfig = (maxTurns: number): QualificationConfig =>
+				liveConfig({
+					allowedRoots: [REL],
+					binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
+					spendBounds: {
+						perCall: {
+							inputTokens: 1000,
+							outputTokens: 500,
+							cacheReadTokens: 0,
+							cacheCreationTokens: 0,
+						},
+						perTurnCalls: { modelRounds: 2, children: 1, retries: 0, sideModels: 0, compaction: 0 },
+						sideModels: [],
+					},
+					limits: {
+						budgetUsd: 10,
+						maxCalls: 120,
+						maxTurns,
+						maxWallClockSeconds: 600,
+						perCase: {
+							budgetUsd: 2,
+							maxCalls: 60,
+							maxTurns: Math.min(10, maxTurns),
+							maxWallClockSeconds: 120,
+						},
+						cleanupSeconds: 1,
+					},
+					isolation: {
+						boundary: {
+							kind: 'disposable-os-account',
+							reference: 'boundary:synthetic',
+							actualHome: `${REL}/home`,
+							productionHomeMounted: false,
+							operatorCredentialsReadable: false,
+						},
+						accountRoots: { A: `${REL}/grok-a`, B: `${REL}/grok-b` },
+						remoteRoots: {},
+						policy: {
+							systemPolicyInspected: true,
+							managedPolicy: 'absent',
+							requiredPolicyCompatible: true,
+						},
+						resources: {
+							hooks: 'synthetic-owned',
+							mcp: 'synthetic-owned',
+							plugins: 'synthetic-owned',
+							envrc: 'disabled',
+						},
+						egress: {
+							kind: 'operation-aware',
+							reference: 'egress:synthetic',
+							suppression: {
+								update: 'flags-only',
+								telemetry: 'flags-only',
+								backgroundUpload: 'unknown',
+							},
+						},
+						path: ['/usr/bin', '/bin'],
+					},
+				});
+			/** The turn-bearing legs a native E10 run sends, in fixture order. */
+			const TURN_LEGS = POLICY_LEGS.filter(
+				(l) => l.kind === 'effect' || l.kind === 'tool-surface'
+			).map((l) => l.id as string);
+			const run = async (
+				opts: { maxTurns?: number; policyLegs?: boolean; ledger?: BudgetLedger } = {}
+			) => {
+				fs.rmSync(path.join(ROOT, 'grok-a'), { recursive: true, force: true });
+				fs.mkdirSync(path.join(ROOT, 'grok-a'), { recursive: true });
+				const config = policyConfig(opts.maxTurns ?? 20);
+				const ledger = opts.ledger ?? ledgerFor(config, E10);
+				// The ledger's turn count at every start of the pinned stand-in: a turn is counted before its child.
+				const actual =
+					await vi.importActual<typeof import('node:child_process')>('node:child_process');
+				const atSpawn: number[] = [];
+				spawnSpies[0].mockImplementation(((...a: Parameters<typeof actual.spawn>) => {
+					if (a[0] === BIN) atSpawn.push(ledger.turns);
+					return actual.spawn(...a);
+				}) as never);
+				const lifetime = createCaseLifetime(1);
+				try {
+					const [leg] = await executePaidCase(E10, config, {
+						workspace: WORKSPACE,
+						operatorHome: OPERATOR_HOME,
+						ledger,
+						lifetime,
+						problems: [],
+						capabilities: { ...ALL_CAPS, policyLegs: opts.policyLegs ?? true },
+						now: () => NOW,
+						resolveSecret: (name) => `synthetic-xai-${name}-value`,
+					});
+					await lifetime.cleanup();
+					return { leg, ledger, atSpawn };
+				} finally {
+					spawnSpies[0].mockImplementation(actual.spawn as never);
+				}
+			};
+
+			beforeAll(() => {
+				for (const d of ['home', 'grok-a', 'grok-b', 'bin', path.join('cache', 'tmp')])
+					fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+				fs.writeFileSync(BIN, SOURCE);
+				fs.chmodSync(BIN, 0o555);
+				sha = createHash('sha256').update(fs.readFileSync(BIN)).digest('hex');
+			});
+			afterAll(() => {
+				if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+				fs.rmSync(ROOT, { recursive: true, force: true });
+				fs.rmSync(OPERATOR_HOME, { recursive: true, force: true });
+			});
+			beforeEach(() => {
+				spawnSpies.forEach((s) => s.mockClear());
+			});
+
+			it('each turn-bearing policy leg holds one policy reservation of its own, counted before its child and settled once; approval, refusal and authority legs hold none', async () => {
+				const { leg, ledger, atSpawn } = await run();
+				expect(
+					leg.policyLegs.filter((l) => TURN_LEGS.includes(l.leg)).map((l) => [l.leg, l.status]),
+					JSON.stringify(leg.policyLegs.map((l) => [l.leg, l.assertion.detail]))
+				).toEqual(TURN_LEGS.map((id) => [id, 'passed']));
+				expect(ledger.reservations.map((x) => x.leg)).toEqual([
+					null,
+					...TURN_LEGS.map((id) => `policy:${id}`),
+				]);
+				for (const l of leg.policyLegs) {
+					const res = ledger.reservations.filter((x) => x.leg === `policy:${l.leg}`);
+					if (!TURN_LEGS.includes(l.leg)) {
+						expect(res, l.leg).toEqual([]);
+						expect(l.reservationId, l.leg).toBeNull();
+						expect(l.spawned + l.paidRequests, l.leg).toBe(0);
+						continue;
+					}
+					expect(res, l.leg).toHaveLength(1);
+					expect(res[0].id, l.leg).toBe(l.reservationId);
+					expect(res[0].caseId, l.leg).toBe(E10.caseId);
+					expect(res[0].turnAllowance, l.leg).toBe(1);
+					expect(res[0].turnsUsed, l.leg).toBe(1);
+					expect(res[0], l.leg).toMatchObject({
+						state: 'settled',
+						settledUsd: 0.001,
+						uncertainUsd: 0,
+					});
+				}
+				expect(ledger.turns).toBe(1 + TURN_LEGS.length);
+				expect(ledger.settledUsd).toBeCloseTo(
+					ledger.reservations.reduce((n, x) => n + x.settledUsd, 0),
+					5
+				);
+				expect(ledger.uncertainUsd).toBe(0);
+				// The base turn, then one child per turn leg, each started after its turn was counted.
+				expect(atSpawn).toEqual(Array.from({ length: 1 + TURN_LEGS.length }, (_, i) => i + 1));
+			}, 120_000);
+
+			it('a second run on the same ledger reserves nothing more and starts nothing: no policy leg runs twice', async () => {
+				const first = await run();
+				const before = first.ledger.reservations.length;
+				const turns = first.ledger.turns;
+				const again = await run({ ledger: first.ledger });
+				expect(again.atSpawn).toEqual([]);
+				expect(again.ledger.reservations).toHaveLength(before);
+				expect(again.ledger.turns).toBe(turns);
+				for (const l of again.leg.policyLegs) {
+					expect(l.status, l.leg).not.toBe('passed');
+					expect(l.spawned + l.paidRequests, l.leg).toBe(0);
+				}
+			}, 120_000);
+
+			it('a policy reservation already held for a leg refuses that leg (leg-already-run): no second reservation, no spawn; the other legs still run', async () => {
+				const config = policyConfig(20);
+				const ledger = ledgerFor(config, E10);
+				const first = `policy:${TURN_LEGS[0]}`;
+				held(reserveSpend(ledger, config, request(E10, config, { leg: first }), NOW));
+				const { leg, atSpawn } = await run({ ledger });
+				const r = leg.policyLegs.find((l) => l.leg === TURN_LEGS[0])!;
+				expect(r.status).toBe('not-run');
+				expect(r.reasons.map((x) => x.id)).toEqual(['leg-already-run']);
+				expect(r.reservationId).toBeNull();
+				expect(r.spawned + r.paidRequests).toBe(0);
+				expect(ledger.reservations.filter((x) => x.leg === first)).toHaveLength(1);
+				for (const id of TURN_LEGS.slice(1))
+					expect(leg.policyLegs.find((l) => l.leg === id)!.status, id).toBe('passed');
+				expect(atSpawn).toHaveLength(TURN_LEGS.length);
+			}, 120_000);
+
+			it('flags off: no policy leg reserves, counts or spawns; only the base turn ran', async () => {
+				const { leg, ledger, atSpawn } = await run({ policyLegs: false });
+				expect(leg.policyLegs.every((l) => l.status === 'not-run')).toBe(true);
+				expect(ledger.reservations.map((x) => x.leg)).toEqual([null]);
+				expect(ledger.turns).toBe(1);
+				expect(atSpawn).toEqual([1]);
+			}, 120_000);
+
+			it('a run turn limit the earlier legs exhausted refuses the next policy reservation: unsent, uncounted, nothing spawned', async () => {
+				const { leg, ledger, atSpawn } = await run({ maxTurns: 3 });
+				const [a, b, c] = TURN_LEGS.map((id) => leg.policyLegs.find((l) => l.leg === id)!);
+				expect(a.status, a.assertion.detail).toBe('passed');
+				expect(b.status, b.assertion.detail).toBe('passed');
+				expect(c.status).toBe('not-run');
+				expect(c.reservationId).toBeNull();
+				expect(c.reasons.length).toBeGreaterThan(0);
+				expect(c.spawned + c.paidRequests).toBe(0);
+				expect(ledger.turns).toBe(3);
+				expect(atSpawn).toEqual([1, 2, 3]);
+				expect(ledger.reservations.map((x) => x.leg)).toEqual([
+					null,
+					`policy:${TURN_LEGS[0]}`,
+					`policy:${TURN_LEGS[1]}`,
+				]);
 			}, 120_000);
 		}
 	);
