@@ -6629,7 +6629,8 @@
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
 				"GT1-07-11 verification: Native Grok commands from the composer and queue are admitted host-side and revalidated on the new ACP process (catalog entry digest, binding, generation) before submission; absent, changed or unadvertised commands refuse with no chat fallback. Synthetic catalog only. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -6740,6 +6741,33 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"phase": "02",
@@ -7563,7 +7591,8 @@
 				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: CLI create/update/send and web send/enqueue/resume match; stop is the shared REST/IPC route; native turn lifecycle qualification not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
 				"GT1-11-07 verification at 3cc958d88: A11-F09 repaired by GT1-11-04A/04B (c79a3e969, dc07c81); its pinning cases pass in run-agent-turn.test.ts, acp-turn.test.ts (pass2Consumers); blocker grok-acp-transport-loss-reads-as-stop cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -7719,6 +7748,33 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"phase": "03",
@@ -8737,7 +8793,8 @@
 			},
 			"limitations": [
 				"Phase04 native binding, launch/request ownership, late-ID delivery, persistence, renderer reopen and runtime recording fixtures pass. Unknown or changed provider/account/cwd/host/generation refuses before continuation or mutation. Native fork/title change/delete/message edit remain unsupported through Maestro, with tested refusals; shared text copying and local tab labels are separate. Production ACP wiring, headless SSH observation, real restart/continuation and exact-binary qualification remain pending. Scoped context export is tested but UI/CLI wiring belongs to GT1-06-01.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -8911,6 +8968,33 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"phase": "04",
@@ -10540,7 +10624,8 @@
 				"Phase04 scoped Grok context extraction and inert redacted role/tool/image provenance pass deterministic checks. Export returns at most 1000 normalized records, discloses omitted/raw/opaque content and never claims a native archive. UI/CLI export callers and validated budgeted merge/handoff remain GT1-06-01; supportsContextMerge remains false. Native migration is a separate unsupported registry outcome owned by phase06.",
 				"GT1-06-12 verification: Merge and export run through the shared extractor and merge consumers: source order, tool vs prose, omitted notices and reasoning, named images, Grok redaction, and a budget from the target model window (fixed 100k bound when unknown), sized from text not cumulative usage. Grooming is a read-only turn on the source account and fails visibly when read-only cannot be enforced. Deterministic only. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-11-01 audit at 808b92608: A11-F02 (accidental-exclusion) AGENT_ARTIFACTS and AGENT_TARGET_NOTES have no grok entry; Grok transfers get no scrubbing and a generic target note. See Plans/grok-tier1/evidence/11-static.md.",
-				"GT1-11-03 verification at d84638bfc: A11-F02 repaired by GT1-11-01A (ca86f0def), pinned by GT1-11-01E/02; blocker grok-context-transfer-metadata-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-03 verification at d84638bfc: A11-F02 repaired by GT1-11-01A (ca86f0def), pinned by GT1-11-01E/02; blocker grok-context-transfer-metadata-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -10653,6 +10738,33 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"phase": "06",
@@ -12151,7 +12263,8 @@
 				"GT1-08-21 verification: phase 08 packets autoRun, utilityEffortRetry; verdicts GT1-08-07 pass; GT1-08-21 tab naming (14F) pass; GT1-08-21 headless Auto Run retry (14F) pass. Parity against the comparator baseline: S10-S12 deterministic match; effort retry gap retained. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: CLI batch and headless Auto Run turns settle questions explicitly (crashed with AgentError), never stall; effort retry gap retained (grok-effort-validation-and-retry-pending). Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-11E, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
 				"GT1-11-07 verification at 3cc958d88: A11-F11 repaired by GT1-11-05A/05C (1863a2ac2, a7bb8ff3a); its pinning cases pass in batch-processor.test.ts, useBatchProcessor.test.ts (pass2Workflows); blocker grok-shared-autorun-failed-turn-keeps-ticks cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12267,6 +12380,33 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"phase": "08",
@@ -14485,7 +14625,8 @@
 				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run; builds pass; nativePackaging not-run. Parity against the comparator baseline: CLI create/update/settings/send and library host match; built CLI and dist/maestro-lib carry Grok; list-sessions native disk listing is Claude-only for every non-Claude provider (parity with Codex); native package smoke not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-11E, GT1-11-07, GT1-11-12, GT1-11-10, GT1-12-06 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
 				"GT1-11-07 verification at 3cc958d88: A11-F09 repaired by GT1-11-04A/04B (c79a3e969, dc07c81); its pinning cases pass in run-agent-turn.test.ts, acp-turn.test.ts (pass2Consumers); blocker grok-acp-transport-loss-reads-as-stop cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -14598,6 +14739,33 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"phase": "10",
@@ -15103,7 +15271,8 @@
 				"Phase03/04 fixtures preserve exact decimal ticks, unknown/partial cost, per-model identity, separate cache buckets and once-only turn/session totals. Phase04 selected-account disk reads, accessors, dashboard, CLI/export and Cue consumers pass deterministic regressions. Unknown Grok models never borrow unrelated prices. Real billing, running-child completeness, live/disk agreement and broader ACP/SSH consumer propagation remain phase07/10/11 qualification; managed account-path wiring remains phase09.",
 				"Quota has no Grok provider/view entry; absent quota stays unknown, never zero/unlimited or budget certification. Conservative error/retry fixtures do not prove all real consumer recovery paths. Broader streaming burst/memory bounds, listener cleanup, persistence privacy and cancellation workload evidence remain with later phases.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; quota pass 21/21; nativeQuota unsupported; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; recordings pass 37/37; performance pass 21/21; retry pass 158/158; launch pass 276/276; nativePlatformLaunch not-run. Parity against the comparator baseline: bounded buffers, lazy history, concurrency and dashboards verified deterministically; performance measured without wall-clock thresholds. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-11F, GT1-11-07, GT1-11-11A, GT1-11-10 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -15223,6 +15392,33 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"phase": "10",
@@ -15499,7 +15695,8 @@
 			"limitations": [
 				"The required audit, validation, documentation or delivery decision belongs to the listed later tasks; no passing claim is inferred from this inventory.",
 				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
-				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -15610,6 +15807,33 @@
 					],
 					"ownerTask": "GT1-11-11A1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"phase": "11",
@@ -16207,7 +16431,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Native binding persistence, interrupted-turn recording, admission and stale completion fixtures pass phase04. Real restart and exact native continuation remain not-run; production ACP wiring and headless SSH observation remain pending."
+				"Native binding persistence, interrupted-turn recording, admission and stale completion fixtures pass phase04. Real restart and exact native continuation remain not-run; production ACP wiring and headless SSH observation remain pending.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -16306,6 +16531,33 @@
 					"missingPrerequisite": "Shared launch receipts, pre-resume validation, queued begin/record mutation fences and persistence now pass the selected phase04 suites. Production headless SSH observation remains unavailable; native ACP host wiring and real restart/continuation remain phase07/10/11 obligations.",
 					"affectedRows": ["C-supportsResume"],
 					"evidenceRef": "phase04-reconciliation"
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"field": "supportsResume",
@@ -19343,7 +19595,8 @@
 			},
 			"limitations": [
 				"Grok false excludes merge; implement validated budgeted transfer before enabling, independently from native translation.",
-				"GT1-06-12 verification: Grok supportsContextMerge is now true and marked PROVISIONAL in capabilities.ts. Deterministic merge, budget and read-only grooming invariants pass; the flag is not certified until exact-binary live evidence (GT1-11-11/11C). Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-06-12 verification: Grok supportsContextMerge is now true and marked PROVISIONAL in capabilities.ts. Deterministic merge, budget and read-only grooming invariants pass; the flag is not certified until exact-binary live evidence (GT1-11-11/11C). Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -19396,6 +19649,33 @@
 					"missingPrerequisite": "supportsContextMerge true is provisional; it needs exact-binary merged-context consumption receipts (GT1-11-11, GT1-11-11C) before certification.",
 					"evidenceRef": "phase06-verification",
 					"affectedRows": ["C-supportsContextMerge"]
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"field": "supportsContextMerge",
@@ -19472,7 +19752,8 @@
 			},
 			"limitations": [
 				"The scoped stored-context extraction boundary passes phase04 fixtures, including source ownership, tool linkage, missing images, redaction and truncation notices. It has no production UI caller; GT1-06-01 owns UI/CLI wiring and budgeted transfer. No native resume or migration qualification follows.",
-				"GT1-06-12 verification: Export consumers and the merge injection path pass deterministic checks at the verified source. Live consumption is not run. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-06-12 verification: Export consumers and the merge injection path pass deterministic checks at the verified source. Live consumption is not run. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -19528,6 +19809,33 @@
 					"missingPrerequisite": "Scoped stored-context normalization, redaction and explicit omissions pass phase04 deterministic tests. Neither stored-context retrieval entry currently has a production UI caller; GT1-06-01 owns UI/CLI export and merge wiring. Native resume, live consumption, token budgeting and directional migration need separate proof.",
 					"affectedRows": ["C-supportsContextExport"],
 					"evidenceRef": "phase04-reconciliation"
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"field": "supportsContextExport",
@@ -21892,7 +22200,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"Phase04 native binding, launch/request ownership, late-ID delivery, persistence, renderer reopen and runtime recording fixtures pass. Unknown or changed provider/account/cwd/host/generation refuses before continuation or mutation. Native fork/title change/delete/message edit remain unsupported through Maestro, with tested refusals; shared text copying and local tab labels are separate. Production ACP wiring, headless SSH observation, real restart/continuation and exact-binary qualification remain pending. Scoped context export is tested but UI/CLI wiring belongs to GT1-06-01."
+				"Phase04 native binding, launch/request ownership, late-ID delivery, persistence, renderer reopen and runtime recording fixtures pass. Unknown or changed provider/account/cwd/host/generation refuses before continuation or mutation. Native fork/title change/delete/message edit remain unsupported through Maestro, with tested refusals; shared text copying and local tab labels are separate. Production ACP wiring, headless SSH observation, real restart/continuation and exact-binary qualification remain pending. Scoped context export is tested but UI/CLI wiring belongs to GT1-06-01.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22010,6 +22319,33 @@
 					"missingPrerequisite": "Native delete and message-pair edit remain unsupported through Maestro. Phase04 refusal/no-write consumer regressions pass; neither direct transcript rewrites nor fixture refusals qualify a native mutation transport.",
 					"affectedRows": ["P14", "REG-SESSION-MUTATION"],
 					"evidenceRef": "phase04-reconciliation"
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"branchAuditRefs": ["B22", "B44"]
@@ -23517,7 +23853,8 @@
 				"Grok supportsContextMerge=false hides merge actions; native transcript export is not proof of validated merge/handoff.",
 				"GT1-06-12 verification: Grok merge actions are shown (provisional flag) and merge into tab or a new agent passes deterministic checks, including no target history duplication and source-account inheritance. Live not run. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-11-01 audit at 808b92608: A11-F02 (accidental-exclusion) AGENT_ARTIFACTS and AGENT_TARGET_NOTES have no grok entry; Grok transfers get no scrubbing and a generic target note. See Plans/grok-tier1/evidence/11-static.md.",
-				"GT1-11-03 verification at d84638bfc: A11-F02 repaired by GT1-11-01A (ca86f0def), pinned by GT1-11-01E/02; blocker grok-context-transfer-metadata-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-03 verification at d84638bfc: A11-F02 repaired by GT1-11-01A (ca86f0def), pinned by GT1-11-01E/02; blocker grok-context-transfer-metadata-missing cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23574,6 +23911,33 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S06"]
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"branchAuditRefs": ["B21", "B29"]
@@ -25192,7 +25556,8 @@
 			},
 			"limitations": [
 				"Grok has no owned steering channel; ProcessManager sends the non-Codex route to sendSteeringRequest, which can only succeed for a registered maestro-p channel. Comparable user outcome needs explicit implementation or documented gap; GT1-01-07 must reconcile missing explicit steering acceptance in phase07 task text.",
-				"GT1-07-11 verification: Steering is refused on every Grok route (steering-not-owned, native-steering, acp-steering) and the renderer marks it ineligible; no advertised input op exists. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-07-11 verification: Steering is refused on every Grok route (steering-not-owned, native-steering, acp-steering) and the renderer marks it ineligible; no advertised input op exists. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -25244,6 +25609,33 @@
 					"missingPrerequisite": "Wire 1 and the pinned _x.ai extensions advertise no in-progress input operation; every Grok route refuses steering. Needs an advertised, version-qualified op.",
 					"evidenceRef": "phase07-verification",
 					"affectedRows": ["S21"]
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"ownerScopeReview": {
@@ -26152,7 +26544,8 @@
 			"limitations": [
 				"Grok reaches provider-neutral builder, but account/model/effort/route settings and local/remote isolation need explicit consumer assertions. Phase05/10 owners are provisional; GT1-01-07 must add bounded owner task coverage if current wording cannot cover these files.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: worktree creation through the provider-generic CLI/desktop path; phase 05 owns inherited configuration. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: worktree creation through the provider-generic CLI/desktop path; phase 05 owns inherited configuration. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -26202,6 +26595,33 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S29"]
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"ownerScopeReview": {
@@ -26265,7 +26685,8 @@
 			"limitations": [
 				"Grok uses generic creation; verify duplicated profile/effort, custom executable availability and no fallback provider. No separate agent-template registry was found in bounded symbol search; prompt templates are a distinct surface. GT1-01-07 must reconcile task scope for AgentCreationDialog coverage.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: create-agent accepts grok with model/effort/env/background and refuses aliases before the bridge; duplicate creation owned by phase 05. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: create-agent accepts grok with model/effort/env/background and refuses aliases before the bridge; duplicate creation owned by phase 05. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -26323,6 +26744,33 @@
 					"missingPrerequisite": "GT1-05-02C1 handoff and its GT1-05-02D/02D1 component and creation-consumer regressions pass in GT1-05-13D. Standard stays unsupported and refuses; real readonly enforcement is phase09/11.",
 					"affectedRows": ["S30"],
 					"evidenceRef": "phase05-reconciliation"
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"ownerScopeReview": {
@@ -26418,7 +26866,8 @@
 				"GT1-05-06B2 authors 32 additional system-context/new-tab cases in the two assigned existing renderer suites. Configured local/SSH Git and plugin context, selected native identity and legacy aliases, literal macro arguments/delegation/tickets, fresh-tab ownership, native refusal before creation and truthful queue/failure receipts are covered. Scoped static checks and independent review pass; tests remain not-run for GT1-05-13. Reuses GT1-05-06B/B1 admission and remote-handler coverage; no native capability or parity certification. See Plans/grok-tier1/evidence/05.md#gt1-05-06b2-system-context-and-new-tab-regression-tests.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
 				"GT1-07-11 verification: Queued native commands drain through agentStore with re-admission at spawn; deterministic only. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -26481,6 +26930,33 @@
 					"missingPrerequisite": "GT1-05-06A3 attachment forwarding and its GT1-05-06B3/06B1 regressions pass in GT1-05-13D. Remaining: remote macro attachments stay explicitly unsupported; native image handling on a real binary is phase11.",
 					"affectedRows": ["P07", "S31"],
 					"evidenceRef": "phase05-reconciliation"
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"ownerScopeReview": {
@@ -29141,7 +29617,8 @@
 			"limitations": [
 				"Only Claude has a verified headless compaction command. Grok, Codex and Antigravity receive no automatic compact-and-resend recovery; this is a deliberate safe omission, not permission to send literal /compact as a prompt. Equivalent Grok recovery or explicit limitation needs a separate ledger row, including same native ID, original prompt retention, cancellation and failed compaction behavior. Auto Run is explicitly outside this existing recovery route.",
 				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim.",
-				"GT1-07-11 verification: Context-limit recovery refuses before spawn with required-feature grok-native-compaction; retryStore declines and the original error surfaces. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-07-11 verification: Context-limit recovery refuses before spawn with required-feature grok-native-compaction; retryStore declines and the original error surfaces. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -29195,6 +29672,33 @@
 					"missingPrerequisite": "No qualified Grok native compaction command; recovery refuses before spawn. Needs a pinned, qualified compaction operation (B03).",
 					"evidenceRef": "phase07-verification",
 					"affectedRows": ["S34"]
+				},
+				{
+					"id": "grok-session-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded session-consumer case logic: E04 cancel/restart and invalid-resume plus E05 fork/rename/delete/export/continuation over owned native histories, steering and compaction legs (GT1-11-11C1), context export/merge/handoff, agent creation and custom command/template consumer legs (GT1-11-11C2), pinned by GT1-11-11C3; then live run-state inputs.",
+					"affectedRows": [
+						"P07",
+						"P10",
+						"P14",
+						"P21",
+						"P29",
+						"P38",
+						"P40",
+						"P43",
+						"C-supportsResume",
+						"C-supportsContextMerge",
+						"C-supportsContextExport",
+						"REG-SESSION-MUTATION",
+						"S06",
+						"S21",
+						"S29",
+						"S30",
+						"S31",
+						"S34"
+					],
+					"ownerTask": "GT1-11-11C1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 				}
 			],
 			"ownerScopeReview": {
@@ -36101,6 +36605,576 @@
 				"change": "added",
 				"addedTo": ["P18", "P19", "P25", "P26", "P27", "P28", "S35", "S36"],
 				"evidenceRef": "Plans/grok-tier1/evidence/11-native-resources.md"
+			}
+		],
+		"liveCalls": 0,
+		"readiness": false
+	},
+	"phase11NativeSessionConsumers": {
+		"taskId": "GT1-11-11C",
+		"recordedAt": "2026-11-01",
+		"sourceCommit": "2f8db5f1bd0608cf6958bc9310af4d3315ff2053",
+		"branch": "auto-run-feature/grok-cli-integration",
+		"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md",
+		"prerequisites": {
+			"missing": [
+				"live.enabled false",
+				"live.credentialsReference null",
+				"live.authorizationReference null",
+				"live.budgetUsd 0",
+				"live.maxCalls 0",
+				"live.maxTurns 0",
+				"live.maxWallClockSeconds 0",
+				"live.allowedEndpoints empty",
+				"selectedBinaryPath null",
+				"selectedBinarySha256 null",
+				"selectedLiveModels empty",
+				"authorization.configurationReference null",
+				"authorization.expiresAt null",
+				"authorization.isolationReceipt null",
+				"authorization.allowedRoots empty",
+				"no provider cap or worst-case reservation",
+				"authorization.sharedBudgetLedgerReference null"
+			],
+			"configFiles": [],
+			"requiredLiveBlockers": [
+				"live-authorization-absent",
+				"binary-unpinned",
+				"host-isolation-unqualified",
+				"background-egress-unqualified",
+				"discovery-authorization-absent",
+				"live-limits-unset",
+				"spend-guarantee-absent"
+			]
+		},
+		"configurationSelectionFiles": [],
+		"suites": {
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/scripts/grok-qualification-spend.test.ts src/__tests__/scripts/grok-qualification-harness.test.ts src/__tests__/main/storage/grok-session-storage.test.ts src/__tests__/main/ipc/handlers/agentSessions.test.ts src/__tests__/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsRename.test.ts src/__tests__/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsResume.test.ts src/__tests__/renderer/services/resumableSession.relay.test.ts src/__tests__/renderer/hooks/useMergeSession.test.ts src/__tests__/renderer/hooks/useMergeTransferHandlers.test.ts src/__tests__/renderer/utils/contextExtractor.test.ts src/__tests__/shared/maestro-lib/turns/context.test.ts src/__tests__/renderer/services/chatSteering.test.ts src/__tests__/renderer/services/contextCompaction.test.ts src/__tests__/renderer/hooks/useWorktreeHandlers.test.ts src/__tests__/renderer/utils/worktreeSession.test.ts src/__tests__/renderer/utils/worktreeSpawn.test.ts src/__tests__/renderer/components/AgentCreationDialog.test.tsx src/__tests__/renderer/components/NewInstanceModal.test.tsx src/__tests__/shared/maestro-lib/agents/providerSwap.test.ts src/__tests__/shared/templateVariables.test.ts src/__tests__/renderer/hooks/useInputProcessing.test.ts",
+			"exit": 0,
+			"total": 2017,
+			"passed": 2017,
+			"failed": 0,
+			"files": [
+				{
+					"file": "src/__tests__/renderer/components/AgentCreationDialog.test.tsx",
+					"passed": 22,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/NewInstanceModal.test.tsx",
+					"passed": 118,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useInputProcessing.test.ts",
+					"passed": 172,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useMergeSession.test.ts",
+					"passed": 34,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useMergeTransferHandlers.test.ts",
+					"passed": 46,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useWorktreeHandlers.test.ts",
+					"passed": 295,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/services/chatSteering.test.ts",
+					"passed": 43,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/services/contextCompaction.test.ts",
+					"passed": 15,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/services/resumableSession.relay.test.ts",
+					"passed": 39,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/utils/contextExtractor.test.ts",
+					"passed": 85,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/utils/worktreeSession.test.ts",
+					"passed": 19,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/utils/worktreeSpawn.test.ts",
+					"passed": 8,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsRename.test.ts",
+					"passed": 21,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/AgentSessionsBrowser/hooks/useAgentSessionsResume.test.ts",
+					"passed": 32,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-harness.test.ts",
+					"passed": 65,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-spend.test.ts",
+					"passed": 26,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/templateVariables.test.ts",
+					"passed": 116,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/storage/grok-session-storage.test.ts",
+					"passed": 338,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/ipc/handlers/agentSessions.test.ts",
+					"passed": 416,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/agents/providerSwap.test.ts",
+					"passed": 76,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/turns/context.test.ts",
+					"passed": 31,
+					"failed": 0,
+					"skipped": 0
+				}
+			]
+		},
+		"harness": {
+			"command": "node scripts/grok-qualification.mjs --json --no-write",
+			"exit": 0,
+			"configSource": "default-run-state",
+			"totals": {
+				"cases": 48,
+				"admitted": 0,
+				"notRun": 48,
+				"spawned": 0,
+				"paidRequests": 0,
+				"networkContacts": 0
+			},
+			"capabilities": {
+				"isolationPreflight": true,
+				"atomicSpendAdmission": true,
+				"offlineExecutor": true,
+				"caseExecutor": true,
+				"discoveryExecutor": true,
+				"sshExecutor": true,
+				"consumerLegs": true
+			}
+		},
+		"cases": [
+			{
+				"caseId": "E04:native-headless:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "cancellation",
+						"owner": "GT1-11-11C"
+					},
+					{
+						"id": "invalid-resume",
+						"owner": "GT1-11-11C"
+					}
+				]
+			},
+			{
+				"caseId": "E04:native-headless:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "cancellation",
+						"owner": "GT1-11-11C"
+					},
+					{
+						"id": "invalid-resume",
+						"owner": "GT1-11-11C"
+					}
+				]
+			},
+			{
+				"caseId": "E04:acp-stdio:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "cancellation",
+						"owner": "GT1-11-11C"
+					},
+					{
+						"id": "invalid-resume",
+						"owner": "GT1-11-11C"
+					}
+				]
+			},
+			{
+				"caseId": "E04:acp-stdio:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "cancellation",
+						"owner": "GT1-11-11C"
+					},
+					{
+						"id": "invalid-resume",
+						"owner": "GT1-11-11C"
+					}
+				]
+			},
+			{
+				"caseId": "E05:native-headless:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "reload-fork-export",
+						"owner": "GT1-11-11C"
+					}
+				]
+			},
+			{
+				"caseId": "E05:native-headless:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "reload-fork-export",
+						"owner": "GT1-11-11C"
+					}
+				]
+			},
+			{
+				"caseId": "E05:acp-stdio:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "reload-fork-export",
+						"owner": "GT1-11-11C"
+					}
+				]
+			},
+			{
+				"caseId": "E05:acp-stdio:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "reload-fork-export",
+						"owner": "GT1-11-11C"
+					}
+				]
+			}
+		],
+		"claims": [
+			{
+				"claim": "Native fork, rename, delete and export with exact continuation of the forked session",
+				"rows": ["P14", "REG-SESSION-MUTATION", "C-supportsResume"],
+				"cases": "E05 (paid, two turns)",
+				"implemented": "the E05 fixture runs two resumed token turns; reload-fork-export is not-evaluated (owner GT1-11-11C); no leg forks, renames, deletes or exports a native session through the production Grok session storage or agentSessions consumers against an owned GROK_HOME, and no assertion observes the outcome; phase 04 left native fork, title change, delete and message edit refused through Maestro with tested refusals (blockers grok-native-fork-rename-transport-unqualified, grok-native-delete-edit-transport-unqualified), so the honest native observation is each refusal with the owned history byte-unchanged, plus scoped export of an exact payload and exact continuation of the resumed session",
+				"gap": "session-mutation leg over owned native histories (refused fork/rename/delete with history unchanged, export payload, exact continuation)",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Mid-turn cancellation, restart and invalid resume with one honest terminal outcome",
+				"rows": ["P10", "P38"],
+				"cases": "E04 (paid, two turns)",
+				"implemented": "the E04 fixture runs two resumed token turns; cancellation and invalid-resume are not-evaluated (owner GT1-11-11C); nothing stops a turn mid-stream, restarts it, or resumes an unknown native id and asserts the refusal",
+				"gap": "cancel/restart and invalid-resume legs with orphan and terminal-outcome assertions",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Context export, merge and handoff consumed by a Grok turn",
+				"rows": ["P21", "S06", "C-supportsContextMerge", "C-supportsContextExport"],
+				"cases": "none",
+				"implemented": "no leg extracts an owned Grok session through the production context extractor or merge/transfer consumers and hands the result to a following Grok turn; deterministic contextExtractor, useMergeSession, useMergeTransferHandlers and turns/context suites only",
+				"gap": "context export/merge/handoff consumer leg with payload-preservation assertion",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Mid-turn steering",
+				"rows": ["S21"],
+				"cases": "none",
+				"implemented": "no leg sends a steering input during a running Grok turn; the row carries grok-steering-input-op-unadvertised, so the honest observation is the refusal or queued fallback, which nothing observes; deterministic chatSteering suite only",
+				"gap": "steering leg observing the refusal or the queued fallback with no second turn started",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Native compaction after a context-limit refusal with one bounded retry",
+				"rows": ["S34", "P29"],
+				"cases": "none",
+				"implemented": "spend bounds count a 'compaction' billable call kind, but no fixture drives a context-limit refusal, the compaction command and exactly one retry; deterministic contextCompaction suite only",
+				"gap": "compaction leg (refusal, one compaction, one retry, no replay of uncertain effects)",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Custom, duplicate and worktree agent creation inheriting profile, model, effort and remote settings",
+				"rows": ["S29", "S30", "P40"],
+				"cases": "none",
+				"implemented": "no leg creates an agent record through the production creation, duplication or worktree builders and launches its first Grok turn to observe the inherited profile, model, effort and remote; deterministic AgentCreationDialog, NewInstanceModal, useWorktreeHandlers, worktreeSession, worktreeSpawn and providerSwap suites only",
+				"gap": "agent-creation consumer leg asserting inherited settings on the observed launch",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Custom AI command and prompt-template dispatch",
+				"rows": ["P07", "S31"],
+				"cases": "none",
+				"implemented": "no leg expands a custom AI command or prompt template through the production template substitution and dispatches it as a Grok turn whose observed prompt and reply match; deterministic templateVariables and useInputProcessing suites only",
+				"gap": "custom command/template dispatch leg asserting the expanded prompt reached the turn",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Qualification harness completeness (P43)",
+				"rows": ["P43"],
+				"cases": "all families",
+				"implemented": "the harness enumerates 48 cases with the families above; the session-consumer legs are missing as listed",
+				"gap": "the legs above",
+				"outcome": "not-run"
+			}
+		],
+		"observed": {
+			"sessionIdentities": [],
+			"payloadDigests": [],
+			"contexts": [],
+			"steeringDecisions": [],
+			"compactions": [],
+			"createdAgents": [],
+			"expandedTemplates": []
+		},
+		"ownedFixtures": {
+			"histories": 0,
+			"worktrees": 0,
+			"assertionsEvaluated": 0,
+			"uncertainEffectsReplayed": 0
+		},
+		"productionInstall": {
+			"sha256": "5c8a688251bf61e35370b828b6a353b0a20fcc3f64000de8a91d426039f29cec",
+			"executed": false,
+			"modified": false
+		},
+		"findings": [
+			{
+				"id": "A11-F18",
+				"classification": "harness-gap",
+				"anchors": [
+					"scripts/grok-qualification/paid-fixtures.ts:246",
+					"scripts/grok-qualification/paid-fixtures.ts:247",
+					"scripts/grok-qualification/paid-fixtures.ts:253",
+					"scripts/grok-qualification/harness.ts:4580"
+				],
+				"consequence": "The session-consumer cases this VERIFY must observe are not implemented: E04 lists cancellation and invalid-resume and E05 lists reload-fork-export as not-evaluated with owner GT1-11-11C, and no family or leg drives native fork/rename/delete/export, context export/merge/handoff, mid-turn steering, compaction after a context-limit refusal, agent creation with inherited settings, or custom command/template dispatch through a production consumer. GT1-11-11C is a VERIFY packet and may not add harness code, so even with every run-state prerequisite these claims could not be observed.",
+				"rows": [
+					"P07",
+					"P10",
+					"P14",
+					"P21",
+					"P29",
+					"P38",
+					"P40",
+					"P43",
+					"C-supportsResume",
+					"C-supportsContextMerge",
+					"C-supportsContextExport",
+					"REG-SESSION-MUTATION",
+					"S06",
+					"S21",
+					"S29",
+					"S30",
+					"S31",
+					"S34"
+				],
+				"blocker": "grok-session-consumer-cases-unimplemented",
+				"repairTasks": ["GT1-11-11C1", "GT1-11-11C2", "GT1-11-11C3"]
+			}
+		],
+		"blockerUpdates": [
+			{
+				"id": "grok-session-consumer-cases-unimplemented",
+				"finding": "A11-F18",
+				"taskId": "GT1-11-11C",
+				"change": "added",
+				"addedTo": [
+					"P07",
+					"P10",
+					"P14",
+					"P21",
+					"P29",
+					"P38",
+					"P40",
+					"P43",
+					"C-supportsResume",
+					"C-supportsContextMerge",
+					"C-supportsContextExport",
+					"REG-SESSION-MUTATION",
+					"S06",
+					"S21",
+					"S29",
+					"S30",
+					"S31",
+					"S34"
+				],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
 			}
 		],
 		"liveCalls": 0,
