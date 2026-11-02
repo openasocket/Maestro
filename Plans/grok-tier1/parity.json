@@ -12005,7 +12005,8 @@
 				"GT1-07-11 verification: Native trust scanners, folder trust, disabled and shadowed servers refuse injection; native enforcement is unqualified. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-08-21 verification: phase 08 packets cue; verdicts GT1-08-12 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-12, GT1-11-11B linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
 				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
-				"GT1-11-11B verification at 54cdba84f: native resource/MCP/plugin/installer/bundle cases not-run (run-state live prerequisites absent; case logic missing, A11-F17). Live stays not-run. See Plans/grok-tier1/evidence/11-native-resources.md."
+				"GT1-11-11B verification at 54cdba84f: native resource/MCP/plugin/installer/bundle cases not-run (run-state live prerequisites absent; case logic missing, A11-F17). Live stays not-run. See Plans/grok-tier1/evidence/11-native-resources.md.",
+				"GT1-11-12 verification at 4ef249699: native negative policy cases (denied writes, outside-root and symlink access, shell, network and in-process egress, MCP/meta-tools/subagents/hooks, read-only/no-tools violations, unknown effects, stale approvals, revocation, prohibited model routes, endpoint substitution, custody/enrollment/attribution) not-run (run-state live prerequisites absent; case logic missing, A11-F29). Live stays not-run. See Plans/grok-tier1/evidence/11-policy-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12125,6 +12126,25 @@
 					"affectedRows": ["P18", "P19", "P25", "P26", "P27", "P28", "S35", "S36"],
 					"ownerTask": "GT1-11-11B1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-resources.md"
+				},
+				{
+					"id": "grok-negative-policy-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded negative policy case logic on E10: filesystem and process legs with owned sentinels, an owned symlink and an owned loopback service (GT1-11-12A), tool-surface and approval legs for MCP/meta-tools/subagents/hooks, unknown effects, stale approvals and revocation (GT1-11-12B), route and authority legs for prohibited models, endpoint substitution and custody/enrollment standings (GT1-11-12C), pinned by GT1-11-12D; then live run-state inputs and, for attribution, a real authority.",
+					"affectedRows": [
+						"P28",
+						"P33",
+						"P34",
+						"P35",
+						"P36",
+						"C-supportsReadOnlyMode",
+						"S19",
+						"S23",
+						"S33",
+						"META-03"
+					],
+					"ownerTask": "GT1-11-12A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-policy-native.md"
 				}
 			],
 			"phase": "07",
@@ -13316,7 +13336,8 @@
 				"ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal.",
 				"GT1-07-11 verification: Spawn admission and permission-mode naming are preserved on the ACP route; managed effect qualification is phase09. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
-				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md.",
+				"GT1-11-12 verification at 4ef249699: native negative policy cases (denied writes, outside-root and symlink access, shell, network and in-process egress, MCP/meta-tools/subagents/hooks, read-only/no-tools violations, unknown effects, stale approvals, revocation, prohibited model routes, endpoint substitution, custody/enrollment/attribution) not-run (run-state live prerequisites absent; case logic missing, A11-F29). Live stays not-run. See Plans/grok-tier1/evidence/11-policy-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -13460,6 +13481,25 @@
 					],
 					"ownerTask": "GT1-11-11A1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
+				},
+				{
+					"id": "grok-negative-policy-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded negative policy case logic on E10: filesystem and process legs with owned sentinels, an owned symlink and an owned loopback service (GT1-11-12A), tool-surface and approval legs for MCP/meta-tools/subagents/hooks, unknown effects, stale approvals and revocation (GT1-11-12B), route and authority legs for prohibited models, endpoint substitution and custody/enrollment standings (GT1-11-12C), pinned by GT1-11-12D; then live run-state inputs and, for attribution, a real authority.",
+					"affectedRows": [
+						"P28",
+						"P33",
+						"P34",
+						"P35",
+						"P36",
+						"C-supportsReadOnlyMode",
+						"S19",
+						"S23",
+						"S33",
+						"META-03"
+					],
+					"ownerTask": "GT1-11-12A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-policy-native.md"
 				}
 			],
 			"phase": "09",
@@ -13622,7 +13662,8 @@
 			"limitations": [
 				"ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. Output-only native headless cannot answer approvals. Shared ACP permission decisions are separate from ordinary answers; pinned conversational ask-back/elicitation remains unsupported. Real interaction channels and preventive effect qualification remain phase07/09/10/11 work. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal. The standard-permission flag remains omitted. The shared ACP request port has passing fail-closed synthetic coverage, but production consent channels and preventive native effect coverage remain unqualified; output-only headless streams cannot answer approvals.",
 				"GT1-07-11 verification: ACP permission requests route through the desktop consent port and the portable ManagedTurnAuthority.effects; unmanaged portable standard turns refuse consent-port. Preventive effect classification is phase09. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups interaction pass 137/137; cli pass 81/81; web pass 427/427; liteNative not-run. Parity against the comparator baseline: consent relay answers only the owning request on desktop, web-desktop and Lite bridges; gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-12, GT1-11-07, GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups interaction pass 137/137; cli pass 81/81; web pass 427/427; liteNative not-run. Parity against the comparator baseline: consent relay answers only the owning request on desktop, web-desktop and Lite bridges; gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-12, GT1-11-07, GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-12 verification at 4ef249699: native negative policy cases (denied writes, outside-root and symlink access, shell, network and in-process egress, MCP/meta-tools/subagents/hooks, read-only/no-tools violations, unknown effects, stale approvals, revocation, prohibited model routes, endpoint substitution, custody/enrollment/attribution) not-run (run-state live prerequisites absent; case logic missing, A11-F29). Live stays not-run. See Plans/grok-tier1/evidence/11-policy-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -13773,6 +13814,25 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-negative-policy-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded negative policy case logic on E10: filesystem and process legs with owned sentinels, an owned symlink and an owned loopback service (GT1-11-12A), tool-surface and approval legs for MCP/meta-tools/subagents/hooks, unknown effects, stale approvals and revocation (GT1-11-12B), route and authority legs for prohibited models, endpoint substitution and custody/enrollment standings (GT1-11-12C), pinned by GT1-11-12D; then live run-state inputs and, for attribution, a real authority.",
+					"affectedRows": [
+						"P28",
+						"P33",
+						"P34",
+						"P35",
+						"P36",
+						"C-supportsReadOnlyMode",
+						"S19",
+						"S23",
+						"S33",
+						"META-03"
+					],
+					"ownerTask": "GT1-11-12A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-policy-native.md"
 				}
 			],
 			"phase": "09",
@@ -13938,7 +13998,8 @@
 			"limitations": [
 				"ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. disableTools only appends agent.noToolsArgs when present (context-groomer.ts:379); Grok lacks them and is left unchanged. Must refuse required no-tools rather than imply enforcement; preserve account/SSH locality. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal. Grok plan plus Bash deny is wired but does not establish complete filesystem/network/MCP/child containment on each OS. Grok prompt-only directory hints are not grants; prove native mechanism or maintain explicit safe refusal for required containment.",
 				"GT1-08-21 verification: phase 08 packets utilityGrooming, feedback, directorNotesAndGrooming; verdicts GT1-08-21 grooming pass; GT1-08-21 feedback accounts (14C) pass; GT1-08-21 feedback interview (14D) pass; GT1-08-21 director-notes pass. Parity against the comparator baseline: required no tools unsupported (gap); read-only fallback deterministic. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12, GT1-11-11D linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md."
+				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md.",
+				"GT1-11-12 verification at 4ef249699: native negative policy cases (denied writes, outside-root and symlink access, shell, network and in-process egress, MCP/meta-tools/subagents/hooks, read-only/no-tools violations, unknown effects, stale approvals, revocation, prohibited model routes, endpoint substitution, custody/enrollment/attribution) not-run (run-state live prerequisites absent; case logic missing, A11-F29). Live stays not-run. See Plans/grok-tier1/evidence/11-policy-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -14095,6 +14156,25 @@
 					],
 					"ownerTask": "GT1-11-11D1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
+				},
+				{
+					"id": "grok-negative-policy-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded negative policy case logic on E10: filesystem and process legs with owned sentinels, an owned symlink and an owned loopback service (GT1-11-12A), tool-surface and approval legs for MCP/meta-tools/subagents/hooks, unknown effects, stale approvals and revocation (GT1-11-12B), route and authority legs for prohibited models, endpoint substitution and custody/enrollment standings (GT1-11-12C), pinned by GT1-11-12D; then live run-state inputs and, for attribution, a real authority.",
+					"affectedRows": [
+						"P28",
+						"P33",
+						"P34",
+						"P35",
+						"P36",
+						"C-supportsReadOnlyMode",
+						"S19",
+						"S23",
+						"S33",
+						"META-03"
+					],
+					"ownerTask": "GT1-11-12A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-policy-native.md"
 				}
 			],
 			"phase": "09",
@@ -14270,7 +14350,8 @@
 			},
 			"limitations": [
 				"Grok absent from profile registry despite GROK_HOME storage support. resolveAgentAccountDir returns undefined; account enumerator returns []; token collector does one default-account pass. Multiple Grok accounts and same-ID local/remote sessions cannot be attributed by the shared account machinery. Grok also falls through to oauth; XAI_API_KEY, GROK_AUTH, GROK_AUTH_PATH, per-model overrides and gateway precedence remain unrepresented. No real credential files inspected; upstream precedence in REFERENCE is a lead for exact-version qualification. ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal.",
-				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md."
+				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md.",
+				"GT1-11-12 verification at 4ef249699: native negative policy cases (denied writes, outside-root and symlink access, shell, network and in-process egress, MCP/meta-tools/subagents/hooks, read-only/no-tools violations, unknown effects, stale approvals, revocation, prohibited model routes, endpoint substitution, custody/enrollment/attribution) not-run (run-state live prerequisites absent; case logic missing, A11-F29). Live stays not-run. See Plans/grok-tier1/evidence/11-policy-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -14414,6 +14495,25 @@
 					],
 					"ownerTask": "GT1-11-11A1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
+				},
+				{
+					"id": "grok-negative-policy-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded negative policy case logic on E10: filesystem and process legs with owned sentinels, an owned symlink and an owned loopback service (GT1-11-12A), tool-surface and approval legs for MCP/meta-tools/subagents/hooks, unknown effects, stale approvals and revocation (GT1-11-12B), route and authority legs for prohibited models, endpoint substitution and custody/enrollment standings (GT1-11-12C), pinned by GT1-11-12D; then live run-state inputs and, for attribution, a real authority.",
+					"affectedRows": [
+						"P28",
+						"P33",
+						"P34",
+						"P35",
+						"P36",
+						"C-supportsReadOnlyMode",
+						"S19",
+						"S23",
+						"S33",
+						"META-03"
+					],
+					"ownerTask": "GT1-11-12A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-policy-native.md"
 				}
 			],
 			"phase": "09",
@@ -16868,7 +16968,8 @@
 			},
 			"limitations": [
 				"Grok plan plus Bash deny is wired but does not establish complete filesystem/network/MCP/child containment on each OS.",
-				"GT1-11-01 audit at 808b92608: A11-F05 (unqualified-native-enforcement-claim) readOnlyCliEnforced true admits Grok on read-only-required callers; no evidence that --permission-mode plan plus --deny Bash(*) blocks writes, MCP, web, subagents and hooks. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-01 audit at 808b92608: A11-F05 (unqualified-native-enforcement-claim) readOnlyCliEnforced true admits Grok on read-only-required callers; no evidence that --permission-mode plan plus --deny Bash(*) blocks writes, MCP, web, subagents and hooks. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-12 verification at 4ef249699: native negative policy cases (denied writes, outside-root and symlink access, shell, network and in-process egress, MCP/meta-tools/subagents/hooks, read-only/no-tools violations, unknown effects, stale approvals, revocation, prohibited model routes, endpoint substitution, custody/enrollment/attribution) not-run (run-state live prerequisites absent; case logic missing, A11-F29). Live stays not-run. See Plans/grok-tier1/evidence/11-policy-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -16919,6 +17020,25 @@
 					"affectedRows": ["C-supportsReadOnlyMode", "META-03", "S19", "S33"],
 					"taskId": "GT1-11-01",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
+				},
+				{
+					"id": "grok-negative-policy-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded negative policy case logic on E10: filesystem and process legs with owned sentinels, an owned symlink and an owned loopback service (GT1-11-12A), tool-surface and approval legs for MCP/meta-tools/subagents/hooks, unknown effects, stale approvals and revocation (GT1-11-12B), route and authority legs for prohibited models, endpoint substitution and custody/enrollment standings (GT1-11-12C), pinned by GT1-11-12D; then live run-state inputs and, for attribution, a real authority.",
+					"affectedRows": [
+						"P28",
+						"P33",
+						"P34",
+						"P35",
+						"P36",
+						"C-supportsReadOnlyMode",
+						"S19",
+						"S23",
+						"S33",
+						"META-03"
+					],
+					"ownerTask": "GT1-11-12A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-policy-native.md"
 				}
 			],
 			"field": "supportsReadOnlyMode",
@@ -25960,7 +26080,8 @@
 				"disableTools only appends agent.noToolsArgs when present (context-groomer.ts:379); Grok lacks them and is left unchanged. Must refuse required no-tools rather than imply enforcement; preserve account/SSH locality.",
 				"GT1-08-21 verification: phase 08 packets utilityGrooming, utilityEffortRetry, directorNotesAndGrooming; verdicts GT1-08-21 grooming pass; GT1-08-21 tab naming (14F) pass; GT1-08-21 headless Auto Run retry (14F) pass; GT1-08-21 director-notes pass. Parity against the comparator baseline: gap: required no tools unsupported and no effort retry while Claude Code has noToolsArgs and both comparators retry (release blocker). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12, GT1-11-11D linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
 				"GT1-11-01 audit at 808b92608: A11-F05 (unqualified-native-enforcement-claim) readOnlyCliEnforced true admits Grok on read-only-required callers; no evidence that --permission-mode plan plus --deny Bash(*) blocks writes, MCP, web, subagents and hooks. See Plans/grok-tier1/evidence/11-static.md.",
-				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md."
+				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md.",
+				"GT1-11-12 verification at 4ef249699: native negative policy cases (denied writes, outside-root and symlink access, shell, network and in-process egress, MCP/meta-tools/subagents/hooks, read-only/no-tools violations, unknown effects, stale approvals, revocation, prohibited model routes, endpoint substitution, custody/enrollment/attribution) not-run (run-state live prerequisites absent; case logic missing, A11-F29). Live stays not-run. See Plans/grok-tier1/evidence/11-policy-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -26049,6 +26170,25 @@
 					],
 					"ownerTask": "GT1-11-11D1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
+				},
+				{
+					"id": "grok-negative-policy-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded negative policy case logic on E10: filesystem and process legs with owned sentinels, an owned symlink and an owned loopback service (GT1-11-12A), tool-surface and approval legs for MCP/meta-tools/subagents/hooks, unknown effects, stale approvals and revocation (GT1-11-12B), route and authority legs for prohibited models, endpoint substitution and custody/enrollment standings (GT1-11-12C), pinned by GT1-11-12D; then live run-state inputs and, for attribution, a real authority.",
+					"affectedRows": [
+						"P28",
+						"P33",
+						"P34",
+						"P35",
+						"P36",
+						"C-supportsReadOnlyMode",
+						"S19",
+						"S23",
+						"S33",
+						"META-03"
+					],
+					"ownerTask": "GT1-11-12A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-policy-native.md"
 				}
 			],
 			"branchAuditRefs": ["B08", "B40", "B41"]
@@ -26485,7 +26625,8 @@
 				"supportedRange": null
 			},
 			"limitations": [
-				"No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal."
+				"No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal.",
+				"GT1-11-12 verification at 4ef249699: native negative policy cases (denied writes, outside-root and symlink access, shell, network and in-process egress, MCP/meta-tools/subagents/hooks, read-only/no-tools violations, unknown effects, stale approvals, revocation, prohibited model routes, endpoint substitution, custody/enrollment/attribution) not-run (run-state live prerequisites absent; case logic missing, A11-F29). Live stays not-run. See Plans/grok-tier1/evidence/11-policy-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -26539,6 +26680,25 @@
 					"evidencePath": "Plans/grok-tier1/evidence/09.md",
 					"requirements": ["GT1-09-R01", "GT1-09-R02", "GT1-09-R08", "GT1-09-R13"],
 					"phase11Scenarios": ["GT1-11-10", "GT1-11-11A", "GT1-11-12"]
+				},
+				{
+					"id": "grok-negative-policy-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded negative policy case logic on E10: filesystem and process legs with owned sentinels, an owned symlink and an owned loopback service (GT1-11-12A), tool-surface and approval legs for MCP/meta-tools/subagents/hooks, unknown effects, stale approvals and revocation (GT1-11-12B), route and authority legs for prohibited models, endpoint substitution and custody/enrollment standings (GT1-11-12C), pinned by GT1-11-12D; then live run-state inputs and, for attribution, a real authority.",
+					"affectedRows": [
+						"P28",
+						"P33",
+						"P34",
+						"P35",
+						"P36",
+						"C-supportsReadOnlyMode",
+						"S19",
+						"S23",
+						"S33",
+						"META-03"
+					],
+					"ownerTask": "GT1-11-12A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-policy-native.md"
 				}
 			],
 			"branchAuditRefs": ["B06", "B11", "B40"]
@@ -27883,7 +28043,8 @@
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
 				"GT1-08-21 verification: phase 08 packets utilityGrooming, directorNotesAndGrooming; verdicts GT1-08-21 grooming pass; GT1-08-21 director-notes pass. Parity against the comparator baseline: required no tools unsupported (gap); read-only fallback deterministic. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: Claude/Codex-only CLI flags refused on a grok agent as JSON; read-only label and required no-tools gap retained (grok-required-no-tools-unsupported). Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-12, GT1-11-07, GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
-				"GT1-11-01 audit at 808b92608: A11-F05 (unqualified-native-enforcement-claim) readOnlyCliEnforced true admits Grok on read-only-required callers; no evidence that --permission-mode plan plus --deny Bash(*) blocks writes, MCP, web, subagents and hooks. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-01 audit at 808b92608: A11-F05 (unqualified-native-enforcement-claim) readOnlyCliEnforced true admits Grok on read-only-required callers; no evidence that --permission-mode plan plus --deny Bash(*) blocks writes, MCP, web, subagents and hooks. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-12 verification at 4ef249699: native negative policy cases (denied writes, outside-root and symlink access, shell, network and in-process egress, MCP/meta-tools/subagents/hooks, read-only/no-tools violations, unknown effects, stale approvals, revocation, prohibited model routes, endpoint substitution, custody/enrollment/attribution) not-run (run-state live prerequisites absent; case logic missing, A11-F29). Live stays not-run. See Plans/grok-tier1/evidence/11-policy-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -27973,6 +28134,25 @@
 					"affectedRows": ["C-supportsReadOnlyMode", "META-03", "S19", "S33"],
 					"taskId": "GT1-11-01",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
+				},
+				{
+					"id": "grok-negative-policy-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded negative policy case logic on E10: filesystem and process legs with owned sentinels, an owned symlink and an owned loopback service (GT1-11-12A), tool-surface and approval legs for MCP/meta-tools/subagents/hooks, unknown effects, stale approvals and revocation (GT1-11-12B), route and authority legs for prohibited models, endpoint substitution and custody/enrollment standings (GT1-11-12C), pinned by GT1-11-12D; then live run-state inputs and, for attribution, a real authority.",
+					"affectedRows": [
+						"P28",
+						"P33",
+						"P34",
+						"P35",
+						"P36",
+						"C-supportsReadOnlyMode",
+						"S19",
+						"S23",
+						"S33",
+						"META-03"
+					],
+					"ownerTask": "GT1-11-12A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-policy-native.md"
 				}
 			],
 			"symbols": ["PLAN_MODE_AGENTS", "getReadOnlyModeLabel", "getPermissionModeTooltip"]
@@ -30226,7 +30406,8 @@
 				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim.",
 				"GT1-08-21 verification: phase 08 packets utilityGrooming, feedback, directorNotesAndGrooming; verdicts GT1-08-21 grooming pass; GT1-08-21 feedback accounts (14C) pass; GT1-08-21 feedback interview (14D) pass; GT1-08-21 director-notes pass. Parity against the comparator baseline: deterministic match beyond Antigravity (excluded); FeedbackChatView refused fall-through open. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12, GT1-11-11D linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
 				"GT1-11-01 audit at 808b92608: A11-F05 (unqualified-native-enforcement-claim) readOnlyCliEnforced true admits Grok on read-only-required callers; no evidence that --permission-mode plan plus --deny Bash(*) blocks writes, MCP, web, subagents and hooks. See Plans/grok-tier1/evidence/11-static.md.",
-				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md."
+				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md.",
+				"GT1-11-12 verification at 4ef249699: native negative policy cases (denied writes, outside-root and symlink access, shell, network and in-process egress, MCP/meta-tools/subagents/hooks, read-only/no-tools violations, unknown effects, stale approvals, revocation, prohibited model routes, endpoint substitution, custody/enrollment/attribution) not-run (run-state live prerequisites absent; case logic missing, A11-F29). Live stays not-run. See Plans/grok-tier1/evidence/11-policy-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -30298,6 +30479,25 @@
 					],
 					"ownerTask": "GT1-11-11D1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
+				},
+				{
+					"id": "grok-negative-policy-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded negative policy case logic on E10: filesystem and process legs with owned sentinels, an owned symlink and an owned loopback service (GT1-11-12A), tool-surface and approval legs for MCP/meta-tools/subagents/hooks, unknown effects, stale approvals and revocation (GT1-11-12B), route and authority legs for prohibited models, endpoint substitution and custody/enrollment standings (GT1-11-12C), pinned by GT1-11-12D; then live run-state inputs and, for attribution, a real authority.",
+					"affectedRows": [
+						"P28",
+						"P33",
+						"P34",
+						"P35",
+						"P36",
+						"C-supportsReadOnlyMode",
+						"S19",
+						"S23",
+						"S33",
+						"META-03"
+					],
+					"ownerTask": "GT1-11-12A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-policy-native.md"
 				}
 			],
 			"ownerScopeReview": {
@@ -39584,6 +39784,530 @@
 				"change": "added",
 				"addedTo": ["P11", "C-supportsCostTracking", "C-supportsUsageStats", "REG-USAGE", "S26"],
 				"evidenceRef": "Plans/grok-tier1/evidence/11-native-accounting.md"
+			}
+		],
+		"liveCalls": 0,
+		"readiness": false
+	},
+	"phase11NativePolicy": {
+		"taskId": "GT1-11-12",
+		"recordedAt": "2026-11-02",
+		"sourceCommit": "4ef24969946785b475af4d85ce07c5638c9df682",
+		"branch": "auto-run-feature/grok-cli-integration",
+		"evidenceRef": "Plans/grok-tier1/evidence/11-policy-native.md",
+		"prerequisites": {
+			"missing": [
+				"live.enabled false",
+				"live.credentialsReference null",
+				"live.authorizationReference null",
+				"live.budgetUsd 0",
+				"live.maxCalls 0",
+				"live.maxTurns 0",
+				"live.maxWallClockSeconds 0",
+				"live.allowedEndpoints empty",
+				"selectedBinaryPath null",
+				"selectedBinarySha256 null",
+				"selectedLiveModels empty",
+				"authorization.configurationReference null",
+				"authorization.expiresAt null",
+				"authorization.isolationReceipt null",
+				"authorization.allowedRoots empty",
+				"no provider cap or worst-case reservation",
+				"authorization.sharedBudgetLedgerReference null"
+			],
+			"configFiles": [],
+			"requiredLiveBlockers": [
+				"live-authorization-absent",
+				"binary-unpinned",
+				"host-isolation-unqualified",
+				"background-egress-unqualified",
+				"discovery-authorization-absent",
+				"live-limits-unset",
+				"spend-guarantee-absent"
+			],
+			"realAuthority": null
+		},
+		"configurationSelectionFiles": [],
+		"suites": {
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/scripts/grok-qualification-harness.test.ts src/__tests__/scripts/grok-qualification-spend.test.ts src/__tests__/shared/redactSecrets.test.ts src/__tests__/integration/mega-maestro/offline-recovery.test.ts src/__tests__/main/agents/agent-config-writes.test.ts src/__tests__/main/debug-package/redaction-canaries.test.ts src/__tests__/main/cue/cue-process-lifecycle.managed.test.ts src/__tests__/main/enterprise/credential-custody.test.ts src/__tests__/main/enterprise/dispatch.test.ts src/__tests__/main/enterprise/egress-policy.test.ts src/__tests__/main/enterprise/enrollment.test.ts src/__tests__/main/enterprise/identity-store.test.ts src/__tests__/main/enterprise/local-effects-policy.test.ts src/__tests__/main/enterprise/remote.test.ts src/__tests__/main/enterprise/settings-policy.test.ts src/__tests__/main/enterprise/shell-policy.test.ts src/__tests__/main/enterprise/spawn-authority.test.ts src/__tests__/main/permission-relay/relay-core.test.ts src/__tests__/main/utils/agent-args.test.ts src/__tests__/main/utils/context-groomer.managed.test.ts src/__tests__/main/process-manager/spawners/ChildProcessSpawner.test.ts src/__tests__/main/process-manager/spawners/PtySpawner.test.ts src/__tests__/shared/maestro-lib/grok/acp-client.test.ts src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts src/__tests__/shared/maestro-lib/grok/acp-session.test.ts src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts src/__tests__/shared/maestro-lib/launch/agent-args.managed.test.ts src/__tests__/shared/maestro-lib/managed/authority.test.ts src/__tests__/shared/maestro-lib/managed/contracts.test.ts src/__tests__/shared/maestro-lib/managed/credentials.test.ts src/__tests__/shared/maestro-lib/managed/delegation.test.ts src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts src/__tests__/shared/maestro-lib/managed/permission-ceiling.test.ts src/__tests__/shared/maestro-lib/managed/provider-route.test.ts",
+			"exit": 0,
+			"total": 1558,
+			"passed": 1558,
+			"failed": 0,
+			"files": [
+				{
+					"file": "src/__tests__/scripts/grok-qualification-harness.test.ts",
+					"passed": 124,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-spend.test.ts",
+					"passed": 40,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/redactSecrets.test.ts",
+					"passed": 72,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/integration/mega-maestro/offline-recovery.test.ts",
+					"passed": 9,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/agents/agent-config-writes.test.ts",
+					"passed": 8,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/debug-package/redaction-canaries.test.ts",
+					"passed": 6,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/cue/cue-process-lifecycle.managed.test.ts",
+					"passed": 9,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/enterprise/credential-custody.test.ts",
+					"passed": 8,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/enterprise/dispatch.test.ts",
+					"passed": 27,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/enterprise/egress-policy.test.ts",
+					"passed": 34,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/enterprise/enrollment.test.ts",
+					"passed": 7,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/enterprise/identity-store.test.ts",
+					"passed": 10,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/enterprise/local-effects-policy.test.ts",
+					"passed": 23,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/enterprise/remote.test.ts",
+					"passed": 24,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/enterprise/settings-policy.test.ts",
+					"passed": 29,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/enterprise/shell-policy.test.ts",
+					"passed": 14,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/enterprise/spawn-authority.test.ts",
+					"passed": 36,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/permission-relay/relay-core.test.ts",
+					"passed": 35,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/utils/agent-args.test.ts",
+					"passed": 239,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/utils/context-groomer.managed.test.ts",
+					"passed": 35,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/process-manager/spawners/ChildProcessSpawner.test.ts",
+					"passed": 82,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/process-manager/spawners/PtySpawner.test.ts",
+					"passed": 18,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-client.test.ts",
+					"passed": 31,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts",
+					"passed": 120,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-session.test.ts",
+					"passed": 147,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts",
+					"passed": 102,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/launch/agent-args.managed.test.ts",
+					"passed": 44,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/managed/authority.test.ts",
+					"passed": 33,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/managed/contracts.test.ts",
+					"passed": 31,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/managed/credentials.test.ts",
+					"passed": 28,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/managed/delegation.test.ts",
+					"passed": 18,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/managed/host-adapter.test.ts",
+					"passed": 36,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/managed/permission-ceiling.test.ts",
+					"passed": 75,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/managed/provider-route.test.ts",
+					"passed": 4,
+					"failed": 0,
+					"skipped": 0
+				}
+			]
+		},
+		"harness": {
+			"command": "node scripts/grok-qualification.mjs --json --no-write",
+			"exit": 0,
+			"configSource": "default-run-state",
+			"totals": {
+				"cases": 48,
+				"admitted": 0,
+				"notRun": 48,
+				"spawned": 0,
+				"paidRequests": 0,
+				"networkContacts": 0
+			},
+			"capabilities": {
+				"isolationPreflight": true,
+				"atomicSpendAdmission": true,
+				"offlineExecutor": true,
+				"caseExecutor": true,
+				"discoveryExecutor": true,
+				"sshExecutor": true,
+				"consumerLegs": true,
+				"sessionLegs": true,
+				"sessionConsumers": true,
+				"utilityLegs": true,
+				"cheapUtilityLegs": true,
+				"workflowLegs": true,
+				"orchestrationLegs": true,
+				"contributionLegs": true,
+				"accountingLegs": true,
+				"accountingConsumers": true
+			}
+		},
+		"cases": [
+			{
+				"caseId": "E10:native-headless:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "negative-policy",
+						"owner": "GT1-11-12"
+					}
+				]
+			},
+			{
+				"caseId": "E10:native-headless:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "negative-policy",
+						"owner": "GT1-11-12"
+					}
+				]
+			},
+			{
+				"caseId": "E10:acp-stdio:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "negative-policy",
+						"owner": "GT1-11-12"
+					}
+				]
+			},
+			{
+				"caseId": "E10:acp-stdio:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "negative-policy",
+						"owner": "GT1-11-12"
+					}
+				]
+			}
+		],
+		"claims": [
+			{
+				"claim": "Denied writes, outside-root access and symlink escape leave owned sentinels unchanged",
+				"rows": ["P34", "P35", "C-supportsReadOnlyMode", "META-03"],
+				"cases": "E10 (paid; one token turn)",
+				"implemented": "E10 runs one tool-free token turn and records `negative-policy` not-evaluated (owner GT1-11-12, paid-fixtures.ts:721); no leg asks a read-only or plan-mode Grok turn to write an owned sentinel, write outside the allowed root or follow an owned symlink out of it, or compares the sentinel tree before and after. The harness itself refuses outside-root and symlinked roots in its own preflight (owned-root-symlink-escape, prompt-file-outside-root, resources-root-symlink), which is harness hygiene, not a native denial. The read-only utility legs (GT1-11-11D2 grooming-read-only, feedback sentinels-unchanged) are positive consumer checks, not denied-write attempts. Deterministic agent-args (plain and managed), permission-ceiling, local-effects-policy, ChildProcessSpawner and PtySpawner suites only",
+				"gap": "filesystem legs: owned sentinel files and an owned symlink to an outside sentinel; read-only (readOnlyArgs) and default turns each asked to write, append, delete and follow the link; sentinel hashes and the outside tree compared byte for byte; temporary files and shell descendants included",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Shell, network and in-process egress denied with zero effect",
+				"rows": ["P34", "P35", "S23"],
+				"cases": "none",
+				"implemented": "no leg asks a Grok turn under a read-only or managed ceiling to run a shell command that writes a sentinel, or to reach a harmless owned loopback service, and no leg counts the connections that service received or checks in-process egress from the Grok process; deterministic shell-policy, egress-policy, local-effects-policy and spawner suites only",
+				"gap": "process legs: an owned loopback listener counting accepted connections, an owned shell sentinel; denied turns must leave the connection count and sentinel at zero, not merely print a refusal; the platform sandbox limits (no macOS/Linux sandbox profile is applied to the Grok child) recorded per OS",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "MCP, meta-tools, subagents and hooks refused or held to the trust/disable policy",
+				"rows": ["P28", "P34", "P35"],
+				"cases": "E08 (resources; positive only)",
+				"implemented": "E08 observes a selected skill and its MCP sentinel and fails on undeclared sentinels (no-implicit-effect), a positive resource check; no leg asks for a disabled or untrusted MCP server, a meta-tool (task/agent spawn), a native subagent or a configured hook and observes that none ran; Grok MCP stays verified false (grok-native-mcp-unqualified) and native subagents unqualified (grok-native-subagent-unqualified); deterministic acp-requests, acp-session, acp-turn and acp-client suites only",
+				"gap": "tool-surface legs: owned MCP stand-in disabled and untrusted, a hook stand-in and a child stand-in, each with a sentinel; requests for them under the policy produce zero sentinel records and zero child processes",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "No-tools and read-only violations, unknown effect requests, stale approvals and revocation",
+				"rows": ["P33", "P34", "P35", "S19", "S33", "C-supportsReadOnlyMode", "META-03"],
+				"cases": "none",
+				"implemented": "requireDisabledTools is refused before spawn (grok-required-no-tools-unsupported) and the D2 no-tools-refused utility leg observes that refusal; no leg sends an unknown ACP effect request, replays a stale approval after the turn or session it was granted for ended, or revokes an approval mid-turn and observes the effect not running; deterministic relay-core, dispatch, acp-requests and permission-ceiling suites only",
+				"gap": "approval legs on the ACP route: an unknown permission/effect method answered with a refusal and nothing run, an approval id replayed on a later turn refused, a revocation before the tool call leaves its sentinel absent; the native route records the same claims unsupported where no approval channel exists",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Prohibited model routes and remote endpoint substitution refused before spawn",
+				"rows": ["P33", "P36", "S23"],
+				"cases": "none",
+				"implemented": "no leg selects a model or gateway outside the approved set, or substitutes the SSH or endpoint target named in the authorization, and observes the refusal before any process or connection; the harness preflight refuses unapproved endpoints and SSH targets at admission (endpoints-unapproved, ssh-target-unapproved), which is admission hygiene, not a production refusal; deterministic spawn-authority, remote, provider-route, contracts and host-adapter suites only",
+				"gap": "route legs: a prohibited model and gateway, and a substituted remote endpoint, each refused by the production launch plan with zero spawns and zero connections to the owned loopback service",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Credential custody, offline/revoked/expired enrollment and audit attribution (P36, GT1-01-07 scope)",
+				"rows": ["P36", "S23"],
+				"cases": "none",
+				"implemented": "no leg runs a Grok turn under a disposable credential-custody refusal or an offline, revoked or expired enrollment standing, or reads the audit record and binds it to the Grok account, actor and turn. A synthetic endpoint cannot qualify these claims (task scope), and run-state names no real authority, so after a repair they stay not-run without one; the operator production endpoint was not enrolled or changed. Deterministic credential-custody, credentials, enrollment, identity-store, offline-recovery, settings-policy, agent-config-writes, cue-process-lifecycle.managed, context-groomer.managed, redaction-canaries and redactSecrets suites only",
+				"gap": "authority legs: the production refusal observed with zero spawns for each standing (custody refused, offline, revoked, expired) over owned synthetic custody; the attribution claim recorded not-run until a real authority is authorized",
+				"outcome": "not-run"
+			}
+		],
+		"observed": {
+			"deniedWrites": [],
+			"outsideRootAttempts": [],
+			"symlinkAttempts": [],
+			"shellRuns": [],
+			"loopbackConnections": [],
+			"inProcessEgress": [],
+			"toolSurfaceInvocations": [],
+			"unknownEffectRequests": [],
+			"staleApprovals": [],
+			"revocations": [],
+			"prohibitedRoutes": [],
+			"endpointSubstitutions": [],
+			"authorityStandings": [],
+			"auditRecords": [],
+			"prohibitedEffects": 0
+		},
+		"platformLimitations": {
+			"osSandbox": "Maestro applies none to the Grok child on any platform; confinement is launch arguments, managed ceilings and process sinks; Grok CLI self-confinement unobserved",
+			"inProcessEgress": "unobserved; needs the owned loopback leg",
+			"hostsObserved": []
+		},
+		"managedReadyRoutes": [],
+		"ownedFixtures": {
+			"sentinels": 0,
+			"symlinks": 0,
+			"loopbackServices": 0,
+			"assertionsEvaluated": 0
+		},
+		"productionEndpoint": {
+			"enrolled": false,
+			"changed": false
+		},
+		"productionInstall": {
+			"sha256": "5c8a688251bf61e35370b828b6a353b0a20fcc3f64000de8a91d426039f29cec",
+			"executed": false,
+			"modified": false
+		},
+		"findings": [
+			{
+				"id": "A11-F29",
+				"classification": "harness-gap",
+				"anchors": [
+					"scripts/grok-qualification/paid-fixtures.ts:721",
+					"scripts/grok-qualification/paid-fixtures.ts:724"
+				],
+				"consequence": "The negative policy cases this VERIFY must observe are not implemented: run-state maps E10 (P33..P36) to GT1-11-12, but E10 is one tool-free token turn that records `negative-policy` (denied effects) as not-evaluated with owner GT1-11-12, and no family or leg attempts a denied write, outside-root or symlink access, shell, network or in-process egress, MCP, meta-tool, subagent or hook use, a read-only or no-tools violation, an unknown effect request, a stale approval, a revocation, a prohibited model route or a remote endpoint substitution, or compares owned sentinels and an owned loopback service before and after. GT1-11-12 is a VERIFY packet and may not add harness code, so even with every run-state prerequisite these claims could not be observed, and a denial message alone could never be counted as zero effect.",
+				"rows": [
+					"P28",
+					"P33",
+					"P34",
+					"P35",
+					"P36",
+					"C-supportsReadOnlyMode",
+					"S19",
+					"S23",
+					"S33",
+					"META-03"
+				],
+				"blocker": "grok-negative-policy-cases-unimplemented",
+				"repairTasks": ["GT1-11-12A", "GT1-11-12B", "GT1-11-12C", "GT1-11-12D"]
+			}
+		],
+		"blockerUpdates": [
+			{
+				"id": "grok-negative-policy-cases-unimplemented",
+				"finding": "A11-F29",
+				"taskId": "GT1-11-12",
+				"change": "added",
+				"addedTo": [
+					"P28",
+					"P33",
+					"P34",
+					"P35",
+					"P36",
+					"C-supportsReadOnlyMode",
+					"S19",
+					"S23",
+					"S33",
+					"META-03"
+				],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-policy-native.md"
 			}
 		],
 		"liveCalls": 0,
