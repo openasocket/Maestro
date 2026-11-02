@@ -30,7 +30,21 @@ export type PaidAssertionId =
 	/** Every turn reported usage the ledger could settle against. */
 	| 'usage-reported'
 	/** The pinned binary was byte-identical after the leg as before it. */
-	| 'binary-unchanged';
+	| 'binary-unchanged'
+	/**
+	 * Two-account cases (GT1-11-11A2): after both legs, each owned home lists
+	 * only the session ids its own leg created, carries no record of the other
+	 * leg, and each leg ran on its own account's credential reference and home.
+	 * Evaluated across both legs by the executor, never by one leg alone.
+	 */
+	| 'colliding-native-ids'
+	/**
+	 * Effort and gateway (GT1-11-11A2): the acknowledged effort equals the
+	 * selected one on every turn, every gateway variable the child received
+	 * names an approved origin, and a rejected choice stops the leg unsent
+	 * (never a downgrade to another effort or model).
+	 */
+	| 'effort-and-gateway';
 
 export interface PaidFixtureTurn {
 	prompt: string;
@@ -42,6 +56,11 @@ export interface PaidFixture {
 	schema: typeof PAID_FIXTURE_SCHEMA;
 	family: string;
 	turns: PaidFixtureTurn[];
+	/**
+	 * Per-account turns of a two-account case: each leg asks for its own token,
+	 * so a record of one leg found under the other leg's home is attributable.
+	 */
+	accountTurns?: Partial<Record<'A' | 'B', PaidFixtureTurn[]>>;
 	assertions: PaidAssertionId[];
 	unevaluated: Array<{ id: string; detail: string; owner: string }>;
 }
@@ -74,27 +93,27 @@ const UNICODE_PREAMBLE =
 const fixture = (
 	family: string,
 	turns: PaidFixtureTurn[],
-	unevaluated: PaidFixture['unevaluated']
+	unevaluated: PaidFixture['unevaluated'],
+	extra: { assertions?: PaidAssertionId[]; accountTurns?: PaidFixture['accountTurns'] } = {}
 ): PaidFixture => ({
 	schema: PAID_FIXTURE_SCHEMA,
 	family,
 	turns,
-	assertions: turns.length > 1 ? RESUMED : BASE,
+	...(extra.accountTurns ? { accountTurns: extra.accountTurns } : {}),
+	assertions: [...(turns.length > 1 ? RESUMED : BASE), ...(extra.assertions ?? [])],
 	unevaluated,
 });
 
+/** The turns one account's leg runs: its own when the fixture names per-account turns. */
+export function fixtureTurnsFor(fixture: PaidFixture, account: 'A' | 'B'): PaidFixtureTurn[] {
+	return fixture.accountTurns?.[account] ?? fixture.turns;
+}
+
 export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freeze({
-	E01: fixture(
-		'E01',
-		[turn('E01', 1)],
-		[
-			{
-				id: 'colliding-native-ids',
-				detail: 'two accounts run one leg each; cross-account leakage is not inspected here',
-				owner: 'GT1-11-11A',
-			},
-		]
-	),
+	E01: fixture('E01', [turn('E01A', 1)], [], {
+		assertions: ['colliding-native-ids'],
+		accountTurns: { A: [turn('E01A', 1)], B: [turn('E01B', 1)] },
+	}),
 	E03: fixture(
 		'E03',
 		[turn('E03', 1, UNICODE_PREAMBLE), turn('E03', 2)],
@@ -121,11 +140,7 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 		[turn('E06', 1)],
 		[{ id: 'child-usage', detail: 'child and cache-bucket usage', owner: 'GT1-11-11F' }]
 	),
-	E07: fixture(
-		'E07',
-		[turn('E07', 1)],
-		[{ id: 'effort-and-gateway', detail: 'effort levels and gateways', owner: 'GT1-11-11A' }]
-	),
+	E07: fixture('E07', [turn('E07', 1)], [], { assertions: ['effort-and-gateway'] }),
 	E08: fixture(
 		'E08',
 		[turn('E08', 1)],

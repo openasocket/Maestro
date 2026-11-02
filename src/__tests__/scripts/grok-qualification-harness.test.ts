@@ -1581,6 +1581,8 @@ describe('GT1-11-09 qualification harness', () => {
 				"const tokenOf = (s) => (String(s).match(/QUALIFY-[A-Z0-9]+-T[0-9]+-OK/) || [''])[0];",
 				"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
 				'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
+				// Native history under the owned account home, laid out as the Grok session store reads it.
+				'const keep = (sid, text) => { const d = `${process.env.GROK_HOME}/sessions/synthetic-cwd/${sid}`; fs.mkdirSync(d, { recursive: true }); fs.appendFileSync(`${d}/chat_history.jsonl`, JSON.stringify({ type: "user", text }) + "\\n"); };',
 				'if (!acp) {',
 				"  if (MODE === 'sleep') setTimeout(() => {}, 30000);",
 				'  else {',
@@ -1596,6 +1598,7 @@ describe('GT1-11-09 qualification harness', () => {
 				'      modelUsage: { [model]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.001 } },',
 				'    };',
 				"    if (MODE !== 'nocost') end.total_cost_usd = 0.001;",
+				"    keep(end.sessionId, at('-p'));",
 				'    out(end);',
 				// Past the output cap it keeps running, so only the cap can stop it in time.
 				"    if (MODE === 'big') { process.stdout.write('x'.repeat(1200000)); setTimeout(() => {}, 30000); }",
@@ -1610,6 +1613,7 @@ describe('GT1-11-09 qualification harness', () => {
 				"      reply(m.id, { sessionId: sid, models: { currentModelId: MODE === 'wrongmodel' ? 'other-model' : m.params._meta.modelId } });",
 				"    else if (m.method === 'session/prompt') {",
 				"      fs.appendFileSync(`${LOG}/prompts`, '1\\n');",
+				'      keep(sid, m.params.prompt[0].text);',
 				"      if (MODE === 'sleep') return;",
 				"      out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: tokenOf(m.params.prompt[0].text) } } } });",
 				"      reply(m.id, { stopReason: 'end_turn' });",

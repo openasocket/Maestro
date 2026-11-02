@@ -35,6 +35,19 @@
  * classified by the canonical Grok error patterns (never a login, a retry or
  * another account). An E07 paid leg runs only after its discovery leg passed.
  *
+ * Identity assertions (GT1-11-11A2): an E01 case evaluates
+ * `colliding-native-ids` after both account legs by inspecting only the two
+ * owned homes (each lists only the session ids its own leg created, carries no
+ * record of the other leg, and each leg ran on its own credential reference and
+ * home). The offline-inspection case also runs a binary-resolution leg (files
+ * only, no spawn) that resolves the pin through the production custom-path rule
+ * from the pinned path, an owned custom path and the boundary PATH, and fails
+ * any resolution that is not the pin itself (no fallback to another install).
+ * An E07 paid leg selects `selection.effort` (refused unsent when absent),
+ * evaluates `effort-and-gateway` (acknowledged effort equals the selection,
+ * every gateway the child received names an approved origin) and stops before
+ * any prompt on a rejected or unacknowledged choice, never downgrading.
+ *
  * Offline inspection (GT1-11-10A): the offline-inspection leg of a case (E02)
  * is admitted and recorded as its own receipt entry, independently of
  * discovery. It needs the pinned binary, disabled auto-update, owned roots, the
@@ -125,7 +138,8 @@ import {
 	GrokAcpTransportError,
 } from '../../src/shared/maestro-lib/grok/acp-protocol';
 import { GROK_ACP_ARGS } from '../../src/shared/maestro-lib/grok/route';
-import { PAID_FIXTURES, type PaidFixture } from './paid-fixtures';
+import { checkCustomPath } from '../../src/shared/maestro-lib/launch/path-prober';
+import { fixtureTurnsFor, PAID_FIXTURES, type PaidFixture } from './paid-fixtures';
 import { isPathAtOrUnderRoot } from '../../src/shared/worktreePaths';
 import { stopProcess } from '../../src/shared/maestro-lib/control/termination';
 import { getAgentCapabilities } from '../../src/shared/maestro-lib/providers/capabilities';
@@ -223,6 +237,17 @@ export interface QualificationConfig {
 	spendBounds?: SpendBounds | null;
 	limits: QualificationLimits;
 	cases: string[];
+	/**
+	 * What an E07 paid leg selects (GT1-11-11A2): the reasoning effort it asks
+	 * for and the gateway variables its credentialed child receives. Each
+	 * gateway must name an approved origin; absent, an E07 leg refuses unsent.
+	 */
+	selection?: { effort: string | null; gateways?: Record<string, string> } | null;
+	/**
+	 * The binary-resolution leg's custom path (GT1-11-11A2): an owned path,
+	 * under the runs root, that must resolve to the pinned binary itself.
+	 */
+	binaryResolution?: { customPath: string | null } | null;
 }
 
 export interface SpendBounds {
@@ -329,6 +354,8 @@ export interface CaseReceipt {
 	 * spawns. Null when the case has no offline-inspection class.
 	 */
 	offlineLeg: OfflineLegReceipt | null;
+	/** The binary-resolution leg (no spawn, no network, no credential); null when the case has no offline-inspection class. */
+	resolutionLeg: BinaryResolutionLegReceipt | null;
 	/** Discovery legs the executor ran or refused (one per account); empty when the case was not admitted. */
 	discoveryLegs: DiscoveryLegReceipt[];
 	/** Paid legs the executor ran or refused (one per account); empty when the case was not admitted. */
@@ -681,6 +708,15 @@ export function validateConfig(config: QualificationConfig, workspace: string): 
 			if (!['grok', 'claude-code', 'codex'].includes(p))
 				add(`spendGuarantee.providers[${i}]`, 'unknown-provider');
 		});
+	for (const key of Object.keys(config.selection?.gateways ?? {}))
+		if (!GROK_GATEWAY_ENV.includes(key))
+			add(`selection.gateways.${key}`, 'gateway-variable-unknown');
+	const customPath = config.binaryResolution?.customPath;
+	if (
+		customPath &&
+		!isPathAtOrUnderRoot(path.resolve(workspace, customPath).replace(/\\/g, '/'), runsRoot)
+	)
+		add('binaryResolution.customPath', 'custom-path-outside-runs');
 	return problems;
 }
 
@@ -1270,6 +1306,10 @@ export function planIsolatedLaunch(
 	// A secret is resolved by name at spawn; the plan carries only the reference.
 	if (credentialMode === 'secret-name' && ref?.kind === 'secret-name')
 		session.XAI_API_KEY = `secret-ref:${ref.name}`;
+	// Selected gateways ride only a credentialed launch; the validation below holds each to an approved origin.
+	if (mode === 'credentialed')
+		for (const [key, value] of Object.entries(config.selection?.gateways ?? {}))
+			if (GROK_GATEWAY_ENV.includes(key)) session[key] = value;
 	const env = {
 		PATH: iso.path.join(c.target === 'ssh' ? ':' : path.delimiter),
 		HOME: home,
@@ -2617,6 +2657,154 @@ export async function runOfflineLeg(
 }
 
 // ---------------------------------------------------------------------------
+// Binary-resolution leg (GT1-11-11A2)
+// ---------------------------------------------------------------------------
+
+export type BinaryResolutionSource = 'pinned-path' | 'custom-path' | 'owned-path';
+
+export interface BinaryResolution {
+	source: BinaryResolutionSource;
+	/** What was asked for: the configured path, or the owned PATH entries walked in order. */
+	requested: string | string[];
+	/** What the production custom-path rule (`checkCustomPath`) returned; null when nothing resolved. */
+	resolved: string | null;
+	realPath: string | null;
+	sha256: string | null;
+	outcome: 'passed' | 'failed';
+	/** `matches-pin`, or why it does not (never a fallback to another install). */
+	detail: string;
+}
+
+export interface BinaryResolutionLegReceipt {
+	leg: 'binary-resolution';
+	/** not-run: refused before resolving; failed: a source did not resolve to the pin; passed: all three did. */
+	status: 'not-run' | 'passed' | 'failed';
+	reasons: AdmissionReason[];
+	pinned: { path: string | null; realPath: string | null; sha256: string | null };
+	resolutions: BinaryResolution[];
+	/** Always 0: the leg reads files only and never runs any binary. */
+	spawned: 0;
+	networkContacts: 0;
+}
+
+const resolutionReason = (id: string, detail: string): AdmissionReason => ({
+	id,
+	kind: 'offline-execution',
+	detail,
+	owner: 'GT1-11-11A2',
+});
+
+/** The executable name the production definition launches (`grok`). */
+function grokBinaryName(): string {
+	return getAgentDefinition('grok')?.binaryName ?? 'grok';
+}
+
+/**
+ * Resolve the pinned binary three ways through the production custom-path
+ * rule (`checkCustomPath`, what the detector applies to a configured path):
+ * the pinned path, the configured owned custom path, and a walk of the
+ * boundary's PATH in order (the first entry holding the binary wins, as a
+ * PATH lookup would). Each must resolve to the pin's own file (same real path,
+ * same sha256) inside the owned roots. A source that resolves nothing fails;
+ * there is no fallback to a known install location, `which`, or a login shell,
+ * and nothing is ever run.
+ */
+export async function runBinaryResolutionLeg(
+	c: QualificationCase,
+	config: QualificationConfig,
+	problems: ConfigProblem[],
+	capabilities: HarnessCapabilities,
+	ctx: { workspace: string; operatorHome: string }
+): Promise<BinaryResolutionLegReceipt> {
+	const leg = offlineLegCase(c);
+	const reasons = admitOfflineLeg(c, config, problems, capabilities);
+	if (capabilities.isolationPreflight)
+		reasons.push(
+			...preflightCase(leg, config, { workspace: ctx.workspace, operatorHome: ctx.operatorHome })
+				.reasons
+		);
+	const customPath = config.binaryResolution?.customPath ?? null;
+	if (!customPath)
+		reasons.push(resolutionReason('binary-resolution-undeclared', 'binaryResolution.customPath'));
+	const roots = config.allowedRoots.map((r) => path.resolve(ctx.workspace, r));
+	const pathEntries = (config.isolation?.path ?? []).map((p) => path.resolve(ctx.workspace, p));
+	if (!pathEntries.some((p) => underAny('local', p, roots)))
+		reasons.push(resolutionReason('owned-path-absent', 'isolation.path'));
+	const pinnedFile = config.binary.path ? path.resolve(ctx.workspace, config.binary.path) : null;
+	const pin = pinnedFile ? inspectExecutable(pinnedFile) : null;
+	let pinnedReal: string | null = null;
+	try {
+		pinnedReal = pinnedFile ? fs.realpathSync(pinnedFile) : null;
+	} catch {
+		pinnedReal = null;
+	}
+	const receipt: BinaryResolutionLegReceipt = {
+		leg: 'binary-resolution',
+		status: 'not-run',
+		reasons,
+		pinned: { path: pinnedFile, realPath: pinnedReal, sha256: pin?.sha256 ?? null },
+		resolutions: [],
+		spawned: 0,
+		networkContacts: 0,
+	};
+	if (reasons.length) return receipt;
+	if (!pinnedReal || pin?.sha256 !== config.binary.sha256) {
+		receipt.reasons.push(resolutionReason('binary-hash-mismatch', 'binary.sha256'));
+		receipt.status = 'failed';
+		return receipt;
+	}
+	const realRoots = roots.filter((r) => fs.existsSync(r)).map((r) => fs.realpathSync(r));
+	const judge = (
+		source: BinaryResolutionSource,
+		requested: string | string[],
+		resolved: string | null
+	): BinaryResolution => {
+		const out: BinaryResolution = {
+			source,
+			requested,
+			resolved,
+			realPath: null,
+			sha256: null,
+			outcome: 'failed',
+			detail: 'binary-unresolved',
+		};
+		if (!resolved) return out;
+		try {
+			out.realPath = fs.realpathSync(resolved);
+		} catch {
+			return out;
+		}
+		out.sha256 = inspectExecutable(resolved).sha256;
+		if (!underAny('local', out.realPath, realRoots)) out.detail = 'binary-resolution-fallback';
+		else if (normalizeFor('local', out.realPath) !== normalizeFor('local', pinnedReal))
+			out.detail = 'binary-resolution-other-file';
+		else if (out.sha256 !== config.binary.sha256) out.detail = 'binary-resolution-hash-mismatch';
+		else {
+			out.outcome = 'passed';
+			out.detail = 'matches-pin';
+		}
+		return out;
+	};
+	const viaRule = async (p: string) => {
+		const found = await checkCustomPath(p);
+		return found.exists ? (found.path ?? p) : null;
+	};
+	receipt.resolutions.push(judge('pinned-path', pinnedFile!, await viaRule(pinnedFile!)));
+	const custom = path.resolve(ctx.workspace, customPath!);
+	receipt.resolutions.push(judge('custom-path', custom, await viaRule(custom)));
+	let fromPath: string | null = null;
+	for (const entry of pathEntries) {
+		fromPath = await viaRule(path.join(entry, grokBinaryName()));
+		if (fromPath) break;
+	}
+	receipt.resolutions.push(judge('owned-path', pathEntries, fromPath));
+	for (const r of receipt.resolutions)
+		if (r.outcome === 'failed') receipt.reasons.push(resolutionReason(r.detail, r.source));
+	receipt.status = receipt.reasons.length ? 'failed' : 'passed';
+	return receipt;
+}
+
+// ---------------------------------------------------------------------------
 // Discovery executor (GT1-11-11A1)
 // ---------------------------------------------------------------------------
 
@@ -3272,6 +3460,13 @@ export interface PaidTurnResult {
 	reply: { sha256: string; bytes: number; tokenSeen: boolean };
 	/** The model the turn reported (native usage) or the session acknowledged (ACP). */
 	model: string | null;
+	/**
+	 * The reasoning effort the peer acknowledged: the ACP `reasoning_effort`
+	 * option after the selection, or a `reasoning_effort` / `reasoningEffort`
+	 * string the native terminal record itself carried. Null when unreported;
+	 * never the selected value copied over.
+	 */
+	effort: string | null;
 	usage: { costUsd: number | null; status: PaidCostStatus };
 	/** Billable calls drawn from the reservation before the turn was sent. */
 	callsRecorded: Record<BillableCallKind, number>;
@@ -3297,6 +3492,12 @@ export interface PaidLegReceipt {
 	binary: { sha256Pinned: string | null; sha256AtSpawn: string | null; sha256After: string | null };
 	/** Names only (never values) of the validated child environment. */
 	launch: { credentialMode: CredentialMode; keys: string[] } | null;
+	/** The owned account home (`GROK_HOME`) the child received; null when refused before planning. */
+	accountRoot: string | null;
+	/** The credential reference the child was launched with (a name or path, never a value). */
+	credential: { kind: CredentialReference['kind']; reference: string } | null;
+	/** Gateway variables the child received, by name, as origins only. */
+	gateways: Record<string, string>;
 	turns: PaidTurnResult[];
 	assertions: PaidAssertionOutcome[];
 	settlement: {
@@ -3399,6 +3600,27 @@ function nativeUsageOf(usage: unknown): {
 	};
 }
 
+/**
+ * The effort a native terminal record itself reports, read from the raw line
+ * (`reasoning_effort` or `reasoningEffort`, top level or under `usage`). Null
+ * when the record names none: an unreported effort is never acknowledged.
+ */
+function reportedEffortOf(line: string): string | null {
+	let raw: unknown;
+	try {
+		raw = JSON.parse(line);
+	} catch {
+		return null;
+	}
+	const pick = (o: unknown): string | null => {
+		if (!o || typeof o !== 'object') return null;
+		const r = o as Record<string, unknown>;
+		const v = r.reasoning_effort ?? r.reasoningEffort;
+		return typeof v === 'string' && v.trim() ? v.trim() : null;
+	};
+	return pick(raw) ?? pick((raw as Record<string, unknown> | null)?.usage);
+}
+
 /** Evaluate a fixture's assertions against what the leg observed. */
 export function evaluatePaidAssertions(
 	fixture: PaidFixture,
@@ -3408,15 +3630,23 @@ export function evaluatePaidAssertions(
 		model: string;
 		sha256Pinned: string | null;
 		sha256After: string | null;
+		/** The account whose turns ran (per-account fixtures); defaults to A. */
+		account?: 'A' | 'B';
+		/** The effort the leg selected; null when none was. */
+		effort?: string | null;
+		/** Gateway variables the child received (name to origin) and the ones the selection named. */
+		gateways?: Record<string, string>;
+		selectedGateways?: string[];
+		approvedEndpoints?: string[];
 	}
 ): PaidAssertionOutcome[] {
 	const { turns } = observed;
-	const complete = turns.length === fixture.turns.length;
+	const complete = turns.length === fixtureTurnsFor(fixture, observed.account ?? 'A').length;
 	const all = (pred: (t: PaidTurnResult) => boolean) => complete && turns.every(pred);
 	const out: PaidAssertionOutcome[] = [];
 	const verdict = (id: string, ok: boolean, detail: string) =>
 		out.push({ id, outcome: ok ? 'passed' : 'failed', detail });
-	const ran = `${turns.length}/${fixture.turns.length} turns`;
+	const ran = `${turns.length}/${fixtureTurnsFor(fixture, observed.account ?? 'A').length} turns`;
 	for (const id of fixture.assertions) {
 		switch (id) {
 			case 'exit-clean':
@@ -3491,6 +3721,38 @@ export function evaluatePaidAssertions(
 					'sha256 after the leg'
 				);
 				break;
+			case 'colliding-native-ids':
+				// A cross-leg verdict: executePaidCase replaces this once both legs ran.
+				out.push({
+					id,
+					outcome: 'not-evaluated',
+					detail: 'evaluated across both account legs',
+					owner: 'GT1-11-11A2',
+				});
+				break;
+			case 'effort-and-gateway': {
+				const failures: string[] = [];
+				const selected = observed.effort ?? null;
+				if (!selected) failures.push('effort-unselected');
+				else if (!all((t) => t.effort === selected))
+					failures.push(
+						`effort-unacknowledged:${turns.map((t) => t.effort ?? 'unreported').join(',') || 'no-turn'}`
+					);
+				const approved = (observed.approvedEndpoints ?? [])
+					.filter((e) => endpointOriginProblem(e) === null)
+					.map((e) => new URL(e).origin);
+				const received = observed.gateways ?? {};
+				for (const [key, origin] of Object.entries(received))
+					if (!approved.includes(origin)) failures.push(`gateway-unapproved:${key}`);
+				for (const key of observed.selectedGateways ?? [])
+					if (!(key in received)) failures.push(`gateway-not-applied:${key}`);
+				verdict(
+					id,
+					failures.length === 0,
+					failures.length ? failures.join('; ') : `effort ${selected}; ${ran}`
+				);
+				break;
+			}
 		}
 	}
 	for (const u of fixture.unevaluated)
@@ -3564,16 +3826,22 @@ async function executePaidLeg(
 		fixture: { schema: fixture.schema, family: fixture.family, sha256: paidFixtureDigest(fixture) },
 		binary: { sha256Pinned: config.binary.sha256, sha256AtSpawn: null, sha256After: null },
 		launch: null,
+		accountRoot: null,
+		credential: null,
+		gateways: {},
 		turns: [],
 		assertions: [],
 		settlement: null,
 		spawned: 0,
 		paidRequests: 0,
 	};
-	const refuse = (id: string, detail: string) => {
-		receipt.reasons.push(paidReason(id, detail));
+	const refuse = (id: string, detail: string, owner?: string) => {
+		receipt.reasons.push(paidReason(id, detail, owner));
 		return receipt;
 	};
+	const legTurns = fixtureTurnsFor(fixture, account);
+	const effortCase = fixture.assertions.includes('effort-and-gateway');
+	const effort = effortCase ? (config.selection?.effort?.trim() ?? '') || null : null;
 
 	// Never a retry: a leg whose earlier reservation left an effect uncertain, or already ran, refuses.
 	const prior = ledger.reservations.filter(
@@ -3582,6 +3850,8 @@ async function executePaidLeg(
 	if (prior.some((r) => r.state === 'uncertain' || r.uncertainEffect))
 		return refuse('uncertain-prior-effect', receipt.leg);
 	if (prior.length) return refuse('leg-already-run', receipt.leg);
+	// An effort case with nothing selected could only pass on the model default: refuse it unsent.
+	if (effortCase && !effort) return refuse('effort-unselected', 'selection.effort', 'GT1-11-11A2');
 
 	// The immutable pinned binary, re-hashed before anything is reserved or spawned.
 	const file = path.resolve(ctx.workspace, config.binary.path ?? '');
@@ -3603,9 +3873,28 @@ async function executePaidLeg(
 	);
 	if (!launch || launch.credentialMode === 'none')
 		return refuse('paid-launch-unplannable', account);
+	receipt.accountRoot = launch.expectation.accountRoot;
+	const ref = config.credentialReferences.find(
+		(r) => r.provider === 'grok' && r.account === account
+	);
+	if (ref)
+		receipt.credential = {
+			kind: ref.kind,
+			reference: ref.kind === 'file' ? ref.path : ref.name,
+		};
 	const credential = resolveLaunchCredential(launch, config, account, ctx.resolveSecret);
 	if ('refused' in credential) return refuse(credential.refused, credential.detail);
 	const env = credential.env;
+	for (const key of GROK_GATEWAY_ENV)
+		if (env[key]) {
+			let origin: string;
+			try {
+				origin = new URL(env[key]).origin;
+			} catch {
+				origin = 'invalid-url';
+			}
+			receipt.gateways[key] = origin;
+		}
 	const report = validateLaunchEnvironment(env, launch.expectation);
 	if (report.reasons.length) {
 		receipt.reasons.push(...report.reasons);
@@ -3696,9 +3985,13 @@ async function executePaidLeg(
 
 	if (c.route === 'native-headless') {
 		const def = getAgentDefinition('grok');
-		for (let i = 0; i < fixture.turns.length; i++) {
+		// The definition's own effort builder (`--reasoning-effort <level>`), never a hand-rolled flag.
+		const effortOption = def?.configOptions?.find((o) => o.key === 'reasoningEffort');
+		const effortArgs =
+			effort && effortOption?.type === 'text' ? (effortOption.argBuilder?.(effort) ?? []) : [];
+		for (let i = 0; i < legTurns.length; i++) {
 			const n = i + 1;
-			const t = fixture.turns[i];
+			const t = legTurns[i];
 			const resumeId = i > 0 ? receipt.turns[0]?.sessionId : null;
 			if (i > 0 && !resumeId) {
 				receipt.reasons.push(paidReason('session-id-missing', `turn ${n}`));
@@ -3708,6 +4001,7 @@ async function executePaidLeg(
 				...(def?.jsonOutputArgs ?? []),
 				...(def?.readOnlyArgs ?? []),
 				...(def?.modelArgs?.(primary) ?? []),
+				...effortArgs,
 				...(def?.workingDirArgs?.(cwd) ?? []),
 				...(resumeId ? (def?.resumeArgs?.(resumeId) ?? []) : []),
 				...(def?.promptArgs?.(prompt) ?? []),
@@ -3718,15 +4012,18 @@ async function executePaidLeg(
 			const decoder = new StringDecoder('utf8');
 			let pending = '';
 			// One object, so the closure's writes are not narrowed away at the reads below.
-			const seen: Pick<PaidTurnResult, 'sessionId' | 'terminal' | 'usage' | 'model'> = {
+			const seen: Pick<PaidTurnResult, 'sessionId' | 'terminal' | 'usage' | 'model' | 'effort'> = {
 				sessionId: null,
 				terminal: 'none',
 				usage: { costUsd: null, status: 'absent' },
 				model: null,
+				effort: null,
 			};
 			const onLine = (line: string) => {
 				const ev = parser.parseJsonLine(line);
 				if (!ev) return;
+				if ((ev.type === 'result' || ev.type === 'error') && ev.terminal)
+					seen.effort = reportedEffortOf(line);
 				if (ev.sessionId && !seen.sessionId) seen.sessionId = ev.sessionId;
 				if (ev.type === 'text' && !ev.isReasoning && ev.text) reply.push(ev.text);
 				if ((ev.type === 'result' || ev.type === 'error') && ev.terminal) {
@@ -3798,7 +4095,9 @@ async function executePaidLeg(
 			env,
 			cwd,
 			model: primary,
+			effort,
 			fixture,
+			turns: legTurns,
 			graceMs,
 			lifetime: ctx.lifetime,
 			turnMs,
@@ -3868,6 +4167,11 @@ async function executePaidLeg(
 		model: primary,
 		sha256Pinned: config.binary.sha256,
 		sha256After: receipt.binary.sha256After,
+		account,
+		effort,
+		gateways: receipt.gateways,
+		selectedGateways: Object.keys(config.selection?.gateways ?? {}),
+		approvedEndpoints: config.allowedEndpoints,
 	});
 	receipt.status =
 		receipt.spawned === 0
@@ -3890,7 +4194,11 @@ async function runAcpPaidTurns(args: {
 	env: Record<string, string>;
 	cwd: string;
 	model: string;
+	/** The selected effort; set through session/set_config_option and acknowledged before any prompt. */
+	effort: string | null;
 	fixture: PaidFixture;
+	/** The turns this account runs (its own on a per-account fixture). */
+	turns: PaidFixture['turns'];
 	graceMs: number;
 	lifetime: CaseLifetime;
 	turnMs: () => number;
@@ -3974,6 +4282,7 @@ async function runAcpPaidTurns(args: {
 	child.on('close', () => client.close('closed'));
 
 	let acknowledged: string | null = null;
+	let openedOptions: unknown[] = [];
 	try {
 		await client.initialize();
 		const opened = (await client.request('session/new', {
@@ -3985,6 +4294,7 @@ async function runAcpPaidTurns(args: {
 		if (typeof id === 'string' && id.trim()) sessionId = id;
 		const models = (opened?.models ?? {}) as Record<string, unknown>;
 		const options = Array.isArray(opened?.configOptions) ? opened.configOptions : [];
+		openedOptions = options;
 		const modelOption = options.find(
 			(o) => o && typeof o === 'object' && (o as Record<string, unknown>).id === 'model'
 		) as Record<string, unknown> | undefined;
@@ -4001,10 +4311,50 @@ async function runAcpPaidTurns(args: {
 	if (!reasons.length && !sessionId) reasons.push(paidReason('session-id-missing', 'session/new'));
 	if (!reasons.length && acknowledged !== args.model)
 		reasons.push(paidReason('model-unacknowledged', args.model));
+	// The selected effort, acknowledged before any prompt. A choice the menu does not offer, a
+	// refused write or an unacknowledged answer stops the leg unsent: never a lower effort or model.
+	let effortAck: string | null = null;
+	if (!reasons.length && args.effort) {
+		const optionOf = (list: unknown, id: string) =>
+			(Array.isArray(list) ? list : []).find(
+				(o) => o && typeof o === 'object' && (o as Record<string, unknown>).id === id
+			) as Record<string, unknown> | undefined;
+		const menu = optionOf(openedOptions, 'reasoning_effort');
+		const offered =
+			Array.isArray(menu?.options) &&
+			menu.options.some(
+				(o) => o && typeof o === 'object' && (o as Record<string, unknown>).value === args.effort
+			);
+		if (!offered) reasons.push(paidReason('effort-unsupported', args.effort, 'GT1-11-11A2'));
+		else if (menu?.currentValue === args.effort) effortAck = args.effort;
+		else
+			try {
+				const answer = (await client.request('session/set_config_option', {
+					sessionId,
+					configId: 'reasoning_effort',
+					value: args.effort,
+				})) as Record<string, unknown> | null;
+				const after = optionOf(answer?.configOptions, 'reasoning_effort')?.currentValue;
+				const modelAfter = optionOf(answer?.configOptions, 'model')?.currentValue;
+				effortAck = typeof after === 'string' ? after : null;
+				if (effortAck !== args.effort)
+					reasons.push(paidReason('effort-unacknowledged', args.effort, 'GT1-11-11A2'));
+				else if (modelAfter !== undefined && modelAfter !== args.model)
+					reasons.push(paidReason('model-downgraded', String(modelAfter), 'GT1-11-11A2'));
+			} catch (e) {
+				reasons.push(
+					paidReason(
+						'effort-rejected',
+						e instanceof GrokAcpTransportError ? e.reason : 'request-error',
+						'GT1-11-11A2'
+					)
+				);
+			}
+	}
 
-	for (let i = 0; !reasons.length && i < args.fixture.turns.length; i++) {
+	for (let i = 0; !reasons.length && i < args.turns.length; i++) {
 		const n = i + 1;
-		const t = args.fixture.turns[i];
+		const t = args.turns[i];
 		if (!args.admitTurn(n)) break;
 		if (i > 0) window = { out: streamDigest(), err: streamDigest(), started: Date.now() };
 		reply = replyCollector(t.expect);
@@ -4037,6 +4387,7 @@ async function runAcpPaidTurns(args: {
 			terminal: stopReason === 'end_turn' ? 'success' : stopReason ? 'failure' : 'none',
 			reply: reply.result(),
 			model: acknowledged,
+			effort: effortAck,
 			// ACP returns no settled charge on this route; the cost stays unknown.
 			usage: { costUsd: null, status: 'absent' },
 			callsRecorded: args.calls(),
@@ -4059,6 +4410,166 @@ async function runAcpPaidTurns(args: {
 	stop();
 	await Promise.race([exited, delay(args.graceMs + 1000)]);
 	return { turns, reasons, spawned: 1, sent, uncertainWhy };
+}
+
+/** Bounds of one owned-home inspection; past either, the home cannot be vouched for and the verdict fails. */
+export const HOME_SCAN_LIMITS = Object.freeze({ entries: 4096, bytes: 16 * 1024 * 1024 });
+
+/**
+ * The session ids a Grok home lists natively: the
+ * `sessions/<encoded-cwd>/<session-id>/` directories (the layout
+ * `grok-session-storage.ts` reads). A symlink anywhere on that path is a
+ * problem (a shared pool is exactly what isolation must rule out); nothing is
+ * followed and no transcript is read.
+ */
+export function listNativeSessionIds(home: string | null): {
+	ids: string[];
+	problem: string | null;
+} {
+	if (!home) return { ids: [], problem: 'home-undeclared' };
+	const sessions = path.join(home, 'sessions');
+	const lst = (p: string) => {
+		try {
+			return fs.lstatSync(p);
+		} catch {
+			return null;
+		}
+	};
+	const top = lst(sessions);
+	if (!top) return { ids: [], problem: null };
+	if (top.isSymbolicLink() || !top.isDirectory()) return { ids: [], problem: 'sessions-not-owned' };
+	const ids = new Set<string>();
+	for (const folder of fs.readdirSync(sessions)) {
+		const fp = path.join(sessions, folder);
+		const st = lst(fp);
+		if (!st) continue;
+		if (st.isSymbolicLink()) return { ids: [], problem: 'sessions-entry-symlink' };
+		if (!st.isDirectory()) continue;
+		for (const id of fs.readdirSync(fp)) {
+			const s = lst(path.join(fp, id));
+			if (s?.isSymbolicLink()) return { ids: [], problem: 'sessions-entry-symlink' };
+			if (s?.isDirectory()) ids.add(id);
+		}
+	}
+	return { ids: [...ids].sort(), problem: null };
+}
+
+/**
+ * Which needles any entry name or regular file under an owned home carries.
+ * Bounded by `HOME_SCAN_LIMITS`, never through a symlink; the content is
+ * searched in memory and never kept or written.
+ */
+function homeCarries(home: string, needles: string[]): { found: string[]; problem: string | null } {
+	const found = new Set<string>();
+	if (!needles.length || !fs.existsSync(home)) return { found: [], problem: null };
+	const stack = [home];
+	let entries = 0;
+	let bytes = 0;
+	while (stack.length) {
+		const dir = stack.pop()!;
+		for (const name of fs.readdirSync(dir)) {
+			if (++entries > HOME_SCAN_LIMITS.entries)
+				return { found: [...found], problem: 'home-scan-unbounded' };
+			for (const n of needles) if (name.includes(n)) found.add(n);
+			const p = path.join(dir, name);
+			const st = fs.lstatSync(p);
+			if (st.isSymbolicLink()) return { found: [...found], problem: 'home-entry-symlink' };
+			if (st.isDirectory()) stack.push(p);
+			else if (st.isFile()) {
+				bytes += st.size;
+				if (bytes > HOME_SCAN_LIMITS.bytes)
+					return { found: [...found], problem: 'home-scan-unbounded' };
+				const text = fs.readFileSync(p, 'latin1');
+				for (const n of needles) if (text.includes(n)) found.add(n);
+			}
+		}
+	}
+	return { found: [...found], problem: null };
+}
+
+/**
+ * The `colliding-native-ids` verdict of a two-account case, from the two owned
+ * homes after both legs: each leg ran on its own account's credential
+ * reference and home; each home lists every session id its own leg reported
+ * and gained no other; and no entry of either home carries the other leg's
+ * fixture token, or the other leg's session id when the two ids differ (when
+ * they collide, the token is what tells the records apart).
+ */
+export function evaluateCollidingNativeIds(
+	legs: PaidLegReceipt[],
+	fixture: PaidFixture,
+	config: QualificationConfig,
+	ctx: {
+		homes: Record<'A' | 'B', string | null>;
+		/** Session ids each home listed before the legs ran. */
+		before: Record<'A' | 'B', string[]>;
+	}
+): PaidAssertionOutcome {
+	const id = 'colliding-native-ids';
+	const legOf = (a: 'A' | 'B') => legs.find((l) => l.account === a);
+	const a = legOf('A');
+	const b = legOf('B');
+	if (!a || !b || !a.spawned || !b.spawned)
+		return {
+			id,
+			outcome: 'not-evaluated',
+			detail: 'both account legs must run',
+			owner: 'GT1-11-11A2',
+		};
+	const failures: string[] = [];
+	const { homes } = ctx;
+	if (!homes.A || !homes.B) failures.push('account-home-undeclared');
+	else if (overlaps('local', homes.A, homes.B)) failures.push('account-home-shared');
+	const own = (leg: PaidLegReceipt) => [
+		...new Set(leg.turns.map((t) => t.sessionId).filter((s): s is string => Boolean(s))),
+	];
+	const refOf = (acct: 'A' | 'B') => {
+		const r = config.credentialReferences.find((x) => x.provider === 'grok' && x.account === acct);
+		return r ? `${r.kind}:${r.kind === 'file' ? r.path : r.name}` : null;
+	};
+	if (refOf('A') && refOf('A') === refOf('B')) failures.push('credential-source-shared');
+	for (const [x, y] of [
+		['A', 'B'],
+		['B', 'A'],
+	] as const) {
+		const lx = x === 'A' ? a : b;
+		const ly = y === 'A' ? a : b;
+		const home = homes[x];
+		if (
+			!home ||
+			!lx.accountRoot ||
+			normalizeFor('local', lx.accountRoot) !== normalizeFor('local', home)
+		)
+			failures.push(`leg-home-not-own:${x}`);
+		const used = lx.credential ? `${lx.credential.kind}:${lx.credential.reference}` : null;
+		if (!used || used !== refOf(x)) failures.push(`credential-source-not-own:${x}`);
+		const mine = own(lx);
+		if (!mine.length) failures.push(`own-session-unnamed:${x}`);
+		if (!home) continue;
+		const after = listNativeSessionIds(home);
+		if (after.problem) failures.push(`${after.problem}:${x}`);
+		for (const s of mine) if (!after.ids.includes(s)) failures.push(`own-session-unlisted:${x}`);
+		const added = after.ids.filter((s) => !ctx.before[x].includes(s));
+		if (added.some((s) => !mine.includes(s))) failures.push(`foreign-session-listed:${x}`);
+		const myTokens = fixtureTurnsFor(fixture, x).map((t) => t.expect);
+		const needles = [
+			...fixtureTurnsFor(fixture, y)
+				.map((t) => t.expect)
+				.filter((t) => !myTokens.includes(t)),
+			...own(ly).filter((s) => !mine.includes(s)),
+		];
+		const scan = homeCarries(home, needles);
+		if (scan.problem) failures.push(`${scan.problem}:${x}`);
+		if (scan.found.length) failures.push(`other-leg-record:${x}`);
+	}
+	const collide = own(a).some((s) => own(b).includes(s));
+	return {
+		id,
+		outcome: failures.length ? 'failed' : 'passed',
+		detail: failures.length
+			? [...new Set(failures)].join('; ')
+			: `each home holds only its own leg; session ids ${collide ? 'collide' : 'differ'}`,
+	};
 }
 
 /**
@@ -4084,10 +4595,11 @@ export async function executePaidCase(
 		reasons.push(paidReason('case-not-admitted', c.caseId));
 	if (!fixture) reasons.push(paidReason('fixture-absent', c.family));
 	const plan = planCaseReservation(c, config);
-	if (fixture && fixture.turns.length > plan.turns)
-		reasons.push(
-			paidReason('fixture-exceeds-turn-allowance', `${fixture.turns.length} > ${plan.turns}`)
-		);
+	const mostTurns = fixture
+		? Math.max(...accounts.map((a) => fixtureTurnsFor(fixture, a).length))
+		: 0;
+	if (mostTurns > plan.turns)
+		reasons.push(paidReason('fixture-exceeds-turn-allowance', `${mostTurns} > ${plan.turns}`));
 	const refused = (account: 'A' | 'B'): PaidLegReceipt => ({
 		leg: accounts.length > 1 ? `account-${account}` : 'main',
 		account,
@@ -4100,6 +4612,9 @@ export async function executePaidCase(
 			: null,
 		binary: { sha256Pinned: config.binary.sha256, sha256AtSpawn: null, sha256After: null },
 		launch: null,
+		accountRoot: null,
+		credential: null,
+		gateways: {},
 		turns: [],
 		assertions: [],
 		settlement: null,
@@ -4107,6 +4622,15 @@ export async function executePaidCase(
 		paidRequests: 0,
 	});
 	if (reasons.length || !fixture) return accounts.map(refused);
+	// What each owned home listed before the legs: the colliding-ID verdict judges only what they added.
+	const crossLeg = fixture.assertions.includes('colliding-native-ids') && accounts.length === 2;
+	const homeOf = (a: 'A' | 'B') =>
+		config.isolation?.accountRoots[a]
+			? path.resolve(ctx.workspace, config.isolation.accountRoots[a]!)
+			: null;
+	const before = crossLeg
+		? { A: listNativeSessionIds(homeOf('A')).ids, B: listNativeSessionIds(homeOf('B')).ids }
+		: null;
 	const legs: PaidLegReceipt[] = [];
 	for (const account of accounts)
 		legs.push(
@@ -4120,6 +4644,18 @@ export async function executePaidCase(
 				plan
 			)
 		);
+	if (before) {
+		const verdict = evaluateCollidingNativeIds(legs, fixture, config, {
+			homes: { A: homeOf('A'), B: homeOf('B') },
+			before,
+		});
+		for (const leg of legs) {
+			leg.assertions = leg.assertions.map((a) =>
+				a.id === 'colliding-native-ids' ? { ...verdict } : a
+			);
+			if (verdict.outcome === 'failed' && leg.status === 'passed') leg.status = 'failed';
+		}
+	}
 	return legs;
 }
 
@@ -4229,6 +4765,13 @@ export async function runQualification(options: RunOptions): Promise<{
 					timeoutMs: offlineTimeoutMs,
 				})
 			: null;
+		// The binary-resolution leg beside it: files only, no spawn, no credential, no network.
+		const resolutionLeg = c.classes.includes('offline-inspection')
+			? await runBinaryResolutionLeg(c, config, problems, capabilities, {
+					workspace: options.workspace,
+					operatorHome,
+				})
+			: null;
 		const reasons = admitCase(c, config, problems, capabilities, now());
 		const needsBinary = c.classes.some((k) => k !== 'deterministic');
 		// Pre-spawn: every binary case is held to the isolation preflight first.
@@ -4323,6 +4866,7 @@ export async function runQualification(options: RunOptions): Promise<{
 			candidateSnapshot: buildCandidateSnapshot(c, config),
 			preflight,
 			offlineLeg,
+			resolutionLeg,
 			discoveryLegs,
 			paidLegs,
 		});
