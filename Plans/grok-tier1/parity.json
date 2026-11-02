@@ -10884,7 +10884,8 @@
 			},
 			"limitations": [
 				"Grok has neither native adapter nor declared directions. Host import/root logic contains Claude/Codex-specific branches (including account env selection), so adding registry rows alone is insufficient. Existing History reader/context export is not reversible native translation. Every direction and supported version needs explicit limits and destination resume evidence. Grok is absent from native translation adapters/support. History readers and prompt summaries do not establish native round-trip continuation.",
-				"GT1-06-12 verification: grok to and from claude-code and codex are declared for Grok 1.0.70 with verification unverified. Extraction, staging with strict readback, host wiring (GROK_HOME binding, destination model, confined session root, capacity) and rollback are implemented and fixture-tested. Grok to Grok across accounts and Antigravity directions are unsupported. No native resume has been run. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-06-12 verification: grok to and from claude-code and codex are declared for Grok 1.0.70 with verification unverified. Extraction, staging with strict readback, host wiring (GROK_HOME binding, destination model, confined session root, capacity) and rollback are implemented and fixture-tested. Grok to Grok across accounts and Antigravity directions are unsupported. No native resume has been run. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-11-13 verification at 9ffa9b3e7: native cross-provider translation (per-provider admission, staged-session resume, fact recall, tool/resource resolution, rule/skill/memory discovery, repeated Grok-Claude-Grok and Grok-Codex-Grok round trips, apply interruption and rollback) not-run for all 8 declared direction/version pairs (run-state live and cross-provider prerequisites absent; case logic missing, A11-F31). Directions stay unverified. See Plans/grok-tier1/evidence/11-translation-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -10984,6 +10985,23 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-cross-provider-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded cross-provider case logic on E11: a Claude and Codex preflight and per-provider admission (GT1-11-13A), translation and native-resume legs for every declared direction/version pair with recall, resource and discovery assertions and repeated round trips (GT1-11-13B), apply-interruption, rollback, no-replay and user-home legs (GT1-11-13C), pinned by GT1-11-13D; then live run-state inputs including crossProviderAuthorizations.",
+					"affectedRows": [
+						"P22",
+						"P23",
+						"P24",
+						"P43",
+						"C-supportsProjectMemory",
+						"REG-TRANSLATION",
+						"S07",
+						"S36"
+					],
+					"ownerTask": "GT1-11-13A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-translation-native.md"
 				}
 			],
 			"phase": "06",
@@ -11070,7 +11088,8 @@
 			},
 			"limitations": [
 				"Grok has neither native adapter nor declared directions. Host import/root logic contains Claude/Codex-specific branches (including account env selection), so adding registry rows alone is insufficient. Existing History reader/context export is not reversible native translation. Every direction and supported version needs explicit limits and destination resume evidence. Grok is absent from native translation adapters/support. History readers and prompt summaries do not establish native round-trip continuation. Distinguish Grok native rules/memory from Maestro bound project knowledge; false flag is not universal memory absence.",
-				"GT1-06-12 verification: Translated history keeps provider IDs, tool linkage and portable origins; repeated Grok-Claude-Grok and Grok-Codex-Grok fixture round trips reconcile with no new records. Resource carry-over is limited to instructions and skills; Grok rule, agent and subagent discovery is unpinned and reported. Destination native resume and native resource discovery are not proven. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-06-12 verification: Translated history keeps provider IDs, tool linkage and portable origins; repeated Grok-Claude-Grok and Grok-Codex-Grok fixture round trips reconcile with no new records. Resource carry-over is limited to instructions and skills; Grok rule, agent and subagent discovery is unpinned and reported. Destination native resume and native resource discovery are not proven. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-11-13 verification at 9ffa9b3e7: native cross-provider translation (per-provider admission, staged-session resume, fact recall, tool/resource resolution, rule/skill/memory discovery, repeated Grok-Claude-Grok and Grok-Codex-Grok round trips, apply interruption and rollback) not-run for all 8 declared direction/version pairs (run-state live and cross-provider prerequisites absent; case logic missing, A11-F31). Directions stay unverified. See Plans/grok-tier1/evidence/11-translation-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -11177,6 +11196,23 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-cross-provider-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded cross-provider case logic on E11: a Claude and Codex preflight and per-provider admission (GT1-11-13A), translation and native-resume legs for every declared direction/version pair with recall, resource and discovery assertions and repeated round trips (GT1-11-13B), apply-interruption, rollback, no-replay and user-home legs (GT1-11-13C), pinned by GT1-11-13D; then live run-state inputs including crossProviderAuthorizations.",
+					"affectedRows": [
+						"P22",
+						"P23",
+						"P24",
+						"P43",
+						"C-supportsProjectMemory",
+						"REG-TRANSLATION",
+						"S07",
+						"S36"
+					],
+					"ownerTask": "GT1-11-13A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-translation-native.md"
 				}
 			],
 			"phase": "06",
@@ -11254,7 +11290,8 @@
 			},
 			"limitations": [
 				"Grok has neither native adapter nor declared directions. Host import/root logic contains Claude/Codex-specific branches (including account env selection), so adding registry rows alone is insufficient. Existing History reader/context export is not reversible native translation. Every direction and supported version needs explicit limits and destination resume evidence. Grok is absent from native translation adapters/support. History readers and prompt summaries do not establish native round-trip continuation.",
-				"GT1-06-12 verification: Plans report Grok-specific lossy and unsupported codes before apply (replay absent, search index, remote sync, long cwd, tool error flag, timestamps, attachments, runtime state, compaction, backend tools, rules, subagents, missing account, unknown capacity) and block limitations cannot be accepted. Directions stay labeled unverified in UI and CLI. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-06-12 verification: Plans report Grok-specific lossy and unsupported codes before apply (replay absent, search index, remote sync, long cwd, tool error flag, timestamps, attachments, runtime state, compaction, backend tools, rules, subagents, missing account, unknown capacity) and block limitations cannot be accepted. Directions stay labeled unverified in UI and CLI. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-11-13 verification at 9ffa9b3e7: native cross-provider translation (per-provider admission, staged-session resume, fact recall, tool/resource resolution, rule/skill/memory discovery, repeated Grok-Claude-Grok and Grok-Codex-Grok round trips, apply interruption and rollback) not-run for all 8 declared direction/version pairs (run-state live and cross-provider prerequisites absent; case logic missing, A11-F31). Directions stay unverified. See Plans/grok-tier1/evidence/11-translation-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -11354,6 +11391,23 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-cross-provider-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded cross-provider case logic on E11: a Claude and Codex preflight and per-provider admission (GT1-11-13A), translation and native-resume legs for every declared direction/version pair with recall, resource and discovery assertions and repeated round trips (GT1-11-13B), apply-interruption, rollback, no-replay and user-home legs (GT1-11-13C), pinned by GT1-11-13D; then live run-state inputs including crossProviderAuthorizations.",
+					"affectedRows": [
+						"P22",
+						"P23",
+						"P24",
+						"P43",
+						"C-supportsProjectMemory",
+						"REG-TRANSLATION",
+						"S07",
+						"S36"
+					],
+					"ownerTask": "GT1-11-13A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-translation-native.md"
 				}
 			],
 			"phase": "06",
@@ -15985,7 +16039,8 @@
 				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md.",
 				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md.",
 				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md.",
-				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md."
+				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md.",
+				"GT1-11-13 verification at 9ffa9b3e7: native cross-provider translation (per-provider admission, staged-session resume, fact recall, tool/resource resolution, rule/skill/memory discovery, repeated Grok-Claude-Grok and Grok-Codex-Grok round trips, apply interruption and rollback) not-run for all 8 declared direction/version pairs (run-state live and cross-provider prerequisites absent; case logic missing, A11-F31). Directions stay unverified. See Plans/grok-tier1/evidence/11-translation-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -16168,6 +16223,23 @@
 					],
 					"ownerTask": "GT1-11-11E1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
+				},
+				{
+					"id": "grok-cross-provider-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded cross-provider case logic on E11: a Claude and Codex preflight and per-provider admission (GT1-11-13A), translation and native-resume legs for every declared direction/version pair with recall, resource and discovery assertions and repeated round trips (GT1-11-13B), apply-interruption, rollback, no-replay and user-home legs (GT1-11-13C), pinned by GT1-11-13D; then live run-state inputs including crossProviderAuthorizations.",
+					"affectedRows": [
+						"P22",
+						"P23",
+						"P24",
+						"P43",
+						"C-supportsProjectMemory",
+						"REG-TRANSLATION",
+						"S07",
+						"S36"
+					],
+					"ownerTask": "GT1-11-13A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-translation-native.md"
 				}
 			],
 			"phase": "11",
@@ -21072,7 +21144,8 @@
 			"limitations": [
 				"Distinguish Grok native rules/memory from Maestro bound project knowledge; false flag is not universal memory absence.",
 				"GT1-05-07 provides a truthful native-memory refusal and preserves explicit Maestro-bound knowledge with configured-host, entry-path and redacted-error guards; native discovery/binding and deterministic/live qualification remain pending.",
-				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
+				"GT1-11-13 verification at 9ffa9b3e7: native cross-provider translation (per-provider admission, staged-session resume, fact recall, tool/resource resolution, rule/skill/memory discovery, repeated Grok-Claude-Grok and Grok-Codex-Grok round trips, apply interruption and rollback) not-run for all 8 declared direction/version pairs (run-state live and cross-provider prerequisites absent; case logic missing, A11-F31). Directions stay unverified. See Plans/grok-tier1/evidence/11-translation-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -21119,6 +21192,23 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["C-supportsProjectMemory"]
+				},
+				{
+					"id": "grok-cross-provider-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded cross-provider case logic on E11: a Claude and Codex preflight and per-provider admission (GT1-11-13A), translation and native-resume legs for every declared direction/version pair with recall, resource and discovery assertions and repeated round trips (GT1-11-13B), apply-interruption, rollback, no-replay and user-home legs (GT1-11-13C), pinned by GT1-11-13D; then live run-state inputs including crossProviderAuthorizations.",
+					"affectedRows": [
+						"P22",
+						"P23",
+						"P24",
+						"P43",
+						"C-supportsProjectMemory",
+						"REG-TRANSLATION",
+						"S07",
+						"S36"
+					],
+					"ownerTask": "GT1-11-13A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-translation-native.md"
 				}
 			],
 			"field": "supportsProjectMemory",
@@ -22893,7 +22983,8 @@
 			},
 			"limitations": [
 				"Grok has neither native adapter nor declared directions. Host import/root logic contains Claude/Codex-specific branches (including account env selection), so adding registry rows alone is insufficient. Existing History reader/context export is not reversible native translation. Every direction and supported version needs explicit limits and destination resume evidence.",
-				"GT1-06-12 verification: Four Grok directions are registered unverified with exact version 1.0.70; the registry, adapters and host share one plan/apply/status/recover/rollback path for UI and CLI. Fixture-only; not certified. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-06-12 verification: Four Grok directions are registered unverified with exact version 1.0.70; the registry, adapters and host share one plan/apply/status/recover/rollback path for UI and CLI. Fixture-only; not certified. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-11-13 verification at 9ffa9b3e7: native cross-provider translation (per-provider admission, staged-session resume, fact recall, tool/resource resolution, rule/skill/memory discovery, repeated Grok-Claude-Grok and Grok-Codex-Grok round trips, apply interruption and rollback) not-run for all 8 declared direction/version pairs (run-state live and cross-provider prerequisites absent; case logic missing, A11-F31). Directions stay unverified. See Plans/grok-tier1/evidence/11-translation-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22946,6 +23037,23 @@
 					"missingPrerequisite": "Declared directions are fixture-tested only. Exact-binary Grok 1.0.70 plus pinned Claude/Codex versions must resume each translated session natively and round-trip it (GT1-11-13) before any direction leaves unverified.",
 					"evidenceRef": "phase06-verification",
 					"affectedRows": ["REG-TRANSLATION"]
+				},
+				{
+					"id": "grok-cross-provider-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded cross-provider case logic on E11: a Claude and Codex preflight and per-provider admission (GT1-11-13A), translation and native-resume legs for every declared direction/version pair with recall, resource and discovery assertions and repeated round trips (GT1-11-13B), apply-interruption, rollback, no-replay and user-home legs (GT1-11-13C), pinned by GT1-11-13D; then live run-state inputs including crossProviderAuthorizations.",
+					"affectedRows": [
+						"P22",
+						"P23",
+						"P24",
+						"P43",
+						"C-supportsProjectMemory",
+						"REG-TRANSLATION",
+						"S07",
+						"S36"
+					],
+					"ownerTask": "GT1-11-13A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-translation-native.md"
 				}
 			],
 			"branchAuditRefs": ["B07"]
@@ -24518,7 +24626,8 @@
 			},
 			"limitations": [
 				"Grok is absent from native translation adapters/support. History readers and prompt summaries do not establish native round-trip continuation.",
-				"GT1-06-12 verification: Grok translation runs through the shared transaction (locks, plan IDs, conflict hashes, journal, idempotent retry, recovery, non-destructive rollback, busy deferral, stale-plan and stored-toolType refusals). Fixture-only. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-06-12 verification: Grok translation runs through the shared transaction (locks, plan IDs, conflict hashes, journal, idempotent retry, recovery, non-destructive rollback, busy deferral, stale-plan and stored-toolType refusals). Fixture-only. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-11-13 verification at 9ffa9b3e7: native cross-provider translation (per-provider admission, staged-session resume, fact recall, tool/resource resolution, rule/skill/memory discovery, repeated Grok-Claude-Grok and Grok-Codex-Grok round trips, apply interruption and rollback) not-run for all 8 declared direction/version pairs (run-state live and cross-provider prerequisites absent; case logic missing, A11-F31). Directions stay unverified. See Plans/grok-tier1/evidence/11-translation-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -24571,6 +24680,23 @@
 					"missingPrerequisite": "Declared directions are fixture-tested only. Exact-binary Grok 1.0.70 plus pinned Claude/Codex versions must resume each translated session natively and round-trip it (GT1-11-13) before any direction leaves unverified.",
 					"evidenceRef": "phase06-verification",
 					"affectedRows": ["S07"]
+				},
+				{
+					"id": "grok-cross-provider-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded cross-provider case logic on E11: a Claude and Codex preflight and per-provider admission (GT1-11-13A), translation and native-resume legs for every declared direction/version pair with recall, resource and discovery assertions and repeated round trips (GT1-11-13B), apply-interruption, rollback, no-replay and user-home legs (GT1-11-13C), pinned by GT1-11-13D; then live run-state inputs including crossProviderAuthorizations.",
+					"affectedRows": [
+						"P22",
+						"P23",
+						"P24",
+						"P43",
+						"C-supportsProjectMemory",
+						"REG-TRANSLATION",
+						"S07",
+						"S36"
+					],
+					"ownerTask": "GT1-11-13A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-translation-native.md"
 				}
 			],
 			"branchAuditRefs": ["B07"]
@@ -30837,7 +30963,8 @@
 				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim.",
 				"GT1-06-12 verification: Phase06 carries Grok project skills and refuses account files; Cue/agent bundle portability and MCP secret names stay with GROK-TIER1-08. No change in status. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-08-21 verification: phase 08 packets cue; verdicts GT1-08-12 pass. Parity against the comparator baseline: deterministic match; native discovery unverified. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12, GT1-11-13, GT1-11-11B linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-11B verification at 54cdba84f: native resource/MCP/plugin/installer/bundle cases not-run (run-state live prerequisites absent; case logic missing, A11-F17). Live stays not-run. See Plans/grok-tier1/evidence/11-native-resources.md."
+				"GT1-11-11B verification at 54cdba84f: native resource/MCP/plugin/installer/bundle cases not-run (run-state live prerequisites absent; case logic missing, A11-F17). Live stays not-run. See Plans/grok-tier1/evidence/11-native-resources.md.",
+				"GT1-11-13 verification at 9ffa9b3e7: native cross-provider translation (per-provider admission, staged-session resume, fact recall, tool/resource resolution, rule/skill/memory discovery, repeated Grok-Claude-Grok and Grok-Codex-Grok round trips, apply interruption and rollback) not-run for all 8 declared direction/version pairs (run-state live and cross-provider prerequisites absent; case logic missing, A11-F31). Directions stay unverified. See Plans/grok-tier1/evidence/11-translation-native.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -30899,6 +31026,23 @@
 					"affectedRows": ["P18", "P19", "P25", "P26", "P27", "P28", "S35", "S36"],
 					"ownerTask": "GT1-11-11B1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-resources.md"
+				},
+				{
+					"id": "grok-cross-provider-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded cross-provider case logic on E11: a Claude and Codex preflight and per-provider admission (GT1-11-13A), translation and native-resume legs for every declared direction/version pair with recall, resource and discovery assertions and repeated round trips (GT1-11-13B), apply-interruption, rollback, no-replay and user-home legs (GT1-11-13C), pinned by GT1-11-13D; then live run-state inputs including crossProviderAuthorizations.",
+					"affectedRows": [
+						"P22",
+						"P23",
+						"P24",
+						"P43",
+						"C-supportsProjectMemory",
+						"REG-TRANSLATION",
+						"S07",
+						"S36"
+					],
+					"ownerTask": "GT1-11-13A",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-translation-native.md"
 				}
 			],
 			"ownerScopeReview": {
@@ -40308,6 +40452,481 @@
 					"META-03"
 				],
 				"evidenceRef": "Plans/grok-tier1/evidence/11-policy-native.md"
+			}
+		],
+		"liveCalls": 0,
+		"readiness": false
+	},
+	"phase11NativeTranslation": {
+		"taskId": "GT1-11-13",
+		"recordedAt": "2026-11-02",
+		"sourceCommit": "9ffa9b3e72cbc813e4b3b86716233d250e7aba89",
+		"branch": "auto-run-feature/grok-cli-integration",
+		"evidenceRef": "Plans/grok-tier1/evidence/11-translation-native.md",
+		"prerequisites": {
+			"missing": [
+				"live.enabled false",
+				"live.credentialsReference null",
+				"live.authorizationReference null",
+				"live.budgetUsd 0",
+				"live.maxCalls 0",
+				"live.maxTurns 0",
+				"live.maxWallClockSeconds 0",
+				"live.allowedEndpoints empty",
+				"selectedBinaryPath null",
+				"selectedBinarySha256 null",
+				"selectedLiveModels empty",
+				"authorization.configurationReference null",
+				"authorization.expiresAt null",
+				"authorization.isolationReceipt null",
+				"authorization.allowedRoots empty",
+				"no provider cap or worst-case reservation",
+				"authorization.sharedBudgetLedgerReference null",
+				"authorization.crossProviderAuthorizations empty"
+			],
+			"configFiles": [],
+			"requiredLiveBlockers": [
+				"live-authorization-absent",
+				"binary-unpinned",
+				"host-isolation-unqualified",
+				"background-egress-unqualified",
+				"discovery-authorization-absent",
+				"live-limits-unset",
+				"spend-guarantee-absent"
+			],
+			"crossProviderAuthorizations": []
+		},
+		"configurationSelectionFiles": [],
+		"suites": {
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/renderer/services/providerTranslation.test.ts src/__tests__/main/provider-translation-service.test.ts src/__tests__/scripts/grok-qualification-harness.test.ts src/__tests__/scripts/grok-qualification-spend.test.ts src/__tests__/main/storage/grok-session-storage.test.ts src/__tests__/shared/maestro-lib/translation-acceptance-inputs.test.ts src/__tests__/shared/maestro-lib/translation-adapters.test.ts src/__tests__/shared/maestro-lib/translation-contract.test.ts src/__tests__/shared/maestro-lib/translation-governance.test.ts src/__tests__/shared/maestro-lib/translation-native.test.ts src/__tests__/shared/maestro-lib/translation-projections.test.ts src/__tests__/shared/maestro-lib/translation-reconcile.test.ts src/__tests__/shared/maestro-lib/translation-resources.test.ts src/__tests__/shared/maestro-lib/translation-session.test.ts src/__tests__/shared/maestro-lib/translation-transaction.test.ts src/__tests__/main/web-server/handlers/providerTranslation.test.ts src/__tests__/shared/maestro-lib/agents/providerSwap.test.ts src/__tests__/shared/maestro-lib/grok/acp-session.test.ts",
+			"exit": 0,
+			"total": 954,
+			"passed": 954,
+			"failed": 0,
+			"files": [
+				{
+					"file": "src/__tests__/renderer/services/providerTranslation.test.ts",
+					"passed": 17,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/provider-translation-service.test.ts",
+					"passed": 43,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-harness.test.ts",
+					"passed": 138,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-spend.test.ts",
+					"passed": 45,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/storage/grok-session-storage.test.ts",
+					"passed": 338,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/translation-acceptance-inputs.test.ts",
+					"passed": 1,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/translation-adapters.test.ts",
+					"passed": 16,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/translation-contract.test.ts",
+					"passed": 4,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/translation-governance.test.ts",
+					"passed": 9,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/translation-native.test.ts",
+					"passed": 15,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/translation-projections.test.ts",
+					"passed": 6,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/translation-reconcile.test.ts",
+					"passed": 5,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/translation-resources.test.ts",
+					"passed": 16,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/translation-session.test.ts",
+					"passed": 34,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/translation-transaction.test.ts",
+					"passed": 36,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/web-server/handlers/providerTranslation.test.ts",
+					"passed": 8,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/agents/providerSwap.test.ts",
+					"passed": 76,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/grok/acp-session.test.ts",
+					"passed": 147,
+					"failed": 0,
+					"skipped": 0
+				}
+			]
+		},
+		"harness": {
+			"command": "node scripts/grok-qualification.mjs --json --no-write",
+			"exit": 0,
+			"configSource": "default-run-state",
+			"totals": {
+				"cases": 48,
+				"admitted": 0,
+				"notRun": 48,
+				"spawned": 0,
+				"paidRequests": 0,
+				"networkContacts": 0
+			},
+			"capabilities": {
+				"isolationPreflight": true,
+				"atomicSpendAdmission": true,
+				"offlineExecutor": true,
+				"caseExecutor": true,
+				"discoveryExecutor": true,
+				"sshExecutor": true,
+				"consumerLegs": true,
+				"sessionLegs": true,
+				"sessionConsumers": true,
+				"utilityLegs": true,
+				"cheapUtilityLegs": true,
+				"workflowLegs": true,
+				"orchestrationLegs": true,
+				"contributionLegs": true,
+				"accountingLegs": true,
+				"accountingConsumers": true,
+				"policyLegs": true
+			}
+		},
+		"cases": [
+			{
+				"caseId": "E11:native-headless:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"cross-provider-authorization-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"case-executor-unimplemented",
+					"cross-provider-preflight-unimplemented",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "cross-provider",
+						"owner": "GT1-11-13"
+					}
+				]
+			},
+			{
+				"caseId": "E11:native-headless:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"cross-provider-authorization-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"case-executor-unimplemented",
+					"cross-provider-preflight-unimplemented",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "cross-provider",
+						"owner": "GT1-11-13"
+					}
+				]
+			},
+			{
+				"caseId": "E11:acp-stdio:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"cross-provider-authorization-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"case-executor-unimplemented",
+					"cross-provider-preflight-unimplemented",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "cross-provider",
+						"owner": "GT1-11-13"
+					}
+				]
+			},
+			{
+				"caseId": "E11:acp-stdio:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"cross-provider-authorization-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"case-executor-unimplemented",
+					"cross-provider-preflight-unimplemented",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "cross-provider",
+						"owner": "GT1-11-13"
+					}
+				]
+			}
+		],
+		"directionPairs": [
+			{
+				"source": "grok",
+				"sourceVersion": "1.0.70",
+				"destination": "claude-code",
+				"destinationVersion": "2.1.296",
+				"outcome": "not-run",
+				"verification": "unverified"
+			},
+			{
+				"source": "claude-code",
+				"sourceVersion": "2.1.296",
+				"destination": "grok",
+				"destinationVersion": "1.0.70",
+				"outcome": "not-run",
+				"verification": "unverified"
+			},
+			{
+				"source": "grok",
+				"sourceVersion": "1.0.70",
+				"destination": "claude-code",
+				"destinationVersion": "2.1.302",
+				"outcome": "not-run",
+				"verification": "unverified"
+			},
+			{
+				"source": "claude-code",
+				"sourceVersion": "2.1.302",
+				"destination": "grok",
+				"destinationVersion": "1.0.70",
+				"outcome": "not-run",
+				"verification": "unverified"
+			},
+			{
+				"source": "grok",
+				"sourceVersion": "1.0.70",
+				"destination": "codex",
+				"destinationVersion": "0.162.1",
+				"outcome": "not-run",
+				"verification": "unverified"
+			},
+			{
+				"source": "codex",
+				"sourceVersion": "0.162.1",
+				"destination": "grok",
+				"destinationVersion": "1.0.70",
+				"outcome": "not-run",
+				"verification": "unverified"
+			},
+			{
+				"source": "grok",
+				"sourceVersion": "1.0.70",
+				"destination": "codex",
+				"destinationVersion": "0.163.0",
+				"outcome": "not-run",
+				"verification": "unverified"
+			},
+			{
+				"source": "codex",
+				"sourceVersion": "0.163.0",
+				"destination": "grok",
+				"destinationVersion": "1.0.70",
+				"outcome": "not-run",
+				"verification": "unverified"
+			}
+		],
+		"claims": [
+			{
+				"claim": "Per-provider admission: disposable credential references, approved endpoints/models and budget authorization for Grok, Claude and Codex",
+				"rows": ["P22", "P23", "P24", "REG-TRANSLATION"],
+				"cases": "E11 (admission only)",
+				"implemented": "admission refuses E11 when the config does not list claude-code and codex (`cross-provider-authorization-absent`) or lacks a credential reference per provider (`credential-reference-absent`); the isolation preflight plans only the Grok child and records `cross-provider-preflight-unimplemented` (harness.ts:1867) for each peer, so no Claude or Codex home, endpoint, model or binary tuple is ever checked, and run-state `crossProviderAuthorizations` is empty. Deterministic translation-acceptance-inputs suite (the separate Claude/Codex acceptance driver refuses without opt-in and auth paths) only",
+				"gap": "peer preflight: per provider an owned disposable home, a credential reference (never read or copied), an approved endpoint and model, the exact binary path and sha256, and a reservation on the shared ledger; any missing input leaves every direction that needs that peer not-run",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Isolated native continuation and repeated Grok-Claude-Grok and Grok-Codex-Grok carry-over for every declared direction/version pair",
+				"rows": ["P22", "P24", "REG-TRANSLATION", "S07"],
+				"cases": "E11 (two Grok token turns)",
+				"implemented": "E11 is two Grok-only token turns that record `cross-provider` not-evaluated (owner GT1-11-13, paid-fixtures.ts:889); paidExecutorGaps leaves the case `case-executor-unimplemented` (harness.ts:2769); no leg extracts the Grok session, runs planTranslation/applyTranslation into an owned destination home, resumes it with `claude --resume` or `codex exec resume`, or translates back and resumes with `grok --resume`, and nothing repeats the round trip. Deterministic translation-adapters, translation-native, translation-session, translation-contract, grok-session-storage, provider-translation-service and providerSwap suites only, over fixtures",
+				"gap": "translation legs: per direction/version pair the production extract, plan and apply into an owned destination root, the destination CLI resuming the staged id (exit code, session id, row count equal to the strict validator count), then the reverse leg, repeated twice with no duplicated session and stable lineage; all legs share the case deadline, call cap and atomic ledger",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Destination accepts staged sessions, remembers synthetic facts, resolves tools and resources, discovers mapped rules, skills and memory",
+				"rows": ["P22", "P23", "C-supportsProjectMemory", "S36"],
+				"cases": "none",
+				"implemented": "no leg seeds a synthetic fact in the source history and asks the destination to answer it, asks for a prior tool result by citation, or checks that projected rules, skills and memory are discovered by the destination binary; the Grok skill, rule and agent loaders stay unpinned (`grok-resource-loaders-unpinned`). Deterministic translation-resources, translation-projections and translation-reconcile suites only",
+				"gap": "recall and discovery assertions: a nonce fact and a nonce tool result in the synthetic source, a destination reply that carries each nonce, projected skill and rule sentinels the destination reports, and memory read through the destination memory folder; a prompt summary of the history never counts",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Apply interruption, recovery and rollback; no replay of original tool calls; never user histories",
+				"rows": ["P22", "P24", "REG-TRANSLATION"],
+				"cases": "none",
+				"implemented": "no leg interrupts applyTranslation mid-write against an owned destination and observes the journal recovering or rolling back with the destination session retained after an append; no leg asserts that the destination produced zero tool executions for carried tool calls or that only the owned account roots changed. Deterministic translation-transaction and translation-governance suites only",
+				"gap": "fault legs: a kill between journal stages, then recovery to committed or a clean rollback, the destination history byte-identical to the pre-apply snapshot on rollback, a tool-call sentinel absent after resume, and the user homes (HOME/.claude, ~/.codex, ~/.grok) hashed unchanged",
+				"outcome": "not-run"
+			}
+		],
+		"observed": {
+			"binaryTuples": [],
+			"stagedSessions": [],
+			"destinationResumes": [],
+			"factRecalls": [],
+			"resourceResolutions": [],
+			"discoveries": [],
+			"roundTrips": [],
+			"interruptions": [],
+			"recoveries": [],
+			"rollbacks": [],
+			"toolCallsReplayed": 0,
+			"userHistoriesTouched": 0
+		},
+		"promptSummarySubstitute": false,
+		"productionInstall": {
+			"sha256": "5c8a688251bf61e35370b828b6a353b0a20fcc3f64000de8a91d426039f29cec",
+			"executed": false,
+			"modified": false
+		},
+		"peerBinaries": {
+			"located": false,
+			"executed": false
+		},
+		"findings": [
+			{
+				"id": "A11-F31",
+				"classification": "harness-gap",
+				"anchors": [
+					"scripts/grok-qualification/paid-fixtures.ts:889",
+					"scripts/grok-qualification/harness.ts:1867",
+					"scripts/grok-qualification/harness.ts:2769"
+				],
+				"consequence": "The cross-provider translation cases this VERIFY must observe are not implemented: run-state maps E11 (P21..P24) to GT1-11-13, but E11 is two Grok-only token turns that record `cross-provider` as not-evaluated with owner GT1-11-13, the isolation preflight plans no Claude or Codex child (`cross-provider-preflight-unimplemented`), and the paid executor leaves a cross-provider case `case-executor-unimplemented`. No leg extracts, plans and applies a translation into an owned destination home, resumes the staged session with the destination CLI, checks synthetic-fact recall, tool and resource resolution or rule/skill/memory discovery, repeats the Grok-Claude-Grok or Grok-Codex-Grok round trip, or interrupts an apply and observes recovery or rollback. GT1-11-13 is a VERIFY packet and may not add harness code, so even with every input the eight declared direction/version pairs could not leave unverified.",
+				"rows": [
+					"P22",
+					"P23",
+					"P24",
+					"P43",
+					"C-supportsProjectMemory",
+					"REG-TRANSLATION",
+					"S07",
+					"S36"
+				],
+				"blocker": "grok-cross-provider-cases-unimplemented",
+				"repairTasks": ["GT1-11-13A", "GT1-11-13B", "GT1-11-13C", "GT1-11-13D"]
+			}
+		],
+		"blockerUpdates": [
+			{
+				"id": "grok-cross-provider-cases-unimplemented",
+				"finding": "A11-F31",
+				"taskId": "GT1-11-13",
+				"change": "added",
+				"addedTo": [
+					"P22",
+					"P23",
+					"P24",
+					"P43",
+					"C-supportsProjectMemory",
+					"REG-TRANSLATION",
+					"S07",
+					"S36"
+				],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-translation-native.md"
 			}
 		],
 		"liveCalls": 0,
