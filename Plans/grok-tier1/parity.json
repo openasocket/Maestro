@@ -9789,7 +9789,8 @@
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
 				"GT1-07-11 verification: Native command discovery reads the live ACP catalog (GrokAcpSpawner.observeCommands); grok-skills projection stamps the entry digest and binding. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11B linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11B verification at 54cdba84f: native resource/MCP/plugin/installer/bundle cases not-run (run-state live prerequisites absent; case logic missing, A11-F17). Live stays not-run. See Plans/grok-tier1/evidence/11-native-resources.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -9885,6 +9886,14 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-resource-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded resource case logic: synthetic skill/command/rule/MCP legs with advertised-vs-executed, no-implicit-effect and resume-state assertions (GT1-11-11B1), coworking installer and bundle portability consumer legs (GT1-11-11B2), pinned by GT1-11-11B3; then live run-state inputs.",
+					"affectedRows": ["P18", "P19", "P25", "P26", "P27", "P28", "S35", "S36"],
+					"ownerTask": "GT1-11-11B1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-resources.md"
 				}
 			],
 			"phase": "05",
@@ -10069,7 +10078,8 @@
 				"GT1-05-07 provides a truthful native-memory refusal and preserves explicit Maestro-bound knowledge with configured-host, entry-path and redacted-error guards; native discovery/binding and deterministic/live qualification remain pending.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
 				"GT1-06-12 verification: Grok project skills carry over (.grok/skills to .claude/skills or .agents/skills and back); Grok rules and agents are reported unsupported because their loaders are not in the pinned source. Native memory binding is unchanged from phase05. Deterministic only. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11B verification at 54cdba84f: native resource/MCP/plugin/installer/bundle cases not-run (run-state live prerequisites absent; case logic missing, A11-F17). Live stays not-run. See Plans/grok-tier1/evidence/11-native-resources.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -10172,6 +10182,14 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-resource-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded resource case logic: synthetic skill/command/rule/MCP legs with advertised-vs-executed, no-implicit-effect and resume-state assertions (GT1-11-11B1), coworking installer and bundle portability consumer legs (GT1-11-11B2), pinned by GT1-11-11B3; then live run-state inputs.",
+					"affectedRows": ["P18", "P19", "P25", "P26", "P27", "P28", "S35", "S36"],
+					"ownerTask": "GT1-11-11B1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-resources.md"
 				}
 			],
 			"phase": "05",
@@ -11252,7 +11270,8 @@
 			"limitations": [
 				"Grok absent from MCP_CONFIG_BY_AGENT; plugin runner refuses required tools/receipts when strategy is unverified or absent. Needs scoped native config and real receipt evidence. Native hooks/skills/plugin trust precedence and disabling across resume remain unqualified; project/persona instructions are not effect enforcement.",
 				"GT1-07-11 verification: Grok MCP overlay (temp config.toml + GROK_CONFIG_PATH) and native config/trust facts gate injection; Grok is verified false with qualifiedVersions [], so production Grok stays uninjected. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11B verification at 54cdba84f: native resource/MCP/plugin/installer/bundle cases not-run (run-state live prerequisites absent; case logic missing, A11-F17). Live stays not-run. See Plans/grok-tier1/evidence/11-native-resources.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -11351,6 +11370,14 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-resource-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded resource case logic: synthetic skill/command/rule/MCP legs with advertised-vs-executed, no-implicit-effect and resume-state assertions (GT1-11-11B1), coworking installer and bundle portability consumer legs (GT1-11-11B2), pinned by GT1-11-11B3; then live run-state inputs.",
+					"affectedRows": ["P18", "P19", "P25", "P26", "P27", "P28", "S35", "S36"],
+					"ownerTask": "GT1-11-11B1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-resources.md"
 				}
 			],
 			"phase": "07",
@@ -11418,7 +11445,8 @@
 			"limitations": [
 				"Grok absent from MCP_CONFIG_BY_AGENT; plugin runner refuses required tools/receipts when strategy is unverified or absent. Needs scoped native config and real receipt evidence. Native hooks/skills/plugin trust precedence and disabling across resume remain unqualified; project/persona instructions are not effect enforcement.",
 				"GT1-07-11 verification: Plugin headless runs on Grok require host-observed per-run tool advertisement and fail without it; deterministic plugin receipts pass. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11B verification at 54cdba84f: native resource/MCP/plugin/installer/bundle cases not-run (run-state live prerequisites absent; case logic missing, A11-F17). Live stays not-run. See Plans/grok-tier1/evidence/11-native-resources.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -11517,6 +11545,14 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-resource-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded resource case logic: synthetic skill/command/rule/MCP legs with advertised-vs-executed, no-implicit-effect and resume-state assertions (GT1-11-11B1), coworking installer and bundle portability consumer legs (GT1-11-11B2), pinned by GT1-11-11B3; then live run-state inputs.",
+					"affectedRows": ["P18", "P19", "P25", "P26", "P27", "P28", "S35", "S36"],
+					"ownerTask": "GT1-11-11B1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-resources.md"
 				}
 			],
 			"phase": "07",
@@ -11599,7 +11635,8 @@
 			"limitations": [
 				"ACP normalizes reported child lineage; native/history child identity and real consumer propagation still require phase04/07/10/11 work. Task prose cannot substitute for native IDs or proven usage inclusion. Shared ACP lineage and scoped usage fixtures preserve reported children without fabricating per-child detail. Native child lifecycle/history reconciliation remains unqualified. Renderer groupSubagentToolLogs adopts metadata.parentToolUseId under tool-{id}; one level only, orphans/deeper descendants stay flat. Grok normalization must feed this existing contract or extend it deliberately.",
 				"GT1-07-11 verification: Subagent lifecycle, lineage, overlap, incomplete identity, failure, cancellation and reconnect pass with synthetic _x.ai variants; task text never becomes a child identity. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11B verification at 54cdba84f: native resource/MCP/plugin/installer/bundle cases not-run (run-state live prerequisites absent; case logic missing, A11-F17). Live stays not-run. See Plans/grok-tier1/evidence/11-native-resources.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -11700,6 +11737,14 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-resource-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded resource case logic: synthetic skill/command/rule/MCP legs with advertised-vs-executed, no-implicit-effect and resume-state assertions (GT1-11-11B1), coworking installer and bundle portability consumer legs (GT1-11-11B2), pinned by GT1-11-11B3; then live run-state inputs.",
+					"affectedRows": ["P18", "P19", "P25", "P26", "P27", "P28", "S35", "S36"],
+					"ownerTask": "GT1-11-11B1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-resources.md"
 				}
 			],
 			"phase": "07",
@@ -11810,7 +11855,8 @@
 				"Grok has no discovery branch (agents.ts:1994), so native skills/commands are unavailable via this API despite upstream features. Grok absent from MCP_CONFIG_BY_AGENT; plugin runner refuses required tools/receipts when strategy is unverified or absent. Needs scoped native config and real receipt evidence. Native hooks/skills/plugin trust precedence and disabling across resume remain unqualified; project/persona instructions are not effect enforcement. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal.",
 				"GT1-07-11 verification: Native trust scanners, folder trust, disabled and shadowed servers refuse injection; native enforcement is unqualified. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-08-21 verification: phase 08 packets cue; verdicts GT1-08-12 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-12, GT1-11-11B linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11B verification at 54cdba84f: native resource/MCP/plugin/installer/bundle cases not-run (run-state live prerequisites absent; case logic missing, A11-F17). Live stays not-run. See Plans/grok-tier1/evidence/11-native-resources.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -11922,6 +11968,14 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-resource-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded resource case logic: synthetic skill/command/rule/MCP legs with advertised-vs-executed, no-implicit-effect and resume-state assertions (GT1-11-11B1), coworking installer and bundle portability consumer legs (GT1-11-11B2), pinned by GT1-11-11B3; then live run-state inputs.",
+					"affectedRows": ["P18", "P19", "P25", "P26", "P27", "P28", "S35", "S36"],
+					"ownerTask": "GT1-11-11B1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-resources.md"
 				}
 			],
 			"phase": "07",
@@ -29204,7 +29258,8 @@
 				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim.",
 				"GT1-07-11 verification: Coworking installer writes and removes a sentinel-owned maestro-coworking entry with explicit refusals; whether a selected binary loads it is not qualified. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-11-01 audit at 808b92608: A11-F04 (stale-copy) Settings search for grok finds neither the coworking MCP setting nor the synopsis provider setting. See Plans/grok-tier1/evidence/11-static.md.",
-				"GT1-11-03 verification at d84638bfc: A11-F04 repaired by GT1-11-01D (943dfe213), pinned by GT1-11-01E/02; blocker grok-settings-search-copy-stale cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-03 verification at d84638bfc: A11-F04 repaired by GT1-11-01D (943dfe213), pinned by GT1-11-01E/02; blocker grok-settings-search-copy-stale cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-11B verification at 54cdba84f: native resource/MCP/plugin/installer/bundle cases not-run (run-state live prerequisites absent; case logic missing, A11-F17). Live stays not-run. See Plans/grok-tier1/evidence/11-native-resources.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -29256,6 +29311,14 @@
 					"missingPrerequisite": "Grok MCP config is verified false with qualifiedVersions []; production Grok runs uninjected. Exact-binary MCP loading, trust/disable enforcement, coworking entry loading and real tool calls need phase11 evidence.",
 					"evidenceRef": "phase07-verification",
 					"affectedRows": ["S35"]
+				},
+				{
+					"id": "grok-resource-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded resource case logic: synthetic skill/command/rule/MCP legs with advertised-vs-executed, no-implicit-effect and resume-state assertions (GT1-11-11B1), coworking installer and bundle portability consumer legs (GT1-11-11B2), pinned by GT1-11-11B3; then live run-state inputs.",
+					"affectedRows": ["P18", "P19", "P25", "P26", "P27", "P28", "S35", "S36"],
+					"ownerTask": "GT1-11-11B1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-resources.md"
 				}
 			],
 			"ownerScopeReview": {
@@ -29325,7 +29388,8 @@
 				"Generic agent/settings/playbook export retains toolType, but native assets are collected only for Claude agents and MCP secret names from .mcp.json are attached only to Claude on export/import. These guards correctly protect Claude-specific formats; Grok needs a separately qualified native-resource projection/explicit limitation so bundling does not silently promise full portability.",
 				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim.",
 				"GT1-06-12 verification: Phase06 carries Grok project skills and refuses account files; Cue/agent bundle portability and MCP secret names stay with GROK-TIER1-08. No change in status. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
-				"GT1-08-21 verification: phase 08 packets cue; verdicts GT1-08-12 pass. Parity against the comparator baseline: deterministic match; native discovery unverified. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12, GT1-11-13, GT1-11-11B linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets cue; verdicts GT1-08-12 pass. Parity against the comparator baseline: deterministic match; native discovery unverified. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12, GT1-11-13, GT1-11-11B linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-11-11B verification at 54cdba84f: native resource/MCP/plugin/installer/bundle cases not-run (run-state live prerequisites absent; case logic missing, A11-F17). Live stays not-run. See Plans/grok-tier1/evidence/11-native-resources.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -29379,6 +29443,14 @@
 					"missingPrerequisite": "The Grok skill, rule and agent loaders are not in the pinned source (2bdd1d6 retained tree); rules and subagents stay unsupported and copied skills are not proof of native discovery. Pin the loaders and qualify discovery live (GT1-11-13).",
 					"evidenceRef": "phase06-verification",
 					"affectedRows": ["S36"]
+				},
+				{
+					"id": "grok-resource-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded resource case logic: synthetic skill/command/rule/MCP legs with advertised-vs-executed, no-implicit-effect and resume-state assertions (GT1-11-11B1), coworking installer and bundle portability consumer legs (GT1-11-11B2), pinned by GT1-11-11B3; then live run-state inputs.",
+					"affectedRows": ["P18", "P19", "P25", "P26", "P27", "P28", "S35", "S36"],
+					"ownerTask": "GT1-11-11B1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-resources.md"
 				}
 			],
 			"ownerScopeReview": {
@@ -35650,6 +35722,385 @@
 					"P43"
 				],
 				"evidenceRef": "Plans/grok-tier1/evidence/11-native-identity.md"
+			}
+		],
+		"liveCalls": 0,
+		"readiness": false
+	},
+	"phase11NativeResources": {
+		"taskId": "GT1-11-11B",
+		"recordedAt": "2026-11-01",
+		"sourceCommit": "54cdba84f7c5e6a7b22bf9bb54849317bcb41ffd",
+		"branch": "auto-run-feature/grok-cli-integration",
+		"evidenceRef": "Plans/grok-tier1/evidence/11-native-resources.md",
+		"prerequisites": {
+			"missing": [
+				"live.enabled false",
+				"live.credentialsReference null",
+				"live.authorizationReference null",
+				"live.budgetUsd 0",
+				"live.maxCalls 0",
+				"live.maxTurns 0",
+				"live.maxWallClockSeconds 0",
+				"live.allowedEndpoints empty",
+				"selectedBinaryPath null",
+				"selectedBinarySha256 null",
+				"selectedLiveModels empty",
+				"authorization.configurationReference null",
+				"authorization.expiresAt null",
+				"authorization.isolationReceipt null",
+				"authorization.allowedRoots empty",
+				"no provider cap or worst-case reservation",
+				"authorization.sharedBudgetLedgerReference null"
+			],
+			"configFiles": [],
+			"requiredLiveBlockers": [
+				"live-authorization-absent",
+				"binary-unpinned",
+				"host-isolation-unqualified",
+				"background-egress-unqualified",
+				"discovery-authorization-absent",
+				"live-limits-unset",
+				"spend-guarantee-absent"
+			]
+		},
+		"configurationSelectionFiles": [],
+		"suites": {
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/scripts/grok-qualification-spend.test.ts src/__tests__/scripts/grok-qualification-harness.test.ts src/__tests__/main/agents/grok-skills.test.ts src/__tests__/main/coworking/installers/grok.test.ts src/__tests__/main/coworking/installers/managed.test.ts src/__tests__/main/cue/bundle/cue-bundle-exporter.test.ts src/__tests__/main/cue/bundle/cue-bundle-importer.test.ts src/__tests__/main/cue/bundle/cue-bundle-roundtrip.test.ts src/__tests__/main/memory-manager.test.ts src/__tests__/main/ipc/handlers/memory.test.ts src/__tests__/main/plugins/plugin-headless-agent-runner.test.ts src/__tests__/main/plugins/plugin-tool-run-identity.test.ts src/__tests__/shared/maestro-lib/translation-resources.test.ts src/__tests__/shared/plugins/mcp-agent-config.test.ts src/__tests__/renderer/components/Settings/CoworkingSetup.test.tsx",
+			"exit": 0,
+			"total": 489,
+			"passed": 489,
+			"failed": 0,
+			"files": [
+				{
+					"file": "src/__tests__/renderer/components/Settings/CoworkingSetup.test.tsx",
+					"passed": 13,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/memory-manager.test.ts",
+					"passed": 37,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-harness.test.ts",
+					"passed": 53,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-spend.test.ts",
+					"passed": 25,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/agents/grok-skills.test.ts",
+					"passed": 37,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/plugins/plugin-headless-agent-runner.test.ts",
+					"passed": 63,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/plugins/plugin-tool-run-identity.test.ts",
+					"passed": 15,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/translation-resources.test.ts",
+					"passed": 16,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/plugins/mcp-agent-config.test.ts",
+					"passed": 62,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/coworking/installers/grok.test.ts",
+					"passed": 17,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/coworking/installers/managed.test.ts",
+					"passed": 14,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/cue/bundle/cue-bundle-exporter.test.ts",
+					"passed": 45,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/cue/bundle/cue-bundle-importer.test.ts",
+					"passed": 58,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/cue/bundle/cue-bundle-roundtrip.test.ts",
+					"passed": 6,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/ipc/handlers/memory.test.ts",
+					"passed": 28,
+					"failed": 0,
+					"skipped": 0
+				}
+			]
+		},
+		"harness": {
+			"command": "node scripts/grok-qualification.mjs --json --no-write",
+			"exit": 0,
+			"configSource": "default-run-state",
+			"totals": {
+				"cases": 48,
+				"admitted": 0,
+				"notRun": 48,
+				"spawned": 0,
+				"paidRequests": 0,
+				"networkContacts": 0
+			},
+			"capabilities": {
+				"isolationPreflight": true,
+				"atomicSpendAdmission": true,
+				"offlineExecutor": true,
+				"caseExecutor": true,
+				"discoveryExecutor": true,
+				"sshExecutor": true
+			}
+		},
+		"cases": [
+			{
+				"caseId": "E08:native-headless:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"executorOwner": null,
+				"unevaluated": [
+					{
+						"id": "synthetic-resources",
+						"owner": "GT1-11-11B"
+					}
+				]
+			},
+			{
+				"caseId": "E08:native-headless:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"executorOwner": null,
+				"unevaluated": [
+					{
+						"id": "synthetic-resources",
+						"owner": "GT1-11-11B"
+					}
+				]
+			},
+			{
+				"caseId": "E08:acp-stdio:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"executorOwner": null,
+				"unevaluated": [
+					{
+						"id": "synthetic-resources",
+						"owner": "GT1-11-11B"
+					}
+				]
+			},
+			{
+				"caseId": "E08:acp-stdio:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"executorOwner": null,
+				"unevaluated": [
+					{
+						"id": "synthetic-resources",
+						"owner": "GT1-11-11B"
+					}
+				]
+			}
+		],
+		"claims": [
+			{
+				"claim": "Advertised and user slash commands/skills invoked with arguments; advertised versus executed semantics",
+				"rows": ["P18", "P28"],
+				"cases": "E08 (paid)",
+				"implemented": "paid executor runs one token turn; synthetic-resources is not-evaluated (owner GT1-11-11B); no synthetic skill/command is materialized in an owned root and no assertion compares an advertised catalog entry to the executed effect; deterministic grok-skills and ACP command-observation suites only",
+				"gap": "synthetic skill/command materialization and advertised-vs-executed assertion",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Selected project rules and memory with provenance and trust scope",
+				"rows": ["P19"],
+				"cases": "E08 (paid)",
+				"implemented": "isolation turns the 18 Claude/Cursor/Codex compatibility scanners off (GROK_<VENDOR>_<SURFACE>_ENABLED=0) and no case writes a selected synthetic rule/memory file or asserts its effect; deterministic memory-manager and memory IPC suites only",
+				"gap": "selected synthetic rule/memory leg",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Native, MCP and plugin tools; disabled, failed-handshake and OAuth MCP paths with cleanup",
+				"rows": ["P25", "P26"],
+				"cases": "E08 (paid)",
+				"implemented": "isolation accepts resources.mcp/plugins/hooks 'synthetic-owned' as a declaration only: nothing materializes a local stand-in MCP server, a disabled or failing entry, or an OAuth entry without a credential, and no assertion observes the tool call, refusal or cleanup; Maestro plugin broker dispatch is desktop-side and has no harness leg",
+				"gap": "synthetic MCP legs (enabled, disabled, failing, OAuth-unauthenticated); plugin broker leg",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Trust and enable/disable state across resume",
+				"rows": ["P28"],
+				"cases": "E08 (paid, one turn)",
+				"implemented": "the E08 fixture has a single turn, so no resume exists to carry a disabled or untrusted resource across",
+				"gap": "two-turn E08 fixture with a resume-state assertion",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Existing coworking MCP installer and configuration surface",
+				"rows": ["S35"],
+				"cases": "none",
+				"implemented": "no harness leg runs the production Grok coworking installer against an owned home; deterministic installer, managed-installer and CoworkingSetup suites only",
+				"gap": "installer consumer leg over an owned GROK_HOME",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Native resource and MCP secret-name bundle portability through real import/dispatch consumers, no credential bodies",
+				"rows": ["S36"],
+				"cases": "none",
+				"implemented": "no harness leg exports and imports a bundle carrying a synthetic Grok resource and an MCP secret-name requirement; deterministic cue-bundle exporter/importer/roundtrip and translation-resources suites only",
+				"gap": "bundle export/import consumer leg asserting names only",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Native subagent lineage (E08 row, outside the claims GT1-11-11B names)",
+				"rows": ["P27"],
+				"cases": "E08 / E06 (paid)",
+				"implemented": "child lineage and child usage are traced by GT1-11-11F (E06 child-usage owner GT1-11-11F)",
+				"gap": "none here; recorded so the row is not read as covered",
+				"outcome": "not-run"
+			}
+		],
+		"misownedAssertions": [
+			{
+				"family": "E03",
+				"items": ["images", "large-prompt"],
+				"detail": "paid-fixtures.ts names GT1-11-11B as the owner of the E03 fresh/resumed image and above-argv prompt assertions, but GT1-11-11B covers resources, not prompt delivery; left not-evaluated and re-owned by the repair to an explicit unassigned owner so no VERIFY is queued against it"
+			}
+		],
+		"observed": {
+			"advertisedCommands": [],
+			"executedCommands": [],
+			"rules": [],
+			"mcpServers": [],
+			"pluginDecisions": [],
+			"installerWrites": [],
+			"bundleEntries": []
+		},
+		"fixtures": {
+			"materialized": 0,
+			"hashes": [],
+			"assertionsEvaluated": 0
+		},
+		"productionInstall": {
+			"sha256": "5c8a688251bf61e35370b828b6a353b0a20fcc3f64000de8a91d426039f29cec",
+			"executed": false,
+			"modified": false
+		},
+		"findings": [
+			{
+				"id": "A11-F17",
+				"classification": "harness-gap",
+				"anchors": [
+					"scripts/grok-qualification/paid-fixtures.ts:144",
+					"scripts/grok-qualification/paid-fixtures.ts:117",
+					"scripts/grok-qualification/harness.ts:1042",
+					"scripts/grok-qualification/harness.ts:4485"
+				],
+				"consequence": "The resource cases this VERIFY must observe are not implemented: the E08 fixture runs one token turn and lists synthetic-resources (skills, MCP, plugins, hooks) as not-evaluated with owner GT1-11-11B, the isolation declaration accepts 'synthetic-owned' resources without anything materializing them, no assertion compares an advertised command to its executed effect or carries enable/disable state across a resume, and no leg drives the coworking MCP installer or a bundle export/import with an MCP secret-name requirement. GT1-11-11B is a VERIFY packet and may not add harness code, so even with every run-state prerequisite these claims could not be observed. The E03 image and large-prompt assertions are also mis-owned to GT1-11-11B.",
+				"rows": ["P18", "P19", "P25", "P26", "P27", "P28", "S35", "S36"],
+				"blocker": "grok-resource-cases-unimplemented",
+				"repairTasks": ["GT1-11-11B1", "GT1-11-11B2", "GT1-11-11B3"]
+			}
+		],
+		"blockerUpdates": [
+			{
+				"id": "grok-resource-cases-unimplemented",
+				"finding": "A11-F17",
+				"taskId": "GT1-11-11B",
+				"change": "added",
+				"addedTo": ["P18", "P19", "P25", "P26", "P27", "P28", "S35", "S36"],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-native-resources.md"
 			}
 		],
 		"liveCalls": 0,
