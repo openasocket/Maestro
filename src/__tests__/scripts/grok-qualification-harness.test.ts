@@ -1721,7 +1721,7 @@ describe('GT1-11-09 qualification harness', () => {
 			});
 			expect(receipt.totals).toMatchObject({ spawned: 0, paidRequests: 0, networkContacts: 0 });
 			const owners: Record<string, string> = {
-				'E01:ssh': 'unassigned-ssh-identity-inspection',
+				'E01:ssh': 'grok-harness-ssh-target-absent',
 			};
 			for (const c of receipt.cases) {
 				const executor = c.reasons.find((r) => r.id === 'case-executor-unimplemented');
@@ -2797,7 +2797,7 @@ describe('GT1-11-09 qualification harness', () => {
 				expect.objectContaining({
 					id: 'usage-reported',
 					outcome: 'not-evaluated',
-					owner: 'GT1-11-11F',
+					owner: 'GT1-11-14P4A',
 				})
 			);
 			expect(leg.assertions.filter((a) => a.outcome === 'failed')).toEqual([]);
@@ -2866,7 +2866,7 @@ describe('GT1-11-09 qualification harness', () => {
 				resolveSecret: SECRET,
 			});
 			const owners: Record<string, string> = {
-				// Re-owned from `unassigned-ssh-paid-executor`: with the SSH executor off the leg is GT1-11-11A3's.
+				// Re-owned from the former unassigned paid-executor owner: with the SSH executor off the leg is GT1-11-11A3's.
 				'E03:native-headless:ssh': 'GT1-11-11A3',
 				'E03:acp-stdio:ssh': 'GT1-11-11A3',
 				'E07:native-headless:local': 'GT1-11-11A1',
@@ -4507,7 +4507,7 @@ describe('GT1-11-09 qualification harness', () => {
 				expect(compact.status).toBe('not-evaluated');
 				expect(compact.assertion).toMatchObject({
 					outcome: 'not-evaluated',
-					owner: 'unassigned-native-context-limit-induction',
+					owner: 'grok-context-limit-induction-over-budget',
 				});
 				expect(leg.status, JSON.stringify(leg.reasons)).toBe('passed');
 				expect(fetchSpy).not.toHaveBeenCalled();

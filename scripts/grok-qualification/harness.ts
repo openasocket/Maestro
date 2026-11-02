@@ -78,8 +78,8 @@
  * stray files and re-hashed resources. The paid argv keeps its read-only
  * flags: whether the pinned binary admits the stand-in tool call under them is
  * what a live run observes. An SSH resource leg has no materializer and stays
- * not-run (`unassigned-ssh-resource-legs`); Maestro plugin broker dispatch of
- * a native tool stays unevaluated (`unassigned-plugin-broker-native-leg`).
+ * not-run (`grok-harness-ssh-target-absent`); Maestro plugin broker dispatch of
+ * a native tool stays unevaluated (`grok-plugin-broker-native-dispatch-unproduced`).
  *
  * Consumer legs (GT1-11-11B2): an E08 receipt also carries two no-network,
  * no-credential, no-spawn legs with their own admission (live authorization,
@@ -116,9 +116,9 @@
  * carries every fixture prompt and reply token in order, digest recorded) and
  * `exact-continuation` (the session reloaded through `listSessions()` is
  * resumed under the same id). Turn-bearing legs on the ACP route and every SSH
- * session leg are not evaluated with explicit `unassigned-*` owners; a live
+ * session leg are not evaluated with explicit owners (GT1-11-14P4); a live
  * turn that never hits the context limit leaves `compaction-retry` unevaluated
- * (`unassigned-native-context-limit-induction`).
+ * (`grok-context-limit-induction-over-budget`).
  *
  * Session consumer legs (GT1-11-11C2): after an E05 leg's fixture turns and
  * session legs, three consumer legs run on the same reservation, each drawing
@@ -140,7 +140,7 @@
  * then `substituteTemplateVariables()`, as the desktop queue does) and a prompt
  * template, and each expanded text must be the prompt the turn was handed,
  * with no variable left and a reply token only the expansion produces. SSH and
- * ACP consumer legs are not evaluated with explicit `unassigned-*` owners.
+ * ACP consumer legs are not evaluated with explicit owners (GT1-11-14P4).
  *
  * Utility consumer legs (GT1-11-11D1): after E09's fixture turn, on the same
  * reservation, the production renderer consumers run over Grok through a
@@ -157,7 +157,7 @@
  * grooming path refuse a required no-tools request before any spawn, then runs
  * one read-only interview turn: the account dir in the planned env, the
  * read-only args applied, owned sentinels unchanged, the reply bounded. SSH and
- * ACP utility legs are not evaluated with explicit `unassigned-*` owners.
+ * ACP utility legs are not evaluated with explicit owners (GT1-11-14P4).
  *
  * Cheap utility legs (GT1-11-11D2): four more E09 legs on the same
  * reservation, each through production code. `no-tools-refused` hands
@@ -2142,7 +2142,7 @@ export const CROSS_PROVIDER_PREFLIGHT_OWNER = 'GT1-11-13A';
 /** Owner of the translation legs a ready direction runs. */
 export const CROSS_PROVIDER_LEGS_OWNER = 'GT1-11-13B';
 /** No task runs a peer CLI on an SSH host; its directions stay not-run. */
-export const SSH_CROSS_PROVIDER_OWNER = 'unassigned-ssh-cross-provider-legs';
+export const SSH_CROSS_PROVIDER_OWNER = 'grok-harness-ssh-target-absent';
 
 /** The user's own provider homes, which no peer home may be or sit under. */
 const USER_PROVIDER_HOMES = ['.claude', '.codex', '.grok'] as const;
@@ -2977,7 +2977,7 @@ export function releaseReservation(
 	return r;
 }
 
-/** The SSH legs of every executor are GT1-11-11A3's (re-owned from `unassigned-ssh-paid-executor`). */
+/** The SSH legs of every executor are GT1-11-11A3's (re-owned from the former unassigned paid-executor owner). */
 export const SSH_EXECUTOR_OWNER = 'GT1-11-11A3';
 /** Kept for callers of the earlier name; the SSH paid leg is now GT1-11-11A3's. */
 export const SSH_PAID_EXECUTOR_OWNER = SSH_EXECUTOR_OWNER;
@@ -2986,9 +2986,9 @@ export const SSH_PAID_EXECUTOR_OWNER = SSH_EXECUTOR_OWNER;
  * `colliding-native-ids` inspects local homes only, so an SSH E01 case stays
  * not-run rather than pass with the verdict unevaluated.
  */
-export const SSH_IDENTITY_INSPECTION_OWNER = 'unassigned-ssh-identity-inspection';
+export const SSH_IDENTITY_INSPECTION_OWNER = 'grok-harness-ssh-target-absent';
 /** No playbook task owns resolving the binary on a remote host through the production detector. */
-export const SSH_BINARY_RESOLUTION_OWNER = 'unassigned-ssh-binary-resolution';
+export const SSH_BINARY_RESOLUTION_OWNER = 'grok-harness-ssh-target-absent';
 
 /**
  * The legs of a case no bound executor covers, each with its owner. The
@@ -5249,7 +5249,7 @@ export function evaluatePaidAssertions(
 						id,
 						outcome: 'not-evaluated',
 						detail: 'the paid executor reads no ACP usage; the charge stays uncertain',
-						owner: 'GT1-11-11F',
+						owner: 'GT1-11-14P4A',
 					});
 				else
 					verdict(
@@ -5324,7 +5324,7 @@ export const RESOURCE_CONFIG_FILE = 'qualify-resources.toml';
 /** Bounds of one resource-log or directory read; past either, the leg cannot vouch for what ran. */
 export const RESOURCE_SCAN_LIMITS = Object.freeze({ entries: 2048, bytes: 1024 * 1024 });
 /** No playbook task owns materializing synthetic resources under an owned remote root. */
-export const SSH_RESOURCE_LEGS_OWNER = 'unassigned-ssh-resource-legs';
+export const SSH_RESOURCE_LEGS_OWNER = 'grok-harness-ssh-target-absent';
 
 /**
  * The local stdio MCP stand-in the enabled, disabled, failing and OAuth entries
@@ -7220,14 +7220,14 @@ async function runAcpPaidTurns(args: {
 // Session legs (GT1-11-11C1)
 // ---------------------------------------------------------------------------
 
-/** No playbook task owns the ACP route's turn-bearing session legs (session/cancel, session/load, a held steer). */
-export const ACP_SESSION_LEGS_OWNER = 'unassigned-acp-session-legs';
+/** The ACP route's turn-bearing session legs (session/cancel, session/load, a held steer): GT1-11-14P4B. */
+export const ACP_SESSION_LEGS_OWNER = 'GT1-11-14P4B';
 /** No playbook task owns session legs against a remote home: storage reads and the orphan check are local. */
-export const SSH_SESSION_LEGS_OWNER = 'unassigned-ssh-session-legs';
+export const SSH_SESSION_LEGS_OWNER = 'grok-harness-ssh-target-absent';
 /** A live turn cannot be driven into the context limit within a bounded synthetic budget. */
-export const CONTEXT_LIMIT_INDUCTION_OWNER = 'unassigned-native-context-limit-induction';
+export const CONTEXT_LIMIT_INDUCTION_OWNER = 'grok-context-limit-induction-over-budget';
 /** The production steering decision offering delivery would need a delivery this harness does not have. */
-export const STEERING_DELIVERY_OWNER = 'unassigned-grok-steering-delivery';
+export const STEERING_DELIVERY_OWNER = 'grok-steering-protocol-absent';
 
 export interface SessionLegReceipt {
 	leg: SessionLegId;
@@ -7896,7 +7896,7 @@ const runMutationRefusedLeg: SessionLegRunner = async (_spec, s, r, home) => {
 		sessionId: id,
 		fork: { refused: fork !== null, detail: fork ?? '' },
 		delete: deletion,
-		titleChange: { evaluated: false, owner: 'unassigned-grok-title-ipc-leg' },
+		titleChange: { evaluated: false, owner: 'grok-harness-desktop-host-absent' },
 		files: before?.size ?? null,
 		historySha256: before ? sha256Of(canonicalJson(Object.fromEntries(before))) : null,
 		changed,
@@ -8073,11 +8073,11 @@ async function runSessionLegs(s: SessionLegContext): Promise<{
 /** Case families whose paid leg carries the session consumer legs: the session family. */
 export const SESSION_CONSUMER_FAMILIES: readonly string[] = Object.freeze(['E05']);
 /** No playbook task owns the consumer legs against a remote home: the storage read, data dir and worktree are local. */
-export const SSH_SESSION_CONSUMER_LEGS_OWNER = 'unassigned-ssh-session-consumer-legs';
-/** No playbook task owns turn-bearing consumer legs on the ACP route (one stdio child per leg, no fresh argv turn). */
-export const ACP_SESSION_CONSUMER_LEGS_OWNER = 'unassigned-acp-session-consumer-legs';
+export const SSH_SESSION_CONSUMER_LEGS_OWNER = 'grok-harness-ssh-target-absent';
+/** Turn-bearing consumer legs on the ACP route (one stdio child per leg, no fresh argv turn): GT1-11-14P4C. */
+export const ACP_SESSION_CONSUMER_LEGS_OWNER = 'GT1-11-14P4C';
 /** The desktop's worktree dispatch (`spawnWorktreeAgentAndDispatch`) runs over Electron IPC a script cannot register. */
-export const WORKTREE_SPAWN_IPC_OWNER = 'unassigned-worktree-spawn-ipc-leg';
+export const WORKTREE_SPAWN_IPC_OWNER = 'grok-harness-desktop-host-absent';
 /** The owner agent id the context-handoff leg reads the history as. */
 export const SESSION_CONSUMER_OWNER_AGENT = 'qualify-e05-owner';
 /** The host identity a local bound read names: opaque to the storage, never a real installation id. */
@@ -8938,9 +8938,9 @@ async function runSessionConsumerLegs(s: SessionConsumerContext): Promise<{
 // ---------------------------------------------------------------------------
 
 /** No playbook task owns the utility legs against a remote home: the bridge plans and spawns local launches only. */
-export const SSH_UTILITY_LEGS_OWNER = 'unassigned-ssh-utility-legs';
+export const SSH_UTILITY_LEGS_OWNER = 'grok-harness-ssh-target-absent';
 /** The wizard and feedback consumers launch native headless turns; no task owns an ACP utility leg. */
-export const ACP_UTILITY_LEGS_OWNER = 'unassigned-acp-utility-legs';
+export const ACP_UTILITY_LEGS_OWNER = 'grok-acp-route-not-produced';
 /** The project name the wizard legs hand the production prompts. */
 export const UTILITY_PROJECT_NAME = 'Qualify E09';
 /** The agent the feedback account rules read the owned account from. */
@@ -10935,9 +10935,9 @@ async function runUtilityLegs(s: SessionConsumerContext): Promise<{
 // ---------------------------------------------------------------------------
 
 /** No task owns workflow legs against a remote home: documents, History and the reaping check are local. */
-export const SSH_WORKFLOW_LEGS_OWNER = 'unassigned-ssh-workflow-legs';
+export const SSH_WORKFLOW_LEGS_OWNER = 'grok-harness-ssh-target-absent';
 /** The Auto Run turn port launches native headless prompt-file turns; no task owns an ACP workflow leg. */
-export const ACP_WORKFLOW_LEGS_OWNER = 'unassigned-acp-workflow-legs';
+export const ACP_WORKFLOW_LEGS_OWNER = 'grok-acp-route-not-produced';
 /** The synthetic Grok agent every workflow leg runs as (History, activity and stats are keyed by it). */
 export const WORKFLOW_AGENT_ID = 'qualify-e09-workflow';
 /** A task leg's synthetic document: `<project>/.maestro/playbooks/<name>.md`. */
@@ -12114,9 +12114,9 @@ export const ACCOUNTING_LEGS_OWNER = 'GT1-11-11F1';
 /** The native headless stream carries no child record (`childCompleteness: unknown`), so no native child turn qualifies. */
 export const NATIVE_SUBAGENT_OWNER = 'grok-native-subagent-unqualified';
 /** The accounting legs read the owned home and the ledger locally; no task owns an SSH accounting leg. */
-export const SSH_ACCOUNTING_LEGS_OWNER = 'unassigned-ssh-accounting-legs';
-/** The fault fixtures write the native stream shape; no task owns ACP-framed fault fixtures. */
-export const ACP_FAULT_LEGS_OWNER = 'unassigned-acp-fault-legs';
+export const SSH_ACCOUNTING_LEGS_OWNER = 'grok-harness-ssh-target-absent';
+/** The fault fixtures write the native stream shape; ACP-framed fault fixtures are GT1-11-14P4D's. */
+export const ACP_FAULT_LEGS_OWNER = 'GT1-11-14P4D';
 
 /** The assertions each accounting leg must evaluate; a leg missing one cannot pass. */
 export const ACCOUNTING_ASSERTIONS: Readonly<Record<AccountingLegId, readonly string[]>> =
@@ -13246,7 +13246,7 @@ async function runAccountingLegs(w: AccountingLegContext): Promise<{
 
 export const POLICY_LEGS_OWNER = 'GT1-11-12A';
 /** The sentinels, symlink, listener and tree checks are local; no task owns an SSH policy leg. */
-export const SSH_POLICY_LEGS_OWNER = 'unassigned-ssh-policy-legs';
+export const SSH_POLICY_LEGS_OWNER = 'grok-harness-ssh-target-absent';
 /** The ACP route: every permission request is answered with its reject option, never an allow. */
 export const ACP_POLICY_LEGS_OWNER = 'GT1-11-12A1';
 /** The tool-surface, approval and refusal legs. */
@@ -14482,13 +14482,13 @@ export const TRANSLATION_STAGING_CHANNELS: Record<'grok' | CrossProviderPeer, st
 /** The reverse leg and the repeated round trips: GT1-11-13B2's. */
 export const CROSS_PROVIDER_ROUND_TRIP_OWNER = 'GT1-11-13B2';
 /** No task resumes a staged Grok session through ACP `session/load`; an ACP case resumes only a peer destination. */
-export const ACP_TRANSLATION_RESUME_OWNER = 'unassigned-acp-translation-resume';
+export const ACP_TRANSLATION_RESUME_OWNER = 'grok-acp-route-not-produced';
 /**
  * Production stages a Codex thread through the app-server and journals its
  * rollout `cleanup: 'retain'`, so a rollback keeps it: no Codex destination
  * history can be byte-identical after one, and no task deletes the thread.
  */
-export const CODEX_STAGED_ROLLBACK_OWNER = 'unassigned-codex-staged-thread-rollback';
+export const CODEX_STAGED_ROLLBACK_OWNER = 'codex-staged-thread-retained';
 
 type TranslationAssertionId =
 	| (typeof TRANSLATION_LEG_ASSERTIONS)[number]
@@ -16095,11 +16095,11 @@ async function runCrossProviderLegs(w: AccountingLegContext): Promise<{
 /** The task that implements the E06 accounting consumer legs. */
 export const ACCOUNTING_CONSUMERS_OWNER = 'GT1-11-11F2';
 /** The consumers replay the captured native stream locally; no task owns an SSH consumer leg. */
-export const SSH_ACCOUNTING_CONSUMERS_OWNER = 'unassigned-ssh-accounting-consumers';
-/** The consumers replay a native headless stream; the ACP route keeps no stream to replay. */
-export const ACP_ACCOUNTING_CONSUMERS_OWNER = 'unassigned-acp-accounting-consumers';
+export const SSH_ACCOUNTING_CONSUMERS_OWNER = 'grok-harness-ssh-target-absent';
+/** The consumers replay a native headless stream; capturing and replaying the ACP stream is GT1-11-14P4E's. */
+export const ACP_ACCOUNTING_CONSUMERS_OWNER = 'GT1-11-14P4E';
 /** `maestro-cli stats-tokens` reads a running desktop over its socket; no owned desktop is started. */
-export const STATS_CLI_OWNER = 'unassigned-stats-cli-desktop-bridge';
+export const STATS_CLI_OWNER = 'grok-harness-desktop-host-absent';
 /** The blocker a quota leg keeps open: Grok has no qualified quota contract. */
 export const GROK_QUOTA_BLOCKER = 'grok-native-quota-unavailable';
 /** The pipeline and subscription the Cue attribution leg files its one run under. */
@@ -20396,7 +20396,7 @@ export async function runQualification(options: RunOptions): Promise<{
 /** Case families whose receipt carries the consumer legs: the resource family. */
 export const CONSUMER_LEG_FAMILIES: readonly string[] = Object.freeze(['E08']);
 /** No playbook task owns running the installer or the bundle consumers against an owned remote root. */
-export const SSH_CONSUMER_LEGS_OWNER = 'unassigned-ssh-consumer-legs';
+export const SSH_CONSUMER_LEGS_OWNER = 'grok-harness-ssh-target-absent';
 /** The secret name the bundle leg's synthetic MCP server reads; only this name may cross. */
 export const CONSUMER_BUNDLE_SECRET = 'QUALIFY_MCP_TOKEN';
 /** Bounds of the post-import tree scan; past either, the leg cannot vouch that no body crossed. */

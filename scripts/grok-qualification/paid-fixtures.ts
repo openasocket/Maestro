@@ -1162,12 +1162,12 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 			{
 				id: 'images',
 				detail: 'fresh and resumed images',
-				owner: 'unassigned-image-large-prompt-legs',
+				owner: 'GT1-11-14P4F',
 			},
 			{
 				id: 'large-prompt',
 				detail: 'prompt above the argv size',
-				owner: 'unassigned-image-large-prompt-legs',
+				owner: 'GT1-11-14P4F',
 			},
 		]
 	),
@@ -1182,7 +1182,7 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 				id: 'native-title-change',
 				detail:
 					'the native title-change refusal lives in the Electron agentSessions IPC handler, which a script cannot register',
-				owner: 'unassigned-grok-title-ipc-leg',
+				owner: 'grok-harness-desktop-host-absent',
 			},
 		],
 		{ sessionLegs: [MUTATION_REFUSED_LEG, EXPORT_PAYLOAD_LEG, CONTINUATION_LEG] }
@@ -1199,7 +1199,7 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 			{
 				id: 'plugin-broker',
 				detail: 'Maestro plugin broker dispatch of a native tool',
-				owner: 'unassigned-plugin-broker-native-leg',
+				owner: 'grok-plugin-broker-native-dispatch-unproduced',
 			},
 		],
 		{ assertions: RESOURCE_ASSERTIONS, resources: SYNTHETIC_RESOURCES }
