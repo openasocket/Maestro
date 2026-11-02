@@ -81,8 +81,11 @@ const REGISTERED: IdentityRead = {
 	epoch: 1,
 };
 
-/** The config the sink was handed: the group chat spawn's write switch rides it as `readOnlyMode`. */
-type SpawnedConfig = ProcessConfig & { readOnlyMode?: boolean };
+/**
+ * The config the sink was handed. The write switch is not a field on it: the
+ * canonical argument builder composes it into `args`, which the sink admits.
+ */
+type SpawnedConfig = ProcessConfig;
 
 const target = (overrides: Partial<CrossAgentTargetSession> = {}): CrossAgentTargetSession => ({
 	id: 'tgt',
@@ -312,7 +315,6 @@ describe('access: a consult never widens what its initiator may do', () => {
 		]);
 		expect(stampedOn(second).identity.parentRunId).toBe('r1');
 		expect(stampedOn(second).identity.rootRunId).toBe('ask:src:r1');
-		expect(second.readOnlyMode).toBe(true);
 		expect(second.args).toContain('--permission-mode');
 		expect(second.args).not.toContain('--dangerously-skip-permissions');
 	});
@@ -322,14 +324,14 @@ describe('access: a consult never widens what its initiator may do', () => {
 		const initiator: ConsultInitiator = { delegation: managedInitiator(), writable: false };
 		await dispatch({}, { writable: true, initiator });
 		expect(spawned).toHaveLength(1);
-		expect(spawned[0].readOnlyMode).toBe(true);
+		expect(spawned[0].args).toContain('--permission-mode');
 		expect(spawned[0].args).not.toContain('--dangerously-skip-permissions');
 	});
 
 	it('a writable consult stays writable when nothing narrows it', async () => {
 		const { spawned, dispatch } = harness(fakeSpawnPort());
 		await dispatch({}, { writable: true });
-		expect(spawned[0].readOnlyMode).toBe(false);
+		expect(spawned[0].args).not.toContain('--permission-mode');
 		expect(spawned[0].args).toContain('--dangerously-skip-permissions');
 	});
 });
@@ -400,7 +402,8 @@ describe('standalone: unchanged', () => {
 		expect(spawned).toHaveLength(1);
 		expect(spawned[0].admission).toBeUndefined();
 		expect(spawned[0].dispatchedAs).toEqual({ requestId: 'r1', attemptId: 'r1' });
-		expect(spawned[0].readOnlyMode).toBe(true);
+		expect(spawned[0].args).toContain('--permission-mode');
+		expect(spawned[0].args).not.toContain('--dangerously-skip-permissions');
 	});
 
 	it('a standalone port spawns without an admission and never asks the authority', async () => {

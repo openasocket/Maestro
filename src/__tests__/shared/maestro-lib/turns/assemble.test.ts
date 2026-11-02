@@ -383,13 +383,21 @@ describe('the system prompt', () => {
 		expect(turn.systemPrompt).toBe('[][]');
 	});
 
-	it('names the deprecated agent-level session id, not the tab one (F6)', () => {
+	it("names the tab's provider session, never the deprecated agent-level one (F6)", () => {
+		// The desktop's prepareMaestroSystemPrompt reads the active tab's identity.
 		const turn = assemble({
 			agent: { agentSessionId: 'legacy' },
 			tab: { agentSessionId: 'tab-sess' },
 			context: { prompts: { imageOnlyDefault: '', maestroSystem: '[{{AGENT_SESSION_ID}}]' } },
 		});
-		expect(turn.systemPrompt).toBe('[legacy]');
+		expect(turn.systemPrompt).toBe('[tab-sess]');
+		// A new tab with no provider session does not inherit the agent-level id.
+		const fresh = assemble({
+			agent: { agentSessionId: 'legacy' },
+			tab: {},
+			context: { prompts: { imageOnlyDefault: '', maestroSystem: '[{{AGENT_SESSION_ID}}]' } },
+		});
+		expect(fresh.systemPrompt).toBe('[]');
 	});
 });
 

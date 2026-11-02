@@ -745,6 +745,8 @@ describe('cue-cli-executor', () => {
 		expect(mockExecFile).toHaveBeenCalledWith(
 			'taskkill',
 			['/pid', String(mockChild.pid), '/t', '/f'],
+			// taskkill is bounded so a hung tree walk cannot hold the stop ladder.
+			{ timeout: expect.any(Number) },
 			expect.any(Function)
 		);
 		// POSIX signals are a no-op for shell-spawned trees on Windows.

@@ -182,6 +182,28 @@ describe('ProcessManager spawn event on the OpenCode serve transport', () => {
  * spawner's result, released by the exit, and a revocation kills. The lease
  * authority is real; only its policy answer is a table.
  */
+/**
+ * A Grok resume's retained ownership: the launch scope and the binding naming the same
+ * native session, as the desktop attaches them (ProcessManager refuses a resume without).
+ */
+function boundGrokResume(
+	nativeSessionId: string,
+	host: { kind: 'local' | 'ssh'; identity: string }
+): Pick<ProcessConfig, 'nativeSessionScope' | 'nativeSessionBinding'> {
+	const scope = {
+		version: 1,
+		state: 'bound',
+		provider: 'grok',
+		accountRef: 'grok:fixture-account',
+		host,
+		cwd: '/synthetic',
+	} as const;
+	return {
+		nativeSessionScope: scope as ProcessConfig['nativeSessionScope'],
+		nativeSessionBinding: { ...scope, nativeSessionId } as ProcessConfig['nativeSessionBinding'],
+	};
+}
+
 describe('ProcessManager managed admission at the sink', () => {
 	function managedManager(port = fakeSpawnPort()) {
 		const manager = new ProcessManager(() => true, { spawnAuthority: () => port });
@@ -659,6 +681,8 @@ describe('ProcessManager managed admission at the sink', () => {
 				args: ['synthetic.invalid', 'bash'],
 				agentSessionId: 'resume-native',
 				tabId: 'tab-1',
+				// A Grok resume names the account and host it was retained under.
+				...boundGrokResume('resume-native', { kind: 'ssh', identity: 'selected-remote' }),
 			});
 			const original = structuredClone(request);
 			const heard: ProcessConfig[] = [];
@@ -842,10 +866,16 @@ describe('ProcessManager managed admission at the sink', () => {
 					command: 'grok',
 					cwd: '~',
 					prompt: undefined,
-					args: ['--prompt-file', selected.path],
+					args:
+						turn === 'resumed'
+							? ['--resume', 'native-resume-id', '--prompt-file', selected.path]
+							: ['--prompt-file', selected.path],
 					promptArtifact: selected,
 					customEnvVars: { GROK_HOME: path.join(os.tmpdir(), 'synthetic-grok-account') },
 					agentSessionId: turn === 'resumed' ? 'native-resume-id' : undefined,
+					...(turn === 'resumed'
+						? boundGrokResume('native-resume-id', { kind: 'local', identity: 'fixture-machine' })
+						: {}),
 				});
 				const original = structuredClone(request);
 				const snapshot = buildSpawnRequestSnapshot(request);
