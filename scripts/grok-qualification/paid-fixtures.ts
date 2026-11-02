@@ -24,6 +24,11 @@
  * compaction retry (E04), and the turnless refused-mutation and export legs
  * plus one continuation turn (E05). The harness runs them after the fixture
  * turns on the same reservation, each within its own `maxTurns`.
+ *
+ * E09 (GT1-11-11D1) also names utility legs (`UtilityLegSpec`): the user
+ * messages the production onboarding and inline wizard services and the
+ * feedback interview send over Grok, after the fixture turn, on the same
+ * reservation and the owned account home and project only.
  */
 
 export const PAID_FIXTURE_SCHEMA = 'grok-paid-fixture/v1';
@@ -150,6 +155,8 @@ export interface PaidFixture {
 	resources?: SyntheticResourceSet;
 	/** Session legs the harness runs after the fixture turns, on the same reservation (E04, E05). */
 	sessionLegs?: SessionLegSpec[];
+	/** Utility consumer legs the harness runs after the fixture turns, on the same reservation (E09). */
+	utilityLegs?: UtilityLegSpec[];
 	unevaluated: Array<{ id: string; detail: string; owner: string }>;
 }
 
@@ -263,6 +270,51 @@ const CONTINUATION_LEG: SessionLegSpec = {
 	sends: true,
 };
 
+/**
+ * Utility consumer legs (GT1-11-11D1). Each drives a production renderer
+ * consumer over Grok through a desktop-shaped process bridge, after E09's
+ * fixture turn passed, on the same reservation; every turn is counted first.
+ *
+ * - `wizard-structured`: `messages[0]` through the onboarding conversation
+ *   manager and the inline wizard service (each answer validated by the
+ *   production parser); `messages[1]` through the inline service with its
+ *   delivered answer forced malformed, then resent once as the inline retry
+ *   resends it (drawn as a `retry` call); then the onboarding conversation is
+ *   reset and `messages[0]` sent again on a fresh native session with the
+ *   wizard instructions delivered again.
+ * - `feedback-interview`: an account chosen by the production feedback
+ *   account rules, a required no-tools request refused before any spawn, then
+ *   `messages[0]` as one read-only interview turn on that account.
+ */
+export type UtilityLegId = 'wizard-structured' | 'feedback-interview';
+
+export interface UtilityLegSpec {
+	id: UtilityLegId;
+	/** The user messages the leg's production consumers send, in the order described above. */
+	messages: string[];
+	/** The most user turns the leg may send; it refuses unsent when the reservation cannot cover them. */
+	maxTurns: number;
+}
+
+const WIZARD_STRUCTURED_LEG: UtilityLegSpec = {
+	id: 'wizard-structured',
+	messages: [
+		'I want to plan a tiny synthetic checklist with three items. Do not read, write or run anything; ' +
+			'answer from this message alone.',
+		'The three items are alpha, beta and gamma, in that order. Do not read, write or run anything.',
+	],
+	maxTurns: 5,
+};
+
+const FEEDBACK_INTERVIEW_LEG: UtilityLegSpec = {
+	id: 'feedback-interview',
+	messages: [
+		'Synthetic qualification report: a settings toggle did not stay switched on after a restart. ' +
+			'Do not run any command or read any file; answer from this message alone.',
+	],
+	maxTurns: 1,
+};
+
 const turn = (family: string, n: number, extra = ''): PaidFixtureTurn => {
 	const token = `QUALIFY-${family}-T${n}-OK`;
 	return {
@@ -321,6 +373,7 @@ const fixture = (
 		accountTurns?: PaidFixture['accountTurns'];
 		resources?: SyntheticResourceSet;
 		sessionLegs?: SessionLegSpec[];
+		utilityLegs?: UtilityLegSpec[];
 	} = {}
 ): PaidFixture => ({
 	schema: PAID_FIXTURE_SCHEMA,
@@ -330,6 +383,7 @@ const fixture = (
 	assertions: [...(turns.length > 1 ? RESUMED : BASE), ...(extra.assertions ?? [])],
 	...(extra.resources ? { resources: extra.resources } : {}),
 	...(extra.sessionLegs ? { sessionLegs: extra.sessionLegs } : {}),
+	...(extra.utilityLegs ? { utilityLegs: extra.utilityLegs } : {}),
 	unevaluated,
 });
 
@@ -396,7 +450,8 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 	E09: fixture(
 		'E09',
 		[turn('E09', 1)],
-		[{ id: 'consumers', detail: 'desktop/library/CLI/workflow consumers', owner: 'GT1-11-11E' }]
+		[{ id: 'consumers', detail: 'desktop/library/CLI/workflow consumers', owner: 'GT1-11-11E' }],
+		{ utilityLegs: [WIZARD_STRUCTURED_LEG, FEEDBACK_INTERVIEW_LEG] }
 	),
 	E10: fixture(
 		'E10',

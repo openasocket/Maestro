@@ -141,6 +141,23 @@
  * with no variable left and a reply token only the expansion produces. SSH and
  * ACP consumer legs are not evaluated with explicit `unassigned-*` owners.
  *
+ * Utility consumer legs (GT1-11-11D1): after E09's fixture turn, on the same
+ * reservation, the production renderer consumers run over Grok through a
+ * desktop-shaped `window.maestro` bridge whose `process.spawn` plans each launch
+ * as the desktop spawn handler does (`buildAgentArgs()`,
+ * `applyAgentConfigOverrides()`, `buildAgentLaunchPlan()`), writes its prompt
+ * file under an owned root and runs exactly the planned argv. `wizard-structured`
+ * drives the onboarding conversation manager and the inline wizard service:
+ * each answer parsed by the production parser, one delivered answer forced
+ * malformed and resent exactly once as a `retry` call on the shared
+ * reservation, then a reset whose turn must be a fresh native session carrying
+ * the wizard instructions again. `feedback-interview` selects the owned Grok
+ * account through the production feedback account rules, has the production
+ * grooming path refuse a required no-tools request before any spawn, then runs
+ * one read-only interview turn: the account dir in the planned env, the
+ * read-only args applied, owned sentinels unchanged, the reply bounded. SSH and
+ * ACP utility legs are not evaluated with explicit `unassigned-*` owners.
+ *
  * Offline inspection (GT1-11-10A): the offline-inspection leg of a case (E02)
  * is admitted and recorded as its own receipt entry, independently of
  * discovery. It needs the pinned binary, disabled auto-update, owned roots, the
@@ -233,6 +250,7 @@ import {
 import { GROK_ACP_ARGS, grokSteeringAvailability } from '../../src/shared/maestro-lib/grok/route';
 import {
 	applyAgentConfigOverrides,
+	buildAgentArgs,
 	grokLaunchArgsProblem,
 } from '../../src/shared/maestro-lib/launch/agent-args';
 import { buildAgentLaunchPlan } from '../../src/shared/maestro-lib/launch/launch-plan';
@@ -275,7 +293,19 @@ import {
 	type SessionLegId,
 	type SessionLegSpec,
 	type SyntheticResourceSet,
+	type UtilityLegId,
+	type UtilityLegSpec,
 } from './paid-fixtures';
+import {
+	buildFeedbackAccountCandidates,
+	feedbackInterviewRouteProblem,
+	isFeedbackAccountUsable,
+	orderFeedbackAccounts,
+	type FeedbackAccount,
+} from '../../src/shared/feedbackAccounts';
+import { MAX_FEEDBACK_FIELD_LENGTH } from '../../src/shared/feedback';
+import { isWindows } from '../../src/shared/platformDetection';
+import { GROK_WIZARD_DISCOVERY_ARGS } from '../../src/renderer/utils/grokWizard';
 import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { isPathAtOrUnderRoot } from '../../src/shared/worktreePaths';
 import { stopProcess } from '../../src/shared/maestro-lib/control/termination';
@@ -361,6 +391,13 @@ export const HARNESS_CAPABILITIES = {
 	 * after the session legs on the same reservation. Off, each is not-run.
 	 */
 	sessionConsumers: true,
+	/**
+	 * The E09 utility consumer legs (GT1-11-11D1): the onboarding and inline
+	 * wizard services and the feedback interview through a desktop-shaped
+	 * process bridge, after the fixture turn on the same reservation. Off, each
+	 * is not-run.
+	 */
+	utilityLegs: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
 
@@ -4412,6 +4449,8 @@ export interface PaidLegReceipt {
 	sessionLegs: SessionLegReceipt[];
 	/** The session consumer legs of an E05 fixture (GT1-11-11C2), each its own entry; empty otherwise. */
 	sessionConsumers: SessionConsumerReceipt[];
+	/** The utility consumer legs of an E09 fixture (GT1-11-11D1), each its own entry; empty otherwise. */
+	utilityLegs: UtilityLegReceipt[];
 }
 
 export interface PaidExecutionContext {
@@ -5505,6 +5544,7 @@ async function runPaidLeg(
 		resources: null,
 		sessionLegs: [],
 		sessionConsumers: [],
+		utilityLegs: [],
 	};
 	const refuse = (id: string, detail: string, owner?: string) => {
 		receipt.reasons.push(paidReason(id, detail, owner));
@@ -5898,6 +5938,7 @@ async function runPaidLeg(
 			receipt.turns.length +
 			receipt.sessionLegs.reduce((n, l) => n + l.turns.length, 0) +
 			receipt.sessionConsumers.reduce((n, l) => n + l.turns.length, 0) +
+			receipt.utilityLegs.reduce((n, l) => n + l.turns.length, 0) +
 			1,
 		admit: admitTurn,
 		remainingTurns: () =>
@@ -5970,12 +6011,34 @@ async function runPaidLeg(
 		}
 	}
 
+	// Utility consumer legs (E09): after the fixture turn, on the same reservation, never after an uncertain effect.
+	if (fixture.utilityLegs?.length) {
+		const run = await runUtilityLegs({
+			...sessionContext(),
+			config,
+			workspace: ctx.workspace,
+			operatorHome: ctx.operatorHome,
+			binaryPath: file,
+			model: primary,
+			effort: (config.selection?.effort?.trim() ?? '') || null,
+			uncertain: uncertainWhy,
+		});
+		receipt.utilityLegs = run.legs;
+		receipt.spawned += run.spawned;
+		receipt.paidRequests += run.sent;
+		if (run.uncertainWhy) {
+			uncertainWhy = run.uncertainWhy;
+			receipt.reasons.push(paidReason(run.uncertainWhy, 'utility leg', 'GT1-11-11D1'));
+		}
+	}
+
 	// Settle or release exactly once: an unknown or partial charge stays uncertain, never zero.
 	const sentTurns = receipt.paidRequests;
 	const allTurns = [
 		...receipt.turns,
 		...receipt.sessionLegs.flatMap((l) => l.turns),
 		...receipt.sessionConsumers.flatMap((l) => l.turns),
+		...receipt.utilityLegs.flatMap((l) => l.turns),
 	];
 	let settled: SpendReservation;
 	if (reservation.turnsUsed === 0 && reservation.callsUsed === 0 && !reservation.uncertainEffect)
@@ -6052,7 +6115,8 @@ async function runPaidLeg(
 			: receipt.reasons.length ||
 				  receipt.assertions.some((a) => a.outcome === 'failed') ||
 				  receipt.sessionLegs.some((l) => l.status === 'failed') ||
-				  receipt.sessionConsumers.some((l) => l.status === 'failed')
+				  receipt.sessionConsumers.some((l) => l.status === 'failed') ||
+				  receipt.utilityLegs.some((l) => l.status === 'failed')
 				? 'failed'
 				: 'passed';
 	return receipt;
@@ -6403,6 +6467,8 @@ function runNativeSessionTurn(a: {
 	stopWhen?: (ev: ParsedGrokEvent) => boolean;
 	/** Called once, on the first parsed event, while the turn is running. */
 	onRunning?: () => void;
+	/** Called with every parsed event, in stream order (a utility leg's bridge hands answer text on). */
+	onEvent?: (ev: ParsedGrokEvent) => void;
 }): Promise<SessionTurnRun> {
 	return new Promise((resolve) => {
 		const started = Date.now();
@@ -6445,6 +6511,7 @@ function runNativeSessionTurn(a: {
 				state.running = true;
 				a.onRunning?.();
 			}
+			a.onEvent?.(ev);
 			if (ev.sessionId) {
 				ids.add(ev.sessionId);
 				if (!seen.sessionId) seen.sessionId = ev.sessionId;
@@ -6564,10 +6631,13 @@ async function sendSessionTurn(
 		as?: 'compaction' | 'retry';
 		stopWhen?: (ev: ParsedGrokEvent) => boolean;
 		onRunning?: () => void;
+		onEvent?: (ev: ParsedGrokEvent) => void;
+		/** The argv a production launch plan built (a utility leg); absent, the definition's own native argv. */
+		argv?: string[];
 	} = {}
 ): Promise<{ run: SessionTurnRun | null; uncertainWhy: string | null }> {
 	const n = s.nextTurn();
-	const spec = await s.launcher(s.nativeArgv(t.prompt, resumeId));
+	const spec = await s.launcher(opts.argv ?? s.nativeArgv(t.prompt, resumeId));
 	if ('refused' in spec) {
 		r.reasons.push(sshReason(spec.refused, spec.detail, 'paid-execution'));
 		return { run: null, uncertainWhy: null };
@@ -6579,7 +6649,10 @@ async function sendSessionTurn(
 	const run = await runNativeSessionTurn({
 		n,
 		expect: t.expect,
-		recordedArgv: s.nativeArgv(`<fixture:${s.fixture.family}:${r.leg}:turn-${n}>`, resumeId),
+		// A planned argv names its prompt file, never the prompt; the definition's argv carries a placeholder.
+		recordedArgv: opts.argv
+			? [...opts.argv]
+			: s.nativeArgv(`<fixture:${s.fixture.family}:${r.leg}:turn-${n}>`, resumeId),
 		spec,
 		timeoutMs: s.turnMs(),
 		graceMs: s.graceMs,
@@ -6587,6 +6660,7 @@ async function sendSessionTurn(
 		calls: s.callsDrawn(),
 		stopWhen: opts.stopWhen,
 		onRunning: opts.onRunning,
+		onEvent: opts.onEvent,
 	});
 	r.spawned++;
 	if (!run.neverRan) r.paidRequests++;
@@ -7164,8 +7238,12 @@ const AGENT_CREATION_PROMPT = `Reply with only this token: ${AGENT_CREATION_TOKE
 
 const SESSION_CONSUMER_LEG_IDS: readonly string[] = SESSION_CONSUMER_LEGS.map((l) => l.id);
 
-/** The task that owns a turn-bearing leg's reasons: GT1-11-11C2 for a consumer leg, GT1-11-11C1 otherwise. */
+/**
+ * The task that owns a turn-bearing leg's reasons: GT1-11-11D1 for a utility
+ * leg, GT1-11-11C2 for a consumer leg, GT1-11-11C1 otherwise.
+ */
 function ownerOfLeg(leg: string): string {
+	if (UTILITY_LEG_IDS.includes(leg)) return 'GT1-11-11D1';
 	return SESSION_CONSUMER_LEG_IDS.includes(leg) ? 'GT1-11-11C2' : 'GT1-11-11C1';
 }
 
@@ -7960,6 +8038,995 @@ async function runSessionConsumerLegs(s: SessionConsumerContext): Promise<{
 	return { legs, spawned, sent, uncertainWhy };
 }
 
+// ---------------------------------------------------------------------------
+// Utility consumer legs (GT1-11-11D1)
+// ---------------------------------------------------------------------------
+
+/** No playbook task owns the utility legs against a remote home: the bridge plans and spawns local launches only. */
+export const SSH_UTILITY_LEGS_OWNER = 'unassigned-ssh-utility-legs';
+/** The wizard and feedback consumers launch native headless turns; no task owns an ACP utility leg. */
+export const ACP_UTILITY_LEGS_OWNER = 'unassigned-acp-utility-legs';
+/** The project name the wizard legs hand the production prompts. */
+export const UTILITY_PROJECT_NAME = 'Qualify E09';
+/** The agent the feedback account rules read the owned account from. */
+export const UTILITY_FEEDBACK_AGENT = 'Qualify E09 Feedback';
+/** Owned sentinel files the feedback leg writes before its turn and compares after it. */
+export const UTILITY_SENTINELS = Object.freeze([
+	'sentinel-a.txt',
+	'sentinel-b.txt',
+	'nested/sentinel-c.txt',
+]);
+/** The most answer text a utility turn may hand its consumer. */
+export const UTILITY_REPLY_MAX_CHARS = 32_000;
+/** What the bridge hands a consumer in place of a forced malformed answer: no brace, so no JSON. */
+const MALFORMED_ANSWER_PREFIX = 'QUALIFY-MALFORMED-ANSWER';
+
+/** The assertions each utility leg must evaluate; a leg missing one cannot pass. */
+export const UTILITY_ASSERTIONS: Readonly<Record<UtilityLegId, readonly string[]>> = Object.freeze({
+	'wizard-structured': [
+		'onboarding-structured',
+		'inline-structured',
+		'read-only-launch',
+		'malformed-retried-once',
+		'reset-fresh-session',
+	],
+	'feedback-interview': [
+		'account-selected',
+		'no-tools-refused',
+		'account-env',
+		'read-only-args',
+		'sentinels-unchanged',
+		'reply-bounded',
+	],
+});
+
+const UTILITY_LEG_IDS: readonly string[] = Object.keys(UTILITY_ASSERTIONS);
+
+export interface UtilityLegReceipt extends Omit<SessionConsumerReceipt, 'leg'> {
+	leg: UtilityLegId;
+}
+
+const utilityLegReason = (id: string, detail: string, owner = 'GT1-11-11D1') =>
+	paidReason(id, detail, owner);
+
+/** What `window.maestro.process.spawn` received from a production consumer (the desktop ProcessConfig subset). */
+interface UtilitySpawnConfig {
+	sessionId: string;
+	toolType: string;
+	cwd: string;
+	command?: string;
+	args?: string[];
+	prompt?: string;
+	readOnlyMode?: boolean;
+	permissionMode?: 'readonly' | 'standard' | 'full';
+	sessionCustomModel?: string;
+	sessionCustomEffort?: string;
+	sessionCustomArgs?: string;
+	sessionCustomEnvVars?: Record<string, string>;
+	sessionCustomPath?: string;
+	sessionSshRemoteConfig?: { enabled?: boolean } | null;
+}
+
+/** One spawn a consumer requested through the bridge, and what the production planner made of it. */
+interface UtilitySpawnRecord {
+	processId: string;
+	readOnlyMode: boolean;
+	permissionMode: string | null;
+	/** The base args the consumer built before the planner. */
+	baseArgs: string[];
+	cwd: string;
+	/** The account dir the consumer's env names (`GROK_HOME`); null when it names none. */
+	requestedAccount: string | null;
+	planned: {
+		ok: boolean;
+		reason: string | null;
+		args: string[];
+		account: string | null;
+		permission: string | null;
+		promptVia: string | null;
+		target: string | null;
+	};
+	/** In memory only; the receipt carries its digest. */
+	prompt: string;
+	as: 'retry' | null;
+	forced: boolean;
+	turn: number | null;
+	nativeId: string | null;
+	/** The answer text handed to the consumer's data listeners (memory only). */
+	delivered: string;
+	/** Why the turn was never sent; null when it was. */
+	unsent: string | null;
+	exitCode: number | null;
+}
+
+type ProcessListener<A extends unknown[]> = (...args: A) => void;
+
+/**
+ * The desktop half of `window.maestro` a renderer consumer needs, answered
+ * in-process: prompts from the checkout's `src/prompts`, the Grok agent at the
+ * pinned binary, and `process.spawn` planned the way the desktop spawn handler
+ * plans it (`buildAgentArgs()`, `applyAgentConfigOverrides()`,
+ * `buildAgentLaunchPlan()`), its prompt file written under the leg's owned
+ * root and its turn counted and run through the leg's launcher on the shared
+ * reservation. Data events carry answer text, as the desktop's do; exit and
+ * agent-error events follow the turn. Never a second launch path: what is
+ * spawned is exactly the planned argv.
+ */
+function createUtilityBridge(s: SessionConsumerContext, r: UtilityLegReceipt, root: string) {
+	const def = getAgentDefinition('grok');
+	const listeners = {
+		data: new Set<ProcessListener<[string, string]>>(),
+		exit: new Set<ProcessListener<[string, number, number | undefined]>>(),
+		error: new Set<ProcessListener<[string, { message: string }]>>(),
+	};
+	const spawns: UtilitySpawnRecord[] = [];
+	const inflight: Promise<void>[] = [];
+	const control = {
+		/** The next spawn draws one of its model rounds as a retry. */
+		nextAs: null as 'retry' | null,
+		/** The next spawn's answer is withheld and a malformed one delivered instead. */
+		forceMalformed: false,
+		uncertainWhy: null as string | null,
+	};
+	const subscribe =
+		<A extends unknown[]>(set: Set<ProcessListener<A>>) =>
+		(fn: ProcessListener<A>) => {
+			set.add(fn);
+			return () => {
+				set.delete(fn);
+			};
+		};
+	const agentConfig = def
+		? {
+				...def,
+				available: true,
+				path: s.binaryPath,
+				command: def.binaryName,
+				args: [...(def.args ?? [])],
+			}
+		: null;
+	const promptsDir = path.join(s.workspace, 'src', 'prompts');
+
+	const spawnTurn = async (raw: unknown): Promise<{ success: boolean; pid: number }> => {
+		const config = (raw ?? {}) as UtilitySpawnConfig;
+		const envVar = getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME';
+		const record: UtilitySpawnRecord = {
+			processId: String(config.sessionId ?? ''),
+			readOnlyMode: config.readOnlyMode === true,
+			permissionMode: config.permissionMode ?? null,
+			baseArgs: [...(config.args ?? [])],
+			cwd: String(config.cwd ?? ''),
+			requestedAccount: config.sessionCustomEnvVars?.[envVar] ?? null,
+			planned: {
+				ok: false,
+				reason: null,
+				args: [],
+				account: null,
+				permission: null,
+				promptVia: null,
+				target: null,
+			},
+			prompt: typeof config.prompt === 'string' ? config.prompt : '',
+			as: null,
+			forced: false,
+			turn: null,
+			nativeId: null,
+			delivered: '',
+			unsent: null,
+			exitCode: null,
+		};
+		spawns.push(record);
+		const refuse = (why: string) => {
+			record.unsent = why;
+			const id = record.processId;
+			queueMicrotask(() => {
+				for (const l of [...listeners.error]) l(id, { message: why });
+			});
+			return { success: false, pid: 0 };
+		};
+		if (!def || !agentConfig) return refuse('definition-absent');
+		if (config.toolType !== 'grok') return refuse('not-grok');
+		if (config.sessionSshRemoteConfig?.enabled) return refuse('remote-requested');
+		if (control.uncertainWhy) return refuse(`uncertain-prior-effect:${control.uncertainWhy}`);
+		let planned: ReturnType<typeof buildAgentLaunchPlan>;
+		try {
+			const agent = agentConfig as unknown as Parameters<typeof buildAgentArgs>[0];
+			const isReadOnly =
+				config.permissionMode === 'readonly' ||
+				(config.permissionMode === undefined && config.readOnlyMode === true);
+			const built = buildAgentArgs(agent, {
+				baseArgs: record.baseArgs,
+				prompt: config.prompt,
+				forceBatchMode: !!def.promptFile && config.prompt !== undefined,
+				cwd: config.cwd,
+				readOnlyMode: config.readOnlyMode,
+				permissionMode: config.permissionMode,
+			});
+			const resolution = applyAgentConfigOverrides(def, built, {
+				sessionCustomModel: config.sessionCustomModel,
+				sessionCustomEffort: config.sessionCustomEffort,
+				sessionCustomArgs: config.sessionCustomArgs,
+				sessionCustomEnvVars: config.sessionCustomEnvVars,
+				readOnlyMode: isReadOnly,
+			});
+			planned = buildAgentLaunchPlan({
+				surface: 'desktop',
+				agent: def,
+				command: s.binaryPath,
+				args: resolution.args,
+				cwd: config.cwd,
+				prompt: config.prompt,
+				// The prompt file lands in the leg's owned root, never the shared tmpdir.
+				promptFileDestination: {
+					owner: 'local',
+					path: path.join(root, 'prompts', `maestro-prompt-${randomUUID()}.json`),
+				},
+				sessionCustomEnvVars: resolution.effectiveCustomEnvVars,
+				readOnlyMode: isReadOnly,
+				permissionMode: config.permissionMode,
+				isWindowsHost: isWindows(),
+			});
+		} catch (e) {
+			return refuse(`plan-threw:${errorText(e)}`);
+		}
+		if (!planned.ok) {
+			record.planned.reason = planned.reason;
+			return refuse(planned.reason);
+		}
+		const plan = planned.plan;
+		record.planned = {
+			ok: true,
+			reason: null,
+			args: [...plan.args],
+			account: plan.envVars?.[envVar] ?? null,
+			permission: plan.permission.requested ?? null,
+			promptVia: plan.prompt.via,
+			target: plan.target.kind,
+		};
+		if (plan.target.kind !== 'local') return refuse('plan-not-local');
+		if (plan.prompt.via !== 'file') return refuse(`prompt-via-${plan.prompt.via}`);
+		const artifact = plan.prompt.artifact;
+		if (
+			artifact.owner !== 'local' ||
+			!isPathAtOrUnderRoot(normalizeFor('local', artifact.path), normalizeFor('local', root))
+		)
+			return refuse('prompt-file-outside-root');
+		try {
+			fs.mkdirSync(path.dirname(artifact.path), { recursive: true, mode: 0o700 });
+			fs.writeFileSync(artifact.path, artifact.content, {
+				encoding: artifact.encoding,
+				mode: artifact.mode,
+				flag: artifact.flag,
+			});
+		} catch (e) {
+			return refuse(`prompt-file-unwritable:${errorText(e)}`);
+		}
+		record.as = control.nextAs;
+		control.nextAs = null;
+		record.forced = control.forceMalformed;
+		control.forceMalformed = false;
+		const id = record.processId;
+		const emit = (text: string) => {
+			record.delivered += text;
+			for (const l of [...listeners.data]) l(id, text);
+		};
+		const withheld: string[] = [];
+		const turn = (async () => {
+			let exitCode = 1;
+			let signal: number | undefined;
+			let problem: string | null = null;
+			try {
+				const sent = await sendSessionTurn(s, r, { prompt: record.prompt, expect: '' }, null, {
+					argv: plan.args,
+					as: record.as ?? undefined,
+					onEvent: (ev) => {
+						if (ev.type !== 'text' || ev.isReasoning || !ev.text) return;
+						if (record.forced) withheld.push(ev.text);
+						else emit(ev.text);
+					},
+				});
+				if (sent.uncertainWhy) control.uncertainWhy ??= sent.uncertainWhy;
+				const run = sent.run;
+				if (!run) {
+					record.unsent = 'turn-unsent';
+					problem = 'The qualification turn was not sent.';
+				} else {
+					record.turn = run.turn.turn;
+					record.nativeId = run.turn.sessionId;
+					record.exitCode = run.turn.exitCode;
+					if (record.forced) {
+						const answer = withheld.join('').replace(/[{}[\]`]/g, ' ');
+						emit(`${MALFORMED_ANSWER_PREFIX} ${answer.slice(0, 200)}`);
+					}
+					exitCode = run.turn.exitCode ?? 1;
+					if (run.turn.signal) signal = 15;
+					if (run.errorType) problem = run.errorType;
+				}
+			} catch (e) {
+				problem = `bridge-threw:${errorText(e)}`;
+			} finally {
+				fs.rmSync(artifact.path, { force: true });
+			}
+			if (problem) for (const l of [...listeners.error]) l(id, { message: problem });
+			for (const l of [...listeners.exit]) l(id, exitCode, signal);
+		})();
+		inflight.push(turn);
+		return { success: true, pid: 0 };
+	};
+
+	const maestro = {
+		platform: process.platform,
+		logger: { log: () => undefined },
+		prompts: {
+			get: async (id: string) => {
+				if (!/^[a-z0-9-]+$/.test(id)) return { success: false, error: 'invalid prompt id' };
+				try {
+					return {
+						success: true,
+						content: fs.readFileSync(path.join(promptsDir, `${id}.md`), 'utf8'),
+					};
+				} catch (e) {
+					return { success: false, error: errorText(e) };
+				}
+			},
+		},
+		agents: { get: async (id: string) => (id === 'grok' ? agentConfig : null) },
+		process: {
+			spawn: spawnTurn,
+			// Every bridged turn is bounded by the leg's own deadline; a consumer's kill has nothing to stop.
+			kill: async () => true,
+			onData: subscribe(listeners.data),
+			onExit: subscribe(listeners.exit),
+			onAgentError: subscribe(listeners.error),
+			onThinkingChunk: () => () => undefined,
+			onToolExecution: () => () => undefined,
+		},
+	};
+	return {
+		maestro,
+		spawns,
+		control,
+		/** Wait for every bridged turn to close. */
+		settle: async () => {
+			await Promise.all(inflight);
+		},
+	};
+}
+
+/** Run with `window.maestro` answered by a bridge, then restore whatever `window` was before (none, in a script). */
+async function withWindowMaestro<T>(maestro: object, run: () => Promise<T>): Promise<T> {
+	const g = globalThis as unknown as { window?: { maestro?: unknown } };
+	const had = Object.prototype.hasOwnProperty.call(g, 'window');
+	const host = g.window;
+	const previous = host?.maestro;
+	if (host && typeof host === 'object') host.maestro = maestro;
+	else g.window = { maestro };
+	try {
+		return await run();
+	} finally {
+		if (host && typeof host === 'object') {
+			if (previous === undefined) delete host.maestro;
+			else host.maestro = previous;
+		} else if (had) g.window = host;
+		else delete g.window;
+	}
+}
+
+/** True when `needle` appears in `hay` as one contiguous run. */
+function hasRun(hay: readonly string[], needle: readonly string[]): boolean {
+	if (!needle.length) return true;
+	for (let i = 0; i + needle.length <= hay.length; i++)
+		if (needle.every((x, k) => hay[i + k] === x)) return true;
+	return false;
+}
+
+/** The checks every bridged utility launch must pass: read-only, planned locally, on the owned account, the leg's model. */
+function utilityLaunchProblems(
+	rec: UtilitySpawnRecord,
+	s: SessionConsumerContext,
+	sameAccount: (dir: string | null) => boolean,
+	extra: readonly string[] = []
+): string[] {
+	const def = getAgentDefinition('grok');
+	const a = rec.planned.args;
+	const out: string[] = [];
+	if (rec.unsent) out.push(`unsent:${rec.unsent}`);
+	if (!rec.planned.ok) out.push(`plan:${rec.planned.reason ?? 'refused'}`);
+	// The desktop rule: an explicit mode decides; without one, the legacy boolean does.
+	const requested =
+		rec.permissionMode === 'readonly' || (rec.permissionMode === null && rec.readOnlyMode);
+	if (!requested) out.push('request-not-readonly');
+	if (rec.planned.permission !== 'readonly') out.push('plan-not-readonly');
+	if (!def?.readOnlyArgs?.length || !hasRun(a, def.readOnlyArgs)) out.push('read-only-args');
+	if ((def?.batchModeArgs ?? []).some((x) => a.includes(x))) out.push('batch-args');
+	if (!hasRun(a, extra)) out.push('consumer-args');
+	if (a.includes('--resume')) out.push('resume');
+	if (argValue(a, '-m') !== s.model) out.push('model');
+	if (!sameAccount(rec.planned.account)) out.push('plan-account');
+	return out;
+}
+
+type UtilityLegRunner = (
+	spec: UtilityLegSpec,
+	s: SessionConsumerContext,
+	r: UtilityLegReceipt,
+	problems: string[]
+) => Promise<string | null>;
+
+/** A turn a bridged spawn ran to a clean, successful end. */
+const bridgedTurnClean = (rec: UtilitySpawnRecord | undefined, r: UtilityLegReceipt): boolean => {
+	if (!rec || rec.turn === null) return false;
+	const t = r.turns.find((x) => x.turn === rec.turn);
+	return Boolean(
+		t &&
+		!t.timedOut &&
+		!t.spawnError &&
+		t.exitCode === 0 &&
+		t.terminal === 'success' &&
+		!t.stdout.truncated &&
+		!t.stderr.truncated
+	);
+};
+
+const utilitySameAccount = (s: SessionConsumerContext) => (dir: string | null) => {
+	if (!dir || !s.accountRoot) return false;
+	try {
+		return (
+			normalizeFor('local', fs.realpathSync(dir)) ===
+			normalizeFor('local', fs.realpathSync(s.accountRoot))
+		);
+	} catch {
+		return false;
+	}
+};
+
+/**
+ * wizard-structured: the production onboarding conversation manager and the
+ * inline wizard service over Grok through the bridge. Each answer must parse
+ * through the production parser; one inline answer is delivered malformed and
+ * the message resent once (as the inline retry resends it), drawn as a retry
+ * call on the shared reservation; then the onboarding conversation is reset
+ * and the next turn must be a fresh native session carrying the wizard
+ * instructions again. Every launch is planned read-only on the owned account.
+ */
+const runWizardStructuredLeg: UtilityLegRunner = async (spec, s, r, problems) => {
+	const assert = assertionOn(r as unknown as SessionConsumerReceipt);
+	const made = prepareConsumerRoot(s.c, s.config, 'wizard-structured', {
+		workspace: s.workspace,
+		operatorHome: s.operatorHome,
+	});
+	if ('refused' in made) {
+		r.reasons.push(utilityLegReason(made.refused, made.detail));
+		return null;
+	}
+	r.root = made.root;
+	const project = path.join(made.root, 'project');
+	writeOwned(path.join(project, 'README.md'), 'Synthetic qualification project.\n');
+	const projectReal = fs.realpathSync(project);
+	const bridge = createUtilityBridge(s, r, made.root);
+	const sameAccount = utilitySameAccount(s);
+	const [first, second] = spec.messages;
+	if (!first || !second) {
+		problems.push('wizard-messages-missing');
+		return null;
+	}
+	const retryCallsBefore = s.callsByKind().retry;
+	await withWindowMaestro(bridge.maestro, async () => {
+		const prompts = await import('../../src/renderer/components/Wizard/services/wizardPrompts');
+		const onboarding =
+			await import('../../src/renderer/components/Wizard/services/conversationManager');
+		const inline = await import('../../src/renderer/services/inlineWizardConversation');
+		await prompts.loadWizardPrompts(true);
+		await inline.loadInlineWizardConversationPrompts(true);
+		const manager = onboarding.conversationManager;
+		// The agent's own env, as the desktop hands it: the owned account home.
+		const accountEnv = {
+			[getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME']: s.accountRoot!,
+		};
+		const onboardingConfig = {
+			agentType: 'grok' as const,
+			directoryPath: projectReal,
+			projectName: UTILITY_PROJECT_NAME,
+			model: s.model,
+			sessionCustomEffort: s.effort ?? undefined,
+			sessionCustomPath: s.binaryPath,
+			sessionCustomEnvVars: accountEnv,
+		};
+		const systemPrompt = prompts.generateSystemPrompt({
+			agentName: UTILITY_PROJECT_NAME,
+			agentPath: projectReal,
+		});
+		const instructed = (rec: UtilitySpawnRecord | undefined, text: string) =>
+			!!rec && !!text.trim() && rec.prompt.startsWith(text);
+		const isStructured = (ok: boolean, response: { parseSuccess?: boolean } | undefined) =>
+			ok && response?.parseSuccess === true;
+
+		// 1. Onboarding: the instructions and the first message, a validated structured answer.
+		await manager.startConversation(onboardingConfig);
+		const a = await manager.sendMessage(first, []);
+		await bridge.settle();
+		const recA = bridge.spawns[0];
+		r.observed.onboarding = {
+			success: a.success,
+			parsed: a.response?.parseSuccess ?? false,
+			nativeId: recA?.nativeId ?? null,
+		};
+		r.digests.onboardingPrompt = recA ? sha256Of(recA.prompt) : null;
+		assert(
+			'onboarding-structured',
+			isStructured(a.success, a.response) &&
+				!!a.response?.structured?.message.trim() &&
+				Number.isFinite(a.response?.structured?.confidence) &&
+				bridgedTurnClean(recA, r) &&
+				instructed(recA, systemPrompt),
+			`success=${a.success} parsed=${a.response?.parseSuccess ?? false} ` +
+				`instructed=${instructed(recA, systemPrompt)} clean=${bridgedTurnClean(recA, r)}`
+		);
+		if (stopped(bridge)) return;
+
+		// 2. Inline: a structured answer through the production parser.
+		const inlineConfig = {
+			mode: 'new' as const,
+			agentType: 'grok' as const,
+			directoryPath: projectReal,
+			projectName: UTILITY_PROJECT_NAME,
+			sessionCustomModel: s.model,
+			sessionCustomEffort: s.effort ?? undefined,
+			sessionCustomPath: s.binaryPath,
+			sessionCustomEnvVars: accountEnv,
+		};
+		const inlineSystem = inline.generateInlineWizardPrompt(inlineConfig);
+		const session = inline.startInlineWizardConversation(inlineConfig);
+		const before = bridge.spawns.length;
+		const b = await inline.sendWizardMessage(session, first, []);
+		await bridge.settle();
+		const recB = bridge.spawns[before];
+		const parsedB = recB ? inline.parseWizardResponse(recB.delivered, true) : null;
+		r.observed.inline = { success: b.success, nativeId: recB?.nativeId ?? null };
+		assert(
+			'inline-structured',
+			b.success &&
+				!!b.response &&
+				!!parsedB &&
+				parsedB.message === b.response.message &&
+				bridgedTurnClean(recB, r) &&
+				instructed(recB, inlineSystem),
+			`success=${b.success} parsed=${!!parsedB} instructed=${instructed(recB, inlineSystem)} ` +
+				`clean=${bridgedTurnClean(recB, r)}`
+		);
+		if (stopped(bridge)) return;
+
+		// 3. One malformed answer, then exactly one resend of the same message, drawn as a retry.
+		const history = [
+			{ id: 'u1', role: 'user' as const, content: first, timestamp: 1 },
+			{
+				id: 'a1',
+				role: 'assistant' as const,
+				content: b.response?.message ?? '',
+				timestamp: 2,
+			},
+		];
+		const malformedAt = bridge.spawns.length;
+		bridge.control.forceMalformed = true;
+		const c = await inline.sendWizardMessage(session, second, history);
+		await bridge.settle();
+		const recC = bridge.spawns[malformedAt];
+		const malformedRejected =
+			!c.success &&
+			c.error === 'Failed to parse agent response' &&
+			!!recC?.forced &&
+			recC.delivered.startsWith(MALFORMED_ANSWER_PREFIX) &&
+			inline.parseWizardResponse(recC.delivered, true) === null &&
+			bridgedTurnClean(recC, r);
+		let retried = false;
+		let retryDetail = 'not resent: the forced answer was not rejected';
+		if (malformedRejected && !stopped(bridge)) {
+			const retryAt = bridge.spawns.length;
+			bridge.control.nextAs = 'retry';
+			const d = await inline.sendWizardMessage(session, second, history);
+			await bridge.settle();
+			const recD = bridge.spawns[retryAt];
+			const turnD = recD?.turn !== null ? r.turns.find((t) => t.turn === recD?.turn) : undefined;
+			const baseline = s.baselineCalls();
+			const retryDelta = s.callsByKind().retry - retryCallsBefore;
+			const asRetry = bridge.spawns.filter((x) => x.as === 'retry');
+			retried =
+				d.success &&
+				!!d.response &&
+				bridgedTurnClean(recD, r) &&
+				!!recD &&
+				recD.as === 'retry' &&
+				recD.prompt === recC.prompt &&
+				asRetry.length === 1 &&
+				retryDelta === 1 &&
+				turnD?.callsRecorded.retry === baseline.retry + 1 &&
+				turnD?.callsRecorded['model-round'] === baseline['model-round'] - 1;
+			retryDetail =
+				`rejected=true resent=${!!recD} sameMessage=${recD?.prompt === recC.prompt} ` +
+				`parsed=${d.success && !!d.response} retriesDrawn=${retryDelta} ` +
+				`turnRetry=${turnD?.callsRecorded.retry ?? 'none'} retrySpawns=${asRetry.length}`;
+		} else if (!malformedRejected)
+			retryDetail =
+				`not resent: success=${c.success} error=${c.error ?? 'none'} forced=${!!recC?.forced} ` +
+				`clean=${bridgedTurnClean(recC, r)}`;
+		r.digests.malformedPrompt = recC ? sha256Of(recC.prompt) : null;
+		assert('malformed-retried-once', malformedRejected && retried, retryDetail);
+		await inline.endInlineWizardConversation(session);
+		if (stopped(bridge)) return;
+
+		// 4. Reset: a fresh onboarding conversation, a fresh native session, the instructions again.
+		await manager.endConversation();
+		await manager.startConversation(onboardingConfig);
+		const resetAt = bridge.spawns.length;
+		const e = await manager.sendMessage(first, []);
+		await bridge.settle();
+		await manager.endConversation();
+		const recE = bridge.spawns[resetAt];
+		const earlier = new Set(
+			bridge.spawns
+				.slice(0, resetAt)
+				.map((x) => x.nativeId)
+				.filter((x): x is string => !!x)
+		);
+		const fresh = !!recE?.nativeId && !earlier.has(recE.nativeId);
+		r.observed.reset = {
+			success: e.success,
+			parsed: e.response?.parseSuccess ?? false,
+			nativeId: recE?.nativeId ?? null,
+			fresh,
+		};
+		assert(
+			'reset-fresh-session',
+			isStructured(e.success, e.response) &&
+				bridgedTurnClean(recE, r) &&
+				fresh &&
+				instructed(recE, systemPrompt) &&
+				recE?.prompt === recA?.prompt,
+			`success=${e.success} parsed=${e.response?.parseSuccess ?? false} fresh=${fresh} ` +
+				`instructed=${instructed(recE, systemPrompt)} samePrompt=${recE?.prompt === recA?.prompt}`
+		);
+	});
+	await bridge.settle();
+	const launches = bridge.spawns.map((rec, i) => ({
+		spawn: i + 1,
+		turn: rec.turn,
+		problems: utilityLaunchProblems(rec, s, sameAccount, GROK_WIZARD_DISCOVERY_ARGS),
+	}));
+	r.observed.launches = launches.map((l) => `${l.spawn}:${l.problems.join(',') || 'ok'}`);
+	r.observed.nativeIds = bridge.spawns.map((x) => x.nativeId);
+	assert(
+		'read-only-launch',
+		launches.length > 0 && launches.every((l) => !l.problems.length),
+		(r.observed.launches as string[]).join(' ')
+	);
+	return bridge.control.uncertainWhy;
+};
+
+/** True once a bridged turn left an effect uncertain: the leg sends nothing more. */
+function stopped(bridge: ReturnType<typeof createUtilityBridge>): boolean {
+	return bridge.control.uncertainWhy !== null;
+}
+
+/**
+ * feedback-interview: the account the production feedback rules pick from an
+ * agent on the owned account (only the pinned binary counts as installed, as
+ * nothing is detected), a required no-tools request through the production
+ * grooming path refused before any spawn, then one interview turn through the
+ * production feedback conversation manager over the bridge: the selected
+ * account dir in the planned env, the read-only args applied, owned sentinel
+ * files unchanged and a bounded reply.
+ */
+const runFeedbackInterviewLeg: UtilityLegRunner = async (spec, s, r, problems) => {
+	const assert = assertionOn(r as unknown as SessionConsumerReceipt);
+	const made = prepareConsumerRoot(s.c, s.config, 'feedback-interview', {
+		workspace: s.workspace,
+		operatorHome: s.operatorHome,
+	});
+	if ('refused' in made) {
+		r.reasons.push(utilityLegReason(made.refused, made.detail));
+		return null;
+	}
+	r.root = made.root;
+	const project = path.join(made.root, 'project');
+	const home = path.join(made.root, 'home');
+	fs.mkdirSync(home, { recursive: true, mode: 0o700 });
+	for (const name of UTILITY_SENTINELS)
+		writeOwned(path.join(project, name), `sentinel ${randomBytes(8).toString('hex')}\n`);
+	const projectReal = fs.realpathSync(project);
+	const sameAccount = utilitySameAccount(s);
+	const envVar = getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME';
+	const message = spec.messages[0];
+	if (!message) {
+		problems.push('feedback-message-missing');
+		return null;
+	}
+
+	// The account: candidates and order from the production rules, checked as main checks them.
+	const candidates = buildFeedbackAccountCandidates({
+		agents: [
+			{
+				name: UTILITY_FEEDBACK_AGENT,
+				toolType: 'grok',
+				customEnvVars: { [envVar]: s.accountRoot! },
+				customPath: s.binaryPath,
+				cwd: projectReal,
+			},
+		],
+		providerEnvByToolType: {},
+		// An owned home: the provider default must never resolve to the operator's login.
+		homeDir: home,
+	});
+	const checked: FeedbackAccount[] = candidates.map((c) => {
+		const routeProblem = feedbackInterviewRouteProblem(c.toolType);
+		if (routeProblem) return { ...c, status: 'unsupported', statusDetail: routeProblem };
+		if (c.sshRemoteId) return { ...c, status: 'unknown', statusDetail: 'Runs on an SSH remote' };
+		const installed = !!c.customPath && inspectExecutable(c.customPath).regular;
+		if (!installed) return { ...c, status: 'not-installed', statusDetail: 'not the pinned binary' };
+		// Grok sign-in is never checked from files; the first turn decides.
+		return { ...c, status: 'unknown' };
+	});
+	const selected = orderFeedbackAccounts(checked, null).find(isFeedbackAccountUsable) ?? null;
+	r.observed.accounts = checked.map((c) => `${c.source}:${c.status}`);
+	r.observed.selected = selected
+		? {
+				source: selected.source,
+				status: selected.status,
+				account: sameAccount(selected.env[envVar] ?? null) ? 'owned-account' : 'other',
+			}
+		: null;
+	if (
+		!assert(
+			'account-selected',
+			!!selected &&
+				selected.toolType === 'grok' &&
+				selected.source === 'agent' &&
+				selected.customPath === s.binaryPath &&
+				sameAccount(selected.env[envVar] ?? null),
+			`candidates=${checked.length} selected=${selected ? `${selected.source}:${selected.status}` : 'none'}`
+		) ||
+		!selected
+	) {
+		assert('reply-bounded', false, 'not sent: no owned Grok account was selected');
+		return null;
+	}
+
+	// A required no-tools request refuses before anything is spawned.
+	let noToolsError = '';
+	const pmCalls: string[] = [];
+	const spawnedBefore = r.spawned;
+	try {
+		const groomer = await import('../../src/main/utils/context-groomer');
+		const processManager = new Proxy(
+			{},
+			{
+				get: (_t, key) => () => {
+					pmCalls.push(String(key));
+					throw new Error('The qualification refuses any spawn of a required no-tools request.');
+				},
+			}
+		) as unknown as Parameters<typeof groomer.groomContext>[1];
+		const def = getAgentDefinition('grok');
+		const detector = {
+			getAgent: async (id: string) =>
+				id === 'grok' && def
+					? { ...def, available: true, path: s.binaryPath, command: def.binaryName }
+					: null,
+		} as unknown as Parameters<typeof groomer.groomContext>[2];
+		await groomer.groomContext(
+			{
+				projectRoot: projectReal,
+				agentType: 'grok',
+				prompt: message,
+				readOnlyMode: true,
+				requireDisabledTools: true,
+				sessionCustomEnvVars: { ...selected.env },
+				sessionCustomPath: s.binaryPath,
+				timeoutMs: 1000,
+			},
+			processManager,
+			detector
+		);
+		noToolsError = 'not-refused';
+	} catch (e) {
+		noToolsError = errorText(e);
+	}
+	const noToolsRefused =
+		/cannot run this turn with tools disabled/.test(noToolsError) &&
+		/Nothing was run/.test(noToolsError) &&
+		!pmCalls.length &&
+		r.spawned === spawnedBefore;
+	r.observed.noTools = { refused: noToolsRefused, processManagerCalls: pmCalls.length };
+	assert(
+		'no-tools-refused',
+		noToolsRefused,
+		`refused=${noToolsRefused} processManagerCalls=${pmCalls.length}`
+	);
+
+	// One read-only interview turn on the selected account.
+	const bridge = createUtilityBridge(s, r, made.root);
+	const treeBefore = safeTree(project);
+	const result = await withWindowMaestro(bridge.maestro, async () => {
+		const feedback = await import('../../src/renderer/services/feedbackConversation');
+		const prompt = await bridge.maestro.prompts.get('feedback-conversation');
+		if (!prompt.success || !prompt.content) {
+			problems.push(`feedback-prompt-unreadable: ${prompt.error ?? 'empty'}`);
+			return null;
+		}
+		const manager = new feedback.FeedbackConversationManager();
+		manager.start({
+			agentType: 'grok',
+			systemPrompt: prompt.content,
+			cwd: projectReal,
+			account: { ...selected, model: s.model },
+		});
+		try {
+			const turn = await manager.sendTurn(message, []);
+			await bridge.settle();
+			return turn;
+		} finally {
+			manager.cleanup();
+			await bridge.settle();
+		}
+	});
+	const treeAfter = safeTree(project);
+	const rec = bridge.spawns[0];
+	const changed = treeBefore && treeAfter ? treeChanges(treeBefore, treeAfter) : null;
+	r.observed.interview = {
+		spawns: bridge.spawns.length,
+		failed: result?.failed ?? null,
+		refused: result?.refused ?? null,
+		nativeId: rec?.nativeId ?? null,
+		changed: changed ?? 'unreadable',
+	};
+	r.digests.interviewPrompt = rec ? sha256Of(rec.prompt) : null;
+	assert(
+		'account-env',
+		bridge.spawns.length === 1 &&
+			!!rec &&
+			sameAccount(rec.requestedAccount) &&
+			sameAccount(rec.planned.account),
+		`spawns=${bridge.spawns.length} requested=${sameAccount(rec?.requestedAccount ?? null)} ` +
+			`planned=${sameAccount(rec?.planned.account ?? null)}`
+	);
+	const launch = rec ? utilityLaunchProblems(rec, s, sameAccount) : ['no-spawn'];
+	assert('read-only-args', !launch.length, launch.join(',') || 'ok');
+	assert(
+		'sentinels-unchanged',
+		!!changed && !changed.length && (treeBefore?.size ?? 0) >= UTILITY_SENTINELS.length,
+		`changed=${changed ? changed.length : 'unreadable'} entries=${treeBefore?.size ?? 'none'}`
+	);
+	const replyChars = rec?.delivered.length ?? 0;
+	assert(
+		'reply-bounded',
+		!!result &&
+			!result.failed &&
+			!result.refused &&
+			bridgedTurnClean(rec, r) &&
+			replyChars > 0 &&
+			replyChars <= UTILITY_REPLY_MAX_CHARS &&
+			result.response.message.length <= MAX_FEEDBACK_FIELD_LENGTH,
+		`failed=${result?.failed ?? 'none'} clean=${bridgedTurnClean(rec, r)} replyChars=${replyChars} ` +
+			`messageChars=${result?.response.message.length ?? 0}`
+	);
+	return bridge.control.uncertainWhy;
+};
+
+const UTILITY_RUNNERS: Record<UtilityLegId, UtilityLegRunner> = {
+	'wizard-structured': runWizardStructuredLeg,
+	'feedback-interview': runFeedbackInterviewLeg,
+};
+
+/** Close a utility leg: passed only when every required assertion passed with no reason or problem. */
+function settleUtilityLeg(r: UtilityLegReceipt, problems: string[]): UtilityLegReceipt {
+	if (r.reasons.length && r.spawned === 0 && !r.assertions.length && !problems.length) {
+		r.status = 'not-run';
+		r.assertion = {
+			id: r.leg,
+			outcome: 'not-evaluated',
+			detail: r.reasons.map((x) => x.id).join('; '),
+			owner: 'GT1-11-11D1',
+		};
+		return r;
+	}
+	const required = UTILITY_ASSERTIONS[r.leg];
+	const all = [
+		...r.reasons.map((x) => x.id),
+		...problems,
+		...r.assertions.filter((a) => a.outcome === 'failed').map((a) => `failed:${a.id}`),
+		...required
+			.filter((id) => !r.assertions.some((a) => a.id === id))
+			.map((id) => `assertion-not-evaluated:${id}`),
+	];
+	r.status = all.length ? 'failed' : 'passed';
+	r.assertion = {
+		id: r.leg,
+		outcome: all.length ? 'failed' : 'passed',
+		detail: all.join('; ') || `${required.length} assertions passed`,
+	};
+	return r;
+}
+
+/**
+ * The utility consumer legs of an E09 leg, after its fixture turn, on the
+ * same reservation and the owned account home and project only. Each turn is
+ * counted before it is sent; an uncertain effect stops every later leg.
+ */
+async function runUtilityLegs(s: SessionConsumerContext): Promise<{
+	legs: UtilityLegReceipt[];
+	spawned: number;
+	sent: number;
+	uncertainWhy: string | null;
+}> {
+	const legs: UtilityLegReceipt[] = [];
+	let spawned = 0;
+	let sent = 0;
+	let uncertainWhy: string | null = null;
+	// The paid leg files these receipts only after the run: number the turns here so none repeats.
+	let turnNo = s.nextTurn() - 1;
+	s = { ...s, nextTurn: () => ++turnNo };
+	for (const spec of s.fixture.utilityLegs ?? []) {
+		const r: UtilityLegReceipt = {
+			leg: spec.id,
+			status: 'not-run',
+			reasons: [],
+			turns: [],
+			assertions: [],
+			assertion: { id: spec.id, outcome: 'not-evaluated', detail: '', owner: 'GT1-11-11D1' },
+			observed: {},
+			digests: {},
+			root: null,
+			spawned: 0,
+			paidRequests: 0,
+		};
+		const gap = (detail: string, owner: string) => {
+			r.status = 'not-evaluated';
+			r.assertion = { id: spec.id, outcome: 'not-evaluated', detail, owner };
+		};
+		const uncertain = s.uncertain ?? uncertainWhy;
+		if (!s.capabilities.utilityLegs)
+			r.reasons.push(utilityLegReason('utility-legs-unimplemented', spec.id));
+		else if (s.blocked) r.reasons.push(utilityLegReason(s.blocked, spec.id));
+		else if (uncertain) r.reasons.push(utilityLegReason('uncertain-prior-effect', uncertain));
+		else if (s.c.target === 'ssh')
+			gap(
+				'the bridge plans and spawns local launches against a local owned home only',
+				SSH_UTILITY_LEGS_OWNER
+			);
+		else if (s.c.route !== 'native-headless')
+			gap(
+				'the wizard and feedback consumers launch native headless turns only',
+				ACP_UTILITY_LEGS_OWNER
+			);
+		else if (!s.accountRoot) r.reasons.push(utilityLegReason('account-root-unknown', spec.id));
+		else if (spec.maxTurns > s.remainingTurns())
+			r.reasons.push(
+				utilityLegReason('utility-turns-unavailable', `${spec.maxTurns} > ${s.remainingTurns()}`)
+			);
+		if (r.reasons.length) {
+			r.assertion.detail = r.reasons.map((x) => x.id).join('; ');
+			legs.push(r);
+			continue;
+		}
+		if (r.status === 'not-evaluated') {
+			legs.push(r);
+			continue;
+		}
+		const problems: string[] = [];
+		let why: string | null = null;
+		try {
+			why = await UTILITY_RUNNERS[spec.id](spec, s, r, problems);
+		} catch (e) {
+			problems.push(`${spec.id}-threw: ${errorText(e)}`);
+		}
+		settleUtilityLeg(r, problems);
+		spawned += r.spawned;
+		sent += r.paidRequests;
+		if (why) uncertainWhy = why;
+		legs.push(r);
+	}
+	return { legs, spawned, sent, uncertainWhy };
+}
+
 /** Bounds of one owned-home inspection; past either, the home cannot be vouched for and the verdict fails. */
 export const HOME_SCAN_LIMITS = Object.freeze({ entries: 4096, bytes: 16 * 1024 * 1024 });
 
@@ -8172,6 +9239,7 @@ export async function executePaidCase(
 		resources: null,
 		sessionLegs: [],
 		sessionConsumers: [],
+		utilityLegs: [],
 	});
 	if (reasons.length || !fixture) return accounts.map(refused);
 	// What each owned home listed before the legs: the colliding-ID verdict judges only what they added.
