@@ -12701,12 +12701,15 @@ const turnUsageOf = (rec: AccountingUsageRecord): PaidTurnResult['usage'] =>
  * the prompt's session, every notification of the channel handed to it (a
  * child's channel is ignored unless the adapter admitted that child), and the
  * turn's usage read from its prompt settlement. Child usage frames are
- * counted, never added.
+ * counted, never added. Each turn's frames and answer are kept in memory,
+ * bounded, for the consumer legs to replay (GT1-11-14P4E).
  */
 function acpAccountingCapture(route: Route, acknowledged: () => string | null) {
 	const records: AccountingUsageRecord[] = [];
 	/** Each turn's parent total through the production conversion; undefined when no terminal carried usage. */
 	const finals: Array<UsageStats | undefined> = [];
+	const kept: AcpTurnFrames[] = [];
+	let frames: AcpTurnFrames | null = null;
 	let adapter: GrokAcpEventAdapter | null = null;
 	let turnId = '';
 	let parent = '';
@@ -12719,9 +12722,23 @@ function acpAccountingCapture(route: Route, acknowledged: () => string | null) {
 			adapter = new GrokAcpEventAdapter({ sessionId, turnId });
 			tracker = new UsageProvenanceTracker({ reporting: 'turn-total' });
 			childFrames = 0;
+			frames = {
+				frames: [],
+				bytes: 0,
+				truncated: false,
+				answer: null,
+				failed: false,
+				sessionId,
+				turnId,
+			};
 		},
 		notify(message: AcpCall) {
 			if (!adapter) return;
+			if (frames) {
+				frames.bytes += Buffer.byteLength(JSON.stringify(message));
+				if (frames.bytes > ACCOUNTING_CAPTURE_MAX_BYTES) frames.truncated = true;
+				else frames.frames.push(structuredClone(message));
+			}
 			const params = (message.params ?? {}) as Record<string, unknown>;
 			const update = (params.update ?? {}) as Record<string, unknown>;
 			if (
@@ -12763,11 +12780,13 @@ function acpAccountingCapture(route: Route, acknowledged: () => string | null) {
 			});
 			records.push(rec);
 			finals.push(final ? parsedUsageToStats(final) : undefined);
+			if (frames) kept.push({ ...frames, answer: structuredClone(answer), failed });
+			frames = null;
 			adapter = null;
 			return turnUsageOf(rec);
 		},
 	};
-	return { records, finals, hook };
+	return { records, finals, kept, hook };
 }
 
 /** Settle a parent turn total into the lifetime exactly once (its children are inside it, never beside it). */
@@ -13082,11 +13101,26 @@ async function runUsageCaptureLeg(
 				endedAt: Date.now(),
 			};
 	} else {
+		const startedAt = Date.now();
 		const run = await runAccountingAcpTurns(w, r, s, spec.turns.slice(0, 1));
 		uncertainWhy = run.uncertainWhy;
 		rec = r.usage[0] ?? null;
 		turn = r.turns[0] ?? null;
 		if (rec && run.finals[0]) settleIntoLifetime(life, rec, run.finals[0]);
+		// The frames are kept in memory for the consumer legs, bounded; they never reach a receipt.
+		const acp = run.kept[0];
+		if (rec && turn && acp)
+			life.capture = {
+				chunks: [],
+				bytes: acp.bytes,
+				truncated: acp.truncated,
+				acp,
+				rec,
+				turn,
+				final: run.finals[0],
+				startedAt,
+				endedAt: Date.now(),
+			};
 	}
 	r.lifetime.after = lifetimeTokens(life.total);
 	r.lifetime.cost = life.total?.accounting
@@ -13113,11 +13147,15 @@ async function runAccountingAcpTurns(
 	turns: PaidFixtureTurn[],
 	/** A fault leg's retry: drawn as a retry call, numbered after the attempt it retries. */
 	retry?: { as: 'retry'; base: number }
-): Promise<{ uncertainWhy: string | null; finals: Array<UsageStats | undefined> }> {
+): Promise<{
+	uncertainWhy: string | null;
+	finals: Array<UsageStats | undefined>;
+	kept: AcpTurnFrames[];
+}> {
 	const spec = await w.launcher(GROK_ACP_ARGS);
 	if ('refused' in spec) {
 		r.reasons.push(sshReason(spec.refused, spec.detail, 'paid-execution'));
-		return { uncertainWhy: null, finals: [] };
+		return { uncertainWhy: null, finals: [], kept: [] };
 	}
 	const capture = acpAccountingCapture('acp-stdio', () => null);
 	const run = await runAcpPaidTurns({
@@ -13145,7 +13183,7 @@ async function runAccountingAcpTurns(
 		if (t) capture.records[i].model = capture.records[i].model ?? t.model;
 	}
 	r.usage.push(...capture.records);
-	return { uncertainWhy: run.uncertainWhy, finals: capture.finals };
+	return { uncertainWhy: run.uncertainWhy, finals: capture.finals, kept: capture.kept };
 }
 
 /** The child usage leg: one ACP turn with one native subagent; its usage settles once into the parent and the lifetime. */
@@ -16489,8 +16527,6 @@ async function runCrossProviderLegs(w: AccountingLegContext): Promise<{
 export const ACCOUNTING_CONSUMERS_OWNER = 'GT1-11-11F2';
 /** The consumers replay the captured native stream locally; no task owns an SSH consumer leg. */
 export const SSH_ACCOUNTING_CONSUMERS_OWNER = 'grok-harness-ssh-target-absent';
-/** The consumers replay a native headless stream; capturing and replaying the ACP stream is GT1-11-14P4E's. */
-export const ACP_ACCOUNTING_CONSUMERS_OWNER = 'GT1-11-14P4E';
 /** `maestro-cli stats-tokens` reads a running desktop over its socket; no owned desktop is started. */
 export const STATS_CLI_OWNER = 'grok-harness-desktop-host-absent';
 /** The blocker a quota leg keeps open: Grok has no qualified quota contract. */
@@ -16545,11 +16581,25 @@ export const ACCOUNTING_CONSUMER_ASSERTIONS: Readonly<
 	'quota-unavailable': ['quota-not-sampled', 'quota-zero-network', 'budget-not-reset'],
 });
 
-/** What the usage capture leg kept of its native turn for the consumers: bytes in memory, never on a receipt. */
+/** The ACP frames of one turn as the channel handed them, bounded like a native stream (GT1-11-14P4E). */
+interface AcpTurnFrames {
+	frames: AcpCall[];
+	/** Serialized bytes of every frame seen, kept or not. */
+	bytes: number;
+	truncated: boolean;
+	answer: Record<string, unknown> | null;
+	failed: boolean;
+	sessionId: string;
+	turnId: string;
+}
+
+/** What the usage capture leg kept of its turn for the consumers: in memory, never on a receipt. */
 interface AccountingTurnCapture {
 	chunks: Buffer[];
 	bytes: number;
 	truncated: boolean;
+	/** The ACP route's frames and prompt answer; absent on the native route, whose bytes are `chunks`. */
+	acp?: AcpTurnFrames;
 	rec: AccountingUsageRecord;
 	turn: PaidTurnResult;
 	final: UsageStats | undefined;
@@ -16590,7 +16640,10 @@ interface MainAccountingConsumers {
 	flushQueryEventsSync: () => void;
 	invalidateTokenUsageMemo: () => void;
 	initializeSessionStorages: () => void;
-	StdoutHandler: new (deps: unknown) => { handleData: (sid: string, text: string) => void };
+	StdoutHandler: new (deps: unknown) => {
+		handleData: (sid: string, text: string) => void;
+		handleNormalizedEvent: (sid: string, proc: unknown, event: unknown) => void;
+	};
 	ExitHandler: new (deps: unknown) => {
 		handleExit: (sid: string, code: number, _x: unknown, signal: string | null) => Promise<void>;
 	};
@@ -16806,9 +16859,11 @@ interface DesktopReplay {
 }
 
 /**
- * Replay the captured native stream through the desktop's own stdout and exit
- * handlers (the turn-recordings path): chunks in the order the child wrote
- * them, then the exit the child reported.
+ * Replay the captured stream through the desktop's own stdout and exit
+ * handlers (the turn-recordings path): native chunks in the order the child
+ * wrote them, then the exit the child reported; ACP frames through the
+ * production event adapter into the normalized-event path, then the exit the
+ * desktop ACP spawner reports (GT1-11-14P4E).
  */
 async function replayDesktopTurn(
 	mod: MainAccountingConsumers,
@@ -16858,6 +16913,29 @@ async function replayDesktopTurn(
 		out.exits++;
 		out.settlements.push(settlement);
 	});
+	if (capture.acp) {
+		// The desktop ACP path (GrokAcpSpawner): the production adapter's events through
+		// handleNormalizedEvent, in the order the driver emits them, then the spawner's exit.
+		const a = capture.acp;
+		Object.assign(proc, { isBatchMode: true, args: [], sdkController: {} });
+		const adapter = new GrokAcpEventAdapter({ sessionId: a.sessionId, turnId: a.turnId });
+		const emit = (ev: unknown) => stdout.handleNormalizedEvent(sid, proc, ev);
+		emit({ type: 'init', sessionId: a.sessionId });
+		for (const frame of a.frames) {
+			out.replayedBytes += Buffer.byteLength(JSON.stringify(frame));
+			for (const ev of adapter.notification(frame, { replay: false, turnId: a.turnId })) emit(ev);
+		}
+		const settled = adapter.settle(
+			a.answer ?? undefined,
+			a.failed ? { status: 'failed', kind: 'transport' } : undefined
+		);
+		for (const ev of settled) emit(ev);
+		const ok = !a.failed && a.answer?.stopReason === 'end_turn';
+		await exit.handleExit(sid, ok ? 0 : 1, proc, null);
+		out.jsonBufferAfter = String(proc.jsonBuffer ?? '').length;
+		out.released = !processes.has(sid);
+		return out;
+	}
 	const decoder = new StringDecoder('utf8');
 	for (const chunk of capture.chunks) {
 		out.replayedBytes += chunk.length;
@@ -17424,12 +17502,6 @@ async function runAccountingConsumers(
 		gapAll(
 			'the consumers replay the captured stream and read owned databases locally; no task owns an SSH consumer leg',
 			SSH_ACCOUNTING_CONSUMERS_OWNER
-		);
-		return legs;
-	} else if (w.c.route !== 'native-headless') {
-		gapAll(
-			'the consumers replay a captured native headless stream; the ACP route keeps none',
-			ACP_ACCOUNTING_CONSUMERS_OWNER
 		);
 		return legs;
 	} else if (usageLeg?.status !== 'passed' || !capture)

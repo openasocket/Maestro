@@ -123,7 +123,6 @@ import {
 	ACCOUNTING_CONSUMER_ASSERTIONS,
 	ACCOUNTING_CONSUMER_READERS,
 	ACCOUNTING_FAULT_EXPECTED,
-	ACP_ACCOUNTING_CONSUMERS_OWNER,
 	ACP_ACCOUNTING_FAULT_EXPECTED,
 	ACP_TRANSLATION_RESUME_OWNER,
 	CANDIDATE_CAPABILITIES,
@@ -6244,7 +6243,8 @@ describe('GT1-11-09 qualification harness', () => {
 			 * ACP over `agent stdio`. A native turn ends on one `end` record carrying
 			 * usage with cache-read/cache-write/reasoning buckets and an exact charge,
 			 * and keeps its history under the owned GROK_HOME where the production
-			 * token accessor reads it. An ACP prompt answers with `_meta.usage`
+			 * token accessor reads it; an ACP prompt keeps its history there too, under
+			 * the cwd session/new named, as Grok does. An ACP prompt answers with `_meta.usage`
 			 * (ticks); a prompt naming a subagent first reports one child on the
 			 * parent channel and the child's own usage frame on the child channel.
 			 * A mode bends exactly one fact: no charge, a partial charge with or
@@ -6281,13 +6281,17 @@ describe('GT1-11-09 qualification harness', () => {
 				'} else {',
 				"  const sid = 'f3-acp-session';",
 				"  let buf = '';",
+				'  let cwd = process.cwd();',
 				"  const reply = (id, result) => out({ jsonrpc: '2.0', id, result });",
 				"  const xai = (sessionId, update) => out({ jsonrpc: '2.0', method: '_x.ai/session/update', params: { sessionId, update } });",
 				'  const handle = (m) => {',
 				"    if (m.method === 'initialize') reply(m.id, { protocolVersion: 1 });",
-				"    else if (m.method === 'session/new') reply(m.id, { sessionId: sid, models: { currentModelId: m.params._meta.modelId } });",
+				"    else if (m.method === 'session/new') { cwd = m.params.cwd || cwd; reply(m.id, { sessionId: sid, models: { currentModelId: m.params._meta.modelId } }); }",
 				"    else if (m.method === 'session/prompt') {",
 				'      const text = m.params.prompt[0].text;',
+				"      const dir = path.join(process.env.GROK_HOME || '', 'sessions', encodeURIComponent(fs.realpathSync(cwd)), sid);",
+				'      fs.mkdirSync(dir, { recursive: true });',
+				"      fs.appendFileSync(path.join(dir, 'chat_history.jsonl'), JSON.stringify({ type: 'user', content: 'q' }) + '\\n' + JSON.stringify({ type: 'assistant', content: 'a' }) + '\\n');",
 				"      if (text.includes('subagent') && MODE !== 'nochild') {",
 				"        xai(sid, { sessionUpdate: 'subagent_spawned', parent_session_id: sid, child_session_id: 'f3-child', subagent_id: 'sub-1', model: 'grok-child' });",
 				"        xai('f3-child', { sessionUpdate: 'response_completed', message_id: 'c1', usage: { input_tokens: 7, output_tokens: 4, cache_read_input_tokens: 1, cache_creation_input_tokens: 0, reasoning_tokens: 0 } });",
@@ -6723,7 +6727,7 @@ describe('GT1-11-09 qualification harness', () => {
 			}, 120_000);
 
 			it('an ACP child is parent detail: reported completed and included, its own usage frame counted and never added, the lifetime grown by the parent once', async () => {
-				const { leg, acc, con } = await execute('acp-stdio', 'ok');
+				const { leg, acc } = await execute('acp-stdio', 'ok');
 				const usage = acc('usage-capture');
 				expect(usage.status, usage.assertion.detail).toBe('passed');
 				expect(usage.usage[0].buckets).toEqual({
@@ -6750,11 +6754,8 @@ describe('GT1-11-09 qualification harness', () => {
 					cost: { status: 'exact', costUsd: 0.002 },
 				});
 				expect(child.settlement).toMatchObject({ state: 'settled', settledUsd: 0.001 });
-				// The consumers replay a native stream only (the ACP fault leg is pinned below).
-				for (const id of CONSUMERS) {
-					expect(con(id).status, id).toBe('not-evaluated');
-					expect(con(id).assertion.owner, id).toBe(ACP_ACCOUNTING_CONSUMERS_OWNER);
-				}
+				// The consumers replay the ACP frames too (GT1-11-14P4E, pinned below).
+				expect(verdicts(leg.accountingConsumers)).toEqual(CONSUMERS.map((id) => [id, 'passed']));
 				// A11-F42 repaired (GT1-11-14P4D1): every ACP accounting leg passes, the fault leg included.
 				expect(verdicts(leg.accountingLegs)).toEqual([
 					['usage-capture', 'passed'],
@@ -6783,6 +6784,58 @@ describe('GT1-11-09 qualification harness', () => {
 					costUsd: null,
 				});
 			}, 120_000);
+
+			describe('ACP accounting consumer legs (GT1-11-14P4E)', () => {
+				it('the ACP usage capture turn replayed through the production adapter reaches every consumer once, its exact charge labelled; no consumer is a gap', async () => {
+					const { leg, acc, con } = await execute('acp-stdio', 'ok');
+					expect(acc('usage-capture').status).toBe('passed');
+					expect(verdicts(leg.accountingConsumers)).toEqual(CONSUMERS.map((id) => [id, 'passed']));
+					for (const l of leg.accountingConsumers) {
+						expect(l.assertion.owner, l.leg).toBeUndefined();
+						expect(l.assertions.map((a) => a.id).sort(), l.leg).toEqual(
+							[...ACCOUNTING_CONSUMER_ASSERTIONS[l.leg]].sort()
+						);
+					}
+					expect(con('turn-recorder').observed).toMatchObject({ rows: 1, rowCost: 0.001 });
+					const desk = con('desktop-recording').observed as Record<string, unknown>;
+					expect(desk).toMatchObject({
+						exits: 1,
+						settlements: 1,
+						ledgerEvents: desk.usageEvents,
+						agentErrors: 0,
+						bufferAfter: 0,
+						released: true,
+						costUnknown: false,
+						rows: 1,
+					});
+					// The frames replayed are the frames captured: bytes counted, never on the receipt.
+					expect(desk.replayedBytes).toBeGreaterThan(0);
+					expect(JSON.stringify(leg)).not.toContain('session/update');
+					expect(con('stats-readers').observed).toMatchObject({
+						grokQueries: 2,
+						desktopPriced: 1,
+						dashboardCost: 0.001,
+						readers: ACCOUNTING_CONSUMER_READERS,
+					});
+					expect(con('cue-attribution').observed).toMatchObject({
+						runs: 1,
+						pipelineRuns: 1,
+						pipelineCost: 0.001,
+					});
+					expect(outcome(con('quota-unavailable'), 'quota-zero-network')).toBe('passed');
+				}, 120_000);
+
+				it('an unknown ACP charge stays unknown through the recorder, the desktop ledger, the dashboard, the export and Cue (A11-F34)', async () => {
+					const { leg, acc, con } = await execute('acp-stdio', 'nocost');
+					expect(acc('usage-capture').usage[0].cost).toEqual({ status: 'unknown', costUsd: null });
+					expect(verdicts(leg.accountingConsumers)).toEqual(CONSUMERS.map((id) => [id, 'passed']));
+					expect(con('turn-recorder').observed).toMatchObject({ rows: 1, rowCost: null });
+					expect(con('desktop-recording').observed).toMatchObject({ costUnknown: true, rows: 1 });
+					expect(con('stats-readers').observed).toMatchObject({ dashboardCost: null });
+					expect(outcome(con('stats-readers'), 'export-rows')).toBe('passed');
+					expect(con('cue-attribution').observed).toMatchObject({ pipelineCost: null });
+				}, 120_000);
+			});
 
 			describe('ACP fault legs (GT1-11-14P4D)', () => {
 				afterEach(() => {
