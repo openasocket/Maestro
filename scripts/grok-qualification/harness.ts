@@ -4,13 +4,23 @@
  * Composition only: it reads an explicit run configuration, expands the
  * E01-E12 case families recorded in `Plans/grok-tier1/run-state.json`
  * (`testEnvironment.cases`) over route and target, decides admission for each
- * case and writes one structured receipt per run. It never reads a credential,
- * never contacts an endpoint and never spawns a provider. A case is only ever
- * handed to an executor after every admission input is present AND every
- * harness capability it needs is implemented; the case executor is not yet,
- * so every case records `not-run` with machine-readable reasons. Default
- * execution, with no configuration, therefore makes zero paid requests and
- * zero network contacts.
+ * case and writes one structured receipt per run. It never reads a credential
+ * and never contacts an endpoint. A case is only ever handed to an executor
+ * after every admission input is present AND every harness capability it needs
+ * is implemented; the discovery/paid executor is not yet (GT1-11-11 /
+ * GT1-11-11A), so those legs record `not-run` with machine-readable reasons.
+ * Default execution, with no configuration, therefore makes zero spawns, zero
+ * paid requests and zero network contacts.
+ *
+ * Offline inspection (GT1-11-10A): the offline-inspection leg of a case (E02)
+ * is admitted and recorded as its own receipt entry, independently of
+ * discovery. It needs the pinned binary, disabled auto-update, owned roots, the
+ * isolation receipt and a declaration with deny-all egress, never a credential
+ * reference, endpoint or discovery authorization. Its executor re-hashes the
+ * binary and refuses before spawn on a mismatch, then runs only the
+ * `OFFLINE_PROBES` argv under the planned credential-free environment, each
+ * child owned by the case lifetime with a wall-clock bound, and records exit,
+ * duration, stdout/stderr digests and the parsed version beside the pin.
  *
  * Spend admission (GT1-11-08C): a paid case needs a worst-case plan from
  * declared per-call token bounds and per-turn billable calls (model rounds,
@@ -57,7 +67,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import type { ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -103,7 +113,9 @@ export const HARNESS_CAPABILITIES = {
 	isolationPreflight: true,
 	/** Atomic shared reservation / provider-cap admission (GT1-11-08C). */
 	atomicSpendAdmission: true,
-	/** A case executor bound to the admitted tuple (later VERIFY owners). */
+	/** The bounded offline-inspection executor: version/help of the pinned binary (GT1-11-10A). */
+	offlineExecutor: true,
+	/** A discovery or paid executor bound to the admitted tuple (GT1-11-11 / GT1-11-11A). */
 	caseExecutor: false,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
@@ -215,7 +227,8 @@ export interface AdmissionReason {
 		| 'config-problem'
 		| 'pricing'
 		| 'isolation-preflight'
-		| 'spend-admission';
+		| 'spend-admission'
+		| 'offline-execution';
 	detail: string;
 	owner?: string;
 }
@@ -258,6 +271,46 @@ export interface CaseReceipt {
 	candidateSnapshot: CandidateCapabilitySnapshot | null;
 	/** Pre-spawn isolation and discovery preflight; null when the case needs no binary. */
 	preflight: PreflightResult | null;
+	/**
+	 * The offline-inspection leg, a separate entry from the discovery/paid leg
+	 * the fields above describe: its own admission, preflight, probes and
+	 * spawns. Null when the case has no offline-inspection class.
+	 */
+	offlineLeg: OfflineLegReceipt | null;
+}
+
+/** One credential-free offline probe of the pinned binary; output is kept as digests only. */
+export interface OfflineProbeResult {
+	probe: string;
+	argv: string[];
+	exitCode: number | null;
+	signal: string | null;
+	durationMs: number;
+	timedOut: boolean;
+	spawnError: string | null;
+	stdout: { sha256: string; bytes: number; truncated: boolean };
+	stderr: { sha256: string; bytes: number; truncated: boolean };
+}
+
+export interface OfflineLegReceipt {
+	leg: 'offline-inspection';
+	/** not-run: refused before spawn; failed: a probe or identity check failed; passed: both probes agree with the pin. */
+	status: 'not-run' | 'passed' | 'failed';
+	/** Admission refusals when not-run, execution failures when failed; empty when passed. */
+	reasons: AdmissionReason[];
+	preflight: PreflightResult | null;
+	binary: {
+		sha256Pinned: string | null;
+		sha256AtSpawn: string | null;
+		sha256After: string | null;
+		versionPinned: string | null;
+		versionObserved: string | null;
+	};
+	probes: OfflineProbeResult[];
+	spawned: number;
+	/** Always 0: the leg runs under deny-all egress with no endpoint and no credential. */
+	networkContacts: 0;
+	cleanup: { ownedProcesses: number; stopped: number };
 }
 
 export interface BudgetLedger {
@@ -1384,6 +1437,8 @@ export const HARNESS_CEILINGS = {
 	turnsPerCase: 2,
 	caseSeconds: 120,
 	discoverySeconds: 30,
+	/** Wall-clock bound of one offline probe (GT1-11-10A). */
+	offlineProbeSeconds: 15,
 	idleSeconds: 30,
 	cleanupSeconds: 5,
 } as const;
@@ -2019,14 +2074,364 @@ export function admitCase(
 				owner: 'GT1-11-08C',
 			});
 	}
+	// The offline-inspection leg has its own executor (runOfflineLeg); this one is discovery/paid.
 	if (!capabilities.caseExecutor)
 		add({
 			id: 'case-executor-unimplemented',
 			kind: 'harness-capability',
-			detail: 'no executor is bound to an admitted tuple yet',
-			owner: 'GT1-11-10',
+			detail: 'no discovery or paid executor is bound to an admitted tuple yet',
+			owner: [
+				...(c.classes.includes('discovery') ? ['GT1-11-11A'] : []),
+				...(paid ? ['GT1-11-11'] : []),
+			].join('/'),
 		});
 	return reasons;
+}
+
+// ---------------------------------------------------------------------------
+// Offline-inspection leg (GT1-11-10A)
+// ---------------------------------------------------------------------------
+
+/** Bytes of each probe stream the executor accepts; more is an unbounded probe and fails. */
+export const OFFLINE_OUTPUT_CAP_BYTES = 1024 * 1024;
+/** Leading bytes of stdout kept in memory to parse the version; never written anywhere. */
+const OFFLINE_PARSE_BYTES = 64 * 1024;
+
+const offlineReason = (id: string, detail: string): AdmissionReason => ({
+	id,
+	kind: 'offline-execution',
+	detail,
+	owner: 'GT1-11-10A',
+});
+
+/** The offline-inspection leg of a case as a case of its own: same identity, offline class only. */
+export function offlineLegCase(c: QualificationCase): QualificationCase {
+	return { ...c, classes: ['offline-inspection'] };
+}
+
+/**
+ * Admission of the offline leg alone. It needs the pinned binary, disabled
+ * auto-update, owned roots and the isolation receipt (the preflight then holds
+ * the declaration, deny-all egress and a credential-free launch), but no
+ * credential reference, endpoint, discovery authorization, model or spend
+ * input: it makes no network contact and reads no credential.
+ */
+export function admitOfflineLeg(
+	c: QualificationCase,
+	config: QualificationConfig,
+	problems: ConfigProblem[],
+	capabilities: HarnessCapabilities
+): AdmissionReason[] {
+	const reasons: AdmissionReason[] = [];
+	const add = (r: AdmissionReason) => reasons.push(r);
+	if (!c.classes.includes('offline-inspection'))
+		add({ id: 'offline-leg-absent', kind: 'admission-input', detail: c.caseId });
+	for (const p of problems)
+		add({ id: `config:${p.code}`, kind: 'config-problem', detail: p.field });
+	if (!config.providers.includes('grok'))
+		add({ id: 'provider-not-authorized', kind: 'admission-input', detail: 'grok' });
+	const b = config.binary;
+	if (!b.path || !b.sha256 || !b.version)
+		add({ id: 'binary-unpinned', kind: 'admission-input', detail: 'binary.path/sha256/version' });
+	if (!config.autoUpdateDisabled)
+		add({ id: 'auto-update-not-disabled', kind: 'admission-input', detail: 'autoUpdateDisabled' });
+	if (!config.allowedRoots.length)
+		add({ id: 'allowed-roots-absent', kind: 'admission-input', detail: 'allowedRoots' });
+	if (!config.isolationReceipt)
+		add({ id: 'host-isolation-unqualified', kind: 'admission-input', detail: 'isolationReceipt' });
+	if (c.target !== 'local')
+		add({
+			id: 'offline-executor-local-only',
+			kind: 'harness-capability',
+			detail: 'the offline executor launches local binaries only',
+			owner: 'GT1-11-11A',
+		});
+	if (!capabilities.isolationPreflight)
+		add({
+			id: 'isolation-preflight-unimplemented',
+			kind: 'harness-capability',
+			detail: 'pre-spawn isolation and discovery preflight',
+			owner: 'GT1-11-08B',
+		});
+	if (!capabilities.offlineExecutor)
+		add({
+			id: 'offline-executor-unimplemented',
+			kind: 'harness-capability',
+			detail: 'no offline-inspection executor',
+			owner: 'GT1-11-10A',
+		});
+	return reasons;
+}
+
+/** The first semver-shaped token of a `--version` output, without a leading `v`. */
+export function parseProbeVersion(text: string): string | null {
+	const m = /(?:^|[^0-9A-Za-z.])v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)/.exec(
+		text
+	);
+	return m ? m[1] : null;
+}
+
+const normalizeVersion = (v: string) => v.trim().replace(/^v/, '');
+
+/** Hash every byte of a stream, keep a bounded head, and report when the cap is crossed. */
+function streamDigest() {
+	const hash = createHash('sha256');
+	const head: Buffer[] = [];
+	let headBytes = 0;
+	let bytes = 0;
+	return {
+		push(chunk: Buffer): boolean {
+			bytes += chunk.length;
+			hash.update(chunk);
+			if (headBytes < OFFLINE_PARSE_BYTES) {
+				const take = chunk.subarray(0, OFFLINE_PARSE_BYTES - headBytes);
+				head.push(take);
+				headBytes += take.length;
+			}
+			return bytes > OFFLINE_OUTPUT_CAP_BYTES;
+		},
+		head: () => Buffer.concat(head).toString('utf8'),
+		result: () => ({
+			sha256: hash.digest('hex'),
+			bytes,
+			truncated: bytes > OFFLINE_OUTPUT_CAP_BYTES,
+		}),
+	};
+}
+
+type CaseLifetime = ReturnType<typeof createCaseLifetime>;
+
+/** Run one offline probe as an owned child with a wall-clock bound; never throws. */
+function runOfflineProbe(
+	probe: string,
+	file: string,
+	argv: readonly string[],
+	env: Record<string, string>,
+	cwd: string,
+	timeoutMs: number,
+	graceMs: number,
+	lifetime: CaseLifetime
+): Promise<{ result: OfflineProbeResult; stdoutHead: string }> {
+	return new Promise((resolve) => {
+		const started = Date.now();
+		const out = streamDigest();
+		const err = streamDigest();
+		let timedOut = false;
+		let spawnError: string | null = null;
+		let settled = false;
+		let timer: NodeJS.Timeout | undefined;
+		const finish = (exitCode: number | null, signal: string | null) => {
+			if (settled) return;
+			settled = true;
+			if (timer) clearTimeout(timer);
+			resolve({
+				result: {
+					probe,
+					argv: [...argv],
+					exitCode,
+					signal,
+					durationMs: Date.now() - started,
+					timedOut,
+					spawnError,
+					stdout: out.result(),
+					stderr: err.result(),
+				},
+				stdoutHead: out.head(),
+			});
+		};
+		let child: ChildProcess;
+		try {
+			// Absolute pinned file, no shell, only the planned environment (never process.env).
+			child = spawn(file, [...argv], {
+				cwd,
+				env,
+				shell: false,
+				stdio: ['ignore', 'pipe', 'pipe'],
+				windowsHide: true,
+			});
+		} catch (e) {
+			spawnError = (e as NodeJS.ErrnoException).code ?? 'spawn-threw';
+			finish(null, null);
+			return;
+		}
+		lifetime.own(child);
+		const stop = () => stopProcess({ child }, { from: 'terminate', graceMs });
+		timer = setTimeout(() => {
+			timedOut = true;
+			stop();
+		}, timeoutMs);
+		child.stdout?.on('data', (d: Buffer) => {
+			if (out.push(d)) stop();
+		});
+		child.stderr?.on('data', (d: Buffer) => {
+			if (err.push(d)) stop();
+		});
+		child.on('error', (e: NodeJS.ErrnoException) => {
+			spawnError = e.code ?? 'spawn-error';
+			if (child.pid === undefined) finish(null, null);
+		});
+		child.on('close', (code, signal) => finish(code, signal));
+	});
+}
+
+export interface OfflineExecutionContext {
+	workspace: string;
+	operatorHome: string;
+	/** Per-probe wall-clock bound, already clamped to the ceiling. */
+	timeoutMs: number;
+	lifetime: CaseLifetime;
+}
+
+/**
+ * The bounded offline executor. Re-checks what it relies on (pin, local
+ * target, disabled update, a credential-free validated launch), re-hashes the
+ * binary and refuses before any spawn on a mismatch, then runs only the
+ * `OFFLINE_PROBES` argv, one owned child at a time. Callers hand it only an
+ * admitted leg; a refusal here still never spawns.
+ */
+export async function executeOfflineLeg(
+	c: QualificationCase,
+	config: QualificationConfig,
+	ctx: OfflineExecutionContext
+): Promise<{
+	reasons: AdmissionReason[];
+	probes: OfflineProbeResult[];
+	binary: OfflineLegReceipt['binary'];
+	spawned: number;
+}> {
+	const reasons: AdmissionReason[] = [];
+	const probes: OfflineProbeResult[] = [];
+	const binary: OfflineLegReceipt['binary'] = {
+		sha256Pinned: config.binary.sha256,
+		sha256AtSpawn: null,
+		sha256After: null,
+		versionPinned: config.binary.version,
+		versionObserved: null,
+	};
+	const refuse = (id: string, detail: string) => {
+		reasons.push(offlineReason(id, detail));
+		return { reasons, probes, binary, spawned: 0 };
+	};
+	if (!config.binary.path || !config.binary.sha256 || !config.binary.version)
+		return refuse('binary-unpinned', 'binary.path/sha256/version');
+	if (c.target !== 'local') return refuse('offline-executor-local-only', c.target);
+	if (!config.autoUpdateDisabled) return refuse('auto-update-not-disabled', 'autoUpdateDisabled');
+
+	const file = path.resolve(ctx.workspace, config.binary.path);
+	const atSpawn = inspectExecutable(file);
+	binary.sha256AtSpawn = atSpawn.sha256;
+	if (!atSpawn.regular) return refuse('binary-unreadable', 'binary.path');
+	if (atSpawn.sha256 !== config.binary.sha256)
+		return refuse('binary-hash-mismatch-at-spawn', 'binary.sha256');
+	if (!atSpawn.readOnly) return refuse('binary-mutable', 'binary.path');
+
+	const plan = planIsolatedLaunch(
+		offlineLegCase(c),
+		config,
+		'A',
+		'offline',
+		ctx.workspace,
+		ctx.operatorHome
+	);
+	if (!plan || plan.credentialMode !== 'none') return refuse('offline-launch-unplannable', 'A');
+	const report = validateLaunchEnvironment(plan.env, plan.expectation);
+	if (report.reasons.length) {
+		reasons.push(...report.reasons);
+		return { reasons, probes, binary, spawned: 0 };
+	}
+	const cwd = plan.expectation.home;
+	if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
+		return refuse('offline-home-absent', 'isolation.boundary.actualHome');
+	fs.mkdirSync(plan.env.TMPDIR, { recursive: true, mode: 0o700 });
+
+	const real = fs.realpathSync(file);
+	const graceMs = Math.max(1, Math.min(config.limits.cleanupSeconds, 5)) * 1000;
+	let spawned = 0;
+	let versionHead: string | null = null;
+	for (const [name, argv] of Object.entries(OFFLINE_PROBES)) {
+		const { result, stdoutHead } = await runOfflineProbe(
+			name,
+			real,
+			argv,
+			plan.env,
+			cwd,
+			ctx.timeoutMs,
+			graceMs,
+			ctx.lifetime
+		);
+		spawned++;
+		probes.push(result);
+		if (name === 'version') versionHead = stdoutHead;
+		if (result.spawnError) reasons.push(offlineReason('probe-spawn-failed', name));
+		else if (result.timedOut) reasons.push(offlineReason('probe-timeout', name));
+		else if (result.stdout.truncated || result.stderr.truncated)
+			reasons.push(offlineReason('probe-output-unbounded', name));
+		else if (result.exitCode !== 0) reasons.push(offlineReason('probe-exit-nonzero', name));
+		// The binary must stay byte-identical across every probe.
+		binary.sha256After = inspectExecutable(file).sha256;
+		if (binary.sha256After !== config.binary.sha256) {
+			reasons.push(offlineReason('binary-changed-during-probe', name));
+			break;
+		}
+		if (reasons.length) break;
+	}
+	if (versionHead !== null) {
+		binary.versionObserved = parseProbeVersion(versionHead);
+		if (!reasons.length) {
+			if (!binary.versionObserved)
+				reasons.push(offlineReason('binary-version-unparsed', 'version'));
+			else if (binary.versionObserved !== normalizeVersion(config.binary.version))
+				reasons.push(offlineReason('binary-version-mismatch', 'binary.version'));
+		}
+	}
+	return { reasons, probes, binary, spawned };
+}
+
+/** Admit, preflight and (only when nothing refuses) execute the offline leg of one case. */
+export async function runOfflineLeg(
+	c: QualificationCase,
+	config: QualificationConfig,
+	problems: ConfigProblem[],
+	capabilities: HarnessCapabilities,
+	ctx: { workspace: string; operatorHome: string; timeoutMs: number }
+): Promise<OfflineLegReceipt> {
+	const leg = offlineLegCase(c);
+	const reasons = admitOfflineLeg(c, config, problems, capabilities);
+	const preflight = capabilities.isolationPreflight
+		? preflightCase(leg, config, { workspace: ctx.workspace, operatorHome: ctx.operatorHome })
+		: null;
+	if (preflight) reasons.push(...preflight.reasons);
+	const receipt: OfflineLegReceipt = {
+		leg: 'offline-inspection',
+		status: 'not-run',
+		reasons,
+		preflight,
+		binary: {
+			sha256Pinned: config.binary.sha256,
+			sha256AtSpawn: null,
+			sha256After: null,
+			versionPinned: config.binary.version,
+			versionObserved: null,
+		},
+		probes: [],
+		spawned: 0,
+		networkContacts: 0,
+		cleanup: { ownedProcesses: 0, stopped: 0 },
+	};
+	if (reasons.length) return receipt;
+	const lifetime = createCaseLifetime(config.limits.cleanupSeconds);
+	try {
+		const run = await executeOfflineLeg(leg, config, { ...ctx, lifetime });
+		receipt.reasons = run.reasons;
+		receipt.probes = run.probes;
+		receipt.binary = run.binary;
+		receipt.spawned = run.spawned;
+		receipt.status = run.spawned === 0 ? 'not-run' : run.reasons.length ? 'failed' : 'passed';
+	} finally {
+		receipt.cleanup = await lifetime.cleanup();
+	}
+	if (preflight) preflight.binary.sha256After = receipt.binary.sha256After;
+	return receipt;
 }
 
 /**
@@ -2089,6 +2494,8 @@ export interface RunOptions {
 	operatorHome?: string;
 	/** Write the receipt into the owned run directory (the CLI does; tests may not). */
 	write?: boolean;
+	/** Per-probe wall-clock bound of the offline leg; clamped to `HARNESS_CEILINGS.offlineProbeSeconds`. */
+	offlineProbeTimeoutMs?: number;
 }
 
 /**
@@ -2112,9 +2519,21 @@ export async function runQualification(options: RunOptions): Promise<{
 	const ledger = createBudgetLedger(config, runId, new Date(startedAt));
 	const productionDigestBefore = productionCapabilityDigest();
 	const operatorHome = options.operatorHome ?? os.homedir();
+	const ceilingMs = HARNESS_CEILINGS.offlineProbeSeconds * 1000;
+	const offlineTimeoutMs = positiveFinite(options.offlineProbeTimeoutMs)
+		? Math.min(options.offlineProbeTimeoutMs, ceilingMs)
+		: ceilingMs;
 
 	const receipts: CaseReceipt[] = [];
 	for (const c of cases) {
+		// The offline-inspection leg first, as its own entry: it never waits on discovery inputs.
+		const offlineLeg = c.classes.includes('offline-inspection')
+			? await runOfflineLeg(c, config, problems, capabilities, {
+					workspace: options.workspace,
+					operatorHome,
+					timeoutMs: offlineTimeoutMs,
+				})
+			: null;
 		const reasons = admitCase(c, config, problems, capabilities, now());
 		const needsBinary = c.classes.some((k) => k !== 'deterministic');
 		// Pre-spawn: every binary case is held to the isolation preflight first.
@@ -2124,7 +2543,7 @@ export async function runQualification(options: RunOptions): Promise<{
 				: null;
 		if (preflight) reasons.push(...preflight.reasons);
 		const lifetime = createCaseLifetime(config.limits.cleanupSeconds);
-		// No executor exists yet: an admitted case would be handed to one here.
+		// No discovery/paid executor exists yet: an admitted case would be handed to one here.
 		// A case with any reason is recorded and never started.
 		const cleanup = await lifetime.cleanup();
 		// The pinned binary must be byte-identical after the case as before it.
@@ -2167,6 +2586,7 @@ export async function runQualification(options: RunOptions): Promise<{
 			cleanup,
 			candidateSnapshot: buildCandidateSnapshot(c, config),
 			preflight,
+			offlineLeg,
 		});
 	}
 	const productionDigestAfter = productionCapabilityDigest();
@@ -2203,7 +2623,7 @@ export async function runQualification(options: RunOptions): Promise<{
 			cases: receipts.length,
 			admitted: receipts.filter((r) => r.status === 'admitted').length,
 			notRun: receipts.filter((r) => r.status === 'not-run').length,
-			spawned: 0,
+			spawned: receipts.reduce((n, r) => n + r.spawned + (r.offlineLeg?.spawned ?? 0), 0),
 			paidRequests: 0,
 			networkContacts: 0,
 		},
