@@ -784,14 +784,85 @@ export const TRANSLATION_NONCES = Object.freeze({
 	toolSentinel: 'qualify-e11-tool-sentinel',
 });
 
-/** The one resumed turn of a translate-resume leg: the fact nonce is its token, the tool nonce its citation. */
+/**
+ * The resource sentinels an E11 leg seeds beside its source history
+ * (GT1-11-13B1): a project skill whose NAME is the skill nonce, a project rule
+ * (the instruction file) carrying the rule nonce, and a selected user memory
+ * carrying the memory nonce. The skill and the rule reach the destination as
+ * native projections, the memory through the bound knowledge index; the
+ * prompt names none of them.
+ */
+export const TRANSLATION_RESOURCE_NONCES = Object.freeze({
+	skill: 'qualify-e11-skill-5r2w',
+	rule: 'QUALIFY-E11-RULE-8D1N',
+	memory: 'QUALIFY-E11-MEMORY-6J9T',
+});
+
+/** The source-side folder of a project skill: each provider's own native skill root. */
+const SKILL_ROOT: Record<'grok' | CrossProviderPeer, string> = {
+	grok: '.grok/skills',
+	'claude-code': '.claude/skills',
+	codex: '.codex/skills',
+};
+
+/**
+ * The resource files one leg seeds into its source, relative to the project
+ * (`project`) or the source account root (`account`), and the selected user
+ * resources to name in the plan's scope. Every direction seeds identical bytes
+ * (a shared project, a shared Grok account), so a file another leg already
+ * seeded or projected is equal, never a conflict. The skill is written in the
+ * projected form (frontmatter `name` and `description`), so its projection is
+ * a fixed point.
+ */
+export function translationResourceSeeds(provider: 'grok' | CrossProviderPeer): Array<{
+	base: 'project' | 'account';
+	path: string;
+	body: string;
+	selected: boolean;
+}> {
+	const n = TRANSLATION_RESOURCE_NONCES;
+	return [
+		{
+			base: 'project',
+			path: `${SKILL_ROOT[provider]}/${n.skill}/SKILL.md`,
+			body: `---\nname: ${n.skill}\ndescription: Qualification skill sentinel.\n---\nReply with the skill name when asked which skills are available.\n`,
+			selected: false,
+		},
+		{
+			base: 'project',
+			path: provider === 'claude-code' ? 'CLAUDE.md' : 'AGENTS.md',
+			body: `# Qualification rule\n\nThe qualification rule token is ${n.rule}.\n`,
+			selected: false,
+		},
+		{
+			base: 'account',
+			path: 'memories/qualify-e11-memory.md',
+			body: `# Qualification memory\n\nThe qualification memory token is ${n.memory}.\n`,
+			selected: true,
+		},
+	];
+}
+
+/**
+ * The one resumed turn of a translate-resume leg: the fact nonce is its token;
+ * the tool nonce, the projected skill and rule, and the recalled memory its
+ * citations. Reading the memory file is allowed; running anything is not.
+ */
 export const TRANSLATION_RESUME_TURN: PaidFixtureTurn = Object.freeze({
 	prompt:
-		'Do not use any tool and do not run anything. Using only the earlier messages of this ' +
+		'Do not run any command and do not change any file. Using the earlier messages of this ' +
 		'conversation, reply on one line with the synthetic fact I asked you to remember, a space, ' +
-		'and the exact token the earlier tool result returned.',
+		'and the exact token the earlier tool result returned. Then, on a second line, give the ' +
+		'name of the qualification skill available to you, the qualification rule token from your ' +
+		'project instructions, and the qualification memory token from the memory your project ' +
+		'knowledge lists (you may read that memory file).',
 	expect: TRANSLATION_NONCES.fact,
-	alsoExpect: [TRANSLATION_NONCES.toolResult],
+	alsoExpect: [
+		TRANSLATION_NONCES.toolResult,
+		TRANSLATION_RESOURCE_NONCES.skill,
+		TRANSLATION_RESOURCE_NONCES.rule,
+		TRANSLATION_RESOURCE_NONCES.memory,
+	],
 });
 
 /** The assertions a translate-resume leg must evaluate; a leg missing one cannot pass. */
@@ -802,6 +873,9 @@ export const TRANSLATION_LEG_ASSERTIONS = Object.freeze([
 	'loaded-rows',
 	'fact-nonce',
 	'tool-result-nonce',
+	'projected-skill',
+	'projected-rule',
+	'memory-recalled',
 	'carried-tool-not-executed',
 	'no-duplicate-session',
 	'source-unchanged',
@@ -1059,12 +1133,6 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 		'E11',
 		[turn('E11', 1), turn('E11', 2)],
 		[
-			{
-				id: 'cross-provider-resources',
-				detail:
-					'projected skill, rule and memory sentinels, and the Codex destination import channel',
-				owner: 'GT1-11-13B1',
-			},
 			{
 				id: 'cross-provider-round-trip',
 				detail: 'the reverse leg and two Grok-Claude-Grok and Grok-Codex-Grok round trips',

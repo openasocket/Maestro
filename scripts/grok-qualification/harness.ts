@@ -303,6 +303,11 @@ import {
 } from '../../src/shared/maestro-lib/translation/native-records';
 import { planTranslation } from '../../src/shared/maestro-lib/translation/registry';
 import { applyTranslation } from '../../src/shared/maestro-lib/translation/transaction';
+import { collectTranslationResources } from '../../src/shared/maestro-lib/translation/resources';
+import { planResourceProjections } from '../../src/shared/maestro-lib/translation/resource-projections';
+import { bindTranslationKnowledge } from '../../src/shared/maestro-lib/translation/knowledge-binding';
+import { openCodexTranslationConnection } from '../../src/shared/maestro-lib/codex/connection';
+import { buildPromptArgv } from '../../src/shared/maestro-lib/launch/prompt-delivery';
 import {
 	TranslationArchive,
 	type TranslationJournal,
@@ -415,7 +420,9 @@ import {
 	type SyntheticResourceSet,
 	TRANSLATION_LEG_ASSERTIONS,
 	TRANSLATION_NONCES,
+	TRANSLATION_RESOURCE_NONCES,
 	TRANSLATION_RESUME_TURN,
+	translationResourceSeeds,
 	translationSeedRows,
 	type UtilityLegId,
 	type WorkflowLegId,
@@ -14451,8 +14458,14 @@ async function runPolicyLegs(w: PolicyLegContext): Promise<{
 // E11 translation legs (GT1-11-13B)
 // ---------------------------------------------------------------------------
 
-/** The Codex destination stages through the app-server import channel, and the resource sentinels: GT1-11-13B1's. */
+/** The Codex app-server staging channel and the resource sentinels (GT1-11-13B1). */
 export const CROSS_PROVIDER_RESOURCES_OWNER = 'GT1-11-13B1';
+/** How each destination's staged session is written; the receipt names it. */
+export const TRANSLATION_STAGING_CHANNELS: Record<'grok' | CrossProviderPeer, string> = {
+	grok: 'native session files (GROK_HOME/sessions)',
+	'claude-code': 'native transcript file (CLAUDE_CONFIG_DIR/projects)',
+	codex: 'codex app-server (thread/start, thread/inject_items) under CODEX_HOME',
+};
 /** The reverse leg and the repeated round trips: GT1-11-13B2's. */
 export const CROSS_PROVIDER_ROUND_TRIP_OWNER = 'GT1-11-13B2';
 /** No task resumes a staged Grok session through ACP `session/load`; an ACP case resumes only a peer destination. */
@@ -14478,6 +14491,10 @@ export interface CrossProviderLegReceipt {
 	/** Portable block and artifact kinds the extracted history carried (never content). */
 	payloadClasses: string[];
 	plan: { status: string; verification: string; limitations: string[] } | null;
+	/** The channel the destination's session was staged through (`TRANSLATION_STAGING_CHANNELS`). */
+	channel: string | null;
+	/** The seeded resource sentinels: kinds collected, projected native files, the bound knowledge index. */
+	resources: { kinds: string[]; projected: string[]; knowledgeBound: boolean } | null;
 	/** What the production apply staged: the new native id and the strictly validated row counts. */
 	staged: { sessionId: string | null; state: string; rows: number; readbackRows: number } | null;
 	/** What the destination CLI did with the staged id. */
@@ -14608,9 +14625,50 @@ async function seedTranslationSource(
 	};
 }
 
+/**
+ * Seed the leg's resource sentinels into its source (the project skill and
+ * rule, the selected user memory in the source account) and collect them
+ * through production code. A file already there must hold the same bytes:
+ * every direction seeds identically, so equal is another leg's seed or
+ * projection and anything else is refused, never overwritten.
+ */
+async function seedTranslationResources(src: TranslationIdentity): Promise<{
+	selected: string[];
+	resources: Awaited<ReturnType<typeof collectTranslationResources>>;
+}> {
+	const selected: string[] = [];
+	for (const seed of translationResourceSeeds(src.provider as 'grok' | CrossProviderPeer)) {
+		const file = path.join(seed.base === 'project' ? src.projectRoot : src.accountRoot, seed.path);
+		if (fs.existsSync(file)) {
+			if (fs.readFileSync(file, 'utf8') !== seed.body)
+				throw new Error(`resource-seed-differs: ${seed.path}`);
+		} else {
+			fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+			fs.writeFileSync(file, seed.body, { flag: 'wx', mode: 0o600 });
+		}
+		if (seed.selected) selected.push(file);
+	}
+	const resources = await collectTranslationResources(src, {
+		projectKnowledge: true,
+		selectedUserResources: selected,
+	});
+	return { selected, resources };
+}
+
 /** The native sessions a destination lists for the project, to prove a resume added none. */
 function destinationSessions(dest: TranslationIdentity): string[] {
 	if (dest.provider === 'grok') return listNativeSessionIds(dest.accountRoot).ids;
+	if (dest.provider === 'codex') {
+		try {
+			return (
+				fs.readdirSync(path.join(dest.accountRoot, 'sessions'), { recursive: true }) as string[]
+			)
+				.filter((f) => /(^|[\\/])rollout-[^\\/]*\.jsonl$/.test(f))
+				.sort();
+		} catch {
+			return [];
+		}
+	}
 	const dir = path.join(dest.accountRoot, 'projects', encodeClaudeProjectPath(dest.projectRoot));
 	try {
 		return fs.readdirSync(dir).filter((f) => f.endsWith('.jsonl'));
@@ -14647,6 +14705,18 @@ async function runTranslateResumeLeg(
 	};
 	const sentinel = path.join(project, TRANSLATION_NONCES.toolSentinel);
 	if (fs.existsSync(sentinel)) throw new Error('tool-sentinel-present-before-leg');
+	// A peer destination's launch environment (owned home, credential by reference) is
+	// settled before anything is written: a refusal leaves the leg not-run.
+	const toPeer = dest.provider !== 'grok';
+	let launchEnv: Record<string, string> = {};
+	if (toPeer) {
+		const env = peerLaunchEnv(w, peer);
+		if ('refused' in env) {
+			r.reasons.push(translationReason(env.refused, env.detail));
+			return null;
+		}
+		launchEnv = env.env;
+	}
 
 	const seeded = await seedTranslationSource(src, `qualify-${spec.id}`);
 	const digest = () => seeded.files.map((f) => sha256Of(fs.readFileSync(f))).join(',');
@@ -14658,14 +14728,20 @@ async function runTranslateResumeLeg(
 			...conv.artifacts.map((a) => `artifact:${a.kind}`),
 		]),
 	].sort();
+	// The resource sentinels go through the plan's resource scope and the production projections.
+	const seededResources = await seedTranslationResources(src);
+	const resources = seededResources.resources.artifacts;
+	const projections = await planResourceProjections(resources, dest);
 	const registry = createTranslationRegistry();
 	const plan = planTranslation({
 		agentId: `qualify-${w.c.caseId}-${spec.id}`,
 		source: src,
 		destination: dest,
-		scope: { projectKnowledge: true, selectedUserResources: [] },
+		scope: { projectKnowledge: true, selectedUserResources: seededResources.selected },
 		conversations: [conv],
 		registry,
+		limitations: [...seededResources.resources.limitations, ...projections.limitations],
+		resources,
 	});
 	r.plan = {
 		status: plan.status,
@@ -14677,39 +14753,83 @@ async function runTranslateResumeLeg(
 		plan,
 		state: 'planned',
 		conversations: [conv],
-		resources: [],
+		resources,
+		projections: projections.projections,
 		mappings: [],
 		resourceWrites: [],
 	};
+	r.channel = TRANSLATION_STAGING_CHANNELS[dest.provider as 'grok' | CrossProviderPeer];
 	let committed = false;
-	const result = await applyTranslation(
-		new TranslationArchive(path.join(w.accountRoot!, 'qualify-e11-archive', spec.id)),
-		registry,
-		journal,
-		{
-			assertSourceUnchanged: async () => {
-				if (digest() !== sourceDigest) throw new Error('synthetic source changed');
+	// A Codex destination stages through the production app-server import channel of
+	// the pinned binary under the owned CODEX_HOME (no exec fallback). It calls no
+	// model: one spawn, never a paid request, closed whatever the apply did.
+	let codex: Awaited<ReturnType<typeof openCodexTranslationConnection>> | undefined;
+	if (dest.provider === 'codex') {
+		r.spawned++;
+		codex = await openCodexTranslationConnection({
+			binary: peer.binary.path!,
+			cwd: project,
+			env: launchEnv,
+		});
+	}
+	let result: Awaited<ReturnType<typeof applyTranslation>>;
+	try {
+		result = await applyTranslation(
+			new TranslationArchive(path.join(w.accountRoot!, 'qualify-e11-archive', spec.id)),
+			registry,
+			journal,
+			{
+				assertSourceUnchanged: async () => {
+					if (digest() !== sourceDigest) throw new Error('synthetic source changed');
+				},
+				setMigration: async () => {},
+				commit: async () => {
+					committed = true;
+				},
+				isCommitted: async () => committed,
+				destinationModel: () => (dest.provider === 'grok' ? w.model : undefined),
+				...(codex ? { codex } : {}),
 			},
-			setMigration: async () => {},
-			commit: async () => {
-				committed = true;
-			},
-			isCommitted: async () => committed,
-			destinationModel: () => (dest.provider === 'grok' ? w.model : undefined),
-		},
-		true
-	);
+			true
+		);
+	} finally {
+		codex?.close();
+	}
 	const mapping = result.mappings[0];
 	const stagedId = mapping?.destinationSessionId ?? null;
 	const transcript = mapping?.artifacts[0]?.path ?? '';
 	const stagedLines = transcript ? linesOf(transcript) : [];
 	const rows = mapping ? Object.keys(mapping.lineage).length : 0;
-	r.staged = { sessionId: stagedId, state: result.state, rows, readbackRows: stagedLines.length };
+	// A Codex rollout carries its own session records beside the injected items: its
+	// readback counts the response items, which must hold every staged row.
+	const readbackRows =
+		dest.provider === 'codex'
+			? stagedLines.filter((l) => {
+					try {
+						return (JSON.parse(l) as { type?: string }).type === 'response_item';
+					} catch {
+						return false;
+					}
+				}).length
+			: stagedLines.length;
+	r.staged = { sessionId: stagedId, state: result.state, rows, readbackRows };
 	check(
 		'staged-rows-validated',
-		result.state === 'committed' && !!stagedId && rows > 0 && stagedLines.length === rows,
-		`${result.state}; ${rows} rows staged, ${stagedLines.length} read back${result.error ? `; ${result.error}` : ''}`
+		result.state === 'committed' &&
+			!!stagedId &&
+			rows > 0 &&
+			(dest.provider === 'codex' ? readbackRows >= rows : readbackRows === rows),
+		`${result.state}; ${rows} rows staged, ${readbackRows} read back${result.error ? `; ${result.error}` : ''}`
 	);
+	const projectedFiles = new Set(projections.projections.map((p) => p.path));
+	r.resources = {
+		kinds: [...new Set(resources.map((a) => a.kind))].sort(),
+		projected: journal.resourceWrites
+			.filter((x) => projectedFiles.has(x.path))
+			.map((x) => path.relative(project, x.path))
+			.sort(),
+		knowledgeBound: Boolean(journal.knowledgeDirectory),
+	};
 	const owned = [w.accountRoot!, project, peer.home!];
 	const writes = [
 		...(mapping?.artifacts ?? []).map((a) => a.path),
@@ -14727,16 +14847,30 @@ async function runTranslateResumeLeg(
 	}
 
 	// The destination resumes the staged id: one counted turn, its own binary and home.
-	const toPeer = dest.provider !== 'grok';
-	let launchEnv: Record<string, string> = {};
-	if (toPeer) {
-		const env = peerLaunchEnv(w, peer);
-		if ('refused' in env) {
-			r.reasons.push(translationReason(env.refused, env.detail));
-			return null;
-		}
-		launchEnv = env.env;
-	}
+	const codexDef = dest.provider === 'codex' ? getAgentDefinition('codex') : undefined;
+	/** `codex [-C dir] exec --json --sandbox read-only ... -m <model> resume <id> -- <prompt>`, from the production definition. */
+	const codexArgv = (prompt: string, id: string | null) => [
+		...buildAgentArgs(codexDef as unknown as Parameters<typeof buildAgentArgs>[0], {
+			baseArgs: [...(codexDef?.args ?? [])],
+			prompt,
+			cwd: project,
+			readOnlyMode: true,
+			modelId: peer.model ?? undefined,
+			agentSessionId: id ?? undefined,
+		}),
+		...buildPromptArgv(codexDef, prompt),
+	];
+	const claudeArgv = (prompt: string, id: string | null) => [
+		'--resume',
+		id ?? '',
+		'-p',
+		prompt,
+		'--output-format',
+		'stream-json',
+		'--verbose',
+		'--model',
+		peer.model ?? '',
+	];
 	const pin = toPeer
 		? { file: peer.binary.path!, sha256: peer.binary.sha256!, model: peer.model! }
 		: undefined;
@@ -14750,21 +14884,22 @@ async function runTranslateResumeLeg(
 						cwd: project,
 						env: launchEnv,
 					}),
-					nativeArgv: (prompt: string, id: string | null) => [
-						'--resume',
-						id ?? '',
-						'-p',
-						prompt,
-						'--output-format',
-						'stream-json',
-						'--verbose',
-						'--model',
-						peer.model ?? '',
-					],
+					nativeArgv: dest.provider === 'codex' ? codexArgv : claudeArgv,
 				}
 			: {}),
 	};
 	const sessionsBefore = destinationSessions(dest);
+	// The memory sentinel reaches the destination only through the bound knowledge
+	// index, delivered on the continuation as production launches deliver it.
+	const turn: PaidFixtureTurn = journal.knowledgeDirectory
+		? {
+				...TRANSLATION_RESUME_TURN,
+				prompt:
+					bindTranslationKnowledge(TRANSLATION_RESUME_TURN.prompt, journal.knowledgeDirectory) ??
+					TRANSLATION_RESUME_TURN.prompt,
+			}
+		: TRANSLATION_RESUME_TURN;
+	/** Tool events that replay the carried call (they name its sentinel); reading the memory is allowed. */
 	let toolEvents = 0;
 	const receipt: TurnBearingReceipt = {
 		leg: translationLegName(spec.id, 'translate-resume'),
@@ -14773,10 +14908,11 @@ async function runTranslateResumeLeg(
 		spawned: 0,
 		paidRequests: 0,
 	};
-	const sent = await sendSessionTurn(s, receipt, TRANSLATION_RESUME_TURN, stagedId, {
+	const sent = await sendSessionTurn(s, receipt, turn, stagedId, {
 		parser: toPeer ? createOutputParser(dest.provider) : undefined,
 		onEvent: (ev) => {
-			if (ev.type === 'tool_use') toolEvents++;
+			if (ev.type === 'tool_use' && JSON.stringify(ev).includes(TRANSLATION_NONCES.toolSentinel))
+				toolEvents++;
 		},
 	});
 	r.spawned += receipt.spawned;
@@ -14807,14 +14943,53 @@ async function runTranslateResumeLeg(
 	);
 	check(
 		'loaded-rows',
-		loaded === rows,
-		`${loaded} of ${rows} staged rows intact under the resumed session`
+		stagedLines.length > 0 && loaded === stagedLines.length,
+		`${loaded} of ${stagedLines.length} staged lines (${rows} rows) intact under the resumed session`
 	);
+	const cited = (token: string) => run.turn.reply.tokens?.[token] === true;
 	check('fact-nonce', run.turn.reply.tokenSeen, 'the staged fact nonce in the reply');
 	check(
 		'tool-result-nonce',
-		run.turn.reply.tokens?.[TRANSLATION_NONCES.toolResult] === true,
+		cited(TRANSLATION_NONCES.toolResult),
 		'the staged tool-result nonce cited in the reply'
+	);
+	// The skill and rule must sit where the destination natively discovers them AND be reported.
+	const R = TRANSLATION_RESOURCE_NONCES;
+	const skillFile = path.join(
+		project,
+		dest.provider === 'claude-code' ? '.claude' : '.agents',
+		'skills',
+		R.skill,
+		'SKILL.md'
+	);
+	const ruleFiles = (
+		dest.provider === 'claude-code'
+			? ['CLAUDE.md']
+			: dest.provider === 'codex'
+				? ['AGENTS.md']
+				: ['AGENTS.md', 'CLAUDE.md']
+	).map((f) => path.join(project, f));
+	const ruleNative = ruleFiles.some((f) => {
+		try {
+			return fs.readFileSync(f, 'utf8').includes(R.rule);
+		} catch {
+			return false;
+		}
+	});
+	check(
+		'projected-skill',
+		fs.existsSync(skillFile) && cited(R.skill),
+		`${path.relative(project, skillFile)} ${fs.existsSync(skillFile) ? 'present' : 'absent'}; ${cited(R.skill) ? 'reported' : 'not reported'}`
+	);
+	check(
+		'projected-rule',
+		ruleNative && cited(R.rule),
+		`rule ${ruleNative ? 'in' : 'absent from'} the native instruction file; ${cited(R.rule) ? 'reported' : 'not reported'}`
+	);
+	check(
+		'memory-recalled',
+		Boolean(journal.knowledgeDirectory) && cited(R.memory),
+		`knowledge index ${journal.knowledgeDirectory ? 'bound' : 'absent'}; ${cited(R.memory) ? 'recalled' : 'not recalled'}`
 	);
 	check(
 		'carried-tool-not-executed',
@@ -14860,8 +15035,8 @@ function settleCrossProviderLeg(
  * Every declared E11 direction's legs, in order, each on its own
  * `translation:<direction>:<leg>` reservation billed to the destination
  * (spend, calls and the case deadline shared). A direction the preflight did
- * not pass stays not-run with its own reasons; a Codex destination and an ACP
- * Grok resume are honest gaps with owners. Never after an uncertain effect,
+ * not pass stays not-run with its own reasons; an ACP Grok resume is an honest
+ * gap with an owner. Never after an uncertain effect,
  * never twice, local only.
  */
 async function runCrossProviderLegs(w: AccountingLegContext): Promise<{
@@ -14893,16 +15068,13 @@ async function runCrossProviderLegs(w: AccountingLegContext): Promise<{
 				binaries: null,
 				payloadClasses: [],
 				plan: null,
+				channel: null,
+				resources: null,
 				staged: null,
 				resumed: null,
 				turns: [],
 				assertions: [],
 				openGaps: [
-					{
-						id: 'projected-resources',
-						detail: 'projected skill, rule and memory sentinels reported by the destination',
-						owner: CROSS_PROVIDER_RESOURCES_OWNER,
-					},
 					{
 						id: 'round-trip',
 						detail: 'the reverse leg and the two repeated round trips with stable lineage',
@@ -14938,11 +15110,6 @@ async function runCrossProviderLegs(w: AccountingLegContext): Promise<{
 			else if (!d || !peer) reason('translation-direction-unknown', spec.id);
 			else if (d.status !== 'pass') r.reasons.push(...d.reasons.map((x) => ({ ...x })));
 			else if (leg !== 'translate-resume') reason('translation-leg-unknown', leg);
-			else if (spec.destination === 'codex')
-				gap(
-					'the Codex destination stages through the Codex app-server import channel, which no harness leg starts yet',
-					CROSS_PROVIDER_RESOURCES_OWNER
-				);
 			else if (spec.destination === 'grok' && w.c.route !== 'native-headless')
 				gap(
 					'a staged Grok session is resumed through the native headless route only',
