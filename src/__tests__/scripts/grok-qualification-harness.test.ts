@@ -6285,7 +6285,7 @@ describe('GT1-11-09 qualification harness', () => {
 				expect(ledger.uncertainUsd).toBeGreaterThanOrEqual(transport.uncertainUsd);
 			}, 120_000);
 
-			it('an unknown native charge stays unknown on the receipt and every labelled consumer; the library recorder and the dashboard writing 0 fail their leg (A11-F25, A11-F26)', async () => {
+			it('an unknown native charge stays unknown on the receipt and every labelled consumer, the library recorder and the dashboard included (A11-F25, A11-F26 repaired by GT1-11-14P1)', async () => {
 				const { leg, acc, con } = await execute('native-headless', 'nocost');
 				const usage = acc('usage-capture');
 				expect(usage.status, usage.assertion.detail).toBe('passed');
@@ -6296,20 +6296,13 @@ describe('GT1-11-09 qualification harness', () => {
 				expect(usage.settlement).toMatchObject({ state: 'uncertain', settledUsd: 0 });
 				expect(usage.settlement!.uncertainUsd).toBeGreaterThan(0);
 				expect(usage.lifetime!.cost).toEqual({ status: 'unknown', costUsd: null });
-				expect(verdicts(leg.accountingConsumers)).toEqual([
-					['turn-recorder', 'failed'],
-					['desktop-recording', 'passed'],
-					['stats-readers', 'failed'],
-					['cue-attribution', 'passed'],
-					['context-window', 'passed'],
-					['quota-unavailable', 'passed'],
-				]);
-				// A11-F25: the library recorder writes 0 for an unknown charge.
-				expect(failedIds(con('turn-recorder'))).toEqual(['recorder-cost-label']);
-				expect(con('turn-recorder').observed).toMatchObject({ rows: 1, rowCost: 0 });
-				// A11-F26: the dashboard aggregation sums the unknown row as a priced 0.
-				expect(failedIds(con('stats-readers'))).toEqual(['aggregation-cost-label']);
-				expect(con('stats-readers').observed).toMatchObject({ dashboardCost: 0 });
+				expect(verdicts(leg.accountingConsumers)).toEqual(CONSUMERS.map((id) => [id, 'passed']));
+				// A11-F25: the library recorder leaves the unknown charge NULL, never 0.
+				expect(outcome(con('turn-recorder'), 'recorder-cost-label')).toBe('passed');
+				expect(con('turn-recorder').observed).toMatchObject({ rows: 1, rowCost: null });
+				// A11-F26: the dashboard aggregation reports no figure, never a priced 0.
+				expect(outcome(con('stats-readers'), 'aggregation-cost-label')).toBe('passed');
+				expect(con('stats-readers').observed).toMatchObject({ dashboardCost: null });
 				// The desktop ledger, the export and the Cue pipeline keep it unknown.
 				expect(con('desktop-recording').observed).toMatchObject({ costUnknown: true, rows: 1 });
 				expect(outcome(con('stats-readers'), 'export-rows')).toBe('passed');
@@ -6317,10 +6310,10 @@ describe('GT1-11-09 qualification harness', () => {
 					pipelineRuns: 1,
 					pipelineCost: null,
 				});
-				expect(leg.status).toBe('failed');
+				expect(leg.status).toBe('passed');
 			}, 120_000);
 
-			it('a partial native charge keeps its label and figure through every consumer; with no figure the same two consumers write 0 and fail', async () => {
+			it('a partial native charge keeps its label and figure through every consumer; with no figure every consumer keeps the charge unknown', async () => {
 				const withFigure = await execute('native-headless', 'partial');
 				const u = withFigure.acc('usage-capture');
 				expect(u.status, u.assertion.detail).toBe('passed');
@@ -6339,15 +6332,11 @@ describe('GT1-11-09 qualification harness', () => {
 				expect(n.usage[0].cost).toEqual({ status: 'partial', costUsd: null });
 				expect(n.turns[0].usage).toEqual({ costUsd: null, status: 'partial' });
 				expect(n.settlement).toMatchObject({ state: 'uncertain', settledUsd: 0 });
-				expect(failedIds(none.con('turn-recorder'))).toEqual(['recorder-cost-label']);
-				expect(failedIds(none.con('stats-readers'))).toEqual(['aggregation-cost-label']);
-				for (const id of [
-					'desktop-recording',
-					'cue-attribution',
-					'context-window',
-					'quota-unavailable',
-				])
-					expect(none.con(id).status, id).toBe('passed');
+				expect(verdicts(none.leg.accountingConsumers)).toEqual(
+					CONSUMERS.map((id) => [id, 'passed'])
+				);
+				expect(none.con('turn-recorder').observed).toMatchObject({ rows: 1, rowCost: null });
+				expect(none.con('stats-readers').observed).toMatchObject({ dashboardCost: null });
 				expect(none.con('cue-attribution').observed).toMatchObject({ pipelineCost: null });
 			}, 120_000);
 
