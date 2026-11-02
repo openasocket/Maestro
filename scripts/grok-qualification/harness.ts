@@ -8264,7 +8264,15 @@ type ProcessListener<A extends unknown[]> = (...args: A) => void;
  * agent-error events follow the turn. Never a second launch path: what is
  * spawned is exactly the planned argv.
  */
-function createUtilityBridge(s: SessionConsumerContext, r: UtilityLegReceipt, root: string) {
+function createUtilityBridge(
+	s: SessionConsumerContext,
+	r: UtilityLegReceipt,
+	root: string,
+	opts: {
+		/** Past this many spawn requests the bridge refuses unsent: the leg cannot spend another leg's turn. */
+		maxSpawns?: number;
+	} = {}
+) {
 	const def = getAgentDefinition('grok');
 	const listeners = {
 		data: new Set<ProcessListener<[string, string]>>(),
@@ -8336,6 +8344,8 @@ function createUtilityBridge(s: SessionConsumerContext, r: UtilityLegReceipt, ro
 			});
 			return { success: false, pid: 0 };
 		};
+		if (opts.maxSpawns !== undefined && spawns.length > opts.maxSpawns)
+			return refuse(`leg-turns-exhausted:${spawns.length}>${opts.maxSpawns}`);
 		if (!def || !agentConfig) return refuse('definition-absent');
 		if (config.toolType !== 'grok') return refuse('not-grok');
 		if (config.sessionSshRemoteConfig?.enabled) return refuse('remote-requested');
@@ -8603,6 +8613,10 @@ const utilitySameAccount = (s: SessionConsumerContext) => (dir: string | null) =
  * call on the shared reservation; then the onboarding conversation is reset
  * and the next turn must be a fresh native session carrying the wizard
  * instructions again. Every launch is planned read-only on the owned account.
+ * The malformed message must reach exactly two bridged spawns, the forced send
+ * and the counted retry with nothing between them, and the bridge refuses any
+ * spawn past the leg's own turns (more requests than `maxTurns` fails the leg),
+ * so a consumer that resends on its own neither passes nor spends another leg's turn.
  */
 const runWizardStructuredLeg: UtilityLegRunner = async (spec, s, r, problems) => {
 	const assert = assertionOn(r as unknown as SessionConsumerReceipt);
@@ -8618,7 +8632,8 @@ const runWizardStructuredLeg: UtilityLegRunner = async (spec, s, r, problems) =>
 	const project = path.join(made.root, 'project');
 	writeOwned(path.join(project, 'README.md'), 'Synthetic qualification project.\n');
 	const projectReal = fs.realpathSync(project);
-	const bridge = createUtilityBridge(s, r, made.root);
+	// Bounded by the leg's own turns: a consumer resending on its own cannot reach the next leg's.
+	const bridge = createUtilityBridge(s, r, made.root, { maxSpawns: spec.maxTurns });
 	const sameAccount = utilitySameAccount(s);
 	const [first, second] = spec.messages;
 	if (!first || !second) {
@@ -8745,6 +8760,9 @@ const runWizardStructuredLeg: UtilityLegRunner = async (spec, s, r, problems) =>
 			const baseline = s.baselineCalls();
 			const retryDelta = s.callsByKind().retry - retryCallsBefore;
 			const asRetry = bridge.spawns.filter((x) => x.as === 'retry');
+			// Counted by the spawn records' prompts: the forced send, then the one counted retry, nothing between.
+			const sends = bridge.spawns.filter((x) => x.prompt === recC.prompt).length;
+			const adjacent = retryAt === malformedAt + 1;
 			retried =
 				d.success &&
 				!!d.response &&
@@ -8752,6 +8770,8 @@ const runWizardStructuredLeg: UtilityLegRunner = async (spec, s, r, problems) =>
 				!!recD &&
 				recD.as === 'retry' &&
 				recD.prompt === recC.prompt &&
+				sends === 2 &&
+				adjacent &&
 				asRetry.length === 1 &&
 				retryDelta === 1 &&
 				turnD?.callsRecorded.retry === baseline.retry + 1 &&
@@ -8759,7 +8779,8 @@ const runWizardStructuredLeg: UtilityLegRunner = async (spec, s, r, problems) =>
 			retryDetail =
 				`rejected=true resent=${!!recD} sameMessage=${recD?.prompt === recC.prompt} ` +
 				`parsed=${d.success && !!d.response} retriesDrawn=${retryDelta} ` +
-				`turnRetry=${turnD?.callsRecorded.retry ?? 'none'} retrySpawns=${asRetry.length}`;
+				`turnRetry=${turnD?.callsRecorded.retry ?? 'none'} retrySpawns=${asRetry.length} ` +
+				`sends=${sends} adjacent=${adjacent}`;
 		} else if (!malformedRejected)
 			retryDetail =
 				`not resent: success=${c.success} error=${c.error ?? 'none'} forced=${!!recC?.forced} ` +
@@ -8814,6 +8835,9 @@ const runWizardStructuredLeg: UtilityLegRunner = async (spec, s, r, problems) =>
 		launches.length > 0 && launches.every((l) => !l.problems.length),
 		(r.observed.launches as string[]).join(' ')
 	);
+	// More spawn requests than the leg's turns is a failure whatever the assertions say.
+	if (bridge.spawns.length > spec.maxTurns)
+		problems.push(`wizard-turns-exceeded: ${bridge.spawns.length} > ${spec.maxTurns}`);
 	return bridge.control.uncertainWhy;
 };
 
