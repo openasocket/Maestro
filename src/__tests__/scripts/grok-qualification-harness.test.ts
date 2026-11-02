@@ -13,6 +13,14 @@
  * GT1-11-10B adds the offline-inspection leg (GT1-11-10A): a synthetic shell
  * stand-in, never a real Grok, run only with `--version` / `--help` under the
  * credential-free planned env, and every admission and executor guard.
+ *
+ * GT1-11-11P2 adds the paid executor (GT1-11-11P1): a synthetic Node stand-in
+ * that speaks the native streaming-json and ACP stdio protocols, never a real
+ * Grok and never a credential. An admitted leg reserves before its spawn and
+ * settles after; every refusal starts nothing and holds nothing; the child env
+ * is the planned env with only the selected credential; a timeout stops the
+ * owned child and keeps the charge uncertain, never retried; SSH and discovery
+ * legs stay not-run with their owners.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -33,13 +41,17 @@ import {
 	RUNS_ROOT,
 	admitCase,
 	buildCandidateSnapshot,
+	createBudgetLedger,
 	createCaseLifetime,
 	defaultConfigFromRunState,
 	executeOfflineLeg,
+	executePaidCase,
 	expandCases,
 	main,
 	offlineLegCase,
+	paidFixtureDigest,
 	parseProbeVersion,
+	planCaseReservation,
 	planIsolatedLaunch,
 	runOfflineLeg,
 	preflightCase,
@@ -54,6 +66,7 @@ import {
 	type QualificationCase,
 	type QualificationConfig,
 } from '../../../scripts/grok-qualification/harness';
+import { PAID_FIXTURES } from '../../../scripts/grok-qualification/paid-fixtures';
 import { getAgentCapabilities } from '../../../src/shared/maestro-lib/providers/capabilities';
 import { buildAgentEnvironment } from '../../../src/shared/maestro-lib/launch/env';
 
@@ -1535,6 +1548,818 @@ describe('GT1-11-09 qualification harness', () => {
 			expect(parseProbeVersion('grok-cli v1.2.3-rc.1+abc (build)')).toBe('1.2.3-rc.1+abc');
 			expect(parseProbeVersion('grok 2.0.10')).toBe('2.0.10');
 			expect(parseProbeVersion('grok build x1.2.3 or 20261101')).toBeNull();
+		});
+	});
+
+	describe.skipIf(process.platform === 'win32')('paid executor (GT1-11-11P2)', () => {
+		const REL = `${RUNS_ROOT}/gt1-11-11p2-${process.pid}`;
+		const ROOT = path.join(WORKSPACE, REL);
+		const BIN = path.join(ROOT, 'bin', 'grok');
+		const LOG = path.join(ROOT, 'log');
+		const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-11p2-operator-${process.pid}`);
+		const MODEL = 'claude-haiku-4-5';
+		/** Synthetic secret values the injected resolver hands out; never a credential. */
+		const SECRET = (name: string) => `synthetic-xai-${name}-value`;
+		type Mode = 'ok' | 'sleep' | 'nocost' | 'big' | 'mutate' | 'chmod' | 'vanish' | 'wrongmodel';
+		/**
+		 * The stand-in: a Node script (never a real Grok) that logs its argv, env and
+		 * pid, then answers the native streaming-json or the ACP stdio protocol with
+		 * the fixture's token. Only `process.getBuiltinModule` is used, so it runs
+		 * as CommonJS or ESM alike.
+		 */
+		const standIn = (mode: Mode): string => {
+			if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+			fs.rmSync(LOG, { recursive: true, force: true });
+			fs.mkdirSync(LOG, { recursive: true });
+			const src = [
+				`#!${process.execPath}`,
+				"const fs = process.getBuiltinModule('fs');",
+				`const MODE = ${JSON.stringify(mode)};`,
+				`const LOG = ${JSON.stringify(LOG)};`,
+				'const self = process.argv[1];',
+				'const argv = process.argv.slice(2);',
+				"const acp = argv[0] === 'agent' && argv[1] === 'stdio';",
+				'fs.writeFileSync(`${LOG}/${process.pid}.json`, JSON.stringify({ argv, env: process.env, acp }));',
+				"const tokenOf = (s) => (String(s).match(/QUALIFY-[A-Z0-9]+-T[0-9]+-OK/) || [''])[0];",
+				"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
+				'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
+				'if (!acp) {',
+				"  if (MODE === 'sleep') setTimeout(() => {}, 30000);",
+				'  else {',
+				"    if (MODE === 'mutate') { fs.chmodSync(self, 0o755); fs.appendFileSync(self, '\\n// changed\\n'); }",
+				"    if (MODE === 'chmod') fs.chmodSync(self, 0o755);",
+				"    if (MODE === 'vanish') fs.unlinkSync(self);",
+				"    const model = at('-m');",
+				"    out({ type: 'text', data: tokenOf(at('-p')) });",
+				'    const end = {',
+				"      type: 'end', stopReason: 'end_turn', requestId: 'req-synthetic',",
+				"      sessionId: at('--resume') || 'gt1-11-11p2-native-session',",
+				'      usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_tokens: 0 },',
+				'      modelUsage: { [model]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.001 } },',
+				'    };',
+				"    if (MODE !== 'nocost') end.total_cost_usd = 0.001;",
+				'    out(end);',
+				// Past the output cap it keeps running, so only the cap can stop it in time.
+				"    if (MODE === 'big') { process.stdout.write('x'.repeat(1200000)); setTimeout(() => {}, 30000); }",
+				'  }',
+				'} else {',
+				"  const sid = 'gt1-11-11p2-acp-session';",
+				"  let buf = '';",
+				"  const reply = (id, result) => out({ jsonrpc: '2.0', id, result });",
+				'  const handle = (m) => {',
+				"    if (m.method === 'initialize') reply(m.id, { protocolVersion: 1 });",
+				"    else if (m.method === 'session/new')",
+				"      reply(m.id, { sessionId: sid, models: { currentModelId: MODE === 'wrongmodel' ? 'other-model' : m.params._meta.modelId } });",
+				"    else if (m.method === 'session/prompt') {",
+				"      fs.appendFileSync(`${LOG}/prompts`, '1\\n');",
+				"      if (MODE === 'sleep') return;",
+				"      out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: tokenOf(m.params.prompt[0].text) } } } });",
+				"      reply(m.id, { stopReason: 'end_turn' });",
+				"    } else if (m.id !== undefined) out({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'Method not found' } });",
+				'  };',
+				"  process.stdin.on('data', (d) => {",
+				'    buf += d;',
+				'    let k;',
+				"    while ((k = buf.indexOf('\\n')) >= 0) {",
+				'      const line = buf.slice(0, k);',
+				'      buf = buf.slice(k + 1);',
+				'      if (line.trim()) handle(JSON.parse(line));',
+				'    }',
+				'  });',
+				"  process.stdin.on('end', () => process.exit(0));",
+				'}',
+				'',
+			].join('\n');
+			fs.writeFileSync(BIN, src);
+			fs.chmodSync(BIN, 0o555);
+			return createHash('sha256').update(fs.readFileSync(BIN)).digest('hex');
+		};
+		/** What each stand-in process recorded, in start order. */
+		const runs = (): Array<{
+			argv: string[];
+			env: Record<string, string>;
+			acp: boolean;
+			pid: number;
+		}> =>
+			fs
+				.readdirSync(LOG)
+				.filter((f) => /^\d+\.json$/.test(f))
+				.map((f) => ({
+					...JSON.parse(fs.readFileSync(path.join(LOG, f), 'utf8')),
+					pid: Number(f.slice(0, -5)),
+					at: fs.statSync(path.join(LOG, f)).mtimeMs,
+				}))
+				.sort((a, b) => a.at - b.at);
+		const prompts = () => {
+			const file = path.join(LOG, 'prompts');
+			return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n').length : 0;
+		};
+		/** A complete synthetic paid declaration over the stand-in: every admission and preflight input. */
+		const paidConfig = (
+			sha: string,
+			refs: 'secret' | 'file' = 'secret'
+		): QualificationConfig & { isolation: IsolationDeclaration } => ({
+			...liveConfig({
+				credentialReferences:
+					refs === 'secret'
+						? [
+								{
+									provider: 'grok',
+									account: 'A',
+									kind: 'secret-name',
+									name: 'GROK_QUAL_ACCOUNT_A',
+								},
+								{
+									provider: 'grok',
+									account: 'B',
+									kind: 'secret-name',
+									name: 'GROK_QUAL_ACCOUNT_B',
+								},
+							]
+						: [
+								{ provider: 'grok', account: 'A', kind: 'file', path: `${REL}/auth/a.json` },
+								{ provider: 'grok', account: 'B', kind: 'file', path: `${REL}/auth/b.json` },
+							],
+				allowedRoots: [REL],
+				allowedModels: [MODEL],
+				binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
+			}),
+			isolation: {
+				boundary: {
+					kind: 'disposable-os-account',
+					reference: 'boundary:synthetic',
+					actualHome: `${REL}/home`,
+					productionHomeMounted: false,
+					operatorCredentialsReadable: false,
+				},
+				accountRoots: { A: `${REL}/grok-a`, B: `${REL}/grok-b` },
+				remoteRoots: { 'qual-host': { root: '/srv/grok-qual', binarySha256: sha } },
+				policy: {
+					systemPolicyInspected: true,
+					managedPolicy: 'absent',
+					requiredPolicyCompatible: true,
+				},
+				resources: { hooks: 'empty', mcp: 'empty', plugins: 'synthetic-owned', envrc: 'disabled' },
+				egress: {
+					kind: 'operation-aware',
+					reference: 'egress:synthetic',
+					suppression: {
+						update: 'flags-only',
+						telemetry: 'flags-only',
+						backgroundUpload: 'unknown',
+					},
+				},
+				path: ['/usr/bin', '/bin', path.join(ROOT, 'bin')],
+			},
+		});
+		const caseOf = (id: string) => expandCases(FAMILIES, [id])[0];
+		const ids = (r: { reasons: Array<{ id: string }> }) => r.reasons.map((x) => x.id);
+		let ledgerSeq = 0;
+		const ledgerFor = (cfg: QualificationConfig, ...cases: string[]) => {
+			const ledger = createBudgetLedger(cfg, `gt1-11-11p2-${process.pid}-${++ledgerSeq}`, NOW);
+			ledger.authorizedCaseIds.push(...cases);
+			return ledger;
+		};
+		const execute = async (
+			id: string,
+			cfg: QualificationConfig,
+			opts: {
+				ledger?: ReturnType<typeof createBudgetLedger>;
+				now?: () => Date;
+				turnTimeoutMs?: number;
+				resolveSecret?: (name: string) => string | null;
+				capabilities?: HarnessCapabilities;
+				c?: QualificationCase;
+			} = {}
+		) => {
+			const ledger = opts.ledger ?? ledgerFor(cfg, id);
+			const lifetime = createCaseLifetime(1);
+			const legs = await executePaidCase(opts.c ?? caseOf(id), cfg, {
+				workspace: WORKSPACE,
+				operatorHome: OPERATOR_HOME,
+				ledger,
+				lifetime,
+				problems: validateConfig(cfg, WORKSPACE),
+				capabilities: opts.capabilities ?? ALL_CAPS,
+				now: opts.now ?? clock,
+				turnTimeoutMs: opts.turnTimeoutMs,
+				resolveSecret: opts.resolveSecret ?? SECRET,
+			});
+			const cleanup = await lifetime.cleanup();
+			return { legs, ledger, cleanup };
+		};
+		const spawnCalls = () => spawnSpies[0].mock.calls as unknown as Array<[string, string[], any]>;
+		const expectNoSpawn = () => {
+			for (const s of spawnSpies) expect(s).not.toHaveBeenCalled();
+			expect(fetchSpy).not.toHaveBeenCalled();
+		};
+		const alive = (pid: number) => {
+			try {
+				process.kill(pid, 0);
+				return true;
+			} catch {
+				return false;
+			}
+		};
+
+		beforeAll(() => {
+			for (const d of ['home', 'grok-a', 'grok-b', 'auth', 'bin', 'log', path.join('cache', 'tmp')])
+				fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+			fs.writeFileSync(path.join(ROOT, 'auth', 'a.json'), '{}');
+			fs.writeFileSync(path.join(ROOT, 'auth', 'b.json'), '{}');
+		});
+		afterAll(() => {
+			if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+			fs.rmSync(ROOT, { recursive: true, force: true });
+		});
+		beforeEach(() => {
+			spawnSpies.forEach((s) => s.mockClear());
+			fetchSpy.mockClear();
+		});
+
+		it('the fixture is admitted and preflights clean, so every refusal below is the guard under test', () => {
+			const sha = standIn('ok');
+			for (const refs of ['secret', 'file'] as const)
+				for (const id of [
+					'E03:native-headless:local',
+					'E03:acp-stdio:local',
+					'E01:native-headless:local',
+				]) {
+					const cfg = paidConfig(sha, refs);
+					expect(
+						admitCase(caseOf(id), cfg, validateConfig(cfg, WORKSPACE), ALL_CAPS, NOW),
+						id
+					).toEqual([]);
+					expect(
+						ids(
+							preflightCase(caseOf(id), cfg, { workspace: WORKSPACE, operatorHome: OPERATOR_HOME })
+						),
+						id
+					).toEqual([]);
+				}
+			expect(PAID_FIXTURES.E03.turns).toHaveLength(2);
+			expectNoSpawn();
+		});
+
+		it('an admitted native leg reserves before its first spawn, counts every call before each turn and settles exact after', async () => {
+			const sha = standIn('ok');
+			const cfg = paidConfig(sha);
+			const id = 'E03:native-headless:local';
+			const ledger = ledgerFor(cfg, id);
+			const actual =
+				await vi.importActual<typeof import('node:child_process')>('node:child_process');
+			const atSpawn: Array<{
+				state: string;
+				turnsUsed: number;
+				callsUsed: number;
+				ledgerTurns: number;
+				reserved: number;
+			}> = [];
+			spawnSpies[0].mockImplementation(((...a: Parameters<typeof actual.spawn>) => {
+				const r = ledger.reservations[0];
+				atSpawn.push({
+					state: r?.state ?? 'none',
+					turnsUsed: r?.turnsUsed ?? 0,
+					callsUsed: r?.callsUsed ?? 0,
+					ledgerTurns: ledger.turns,
+					reserved: ledger.reservedUsd,
+				});
+				return actual.spawn(...a);
+			}) as never);
+			let result: Awaited<ReturnType<typeof execute>>;
+			try {
+				result = await execute(id, cfg, { ledger });
+			} finally {
+				spawnSpies[0].mockImplementation(actual.spawn as never);
+			}
+			const [leg] = result.legs;
+			const plan = planCaseReservation(caseOf(id), cfg);
+			// The hold existed at every spawn, and the turn plus all its calls were drawn before it.
+			expect(atSpawn).toEqual([
+				{ state: 'held', turnsUsed: 1, callsUsed: 4, ledgerTurns: 1, reserved: plan.holdUsd },
+				{ state: 'held', turnsUsed: 2, callsUsed: 8, ledgerTurns: 2, reserved: plan.holdUsd },
+			]);
+			expect(leg.turns.map((t) => t.callsRecorded)).toEqual([
+				{ 'model-round': 2, child: 1, retry: 1, 'side-model': 0, compaction: 0 },
+				{ 'model-round': 2, child: 1, retry: 1, 'side-model': 0, compaction: 0 },
+			]);
+			expect(leg).toMatchObject({
+				leg: 'main',
+				account: 'A',
+				route: 'native-headless',
+				status: 'passed',
+				reasons: [],
+				spawned: 2,
+				paidRequests: 2,
+				binary: { sha256Pinned: sha, sha256AtSpawn: sha, sha256After: sha },
+				settlement: {
+					state: 'settled',
+					settledUsd: 0.002,
+					uncertainUsd: 0,
+					reason: 'observed-exact-usage',
+				},
+			});
+			expect(leg.reservationId).toBe(ledger.reservations[0].id);
+			expect(ledger).toMatchObject({
+				reservedUsd: 0,
+				settledUsd: 0.002,
+				uncertainUsd: 0,
+				turns: 2,
+				calls: 8,
+			});
+			expect(ledger.reservations).toHaveLength(1);
+			expect(ledger.reservations[0]).toMatchObject({ state: 'settled', uncertainEffect: false });
+			// The second turn resumed the first turn's native session; prompts are fixture references.
+			const [one, two] = spawnCalls();
+			expect(one[0]).toBe(fs.realpathSync(BIN));
+			expect(one[1]).not.toContain('--resume');
+			expect(two[1]).toEqual(expect.arrayContaining(['--resume', 'gt1-11-11p2-native-session']));
+			expect(one[1]).toEqual(
+				expect.arrayContaining([
+					'--output-format',
+					'streaming-json',
+					'-m',
+					MODEL,
+					'--permission-mode',
+					'plan',
+				])
+			);
+			expect(leg.turns[1].argv).toContain('<fixture:E03:turn-2>');
+			expect(
+				leg.turns.map((t) => [t.sessionId, t.terminal, t.reply.tokenSeen, t.model, t.usage])
+			).toEqual([
+				['gt1-11-11p2-native-session', 'success', true, MODEL, { costUsd: 0.001, status: 'exact' }],
+				['gt1-11-11p2-native-session', 'success', true, MODEL, { costUsd: 0.001, status: 'exact' }],
+			]);
+			// The receipt names the fixture by digest and records every assertion with its outcome.
+			expect(leg.fixture).toEqual({
+				schema: PAID_FIXTURES.E03.schema,
+				family: 'E03',
+				sha256: paidFixtureDigest(PAID_FIXTURES.E03),
+			});
+			expect(
+				leg.assertions.filter((a) => a.outcome !== 'not-evaluated').map((a) => [a.id, a.outcome])
+			).toEqual(PAID_FIXTURES.E03.assertions.map((a) => [a, 'passed']));
+			expect(leg.assertions.filter((a) => a.outcome === 'not-evaluated')).toEqual(
+				PAID_FIXTURES.E03.unevaluated.map((u) => ({ ...u, outcome: 'not-evaluated' }))
+			);
+			const text = JSON.stringify(result.legs);
+			expect(text).not.toContain('Do not use any tool');
+			expect(text).not.toContain(SECRET('GROK_QUAL_ACCOUNT_A'));
+			expect(result.cleanup).toEqual({ ownedProcesses: 2, stopped: 0 });
+			expect(fetchSpy).not.toHaveBeenCalled();
+		});
+
+		it('the child env equals the planned env with only the selected account credential reference', async () => {
+			const saved = { xai: process.env.XAI_API_KEY, auth: process.env.GROK_AUTH_PATH };
+			process.env.XAI_API_KEY = 'SENTINEL-AMBIENT-XAI';
+			process.env.GROK_AUTH_PATH = '/SENTINEL/auth.json';
+			try {
+				// Secret-name: the planned env with the reference replaced by account A's resolved value.
+				const sha = standIn('ok');
+				const cfg = paidConfig(sha);
+				const asked: string[] = [];
+				const { legs } = await execute('E03:native-headless:local', cfg, {
+					resolveSecret: (name) => (asked.push(name), SECRET(name)),
+				});
+				expect(legs[0].status).toBe('passed');
+				expect(asked).toEqual(['GROK_QUAL_ACCOUNT_A']);
+				const plan = planIsolatedLaunch(
+					caseOf('E03:native-headless:local'),
+					cfg,
+					'A',
+					'credentialed',
+					WORKSPACE,
+					OPERATOR_HOME
+				)!;
+				expect(plan.env.XAI_API_KEY).toBe('secret-ref:GROK_QUAL_ACCOUNT_A');
+				const want = { ...plan.env, XAI_API_KEY: SECRET('GROK_QUAL_ACCOUNT_A') };
+				for (const [, , opts] of spawnCalls()) {
+					expect(opts.env).toEqual(want);
+					expect(opts.shell).toBe(false);
+					expect(opts.cwd).toBe(path.join(ROOT, 'home'));
+				}
+				expect(legs[0].launch).toEqual({
+					credentialMode: 'secret-name',
+					keys: Object.keys(want).sort(),
+				});
+				for (const run of runs()) {
+					for (const [k, v] of Object.entries(GROK_CONTROL_ENV)) expect(run.env[k], k).toBe(v);
+					expect(run.env.XAI_API_KEY).toBe(SECRET('GROK_QUAL_ACCOUNT_A'));
+					expect(run.env.GROK_AUTH_PATH).toBeUndefined();
+					expect(JSON.stringify(run.env)).not.toMatch(/SENTINEL|GROK_QUAL_ACCOUNT_B/);
+				}
+
+				// File mode, two accounts: each leg sees its own auth file and account home, nothing of the other.
+				spawnSpies.forEach((s) => s.mockClear());
+				standIn('ok');
+				const fileCfg = paidConfig(sha, 'file');
+				const two = await execute('E01:native-headless:local', fileCfg);
+				expect(two.legs.map((l) => [l.leg, l.account, l.status])).toEqual([
+					['account-A', 'A', 'passed'],
+					['account-B', 'B', 'passed'],
+				]);
+				const calls = spawnCalls();
+				expect(calls).toHaveLength(2);
+				for (const [i, account] of (['A', 'B'] as const).entries()) {
+					const p = planIsolatedLaunch(
+						caseOf('E01:native-headless:local'),
+						fileCfg,
+						account,
+						'credentialed',
+						WORKSPACE,
+						OPERATOR_HOME
+					)!;
+					expect(calls[i][2].env, account).toEqual(p.env);
+					expect(calls[i][2].env.GROK_AUTH_PATH).toBe(
+						path.join(ROOT, 'auth', `${account.toLowerCase()}.json`)
+					);
+					expect(calls[i][2].env.GROK_HOME).toBe(path.join(ROOT, `grok-${account.toLowerCase()}`));
+					expect(calls[i][2].env.XAI_API_KEY).toBeUndefined();
+				}
+				// Secret-name, two accounts: leg B resolves and receives account B's reference only.
+				spawnSpies.forEach((s) => s.mockClear());
+				const both = await execute('E01:native-headless:local', cfg);
+				expect(both.legs.map((l) => l.status)).toEqual(['passed', 'passed']);
+				expect(spawnCalls().map(([, , opts]) => opts.env.XAI_API_KEY)).toEqual([
+					SECRET('GROK_QUAL_ACCOUNT_A'),
+					SECRET('GROK_QUAL_ACCOUNT_B'),
+				]);
+				standIn('ok');
+				spawnSpies.forEach((s) => s.mockClear());
+				await execute('E01:native-headless:local', fileCfg);
+				const [a, b] = runs();
+				expect(a.env.GROK_AUTH_PATH).toMatch(/a\.json$/);
+				expect(b.env.GROK_AUTH_PATH).toMatch(/b\.json$/);
+				expect(JSON.stringify(a.env)).not.toMatch(/b\.json|grok-b|SENTINEL/);
+				expect(JSON.stringify(b.env)).not.toMatch(/a\.json|grok-a|SENTINEL/);
+			} finally {
+				for (const [k, v] of [
+					['XAI_API_KEY', saved.xai],
+					['GROK_AUTH_PATH', saved.auth],
+				] as const)
+					if (v === undefined) delete process.env[k];
+					else process.env[k] = v;
+			}
+		});
+
+		it('refuses with zero spawn and no hold: hash mismatch, expired authorization, credential, admission and fixture guards', async () => {
+			const sha = standIn('ok');
+			const id = 'E03:native-headless:local';
+			type Flip = {
+				label: string;
+				want: Array<{ id: string; kind?: string }>;
+				cfg?: (c: ReturnType<typeof paidConfig>) => void;
+				opts?: Parameters<typeof execute>[2];
+				before?: () => void;
+				after?: () => void;
+			};
+			const flips: Flip[] = [
+				{
+					label: 'hash mismatch',
+					cfg: (c) => (c.binary.sha256 = 'c'.repeat(64)),
+					want: [{ id: 'binary-hash-mismatch', kind: 'isolation-preflight' }],
+				},
+				{
+					label: 'expired authorization',
+					cfg: (c) => (c.expiresAt = new Date(NOW.getTime() - 1000).toISOString()),
+					want: [{ id: 'live-authorization-expired', kind: 'admission-input' }],
+				},
+				{
+					label: 'unresolvable secret',
+					opts: { resolveSecret: () => null },
+					want: [{ id: 'credential-unresolvable', kind: 'paid-execution' }],
+				},
+				{
+					label: 'blank secret',
+					opts: { resolveSecret: () => '   ' },
+					want: [{ id: 'env-credential-absent', kind: 'isolation-preflight' }],
+				},
+				{
+					label: 'credential file absent',
+					cfg: (c) => {
+						c.credentialReferences = [
+							{ provider: 'grok', account: 'A', kind: 'file', path: `${REL}/auth/gone.json` },
+						];
+					},
+					want: [{ id: 'credential-file-absent', kind: 'paid-execution' }],
+				},
+				{
+					label: 'home absent',
+					cfg: (c) => (c.isolation.boundary!.actualHome = `${REL}/no-home`),
+					want: [{ id: 'paid-home-absent', kind: 'paid-execution' }],
+				},
+				{
+					label: 'not admitted on the ledger',
+					opts: { ledger: undefined },
+					want: [{ id: 'case-not-admitted', kind: 'paid-execution' }],
+				},
+				{
+					label: 'no paid class',
+					opts: { c: { ...caseOf(id), classes: ['deterministic'] } },
+					want: [{ id: 'paid-leg-absent', kind: 'paid-execution' }],
+				},
+				{
+					label: 'no fixture',
+					opts: { c: { ...caseOf(id), family: 'E02' } },
+					want: [{ id: 'fixture-absent', kind: 'paid-execution' }],
+				},
+				{
+					label: 'fixture longer than the turn allowance',
+					cfg: (c) => (c.limits = { ...c.limits, perCase: { ...c.limits.perCase, maxTurns: 1 } }),
+					want: [{ id: 'fixture-exceeds-turn-allowance', kind: 'paid-execution' }],
+				},
+				{
+					label: 'executor off',
+					opts: { capabilities: { ...ALL_CAPS, caseExecutor: false } },
+					want: [{ id: 'case-executor-unimplemented', kind: 'harness-capability' }],
+				},
+			];
+			for (const f of flips) {
+				const cfg = paidConfig(sha);
+				f.cfg?.(cfg);
+				const ledger =
+					f.label === 'not admitted on the ledger' ? ledgerFor(cfg) : ledgerFor(cfg, id);
+				const { legs } = await execute(id, cfg, { ...f.opts, ledger });
+				expect(legs, f.label).toHaveLength(1);
+				for (const w of f.want)
+					expect(legs[0].reasons, f.label).toContainEqual(expect.objectContaining(w));
+				expect(legs[0], f.label).toMatchObject({
+					status: 'not-run',
+					spawned: 0,
+					paidRequests: 0,
+					reservationId: null,
+					turns: [],
+				});
+				expect(ledger.reservations, f.label).toEqual([]);
+				expect([ledger.turns, ledger.calls, ledger.reservedUsd], f.label).toEqual([0, 0, 0]);
+			}
+			expectNoSpawn();
+			expect(runs()).toEqual([]);
+		});
+
+		it('a binary that changes, opens or vanishes after a turn or a leg never starts again', async () => {
+			// Changed by turn 1: turn 2 is refused before its spawn; turn 1 alone settles exact.
+			let sha = standIn('mutate');
+			let r = await execute('E03:native-headless:local', paidConfig(sha));
+			expect(ids(r.legs[0])).toEqual([
+				'binary-hash-mismatch-at-spawn',
+				'binary-changed-during-leg',
+			]);
+			expect([r.legs[0].spawned, r.legs[0].turns.length, r.legs[0].status]).toEqual([
+				1,
+				1,
+				'failed',
+			]);
+			expect(r.legs[0].binary.sha256After).not.toBe(sha);
+			expect(r.legs[0].settlement).toMatchObject({ state: 'settled', settledUsd: 0.001 });
+			expect(r.legs[0].assertions).toContainEqual(
+				expect.objectContaining({ id: 'binary-unchanged', outcome: 'failed' })
+			);
+			// Leg A changes, opens or removes the binary: leg B re-checks it and never reserves or spawns.
+			const legB: Array<[Mode, string]> = [
+				['mutate', 'binary-hash-mismatch-at-spawn'],
+				['chmod', 'binary-mutable'],
+				['vanish', 'binary-unreadable'],
+			];
+			for (const [mode, want] of legB) {
+				spawnSpies.forEach((s) => s.mockClear());
+				sha = standIn(mode);
+				r = await execute('E01:native-headless:local', paidConfig(sha));
+				const [a, b] = r.legs;
+				expect(a.spawned, mode).toBe(1);
+				expect(ids(b), mode).toEqual([want]);
+				expect(b, mode).toMatchObject({ status: 'not-run', spawned: 0, reservationId: null });
+				expect(
+					r.ledger.reservations.map((x) => x.leg),
+					mode
+				).toEqual(['account-A']);
+				expect(spawnCalls(), mode).toHaveLength(1);
+			}
+		});
+
+		it('a reservation deadline that passes before a turn refuses it unsent and releases the hold', async () => {
+			const sha = standIn('ok');
+			const cfg = paidConfig(sha);
+			const id = 'E03:native-headless:local';
+			const ledger = ledgerFor(cfg, id);
+			const late = new Date(NOW.getTime() + 121_000);
+			const { legs } = await execute(id, cfg, {
+				ledger,
+				now: () => (ledger.reservations.length ? late : NOW),
+			});
+			expect(ids(legs[0])).toEqual(['reservation-deadline-passed']);
+			expect(legs[0]).toMatchObject({ status: 'not-run', spawned: 0, paidRequests: 0 });
+			expect(legs[0].settlement).toMatchObject({
+				state: 'released',
+				settledUsd: 0,
+				uncertainUsd: 0,
+			});
+			expect([ledger.turns, ledger.calls, ledger.reservedUsd]).toEqual([0, 0, 0]);
+			expectNoSpawn();
+		});
+
+		it('a native turn past its bound is stopped as an owned child, stays uncertain and is never retried', async () => {
+			const sha = standIn('sleep');
+			const cfg = paidConfig(sha);
+			const id = 'E03:native-headless:local';
+			const ledger = ledgerFor(cfg, id);
+			const started = Date.now();
+			const { legs } = await execute(id, cfg, { ledger, turnTimeoutMs: 300 });
+			expect(Date.now() - started).toBeLessThan(15_000);
+			const [leg] = legs;
+			expect(ids(leg)).toEqual(['turn-timeout']);
+			expect(leg).toMatchObject({ status: 'failed', spawned: 1, paidRequests: 1 });
+			expect(leg.turns).toHaveLength(1);
+			expect(leg.turns[0]).toMatchObject({ timedOut: true, signal: 'SIGTERM', terminal: 'none' });
+			expect(leg.settlement).toMatchObject({
+				state: 'uncertain',
+				settledUsd: 0,
+				reason: 'turn-timeout',
+			});
+			expect(leg.settlement!.uncertainUsd).toBe(ledger.reservations[0].holdUsd);
+			expect(ledger.reservations[0]).toMatchObject({
+				state: 'uncertain',
+				uncertainEffect: true,
+				turnsUsed: 1,
+			});
+			const [run] = runs();
+			expect(alive(run.pid)).toBe(false);
+			// The same leg on the same ledger is refused, never re-sent.
+			spawnSpies.forEach((s) => s.mockClear());
+			const again = await execute(id, cfg, { ledger });
+			expect(ids(again.legs[0])).toEqual(['uncertain-prior-effect']);
+			expect(again.legs[0]).toMatchObject({ status: 'not-run', spawned: 0, reservationId: null });
+			expect(ledger.reservations).toHaveLength(1);
+			expectNoSpawn();
+		});
+
+		it('a native charge that is not reported exactly stays uncertain, never settled as zero', async () => {
+			const sha = standIn('nocost');
+			const { legs, ledger } = await execute('E03:native-headless:local', paidConfig(sha));
+			expect(legs[0].turns.map((t) => t.usage.status)).toEqual(['unknown', 'unknown']);
+			expect(legs[0].settlement).toMatchObject({
+				state: 'uncertain',
+				settledUsd: 0,
+				reason: 'charge-unknown',
+			});
+			expect(ledger.uncertainUsd).toBe(ledger.reservations[0].holdUsd);
+			expect(ledger.settledUsd).toBe(0);
+		});
+
+		it('an unbounded turn stays uncertain even after it reported an exact charge', async () => {
+			const sha = standIn('big');
+			const started = Date.now();
+			const { legs, ledger } = await execute('E03:native-headless:local', paidConfig(sha));
+			expect(Date.now() - started).toBeLessThan(15_000);
+			const [leg] = legs;
+			expect(ids(leg)).toEqual(['turn-output-unbounded']);
+			expect(leg.turns).toHaveLength(1);
+			expect(leg.turns[0].stdout.truncated).toBe(true);
+			expect(leg.turns[0].usage).toEqual({ costUsd: 0.001, status: 'exact' });
+			// The known part is kept; the rest of the hold stays uncertain, never refunded.
+			expect(leg.settlement).toMatchObject({
+				state: 'uncertain',
+				settledUsd: 0.001,
+				reason: 'turn-output-unbounded',
+			});
+			expect(ledger.reservations[0].uncertainEffect).toBe(true);
+			expect(alive(runs()[0].pid)).toBe(false);
+		});
+
+		it('an ACP leg runs one owned child, prompts only after the model is acknowledged and keeps the charge uncertain', async () => {
+			const sha = standIn('ok');
+			const id = 'E03:acp-stdio:local';
+			const cfg = paidConfig(sha);
+			const { legs, ledger, cleanup } = await execute(id, cfg);
+			const [leg] = legs;
+			expect(leg).toMatchObject({
+				route: 'acp-stdio',
+				status: 'passed',
+				spawned: 1,
+				paidRequests: 2,
+				reasons: [],
+			});
+			expect(spawnCalls().map(([file, argv]) => [file, argv])).toEqual([
+				[fs.realpathSync(BIN), ['agent', 'stdio']],
+			]);
+			const plan = planIsolatedLaunch(
+				caseOf(id),
+				cfg,
+				'A',
+				'credentialed',
+				WORKSPACE,
+				OPERATOR_HOME
+			)!;
+			expect(spawnCalls()[0][2].env).toEqual({
+				...plan.env,
+				XAI_API_KEY: SECRET('GROK_QUAL_ACCOUNT_A'),
+			});
+			expect(prompts()).toBe(2);
+			expect(leg.turns.map((t) => [t.terminal, t.reply.tokenSeen, t.model, t.sessionId])).toEqual([
+				['success', true, MODEL, 'gt1-11-11p2-acp-session'],
+				['success', true, MODEL, 'gt1-11-11p2-acp-session'],
+			]);
+			// ACP reports no settled charge: usage is not evaluated, and the hold stays uncertain.
+			expect(leg.assertions).toContainEqual(
+				expect.objectContaining({
+					id: 'usage-reported',
+					outcome: 'not-evaluated',
+					owner: 'GT1-11-11F',
+				})
+			);
+			expect(leg.assertions.filter((a) => a.outcome === 'failed')).toEqual([]);
+			expect(leg.settlement).toMatchObject({ state: 'uncertain', reason: 'charge-unknown' });
+			expect(ledger.reservations[0]).toMatchObject({
+				state: 'uncertain',
+				uncertainEffect: true,
+				turnsUsed: 2,
+			});
+			// The leg stopped its own child before cleanup had anything left to stop.
+			expect(cleanup).toEqual({ ownedProcesses: 1, stopped: 0 });
+			expect(alive(runs()[0].pid)).toBe(false);
+
+			// A model the session does not acknowledge stops the leg before any prompt; nothing was counted.
+			spawnSpies.forEach((s) => s.mockClear());
+			const wrong = await execute(id, paidConfig(standIn('wrongmodel')));
+			expect(ids(wrong.legs[0])).toEqual(['model-unacknowledged']);
+			expect(wrong.legs[0]).toMatchObject({ spawned: 1, paidRequests: 0, turns: [] });
+			expect(wrong.legs[0].settlement).toMatchObject({ state: 'released' });
+			expect([wrong.ledger.turns, wrong.ledger.calls]).toEqual([0, 0]);
+			expect(prompts()).toBe(0);
+			expect(alive(runs()[0].pid)).toBe(false);
+		});
+
+		it('an ACP turn past its bound stops the owned child, stays uncertain and sends no second prompt', async () => {
+			const sha = standIn('sleep');
+			const id = 'E03:acp-stdio:local';
+			const { legs, ledger } = await execute(id, paidConfig(sha), { turnTimeoutMs: 1500 });
+			expect(ids(legs[0])).toEqual(['turn-timeout']);
+			expect(legs[0]).toMatchObject({ spawned: 1, paidRequests: 1 });
+			expect(legs[0].turns[0]).toMatchObject({ timedOut: true, spawnError: 'transport:timeout' });
+			expect(legs[0].settlement).toMatchObject({ state: 'uncertain', reason: 'turn-timeout' });
+			expect(ledger.reservations[0]).toMatchObject({ state: 'uncertain', turnsUsed: 1 });
+			expect(prompts()).toBe(1);
+			expect(alive(runs()[0].pid)).toBe(false);
+			spawnSpies.forEach((s) => s.mockClear());
+			const again = await execute(id, paidConfig(sha), { ledger });
+			expect(ids(again.legs[0])).toEqual(['uncertain-prior-effect']);
+			expectNoSpawn();
+		});
+
+		it('SSH and discovery legs stay not-run with their owners and spawn nothing', async () => {
+			const sha = standIn('ok');
+			const cfg = paidConfig(sha);
+			const selected = [
+				'E03:native-headless:ssh',
+				'E03:acp-stdio:ssh',
+				'E07:native-headless:local',
+				'E02:acp-stdio:local',
+			];
+			const { receipt } = await runQualification({
+				workspace: WORKSPACE,
+				runState: RUN_STATE,
+				config: {
+					...cfg,
+					discovery: {
+						authorizationReference: 'discovery:synthetic',
+						operations: ['acp-initialize'],
+					},
+				},
+				selectedCases: selected,
+				capabilities: ALL_CAPS,
+				now: clock,
+				runId: runId(),
+				operatorHome: OPERATOR_HOME,
+				resolveSecret: SECRET,
+			});
+			const owners: Record<string, string> = {
+				'E03:native-headless:ssh': 'unassigned-ssh-paid-executor',
+				'E03:acp-stdio:ssh': 'unassigned-ssh-paid-executor',
+				'E07:native-headless:local': 'GT1-11-11A',
+				'E02:acp-stdio:local': 'GT1-11-11A',
+			};
+			expect(receipt.cases.map((c) => c.caseId).sort()).toEqual([...selected].sort());
+			for (const c of receipt.cases) {
+				expect(c.status, c.caseId).toBe('not-run');
+				expect(c.reasons.find((r) => r.id === 'case-executor-unimplemented')?.owner, c.caseId).toBe(
+					owners[c.caseId]
+				);
+				expect(c.paidLegs, c.caseId).toEqual([]);
+				expect([c.spawned, c.paidRequests, c.networkContacts], c.caseId).toEqual([0, 0, 0]);
+				expect(c.budget.reservations, c.caseId).toEqual([]);
+			}
+			// Called directly, the executor re-checks admission and refuses the same legs.
+			for (const id of ['E03:native-headless:ssh', 'E07:native-headless:local']) {
+				const { legs, ledger } = await execute(id, cfg);
+				expect(legs[0].reasons.find((r) => r.id === 'case-executor-unimplemented')?.owner, id).toBe(
+					owners[id]
+				);
+				expect(legs[0], id).toMatchObject({ status: 'not-run', spawned: 0, reservationId: null });
+				expect(ledger.reservations, id).toEqual([]);
+			}
+			expectNoSpawn();
+			expect(runs()).toEqual([]);
 		});
 	});
 });

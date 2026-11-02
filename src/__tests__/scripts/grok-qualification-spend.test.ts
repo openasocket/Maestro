@@ -8,9 +8,18 @@
  * provider cap) is held on the one shared run ledger; request and token
  * bounds alone never pass the dollar gate, an unknown cost stays unknown and
  * an uncertain charge is never refunded, read as zero, or retried.
+ *
+ * GT1-11-11P2 drives the paid executor (GT1-11-11P1) against the same shared
+ * ledger: an earlier uncertain effect or an already-run leg is never re-sent,
+ * and a run budget or turn limit exhausted by an earlier case refuses the
+ * reservation, each with the child_process entry points spied and a pinned
+ * stand-in that would leave a marker if it were ever started.
  */
-import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { createHash, randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
 	CONFIG_SCHEMA,
@@ -18,9 +27,13 @@ import {
 	RUNS_ROOT,
 	admitCase,
 	createBudgetLedger,
+	createCaseLifetime,
+	executePaidCase,
 	expandCases,
 	markUncertainEffect,
+	paidCallsPerTurn,
 	planCaseReservation,
+	preflightCase,
 	recordBillableCall,
 	recordUserTurn,
 	releaseReservation,
@@ -33,6 +46,34 @@ import {
 	type QualificationConfig,
 	type ReservationRequest,
 } from '../../../scripts/grok-qualification/harness';
+
+/** Pass-through spies on every child_process entry point, so a test can prove none ran. */
+const childProcess = vi.hoisted(() => {
+	const spies: Array<ReturnType<typeof vi.fn>> = [];
+	const factory = async (importOriginal: () => Promise<typeof import('node:child_process')>) => {
+		const actual = await importOriginal();
+		const wrapped: Record<string, unknown> = { ...actual };
+		for (const name of [
+			'spawn',
+			'spawnSync',
+			'exec',
+			'execSync',
+			'execFile',
+			'execFileSync',
+			'fork',
+		]) {
+			const spy = vi.fn((actual as unknown as Record<string, (...a: unknown[]) => unknown>)[name]);
+			spies.push(spy);
+			wrapped[name] = spy;
+		}
+		return { ...wrapped, default: wrapped };
+	};
+	return { spies, factory };
+});
+vi.mock('node:child_process', (importOriginal) => childProcess.factory(importOriginal as never));
+vi.mock('child_process', (importOriginal) => childProcess.factory(importOriginal as never));
+const spawnSpies = childProcess.spies;
+const WORKSPACE = path.resolve(__dirname, '../../..');
 
 /** A priced stand-in model (the price table knows no Grok model). */
 const PRICED = 'claude-haiku-4-5';
@@ -551,4 +592,209 @@ describe('GT1-11-09 qualification spend admission', () => {
 			);
 		});
 	});
+
+	describe.skipIf(process.platform === 'win32')(
+		'the paid executor on the shared ledger (GT1-11-11P2)',
+		() => {
+			const REL = `${RUNS_ROOT}/gt1-11-11p2-spend-${process.pid}`;
+			const ROOT = path.join(WORKSPACE, REL);
+			const BIN = path.join(ROOT, 'bin', 'grok');
+			const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-11p2-spend-operator-${process.pid}`);
+			/** A pinned stand-in that writes a marker if it is ever started; every case below must refuse first. */
+			const MARKER = path.join(ROOT, 'started');
+			let sha = '';
+			const paidConfig = (patch: Partial<QualificationConfig> = {}): QualificationConfig =>
+				liveConfig({
+					credentialReferences: [
+						{ provider: 'grok', account: 'A', kind: 'file', path: `${REL}/auth/a.json` },
+						{ provider: 'grok', account: 'B', kind: 'file', path: `${REL}/auth/b.json` },
+					],
+					allowedRoots: [REL],
+					binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
+					isolation: {
+						boundary: {
+							kind: 'disposable-os-account',
+							reference: 'boundary:synthetic',
+							actualHome: `${REL}/home`,
+							productionHomeMounted: false,
+							operatorCredentialsReadable: false,
+						},
+						accountRoots: { A: `${REL}/grok-a`, B: `${REL}/grok-b` },
+						remoteRoots: {},
+						policy: {
+							systemPolicyInspected: true,
+							managedPolicy: 'absent',
+							requiredPolicyCompatible: true,
+						},
+						resources: { hooks: 'empty', mcp: 'empty', plugins: 'empty', envrc: 'disabled' },
+						egress: {
+							kind: 'operation-aware',
+							reference: 'egress:synthetic',
+							suppression: {
+								update: 'flags-only',
+								telemetry: 'flags-only',
+								backgroundUpload: 'unknown',
+							},
+						},
+						path: ['/usr/bin', '/bin'],
+					},
+					...patch,
+				});
+			const execute = (c: QualificationCase, config: QualificationConfig, ledger: BudgetLedger) =>
+				executePaidCase(c, config, {
+					workspace: WORKSPACE,
+					operatorHome: OPERATOR_HOME,
+					ledger,
+					lifetime: createCaseLifetime(1),
+					problems: [],
+					capabilities: ALL_CAPS,
+					now: () => NOW,
+				});
+			/** A closed earlier reservation of `c` on the ledger, in the state the case needs. */
+			const prior = (
+				ledger: BudgetLedger,
+				config: QualificationConfig,
+				c: QualificationCase,
+				close: 'uncertain' | 'settled' | 'turns-settled'
+			) => {
+				const r = held(reserveSpend(ledger, config, request(c, config), NOW));
+				if (close === 'uncertain') {
+					recordUserTurn(ledger, r.id, NOW);
+					markUncertainEffect(ledger, r.id);
+					settleReservation(ledger, r.id, { kind: 'uncertain', reason: 'synthetic-timeout' }, NOW);
+				} else {
+					if (close === 'turns-settled') {
+						recordUserTurn(ledger, r.id, NOW);
+						recordUserTurn(ledger, r.id, NOW);
+					}
+					settleReservation(
+						ledger,
+						r.id,
+						{
+							kind: 'settled',
+							actualUsd: close === 'settled' ? r.holdUsd : 0,
+							reason: 'synthetic',
+						},
+						NOW
+					);
+				}
+				return r;
+			};
+			const snapshot = (l: BudgetLedger) =>
+				JSON.stringify([
+					l.reservations,
+					l.turns,
+					l.calls,
+					l.reservedUsd,
+					l.settledUsd,
+					l.uncertainUsd,
+				]);
+			const expectNothingStarted = () => {
+				for (const s of spawnSpies) expect(s).not.toHaveBeenCalled();
+				expect(fs.existsSync(MARKER)).toBe(false);
+			};
+
+			beforeAll(() => {
+				for (const d of ['home', 'grok-a', 'grok-b', 'auth', 'bin', path.join('cache', 'tmp')])
+					fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+				fs.writeFileSync(path.join(ROOT, 'auth', 'a.json'), '{}');
+				fs.writeFileSync(path.join(ROOT, 'auth', 'b.json'), '{}');
+				fs.writeFileSync(BIN, `#!/bin/sh\ntouch '${MARKER}'\nexit 0\n`);
+				fs.chmodSync(BIN, 0o555);
+				sha = createHash('sha256').update(fs.readFileSync(BIN)).digest('hex');
+			});
+			afterAll(() => {
+				if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+				fs.rmSync(ROOT, { recursive: true, force: true });
+			});
+			beforeEach(() => {
+				spawnSpies.forEach((s) => s.mockClear());
+				fs.rmSync(MARKER, { force: true });
+			});
+
+			it('the control: the fixture is admitted, preflights clean and draws every per-turn call kind', () => {
+				const config = paidConfig();
+				expect(admitCase(E03, config, [], ALL_CAPS, NOW)).toEqual([]);
+				expect(admitCase(E05, config, [], ALL_CAPS, NOW)).toEqual([]);
+				expect(
+					preflightCase(E05, config, { workspace: WORKSPACE, operatorHome: OPERATOR_HOME }).reasons
+				).toEqual([]);
+				const r = held(reserveSpend(ledgerFor(config, E05), config, request(E05, config), NOW));
+				expect(paidCallsPerTurn(config, r)).toEqual({
+					'model-round': 2,
+					child: 1,
+					retry: 1,
+					'side-model': 0,
+					compaction: 0,
+				});
+				// No per-turn bounds (a covering cap): an even share of the allowance as model rounds.
+				const capped = { ...config, spendBounds: undefined } as QualificationConfig;
+				expect(paidCallsPerTurn(capped, { callAllowance: 9, turnAllowance: 2 })).toMatchObject({
+					'model-round': 4,
+					child: 0,
+					retry: 0,
+				});
+				expect(
+					paidCallsPerTurn(capped, { callAllowance: 0, turnAllowance: 0 })['model-round']
+				).toBe(1);
+			});
+
+			it('a leg whose earlier effect is uncertain is never retried, and a leg that ran never runs twice', async () => {
+				const config = paidConfig();
+				for (const [close, want] of [
+					['uncertain', 'uncertain-prior-effect'],
+					['settled', 'leg-already-run'],
+				] as const) {
+					const ledger = ledgerFor(config, E05);
+					prior(ledger, config, E05, close);
+					const before = snapshot(ledger);
+					const [leg] = await execute(E05, config, ledger);
+					expect(ids(leg.reasons), close).toEqual([want]);
+					expect(leg, close).toMatchObject({ status: 'not-run', spawned: 0, reservationId: null });
+					expect(snapshot(ledger), close).toBe(before);
+				}
+				expectNothingStarted();
+			});
+
+			it('an exhausted shared run budget or turn limit refuses the reservation before any spawn', async () => {
+				const base = paidConfig();
+				const hold = planCaseReservation(E05, base).holdUsd;
+				const cases: Array<
+					[string, Partial<QualificationConfig>, 'settled' | 'turns-settled', string]
+				> = [
+					[
+						'dollars',
+						{
+							limits: {
+								...base.limits,
+								budgetUsd: hold * 1.5,
+								perCase: { ...base.limits.perCase, budgetUsd: hold * 1.5 },
+							},
+						},
+						'settled',
+						'run-budget-exhausted',
+					],
+					[
+						'turns',
+						{ limits: { ...base.limits, maxTurns: 3 } },
+						'turns-settled',
+						'run-turns-exhausted',
+					],
+				];
+				for (const [label, patch, close, want] of cases) {
+					const config = paidConfig(patch);
+					// The case alone is admissible: only the earlier case on the same ledger exhausts the run.
+					expect(admitCase(E05, config, [], ALL_CAPS, NOW), label).toEqual([]);
+					const ledger = ledgerFor(config, E03, E05);
+					prior(ledger, config, E03, close);
+					const before = snapshot(ledger);
+					const [leg] = await execute(E05, config, ledger);
+					expect(ids(leg.reasons), label).toEqual([want]);
+					expect(leg, label).toMatchObject({ status: 'not-run', spawned: 0, reservationId: null });
+					expect(snapshot(ledger), label).toBe(before);
+				}
+				expectNothingStarted();
+			});
+		}
+	);
 });
