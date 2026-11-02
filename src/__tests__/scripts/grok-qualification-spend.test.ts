@@ -26,6 +26,11 @@
  * one retry each as its own kind on the shared reservation, every call a turn
  * drew is on the ledger, a second refusal sends nothing more, and a reservation
  * that cannot cover the compaction refuses it unsent rather than uncounted.
+ *
+ * GT1-11-11D3: the E09 utility legs (GT1-11-11D1..D2) on the same ledger: the
+ * wizard retry is drawn once as a retry before its spawn, a resend answered
+ * malformed again draws no second retry, and a utility turn that times out
+ * keeps its charge uncertain and refuses every later utility turn.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -143,6 +148,9 @@ const ALL_CAPS: HarnessCapabilities = {
 	// Off: the session legs run in their own block (GT1-11-11C3).
 	sessionLegs: false,
 	sessionConsumers: false,
+	// Off: the utility consumer legs run in their own block (GT1-11-11D3).
+	utilityLegs: false,
+	cheapUtilityLegs: false,
 };
 
 /** The fake budget provider: a fully authorized worst-case-reservation config. */
@@ -1245,6 +1253,238 @@ describe('GT1-11-09 qualification spend admission', () => {
 				},
 				30_000
 			);
+		}
+	);
+
+	describe.skipIf(process.platform === 'win32')(
+		'utility-leg retries on the shared ledger (GT1-11-11D3)',
+		() => {
+			const REL = `${RUNS_ROOT}/gt1-11-11d3-spend-${process.pid}`;
+			const ROOT = path.join(WORKSPACE, REL);
+			const BIN = path.join(ROOT, 'bin', 'grok');
+			const MODE_FILE = path.join(ROOT, 'mode');
+			const COUNT_FILE = path.join(ROOT, 'log', 'second-message-count');
+			const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-11d3-spend-operator-${process.pid}`);
+			const E09 = expandCases([
+				{
+					id: 'E09',
+					requirementIds: ['R-E09'],
+					ownerTasks: ['GT1-11-11D3'],
+					expectedInvariant: 'synthetic',
+					blockerIds: [],
+				},
+			]).find((c) => c.caseId === 'E09:native-headless:local')!;
+			let sha = '';
+			/**
+			 * A native stand-in (never a real Grok) for the E09 fixture turn and its
+			 * utility consumers: history under the owned GROK_HOME, `--resume` of a
+			 * held id, wizard and feedback JSON, a tab name, a synopsis, else the
+			 * reply token. `badretry` answers the resend of the inline wizard's
+			 * second message malformed again; `stdin` leaves every prompt-file turn
+			 * waiting for input that never comes.
+			 */
+			const SOURCE = [
+				`#!${process.execPath}`,
+				"const fs = process.getBuiltinModule('fs');",
+				"const path = process.getBuiltinModule('path');",
+				"const { randomUUID } = process.getBuiltinModule('crypto');",
+				`const MODE = fs.readFileSync(${JSON.stringify(MODE_FILE)}, 'utf8').trim();`,
+				'const argv = process.argv.slice(2);',
+				'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
+				"const file = at('--prompt-file');",
+				'const texts = (v, acc) => { if (Array.isArray(v)) v.forEach((x) => texts(x, acc)); else if (v && typeof v === "object") { if (typeof v.text === "string") acc.push(v.text); for (const k of Object.keys(v)) if (k !== "text") texts(v[k], acc); } return acc; };',
+				"const prompt = file ? texts(JSON.parse(fs.readFileSync(file, 'utf8')), []).join('') : (at('-p') || '');",
+				"const resume = at('--resume');",
+				"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
+				'function main() {',
+				"  if (MODE === 'stdin' && file) { process.stdin.resume(); setInterval(() => {}, 1000); return; }",
+				"  const dirFor = (id) => path.join(process.env.GROK_HOME, 'sessions', encodeURIComponent(fs.realpathSync(at('--cwd') || process.cwd())), id);",
+				'  if (resume && !fs.existsSync(dirFor(resume))) process.exit(1);',
+				'  const sid = resume || randomUUID();',
+				'  fs.mkdirSync(dirFor(sid), { recursive: true });',
+				"  fs.appendFileSync(path.join(dirFor(sid), 'chat_history.jsonl'), JSON.stringify({ type: 'user', content: prompt.slice(0, 200) }) + '\\n');",
+				'  let seen = 0;',
+				"  if (prompt.includes('in that order')) { const c = " +
+					JSON.stringify(COUNT_FILE) +
+					"; seen = (fs.existsSync(c) ? Number(fs.readFileSync(c, 'utf8')) : 0) + 1; fs.writeFileSync(c, String(seen)); }",
+				'  let reply;',
+				"  if (prompt.includes('Reply with the tab name')) reply = 'Alpha Beta Checklist';",
+				"  else if (resume) reply = '**Summary:** A synthetic turn replied.\\n**Details:** Nothing else happened.';",
+				"  else if (prompt.includes('Synthetic qualification report')) reply = JSON.stringify({ confidence: 40, ready: false, message: 'Which version?', category: 'bug_report', summary: 'toggle', structured: { expectedBehavior: '', actualBehavior: '', reproductionSteps: '', additionalContext: '' } });",
+				"  else if (MODE === 'badretry' && seen === 2) reply = 'Still not a structured answer.';",
+				"  else if (prompt.includes('confidence')) reply = JSON.stringify({ confidence: 50, ready: false, message: 'Noted.' });",
+				"  else { const t = prompt.match(/QUALIFY-[A-Z0-9-]+-OK/g) || []; reply = t.length ? t[t.length - 1] : ''; }",
+				"  if (reply) out({ type: 'text', data: reply });",
+				'  out({',
+				"    type: 'end', stopReason: 'end_turn', sessionId: sid, total_cost_usd: 0.001,",
+				'    usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_tokens: 0 },',
+				"    modelUsage: { [at('-m')]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.001 } },",
+				'  });',
+				'}',
+				'main();',
+				'',
+			].join('\n');
+			const utilityConfig = (): QualificationConfig =>
+				liveConfig({
+					allowedRoots: [REL],
+					binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
+					spendBounds: {
+						perCall: {
+							inputTokens: 1000,
+							outputTokens: 500,
+							cacheReadTokens: 0,
+							cacheCreationTokens: 0,
+						},
+						perTurnCalls: { modelRounds: 2, children: 1, retries: 0, sideModels: 0, compaction: 0 },
+						sideModels: [],
+					},
+					limits: {
+						budgetUsd: 10,
+						maxCalls: 80,
+						maxTurns: 12,
+						maxWallClockSeconds: 600,
+						perCase: { budgetUsd: 2, maxCalls: 60, maxTurns: 10, maxWallClockSeconds: 120 },
+						cleanupSeconds: 1,
+					},
+					isolation: {
+						boundary: {
+							kind: 'disposable-os-account',
+							reference: 'boundary:synthetic',
+							actualHome: `${REL}/home`,
+							productionHomeMounted: false,
+							operatorCredentialsReadable: false,
+						},
+						accountRoots: { A: `${REL}/grok-a`, B: `${REL}/grok-b` },
+						remoteRoots: {},
+						policy: {
+							systemPolicyInspected: true,
+							managedPolicy: 'absent',
+							requiredPolicyCompatible: true,
+						},
+						resources: { hooks: 'empty', mcp: 'empty', plugins: 'empty', envrc: 'disabled' },
+						egress: {
+							kind: 'operation-aware',
+							reference: 'egress:synthetic',
+							suppression: {
+								update: 'flags-only',
+								telemetry: 'flags-only',
+								backgroundUpload: 'unknown',
+							},
+						},
+						path: ['/usr/bin', '/bin'],
+					},
+				});
+			const run = async (
+				mode: 'ok' | 'badretry' | 'stdin',
+				onLedger?: (l: BudgetLedger) => void,
+				turnTimeoutMs?: number
+			) => {
+				fs.writeFileSync(MODE_FILE, mode);
+				fs.rmSync(COUNT_FILE, { force: true });
+				fs.rmSync(path.join(ROOT, 'grok-a'), { recursive: true, force: true });
+				fs.mkdirSync(path.join(ROOT, 'grok-a'), { recursive: true });
+				const config = utilityConfig();
+				const ledger = ledgerFor(config, E09);
+				onLedger?.(ledger);
+				const lifetime = createCaseLifetime(1);
+				const [leg] = await executePaidCase(E09, config, {
+					workspace: WORKSPACE,
+					operatorHome: OPERATOR_HOME,
+					ledger,
+					lifetime,
+					problems: [],
+					capabilities: { ...ALL_CAPS, utilityLegs: true, cheapUtilityLegs: true },
+					now: () => NOW,
+					resolveSecret: (name) => `synthetic-xai-${name}-value`,
+					turnTimeoutMs,
+				});
+				await lifetime.cleanup();
+				const wizard = leg.utilityLegs.find((l) => l.leg === 'wizard-structured');
+				const sends = fs.existsSync(COUNT_FILE) ? Number(fs.readFileSync(COUNT_FILE, 'utf8')) : 0;
+				return { leg, ledger, wizard, sends };
+			};
+			const rowsOf = (leg: Awaited<ReturnType<typeof run>>['leg']) =>
+				[...leg.turns, ...leg.utilityLegs.flatMap((l) => l.turns)].map(
+					(t) => t.callsRecorded as unknown as Record<string, number>
+				);
+			const sum = (rows: Array<Record<string, number>>, kind: string) =>
+				rows.reduce((n, r) => n + r[kind], 0);
+
+			beforeAll(() => {
+				for (const d of ['home', 'grok-a', 'grok-b', 'bin', 'log', path.join('cache', 'tmp')])
+					fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+				fs.writeFileSync(MODE_FILE, 'ok');
+				fs.writeFileSync(BIN, SOURCE);
+				fs.chmodSync(BIN, 0o555);
+				sha = createHash('sha256').update(fs.readFileSync(BIN)).digest('hex');
+			});
+			afterAll(() => {
+				if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+				fs.rmSync(ROOT, { recursive: true, force: true });
+				fs.rmSync(OPERATOR_HOME, { recursive: true, force: true });
+			});
+			beforeEach(() => {
+				spawnSpies.forEach((s) => s.mockClear());
+			});
+
+			it('the wizard retry is drawn once as a retry before its spawn, and every utility call is on the shared ledger', async () => {
+				const actual =
+					await vi.importActual<typeof import('node:child_process')>('node:child_process');
+				const atSpawn: number[] = [];
+				let current: BudgetLedger | null = null;
+				spawnSpies[0].mockImplementation(((...a: Parameters<typeof actual.spawn>) => {
+					const argv = (a[1] ?? []) as string[];
+					const i = argv.indexOf('--prompt-file');
+					const r = current?.reservations[0];
+					if (r && i >= 0 && fs.readFileSync(argv[i + 1], 'utf8').includes('in that order'))
+						atSpawn.push(r.callsByKind.retry);
+					return actual.spawn(...a);
+				}) as never);
+				let result: Awaited<ReturnType<typeof run>>;
+				try {
+					result = await run('ok', (l) => (current = l));
+				} finally {
+					spawnSpies[0].mockImplementation(actual.spawn as never);
+				}
+				const { leg, ledger, wizard, sends } = result;
+				expect(wizard?.status, JSON.stringify(wizard?.assertions)).toBe('passed');
+				expect(leg.utilityLegs.map((l) => l.status)).toEqual(Array(6).fill('passed'));
+				// The forced send drew no retry; the resend's retry was on the reservation when its child started.
+				expect(atSpawn).toEqual([0, 1]);
+				expect(sends).toBe(2);
+				const r = ledger.reservations[0];
+				expect(r.callsByKind.retry).toBe(1);
+				const rows = rowsOf(leg);
+				expect(rows).toHaveLength(10);
+				for (const kind of ['model-round', 'child', 'retry', 'side-model', 'compaction'])
+					expect(sum(rows, kind), kind).toBe((r.callsByKind as Record<string, number>)[kind]);
+				expect(ledger.calls).toBe(r.callsUsed);
+				expect(ledger.turns).toBe(rows.length);
+			}, 60_000);
+
+			it('a resend answered malformed again draws no second retry and sends nothing more', async () => {
+				const { leg, ledger, wizard, sends } = await run('badretry');
+				expect(wizard?.status).toBe('failed');
+				expect(sends).toBe(2);
+				const r = ledger.reservations[0];
+				expect(r.callsByKind.retry).toBe(1);
+				const rows = rowsOf(leg);
+				for (const kind of ['model-round', 'child', 'retry', 'side-model', 'compaction'])
+					expect(sum(rows, kind), kind).toBe((r.callsByKind as Record<string, number>)[kind]);
+				expect(ledger.turns).toBe(rows.length);
+			}, 60_000);
+
+			it('a utility turn that times out keeps its charge uncertain, draws no retry and refuses every later utility turn', async () => {
+				const { leg, ledger, wizard } = await run('stdin', undefined, 2_000);
+				expect(wizard?.status).toBe('failed');
+				expect(wizard?.turns.map((t) => t.timedOut)).toEqual([true]);
+				const r = ledger.reservations[0];
+				expect(r.uncertainEffect).toBe(true);
+				expect(r.callsByKind.retry).toBe(0);
+				// The fixture turn and the one stalled utility turn: nothing after the uncertain effect.
+				expect(ledger.turns).toBe(2);
+				expect(leg.utilityLegs.slice(1).map((l) => l.status)).toEqual(Array(5).fill('not-run'));
+			}, 60_000);
 		}
 	);
 });

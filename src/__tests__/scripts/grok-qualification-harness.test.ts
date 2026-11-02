@@ -50,6 +50,16 @@
  * dropped turn, a new id after reload, a second turn mid-stream, and a tampered
  * handoff digest, lost inherited setting or unexpanded template variable each
  * fail their leg; a compaction runs once and is retried once, never twice.
+ *
+ * GT1-11-11D3 adds the E09 utility consumer legs (GT1-11-11D1..D2): a native
+ * Grok stand-in in owned temp roots (never a real Grok, credential or home)
+ * answering the production wizard, feedback, grooming, tab naming and
+ * synopsis consumers. A malformed answer resent again, swallowed or resent
+ * by the consumer itself, a reset on the old native id, a feedback launch on
+ * another account dir or without read-only, a child asked for under
+ * `requireDisabledTools`, a sentinel write, a non-cheap model, an unbounded
+ * name, a synopsis on a new native id and a stand-in waiting for stdin each
+ * fail their leg; flags or a fixture alone pass nothing.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -270,6 +280,103 @@ vi.mock('../../../src/shared/maestro-lib/launch/agent-args', async (importOrigin
 				: actual.grokLaunchArgsProblem(...args),
 	};
 });
+/**
+ * Pass-through production consumers a GT1-11-11D3 case can bend: the inline
+ * wizard swallowing a malformed answer (`swallow`) or resending it on its own
+ * (`resend`), the feedback interview launching on another account dir
+ * (`account`) or without read-only (`writable`), the grooming path dropping a
+ * required no-tools request (`dropNoTools`), and a cheap tier that names a
+ * model the launch does not carry (`cheapModel`). Off, each is the production
+ * function.
+ */
+const utilityTamper = vi.hoisted(() => ({
+	wizard: null as 'swallow' | 'resend' | null,
+	feedback: null as { account?: string; writable?: true } | null,
+	dropNoTools: false,
+	cheapModel: null as string | null,
+}));
+vi.mock('../../../src/renderer/services/inlineWizardConversation', async (importOriginal) => {
+	const actual =
+		await importOriginal<
+			typeof import('../../../src/renderer/services/inlineWizardConversation')
+		>();
+	const malformed = (r: { success: boolean; error?: string }) =>
+		!r.success && r.error === 'Failed to parse agent response';
+	return {
+		...actual,
+		sendWizardMessage: async (...args: Parameters<typeof actual.sendWizardMessage>) => {
+			const result = await actual.sendWizardMessage(...args);
+			if (!utilityTamper.wizard || !malformed(result)) return result;
+			if (utilityTamper.wizard === 'swallow')
+				return { success: true, response: { message: 'ok', confidence: 50, ready: false } };
+			// The consumer resends the same message itself, then reports the first failure anyway.
+			await actual.sendWizardMessage(...args);
+			return result;
+		},
+	};
+});
+vi.mock('../../../src/renderer/services/feedbackConversation', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('../../../src/renderer/services/feedbackConversation')>();
+	class FeedbackConversationManager extends actual.FeedbackConversationManager {
+		override async sendTurn(
+			...args: Parameters<InstanceType<typeof actual.FeedbackConversationManager>['sendTurn']>
+		) {
+			const tamper = utilityTamper.feedback;
+			const host = (
+				globalThis as unknown as {
+					window?: { maestro?: { process: { spawn: (c: unknown) => unknown } } };
+				}
+			).window?.maestro?.process;
+			const spawn = host?.spawn;
+			if (tamper && host && spawn)
+				host.spawn = (c: unknown) => {
+					const config = { ...(c as Record<string, unknown>) };
+					if (tamper.account)
+						config.sessionCustomEnvVars = {
+							...(config.sessionCustomEnvVars as Record<string, string>),
+							GROK_HOME: tamper.account,
+						};
+					if (tamper.writable) config.readOnlyMode = false;
+					return spawn(config);
+				};
+			try {
+				return await super.sendTurn(...args);
+			} finally {
+				if (host && spawn) host.spawn = spawn;
+			}
+		}
+	}
+	return { ...actual, FeedbackConversationManager };
+});
+vi.mock('../../../src/main/utils/context-groomer', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../../src/main/utils/context-groomer')>();
+	return {
+		...actual,
+		groomContext: (
+			options: Parameters<typeof actual.groomContext>[0],
+			processManager: Parameters<typeof actual.groomContext>[1],
+			agentDetector: Parameters<typeof actual.groomContext>[2]
+		) =>
+			actual.groomContext(
+				utilityTamper.dropNoTools && options.requireDisabledTools
+					? { ...options, requireDisabledTools: false }
+					: options,
+				processManager,
+				agentDetector
+			),
+	};
+});
+vi.mock('../../../src/shared/modelTiers', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../../src/shared/modelTiers')>();
+	return {
+		...actual,
+		cheapTurnSettings: (...args: Parameters<typeof actual.cheapTurnSettings>) =>
+			utilityTamper.cheapModel && args[0] === 'grok'
+				? { ...actual.cheapTurnSettings(...args), model: utilityTamper.cheapModel }
+				: actual.cheapTurnSettings(...args),
+	};
+});
 const WORKSPACE = path.resolve(__dirname, '../../..');
 const RUN_STATE = JSON.parse(
 	fs.readFileSync(path.join(WORKSPACE, 'Plans/grok-tier1/run-state.json'), 'utf8')
@@ -292,6 +399,9 @@ const ALL_CAPS: HarnessCapabilities = {
 	// Off: the session legs and consumers run in their own block (GT1-11-11C3).
 	sessionLegs: false,
 	sessionConsumers: false,
+	// Off: the utility consumer legs run in their own block (GT1-11-11D3).
+	utilityLegs: false,
+	cheapUtilityLegs: false,
 };
 /** A secret-shaped value the shared redactor recognizes; synthetic, never a credential. */
 const FAKE_TOKEN = `ghp_${'A1b2C3d4E5'.repeat(4).slice(0, 36)}`;
@@ -4525,5 +4635,480 @@ describe('GT1-11-09 qualification harness', () => {
 				]);
 			}, 60_000);
 		});
+	});
+
+	describe.skipIf(process.platform === 'win32')('utility consumer legs (GT1-11-11D3)', () => {
+		const REL = `${RUNS_ROOT}/gt1-11-11d3-${process.pid}`;
+		const ROOT = path.join(WORKSPACE, REL);
+		const BIN = path.join(ROOT, 'bin', 'grok');
+		const HOME_A = path.join(ROOT, 'grok-a');
+		const HOME_B = path.join(ROOT, 'grok-b');
+		/** The stand-in reads its mode from here, so its bytes (and the pin) are the same in every mode. */
+		const MODE_FILE = path.join(ROOT, 'mode');
+		/** How many times the stand-in saw the inline wizard's second message. */
+		const COUNT_FILE = path.join(ROOT, 'log', 'second-message-count');
+		/** One line per stand-in process: what it was asked, never a credential. */
+		const LOG = path.join(ROOT, 'log', 'turns.jsonl');
+		const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-11d3-operator-${process.pid}`);
+		const MODEL = 'claude-haiku-4-5';
+		const SECRET = (name: string) => `synthetic-xai-${name}-value`;
+		type Mode = 'ok' | 'silent' | 'badretry' | 'sameid' | 'write' | 'newid' | 'longname' | 'stdin';
+		let sha = '';
+		/**
+		 * The native Grok stand-in (never a real Grok): it reads its prompt from
+		 * `-p` or the JSON `--prompt-file` the production planner writes, keeps
+		 * its history under the owned GROK_HOME where the production Grok session
+		 * storage reads it, honors `--resume` of an id it holds (and refuses any
+		 * other), and answers each production consumer in its own shape: wizard
+		 * JSON, feedback JSON, a tab name, a synopsis, or the reply token its
+		 * prompt carries. A mode bends exactly one behaviour.
+		 */
+		const SOURCE = [
+			`#!${process.execPath}`,
+			"const fs = process.getBuiltinModule('fs');",
+			"const path = process.getBuiltinModule('path');",
+			"const { randomUUID } = process.getBuiltinModule('crypto');",
+			`const MODE = fs.readFileSync(${JSON.stringify(MODE_FILE)}, 'utf8').trim();`,
+			'const argv = process.argv.slice(2);',
+			'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
+			"const file = at('--prompt-file');",
+			'const texts = (v, acc) => { if (Array.isArray(v)) v.forEach((x) => texts(x, acc)); else if (v && typeof v === "object") { if (typeof v.text === "string") acc.push(v.text); for (const k of Object.keys(v)) if (k !== "text") texts(v[k], acc); } return acc; };',
+			"const prompt = file ? texts(JSON.parse(fs.readFileSync(file, 'utf8')), []).join('') : (at('-p') || '');",
+			"const model = at('-m');",
+			"const resume = at('--resume');",
+			"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
+			`fs.appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ pid: process.pid, viaFile: !!file, resume, home: process.env.GROK_HOME, report: prompt.includes('Synthetic qualification report'), noTools: prompt.includes('Synthetic qualification text to summarize') }) + '\\n');`,
+			'function main() {',
+			// A child that waits for an answer on stdin which never comes (its stdin is closed): it never writes a terminal.
+			"  if (MODE === 'stdin' && file) { process.stderr.write('Continue? [y/N] '); process.stdin.resume(); setInterval(() => {}, 1000); return; }",
+			'  const end = (sid) => ({',
+			"    type: 'end', stopReason: 'end_turn', requestId: 'req-synthetic', sessionId: sid, total_cost_usd: 0.001,",
+			'    usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_tokens: 0 },',
+			'    modelUsage: { [model]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.001 } },',
+			'  });',
+			'  const home = process.env.GROK_HOME;',
+			"  const dirFor = (id) => path.join(home, 'sessions', encodeURIComponent(fs.realpathSync(at('--cwd') || process.cwd())), id);",
+			"  if (resume && !fs.existsSync(dirFor(resume))) { process.stderr.write('unknown session\\n'); process.exit(1); }",
+			"  let sid = resume && MODE !== 'newid' ? resume : randomUUID();",
+			// Every wizard conversation on one fixed native id: a reset that keeps the old session.
+			"  if (MODE === 'sameid' && prompt.includes('confidence')) sid = '11111111-1111-4111-8111-111111111111';",
+			'  fs.mkdirSync(dirFor(sid), { recursive: true });',
+			"  fs.appendFileSync(path.join(dirFor(sid), 'chat_history.jsonl'), JSON.stringify({ type: 'user', content: prompt.slice(0, 200) }) + '\\n');",
+			'  let seen = 0;',
+			"  if (prompt.includes('in that order')) { const c = " +
+				JSON.stringify(COUNT_FILE) +
+				"; seen = (fs.existsSync(c) ? Number(fs.readFileSync(c, 'utf8')) : 0) + 1; fs.writeFileSync(c, String(seen)); }",
+			'  let reply;',
+			"  if (MODE === 'silent' && file) reply = '';",
+			"  else if (prompt.includes('Reply with the tab name')) reply = MODE === 'longname' ? 'word '.repeat(30) : 'Alpha Beta Checklist';",
+			"  else if (resume) reply = '**Summary:** A synthetic turn replied with its token.\\n**Details:** Nothing else happened.';",
+			"  else if (prompt.includes('Synthetic qualification report')) reply = JSON.stringify({ confidence: 40, ready: false, message: 'Which version are you on?', category: 'bug_report', summary: 'toggle resets', structured: { expectedBehavior: '', actualBehavior: '', reproductionSteps: '', additionalContext: '' } });",
+			// The resend of the malformed answer is malformed again: one more retry would be needed.
+			"  else if (MODE === 'badretry' && seen === 2) reply = 'Still not a structured answer.';",
+			"  else if (prompt.includes('confidence')) reply = JSON.stringify({ confidence: 50, ready: false, message: 'Noted: a three item checklist.' });",
+			"  else { const t = prompt.match(/QUALIFY-[A-Z0-9-]+-OK/g) || []; reply = t.length ? t[t.length - 1] : ''; }",
+			"  if (MODE === 'write' && prompt.includes('QUALIFY-E09-GROOM-OK')) fs.writeFileSync(path.join(at('--cwd'), 'sentinel-a.txt'), 'changed');",
+			"  if (reply) out({ type: 'text', data: reply });",
+			'  out(end(sid));',
+			'}',
+			'main();',
+			'',
+		].join('\n');
+		const turnsLogged = (): Array<{
+			pid: number;
+			viaFile: boolean;
+			resume: string | null;
+			home: string;
+			report: boolean;
+			noTools: boolean;
+		}> =>
+			fs.existsSync(LOG)
+				? fs
+						.readFileSync(LOG, 'utf8')
+						.trim()
+						.split('\n')
+						.filter(Boolean)
+						.map((l) => JSON.parse(l))
+				: [];
+		/** A complete synthetic paid declaration whose bounds fit the E09 fixture turn and its ten utility turns. */
+		const utilityConfig = (): QualificationConfig => ({
+			...liveConfig({
+				allowedRoots: [REL],
+				allowedModels: [MODEL],
+				binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
+				spendBounds: {
+					perCall: {
+						inputTokens: 1000,
+						outputTokens: 500,
+						cacheReadTokens: 0,
+						cacheCreationTokens: 0,
+					},
+					perTurnCalls: { modelRounds: 2, children: 1, retries: 0, sideModels: 0, compaction: 0 },
+					sideModels: [],
+				},
+				limits: {
+					budgetUsd: 10,
+					maxCalls: 80,
+					maxTurns: 12,
+					maxWallClockSeconds: 600,
+					perCase: { budgetUsd: 2, maxCalls: 60, maxTurns: 10, maxWallClockSeconds: 120 },
+					cleanupSeconds: 1,
+				},
+			}),
+			isolation: {
+				boundary: {
+					kind: 'disposable-os-account',
+					reference: 'boundary:synthetic',
+					actualHome: `${REL}/home`,
+					productionHomeMounted: false,
+					operatorCredentialsReadable: false,
+				},
+				accountRoots: { A: `${REL}/grok-a`, B: `${REL}/grok-b` },
+				remoteRoots: {},
+				policy: {
+					systemPolicyInspected: true,
+					managedPolicy: 'absent',
+					requiredPolicyCompatible: true,
+				},
+				resources: { hooks: 'empty', mcp: 'empty', plugins: 'empty', envrc: 'disabled' },
+				egress: {
+					kind: 'operation-aware',
+					reference: 'egress:synthetic',
+					suppression: {
+						update: 'flags-only',
+						telemetry: 'flags-only',
+						backgroundUpload: 'unknown',
+					},
+				},
+				path: ['/usr/bin', '/bin', path.join(ROOT, 'bin')],
+			},
+		});
+		const CAPS: HarnessCapabilities = { ...ALL_CAPS, utilityLegs: true, cheapUtilityLegs: true };
+		const UTILITY_LEGS = [
+			'wizard-structured',
+			'feedback-interview',
+			'no-tools-refused',
+			'grooming-read-only',
+			'tab-naming',
+			'synopsis',
+		];
+		let ledgerSeq = 0;
+		const execute = async (
+			mode: Mode,
+			opts: { caps?: HarnessCapabilities; turnTimeoutMs?: number } = {}
+		) => {
+			fs.writeFileSync(MODE_FILE, mode);
+			for (const home of [HOME_A, HOME_B]) {
+				fs.rmSync(home, { recursive: true, force: true });
+				fs.mkdirSync(home, { recursive: true });
+			}
+			fs.rmSync(LOG, { force: true });
+			fs.rmSync(COUNT_FILE, { force: true });
+			const cfg = utilityConfig();
+			const c = expandCases(FAMILIES, ['E09:native-headless:local'])[0];
+			const ledger = createBudgetLedger(cfg, `gt1-11-11d3-${process.pid}-${++ledgerSeq}`, NOW);
+			ledger.authorizedCaseIds.push(c.caseId);
+			const lifetime = createCaseLifetime(1);
+			const started = Date.now();
+			const legs = await executePaidCase(c, cfg, {
+				workspace: WORKSPACE,
+				operatorHome: OPERATOR_HOME,
+				ledger,
+				lifetime,
+				problems: validateConfig(cfg, WORKSPACE),
+				capabilities: opts.caps ?? CAPS,
+				now: clock,
+				resolveSecret: SECRET,
+				turnTimeoutMs: opts.turnTimeoutMs,
+			});
+			await lifetime.cleanup();
+			expect(legs).toHaveLength(1);
+			return { leg: legs[0], ledger, elapsedMs: Date.now() - started };
+		};
+		type Leg = Awaited<ReturnType<typeof execute>>['leg'];
+		const utility = (leg: Leg, id: string) => {
+			const found = leg.utilityLegs.find((l) => l.leg === id);
+			expect(found, id).toBeDefined();
+			return found!;
+		};
+		const assertionOf = (
+			r: { assertions: Array<{ id: string; outcome: string; detail: string }> },
+			id: string
+		) => r.assertions.find((a) => a.id === id);
+		const outcomes = (leg: Leg) => leg.utilityLegs.map((l) => [l.leg, l.status]);
+		const operatorHomeUntouched = () =>
+			expect(fs.existsSync(OPERATOR_HOME) ? fs.readdirSync(OPERATOR_HOME) : []).toEqual([]);
+		const alive = (pid: number) => {
+			try {
+				process.kill(pid, 0);
+				return true;
+			} catch {
+				return false;
+			}
+		};
+
+		beforeAll(() => {
+			for (const d of ['home', 'grok-a', 'grok-b', 'bin', 'log', path.join('cache', 'tmp')])
+				fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+			fs.writeFileSync(MODE_FILE, 'ok');
+			fs.writeFileSync(BIN, SOURCE);
+			fs.chmodSync(BIN, 0o555);
+			sha = createHash('sha256').update(fs.readFileSync(BIN)).digest('hex');
+		});
+		afterAll(() => {
+			if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+			fs.rmSync(ROOT, { recursive: true, force: true });
+			fs.rmSync(OPERATOR_HOME, { recursive: true, force: true });
+		});
+		beforeEach(() => {
+			spawnSpies.forEach((s) => s.mockClear());
+			fetchSpy.mockClear();
+			utilityTamper.wizard = null;
+			utilityTamper.feedback = null;
+			utilityTamper.dropNoTools = false;
+			utilityTamper.cheapModel = null;
+		});
+		afterEach(() => {
+			vi.restoreAllMocks();
+		});
+
+		it('every utility leg passes from its production consumer on the owned stand-in, read-only, on the owned account and the leg model', async () => {
+			const { leg, ledger } = await execute('ok');
+			expect(outcomes(leg)).toEqual(UTILITY_LEGS.map((id) => [id, 'passed']));
+			for (const r of leg.utilityLegs)
+				expect(
+					r.assertions.every((a) => a.outcome === 'passed'),
+					JSON.stringify(r.assertions)
+				).toBe(true);
+			const wizard = utility(leg, 'wizard-structured');
+			expect(wizard.observed.reset).toMatchObject({ parsed: true, fresh: true });
+			expect(wizard.observed.launches).toEqual(['1:ok', '2:ok', '3:ok', '4:ok', '5:ok']);
+			expect(utility(leg, 'feedback-interview').observed.selected).toMatchObject({
+				source: 'agent',
+				account: 'owned-account',
+			});
+			expect(utility(leg, 'no-tools-refused').observed.noTools).toEqual({
+				refused: true,
+				spawnRequests: 0,
+				tempEntries: 0,
+			});
+			expect(utility(leg, 'tab-naming').observed.naming).toMatchObject({ named: true, spawns: 1 });
+			expect(utility(leg, 'synopsis').observed.synopsis).toMatchObject({
+				spawns: 1,
+				resumedParent: true,
+				added: 0,
+			});
+			// The fixture turn by -p, then every utility turn through a prompt file, all on the owned account A.
+			const sent = turnsLogged();
+			expect(sent.map((t) => t.viaFile)).toEqual([false, ...Array(9).fill(true)]);
+			for (const t of sent) expect(fs.realpathSync(t.home)).toBe(fs.realpathSync(HOME_A));
+			expect(sent.filter((t) => t.resume)).toHaveLength(1);
+			// No-tools refusal reached no child: its prompt never arrived.
+			expect(sent.some((t) => t.noTools)).toBe(false);
+			expect(ledger.turns).toBe(10);
+			expect(leg.status, JSON.stringify(leg.reasons)).toBe('passed');
+			expect(fetchSpy).not.toHaveBeenCalled();
+			operatorHomeUntouched();
+		}, 60_000);
+
+		it('cannot pass from a flag or a fixture alone: flags off leave every leg not-run, a stand-in that answers nothing fails each spawning leg', async () => {
+			const off = await execute('ok', { caps: { ...CAPS, utilityLegs: false } });
+			expect(off.leg.utilityLegs.map((l) => [l.leg, l.status, l.spawned])).toEqual(
+				UTILITY_LEGS.map((id) => [id, 'not-run', 0])
+			);
+			expect(turnsLogged()).toHaveLength(1);
+			const cheapOff = await execute('ok', { caps: { ...CAPS, cheapUtilityLegs: false } });
+			expect(outcomes(cheapOff.leg)).toEqual([
+				['wizard-structured', 'passed'],
+				['feedback-interview', 'passed'],
+				['no-tools-refused', 'not-run'],
+				['grooming-read-only', 'not-run'],
+				['tab-naming', 'not-run'],
+				['synopsis', 'not-run'],
+			]);
+			expect(utility(cheapOff.leg, 'tab-naming').assertion.detail).toBe(
+				'cheap-utility-legs-unimplemented'
+			);
+			const { leg } = await execute('silent');
+			expect(outcomes(leg)).toEqual([
+				['wizard-structured', 'failed'],
+				['feedback-interview', 'failed'],
+				// Nothing to answer: the refusal is decided before any child.
+				['no-tools-refused', 'passed'],
+				['grooming-read-only', 'failed'],
+				['tab-naming', 'failed'],
+				['synopsis', 'failed'],
+			]);
+			expect(assertionOf(utility(leg, 'wizard-structured'), 'onboarding-structured')?.outcome).toBe(
+				'failed'
+			);
+			expect(assertionOf(utility(leg, 'feedback-interview'), 'reply-bounded')?.outcome).toBe(
+				'failed'
+			);
+			expect(assertionOf(utility(leg, 'grooming-read-only'), 'bounded-completion')?.outcome).toBe(
+				'failed'
+			);
+			expect(assertionOf(utility(leg, 'tab-naming'), 'name-bounded')?.outcome).toBe('failed');
+			expect(assertionOf(utility(leg, 'synopsis'), 'bounded-completion')?.outcome).toBe('failed');
+			expect(leg.status).toBe('failed');
+		}, 90_000);
+
+		describe('wizard-structured', () => {
+			it('fails when the resend of the malformed answer is malformed again (a second retry would be needed)', async () => {
+				const { leg, ledger } = await execute('badretry');
+				const wizard = utility(leg, 'wizard-structured');
+				expect(wizard.status).toBe('failed');
+				expect(assertionOf(wizard, 'malformed-retried-once')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(wizard, 'malformed-retried-once')?.detail).toContain('parsed=false');
+				expect(assertionOf(wizard, 'malformed-retried-once')?.detail).toContain('retriesDrawn=1');
+				// The forced answer and its one resend reached the stand-in; never a third send.
+				expect(Number(fs.readFileSync(COUNT_FILE, 'utf8'))).toBe(2);
+				expect(ledger.reservations[0].callsByKind.retry).toBe(1);
+			}, 60_000);
+
+			it('fails when the consumer swallows the malformed answer, so it is never resent', async () => {
+				utilityTamper.wizard = 'swallow';
+				const { leg, ledger } = await execute('ok');
+				const wizard = utility(leg, 'wizard-structured');
+				expect(wizard.status).toBe('failed');
+				expect(assertionOf(wizard, 'malformed-retried-once')?.detail).toMatch(
+					/^not resent: success=true/
+				);
+				expect(Number(fs.readFileSync(COUNT_FILE, 'utf8'))).toBe(1);
+				expect(ledger.reservations[0].callsByKind.retry).toBe(0);
+			}, 60_000);
+
+			it('a consumer that resends the malformed message on its own, beside the counted retry, is observed (verdict: A11-F21, GT1-11-11D3A)', async () => {
+				utilityTamper.wizard = 'resend';
+				const { leg, ledger } = await execute('ok');
+				const wizard = utility(leg, 'wizard-structured');
+				// Three sends of the second message: the forced one, the consumer's own (uncounted) and the harness retry.
+				expect(Number(fs.readFileSync(COUNT_FILE, 'utf8'))).toBe(3);
+				expect(wizard.turns).toHaveLength(6);
+				expect(assertionOf(wizard, 'malformed-retried-once')?.detail).toContain('retriesDrawn=1');
+				expect(ledger.reservations[0].callsByKind.retry).toBe(1);
+				// Six wizard turns against its five: the E09 ceiling leaves the synopsis no turn.
+				expect(utility(leg, 'synopsis').reasons.map((x) => x.id)).toEqual([
+					'utility-turns-unavailable',
+				]);
+				// GT1-11-11D3A must fail wizard-structured here (a second send of the malformed message);
+				// GT1-11-11D3B flips this case to assert that verdict.
+			}, 60_000);
+
+			it('fails reset-fresh-session when the reset keeps the old native id', async () => {
+				const { leg } = await execute('sameid');
+				const wizard = utility(leg, 'wizard-structured');
+				expect(wizard.status).toBe('failed');
+				expect(assertionOf(wizard, 'reset-fresh-session')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(wizard, 'reset-fresh-session')?.detail).toContain('fresh=false');
+				expect(wizard.observed.reset).toMatchObject({ parsed: true, fresh: false });
+				expect(assertionOf(wizard, 'onboarding-structured')?.outcome).toBe('passed');
+			}, 60_000);
+		});
+
+		describe('feedback-interview', () => {
+			it('fails account-env when the launch runs on another account dir', async () => {
+				utilityTamper.feedback = { account: HOME_B };
+				const { leg } = await execute('ok');
+				const feedback = utility(leg, 'feedback-interview');
+				expect(feedback.status).toBe('failed');
+				expect(assertionOf(feedback, 'account-env')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(feedback, 'account-env')?.detail).toContain('requested=false');
+				expect(assertionOf(feedback, 'read-only-args')?.detail).toContain('plan-account');
+				// The selection itself was right; only the launch request strayed.
+				expect(assertionOf(feedback, 'account-selected')?.outcome).toBe('passed');
+				// The launcher still holds the child to the owned account: the request alone fails the leg.
+				expect(
+					turnsLogged()
+						.filter((t) => t.report)
+						.map((t) => fs.realpathSync(t.home))
+				).toEqual([fs.realpathSync(HOME_A)]);
+				expect(fs.readdirSync(HOME_B)).toEqual([]);
+			}, 60_000);
+
+			it('fails read-only-args when the launch is not read-only', async () => {
+				utilityTamper.feedback = { writable: true };
+				const { leg } = await execute('ok');
+				const feedback = utility(leg, 'feedback-interview');
+				expect(feedback.status).toBe('failed');
+				expect(assertionOf(feedback, 'read-only-args')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(feedback, 'read-only-args')?.detail).toContain('request-not-readonly');
+				expect(assertionOf(feedback, 'read-only-args')?.detail).toContain('plan-not-readonly');
+				expect(assertionOf(feedback, 'account-env')?.outcome).toBe('passed');
+			}, 60_000);
+		});
+
+		it('fails no-tools-refused (and the feedback refusal) when a required no-tools request asks for a child', async () => {
+			utilityTamper.dropNoTools = true;
+			const { leg } = await execute('ok');
+			const noTools = utility(leg, 'no-tools-refused');
+			expect(noTools.status).toBe('failed');
+			expect(assertionOf(noTools, 'refused-before-spawn')).toMatchObject({ outcome: 'failed' });
+			expect(assertionOf(noTools, 'zero-children')).toMatchObject({ outcome: 'failed' });
+			expect((noTools.observed.noTools as { spawnRequests: number }).spawnRequests).toBe(1);
+			const feedback = utility(leg, 'feedback-interview');
+			expect(assertionOf(feedback, 'no-tools-refused')).toMatchObject({ outcome: 'failed' });
+			// Each spawn request was refused unsent: no child ever saw the no-tools prompt.
+			expect(turnsLogged().some((t) => t.noTools)).toBe(false);
+		}, 60_000);
+
+		it('fails grooming-read-only on a sentinel write in the owned project', async () => {
+			const { leg } = await execute('write');
+			const groom = utility(leg, 'grooming-read-only');
+			expect(groom.status).toBe('failed');
+			expect(assertionOf(groom, 'sentinels-unchanged')).toMatchObject({ outcome: 'failed' });
+			expect(assertionOf(groom, 'sentinels-unchanged')?.detail).toContain('changed=1');
+			expect(assertionOf(groom, 'enforced-read-only')?.outcome).toBe('passed');
+		}, 60_000);
+
+		it('fails tab-naming (and the grooming tier) on a launch that is not at the cheap model, and on an unbounded name', async () => {
+			utilityTamper.cheapModel = 'grok-cheap-synthetic';
+			const { leg } = await execute('ok');
+			const naming = utility(leg, 'tab-naming');
+			expect(naming.status).toBe('failed');
+			expect(assertionOf(naming, 'cheap-tier')).toMatchObject({
+				outcome: 'failed',
+				detail: 'spawns=1 model',
+			});
+			expect(assertionOf(naming, 'name-bounded')?.outcome).toBe('passed');
+			expect(assertionOf(utility(leg, 'grooming-read-only'), 'cheap-tier')?.detail).toBe(
+				'spawns=1 model'
+			);
+			utilityTamper.cheapModel = null;
+			const long = utility((await execute('longname')).leg, 'tab-naming');
+			expect(long.status).toBe('failed');
+			expect(assertionOf(long, 'name-bounded')).toMatchObject({ outcome: 'failed' });
+			expect(assertionOf(long, 'cheap-tier')?.outcome).toBe('passed');
+		}, 90_000);
+
+		it('fails synopsis when the resume lands on a new native id', async () => {
+			const { leg } = await execute('newid');
+			const synopsis = utility(leg, 'synopsis');
+			expect(synopsis.status).toBe('failed');
+			expect(assertionOf(synopsis, 'resumed-parent')).toMatchObject({ outcome: 'failed' });
+			expect(assertionOf(synopsis, 'resumed-parent')?.detail).toContain('streamed=false');
+			expect(assertionOf(synopsis, 'no-new-session')).toMatchObject({ outcome: 'failed' });
+			expect(assertionOf(synopsis, 'no-new-session')?.detail).toContain('added=1');
+			expect(assertionOf(synopsis, 'grok-selected')?.outcome).toBe('passed');
+		}, 60_000);
+
+		it('a stand-in that waits for stdin fails on the turn timeout: its child is stopped and nothing later is sent', async () => {
+			const { leg, elapsedMs } = await execute('stdin', { turnTimeoutMs: 2_000 });
+			const wizard = utility(leg, 'wizard-structured');
+			expect(wizard.status).toBe('failed');
+			expect(wizard.turns).toHaveLength(1);
+			expect(wizard.turns[0].timedOut).toBe(true);
+			expect(assertionOf(wizard, 'onboarding-structured')?.outcome).toBe('failed');
+			// The timed-out charge is uncertain: every later leg is refused unsent.
+			for (const id of UTILITY_LEGS.slice(1)) {
+				const r = utility(leg, id);
+				expect(r.status, id).toBe('not-run');
+				expect(r.reasons.map((x) => x.id)).toEqual(['uncertain-prior-effect']);
+			}
+			const sent = turnsLogged();
+			expect(sent.map((t) => t.viaFile)).toEqual([false, true]);
+			expect(alive(sent[1].pid)).toBe(false);
+			expect(elapsedMs).toBeLessThan(30_000);
+		}, 60_000);
 	});
 });
