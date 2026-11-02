@@ -987,7 +987,10 @@ describe('GT1-11-09 qualification spend admission', () => {
 				'});',
 				'',
 			].join('\n');
-			const sessionConfig = (maxCalls: number): QualificationConfig =>
+			const sessionConfig = (
+				maxCalls: number,
+				allowance: { retries?: number; compaction?: number } = {}
+			): QualificationConfig =>
 				liveConfig({
 					allowedRoots: [REL],
 					binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
@@ -998,8 +1001,15 @@ describe('GT1-11-09 qualification spend admission', () => {
 							cacheReadTokens: 0,
 							cacheCreationTokens: 0,
 						},
-						// No per-turn retry allowance: a retry here is only the compaction leg's own (A11-F19).
-						perTurnCalls: { modelRounds: 2, children: 1, retries: 0, sideModels: 0, compaction: 0 },
+						// No per-turn retry allowance unless a case asks for one (A11-F19, GT1-11-11C3B).
+						perTurnCalls: {
+							modelRounds: 2,
+							children: 1,
+							retries: 0,
+							sideModels: 0,
+							compaction: 0,
+							...allowance,
+						},
 						sideModels: [],
 					},
 					limits: {
@@ -1038,9 +1048,13 @@ describe('GT1-11-09 qualification spend admission', () => {
 						path: ['/usr/bin', '/bin'],
 					},
 				});
-			const run = async (maxCalls: number, onLedger?: (l: BudgetLedger) => void) => {
+			const run = async (
+				maxCalls: number,
+				onLedger?: (l: BudgetLedger) => void,
+				allowance: { retries?: number; compaction?: number } = {}
+			) => {
 				fs.rmSync(LOG, { force: true });
-				const config = sessionConfig(maxCalls);
+				const config = sessionConfig(maxCalls, allowance);
 				const ledger = ledgerFor(config, E04);
 				onLedger?.(ledger);
 				const lifetime = createCaseLifetime(1);
@@ -1145,6 +1159,92 @@ describe('GT1-11-09 qualification spend admission', () => {
 				for (const s of spawnSpies) expect(s).not.toHaveBeenCalled();
 				expect(sent).toEqual([]);
 			}, 30_000);
+
+			it.each([
+				['retries', { retries: 1 }],
+				['compaction', { compaction: 1 }],
+			] as const)(
+				'a per-turn %s allowance of 1: the leg passes and every turn draws it, with one extra call of each counted kind (GT1-11-11C3B)',
+				async (_name, allowance) => {
+					const { leg, ledger, compaction, sent } = await run(60, undefined, allowance);
+					if (!compaction) throw new Error(JSON.stringify(leg.reasons));
+					expect(compaction.status, JSON.stringify(compaction)).toBe('passed');
+					expect(compaction.assertion.detail).toBe(
+						'compacted once, retried once, second refusal stopped'
+					);
+					const r = ledger.reservations[0];
+					const rows = [...leg.turns, ...leg.sessionLegs.flatMap((l) => l.turns)].map(
+						(t) => t.callsRecorded as unknown as Record<string, number>
+					);
+					// Every turn drew the allowance; the compaction and the retry each added exactly one of their kind.
+					const declared: { retries?: number; compaction?: number } = allowance;
+					const perTurn = { retry: declared.retries ?? 0, compaction: declared.compaction ?? 0 };
+					expect(r.callsByKind.retry).toBe(rows.length * perTurn.retry + 1);
+					expect(r.callsByKind.compaction).toBe(rows.length * perTurn.compaction + 1);
+					expect(
+						compaction.turns.map((t) => [t.callsRecorded.retry, t.callsRecorded.compaction])
+					).toEqual([
+						[perTurn.retry, perTurn.compaction],
+						[perTurn.retry, perTurn.compaction + 1],
+						[perTurn.retry + 1, perTurn.compaction],
+					]);
+					for (const kind of ['model-round', 'child', 'retry', 'side-model', 'compaction'])
+						expect(sum(rows, kind), kind).toBe((r.callsByKind as Record<string, number>)[kind]);
+					expect(ledger.calls).toBe(r.callsUsed);
+					expect(sent.filter((p) => p.includes('E04-COMPACT-T1'))).toHaveLength(2);
+					expect(sent.filter((p) => p === '/compact')).toHaveLength(1);
+				},
+				30_000
+			);
+
+			it.each([
+				// The retry's extra call lands on the ledger as a compaction: the retry is uncounted.
+				['retry', { retries: 1 }, 'attempt', 'retry-uncounted', 1],
+				// The compaction's extra call lands on the ledger as a retry: uncounted, and nothing is resent.
+				['compaction', { compaction: 1 }, 'compact', 'compaction-uncounted', 0],
+			] as const)(
+				'a %s send drawn under the wrong kind on the ledger fails its count whatever the allowance (GT1-11-11C3B)',
+				async (kind, allowance, at, failure, retrySends) => {
+					const actual =
+						await vi.importActual<typeof import('node:child_process')>('node:child_process');
+					let current: BudgetLedger | null = null;
+					let attempts = 0;
+					let moved = false;
+					spawnSpies[0].mockImplementation(((...a: Parameters<typeof actual.spawn>) => {
+						const argv = (a[1] ?? []) as string[];
+						const prompt = argv[argv.indexOf('-p') + 1] ?? '';
+						if (prompt.includes('E04-COMPACT-T1')) attempts++;
+						const send = prompt === '/compact' ? 'compact' : attempts === 2 ? 'attempt' : null;
+						const r = current?.reservations[0];
+						// The send is already drawn when its child starts: re-file one of its own calls under the other kind.
+						if (r && !moved && send === at) {
+							moved = true;
+							const other = kind === 'retry' ? 'compaction' : 'retry';
+							r.callsByKind[kind]--;
+							r.callsByKind[other]++;
+						}
+						return actual.spawn(...a);
+					}) as never);
+					let result: Awaited<ReturnType<typeof run>>;
+					try {
+						result = await run(60, (l) => (current = l), allowance);
+					} finally {
+						spawnSpies[0].mockImplementation(actual.spawn as never);
+					}
+					const { leg, compaction } = result;
+					expect(moved).toBe(true);
+					if (!compaction) throw new Error(JSON.stringify(leg.reasons));
+					expect(compaction.status, JSON.stringify(compaction)).toBe('failed');
+					expect(compaction.assertion.detail).toContain(failure);
+					expect(compaction.observed).toMatchObject({ compactionSends: 1, retrySends });
+					// The turn's own record is honest; only the ledger disagrees with it.
+					const sends = compaction.turns.slice(1).map((t) => t.callsRecorded);
+					expect(sends[0].compaction).toBe(
+						((allowance as { compaction?: number }).compaction ?? 0) + 1
+					);
+				},
+				30_000
+			);
 		}
 	);
 });

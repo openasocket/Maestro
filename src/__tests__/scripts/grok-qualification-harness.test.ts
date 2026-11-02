@@ -4303,6 +4303,81 @@ describe('GT1-11-09 qualification harness', () => {
 				expect(broken.observed).toMatchObject({ compactionSends: 1, retrySends: 0 });
 			}, 45_000);
 
+			// GT1-11-11C3B: the per-turn allowance every send draws is the baseline each counted send is judged against,
+			// so it can neither fail a correct compaction and retry nor stand in for the one call each must add.
+			it.each([
+				['retries', { retries: 1 }, { retry: 1, compaction: 0 }],
+				['compaction', { compaction: 1 }, { retry: 0, compaction: 1 }],
+			] as const)(
+				'a per-turn %s allowance of 1: one counted compaction, one counted retry, and a second refusal stops (GT1-11-11C3B)',
+				async (_name, allowance, base) => {
+					sessionTamper.compactCommand = '/compact';
+					const config = sessionConfig({
+						spendBounds: {
+							perCall: {
+								inputTokens: 1000,
+								outputTokens: 500,
+								cacheReadTokens: 0,
+								cacheCreationTokens: 0,
+							},
+							perTurnCalls: {
+								modelRounds: 2,
+								children: 1,
+								retries: 0,
+								sideModels: 0,
+								compaction: 0,
+								...allowance,
+							},
+							sideModels: [],
+						},
+					});
+					const plain: Record<string, number> = {
+						'model-round': 2,
+						child: 1,
+						retry: base.retry,
+						'side-model': 0,
+						compaction: base.compaction,
+					};
+					const recovered = session(
+						(await execute('E04', 'ctxonce', { config })).leg,
+						'compaction-retry'
+					);
+					expect(recovered.status, JSON.stringify(recovered)).toBe('passed');
+					expect(recovered.assertion.detail).toBe('compacted once, retried once');
+					// Each send carries the plain per-turn draws, with one model round traded for one call of its own kind.
+					const turns = recovered.turns.map(
+						(t) => t.callsRecorded as unknown as Record<string, number>
+					);
+					expect(turns).toEqual([
+						plain,
+						{ ...plain, 'model-round': 1, compaction: base.compaction + 1 },
+						{ ...plain, 'model-round': 1, retry: base.retry + 1 },
+					]);
+					// The reservation moved by exactly what each send recorded, kind by kind.
+					const kinds = recovered.observed.callsByKind as Array<Record<string, number>>;
+					expect(kinds).toHaveLength(3);
+					for (let i = 1; i < kinds.length; i++)
+						for (const kind of Object.keys(plain))
+							expect(kinds[i][kind] - kinds[i - 1][kind], `send ${i} ${kind}`).toBe(turns[i][kind]);
+					expect(kinds[1].compaction - kinds[0].compaction).toBe(base.compaction + 1);
+					expect(kinds[2].retry - kinds[1].retry).toBe(base.retry + 1);
+					// Under a second refusal the leg still stops after one retry.
+					const stopped = session(
+						(await execute('E04', 'ctxalways', { config })).leg,
+						'compaction-retry'
+					);
+					expect(stopped.status, JSON.stringify(stopped)).toBe('passed');
+					expect(stopped.assertion.detail).toBe(
+						'compacted once, retried once, second refusal stopped'
+					);
+					expect(stopped.observed).toMatchObject({ compactionSends: 1, retrySends: 1 });
+					expect(stopped.turns.map((t) => t.callsRecorded)).toEqual(turns);
+					expect(promptsWith('E04-COMPACT-T1')).toHaveLength(2);
+					expect(promptsWith('/compact')).toHaveLength(1);
+				},
+				45_000
+			);
+
 			it('cannot pass from a flag or a fixture alone: with the capability off no session leg spawns', async () => {
 				const { leg } = await execute('E04', 'ok', { caps: { ...CAPS, sessionLegs: false } });
 				expect(leg.sessionLegs.map((l) => [l.leg, l.status, l.spawned])).toEqual([
