@@ -576,6 +576,7 @@ const ALL_CAPS: HarnessCapabilities = {
 	accountingConsumers: false,
 	// Off: the negative policy legs run in their own block (GT1-11-12D).
 	policyLegs: false,
+	crossProviderLegs: false,
 };
 /** A secret-shaped value the shared redactor recognizes; synthetic, never a credential. */
 const FAKE_TOKEN = `ghp_${'A1b2C3d4E5'.repeat(4).slice(0, 36)}`;
@@ -953,10 +954,8 @@ describe('GT1-11-09 qualification harness', () => {
 					for (const target of ['local', 'ssh']) {
 						const r = pf(`${fam}:${route}:${target}`);
 						if (fam === 'E11') {
-							expect(ids(r)).toEqual([
-								'cross-provider-preflight-unimplemented',
-								'cross-provider-preflight-unimplemented',
-							]);
+							// GT1-11-13A: no peer is declared, so no direction is ready.
+							expect(ids(r)).toEqual(['cross-provider-directions-not-ready']);
 							expect(r.status).toBe('not-run');
 						} else {
 							expect(ids(r), `${fam}:${route}:${target}`).toEqual([]);
@@ -1691,7 +1690,7 @@ describe('GT1-11-09 qualification harness', () => {
 			expect(receipt.totals).toMatchObject({ spawned: 0, paidRequests: 0, networkContacts: 0 });
 			const owners: Record<string, string> = {
 				'E01:ssh': 'unassigned-ssh-identity-inspection',
-				'E11:local': 'GT1-11-13',
+				'E11:local': 'GT1-11-13B',
 			};
 			for (const c of receipt.cases) {
 				const executor = c.reasons.find((r) => r.id === 'case-executor-unimplemented');

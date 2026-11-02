@@ -7,9 +7,10 @@
  * case and writes one structured receipt per run. It never reads a credential
  * and never contacts an endpoint. A case is only ever handed to an executor
  * after every admission input is present AND every harness capability it needs
- * is implemented; a cross-provider paid leg and an SSH two-account identity
- * verdict have no executor yet, so those record `not-run` with
- * machine-readable reasons. Default execution, with no configuration,
+ * is implemented; the cross-provider translation legs (GT1-11-13B) and an
+ * SSH two-account identity verdict have no executor yet, so those record
+ * `not-run` with machine-readable reasons. The Claude and Codex peers of an
+ * E11 case have their own preflight (GT1-11-13A, `preflightCrossProvider`). Default execution, with no configuration,
  * therefore makes zero spawns, zero paid requests and zero network contacts.
  *
  * SSH legs (GT1-11-11A3): the offline, discovery and paid executors run an SSH
@@ -284,7 +285,13 @@ import {
 } from '../../src/shared/modelPricing';
 import { redactSecrets } from '../../src/shared/redactSecrets';
 import { containsCredentialToken } from '../../src/shared/agent-run/redact';
-import { isValidSecretName, lookupSecret } from '../../src/shared/serverSecrets';
+import {
+	CREDENTIALS_DIRECTORY_ENV_VAR,
+	isValidSecretName,
+	lookupSecret,
+	RUN_SECRETS_DIR,
+} from '../../src/shared/serverSecrets';
+import { TRANSLATION_PROVIDER_VERSIONS } from '../../src/shared/maestro-lib/translation/support';
 import { getAgentDefinition } from '../../src/shared/maestro-lib/providers/definitions';
 import { buildShellCommand } from '../../src/shared/maestro-lib/launch/shell-escape';
 import { GrokOutputParser } from '../../src/shared/maestro-lib/parsers/grok-output-parser';
@@ -373,6 +380,7 @@ import {
 	type AccountingFaultKind,
 	type AccountingLegId,
 	type AccountingLegSpec,
+	type CrossProviderPeer,
 	fixtureTurnsFor,
 	PAID_FIXTURES,
 	type PaidFixture,
@@ -476,7 +484,7 @@ export const HARNESS_CAPABILITIES = {
 	/**
 	 * The paid executor bound to an admitted tuple (GT1-11-11P1). It covers the
 	 * native-headless and ACP legs of a local Grok-only paid case; SSH and
-	 * cross-provider legs stay `case-executor-unimplemented`.
+	 * cross-provider translation legs stay `case-executor-unimplemented`.
 	 */
 	caseExecutor: true,
 	/**
@@ -565,6 +573,15 @@ export const HARNESS_CAPABILITIES = {
 	accountingConsumers: true,
 	/** The E10 negative policy legs (GT1-11-12A, tool-surface/approval/refusal GT1-11-12B), each on a policy reservation of its own (a refusal holds none). Off, each is not-run. */
 	policyLegs: true,
+	/**
+	 * The E11 Claude and Codex peer preflight (GT1-11-13A): per peer an owned
+	 * disposable home, a credential reference checked for presence only, an
+	 * approved endpoint and model and the pinned binary matched against the
+	 * declared translation versions; each direction leg reserves
+	 * `translation:<direction>:<leg>` on the shared ledger. A missing input of
+	 * one peer leaves only its directions not-run. Off, E11 is not-run.
+	 */
+	crossProviderLegs: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
 
@@ -639,6 +656,23 @@ export interface QualificationConfig {
 	sshRemotes?: Record<string, SshRemoteDeclaration> | null;
 	/** The local ssh client the production builder must resolve to, pinned by sha256. */
 	sshClient?: { path: string | null; sha256: string | null } | null;
+	/**
+	 * The disposable inputs of each E11 peer provider (GT1-11-13A). The peer's
+	 * credential reference is its `credentialReferences` entry for account A.
+	 */
+	crossProvider?: Partial<Record<CrossProviderPeer, PeerProviderDeclaration>> | null;
+}
+
+/** One peer provider's disposable inputs for E11; never the operator's own home or credential. */
+export interface PeerProviderDeclaration {
+	/** Owned disposable home under the allowed roots (the peer child's HOME; never ~/.claude or ~/.codex). */
+	home: string;
+	/** An approved endpoint origin the peer leg may reach. */
+	endpoint: string;
+	/** An authorized model the peer leg selects. */
+	model: string;
+	/** The exact peer binary, pinned by sha256; the version must be one the translation direction declares. */
+	binary: { path: string | null; sha256: string | null; version: string | null };
 }
 
 /** One approved disposable SSH host (GT1-11-11A3). */
@@ -1811,6 +1845,8 @@ export interface PreflightResult {
 		denied: string[];
 		missingControls: string[];
 	}>;
+	/** The E11 peer and direction preflight (GT1-11-13A); null when the case has no peer. */
+	crossProvider: CrossProviderPreflight | null;
 	reasons: AdmissionReason[];
 }
 
@@ -1818,6 +1854,8 @@ export interface PreflightContext {
 	workspace: string;
 	/** The harness operator's own home; the child's home may neither be nor contain it. */
 	operatorHome: string;
+	/** Where a secret-name credential reference is looked for (presence only); defaults to process.env. */
+	env?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -1828,7 +1866,8 @@ export interface PreflightContext {
 export function preflightCase(
 	c: QualificationCase,
 	config: QualificationConfig,
-	ctx: PreflightContext
+	ctx: PreflightContext,
+	capabilities: HarnessCapabilities = HARNESS_CAPABILITIES
 ): PreflightResult {
 	const reasons: AdmissionReason[] = [];
 	const add = (id: string, detail: string) => reasons.push(preflightReason(id, detail));
@@ -1847,6 +1886,7 @@ export function preflightCase(
 		},
 		binary: { state: 'unpinned', sha256Before: null, sha256After: null, readOnly: null },
 		launches: [],
+		crossProvider: null,
 		reasons,
 	};
 
@@ -1860,15 +1900,27 @@ export function preflightCase(
 		if (!result.operations.discovery.length) add('discovery-operation-unauthorized', c.route);
 	}
 
-	// Only the Grok child is planned here; another provider's leg has no preflight of its own yet.
-	for (const p of c.providers)
-		if (p !== 'grok')
+	// The Grok child is planned below; each peer provider has its own preflight, judged per
+	// direction, so the case refuses here only when no direction is ready.
+	const peers = c.providers.filter((p) => p !== 'grok');
+	if (peers.length) {
+		if (!capabilities.crossProviderLegs)
 			reasons.push({
-				id: 'cross-provider-preflight-unimplemented',
-				kind: 'isolation-preflight',
-				detail: p,
-				owner: 'GT1-11-13',
+				id: 'cross-provider-legs-unimplemented',
+				kind: 'harness-capability',
+				detail: peers.join(','),
+				owner: CROSS_PROVIDER_PREFLIGHT_OWNER,
 			});
+		else {
+			result.crossProvider = preflightCrossProvider(c, config, ctx);
+			const { directions } = result.crossProvider;
+			if (!directions.some((d) => d.status === 'pass'))
+				add(
+					'cross-provider-directions-not-ready',
+					directions.map((d) => d.id).join(',') || 'no direction declared'
+				);
+		}
+	}
 
 	const iso = config.isolation;
 	if (!iso) {
@@ -2031,6 +2083,293 @@ export function preflightCase(
 
 	result.status = reasons.length ? 'not-run' : 'pass';
 	return result;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-provider peer preflight (GT1-11-13A)
+// ---------------------------------------------------------------------------
+
+/** Owner of the E11 preflight itself. */
+export const CROSS_PROVIDER_PREFLIGHT_OWNER = 'GT1-11-13A';
+/** Owner of the translation legs a ready direction runs. */
+export const CROSS_PROVIDER_LEGS_OWNER = 'GT1-11-13B';
+/** No task runs a peer CLI on an SSH host; its directions stay not-run. */
+export const SSH_CROSS_PROVIDER_OWNER = 'unassigned-ssh-cross-provider-legs';
+
+/** The user's own provider homes, which no peer home may be or sit under. */
+const USER_PROVIDER_HOMES = ['.claude', '.codex', '.grok'] as const;
+
+export interface PeerPreflight {
+	provider: CrossProviderPeer;
+	status: 'pass' | 'not-run';
+	home: string | null;
+	endpoint: string | null;
+	model: string | null;
+	binary: {
+		path: string | null;
+		version: string | null;
+		sha256: string | null;
+		readOnly: boolean | null;
+	};
+	/** Whether the reference resolves to something; its value is never read. */
+	credential: { kind: CredentialReference['kind'] | null; present: boolean };
+	reasons: AdmissionReason[];
+}
+
+export interface DirectionPreflight {
+	id: string;
+	source: ProviderId;
+	destination: ProviderId;
+	peer: CrossProviderPeer;
+	/** The pinned version of each side, when both are declared for this direction. */
+	versions: { grok: string | null; peer: string | null };
+	legs: string[];
+	status: 'pass' | 'not-run';
+	reasons: AdmissionReason[];
+}
+
+export interface CrossProviderPreflight {
+	peers: PeerPreflight[];
+	directions: DirectionPreflight[];
+}
+
+/**
+ * Whether a credential reference resolves, by stat or by name only: a file
+ * reference must be a non-empty regular file, a secret name must exist as a
+ * systemd credential, a `/run/secrets` file or a non-empty variable. The value
+ * is never read, copied or returned.
+ */
+export function credentialReferencePresent(
+	ref: CredentialReference,
+	workspace: string,
+	env: NodeJS.ProcessEnv = process.env
+): boolean {
+	const isFile = (p: string) => {
+		try {
+			const st = fs.statSync(p);
+			return st.isFile() && st.size > 0;
+		} catch {
+			return false;
+		}
+	};
+	if (ref.kind === 'file') return isFile(path.resolve(workspace, ref.path));
+	if (!isValidSecretName(ref.name)) return false;
+	const dir = env[CREDENTIALS_DIRECTORY_ENV_VAR];
+	if (dir && path.isAbsolute(dir) && isFile(path.join(dir, ref.name))) return true;
+	if (!isWindows() && isFile(path.join(RUN_SECRETS_DIR, ref.name))) return true;
+	return (env[ref.name] ?? '').length > 0;
+}
+
+/** One peer's inputs, each missing or wrong one a reason that names the peer. */
+function preflightPeer(
+	peer: CrossProviderPeer,
+	c: QualificationCase,
+	config: QualificationConfig,
+	ctx: PreflightContext
+): PeerPreflight {
+	const reasons: AdmissionReason[] = [];
+	const add = (id: string, detail: string, owner?: string) =>
+		reasons.push({ ...preflightReason(id, `${peer}: ${detail}`), ...(owner ? { owner } : {}) });
+	const out: PeerPreflight = {
+		provider: peer,
+		status: 'not-run',
+		home: null,
+		endpoint: null,
+		model: null,
+		binary: { path: null, version: null, sha256: null, readOnly: null },
+		credential: { kind: null, present: false },
+		reasons,
+	};
+	if (!config.providers.includes(peer)) add('cross-provider-authorization-absent', 'providers');
+	const ref = config.credentialReferences.find((r) => r.provider === peer && r.account === 'A');
+	if (!ref) add('credential-reference-absent', `${peer}/A`);
+	else {
+		out.credential = {
+			kind: ref.kind,
+			present: credentialReferencePresent(ref, ctx.workspace, ctx.env),
+		};
+		if (!out.credential.present) add('credential-reference-unresolved', ref.kind);
+	}
+	if (c.target === 'ssh') add('peer-ssh-unsupported', c.target, SSH_CROSS_PROVIDER_OWNER);
+	const decl = config.crossProvider?.[peer] ?? null;
+	if (!decl) {
+		add('peer-declaration-absent', `crossProvider.${peer}`);
+		out.status = 'not-run';
+		return out;
+	}
+
+	// The owned disposable home: under the allowed roots, never the user's own provider home.
+	const roots = config.allowedRoots.map((r) => path.resolve(ctx.workspace, r));
+	const home = decl.home?.trim() ? path.resolve(ctx.workspace, decl.home) : null;
+	if (!home) add('peer-home-absent', `crossProvider.${peer}.home`);
+	else {
+		out.home = home;
+		if (!underAny('local', home, roots)) add('peer-home-outside-allowed', 'home');
+		else if (fs.existsSync(home)) {
+			const realRoots = roots.filter((r) => fs.existsSync(r)).map((r) => fs.realpathSync(r));
+			if (!underAny('local', fs.realpathSync(home), realRoots))
+				add('peer-home-symlink-escape', 'home');
+		}
+		const nHome = normalizeFor('local', home);
+		if (isPathAtOrUnderRoot(normalizeFor('local', ctx.operatorHome), nHome))
+			add('peer-home-contains-operator-home', 'home');
+		for (const d of USER_PROVIDER_HOMES)
+			if (isPathAtOrUnderRoot(nHome, normalizeFor('local', path.join(ctx.operatorHome, d))))
+				add('peer-home-is-user-home', d);
+		const grokHome = config.isolation?.accountRoots.A;
+		if (grokHome && overlaps('local', home, path.resolve(ctx.workspace, grokHome)))
+			add('peer-home-overlaps-grok-home', 'isolation.accountRoots.A');
+		for (const [other, o] of Object.entries(config.crossProvider ?? {}))
+			if (
+				other !== peer &&
+				o?.home?.trim() &&
+				overlaps('local', home, path.resolve(ctx.workspace, o.home))
+			)
+				add('peer-homes-overlap', other);
+	}
+
+	// The approved endpoint and model, and a spend guarantee that covers this peer.
+	try {
+		assertEndpointApproved(decl.endpoint, config);
+		out.endpoint = new URL(decl.endpoint).origin;
+	} catch {
+		add('peer-endpoint-not-approved', 'endpoint');
+	}
+	if (!decl.model || !config.allowedModels.includes(decl.model))
+		add('peer-model-not-authorized', decl.model || 'model');
+	else out.model = decl.model;
+	const g = config.spendGuarantee;
+	if (g?.kind === 'provider-cap' && !capProviders(config).includes(peer))
+		add('provider-cap-does-not-cover', peer);
+	else if (
+		g?.kind !== 'provider-cap' &&
+		out.model &&
+		pricingProvenance(out.model).source === 'unknown'
+	)
+		add('price-unknown', out.model);
+
+	// The exact binary: a declared translation version and the pinned bytes (hashed, never run).
+	const b = decl.binary ?? { path: null, sha256: null, version: null };
+	out.binary.version = b.version;
+	if (!b.path || !b.sha256 || !b.version) add('peer-binary-unpinned', 'binary.path/sha256/version');
+	if (b.version && !(TRANSLATION_PROVIDER_VERSIONS[peer] as readonly string[]).includes(b.version))
+		add('peer-version-undeclared', b.version);
+	if (b.sha256 && !/^[0-9a-f]{64}$/.test(b.sha256))
+		add('peer-binary-sha256-invalid', 'binary.sha256');
+	if (b.path) {
+		const resolved = path.resolve(ctx.workspace, b.path);
+		const seen = inspectExecutable(resolved);
+		out.binary = {
+			path: resolved,
+			version: b.version,
+			sha256: seen.sha256,
+			readOnly: seen.readOnly,
+		};
+		if (!seen.regular) add('peer-binary-unreadable', 'binary.path');
+		else {
+			if (!seen.readOnly) add('peer-binary-mutable', 'binary.path');
+			if (b.sha256 && seen.sha256 !== b.sha256) add('peer-binary-hash-mismatch', 'binary.sha256');
+		}
+	}
+	out.status = reasons.length ? 'not-run' : 'pass';
+	return out;
+}
+
+/**
+ * The E11 preflight (GT1-11-13A): each peer once, then each declared direction
+ * ready only when its own peer and the pinned Grok version are. Never spawns,
+ * never reads a credential value, never touches run-state.
+ */
+export function preflightCrossProvider(
+	c: QualificationCase,
+	config: QualificationConfig,
+	ctx: PreflightContext
+): CrossProviderPreflight {
+	const specs = PAID_FIXTURES[c.family]?.crossProvider ?? [];
+	const peers = [...new Set(specs.map((d) => d.peer))].map((p) => preflightPeer(p, c, config, ctx));
+	const grokVersion = config.binary.version;
+	const grokReasons =
+		grokVersion && (TRANSLATION_PROVIDER_VERSIONS.grok as readonly string[]).includes(grokVersion)
+			? []
+			: [preflightReason('grok-version-undeclared', grokVersion ?? 'binary.version')];
+	const directions = specs.map((d): DirectionPreflight => {
+		const peer = peers.find((p) => p.provider === d.peer)!;
+		const reasons = [...grokReasons, ...peer.reasons].map((r) => ({ ...r }));
+		const sideOk = (side: ProviderId, version: string | null) =>
+			!!version && (side === d.source ? d.sourceVersions : d.destinationVersions).includes(version);
+		const versions = { grok: grokVersion, peer: peer.binary.version };
+		if (!reasons.length && !(sideOk('grok', versions.grok) && sideOk(d.peer, versions.peer)))
+			reasons.push(preflightReason('direction-version-undeclared', d.id));
+		return {
+			id: d.id,
+			source: d.source,
+			destination: d.destination,
+			peer: d.peer,
+			versions,
+			legs: [...d.legs],
+			status: reasons.length ? 'not-run' : 'pass',
+			reasons,
+		};
+	});
+	return { peers, directions };
+}
+
+/** The ledger name of one E11 translation leg. */
+export const translationLegName = (direction: string, leg: string) =>
+	`translation:${direction}:${leg}`;
+
+/**
+ * Reserve one E11 translation leg on the shared ledger (GT1-11-13A), billed to
+ * the destination provider on its own endpoint and model, with the leg's turn
+ * allowance. Spend, calls and the case deadline stay shared by every leg (see
+ * `reserveSpend`). A direction the preflight did not pass, an unknown leg, or
+ * a leg already reserved is refused without a reservation.
+ */
+export function reserveTranslationLeg(
+	ledger: BudgetLedger,
+	config: QualificationConfig,
+	c: QualificationCase,
+	preflight: CrossProviderPreflight,
+	request: { direction: string; leg: string; grokModel: string; plan: ReservationPlan },
+	now: Date
+): ReservationResult {
+	const refuse = (id: string, detail: string): ReservationResult => ({
+		ok: false,
+		reasons: [spendReason(id, detail, CROSS_PROVIDER_PREFLIGHT_OWNER)],
+	});
+	const spec = PAID_FIXTURES[c.family]?.crossProvider?.find((d) => d.id === request.direction);
+	const d = preflight.directions.find((x) => x.id === request.direction);
+	if (!spec || !d) return refuse('translation-direction-unknown', request.direction);
+	if (!spec.legs.includes(request.leg)) return refuse('translation-leg-unknown', request.leg);
+	if (d.status !== 'pass')
+		return d.reasons.length
+			? { ok: false, reasons: d.reasons.map((r) => ({ ...r })) }
+			: refuse('direction-not-ready', d.id);
+	const name = translationLegName(d.id, request.leg);
+	if (
+		ledger.reservations.some(
+			(r) => r.caseId === c.caseId && r.leg === name && r.state !== 'released'
+		)
+	)
+		return refuse('leg-already-run', name);
+	const peer = preflight.peers.find((p) => p.provider === d.peer)!;
+	const toPeer = spec.destination !== 'grok';
+	return reserveSpend(
+		ledger,
+		config,
+		{
+			caseId: c.caseId,
+			leg: name,
+			provider: spec.destination,
+			account: 'A',
+			endpoint: (toPeer ? peer.endpoint : config.allowedEndpoints[0]) ?? '',
+			models: toPeer ? [peer.model ?? ''] : [request.grokModel],
+			target: c.target,
+			sshTarget: null,
+			plan: workflowReservationPlan(request.plan, spec.maxTurns),
+		},
+		now
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -2201,7 +2540,8 @@ function capProviders(config: QualificationConfig): ProviderId[] {
  */
 export function planCaseReservation(
 	c: QualificationCase,
-	config: QualificationConfig
+	config: QualificationConfig,
+	options: { peersPerDirection?: boolean } = {}
 ): ReservationPlan {
 	const reasons: AdmissionReason[] = [];
 	const limits = effectiveLimits(config);
@@ -2264,7 +2604,10 @@ export function planCaseReservation(
 		}
 	} else if (g?.kind === 'provider-cap') {
 		const providers = capProviders(config);
-		const uncovered = c.providers.filter((p) => !providers.includes(p));
+		// With the E11 peer preflight, a peer the cap misses refuses only its own directions.
+		const uncovered = c.providers.filter(
+			(p) => !providers.includes(p) && !(options.peersPerDirection && p !== 'grok')
+		);
 		for (const p of uncovered) reasons.push(spendReason('provider-cap-does-not-cover', p));
 		if (positiveFinite(g.capUsd) && g.capUsd > config.limits.budgetUsd)
 			reasons.push(spendReason('provider-cap-exceeds-run-budget', `${g.capUsd}`));
@@ -2640,7 +2983,17 @@ export function paidExecutorGaps(
 					owner: SSH_IDENTITY_INSPECTION_OWNER,
 				});
 			if (c.providers.some((p) => p !== 'grok'))
-				gaps.push({ detail: 'the paid executor runs Grok legs only', owner: 'GT1-11-13' });
+				gaps.push(
+					capabilities.crossProviderLegs
+						? {
+								detail: 'no translation leg runs on a ready direction yet',
+								owner: CROSS_PROVIDER_LEGS_OWNER,
+							}
+						: {
+								detail: 'the paid executor runs Grok legs only',
+								owner: CROSS_PROVIDER_PREFLIGHT_OWNER,
+							}
+				);
 		}
 	}
 	return gaps;
@@ -2673,6 +3026,8 @@ export function admitCase(
 		add({ id: 'live-authorization-expired', kind: 'admission-input', detail: 'expiresAt' });
 
 	for (const provider of c.providers) {
+		// A peer's authorization and credential are judged per direction (preflightCrossProvider).
+		if (provider !== 'grok' && capabilities.crossProviderLegs) continue;
 		if (!config.providers.includes(provider))
 			add({
 				id: provider === 'grok' ? 'provider-not-authorized' : 'cross-provider-authorization-absent',
@@ -2755,7 +3110,12 @@ export function admitCase(
 				if (pricingProvenance(model).source === 'unknown')
 					add({ id: 'price-unknown', kind: 'pricing', detail: model });
 		}
-		if (capabilities.atomicSpendAdmission) reasons.push(...planCaseReservation(c, config).reasons);
+		if (capabilities.atomicSpendAdmission)
+			reasons.push(
+				...planCaseReservation(c, config, {
+					peersPerDirection: capabilities.crossProviderLegs,
+				}).reasons
+			);
 		else
 			add({
 				id: 'spend-admission-unimplemented',
@@ -2766,7 +3126,7 @@ export function admitCase(
 	}
 	// The offline-inspection leg has its own executor (runOfflineLeg). The discovery
 	// (GT1-11-11A1) and paid (GT1-11-11P1) executors cover Grok-only legs, an SSH
-	// one through the SSH leg (GT1-11-11A3); a cross-provider leg is GT1-11-13's.
+	// one through the SSH leg (GT1-11-11A3); a translation leg is GT1-11-13B's.
 	const gaps = paidExecutorGaps(c, capabilities);
 	if (gaps.length)
 		add({
@@ -17917,15 +18277,21 @@ export async function executePaidCase(
 	const fixture = PAID_FIXTURES[c.family];
 	const reasons = admitCase(c, config, ctx.problems, ctx.capabilities, ctx.now());
 	reasons.push(
-		...preflightCase(c, config, { workspace: ctx.workspace, operatorHome: ctx.operatorHome })
-			.reasons
+		...preflightCase(
+			c,
+			config,
+			{ workspace: ctx.workspace, operatorHome: ctx.operatorHome },
+			ctx.capabilities
+		).reasons
 	);
 	if (!c.classes.includes('paid')) reasons.push(paidReason('paid-leg-absent', c.caseId));
 	reasons.push(...(ctx.precondition ?? []));
 	if (!ctx.ledger.authorizedCaseIds.includes(c.caseId))
 		reasons.push(paidReason('case-not-admitted', c.caseId));
 	if (!fixture) reasons.push(paidReason('fixture-absent', c.family));
-	const plan = planCaseReservation(c, config);
+	const plan = planCaseReservation(c, config, {
+		peersPerDirection: ctx.capabilities.crossProviderLegs,
+	});
 	const mostTurns = fixture
 		? Math.max(...accounts.map((a) => fixtureTurnsFor(fixture, a).length))
 		: 0;
@@ -18123,7 +18489,7 @@ export async function runQualification(options: RunOptions): Promise<{
 		// Pre-spawn: every binary case is held to the isolation preflight first.
 		const preflight =
 			needsBinary && capabilities.isolationPreflight
-				? preflightCase(c, config, { workspace: options.workspace, operatorHome })
+				? preflightCase(c, config, { workspace: options.workspace, operatorHome }, capabilities)
 				: null;
 		if (preflight) reasons.push(...preflight.reasons);
 		const lifetime = createCaseLifetime(config.limits.cleanupSeconds);
@@ -18185,7 +18551,10 @@ export async function runQualification(options: RunOptions): Promise<{
 			}
 		}
 		const paid = c.classes.includes('paid');
-		const plan = paid && capabilities.atomicSpendAdmission ? planCaseReservation(c, config) : null;
+		const plan =
+			paid && capabilities.atomicSpendAdmission
+				? planCaseReservation(c, config, { peersPerDirection: capabilities.crossProviderLegs })
+				: null;
 		const held = ledger.reservations.filter((r) => r.caseId === c.caseId);
 		// Each SSH verification is an owned ssh child and a connection to the approved host.
 		const sshConnections = [...discoveryLegs, ...paidLegs].reduce(

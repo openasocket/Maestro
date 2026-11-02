@@ -182,6 +182,7 @@ const ALL_CAPS: HarnessCapabilities = {
 	accountingConsumers: false,
 	// Off: the negative policy legs run in their own block (GT1-11-12D).
 	policyLegs: false,
+	crossProviderLegs: false,
 };
 
 /** The fake budget provider: a fully authorized worst-case-reservation config. */

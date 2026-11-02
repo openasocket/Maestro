@@ -35,7 +35,14 @@
  * retry, run after the leg settled, each on an accounting reservation of its own.
  *
  * E10 (GT1-11-12A) also names negative policy legs (`PolicyLegSpec`).
+ *
+ * E11 (GT1-11-13A) also names its cross-provider directions
+ * (`CrossProviderDirectionSpec`): every declared translation direction with
+ * Grok on one side, the peer provider it needs and the legs each direction
+ * reserves for on the shared ledger (`translation:<direction>:<leg>`).
  */
+
+import { TRANSLATION_DIRECTIONS } from '../../src/shared/maestro-lib/translation/support';
 
 export const PAID_FIXTURE_SCHEMA = 'grok-paid-fixture/v1';
 
@@ -169,7 +176,32 @@ export interface PaidFixture {
 	accountingLegs?: AccountingLegSpec[];
 	/** Negative policy legs the harness runs after the leg settled, each on a policy reservation of its own (E10). */
 	policyLegs?: PolicyLegSpec[];
+	/** Cross-provider directions, each leg on a translation reservation of its own (E11). */
+	crossProvider?: CrossProviderDirectionSpec[];
 	unevaluated: Array<{ id: string; detail: string; owner: string }>;
+}
+
+/** A provider an E11 direction pairs with Grok (GT1-11-13A). */
+export type CrossProviderPeer = 'claude-code' | 'codex';
+
+/**
+ * One declared translation direction with Grok on one side (GT1-11-13A). The
+ * peer is the other provider: its disposable home, credential reference,
+ * endpoint, model and pinned binary are preflighted on their own, so a missing
+ * input for one peer leaves only that peer's directions not-run. Each leg holds
+ * its own `translation:<id>:<leg>` reservation, billed to the destination, with
+ * at most `maxTurns` user turns; spend, calls and the case deadline stay shared.
+ */
+export interface CrossProviderDirectionSpec {
+	id: string;
+	source: 'grok' | CrossProviderPeer;
+	destination: 'grok' | CrossProviderPeer;
+	peer: CrossProviderPeer;
+	/** The versions the production direction declares for each side. */
+	sourceVersions: readonly string[];
+	destinationVersions: readonly string[];
+	legs: readonly string[];
+	maxTurns: number;
 }
 
 /**
@@ -722,6 +754,22 @@ export const POLICY_LEGS: readonly PolicyLegSpec[] = Object.freeze([
 	).map((id): PolicyLegSpec => ({ id, kind: 'authority', turns: [], maxTurns: 0 })),
 ]);
 
+/** Every production direction with Grok on one side; the legs that run on it are GT1-11-13B's. */
+export const CROSS_PROVIDER_DIRECTIONS: readonly CrossProviderDirectionSpec[] = Object.freeze(
+	TRANSLATION_DIRECTIONS.filter((d) => (d.source === 'grok') !== (d.destination === 'grok')).map(
+		(d): CrossProviderDirectionSpec => ({
+			id: `${d.source}-to-${d.destination}`,
+			source: d.source as CrossProviderDirectionSpec['source'],
+			destination: d.destination as CrossProviderDirectionSpec['destination'],
+			peer: (d.source === 'grok' ? d.destination : d.source) as CrossProviderPeer,
+			sourceVersions: [...d.sourceVersions],
+			destinationVersions: [...d.destinationVersions],
+			legs: ['translate-resume'],
+			maxTurns: 1,
+		})
+	)
+);
+
 const turn = (family: string, n: number, extra = ''): PaidFixtureTurn => {
 	const token = `QUALIFY-${family}-T${n}-OK`;
 	return {
@@ -784,6 +832,7 @@ const fixture = (
 		workflowLegs?: WorkflowLegSpec[];
 		accountingLegs?: AccountingLegSpec[];
 		policyLegs?: PolicyLegSpec[];
+		crossProvider?: CrossProviderDirectionSpec[];
 	} = {}
 ): PaidFixture => ({
 	schema: PAID_FIXTURE_SCHEMA,
@@ -797,6 +846,7 @@ const fixture = (
 	...(extra.workflowLegs ? { workflowLegs: extra.workflowLegs } : {}),
 	...(extra.accountingLegs ? { accountingLegs: extra.accountingLegs } : {}),
 	...(extra.policyLegs ? { policyLegs: extra.policyLegs } : {}),
+	...(extra.crossProvider ? { crossProvider: extra.crossProvider } : {}),
 	unevaluated,
 });
 
@@ -889,7 +939,8 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 	E11: fixture(
 		'E11',
 		[turn('E11', 1), turn('E11', 2)],
-		[{ id: 'cross-provider', detail: 'Claude and Codex legs', owner: 'GT1-11-13' }]
+		[{ id: 'cross-provider', detail: 'Claude and Codex legs', owner: 'GT1-11-13B' }],
+		{ crossProvider: [...CROSS_PROVIDER_DIRECTIONS] }
 	),
 	E12: fixture(
 		'E12',
