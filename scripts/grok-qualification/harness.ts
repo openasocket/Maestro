@@ -287,7 +287,10 @@ import { containsCredentialToken } from '../../src/shared/agent-run/redact';
 import { isValidSecretName, lookupSecret } from '../../src/shared/serverSecrets';
 import { getAgentDefinition } from '../../src/shared/maestro-lib/providers/definitions';
 import { GrokOutputParser } from '../../src/shared/maestro-lib/parsers/grok-output-parser';
-import { GrokAcpClient } from '../../src/shared/maestro-lib/grok/acp-client';
+import {
+	GrokAcpClient,
+	type GrokAcpClientOptions,
+} from '../../src/shared/maestro-lib/grok/acp-client';
 import { GrokAcpEventAdapter } from '../../src/shared/maestro-lib/grok/acp-events';
 import type { AcpCall } from '../../src/shared/maestro-lib/grok/acp-protocol';
 import {
@@ -6501,6 +6504,10 @@ async function runAcpPaidTurns(args: {
 			failed: boolean
 		): PaidTurnResult['usage'];
 	};
+	/** Agent-to-client request handlers handed to the client (a policy leg's denials, GT1-11-12A1). */
+	requestHandlers?: GrokAcpClientOptions['requestHandlers'];
+	/** Told the owned child right after spawn (a policy leg's descendant watch). */
+	onChild?: (child: ChildProcess) => void;
 }): Promise<{
 	turns: PaidTurnResult[];
 	reasons: AdmissionReason[];
@@ -6528,6 +6535,7 @@ async function runAcpPaidTurns(args: {
 		return { turns, reasons, spawned: 0, sent, uncertainWhy };
 	}
 	args.lifetime.own(child);
+	args.onChild?.(child);
 	let spawnError: string | null = null;
 	let window = { out: streamDigest(), err: streamDigest(), started: Date.now() };
 	let reply: ReturnType<typeof replyCollector> | null = null;
@@ -6566,6 +6574,7 @@ async function runAcpPaidTurns(args: {
 			)
 				reply?.push(content.text);
 		},
+		requestHandlers: args.requestHandlers,
 	});
 	child.stdout?.on('data', (d: Buffer) => {
 		if (window.out.push(d)) {
@@ -12730,8 +12739,34 @@ async function runAccountingLegs(w: AccountingLegContext): Promise<{
 export const POLICY_LEGS_OWNER = 'GT1-11-12A';
 /** The sentinels, symlink, listener and tree checks are local; no task owns an SSH policy leg. */
 export const SSH_POLICY_LEGS_OWNER = 'unassigned-ssh-policy-legs';
-/** The ACP route (every permission request denied by the harness), a continuation for the line bound. */
+/** The ACP route: every permission request is answered with its reject option, never an allow. */
 export const ACP_POLICY_LEGS_OWNER = 'GT1-11-12A1';
+
+/**
+ * The answer a policy leg gives a `session/request_permission`: the request's
+ * `reject_once` option, else its `reject_always`, else `cancelled`. Never an allow.
+ */
+export function policyDenialAnswer(params: unknown): {
+	outcome: { outcome: 'selected'; optionId: string } | { outcome: 'cancelled' };
+} {
+	const options =
+		params && typeof params === 'object' && !Array.isArray(params)
+			? (params as Record<string, unknown>).options
+			: undefined;
+	const list = (Array.isArray(options) ? options : []) as Array<Record<string, unknown> | null>;
+	for (const kind of ['reject_once', 'reject_always']) {
+		const o = list.find(
+			(x) =>
+				!!x &&
+				typeof x === 'object' &&
+				x.kind === kind &&
+				typeof x.optionId === 'string' &&
+				!!x.optionId
+		);
+		if (o) return { outcome: { outcome: 'selected', optionId: o.optionId as string } };
+	}
+	return { outcome: { outcome: 'cancelled' } };
+}
 
 /** The assertions every policy leg must evaluate; each reads an effect, never the reply. */
 export const POLICY_ASSERTIONS: readonly string[] = Object.freeze([
@@ -12776,6 +12811,8 @@ export interface PolicyLegReceipt {
 	/** Descendants the production process-tree snapshot saw while the turn ran, and those alive after it. */
 	descendants: number;
 	survivors: number;
+	/** Permission requests the harness denied on the ACP route (null on native); recorded, never evidence. */
+	denials: number | null;
 	/** Owned paths whose bytes changed, appeared or vanished (`project/`, `outside/`, `tmp/` prefixed). */
 	changed: string[];
 	sandbox: ReturnType<typeof policySandboxNote>;
@@ -12872,10 +12909,14 @@ async function assertPolicyEffects(
 	w: PolicyLegContext,
 	r: PolicyLegReceipt,
 	f: PolicyFixture,
-	descendants: Set<number>
+	descendants: Set<number>,
+	/** Descendants the turn started and left running at its end (ACP: the agent outlives the turn). */
+	lingering: number[] = []
 ): Promise<void> {
 	const t = r.turns[0];
-	const survivors = await survivorsAfter([...descendants], w.graceMs);
+	const survivors = [
+		...new Set([...(await survivorsAfter([...descendants], w.graceMs)), ...lingering]),
+	];
 	r.descendants = descendants.size;
 	r.survivors = survivors.length;
 	const diff = (key: 'project' | 'outside' | 'tmp', dir: string | null) => {
@@ -12927,14 +12968,83 @@ async function assertPolicyEffects(
 			!winTree && !survivors.length,
 			winTree
 				? 'the process tree is unowned on win32; survivors cannot be proven absent'
-				: `descendants=${descendants.size}; survivors=${survivors.length}`,
+				: `descendants=${descendants.size}; survivors=${survivors.length}; left running at turn end=${lingering.length}`,
 		],
 	];
 	for (const [id, ok, detail] of checks)
 		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
 }
 
-/** One policy leg's turn and effect checks (native route); returns the uncertainty its turn left. */
+/**
+ * The ACP route of a policy leg: one owned `agent stdio` child, one turn, and
+ * every `session/request_permission` answered with its reject option. The
+ * denial count is recorded on the receipt; the effect checks decide the leg.
+ */
+async function runPolicyAcpTurn(
+	w: PolicyLegContext,
+	r: PolicyLegReceipt,
+	s: ReturnType<typeof accountingSessionContext>,
+	turn: PaidFixtureTurn,
+	descendants: Set<number>,
+	lingering: number[]
+): Promise<string | null> {
+	const spec = await w.launcher(GROK_ACP_ARGS);
+	if ('refused' in spec) {
+		r.reasons.push(sshReason(spec.refused, spec.detail, 'paid-execution'));
+		return null;
+	}
+	r.denials = 0;
+	// The agent outlives its turn, and the stop ladder reaps its tree; a process the turn
+	// started and left running at its end is a survivor, read before the agent is stopped.
+	let agent: ChildProcess | null = null;
+	let before = new Set<number>();
+	const alive = () =>
+		agent?.pid ? snapshotProcessTree(agent.pid).descendants.map((d) => d.pid) : [];
+	const run = await runAcpPaidTurns({
+		spec,
+		cwd: w.cwd,
+		model: w.model,
+		effort: w.effort,
+		fixture: w.fixture,
+		turns: [turn],
+		graceMs: w.graceMs,
+		lifetime: w.lifetime,
+		turnMs: s.turnMs,
+		admitTurn: (n) => {
+			before = new Set(alive());
+			return s.admit(n);
+		},
+		calls: () => s.drawn(),
+		observe: {
+			observe: () => {},
+			endTurn: () => {
+				for (const pid of alive()) {
+					descendants.add(pid);
+					if (!before.has(pid)) lingering.push(pid);
+				}
+			},
+		},
+		requestHandlers: new Map([
+			[
+				'session/request_permission',
+				(request, respond) => {
+					if (respond({ result: policyDenialAnswer(request.params) })) r.denials!++;
+				},
+			],
+		]),
+		onChild: (child) => {
+			agent = child;
+			watchDescendants(child, descendants);
+		},
+	});
+	r.turns.push(...run.turns);
+	r.spawned += run.spawned;
+	r.paidRequests += run.sent;
+	r.reasons.push(...run.reasons.map((x) => ({ ...x, owner: x.owner ?? ACP_POLICY_LEGS_OWNER })));
+	return run.uncertainWhy;
+}
+
+/** One policy leg's turn and effect checks (native or ACP route); returns the uncertainty its turn left. */
 async function runPolicyLeg(
 	spec: PolicyLegSpec,
 	w: PolicyLegContext,
@@ -12945,6 +13055,19 @@ async function runPolicyLeg(
 	const descendants = new Set<number>();
 	try {
 		const s = accountingSessionContext(w, r, reservation, { n: 0 });
+		if (w.c.route === 'acp-stdio') {
+			const lingering: number[] = [];
+			const why = await runPolicyAcpTurn(
+				w,
+				r,
+				s,
+				policyTurnFor(spec.turns[0], f.paths),
+				descendants,
+				lingering
+			);
+			if (r.spawned > 0) await assertPolicyEffects(w, r, f, descendants, lingering);
+			return why;
+		}
 		const { reasons, turns } = r;
 		const receipt: TurnBearingReceipt = {
 			leg: `policy:${spec.id}`,
@@ -13025,6 +13148,7 @@ async function runPolicyLegs(w: PolicyLegContext): Promise<{
 			loopbackConnections: null,
 			descendants: 0,
 			survivors: 0,
+			denials: null,
 			changed: [],
 			sandbox: policySandboxNote(),
 			assertions: [],
@@ -13051,8 +13175,6 @@ async function runPolicyLegs(w: PolicyLegContext): Promise<{
 		else if (prior.length) reason('leg-already-run', legName);
 		else if (w.c.target === 'ssh')
 			gap('the sentinels, listener and tree checks are local', SSH_POLICY_LEGS_OWNER);
-		else if (w.c.route !== 'native-headless')
-			gap('the ACP denial route is not implemented', ACP_POLICY_LEGS_OWNER);
 		else if (!w.accountRoot) reason('account-root-unknown', spec.id);
 		else if (spec.maxTurns !== 1 || spec.turns.length !== 1)
 			reason('policy-turns-outside-ceiling', `${spec.maxTurns}; a policy leg sends one turn`);
