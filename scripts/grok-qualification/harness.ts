@@ -238,7 +238,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { EventEmitter } from 'node:events';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { syncBuiltinESMExports } from 'node:module';
 
 import { canonicalJson } from '../../src/shared/canonicalJson';
 import {
@@ -469,6 +470,15 @@ export const HARNESS_CAPABILITIES = {
 	 * holds a workflow reservation of its own. Off, each is not-run.
 	 */
 	orchestrationLegs: true,
+	/**
+	 * The E09 contribution legs (GT1-11-11E3): the production Symphony runner
+	 * over an owned repository with every remote effect held by the repository
+	 * ceiling and one Grok task turn, a Pianola plan task selected onto Grok and
+	 * run under the production supervisor, and `pianola learn` over the owned
+	 * Grok home only. The Symphony and Pianola dispatch legs record their open
+	 * blockers as gaps, never passes. Off, each is not-run.
+	 */
+	contributionLegs: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
 
@@ -6643,6 +6653,12 @@ function runNativeSessionTurn(a: {
 	onRunning?: () => void;
 	/** Called with every parsed event, in stream order (a utility leg's bridge hands answer text on). */
 	onEvent?: (ev: ParsedGrokEvent) => void;
+	/**
+	 * Makes the child from the exact spec, in place of a bare spawn (the Pianola
+	 * leg hands it to the production supervisor). Must spawn `spec` itself with
+	 * no input channel; a throw is a spawn that never happened.
+	 */
+	spawnChild?: (spec: SpawnSpec) => ChildProcess;
 }): Promise<SessionTurnRun> {
 	return new Promise((resolve) => {
 		const started = Date.now();
@@ -6744,14 +6760,16 @@ function runNativeSessionTurn(a: {
 			});
 		};
 		try {
-			child = spawn(a.spec.command, [...a.spec.args], {
-				cwd: a.spec.cwd,
-				env: a.spec.env,
-				shell: false,
-				// No input channel: nothing can be written into a running turn.
-				stdio: ['ignore', 'pipe', 'pipe'],
-				windowsHide: true,
-			});
+			child = a.spawnChild
+				? a.spawnChild(a.spec)
+				: spawn(a.spec.command, [...a.spec.args], {
+						cwd: a.spec.cwd,
+						env: a.spec.env,
+						shell: false,
+						// No input channel: nothing can be written into a running turn.
+						stdio: ['ignore', 'pipe', 'pipe'],
+						windowsHide: true,
+					});
 		} catch (e) {
 			state.spawnError = (e as NodeJS.ErrnoException).code ?? 'spawn-threw';
 			finish(null, null);
@@ -6766,7 +6784,10 @@ function runNativeSessionTurn(a: {
 			},
 			Math.max(1, a.timeoutMs)
 		);
-		child.stdout?.on('data', (d: Buffer) => {
+		// A supervisor that owns the child may have set an encoding on its streams: bytes either way.
+		const bytes = (d: Buffer | string) => (typeof d === 'string' ? Buffer.from(d, 'utf8') : d);
+		child.stdout?.on('data', (raw: Buffer | string) => {
+			const d = bytes(raw);
 			if (out.push(d)) stop();
 			state.pending += decoder.write(d);
 			let k: number;
@@ -6776,8 +6797,8 @@ function runNativeSessionTurn(a: {
 				onLine(line);
 			}
 		});
-		child.stderr?.on('data', (d: Buffer) => {
-			if (err.push(d)) stop();
+		child.stderr?.on('data', (raw: Buffer | string) => {
+			if (err.push(bytes(raw))) stop();
 		});
 		child.on('error', (e: NodeJS.ErrnoException) => {
 			state.spawnError = e.code ?? 'spawn-error';
@@ -6808,6 +6829,8 @@ async function sendSessionTurn(
 		onEvent?: (ev: ParsedGrokEvent) => void;
 		/** The argv a production launch plan built (a utility leg); absent, the definition's own native argv. */
 		argv?: string[];
+		/** Who makes the child from the built spec (see `runNativeSessionTurn`); absent, a bare spawn. */
+		spawnChild?: (spec: SpawnSpec) => ChildProcess;
 	} = {}
 ): Promise<{ run: SessionTurnRun | null; uncertainWhy: string | null }> {
 	const n = s.nextTurn();
@@ -6835,6 +6858,7 @@ async function sendSessionTurn(
 		stopWhen: opts.stopWhen,
 		onRunning: opts.onRunning,
 		onEvent: opts.onEvent,
+		spawnChild: opts.spawnChild,
 	});
 	r.spawned++;
 	if (!run.neverRan) r.paidRequests++;
@@ -7418,6 +7442,7 @@ const SESSION_CONSUMER_LEG_IDS: readonly string[] = SESSION_CONSUMER_LEGS.map((l
  * leg, GT1-11-11C1 otherwise.
  */
 function ownerOfLeg(leg: string): string {
+	if (CONTRIBUTION_LEG_IDS.includes(leg)) return CONTRIBUTION_LEGS_OWNER;
 	if (ORCHESTRATION_LEG_IDS.includes(leg)) return ORCHESTRATION_LEGS_OWNER;
 	if (WORKFLOW_LEG_IDS.includes(leg)) return 'GT1-11-11E1';
 	if (CHEAP_UTILITY_LEG_IDS.includes(leg)) return 'GT1-11-11D2';
@@ -7725,7 +7750,7 @@ const runContextHandoffLeg: SessionConsumerRunner = async (s, r, id, problems) =
 };
 
 /** A git child in an owned root: no operator config, no signing, no prompt, bounded. */
-function ownedGit(root: string, r: SessionConsumerReceipt) {
+function ownedGit(root: string, r: { spawned: number }) {
 	const env: NodeJS.ProcessEnv = {
 		PATH: process.env.PATH ?? '',
 		HOME: root,
@@ -9495,6 +9520,50 @@ async function loadMainUtilityConsumers(
 	workspace: string,
 	userData: string
 ): Promise<MainUtilityConsumers> {
+	const src = (rel: string) => JSON.stringify(path.join(workspace, 'src', 'main', rel));
+	const loaded = await bundleMainEntry<
+		Omit<MainUtilityConsumers, 'handlers' | 'dispose'> & {
+			logger: { setLogLevel: (level: 'error') => void };
+		}
+	>(workspace, userData, 'qualify-main-utility.ts', [
+		`export { generateTabName } from ${src('ipc/handlers/tabNaming.ts')};`,
+		`export { registerContextHandlers } from ${src('ipc/handlers/context.ts')};`,
+		`export { initializePrompts, getPrompt } from ${src('prompt-manager.ts')};`,
+		`export { logger } from ${src('utils/logger.ts')};`,
+	]);
+	const mod = loaded.mod;
+	// The consumers' own info logging would interleave with the run's output.
+	mod.logger.setLogLevel('error');
+	return {
+		generateTabName: mod.generateTabName,
+		registerContextHandlers: mod.registerContextHandlers,
+		initializePrompts: mod.initializePrompts,
+		getPrompt: mod.getPrompt,
+		handlers: loaded.handlers,
+		dispose: loaded.dispose,
+	};
+}
+
+/**
+ * Bundle checkout modules that import Electron (which plain Node cannot link)
+ * at run time and import the result: esbuild, packages external, as the
+ * launcher bundles this harness, with one substitution. `electron` becomes a
+ * stand-in whose `ipcMain.handle` records handlers and whose `app` is an
+ * unpackaged app with `userData` at an owned dir. `__dirname` is pinned to the
+ * checkout's `dist/main`, so the prompt manager reads `src/prompts`. The bundle
+ * file is written beside the harness bundle and removed once loaded; nothing
+ * else is substituted. `entry` is the export lines of the synthetic entry.
+ */
+async function bundleMainEntry<T>(
+	workspace: string,
+	userData: string,
+	sourcefile: string,
+	entry: readonly string[]
+): Promise<{
+	mod: T;
+	handlers: Map<string, (...args: unknown[]) => Promise<unknown>>;
+	dispose: () => void;
+}> {
 	const { build } = await import('esbuild');
 	const key = `__qualifyElectron_${randomUUID().replace(/-/g, '')}`;
 	const state = { handlers: new Map<string, (...args: unknown[]) => Promise<unknown>>(), userData };
@@ -9503,7 +9572,6 @@ async function loadMainUtilityConsumers(
 	const dir = path.join(workspace, 'tmp', 'grok-tier1-environment', 'harness');
 	fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
 	const out = path.join(dir, `main-utility-${randomUUID()}.mjs`);
-	const src = (rel: string) => JSON.stringify(path.join(workspace, 'src', 'main', rel));
 	const shim = [
 		`const s = globalThis[${JSON.stringify(key)}];`,
 		'const handle = (channel, fn) => { s.handlers.set(channel, fn); };',
@@ -9515,14 +9583,9 @@ async function loadMainUtilityConsumers(
 	try {
 		await build({
 			stdin: {
-				contents: [
-					`export { generateTabName } from ${src('ipc/handlers/tabNaming.ts')};`,
-					`export { registerContextHandlers } from ${src('ipc/handlers/context.ts')};`,
-					`export { initializePrompts, getPrompt } from ${src('prompt-manager.ts')};`,
-					`export { logger } from ${src('utils/logger.ts')};`,
-				].join('\n'),
+				contents: entry.join('\n'),
 				resolveDir: workspace,
-				sourcefile: 'qualify-main-utility.ts',
+				sourcefile,
 				loader: 'ts',
 			},
 			outfile: out,
@@ -9549,17 +9612,9 @@ async function loadMainUtilityConsumers(
 				},
 			],
 		});
-		const mod = (await import(pathToFileURL(out).href)) as Omit<
-			MainUtilityConsumers,
-			'handlers' | 'dispose'
-		> & { logger: { setLogLevel: (level: 'error') => void } };
-		// The consumers' own info logging would interleave with the run's output.
-		mod.logger.setLogLevel('error');
+		const mod = (await import(pathToFileURL(out).href)) as T;
 		return {
-			generateTabName: mod.generateTabName,
-			registerContextHandlers: mod.registerContextHandlers,
-			initializePrompts: mod.initializePrompts,
-			getPrompt: mod.getPrompt,
+			mod,
 			handlers: state.handlers,
 			dispose: () => {
 				delete g[key];
@@ -10255,6 +10310,32 @@ export const WORKFLOW_ASSERTIONS: Readonly<Record<WorkflowLegId, readonly string
 			'history-entry',
 			'children-reaped',
 		],
+		'symphony-local': [
+			'clone-refused',
+			'planned-launch',
+			'turn-completed',
+			'completion-recorded',
+			'push-refused',
+			'cancel-refused',
+			'zero-network',
+			'children-reaped',
+		],
+		'pianola-dispatch': [
+			'selects-grok',
+			'planned-launch',
+			'supervisor-admission',
+			'task-done',
+			'no-stale-relaunch',
+			'transcript-recorded',
+			'cleanup-reaps-child',
+		],
+		'pianola-learn': [
+			'owned-home-only',
+			'attributed-to-grok',
+			'output-bounded',
+			'permission-decisions-unsupported',
+			'zero-billable-calls',
+		],
 	});
 
 const WORKFLOW_LEG_IDS: readonly string[] = Object.keys(WORKFLOW_ASSERTIONS);
@@ -10317,6 +10398,12 @@ export interface WorkflowLegReceipt {
 	root: string | null;
 	spawned: number;
 	paidRequests: number;
+	/**
+	 * Open blockers the leg observed (GT1-11-11E3): a leg whose assertions all
+	 * pass but that carries one is not-evaluated, owned by the first, never
+	 * passed. Empty for every other leg.
+	 */
+	openGaps: string[];
 }
 
 interface WorkflowLegContext {
@@ -10446,6 +10533,8 @@ function createWorkflowTurnPort(
 		onRefused?: () => void;
 		/** The query source the launcher stamps into the child (set per dispatch from the plan). */
 		querySource: { value: string | null };
+		/** Who makes each turn's child (the Pianola supervisor); absent, a bare spawn. */
+		spawnChild?: (spec: SpawnSpec) => ChildProcess;
 	}
 ) {
 	const def = getAgentDefinition('grok');
@@ -10598,6 +10687,7 @@ function createWorkflowTurnPort(
 				},
 				// The run control's signal is the only stop: never a stop of the harness's own choosing.
 				stopWhen: () => request.signal?.aborted === true,
+				spawnChild: opts.spawnChild,
 			});
 		} finally {
 			fs.rmSync(artifact.path, { force: true });
@@ -10677,6 +10767,17 @@ function settleWorkflowLeg(r: WorkflowLegReceipt, problems: string[]): WorkflowL
 			.filter((id) => !r.assertions.some((a) => a.id === id))
 			.map((id) => `assertion-not-evaluated:${id}`),
 	];
+	if (!all.length && r.openGaps.length) {
+		// Every assertion held, but an open blocker stands: an honest gap, never a pass.
+		r.status = 'not-evaluated';
+		r.assertion = {
+			id: r.leg,
+			outcome: 'not-evaluated',
+			detail: `${required.length} assertions passed; open: ${r.openGaps.join(', ')}`,
+			owner: r.openGaps[0],
+		};
+		return r;
+	}
 	r.status = all.length ? 'failed' : 'passed';
 	r.assertion = {
 		id: r.leg,
@@ -11223,8 +11324,10 @@ async function runWorkflowLegs(w: WorkflowLegContext): Promise<{
 	let uncertainWhy: string | null = null;
 	for (const spec of w.fixture.workflowLegs ?? []) {
 		const orchestration = ORCHESTRATION_LEG_IDS.includes(spec.id);
+		const contribution = CONTRIBUTION_LEG_IDS.includes(spec.id);
 		const owner = ownerOfLeg(spec.id);
-		const minTurns = REFUSAL_LEG_IDS.includes(spec.id) ? 0 : 1;
+		const minTurns =
+			REFUSAL_LEG_IDS.includes(spec.id) || TURNLESS_CONTRIBUTION_LEG_IDS.includes(spec.id) ? 0 : 1;
 		const r: WorkflowLegReceipt = {
 			leg: spec.id,
 			status: 'not-run',
@@ -11240,6 +11343,7 @@ async function runWorkflowLegs(w: WorkflowLegContext): Promise<{
 			root: null,
 			spawned: 0,
 			paidRequests: 0,
+			openGaps: [],
 		};
 		const gap = (detail: string, gapOwner: string) => {
 			r.status = 'not-evaluated';
@@ -11254,6 +11358,8 @@ async function runWorkflowLegs(w: WorkflowLegContext): Promise<{
 			r.reasons.push(workflowReason('workflow-legs-unimplemented', spec.id, owner));
 		else if (orchestration && !w.capabilities.orchestrationLegs)
 			r.reasons.push(workflowReason('orchestration-legs-unimplemented', spec.id, owner));
+		else if (contribution && !w.capabilities.contributionLegs)
+			r.reasons.push(workflowReason('contribution-legs-unimplemented', spec.id, owner));
 		else if (w.blocked) r.reasons.push(workflowReason(w.blocked, spec.id, owner));
 		else if (uncertain) r.reasons.push(workflowReason('uncertain-prior-effect', uncertain, owner));
 		else if (prior.some((x) => x.state === 'uncertain' || x.uncertainEffect))
@@ -11290,9 +11396,11 @@ async function runWorkflowLegs(w: WorkflowLegContext): Promise<{
 		const problems: string[] = [];
 		let why: string | null = null;
 		try {
-			why = orchestration
-				? await runOrchestrationLeg(spec, w, r, problems)
-				: await runWorkflowLeg(spec, w, r, problems);
+			why = contribution
+				? await runContributionLeg(spec, w, r, problems)
+				: orchestration
+					? await runOrchestrationLeg(spec, w, r, problems)
+					: await runWorkflowLeg(spec, w, r, problems);
 		} catch (e) {
 			problems.push(`${spec.id}-threw: ${errorText(e)}`);
 		}
@@ -12835,6 +12943,1146 @@ function runOrchestrationLeg(
 		return runCueLeg(spec, w, r, problems);
 	if (spec.id === 'groupchat-participant') return runGroupChatParticipantLeg(spec, w, r, problems);
 	return runModeratorRefusedLeg(spec, w, r, problems);
+}
+
+// ---------------------------------------------------------------------------
+// Symphony and Pianola workflow legs (GT1-11-11E3)
+// ---------------------------------------------------------------------------
+
+/** The task that implements the Symphony and Pianola workflow legs. */
+export const CONTRIBUTION_LEGS_OWNER = 'GT1-11-11E3';
+/** The workflow legs GT1-11-11E3 owns. */
+const CONTRIBUTION_LEG_IDS: readonly string[] = [
+	'symphony-local',
+	'pianola-dispatch',
+	'pianola-learn',
+];
+/** Contribution legs that send no turn: they hold no reservation and must leave the ledger untouched. */
+const TURNLESS_CONTRIBUTION_LEG_IDS: readonly string[] = ['pianola-learn'];
+/**
+ * Open blockers the contribution legs observe and never lift. The Symphony
+ * runner takes no agent profile, model or effort (`SymphonyRunnerOptions`), so
+ * the selected configuration never reaches the contribution's session; a
+ * Pianola plan task carries no session configuration for the fresh session it
+ * would create (`PianolaTask`); Grok's `chat_history.jsonl` records no
+ * tool-permission decision. Each stays open until parity lifts it.
+ */
+export const SYMPHONY_HANDOFF_GAP = 'symphony-selected-config-handoff-pending';
+export const PIANOLA_FRESH_SESSION_GAP = 'pianola-fresh-session-config-absent';
+export const GROK_PERMISSION_DECISIONS_GAP = 'grok-permission-decisions-unrecorded';
+/** The slug the owned contribution names (never a forge repository). */
+export const SYMPHONY_REPOSITORY = 'qualify/e09-symphony';
+/** The branch and the issue the owned contribution claims. */
+const SYMPHONY_BRANCH = 'symphony/qualify-e09';
+const SYMPHONY_ISSUE = 1;
+const SYMPHONY_ISSUE_TITLE = 'Qualify E09 Symphony contribution';
+/** The contribution's document, under the project's playbooks folder. */
+export const SYMPHONY_DOCUMENT = 'qualify-symphony.md';
+/**
+ * The repository ceiling the Symphony leg holds every effect against: the
+ * agent may branch and commit locally, and nothing else. Every clone, fork,
+ * push, pull request, finalization and cancel is outside it.
+ */
+export const SYMPHONY_CEILING = Object.freeze({
+	policyRevision: 1,
+	actors: [{ actor: 'agent', effects: ['branch', 'commit'] }],
+});
+/** The plan, task and supervised target of the Pianola dispatch leg. */
+export const PIANOLA_PLAN_ID = 'qualify-e09-pianola';
+const PIANOLA_TASK_ID = 'qualify-e09-pianola-task';
+const PIANOLA_TARGET_ID = 'qualify-e09-pianola-target';
+/** The busy non-Grok session the selection must pass over. */
+const PIANOLA_BUSY_AGENT_ID = 'qualify-e09-pianola-busy';
+/** The Pianola agent id the supervisor hands its child (never the Grok agent). */
+const PIANOLA_SELF_ID = 'qualify-e09-pianola-self';
+/** The most orchestrator iterations the dispatch leg runs; the plan settles in two. */
+const PIANOLA_MAX_ITERATIONS = 6;
+/** The most transcripts `pianola learn` may read, and the most bytes its corpus may hold. */
+export const PIANOLA_LEARN_LIMITS = Object.freeze({ sessions: 50, outputBytes: 1024 * 1024 });
+
+/** What a contribution leg's reservation and session context are. */
+interface ContributionSession {
+	reservation: SpendReservation;
+	s: SessionLegContext;
+}
+
+/**
+ * The leg's own workflow reservation and the session context its turns draw
+ * on: turns under the per-leg ceiling, spend and calls shared with the case,
+ * each child run in the owned project with the planned query source.
+ */
+function openContributionSession(
+	w: WorkflowLegContext,
+	r: WorkflowLegReceipt,
+	spec: WorkflowLegSpec,
+	project: string,
+	querySource: { value: string | null }
+): ContributionSession | null {
+	const reserved = reserveSpend(
+		w.ledger,
+		w.config,
+		{
+			caseId: w.c.caseId,
+			leg: `workflow:${spec.id}`,
+			provider: 'grok',
+			account: w.account,
+			endpoint: w.config.allowedEndpoints[0] ?? '',
+			models: [...new Set([w.model, ...(w.config.spendBounds?.sideModels ?? [])])],
+			target: w.c.target,
+			sshTarget: null,
+			plan: workflowReservationPlan(w.plan, spec.maxTurns),
+		},
+		w.now()
+	);
+	if (!reserved.ok) {
+		r.reasons.push(...reserved.reasons);
+		return null;
+	}
+	const reservation = reserved.reservation;
+	r.reservationId = reservation.id;
+	const ceilingMs = HARNESS_CEILINGS.caseSeconds * 1000;
+	const turnMs = () =>
+		Math.min(
+			positiveFinite(w.turnTimeoutMs) ? w.turnTimeoutMs : ceilingMs,
+			ceilingMs,
+			Date.parse(reservation.deadlineAt) - w.now().getTime()
+		);
+	let drawn = emptyCalls();
+	let turnNo = 0;
+	const s: SessionLegContext = {
+		c: w.c,
+		fixture: w.fixture,
+		capabilities: w.capabilities,
+		blocked: null,
+		cwd: project,
+		accountRoot: w.accountRoot,
+		mainTurns: [],
+		nextTurn: () => ++turnNo,
+		admit: (n, as) => {
+			const d = drawReservedTurn({
+				ledger: w.ledger,
+				reservation,
+				config: w.config,
+				now: w.now,
+				turnMs,
+				pinnedFile: w.binaryPath,
+				n,
+				as,
+			});
+			if (!d.ok) {
+				r.reasons.push(d.reason);
+				return false;
+			}
+			drawn = d.draws;
+			return true;
+		},
+		remainingTurns: () =>
+			Math.min(
+				reservation.turnAllowance - reservation.turnsUsed,
+				w.ledger.limitTurns - w.ledger.turns
+			),
+		callsByKind: () => ({ ...reservation.callsByKind }),
+		callsDrawn: () => drawn,
+		baselineCalls: () => paidCallsPerTurn(w.config, reservation),
+		launcher: async (argv) => {
+			const built = await w.launcher(argv);
+			if ('refused' in built) return built;
+			return {
+				...built,
+				cwd: project,
+				env: {
+					...built.env,
+					...(querySource.value ? { [QUERY_SOURCE_ENV_VAR]: querySource.value } : {}),
+				},
+			};
+		},
+		// Never used: every contribution turn carries the argv its launch plan built.
+		nativeArgv: () => [],
+		turnMs,
+		graceMs: w.graceMs,
+		lifetime: w.lifetime,
+	};
+	return { reservation, s };
+}
+
+/** Where a dispatch's plan is not the owned, local, prompt-file Grok launch with the agent's model and effort. */
+function contributionLaunchProblems(
+	w: WorkflowLegContext,
+	d: WorkflowDispatch | undefined
+): string[] {
+	if (!d) return ['no-dispatch'];
+	const p = d.planned;
+	const out: string[] = [];
+	if (!p.ok) out.push(`plan:${p.reason ?? 'refused'}`);
+	if (p.account !== w.accountRoot) out.push('account');
+	if (p.target !== 'local') out.push('target');
+	if (p.promptVia !== 'file') out.push('prompt-via');
+	if (p.querySource !== WORKFLOW_QUERY_SOURCE) out.push('query-source');
+	if (p.model !== w.model) out.push('model');
+	if (p.effort !== (w.effort ?? null)) out.push('effort');
+	if (p.resumed) out.push('resumed');
+	return out;
+}
+
+/** The owned git environment: no operator config, no system config, no prompt, no signing. */
+function ownedGitEnv(base: Record<string, string>, bin: string): Record<string, string> {
+	return {
+		...base,
+		PATH: [bin, base.PATH ?? ''].filter(Boolean).join(path.delimiter),
+		GIT_CONFIG_GLOBAL: os.devNull,
+		GIT_CONFIG_NOSYSTEM: '1',
+		GIT_TERMINAL_PROMPT: '0',
+		GIT_AUTHOR_NAME: 'Qualify E09',
+		GIT_AUTHOR_EMAIL: 'qualify-e09@invalid',
+		GIT_COMMITTER_NAME: 'Qualify E09',
+		GIT_COMMITTER_EMAIL: 'qualify-e09@invalid',
+	};
+}
+
+/**
+ * A `gh` stand-in first on the leg's PATH: it records that it was asked and
+ * fails, so a forge call can never reach a network. The leg asserts it was
+ * never asked.
+ */
+const GH_STAND_IN_SOURCE = (log: string) =>
+	['#!/bin/sh', `printf '%s\\n' "$*" >> ${JSON.stringify(log)}`, 'exit 1', ''].join('\n');
+
+/** Every ref of a repository with its object, sorted: a push or a fetch into it changes this. */
+function refsDigest(git: ReturnType<typeof ownedGit>, repo: string): string | null {
+	const r = git(repo, ['for-each-ref', '--format=%(refname) %(objectname)']);
+	return r.ok ? sha256Of(r.stdout.split('\n').sort().join('\n')) : null;
+}
+
+/** The production Symphony runner, repository ceiling and logger, bundled with the Electron stand-in. */
+interface SymphonyModules {
+	startContribution: (options: Record<string, unknown>) => Promise<{
+		success: boolean;
+		error?: string;
+		managed?: Array<{ effect: string; outcome: string; remote: string | null }>;
+	}>;
+	finalizeContribution: (
+		localPath: string,
+		prNumber: number,
+		issueNumber: number,
+		issueTitle: string,
+		upstreamSlug?: string,
+		gate?: unknown
+	) => Promise<{
+		success: boolean;
+		error?: string;
+		managed?: Array<{ effect: string; outcome: string }>;
+	}>;
+	cancelContribution: (
+		localPath: string,
+		prNumber: number,
+		cleanup?: boolean,
+		upstreamSlug?: string,
+		gate?: unknown
+	) => Promise<{
+		success: boolean;
+		error?: string;
+		managed?: Array<{ effect: string; outcome: string }>;
+	}>;
+	parseRepositoryPolicyCeiling: (
+		raw: unknown
+	) => { ok: true; ceiling: unknown } | { ok: false; problems: string[] };
+	repositoryEffectVerdict: (
+		standing: unknown,
+		request: { effect: string; resource: string; remote: string | null }
+	) => { allowed: true } | { allowed: false; code: string; message: string };
+	PLAYBOOKS_DIR: string;
+	logger: { setLogLevel: (level: 'error') => void };
+}
+
+/**
+ * `symphony-local`: the production Symphony runner over an owned synthetic
+ * repository, every effect held by the repository ceiling as the runner holds
+ * it under management. The clone is refused before it runs; the contribution's
+ * document is worked by one Grok task turn on the leg's reservation; only a
+ * clean turn lets the runner finalize, whose local commit records completion
+ * while its push is refused; the cancel is refused. The owned upstream's refs
+ * never move and the `gh` stand-in is never asked. With every assertion held
+ * the leg is still not-evaluated: the selected-config handoff is pending.
+ */
+async function runSymphonyLeg(
+	spec: WorkflowLegSpec,
+	w: WorkflowLegContext,
+	r: WorkflowLegReceipt,
+	problems: string[]
+): Promise<string | null> {
+	const assert = (id: string, ok: boolean, detail: string): boolean => {
+		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+		return ok;
+	};
+	const prompt = spec.prompts?.[0];
+	const task = spec.tasks[0];
+	if (!prompt || !task) {
+		r.reasons.push(workflowReason('symphony-prompt-absent', spec.id, CONTRIBUTION_LEGS_OWNER));
+		return null;
+	}
+	const expect = /QUALIFY-[A-Z0-9-]+-OK/.exec(prompt)?.[0] ?? '';
+	const made = prepareConsumerRoot(w.c, w.config, `workflow-${spec.id}`, {
+		workspace: w.workspace,
+		operatorHome: w.operatorHome,
+	});
+	if ('refused' in made) {
+		r.reasons.push(workflowReason(made.refused, made.detail, CONTRIBUTION_LEGS_OWNER));
+		return null;
+	}
+	r.root = made.root;
+	const upstream = path.join(made.root, 'upstream');
+	const project = path.join(made.root, 'project');
+	const clone = path.join(made.root, 'clone');
+	const dataDir = path.join(made.root, 'maestro-data');
+	const resources = path.join(made.root, 'resources');
+	const bin = path.join(made.root, 'bin');
+	const tmp = path.join(made.root, 'tmp');
+	const ghLog = path.join(made.root, 'gh-calls.log');
+	for (const dir of [upstream, project, dataDir, resources, bin, tmp])
+		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	writeOwned(path.join(bin, 'gh'), GH_STAND_IN_SOURCE(ghLog), 0o700);
+	const built = await w.launcher([]);
+	if ('refused' in built) {
+		r.reasons.push(workflowReason(built.refused, built.detail, CONTRIBUTION_LEGS_OWNER));
+		return null;
+	}
+	const legEnv = ownedGitEnv(
+		{ ...built.env, MAESTRO_USER_DATA: dataDir, TMPDIR: tmp, TMP: tmp, TEMP: tmp },
+		bin
+	);
+	const git = ownedGit(made.root, r);
+
+	// The owned upstream and the contribution's local repository: local only, signing off.
+	const setup: Array<[string, string[]]> = [
+		[upstream, ['init', '-q', '-b', 'main']],
+		[upstream, ['add', 'README.md']],
+		[upstream, ['commit', '-q', '-m', 'Qualify E09 upstream seed']],
+		[project, ['init', '-q', '-b', 'main']],
+		[project, ['add', 'README.md']],
+		[project, ['commit', '-q', '-m', 'Qualify E09 project seed']],
+		[project, ['remote', 'add', 'origin', pathToFileURL(upstream).href]],
+		[project, ['checkout', '-q', '-b', SYMPHONY_BRANCH]],
+	];
+	writeOwned(path.join(upstream, 'README.md'), 'Synthetic qualification upstream.\n');
+	writeOwned(path.join(project, 'README.md'), 'Synthetic qualification project.\n');
+	for (const [cwd, args] of setup) {
+		const g = git(cwd, args);
+		if (!g.ok) {
+			r.reasons.push(
+				workflowReason('symphony-repository-setup-failed', args[0], CONTRIBUTION_LEGS_OWNER)
+			);
+			return null;
+		}
+	}
+	const upstreamBefore = refsDigest(git, upstream);
+	const headBefore = git(project, ['rev-parse', 'HEAD']).stdout.trim();
+
+	const querySource = { value: null as string | null };
+	const opened = openContributionSession(w, r, spec, project, querySource);
+	if (!opened) return null;
+	const { reservation, s } = opened;
+	let uncertainWhy: string | null = null;
+	try {
+		await withLegProcess(legEnv, resources, async () => {
+			const src = (rel: string) => JSON.stringify(path.join(w.workspace, 'src', rel));
+			const loaded = await bundleMainEntry<SymphonyModules>(
+				w.workspace,
+				dataDir,
+				'qualify-symphony.ts',
+				[
+					`export { startContribution, finalizeContribution, cancelContribution } from ${src('main/services/symphony-runner.ts')};`,
+					`export { parseRepositoryPolicyCeiling, repositoryEffectVerdict } from ${src('main/enterprise/repository-policy.ts')};`,
+					`export { PLAYBOOKS_DIR } from ${src('shared/maestro-paths.ts')};`,
+					`export { logger } from ${src('main/utils/logger.ts')};`,
+				]
+			);
+			const m = loaded.mod;
+			m.logger.setLogLevel('error');
+			try {
+				const parsed = m.parseRepositoryPolicyCeiling(SYMPHONY_CEILING);
+				if (!parsed.ok) throw new Error(`ceiling refused: ${parsed.problems.join('; ')}`);
+				const standing = { standing: 'managed', ceiling: parsed.ceiling, policyRevision: 1 };
+				const decisions: Array<{
+					effect: string;
+					resource: string;
+					allowed: boolean;
+					code: string | null;
+				}> = [];
+				const gate = {
+					authority: {
+						authorize: (request: { effect: string; resource: string; remote: string | null }) => {
+							const d = m.repositoryEffectVerdict(standing, request);
+							decisions.push({
+								effect: request.effect,
+								resource: request.resource,
+								allowed: d.allowed,
+								code: d.allowed ? null : d.code,
+							});
+							return d;
+						},
+					},
+					actor: { kind: 'agent', sessionId: WORKFLOW_AGENT_ID, agentType: 'grok' },
+				};
+				const refusedAs = (effect: string) =>
+					decisions.some((d) => d.effect === effect && !d.allowed && d.code === 'outside-ceiling');
+
+				// 1. The contribution's start: the clone is held first and refused.
+				const start = await m.startContribution({
+					contributionId: 'qualify-e09-symphony',
+					repoSlug: SYMPHONY_REPOSITORY,
+					repoUrl: pathToFileURL(upstream).href,
+					issueNumber: SYMPHONY_ISSUE,
+					issueTitle: SYMPHONY_ISSUE_TITLE,
+					documentPaths: [],
+					localPath: clone,
+					branchName: SYMPHONY_BRANCH,
+					gate,
+				});
+				assert(
+					'clone-refused',
+					!start.success &&
+						/^\[managed-outside-ceiling\]/.test(start.error ?? '') &&
+						refusedAs('clone') &&
+						decisions.length === 1 &&
+						!fs.existsSync(clone),
+					`success=${start.success} error=${(start.error ?? '').slice(0, 40)} decisions=${decisions.map((d) => `${d.effect}:${d.allowed ? 'ok' : d.code}`).join(',')} clone=${fs.existsSync(clone)}`
+				);
+
+				// 2. The contribution's document and its one Grok task turn.
+				const folder = path.join(project, m.PLAYBOOKS_DIR);
+				const document = path.join(folder, SYMPHONY_DOCUMENT);
+				const docText = [
+					'# Qualify E09 Symphony',
+					'',
+					'Synthetic qualification contribution. Work only inside the working directory.',
+					'',
+					`- [ ] ${task}`,
+					'',
+				].join('\n');
+				writeOwned(document, docText);
+				r.digests.documentAtDispatch = sha256Of(Buffer.from(docText));
+				const port = createWorkflowTurnPort(
+					w,
+					s,
+					r,
+					spec,
+					{ root: made.root, project, document },
+					{ purposes: ['task'], forceFailure: false, querySource }
+				);
+				const result = await port.run({
+					purpose: 'task',
+					prompt,
+					model: w.model,
+					...(w.effort ? { effort: w.effort } : {}),
+					document: SYMPHONY_DOCUMENT,
+				});
+				uncertainWhy = port.control.uncertainWhy;
+				const d = r.dispatches[0];
+				const launch = contributionLaunchProblems(w, d);
+				assert(
+					'planned-launch',
+					r.dispatches.length === 1 && launch.length === 0,
+					launch.length ? launch.join(',') : `dispatches=${r.dispatches.length}`
+				);
+				const clean = !!d?.clean && result.success && port.lastResponse().includes(expect);
+				assert(
+					'turn-completed',
+					clean,
+					`clean=${String(d?.clean)} success=${result.success} replied=${port.lastResponse().includes(expect)}`
+				);
+
+				// 3. Finalize only after a clean turn: the local commit records it, the push is refused.
+				let fin: Awaited<ReturnType<SymphonyModules['finalizeContribution']>> | null = null;
+				if (clean && !uncertainWhy)
+					fin = await m.finalizeContribution(
+						project,
+						1,
+						SYMPHONY_ISSUE,
+						SYMPHONY_ISSUE_TITLE,
+						SYMPHONY_REPOSITORY,
+						gate
+					);
+				const head = git(project, ['rev-parse', 'HEAD']).stdout.trim();
+				const subject = git(project, ['log', '-1', '--format=%s']).stdout.trim();
+				const tracked = git(project, ['ls-files'])
+					.stdout.split('\n')
+					.some((f) => f.endsWith(SYMPHONY_DOCUMENT));
+				const committed = decisions.some((x) => x.effect === 'commit' && x.allowed);
+				assert(
+					'completion-recorded',
+					clean &&
+						fin !== null &&
+						committed &&
+						head !== headBefore &&
+						subject === `[Symphony] Complete contribution for #${SYMPHONY_ISSUE}` &&
+						tracked,
+					`clean=${clean} finalized=${fin !== null} committed=${committed} moved=${head !== headBefore} tracked=${tracked}`
+				);
+				assert(
+					'push-refused',
+					fin !== null &&
+						!fin.success &&
+						/^\[managed-outside-ceiling\]/.test(fin.error ?? '') &&
+						refusedAs('push') &&
+						!decisions.some((x) => x.effect === 'finalize'),
+					`finalized=${fin !== null} error=${(fin?.error ?? '').slice(0, 40)} decisions=${decisions.map((x) => `${x.effect}:${x.allowed ? 'ok' : x.code}`).join(',')}`
+				);
+
+				// 4. The cancel: held before `gh pr close` and refused.
+				const cancel = await m.cancelContribution(project, 1, false, SYMPHONY_REPOSITORY, gate);
+				assert(
+					'cancel-refused',
+					!cancel.success &&
+						/^\[managed-outside-ceiling\]/.test(cancel.error ?? '') &&
+						refusedAs('cancel') &&
+						fs.existsSync(project),
+					`success=${cancel.success} error=${(cancel.error ?? '').slice(0, 40)}`
+				);
+
+				// 5. Nothing left the machine: no remote effect allowed, upstream untouched, gh never asked.
+				const upstreamAfter = refsDigest(git, upstream);
+				const ghCalls = fs.existsSync(ghLog)
+					? fs.readFileSync(ghLog, 'utf8').split('\n').filter(Boolean).length
+					: 0;
+				const remoteAllowed = decisions.filter((x) => x.resource === 'remote' && x.allowed);
+				assert(
+					'zero-network',
+					upstreamBefore !== null &&
+						upstreamAfter === upstreamBefore &&
+						ghCalls === 0 &&
+						remoteAllowed.length === 0 &&
+						!fs.existsSync(clone),
+					`upstream=${upstreamAfter === upstreamBefore ? 'same' : 'moved'} gh=${ghCalls} remoteAllowed=${remoteAllowed.map((x) => x.effect).join(',') || 'none'}`
+				);
+				const survivors = r.dispatches.flatMap((x) => x.survivors);
+				assert(
+					'children-reaped',
+					r.dispatches.every((x) => x.exitCode !== null || x.unsent !== null) &&
+						survivors.length === 0,
+					`survivors=${survivors.length}`
+				);
+				r.observed = {
+					decisions: decisions.map((x) => `${x.effect}:${x.allowed ? 'allowed' : x.code}`),
+					start: start.managed?.map((x) => `${x.effect}:${x.outcome}`) ?? [],
+					finalize: fin?.managed?.map((x) => `${x.effect}:${x.outcome}`) ?? [],
+					cancel: cancel.managed?.map((x) => `${x.effect}:${x.outcome}`) ?? [],
+					ghCalls,
+				};
+				r.digests.documentAtEnd = fs.existsSync(document)
+					? sha256Of(fs.readFileSync(document))
+					: null;
+			} finally {
+				loaded.dispose();
+			}
+		});
+		r.openGaps = [SYMPHONY_HANDOFF_GAP];
+	} catch (e) {
+		problems.push(`${spec.id}-threw: ${errorText(e)}`);
+	} finally {
+		r.settlement = settleLegReservation(
+			w.ledger,
+			reservation,
+			r.paidRequests,
+			r.turns,
+			uncertainWhy,
+			w.now
+		);
+	}
+	return uncertainWhy;
+}
+
+/** The production Pianola supervisor, its store and the CLI's provider choice, bundled with the Electron stand-in. */
+interface PianolaModules {
+	PianolaSupervisor: new (deps: {
+		isEnabled: () => boolean;
+		getPianolaAgentId: () => string | undefined;
+		spawnChild?: (command: string, args: readonly string[], opts: unknown) => ChildProcess;
+		managedPort?: () => null;
+	}) => {
+		reconcile(): void;
+		relaunchStale(): number;
+		getHealth(): Array<{
+			id: string;
+			state: string;
+			pid?: number;
+			restarts: number;
+			recentLogs: string[];
+		}>;
+		stopAll(): void;
+	};
+	readSupervisorTargets: () => Array<{ id: string }>;
+	writeSupervisorTargets: (targets: unknown[]) => void;
+	choosePianolaToolType: (
+		task: PianolaTask,
+		sessions: readonly unknown[],
+		planTasks: readonly PianolaTask[]
+	) => { toolType: string; note?: string };
+	logger: { setLogLevel: (level: 'error') => void };
+}
+
+type PianolaTask = import('../../src/shared/pianola/pianola-tasks').PianolaTask;
+
+/**
+ * `pianola-dispatch`: one bounded plan task through the production
+ * orchestrator engine. The CLI's provider choice and the shared selection pick
+ * the Grok agent over a busy one; the dispatch hands the task turn's planned
+ * launch to the production supervisor, which spawns it as the plan's
+ * supervised child (its managed port consulted, standalone here) in place of
+ * the orchestrate CLI process, which would dispatch to a desktop the leg never
+ * contacts. The orchestrator settles the task on the supervisor-owned turn;
+ * the supervisor's stale check relaunches nothing; stopping the supervisor
+ * leaves no process alive. With every assertion held the leg is still
+ * not-evaluated: the fresh-session config is absent and Grok permission
+ * decisions are unrecorded.
+ */
+async function runPianolaDispatchLeg(
+	spec: WorkflowLegSpec,
+	w: WorkflowLegContext,
+	r: WorkflowLegReceipt,
+	problems: string[]
+): Promise<string | null> {
+	const assert = (id: string, ok: boolean, detail: string): boolean => {
+		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+		return ok;
+	};
+	const prompt = spec.prompts?.[0];
+	if (!prompt) {
+		r.reasons.push(workflowReason('pianola-prompt-absent', spec.id, CONTRIBUTION_LEGS_OWNER));
+		return null;
+	}
+	const expect = /QUALIFY-[A-Z0-9-]+-OK/.exec(prompt)?.[0] ?? '';
+	const made = prepareConsumerRoot(w.c, w.config, `workflow-${spec.id}`, {
+		workspace: w.workspace,
+		operatorHome: w.operatorHome,
+	});
+	if ('refused' in made) {
+		r.reasons.push(workflowReason(made.refused, made.detail, CONTRIBUTION_LEGS_OWNER));
+		return null;
+	}
+	r.root = made.root;
+	const project = path.join(made.root, 'project');
+	const dataDir = path.join(made.root, 'maestro-data');
+	const resources = path.join(made.root, 'resources');
+	const tmp = path.join(made.root, 'tmp');
+	for (const dir of [project, dataDir, resources, tmp])
+		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	// Where the production resolver looks first for the CLI the supervisor would run: never executed here.
+	writeOwned(path.join(resources, 'maestro-cli.js'), COURIER_STAND_IN_SOURCE, 0o700);
+	writeOwned(path.join(project, 'README.md'), 'Synthetic qualification project.\n');
+	const built = await w.launcher([]);
+	if ('refused' in built) {
+		r.reasons.push(workflowReason(built.refused, built.detail, CONTRIBUTION_LEGS_OWNER));
+		return null;
+	}
+	const legEnv: Record<string, string> = {
+		...built.env,
+		MAESTRO_USER_DATA: dataDir,
+		TMPDIR: tmp,
+		TMP: tmp,
+		TEMP: tmp,
+	};
+	const querySource = { value: null as string | null };
+	const opened = openContributionSession(w, r, spec, project, querySource);
+	if (!opened) return null;
+	const { reservation, s } = opened;
+	let uncertainWhy: string | null = null;
+	const log: string[] = [];
+	try {
+		await withLegProcess(legEnv, resources, async () => {
+			const [orchestrator, selection, tasks] = await Promise.all([
+				import('../../src/shared/pianola/pianola-orchestrator'),
+				import('../../src/shared/pianola/pianola-agent-select'),
+				import('../../src/shared/pianola/pianola-tasks'),
+			]);
+			const src = (rel: string) => JSON.stringify(path.join(w.workspace, 'src', rel));
+			const loaded = await bundleMainEntry<PianolaModules>(
+				w.workspace,
+				dataDir,
+				'qualify-pianola.ts',
+				[
+					`export { PianolaSupervisor } from ${src('main/pianola/pianola-supervisor.ts')};`,
+					`export { readSupervisorTargets, writeSupervisorTargets } from ${src('main/pianola/pianola-store-main.ts')};`,
+					`export { choosePianolaToolType } from ${src('cli/commands/pianola-orchestrate.ts')};`,
+					`export { logger } from ${src('main/utils/logger.ts')};`,
+				]
+			);
+			const m = loaded.mod;
+			m.logger.setLogLevel('error');
+			// What the supervisor asked to run, and the turn launch it was handed in its place.
+			const intended: string[][] = [];
+			let portReads = 0;
+			let pending: SpawnSpec | null = null;
+			let supervised = null as ChildProcess | null;
+			let descendants: number[] = [];
+			const supervisor = new m.PianolaSupervisor({
+				isEnabled: () => true,
+				getPianolaAgentId: () => PIANOLA_SELF_ID,
+				managedPort: () => {
+					portReads++;
+					return null;
+				},
+				spawnChild: (command, args) => {
+					intended.push([path.basename(command), ...args.map((a) => path.basename(a))]);
+					const launch = pending;
+					pending = null;
+					// No turn is pending (a restart after an exit): nothing runs, nothing is replayed.
+					if (!launch)
+						throw Object.assign(new Error('no qualification turn is pending'), { code: 'ENOENT' });
+					const child = spawn(launch.command, [...launch.args], {
+						cwd: launch.cwd,
+						env: launch.env,
+						shell: false,
+						stdio: ['ignore', 'pipe', 'pipe'],
+						windowsHide: true,
+					});
+					supervised = child;
+					return child;
+				},
+			});
+			try {
+				const pool = [
+					{
+						tabId: 'qualify-tab-grok',
+						sessionId: WORKFLOW_AGENT_ID,
+						agentId: WORKFLOW_AGENT_ID,
+						toolType: 'grok',
+						state: 'idle' as const,
+					},
+					{
+						tabId: 'qualify-tab-busy',
+						sessionId: PIANOLA_BUSY_AGENT_ID,
+						agentId: PIANOLA_BUSY_AGENT_ID,
+						toolType: GROUPCHAT_MODERATOR_PROVIDER,
+						state: 'busy' as const,
+					},
+				];
+				const valid = tasks.validatePlan({
+					id: PIANOLA_PLAN_ID,
+					title: 'Qualify E09 Pianola',
+					createdAt: Date.now(),
+					tasks: [
+						{
+							id: PIANOLA_TASK_ID,
+							title: 'Qualify E09 Pianola task',
+							prompt,
+							dependsOn: [],
+							status: 'pending',
+							cwd: project,
+						},
+					],
+				});
+				if (!valid.plan) throw new Error(`plan refused: ${valid.errors.join('; ')}`);
+				let state = orchestrator.initialOrchestratorState(valid.plan);
+				const choices: string[] = [];
+				const selections: string[] = [];
+				let dispatchCalls = 0;
+				let turn: Promise<AutoRunTurnResult> | null = null;
+				let result = null as AutoRunTurnResult | null;
+				const port = createWorkflowTurnPort(
+					w,
+					s,
+					r,
+					spec,
+					{ root: made.root, project, document: null },
+					{
+						purposes: ['task'],
+						forceFailure: false,
+						querySource,
+						onStreaming: () => {
+							const pid = supervised?.pid;
+							if (pid) descendants = snapshotProcessTree(pid).descendants.map((x) => x.pid);
+						},
+						// The supervisor makes the child: the target is written to the owned store and reconciled.
+						spawnChild: (launch) => {
+							pending = launch;
+							m.writeSupervisorTargets([
+								{
+									id: PIANOLA_TARGET_ID,
+									kind: 'orchestrate',
+									planId: PIANOLA_PLAN_ID,
+									enabled: true,
+									createdAt: Date.now(),
+									concurrency: 1,
+									intervalSeconds: 1,
+								},
+							]);
+							supervisor.reconcile();
+							const child = supervised;
+							pending = null;
+							if (!child) throw new Error('the supervisor started no child');
+							return child;
+						},
+					}
+				);
+				const deps: import('../../src/shared/pianola/pianola-orchestrator').OrchestratorDeps = {
+					getRunState: async () => (result === null ? 'busy' : result.success ? 'idle' : 'error'),
+					getRecentMessages: async () =>
+						result === null
+							? []
+							: [
+									{
+										id: 'qualify-e09-pianola-reply',
+										role: result.success ? 'assistant' : 'error',
+										source: 'qualification',
+										content: (result.success ? port.lastResponse() : (result.error ?? '')).slice(
+											0,
+											UTILITY_REPLY_MAX_CHARS
+										),
+										timestamp: new Date().toISOString(),
+									},
+								],
+					ensureAgent: async (t) => {
+						const choice = m.choosePianolaToolType(t, pool, state.plan.tasks);
+						choices.push(choice.toolType);
+						const picked = selection.selectAgentForTask(
+							t,
+							pool.map((p) => ({
+								agentId: p.sessionId,
+								capabilities: getAgentCapabilities(p.toolType),
+								status: 'ok' as const,
+								busy: p.state === 'busy',
+								inFlight: 0,
+							}))
+						);
+						selections.push('agentId' in picked ? picked.agentId : `escalate:${picked.escalate}`);
+						if (!('agentId' in picked)) return { error: picked.escalate };
+						const bound = pool.find((p) => p.sessionId === picked.agentId);
+						if (!bound || bound.toolType !== choice.toolType)
+							return { error: `selection ${picked.agentId} is not a ${choice.toolType} agent` };
+						return { agentId: bound.sessionId, agentType: bound.toolType };
+					},
+					dispatch: async (t, agentId) => {
+						dispatchCalls++;
+						if (turn) return { success: false, error: 'already dispatched' };
+						if (agentId !== WORKFLOW_AGENT_ID)
+							return { success: false, error: `not the Grok agent: ${agentId}` };
+						turn = port
+							.run({
+								purpose: 'task',
+								prompt: t.prompt,
+								model: w.model,
+								...(w.effort ? { effort: w.effort } : {}),
+							})
+							.then((x) => (result = x));
+						const started = await waitUntil(
+							() => supervised !== null || result !== null,
+							s.turnMs() + w.graceMs
+						);
+						return started && supervised
+							? { success: true, tabId: 'qualify-tab-grok' }
+							: { success: false, error: 'the supervisor started no child' };
+					},
+					persist: () => undefined,
+					log: (line) => {
+						if (log.length < WORKFLOW_EVENT_CAP) log.push(line.slice(0, 200));
+					},
+				};
+				let done = false;
+				for (let i = 0; i < PIANOLA_MAX_ITERATIONS && !done; i++) {
+					const tick = await orchestrator.runOrchestratorIteration(state, deps, {
+						concurrencyLimit: 1,
+					});
+					state = tick.state;
+					done = tick.done;
+					// The turn's own wall-clock bound ends it; the next tick observes how.
+					if (!done && turn) await turn;
+				}
+				if (turn) await turn;
+				uncertainWhy = port.control.uncertainWhy;
+				const health = supervisor.getHealth();
+				const relaunched = supervisor.relaunchStale();
+				const finalTask = state.plan.tasks.find((t) => t.id === PIANOLA_TASK_ID);
+				const d = r.dispatches[0];
+				const pid = supervised?.pid ?? null;
+				assert(
+					'selects-grok',
+					choices.length >= 1 &&
+						choices.every((x) => x === 'grok') &&
+						selections.length >= 1 &&
+						selections.every((x) => x === WORKFLOW_AGENT_ID) &&
+						finalTask?.agentId === WORKFLOW_AGENT_ID &&
+						finalTask?.agentType === 'grok',
+					`choices=${choices.join(',')} selections=${selections.join(',')} bound=${finalTask?.agentId ?? 'none'}`
+				);
+				const launch = contributionLaunchProblems(w, d);
+				assert(
+					'planned-launch',
+					r.dispatches.length === 1 && launch.length === 0,
+					launch.length ? launch.join(',') : `dispatches=${r.dispatches.length}`
+				);
+				assert(
+					'supervisor-admission',
+					portReads === 1 &&
+						intended.length >= 1 &&
+						intended[0].includes('orchestrate') &&
+						intended[0].includes(PIANOLA_PLAN_ID) &&
+						pid !== null &&
+						health.length === 1 &&
+						health[0].id === PIANOLA_TARGET_ID,
+					`portReads=${portReads} intended=${intended.length} pid=${pid !== null} targets=${health.length}`
+				);
+				const clean =
+					!!d?.clean && result?.success === true && port.lastResponse().includes(expect);
+				assert(
+					'task-done',
+					clean && finalTask?.status === 'done' && dispatchCalls === 1,
+					`clean=${clean} status=${finalTask?.status ?? 'none'} dispatchCalls=${dispatchCalls}`
+				);
+				assert(
+					'no-stale-relaunch',
+					relaunched === 0 && intended.length === 1 && health[0]?.state === 'stopped',
+					`relaunched=${relaunched} spawnAsks=${intended.length} state=${health[0]?.state ?? 'none'}`
+				);
+				const listed = listNativeSessionIds(w.accountRoot);
+				const transcript =
+					!!d?.nativeId && listed.problem === null && listed.ids.includes(d.nativeId);
+				assert(
+					'transcript-recorded',
+					transcript && (health[0]?.recentLogs.length ?? 0) > 0,
+					`native=${transcript} supervisorLines=${health[0]?.recentLogs.length ?? 0}`
+				);
+				supervisor.stopAll();
+				m.writeSupervisorTargets([]);
+				const survivors = await survivorsAfter([...(pid ? [pid] : []), ...descendants], w.graceMs);
+				assert(
+					'cleanup-reaps-child',
+					pid !== null && survivors.length === 0 && m.readSupervisorTargets().length === 0,
+					`survivors=${survivors.length} descendants=${descendants.length} targets=${m.readSupervisorTargets().length}`
+				);
+				r.observed = {
+					iterations: log.length,
+					taskStatus: finalTask?.status ?? null,
+					supervisorState: health[0]?.state ?? null,
+					restarts: health[0]?.restarts ?? null,
+					spawnAsks: intended.length,
+					log: log.slice(0, 20),
+				};
+			} finally {
+				supervisor.stopAll();
+				loaded.dispose();
+			}
+		});
+		r.openGaps = [PIANOLA_FRESH_SESSION_GAP, GROK_PERMISSION_DECISIONS_GAP];
+	} catch (e) {
+		problems.push(`${spec.id}-threw: ${errorText(e)}`);
+	} finally {
+		r.settlement = settleLegReservation(
+			w.ledger,
+			reservation,
+			r.paidRequests,
+			r.turns,
+			uncertainWhy,
+			w.now
+		);
+	}
+	return uncertainWhy;
+}
+
+/** The production `pianola learn`, bundled with the Electron stand-in. */
+interface PianolaLearnModule {
+	pianolaLearn: (options: { agent?: string; limit?: string; out?: string; json?: boolean }) => void;
+}
+
+/** The fs entry points `pianola learn` reads through; each path one is recorded while it runs. */
+const LEARN_READ_FNS = [
+	'readdirSync',
+	'statSync',
+	'lstatSync',
+	'readFileSync',
+	'openSync',
+	'existsSync',
+	'realpathSync',
+] as const;
+
+/**
+ * Run `fn` with every path the fs entry points above are asked for recorded,
+ * then restore them (the ESM namespace too). A file descriptor is not a path
+ * and is not recorded.
+ */
+function withReadsRecorded<T>(reads: string[], fn: () => T): T {
+	const target = fs as unknown as Record<string, (...args: unknown[]) => unknown>;
+	const saved = LEARN_READ_FNS.map((k) => [k, target[k]] as const);
+	for (const [k, original] of saved)
+		target[k] = function (this: unknown, ...args: unknown[]) {
+			const p = args[0];
+			if (typeof p === 'string') reads.push(path.resolve(p));
+			else if (p instanceof URL) reads.push(fileURLToPath(p));
+			else if (Buffer.isBuffer(p)) reads.push(path.resolve(p.toString('utf8')));
+			return original.apply(this, args);
+		};
+	syncBuiltinESMExports();
+	try {
+		return fn();
+	} finally {
+		for (const [k, original] of saved) target[k] = original;
+		syncBuiltinESMExports();
+	}
+}
+
+/**
+ * `pianola-learn`: the production `pianola learn` over the owned E09 Grok home
+ * only (the leg's account root as `GROK_HOME`, an owned `HOME`, an owned data
+ * dir with Pianola enabled). Every path it reads is recorded and must lie
+ * under the account root or the leg's own root; its corpus is bounded, names
+ * Grok alone and only the owned home's sessions, and reports the unrecorded
+ * permission decisions explicitly. No turn is sent and nothing is counted.
+ */
+async function runPianolaLearnLeg(
+	spec: WorkflowLegSpec,
+	w: WorkflowLegContext,
+	r: WorkflowLegReceipt,
+	problems: string[]
+): Promise<null> {
+	const assert = (id: string, ok: boolean, detail: string): boolean => {
+		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+		return ok;
+	};
+	const made = prepareConsumerRoot(w.c, w.config, `workflow-${spec.id}`, {
+		workspace: w.workspace,
+		operatorHome: w.operatorHome,
+	});
+	if ('refused' in made) {
+		r.reasons.push(workflowReason(made.refused, made.detail, CONTRIBUTION_LEGS_OWNER));
+		return null;
+	}
+	r.root = made.root;
+	const home = path.join(made.root, 'home');
+	const dataDir = path.join(made.root, 'maestro-data');
+	const resources = path.join(made.root, 'resources');
+	const tmp = path.join(made.root, 'tmp');
+	const outFile = path.join(made.root, 'learn', 'corpus.json');
+	for (const dir of [home, dataDir, resources, tmp, path.dirname(outFile)])
+		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+	writeOwned(
+		path.join(dataDir, 'maestro-settings.json'),
+		`${JSON.stringify({ encoreFeatures: { pianola: true } })}\n`
+	);
+	const accountRoot = w.accountRoot!;
+	const before = {
+		turns: w.ledger.turns,
+		calls: w.ledger.calls,
+		reservations: w.ledger.reservations.length,
+	};
+	const env: Record<string, string> = {
+		PATH: process.env.PATH ?? '',
+		HOME: home,
+		USERPROFILE: home,
+		GROK_HOME: accountRoot,
+		MAESTRO_USER_DATA: dataDir,
+		TMPDIR: tmp,
+		TMP: tmp,
+		TEMP: tmp,
+	};
+	const reads: string[] = [];
+	try {
+		await withLegProcess(env, resources, async () => {
+			const loaded = await bundleMainEntry<PianolaLearnModule>(
+				w.workspace,
+				dataDir,
+				'qualify-pianola-learn.ts',
+				[
+					`export { pianolaLearn } from ${JSON.stringify(path.join(w.workspace, 'src', 'cli', 'commands', 'pianola-learn.ts'))};`,
+				]
+			);
+			const savedLog = console.log;
+			const savedExit = process.exit;
+			try {
+				// The command prints a summary and exits on a refusal: neither may reach the run's output or end it.
+				console.log = () => undefined;
+				process.exit = ((code?: number) => {
+					throw new Error(`pianola learn exited ${String(code)}`);
+				}) as typeof process.exit;
+				withReadsRecorded(reads, () =>
+					loaded.mod.pianolaLearn({
+						agent: 'grok',
+						limit: String(PIANOLA_LEARN_LIMITS.sessions),
+						out: outFile,
+						json: true,
+					})
+				);
+			} finally {
+				console.log = savedLog;
+				process.exit = savedExit;
+				loaded.dispose();
+			}
+		});
+		const owned = [accountRoot, made.root].map((p) => normalizeFor('local', path.resolve(p)));
+		const outside = [...new Set(reads)].filter(
+			(p) => !owned.some((root) => isPathAtOrUnderRoot(normalizeFor('local', p), root))
+		);
+		assert(
+			'owned-home-only',
+			reads.length > 0 && outside.length === 0,
+			`reads=${reads.length} outside=${outside.length}${outside.length ? ` first=${path.basename(outside[0])}` : ''}`
+		);
+		const size = fs.existsSync(outFile) ? fs.statSync(outFile).size : -1;
+		const corpus =
+			size >= 0 && size <= PIANOLA_LEARN_LIMITS.outputBytes
+				? (JSON.parse(fs.readFileSync(outFile, 'utf8')) as {
+						scanned?: Record<string, { files: number; unsupported?: Array<{ code: string }> }>;
+						pairCount?: number;
+						pairs?: Array<{ agent?: string; sessionId?: string }>;
+					})
+				: null;
+		const listed = listNativeSessionIds(accountRoot);
+		const scanned = corpus?.scanned ?? {};
+		const grok = scanned.grok;
+		const pairs = corpus?.pairs ?? [];
+		assert(
+			'attributed-to-grok',
+			!!grok &&
+				Object.keys(scanned).join(',') === 'grok' &&
+				listed.problem === null &&
+				grok.files >= 1 &&
+				grok.files <= listed.ids.length &&
+				pairs.every((p) => p.agent === 'grok' && !!p.sessionId && listed.ids.includes(p.sessionId)),
+			`agents=${Object.keys(scanned).join(',') || 'none'} files=${grok?.files ?? 'none'} ownedSessions=${listed.ids.length} pairs=${pairs.length}`
+		);
+		assert(
+			'output-bounded',
+			corpus !== null &&
+				pairs.length === corpus.pairCount &&
+				(grok?.files ?? Infinity) <= PIANOLA_LEARN_LIMITS.sessions,
+			`bytes=${size} pairs=${pairs.length}/${String(corpus?.pairCount)}`
+		);
+		assert(
+			'permission-decisions-unsupported',
+			!!grok?.unsupported?.some((u) => u.code === GROK_PERMISSION_DECISIONS_GAP),
+			`unsupported=${grok?.unsupported?.map((u) => u.code).join(',') || 'none'}`
+		);
+		assert(
+			'zero-billable-calls',
+			w.ledger.turns === before.turns &&
+				w.ledger.calls === before.calls &&
+				w.ledger.reservations.length === before.reservations &&
+				r.spawned === 0 &&
+				r.paidRequests === 0,
+			`turns=${before.turns}->${w.ledger.turns} calls=${before.calls}->${w.ledger.calls} reservations=${before.reservations}->${w.ledger.reservations.length}`
+		);
+		r.observed = {
+			reads: reads.length,
+			outside: outside.length,
+			files: grok?.files ?? null,
+			pairCount: corpus?.pairCount ?? null,
+			bytes: size,
+		};
+		r.digests.corpus = size >= 0 ? sha256Of(fs.readFileSync(outFile)) : null;
+	} catch (e) {
+		problems.push(`${spec.id}-threw: ${errorText(e)}`);
+	}
+	return null;
+}
+
+/** Route one contribution leg to its runner. */
+function runContributionLeg(
+	spec: WorkflowLegSpec,
+	w: WorkflowLegContext,
+	r: WorkflowLegReceipt,
+	problems: string[]
+): Promise<string | null> {
+	if (spec.id === 'symphony-local') return runSymphonyLeg(spec, w, r, problems);
+	if (spec.id === 'pianola-dispatch') return runPianolaDispatchLeg(spec, w, r, problems);
+	return runPianolaLearnLeg(spec, w, r, problems);
 }
 
 export const HOME_SCAN_LIMITS = Object.freeze({ entries: 4096, bytes: 16 * 1024 * 1024 });

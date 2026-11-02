@@ -345,6 +345,15 @@ const FEEDBACK_INTERVIEW_LEG: UtilityLegSpec = {
  *   request per round.
  * - `groupchat-moderator-refused` (GT1-11-11E2): a Grok moderator refused by the
  *   production capability flag before any spawn; no turn, so `maxTurns` is 0.
+ * - `symphony-local` (GT1-11-11E3): the production Symphony runner over an owned
+ *   synthetic repository with every clone, push, PR and cancel effect held by the
+ *   repository ceiling, and one Grok task turn on the contribution's document.
+ *   `tasks` is the document's one task; `prompts` is the task turn's prompt.
+ * - `pianola-dispatch` (GT1-11-11E3): one bounded plan task selected onto the
+ *   Grok agent by the production Pianola selection and orchestrator, its child
+ *   run under the production supervisor. `prompts` is the task prompt.
+ * - `pianola-learn` (GT1-11-11E3): the production `pianola learn` over the
+ *   owned Grok home only; no turn, so `maxTurns` is 0.
  */
 export type WorkflowLegId =
 	| 'autorun-document'
@@ -354,7 +363,10 @@ export type WorkflowLegId =
 	| 'cue-prompt-desktop'
 	| 'cue-prompt-headless'
 	| 'groupchat-participant'
-	| 'groupchat-moderator-refused';
+	| 'groupchat-moderator-refused'
+	| 'symphony-local'
+	| 'pianola-dispatch'
+	| 'pianola-learn';
 
 export interface WorkflowLegSpec {
 	id: WorkflowLegId;
@@ -446,6 +458,33 @@ const GROUPCHAT_PARTICIPANT_LEG: WorkflowLegSpec = {
 
 const GROUPCHAT_MODERATOR_REFUSED_LEG: WorkflowLegSpec = {
 	id: 'groupchat-moderator-refused',
+	tasks: [],
+	goal: null,
+	maxTurns: 0,
+};
+
+const SYMPHONY_LOCAL_LEG: WorkflowLegSpec = {
+	id: 'symphony-local',
+	tasks: ['Reply with exactly this token and nothing else: QUALIFY-E09-SYMPHONY-OK'],
+	goal: null,
+	maxTurns: 1,
+	prompts: [
+		'Do not use any tool. Reply with exactly this token and nothing else: QUALIFY-E09-SYMPHONY-OK',
+	],
+};
+
+const PIANOLA_DISPATCH_LEG: WorkflowLegSpec = {
+	id: 'pianola-dispatch',
+	tasks: [],
+	goal: null,
+	maxTurns: 1,
+	prompts: [
+		'Do not use any tool. Reply with exactly this token and nothing else: QUALIFY-E09-PIANOLA-OK',
+	],
+};
+
+const PIANOLA_LEARN_LEG: WorkflowLegSpec = {
+	id: 'pianola-learn',
 	tasks: [],
 	goal: null,
 	maxTurns: 0,
@@ -600,6 +639,9 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 				CUE_PROMPT_HEADLESS_LEG,
 				GROUPCHAT_PARTICIPANT_LEG,
 				GROUPCHAT_MODERATOR_REFUSED_LEG,
+				SYMPHONY_LOCAL_LEG,
+				PIANOLA_DISPATCH_LEG,
+				PIANOLA_LEARN_LEG,
 			],
 		}
 	),
