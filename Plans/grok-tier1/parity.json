@@ -10386,7 +10386,8 @@
 				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. GT1-05-11A/B/C/D implement selected configuration, account/host readiness, generation and streaming preview with static checks only. Tests/verification and native qualification remain required; no onboarding parity claim.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
 				"GT1-08-21 verification: phase 08 packets utilityGrooming, directorNotesAndGrooming; verdicts GT1-08-21 grooming pass; GT1-08-21 director-notes pass. Parity against the comparator baseline: required no tools unsupported (gap); read-only fallback deterministic. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11D linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -10517,6 +10518,25 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-utility-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded utility-consumer case logic: wizard structured answer/retry/reset and feedback interview legs (GT1-11-11D1), Director Notes/synopsis, tab naming and grooming/cheap-turn legs with the required no-tools refusal and read-only sentinels (GT1-11-11D2), pinned by GT1-11-11D3; then live run-state inputs.",
+					"affectedRows": [
+						"P20",
+						"P32",
+						"P35",
+						"P43",
+						"C-supportsWizard",
+						"S04",
+						"S05",
+						"S18",
+						"S19",
+						"S33"
+					],
+					"ownerTask": "GT1-11-11D1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
 				}
 			],
 			"phase": "05",
@@ -12957,7 +12977,8 @@
 			"limitations": [
 				"Grok absent from auto preference; manual selected-provider behavior and utility prerequisites need proof without silently substituting another provider. disableTools only appends agent.noToolsArgs when present (context-groomer.ts:379); Grok lacks them and is left unchanged. Must refuse required no-tools rather than imply enforcement; preserve account/SSH locality.",
 				"GT1-08-21 verification: phase 08 packets directorNotes, utilityGrooming, feedback, utilityEffortRetry, directorNotesAndGrooming; verdicts GT1-08-21 director-notes pass; GT1-08-21 grooming pass; GT1-08-21 feedback accounts (14C) pass; GT1-08-21 feedback interview (14D) pass; GT1-08-21 tab naming (14F) pass; GT1-08-21 headless Auto Run retry (14F) pass. Parity against the comparator baseline: gaps carried from S19; S18 match. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11D linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -13066,6 +13087,25 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-utility-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded utility-consumer case logic: wizard structured answer/retry/reset and feedback interview legs (GT1-11-11D1), Director Notes/synopsis, tab naming and grooming/cheap-turn legs with the required no-tools refusal and read-only sentinels (GT1-11-11D2), pinned by GT1-11-11D3; then live run-state inputs.",
+					"affectedRows": [
+						"P20",
+						"P32",
+						"P35",
+						"P43",
+						"C-supportsWizard",
+						"S04",
+						"S05",
+						"S18",
+						"S19",
+						"S33"
+					],
+					"ownerTask": "GT1-11-11D1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
 				}
 			],
 			"phase": "08",
@@ -13799,7 +13839,8 @@
 			},
 			"limitations": [
 				"ManagedRoute lists child-process/codex-app-server/opencode-server/pty/ssh, no Grok ACP. Grok child admission is not effect qualification. Synthetic Node harness explicitly certifies no real provider. disableTools only appends agent.noToolsArgs when present (context-groomer.ts:379); Grok lacks them and is left unchanged. Must refuse required no-tools rather than imply enforcement; preserve account/SSH locality. No Grok real-provider qualification from synthetic harness. Actual account/model/actor/remote identity and all native internal effects require proof or fail-closed refusal. Grok plan plus Bash deny is wired but does not establish complete filesystem/network/MCP/child containment on each OS. Grok prompt-only directory hints are not grants; prove native mechanism or maintain explicit safe refusal for required containment.",
-				"GT1-08-21 verification: phase 08 packets utilityGrooming, feedback, directorNotesAndGrooming; verdicts GT1-08-21 grooming pass; GT1-08-21 feedback accounts (14C) pass; GT1-08-21 feedback interview (14D) pass; GT1-08-21 director-notes pass. Parity against the comparator baseline: required no tools unsupported (gap); read-only fallback deterministic. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12, GT1-11-11D linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets utilityGrooming, feedback, directorNotesAndGrooming; verdicts GT1-08-21 grooming pass; GT1-08-21 feedback accounts (14C) pass; GT1-08-21 feedback interview (14D) pass; GT1-08-21 director-notes pass. Parity against the comparator baseline: required no tools unsupported (gap); read-only fallback deterministic. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12, GT1-11-11D linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -13937,6 +13978,25 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-utility-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded utility-consumer case logic: wizard structured answer/retry/reset and feedback interview legs (GT1-11-11D1), Director Notes/synopsis, tab naming and grooming/cheap-turn legs with the required no-tools refusal and read-only sentinels (GT1-11-11D2), pinned by GT1-11-11D3; then live run-state inputs.",
+					"affectedRows": [
+						"P20",
+						"P32",
+						"P35",
+						"P43",
+						"C-supportsWizard",
+						"S04",
+						"S05",
+						"S18",
+						"S19",
+						"S33"
+					],
+					"ownerTask": "GT1-11-11D1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
 				}
 			],
 			"phase": "09",
@@ -15696,7 +15756,8 @@
 				"The required audit, validation, documentation or delivery decision belongs to the listed later tasks; no passing claim is inferred from this inventory.",
 				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
 				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md.",
-				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md.",
+				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -15834,6 +15895,25 @@
 					],
 					"ownerTask": "GT1-11-11C1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
+				},
+				{
+					"id": "grok-utility-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded utility-consumer case logic: wizard structured answer/retry/reset and feedback interview legs (GT1-11-11D1), Director Notes/synopsis, tab naming and grooming/cheap-turn legs with the required no-tools refusal and read-only sentinels (GT1-11-11D2), pinned by GT1-11-11D3; then live run-state inputs.",
+					"affectedRows": [
+						"P20",
+						"P32",
+						"P35",
+						"P43",
+						"C-supportsWizard",
+						"S04",
+						"S05",
+						"S18",
+						"S19",
+						"S33"
+					],
+					"ownerTask": "GT1-11-11D1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
 				}
 			],
 			"phase": "11",
@@ -19949,7 +20029,8 @@
 				"Existing Grok wizard adapter needs malformed/partial JSON, tool failures, reset/resume and read-only utility coverage.",
 				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. GT1-05-09A implements selected-tab model/effort capture and conversation handoff. GT1-05-09B implements per-tab generation cancellation and captured effort forwarding; tests are not run and native continuation remains unqualified.",
 				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. GT1-05-11A/B/C/D implement selected configuration, account/host readiness, generation and streaming preview with static checks only. Tests/verification and native qualification remain required; no onboarding parity claim.",
-				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
+				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20024,6 +20105,25 @@
 					"missingPrerequisite": "GT1-05-12/12A/12A1/12B/12B1 regressions pass after the GT1-05-12C repair in GT1-05-13D. Remaining: a real exact-version onboarding flow (phase11).",
 					"affectedRows": ["C-supportsWizard"],
 					"evidenceRef": "phase05-reconciliation"
+				},
+				{
+					"id": "grok-utility-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded utility-consumer case logic: wizard structured answer/retry/reset and feedback interview legs (GT1-11-11D1), Director Notes/synopsis, tab naming and grooming/cheap-turn legs with the required no-tools refusal and read-only sentinels (GT1-11-11D2), pinned by GT1-11-11D3; then live run-state inputs.",
+					"affectedRows": [
+						"P20",
+						"P32",
+						"P35",
+						"P43",
+						"C-supportsWizard",
+						"S04",
+						"S05",
+						"S18",
+						"S19",
+						"S33"
+					],
+					"ownerTask": "GT1-11-11D1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
 				}
 			],
 			"field": "supportsWizard",
@@ -23572,7 +23672,8 @@
 			},
 			"limitations": [
 				"GT1-05-09 implements canonical readonly discovery, distinct bounded generation, normalized/native completion and strict structured document validation in the existing services. GT1-05-09A implements selected-tab model/effort capture and conversation handoff. GT1-05-09B implements per-tab generation cancellation and captured effort forwarding; tests are not run and native continuation remains unqualified.",
-				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
+				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23630,6 +23731,25 @@
 					"missingPrerequisite": "GT1-05-10/10A/10B service and caller regressions pass in GT1-05-13D. Remaining: a real exact-version Grok wizard flow (phase11); continuation remains full history replay without native ownership.",
 					"affectedRows": ["S04"],
 					"evidenceRef": "phase05-reconciliation"
+				},
+				{
+					"id": "grok-utility-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded utility-consumer case logic: wizard structured answer/retry/reset and feedback interview legs (GT1-11-11D1), Director Notes/synopsis, tab naming and grooming/cheap-turn legs with the required no-tools refusal and read-only sentinels (GT1-11-11D2), pinned by GT1-11-11D3; then live run-state inputs.",
+					"affectedRows": [
+						"P20",
+						"P32",
+						"P35",
+						"P43",
+						"C-supportsWizard",
+						"S04",
+						"S05",
+						"S18",
+						"S19",
+						"S33"
+					],
+					"ownerTask": "GT1-11-11D1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
 				}
 			],
 			"branchAuditRefs": ["B27"]
@@ -23711,7 +23831,8 @@
 			"limitations": [
 				"Grok has a dedicated shared discovery-args branch and text extraction. Account/model, unavailable binary, resume and error handling need consumer evidence.",
 				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. GT1-05-11A/B/C/D implement selected configuration, account/host readiness, generation and streaming preview with static checks only. Tests/verification and native qualification remain required; no onboarding parity claim.",
-				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted."
+				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
+				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23782,6 +23903,25 @@
 					"missingPrerequisite": "GT1-05-12/12A/12A1/12B/12B1 regressions pass after the GT1-05-12C repair in GT1-05-13D. Remaining: a real exact-version onboarding flow (phase11).",
 					"affectedRows": ["S05"],
 					"evidenceRef": "phase05-reconciliation"
+				},
+				{
+					"id": "grok-utility-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded utility-consumer case logic: wizard structured answer/retry/reset and feedback interview legs (GT1-11-11D1), Director Notes/synopsis, tab naming and grooming/cheap-turn legs with the required no-tools refusal and read-only sentinels (GT1-11-11D2), pinned by GT1-11-11D3; then live run-state inputs.",
+					"affectedRows": [
+						"P20",
+						"P32",
+						"P35",
+						"P43",
+						"C-supportsWizard",
+						"S04",
+						"S05",
+						"S18",
+						"S19",
+						"S33"
+					],
+					"ownerTask": "GT1-11-11D1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
 				}
 			],
 			"branchAuditRefs": ["B15", "B27"]
@@ -25208,7 +25348,8 @@
 				"Grok absent from auto preference; manual selected-provider behavior and utility prerequisites need proof without silently substituting another provider.",
 				"GT1-08-21 verification: phase 08 packets directorNotes, directorNotesAndGrooming; verdicts GT1-08-21 director-notes pass; GT1-08-21 grooming pass. Parity against the comparator baseline: deterministic match (Grok last auto preference, explicit only, no substitution). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11D linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
 				"GT1-11-01 audit at 808b92608: A11-F04 (stale-copy) Settings search for grok finds neither the coworking MCP setting nor the synopsis provider setting. See Plans/grok-tier1/evidence/11-static.md.",
-				"GT1-11-03 verification at d84638bfc: A11-F04 repaired by GT1-11-01D (943dfe213), pinned by GT1-11-01E/02; blocker grok-settings-search-copy-stale cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-03 verification at d84638bfc: A11-F04 repaired by GT1-11-01D (943dfe213), pinned by GT1-11-01E/02; blocker grok-settings-search-copy-stale cleared on a passing static run. Row statuses unchanged. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -25253,6 +25394,25 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S18"]
+				},
+				{
+					"id": "grok-utility-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded utility-consumer case logic: wizard structured answer/retry/reset and feedback interview legs (GT1-11-11D1), Director Notes/synopsis, tab naming and grooming/cheap-turn legs with the required no-tools refusal and read-only sentinels (GT1-11-11D2), pinned by GT1-11-11D3; then live run-state inputs.",
+					"affectedRows": [
+						"P20",
+						"P32",
+						"P35",
+						"P43",
+						"C-supportsWizard",
+						"S04",
+						"S05",
+						"S18",
+						"S19",
+						"S33"
+					],
+					"ownerTask": "GT1-11-11D1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
 				}
 			],
 			"branchAuditRefs": ["B08"]
@@ -25328,7 +25488,8 @@
 			"limitations": [
 				"disableTools only appends agent.noToolsArgs when present (context-groomer.ts:379); Grok lacks them and is left unchanged. Must refuse required no-tools rather than imply enforcement; preserve account/SSH locality.",
 				"GT1-08-21 verification: phase 08 packets utilityGrooming, utilityEffortRetry, directorNotesAndGrooming; verdicts GT1-08-21 grooming pass; GT1-08-21 tab naming (14F) pass; GT1-08-21 headless Auto Run retry (14F) pass; GT1-08-21 director-notes pass. Parity against the comparator baseline: gap: required no tools unsupported and no effort retry while Claude Code has noToolsArgs and both comparators retry (release blocker). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12, GT1-11-11D linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-01 audit at 808b92608: A11-F05 (unqualified-native-enforcement-claim) readOnlyCliEnforced true admits Grok on read-only-required callers; no evidence that --permission-mode plan plus --deny Bash(*) blocks writes, MCP, web, subagents and hooks. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-01 audit at 808b92608: A11-F05 (unqualified-native-enforcement-claim) readOnlyCliEnforced true admits Grok on read-only-required callers; no evidence that --permission-mode plan plus --deny Bash(*) blocks writes, MCP, web, subagents and hooks. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -25398,6 +25559,25 @@
 					"affectedRows": ["C-supportsReadOnlyMode", "META-03", "S19", "S33"],
 					"taskId": "GT1-11-01",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
+				},
+				{
+					"id": "grok-utility-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded utility-consumer case logic: wizard structured answer/retry/reset and feedback interview legs (GT1-11-11D1), Director Notes/synopsis, tab naming and grooming/cheap-turn legs with the required no-tools refusal and read-only sentinels (GT1-11-11D2), pinned by GT1-11-11D3; then live run-state inputs.",
+					"affectedRows": [
+						"P20",
+						"P32",
+						"P35",
+						"P43",
+						"C-supportsWizard",
+						"S04",
+						"S05",
+						"S18",
+						"S19",
+						"S33"
+					],
+					"ownerTask": "GT1-11-11D1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
 				}
 			],
 			"branchAuditRefs": ["B08", "B40", "B41"]
@@ -29501,7 +29681,8 @@
 				"FEEDBACK_PROVIDERS is restricted to Claude/Codex/OpenCode; candidate builder skips Grok and Antigravity agents and only enumerates allowlisted provider defaults. This is a real shared utility surface missing from the current ledger. Extend only with qualified account identity and read-only interview semantics; picker registration alone does not enable it.",
 				"Implementation/test owners identify the nearest integration area only. Their current bounded file lists do not cover this new outcome; owner-scope reconciliation is explicitly pending, not an implementation claim.",
 				"GT1-08-21 verification: phase 08 packets utilityGrooming, feedback, directorNotesAndGrooming; verdicts GT1-08-21 grooming pass; GT1-08-21 feedback accounts (14C) pass; GT1-08-21 feedback interview (14D) pass; GT1-08-21 director-notes pass. Parity against the comparator baseline: deterministic match beyond Antigravity (excluded); FeedbackChatView refused fall-through open. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-12, GT1-11-11D linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-01 audit at 808b92608: A11-F05 (unqualified-native-enforcement-claim) readOnlyCliEnforced true admits Grok on read-only-required callers; no evidence that --permission-mode plan plus --deny Bash(*) blocks writes, MCP, web, subagents and hooks. See Plans/grok-tier1/evidence/11-static.md."
+				"GT1-11-01 audit at 808b92608: A11-F05 (unqualified-native-enforcement-claim) readOnlyCliEnforced true admits Grok on read-only-required callers; no evidence that --permission-mode plan plus --deny Bash(*) blocks writes, MCP, web, subagents and hooks. See Plans/grok-tier1/evidence/11-static.md.",
+				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -29554,6 +29735,25 @@
 					"affectedRows": ["C-supportsReadOnlyMode", "META-03", "S19", "S33"],
 					"taskId": "GT1-11-01",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-static.md"
+				},
+				{
+					"id": "grok-utility-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded utility-consumer case logic: wizard structured answer/retry/reset and feedback interview legs (GT1-11-11D1), Director Notes/synopsis, tab naming and grooming/cheap-turn legs with the required no-tools refusal and read-only sentinels (GT1-11-11D2), pinned by GT1-11-11D3; then live run-state inputs.",
+					"affectedRows": [
+						"P20",
+						"P32",
+						"P35",
+						"P43",
+						"C-supportsWizard",
+						"S04",
+						"S05",
+						"S18",
+						"S19",
+						"S33"
+					],
+					"ownerTask": "GT1-11-11D1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
 				}
 			],
 			"ownerScopeReview": {
@@ -37175,6 +37375,587 @@
 					"S34"
 				],
 				"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
+			}
+		],
+		"liveCalls": 0,
+		"readiness": false
+	},
+	"phase11NativeUtilities": {
+		"taskId": "GT1-11-11D",
+		"recordedAt": "2026-11-01",
+		"sourceCommit": "367139adc4fc3f576c63251e270309a1c8c79643",
+		"branch": "auto-run-feature/grok-cli-integration",
+		"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md",
+		"prerequisites": {
+			"missing": [
+				"live.enabled false",
+				"live.credentialsReference null",
+				"live.authorizationReference null",
+				"live.budgetUsd 0",
+				"live.maxCalls 0",
+				"live.maxTurns 0",
+				"live.maxWallClockSeconds 0",
+				"live.allowedEndpoints empty",
+				"selectedBinaryPath null",
+				"selectedBinarySha256 null",
+				"selectedLiveModels empty",
+				"authorization.configurationReference null",
+				"authorization.expiresAt null",
+				"authorization.isolationReceipt null",
+				"authorization.allowedRoots empty",
+				"no provider cap or worst-case reservation",
+				"authorization.sharedBudgetLedgerReference null"
+			],
+			"configFiles": [],
+			"requiredLiveBlockers": [
+				"live-authorization-absent",
+				"binary-unpinned",
+				"host-isolation-unqualified",
+				"background-egress-unqualified",
+				"discovery-authorization-absent",
+				"live-limits-unset",
+				"spend-guarantee-absent"
+			]
+		},
+		"configurationSelectionFiles": [],
+		"suites": {
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/scripts/grok-qualification-spend.test.ts src/__tests__/scripts/grok-qualification-harness.test.ts src/__tests__/main/feedback/accounts.test.ts src/__tests__/main/feedback/managed.test.ts src/__tests__/main/ipc/handlers/context-groom.test.ts src/__tests__/main/ipc/handlers/tabNaming.managed.test.ts src/__tests__/main/ipc/handlers/tabNaming.test.ts src/__tests__/main/utils/context-groomer.managed.test.ts src/__tests__/main/utils/context-groomer.test.ts src/__tests__/main/utils/director-notes-provider.test.ts src/__tests__/main/ipc/handlers/director-notes.test.ts src/__tests__/renderer/components/DirectorNotes/DirectorNotesModal.test.tsx src/__tests__/renderer/components/Wizard/WizardContext.test.tsx src/__tests__/renderer/components/Wizard/screens/AgentSelectionScreen/hooks.test.tsx src/__tests__/renderer/components/Wizard/screens/ConversationScreen/hooks.test.tsx src/__tests__/renderer/components/Wizard/screens/ConversationScreen/utils.test.ts src/__tests__/renderer/components/Wizard/screens/PreparingPlanScreen/hooks.test.tsx src/__tests__/renderer/components/Wizard/services/conversationManager.test.ts src/__tests__/renderer/components/Wizard/services/phaseGenerator.test.ts src/__tests__/renderer/components/Wizard/services/phaseGenerator_ssh.test.ts src/__tests__/renderer/components/Wizard/services/wizardErrorDetection.test.ts src/__tests__/renderer/hooks/useInlineWizard.test.ts src/__tests__/renderer/hooks/useInlineWizard_overrides.test.ts src/__tests__/renderer/hooks/useWizardHandlers.test.ts src/__tests__/renderer/services/contextGroomer.test.ts src/__tests__/renderer/services/feedbackConversation.test.ts src/__tests__/renderer/services/inlineWizardConversation.test.ts src/__tests__/renderer/services/inlineWizardDocumentGeneration.test.ts src/__tests__/renderer/utils/grokWizard.test.ts src/__tests__/shared/feedbackAccounts.test.ts src/__tests__/shared/modelTiers.test.ts src/__tests__/cli/services/synopsis.test.ts src/__tests__/renderer/hooks/agent/internal/helpers/exitSynopsis.test.ts",
+			"exit": 0,
+			"total": 1578,
+			"passed": 1578,
+			"failed": 0,
+			"files": [
+				{
+					"file": "src/__tests__/renderer/services/contextGroomer.test.ts",
+					"passed": 32,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/services/feedbackConversation.test.ts",
+					"passed": 26,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/services/inlineWizardConversation.test.ts",
+					"passed": 26,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/services/inlineWizardDocumentGeneration.test.ts",
+					"passed": 92,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useInlineWizard.test.ts",
+					"passed": 65,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useInlineWizard_overrides.test.ts",
+					"passed": 8,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/useWizardHandlers.test.ts",
+					"passed": 140,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/utils/grokWizard.test.ts",
+					"passed": 24,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/DirectorNotes/DirectorNotesModal.test.tsx",
+					"passed": 38,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/Wizard/WizardContext.test.tsx",
+					"passed": 110,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/Wizard/services/conversationManager.test.ts",
+					"passed": 35,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/Wizard/services/phaseGenerator.test.ts",
+					"passed": 62,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/Wizard/services/phaseGenerator_ssh.test.ts",
+					"passed": 14,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/Wizard/services/wizardErrorDetection.test.ts",
+					"passed": 20,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/Wizard/screens/ConversationScreen/hooks.test.tsx",
+					"passed": 159,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/Wizard/screens/ConversationScreen/utils.test.ts",
+					"passed": 35,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/Wizard/screens/AgentSelectionScreen/hooks.test.tsx",
+					"passed": 68,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/components/Wizard/screens/PreparingPlanScreen/hooks.test.tsx",
+					"passed": 12,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/renderer/hooks/agent/internal/helpers/exitSynopsis.test.ts",
+					"passed": 29,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-harness.test.ts",
+					"passed": 85,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-spend.test.ts",
+					"passed": 32,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/feedbackAccounts.test.ts",
+					"passed": 12,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/modelTiers.test.ts",
+					"passed": 56,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/cli/services/synopsis.test.ts",
+					"passed": 11,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/feedback/accounts.test.ts",
+					"passed": 11,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/feedback/managed.test.ts",
+					"passed": 9,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/utils/context-groomer.managed.test.ts",
+					"passed": 35,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/utils/context-groomer.test.ts",
+					"passed": 74,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/utils/director-notes-provider.test.ts",
+					"passed": 15,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/ipc/handlers/context-groom.test.ts",
+					"passed": 5,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/ipc/handlers/director-notes.test.ts",
+					"passed": 68,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/ipc/handlers/tabNaming.managed.test.ts",
+					"passed": 26,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/ipc/handlers/tabNaming.test.ts",
+					"passed": 144,
+					"failed": 0,
+					"skipped": 0
+				}
+			]
+		},
+		"harness": {
+			"command": "node scripts/grok-qualification.mjs --json --no-write",
+			"exit": 0,
+			"configSource": "default-run-state",
+			"totals": {
+				"cases": 48,
+				"admitted": 0,
+				"notRun": 48,
+				"spawned": 0,
+				"paidRequests": 0,
+				"networkContacts": 0
+			},
+			"capabilities": {
+				"isolationPreflight": true,
+				"atomicSpendAdmission": true,
+				"offlineExecutor": true,
+				"caseExecutor": true,
+				"discoveryExecutor": true,
+				"sshExecutor": true,
+				"consumerLegs": true,
+				"sessionLegs": true,
+				"sessionConsumers": true
+			}
+		},
+		"cases": [
+			{
+				"caseId": "E09:native-headless:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "consumers",
+						"owner": "GT1-11-11E"
+					}
+				]
+			},
+			{
+				"caseId": "E09:native-headless:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "consumers",
+						"owner": "GT1-11-11E"
+					}
+				]
+			},
+			{
+				"caseId": "E09:acp-stdio:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "consumers",
+						"owner": "GT1-11-11E"
+					}
+				]
+			},
+			{
+				"caseId": "E09:acp-stdio:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "consumers",
+						"owner": "GT1-11-11E"
+					}
+				]
+			},
+			{
+				"caseId": "E10:native-headless:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "negative-policy",
+						"owner": "GT1-11-12"
+					}
+				]
+			},
+			{
+				"caseId": "E10:native-headless:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "negative-policy",
+						"owner": "GT1-11-12"
+					}
+				]
+			},
+			{
+				"caseId": "E10:acp-stdio:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "negative-policy",
+						"owner": "GT1-11-12"
+					}
+				]
+			},
+			{
+				"caseId": "E10:acp-stdio:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "negative-policy",
+						"owner": "GT1-11-12"
+					}
+				]
+			}
+		],
+		"claims": [
+			{
+				"claim": "Inline and onboarding wizard structured responses, bounded schema retry and session reset",
+				"rows": ["S04", "S05", "C-supportsWizard", "P20"],
+				"cases": "E09 (paid, one turn)",
+				"implemented": "E09 runs one token turn and leaves its consumers not-evaluated (owner GT1-11-11E, workflow consumers); no leg drives the production inline wizard conversation or onboarding conversation manager over a Grok turn, validates the structured answer, forces one malformed answer to observe the bounded retry, or resets the wizard session and observes a fresh native id; deterministic conversationManager, inlineWizardConversation, inlineWizardDocumentGeneration, useInlineWizard, WizardContext, ConversationScreen, PreparingPlanScreen, phaseGenerator and grokWizard suites only",
+				"gap": "wizard leg: structured answer validated, one bounded retry on a malformed answer, reset yields a fresh session, instructions delivered, no prompt for input",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Director Notes provider selection and synopsis generation",
+				"rows": ["S18", "P32"],
+				"cases": "none",
+				"implemented": "no leg resolves the Director Notes provider to Grok through resolveSynopsisProvider and runs the synopsis or narrative turn as a cheap read-only resume; deterministic director-notes-provider, director-notes IPC, DirectorNotesModal, cli synopsis and exitSynopsis suites only",
+				"gap": "director-notes/synopsis leg asserting the selected provider, the cheap resume settings, the resumed native id and bounded completion",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Tab naming, context grooming and cheap turns under read-only or no-tools requirements",
+				"rows": ["S19", "P20", "P32", "P35"],
+				"cases": "none",
+				"implemented": "no leg runs groomContext (cheapTurn, readOnly, disableTools, requireDisabledTools) or tab naming over Grok; the source refuses requireDisabledTools before spawn because Grok has no noToolsArgs and runs best-effort disableTools as enforced read-only (blocker grok-required-no-tools-unsupported), and readOnlyArgs enforcement is unqualified (grok-readonly-cli-enforcement-unqualified), so the honest observation is the refusal with zero spawns plus a read-only turn with zero prohibited effects, which nothing observes natively; deterministic context-groomer, context-groom IPC, contextGroomer, tabNaming, tabNaming.managed and modelTiers suites only",
+				"gap": "utility-turn leg: required no-tools refused with nothing spawned, read-only grooming and tab naming with the cheap tier, sentinel files unchanged, bounded completion, no interactive stall",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Shared feedback interview on a selected Grok account with read-only semantics",
+				"rows": ["S33"],
+				"cases": "none",
+				"implemented": "no leg selects a Grok account through the feedback account resolver and runs the feedback interview turn read-only, observing the account home, the instructions and zero prohibited effects; deterministic feedback accounts, feedback managed, feedbackConversation and feedbackAccounts suites only",
+				"gap": "feedback-interview leg asserting the selected account dir, read-only launch, sentinel files unchanged and a bounded reply",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Qualification harness completeness (P43)",
+				"rows": ["P43"],
+				"cases": "all families",
+				"implemented": "the harness enumerates 48 cases; no family or leg drives a shared utility consumer",
+				"gap": "the legs above",
+				"outcome": "not-run"
+			}
+		],
+		"observed": {
+			"selectedProfiles": [],
+			"instructions": [],
+			"resumeIdentities": [],
+			"structuredAnswers": [],
+			"retries": [],
+			"resets": [],
+			"synopses": [],
+			"tabNames": [],
+			"groomedContexts": [],
+			"feedbackReplies": [],
+			"prohibitedEffects": [],
+			"noToolsRefusals": []
+		},
+		"ownedFixtures": {
+			"sentinels": 0,
+			"assertionsEvaluated": 0,
+			"interactiveStalls": 0
+		},
+		"productionInstall": {
+			"sha256": "5c8a688251bf61e35370b828b6a353b0a20fcc3f64000de8a91d426039f29cec",
+			"executed": false,
+			"modified": false
+		},
+		"findings": [
+			{
+				"id": "A11-F20",
+				"classification": "harness-gap",
+				"anchors": [
+					"scripts/grok-qualification/paid-fixtures.ts:396",
+					"scripts/grok-qualification/paid-fixtures.ts:399",
+					"scripts/grok-qualification/paid-fixtures.ts:404",
+					"src/main/utils/context-groomer.ts:441"
+				],
+				"consequence": "The utility-consumer cases this VERIFY must observe are not implemented: run-state maps E09 and E10 to GT1-11-11D, but E09 runs one token turn with its consumers not-evaluated for GT1-11-11E and E10 leaves negative-policy to GT1-11-12, and no family or leg drives the inline or onboarding wizard (structured answer, bounded retry, reset), Director Notes or synopsis, tab naming, context grooming or cheap turns under read-only/no-tools requirements, or the feedback interview through a production consumer. GT1-11-11D is a VERIFY packet and may not add harness code, so even with every run-state prerequisite these claims could not be observed.",
+				"rows": ["P20", "P32", "P35", "P43", "C-supportsWizard", "S04", "S05", "S18", "S19", "S33"],
+				"blocker": "grok-utility-consumer-cases-unimplemented",
+				"repairTasks": ["GT1-11-11D1", "GT1-11-11D2", "GT1-11-11D3"]
+			}
+		],
+		"blockerUpdates": [
+			{
+				"id": "grok-utility-consumer-cases-unimplemented",
+				"finding": "A11-F20",
+				"taskId": "GT1-11-11D",
+				"change": "added",
+				"addedTo": [
+					"P20",
+					"P32",
+					"P35",
+					"P43",
+					"C-supportsWizard",
+					"S04",
+					"S05",
+					"S18",
+					"S19",
+					"S33"
+				],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
 			}
 		],
 		"liveCalls": 0,
