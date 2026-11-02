@@ -10286,7 +10286,8 @@
 				"GT1-07-11 verification: Native command discovery reads the live ACP catalog (GrokAcpSpawner.observeCommands); grok-skills projection stamps the entry digest and binding. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11B linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
 				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
-				"GT1-11-11B verification at 54cdba84f: native resource/MCP/plugin/installer/bundle cases not-run (run-state live prerequisites absent; case logic missing, A11-F17). Live stays not-run. See Plans/grok-tier1/evidence/11-native-resources.md."
+				"GT1-11-11B verification at 54cdba84f: native resource/MCP/plugin/installer/bundle cases not-run (run-state live prerequisites absent; case logic missing, A11-F17). Live stays not-run. See Plans/grok-tier1/evidence/11-native-resources.md.",
+				"GT1-11-14C at dd53218a8: A11-F43, the E08/E09 receipts still carry a candidate override for this flag after the registry was finalized false; no executor reads it (production selection held), retirement owned by GT1-11-14C1/14C2."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -10403,6 +10404,16 @@
 						"grok-plugin-broker-native-dispatch-unproduced (GT1-11-14P4: named blocker; former owner plugin-broker-native-leg)",
 						"grok-harness-ssh-target-absent (GT1-11-14P4: named blocker; former owner ssh-consumer-legs)"
 					]
+				},
+				{
+					"id": "grok-candidate-snapshot-outlives-registry",
+					"code": "harness-gap",
+					"missingPrerequisite": "Retire the candidate snapshot for flags the finalized registry keeps false (CANDIDATE_CAPABILITIES empty or removed, no override on any receipt), so every case judges the flag through production selection.",
+					"ownerTask": "GT1-11-14C1",
+					"affectedRows": ["P18", "C-supportsSlashCommands", "C-supportsGroupChatModeration"],
+					"taskId": "GT1-11-14C",
+					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
+					"finding": "A11-F43"
 				}
 			],
 			"phase": "05",
@@ -18316,7 +18327,8 @@
 				"Grok plan plus Bash deny is wired but does not establish complete filesystem/network/MCP/child containment on each OS.",
 				"GT1-11-01 audit at 808b92608: A11-F05 (unqualified-native-enforcement-claim) readOnlyCliEnforced true admits Grok on read-only-required callers; no evidence that --permission-mode plan plus --deny Bash(*) blocks writes, MCP, web, subagents and hooks. See Plans/grok-tier1/evidence/11-static.md.",
 				"GT1-11-12 verification at 4ef249699: native negative policy cases (denied writes, outside-root and symlink access, shell, network and in-process egress, MCP/meta-tools/subagents/hooks, read-only/no-tools violations, unknown effects, stale approvals, revocation, prohibited model routes, endpoint substitution, custody/enrollment/attribution) not-run (run-state live prerequisites absent; case logic missing, A11-F29). Live stays not-run. See Plans/grok-tier1/evidence/11-policy-native.md.",
-				"GT1-11-14A: Grok flag kept true on its production builder and consumers (GROK_CAPABILITY_EVIDENCE.retained: plan + deny Bash(*) observed on 1.0.5; readOnlyCliEnforced stays true because false would keep --always-approve in CLI read-only runs (resolveCliBatchModeArgs); managed read-only refuses Grok; containment stays A11-F05). No version is qualified (qualifiedVersions empty, candidate 1.0.70 not-run); live proof owned by GT1-11-14C."
+				"GT1-11-14A: Grok flag kept true on its production builder and consumers (GROK_CAPABILITY_EVIDENCE.retained: plan + deny Bash(*) observed on 1.0.5; readOnlyCliEnforced stays true because false would keep --always-approve in CLI read-only runs (resolveCliBatchModeArgs); managed read-only refuses Grok; containment stays A11-F05). No version is qualified (qualifiedVersions empty, candidate 1.0.70 not-run); live proof owned by GT1-11-14C.",
+				"GT1-11-14C at dd53218a8: rerun through production registry selection (production digest 068efe87eb60 unchanged, no candidate override on this row's cases); focused capability and consumer suites 20 files 1811/1811; every native case not-run (run-state lacks 17 live prerequisites, 0 admitted, 0 spawned). Live proof moves to GT1-12-06."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -18397,8 +18409,8 @@
 				{
 					"id": "grok-capability-true-without-pinned-evidence",
 					"code": "unproven-capability-claim",
-					"missingPrerequisite": "The flag is true on its production builder and consumers, observed on an earlier binary (0.2.93, 1.0.5, 1.0.41) or pinned deterministically (GROK_CAPABILITY_EVIDENCE.retained), while the pinned candidate 1.0.70 has no native case run and qualifiedVersions is empty. Closes when GT1-11-14C (or phase 12) observes the outcome on a qualified binary through production selection.",
-					"ownerTask": "GT1-11-14C",
+					"missingPrerequisite": "The flag is true on its production builder and consumers, observed on an earlier binary (0.2.93, 1.0.5, 1.0.41) or pinned deterministically (GROK_CAPABILITY_EVIDENCE.retained), while the pinned candidate 1.0.70 has no native case run and qualifiedVersions is empty. GT1-11-14C re-observed it through production selection with every native case not-run; closes when phase 12 (GT1-12-06) observes the outcome on a qualified binary.",
+					"ownerTask": "GT1-12-06",
 					"affectedRows": [
 						"C-supportsReadOnlyMode",
 						"C-supportsCostTracking",
@@ -18408,7 +18420,9 @@
 					],
 					"taskId": "GT1-11-14",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"reconciledBy": "GT1-11-14A"
+					"reconciledBy": "GT1-11-14A",
+					"reobserved": "GT1-11-14C at dd53218a8: production selection, suites 1811/1811, harness 48 not-run, 0 admitted",
+					"residual": ["live-authorization-absent (run-state live inputs; every case not-run)"]
 				}
 			],
 			"field": "supportsReadOnlyMode",
@@ -19390,7 +19404,8 @@
 				"GT1-05-05 implements only scoped slash refusals in the composer/queue and excludes stale provider prompt bodies. GT1-05-05A adds ephemeral discovery and completion metadata with no selectable native entries; admitted invocation with a fresh catalog on each new ACP process remains GT1-07-02. No native skill expansion, TUI action, CLI subcommand or headless command execution is certified.",
 				"GT1-05-05A refreshes advisory discovery on selected context, settings, focus and completion changes, with a finite receipt lifetime. Main-only revisions still require fresh admitted-sink validation; no native command is selectable or executed. GT1-05-06C/13 own completion regression coverage/execution.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
-				"GT1-07-11 verification: Native command submission over ACP is implemented and fixture-tested; not qualified on a real binary. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted."
+				"GT1-07-11 verification: Native command submission over ACP is implemented and fixture-tested; not qualified on a real binary. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
+				"GT1-11-14C at dd53218a8: A11-F43, the E08/E09 receipts still carry a candidate override for this flag after the registry was finalized false; no executor reads it (production selection held), retirement owned by GT1-11-14C1/14C2."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -19437,6 +19452,16 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["C-supportsSlashCommands"]
+				},
+				{
+					"id": "grok-candidate-snapshot-outlives-registry",
+					"code": "harness-gap",
+					"missingPrerequisite": "Retire the candidate snapshot for flags the finalized registry keeps false (CANDIDATE_CAPABILITIES empty or removed, no override on any receipt), so every case judges the flag through production selection.",
+					"ownerTask": "GT1-11-14C1",
+					"affectedRows": ["P18", "C-supportsSlashCommands", "C-supportsGroupChatModeration"],
+					"taskId": "GT1-11-14C",
+					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
+					"finding": "A11-F43"
 				}
 			],
 			"field": "supportsSlashCommands",
@@ -19853,7 +19878,8 @@
 				"Current phase04 evidence: selected account discovery, lifetime/child accounting, dashboard, CLI/export and Cue consumers pass deterministic regression checks; historical phase03 limitations above are superseded only for these tested boundaries. Live billing/child completeness, managed account paths and broader route qualification remain pending.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: cost tracked as exact ticks or partial/unknown with coverage; never priced from tokens for Grok; Claude reports, Codex estimates. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
 				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). The library recorder and dashboard aggregation write an unknown cost as 0 (A11-F25, A11-F26). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md.",
-				"GT1-11-14A: Grok flag kept true on its production builder and consumers (GROK_CAPABILITY_EVIDENCE.retained: end.total_cost_usd observed on 1.0.41; unknown cost stays unknown (14P1)). No version is qualified (qualifiedVersions empty, candidate 1.0.70 not-run); live proof owned by GT1-11-14C."
+				"GT1-11-14A: Grok flag kept true on its production builder and consumers (GROK_CAPABILITY_EVIDENCE.retained: end.total_cost_usd observed on 1.0.41; unknown cost stays unknown (14P1)). No version is qualified (qualifiedVersions empty, candidate 1.0.70 not-run); live proof owned by GT1-11-14C.",
+				"GT1-11-14C at dd53218a8: rerun through production registry selection (production digest 068efe87eb60 unchanged, no candidate override on this row's cases); focused capability and consumer suites 20 files 1811/1811; every native case not-run (run-state lacks 17 live prerequisites, 0 admitted, 0 spawned). Live proof moves to GT1-12-06."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20007,8 +20033,8 @@
 				{
 					"id": "grok-capability-true-without-pinned-evidence",
 					"code": "unproven-capability-claim",
-					"missingPrerequisite": "The flag is true on its production builder and consumers, observed on an earlier binary (0.2.93, 1.0.5, 1.0.41) or pinned deterministically (GROK_CAPABILITY_EVIDENCE.retained), while the pinned candidate 1.0.70 has no native case run and qualifiedVersions is empty. Closes when GT1-11-14C (or phase 12) observes the outcome on a qualified binary through production selection.",
-					"ownerTask": "GT1-11-14C",
+					"missingPrerequisite": "The flag is true on its production builder and consumers, observed on an earlier binary (0.2.93, 1.0.5, 1.0.41) or pinned deterministically (GROK_CAPABILITY_EVIDENCE.retained), while the pinned candidate 1.0.70 has no native case run and qualifiedVersions is empty. GT1-11-14C re-observed it through production selection with every native case not-run; closes when phase 12 (GT1-12-06) observes the outcome on a qualified binary.",
+					"ownerTask": "GT1-12-06",
 					"affectedRows": [
 						"C-supportsReadOnlyMode",
 						"C-supportsCostTracking",
@@ -20018,7 +20044,9 @@
 					],
 					"taskId": "GT1-11-14",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"reconciledBy": "GT1-11-14A"
+					"reconciledBy": "GT1-11-14A",
+					"reobserved": "GT1-11-14C at dd53218a8: production selection, suites 1811/1811, harness 48 not-run, 0 admitted",
+					"residual": ["live-authorization-absent (run-state live inputs; every case not-run)"]
 				}
 			],
 			"field": "supportsCostTracking",
@@ -20158,7 +20186,8 @@
 				"Current phase04 evidence: selected account discovery, lifetime/child accounting, dashboard, CLI/export and Cue consumers pass deterministic regression checks; historical phase03 limitations above are superseded only for these tested boundaries. Live billing/child completeness, managed account paths and broader route qualification remain pending.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups usage pass 91/91; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; quota pass 21/21; retry pass 158/158; nativePlatformLaunch not-run. Parity against the comparator baseline: usage stats reach accessor, Cue accessor, legend, Agent Runs, global stats and About through the same accessors as the comparators. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11F, GT1-11-07, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
 				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). The library recorder and dashboard aggregation write an unknown cost as 0 (A11-F25, A11-F26). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md.",
-				"GT1-11-14A: Grok flag kept true on its production builder and consumers (GROK_CAPABILITY_EVIDENCE.retained: per-call usage and end totals observed on 1.0.41). No version is qualified (qualifiedVersions empty, candidate 1.0.70 not-run); live proof owned by GT1-11-14C."
+				"GT1-11-14A: Grok flag kept true on its production builder and consumers (GROK_CAPABILITY_EVIDENCE.retained: per-call usage and end totals observed on 1.0.41). No version is qualified (qualifiedVersions empty, candidate 1.0.70 not-run); live proof owned by GT1-11-14C.",
+				"GT1-11-14C at dd53218a8: rerun through production registry selection (production digest 068efe87eb60 unchanged, no candidate override on this row's cases); focused capability and consumer suites 20 files 1811/1811; every native case not-run (run-state lacks 17 live prerequisites, 0 admitted, 0 spawned). Live proof moves to GT1-12-06."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20312,8 +20341,8 @@
 				{
 					"id": "grok-capability-true-without-pinned-evidence",
 					"code": "unproven-capability-claim",
-					"missingPrerequisite": "The flag is true on its production builder and consumers, observed on an earlier binary (0.2.93, 1.0.5, 1.0.41) or pinned deterministically (GROK_CAPABILITY_EVIDENCE.retained), while the pinned candidate 1.0.70 has no native case run and qualifiedVersions is empty. Closes when GT1-11-14C (or phase 12) observes the outcome on a qualified binary through production selection.",
-					"ownerTask": "GT1-11-14C",
+					"missingPrerequisite": "The flag is true on its production builder and consumers, observed on an earlier binary (0.2.93, 1.0.5, 1.0.41) or pinned deterministically (GROK_CAPABILITY_EVIDENCE.retained), while the pinned candidate 1.0.70 has no native case run and qualifiedVersions is empty. GT1-11-14C re-observed it through production selection with every native case not-run; closes when phase 12 (GT1-12-06) observes the outcome on a qualified binary.",
+					"ownerTask": "GT1-12-06",
 					"affectedRows": [
 						"C-supportsReadOnlyMode",
 						"C-supportsCostTracking",
@@ -20323,7 +20352,9 @@
 					],
 					"taskId": "GT1-11-14",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"reconciledBy": "GT1-11-14A"
+					"reconciledBy": "GT1-11-14A",
+					"reobserved": "GT1-11-14C at dd53218a8: production selection, suites 1811/1811, harness 48 not-run, 0 admitted",
+					"residual": ["live-authorization-absent (run-state live inputs; every case not-run)"]
 				}
 			],
 			"field": "supportsUsageStats",
@@ -21803,7 +21834,8 @@
 				"The scoped stored-context extraction boundary passes phase04 fixtures, including source ownership, tool linkage, missing images, redaction and truncation notices. It has no production UI caller; GT1-06-01 owns UI/CLI wiring and budgeted transfer. No native resume or migration qualification follows.",
 				"GT1-06-12 verification: Export consumers and the merge injection path pass deterministic checks at the verified source. Live consumption is not run. Phase06 focused suites pass at 10cbcbeb5 (33 files, 1306 passed, 0 failed, phase06-verification). Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md.",
-				"GT1-11-14A: Grok flag kept true on its production builder and consumers (GROK_CAPABILITY_EVIDENCE.retained: GrokSessionStorage chat_history.jsonl extraction pinned by phase04 fixtures). No version is qualified (qualifiedVersions empty, candidate 1.0.70 not-run); live proof owned by GT1-11-14C."
+				"GT1-11-14A: Grok flag kept true on its production builder and consumers (GROK_CAPABILITY_EVIDENCE.retained: GrokSessionStorage chat_history.jsonl extraction pinned by phase04 fixtures). No version is qualified (qualifiedVersions empty, candidate 1.0.70 not-run); live proof owned by GT1-11-14C.",
+				"GT1-11-14C at dd53218a8: rerun through production registry selection (production digest 068efe87eb60 unchanged, no candidate override on this row's cases); focused capability and consumer suites 20 files 1811/1811; every native case not-run (run-state lacks 17 live prerequisites, 0 admitted, 0 spawned). Live proof moves to GT1-12-06."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -21929,8 +21961,8 @@
 				{
 					"id": "grok-capability-true-without-pinned-evidence",
 					"code": "unproven-capability-claim",
-					"missingPrerequisite": "The flag is true on its production builder and consumers, observed on an earlier binary (0.2.93, 1.0.5, 1.0.41) or pinned deterministically (GROK_CAPABILITY_EVIDENCE.retained), while the pinned candidate 1.0.70 has no native case run and qualifiedVersions is empty. Closes when GT1-11-14C (or phase 12) observes the outcome on a qualified binary through production selection.",
-					"ownerTask": "GT1-11-14C",
+					"missingPrerequisite": "The flag is true on its production builder and consumers, observed on an earlier binary (0.2.93, 1.0.5, 1.0.41) or pinned deterministically (GROK_CAPABILITY_EVIDENCE.retained), while the pinned candidate 1.0.70 has no native case run and qualifiedVersions is empty. GT1-11-14C re-observed it through production selection with every native case not-run; closes when phase 12 (GT1-12-06) observes the outcome on a qualified binary.",
+					"ownerTask": "GT1-12-06",
 					"affectedRows": [
 						"C-supportsReadOnlyMode",
 						"C-supportsCostTracking",
@@ -21940,7 +21972,9 @@
 					],
 					"taskId": "GT1-11-14",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"reconciledBy": "GT1-11-14A"
+					"reconciledBy": "GT1-11-14A",
+					"reobserved": "GT1-11-14C at dd53218a8: production selection, suites 1811/1811, harness 48 not-run, 0 admitted",
+					"residual": ["live-authorization-absent (run-state live inputs; every case not-run)"]
 				}
 			],
 			"field": "supportsContextExport",
@@ -22056,7 +22090,8 @@
 				"GT1-05-11 implements canonical readonly discovery, strict Grok completion and owned cancellation, selected-config service fields, detection-backed readiness and registry labels. GT1-05-11A/B/C/D implement selected configuration, account/host readiness, generation and streaming preview with static checks only. Tests/verification and native qualification remain required; no onboarding parity claim.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
 				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md.",
-				"GT1-11-14A: Grok flag kept true on its production builder and consumers (GROK_CAPABILITY_EVIDENCE.retained: streaming-json structured reply; phase05 deterministic suites; native wizard cases not-run). No version is qualified (qualifiedVersions empty, candidate 1.0.70 not-run); live proof owned by GT1-11-14C."
+				"GT1-11-14A: Grok flag kept true on its production builder and consumers (GROK_CAPABILITY_EVIDENCE.retained: streaming-json structured reply; phase05 deterministic suites; native wizard cases not-run). No version is qualified (qualifiedVersions empty, candidate 1.0.70 not-run); live proof owned by GT1-11-14C.",
+				"GT1-11-14C at dd53218a8: rerun through production registry selection (production digest 068efe87eb60 unchanged, no candidate override on this row's cases); focused capability and consumer suites 20 files 1811/1811; every native case not-run (run-state lacks 17 live prerequisites, 0 admitted, 0 spawned). Live proof moves to GT1-12-06."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22188,8 +22223,8 @@
 				{
 					"id": "grok-capability-true-without-pinned-evidence",
 					"code": "unproven-capability-claim",
-					"missingPrerequisite": "The flag is true on its production builder and consumers, observed on an earlier binary (0.2.93, 1.0.5, 1.0.41) or pinned deterministically (GROK_CAPABILITY_EVIDENCE.retained), while the pinned candidate 1.0.70 has no native case run and qualifiedVersions is empty. Closes when GT1-11-14C (or phase 12) observes the outcome on a qualified binary through production selection.",
-					"ownerTask": "GT1-11-14C",
+					"missingPrerequisite": "The flag is true on its production builder and consumers, observed on an earlier binary (0.2.93, 1.0.5, 1.0.41) or pinned deterministically (GROK_CAPABILITY_EVIDENCE.retained), while the pinned candidate 1.0.70 has no native case run and qualifiedVersions is empty. GT1-11-14C re-observed it through production selection with every native case not-run; closes when phase 12 (GT1-12-06) observes the outcome on a qualified binary.",
+					"ownerTask": "GT1-12-06",
 					"affectedRows": [
 						"C-supportsReadOnlyMode",
 						"C-supportsCostTracking",
@@ -22199,7 +22234,9 @@
 					],
 					"taskId": "GT1-11-14",
 					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
-					"reconciledBy": "GT1-11-14A"
+					"reconciledBy": "GT1-11-14A",
+					"reobserved": "GT1-11-14C at dd53218a8: production selection, suites 1811/1811, harness 48 not-run, 0 admitted",
+					"residual": ["live-authorization-absent (run-state live inputs; every case not-run)"]
 				}
 			],
 			"field": "supportsWizard",
@@ -22277,7 +22314,8 @@
 			"limitations": [
 				"Grok moderation currently rejected despite picker visibility. Antigravity own gap does not lower required outcome.",
 				"GT1-08-21 verification: phase 08 packets groupChat, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-12 pass. Parity against the comparator baseline: gap: rejected while Claude Code and Codex are accepted (release blocker). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md.",
+				"GT1-11-14C at dd53218a8: A11-F43, the E08/E09 receipts still carry a candidate override for this flag after the registry was finalized false; no executor reads it (production selection held), retirement owned by GT1-11-14C1/14C2."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22383,6 +22421,16 @@
 					],
 					"reobserved": "GT1-11-14P4E: every ACP harness leg owner closed; the E06 accounting consumer legs pass on acp-stdio (no consumer reports an owner), harness+spend 216/216, 0 admitted",
 					"residual": ["live-authorization-absent (run-state live inputs; every case not-run)"]
+				},
+				{
+					"id": "grok-candidate-snapshot-outlives-registry",
+					"code": "harness-gap",
+					"missingPrerequisite": "Retire the candidate snapshot for flags the finalized registry keeps false (CANDIDATE_CAPABILITIES empty or removed, no override on any receipt), so every case judges the flag through production selection.",
+					"ownerTask": "GT1-11-14C1",
+					"affectedRows": ["P18", "C-supportsSlashCommands", "C-supportsGroupChatModeration"],
+					"taskId": "GT1-11-14C",
+					"evidenceRef": "Plans/grok-tier1/evidence/11.md",
+					"finding": "A11-F43"
 				}
 			],
 			"field": "supportsGroupChatModeration",
@@ -44360,6 +44408,21 @@
 				"resolvedBy": "GT1-11-14P4D2",
 				"repairCommit": "91d679af7",
 				"resolution": "GrokAcpClient classifies a JSON-RPC error once at the client boundary (ACP_AUTH_REQUIRED_CODE -32000 reads auth_expired, otherwise the shared Grok error bank over the message) and keeps only the type on GrokAcpRequestError; GrokAcpSession.prompt reads it as provider-error (not transport-lost); startGrokAcpTurn settles failed/provider with dispatch dispatched and the classified type; GrokAcpSpawner.settle emits that type. A real peer loss stays agent_crashed. The provider message is retained nowhere (error, cause, terminal, events, desktop agent-error, data or logger)."
+			},
+			{
+				"id": "A11-F43",
+				"class": "harness-defect",
+				"status": "open",
+				"anchors": [
+					"scripts/grok-qualification/harness.ts:1314",
+					"scripts/grok-qualification/harness.ts:1438",
+					"scripts/grok-qualification/harness.ts:20956"
+				],
+				"consequence": "After GT1-11-14A finalized the registry (supportsSlashCommands and supportsGroupChatModeration kept false), CANDIDATE_CAPABILITIES still lists both as candidates and buildCandidateSnapshot still attaches a true override to every E08 and E09 receipt (8 cases, versionBasis unbound). No executor reads the snapshot today (its only readers are the receipt field and the receipt count), so this run selected through the production registry; but the harness still declares an evaluation path in which slash commands and moderation would be judged outside production selection, which the final verification forbids, and the CANDIDATE_CAPABILITIES comment still names GT1-11-14A as the pending finalization.",
+				"repairTask": "GT1-11-14C1",
+				"testTask": "GT1-11-14C2",
+				"foundBy": "GT1-11-14C",
+				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
 			}
 		],
 		"rejectedChallenges": [
@@ -45048,6 +45111,29 @@
 				],
 				"newOwner": "GT1-11-14C",
 				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
+			},
+			{
+				"id": "grok-capability-true-without-pinned-evidence",
+				"taskId": "GT1-11-14C",
+				"change": "reobserved-open",
+				"keptOnRows": [
+					"C-supportsReadOnlyMode",
+					"C-supportsCostTracking",
+					"C-supportsUsageStats",
+					"C-supportsContextExport",
+					"C-supportsWizard"
+				],
+				"newOwner": "GT1-12-06",
+				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
+			},
+			{
+				"id": "grok-candidate-snapshot-outlives-registry",
+				"taskId": "GT1-11-14C",
+				"change": "added",
+				"rows": ["P18", "C-supportsSlashCommands", "C-supportsGroupChatModeration"],
+				"owner": "GT1-11-14C1",
+				"finding": "A11-F43",
+				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
 			}
 		],
 		"ownerTriage": {
@@ -45238,5 +45324,242 @@
 		],
 		"liveCalls": 0,
 		"imagesAnalyzed": 0
+	},
+	"phase11CapabilityVerify": {
+		"taskId": "GT1-11-14C",
+		"recordedAt": "2026-11-02T17:01:05.762Z",
+		"sourceCommit": "dd53218a867f08b72312a1e2783a50ce05772548",
+		"branch": "auto-run-feature/grok-cli-integration",
+		"evidenceRef": "Plans/grok-tier1/evidence/11.md",
+		"sourceProvenance": {
+			"sourceCommit": "dd53218a867f08b72312a1e2783a50ce05772548",
+			"treeClean": true,
+			"productionGrokCapabilityDigest": "068efe87eb60bdcc46f209109c0b9acb88016818b7bf7ed2b3124b73a81adaef",
+			"digestUnchangedAcrossRun": true,
+			"registry": "src/shared/maestro-lib/providers/capabilities.ts (GROK_CAPABILITY_EVIDENCE, qualifiedVersions empty)"
+		},
+		"prerequisites": {
+			"missing": [
+				"live.enabled false",
+				"live.credentialsReference null",
+				"live.authorizationReference null",
+				"live.budgetUsd 0",
+				"live.maxCalls 0",
+				"live.maxTurns 0",
+				"live.maxWallClockSeconds 0",
+				"live.allowedEndpoints empty",
+				"selectedBinaryPath null",
+				"selectedBinarySha256 null",
+				"selectedLiveModels empty",
+				"authorization.configurationReference null",
+				"authorization.expiresAt null",
+				"authorization.isolationReceipt null",
+				"authorization.allowedRoots empty",
+				"no provider cap or worst-case reservation",
+				"authorization.sharedBudgetLedgerReference null"
+			],
+			"configurationSelectionFiles": []
+		},
+		"suites": {
+			"files": [
+				"src/__tests__/main/agents/capabilities.test.ts",
+				"src/__tests__/main/agents/agent-completeness.test.ts",
+				"src/__tests__/main/agents/capability-snapshot.test.ts",
+				"src/__tests__/main/agents/definitions.test.ts",
+				"src/__tests__/renderer/hooks/useAgentCapabilities.test.ts",
+				"src/__tests__/shared/pianola/pianola-agent-select.test.ts",
+				"src/__tests__/main/utils/agent-args.test.ts",
+				"src/__tests__/shared/maestro-lib/launch/agent-args.managed.test.ts",
+				"src/__tests__/shared/maestro-lib/launch/launch-plan.test.ts",
+				"src/__tests__/renderer/components/shared/AdditionalDirectoriesSection.test.tsx",
+				"src/__tests__/shared/additionalDirectories.test.ts",
+				"src/__tests__/main/storage/grok-session-storage.test.ts",
+				"src/__tests__/renderer/hooks/useMergeSession.test.ts",
+				"src/__tests__/main/utils/context-groomer.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-session.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-requests.test.ts",
+				"src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts",
+				"src/__tests__/main/permission-relay/relay-core.test.ts",
+				"src/__tests__/scripts/grok-qualification-harness.test.ts",
+				"src/__tests__/scripts/grok-qualification-spend.test.ts"
+			],
+			"total": 1811,
+			"passed": 1811,
+			"failed": 0
+		},
+		"harness": {
+			"command": "node scripts/grok-qualification.mjs --json --no-write",
+			"exit": 0,
+			"totals": {
+				"cases": 48,
+				"admitted": 0,
+				"notRun": 48,
+				"spawned": 0,
+				"paidRequests": 0,
+				"networkContacts": 0
+			},
+			"configSource": "default-run-state",
+			"capabilities": {
+				"isolationPreflight": true,
+				"atomicSpendAdmission": true,
+				"offlineExecutor": true,
+				"caseExecutor": true,
+				"discoveryExecutor": true,
+				"sshExecutor": true,
+				"consumerLegs": true,
+				"sessionLegs": true,
+				"sessionConsumers": true,
+				"utilityLegs": true,
+				"cheapUtilityLegs": true,
+				"workflowLegs": true,
+				"orchestrationLegs": true,
+				"contributionLegs": true,
+				"accountingLegs": true,
+				"accountingConsumers": true,
+				"policyLegs": true,
+				"crossProviderLegs": true
+			},
+			"families": {
+				"E01": {
+					"cases": 4,
+					"requirementIds": ["P03", "P13", "P15", "P36"],
+					"status": ["not-run"]
+				},
+				"E02": {
+					"cases": 4,
+					"requirementIds": ["P01", "P04", "P09"],
+					"status": ["not-run"]
+				},
+				"E03": {
+					"cases": 4,
+					"requirementIds": ["P06", "P07", "P08"],
+					"status": ["not-run"]
+				},
+				"E04": {
+					"cases": 4,
+					"requirementIds": ["P10", "P12", "P14"],
+					"status": ["not-run"]
+				},
+				"E05": {
+					"cases": 4,
+					"requirementIds": ["P13", "P14", "P15", "P16"],
+					"status": ["not-run"]
+				},
+				"E06": {
+					"cases": 4,
+					"requirementIds": ["P11", "P40"],
+					"status": ["not-run"]
+				},
+				"E07": {
+					"cases": 4,
+					"requirementIds": ["P04", "P05", "P33"],
+					"status": ["not-run"]
+				},
+				"E08": {
+					"cases": 4,
+					"requirementIds": ["P18", "P19", "P25", "P26", "P27", "P28"],
+					"status": ["not-run"]
+				},
+				"E09": {
+					"cases": 4,
+					"requirementIds": ["P17", "P20", "P29", "P30", "P31", "P32", "P37", "P38"],
+					"status": ["not-run"]
+				},
+				"E10": {
+					"cases": 4,
+					"requirementIds": ["P33", "P34", "P35", "P36"],
+					"status": ["not-run"]
+				},
+				"E11": {
+					"cases": 4,
+					"requirementIds": ["P21", "P22", "P23", "P24"],
+					"status": ["not-run"]
+				},
+				"E12": {
+					"cases": 4,
+					"requirementIds": ["P15", "P39", "P43"],
+					"status": ["not-run"]
+				}
+			}
+		},
+		"productionSelection": {
+			"candidateSnapshotReaders": [
+				"scripts/grok-qualification/harness.ts:845",
+				"scripts/grok-qualification/harness.ts:1438",
+				"scripts/grok-qualification/harness.ts:20956",
+				"scripts/grok-qualification/harness.ts:20987"
+			],
+			"executorReadsSnapshot": false,
+			"snapshotCases": [
+				{
+					"caseId": "E08:native-headless:local",
+					"overrides": ["supportsSlashCommands"],
+					"state": "unbound"
+				},
+				{
+					"caseId": "E08:native-headless:ssh",
+					"overrides": ["supportsSlashCommands"],
+					"state": "unbound"
+				},
+				{
+					"caseId": "E08:acp-stdio:local",
+					"overrides": ["supportsSlashCommands"],
+					"state": "unbound"
+				},
+				{
+					"caseId": "E08:acp-stdio:ssh",
+					"overrides": ["supportsSlashCommands"],
+					"state": "unbound"
+				},
+				{
+					"caseId": "E09:native-headless:local",
+					"overrides": ["supportsGroupChatModeration"],
+					"state": "unbound"
+				},
+				{
+					"caseId": "E09:native-headless:ssh",
+					"overrides": ["supportsGroupChatModeration"],
+					"state": "unbound"
+				},
+				{
+					"caseId": "E09:acp-stdio:local",
+					"overrides": ["supportsGroupChatModeration"],
+					"state": "unbound"
+				},
+				{
+					"caseId": "E09:acp-stdio:ssh",
+					"overrides": ["supportsGroupChatModeration"],
+					"state": "unbound"
+				}
+			],
+			"verdict": "every leg selects through the production registry; the 8 E08/E09 receipts still record an unread override (A11-F43)"
+		},
+		"requested": {
+			"additionalDirectories": "not-reachable: supportsAdditionalDirectories is false (policy-bearing, never forced), the grant UI is hidden for Grok and selectGrokRoute refuses native; positive in-grant access and outside-grant denial stay not-run (grok-directory-grants-unqualified, live-authorization-absent)",
+			"nativeHistory": "E05 (P13-P16) 4 tuples not-run; GrokSessionStorage suite green",
+			"planQuestion": "E10 (P33-P36, S22) 4 tuples not-run; ACP request/relay suites green",
+			"newlyEnabledWorkflow": "none: GT1-11-14A promoted nothing (3 flags withheld, 5 retained)"
+		},
+		"matrix": {
+			"rows": 134,
+			"tally": {
+				"implementation:pending": 134,
+				"static:not-run": 134,
+				"deterministic:not-run": 133,
+				"live:not-run": 134,
+				"deterministic:fail": 1
+			},
+			"rowsPromoted": []
+		},
+		"productionInstall": {
+			"path": "/Users/dr3/.grok/downloads/grok-macos-aarch64",
+			"sha256": "5c8a688251bf61e35370b828b6a353b0a20fcc3f64000de8a91d426039f29cec",
+			"executed": false
+		},
+		"findings": ["A11-F43"],
+		"repairTasks": ["GT1-11-14C1", "GT1-11-14C2"],
+		"liveCalls": 0,
+		"imagesAnalyzed": 0,
+		"readiness": false
 	}
 }
