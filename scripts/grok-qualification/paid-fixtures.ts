@@ -29,6 +29,10 @@
  * messages the production onboarding and inline wizard services and the
  * feedback interview send over Grok, after the fixture turn, on the same
  * reservation and the owned account home and project only.
+ *
+ * E06 (GT1-11-11F1) also names accounting legs (`AccountingLegSpec`): usage
+ * capture, one native child's usage and fixture-induced faults with one billed
+ * retry, run after the leg settled, each on an accounting reservation of its own.
  */
 
 export const PAID_FIXTURE_SCHEMA = 'grok-paid-fixture/v1';
@@ -159,6 +163,8 @@ export interface PaidFixture {
 	utilityLegs?: UtilityLegSpec[];
 	/** Workflow legs the harness runs after the leg settled, each on a workflow reservation of its own (E09). */
 	workflowLegs?: WorkflowLegSpec[];
+	/** Accounting legs the harness runs after the leg settled, each on an accounting reservation of its own (E06). */
+	accountingLegs?: AccountingLegSpec[];
 	unevaluated: Array<{ id: string; detail: string; owner: string }>;
 }
 
@@ -490,6 +496,72 @@ const PIANOLA_LEARN_LEG: WorkflowLegSpec = {
 	maxTurns: 0,
 };
 
+/**
+ * Accounting legs (GT1-11-11F1): E06 after its leg settled, each on an
+ * accounting reservation of its own (its own turn allowance under the per-leg
+ * ceiling, spend and calls shared with the case), against the owned account
+ * home only.
+ *
+ * - `usage-capture`: one turn whose usage record (native terminal record or the
+ *   ACP prompt usage) is kept with its token buckets (input, output, cache read,
+ *   cache write, reasoning), its cost status (exact, partial or unknown, never
+ *   a zero for an unknown), the acknowledged model and the production usage
+ *   provenance; the reservation settles exact only on an exact charge.
+ * - `child-usage`: one turn that asks for exactly one native subagent; the
+ *   child's lineage is reported and its usage settles once (inside the parent's
+ *   prompt usage, never added beside it) into the parent and the lifetime
+ *   total. The native headless stream carries no child record, so on that
+ *   route the leg is not-evaluated.
+ * - `fault-retry`: `faults` are induced by a harness-owned fixture process,
+ *   never by the provider and never as a rate-limit request (each recorded
+ *   `fixtureInduced: true`): a rate-limit fault is classified and retried once
+ *   against the pinned binary (the one billed send, drawn as a `retry` call),
+ *   an auth fault is classified and never retried, and a transport fault left
+ *   uncertain refuses its retry and is never refunded.
+ */
+export type AccountingLegId = 'usage-capture' | 'child-usage' | 'fault-retry';
+
+/** A fault a fixture process emits in the native stream shape; never requested from a provider. */
+export type AccountingFaultKind = 'rate-limit' | 'auth' | 'transport';
+
+export interface AccountingLegSpec {
+	id: AccountingLegId;
+	/** The turns the leg sends to the pinned binary, in order (a retry sends the first). */
+	turns: PaidFixtureTurn[];
+	/** The most user turns the leg may count: its accounting reservation's turn allowance. */
+	maxTurns: number;
+	/** The fixture-induced faults the leg classifies, in order (fault legs only). */
+	faults?: AccountingFaultKind[];
+}
+
+const USAGE_CAPTURE_LEG: AccountingLegSpec = {
+	id: 'usage-capture',
+	turns: [sessionTurn('E06-USAGE-T1')],
+	maxTurns: 1,
+};
+
+const CHILD_USAGE_LEG: AccountingLegSpec = {
+	id: 'child-usage',
+	turns: [
+		{
+			prompt:
+				'Use exactly one subagent and no other tool. Ask the subagent to reply with exactly ' +
+				'QUALIFY-E06-CHILD-SUB-OK and nothing else. After it finished, reply with exactly this ' +
+				'token and nothing else: QUALIFY-E06-CHILD-OK',
+			expect: 'QUALIFY-E06-CHILD-OK',
+		},
+	],
+	maxTurns: 1,
+};
+
+/** The rate-limited attempt and its one retry; the auth and transport faults draw no retry. */
+const FAULT_RETRY_LEG: AccountingLegSpec = {
+	id: 'fault-retry',
+	turns: [sessionTurn('E06-RETRY-T1')],
+	maxTurns: 2,
+	faults: ['rate-limit', 'auth', 'transport'],
+};
+
 const turn = (family: string, n: number, extra = ''): PaidFixtureTurn => {
 	const token = `QUALIFY-${family}-T${n}-OK`;
 	return {
@@ -550,6 +622,7 @@ const fixture = (
 		sessionLegs?: SessionLegSpec[];
 		utilityLegs?: UtilityLegSpec[];
 		workflowLegs?: WorkflowLegSpec[];
+		accountingLegs?: AccountingLegSpec[];
 	} = {}
 ): PaidFixture => ({
 	schema: PAID_FIXTURE_SCHEMA,
@@ -561,6 +634,7 @@ const fixture = (
 	...(extra.sessionLegs ? { sessionLegs: extra.sessionLegs } : {}),
 	...(extra.utilityLegs ? { utilityLegs: extra.utilityLegs } : {}),
 	...(extra.workflowLegs ? { workflowLegs: extra.workflowLegs } : {}),
+	...(extra.accountingLegs ? { accountingLegs: extra.accountingLegs } : {}),
 	unevaluated,
 });
 
@@ -606,11 +680,10 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 		],
 		{ sessionLegs: [MUTATION_REFUSED_LEG, EXPORT_PAYLOAD_LEG, CONTINUATION_LEG] }
 	),
-	E06: fixture(
-		'E06',
-		[turn('E06', 1)],
-		[{ id: 'child-usage', detail: 'child and cache-bucket usage', owner: 'GT1-11-11F' }]
-	),
+	// Child and cache-bucket usage are the accounting legs' (GT1-11-11F1), not an unevaluated entry.
+	E06: fixture('E06', [turn('E06', 1)], [], {
+		accountingLegs: [USAGE_CAPTURE_LEG, CHILD_USAGE_LEG, FAULT_RETRY_LEG],
+	}),
 	E07: fixture('E07', [turn('E07', 1)], [], { assertions: ['effort-and-gateway'] }),
 	E08: fixture(
 		'E08',

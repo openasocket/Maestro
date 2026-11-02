@@ -266,6 +266,20 @@ import { isValidSecretName, lookupSecret } from '../../src/shared/serverSecrets'
 import { getAgentDefinition } from '../../src/shared/maestro-lib/providers/definitions';
 import { GrokOutputParser } from '../../src/shared/maestro-lib/parsers/grok-output-parser';
 import { GrokAcpClient } from '../../src/shared/maestro-lib/grok/acp-client';
+import { GrokAcpEventAdapter } from '../../src/shared/maestro-lib/grok/acp-events';
+import type { AcpCall } from '../../src/shared/maestro-lib/grok/acp-protocol';
+import {
+	describeUsageProvenance,
+	UsageProvenanceTracker,
+	type UsageProvenanceFact,
+	type UsageReport,
+} from '../../src/shared/maestro-lib/streaming/usage-accumulator';
+import {
+	addUsageStats,
+	parsedUsageToStats,
+	usageCostUsd,
+} from '../../src/shared/maestro-lib/streaming/usage-totals';
+import type { UsageStats } from '../../src/shared/types';
 import {
 	GrokAcpRequestError,
 	GrokAcpTransportError,
@@ -309,6 +323,9 @@ import {
 import { validateSshOption } from '../../src/shared/sshOptions';
 import type { AgentSshRemoteConfig, SshRemoteConfig } from '../../src/shared/types';
 import {
+	type AccountingFaultKind,
+	type AccountingLegId,
+	type AccountingLegSpec,
 	fixtureTurnsFor,
 	PAID_FIXTURES,
 	type PaidFixture,
@@ -479,6 +496,14 @@ export const HARNESS_CAPABILITIES = {
 	 * blockers as gaps, never passes. Off, each is not-run.
 	 */
 	contributionLegs: true,
+	/**
+	 * The E06 accounting legs (GT1-11-11F1): usage capture with buckets, cost
+	 * status and provenance, one native child's usage settled once, and
+	 * fixture-induced rate-limit, auth and transport faults with one billed
+	 * retry and an uncertain reservation never refunded. Each holds an
+	 * accounting reservation of its own. Off, each is not-run.
+	 */
+	accountingLegs: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
 
@@ -1973,6 +1998,12 @@ export const HARNESS_CEILINGS = {
 	 * third; every other workflow leg asks for two at most.
 	 */
 	workflowTurnsPerLeg: 3,
+	/**
+	 * Turns one E06 accounting leg may count (GT1-11-11F1), on a reservation of
+	 * its own like a workflow leg: the fault leg's rate-limited attempt and its
+	 * one retry; every other accounting leg counts one.
+	 */
+	accountingTurnsPerLeg: 2,
 	caseSeconds: 120,
 	discoverySeconds: 30,
 	/** Wall-clock bound of one offline probe (GT1-11-10A). */
@@ -4543,6 +4574,8 @@ export interface PaidLegReceipt {
 	utilityLegs: UtilityLegReceipt[];
 	/** The workflow legs of an E09 fixture (GT1-11-11E1), each on its own reservation; empty otherwise. */
 	workflowLegs: WorkflowLegReceipt[];
+	/** The accounting legs of an E06 fixture (GT1-11-11F1), each on its own reservation; empty otherwise. */
+	accountingLegs: AccountingLegReceipt[];
 }
 
 export interface PaidExecutionContext {
@@ -5759,6 +5792,7 @@ async function runPaidLeg(
 		sessionConsumers: [],
 		utilityLegs: [],
 		workflowLegs: [],
+		accountingLegs: [],
 	};
 	const refuse = (id: string, detail: string, owner?: string) => {
 		receipt.reasons.push(paidReason(id, detail, owner));
@@ -6279,6 +6313,42 @@ async function runPaidLeg(
 		if (run.uncertainWhy)
 			receipt.reasons.push(paidReason(run.uncertainWhy, 'workflow leg', 'GT1-11-11E1'));
 	}
+	// Accounting legs (E06): after the leg settled, each on an accounting reservation of its own.
+	if (fixture.accountingLegs?.length) {
+		const run = await runAccountingLegs({
+			c,
+			config,
+			fixture,
+			capabilities: ctx.capabilities,
+			ledger,
+			plan,
+			account,
+			now: ctx.now,
+			workspace: ctx.workspace,
+			operatorHome: ctx.operatorHome,
+			binaryPath: file,
+			accountRoot: receipt.accountRoot,
+			cwd,
+			launcher,
+			nativeArgv,
+			graceMs,
+			lifetime: ctx.lifetime,
+			turnTimeoutMs: ctx.turnTimeoutMs,
+			model: primary,
+			effort,
+			blocked: !fixtureTurnsPassed
+				? 'fixture-turns-not-passed'
+				: receipt.reasons.length
+					? 'leg-not-clean'
+					: null,
+			uncertain: uncertainWhy,
+		});
+		receipt.accountingLegs = run.legs;
+		receipt.spawned += run.spawned;
+		receipt.paidRequests += run.sent;
+		if (run.uncertainWhy)
+			receipt.reasons.push(paidReason(run.uncertainWhy, 'accounting leg', ACCOUNTING_LEGS_OWNER));
+	}
 	receipt.assertions = evaluatePaidAssertions(fixture, {
 		route: c.route,
 		turns: receipt.turns,
@@ -6300,7 +6370,8 @@ async function runPaidLeg(
 				  receipt.sessionLegs.some((l) => l.status === 'failed') ||
 				  receipt.sessionConsumers.some((l) => l.status === 'failed') ||
 				  receipt.utilityLegs.some((l) => l.status === 'failed') ||
-				  receipt.workflowLegs.some((l) => l.status === 'failed')
+				  receipt.workflowLegs.some((l) => l.status === 'failed') ||
+				  receipt.accountingLegs.some((l) => l.status === 'failed')
 				? 'failed'
 				: 'passed';
 	return receipt;
@@ -6334,6 +6405,21 @@ async function runAcpPaidTurns(args: {
 		observe(raw: unknown, text: string): void;
 		endTurn(turn: number): void;
 	} | null;
+	/**
+	 * An accounting leg's usage capture (GT1-11-11F1): told when each prompt is
+	 * written, handed every notification of the channel (a child's channel too),
+	 * and asked for the turn's usage once its prompt settled. Absent, a sent
+	 * turn's charge stays unknown (`absent`), as on every paid leg.
+	 */
+	usage?: {
+		begin(turn: number, sessionId: string): void;
+		notify(message: AcpCall): void;
+		end(
+			turn: number,
+			answer: Record<string, unknown> | null,
+			failed: boolean
+		): PaidTurnResult['usage'];
+	};
 }): Promise<{
 	turns: PaidTurnResult[];
 	reasons: AdmissionReason[];
@@ -6377,6 +6463,8 @@ async function runAcpPaidTurns(args: {
 			Math.min(HARNESS_CEILINGS.discoverySeconds * 1000, Math.floor(args.turnMs()))
 		),
 		onNotification: (message) => {
+			// The capture filters by session and admitted child lineage itself.
+			args.usage?.notify(message);
 			const params = (message.params ?? {}) as Record<string, unknown>;
 			// The agent's own frames of this session (or before session/new answered), never the prompt echo.
 			const echo = ((params.update ?? {}) as Record<string, unknown>).sessionUpdate;
@@ -6499,9 +6587,11 @@ async function runAcpPaidTurns(args: {
 		let stopReason: unknown = null;
 		let failure: string | null = null;
 		let timedOut = false;
+		let answer: Record<string, unknown> | null = null;
 		sent++;
+		args.usage?.begin(n, sessionId!);
 		try {
-			const answer = (await client.request(
+			answer = (await client.request(
 				'session/prompt',
 				{ sessionId, prompt: [{ type: 'text', text: t.prompt }] },
 				{ timeoutMs: Math.max(1, Math.floor(args.turnMs())) }
@@ -6526,8 +6616,8 @@ async function runAcpPaidTurns(args: {
 			reply: reply.result(),
 			model: acknowledged,
 			effort: effortAck,
-			// ACP returns no settled charge on this route; the cost stays unknown.
-			usage: { costUsd: null, status: 'absent' },
+			// Without a capture the paid route reads no ACP usage, so the cost stays unknown.
+			usage: args.usage?.end(n, answer, failure !== null) ?? { costUsd: null, status: 'absent' },
 			callsRecorded: args.calls(),
 		});
 		args.observe?.endTurn(n);
@@ -7442,6 +7532,7 @@ const SESSION_CONSUMER_LEG_IDS: readonly string[] = SESSION_CONSUMER_LEGS.map((l
  * leg, GT1-11-11C1 otherwise.
  */
 function ownerOfLeg(leg: string): string {
+	if (leg.startsWith('accounting:')) return ACCOUNTING_LEGS_OWNER;
 	if (CONTRIBUTION_LEG_IDS.includes(leg)) return CONTRIBUTION_LEGS_OWNER;
 	if (ORCHESTRATION_LEG_IDS.includes(leg)) return ORCHESTRATION_LEGS_OWNER;
 	if (WORKFLOW_LEG_IDS.includes(leg)) return 'GT1-11-11E1';
@@ -11414,6 +11505,1065 @@ async function runWorkflowLegs(w: WorkflowLegContext): Promise<{
 }
 
 // ---------------------------------------------------------------------------
+// Accounting legs (GT1-11-11F1)
+// ---------------------------------------------------------------------------
+
+/** The task that implements the E06 accounting legs. */
+export const ACCOUNTING_LEGS_OWNER = 'GT1-11-11F1';
+/** The native headless stream carries no child record (`childCompleteness: unknown`), so no native child turn qualifies. */
+export const NATIVE_SUBAGENT_OWNER = 'grok-native-subagent-unqualified';
+/** The accounting legs read the owned home and the ledger locally; no task owns an SSH accounting leg. */
+export const SSH_ACCOUNTING_LEGS_OWNER = 'unassigned-ssh-accounting-legs';
+/** The fault fixtures write the native stream shape; no task owns ACP-framed fault fixtures. */
+export const ACP_FAULT_LEGS_OWNER = 'unassigned-acp-fault-legs';
+
+/** The assertions each accounting leg must evaluate; a leg missing one cannot pass. */
+export const ACCOUNTING_ASSERTIONS: Readonly<Record<AccountingLegId, readonly string[]>> =
+	Object.freeze({
+		'usage-capture': [
+			'usage-captured',
+			'cache-buckets',
+			'model-acknowledged',
+			'cost-provenance',
+			'no-zero-substitution',
+			'settled-by-status',
+		],
+		'child-usage': [
+			'child-reported',
+			'child-settled-once',
+			'lifetime-once',
+			'no-zero-substitution',
+			'settled-by-status',
+		],
+		'fault-retry': [
+			'faults-classified',
+			'faults-labeled',
+			'retry-billed-once',
+			'uncertain-not-refunded',
+		],
+	});
+
+/** The production error type each fixture fault must be classified as. */
+export const ACCOUNTING_FAULT_EXPECTED: Readonly<Record<AccountingFaultKind, string>> =
+	Object.freeze({
+		'rate-limit': 'rate_limited',
+		auth: 'auth_expired',
+		transport: 'network_error',
+	});
+
+/**
+ * What each fault fixture writes: the native records Grok itself writes for
+ * that failure, from a harness-owned process (never the pinned binary, never a
+ * provider request). The transport fixture starts a reply and loses its
+ * connection before any terminal record, so its completion is uncertain.
+ */
+export const ACCOUNTING_FAULT_FIXTURES: Readonly<
+	Record<AccountingFaultKind, { stdout: string[]; stderr: string }>
+> = Object.freeze({
+	'rate-limit': {
+		stdout: [
+			JSON.stringify({
+				type: 'error',
+				message: 'Rate limit exceeded: too many requests (qualification fixture)',
+			}),
+		],
+		stderr: 'Error: Rate limit exceeded: too many requests (qualification fixture)',
+	},
+	auth: {
+		stdout: [JSON.stringify({ type: 'error', message: 'Invalid API key (qualification fixture)' })],
+		stderr: 'Error: Invalid API key (qualification fixture)',
+	},
+	transport: {
+		stdout: [JSON.stringify({ type: 'text', data: 'QUALIFY-E06-FIXTURE-PARTIAL' })],
+		stderr: 'Error: connection reset (ECONNRESET) (qualification fixture)',
+	},
+});
+
+/** The fixture process: writes its records and exits 1. No input, no network, no environment. */
+const FAULT_FIXTURE_SOURCE = [
+	'const f = JSON.parse(process.argv[process.argv.length - 1]);',
+	"for (const l of f.stdout) process.stdout.write(l + '\\n');",
+	"process.stderr.write(f.stderr + '\\n');",
+	'process.exitCode = 1;',
+].join('\n');
+
+/** One turn's usage as the leg captured it; never transcript text. */
+export interface AccountingUsageRecord {
+	turn: number;
+	route: Route;
+	/** Usage reports the production parser (native) or ACP capture handed on for the turn. */
+	reports: number;
+	/** True when the turn's terminal (native result/error, ACP prompt settlement) carried usage. */
+	final: boolean;
+	/** Token buckets of the turn total; a bucket the stream never carried is null, never zero. */
+	buckets: {
+		input: number | null;
+		output: number | null;
+		cacheRead: number | null;
+		cacheWrite: number | null;
+		reasoning: number | null;
+	};
+	/** The charge as reported: exact, partial or unknown. An unknown charge has no figure, never 0. */
+	cost: { status: 'exact' | 'partial' | 'unknown'; costUsd: number | null };
+	/** The model the usage record named, else the model the session acknowledged; null when neither did. */
+	model: string | null;
+	/** The production provenance of the turn total (`describeUsageProvenance`). */
+	provenance: UsageProvenanceFact;
+	/** The children the parent's usage named, as detail of the parent total (never added to it). */
+	children: Array<{
+		providerSessionId: string;
+		status: string;
+		includedInParent: boolean | 'unknown';
+	}>;
+	/** Usage frames a child's own channel carried: occupancy, never added to the parent or the lifetime. */
+	childFrames: number;
+	/** The provider's own prompt usage of an ACP turn (output, cache read), for the once-only check; null otherwise. */
+	promptUsage: { output: number | null; cacheRead: number | null } | null;
+}
+
+/** A fault a fixture process induced; never a provider observation. */
+export interface AccountingFaultRecord {
+	kind: AccountingFaultKind;
+	fixtureInduced: true;
+	/** The production error type expected for it and the one the production parser classified. */
+	expected: string;
+	classified: string | null;
+	/** The command that wrote it: always the harness's own Node, never the pinned binary. */
+	command: string;
+	/** Environment keys the fixture received (always none: no credential reaches it). */
+	envKeys: string[];
+	exitCode: number | null;
+	terminal: PaidTurnResult['terminal'];
+	/** Whether the fault counted a user turn on a reservation before it ran. */
+	counted: boolean;
+	/** Always false: a fixture fault never reaches a provider. */
+	sent: false;
+}
+
+export interface AccountingLegReceipt {
+	leg: AccountingLegId;
+	/** not-run: refused before anything was counted; not-evaluated: an honest gap with an owner. */
+	status: 'not-run' | 'not-evaluated' | 'passed' | 'failed';
+	reasons: AdmissionReason[];
+	/** The leg's own accounting reservation on the shared ledger; null when none was held. */
+	reservationId: string | null;
+	settlement: PaidLegReceipt['settlement'];
+	/** Turns sent to the pinned binary (fixture faults are not turns). */
+	turns: PaidTurnResult[];
+	usage: AccountingUsageRecord[];
+	faults: AccountingFaultRecord[];
+	/** The lifetime total before and after the leg (tokens and the cost status), from the production totals. */
+	lifetime: {
+		before: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
+		after: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
+		cost: { status: string; costUsd: number | null } | null;
+	} | null;
+	assertions: ConsumerAssertion[];
+	assertion: PaidAssertionOutcome;
+	/** Ledger facts beyond the leg's own reservation (the transport fault's reservation); never transcript text. */
+	observed: Record<string, unknown>;
+	spawned: number;
+	paidRequests: number;
+	/** Harness-owned fault fixture processes started (never the pinned binary, never a provider). */
+	fixtureSpawned: number;
+}
+
+interface AccountingLegContext extends Omit<WorkflowLegContext, 'blocked' | 'uncertain'> {
+	/** The paid leg's working directory (the owned account home). */
+	cwd: string;
+	nativeArgv: (prompt: string, resumeId: string | null) => string[];
+	blocked: string | null;
+	uncertain: string | null;
+}
+
+const accountingReason = (id: string, detail: string, owner = ACCOUNTING_LEGS_OWNER) =>
+	paidReason(id, detail, owner);
+
+type ParsedUsage = NonNullable<ParsedGrokEvent['usage']>;
+
+/** The lifetime total the legs settle into: the production totals, one parent total per turn. */
+interface AccountingLifetime {
+	total: UsageStats | undefined;
+}
+
+const lifetimeTokens = (t: UsageStats | undefined) =>
+	t
+		? {
+				input: t.inputTokens,
+				output: t.outputTokens,
+				cacheRead: t.cacheReadInputTokens,
+				cacheWrite: t.cacheCreationInputTokens,
+			}
+		: null;
+
+/** The cost status a usage record reports; an estimate or nothing is unknown, and unknown carries no figure. */
+function costOf(final: ParsedUsage | undefined): AccountingUsageRecord['cost'] {
+	if (!final) return { status: 'unknown', costUsd: null };
+	const cost = final.accounting?.cost;
+	const known = cost ? usageCostUsd(cost) : undefined;
+	if (cost?.status === 'exact' && known !== undefined) return { status: 'exact', costUsd: known };
+	if (cost?.status === 'exact' || cost?.status === 'partial')
+		return { status: 'partial', costUsd: known ?? null };
+	return { status: 'unknown', costUsd: null };
+}
+
+/** One turn's record from its terminal usage and what the tracker saw of the stream. */
+function accountingUsageRecord(a: {
+	turn: number;
+	route: Route;
+	final: ParsedUsage | undefined;
+	tracker: UsageProvenanceTracker;
+	acknowledged: string | null;
+	childFrames: number;
+	promptUsage: AccountingUsageRecord['promptUsage'];
+}): AccountingUsageRecord {
+	const total = a.final ? parsedUsageToStats(a.final) : undefined;
+	const model = a.final?.model ?? a.acknowledged;
+	const provenance = describeUsageProvenance(a.tracker.summary(), total, model);
+	const counts = provenance.counts;
+	return {
+		turn: a.turn,
+		route: a.route,
+		reports: provenance.events,
+		final: Boolean(a.final),
+		buckets: {
+			input: counts?.inputTokens ?? null,
+			output: counts?.outputTokens ?? null,
+			cacheRead: counts?.cacheReadInputTokens ?? null,
+			cacheWrite: counts?.cacheCreationInputTokens ?? null,
+			reasoning: counts?.reasoningTokens ?? null,
+		},
+		cost: costOf(a.final),
+		model,
+		provenance,
+		children: (a.final?.accounting?.children ?? []).map((ch) => ({
+			providerSessionId: ch.providerSessionId ?? '',
+			status: String(ch.status ?? 'unknown'),
+			includedInParent: ch.includedInParent === true ? true : 'unknown',
+		})),
+		childFrames: a.childFrames,
+		promptUsage: a.promptUsage,
+	};
+}
+
+/** The turn result's usage from a record: the charge as reported, absent when no terminal carried usage. */
+const turnUsageOf = (rec: AccountingUsageRecord): PaidTurnResult['usage'] =>
+	rec.final
+		? { costUsd: rec.cost.costUsd, status: rec.cost.status }
+		: { costUsd: null, status: 'absent' };
+
+/**
+ * The ACP capture of an accounting turn: the production event adapter bound to
+ * the prompt's session, every notification of the channel handed to it (a
+ * child's channel is ignored unless the adapter admitted that child), and the
+ * turn's usage read from its prompt settlement. Child usage frames are
+ * counted, never added.
+ */
+function acpAccountingCapture(route: Route, acknowledged: () => string | null) {
+	const records: AccountingUsageRecord[] = [];
+	/** Each turn's parent total through the production conversion; undefined when no terminal carried usage. */
+	const finals: Array<UsageStats | undefined> = [];
+	let adapter: GrokAcpEventAdapter | null = null;
+	let turnId = '';
+	let parent = '';
+	let tracker = new UsageProvenanceTracker({ reporting: 'turn-total' });
+	let childFrames = 0;
+	const hook = {
+		begin(turn: number, sessionId: string) {
+			turnId = `accounting-turn-${turn}`;
+			parent = sessionId;
+			adapter = new GrokAcpEventAdapter({ sessionId, turnId });
+			tracker = new UsageProvenanceTracker({ reporting: 'turn-total' });
+			childFrames = 0;
+		},
+		notify(message: AcpCall) {
+			if (!adapter) return;
+			const params = (message.params ?? {}) as Record<string, unknown>;
+			const update = (params.update ?? {}) as Record<string, unknown>;
+			if (
+				typeof params.sessionId === 'string' &&
+				params.sessionId !== parent &&
+				update.usage !== undefined
+			)
+				childFrames++;
+			for (const ev of adapter.notification(message, { replay: false, turnId }))
+				if (ev.usage) tracker.observe(ev.usage as UsageReport);
+		},
+		end(turn: number, answer: Record<string, unknown> | null, failed: boolean) {
+			let final: ParsedUsage | undefined;
+			if (adapter) {
+				const events = adapter.settle(
+					answer ?? undefined,
+					failed ? { status: 'failed', kind: 'transport' } : undefined
+				);
+				for (const ev of events)
+					if (ev.usage) {
+						tracker.observe(ev.usage as UsageReport);
+						if (ev.type === 'result' || ev.type === 'error') final = ev.usage;
+					}
+			}
+			const meta = ((answer?._meta ?? {}) as Record<string, unknown>).usage as
+				| Record<string, unknown>
+				| undefined;
+			const n = (v: unknown) => (typeof v === 'number' && Number.isSafeInteger(v) ? v : null);
+			const rec = accountingUsageRecord({
+				turn,
+				route,
+				final,
+				tracker,
+				acknowledged: acknowledged(),
+				childFrames,
+				promptUsage: meta
+					? { output: n(meta.outputTokens), cacheRead: n(meta.cachedReadTokens) }
+					: null,
+			});
+			records.push(rec);
+			finals.push(final ? parsedUsageToStats(final) : undefined);
+			adapter = null;
+			return turnUsageOf(rec);
+		},
+	};
+	return { records, finals, hook };
+}
+
+/** Settle a parent turn total into the lifetime exactly once (its children are inside it, never beside it). */
+function settleIntoLifetime(
+	life: AccountingLifetime,
+	rec: AccountingUsageRecord,
+	final: UsageStats | undefined
+) {
+	if (rec.final && final) life.total = addUsageStats(life.total, final);
+}
+
+function settleAccountingLeg(r: AccountingLegReceipt, problems: string[]): AccountingLegReceipt {
+	if (
+		r.reasons.length &&
+		r.spawned === 0 &&
+		r.fixtureSpawned === 0 &&
+		!r.assertions.length &&
+		!problems.length
+	) {
+		r.status = 'not-run';
+		r.assertion = {
+			id: r.leg,
+			outcome: 'not-evaluated',
+			detail: r.reasons.map((x) => x.id).join('; '),
+			owner: ACCOUNTING_LEGS_OWNER,
+		};
+		return r;
+	}
+	const required = ACCOUNTING_ASSERTIONS[r.leg];
+	const all = [
+		...r.reasons.map((x) => x.id),
+		...problems,
+		...r.assertions.filter((a) => a.outcome === 'failed').map((a) => `failed:${a.id}`),
+		...required
+			.filter((id) => !r.assertions.some((a) => a.id === id))
+			.map((id) => `assertion-not-evaluated:${id}`),
+	];
+	r.status = all.length ? 'failed' : 'passed';
+	r.assertion = {
+		id: r.leg,
+		outcome: all.length ? 'failed' : 'passed',
+		detail: all.join('; ') || `${required.length} assertions passed`,
+	};
+	return r;
+}
+
+/** Reserve one accounting leg's own allowance; spend, calls and the deadline stay shared with the case. */
+function reserveAccounting(
+	w: AccountingLegContext,
+	legName: string,
+	turns: number
+): ReservationResult {
+	return reserveSpend(
+		w.ledger,
+		w.config,
+		{
+			caseId: w.c.caseId,
+			leg: legName,
+			provider: 'grok',
+			account: w.account,
+			endpoint: w.config.allowedEndpoints[0] ?? '',
+			models: [...new Set([w.model, ...(w.config.spendBounds?.sideModels ?? [])])],
+			target: w.c.target,
+			sshTarget: null,
+			plan: workflowReservationPlan(w.plan, turns),
+		},
+		w.now()
+	);
+}
+
+/** A session-leg context over one accounting reservation, so turns go through the shared send path. */
+function accountingSessionContext(
+	w: AccountingLegContext,
+	r: AccountingLegReceipt,
+	reservation: SpendReservation,
+	turnNo: { n: number }
+): SessionLegContext & { drawn: () => Record<BillableCallKind, number> } {
+	const ceilingMs = HARNESS_CEILINGS.caseSeconds * 1000;
+	const turnMs = () =>
+		Math.min(
+			positiveFinite(w.turnTimeoutMs) ? w.turnTimeoutMs : ceilingMs,
+			ceilingMs,
+			Date.parse(reservation.deadlineAt) - w.now().getTime()
+		);
+	let drawn = emptyCalls();
+	return {
+		c: w.c,
+		fixture: w.fixture,
+		capabilities: w.capabilities,
+		blocked: null,
+		cwd: w.cwd,
+		accountRoot: w.accountRoot,
+		mainTurns: [],
+		nextTurn: () => ++turnNo.n,
+		admit: (n, as) => {
+			const d = drawReservedTurn({
+				ledger: w.ledger,
+				reservation,
+				config: w.config,
+				now: w.now,
+				turnMs,
+				pinnedFile: w.binaryPath,
+				n,
+				as,
+			});
+			if (!d.ok) {
+				r.reasons.push(d.reason);
+				return false;
+			}
+			drawn = d.draws;
+			return true;
+		},
+		remainingTurns: () =>
+			Math.min(
+				reservation.turnAllowance - reservation.turnsUsed,
+				w.ledger.limitTurns - w.ledger.turns
+			),
+		callsByKind: () => ({ ...reservation.callsByKind }),
+		callsDrawn: () => drawn,
+		baselineCalls: () => paidCallsPerTurn(w.config, reservation),
+		launcher: w.launcher,
+		nativeArgv: w.nativeArgv,
+		turnMs,
+		graceMs: w.graceMs,
+		lifetime: w.lifetime,
+		drawn: () => drawn,
+	};
+}
+
+/** One native accounting turn: the shared send path, its usage captured from the production parser's events. */
+async function sendAccountingNativeTurn(
+	s: SessionLegContext,
+	r: AccountingLegReceipt,
+	t: PaidFixtureTurn,
+	opts: { as?: 'retry' } = {}
+): Promise<{
+	run: SessionTurnRun | null;
+	uncertainWhy: string | null;
+	rec: AccountingUsageRecord | null;
+	final: UsageStats | undefined;
+}> {
+	const tracker = new UsageProvenanceTracker({ reporting: 'turn-total' });
+	let final: ParsedUsage | undefined;
+	const receipt: TurnBearingReceipt = {
+		leg: `accounting:${r.leg}`,
+		reasons: r.reasons,
+		turns: r.turns,
+		spawned: 0,
+		paidRequests: 0,
+	};
+	const sent = await sendSessionTurn(s, receipt, t, null, {
+		as: opts.as,
+		onEvent: (ev) => {
+			if (!ev.usage) return;
+			tracker.observe(ev.usage as UsageReport);
+			if ((ev.type === 'result' || ev.type === 'error') && ev.terminal) final = ev.usage;
+		},
+	});
+	r.spawned += receipt.spawned;
+	r.paidRequests += receipt.paidRequests;
+	if (!sent.run || sent.run.neverRan) return { ...sent, rec: null, final: undefined };
+	const rec = accountingUsageRecord({
+		turn: sent.run.turn.turn,
+		route: 'native-headless',
+		final,
+		tracker,
+		acknowledged: null,
+		childFrames: 0,
+		promptUsage: null,
+	});
+	// The turn's charge is the record's: the same status, never a figure for an unknown cost.
+	sent.run.turn.usage = turnUsageOf(rec);
+	r.usage.push(rec);
+	return { ...sent, rec, final: final ? parsedUsageToStats(final) : undefined };
+}
+
+/** The usage assertions shared by the usage and child legs, from one record. */
+function assertUsageRecord(
+	r: AccountingLegReceipt,
+	rec: AccountingUsageRecord | null,
+	turn: PaidTurnResult | null,
+	model: string,
+	which: readonly string[]
+) {
+	const assert = (id: string, ok: boolean, detail: string) => {
+		if (which.includes(id)) r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+	};
+	if (!rec || !turn) {
+		for (const id of which)
+			if (id !== 'settled-by-status')
+				r.assertions.push({ id, outcome: 'failed', detail: 'no usage record' });
+		return;
+	}
+	assert(
+		'usage-captured',
+		rec.final && rec.reports >= 1,
+		`reports=${rec.reports}; final=${rec.final}`
+	);
+	assert(
+		'cache-buckets',
+		rec.buckets.cacheRead !== null && rec.buckets.cacheWrite !== null,
+		`cacheRead=${rec.buckets.cacheRead ?? 'unreported'}; cacheWrite=${rec.buckets.cacheWrite ?? 'unreported'}`
+	);
+	assert('model-acknowledged', rec.model === model, `${rec.model ?? 'unreported'} vs ${model}`);
+	const p = rec.provenance;
+	const reportedCost = rec.cost.costUsd !== null;
+	assert(
+		'cost-provenance',
+		p.provenance === 'estimated' &&
+			p.tokens === 'provider-stream' &&
+			(reportedCost
+				? p.cost === 'reported' && p.costUsd === rec.cost.costUsd
+				: p.cost !== 'reported'),
+		`${rec.cost.status}; provenance ${p.provenance}/${p.tokens}/${p.cost}`
+	);
+	// An unknown charge carries no figure anywhere: record, turn and provenance.
+	const zeroFree =
+		rec.cost.status !== 'unknown' ||
+		(rec.cost.costUsd === null &&
+			turn.usage.costUsd === null &&
+			turn.usage.status === 'unknown' &&
+			p.cost !== 'reported');
+	assert(
+		'no-zero-substitution',
+		zeroFree && (rec.cost.status === 'exact' || turn.usage.status !== 'exact'),
+		`${rec.cost.status}; turn ${turn.usage.status}/${turn.usage.costUsd ?? 'none'}`
+	);
+}
+
+/** Close a leg's reservation exactly once and assert it settled by the charge's own status. */
+function settleAccountingReservation(
+	w: AccountingLegContext,
+	r: AccountingLegReceipt,
+	reservation: SpendReservation,
+	uncertainWhy: string | null,
+	assertStatus: boolean
+) {
+	r.settlement = settleLegReservation(
+		w.ledger,
+		reservation,
+		r.paidRequests,
+		r.turns,
+		uncertainWhy,
+		w.now
+	);
+	if (!assertStatus) return;
+	const allExact =
+		!uncertainWhy &&
+		r.turns.length === r.paidRequests &&
+		r.turns.length > 0 &&
+		r.turns.every((t) => t.usage.status === 'exact' && t.usage.costUsd !== null);
+	const s = r.settlement;
+	const ok = allExact
+		? s.state === 'settled' && s.uncertainUsd === 0
+		: s.state === 'uncertain' && s.uncertainUsd > 0;
+	r.assertions.push({
+		id: 'settled-by-status',
+		outcome: ok ? 'passed' : 'failed',
+		detail: `${s.state}; settled ${s.settledUsd}; uncertain ${s.uncertainUsd}; ${allExact ? 'exact' : 'not exact'}`,
+	});
+}
+
+/** The usage capture leg: one turn, every usage fact kept as reported. */
+async function runUsageCaptureLeg(
+	spec: AccountingLegSpec,
+	w: AccountingLegContext,
+	r: AccountingLegReceipt,
+	life: AccountingLifetime,
+	reservation: SpendReservation
+): Promise<string | null> {
+	const turnNo = { n: 0 };
+	const s = accountingSessionContext(w, r, reservation, turnNo);
+	let uncertainWhy: string | null = null;
+	let rec: AccountingUsageRecord | null = null;
+	let turn: PaidTurnResult | null = null;
+	r.lifetime = { before: lifetimeTokens(life.total), after: null, cost: null };
+	if (w.c.route === 'native-headless') {
+		const sent = await sendAccountingNativeTurn(s, r, spec.turns[0]);
+		uncertainWhy = sent.uncertainWhy;
+		rec = sent.rec;
+		turn = sent.run?.turn ?? null;
+		if (rec) settleIntoLifetime(life, rec, sent.final);
+	} else {
+		const run = await runAccountingAcpTurns(w, r, s, spec.turns.slice(0, 1));
+		uncertainWhy = run.uncertainWhy;
+		rec = r.usage[0] ?? null;
+		turn = r.turns[0] ?? null;
+		if (rec && run.finals[0]) settleIntoLifetime(life, rec, run.finals[0]);
+	}
+	r.lifetime.after = lifetimeTokens(life.total);
+	r.lifetime.cost = life.total?.accounting
+		? {
+				status: life.total.accounting.cost.status,
+				costUsd: usageCostUsd(life.total.accounting.cost) ?? null,
+			}
+		: null;
+	if (turn && turn.reply.tokenSeen !== true)
+		r.assertions.push({ id: 'reply-token', outcome: 'failed', detail: 'reply token missing' });
+	assertUsageRecord(r, rec, turn, w.model, ACCOUNTING_ASSERTIONS['usage-capture']);
+	settleAccountingReservation(w, r, reservation, uncertainWhy, true);
+	return uncertainWhy;
+}
+
+/**
+ * ACP accounting turns: one owned `agent stdio` child through the paid ACP
+ * route with the usage capture attached; returns each turn's parent total.
+ */
+async function runAccountingAcpTurns(
+	w: AccountingLegContext,
+	r: AccountingLegReceipt,
+	s: SessionLegContext & { drawn: () => Record<BillableCallKind, number> },
+	turns: PaidFixtureTurn[]
+): Promise<{ uncertainWhy: string | null; finals: Array<UsageStats | undefined> }> {
+	const spec = await w.launcher(GROK_ACP_ARGS);
+	if ('refused' in spec) {
+		r.reasons.push(sshReason(spec.refused, spec.detail, 'paid-execution'));
+		return { uncertainWhy: null, finals: [] };
+	}
+	const capture = acpAccountingCapture('acp-stdio', () => null);
+	const run = await runAcpPaidTurns({
+		spec,
+		cwd: w.cwd,
+		model: w.model,
+		effort: w.effort,
+		fixture: w.fixture,
+		turns,
+		graceMs: w.graceMs,
+		lifetime: w.lifetime,
+		turnMs: s.turnMs,
+		admitTurn: (n) => s.admit(n),
+		calls: () => s.drawn(),
+		usage: capture.hook,
+	});
+	r.turns.push(...run.turns);
+	r.spawned += run.spawned;
+	r.paidRequests += run.sent;
+	r.reasons.push(...run.reasons.map((x) => ({ ...x, owner: x.owner ?? ACCOUNTING_LEGS_OWNER })));
+	// The acknowledged model is the turn's own (session/new already refused any other before a prompt).
+	for (let i = 0; i < capture.records.length; i++) {
+		const t = run.turns[i];
+		if (t) capture.records[i].model = capture.records[i].model ?? t.model;
+	}
+	r.usage.push(...capture.records);
+	return { uncertainWhy: run.uncertainWhy, finals: capture.finals };
+}
+
+/** The child usage leg: one ACP turn with one native subagent; its usage settles once into the parent and the lifetime. */
+async function runChildUsageLeg(
+	spec: AccountingLegSpec,
+	w: AccountingLegContext,
+	r: AccountingLegReceipt,
+	life: AccountingLifetime,
+	reservation: SpendReservation
+): Promise<string | null> {
+	const turnNo = { n: 0 };
+	const s = accountingSessionContext(w, r, reservation, turnNo);
+	r.lifetime = { before: lifetimeTokens(life.total), after: null, cost: null };
+	const run = await runAccountingAcpTurns(w, r, s, spec.turns.slice(0, 1));
+	const rec = r.usage[0] ?? null;
+	const turn = r.turns[0] ?? null;
+	const before = life.total;
+	if (rec && run.finals[0]) settleIntoLifetime(life, rec, run.finals[0]);
+	r.lifetime.after = lifetimeTokens(life.total);
+	r.lifetime.cost = life.total?.accounting
+		? {
+				status: life.total.accounting.cost.status,
+				costUsd: usageCostUsd(life.total.accounting.cost) ?? null,
+			}
+		: null;
+	const assert = (id: string, ok: boolean, detail: string) =>
+		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+	if (!rec || !turn) {
+		for (const id of [
+			'child-reported',
+			'child-settled-once',
+			'lifetime-once',
+			'no-zero-substitution',
+		])
+			assert(id, false, 'no usage record');
+	} else {
+		if (turn.reply.tokenSeen !== true) assert('reply-token', false, 'reply token missing');
+		const completed = rec.children.filter((ch) => ch.status === 'completed');
+		assert(
+			'child-reported',
+			completed.length >= 1 && completed.every((ch) => ch.includedInParent === true),
+			`${rec.children.length} children; ${completed.length} completed and included`
+		);
+		// The parent's total is the provider's own prompt usage: no child frame was added to it.
+		const pu = rec.promptUsage;
+		assert(
+			'child-settled-once',
+			rec.final &&
+				pu !== null &&
+				pu.output !== null &&
+				pu.output === rec.buckets.output &&
+				pu.cacheRead === rec.buckets.cacheRead,
+			`parent output ${rec.buckets.output ?? 'none'} vs prompt ${pu?.output ?? 'none'}; child frames ${rec.childFrames}`
+		);
+		const b = lifetimeTokens(before) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+		const a = r.lifetime.after;
+		assert(
+			'lifetime-once',
+			a !== null &&
+				a.output - b.output === (rec.buckets.output ?? -1) &&
+				a.cacheRead - b.cacheRead === (rec.buckets.cacheRead ?? -1),
+			`lifetime output +${a ? a.output - b.output : 'none'}`
+		);
+		assertUsageRecord(r, rec, turn, w.model, ['no-zero-substitution']);
+	}
+	settleAccountingReservation(w, r, reservation, run.uncertainWhy, true);
+	return run.uncertainWhy;
+}
+
+/** Run one fault fixture: the harness's own Node writing the fault records, classified by the production parser. */
+async function runFaultFixture(
+	w: AccountingLegContext,
+	r: AccountingLegReceipt,
+	kind: AccountingFaultKind,
+	n: number,
+	counted: boolean
+): Promise<{ record: AccountingFaultRecord; run: SessionTurnRun }> {
+	const env: Record<string, string> = {};
+	const run = await runNativeSessionTurn({
+		n,
+		expect: 'QUALIFY-FIXTURE-NEVER-REPLIES',
+		recordedArgv: [`<fault-fixture:${kind}>`],
+		spec: {
+			command: process.execPath,
+			args: ['-e', FAULT_FIXTURE_SOURCE, JSON.stringify(ACCOUNTING_FAULT_FIXTURES[kind])],
+			env,
+			cwd: w.cwd,
+		},
+		timeoutMs: HARNESS_CEILINGS.offlineProbeSeconds * 1000,
+		graceMs: w.graceMs,
+		lifetime: w.lifetime,
+		calls: emptyCalls(),
+	});
+	r.fixtureSpawned++;
+	const record: AccountingFaultRecord = {
+		kind,
+		fixtureInduced: true,
+		expected: ACCOUNTING_FAULT_EXPECTED[kind],
+		classified: run.errorType,
+		command: process.execPath,
+		envKeys: Object.keys(env),
+		exitCode: run.turn.exitCode,
+		terminal: run.turn.terminal,
+		counted,
+		sent: false,
+	};
+	r.faults.push(record);
+	return { record, run };
+}
+
+/**
+ * The fault leg: a rate-limited attempt counted and retried once against the
+ * pinned binary (the one billed send), an auth fault classified and never
+ * retried, and a transport fault on a reservation of its own left uncertain:
+ * its retry is refused and its hold is never refunded.
+ */
+async function runFaultRetryLeg(
+	spec: AccountingLegSpec,
+	w: AccountingLegContext,
+	r: AccountingLegReceipt,
+	life: AccountingLifetime,
+	reservation: SpendReservation
+): Promise<string | null> {
+	const turnNo = { n: 0 };
+	const s = accountingSessionContext(w, r, reservation, turnNo);
+	const assert = (id: string, ok: boolean, detail: string) =>
+		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+	const perTurn = paidCallsPerTurn(w.config, reservation);
+	let uncertainWhy: string | null = null;
+	let retried: PaidTurnResult | null = null;
+	let retrySends = 0;
+	const transport: Record<string, unknown> = {};
+	for (const kind of spec.faults ?? []) {
+		if (kind === 'rate-limit') {
+			// The attempt is counted before it runs, as any user turn is; the fixture answers it, not a provider.
+			const n = turnNo.n + 1;
+			if (!s.admit(n)) break;
+			turnNo.n = n;
+			const { record } = await runFaultFixture(w, r, kind, n, true);
+			if (record.classified !== ACCOUNTING_FAULT_EXPECTED[kind]) continue;
+			const sentBefore = r.paidRequests;
+			const sent = await sendAccountingNativeTurn(s, r, spec.turns[0], { as: 'retry' });
+			retrySends = r.paidRequests - sentBefore;
+			uncertainWhy = sent.uncertainWhy;
+			retried = sent.run?.turn ?? null;
+			if (sent.rec) settleIntoLifetime(life, sent.rec, sent.final);
+		} else if (kind === 'auth') {
+			// Auth is not retried and nothing is counted: the fixture is classified alone.
+			await runFaultFixture(w, r, kind, turnNo.n + 1, false);
+		} else {
+			const own = reserveAccounting(w, `accounting:${spec.id}:transport`, 2);
+			if (!own.ok) {
+				r.reasons.push(...own.reasons);
+				continue;
+			}
+			const b = own.reservation;
+			transport.reservationId = b.id;
+			const bs = accountingSessionContext(w, r, b, { n: 0 });
+			if (!bs.admit(1)) continue;
+			const { run } = await runFaultFixture(w, r, kind, 1, true);
+			// Started and lost before any terminal: whether it reached a provider is unknown, so the effect is uncertain.
+			const lost = run.turn.terminal === 'none';
+			if (lost) markUncertainEffect(w.ledger, b.id);
+			const reasonsBefore = r.reasons.length;
+			const retryAdmitted = bs.admit(2, 'retry');
+			const refusal = r.reasons.slice(reasonsBefore).map((x) => x.id);
+			r.reasons.splice(reasonsBefore);
+			let releaseRefused = false;
+			try {
+				releaseReservation(w.ledger, b.id, w.now());
+			} catch {
+				releaseRefused = true;
+			}
+			const settled =
+				b.state === 'held'
+					? settleReservation(
+							w.ledger,
+							b.id,
+							{ kind: 'uncertain', reason: 'fixture-induced-transport-lost' },
+							w.now()
+						)
+					: b;
+			Object.assign(transport, {
+				lost,
+				retryAdmitted,
+				retryRefusal: refusal,
+				releaseRefused,
+				state: settled.state,
+				settledUsd: settled.settledUsd,
+				uncertainUsd: settled.uncertainUsd,
+				uncertainEffect: settled.uncertainEffect,
+				ledgerUncertainUsd: w.ledger.uncertainUsd,
+			});
+		}
+	}
+	r.observed.transport = transport;
+	const expectedKinds = spec.faults ?? [];
+	assert(
+		'faults-classified',
+		expectedKinds.length > 0 &&
+			expectedKinds.every((k) =>
+				r.faults.some((f) => f.kind === k && f.classified === ACCOUNTING_FAULT_EXPECTED[k])
+			),
+		r.faults.map((f) => `${f.kind}:${f.classified ?? 'unclassified'}`).join(', ') || 'no fault ran'
+	);
+	assert(
+		'faults-labeled',
+		r.faults.length === expectedKinds.length &&
+			r.faults.every(
+				(f) =>
+					f.fixtureInduced === true &&
+					f.sent === false &&
+					f.command === process.execPath &&
+					f.command !== w.binaryPath &&
+					f.envKeys.length === 0
+			),
+		`${r.faults.length} fixture faults`
+	);
+	// One billed send: the retry alone reached the pinned binary, drawn once as a retry call.
+	const expectRetryCalls = perTurn.retry * 2 + 1;
+	assert(
+		'retry-billed-once',
+		retried !== null &&
+			turnSucceeded({
+				turn: retried,
+				neverRan: false,
+				terminals: 1,
+				sessionIds: [],
+				stopRequested: false,
+				descendants: [],
+				errorType: null,
+			}) &&
+			retrySends === 1 &&
+			r.paidRequests === 1 &&
+			reservation.turnsUsed === 2 &&
+			reservation.callsByKind.retry === expectRetryCalls,
+		`sends ${retrySends}; paid ${r.paidRequests}; turns ${reservation.turnsUsed}; retry calls ${reservation.callsByKind.retry}/${expectRetryCalls}`
+	);
+	const refusal = (transport.retryRefusal as string[] | undefined) ?? [];
+	assert(
+		'uncertain-not-refunded',
+		transport.lost === true &&
+			transport.retryAdmitted === false &&
+			refusal.includes('turn-allowance-refused') &&
+			transport.releaseRefused === true &&
+			transport.state === 'uncertain' &&
+			transport.uncertainEffect === true &&
+			transport.settledUsd === 0 &&
+			typeof transport.uncertainUsd === 'number' &&
+			transport.uncertainUsd > 0,
+		`state ${String(transport.state ?? 'none')}; uncertain ${String(transport.uncertainUsd ?? 'none')}; retry ${refusal.join(',') || (transport.retryAdmitted ? 'admitted' : 'none')}`
+	);
+	// The leg's own reservation settles by the retry's own charge; the fixture attempt adds nothing.
+	settleAccountingReservation(w, r, reservation, uncertainWhy, false);
+	return uncertainWhy;
+}
+
+const ACCOUNTING_RUNNERS: Record<
+	AccountingLegId,
+	(
+		spec: AccountingLegSpec,
+		w: AccountingLegContext,
+		r: AccountingLegReceipt,
+		life: AccountingLifetime,
+		reservation: SpendReservation
+	) => Promise<string | null>
+> = {
+	'usage-capture': runUsageCaptureLeg,
+	'child-usage': runChildUsageLeg,
+	'fault-retry': runFaultRetryLeg,
+};
+
+/**
+ * Every accounting leg of an E06 fixture, in order, each on an accounting
+ * reservation of its own (its turns under the per-leg ceiling, spend and
+ * calls shared with the case). Never after an uncertain effect, never twice.
+ */
+async function runAccountingLegs(w: AccountingLegContext): Promise<{
+	legs: AccountingLegReceipt[];
+	spawned: number;
+	sent: number;
+	uncertainWhy: string | null;
+}> {
+	const legs: AccountingLegReceipt[] = [];
+	const life: AccountingLifetime = { total: undefined };
+	let spawned = 0;
+	let sent = 0;
+	let uncertainWhy: string | null = null;
+	for (const spec of w.fixture.accountingLegs ?? []) {
+		const r: AccountingLegReceipt = {
+			leg: spec.id,
+			status: 'not-run',
+			reasons: [],
+			reservationId: null,
+			settlement: null,
+			turns: [],
+			usage: [],
+			faults: [],
+			lifetime: null,
+			assertions: [],
+			assertion: {
+				id: spec.id,
+				outcome: 'not-evaluated',
+				detail: '',
+				owner: ACCOUNTING_LEGS_OWNER,
+			},
+			observed: {},
+			spawned: 0,
+			paidRequests: 0,
+			fixtureSpawned: 0,
+		};
+		const gap = (detail: string, owner: string) => {
+			r.status = 'not-evaluated';
+			r.assertion = { id: spec.id, outcome: 'not-evaluated', detail, owner };
+		};
+		const uncertain = w.uncertain ?? uncertainWhy;
+		const legName = `accounting:${spec.id}`;
+		const prior = w.ledger.reservations.filter(
+			(x) => x.caseId === w.c.caseId && x.leg === legName && x.state !== 'released'
+		);
+		const minTurns = spec.id === 'fault-retry' ? 2 : 1;
+		if (!w.capabilities.accountingLegs)
+			r.reasons.push(accountingReason('accounting-legs-unimplemented', spec.id));
+		else if (w.blocked) r.reasons.push(accountingReason(w.blocked, spec.id));
+		else if (uncertain) r.reasons.push(accountingReason('uncertain-prior-effect', uncertain));
+		else if (prior.some((x) => x.state === 'uncertain' || x.uncertainEffect))
+			r.reasons.push(accountingReason('uncertain-prior-effect', legName));
+		else if (prior.length) r.reasons.push(accountingReason('leg-already-run', legName));
+		else if (w.c.target === 'ssh')
+			gap(
+				'the usage capture, fault fixtures and ledger checks are local; no task owns an SSH accounting leg',
+				SSH_ACCOUNTING_LEGS_OWNER
+			);
+		else if (spec.id === 'child-usage' && w.c.route === 'native-headless')
+			gap(
+				'the native headless stream carries no child record (childCompleteness unknown); no native child turn is qualified',
+				NATIVE_SUBAGENT_OWNER
+			);
+		else if (spec.id === 'fault-retry' && w.c.route !== 'native-headless')
+			gap('the fault fixtures write the native stream shape only', ACP_FAULT_LEGS_OWNER);
+		else if (!w.accountRoot) r.reasons.push(accountingReason('account-root-unknown', spec.id));
+		else if (
+			spec.maxTurns < minTurns ||
+			spec.maxTurns > HARNESS_CEILINGS.accountingTurnsPerLeg ||
+			spec.turns.length < 1
+		)
+			r.reasons.push(
+				accountingReason(
+					'accounting-turns-outside-ceiling',
+					`${spec.maxTurns} not in ${minTurns}..${HARNESS_CEILINGS.accountingTurnsPerLeg}`
+				)
+			);
+		if (r.reasons.length) {
+			r.assertion.detail = r.reasons.map((x) => x.id).join('; ');
+			legs.push(r);
+			continue;
+		}
+		if (r.status === 'not-evaluated') {
+			legs.push(r);
+			continue;
+		}
+		const reserved = reserveAccounting(w, legName, spec.maxTurns);
+		if (!reserved.ok) {
+			r.reasons.push(...reserved.reasons);
+			settleAccountingLeg(r, []);
+			legs.push(r);
+			continue;
+		}
+		r.reservationId = reserved.reservation.id;
+		const problems: string[] = [];
+		let why: string | null = null;
+		try {
+			why = await ACCOUNTING_RUNNERS[spec.id](spec, w, r, life, reserved.reservation);
+		} catch (e) {
+			problems.push(`${spec.id}-threw: ${errorText(e)}`);
+		}
+		// Whatever happened, the reservation is closed exactly once.
+		if (reserved.reservation.state === 'held')
+			r.settlement = settleLegReservation(
+				w.ledger,
+				reserved.reservation,
+				r.paidRequests,
+				r.turns,
+				why ?? (problems.length ? 'accounting-leg-threw' : null),
+				w.now
+			);
+		settleAccountingLeg(r, problems);
+		spawned += r.spawned;
+		sent += r.paidRequests;
+		if (why) uncertainWhy = why;
+		legs.push(r);
+	}
+	return { legs, spawned, sent, uncertainWhy };
+}
+
+// ---------------------------------------------------------------------------
 // Cue and group chat workflow legs (GT1-11-11E2)
 // ---------------------------------------------------------------------------
 
@@ -14340,6 +15490,7 @@ export async function executePaidCase(
 		sessionConsumers: [],
 		utilityLegs: [],
 		workflowLegs: [],
+		accountingLegs: [],
 	});
 	if (reasons.length || !fixture) return accounts.map(refused);
 	// What each owned home listed before the legs: the colliding-ID verdict judges only what they added.
