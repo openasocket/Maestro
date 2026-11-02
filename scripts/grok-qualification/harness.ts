@@ -327,6 +327,7 @@ import { getAgentDefinition } from '../../src/shared/maestro-lib/providers/defin
 import { buildShellCommand } from '../../src/shared/maestro-lib/launch/shell-escape';
 import { GrokOutputParser } from '../../src/shared/maestro-lib/parsers/grok-output-parser';
 import {
+	ACP_AUTH_REQUIRED_CODE,
 	GrokAcpClient,
 	type GrokAcpClientOptions,
 } from '../../src/shared/maestro-lib/grok/acp-client';
@@ -4285,8 +4286,6 @@ export const DISCOVERY_OPERATION_REQUIRES: Readonly<Record<string, string | null
 	'native-model-catalog': null,
 });
 
-/** The ACP spec's reserved `auth_required` error code; its meaning is protocol-defined, not inferred. */
-const ACP_AUTH_REQUIRED_CODE = -32000;
 /**
  * Within the canonical `auth_expired` type, the evidence that says no usable
  * credential was presented at all (as opposed to one that was rejected). It
@@ -12455,7 +12454,7 @@ export const ACP_ACCOUNTING_FAULT_FIXTURES: Readonly<
 	},
 	auth: {
 		error: {
-			code: -32000,
+			code: ACP_AUTH_REQUIRED_CODE,
 			message: 'Authentication required: invalid API key (qualification fixture)',
 		},
 		stderr: 'Error: Invalid API key (qualification fixture)',

@@ -145,6 +145,7 @@ import {
 } from '../../main/process-manager';
 import type { ManagedProcess, ProcessConfig } from '../../main/process-manager/types';
 import { nextSpawnGeneration } from '../../main/process-manager/generation';
+import { logger } from '../../main/utils/logger';
 import { buildSpawnRequestSnapshot } from '../../main/process-manager/ProcessManager';
 import { fakeSpawnPort } from '../helpers/managedSpawnPort';
 import { GrokOutputParser } from '../../main/parsers/grok-output-parser';
@@ -1266,7 +1267,9 @@ describe('process-manager.ts', () => {
 						const errors = of('agent-error', key);
 						expect(errors).toHaveLength(1);
 						expect(errors[0][2]).toMatchObject({ type, agentId: 'grok' });
-						expect(JSON.stringify([errors, of('data', key)])).not.toContain(
+						// Nor in the desktop's diagnostics: no logger line carries the provider message.
+						const logged = Object.values(logger).flatMap((fn) => vi.mocked(fn).mock.calls);
+						expect(JSON.stringify([errors, of('data', key), logged])).not.toContain(
 							'PRIVATE-PROVIDER-TEXT'
 						);
 						expect(exitCodes(key)).toEqual([1]);

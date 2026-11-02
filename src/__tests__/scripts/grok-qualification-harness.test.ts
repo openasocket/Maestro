@@ -577,9 +577,10 @@ vi.mock('../../../src/shared/maestro-lib/autorun/run-goal', async (importOrigina
 	};
 });
 /**
- * GT1-11-14P4D: stands in for a repaired production ACP error mapping. When set,
- * a fault fixture turn's completed error type is rewritten per fixture kind
- * (read from the fixture's own JSON argument); null passes every turn through.
+ * GT1-11-14P4D: misread controls for the ACP fault leg. When set, a fault fixture
+ * turn's completed error type is rewritten per fixture kind (read from the fixture's
+ * own JSON argument) to stand in for a production mapping that misreads a fault;
+ * null (the default) passes production's own classification through.
  */
 const acpFaultTamper = vi.hoisted(() => ({
 	types: null as Record<string, string> | null,
@@ -6754,14 +6755,14 @@ describe('GT1-11-09 qualification harness', () => {
 					expect(con(id).status, id).toBe('not-evaluated');
 					expect(con(id).assertion.owner, id).toBe(ACP_ACCOUNTING_CONSUMERS_OWNER);
 				}
-				// Only the ACP fault leg fails (A11-F42, pinned below); the usage legs pass.
+				// A11-F42 repaired (GT1-11-14P4D1): every ACP accounting leg passes, the fault leg included.
 				expect(verdicts(leg.accountingLegs)).toEqual([
 					['usage-capture', 'passed'],
 					['child-usage', 'passed'],
-					['fault-retry', 'failed'],
+					['fault-retry', 'passed'],
 				]);
-				expect(leg.status).toBe('failed');
-				expect(standInRuns().map((r) => r.route)).toEqual(['acp', 'acp', 'acp']);
+				expect(leg.status).toBe('passed');
+				expect(standInRuns().map((r) => r.route)).toEqual(['acp', 'acp', 'acp', 'acp']);
 			}, 120_000);
 
 			it('an ACP turn whose child never reports fails child-reported; an unknown ACP charge stays unknown on both legs and the lifetime', async () => {
@@ -6812,36 +6813,22 @@ describe('GT1-11-09 qualification harness', () => {
 					expect(() => releaseReservation(ledger, t.id, NOW)).toThrow();
 				};
 
-				it('the production ACP mapping reads a JSON-RPC rate limit and auth refusal as a lost connection (A11-F42): both classified agent_crashed, no retry sent, the lost peer uncertain and never refunded', async () => {
-					const { ledger, acc } = await execute('acp-stdio', 'ok');
-					const fault = acc('fault-retry');
-					labelled(fault);
-					// A11-F42: the JSON-RPC error message is discarded and the failure read as transport-lost.
-					expect(fault.faults.map((f) => [f.kind, f.classified, f.terminal])).toEqual([
-						['rate-limit', 'agent_crashed', 'none'],
-						['auth', 'agent_crashed', 'none'],
-						['transport', 'agent_crashed', 'none'],
-					]);
-					expect(fault.status).toBe('failed');
-					expect(failedIds(fault)).toEqual(['faults-classified', 'retry-billed-once']);
-					expect(outcome(fault, 'uncertain-not-refunded')).toBe('passed');
-					// A misread rate limit is never retried: nothing reached the pinned binary.
-					expect(fault.paidRequests).toBe(0);
-					expect(fault.turns).toEqual([]);
-					transportKept(ledger);
-				}, 120_000);
-
-				it('with the mapping repaired, every ACP fault reads its type, the rate limit is retried once over ACP as a retry call, and the leg passes', async () => {
-					acpFaultTamper.types = { ...ACP_ACCOUNTING_FAULT_EXPECTED };
+				it('the production ACP mapping reads each fault by its own content (A11-F42 repaired, GT1-11-14P4D1): rate_limited, auth_expired, a lost peer agent_crashed; the rate limit is retried once over ACP as a retry call and the leg passes', async () => {
 					const { ledger, acc } = await execute('acp-stdio', 'ok');
 					const fault = acc('fault-retry');
 					expect(fault.status, fault.assertions.map((a) => `${a.id}:${a.outcome}`).join(',')).toBe(
 						'passed'
 					);
+					expect(failedIds(fault)).toEqual([]);
 					labelled(fault);
-					expect(fault.faults.map((f) => [f.kind, f.classified])).toEqual(
-						Object.entries(ACP_ACCOUNTING_FAULT_EXPECTED)
-					);
+					// No stand-in: the classification is production's own completed.error.type.
+					expect(acpFaultTamper.types).toBeNull();
+					expect(fault.faults.map((f) => [f.kind, f.classified])).toEqual([
+						['rate-limit', 'rate_limited'],
+						['auth', 'auth_expired'],
+						['transport', 'agent_crashed'],
+					]);
+					expect(outcome(fault, 'uncertain-not-refunded')).toBe('passed');
 					// One billed send, over ACP: the retry alone, numbered after the attempt it retries.
 					expect(fault.paidRequests).toBe(1);
 					expect(fault.spawned).toBe(1);
@@ -6857,7 +6844,7 @@ describe('GT1-11-09 qualification harness', () => {
 					expect(standInRuns().map((r) => r.route)).toEqual(['acp', 'acp', 'acp', 'acp']);
 				}, 120_000);
 
-				it('a repaired mapping that misreads one ACP fault fails faults-classified, and a rate limit read as anything else is never retried', async () => {
+				it('a mapping that misreads one ACP fault fails faults-classified, and a rate limit read as anything else (the A11-F42 reading) is never retried', async () => {
 					acpFaultTamper.types = { ...ACP_ACCOUNTING_FAULT_EXPECTED, auth: 'agent_crashed' };
 					const auth = (await execute('acp-stdio', 'ok')).acc('fault-retry');
 					expect(failedIds(auth)).toEqual(['faults-classified']);

@@ -23717,7 +23717,11 @@
 						"src/shared/maestro-lib/grok/acp-turn.ts:762",
 						"src/main/process-manager/spawners/GrokAcpSpawner.ts:683"
 					],
-					"status": "open"
+					"status": "implementation-repaired",
+					"repairedBy": ["GT1-11-14P4D1", "GT1-11-14P4D2"],
+					"repairCommit": "91d679af7",
+					"reobserved": "GT1-11-14P4D2: harness ACP fault leg passed on production classification (rate_limited, auth_expired, agent_crashed; one ACP retry), no stand-in",
+					"residual": ["live-authorization-absent (run-state live inputs; every case not-run)"]
 				}
 			],
 			"branchAuditRefs": ["B06"]
@@ -25274,7 +25278,11 @@
 						"src/shared/maestro-lib/grok/acp-turn.ts:762",
 						"src/main/process-manager/spawners/GrokAcpSpawner.ts:683"
 					],
-					"status": "open"
+					"status": "implementation-repaired",
+					"repairedBy": ["GT1-11-14P4D1", "GT1-11-14P4D2"],
+					"repairCommit": "91d679af7",
+					"reobserved": "GT1-11-14P4D2: harness ACP fault leg passed on production classification (rate_limited, auth_expired, agent_crashed; one ACP retry), no stand-in",
+					"residual": ["live-authorization-absent (run-state live inputs; every case not-run)"]
 				}
 			]
 		},
@@ -43852,7 +43860,7 @@
 			{
 				"id": "A11-F42",
 				"class": "production-defect",
-				"status": "open",
+				"status": "resolved",
 				"anchors": [
 					"src/shared/maestro-lib/grok/acp-client.ts:183",
 					"src/shared/maestro-lib/grok/acp-session.ts:456",
@@ -43863,7 +43871,10 @@
 				"repairTask": "GT1-11-14P4D1",
 				"testTask": "GT1-11-14P4D2",
 				"foundBy": "GT1-11-14P4D",
-				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
+				"evidenceRef": "Plans/grok-tier1/evidence/11.md",
+				"resolvedBy": "GT1-11-14P4D2",
+				"repairCommit": "91d679af7",
+				"resolution": "GrokAcpClient classifies a JSON-RPC error once at the client boundary (ACP_AUTH_REQUIRED_CODE -32000 reads auth_expired, otherwise the shared Grok error bank over the message) and keeps only the type on GrokAcpRequestError; GrokAcpSession.prompt reads it as provider-error (not transport-lost); startGrokAcpTurn settles failed/provider with dispatch dispatched and the classified type; GrokAcpSpawner.settle emits that type. A real peer loss stays agent_crashed. The provider message is retained nowhere (error, cause, terminal, events, desktop agent-error, data or logger)."
 			}
 		],
 		"rejectedChallenges": [
@@ -44481,6 +44492,20 @@
 				"rows": 2,
 				"finding": "A11-F42",
 				"ownerTasks": ["GT1-11-14P4D1", "GT1-11-14P4D2"],
+				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
+			},
+			{
+				"id": "grok-acp-provider-error-read-as-lost-transport",
+				"taskId": "GT1-11-14P4D2",
+				"change": "implementation-repaired",
+				"rows": 2,
+				"finding": "A11-F42",
+				"repairedBy": ["GT1-11-14P4D1", "GT1-11-14P4D2"],
+				"repairCommit": "91d679af7",
+				"mutants": {
+					"killed": 7,
+					"total": 7
+				},
 				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
 			}
 		],
