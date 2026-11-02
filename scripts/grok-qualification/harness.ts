@@ -119,6 +119,28 @@
  * turn that never hits the context limit leaves `compaction-retry` unevaluated
  * (`unassigned-native-context-limit-induction`).
  *
+ * Session consumer legs (GT1-11-11C2): after an E05 leg's fixture turns and
+ * session legs, three consumer legs run on the same reservation, each drawing
+ * production code. `context-handoff` extracts the owned session through the
+ * production context extractor (`extractStoredSessionContext()`, its
+ * `agentSessions.read` answered by the bound `GrokSessionStorage` read the
+ * desktop handler performs) and the merge formatter
+ * (`formatLogsForContextInjection()`), requires the handed-off payload digest
+ * to equal the storage export, and hands it to a fresh turn whose reply token
+ * is derived from the handed-off conversation (absent from the prompt).
+ * `agent-creation` builds a custom record (`buildNewAgentRecord()` with the
+ * New Agent fields), its duplicate (the same builder with the source's fields)
+ * and a worktree record (`buildWorktreeSession()` over an owned git worktree),
+ * writes them to an owned data dir (`writeSessionsStoreFile()`), reads them
+ * back, and plans each first launch (`applyAgentConfigOverrides()` then
+ * `buildAgentLaunchPlan()`): the inherited account dir, model, effort and
+ * remote must reach the plan, and the paid turn must acknowledge the model.
+ * `template-dispatch` expands a custom AI command (`expandCommandArguments()`
+ * then `substituteTemplateVariables()`, as the desktop queue does) and a prompt
+ * template, and each expanded text must be the prompt the turn was handed,
+ * with no variable left and a reply token only the expansion produces. SSH and
+ * ACP consumer legs are not evaluated with explicit `unassigned-*` owners.
+ *
  * Offline inspection (GT1-11-10A): the offline-inspection leg of a case (E02)
  * is admitted and recorded as its own receipt entry, independently of
  * discovery. It needs the pinned binary, disabled auto-update, owned roots, the
@@ -174,7 +196,7 @@
  */
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -209,7 +231,25 @@ import {
 	GrokAcpTransportError,
 } from '../../src/shared/maestro-lib/grok/acp-protocol';
 import { GROK_ACP_ARGS, grokSteeringAvailability } from '../../src/shared/maestro-lib/grok/route';
-import { grokLaunchArgsProblem } from '../../src/shared/maestro-lib/launch/agent-args';
+import {
+	applyAgentConfigOverrides,
+	grokLaunchArgsProblem,
+} from '../../src/shared/maestro-lib/launch/agent-args';
+import { buildAgentLaunchPlan } from '../../src/shared/maestro-lib/launch/launch-plan';
+import type { NativeSessionBinding } from '../../src/shared/maestro-lib/agents/providerSwap';
+/** The renderer context extractor, loaded only when a handoff leg runs (its store graph reads `window` at load). */
+type ContextExtractorModule = typeof import('../../src/renderer/utils/contextExtractor');
+import { buildWorktreeSession } from '../../src/renderer/utils/worktreeSession';
+import type { Session as RendererSession } from '../../src/renderer/types';
+import { buildNewAgentRecord } from '../../src/shared/newAgentRecord';
+import { resolveAgentAccountDir, resolveAgentAccountRef } from '../../src/shared/agentAccountDir';
+import { substituteTemplateVariables } from '../../src/shared/templateVariables';
+import { expandCommandArguments } from '../../src/shared/maestro-lib/turns/prompt';
+import {
+	readSessionsStoreFile,
+	writeSessionsStoreFile,
+	type SessionsStoreData,
+} from '../../src/main/stores/sessions-store-file';
 import {
 	getContextCompactCommand,
 	getContextCompactionBlocker,
@@ -315,6 +355,12 @@ export const HARNESS_CAPABILITIES = {
 	 * reservation. Off, every session leg is recorded not-run.
 	 */
 	sessionLegs: true,
+	/**
+	 * The E05 session consumer legs (GT1-11-11C2): context handoff, agent
+	 * creation and template dispatch through their production consumers, run
+	 * after the session legs on the same reservation. Off, each is not-run.
+	 */
+	sessionConsumers: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
 
@@ -4364,6 +4410,8 @@ export interface PaidLegReceipt {
 	resources: ResourceLegReceipt | null;
 	/** The session legs of an E04/E05 fixture (GT1-11-11C1), each its own entry; empty otherwise. */
 	sessionLegs: SessionLegReceipt[];
+	/** The session consumer legs of an E05 fixture (GT1-11-11C2), each its own entry; empty otherwise. */
+	sessionConsumers: SessionConsumerReceipt[];
 }
 
 export interface PaidExecutionContext {
@@ -5456,6 +5504,7 @@ async function runPaidLeg(
 		remote: null,
 		resources: null,
 		sessionLegs: [],
+		sessionConsumers: [],
 	};
 	const refuse = (id: string, detail: string, owner?: string) => {
 		receipt.reasons.push(paidReason(id, detail, owner));
@@ -5836,8 +5885,33 @@ async function runPaidLeg(
 	}
 
 	// Session legs (E04/E05): only after every fixture turn ran cleanly, on the same reservation.
+	const fixtureTurnsPassed = !receipt.reasons.length && !uncertainWhy;
+	const sessionContext = (): SessionLegContext => ({
+		c,
+		fixture,
+		capabilities: ctx.capabilities,
+		blocked: fixtureTurnsPassed ? null : 'fixture-turns-not-passed',
+		cwd,
+		accountRoot: receipt.accountRoot,
+		mainTurns: receipt.turns,
+		nextTurn: () =>
+			receipt.turns.length +
+			receipt.sessionLegs.reduce((n, l) => n + l.turns.length, 0) +
+			receipt.sessionConsumers.reduce((n, l) => n + l.turns.length, 0) +
+			1,
+		admit: admitTurn,
+		remainingTurns: () =>
+			Math.min(reservation.turnAllowance - reservation.turnsUsed, ledger.limitTurns - ledger.turns),
+		callsByKind: () => ({ ...reservation.callsByKind }),
+		callsDrawn: () => callsDrawn,
+		launcher,
+		nativeArgv,
+		turnMs,
+		graceMs,
+		lifetime: ctx.lifetime,
+	});
 	if (fixture.sessionLegs?.length) {
-		const ready = !receipt.reasons.length && !uncertainWhy;
+		const ready = fixtureTurnsPassed;
 		const run = await runSessionLegs({
 			c,
 			fixture,
@@ -5873,9 +5947,34 @@ async function runPaidLeg(
 		}
 	}
 
+	// Session consumer legs (E05): after the session legs, on the same reservation, never after an uncertain effect.
+	if (SESSION_CONSUMER_FAMILIES.includes(c.family)) {
+		const run = await runSessionConsumerLegs({
+			...sessionContext(),
+			config,
+			workspace: ctx.workspace,
+			operatorHome: ctx.operatorHome,
+			binaryPath: file,
+			model: primary,
+			effort: (config.selection?.effort?.trim() ?? '') || null,
+			uncertain: uncertainWhy,
+		});
+		receipt.sessionConsumers = run.legs;
+		receipt.spawned += run.spawned;
+		receipt.paidRequests += run.sent;
+		if (run.uncertainWhy) {
+			uncertainWhy = run.uncertainWhy;
+			receipt.reasons.push(paidReason(run.uncertainWhy, 'session consumer leg', 'GT1-11-11C2'));
+		}
+	}
+
 	// Settle or release exactly once: an unknown or partial charge stays uncertain, never zero.
 	const sentTurns = receipt.paidRequests;
-	const allTurns = [...receipt.turns, ...receipt.sessionLegs.flatMap((l) => l.turns)];
+	const allTurns = [
+		...receipt.turns,
+		...receipt.sessionLegs.flatMap((l) => l.turns),
+		...receipt.sessionConsumers.flatMap((l) => l.turns),
+	];
 	let settled: SpendReservation;
 	if (reservation.turnsUsed === 0 && reservation.callsUsed === 0 && !reservation.uncertainEffect)
 		settled = releaseReservation(ledger, reservation.id, ctx.now());
@@ -5950,7 +6049,8 @@ async function runPaidLeg(
 			? 'not-run'
 			: receipt.reasons.length ||
 				  receipt.assertions.some((a) => a.outcome === 'failed') ||
-				  receipt.sessionLegs.some((l) => l.status === 'failed')
+				  receipt.sessionLegs.some((l) => l.status === 'failed') ||
+				  receipt.sessionConsumers.some((l) => l.status === 'failed')
 				? 'failed'
 				: 'passed';
 	return receipt;
@@ -6442,10 +6542,18 @@ function runNativeSessionTurn(a: {
 	});
 }
 
+/** What a turn-bearing leg (a session leg or a session consumer leg) records of its turns. */
+type TurnBearingReceipt = Pick<
+	SessionLegReceipt,
+	'reasons' | 'turns' | 'spawned' | 'paidRequests'
+> & {
+	leg: string;
+};
+
 /** Send one session-leg turn: built, then counted, then spawned; never sent when refused. */
 async function sendSessionTurn(
 	s: SessionLegContext,
-	r: SessionLegReceipt,
+	r: TurnBearingReceipt,
 	t: PaidFixtureTurn,
 	resumeId: string | null,
 	opts: {
@@ -6461,7 +6569,7 @@ async function sendSessionTurn(
 		return { run: null, uncertainWhy: null };
 	}
 	if (!s.admit(n, opts.as)) {
-		r.reasons.push(sessionReason('session-turn-refused', `turn ${n}`));
+		r.reasons.push(sessionReason('session-turn-refused', `turn ${n}`, ownerOfLeg(r.leg)));
 		return { run: null, uncertainWhy: null };
 	}
 	const run = await runNativeSessionTurn({
@@ -6480,7 +6588,9 @@ async function sendSessionTurn(
 	if (!run.neverRan) r.paidRequests++;
 	r.turns.push(run.turn);
 	if (run.neverRan) {
-		r.reasons.push(sessionReason('paid-spawn-failed', run.turn.spawnError ?? ''));
+		r.reasons.push(
+			sessionReason('paid-spawn-failed', run.turn.spawnError ?? '', ownerOfLeg(r.leg))
+		);
 		return { run, uncertainWhy: null };
 	}
 	const why = run.turn.timedOut
@@ -6490,7 +6600,7 @@ async function sendSessionTurn(
 			: run.turn.stdout.truncated || run.turn.stderr.truncated
 				? 'turn-output-unbounded'
 				: null;
-	if (why) r.reasons.push(sessionReason(why, `turn ${n}`));
+	if (why) r.reasons.push(sessionReason(why, `turn ${n}`, ownerOfLeg(r.leg)));
 	return { run, uncertainWhy: why };
 }
 
@@ -6976,6 +7086,862 @@ async function runSessionLegs(s: SessionLegContext): Promise<{
 	return { legs, spawned, sent, uncertainWhy };
 }
 
+// ---------------------------------------------------------------------------
+// Session consumer legs (GT1-11-11C2)
+// ---------------------------------------------------------------------------
+
+/** Case families whose paid leg carries the session consumer legs: the session family. */
+export const SESSION_CONSUMER_FAMILIES: readonly string[] = Object.freeze(['E05']);
+/** No playbook task owns the consumer legs against a remote home: the storage read, data dir and worktree are local. */
+export const SSH_SESSION_CONSUMER_LEGS_OWNER = 'unassigned-ssh-session-consumer-legs';
+/** No playbook task owns turn-bearing consumer legs on the ACP route (one stdio child per leg, no fresh argv turn). */
+export const ACP_SESSION_CONSUMER_LEGS_OWNER = 'unassigned-acp-session-consumer-legs';
+/** The desktop's worktree dispatch (`spawnWorktreeAgentAndDispatch`) runs over Electron IPC a script cannot register. */
+export const WORKTREE_SPAWN_IPC_OWNER = 'unassigned-worktree-spawn-ipc-leg';
+/** The owner agent id the context-handoff leg reads the history as. */
+export const SESSION_CONSUMER_OWNER_AGENT = 'qualify-e05-owner';
+/** The host identity a local bound read names: opaque to the storage, never a real installation id. */
+export const SESSION_CONSUMER_HOST_IDENTITY = 'qualify-local-host';
+/** The branch of the owned git worktree the agent-creation leg builds its worktree record on. */
+export const SESSION_CONSUMER_WORKTREE_BRANCH = 'qualify-e05-worktree';
+
+export type SessionConsumerLegId = 'context-handoff' | 'agent-creation' | 'template-dispatch';
+
+/** The consumer legs in run order, with the turns each may send. */
+export const SESSION_CONSUMER_LEGS: ReadonlyArray<{ id: SessionConsumerLegId; maxTurns: number }> =
+	Object.freeze([
+		{ id: 'context-handoff', maxTurns: 1 },
+		{ id: 'agent-creation', maxTurns: 1 },
+		{ id: 'template-dispatch', maxTurns: 2 },
+	]);
+
+/** The assertions each consumer leg must evaluate; a leg missing one cannot pass. */
+export const SESSION_CONSUMER_ASSERTIONS: Readonly<
+	Record<SessionConsumerLegId, readonly string[]>
+> = Object.freeze({
+	'context-handoff': ['extracted', 'digest-matches-export', 'injected-in-order', 'consumed'],
+	'agent-creation': ['records-built', 'inherited-settings', 'launch-plan', 'model-acknowledged'],
+	'template-dispatch': ['command-expanded', 'template-expanded', 'prompt-received'],
+});
+
+/** The custom AI command the template-dispatch leg expands, with the arguments typed after it. */
+export const SESSION_CONSUMER_COMMAND = Object.freeze({
+	command: '/qualify-token',
+	prompt: 'Reply with only this token: QUALIFY-{{AGENT_NAME}}-$ARGUMENTS-OK. Use no tool.',
+	args: 'ARG',
+});
+/** The prompt template the template-dispatch leg expands. */
+export const SESSION_CONSUMER_TEMPLATE =
+	'Working in {{TOOL_TYPE}}. Reply with only this token: QUALIFY-{{GIT_BRANCH}}-TPL-OK. Use no tool.';
+/** A variable or argument placeholder the expansion left behind. */
+const UNEXPANDED_VARIABLE = /\{\{[A-Za-z0-9_]+\}\}|\$ARGUMENTS/;
+/** Reply tokens of the fixture and session-leg turns. */
+const REPLY_TOKEN = /QUALIFY-[A-Z0-9-]+-OK/g;
+const HANDOFF_INSTRUCTION =
+	'The text above is a conversation handed off from another session. Find the token the ' +
+	'assistant replied with in the final turn of that conversation, replace its final OK with ' +
+	'HANDOFF, and reply with only the result. Use no tool.';
+const AGENT_CREATION_TOKEN = 'QUALIFY-E05-AGENT-OK';
+const AGENT_CREATION_PROMPT = `Reply with only this token: ${AGENT_CREATION_TOKEN}. Use no tool.`;
+
+const SESSION_CONSUMER_LEG_IDS: readonly string[] = SESSION_CONSUMER_LEGS.map((l) => l.id);
+
+/** The task that owns a turn-bearing leg's reasons: GT1-11-11C2 for a consumer leg, GT1-11-11C1 otherwise. */
+function ownerOfLeg(leg: string): string {
+	return SESSION_CONSUMER_LEG_IDS.includes(leg) ? 'GT1-11-11C2' : 'GT1-11-11C1';
+}
+
+export interface SessionConsumerReceipt {
+	leg: SessionConsumerLegId;
+	/** not-run: refused before anything was written or sent; not-evaluated: an honest gap with an owner. */
+	status: 'not-run' | 'not-evaluated' | 'passed' | 'failed';
+	reasons: AdmissionReason[];
+	turns: PaidTurnResult[];
+	/** Every assertion the leg evaluated, each from production output. */
+	assertions: ConsumerAssertion[];
+	/** The leg's verdict: passed only when every required assertion was evaluated and passed. */
+	assertion: PaidAssertionOutcome;
+	/** What the leg observed beyond its turns (decisions, ids, plan checks); never transcript text. */
+	observed: Record<string, unknown>;
+	/** sha256 of each payload the leg compared (export, handoff, prompt, store, expansions). */
+	digests: Record<string, string | null>;
+	/** The owned root the leg wrote under (data dir, git worktree); null when it wrote nothing. */
+	root: string | null;
+	/** Turns spawned plus the owned local git children of the agent-creation leg. */
+	spawned: number;
+	paidRequests: number;
+}
+
+interface SessionConsumerContext extends SessionLegContext {
+	config: QualificationConfig;
+	workspace: string;
+	operatorHome: string;
+	/** The pinned binary every launch plan names. */
+	binaryPath: string;
+	/** The leg's model and effort: what a created agent must inherit and its plan must carry. */
+	model: string;
+	effort: string | null;
+	/** Why an earlier leg left an effect uncertain; null when none did. */
+	uncertain: string | null;
+}
+
+const consumerLegReason = (id: string, detail: string, owner = 'GT1-11-11C2') =>
+	paidReason(id, detail, owner);
+
+type BoundRead = Awaited<ReturnType<GrokSessionStorage['readSessionMessages']>>;
+
+/** The value after a flag (`-m x`, `--flag=x`); null when absent. */
+function argValue(args: readonly string[], flag: string): string | null {
+	for (let i = 0; i < args.length; i++) {
+		if (args[i] === flag) return args[i + 1] ?? null;
+		if (args[i].startsWith(`${flag}=`)) return args[i].slice(flag.length + 1);
+	}
+	return null;
+}
+
+/**
+ * The binding the desktop's `agentSessions:read` handler observes for a local
+ * Grok read: the real project, the real account dir and its account reference.
+ * The host identity is the qualification's own opaque value.
+ */
+function localGrokReadBinding(
+	home: string,
+	projectPath: string,
+	sessionId: string
+): Extract<NativeSessionBinding, { state: 'bound' }> | null {
+	try {
+		const cwd = fs.realpathSync(projectPath);
+		const configDir = fs.realpathSync(home);
+		const accountRef = resolveAgentAccountRef(
+			{ toolType: 'grok', managedAccountDir: configDir },
+			{ homeDir: '' }
+		);
+		if (!accountRef) return null;
+		return {
+			version: 1,
+			state: 'bound',
+			provider: 'grok',
+			nativeSessionId: sessionId,
+			accountRef,
+			cwd,
+			host: { kind: 'local', identity: SESSION_CONSUMER_HOST_IDENTITY },
+		};
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * A bound read of an owned Grok session as the handler performs it: account
+ * dir pinned, the binding handed to the storage, and the storage's own binding
+ * checked back (a read the storage cannot vouch for reads as unknown).
+ */
+async function boundGrokRead(
+	home: string,
+	projectPath: string,
+	sessionId: string,
+	options: { offset?: number; limit?: number; includeNativeRecords?: boolean }
+): Promise<BoundRead> {
+	const binding = localGrokReadBinding(home, projectPath, sessionId);
+	if (!binding)
+		return {
+			messages: [],
+			total: 0,
+			hasMore: false,
+			source: { provider: 'grok', status: 'unavailable', reason: 'history-scope-unobserved' },
+		} as BoundRead;
+	const result = await new GrokSessionStorage(home).readSessionMessages(binding.cwd, sessionId, {
+		offset: options.offset ?? 0,
+		limit: options.limit ?? 1000,
+		includeNativeRecords: options.includeNativeRecords,
+		configDir: fs.realpathSync(home),
+		nativeSessionBinding: structuredClone(binding),
+	});
+	if (
+		result.nativeSessionBinding?.state === 'bound' &&
+		canonicalJson(result.nativeSessionBinding) === canonicalJson(binding)
+	)
+		return result;
+	return {
+		...result,
+		nativeSessionBinding: { version: 1, state: 'unknown', reason: 'unobserved' },
+	};
+}
+
+/**
+ * Run the renderer's context extractor with its `agentSessions.read` call
+ * answered by the bound storage read over the owned home, then restore
+ * whatever `window` was before (none, in a script).
+ */
+async function withHistoryReadBridge<T>(home: string, run: () => Promise<T>): Promise<T> {
+	const g = globalThis as unknown as { window?: { maestro?: Record<string, unknown> } };
+	const had = Object.prototype.hasOwnProperty.call(g, 'window');
+	const host = g.window;
+	const read = (
+		agentId: string,
+		projectPath: string,
+		sessionId: string,
+		options?: { offset?: number; limit?: number; includeNativeRecords?: boolean }
+	) => {
+		if (agentId !== 'grok') throw new Error('The qualification bridge reads Grok history only.');
+		return boundGrokRead(home, projectPath, sessionId, options ?? {});
+	};
+	const previousMaestro = host?.maestro;
+	const bridged = {
+		// The extractor's store graph asks the platform once, at load.
+		platform: process.platform,
+		...(previousMaestro ?? {}),
+		agentSessions: { ...((previousMaestro?.agentSessions as object | undefined) ?? {}), read },
+	};
+	if (host && typeof host === 'object') host.maestro = bridged;
+	else g.window = { maestro: bridged };
+	try {
+		return await run();
+	} finally {
+		if (host && typeof host === 'object') {
+			if (previousMaestro === undefined) delete host.maestro;
+			else host.maestro = previousMaestro;
+		} else if (had) g.window = host;
+		else delete g.window;
+	}
+}
+
+/** The text a stored-context log entry carries after its `[Grok ...]` header. */
+function handedContentOf(text: string): string {
+	const k = text.indexOf('\n\n');
+	return k < 0 ? '' : text.slice(k + 2);
+}
+
+type SessionConsumerRunner = (
+	s: SessionConsumerContext,
+	r: SessionConsumerReceipt,
+	sessionId: string,
+	problems: string[]
+) => Promise<string | null>;
+
+const assertionOn =
+	(r: SessionConsumerReceipt) =>
+	(id: string, ok: boolean, detail: string): boolean => {
+		r.assertions.push({ id, outcome: ok ? 'passed' : 'failed', detail });
+		return ok;
+	};
+
+/**
+ * context-handoff: the owned session through the production context extractor
+ * (its read answered by the bound storage read) and the merge formatter, the
+ * handed-off payload digest equal to the storage export, then one fresh turn
+ * whose reply token is derived from the handed-off conversation (never in the
+ * prompt), proving the context was consumed rather than echoed.
+ */
+const runContextHandoffLeg: SessionConsumerRunner = async (s, r, id, problems) => {
+	const assert = assertionOn(r);
+	const home = s.accountRoot!;
+	let source: Awaited<ReturnType<ContextExtractorModule['extractStoredSessionContext']>> = null;
+	let exported: BoundRead | null = null;
+	let extractor: ContextExtractorModule;
+	try {
+		extractor = await withHistoryReadBridge(
+			home,
+			() => import('../../src/renderer/utils/contextExtractor')
+		);
+		const loaded = extractor;
+		source = await withHistoryReadBridge(home, () =>
+			loaded.extractStoredSessionContext('grok', s.cwd, id, {
+				ownerAgentId: SESSION_CONSUMER_OWNER_AGENT,
+			})
+		);
+		exported = await boundGrokRead(home, s.cwd, id, {
+			offset: 0,
+			limit: 1000,
+			includeNativeRecords: true,
+		});
+	} catch (e) {
+		problems.push(`handoff-extract-threw: ${errorText(e)}`);
+		return null;
+	}
+	const logs = source?.logs ?? [];
+	const provenance =
+		logs[0]?.source === 'system' && logs[0].text.startsWith('Grok context export:')
+			? logs[0]
+			: null;
+	const handed = logs.filter((l) => l !== provenance);
+	const handedContents = handed.map((l) => handedContentOf(l.text));
+	// Reasoning is omitted by the export visibility policy; everything else must cross.
+	const exportMessages = (exported?.messages ?? []).filter((m) => m.type !== 'reasoning');
+	const exportContents = exportMessages.map((m) => m.content);
+	r.observed = {
+		sourceSession: id,
+		entries: handed.length,
+		exportMessages: exportMessages.length,
+		omittedReasoning: (exported?.messages.length ?? 0) - exportMessages.length,
+		exportSource: exported?.source?.status ?? null,
+		binding: exported?.nativeSessionBinding?.state ?? null,
+	};
+	assert(
+		'extracted',
+		!!source &&
+			!!provenance &&
+			source.agentSessionId === id &&
+			handed.length > 0 &&
+			exported?.source?.status === 'available' &&
+			exported.nativeSessionBinding?.state === 'bound',
+		`source=${!!source} provenance=${!!provenance} sameId=${source?.agentSessionId === id} ` +
+			`entries=${handed.length} export=${exported?.source?.status ?? 'none'} ` +
+			`binding=${exported?.nativeSessionBinding?.state ?? 'none'}`
+	);
+	r.digests.export = sha256Of(canonicalJson(exportContents));
+	r.digests.handoff = sha256Of(canonicalJson(handedContents));
+	assert(
+		'digest-matches-export',
+		exportContents.length > 0 && !exported?.hasMore && r.digests.export === r.digests.handoff,
+		`export ${r.digests.export.slice(0, 12)} (${exportContents.length}) handoff ` +
+			`${r.digests.handoff.slice(0, 12)} (${handedContents.length}) hasMore=${!!exported?.hasMore}`
+	);
+	const injection = extractor.formatLogsForContextInjection(logs, { sourceAgentType: 'grok' });
+	const missing: number[] = [];
+	let at = 0;
+	handedContents.forEach((content, i) => {
+		const k = content ? injection.text.indexOf(content, at) : -1;
+		if (k < 0) missing.push(i + 1);
+		else at = k + content.length;
+	});
+	assert(
+		'injected-in-order',
+		handed.length > 0 &&
+			!missing.length &&
+			injection.omittedForBudget === 0 &&
+			injection.text.includes('Provenance: '),
+		`included=${injection.includedEntries} missing=${missing.join(',') || 'none'} ` +
+			`omittedForBudget=${injection.omittedForBudget}`
+	);
+	const lastReply = [...handed]
+		.reverse()
+		.find((l) => l.source !== 'user' && (handedContentOf(l.text).match(REPLY_TOKEN) ?? []).length);
+	const tokens = lastReply ? (handedContentOf(lastReply.text).match(REPLY_TOKEN) ?? []) : [];
+	const token = tokens.length ? tokens[tokens.length - 1] : null;
+	if (!token) {
+		assert('consumed', false, 'not sent: no reply token in the handed-off conversation');
+		return null;
+	}
+	const expect = `${token.slice(0, -2)}HANDOFF`;
+	const prompt = `${injection.text}\n\n${HANDOFF_INSTRUCTION}`;
+	r.digests.prompt = sha256Of(prompt);
+	if (prompt.includes(expect)) {
+		assert('consumed', false, 'not sent: the expected reply is already in the prompt');
+		return null;
+	}
+	if (r.assertions.some((a) => a.outcome === 'failed')) {
+		assert('consumed', false, 'not sent: the handed-off payload did not match the export');
+		return null;
+	}
+	const sent = await sendSessionTurn(s, r, { prompt, expect }, null);
+	if (!sent.run || sent.run.neverRan) return sent.uncertainWhy;
+	const run = sent.run;
+	r.observed.handoffSession = run.turn.sessionId;
+	assert(
+		'consumed',
+		turnSucceeded(run) &&
+			!!run.turn.sessionId &&
+			run.turn.sessionId !== id &&
+			!run.sessionIds.includes(id),
+		`replied=${run.turn.reply.tokenSeen} exit=${run.turn.exitCode} session=` +
+			(run.sessionIds.includes(id) ? 'resumed-source' : run.turn.sessionId ? 'fresh' : 'unnamed')
+	);
+	return sent.uncertainWhy;
+};
+
+/** A git child in an owned root: no operator config, no signing, no prompt, bounded. */
+function ownedGit(root: string, r: SessionConsumerReceipt) {
+	const env: NodeJS.ProcessEnv = {
+		PATH: process.env.PATH ?? '',
+		HOME: root,
+		GIT_CONFIG_GLOBAL: os.devNull,
+		GIT_CONFIG_NOSYSTEM: '1',
+		GIT_TERMINAL_PROMPT: '0',
+		GIT_AUTHOR_NAME: 'qualify',
+		GIT_AUTHOR_EMAIL: 'qualify@invalid',
+		GIT_COMMITTER_NAME: 'qualify',
+		GIT_COMMITTER_EMAIL: 'qualify@invalid',
+		...(process.env.SystemRoot ? { SystemRoot: process.env.SystemRoot } : {}),
+	};
+	return (cwd: string, args: string[]): { ok: boolean; stdout: string; detail: string } => {
+		r.spawned++;
+		const res = spawnSync('git', ['-c', 'commit.gpgsign=false', ...args], {
+			cwd,
+			env,
+			encoding: 'utf8',
+			timeout: 30_000,
+			windowsHide: true,
+			shell: false,
+		});
+		const ok = !res.error && res.status === 0;
+		return {
+			ok,
+			stdout: res.stdout ?? '',
+			detail: ok
+				? ''
+				: redactSecrets(res.error?.message ?? (res.stderr || `exit ${res.status}`))
+						.text.split(/\r?\n/)[0]
+						.slice(0, 200),
+		};
+	};
+}
+
+/**
+ * agent-creation: a custom record (`buildNewAgentRecord()` with the New Agent
+ * fields), its duplicate (the same builder with the source's fields, as the
+ * duplicate flow hands them to agent creation) and a worktree record
+ * (`buildWorktreeSession()`) over an owned git worktree, written to and read
+ * back from an owned data dir; each first launch planned through
+ * `applyAgentConfigOverrides()` and `buildAgentLaunchPlan()` must carry the
+ * inherited account dir, model, effort and remote, and the paid turn must
+ * acknowledge the model the worktree record inherited.
+ */
+const runAgentCreationLeg: SessionConsumerRunner = async (s, r, _id, problems) => {
+	const assert = assertionOn(r);
+	const made = prepareConsumerRoot(s.c, s.config, 'agent-creation', {
+		workspace: s.workspace,
+		operatorHome: s.operatorHome,
+	});
+	if ('refused' in made) {
+		r.reasons.push(consumerLegReason(made.refused, made.detail));
+		return null;
+	}
+	r.root = made.root;
+	const repo = path.join(made.root, 'repo');
+	const worktree = path.join(made.root, 'worktree');
+	const dataDir = path.join(made.root, 'data');
+	fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+	writeOwned(path.join(repo, 'README.md'), 'Synthetic qualification repository.\n');
+	const git = ownedGit(made.root, r);
+	for (const step of [
+		['init', '-q', '-b', 'main'],
+		['add', 'README.md'],
+		['commit', '-q', '-m', 'qualify'],
+		['worktree', 'add', '-q', '-b', SESSION_CONSUMER_WORKTREE_BRANCH, worktree],
+	]) {
+		const g = git(repo, step);
+		if (!g.ok) {
+			problems.push(`git-${step[0]}-failed: ${g.detail}`);
+			return null;
+		}
+	}
+	const repoReal = fs.realpathSync(repo);
+	const worktreeReal = fs.realpathSync(worktree);
+	const account = s.accountRoot!;
+	const envVar = getProviderProfileConfig('grok')?.envVar ?? 'GROK_HOME';
+	const custom = {
+		...buildNewAgentRecord(
+			{
+				id: 'qualify-e05-custom',
+				name: 'Qualify E05 Custom',
+				toolType: 'grok',
+				cwd: repoReal,
+				saveToHistory: false,
+			},
+			{ generateId: randomUUID }
+		),
+		customModel: s.model,
+		customEffort: s.effort ?? undefined,
+		customEnvVars: { [envVar]: account } as Record<string, string>,
+		sessionSshRemoteConfig: { enabled: false, remoteId: null } as AgentSshRemoteConfig,
+	};
+	const duplicate = {
+		...buildNewAgentRecord(
+			{
+				id: 'qualify-e05-duplicate',
+				name: `${custom.name} (copy)`,
+				toolType: custom.toolType,
+				cwd: custom.cwd,
+				saveToHistory: false,
+			},
+			{ generateId: randomUUID }
+		),
+		customModel: custom.customModel,
+		customEffort: custom.customEffort,
+		customEnvVars: custom.customEnvVars ? { ...custom.customEnvVars } : undefined,
+		sessionSshRemoteConfig: custom.sessionSshRemoteConfig
+			? { ...custom.sessionSshRemoteConfig }
+			: undefined,
+	};
+	const worktreeRecord = buildWorktreeSession({
+		parentSession: custom as unknown as RendererSession,
+		path: worktreeReal,
+		branch: SESSION_CONSUMER_WORKTREE_BRANCH,
+		name: 'Qualify E05 Worktree',
+		defaultSaveToHistory: false,
+		defaultShowThinking: 'off',
+	});
+	await writeSessionsStoreFile(dataDir, {
+		sessions: [custom, duplicate, worktreeRecord],
+	} as unknown as SessionsStoreData);
+	r.digests.store = digestOrNull(path.join(dataDir, 'maestro-sessions.json'));
+	type StoredRecord = {
+		id?: string;
+		toolType?: string;
+		cwd?: string;
+		aiTabs?: unknown[];
+		parentSessionId?: string;
+		worktreeBranch?: string;
+		customModel?: string;
+		customEffort?: string;
+		customEnvVars?: Record<string, string>;
+		sessionSshRemoteConfig?: AgentSshRemoteConfig;
+	};
+	const stored = readSessionsStoreFile(dataDir).sessions as unknown as StoredRecord[];
+	const byId = (x: string) => stored.find((rec) => rec.id === x) ?? null;
+	const records: Record<'custom' | 'duplicate' | 'worktree', StoredRecord | null> = {
+		custom: byId(custom.id),
+		duplicate: byId(duplicate.id),
+		worktree: byId(worktreeRecord.id),
+	};
+	const listed = git(repo, ['worktree', 'list', '--porcelain']);
+	const slash = (p: string) => p.replace(/\\/g, '/');
+	const worktreeListed =
+		listed.ok &&
+		listed.stdout
+			.split(/\r?\n/)
+			.some((line) => line.startsWith('worktree ') && slash(line.slice(9)) === slash(worktreeReal));
+	const recordsOk =
+		Object.values(records).every(
+			(x) => x && x.toolType === 'grok' && Array.isArray(x.aiTabs) && x.aiTabs.length === 1
+		) &&
+		new Set(Object.values(records).map((x) => x?.id)).size === 3 &&
+		records.worktree?.parentSessionId === custom.id &&
+		records.worktree.worktreeBranch === SESSION_CONSUMER_WORKTREE_BRANCH &&
+		records.worktree.cwd === worktreeReal;
+	assert(
+		'records-built',
+		recordsOk && worktreeListed,
+		`stored=${stored.length} parent=${records.worktree?.parentSessionId === custom.id} ` +
+			`branch=${records.worktree?.worktreeBranch ?? 'none'} worktreeListed=${worktreeListed}`
+	);
+	const settings = (x: StoredRecord | null) =>
+		x
+			? canonicalJson({
+					model: x.customModel ?? null,
+					effort: x.customEffort ?? null,
+					account: x.customEnvVars?.[envVar] ?? null,
+					remote: x.sessionSshRemoteConfig ?? null,
+				})
+			: null;
+	const parent = settings(records.custom);
+	const accountDirs = Object.fromEntries(
+		Object.entries(records).map(([k, x]) => [
+			k,
+			x
+				? (resolveAgentAccountDir(
+						{
+							toolType: 'grok',
+							customEnvVars: x.customEnvVars,
+							sshRemote: x.sessionSshRemoteConfig?.enabled === true,
+						},
+						// An owned home dir: a record that lost its account must not resolve to the operator's.
+						{ homeDir: made.root, env: {} }
+					) ?? null)
+				: null,
+		])
+	);
+	const sameAccount = (d: string | null) =>
+		!!d && normalizeFor('local', path.resolve(d)) === normalizeFor('local', path.resolve(account));
+	const inherited = {
+		duplicate: !!parent && settings(records.duplicate) === parent,
+		worktree: !!parent && settings(records.worktree) === parent,
+		model: records.custom?.customModel === s.model,
+		accounts: Object.values(accountDirs).every(sameAccount),
+	};
+	assert(
+		'inherited-settings',
+		Object.values(inherited).every(Boolean),
+		Object.entries(inherited)
+			.map(([k, v]) => `${k}=${v}`)
+			.join(' ')
+	);
+	const def = getAgentDefinition('grok');
+	const plans = Object.entries(records).map(([k, x]) => {
+		if (!x || !def)
+			return { record: k, ok: false, detail: 'record-or-definition-absent', model: null };
+		try {
+			const resolution = applyAgentConfigOverrides(
+				def,
+				[...(def.jsonOutputArgs ?? []), ...(def.readOnlyArgs ?? [])],
+				{
+					sessionCustomModel: x.customModel,
+					sessionCustomEffort: x.customEffort,
+					sessionCustomEnvVars: x.customEnvVars,
+					readOnlyMode: true,
+				}
+			);
+			const planned = buildAgentLaunchPlan({
+				surface: 'cli',
+				agent: def,
+				command: s.binaryPath,
+				args: resolution.args,
+				cwd: x.cwd ?? '',
+				prompt: AGENT_CREATION_PROMPT,
+				sessionCustomEnvVars: resolution.effectiveCustomEnvVars,
+				sshRemoteConfig: x.sessionSshRemoteConfig ?? null,
+				readOnlyMode: true,
+				permissionMode: 'readonly',
+			});
+			if (!planned.ok) return { record: k, ok: false, detail: planned.reason, model: null };
+			const p = planned.plan;
+			const model = argValue(p.args, '-m');
+			const effort = argValue(p.args, '--reasoning-effort');
+			const planAccount = p.envVars?.[envVar] ?? null;
+			const checks = {
+				local: p.target.kind === 'local',
+				cwd: p.cwd === x.cwd,
+				model: model === s.model,
+				effort: effort === s.effort,
+				account: sameAccount(planAccount),
+			};
+			const bad = Object.entries(checks)
+				.filter(([, v]) => !v)
+				.map(([n]) => n);
+			return { record: k, ok: !bad.length, detail: bad.join(',') || 'ok', model };
+		} catch (e) {
+			return { record: k, ok: false, detail: `threw:${(e as Error).name}`, model: null };
+		}
+	});
+	r.observed = {
+		records: Object.keys(records),
+		launchPlans: plans,
+		accountDirs: Object.fromEntries(
+			Object.entries(accountDirs).map(([k, d]) => [k, sameAccount(d) ? 'owned-account' : d])
+		),
+		worktreeSpawn: { evaluated: false, owner: WORKTREE_SPAWN_IPC_OWNER },
+	};
+	assert(
+		'launch-plan',
+		plans.length === 3 && plans.every((p) => p.ok),
+		plans.map((p) => `${p.record}:${p.detail}`).join(' ')
+	);
+	if (r.assertions.some((a) => a.outcome === 'failed')) {
+		assert('model-acknowledged', false, 'not sent: a record or launch-plan assertion failed');
+		return null;
+	}
+	const planModel = plans.find((p) => p.record === 'worktree')?.model ?? null;
+	const argvModel = argValue(s.nativeArgv(AGENT_CREATION_PROMPT, null), '-m');
+	const sent = await sendSessionTurn(
+		s,
+		r,
+		{ prompt: AGENT_CREATION_PROMPT, expect: AGENT_CREATION_TOKEN },
+		null
+	);
+	if (!sent.run || sent.run.neverRan) return sent.uncertainWhy;
+	const acknowledged = sent.run.turn.model;
+	const inheritedModel = records.worktree?.customModel ?? '';
+	assert(
+		'model-acknowledged',
+		turnSucceeded(sent.run) &&
+			argvModel === planModel &&
+			!!acknowledged &&
+			normalizeModelId(acknowledged) === normalizeModelId(inheritedModel),
+		`argvMatchesPlan=${argvModel === planModel} acknowledged=${acknowledged ?? 'none'} ` +
+			`replied=${sent.run.turn.reply.tokenSeen}`
+	);
+	return sent.uncertainWhy;
+};
+
+/**
+ * template-dispatch: a custom AI command expanded as the desktop queue expands
+ * it (`expandCommandArguments()` then `substituteTemplateVariables()`) and a
+ * prompt template through the same substitution. Each expanded text must leave
+ * no variable, be the exact prompt the turn's argv carries, and be answered
+ * with a token only the expansion produced (an unexpanded echo cannot pass).
+ */
+const runTemplateDispatchLeg: SessionConsumerRunner = async (s, r) => {
+	const assert = assertionOn(r);
+	const nonce = randomBytes(4).toString('hex').toUpperCase();
+	const record = buildNewAgentRecord(
+		{ id: 'qualify-e05-template', name: `E05-CMD-${nonce}`, toolType: 'grok', cwd: s.cwd },
+		{ generateId: randomUUID }
+	);
+	const session = record as unknown as RendererSession;
+	const C = SESSION_CONSUMER_COMMAND;
+	const commandText = substituteTemplateVariables(expandCommandArguments(C.prompt, C.args), {
+		session,
+		groupId: record.groupId,
+		activeTabId: record.activeTabId,
+	});
+	const commandToken = `QUALIFY-E05-CMD-${nonce}-${C.args}-OK`;
+	const branch = `E05-TPL-${nonce}`;
+	const templateText = substituteTemplateVariables(SESSION_CONSUMER_TEMPLATE, {
+		session,
+		gitBranch: branch,
+	});
+	const templateToken = `QUALIFY-${branch}-TPL-OK`;
+	r.digests.command = sha256Of(commandText);
+	r.digests.template = sha256Of(templateText);
+	assert(
+		'command-expanded',
+		!UNEXPANDED_VARIABLE.test(commandText) &&
+			commandText === `Reply with only this token: ${commandToken}. Use no tool.`,
+		`unexpanded=${UNEXPANDED_VARIABLE.test(commandText)} carriesReply=${commandText.includes(commandToken)}`
+	);
+	assert(
+		'template-expanded',
+		!UNEXPANDED_VARIABLE.test(templateText) &&
+			templateText ===
+				`Working in grok. Reply with only this token: ${templateToken}. Use no tool.`,
+		`unexpanded=${UNEXPANDED_VARIABLE.test(templateText)} carriesReply=${templateText.includes(templateToken)}`
+	);
+	if (r.assertions.some((a) => a.outcome === 'failed')) {
+		assert('prompt-received', false, 'not sent: an expansion assertion failed');
+		return null;
+	}
+	const received: string[] = [];
+	let why: string | null = null;
+	for (const [text, token] of [
+		[commandText, commandToken],
+		[templateText, templateToken],
+	] as const) {
+		const argv = s.nativeArgv(text, null);
+		const handed = argv.includes(text) && !argv.some((a) => UNEXPANDED_VARIABLE.test(a));
+		const sent = await sendSessionTurn(s, r, { prompt: text, expect: token }, null);
+		if (!sent.run || sent.run.neverRan) {
+			why = sent.uncertainWhy;
+			received.push('not-sent');
+			break;
+		}
+		received.push(
+			handed && turnSucceeded(sent.run)
+				? 'received'
+				: `handed=${handed} replied=${sent.run.turn.reply.tokenSeen} exit=${sent.run.turn.exitCode}`
+		);
+		if (sent.uncertainWhy) {
+			why = sent.uncertainWhy;
+			break;
+		}
+	}
+	assert(
+		'prompt-received',
+		received.length === 2 && received.every((x) => x === 'received'),
+		received.join('; ')
+	);
+	return why;
+};
+
+const SESSION_CONSUMER_RUNNERS: Record<SessionConsumerLegId, SessionConsumerRunner> = {
+	'context-handoff': runContextHandoffLeg,
+	'agent-creation': runAgentCreationLeg,
+	'template-dispatch': runTemplateDispatchLeg,
+};
+
+/** Close a consumer leg: passed only when every required assertion passed with no reason or problem. */
+function settleSessionConsumer(
+	r: SessionConsumerReceipt,
+	problems: string[]
+): SessionConsumerReceipt {
+	if (r.reasons.length && r.spawned === 0 && !r.assertions.length && !problems.length) {
+		r.status = 'not-run';
+		r.assertion = {
+			id: r.leg,
+			outcome: 'not-evaluated',
+			detail: r.reasons.map((x) => x.id).join('; '),
+			owner: 'GT1-11-11C2',
+		};
+		return r;
+	}
+	const required = SESSION_CONSUMER_ASSERTIONS[r.leg];
+	const all = [
+		...r.reasons.map((x) => x.id),
+		...problems,
+		...r.assertions.filter((a) => a.outcome === 'failed').map((a) => `failed:${a.id}`),
+		...required
+			.filter((id) => !r.assertions.some((a) => a.id === id))
+			.map((id) => `assertion-not-evaluated:${id}`),
+	];
+	r.status = all.length ? 'failed' : 'passed';
+	r.assertion = {
+		id: r.leg,
+		outcome: all.length ? 'failed' : 'passed',
+		detail: all.join('; ') || `${required.length} assertions passed`,
+	};
+	return r;
+}
+
+/**
+ * The session consumer legs of an E05 leg, after its session legs, on the same
+ * reservation and the owned account home and project only. Each turn is
+ * counted before it is sent; an uncertain effect stops every later leg.
+ */
+async function runSessionConsumerLegs(s: SessionConsumerContext): Promise<{
+	legs: SessionConsumerReceipt[];
+	spawned: number;
+	sent: number;
+	uncertainWhy: string | null;
+}> {
+	const legs: SessionConsumerReceipt[] = [];
+	let spawned = 0;
+	let sent = 0;
+	let uncertainWhy: string | null = null;
+	const sessionId = s.mainTurns[0]?.sessionId ?? null;
+	for (const spec of SESSION_CONSUMER_LEGS) {
+		const r: SessionConsumerReceipt = {
+			leg: spec.id,
+			status: 'not-run',
+			reasons: [],
+			turns: [],
+			assertions: [],
+			assertion: { id: spec.id, outcome: 'not-evaluated', detail: '', owner: 'GT1-11-11C2' },
+			observed: {},
+			digests: {},
+			root: null,
+			spawned: 0,
+			paidRequests: 0,
+		};
+		const gap = (detail: string, owner: string) => {
+			r.status = 'not-evaluated';
+			r.assertion = { id: spec.id, outcome: 'not-evaluated', detail, owner };
+		};
+		const uncertain = s.uncertain ?? uncertainWhy;
+		if (!s.capabilities.sessionConsumers)
+			r.reasons.push(consumerLegReason('session-consumers-unimplemented', spec.id));
+		else if (s.blocked) r.reasons.push(consumerLegReason(s.blocked, spec.id));
+		else if (uncertain) r.reasons.push(consumerLegReason('uncertain-prior-effect', uncertain));
+		else if (s.c.target === 'ssh')
+			gap(
+				'consumer legs read a local owned home and write a local data dir and worktree only',
+				SSH_SESSION_CONSUMER_LEGS_OWNER
+			);
+		else if (s.c.route !== 'native-headless')
+			gap('the ACP route has no turn-bearing consumer leg', ACP_SESSION_CONSUMER_LEGS_OWNER);
+		else if (!s.accountRoot) r.reasons.push(consumerLegReason('account-root-unknown', spec.id));
+		else if (!sessionId) r.reasons.push(consumerLegReason('session-id-missing', spec.id));
+		else if (spec.maxTurns > s.remainingTurns())
+			r.reasons.push(
+				consumerLegReason(
+					'session-consumer-turns-unavailable',
+					`${spec.maxTurns} > ${s.remainingTurns()}`
+				)
+			);
+		if (r.reasons.length) {
+			r.assertion.detail = r.reasons.map((x) => x.id).join('; ');
+			legs.push(r);
+			continue;
+		}
+		if (r.status === 'not-evaluated') {
+			legs.push(r);
+			continue;
+		}
+		const problems: string[] = [];
+		let why: string | null = null;
+		try {
+			why = await SESSION_CONSUMER_RUNNERS[spec.id](s, r, sessionId!, problems);
+		} catch (e) {
+			problems.push(`${spec.id}-threw: ${errorText(e)}`);
+		}
+		settleSessionConsumer(r, problems);
+		spawned += r.spawned;
+		sent += r.paidRequests;
+		if (why) uncertainWhy = why;
+		legs.push(r);
+	}
+	return { legs, spawned, sent, uncertainWhy };
+}
+
 /** Bounds of one owned-home inspection; past either, the home cannot be vouched for and the verdict fails. */
 export const HOME_SCAN_LIMITS = Object.freeze({ entries: 4096, bytes: 16 * 1024 * 1024 });
 
@@ -7187,6 +8153,7 @@ export async function executePaidCase(
 		remote: null,
 		resources: null,
 		sessionLegs: [],
+		sessionConsumers: [],
 	});
 	if (reasons.length || !fixture) return accounts.map(refused);
 	// What each owned home listed before the legs: the colliding-ID verdict judges only what they added.
@@ -7640,7 +8607,7 @@ export function admitConsumerLegs(
 function prepareConsumerRoot(
 	c: QualificationCase,
 	config: QualificationConfig,
-	leg: ConsumerLegName,
+	leg: string,
 	ctx: { workspace: string; operatorHome: string }
 ): { root: string } | { refused: string; detail: string } {
 	const roots = config.allowedRoots.map((r) => path.resolve(ctx.workspace, r));
