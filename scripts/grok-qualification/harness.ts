@@ -5904,6 +5904,7 @@ async function runPaidLeg(
 			Math.min(reservation.turnAllowance - reservation.turnsUsed, ledger.limitTurns - ledger.turns),
 		callsByKind: () => ({ ...reservation.callsByKind }),
 		callsDrawn: () => callsDrawn,
+		baselineCalls: () => paidCallsPerTurn(config, reservation),
 		launcher,
 		nativeArgv,
 		turnMs,
@@ -5932,6 +5933,7 @@ async function runPaidLeg(
 				),
 			callsByKind: () => ({ ...reservation.callsByKind }),
 			callsDrawn: () => callsDrawn,
+			baselineCalls: () => paidCallsPerTurn(config, reservation),
 			launcher,
 			nativeArgv,
 			turnMs,
@@ -6343,6 +6345,8 @@ interface SessionLegContext {
 	remainingTurns: () => number;
 	callsByKind: () => Record<BillableCallKind, number>;
 	callsDrawn: () => Record<BillableCallKind, number>;
+	/** The per-turn draws of a plain send (`paidCallsPerTurn()` for the reservation). */
+	baselineCalls: () => Record<BillableCallKind, number>;
 	launcher: LegLauncher;
 	nativeArgv: (prompt: string, resumeId: string | null) => string[];
 	turnMs: () => number;
@@ -6860,8 +6864,22 @@ const runCompactionLeg: SessionLegRunner = async (spec, s, r) => {
 			null
 		);
 	}
-	const draws = (before: Record<BillableCallKind, number>, kind: BillableCallKind) =>
-		s.callsByKind()[kind] - before[kind];
+	// Each counted send is judged on what that turn itself drew: exactly one call of
+	// its own kind beyond a plain send's per-turn draws (whatever `retries` or
+	// `compaction` allowance those carry), with every draw on the reservation.
+	const baseline = s.baselineCalls();
+	const counted = (
+		run: SessionTurnRun,
+		before: Record<BillableCallKind, number>,
+		kind: 'compaction' | 'retry'
+	): boolean => {
+		const drawn = run.turn.callsRecorded;
+		const after = s.callsByKind();
+		return (
+			drawn[kind] === baseline[kind] + 1 &&
+			(Object.keys(drawn) as BillableCallKind[]).every((k) => after[k] - before[k] === drawn[k])
+		);
+	};
 	const k0 = s.callsByKind();
 	const compaction = await sendSessionTurn(s, r, { prompt: command, expect: '' }, id, {
 		as: 'compaction',
@@ -6870,7 +6888,7 @@ const runCompactionLeg: SessionLegRunner = async (spec, s, r) => {
 	(observed.callsByKind as unknown[]).push(s.callsByKind());
 	if (!compaction.run || compaction.uncertainWhy)
 		return closeLeg(r, failures, '', compaction.uncertainWhy);
-	if (draws(k0, 'compaction') !== 1) failures.push('compaction-uncounted');
+	if (!counted(compaction.run, k0, 'compaction')) failures.push('compaction-uncounted');
 	if (compaction.run.turn.exitCode !== 0 || compaction.run.turn.terminal !== 'success')
 		failures.push('compaction-failed');
 	if (compaction.run.turn.sessionId && compaction.run.turn.sessionId !== id)
@@ -6881,7 +6899,7 @@ const runCompactionLeg: SessionLegRunner = async (spec, s, r) => {
 	observed.retrySends = retry.run ? 1 : 0;
 	(observed.callsByKind as unknown[]).push(s.callsByKind());
 	if (!retry.run || retry.uncertainWhy) return closeLeg(r, failures, '', retry.uncertainWhy);
-	if (draws(k1, 'retry') !== 1) failures.push('retry-uncounted');
+	if (!counted(retry.run, k1, 'retry')) failures.push('retry-uncounted');
 	const refusedAgain = retry.run.errorType === 'token_exhaustion';
 	if (!refusedAgain && !turnSucceeded(retry.run)) failures.push('retry-failed');
 	if (retry.run.turn.sessionId && retry.run.turn.sessionId !== id)
