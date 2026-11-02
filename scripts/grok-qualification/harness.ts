@@ -11658,6 +11658,45 @@ function cueAgentRecord(w: WorkflowLegContext, project: string) {
 }
 
 /**
+ * The standalone Cue engine module, with the process map of the lifecycle copy
+ * its executors spawn through (types only: the modules are bundled at run time).
+ */
+type CueStandaloneEngineModule = typeof import('../../src/cli/services/cue-standalone-engine') & {
+	standaloneActiveProcessMap: (typeof import('../../src/main/cue/cue-process-lifecycle'))['getActiveProcessMap'];
+};
+
+/**
+ * Load the standalone Cue engine as it is in the checkout. Its notify and auth
+ * paths reach modules that import Electron by name (`safe-send`,
+ * `bridgeHandlers`, `cue-notify-bridge`, the stores), and a plain lazy
+ * `import()` of it lets esbuild hoist that external import to the top of the
+ * harness bundle, which plain Node then refuses at load (A11-F24). It is
+ * bundled at run time through the Electron stand-in instead, so the harness
+ * bundle carries no top-level `electron` import. The stand-in state is read
+ * once at module evaluation, so it is released as soon as the module loads.
+ * The bundle carries its own copy of the Cue process lifecycle, so its process
+ * map is exported beside the engine: a headless stop must find the child in the
+ * map the standalone executor registered it in.
+ */
+async function loadCueStandaloneEngine(
+	workspace: string,
+	dataDir: string
+): Promise<CueStandaloneEngineModule> {
+	const src = (rel: string) => JSON.stringify(path.join(workspace, 'src', rel));
+	const loaded = await bundleMainEntry<CueStandaloneEngineModule>(
+		workspace,
+		dataDir,
+		'qualify-cue-standalone.ts',
+		[
+			`export * from ${src('cli/services/cue-standalone-engine.ts')};`,
+			`export { getActiveProcessMap as standaloneActiveProcessMap } from ${src('main/cue/cue-process-lifecycle.ts')};`,
+		]
+	);
+	loaded.dispose();
+	return loaded.mod;
+}
+
+/**
  * One Cue leg: the production `CueEngine` over an owned project, data dir and
  * account home, with the desktop's run router and executors
  * (`cue-prompt-desktop`) or the standalone engine's own dependencies
@@ -11785,7 +11824,7 @@ async function runCueLeg(
 				import('../../src/main/cue/cue-spawn-builder'),
 				import('../../src/shared/cue/turn-settings'),
 				import('../../src/shared/maestro-lib/parsers'),
-				import('../../src/cli/services/cue-standalone-engine'),
+				loadCueStandaloneEngine(w.workspace, dataDir),
 			]);
 			// The desktop registers every output parser at boot; the standalone engine does it on its first run.
 			parsers.initializeOutputParsers();
@@ -12062,7 +12101,10 @@ async function runCueLeg(
 							.getActiveRuns()
 							.find((x) => x.subscriptionName === CUE_SUBSCRIPTIONS.stop);
 						if (!active) return false;
-						const proc = lifecycle.getActiveProcessMap().get(active.runId);
+						const processMap = headless
+							? standalone.standaloneActiveProcessMap()
+							: lifecycle.getActiveProcessMap();
+						const proc = processMap.get(active.runId);
 						if (!proc?.child.pid || proc.toolType !== 'grok') return false;
 						// Stop only once the turn has produced output: a stop before that is a stop of a launch.
 						if (!proc.getStdout()) return false;
