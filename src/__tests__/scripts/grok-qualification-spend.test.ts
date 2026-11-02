@@ -14,6 +14,10 @@
  * and a run budget or turn limit exhausted by an earlier case refuses the
  * reservation, each with the child_process entry points spied and a pinned
  * stand-in that would leave a marker if it were ever started.
+ *
+ * GT1-11-11A4 adds the GT1-11-11A1..A3 legs to the same ledger: a discovery leg
+ * never reserves or charges, and an E07 leg with no selected effort or an SSH
+ * leg whose remote does not resolve refuses before any reservation.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -28,6 +32,7 @@ import {
 	admitCase,
 	createBudgetLedger,
 	createCaseLifetime,
+	executeDiscoveryCase,
 	executePaidCase,
 	expandCases,
 	markUncertainEffect,
@@ -798,6 +803,83 @@ describe('GT1-11-09 qualification spend admission', () => {
 					expect(snapshot(ledger), label).toBe(before);
 				}
 				expectNothingStarted();
+			});
+
+			it('discovery holds nothing; an unselected E07 effort or an unresolved SSH remote refuses before any reservation (GT1-11-11A4)', async () => {
+				const more = expandCases(
+					['E02', 'E07'].map((id) => ({
+						id,
+						requirementIds: [`R-${id}`],
+						ownerTasks: ['GT1-11-11A4'],
+						expectedInvariant: 'synthetic',
+						blockerIds: [],
+					}))
+				);
+				const pick = (id: string) => more.find((c) => c.caseId === id)!;
+				const caps = { ...ALL_CAPS, discoveryExecutor: true, sshExecutor: true };
+				const ops = {
+					authorizationReference: 'discovery:synthetic',
+					operations: ['native-model-catalog'],
+				};
+
+				// An E07 leg with no effort selected could only pass on the model default: refused unsent.
+				const e07 = pick('E07:native-headless:local');
+				const config = paidConfig({ discovery: ops, selection: { effort: null } });
+				const ledger = ledgerFor(config, e07);
+				const before = snapshot(ledger);
+				const [leg] = await executePaidCase(e07, config, {
+					workspace: WORKSPACE,
+					operatorHome: OPERATOR_HOME,
+					ledger,
+					lifetime: createCaseLifetime(1),
+					problems: [],
+					capabilities: caps,
+					now: () => NOW,
+				});
+				expect(ids(leg.reasons)).toEqual(['effort-unselected']);
+				expect(leg).toMatchObject({ status: 'not-run', spawned: 0, reservationId: null });
+				expect(snapshot(ledger)).toBe(before);
+
+				// An SSH leg whose approved target has no declaration does not resolve: nothing is held.
+				const ssh = caseOf('E03:acp-stdio:ssh');
+				const sshConfig = paidConfig({ sshRemotes: {} });
+				sshConfig.isolation = {
+					...sshConfig.isolation!,
+					remoteRoots: { 'qual-host': { root: '/srv/grok-qual', binarySha256: sha } },
+				};
+				const sshLedger = ledgerFor(sshConfig, ssh);
+				const sshBefore = snapshot(sshLedger);
+				const [remote] = await executePaidCase(ssh, sshConfig, {
+					workspace: WORKSPACE,
+					operatorHome: OPERATOR_HOME,
+					ledger: sshLedger,
+					lifetime: createCaseLifetime(1),
+					problems: [],
+					capabilities: caps,
+					now: () => NOW,
+				});
+				expect(ids(remote.reasons)).toContain('ssh-remote-unresolved');
+				expect(remote).toMatchObject({ spawned: 0, paidRequests: 0, reservationId: null });
+				expect(snapshot(sshLedger)).toBe(sshBefore);
+				expectNothingStarted();
+
+				// A discovery leg runs its one listing and never touches the spend ledger.
+				const e02 = pick('E02:native-headless:local');
+				const discovery = paidConfig({ discovery: ops });
+				const discoveryLedger = ledgerFor(discovery, e02);
+				const discoveryBefore = snapshot(discoveryLedger);
+				const [listed] = await executeDiscoveryCase(e02, discovery, {
+					workspace: WORKSPACE,
+					operatorHome: OPERATOR_HOME,
+					ledger: discoveryLedger,
+					lifetime: createCaseLifetime(1),
+					problems: [],
+					capabilities: caps,
+					now: () => NOW,
+				});
+				expect(listed.spawned, JSON.stringify(listed.reasons)).toBe(1);
+				expect(listed.paidRequests).toBe(0);
+				expect(snapshot(discoveryLedger)).toBe(discoveryBefore);
 			});
 		}
 	);

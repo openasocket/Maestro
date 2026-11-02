@@ -21,6 +21,15 @@
  * is the planned env with only the selected credential; a timeout stops the
  * owned child and keeps the charge uncertain, never retried; SSH and discovery
  * legs stay not-run with their owners.
+ *
+ * GT1-11-11A4 adds the discovery, identity and SSH legs (GT1-11-11A1..A3) on
+ * synthetic stand-ins in owned temp dirs (never a real Grok, credential or
+ * host; SSH through a local stand-in for the ssh client): discovery runs only
+ * its authorized operations with no prompt and keeps the catalog verbatim, auth
+ * failures are actionable with one child and no other account, E01 colliding
+ * ids pass isolated and fail on a planted record, binary resolution refuses any
+ * other or fallback install, E07 effort and gateway mismatches fail, and an
+ * unresolved SSH remote refuses with zero spawn and never runs locally.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -41,9 +50,11 @@ import {
 	RUNS_ROOT,
 	admitCase,
 	buildCandidateSnapshot,
+	buildSshSpawn,
 	createBudgetLedger,
 	createCaseLifetime,
 	defaultConfigFromRunState,
+	executeDiscoveryCase,
 	executeOfflineLeg,
 	executePaidCase,
 	expandCases,
@@ -53,7 +64,9 @@ import {
 	parseProbeVersion,
 	planCaseReservation,
 	planIsolatedLaunch,
+	planSshLeg,
 	runOfflineLeg,
+	runBinaryResolutionLeg,
 	preflightCase,
 	productionCapabilityDigest,
 	redactDeep,
@@ -66,7 +79,7 @@ import {
 	type QualificationCase,
 	type QualificationConfig,
 } from '../../../scripts/grok-qualification/harness';
-import { PAID_FIXTURES } from '../../../scripts/grok-qualification/paid-fixtures';
+import { PAID_FIXTURES, fixtureTurnsFor } from '../../../scripts/grok-qualification/paid-fixtures';
 import { getAgentCapabilities } from '../../../src/shared/maestro-lib/providers/capabilities';
 import { buildAgentEnvironment } from '../../../src/shared/maestro-lib/launch/env';
 
@@ -97,6 +110,12 @@ vi.mock('node:child_process', (importOriginal) => childProcess.factory(importOri
 vi.mock('child_process', (importOriginal) => childProcess.factory(importOriginal as never));
 const spawnSpies = childProcess.spies;
 const fetchSpy = vi.spyOn(globalThis, 'fetch');
+/** The ssh client the production SSH builder resolves; a test points it at a local stand-in (GT1-11-11A4). */
+const sshPath = vi.hoisted(() => ({ current: null as string | null }));
+vi.mock('../../../src/shared/maestro-lib/launch/ssh-path', async (importOriginal) => ({
+	...(await importOriginal<typeof import('../../../src/shared/maestro-lib/launch/ssh-path')>()),
+	resolveSshPath: async () => sshPath.current ?? 'ssh',
+}));
 
 const WORKSPACE = path.resolve(__dirname, '../../..');
 const RUN_STATE = JSON.parse(
@@ -2393,4 +2412,864 @@ describe('GT1-11-09 qualification harness', () => {
 			expect(runs()).toEqual([]);
 		});
 	});
+	describe.skipIf(process.platform === 'win32')(
+		'discovery, identity and SSH legs (GT1-11-11A4)',
+		() => {
+			const REL = `${RUNS_ROOT}/gt1-11-11a4-${process.pid}`;
+			const ROOT = path.join(WORKSPACE, REL);
+			const BIN = path.join(ROOT, 'bin', 'grok');
+			const LOG = path.join(ROOT, 'log');
+			/** The stand-in reads its mode from here, so its bytes (and the pin) are the same in every mode. */
+			const MODE_FILE = path.join(ROOT, 'mode');
+			const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-11a4-operator-${process.pid}`);
+			/** A directory outside every owned root, standing for another install on the machine. */
+			const ELSEWHERE = path.join(os.tmpdir(), `gt1-11-11a4-elsewhere-${process.pid}`);
+			const MODEL = 'claude-haiku-4-5';
+			/** Synthetic secret values the injected resolver hands out; never a credential. */
+			const SECRET = (name: string) => `synthetic-xai-${name}-value`;
+			type Mode =
+				| 'ok'
+				| 'badkey'
+				| 'denied'
+				| 'notlogged'
+				| 'authreq'
+				| 'loweffort'
+				| 'ignoreeffort'
+				| 'stray';
+			/**
+			 * The stand-in: a Node script (never a real Grok) that logs its argv, env,
+			 * every ACP method and every prompt, then answers the native `models`
+			 * listing, a native streaming-json turn, or the ACP stdio protocol. Native
+			 * turns keep their history under the account's own GROK_HOME with ONE
+			 * session id for every account, so two isolated legs collide by design.
+			 */
+			const standIn = (mode: Mode): string => {
+				fs.writeFileSync(MODE_FILE, mode);
+				if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+				fs.rmSync(LOG, { recursive: true, force: true });
+				fs.mkdirSync(LOG, { recursive: true });
+				const src = [
+					`#!${process.execPath}`,
+					"const fs = process.getBuiltinModule('fs');",
+					`const MODE = fs.readFileSync(${JSON.stringify(MODE_FILE)}, 'utf8').trim();`,
+					`const LOG = ${JSON.stringify(LOG)};`,
+					'const argv = process.argv.slice(2);',
+					"const acp = argv[0] === 'agent' && argv[1] === 'stdio';",
+					'fs.writeFileSync(`${LOG}/${process.pid}.json`, JSON.stringify({ argv, env: process.env, acp }));',
+					"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
+					"const log = (name, s) => fs.appendFileSync(`${LOG}/${name}`, s + '\\n');",
+					'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
+					"const tokenOf = (s) => (String(s).match(/QUALIFY-[A-Z0-9]+-T[0-9]+-OK/) || [''])[0];",
+					'const keep = (sid, text) => { const d = `${process.env.GROK_HOME}/sessions/synthetic-cwd/${sid}`; fs.mkdirSync(d, { recursive: true }); fs.appendFileSync(`${d}/chat_history.jsonl`, JSON.stringify({ type: "user", text }) + "\\n"); };',
+					"const fail = (line) => { process.stderr.write(line + '\\n'); process.exit(1); };",
+					'if (!acp) {',
+					"  if (MODE === 'badkey') fail('Error: invalid API key');",
+					"  if (MODE === 'denied') fail('Error: HTTP 403 model not allowed for this team');",
+					"  if (MODE === 'notlogged') fail('Error: not logged in. Run grok login or set XAI_API_KEY');",
+					"  if (argv[0] === 'models') { process.stdout.write('grok-4.5 (default)\\ngrok-composer-2.5-fast\\n'); process.exit(0); }",
+					"  log('prompts', 'native');",
+					"  const sid = 'gt1-11-11a4-colliding';",
+					"  keep(sid, at('-p'));",
+					"  if (MODE === 'stray' && process.env.GROK_HOME.endsWith('grok-a')) keep('gt1-11-11a4-stray', 'x');",
+					"  out({ type: 'text', data: tokenOf(at('-p')) });",
+					"  const effort = MODE === 'loweffort' ? 'low' : at('--reasoning-effort');",
+					'  const end = {',
+					"    type: 'end', stopReason: 'end_turn', requestId: 'req-synthetic', sessionId: sid, total_cost_usd: 0.001,",
+					'    usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_tokens: 0 },',
+					"    modelUsage: { [at('-m')]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.001 } },",
+					'  };',
+					'  if (effort) end.reasoning_effort = effort;',
+					'  out(end);',
+					'} else {',
+					"  const sid = 'gt1-11-11a4-acp';",
+					"  let effort = 'medium';",
+					"  const menu = () => [{ id: 'reasoning_effort', type: 'select', currentValue: effort, options: [{ value: 'low', name: 'Low' }, { value: 'medium', name: 'Medium' }, { value: 'high', name: 'High' }] }];",
+					"  let buf = '';",
+					"  const reply = (id, result) => out({ jsonrpc: '2.0', id, result });",
+					'  const handle = (m) => {',
+					"    log('methods', m.method);",
+					"    if (m.method === 'initialize') reply(m.id, { protocolVersion: 1, agentCapabilities: { loadSession: true } });",
+					"    else if (m.method === 'session/new') {",
+					"      if (MODE === 'authreq') return out({ jsonrpc: '2.0', id: m.id, error: { code: -32000, message: 'auth required' } });",
+					"      reply(m.id, { sessionId: sid, models: { currentModelId: (m.params._meta && m.params._meta.modelId) || 'grok-4.5', availableModels: [{ modelId: 'grok-4.5', name: 'Grok 4.5', _meta: { contextWindow: 256000 } }] }, configOptions: menu() });",
+					"    } else if (m.method === 'session/set_config_option') {",
+					"      if (MODE !== 'ignoreeffort') effort = m.params.value;",
+					'      reply(m.id, { configOptions: menu() });',
+					"    } else if (m.method === 'session/prompt') {",
+					"      log('prompts', 'acp');",
+					'      keep(sid, m.params.prompt[0].text);',
+					"      out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: sid, update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: tokenOf(m.params.prompt[0].text) } } } });",
+					"      reply(m.id, { stopReason: 'end_turn' });",
+					"    } else if (m.id !== undefined) out({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'Method not found' } });",
+					'  };',
+					"  process.stdin.on('data', (d) => { buf += d; let k; while ((k = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, k); buf = buf.slice(k + 1); if (line.trim()) handle(JSON.parse(line)); } });",
+					"  process.stdin.on('end', () => process.exit(0));",
+					'}',
+					'',
+				].join('\n');
+				fs.writeFileSync(BIN, src);
+				fs.chmodSync(BIN, 0o555);
+				return createHash('sha256').update(fs.readFileSync(BIN)).digest('hex');
+			};
+			/** What each stand-in process recorded, in start order. */
+			const runs = (): Array<{ argv: string[]; env: Record<string, string>; acp: boolean }> =>
+				fs.existsSync(LOG)
+					? fs
+							.readdirSync(LOG)
+							.filter((f) => /^\d+\.json$/.test(f))
+							.map((f) => ({
+								...JSON.parse(fs.readFileSync(path.join(LOG, f), 'utf8')),
+								at: fs.statSync(path.join(LOG, f)).mtimeMs,
+							}))
+							.sort((a, b) => a.at - b.at)
+					: [];
+			const lines = (name: string) => {
+				const file = path.join(LOG, name);
+				return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n') : [];
+			};
+			const isolation = (
+				sha: string,
+				egress: 'operation-aware' | 'deny-all' = 'operation-aware'
+			): IsolationDeclaration => ({
+				boundary: {
+					kind: 'disposable-os-account',
+					reference: 'boundary:synthetic',
+					actualHome: `${REL}/home`,
+					productionHomeMounted: false,
+					operatorCredentialsReadable: false,
+				},
+				accountRoots: { A: `${REL}/grok-a`, B: `${REL}/grok-b` },
+				remoteRoots: { 'qual-host': { root: path.join(ROOT, 'remote'), binarySha256: sha } },
+				policy: {
+					systemPolicyInspected: true,
+					managedPolicy: 'absent',
+					requiredPolicyCompatible: true,
+				},
+				resources: {
+					hooks: 'empty',
+					mcp: 'empty',
+					plugins: egress === 'deny-all' ? 'empty' : 'synthetic-owned',
+					envrc: 'disabled',
+				},
+				egress:
+					egress === 'deny-all'
+						? {
+								kind: 'deny-all',
+								reference: 'egress:synthetic',
+								suppression: {
+									update: 'flags-only',
+									telemetry: 'verified',
+									backgroundUpload: 'verified',
+								},
+							}
+						: {
+								kind: 'operation-aware',
+								reference: 'egress:synthetic',
+								suppression: {
+									update: 'flags-only',
+									telemetry: 'flags-only',
+									backgroundUpload: 'unknown',
+								},
+							},
+				path: ['/usr/bin', '/bin', path.join(ROOT, 'bin')],
+			});
+			/** A complete synthetic declaration over the stand-in: every admission and preflight input. */
+			const fullConfig = (
+				sha: string,
+				patch: Partial<QualificationConfig> = {}
+			): QualificationConfig & { isolation: IsolationDeclaration } => ({
+				...liveConfig({
+					allowedRoots: [REL],
+					allowedModels: [MODEL],
+					binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
+					...patch,
+				}),
+				isolation: isolation(sha),
+			});
+			const discoveryConfig = (sha: string, operations: string[]) =>
+				fullConfig(sha, {
+					discovery: { authorizationReference: 'discovery:synthetic', operations },
+				});
+			const caseOf = (id: string) => expandCases(FAMILIES, [id])[0];
+			const ids = (r: { reasons: Array<{ id: string }> }) => r.reasons.map((x) => x.id);
+			let ledgerSeq = 0;
+			const ledgerFor = (cfg: QualificationConfig, ...cases: string[]) => {
+				const ledger = createBudgetLedger(cfg, `gt1-11-11a4-${process.pid}-${++ledgerSeq}`, NOW);
+				ledger.authorizedCaseIds.push(...cases);
+				return ledger;
+			};
+			const DISCOVERY_CAPS: HarnessCapabilities = {
+				...ALL_CAPS,
+				discoveryExecutor: true,
+				sshExecutor: true,
+			};
+			const discover = async (
+				id: string,
+				cfg: QualificationConfig,
+				caps: HarnessCapabilities = DISCOVERY_CAPS
+			) => {
+				const ledger = ledgerFor(cfg, id);
+				const lifetime = createCaseLifetime(1);
+				const legs = await executeDiscoveryCase(caseOf(id), cfg, {
+					workspace: WORKSPACE,
+					operatorHome: OPERATOR_HOME,
+					ledger,
+					lifetime,
+					problems: validateConfig(cfg, WORKSPACE),
+					capabilities: caps,
+					now: clock,
+					resolveSecret: SECRET,
+				});
+				return { legs, ledger, cleanup: await lifetime.cleanup() };
+			};
+			const pay = async (id: string, cfg: QualificationConfig) => {
+				const ledger = ledgerFor(cfg, id);
+				const lifetime = createCaseLifetime(1);
+				const legs = await executePaidCase(caseOf(id), cfg, {
+					workspace: WORKSPACE,
+					operatorHome: OPERATOR_HOME,
+					ledger,
+					lifetime,
+					problems: validateConfig(cfg, WORKSPACE),
+					capabilities: DISCOVERY_CAPS,
+					now: clock,
+					resolveSecret: SECRET,
+				});
+				return { legs, ledger, cleanup: await lifetime.cleanup() };
+			};
+			const expectNoSpawn = () => {
+				for (const s of spawnSpies) expect(s).not.toHaveBeenCalled();
+				expect(fetchSpy).not.toHaveBeenCalled();
+			};
+			const resetHomes = () => {
+				for (const d of ['grok-a', 'grok-b']) {
+					fs.rmSync(path.join(ROOT, d), { recursive: true, force: true });
+					fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+				}
+			};
+
+			beforeAll(() => {
+				for (const d of ['home', 'grok-a', 'grok-b', 'bin', 'log', path.join('cache', 'tmp')])
+					fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+				fs.mkdirSync(ELSEWHERE, { recursive: true });
+			});
+			afterAll(() => {
+				for (const f of [BIN, path.join(ROOT, 'remote', 'bin', 'grok')])
+					if (fs.existsSync(f)) fs.chmodSync(f, 0o755);
+				fs.rmSync(ROOT, { recursive: true, force: true });
+				fs.rmSync(ELSEWHERE, { recursive: true, force: true });
+				sshPath.current = null;
+			});
+			beforeEach(() => {
+				spawnSpies.forEach((s) => s.mockClear());
+				fetchSpy.mockClear();
+				sshPath.current = null;
+				resetHomes();
+			});
+
+			describe('discovery', () => {
+				it('runs only the authorized ACP operations, sends no prompt and records the catalog verbatim', async () => {
+					const sha = standIn('ok');
+					const all = ['acp-initialize', 'acp-session-new', 'acp-model-catalog'];
+					const { legs, ledger } = await discover('E02:acp-stdio:local', discoveryConfig(sha, all));
+					const l = legs[0];
+					expect(legs).toHaveLength(1);
+					expect(l).toMatchObject({ status: 'passed', account: 'A', host: 'local' });
+					expect([l.spawned, l.networkContacts, l.paidRequests]).toEqual([1, 2, 0]);
+					expect(l.operations.map((o) => o.outcome)).toEqual(['passed', 'passed', 'passed']);
+					// The reported payload is kept as reported, not re-shaped or inferred.
+					const reported = l.catalogs.find((c) => c.operation === 'acp-model-catalog');
+					expect(reported?.currentModel).toBe('grok-4.5');
+					expect(reported?.models).toEqual([
+						{ modelId: 'grok-4.5', name: 'Grok 4.5', _meta: { contextWindow: 256000 } },
+					]);
+					expect(reported?.effortMenu).toMatchObject({
+						id: 'reasoning_effort',
+						currentValue: 'medium',
+						options: [
+							{ value: 'low', name: 'Low' },
+							{ value: 'medium', name: 'Medium' },
+							{ value: 'high', name: 'High' },
+						],
+					});
+					expect(l.auth?.status).toBe('ok');
+					expect(lines('methods')).toEqual(['initialize', 'session/new']);
+					expect(lines('prompts')).toEqual([]);
+					expect(ledger.reservations).toEqual([]);
+					const r = runs();
+					expect(r.map((x) => x.argv)).toEqual([['agent', 'stdio']]);
+					// The selected account's reference only, and its value never in the receipt.
+					expect(r[0].env.XAI_API_KEY).toBe(SECRET('GROK_QUAL_ACCOUNT_A'));
+					expect(JSON.stringify(r[0].env)).not.toContain(SECRET('GROK_QUAL_ACCOUNT_B'));
+					expect(JSON.stringify(l)).not.toContain(SECRET('GROK_QUAL_ACCOUNT_A'));
+
+					// Authorized for initialize alone, the child is never asked to open a session.
+					standIn('ok');
+					const only = await discover(
+						'E02:acp-stdio:local',
+						discoveryConfig(sha, ['acp-initialize'])
+					);
+					expect(only.legs[0].status).toBe('passed');
+					expect(only.legs[0].operations.map((o) => o.operation)).toEqual(['acp-initialize']);
+					expect(lines('methods')).toEqual(['initialize']);
+					expect(lines('prompts')).toEqual([]);
+				});
+
+				it('runs only the native model listing and keeps its text lines verbatim', async () => {
+					const sha = standIn('ok');
+					const { legs } = await discover(
+						'E02:native-headless:local',
+						discoveryConfig(sha, ['native-model-catalog'])
+					);
+					expect(legs[0].status).toBe('passed');
+					expect(runs().map((x) => x.argv)).toEqual([['models']]);
+					expect(legs[0].catalogs[0].raw).toEqual(['grok-4.5 (default)', 'grok-composer-2.5-fast']);
+					expect([legs[0].spawned, legs[0].networkContacts, legs[0].paidRequests]).toEqual([
+						1, 1, 0,
+					]);
+					expect(lines('prompts')).toEqual([]);
+				});
+
+				it('classifies missing, expired and restricted auth as actionable, with one child and no other account', async () => {
+					const cases: Array<[Mode, string, string, string[]]> = [
+						['badkey', 'E02:native-headless:local', 'expired', ['native-model-catalog']],
+						['notlogged', 'E02:native-headless:local', 'missing', ['native-model-catalog']],
+						['denied', 'E02:native-headless:local', 'restricted', ['native-model-catalog']],
+						['authreq', 'E02:acp-stdio:local', 'missing', ['acp-initialize', 'acp-session-new']],
+					];
+					for (const [mode, id, status, ops] of cases) {
+						const sha = standIn(mode);
+						const { legs } = await discover(id, discoveryConfig(sha, ops));
+						const l = legs[0];
+						expect(l.status, mode).toBe('failed');
+						expect(l.auth?.status, mode).toBe(status);
+						expect(ids(l), mode).toContain(`discovery-auth-${status}`);
+						// Actionable: names the account and what to do, never a login run by the harness.
+						expect(l.auth?.guidance, mode).toBeTruthy();
+						expect(l.auth?.credentialKind, mode).toBeTruthy();
+						if (status === 'restricted') expect(l.auth?.guidance, mode).toContain('account A');
+						// One child, one account: no retry and no fallback to account B.
+						const r = runs();
+						expect(r, mode).toHaveLength(1);
+						expect(r[0].env.XAI_API_KEY, mode).toBe(SECRET('GROK_QUAL_ACCOUNT_A'));
+						expect(l.spawned, mode).toBe(1);
+						expect(lines('prompts'), mode).toEqual([]);
+					}
+				});
+
+				it('cannot pass from the flag or the authorization alone: refusals spawn nothing', async () => {
+					const sha = standIn('ok');
+					const ops = ['acp-initialize', 'acp-session-new'];
+					const refusals: Array<[string, QualificationConfig, HarnessCapabilities, string]> = [
+						[
+							'executor off',
+							discoveryConfig(sha, ops),
+							{ ...DISCOVERY_CAPS, discoveryExecutor: false },
+							'discovery-executor-unimplemented',
+						],
+						[
+							'prerequisite unauthorized',
+							discoveryConfig(sha, ['acp-session-new']),
+							DISCOVERY_CAPS,
+							'discovery-operation-prerequisite-unauthorized',
+						],
+						[
+							'hash mismatch',
+							discoveryConfig('b'.repeat(64), ops),
+							DISCOVERY_CAPS,
+							'binary-hash-mismatch',
+						],
+					];
+					for (const [label, cfg, caps, reason] of refusals) {
+						const { legs } = await discover('E02:acp-stdio:local', cfg, caps);
+						expect(legs[0].status, label).toBe('not-run');
+						expect(legs[0].spawned, label).toBe(0);
+						expect(ids(legs[0]), label).toContain(reason);
+					}
+					expectNoSpawn();
+					expect(runs()).toEqual([]);
+				});
+			});
+
+			describe('E01 colliding native ids', () => {
+				const tokenOf = (a: 'A' | 'B') => fixtureTurnsFor(PAID_FIXTURES.E01, a)[0].expect;
+
+				it('passes when each isolated home holds only its own leg, with colliding session ids', async () => {
+					const sha = standIn('ok');
+					const { legs } = await pay('E01:native-headless:local', fullConfig(sha));
+					expect(legs.map((l) => [l.account, l.status])).toEqual([
+						['A', 'passed'],
+						['B', 'passed'],
+					]);
+					const verdict = legs[0].assertions.find((a) => a.id === 'colliding-native-ids');
+					expect(verdict).toMatchObject({ outcome: 'passed' });
+					expect(verdict?.detail).toContain('collide');
+					expect(legs[1].assertions.find((a) => a.id === 'colliding-native-ids')).toEqual(verdict);
+					expect(legs.map((l) => l.turns[0].sessionId)).toEqual([
+						'gt1-11-11a4-colliding',
+						'gt1-11-11a4-colliding',
+					]);
+					// Each leg ran on its own home and its own reference.
+					const r = runs();
+					expect(r.map((x) => [path.basename(x.env.GROK_HOME), x.env.XAI_API_KEY])).toEqual([
+						['grok-a', SECRET('GROK_QUAL_ACCOUNT_A')],
+						['grok-b', SECRET('GROK_QUAL_ACCOUNT_B')],
+					]);
+					expect(legs.map((l) => l.credential?.reference)).toEqual([
+						'GROK_QUAL_ACCOUNT_A',
+						'GROK_QUAL_ACCOUNT_B',
+					]);
+				});
+
+				it('fails on a planted cross-home record, a stray session or a shared credential source', async () => {
+					const sha = standIn('ok');
+					// A record of account B's fixture token planted in account A's home before the run.
+					const planted = path.join(ROOT, 'grok-a', 'sessions', 'other-cwd', 'planted');
+					fs.mkdirSync(planted, { recursive: true });
+					fs.writeFileSync(
+						path.join(planted, 'chat_history.jsonl'),
+						JSON.stringify({ type: 'user', text: tokenOf('B') }) + '\n'
+					);
+					const cross = await pay('E01:native-headless:local', fullConfig(sha));
+					const v1 = cross.legs[0].assertions.find((a) => a.id === 'colliding-native-ids');
+					expect(cross.legs[0].reasons, JSON.stringify(cross.legs[0].reasons)).toEqual([]);
+					expect(v1?.outcome).toBe('failed');
+					expect(v1?.detail).toContain('other-leg-record:A');
+					expect(cross.legs.map((l) => l.status)).toEqual(['failed', 'failed']);
+
+					resetHomes();
+					standIn('stray');
+					const stray = await pay('E01:native-headless:local', fullConfig(sha));
+					const v2 = stray.legs[0].assertions.find((a) => a.id === 'colliding-native-ids');
+					expect(v2?.outcome).toBe('failed');
+					expect(v2?.detail).toContain('foreign-session-listed:A');
+
+					resetHomes();
+					standIn('ok');
+					const shared = await pay(
+						'E01:native-headless:local',
+						fullConfig(sha, {
+							credentialReferences: [
+								{
+									provider: 'grok',
+									account: 'A',
+									kind: 'secret-name',
+									name: 'GROK_QUAL_ACCOUNT_A',
+								},
+								{
+									provider: 'grok',
+									account: 'B',
+									kind: 'secret-name',
+									name: 'GROK_QUAL_ACCOUNT_A',
+								},
+							],
+						})
+					);
+					const v3 = shared.legs[0].assertions.find((a) => a.id === 'colliding-native-ids');
+					expect(v3?.outcome).toBe('failed');
+					expect(v3?.detail).toContain('credential-source-shared');
+				});
+			});
+
+			describe('binary resolution', () => {
+				/** Only the offline inputs plus the custom path the resolution leg asks for. */
+				const resolutionConfig = (
+					sha: string,
+					customPath: string | null,
+					pathEntries?: string[]
+				): QualificationConfig => {
+					const iso = isolation(sha, 'deny-all');
+					return {
+						...defaultConfigFromRunState({}),
+						allowedRoots: [REL],
+						binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
+						autoUpdateDisabled: true,
+						isolationReceipt: 'isolation:synthetic',
+						binaryResolution: { customPath },
+						isolation: {
+							...iso,
+							accountRoots: { A: `${REL}/grok-a` },
+							remoteRoots: {},
+							path: pathEntries ?? iso.path,
+						},
+					};
+				};
+				const resolve = (
+					cfg: QualificationConfig,
+					id = 'E02:acp-stdio:local',
+					caps: HarnessCapabilities = HARNESS_CAPABILITIES
+				) =>
+					runBinaryResolutionLeg(caseOf(id), cfg, validateConfig(cfg, WORKSPACE), caps, {
+						workspace: WORKSPACE,
+						operatorHome: OPERATOR_HOME,
+					});
+				const link = (name: string, target: string) => {
+					const p = path.join(ROOT, 'custom', name);
+					fs.mkdirSync(path.dirname(p), { recursive: true });
+					fs.rmSync(p, { force: true });
+					fs.symlinkSync(target, p);
+					return `${REL}/custom/${name}`;
+				};
+
+				it('passes only when the pinned, custom and PATH lookups all reach the pinned file, never running it', async () => {
+					const sha = standIn('ok');
+					const r = await resolve(resolutionConfig(sha, link('grok', BIN)));
+					expect(r.status, JSON.stringify(r.reasons)).toBe('passed');
+					expect(r.resolutions.map((x) => [x.source, x.outcome, x.detail])).toEqual([
+						['pinned-path', 'passed', 'matches-pin'],
+						['custom-path', 'passed', 'matches-pin'],
+						['owned-path', 'passed', 'matches-pin'],
+					]);
+					expect(r.resolutions.every((x) => x.sha256 === sha)).toBe(true);
+					expect([r.spawned, r.networkContacts]).toEqual([0, 0]);
+					expectNoSpawn();
+					expect(runs()).toEqual([]);
+				});
+
+				it('refuses a mismatched, other or fallback install, with no fallback lookup', async () => {
+					const sha = standIn('ok');
+					// The same bytes at another owned path are still another file.
+					const copy = path.join(ROOT, 'custom', 'copy');
+					fs.mkdirSync(path.dirname(copy), { recursive: true });
+					fs.copyFileSync(BIN, copy);
+					fs.chmodSync(copy, 0o555);
+					const other = await resolve(resolutionConfig(sha, `${REL}/custom/copy`));
+					expect(other.status).toBe('failed');
+					expect(other.resolutions[1]).toMatchObject({
+						source: 'custom-path',
+						outcome: 'failed',
+						detail: 'binary-resolution-other-file',
+					});
+					expect(ids(other)).toContain('binary-resolution-other-file');
+
+					// An install outside every owned root, reached through the custom path or first on PATH.
+					const outside = path.join(ELSEWHERE, 'grok');
+					fs.copyFileSync(BIN, outside);
+					fs.chmodSync(outside, 0o555);
+					const viaCustom = await resolve(resolutionConfig(sha, link('outside', outside)));
+					expect(viaCustom.resolutions[1].detail).toBe('binary-resolution-fallback');
+					expect(viaCustom.status).toBe('failed');
+					const viaPath = await resolve(
+						resolutionConfig(sha, link('grok', BIN), [
+							'/usr/bin',
+							ELSEWHERE,
+							path.join(ROOT, 'bin'),
+						])
+					);
+					expect(viaPath.resolutions[2]).toMatchObject({
+						source: 'owned-path',
+						resolved: outside,
+						outcome: 'failed',
+						detail: 'binary-resolution-fallback',
+					});
+					expect(ids(viaPath)).toContain('binary-resolution-fallback');
+
+					// A custom path that resolves nothing fails; nothing else is tried in its place.
+					const dangling = await resolve(
+						resolutionConfig(sha, link('dangling', path.join(ROOT, 'missing')))
+					);
+					expect(dangling.resolutions[1]).toMatchObject({
+						resolved: null,
+						outcome: 'failed',
+						detail: 'binary-unresolved',
+					});
+
+					// A pin that does not match the file fails before any lookup.
+					const pinned = await resolve({
+						...resolutionConfig(sha, link('grok', BIN)),
+						binary: { path: `${REL}/bin/grok`, sha256: 'c'.repeat(64), version: '0.0.0-synthetic' },
+					});
+					expect(pinned.resolutions).toEqual([]);
+					expect(ids(pinned)).toContain('binary-hash-mismatch');
+
+					// Undeclared custom path, no owned PATH entry, or an SSH case: refused, not resolved.
+					expect(ids(await resolve(resolutionConfig(sha, null)))).toContain(
+						'binary-resolution-undeclared'
+					);
+					expect(
+						ids(await resolve(resolutionConfig(sha, link('grok', BIN), ['/usr/bin', '/bin'])))
+					).toContain('owned-path-absent');
+					expect(
+						ids(await resolve(resolutionConfig(sha, link('grok', BIN)), 'E02:acp-stdio:ssh'))
+					).toContain('binary-resolution-local-only');
+					expectNoSpawn();
+					expect(runs()).toEqual([]);
+				});
+			});
+
+			describe('E07 effort and gateway', () => {
+				const effortConfig = (
+					sha: string,
+					selection: QualificationConfig['selection'],
+					ops: string[] = ['acp-initialize', 'acp-session-new', 'native-model-catalog']
+				) =>
+					fullConfig(sha, {
+						selection,
+						discovery: { authorizationReference: 'discovery:synthetic', operations: ops },
+					});
+				const verdictOf = (legs: Array<{ assertions: Array<{ id: string }> }>) =>
+					legs[0].assertions.find((a) => a.id === 'effort-and-gateway') as
+						| { outcome: string; detail: string }
+						| undefined;
+
+				it('a native leg passes only when the reported effort equals the selection', async () => {
+					const sha = standIn('ok');
+					const ok = await pay('E07:native-headless:local', effortConfig(sha, { effort: 'high' }));
+					expect(ok.legs[0].status, JSON.stringify(ok.legs[0].reasons)).toBe('passed');
+					expect(verdictOf(ok.legs)?.outcome).toBe('passed');
+					const argv = runs()[0].argv;
+					expect(argv[argv.indexOf('--reasoning-effort') + 1]).toBe('high');
+
+					standIn('loweffort');
+					const low = await pay('E07:native-headless:local', effortConfig(sha, { effort: 'high' }));
+					expect(low.legs[0].status).toBe('failed');
+					expect(verdictOf(low.legs)).toMatchObject({ outcome: 'failed' });
+					expect(verdictOf(low.legs)?.detail).toContain('effort-unacknowledged:low');
+				});
+
+				it('an ACP leg stops before any prompt on an unsupported or unacknowledged effort', async () => {
+					const sha = standIn('ok');
+					const ok = await pay('E07:acp-stdio:local', effortConfig(sha, { effort: 'high' }));
+					expect(ok.legs[0].status, JSON.stringify(ok.legs[0].reasons)).toBe('passed');
+					expect(lines('methods')).toEqual([
+						'initialize',
+						'session/new',
+						'session/set_config_option',
+						'session/prompt',
+					]);
+
+					standIn('ignoreeffort');
+					const ignored = await pay('E07:acp-stdio:local', effortConfig(sha, { effort: 'high' }));
+					expect(ids(ignored.legs[0])).toContain('effort-unacknowledged');
+					expect(ignored.legs[0].status).not.toBe('passed');
+					expect(lines('prompts')).toEqual([]);
+
+					standIn('ok');
+					const unsupported = await pay(
+						'E07:acp-stdio:local',
+						effortConfig(sha, { effort: 'max' })
+					);
+					expect(ids(unsupported.legs[0])).toContain('effort-unsupported');
+					expect(lines('methods')).not.toContain('session/set_config_option');
+					expect(lines('prompts')).toEqual([]);
+				});
+
+				it('no effort selected or an unapproved gateway refuses unsent; an approved gateway reaches the child', async () => {
+					const sha = standIn('ok');
+					const none = await pay('E07:native-headless:local', effortConfig(sha, { effort: null }));
+					expect(none.legs[0]).toMatchObject({ status: 'not-run', spawned: 0 });
+					expect(ids(none.legs[0])).toContain('effort-unselected');
+					expect(none.ledger.reservations).toEqual([]);
+
+					const bad = await pay(
+						'E07:native-headless:local',
+						effortConfig(sha, {
+							effort: 'high',
+							gateways: { GROK_XAI_API_BASE_URL: 'https://upload.example' },
+						})
+					);
+					expect(bad.legs[0].spawned).toBe(0);
+					expect(bad.legs[0].status).not.toBe('passed');
+					expect(ids(bad.legs[0]).join(',')).toContain('gateway-unapproved');
+					expect(runs()).toEqual([]);
+
+					const good = await pay(
+						'E07:native-headless:local',
+						effortConfig(sha, {
+							effort: 'high',
+							gateways: { GROK_XAI_API_BASE_URL: 'https://api.x.ai/v1' },
+						})
+					);
+					expect(good.legs[0].status, JSON.stringify(good.legs[0].reasons)).toBe('passed');
+					expect(good.legs[0].gateways).toEqual({ GROK_XAI_API_BASE_URL: 'https://api.x.ai' });
+					expect(runs()[0].env.GROK_XAI_API_BASE_URL).toBe('https://api.x.ai/v1');
+					expect(verdictOf(good.legs)?.outcome).toBe('passed');
+				});
+			});
+
+			describe('SSH legs', () => {
+				const SSH_BIN = path.join(ROOT, 'sshbin', 'ssh');
+				const REMOTE = path.join(ROOT, 'remote');
+				const REMOTE_BIN = path.join(REMOTE, 'bin', 'grok');
+				/** A local stand-in for the ssh client: logs its argv and runs the remote command locally. */
+				const sshStandIn = (file = SSH_BIN): string => {
+					fs.mkdirSync(path.dirname(file), { recursive: true });
+					if (fs.existsSync(file)) fs.chmodSync(file, 0o755);
+					fs.writeFileSync(
+						file,
+						[
+							'#!/bin/sh',
+							`printf "%s\\n" "$*" >> '${LOG}/ssh.argv'`,
+							'for a; do last=$a; done',
+							'exec /bin/sh -c "$last"',
+							'',
+						].join('\n')
+					);
+					fs.chmodSync(file, 0o555);
+					return createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+				};
+				/** The remote binary: a read-only shell stand-in answering only the offline probes. */
+				const remoteStandIn = (): string => {
+					fs.mkdirSync(path.dirname(REMOTE_BIN), { recursive: true });
+					if (fs.existsSync(REMOTE_BIN)) fs.chmodSync(REMOTE_BIN, 0o755);
+					fs.writeFileSync(
+						REMOTE_BIN,
+						[
+							'#!/bin/sh',
+							`echo "$*" >> '${LOG}/remote.argv'`,
+							'[ "$1" = --version ] && echo "grok-cli v1.2.3 (synthetic stand-in)"',
+							'[ "$1" = --help ] && echo "usage: grok [options]"',
+							'exit 0',
+							'',
+						].join('\n')
+					);
+					fs.chmodSync(REMOTE_BIN, 0o555);
+					return createHash('sha256').update(fs.readFileSync(REMOTE_BIN)).digest('hex');
+				};
+				const sshConfig = (
+					sha: string,
+					clientSha: string,
+					remotes: QualificationConfig['sshRemotes'] = {
+						'qual-host': {
+							host: 'qual-host.synthetic',
+							port: 22,
+							username: 'qual',
+							privateKeyPath: '',
+							binaryPath: REMOTE_BIN,
+						},
+					}
+				): QualificationConfig => {
+					const iso = isolation(sha, 'deny-all');
+					return {
+						...defaultConfigFromRunState({}),
+						allowedRoots: [REL],
+						allowedSshTargets: ['qual-host'],
+						binary: { path: `${REL}/remote/bin/grok`, sha256: sha, version: '1.2.3' },
+						autoUpdateDisabled: true,
+						isolationReceipt: 'isolation:synthetic',
+						sshRemotes: remotes,
+						sshClient: { path: `${REL}/sshbin/ssh`, sha256: clientSha },
+						isolation: { ...iso, accountRoots: { A: `${REL}/grok-a` } },
+					};
+				};
+				const offline = (cfg: QualificationConfig) =>
+					executeOfflineLeg(offlineLegCase(caseOf('E02:acp-stdio:ssh')), cfg, {
+						workspace: WORKSPACE,
+						operatorHome: OPERATOR_HOME,
+						timeoutMs: 5000,
+						lifetime: createCaseLifetime(1),
+						capabilities: { ...HARNESS_CAPABILITIES, sshExecutor: true },
+					});
+				beforeEach(() => {
+					fs.rmSync(LOG, { recursive: true, force: true });
+					fs.mkdirSync(LOG, { recursive: true });
+				});
+				const remoteDirs = () => {
+					for (const d of ['home', 'grok-a', path.join('cache', 'tmp')])
+						fs.mkdirSync(path.join(REMOTE, d), { recursive: true });
+				};
+
+				it('the control: an offline SSH leg runs only through the pinned client and records the observed host', async () => {
+					const sha = remoteStandIn();
+					const clientSha = sshStandIn();
+					remoteDirs();
+					sshPath.current = SSH_BIN;
+					const r = await offline(sshConfig(sha, clientSha));
+					expect(r.reasons, JSON.stringify(r.reasons)).toEqual([]);
+					// `uname -n` as the stand-in "remote" reported it: this machine.
+					expect(r.remote?.observedHost).toBe(os.hostname());
+					expect(r.remote?.client).toEqual({ path: SSH_BIN, sha256: clientSha });
+					expect(r.remote?.connections).toBeGreaterThan(0);
+					expect(r.probes.length).toBeGreaterThan(0);
+					expect(lines('remote.argv')).toEqual(['--version', '--help']);
+					// Every child the harness started was the pinned ssh client, never the remote binary locally.
+					const commands = (spawnSpies[0].mock.calls as unknown as Array<[string]>).map(
+						(c) => c[0]
+					);
+					expect(commands.length).toBeGreaterThan(0);
+					expect(new Set(commands)).toEqual(new Set([fs.realpathSync(SSH_BIN)]));
+					// Each ssh child went to the approved destination with the pinned transport options.
+					const sshLog = fs.readFileSync(path.join(LOG, 'ssh.argv'), 'utf8');
+					expect(sshLog.match(/ -p 22 qual@qual-host\.synthetic /g)?.length).toBe(commands.length);
+					for (const opt of ['StrictHostKeyChecking=yes', 'IdentityAgent=none', 'ControlMaster=no'])
+						expect(sshLog.split(opt).length - 1, opt).toBe(commands.length);
+				});
+
+				it('an unresolved remote refuses with zero spawn and never runs locally', async () => {
+					const sha = remoteStandIn();
+					const clientSha = sshStandIn();
+					remoteDirs();
+					sshPath.current = SSH_BIN;
+					// No declaration for the approved target: the production resolver cannot resolve it.
+					const cfg = sshConfig(sha, clientSha, {});
+					const r = await offline(cfg);
+					expect(ids(r)).toContain('ssh-remote-unresolved');
+					expect(r.probes).toEqual([]);
+					expect(r.spawned).toBe(0);
+
+					// The discovery and paid executors refuse the same leg, spawning nothing.
+					// Every live input present, so the remote is the only thing missing.
+					const live = fullConfig(sha, {
+						binary: cfg.binary,
+						allowedSshTargets: ['qual-host'],
+						sshRemotes: {},
+						sshClient: cfg.sshClient,
+						credentialReferences: [
+							{ provider: 'grok', account: 'A', kind: 'file', path: `${REL}/auth/a.json` },
+							{ provider: 'grok', account: 'B', kind: 'file', path: `${REL}/auth/b.json` },
+						],
+						discovery: {
+							authorizationReference: 'discovery:synthetic',
+							operations: ['acp-initialize', 'native-model-catalog'],
+						},
+					});
+					const disc = await discover('E02:acp-stdio:ssh', live);
+					expect(disc.legs[0]).toMatchObject({ status: 'not-run', spawned: 0 });
+					expect(ids(disc.legs[0])).toContain('ssh-remote-unresolved');
+					const paid = await pay('E03:native-headless:ssh', live);
+					expect(paid.legs[0]).toMatchObject({ spawned: 0, paidRequests: 0 });
+					expect(ids(paid.legs[0])).toContain('ssh-remote-unresolved');
+					expect(paid.ledger.reservations.filter((x) => x.state !== 'released')).toEqual([]);
+
+					// A wrap that degrades to the local command is refused, never run.
+					const planned = planSshLeg(
+						caseOf('E02:acp-stdio:ssh'),
+						sshConfig(sha, clientSha),
+						{ workspace: WORKSPACE, operatorHome: OPERATOR_HOME },
+						'offline-execution'
+					);
+					expect(planned.plan, JSON.stringify(planned.reasons)).not.toBeNull();
+					const degraded = await buildSshSpawn(
+						{ ...planned.plan!, store: { getSshRemotes: () => [] } },
+						REMOTE_BIN,
+						['--version'],
+						{},
+						REMOTE
+					);
+					expect(degraded).toMatchObject({ refused: 'ssh-remote-unresolved' });
+					expect((degraded as { detail: string }).detail).toBeTruthy();
+
+					expectNoSpawn();
+					expect(lines('remote.argv')).toEqual([]);
+					expect(lines('ssh.argv')).toEqual([]);
+					expect(runs()).toEqual([]);
+				});
+
+				it('another ssh install than the pinned client refuses before any Grok child', async () => {
+					const sha = remoteStandIn();
+					const clientSha = sshStandIn();
+					remoteDirs();
+					const other = path.join(ELSEWHERE, 'ssh');
+					sshStandIn(other);
+					sshPath.current = other;
+					const r = await offline(sshConfig(sha, clientSha));
+					expect(ids(r).join(',')).toContain('ssh-client-resolution-mismatch');
+					expect(r.probes).toEqual([]);
+					expectNoSpawn();
+					expect(lines('remote.argv')).toEqual([]);
+					expect(lines('ssh.argv')).toEqual([]);
+				});
+			});
+		}
+	);
 });
