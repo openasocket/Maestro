@@ -8268,9 +8268,17 @@
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-accounting.md",
 					"testTask": "GT1-11-14P2",
 					"productionAnchors": [
-						"src/shared/turnUsageLedger.ts:158",
-						"src/shared/turnUsageLedger.ts:162",
-						"src/shared/maestro-lib/turns/record-turn.ts:405"
+						"src/shared/turnUsageLedger.ts:165",
+						"src/main/stats/aggregations.ts:441",
+						"src/shared/stats-types.ts:208"
+					],
+					"status": "implementation-repaired",
+					"repairedBy": ["GT1-11-14P1"],
+					"repairCommit": "0fd69c006",
+					"reobserved": "GT1-11-14P1 at 0fd69c006: harness E06 nocost and partialnone consumer legs turn-recorder and stats-readers pass recorder-cost-label and aggregation-cost-label against the real stats database (NULL row cost, null dashboard cost)",
+					"residual": [
+						"GT1-11-14P2 (the harness cases pinning the old $0 verdicts at grok-qualification-harness.test.ts 6308/6311/6342/6343 fail until flipped; recorder and aggregation suite pins and the || 0 mutation check)",
+						"live-authorization-absent (run-state live inputs; every E06 case not-run)"
 					]
 				},
 				{
@@ -19735,9 +19743,17 @@
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-accounting.md",
 					"testTask": "GT1-11-14P2",
 					"productionAnchors": [
-						"src/shared/turnUsageLedger.ts:158",
-						"src/shared/turnUsageLedger.ts:162",
-						"src/shared/maestro-lib/turns/record-turn.ts:405"
+						"src/shared/turnUsageLedger.ts:165",
+						"src/main/stats/aggregations.ts:441",
+						"src/shared/stats-types.ts:208"
+					],
+					"status": "implementation-repaired",
+					"repairedBy": ["GT1-11-14P1"],
+					"repairCommit": "0fd69c006",
+					"reobserved": "GT1-11-14P1 at 0fd69c006: harness E06 nocost and partialnone consumer legs turn-recorder and stats-readers pass recorder-cost-label and aggregation-cost-label against the real stats database (NULL row cost, null dashboard cost)",
+					"residual": [
+						"GT1-11-14P2 (the harness cases pinning the old $0 verdicts at grok-qualification-harness.test.ts 6308/6311/6342/6343 fail until flipped; recorder and aggregation suite pins and the || 0 mutation check)",
+						"live-authorization-absent (run-state live inputs; every E06 case not-run)"
 					]
 				},
 				{
@@ -20022,9 +20038,17 @@
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-accounting.md",
 					"testTask": "GT1-11-14P2",
 					"productionAnchors": [
-						"src/shared/turnUsageLedger.ts:158",
-						"src/shared/turnUsageLedger.ts:162",
-						"src/shared/maestro-lib/turns/record-turn.ts:405"
+						"src/shared/turnUsageLedger.ts:165",
+						"src/main/stats/aggregations.ts:441",
+						"src/shared/stats-types.ts:208"
+					],
+					"status": "implementation-repaired",
+					"repairedBy": ["GT1-11-14P1"],
+					"repairCommit": "0fd69c006",
+					"reobserved": "GT1-11-14P1 at 0fd69c006: harness E06 nocost and partialnone consumer legs turn-recorder and stats-readers pass recorder-cost-label and aggregation-cost-label against the real stats database (NULL row cost, null dashboard cost)",
+					"residual": [
+						"GT1-11-14P2 (the harness cases pinning the old $0 verdicts at grok-qualification-harness.test.ts 6308/6311/6342/6343 fail until flipped; recorder and aggregation suite pins and the || 0 mutation check)",
+						"live-authorization-absent (run-state live inputs; every E06 case not-run)"
 					]
 				},
 				{
@@ -24003,9 +24027,17 @@
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-accounting.md",
 					"testTask": "GT1-11-14P2",
 					"productionAnchors": [
-						"src/shared/turnUsageLedger.ts:158",
-						"src/shared/turnUsageLedger.ts:162",
-						"src/shared/maestro-lib/turns/record-turn.ts:405"
+						"src/shared/turnUsageLedger.ts:165",
+						"src/main/stats/aggregations.ts:441",
+						"src/shared/stats-types.ts:208"
+					],
+					"status": "implementation-repaired",
+					"repairedBy": ["GT1-11-14P1"],
+					"repairCommit": "0fd69c006",
+					"reobserved": "GT1-11-14P1 at 0fd69c006: harness E06 nocost and partialnone consumer legs turn-recorder and stats-readers pass recorder-cost-label and aggregation-cost-label against the real stats database (NULL row cost, null dashboard cost)",
+					"residual": [
+						"GT1-11-14P2 (the harness cases pinning the old $0 verdicts at grok-qualification-harness.test.ts 6308/6311/6342/6343 fail until flipped; recorder and aggregation suite pins and the || 0 mutation check)",
+						"live-authorization-absent (run-state live inputs; every E06 case not-run)"
 					]
 				},
 				{
@@ -29209,9 +29241,17 @@
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-accounting.md",
 					"testTask": "GT1-11-14P2",
 					"productionAnchors": [
-						"src/shared/turnUsageLedger.ts:158",
-						"src/shared/turnUsageLedger.ts:162",
-						"src/shared/maestro-lib/turns/record-turn.ts:405"
+						"src/shared/turnUsageLedger.ts:165",
+						"src/main/stats/aggregations.ts:441",
+						"src/shared/stats-types.ts:208"
+					],
+					"status": "implementation-repaired",
+					"repairedBy": ["GT1-11-14P1"],
+					"repairCommit": "0fd69c006",
+					"reobserved": "GT1-11-14P1 at 0fd69c006: harness E06 nocost and partialnone consumer legs turn-recorder and stats-readers pass recorder-cost-label and aggregation-cost-label against the real stats database (NULL row cost, null dashboard cost)",
+					"residual": [
+						"GT1-11-14P2 (the harness cases pinning the old $0 verdicts at grok-qualification-harness.test.ts 6308/6311/6342/6343 fail until flipped; recorder and aggregation suite pins and the || 0 mutation check)",
+						"live-authorization-absent (run-state live inputs; every E06 case not-run)"
 					]
 				},
 				{
@@ -42304,6 +42344,14 @@
 				"change": "added",
 				"addedTo": ["P11", "C-supportsCostTracking", "C-supportsUsageStats", "REG-USAGE", "S26"],
 				"evidenceRef": "Plans/grok-tier1/evidence/11-native-accounting.md"
+			},
+			{
+				"id": "grok-unknown-cost-written-as-zero",
+				"findings": ["A11-F25", "A11-F26", "A11-F34"],
+				"taskId": "GT1-11-14P1",
+				"change": "implementation-repaired",
+				"repairCommit": "0fd69c006",
+				"testTask": "GT1-11-14P2"
 			}
 		],
 		"liveCalls": 0,
@@ -43416,7 +43464,7 @@
 			{
 				"id": "A11-F34",
 				"class": "unknown-cost-as-zero",
-				"status": "open",
+				"status": "repaired",
 				"anchors": [
 					"src/shared/turnUsageLedger.ts:158",
 					"src/shared/turnUsageLedger.ts:162",
@@ -43426,7 +43474,9 @@
 				],
 				"consequence": "usageStatsToTurnFields writes costUsd 0 (and token 0) for an unknown charge; the dashboard aggregation sums it as priced. A11-F25/F26 were open with no repair task.",
 				"repairTask": "GT1-11-14P1",
-				"testTask": "GT1-11-14P2"
+				"testTask": "GT1-11-14P2",
+				"repairCommit": "0fd69c006",
+				"repairNote": "usageStatsToTurnFields omits costUsd when reportsUnknownCost (the ledger drain rule); queryBySessionTokens sums cost_usd without COALESCE so an all-unknown session is null; SessionTokenTotals.costUsd number | null; rollup and range sum skip null; Agent Detail shows Unknown. Tokens are still written as reported (0 when absent), outside the cost provenance."
 			},
 			{
 				"id": "A11-F35",
