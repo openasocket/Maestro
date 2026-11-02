@@ -41,6 +41,15 @@
  * their assertion. The installer leg refuses a target outside the owned home
  * before any write, and the bundle leg fails on a crossed credential body or a
  * forbidden entry.
+ *
+ * GT1-11-11C3 adds the E04/E05 session legs and consumers (GT1-11-11C1..C2):
+ * a native Grok stand-in in owned temp roots (never a real Grok, credential or
+ * home) that keeps its history where the production Grok session storage reads
+ * it. Two terminal outcomes or a child left writing after a cancel, a silent
+ * new session on an unknown id, a history byte a refused mutation changed, a
+ * dropped turn, a new id after reload, a second turn mid-stream, and a tampered
+ * handoff digest, lost inherited setting or unexpanded template variable each
+ * fail their leg; a compaction runs once and is retried once, never twice.
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -96,6 +105,7 @@ import { PAID_FIXTURES, fixtureTurnsFor } from '../../../scripts/grok-qualificat
 import { getAgentCapabilities } from '../../../src/shared/maestro-lib/providers/capabilities';
 import { buildAgentEnvironment } from '../../../src/shared/maestro-lib/launch/env';
 import { grokInstaller } from '../../../src/main/coworking/installers/grok';
+import { GrokSessionStorage } from '../../../src/main/storage/grok-session-storage';
 
 /** Pass-through spies on every child_process entry point (vitest folds both specifiers into one module), so a test can prove none ran. */
 const childProcess = vi.hoisted(() => {
@@ -179,6 +189,87 @@ vi.mock('../../../src/main/cue/bundle/cue-bundle-exporter', async (importOrigina
 	};
 });
 
+/**
+ * Pass-through production consumers a GT1-11-11C3 case can bend: a Grok
+ * compaction command (production has none), a handed-off context entry changed
+ * after extraction, a setting the worktree builder drops, and a prompt template
+ * the substitution leaves unexpanded, and a native fork the launch-args check
+ * lets through. Off, each is the production function.
+ */
+const sessionTamper = vi.hoisted(() => ({
+	compactCommand: null as string | null,
+	handoff: false,
+	worktreeDrop: null as string | null,
+	leaveTemplate: false,
+	forkAccepted: false,
+}));
+vi.mock('../../../src/shared/contextCompaction', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../../src/shared/contextCompaction')>();
+	return {
+		...actual,
+		getContextCompactCommand: (t: Parameters<typeof actual.getContextCompactCommand>[0]) =>
+			sessionTamper.compactCommand && t === 'grok'
+				? sessionTamper.compactCommand
+				: actual.getContextCompactCommand(t),
+		getContextCompactionBlocker: (t: Parameters<typeof actual.getContextCompactionBlocker>[0]) =>
+			sessionTamper.compactCommand && t === 'grok'
+				? undefined
+				: actual.getContextCompactionBlocker(t),
+	};
+});
+vi.mock('../../../src/renderer/utils/contextExtractor', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('../../../src/renderer/utils/contextExtractor')>();
+	return {
+		...actual,
+		extractStoredSessionContext: async (
+			...args: Parameters<typeof actual.extractStoredSessionContext>
+		) => {
+			const result = await actual.extractStoredSessionContext(...args);
+			if (sessionTamper.handoff && result?.logs.length) {
+				const last = result.logs[result.logs.length - 1];
+				result.logs[result.logs.length - 1] = { ...last, text: `${last.text} ` };
+			}
+			return result;
+		},
+	};
+});
+vi.mock('../../../src/renderer/utils/worktreeSession', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('../../../src/renderer/utils/worktreeSession')>();
+	return {
+		...actual,
+		buildWorktreeSession: (...args: Parameters<typeof actual.buildWorktreeSession>) => {
+			const record = actual.buildWorktreeSession(...args);
+			if (sessionTamper.worktreeDrop)
+				delete (record as unknown as Record<string, unknown>)[sessionTamper.worktreeDrop];
+			return record;
+		},
+	};
+});
+vi.mock('../../../src/shared/templateVariables', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../../src/shared/templateVariables')>();
+	return {
+		...actual,
+		substituteTemplateVariables: (
+			...args: Parameters<typeof actual.substituteTemplateVariables>
+		) =>
+			sessionTamper.leaveTemplate && args[0].includes('{{GIT_BRANCH}}')
+				? args[0]
+				: actual.substituteTemplateVariables(...args),
+	};
+});
+vi.mock('../../../src/shared/maestro-lib/launch/agent-args', async (importOriginal) => {
+	const actual =
+		await importOriginal<typeof import('../../../src/shared/maestro-lib/launch/agent-args')>();
+	return {
+		...actual,
+		grokLaunchArgsProblem: (...args: Parameters<typeof actual.grokLaunchArgsProblem>) =>
+			sessionTamper.forkAccepted && args[0].includes('--fork-session')
+				? undefined
+				: actual.grokLaunchArgsProblem(...args),
+	};
+});
 const WORKSPACE = path.resolve(__dirname, '../../..');
 const RUN_STATE = JSON.parse(
 	fs.readFileSync(path.join(WORKSPACE, 'Plans/grok-tier1/run-state.json'), 'utf8')
@@ -198,6 +289,9 @@ const ALL_CAPS: HarnessCapabilities = {
 	sshExecutor: false,
 	// Off: the consumer legs run in their own block (GT1-11-11B3); these suites decide admission only.
 	consumerLegs: false,
+	// Off: the session legs and consumers run in their own block (GT1-11-11C3).
+	sessionLegs: false,
+	sessionConsumers: false,
 };
 /** A secret-shaped value the shared redactor recognizes; synthetic, never a credential. */
 const FAKE_TOKEN = `ghp_${'A1b2C3d4E5'.repeat(4).slice(0, 36)}`;
@@ -3796,6 +3890,565 @@ describe('GT1-11-09 qualification harness', () => {
 				expect(off[0].reasons.map((r) => r.id)).toContain('consumer-legs-unimplemented');
 				expect(fs.existsSync(path.join(ROOT, 'consumer-legs'))).toBe(false);
 			});
+		});
+	});
+	describe.skipIf(process.platform === 'win32')('session legs and consumers (GT1-11-11C3)', () => {
+		const REL = `${RUNS_ROOT}/gt1-11-11c3-${process.pid}`;
+		const ROOT = path.join(WORKSPACE, REL);
+		const BIN = path.join(ROOT, 'bin', 'grok');
+		const HOME_A = path.join(ROOT, 'grok-a');
+		/** The stand-in reads its mode from here, so its bytes (and the pin) are the same in every mode. */
+		const MODE_FILE = path.join(ROOT, 'mode');
+		/** One line per stand-in process: what it was asked, never a credential. */
+		const LOG = path.join(ROOT, 'log', 'turns.jsonl');
+		const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-11c3-operator-${process.pid}`);
+		const MODEL = 'claude-haiku-4-5';
+		const SECRET = (name: string) => `synthetic-xai-${name}-value`;
+		type Mode =
+			| 'ok'
+			| 'twoterm'
+			| 'straggler'
+			| 'substitute'
+			| 'steer2'
+			| 'ctxonce'
+			| 'ctxalways'
+			| 'drop'
+			| 'newid'
+			| 'nohistory'
+			| 'endfirst'
+			| 'complete'
+			| 'restartnew'
+			| 'restartfail'
+			| 'heldnew'
+			| 'compactfail'
+			| 'dropreply'
+			| 'handoffsame';
+		let sha = '';
+		/**
+		 * The native Grok stand-in (never a real Grok): it keeps its history
+		 * under the owned GROK_HOME exactly where the production Grok session
+		 * storage reads it (`sessions/<encoded realpath cwd>/<id>/chat_history.jsonl`),
+		 * replies with the last reply token its prompt carries (the HANDOFF swap
+		 * when asked), streams a long turn line by line, refuses a resume of an id
+		 * it does not hold, and answers `/compact`. A mode bends exactly one
+		 * behaviour.
+		 */
+		const SOURCE = [
+			`#!${process.execPath}`,
+			"const fs = process.getBuiltinModule('fs');",
+			"const path = process.getBuiltinModule('path');",
+			"const cp = process.getBuiltinModule('child_process');",
+			"const { randomUUID } = process.getBuiltinModule('crypto');",
+			`const MODE = fs.readFileSync(${JSON.stringify(MODE_FILE)}, 'utf8').trim();`,
+			'const argv = process.argv.slice(2);',
+			'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
+			"const prompt = at('-p') || '';",
+			"const model = at('-m');",
+			"const resume = at('--resume');",
+			"const cwd = fs.realpathSync(at('--cwd') || process.cwd());",
+			'const home = process.env.GROK_HOME;',
+			"const dir = (sid) => path.join(home, 'sessions', encodeURIComponent(cwd), sid);",
+			"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
+			`fs.appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ resume, prompt: prompt.slice(0, 120) + ' ... ' + prompt.slice(-200) }) + '\\n');`,
+			"const keep = (sid, type, content) => { if (MODE === 'nohistory') return; fs.mkdirSync(dir(sid), { recursive: true }); fs.appendFileSync(path.join(dir(sid), 'chat_history.jsonl'), JSON.stringify({ type, content }) + '\\n'); };",
+			'const end = (sid) => ({',
+			"  type: 'end', stopReason: 'end_turn', requestId: 'req-synthetic', sessionId: sid, total_cost_usd: 0.001,",
+			'  usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_tokens: 0 },',
+			'  modelUsage: { [model]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.001 } },',
+			'});',
+			'const tokens = prompt.match(/QUALIFY-[A-Z0-9-]+-OK/g) || [];',
+			"let reply = tokens.length ? tokens[tokens.length - 1] : '';",
+			"if (prompt.includes('final OK with HANDOFF')) reply = reply.slice(0, -2) + 'HANDOFF';",
+			"const held = (sid) => fs.existsSync(path.join(dir(sid), 'chat_history.jsonl'));",
+			"if (resume && !held(resume) && MODE !== 'substitute' && MODE !== 'nohistory') {",
+			"  process.stderr.write('Session ' + resume + ' not found locally, restoring from remote...\\nError: Failed to restore session from remote: session get failed: 404 Not Found\\n');",
+			'  process.exit(1);',
+			'}',
+			"let sid = resume && (held(resume) || MODE === 'nohistory') ? resume : randomUUID();",
+			"if ((MODE === 'newid' && prompt.includes('E05-RELOAD-T1')) || (MODE === 'restartnew' && prompt.includes('E04-CANCEL-T2')) || (MODE === 'heldnew' && prompt.includes('E04-STEER-T2'))) sid = randomUUID();",
+			"if ((MODE === 'restartfail' && prompt.includes('E04-CANCEL-T2')) || (MODE === 'compactfail' && prompt === '/compact')) { process.stderr.write('Error: synthetic failure\\n'); process.exit(1); }",
+			"if (MODE === 'handoffsame' && prompt.includes('final OK with HANDOFF')) sid = fs.readdirSync(path.join(home, 'sessions', encodeURIComponent(cwd)))[0];",
+			"const history = () => (held(sid) ? fs.readFileSync(path.join(dir(sid), 'chat_history.jsonl'), 'utf8') : '');",
+			"if (prompt.includes('E04-COMPACT-T1') && (MODE === 'ctxalways' || ((MODE === 'ctxonce' || MODE === 'compactfail') && !history().includes('/compact')))) {",
+			"  keep(sid, 'user', prompt);",
+			"  out({ type: 'error', message: 'context window exceeded: the conversation is too long' });",
+			'  process.exit(1);',
+			'}',
+			"if (!(MODE === 'drop' && prompt.includes('E05-T2-OK'))) keep(sid, 'user', prompt);",
+			"if (prompt.includes('E04-CANCEL-T1') && MODE === 'endfirst') {",
+			// Over before any streaming event: there was never a running turn to stop.
+			'  out(end(sid));',
+			"} else if (prompt.includes('E04-CANCEL-T1') && MODE === 'complete') {",
+			// The whole answer in one write: the stop arrives, but the turn completes with its token anyway.
+			"  process.stdout.write(JSON.stringify({ type: 'text', data: reply }) + '\\n' + JSON.stringify(end(sid)) + '\\n');",
+			"} else if (prompt.includes('E04-CANCEL-T1')) {",
+			"  if (MODE === 'twoterm') process.on('SIGINT', () => { out(end(sid)); out(end(sid)); process.exit(130); });",
+			// A child the stand-in leaves behind: reparented away from it, so no tree sweep reaches it, and it keeps writing into the owned home.
+			"  if (MODE === 'straggler') cp.spawn('/bin/sh', ['-c', '( for i in 1 2 3 4 5 6 7 8 9 10; do sleep 0.3; echo late >> \"$0/late.txt\"; done ) &', home], { stdio: 'ignore' });",
+			'  let n = 0;',
+			"  setInterval(() => { n++; out({ type: 'text', data: String(n) + '\\n' }); if (n >= 400) process.exit(0); }, 50);",
+			"} else if (prompt.includes('E04-STEER-T1')) {",
+			"  for (let i = 1; i <= 5; i++) out({ type: 'text', data: String(i) + '\\n' });",
+			"  out({ type: 'text', data: reply });",
+			"  keep(sid, 'assistant', reply);",
+			'  out(end(sid));',
+			// A second turn the stand-in starts on its own, mid-stream, under another id.
+			"  if (MODE === 'steer2') { const other = randomUUID(); out({ type: 'text', data: reply }); out(end(other)); }",
+			'} else {',
+			"  if (reply) out({ type: 'text', data: reply });",
+			"  if (!((MODE === 'drop' || MODE === 'dropreply') && prompt.includes('E05-T2-OK'))) keep(sid, 'assistant', reply || 'compacted');",
+			'  out(end(sid));',
+			'}',
+			'',
+		].join('\n');
+		const standIn = (mode: Mode) => fs.writeFileSync(MODE_FILE, mode);
+		const turnsLogged = (): Array<{ resume: string | null; prompt: string }> =>
+			fs.existsSync(LOG)
+				? fs
+						.readFileSync(LOG, 'utf8')
+						.trim()
+						.split('\n')
+						.filter(Boolean)
+						.map((l) => JSON.parse(l))
+				: [];
+		/** A complete synthetic paid declaration whose bounds fit every E04/E05 session and consumer turn. */
+		const sessionConfig = (patch: Partial<QualificationConfig> = {}): QualificationConfig => ({
+			...liveConfig({
+				allowedRoots: [REL],
+				allowedModels: [MODEL],
+				binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
+				spendBounds: {
+					perCall: {
+						inputTokens: 1000,
+						outputTokens: 500,
+						cacheReadTokens: 0,
+						cacheCreationTokens: 0,
+					},
+					// No per-turn retry allowance: with one the compaction leg misreads its own retry (A11-F19, GT1-11-11C3A).
+					perTurnCalls: { modelRounds: 2, children: 1, retries: 0, sideModels: 0, compaction: 0 },
+					sideModels: [],
+				},
+				limits: {
+					budgetUsd: 10,
+					maxCalls: 80,
+					maxTurns: 12,
+					maxWallClockSeconds: 600,
+					perCase: { budgetUsd: 2, maxCalls: 60, maxTurns: 10, maxWallClockSeconds: 120 },
+					cleanupSeconds: 1,
+				},
+				...patch,
+			}),
+			isolation: {
+				boundary: {
+					kind: 'disposable-os-account',
+					reference: 'boundary:synthetic',
+					actualHome: `${REL}/home`,
+					productionHomeMounted: false,
+					operatorCredentialsReadable: false,
+				},
+				accountRoots: { A: `${REL}/grok-a`, B: `${REL}/grok-b` },
+				remoteRoots: {},
+				policy: {
+					systemPolicyInspected: true,
+					managedPolicy: 'absent',
+					requiredPolicyCompatible: true,
+				},
+				resources: { hooks: 'empty', mcp: 'empty', plugins: 'empty', envrc: 'disabled' },
+				egress: {
+					kind: 'operation-aware',
+					reference: 'egress:synthetic',
+					suppression: {
+						update: 'flags-only',
+						telemetry: 'flags-only',
+						backgroundUpload: 'unknown',
+					},
+				},
+				path: ['/usr/bin', '/bin', path.join(ROOT, 'bin')],
+			},
+		});
+		const CAPS: HarnessCapabilities = { ...ALL_CAPS, sessionLegs: true, sessionConsumers: true };
+		let ledgerSeq = 0;
+		const execute = async (
+			family: 'E04' | 'E05',
+			mode: Mode,
+			opts: { caps?: HarnessCapabilities; config?: QualificationConfig } = {}
+		) => {
+			standIn(mode);
+			fs.rmSync(HOME_A, { recursive: true, force: true });
+			fs.mkdirSync(HOME_A, { recursive: true });
+			fs.rmSync(LOG, { force: true });
+			const cfg = opts.config ?? sessionConfig();
+			const c = expandCases(FAMILIES, [`${family}:native-headless:local`])[0];
+			const ledger = createBudgetLedger(cfg, `gt1-11-11c3-${process.pid}-${++ledgerSeq}`, NOW);
+			ledger.authorizedCaseIds.push(c.caseId);
+			const lifetime = createCaseLifetime(1);
+			const legs = await executePaidCase(c, cfg, {
+				workspace: WORKSPACE,
+				operatorHome: OPERATOR_HOME,
+				ledger,
+				lifetime,
+				problems: validateConfig(cfg, WORKSPACE),
+				capabilities: opts.caps ?? CAPS,
+				now: clock,
+				resolveSecret: SECRET,
+			});
+			await lifetime.cleanup();
+			expect(legs).toHaveLength(1);
+			return { leg: legs[0], ledger };
+		};
+		type Leg = Awaited<ReturnType<typeof execute>>['leg'];
+		const session = (leg: Leg, id: string) => {
+			const found = leg.sessionLegs.find((l) => l.leg === id);
+			expect(found, id).toBeDefined();
+			return found!;
+		};
+		const consumer = (leg: Leg, id: string) => {
+			const found = leg.sessionConsumers.find((l) => l.leg === id);
+			expect(found, id).toBeDefined();
+			return found!;
+		};
+		const assertionOf = (
+			r: { assertions: Array<{ id: string; outcome: string; detail: string }> },
+			id: string
+		) => r.assertions.find((a) => a.id === id);
+		const promptsWith = (needle: string) => turnsLogged().filter((t) => t.prompt.includes(needle));
+		const operatorHomeUntouched = () =>
+			expect(fs.existsSync(OPERATOR_HOME) ? fs.readdirSync(OPERATOR_HOME) : []).toEqual([]);
+
+		beforeAll(() => {
+			for (const d of ['home', 'grok-a', 'grok-b', 'bin', 'log', path.join('cache', 'tmp')])
+				fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+			fs.writeFileSync(MODE_FILE, 'ok');
+			fs.writeFileSync(BIN, SOURCE);
+			fs.chmodSync(BIN, 0o555);
+			sha = createHash('sha256').update(fs.readFileSync(BIN)).digest('hex');
+		});
+		afterAll(async () => {
+			// Let the straggler's last write land before the owned tree goes.
+			await new Promise((r) => setTimeout(r, 3500));
+			if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+			fs.rmSync(ROOT, { recursive: true, force: true });
+			fs.rmSync(OPERATOR_HOME, { recursive: true, force: true });
+		}, 10_000);
+		beforeEach(() => {
+			spawnSpies.forEach((s) => s.mockClear());
+			fetchSpy.mockClear();
+			sessionTamper.compactCommand = null;
+			sessionTamper.handoff = false;
+			sessionTamper.worktreeDrop = null;
+			sessionTamper.leaveTemplate = false;
+			sessionTamper.forkAccepted = false;
+		});
+		afterEach(() => {
+			vi.restoreAllMocks();
+		});
+
+		describe('E04 session legs', () => {
+			it('cancel, invalid resume and steering pass only from the owned child and history; compaction stays an owned gap', async () => {
+				const { leg } = await execute('E04', 'ok');
+				const cancel = session(leg, 'cancellation');
+				expect(cancel.status, JSON.stringify(cancel)).toBe('passed');
+				expect(cancel.observed).toMatchObject({
+					stopRequested: true,
+					orphans: [],
+					lateWrites: [],
+					idSource: 'owned-home',
+				});
+				expect(cancel.observed.terminalRecords as number).toBeLessThanOrEqual(1);
+				// The restart resumed exactly the id the stopped turn left in the owned home.
+				const [stopped, restart] = cancel.turns;
+				expect(stopped.reply.tokenSeen).toBe(false);
+				expect(restart.sessionId).toBe(cancel.observed.resumedId);
+				expect(restart.argv).toEqual(
+					expect.arrayContaining(['--resume', cancel.observed.resumedId as string])
+				);
+				const invalid = session(leg, 'invalid-resume');
+				expect(invalid.status, JSON.stringify(invalid)).toBe('passed');
+				expect(invalid.observed).toMatchObject({ exitCode: 1, created: [], sessionIds: [] });
+				expect(invalid.observed.errorType).toBe('session_not_found');
+				const steer = session(leg, 'steering-refused');
+				expect(steer.status, JSON.stringify(steer)).toBe('passed');
+				expect((steer.observed.midTurn as { ok: boolean; missing: string[] }).ok).toBe(false);
+				expect((steer.observed.afterTurn as { missing: string[] }).missing).toContain(
+					'steering-not-owned'
+				);
+				// The held input went out only after the turn, as the next turn of the same session.
+				expect(steer.turns.map((t) => t.sessionId)).toEqual([
+					leg.turns[0].sessionId,
+					leg.turns[0].sessionId,
+				]);
+				// No context-limit refusal: the compaction path is an honest gap with its owner, never a pass.
+				const compact = session(leg, 'compaction-retry');
+				expect(compact.status).toBe('not-evaluated');
+				expect(compact.assertion).toMatchObject({
+					outcome: 'not-evaluated',
+					owner: 'unassigned-native-context-limit-induction',
+				});
+				expect(leg.status, JSON.stringify(leg.reasons)).toBe('passed');
+				expect(fetchSpy).not.toHaveBeenCalled();
+				operatorHomeUntouched();
+			}, 30_000);
+
+			it('fails cancellation on two terminal outcomes, and sends no restart', async () => {
+				const { leg } = await execute('E04', 'twoterm');
+				const cancel = session(leg, 'cancellation');
+				expect(cancel.status).toBe('failed');
+				expect(cancel.assertion.detail).toContain('terminal-outcomes:2');
+				expect(cancel.turns).toHaveLength(1);
+				expect(promptsWith('E04-CANCEL-T2')).toEqual([]);
+				expect(leg.status).toBe('failed');
+			}, 30_000);
+
+			it('fails cancellation when the turn completes despite the stop, or ends before it can be stopped', async () => {
+				const completed = session((await execute('E04', 'complete')).leg, 'cancellation');
+				expect(completed.status).toBe('failed');
+				expect(completed.assertion.detail).toContain('completed-despite-stop');
+				const ended = session((await execute('E04', 'endfirst')).leg, 'cancellation');
+				expect(ended.status).toBe('failed');
+				expect(ended.assertion.detail).toContain('not-stopped-mid-stream');
+				expect(promptsWith('E04-CANCEL-T2')).toEqual([]);
+			}, 30_000);
+
+			it('fails cancellation when the restart lands on another session or does not succeed', async () => {
+				const moved = session((await execute('E04', 'restartnew')).leg, 'cancellation');
+				expect(moved.status).toBe('failed');
+				expect(moved.assertion.detail).toBe('restart-not-same-session');
+				const failed = session((await execute('E04', 'restartfail')).leg, 'cancellation');
+				expect(failed.status).toBe('failed');
+				expect(failed.assertion.detail).toContain('restart-failed');
+			}, 30_000);
+
+			it('fails cancellation on a child the stopped turn left writing into the owned home', async () => {
+				const { leg } = await execute('E04', 'straggler');
+				const cancel = session(leg, 'cancellation');
+				expect(cancel.status).toBe('failed');
+				expect(cancel.assertion.detail).toMatch(/write-after-close:\d+/);
+				expect(cancel.observed.lateWrites).toContain('late.txt');
+				expect(promptsWith('E04-CANCEL-T2')).toEqual([]);
+				expect(leg.status).toBe('failed');
+			}, 30_000);
+
+			it('fails invalid-resume when an unknown id silently starts a new session', async () => {
+				const { leg } = await execute('E04', 'substitute');
+				const invalid = session(leg, 'invalid-resume');
+				expect(invalid.status).toBe('failed');
+				for (const f of [
+					'not-refused',
+					'reply-token-produced',
+					'session-substituted',
+					'session-created:1',
+				])
+					expect(invalid.assertion.detail, f).toContain(f);
+				expect(leg.status).toBe('failed');
+			}, 30_000);
+
+			it('fails steering-refused when a second turn starts mid-stream, and holds the steer unsent', async () => {
+				const { leg } = await execute('E04', 'steer2');
+				const steer = session(leg, 'steering-refused');
+				expect(steer.status).toBe('failed');
+				expect(steer.assertion.detail).toContain('second-turn-mid-stream');
+				expect(steer.turns).toHaveLength(1);
+				expect(promptsWith('E04-STEER-T2')).toEqual([]);
+				expect(leg.status).toBe('failed');
+			}, 30_000);
+
+			it('fails steering-refused when the held input goes out on another session', async () => {
+				const steer = session((await execute('E04', 'heldnew')).leg, 'steering-refused');
+				expect(steer.status).toBe('failed');
+				expect(steer.assertion.detail).toBe('held-turn-not-same-session');
+			}, 30_000);
+
+			it('a context-limit refusal is declined by the Grok compaction blocker with no command and no retry sent', async () => {
+				const { leg } = await execute('E04', 'ctxonce');
+				const compact = session(leg, 'compaction-retry');
+				expect(compact.status, JSON.stringify(compact)).toBe('passed');
+				expect(compact.assertion.detail).toContain('grok-native-compaction');
+				expect(compact.observed).toMatchObject({ compactionSends: 0, retrySends: 0 });
+				expect(compact.turns).toHaveLength(1);
+				expect(promptsWith('E04-COMPACT-T1')).toHaveLength(1);
+				expect(promptsWith('/compact')).toEqual([]);
+			}, 30_000);
+
+			it('with a command: one counted compaction, one counted retry, and a second refusal stops', async () => {
+				sessionTamper.compactCommand = '/compact';
+				const once = (await execute('E04', 'ctxonce')).leg;
+				const recovered = session(once, 'compaction-retry');
+				expect(recovered.status, JSON.stringify(recovered)).toBe('passed');
+				expect(recovered.assertion.detail).toBe('compacted once, retried once');
+				const kinds = recovered.observed.callsByKind as Array<Record<string, number>>;
+				expect(kinds).toHaveLength(3);
+				expect([
+					kinds[1].compaction - kinds[0].compaction,
+					kinds[2].retry - kinds[1].retry,
+				]).toEqual([1, 1]);
+				expect(recovered.turns.map((t) => t.callsRecorded)).toEqual([
+					{ 'model-round': 2, child: 1, retry: 0, 'side-model': 0, compaction: 0 },
+					{ 'model-round': 1, child: 1, retry: 0, 'side-model': 0, compaction: 1 },
+					{ 'model-round': 1, child: 1, retry: 1, 'side-model': 0, compaction: 0 },
+				]);
+				const twice = (await execute('E04', 'ctxalways')).leg;
+				const stopped = session(twice, 'compaction-retry');
+				expect(stopped.status, JSON.stringify(stopped)).toBe('passed');
+				expect(stopped.assertion.detail).toBe(
+					'compacted once, retried once, second refusal stopped'
+				);
+				expect(stopped.observed).toMatchObject({ compactionSends: 1, retrySends: 1 });
+				// Never a second retry: the first attempt and one retry reached the stand-in, nothing more.
+				expect(promptsWith('E04-COMPACT-T1')).toHaveLength(2);
+				expect(promptsWith('/compact')).toHaveLength(1);
+				// A compaction that fails is never followed by the retry.
+				const broken = session((await execute('E04', 'compactfail')).leg, 'compaction-retry');
+				expect(broken.status).toBe('failed');
+				expect(broken.assertion.detail).toContain('compaction-failed');
+				expect(broken.observed).toMatchObject({ compactionSends: 1, retrySends: 0 });
+			}, 45_000);
+
+			it('cannot pass from a flag or a fixture alone: with the capability off no session leg spawns', async () => {
+				const { leg } = await execute('E04', 'ok', { caps: { ...CAPS, sessionLegs: false } });
+				expect(leg.sessionLegs.map((l) => [l.leg, l.status, l.spawned])).toEqual([
+					['cancellation', 'not-run', 0],
+					['invalid-resume', 'not-run', 0],
+					['steering-refused', 'not-run', 0],
+					['compaction-retry', 'not-run', 0],
+				]);
+				expect(leg.sessionLegs[0].reasons.map((r) => r.id)).toEqual(['session-legs-unimplemented']);
+				// Only the two fixture turns ran.
+				expect(leg.spawned).toBe(2);
+				expect(turnsLogged()).toHaveLength(2);
+			}, 30_000);
+		});
+
+		describe('E05 session legs and consumers', () => {
+			it('every leg passes on the owned history, with the export and handoff digests equal and the history unchanged by refusals', async () => {
+				const { leg } = await execute('E05', 'ok');
+				const id = leg.turns[0].sessionId;
+				const mutation = session(leg, 'native-mutation-refused');
+				expect(mutation.status, JSON.stringify(mutation)).toBe('passed');
+				expect(mutation.observed).toMatchObject({
+					sessionId: id,
+					fork: { refused: true },
+					delete: { refused: true },
+					changed: [],
+				});
+				const exported = session(leg, 'export-payload');
+				expect(exported.status, JSON.stringify(exported)).toBe('passed');
+				expect((exported.observed.found as unknown[]).length).toBe(2);
+				const cont = session(leg, 'exact-continuation');
+				expect(cont.status, JSON.stringify(cont)).toBe('passed');
+				expect(cont.observed).toMatchObject({ reloaded: id, created: [] });
+				for (const name of ['context-handoff', 'agent-creation', 'template-dispatch']) {
+					const r = consumer(leg, name);
+					expect(r.status, JSON.stringify(r)).toBe('passed');
+					expect(r.assertions.every((a) => a.outcome === 'passed')).toBe(true);
+				}
+				const handoff = consumer(leg, 'context-handoff');
+				expect(handoff.digests.export).toBe(handoff.digests.handoff);
+				expect(handoff.observed.handoffSession).not.toBe(id);
+				expect(promptsWith('final OK with HANDOFF')).toHaveLength(1);
+				expect(leg.status, JSON.stringify(leg.reasons)).toBe('passed');
+				expect(fetchSpy).not.toHaveBeenCalled();
+				operatorHomeUntouched();
+			}, 30_000);
+
+			it('fails native-mutation-refused on a history byte a refused mutation changed, and on a delete that was not refused', async () => {
+				vi.spyOn(GrokSessionStorage.prototype, 'deleteMessagePair').mockImplementation(async () => {
+					const file = fs
+						.readdirSync(path.join(HOME_A, 'sessions'), { recursive: true })
+						.map(String)
+						.find((f) => f.endsWith('chat_history.jsonl'))!;
+					fs.appendFileSync(path.join(HOME_A, 'sessions', file), ' ');
+					return { success: false, error: 'refused' };
+				});
+				const changed = session((await execute('E05', 'ok')).leg, 'native-mutation-refused');
+				expect(changed.status).toBe('failed');
+				expect(changed.assertion.detail).toContain('history-changed:1');
+				vi.spyOn(GrokSessionStorage.prototype, 'deleteMessagePair').mockResolvedValue({
+					success: true,
+				} as never);
+				const allowed = session((await execute('E05', 'ok')).leg, 'native-mutation-refused');
+				expect(allowed.status).toBe('failed');
+				expect(allowed.assertion.detail).toContain('delete-not-refused');
+				vi.restoreAllMocks();
+				sessionTamper.forkAccepted = true;
+				const forked = session((await execute('E05', 'ok')).leg, 'native-mutation-refused');
+				expect(forked.status).toBe('failed');
+				expect(forked.assertion.detail).toBe('fork-not-refused');
+			}, 30_000);
+
+			it('fails export-payload on a dropped turn or a dropped reply', async () => {
+				const exported = session((await execute('E05', 'drop')).leg, 'export-payload');
+				expect(exported.status).toBe('failed');
+				expect(exported.assertion.detail).toContain('turn-2-prompt-absent');
+				const unanswered = session((await execute('E05', 'dropreply')).leg, 'export-payload');
+				expect(unanswered.status).toBe('failed');
+				expect(unanswered.assertion.detail).toContain('turn-2-reply-absent');
+			}, 30_000);
+
+			it('fails exact-continuation on a new native id after reload', async () => {
+				const cont = session((await execute('E05', 'newid')).leg, 'exact-continuation');
+				expect(cont.status).toBe('failed');
+				expect(cont.assertion.detail).toContain('new-native-id');
+				expect(cont.assertion.detail).toContain('session-created:1');
+			}, 30_000);
+
+			it('fails each consumer leg on a tampered handoff digest, a lost inherited setting or an unexpanded variable', async () => {
+				sessionTamper.handoff = true;
+				const handoff = consumer((await execute('E05', 'ok')).leg, 'context-handoff');
+				expect(handoff.status).toBe('failed');
+				expect(assertionOf(handoff, 'digest-matches-export')?.outcome).toBe('failed');
+				expect(assertionOf(handoff, 'consumed')?.detail).toContain('not sent');
+				expect(promptsWith('final OK with HANDOFF')).toEqual([]);
+				sessionTamper.handoff = false;
+
+				sessionTamper.worktreeDrop = 'customEnvVars';
+				const created = consumer((await execute('E05', 'ok')).leg, 'agent-creation');
+				expect(created.status).toBe('failed');
+				expect(assertionOf(created, 'inherited-settings')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(created, 'inherited-settings')?.detail).toContain('worktree=false');
+				expect(assertionOf(created, 'launch-plan')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(created, 'launch-plan')?.detail).toContain('worktree:account');
+				expect(assertionOf(created, 'model-acknowledged')?.detail).toContain('not sent');
+				expect(promptsWith('QUALIFY-E05-AGENT-OK')).toEqual([]);
+				sessionTamper.worktreeDrop = null;
+
+				sessionTamper.leaveTemplate = true;
+				const dispatched = consumer((await execute('E05', 'ok')).leg, 'template-dispatch');
+				expect(dispatched.status).toBe('failed');
+				expect(assertionOf(dispatched, 'template-expanded')).toMatchObject({
+					outcome: 'failed',
+				});
+				expect(assertionOf(dispatched, 'template-expanded')?.detail).toContain('unexpanded=true');
+				expect(assertionOf(dispatched, 'prompt-received')?.detail).toContain('not sent');
+				expect(promptsWith('-TPL-OK')).toEqual([]);
+			}, 60_000);
+
+			it('fails context-handoff when the handoff turn resumes the source session instead of a fresh one', async () => {
+				const handoff = consumer((await execute('E05', 'handoffsame')).leg, 'context-handoff');
+				expect(handoff.status).toBe('failed');
+				expect(assertionOf(handoff, 'consumed')).toMatchObject({ outcome: 'failed' });
+				expect(assertionOf(handoff, 'consumed')?.detail).toContain('session=resumed-source');
+				expect(assertionOf(handoff, 'digest-matches-export')?.outcome).toBe('passed');
+			}, 30_000);
+
+			it('cannot pass from imported display text or a fixture alone: a stand-in that keeps no history fails', async () => {
+				const { leg } = await execute('E05', 'nohistory');
+				expect(session(leg, 'native-mutation-refused').assertion.detail).toContain(
+					'session-not-in-home'
+				);
+				expect(session(leg, 'export-payload').status).toBe('failed');
+				expect(session(leg, 'exact-continuation').assertion.detail).toContain(
+					'session-not-reloaded'
+				);
+				expect(assertionOf(consumer(leg, 'context-handoff'), 'extracted')?.outcome).toBe('failed');
+				expect(leg.status).toBe('failed');
+				const off = (await execute('E05', 'ok', { caps: { ...CAPS, sessionConsumers: false } }))
+					.leg;
+				expect(off.sessionConsumers.map((l) => [l.leg, l.status, l.spawned])).toEqual([
+					['context-handoff', 'not-run', 0],
+					['agent-creation', 'not-run', 0],
+					['template-dispatch', 'not-run', 0],
+				]);
+			}, 60_000);
 		});
 	});
 });

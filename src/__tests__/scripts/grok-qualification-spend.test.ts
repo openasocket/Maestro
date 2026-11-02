@@ -21,6 +21,11 @@
  *
  * GT1-11-11B3: an E08 resource leg whose isolation does not declare its
  * resources synthetic-owned refuses before any write, spawn or reservation.
+ *
+ * GT1-11-11C3: an E04 compaction leg (GT1-11-11C1) draws its compaction and its
+ * one retry each as its own kind on the shared reservation, every call a turn
+ * drew is on the ledger, a second refusal sends nothing more, and a reservation
+ * that cannot cover the compaction refuses it unsent rather than uncounted.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import fs from 'node:fs';
@@ -81,6 +86,20 @@ const childProcess = vi.hoisted(() => {
 vi.mock('node:child_process', (importOriginal) => childProcess.factory(importOriginal as never));
 vi.mock('child_process', (importOriginal) => childProcess.factory(importOriginal as never));
 const spawnSpies = childProcess.spies;
+/** A Grok compaction command for the GT1-11-11C3 block (production has none); null is production. */
+const compactTamper = vi.hoisted(() => ({ command: null as string | null }));
+vi.mock('../../../src/shared/contextCompaction', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../../../src/shared/contextCompaction')>();
+	return {
+		...actual,
+		getContextCompactCommand: (t: Parameters<typeof actual.getContextCompactCommand>[0]) =>
+			compactTamper.command && t === 'grok'
+				? compactTamper.command
+				: actual.getContextCompactCommand(t),
+		getContextCompactionBlocker: (t: Parameters<typeof actual.getContextCompactionBlocker>[0]) =>
+			compactTamper.command && t === 'grok' ? undefined : actual.getContextCompactionBlocker(t),
+	};
+});
 const WORKSPACE = path.resolve(__dirname, '../../..');
 
 /** A priced stand-in model (the price table knows no Grok model). */
@@ -121,6 +140,9 @@ const ALL_CAPS: HarnessCapabilities = {
 	sshExecutor: false,
 	// Off: the consumer legs run in their own block (GT1-11-11B3); these suites decide admission only.
 	consumerLegs: false,
+	// Off: the session legs run in their own block (GT1-11-11C3).
+	sessionLegs: false,
+	sessionConsumers: false,
 };
 
 /** The fake budget provider: a fully authorized worst-case-reservation config. */
@@ -921,6 +943,208 @@ describe('GT1-11-09 qualification spend admission', () => {
 				expect(fs.existsSync(path.join(ROOT, 'synthetic-resources'))).toBe(false);
 				expectNothingStarted();
 			});
+		}
+	);
+
+	describe.skipIf(process.platform === 'win32')(
+		'session-leg compaction on the shared ledger (GT1-11-11C3)',
+		() => {
+			const REL = `${RUNS_ROOT}/gt1-11-11c3-spend-${process.pid}`;
+			const ROOT = path.join(WORKSPACE, REL);
+			const BIN = path.join(ROOT, 'bin', 'grok');
+			const LOG = path.join(ROOT, 'log', 'prompts');
+			const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-11c3-spend-operator-${process.pid}`);
+			const E04 = expandCases([
+				{
+					id: 'E04',
+					requirementIds: ['R-E04'],
+					ownerTasks: ['GT1-11-11C3'],
+					expectedInvariant: 'synthetic',
+					blockerIds: [],
+				},
+			]).find((c) => c.caseId === 'E04:native-headless:local')!;
+			let sha = '';
+			/**
+			 * A native stand-in (never a real Grok): every compaction-leg attempt is
+			 * refused for the context limit, `/compact` and every other prompt are
+			 * answered with the last reply token the prompt carries.
+			 */
+			const SOURCE = [
+				`#!${process.execPath}`,
+				"const fs = process.getBuiltinModule('fs');",
+				'const argv = process.argv.slice(2);',
+				'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
+				"const prompt = at('-p') || '';",
+				`fs.appendFileSync(${JSON.stringify(LOG)}, prompt.slice(0, 120).replace(/\\n/g, ' ') + '\\n');`,
+				"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
+				"if (prompt.includes('E04-COMPACT-T1')) { out({ type: 'error', message: 'context window exceeded' }); process.exit(1); }",
+				"const tokens = prompt.match(/QUALIFY-[A-Z0-9-]+-OK/g) || [''];",
+				"out({ type: 'text', data: tokens[tokens.length - 1] });",
+				'out({',
+				"  type: 'end', stopReason: 'end_turn', sessionId: at('--resume') || 'gt1-11-11c3-spend-session', total_cost_usd: 0.001,",
+				'  usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0, reasoning_tokens: 0 },',
+				"  modelUsage: { [at('-m')]: { inputTokens: 10, outputTokens: 5, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, costUSD: 0.001 } },",
+				'});',
+				'',
+			].join('\n');
+			const sessionConfig = (maxCalls: number): QualificationConfig =>
+				liveConfig({
+					allowedRoots: [REL],
+					binary: { path: `${REL}/bin/grok`, sha256: sha, version: '0.0.0-synthetic' },
+					spendBounds: {
+						perCall: {
+							inputTokens: 1000,
+							outputTokens: 500,
+							cacheReadTokens: 0,
+							cacheCreationTokens: 0,
+						},
+						// No per-turn retry allowance: a retry here is only the compaction leg's own (A11-F19).
+						perTurnCalls: { modelRounds: 2, children: 1, retries: 0, sideModels: 0, compaction: 0 },
+						sideModels: [],
+					},
+					limits: {
+						budgetUsd: 10,
+						maxCalls: 80,
+						maxTurns: 12,
+						maxWallClockSeconds: 600,
+						perCase: { budgetUsd: 2, maxCalls, maxTurns: 10, maxWallClockSeconds: 120 },
+						cleanupSeconds: 1,
+					},
+					isolation: {
+						boundary: {
+							kind: 'disposable-os-account',
+							reference: 'boundary:synthetic',
+							actualHome: `${REL}/home`,
+							productionHomeMounted: false,
+							operatorCredentialsReadable: false,
+						},
+						accountRoots: { A: `${REL}/grok-a`, B: `${REL}/grok-b` },
+						remoteRoots: {},
+						policy: {
+							systemPolicyInspected: true,
+							managedPolicy: 'absent',
+							requiredPolicyCompatible: true,
+						},
+						resources: { hooks: 'empty', mcp: 'empty', plugins: 'empty', envrc: 'disabled' },
+						egress: {
+							kind: 'operation-aware',
+							reference: 'egress:synthetic',
+							suppression: {
+								update: 'flags-only',
+								telemetry: 'flags-only',
+								backgroundUpload: 'unknown',
+							},
+						},
+						path: ['/usr/bin', '/bin'],
+					},
+				});
+			const run = async (maxCalls: number, onLedger?: (l: BudgetLedger) => void) => {
+				fs.rmSync(LOG, { force: true });
+				const config = sessionConfig(maxCalls);
+				const ledger = ledgerFor(config, E04);
+				onLedger?.(ledger);
+				const lifetime = createCaseLifetime(1);
+				const [leg] = await executePaidCase(E04, config, {
+					workspace: WORKSPACE,
+					operatorHome: OPERATOR_HOME,
+					ledger,
+					lifetime,
+					problems: [],
+					capabilities: { ...ALL_CAPS, sessionLegs: true },
+					now: () => NOW,
+					resolveSecret: (name) => `synthetic-xai-${name}-value`,
+				});
+				await lifetime.cleanup();
+				const compaction = leg.sessionLegs.find((l) => l.leg === 'compaction-retry');
+				const sent = fs.existsSync(LOG) ? fs.readFileSync(LOG, 'utf8').trim().split('\n') : [];
+				return { leg, ledger, compaction, sent };
+			};
+			const sum = (rows: Array<Record<string, number>>, kind: string) =>
+				rows.reduce((n, r) => n + r[kind], 0);
+
+			beforeAll(() => {
+				for (const d of ['home', 'grok-a', 'grok-b', 'bin', 'log', path.join('cache', 'tmp')])
+					fs.mkdirSync(path.join(ROOT, d), { recursive: true });
+				fs.writeFileSync(BIN, SOURCE);
+				fs.chmodSync(BIN, 0o555);
+				sha = createHash('sha256').update(fs.readFileSync(BIN)).digest('hex');
+			});
+			afterAll(() => {
+				if (fs.existsSync(BIN)) fs.chmodSync(BIN, 0o755);
+				fs.rmSync(ROOT, { recursive: true, force: true });
+				fs.rmSync(OPERATOR_HOME, { recursive: true, force: true });
+				compactTamper.command = null;
+			});
+			beforeEach(() => {
+				spawnSpies.forEach((s) => s.mockClear());
+				compactTamper.command = '/compact';
+			});
+
+			it('the compaction and its one retry each draw their own kind once, every call is on the shared ledger, and a second refusal sends nothing more', async () => {
+				const { leg, ledger, compaction, sent } = await run(60);
+				if (!compaction) throw new Error(JSON.stringify(leg.reasons));
+				expect(compaction.status, JSON.stringify(compaction)).toBe('passed');
+				expect(compaction.assertion.detail).toBe(
+					'compacted once, retried once, second refusal stopped'
+				);
+				const r = ledger.reservations[0];
+				expect(r.callsByKind.compaction).toBe(1);
+				expect(r.callsByKind.retry).toBe(1);
+				const rows = [...leg.turns, ...leg.sessionLegs.flatMap((l) => l.turns)].map(
+					(t) => t.callsRecorded as unknown as Record<string, number>
+				);
+				// Every call each turn drew is on the reservation and the run ledger, none outside them.
+				for (const kind of ['model-round', 'child', 'retry', 'side-model', 'compaction'])
+					expect(sum(rows, kind), kind).toBe((r.callsByKind as Record<string, number>)[kind]);
+				expect(ledger.calls).toBe(r.callsUsed);
+				expect(ledger.turns).toBe(rows.length);
+				// The first attempt and the one retry reached the stand-in; never a second retry.
+				expect(sent.filter((p) => p.includes('E04-COMPACT-T1'))).toHaveLength(2);
+				expect(sent.filter((p) => p === '/compact')).toHaveLength(1);
+			}, 30_000);
+
+			it('a compaction and its retry are drawn before they are spawned, and an allowance that cannot cover the leg refuses before any spawn', async () => {
+				const actual =
+					await vi.importActual<typeof import('node:child_process')>('node:child_process');
+				const atSpawn: Array<{ prompt: string; compaction: number; retry: number; turns: number }> =
+					[];
+				let current: BudgetLedger | null = null;
+				spawnSpies[0].mockImplementation(((...a: Parameters<typeof actual.spawn>) => {
+					const argv = (a[1] ?? []) as string[];
+					const prompt = argv[argv.indexOf('-p') + 1] ?? '';
+					const r = current?.reservations[0];
+					if (r && (prompt === '/compact' || prompt.includes('E04-COMPACT-T1')))
+						atSpawn.push({
+							prompt: prompt === '/compact' ? 'compact' : 'attempt',
+							compaction: r.callsByKind.compaction,
+							retry: r.callsByKind.retry,
+							turns: r.turnsUsed,
+						});
+					return actual.spawn(...a);
+				}) as never);
+				try {
+					await run(60, (l) => (current = l));
+				} finally {
+					spawnSpies[0].mockImplementation(actual.spawn as never);
+				}
+				// Each send was already on the reservation when its child started.
+				expect(atSpawn.map((x) => [x.prompt, x.compaction, x.retry])).toEqual([
+					['attempt', 0, 0],
+					['compact', 1, 0],
+					['attempt', 1, 1],
+				]);
+				expect(atSpawn[1].turns).toBe(atSpawn[0].turns + 1);
+				expect(atSpawn[2].turns).toBe(atSpawn[1].turns + 1);
+				// One call short of every planned turn: refused before any spawn, nothing held or drawn.
+				spawnSpies.forEach((s) => s.mockClear());
+				const { leg, ledger, sent } = await run(29);
+				expect(ids(leg.reasons)).toEqual(['call-allowance-exceeds-case-limit']);
+				expect(leg).toMatchObject({ status: 'not-run', spawned: 0, reservationId: null });
+				expect(leg.sessionLegs).toEqual([]);
+				expect([ledger.reservations, ledger.calls, ledger.turns]).toEqual([[], 0, 0]);
+				for (const s of spawnSpies) expect(s).not.toHaveBeenCalled();
+				expect(sent).toEqual([]);
+			}, 30_000);
 		}
 	);
 });
