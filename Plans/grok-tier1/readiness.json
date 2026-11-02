@@ -1,13 +1,14 @@
 {
 	"schemaVersion": 1,
 	"generator": "scripts/verify-grok-tier1.mjs",
-	"sourceCommit": "cb6cba73f52c62c2115585c60969dd26b9a9b577",
-	"behavioralFingerprint": "4ce9d1fb444e50cd4f64047aeb3193e420c9fc3ea5933913d8c15465eb9f8e27",
+	"sourceCommit": "54abf9c11fc68188c96190d21edc3707b1e304c1",
+	"behavioralFingerprint": "c05cacd3de85698b93c09cd7238dfae4d5c2ee06ea5f8c59e74fc9d19788eea3",
 	"inputsSha256": {
-		"Plans/grok-tier1/parity.json": "c1289b7391c2bb1243bfe501678b4fb0996c8c7cd12925a7884d947f6cf6bccb",
+		"Plans/grok-tier1/parity.json": "3078fb5637faa7eb77e84940f4131998622ebe6479c791eb1ec8a99e7961ea62",
 		"Plans/grok-tier1/run-state.json": "7b1502912e0b36dd91d3797660e2f1ff1426f2fd486fcac89f8c94b043a5a064",
 		"Plans/grok-tier1/evidence/01-task-coverage.json": "08c202157f57ad00701402755c20810324b28f1c4b8fd33ad9b86eb4f1acb3c4",
-		"Plans/grok-tier1/evidence/01-baseline-checks.json": "d4dd07afa31b9e9a5b98cda47e155cbcf059d0d6d0fbb9e8b9fb7cdd2dbbe64d"
+		"Plans/grok-tier1/evidence/01-baseline-checks.json": "d4dd07afa31b9e9a5b98cda47e155cbcf059d0d6d0fbb9e8b9fb7cdd2dbbe64d",
+		"Plans/grok-tier1/evidence/12-checks.json": "895a2687950be5b7a82c1f9ec38660b5de8659c9886d5f15b5a3d461f1e71ff8"
 	},
 	"tier1Ready": false,
 	"deliveryComplete": false,
@@ -41,7 +42,8 @@
 		"live:authorization-absent",
 		"regression:baseline-failure-unwaived:lint",
 		"regression:baseline-failure-unwaived:tsc-lint",
-		"regression:checks-missing",
+		"regression:lint:fail",
+		"regression:unit:fail",
 		"version:binary-source-unknown",
 		"version:binary-unqualified",
 		"version:qualification-absent",
@@ -328,12 +330,14 @@
 		"phase09-managed-security:P35",
 		"phase09-managed-security:P36",
 		"phase09-managed-security:S23",
+		"phase12-branch-unit-regressions",
 		"pianola-fresh-session-config-absent",
 		"qualified-binary-and-platforms-missing",
 		"queued-command-main-entry-race",
 		"regression:baseline-failure-unwaived:lint",
 		"regression:baseline-failure-unwaived:tsc-lint",
-		"regression:checks-missing",
+		"regression:lint:fail",
+		"regression:unit:fail",
 		"runtime-native-launch-and-recording-pending",
 		"symphony-selected-config-handoff-pending",
 		"version:binary-source-unknown",
@@ -1976,6 +1980,7 @@
 		"P46": [
 			"blocker:baseline-typescript-dispatcher",
 			"blocker:gap:P46",
+			"blocker:phase12-branch-unit-regressions",
 			"deterministic:fail",
 			"implementation:pending",
 			"static:not-run"

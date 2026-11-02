@@ -4021,6 +4021,157 @@
 				"S32",
 				"S37"
 			]
+		},
+		"phase12-repository-checks": {
+			"path": "Plans/grok-tier1/evidence/12-checks.json",
+			"sourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
+			"provenance": "repository-checks",
+			"acceptanceRun": false,
+			"status": "fail",
+			"affectedRows": ["P46"]
+		},
+		"phase12-readiness": {
+			"path": "Plans/grok-tier1/evidence/12.md#gt1-12-06-verify-acceptance-validation-and-readiness",
+			"sourceCommit": "54abf9c11fc68188c96190d21edc3707b1e304c1",
+			"provenance": "validator-derivation-and-reconciliation",
+			"acceptanceRun": false,
+			"status": "pending-qualification",
+			"affectedRows": [
+				"P01",
+				"P02",
+				"P03",
+				"P04",
+				"P05",
+				"P06",
+				"P07",
+				"P08",
+				"P09",
+				"P10",
+				"P11",
+				"P12",
+				"P13",
+				"P14",
+				"P15",
+				"P16",
+				"P17",
+				"P18",
+				"P19",
+				"P20",
+				"P21",
+				"P22",
+				"P23",
+				"P24",
+				"P25",
+				"P26",
+				"P27",
+				"P28",
+				"P29",
+				"P30",
+				"P31",
+				"P32",
+				"P33",
+				"P34",
+				"P35",
+				"P36",
+				"P37",
+				"P38",
+				"P39",
+				"P40",
+				"P41",
+				"P42",
+				"P43",
+				"P44",
+				"P45",
+				"P46",
+				"P47",
+				"P48",
+				"C-supportsResume",
+				"C-supportsReadOnlyMode",
+				"C-supportsStandardPermissionMode",
+				"C-supportsJsonOutput",
+				"C-supportsSessionId",
+				"C-supportsImageInput",
+				"C-supportsImageInputOnResume",
+				"C-supportsSlashCommands",
+				"C-supportsSessionStorage",
+				"C-supportsCostTracking",
+				"C-supportsUsageStats",
+				"C-supportsBatchMode",
+				"C-requiresPromptToStart",
+				"C-supportsStreaming",
+				"C-supportsResultMessages",
+				"C-supportsModelSelection",
+				"C-supportsStreamJsonInput",
+				"C-supportsPromptViaStdin",
+				"C-supportsThinkingDisplay",
+				"C-supportsContextMerge",
+				"C-supportsContextExport",
+				"C-supportsWizard",
+				"C-supportsGroupChatModeration",
+				"C-usesJsonLineOutput",
+				"C-usesCombinedContextWindow",
+				"C-supportsAppendSystemPrompt",
+				"C-supportsProjectMemory",
+				"C-supportsAdditionalDirectories",
+				"C-imageResumeMode",
+				"REG-PARSER",
+				"REG-STORAGE",
+				"REG-PROFILE",
+				"REG-AUTH",
+				"REG-MODEL",
+				"REG-USAGE",
+				"REG-CHILD",
+				"REG-SESSION-MUTATION",
+				"REG-TRANSLATION",
+				"REG-QUOTA",
+				"REG-DISCOVERY",
+				"REG-ERRORS",
+				"REG-MANAGED-ROUTES",
+				"S01",
+				"S02",
+				"S03",
+				"S04",
+				"S05",
+				"S06",
+				"S07",
+				"S08",
+				"S09",
+				"S10",
+				"S11",
+				"S12",
+				"S13",
+				"S14",
+				"S15",
+				"S16",
+				"S17",
+				"S18",
+				"S19",
+				"S20",
+				"S21",
+				"S22",
+				"S23",
+				"S24",
+				"S25",
+				"S26",
+				"S27",
+				"S28",
+				"S29",
+				"S30",
+				"S31",
+				"META-01",
+				"META-03",
+				"META-04",
+				"META-05",
+				"META-06",
+				"META-07",
+				"REG-DEFINITIONS",
+				"S32",
+				"S33",
+				"S34",
+				"S35",
+				"S36",
+				"S37"
+			]
 		}
 	},
 	"sourceCatalog": {
@@ -17761,7 +17912,8 @@
 				"evidenceRef": "phase01-audit",
 				"phase02EvidenceRef": "phase02-reconciliation",
 				"phase03EvidenceRef": "phase03-reconciliation",
-				"phase03DeterministicEvidenceRef": "phase03-reverification"
+				"phase03DeterministicEvidenceRef": "phase03-reverification",
+				"phase12EvidenceRef": "phase12-repository-checks"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -17791,6 +17943,13 @@
 					"missingPrerequisite": "Resolve or explicitly reconcile TS2339 at plugin-host-handlers.ts(1196,76) before final required checks can pass; this task does not waive it.",
 					"affectedRows": ["P46"],
 					"evidenceRef": "phase03-reverification"
+				},
+				{
+					"id": "phase12-branch-unit-regressions",
+					"code": "branch-regression",
+					"missingPrerequisite": "GT1-12-05 (12-checks.json at 6d574a72f): npm run test fails 24 of 64286; 22 failures in 10 files pass at the RC base 882d658a8 and are Grok-branch regressions (serveSpawn x2, cross-agent-router.managed x4, assemble-parity x3, ptyKill x1, cue-cli-executor x1, cue-shell-executor x1, cue-process-lifecycle x1, resumeTabVisibility x4, inlineWizard lifecycleActions x2, EncoreTab hooks x3). Repair the product or correct each test with a recorded justification (GT1-12-06A), then rerun GT1-12-05. Not waived.",
+					"affectedRows": ["P46"],
+					"evidenceRef": "phase12-repository-checks"
 				}
 			],
 			"phase": "12",
@@ -45593,5 +45752,401 @@
 		"liveCalls": 0,
 		"imagesAnalyzed": 0,
 		"readiness": false
+	},
+	"phase12Readiness": {
+		"taskId": "GT1-12-06",
+		"recordedAt": "2026-11-02",
+		"sourceCommit": "54abf9c11fc68188c96190d21edc3707b1e304c1",
+		"behavioralFingerprint": "c05cacd3de85698b93c09cd7238dfae4d5c2ee06ea5f8c59e74fc9d19788eea3",
+		"evidenceRef": "phase12-readiness",
+		"command": "node scripts/verify-grok-tier1.mjs --write",
+		"verdict": {
+			"tier1Ready": false,
+			"deliveryComplete": false,
+			"implementationComplete": false,
+			"testComplete": false,
+			"liveComplete": false,
+			"outcome": "pending-qualification",
+			"errors": 0
+		},
+		"rowStatus": {
+			"rows": 134,
+			"requiredScope": 134,
+			"qualificationRows": 132,
+			"deliveryRows": 2,
+			"implementation": {
+				"pending": 134
+			},
+			"static": {
+				"not-run": 134
+			},
+			"deterministic": {
+				"not-run": 133,
+				"fail": 1,
+				"failRows": ["P46"]
+			},
+			"live": {
+				"not-run": 134,
+				"applicable": 121,
+				"notApplicable": 13
+			},
+			"incompleteQualificationRows": 132,
+			"incompleteDeliveryRows": 2,
+			"uncheckedOwnerTasks": 0
+		},
+		"provenance": {
+			"catalogEntries": 166,
+			"acceptanceRuns": 0,
+			"commitsNamed": 164,
+			"commitsAtCurrentFingerprint": ["6d574a72f659b8fdc1a3cb8571153f40e3e5e191"],
+			"lastBehavioralChange": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
+			"lastProductChange": "d83f2967c",
+			"note": "No catalog entry is an acceptance run, so no lane can pass whatever its status; every implementation, static and deterministic claim predates the current fingerprint. 6d574a72f changed the fingerprint only through 11 .sloptimize cache files under src/ (no product change); excluding them no earlier evidence commit becomes current either (the last product change d83f2967c postdates every audit)."
+		},
+		"globalBlockers": [
+			"audit:phase11Audit:finding:A11-F33",
+			"audit:phase11Audit:finding:A11-F36",
+			"audit:phase11Audit:finding:A11-F38",
+			"audit:phase11Audit:finding:A11-F39",
+			"audit:phase11Audit:not-ready",
+			"audit:phase11Audit:stale-source",
+			"audit:phase11IntegrationVerify:finding:A11-F13",
+			"audit:phase11IntegrationVerify:stale-source",
+			"audit:phase11StaticVerify:finding:A11-F07",
+			"audit:phase11StaticVerify:stale-source",
+			"external:grok-readonly-cli-enforcement-unqualified",
+			"external:live-authorization-absent",
+			"external:qualified-binary-and-platforms-missing",
+			"live:authorization-absent",
+			"regression:baseline-failure-unwaived:lint",
+			"regression:baseline-failure-unwaived:tsc-lint",
+			"regression:lint:fail",
+			"regression:unit:fail",
+			"version:binary-source-unknown",
+			"version:binary-unqualified",
+			"version:qualification-absent",
+			"version:supported-range-unknown"
+		],
+		"blockerClasses": {
+			"per-row-acceptance-pending": {
+				"gap:*": {
+					"code": "implementation-or-evidence-pending",
+					"rowCount": 125
+				}
+			},
+			"repaired-awaiting-acceptance": {
+				"grok-acp-provider-error-read-as-lost-transport": {
+					"code": "production-defect",
+					"rowCount": 2
+				},
+				"grok-candidate-snapshot-outlives-registry": {
+					"code": "harness-gap",
+					"rowCount": 3
+				},
+				"grok-cross-provider-cases-unimplemented": {
+					"code": "harness-capability",
+					"rowCount": 8
+				},
+				"grok-harness-acp-legs-owned": {
+					"code": "harness-gap",
+					"rowCount": 60
+				},
+				"grok-identity-discovery-cases-unimplemented": {
+					"code": "harness-capability",
+					"rowCount": 12
+				},
+				"grok-negative-policy-cases-unimplemented": {
+					"code": "harness-capability",
+					"rowCount": 10
+				},
+				"grok-offline-inspection-not-separable": {
+					"code": "harness-capability",
+					"rowCount": 1
+				},
+				"grok-paid-executor-unimplemented": {
+					"code": "harness-capability",
+					"rowCount": 38
+				},
+				"grok-resource-cases-unimplemented": {
+					"code": "harness-capability",
+					"rowCount": 8
+				},
+				"grok-session-consumer-cases-unimplemented": {
+					"code": "harness-capability",
+					"rowCount": 18
+				},
+				"grok-unknown-cost-written-as-zero": {
+					"code": "consumer-defect",
+					"rowCount": 5
+				},
+				"grok-utility-consumer-cases-unimplemented": {
+					"code": "harness-capability",
+					"rowCount": 10
+				},
+				"grok-workflow-consumer-cases-unimplemented": {
+					"code": "harness-capability",
+					"rowCount": 17
+				}
+			},
+			"external-verification-unavailable": {
+				"acp-permission-consumers:*": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 10
+				},
+				"acp-plan-consumers:*": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 4
+				},
+				"acp-turn-consumers:*": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 24
+				},
+				"acp-wire-tick-precision:*": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 9
+				},
+				"composer-command-images-omitted": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 2
+				},
+				"duplicate-permission-handoff:*": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 2
+				},
+				"gap:*": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 9
+				},
+				"grok-acp-config-discovery-wiring-pending": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 4
+				},
+				"grok-context-export-consumers-and-verification-pending": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 3
+				},
+				"grok-context-merge-flag-provisional": {
+					"code": "qualification-not-run",
+					"rowCount": 1
+				},
+				"grok-dialog-discovery-regressions-pending": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 4
+				},
+				"grok-directory-grants-unqualified": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 4
+				},
+				"grok-effort-validation-and-retry-pending": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 7
+				},
+				"grok-environment-disclosure-unverified": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 3
+				},
+				"grok-explicit-empty-launch-env": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 2
+				},
+				"grok-groupchat-unknown-context": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 1
+				},
+				"grok-harness-ssh-target-absent": {
+					"code": "external-prerequisite",
+					"rowCount": 54
+				},
+				"grok-inline-wizard-callers:*": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 3
+				},
+				"grok-native-mcp-unqualified": {
+					"code": "qualification-not-run",
+					"rowCount": 5
+				},
+				"grok-native-package-smoke-not-run": {
+					"code": "qualification-not-run",
+					"rowCount": 2
+				},
+				"grok-native-subagent-unqualified": {
+					"code": "qualification-not-run",
+					"rowCount": 5
+				},
+				"grok-native-translation-round-trip-unverified": {
+					"code": "qualification-not-run",
+					"rowCount": 5
+				},
+				"grok-native-windows-ssh-launch-not-run": {
+					"code": "qualification-not-run",
+					"rowCount": 4
+				},
+				"grok-onboarding-callers:*": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 3
+				},
+				"grok-phase10-native-consumer-trace-not-run": {
+					"code": "qualification-not-run",
+					"rowCount": 2
+				},
+				"grok-readonly-cli-enforcement-unqualified": {
+					"code": "qualification-not-run",
+					"rowCount": 4
+				},
+				"grok-recovery-guidance-unverified": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 3
+				},
+				"grok-remote-launch-account-unobserved": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 4
+				},
+				"grok-safe-replay:*": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 6
+				},
+				"grok-scoped-discovery-consumers-pending": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 4
+				},
+				"grok-usage-consumer-continuations-pending": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 7
+				},
+				"grok-withheld-profile-readiness-unverified": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 2
+				},
+				"lite-native-host-display-locked": {
+					"code": "qualification-not-run",
+					"rowCount": 2
+				},
+				"live-authorization-absent": {
+					"code": "live-disabled",
+					"rowCount": 120
+				},
+				"native-parser-followup:*": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 9
+				},
+				"phase09-managed-security:*": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 6
+				},
+				"pianola-fresh-session-config-absent": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 3
+				},
+				"qualified-binary-and-platforms-missing": {
+					"code": "qualification-not-run",
+					"rowCount": 121
+				},
+				"queued-command-main-entry-race": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 2
+				},
+				"runtime-native-launch-and-recording-pending": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 4
+				},
+				"symphony-selected-config-handoff-pending": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 2
+				},
+				"wizard-config-focus-before-remount:*": {
+					"code": "remaining-consumer-or-native-qualification-pending",
+					"rowCount": 4
+				}
+			},
+			"implementation-gap": {
+				"grok-capability-true-without-pinned-evidence": {
+					"code": "unproven-capability-claim",
+					"rowCount": 5
+				},
+				"grok-cue-assist-standard-consent-port": {
+					"code": "implementation-gap",
+					"rowCount": 2
+				},
+				"grok-image-host-bounds-producer-absent": {
+					"code": "implementation-gap",
+					"rowCount": 3
+				},
+				"phase12-branch-unit-regressions": {
+					"code": "branch-regression",
+					"rowCount": 1
+				}
+			},
+			"provider-unsupported": {
+				"acp-question-negotiation:*": {
+					"code": "unsupported-capability",
+					"rowCount": 5
+				},
+				"grok-groupchat-moderation-refused": {
+					"code": "unsupported-capability",
+					"rowCount": 3
+				},
+				"grok-native-compaction-unqualified": {
+					"code": "required-feature",
+					"rowCount": 1
+				},
+				"grok-native-delete-edit-transport-unqualified": {
+					"code": "native-mutation-unsupported",
+					"rowCount": 2
+				},
+				"grok-native-fork-rename-transport-unqualified": {
+					"code": "native-mutation-unsupported",
+					"rowCount": 2
+				},
+				"grok-native-quota-unavailable": {
+					"code": "unsupported-capability",
+					"rowCount": 2
+				},
+				"grok-permission-decisions-unrecorded": {
+					"code": "unsupported-capability",
+					"rowCount": 2
+				},
+				"grok-required-no-tools-unsupported": {
+					"code": "unsupported-capability",
+					"rowCount": 5
+				},
+				"grok-resource-loaders-unpinned": {
+					"code": "evidence-gap",
+					"rowCount": 3
+				},
+				"grok-steering-input-op-unadvertised": {
+					"code": "unsupported",
+					"rowCount": 1
+				}
+			},
+			"baseline-defect": {
+				"baseline-typescript-dispatcher": {
+					"code": "pre-existing-baseline-typecheck-failure",
+					"rowCount": 1
+				}
+			}
+		},
+		"failSafeProbes": {
+			"method": "in-memory mutation of the real ledger through deriveReadiness (Working/gt1-12-06/probe.mjs); nothing written",
+			"allRowsPassOnExistingEvidence": {
+				"tier1Ready": false,
+				"firstReasons": ["not-an-acceptance-run", "implementation:evidence-stale-source"]
+			},
+			"allRowsPassAcceptanceStale": {
+				"tier1Ready": false,
+				"firstReasons": ["evidence-stale-source"]
+			},
+			"allRowsPassCurrentMockLive": {
+				"tier1Ready": false,
+				"firstReasons": ["live-evidence-not-native", "platform/route unqualified"],
+				"globals": 22
+			}
+		},
+		"insertedTasks": ["GT1-12-06A"],
+		"promotion": {
+			"grokRemainsBeta": true,
+			"rowStatusChanges": false,
+			"capabilityChanges": false,
+			"applicabilityChanges": false
+		}
 	}
 }
