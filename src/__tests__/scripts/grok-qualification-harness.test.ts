@@ -4286,7 +4286,8 @@ describe('GT1-11-09 qualification harness', () => {
 			| 'heldnew'
 			| 'compactfail'
 			| 'dropreply'
-			| 'handoffsame';
+			| 'handoffsame'
+			| 'violate';
 		let sha = '';
 		/**
 		 * The native Grok stand-in (never a real Grok): it keeps its history
@@ -4435,14 +4436,18 @@ describe('GT1-11-09 qualification harness', () => {
 		const execute = async (
 			family: 'E04' | 'E05',
 			mode: Mode,
-			opts: { caps?: HarnessCapabilities; config?: QualificationConfig } = {}
+			opts: {
+				caps?: HarnessCapabilities;
+				config?: QualificationConfig;
+				route?: 'native-headless' | 'acp-stdio';
+			} = {}
 		) => {
 			standIn(mode);
 			fs.rmSync(HOME_A, { recursive: true, force: true });
 			fs.mkdirSync(HOME_A, { recursive: true });
 			fs.rmSync(LOG, { force: true });
 			const cfg = opts.config ?? sessionConfig();
-			const c = expandCases(FAMILIES, [`${family}:native-headless:local`])[0];
+			const c = expandCases(FAMILIES, [`${family}:${opts.route ?? 'native-headless'}:local`])[0];
 			const ledger = createBudgetLedger(cfg, `gt1-11-11c3-${process.pid}-${++ledgerSeq}`, NOW);
 			ledger.authorizedCaseIds.push(c.caseId);
 			const lifetime = createCaseLifetime(1);
@@ -4755,6 +4760,171 @@ describe('GT1-11-09 qualification harness', () => {
 				expect(leg.spawned).toBe(2);
 				expect(turnsLogged()).toHaveLength(2);
 			}, 30_000);
+		});
+
+		describe('ACP session legs (GT1-11-14P4B)', () => {
+			const ACP_BIN = path.join(ROOT, 'bin', 'grok-acp');
+			const CANCELS = path.join(ROOT, 'log', 'cancels.jsonl');
+			/**
+			 * The ACP Grok stand-in (never a real Grok): `agent stdio` over JSON-RPC,
+			 * keeping its history where the production Grok session storage reads it,
+			 * replaying a loaded history, refusing a session/load of an id it does not
+			 * hold, and streaming a long turn until session/cancel. `violate` bends
+			 * every leg at once: an unknown load is accepted, a cancel is ignored, the
+			 * steer turn speaks for a second session mid-stream, and the reloaded
+			 * session answers under a new id.
+			 */
+			const ACP_SOURCE = [
+				`#!${process.execPath}`,
+				"const fs = process.getBuiltinModule('fs');",
+				"const path = process.getBuiltinModule('path');",
+				"const { randomUUID } = process.getBuiltinModule('crypto');",
+				`const MODE = fs.readFileSync(${JSON.stringify(MODE_FILE)}, 'utf8').trim();`,
+				'const home = process.env.GROK_HOME;',
+				"let cwd = ''; let sid = null; let buf = ''; let pend = null; let timer = null;",
+				"const dir = (id) => path.join(home, 'sessions', encodeURIComponent(cwd), id);",
+				"const held = (id) => fs.existsSync(path.join(dir(id), 'chat_history.jsonl'));",
+				"const keep = (id, type, content) => { fs.mkdirSync(dir(id), { recursive: true }); fs.appendFileSync(path.join(dir(id), 'chat_history.jsonl'), JSON.stringify({ type, content }) + '\\n'); };",
+				"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
+				"const reply = (id, result) => out({ jsonrpc: '2.0', id, result });",
+				"const update = (id, kind, text) => out({ jsonrpc: '2.0', method: 'session/update', params: { sessionId: id, update: { sessionUpdate: kind, content: { type: 'text', text } } } });",
+				"const end = (id, stopReason) => reply(id, { stopReason, _meta: { usage: { inputTokens: 10, outputTokens: 5, cachedReadTokens: 0, cacheCreationTokens: 0, reasoningTokens: 0, costUsdTicks: '10000000' } } });",
+				`const models = { currentModelId: ${JSON.stringify(MODEL)} };`,
+				'const handle = (m) => {',
+				"  if (m.method === 'initialize') reply(m.id, { protocolVersion: 1, agentCapabilities: { loadSession: true } });",
+				"  else if (m.method === 'session/new') { cwd = fs.realpathSync(m.params.cwd); sid = randomUUID(); reply(m.id, { sessionId: sid, models }); }",
+				"  else if (m.method === 'session/load') {",
+				'    cwd = fs.realpathSync(m.params.cwd); const id = m.params.sessionId;',
+				"    if (!held(id) && MODE !== 'violate') { out({ jsonrpc: '2.0', id: m.id, error: { code: -32002, message: 'Resource not found' } }); return; }",
+				'    sid = id;',
+				"    if (held(id)) for (const l of fs.readFileSync(path.join(dir(id), 'chat_history.jsonl'), 'utf8').trim().split('\\n')) { const r = JSON.parse(l); update(id, r.type === 'user' ? 'user_message_chunk' : 'agent_message_chunk', r.content); }",
+				'    reply(m.id, { models });',
+				"  } else if (m.method === 'session/cancel') {",
+				`    fs.appendFileSync(${JSON.stringify(CANCELS)}, JSON.stringify(m.params) + '\\n');`,
+				"    if (pend && MODE !== 'violate') { clearInterval(timer); reply(pend, { stopReason: 'cancelled' }); pend = null; }",
+				"  } else if (m.method === 'session/prompt') {",
+				'    const text = m.params.prompt[0].text;',
+				`    fs.appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ resume: sid, prompt: text.slice(0, 120) + ' ... ' + text.slice(-200) }) + '\\n');`,
+				"    const tokens = text.match(/QUALIFY-[A-Z0-9-]+-OK/g) || []; const token = tokens.length ? tokens[tokens.length - 1] : '';",
+				"    const to = MODE === 'violate' && text.includes('E05-RELOAD-T1') ? randomUUID() : sid;",
+				"    keep(to, 'user', text);",
+				"    if (text.includes('E04-CANCEL-T1')) {",
+				'      pend = m.id; let n = 0;',
+				"      timer = setInterval(() => { n++; update(sid, 'agent_message_chunk', String(n) + '\\n'); if (n >= 400 || (MODE === 'violate' && n >= 3)) { clearInterval(timer); update(sid, 'agent_message_chunk', token); keep(sid, 'assistant', token); pend = null; end(m.id, 'end_turn'); } }, 50);",
+				'      return;',
+				'    }',
+				"    if (text.includes('E04-STEER-T1')) for (let i = 1; i <= 5; i++) update(sid, 'agent_message_chunk', String(i) + '\\n');",
+				"    if (MODE === 'violate' && text.includes('E04-STEER-T1')) update(randomUUID(), 'agent_message_chunk', token);",
+				"    update(to, 'agent_message_chunk', token); keep(to, 'assistant', token); end(m.id, 'end_turn');",
+				"  } else if (m.id !== undefined && m.method) out({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'Method not found' } });",
+				'};',
+				"process.stdin.on('data', (d) => { buf += d; let k; while ((k = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, k); buf = buf.slice(k + 1); if (line.trim()) handle(JSON.parse(line)); } });",
+				"process.stdin.on('end', () => process.exit(0));",
+				'',
+			].join('\n');
+			let acpSha = '';
+			beforeAll(() => {
+				fs.writeFileSync(ACP_BIN, ACP_SOURCE);
+				fs.chmodSync(ACP_BIN, 0o555);
+				acpSha = createHash('sha256').update(fs.readFileSync(ACP_BIN)).digest('hex');
+			});
+			afterAll(() => {
+				if (fs.existsSync(ACP_BIN)) fs.chmodSync(ACP_BIN, 0o755);
+			});
+			const acp = async (family: 'E04' | 'E05', mode: Mode) => {
+				fs.rmSync(CANCELS, { force: true });
+				const config = sessionConfig({
+					binary: { path: `${REL}/bin/grok-acp`, sha256: acpSha, version: '0.0.0-synthetic' },
+				});
+				return (await execute(family, mode, { route: 'acp-stdio', config })).leg;
+			};
+			const cancels = (): Array<{ sessionId: string }> =>
+				fs.existsSync(CANCELS)
+					? fs
+							.readFileSync(CANCELS, 'utf8')
+							.trim()
+							.split('\n')
+							.map((l) => JSON.parse(l))
+					: [];
+			const loadOf = (id: unknown) => `<session/load:${id as string}>`;
+
+			it('E04: session/cancel, an invalid and an exact session/load, and a held steer pass through the production port', async () => {
+				const leg = await acp('E04', 'ok');
+				expect(leg.sessionLegs.map((l) => l.assertion.owner)).not.toContain('GT1-11-14P4B');
+				const cancel = session(leg, 'cancellation');
+				expect(cancel.status, JSON.stringify(cancel)).toBe('passed');
+				expect(cancel.observed).toMatchObject({
+					stopRequested: true,
+					terminalRecords: 1,
+					terminal: 'failure',
+					orphans: [],
+					lateWrites: [],
+					idSource: 'stream',
+				});
+				const [stopped, restart] = cancel.turns;
+				expect(stopped.reply.tokenSeen).toBe(false);
+				// The cancel went out once, on the stopped turn's own session, through the port.
+				expect(cancels()).toEqual([{ sessionId: stopped.sessionId }]);
+				expect(restart.sessionId).toBe(stopped.sessionId);
+				expect(restart.argv).toContain(loadOf(stopped.sessionId));
+				const invalid = session(leg, 'invalid-resume');
+				expect(invalid.status, JSON.stringify(invalid)).toBe('passed');
+				expect(invalid.observed).toMatchObject({
+					exitCode: 1,
+					terminal: 'none',
+					errorType: 'acp-request-error:-32002',
+					created: [],
+					sessionIds: [],
+				});
+				expect(invalid.turns[0].argv).toContain(loadOf(invalid.observed.requested));
+				// A refused load sends no prompt.
+				expect(promptsWith('E04-INVALID-T1')).toEqual([]);
+				const steer = session(leg, 'steering-refused');
+				expect(steer.status, JSON.stringify(steer)).toBe('passed');
+				expect(steer.observed).toMatchObject({ writesToRunningChild: 0 });
+				expect((steer.observed.midTurn as { ok: boolean }).ok).toBe(false);
+				expect(steer.turns.map((t) => t.sessionId)).toEqual([
+					leg.turns[0].sessionId,
+					leg.turns[0].sessionId,
+				]);
+				expect(steer.turns[1].argv).toContain(loadOf(leg.turns[0].sessionId));
+				expect(session(leg, 'compaction-retry').assertion.owner).toBe(
+					'grok-context-limit-induction-over-budget'
+				);
+				expect(leg.status, JSON.stringify(leg.reasons)).toBe('passed');
+				operatorHomeUntouched();
+			}, 45_000);
+
+			it('E05: the session reloaded from disk continues its own id through session/load', async () => {
+				const leg = await acp('E05', 'ok');
+				const cont = session(leg, 'exact-continuation');
+				expect(cont.status, JSON.stringify(cont)).toBe('passed');
+				expect(cont.observed).toMatchObject({ reloaded: leg.turns[0].sessionId, created: [] });
+				expect(cont.turns[0].argv).toContain(loadOf(leg.turns[0].sessionId));
+				expect(session(leg, 'export-payload').status).toBe('passed');
+				expect(leg.sessionLegs.map((l) => l.assertion.owner)).not.toContain('GT1-11-14P4B');
+			}, 45_000);
+
+			it('violate: an accepted unknown load, an ignored cancel, a second session mid-steer and a new id on reload each fail', async () => {
+				const e04 = await acp('E04', 'violate');
+				const cancel = session(e04, 'cancellation');
+				expect(cancel.status).toBe('failed');
+				expect(cancel.assertion.detail).toContain('completed-despite-stop');
+				expect(promptsWith('E04-CANCEL-T2')).toEqual([]);
+				const invalid = session(e04, 'invalid-resume');
+				expect(invalid.status).toBe('failed');
+				for (const f of ['not-refused', 'reply-token-produced', 'session-created:1'])
+					expect(invalid.assertion.detail, f).toContain(f);
+				const steer = session(e04, 'steering-refused');
+				expect(steer.status).toBe('failed');
+				expect(steer.assertion.detail).toContain('second-turn-mid-stream');
+				expect(promptsWith('E04-STEER-T2')).toEqual([]);
+				expect(e04.status).toBe('failed');
+				const cont = session(await acp('E05', 'violate'), 'exact-continuation');
+				expect(cont.status).toBe('failed');
+				for (const f of ['new-native-id', 'session-created:1'])
+					expect(cont.assertion.detail, f).toContain(f);
+			}, 60_000);
 		});
 
 		describe('E05 session legs and consumers', () => {

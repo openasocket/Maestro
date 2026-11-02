@@ -247,7 +247,7 @@ export interface SessionLegSpec {
 	turns: PaidFixtureTurn[];
 	/** The most user turns the leg may send; the leg refuses unsent when the reservation cannot cover them. */
 	maxTurns: number;
-	/** True when the leg sends turns (and so needs a local native-headless launch). */
+	/** True when the leg sends turns (and so needs a local launch: native argv, or an ACP session/new or session/load). */
 	sends: boolean;
 }
 

@@ -331,6 +331,7 @@ import {
 	type GrokAcpClientOptions,
 } from '../../src/shared/maestro-lib/grok/acp-client';
 import { GrokAcpEventAdapter } from '../../src/shared/maestro-lib/grok/acp-events';
+import { GrokAcpSession, GrokAcpSessionError } from '../../src/shared/maestro-lib/grok/acp-session';
 import type { AcpCall } from '../../src/shared/maestro-lib/grok/acp-protocol';
 import {
 	describeUsageProvenance,
@@ -6656,6 +6657,8 @@ async function runPaidLeg(
 		turnMs,
 		graceMs,
 		lifetime: ctx.lifetime,
+		model: primary,
+		effort,
 	});
 	if (fixture.sessionLegs?.length) {
 		const ready = fixtureTurnsPassed;
@@ -6685,6 +6688,8 @@ async function runPaidLeg(
 			turnMs,
 			graceMs,
 			lifetime: ctx.lifetime,
+			model: primary,
+			effort,
 		});
 		receipt.sessionLegs = run.legs;
 		receipt.spawned += run.spawned;
@@ -7217,8 +7222,6 @@ async function runAcpPaidTurns(args: {
 // Session legs (GT1-11-11C1)
 // ---------------------------------------------------------------------------
 
-/** The ACP route's turn-bearing session legs (session/cancel, session/load, a held steer): GT1-11-14P4B. */
-export const ACP_SESSION_LEGS_OWNER = 'GT1-11-14P4B';
 /** No playbook task owns session legs against a remote home: storage reads and the orphan check are local. */
 export const SSH_SESSION_LEGS_OWNER = 'grok-harness-ssh-target-absent';
 /** A live turn cannot be driven into the context limit within a bounded synthetic budget. */
@@ -7262,6 +7265,9 @@ interface SessionLegContext {
 	turnMs: () => number;
 	graceMs: number;
 	lifetime: CaseLifetime;
+	/** The leg's acknowledged model and selected effort: an ACP session turn selects them on its own session. */
+	model?: string;
+	effort?: string | null;
 }
 
 type ParsedGrokEvent = NonNullable<ReturnType<GrokOutputParser['parseJsonLine']>>;
@@ -7284,6 +7290,8 @@ interface SessionTurnRun {
 	descendants: number[];
 	/** The canonical Grok error type of a failed turn; null when none was classified. */
 	errorType: string | null;
+	/** ACP: frames the harness wrote to the child while its prompt streamed (a cancel is one); a native turn has no input channel. */
+	writesWhileRunning?: number;
 }
 
 const sessionReason = (id: string, detail: string, owner = 'GT1-11-11C1') =>
@@ -7488,6 +7496,190 @@ function runNativeSessionTurn(a: {
 	});
 }
 
+/** Session failures that leave a dispatched prompt's effect unknown (the transport or a bound ended it). */
+const ACP_LOST_REASONS: ReadonlySet<string> = new Set([
+	'closed',
+	'process-lost',
+	'transport-lost',
+	'idle-timeout',
+	'turn-timeout',
+	'cancel-timeout',
+]);
+
+/**
+ * One ACP turn of a session leg (GT1-11-14P4B): an owned `agent stdio` child
+ * driven through the production `GrokAcpSession` port, session/new or (with
+ * `resumeId`) session/load, then one session/prompt. With `stopWhen`, the
+ * turn is cancelled through the port (`session/cancel`) the first time an
+ * agent message chunk satisfies it, after the production process-tree
+ * snapshot recorded its descendants. The child is closed and awaited before
+ * this resolves, so the next turn can claim the same session. An ACP turn has
+ * no process exit of its own: `exitCode` is 0 when the prompt was answered, 1
+ * when the session was refused before any prompt, null otherwise. Never throws.
+ */
+async function runAcpSessionTurn(a: {
+	n: number;
+	prompt: string;
+	expect: string;
+	alsoExpect?: readonly string[];
+	recordedArgv: string[];
+	spec: SpawnSpec;
+	cwd: string;
+	model: string;
+	effort: string | null;
+	resumeId: string | null;
+	timeoutMs: number;
+	graceMs: number;
+	lifetime: CaseLifetime;
+	calls: Record<BillableCallKind, number>;
+	stopWhen?: (ev: ParsedGrokEvent) => boolean;
+	onRunning?: () => void;
+	onEvent?: (ev: ParsedGrokEvent) => void;
+}): Promise<SessionTurnRun> {
+	const started = Date.now();
+	const out = streamDigest();
+	const err = streamDigest();
+	const reply = replyCollector(a.expect, a.alsoExpect);
+	const ids = new Set<string>();
+	const usage = acpAccountingCapture('acp-stdio', () => a.model).hook;
+	const st = { prompting: false, running: false, stopRequested: false, writes: 0, begun: false };
+	let descendants: number[] = [];
+	let spawnError: string | null = null;
+	let answer: Record<string, unknown> | null = null;
+	let failure: GrokAcpSessionError | null = null;
+	let child: ChildProcess | null = null;
+	let session: GrokAcpSession | null = null;
+	try {
+		child = spawn(a.spec.command, [...a.spec.args], {
+			cwd: a.spec.cwd,
+			env: a.spec.env,
+			shell: false,
+			stdio: ['pipe', 'pipe', 'pipe'],
+			windowsHide: true,
+		});
+	} catch (e) {
+		spawnError = (e as NodeJS.ErrnoException).code ?? 'spawn-threw';
+	}
+	if (child) {
+		const owned = child;
+		a.lifetime.own(owned);
+		const exited = new Promise<void>((resolve) => owned.on('close', () => resolve()));
+		owned.on('error', (e: NodeJS.ErrnoException) => {
+			spawnError ??= e.code ?? 'spawn-error';
+		});
+		const bound = Math.max(1, Math.floor(a.timeoutMs));
+		try {
+			const acp = new GrokAcpSession({
+				child: owned,
+				cwd: a.cwd,
+				model: a.model,
+				...(a.effort ? { effort: a.effort } : {}),
+				...(a.resumeId ? { resumeSessionId: a.resumeId } : {}),
+				account: 'qualify-account',
+				host: 'qualify-local-host',
+				write: (frame) => {
+					if (st.running) st.writes++;
+					owned.stdin?.write(frame);
+				},
+				requestTimeoutMs: Math.max(1, Math.min(HARNESS_CEILINGS.discoverySeconds * 1000, bound)),
+				idleTimeoutMs: bound,
+				maxTurnMs: bound,
+				cancelGraceMs: Math.max(1, a.graceMs),
+				onNotification: (message, context) => {
+					usage.notify(message);
+					const params = (message.params ?? {}) as Record<string, unknown>;
+					const update = (params.update ?? {}) as Record<string, unknown>;
+					if (context.replay || message.method !== 'session/update' || !st.prompting) return;
+					if (typeof params.sessionId === 'string') ids.add(params.sessionId);
+					const content = (update.content ?? {}) as Record<string, unknown>;
+					if (update.sessionUpdate !== 'agent_message_chunk' || typeof content.text !== 'string')
+						return;
+					const ev = {
+						type: 'text',
+						sessionId: params.sessionId,
+						text: content.text,
+						isPartial: true,
+					} as ParsedGrokEvent;
+					if (!st.running) {
+						st.running = true;
+						a.onRunning?.();
+					}
+					a.onEvent?.(ev);
+					reply.push(content.text);
+					if (!st.stopRequested && a.stopWhen?.(ev)) {
+						st.stopRequested = true;
+						descendants = owned.pid
+							? snapshotProcessTree(owned.pid).descendants.map((d) => d.pid)
+							: [];
+						acp.cancel();
+					}
+				},
+			});
+			session = acp;
+			owned.stdout?.on('data', (d: Buffer) => {
+				if (out.push(d)) acp.transportLost('frame-too-large');
+				acp.feedStdout(d);
+			});
+			owned.stderr?.on('data', (d: Buffer) => {
+				if (err.push(d)) acp.transportLost('frame-too-large');
+				acp.feedStderr(d);
+			});
+			owned.stdin?.on('error', () => acp.transportLost('write'));
+			await acp.open();
+			ids.add(acp.sessionId!);
+			usage.begin(a.n, acp.sessionId!);
+			st.begun = true;
+			st.prompting = true;
+			answer = await acp.prompt(a.prompt);
+		} catch (e) {
+			if (e instanceof GrokAcpSessionError && e.reason === 'cancelled') answer = e.response ?? null;
+			else
+				failure = e instanceof GrokAcpSessionError ? e : new GrokAcpSessionError('invalid-options');
+		}
+		st.prompting = false;
+		session?.close();
+		if (!session) stopProcess({ child: owned }, { from: 'terminate', graceMs: a.graceMs });
+		await Promise.race([exited, delay(a.graceMs + 1000)]);
+	}
+	const dispatched = session?.promptDispatched ?? false;
+	const lost = failure !== null && dispatched && ACP_LOST_REASONS.has(failure.reason);
+	const cause = (failure as { cause?: unknown } | null)?.cause;
+	const neverRan = spawnError !== null && NEVER_RAN_SPAWN_ERRORS.has(spawnError) && !child?.pid;
+	return {
+		turn: {
+			turn: a.n,
+			argv: a.recordedArgv,
+			exitCode: answer ? 0 : failure && !lost && !neverRan ? 1 : null,
+			signal: null,
+			durationMs: Date.now() - started,
+			timedOut: failure?.reason === 'turn-timeout' || failure?.reason === 'idle-timeout',
+			spawnError: neverRan ? spawnError : lost ? `acp:${failure!.reason}` : null,
+			stdout: out.result(),
+			stderr: err.result(),
+			sessionId: session?.sessionId ?? null,
+			terminal: answer ? (answer.stopReason === 'end_turn' ? 'success' : 'failure') : 'none',
+			reply: reply.result(),
+			model: answer ? a.model : null,
+			effort: answer ? a.effort : null,
+			usage: st.begun
+				? usage.end(a.n, answer, failure !== null)
+				: { costUsd: null, status: 'absent' },
+			callsRecorded: a.calls,
+		},
+		neverRan,
+		terminals: answer ? 1 : 0,
+		sessionIds: [...ids],
+		stopRequested: st.stopRequested,
+		descendants,
+		errorType: failure
+			? cause instanceof GrokAcpRequestError
+				? `acp-request-error:${cause.code}`
+				: failure.reason
+			: null,
+		writesWhileRunning: st.writes,
+	};
+}
+
 /** What a turn-bearing leg (a session leg or a session consumer leg) records of its turns. */
 type TurnBearingReceipt = Pick<
 	SessionLegReceipt,
@@ -7518,7 +7710,11 @@ async function sendSessionTurn(
 	} = {}
 ): Promise<{ run: SessionTurnRun | null; uncertainWhy: string | null }> {
 	const n = s.nextTurn();
-	const spec = await s.launcher(opts.argv ?? s.nativeArgv(t.prompt, resumeId));
+	// A plain session turn on the ACP route is one session/new or session/load and one prompt on its own child.
+	const acp = s.c.route === 'acp-stdio' && !opts.argv && !opts.parser && !opts.spawnChild;
+	const spec = await s.launcher(
+		acp ? GROK_ACP_ARGS : (opts.argv ?? s.nativeArgv(t.prompt, resumeId))
+	);
 	if ('refused' in spec) {
 		r.reasons.push(sshReason(spec.refused, spec.detail, 'paid-execution'));
 		return { run: null, uncertainWhy: null };
@@ -7527,14 +7723,10 @@ async function sendSessionTurn(
 		r.reasons.push(sessionReason('session-turn-refused', `turn ${n}`, ownerOfLeg(r.leg)));
 		return { run: null, uncertainWhy: null };
 	}
-	const run = await runNativeSessionTurn({
+	const common = {
 		n,
 		expect: t.expect,
 		alsoExpect: t.alsoExpect,
-		// A planned argv names its prompt file, never the prompt; the definition's argv carries a placeholder.
-		recordedArgv: opts.argv
-			? [...opts.argv]
-			: s.nativeArgv(`<fixture:${s.fixture.family}:${r.leg}:turn-${n}>`, resumeId),
 		spec,
 		timeoutMs: s.turnMs(),
 		graceMs: s.graceMs,
@@ -7543,10 +7735,31 @@ async function sendSessionTurn(
 		stopWhen: opts.stopWhen,
 		onRunning: opts.onRunning,
 		onEvent: opts.onEvent,
-		onChunk: opts.onChunk,
-		spawnChild: opts.spawnChild,
-		parser: opts.parser ?? undefined,
-	});
+	};
+	const run = acp
+		? await runAcpSessionTurn({
+				...common,
+				prompt: t.prompt,
+				recordedArgv: [
+					...GROK_ACP_ARGS,
+					resumeId ? `<session/load:${resumeId}>` : '<session/new>',
+					`<fixture:${s.fixture.family}:${r.leg}:turn-${n}>`,
+				],
+				cwd: s.cwd,
+				model: s.model ?? '',
+				effort: s.effort ?? null,
+				resumeId,
+			})
+		: await runNativeSessionTurn({
+				...common,
+				// A planned argv names its prompt file, never the prompt; the definition's argv carries a placeholder.
+				recordedArgv: opts.argv
+					? [...opts.argv]
+					: s.nativeArgv(`<fixture:${s.fixture.family}:${r.leg}:turn-${n}>`, resumeId),
+				onChunk: opts.onChunk,
+				spawnChild: opts.spawnChild,
+				parser: opts.parser ?? undefined,
+			});
 	r.spawned++;
 	if (!run.neverRan) r.paidRequests++;
 	r.turns.push(run.turn);
@@ -7734,14 +7947,14 @@ const runSteeringLeg: SessionLegRunner = async (spec, s, r) => {
 	const first = await sendSessionTurn(s, r, t1, id, {
 		// The steer arrives while the turn streams; the production decision answers it.
 		onRunning: () => {
-			midDecision = grokSteeringAvailability({ route: 'native-headless', owned: true });
+			midDecision = grokSteeringAvailability({ route: s.c.route, owned: true });
 		},
 	});
 	if (!first.run || first.uncertainWhy || first.run.neverRan)
 		return closeLeg(r, failures, '', first.uncertainWhy);
 	const run = first.run;
 	const decision = midDecision as ReturnType<typeof grokSteeringAvailability> | null;
-	const after = grokSteeringAvailability({ route: 'native-headless', owned: false });
+	const after = grokSteeringAvailability({ route: s.c.route, owned: false });
 	r.observed = {
 		midTurn: decision
 			? { ok: decision.ok, reason: decision.reason, missing: decision.missing }
@@ -7749,7 +7962,7 @@ const runSteeringLeg: SessionLegRunner = async (spec, s, r) => {
 		afterTurn: { ok: after.ok, reason: after.reason, missing: after.missing },
 		parityRows: decision?.parityRows ?? after.parityRows,
 		heldUntilClose: true,
-		writesToRunningChild: 0,
+		writesToRunningChild: run.writesWhileRunning ?? 0,
 		terminalRecords: run.terminals,
 		sessionIds: run.sessionIds,
 	};
@@ -7764,6 +7977,7 @@ const runSteeringLeg: SessionLegRunner = async (spec, s, r) => {
 		};
 		return null;
 	}
+	if (run.writesWhileRunning) failures.push(`steer-written:${run.writesWhileRunning}`);
 	if (run.terminals > 1 || run.sessionIds.length > 1) failures.push('second-turn-mid-stream');
 	else if (!turnSucceeded(run)) failures.push('running-turn-failed');
 	if (!after.missing.includes('steering-not-owned')) failures.push('finished-turn-still-owned');
@@ -8038,8 +8252,6 @@ async function runSessionLegs(s: SessionLegContext): Promise<{
 		else if (uncertainWhy) r.reasons.push(sessionReason('uncertain-prior-effect', uncertainWhy));
 		else if (s.c.target === 'ssh')
 			gap('session legs read and watch a local owned home only', SSH_SESSION_LEGS_OWNER);
-		else if (spec.sends && s.c.route !== 'native-headless')
-			gap('the ACP route has no turn-bearing session leg', ACP_SESSION_LEGS_OWNER);
 		else if (!s.accountRoot) r.reasons.push(sessionReason('account-root-unknown', spec.id));
 		else if (spec.maxTurns > s.remainingTurns())
 			r.reasons.push(
