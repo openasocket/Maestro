@@ -81,8 +81,8 @@
  * counted once inside its parent; the retried send is billed once; the lost
  * transport hold is never refunded; fixture faults are labelled and never
  * run the pinned binary. The consumers that write 0 for an unknown charge
- * (A11-F25, A11-F26) and the native cache buckets read as 0 (A11-F27) are
- * pinned as the harness sees them today.
+ * (A11-F25, A11-F26) are pinned as the harness sees them today; a native
+ * cache bucket the stream never carried stays unreported, never 0 (A11-F27).
  */
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -5848,7 +5848,15 @@ describe('GT1-11-09 qualification harness', () => {
 			const LOG = path.join(ROOT, 'log', 'turns.jsonl');
 			const OPERATOR_HOME = path.join(os.tmpdir(), `gt1-11-11f3-operator-${process.pid}`);
 			const MODEL = 'claude-haiku-4-5';
-			type Mode = 'ok' | 'nocost' | 'partial' | 'partialnone' | 'absent' | 'nocache' | 'nochild';
+			type Mode =
+				| 'ok'
+				| 'nocost'
+				| 'partial'
+				| 'partialnone'
+				| 'absent'
+				| 'nocache'
+				| 'incomplete'
+				| 'nochild';
 			let sha = '';
 			/**
 			 * The Grok stand-in (never a real Grok): native streaming-json with `-p`,
@@ -5859,7 +5867,8 @@ describe('GT1-11-09 qualification harness', () => {
 			 * (ticks); a prompt naming a subagent first reports one child on the
 			 * parent channel and the child's own usage frame on the child channel.
 			 * A mode bends exactly one fact: no charge, a partial charge with or
-			 * without a figure, no usage at all, no cache buckets, no child.
+			 * without a figure, no usage at all, no cache buckets, usage marked
+			 * incomplete with every bucket carried, no child.
 			 */
 			const SOURCE = [
 				`#!${process.execPath}`,
@@ -5883,6 +5892,7 @@ describe('GT1-11-09 qualification harness', () => {
 				"  if (MODE === 'partial' || MODE === 'partialnone') end.cost_is_partial = true;",
 				"  if (MODE === 'absent') { delete end.usage; delete end.modelUsage; }",
 				"  if (MODE === 'nocache') { delete end.usage.cache_read_input_tokens; delete end.usage.cache_creation_input_tokens; }",
+				"  if (MODE === 'incomplete') end.usage_is_incomplete = true;",
 				"  const dir = path.join(process.env.GROK_HOME || '', 'sessions', encodeURIComponent(fs.realpathSync(at('--cwd') || process.cwd())), 'f3-native-session');",
 				'  fs.mkdirSync(dir, { recursive: true });',
 				"  fs.appendFileSync(path.join(dir, 'chat_history.jsonl'), JSON.stringify({ type: 'user', content: 'q' }) + '\\n' + JSON.stringify({ type: 'assistant', content: 'a' }) + '\\n');",
@@ -6058,6 +6068,8 @@ describe('GT1-11-09 qualification harness', () => {
 				);
 				const usage = acc('usage-capture');
 				expect(usage.status, usage.assertion.detail).toBe('passed');
+				// A complete native record carries every bucket: nothing is held back as uncarried.
+				expect(usage.usage[0].uncarriedBuckets).toBeUndefined();
 				const rec = usage.usage[0];
 				expect(usage.usage).toHaveLength(1);
 				expect(rec.final).toBe(true);
@@ -6297,21 +6309,47 @@ describe('GT1-11-09 qualification harness', () => {
 				expect(leg.status).toBe('failed');
 			}, 120_000);
 
-			it('cache buckets: an ACP turn without them fails cache-buckets with both unreported; a native one reads them as 0 and passes (A11-F27, flipped by GT1-11-11F3B)', async () => {
+			it('cache buckets the stream never carried stay unreported and fail cache-buckets on both routes, never 0; an incomplete native usage that carried them keeps them (A11-F27)', async () => {
 				const viaAcp = await execute('acp-stdio', 'nocache');
 				const a = viaAcp.acc('usage-capture');
 				expect(failedIds(a)).toEqual(['cache-buckets']);
 				expect(a.usage[0].buckets.cacheRead).toBeNull();
 				expect(a.usage[0].buckets.cacheWrite).toBeNull();
 				expect(a.usage[0].cost.status).toBe('partial');
+				// The ACP adapter already leaves them unreported; the native-only guard adds nothing there.
+				expect(a.usage[0].uncarriedBuckets).toBeUndefined();
 				const viaNative = await execute('native-headless', 'nocache');
 				const n = viaNative.acc('usage-capture');
-				// A11-F27: the production parser fills the unreported buckets with 0 and the leg cannot tell.
-				expect(n.status, n.assertion.detail).toBe('passed');
-				expect(outcome(n, 'cache-buckets')).toBe('passed');
-				expect(n.usage[0].buckets).toMatchObject({ cacheRead: 0, cacheWrite: 0 });
-				// Only the charge says the usage was incomplete.
+				// The production parser fills the unreported counts with 0; the record keeps them unreported.
+				expect(n.status).toBe('failed');
+				expect(failedIds(n)).toEqual(['cache-buckets']);
+				expect(n.usage[0].buckets).toEqual({
+					input: 10,
+					output: 5,
+					cacheRead: null,
+					cacheWrite: null,
+					reasoning: 1,
+				});
+				expect(n.usage[0].uncarriedBuckets).toEqual(['cacheRead', 'cacheWrite']);
+				const detail = n.assertions.find((x) => x.id === 'cache-buckets')!.detail;
+				expect(detail).toContain('cacheRead=unreported; cacheWrite=unreported');
+				expect(detail).toContain('native usage incomplete, never carried: cacheRead, cacheWrite');
 				expect(n.usage[0].cost).toEqual({ status: 'partial', costUsd: 0.001 });
+				// The leg failed, so no consumer compares a 0 it never saw.
+				for (const l of viaNative.leg.accountingConsumers) {
+					expect(l.status, l.leg).toBe('not-run');
+					expect(
+						l.reasons.map((x) => x.id),
+						l.leg
+					).toEqual(['usage-capture-not-passed']);
+				}
+				// Incomplete usage that did carry both counts keeps them: only a missing count is held back.
+				const carried = await execute('native-headless', 'incomplete');
+				const c = carried.acc('usage-capture');
+				expect(outcome(c, 'cache-buckets')).toBe('passed');
+				expect(c.usage[0].buckets).toMatchObject({ cacheRead: 3, cacheWrite: 2 });
+				expect(c.usage[0].uncarriedBuckets).toBeUndefined();
+				expect(c.usage[0].cost.status).toBe('partial');
 			}, 120_000);
 
 			it('an ACP child is parent detail: reported completed and included, its own usage frame counted and never added, the lifetime grown by the parent once', async () => {
