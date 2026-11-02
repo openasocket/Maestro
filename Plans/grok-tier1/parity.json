@@ -12284,7 +12284,8 @@
 				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: CLI batch and headless Auto Run turns settle questions explicitly (crashed with AgentError), never stall; effort retry gap retained (grok-effort-validation-and-retry-pending). Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-11E, GT1-11-07, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
 				"GT1-11-07 verification at 3cc958d88: A11-F11 repaired by GT1-11-05A/05C (1863a2ac2, a7bb8ff3a); its pinning cases pass in batch-processor.test.ts, useBatchProcessor.test.ts (pass2Workflows); blocker grok-shared-autorun-failed-turn-keeps-ticks cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md.",
 				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
-				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12427,6 +12428,32 @@
 					],
 					"ownerTask": "GT1-11-11C1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"phase": "08",
@@ -12501,7 +12528,8 @@
 			"limitations": [
 				"Grok gets shared launch/parser but needs completion identity, accounting, admission/lineage and stop proof through desktop and standalone consumers.",
 				"GT1-08-21 verification: phase 08 packets cue; verdicts GT1-08-12 pass. Parity against the comparator baseline: S13 deterministic match. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12593,6 +12621,32 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"phase": "08",
@@ -12748,7 +12802,8 @@
 				"GT1-11-03 verification at d84638bfc: A11-F07 (hardcoded-provider-fallback) turnEndOf calls detectSessionNotFoundError(tails) with no provider, so the headless runtime's group chat reads every participant's stdout/stderr tails through Claude's session_not_found patterns before the router applies the provider's own. Grok reaches the right recovery decision only by coincidence (Claude's /session.*not found/ also matches Grok's non-fatal 'not found locally, restoring from remote' line), and a successful Grok remote restore with no answer text then reports output it does not have. See Plans/grok-tier1/evidence/11-static.md.",
 				"GT1-11-07 verification at 3cc958d88: A11-F07 repaired by GT1-11-03A/03B (84be096ef, 5ca81dcee); its pinning cases pass in turn-end.test.ts (pass2Workflows); blocker grok-groupchat-turn-end-claude-patterns cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md.",
 				"GT1-11-07 verification at 3cc958d88: A11-F12 repaired by GT1-11-05B/05C (99742f718, a7bb8ff3a); its pinning cases pass in output-parser.test.ts (pass2Workflows); blocker grok-room-text-after-terminal-routed cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md.",
-				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md."
+				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -12882,6 +12937,32 @@
 					],
 					"ownerTask": "GT1-11-11P1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native.md"
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"phase": "08",
@@ -14686,7 +14767,8 @@
 				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run; builds pass; nativePackaging not-run. Parity against the comparator baseline: CLI create/update/settings/send and library host match; built CLI and dist/maestro-lib carry Grok; list-sessions native disk listing is Claude-only for every non-Claude provider (parity with Codex); native package smoke not-run. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11C, GT1-11-11E, GT1-11-07, GT1-11-12, GT1-11-10, GT1-12-06 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
 				"GT1-11-07 verification at 3cc958d88: A11-F09 repaired by GT1-11-04A/04B (c79a3e969, dc07c81); its pinning cases pass in run-agent-turn.test.ts, acp-turn.test.ts (pass2Consumers); blocker grok-acp-transport-loss-reads-as-stop cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md.",
 				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
-				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md."
+				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -14826,6 +14908,32 @@
 					],
 					"ownerTask": "GT1-11-11C1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-session-consumers.md"
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"phase": "10",
@@ -15757,7 +15865,8 @@
 				"GT1-11-11 verification at d5ca54d0a: pass-three positive workflows not-run (run-state live prerequisites absent; no paid executor, A11-F15). Live stays not-run. See Plans/grok-tier1/evidence/11-native.md.",
 				"GT1-11-11A verification at 7d3ae20bb: native identity/discovery/account/auth cases not-run (run-state live prerequisites absent; case logic missing, A11-F16). Live stays not-run. See Plans/grok-tier1/evidence/11-native-identity.md.",
 				"GT1-11-11C verification at 2f8db5f1b: native session-consumer cases (fork/rename/delete/export, cancel/invalid resume, context export/merge/handoff, steering, compaction retry, agent creation, custom command/template) not-run (run-state live prerequisites absent; case logic missing, A11-F18). Live stays not-run. See Plans/grok-tier1/evidence/11-native-session-consumers.md.",
-				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md."
+				"GT1-11-11D verification at 367139adc: native utility-consumer cases (inline/onboarding wizard structured answer/retry/reset, Director Notes, synopsis, tab naming, grooming/cheap turns under read-only/no-tools, feedback interview) not-run (run-state live prerequisites absent; case logic missing, A11-F20). Live stays not-run. See Plans/grok-tier1/evidence/11-native-utilities.md.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -15914,6 +16023,32 @@
 					],
 					"ownerTask": "GT1-11-11D1",
 					"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"phase": "11",
@@ -18579,7 +18714,8 @@
 			"limitations": [
 				"Grok native child-process route exists; ACP consumer wiring and automation outcomes are not yet proven.",
 				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: batch/headless consumers settle Grok questions and errors without an interactive stall. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11E, GT1-11-07, GT1-11-11C, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: batch/headless consumers settle Grok questions and errors without an interactive stall. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11E, GT1-11-07, GT1-11-11C, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -18637,6 +18773,32 @@
 					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["C-supportsBatchMode"],
 					"evidenceRef": "phase07-verification"
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"field": "supportsBatchMode",
@@ -20200,7 +20362,8 @@
 			},
 			"limitations": [
 				"Grok moderation currently rejected despite picker visibility. Antigravity own gap does not lower required outcome.",
-				"GT1-08-21 verification: phase 08 packets groupChat, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-12 pass. Parity against the comparator baseline: gap: rejected while Claude Code and Codex are accepted (release blocker). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets groupChat, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-12 pass. Parity against the comparator baseline: gap: rejected while Claude Code and Codex are accepted (release blocker). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -20252,6 +20415,32 @@
 					"missingPrerequisite": "A Grok moderator is refused at createGroupChat (supportsGroupChatModeration false) while Claude Code and Codex moderate. Participant and synthesis consumers pass GT1-08-12. Needs qualified native moderation evidence (GT1-11-11E) before the capability changes.",
 					"affectedRows": ["S14", "C-supportsGroupChatModeration", "P31"],
 					"evidenceRef": "phase08-reconciliation"
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"field": "supportsGroupChatModeration",
@@ -24495,7 +24684,8 @@
 			"limitations": [
 				"Grok reaches generic paths; end-only identity, failure/cancel checkbox preservation and override inheritance require actual-consumer fixtures.",
 				"GT1-08-21 verification: phase 08 packets autoRun, utilityEffortRetry; verdicts GT1-08-07 pass; GT1-08-21 tab naming (14F) pass; GT1-08-21 headless Auto Run retry (14F) pass. Parity against the comparator baseline: deterministic match with the shared orchestration; effort retry gap retained (grok-effort-validation-and-retry-pending). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-11-07 verification at 3cc958d88: A11-F11 repaired by GT1-11-05A/05C (1863a2ac2, a7bb8ff3a); its pinning cases pass in batch-processor.test.ts, useBatchProcessor.test.ts (pass2Workflows); blocker grok-shared-autorun-failed-turn-keeps-ticks cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md."
+				"GT1-11-07 verification at 3cc958d88: A11-F11 repaired by GT1-11-05A/05C (1863a2ac2, a7bb8ff3a); its pinning cases pass in batch-processor.test.ts, useBatchProcessor.test.ts (pass2Workflows); blocker grok-shared-autorun-failed-turn-keeps-ticks cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -24550,6 +24740,32 @@
 					"missingPrerequisite": "Existing final model/effort argument guards and exact advertised hint membership retain their scoped evidence. ACP configuration acknowledgement and owned discovery pass GT1-03-13E; production receipt wiring and orchestration remain GT1-07-01 and phase08/10. Tab-naming/runtime retry provenance remains GT1-08-14E/14F/21; native acceptance is not-run.",
 					"affectedRows": ["P06", "REG-MODEL", "REG-DEFINITIONS", "P29", "P32", "S10", "S19"],
 					"evidenceRef": "phase03-reconciliation"
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"branchAuditRefs": ["B45"]
@@ -24605,7 +24821,8 @@
 			},
 			"limitations": [
 				"Grok late session IDs and failed-iteration counters need targeted recovery assertions.",
-				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: deterministic match; handoff resume lineage open (autorun-goal-handoff-resume-lineage). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: deterministic match; handoff resume lineage open (autorun-goal-handoff-resume-lineage). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -24650,6 +24867,32 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S11"]
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"branchAuditRefs": ["B45"]
@@ -24706,7 +24949,8 @@
 			},
 			"limitations": [
 				"Grok uses generic registered definition/parser path. Final JSONL tail, malformed completion, cancel and late identity must be tested through batch processor.",
-				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: deterministic match (clean exit without terminal record fails, like Codex strict empty-answer checks); CLI follow-ups open. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: deterministic match (clean exit without terminal record fails, like Codex strict empty-answer checks); CLI follow-ups open. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -24751,6 +24995,32 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S12"]
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"branchAuditRefs": ["B45"]
@@ -24806,7 +25076,8 @@
 			},
 			"limitations": [
 				"Grok gets shared launch/parser but needs completion identity, accounting, admission/lineage and stop proof through desktop and standalone consumers.",
-				"GT1-08-21 verification: phase 08 packets cue; verdicts GT1-08-12 pass. Parity against the comparator baseline: deterministic match. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets cue; verdicts GT1-08-12 pass. Parity against the comparator baseline: deterministic match. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -24851,6 +25122,32 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["S13"]
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"branchAuditRefs": ["B37", "B38"]
@@ -24912,7 +25209,8 @@
 				"GT1-08-21 verification: phase 08 packets groupChat, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-12 pass. Parity against the comparator baseline: gap: moderation refused by capability while Claude Code and Codex moderate (release blocker). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
 				"GT1-11-03 verification at d84638bfc: A11-F07 (hardcoded-provider-fallback) turnEndOf calls detectSessionNotFoundError(tails) with no provider, so the headless runtime's group chat reads every participant's stdout/stderr tails through Claude's session_not_found patterns before the router applies the provider's own. Grok reaches the right recovery decision only by coincidence (Claude's /session.*not found/ also matches Grok's non-fatal 'not found locally, restoring from remote' line), and a successful Grok remote restore with no answer text then reports output it does not have. See Plans/grok-tier1/evidence/11-static.md.",
 				"GT1-11-07 verification at 3cc958d88: A11-F07 repaired by GT1-11-03A/03B (84be096ef, 5ca81dcee); its pinning cases pass in turn-end.test.ts (pass2Workflows); blocker grok-groupchat-turn-end-claude-patterns cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md.",
-				"GT1-11-07 verification at 3cc958d88: A11-F12 repaired by GT1-11-05B/05C (99742f718, a7bb8ff3a); its pinning cases pass in output-parser.test.ts (pass2Workflows); blocker grok-room-text-after-terminal-routed cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md."
+				"GT1-11-07 verification at 3cc958d88: A11-F12 repaired by GT1-11-05B/05C (99742f718, a7bb8ff3a); its pinning cases pass in output-parser.test.ts (pass2Workflows); blocker grok-room-text-after-terminal-routed cleared on a passing pass-two integration run. Row statuses unchanged (synthetic consumers, not native qualification). See Plans/grok-tier1/evidence/11-integration.md.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -24964,6 +25262,32 @@
 					"missingPrerequisite": "A Grok moderator is refused at createGroupChat (supportsGroupChatModeration false) while Claude Code and Codex moderate. Participant and synthesis consumers pass GT1-08-12. Needs qualified native moderation evidence (GT1-11-11E) before the capability changes.",
 					"affectedRows": ["S14", "C-supportsGroupChatModeration", "P31"],
 					"evidenceRef": "phase08-reconciliation"
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"branchAuditRefs": ["B14", "B39"]
@@ -25019,7 +25343,8 @@
 			},
 			"limitations": [
 				"No Grok-specific exclusion observed in selected source; managed repository refusal, cancellation and selected provider/worktree need deterministic proof.",
-				"GT1-08-21 verification: phase 08 packets symphony; verdicts GT1-08-21 symphony pass. Parity against the comparator baseline: deterministic match (provider-neutral). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets symphony; verdicts GT1-08-21 symphony pass. Parity against the comparator baseline: deterministic match (provider-neutral). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -25071,6 +25396,32 @@
 					"code": "remaining-consumer-or-native-qualification-pending",
 					"missingPrerequisite": "Symphony selected model/effort handoff, draft/home-path ownership and secret-free creation logging have scoped deterministic evidence in 13/13J; the earlier draft regression is resolved. Full Symphony orchestration remains GT1-08-16/17/21 and native qualification remains phase11. Evidence: Plans/grok-tier1/evidence/02.md#gt1-02-14-phase-02-reconciliation.",
 					"affectedRows": ["P03", "P06", "P31", "S15", "REG-MODEL", "REG-DISCOVERY"]
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"branchAuditRefs": ["B46"]
@@ -25126,7 +25477,8 @@
 			},
 			"limitations": [
 				"Grok candidate reachability follows declared capabilities; selected account/model, unavailable states, quotas and supervised termination remain unverified.",
-				"GT1-08-21 verification: phase 08 packets pianolaDispatch; verdicts GT1-08-21 dispatch (20) pass; GT1-08-21 orchestrate CLI and standalone supervisor (20A) pass. Parity against the comparator baseline: deterministic match for selection; fresh session account/model/SSH absent for every provider. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets pianolaDispatch; verdicts GT1-08-21 dispatch (20) pass; GT1-08-21 orchestrate CLI and standalone supervisor (20A) pass. Parity against the comparator baseline: deterministic match for selection; fresh session account/model/SSH absent for every provider. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -25178,6 +25530,32 @@
 					"missingPrerequisite": "PianolaTask and create_session carry no account, model or SSH remote, so a fresh Pianola session runs on provider defaults for every provider (GT1-08-20A). A bound agent keeps its configuration. Needs a schema extension outside the phase 08 file bounds.",
 					"affectedRows": ["S16", "P31", "P04"],
 					"evidenceRef": "phase08-reconciliation"
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"ownerScopeReview": {
@@ -25239,7 +25617,8 @@
 			},
 			"limitations": [
 				"Grok excluded by TranscriptAgent union; needs validated native human-decision shapes or explicit unsupported result. Antigravity exclusion does not reduce required union.",
-				"GT1-08-21 verification: phase 08 packets pianolaLearning; verdicts GT1-08-21 transcript learning pass. Parity against the comparator baseline: gap: permission decisions unrecorded while Claude Code and Codex mine paired decisions (release blocker). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21."
+				"GT1-08-21 verification: phase 08 packets pianolaLearning; verdicts GT1-08-21 transcript learning pass. Parity against the comparator baseline: gap: permission decisions unrecorded while Claude Code and Codex mine paired decisions (release blocker). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -25291,6 +25670,32 @@
 					"missingPrerequisite": "Grok chat_history.jsonl records no tool-permission outcome and the updates.jsonl schema is unpinned; Pianola learn reports the explicit unsupported result (GT1-08-19 passes in GT1-08-21). Claude Code and Codex mine paired decisions. Needs a pinned native decision record (GT1-11-11E).",
 					"affectedRows": ["S17", "P31"],
 					"evidenceRef": "phase08-reconciliation"
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"branchAuditRefs": ["B09"]
@@ -27561,7 +27966,8 @@
 				"Intentional preference differs from support; moderation backend still rejects Grok.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
 				"GT1-08-21 verification: phase 08 packets groupChat, symphony, pianolaLearning, pianolaDispatch, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-21 symphony pass; GT1-08-21 transcript learning pass; GT1-08-21 dispatch (20) pass; GT1-08-21 orchestrate CLI and standalone supervisor (20A) pass; GT1-08-12 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: autoselect order unchanged; CLI exposes grok without reordering providers. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11E, GT1-11-07, GT1-11-11C, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; web pass 427/427; interaction pass 137/137; liteNative not-run. Parity against the comparator baseline: autoselect order unchanged; CLI exposes grok without reordering providers. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11E, GT1-11-07, GT1-11-11C, GT1-11-12 linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -27613,6 +28019,32 @@
 					"code": "live-disabled",
 					"missingPrerequisite": "Explicit isolated account/endpoint/budget authorization in run-state.",
 					"affectedRows": ["META-04"]
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"symbols": ["AGENT_AUTOSELECT_ORDER"]
@@ -28099,7 +28531,8 @@
 			"limitations": [
 				"Shared defaults do not prove Grok document-mode selection or quota retry correctness.",
 				"GT1-08-21 verification: phase 08 packets autoRun; verdicts GT1-08-07 pass. Parity against the comparator baseline: phase 08 consumers reached through the shared paths the comparators use; whole-row parity still needs native/platform qualification. Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E, GT1-11-11F linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
-				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; usage pass 91/91; quota pass 21/21; nativeQuota unsupported; recordings pass 37/37; performance pass 21/21; retry pass 158/158; web pass 427/427; interaction pass 137/137; liteNative not-run; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; nativePlatformLaunch not-run. Parity against the comparator baseline: threshold constants unchanged by phase 10; retry surfaces unknown Grok resets without the Claude-only estimator. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11E, GT1-11-11F, GT1-11-07, GT1-11-11C, GT1-11-12, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16."
+				"GT1-10-16 verification at d99faa724: phase 10 groups cli pass 81/81; usage pass 91/91; quota pass 21/21; nativeQuota unsupported; recordings pass 37/37; performance pass 21/21; retry pass 158/158; web pass 427/427; interaction pass 137/137; liteNative not-run; launch pass 276/276; agentRuns pass 139/139; storedHistory pass 441/441; aboutShare pass 66/66; nativePlatformLaunch not-run. Parity against the comparator baseline: threshold constants unchanged by phase 10; retry surfaces unknown Grok resets without the Claude-only estimator. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-11, GT1-11-11E, GT1-11-11F, GT1-11-07, GT1-11-11C, GT1-11-12, GT1-11-10, GT1-11-11A linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
+				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -28160,6 +28593,32 @@
 					"missingPrerequisite": "startGrokAcpTurn now has production callers: desktop GrokAcpSpawner (process:spawn, standard tab or native command) and portable runAgentTurn (runtime, maestro-cli host), passing phase07 deterministic consumer suites (phase07-verification). CLI batch stays native headless by design. Remaining: phase08 automation callers, phase10 web/Lite/SSH, phase09 managed effects and phase11 exact-binary qualification.",
 					"affectedRows": ["META-07"],
 					"evidenceRef": "phase07-verification"
+				},
+				{
+					"id": "grok-workflow-consumer-cases-unimplemented",
+					"code": "harness-capability",
+					"missingPrerequisite": "Bounded workflow-consumer case logic: Auto Run task/document/headless/goal legs (GT1-11-11E1), Cue desktop/headless and group chat participant/moderator legs (GT1-11-11E2), Symphony and Pianola legs (GT1-11-11E3), pinned by GT1-11-11E4; then live run-state inputs.",
+					"affectedRows": [
+						"P29",
+						"P30",
+						"P31",
+						"P38",
+						"P43",
+						"C-supportsBatchMode",
+						"C-supportsGroupChatModeration",
+						"S10",
+						"S11",
+						"S12",
+						"S13",
+						"S14",
+						"S15",
+						"S16",
+						"S17",
+						"META-04",
+						"META-07"
+					],
+					"ownerTask": "GT1-11-11E1",
+					"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 				}
 			],
 			"symbols": [
@@ -37956,6 +38415,541 @@
 					"S33"
 				],
 				"evidenceRef": "Plans/grok-tier1/evidence/11-native-utilities.md"
+			}
+		],
+		"liveCalls": 0,
+		"readiness": false
+	},
+	"phase11NativeWorkflows": {
+		"taskId": "GT1-11-11E",
+		"recordedAt": "2026-11-02",
+		"sourceCommit": "4abddb11a46988cb8d2b9d89acc19d20f267fb09",
+		"branch": "auto-run-feature/grok-cli-integration",
+		"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md",
+		"prerequisites": {
+			"missing": [
+				"live.enabled false",
+				"live.credentialsReference null",
+				"live.authorizationReference null",
+				"live.budgetUsd 0",
+				"live.maxCalls 0",
+				"live.maxTurns 0",
+				"live.maxWallClockSeconds 0",
+				"live.allowedEndpoints empty",
+				"selectedBinaryPath null",
+				"selectedBinarySha256 null",
+				"selectedLiveModels empty",
+				"authorization.configurationReference null",
+				"authorization.expiresAt null",
+				"authorization.isolationReceipt null",
+				"authorization.allowedRoots empty",
+				"no provider cap or worst-case reservation",
+				"authorization.sharedBudgetLedgerReference null"
+			],
+			"configFiles": [],
+			"requiredLiveBlockers": [
+				"live-authorization-absent",
+				"binary-unpinned",
+				"host-isolation-unqualified",
+				"background-egress-unqualified",
+				"discovery-authorization-absent",
+				"live-limits-unset",
+				"spend-guarantee-absent"
+			]
+		},
+		"configurationSelectionFiles": [],
+		"suites": {
+			"command": "node node_modules/vitest/vitest.mjs run src/__tests__/scripts/grok-qualification-spend.test.ts src/__tests__/scripts/grok-qualification-harness.test.ts src/__tests__/cli/services/batch-processor.test.ts src/__tests__/cli/commands/run-playbook.test.ts src/__tests__/cli/services/goal-runner.test.ts src/shared/maestro-lib/autorun/__tests__/run-playbook.test.ts src/shared/maestro-lib/autorun/__tests__/run-goal.test.ts src/shared/maestro-lib/autorun/__tests__/run-control.test.ts src/shared/maestro-lib/runtime/__tests__/autorun-turns.test.ts src/shared/maestro-lib/runtime/__tests__/autorun.test.ts src/__tests__/renderer/hooks/batch/useGoalRunner.test.ts src/__tests__/main/cue/cue-process-lifecycle.test.ts src/__tests__/main/cue/cue-process-lifecycle.managed.test.ts src/__tests__/main/cue/cue-executor.test.ts src/__tests__/main/cue/cue-run-router.test.ts src/__tests__/main/cue/cue-run-router.managed.test.ts src/__tests__/main/cue/cue-shell-executor.test.ts src/__tests__/main/cue/cue-cli-executor.test.ts src/__tests__/main/cue/cue-autorun-executor.test.ts src/__tests__/cli/services/cue-standalone-engine.test.ts src/__tests__/main/group-chat/output-parser.test.ts src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts src/shared/maestro-lib/groupchat/__tests__/turn-end.test.ts src/shared/maestro-lib/groupchat/__tests__/router.test.ts src/shared/maestro-lib/groupchat/__tests__/spawn.test.ts src/shared/maestro-lib/groupchat/__tests__/session-recovery.test.ts src/shared/maestro-lib/runtime/__tests__/group-chats.test.ts src/__tests__/main/services/symphony-runner.test.ts src/__tests__/main/pianola/pianola-supervisor.test.ts src/__tests__/main/pianola/pianola-supervisor.managed.test.ts src/__tests__/main/pianola/pianola-relearn.test.ts src/__tests__/cli/commands/pianola-supervise.test.ts src/__tests__/cli/commands/pianola-learn.test.ts src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts",
+			"exit": 1,
+			"total": 1407,
+			"passed": 1404,
+			"failed": 2,
+			"knownPreexistingFailures": [
+				"cue-cli-executor stopProcess uses taskkill /t /f on Windows instead of POSIX signals",
+				"cue-shell-executor stopProcess uses taskkill /t /f on Windows instead of POSIX signals"
+			],
+			"files": [
+				{
+					"file": "src/__tests__/renderer/hooks/batch/useGoalRunner.test.ts",
+					"passed": 29,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-harness.test.ts",
+					"passed": 99,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/scripts/grok-qualification-spend.test.ts",
+					"passed": 35,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/cli/services/batch-processor.test.ts",
+					"passed": 110,
+					"failed": 0,
+					"skipped": 1
+				},
+				{
+					"file": "src/__tests__/cli/services/cue-standalone-engine.test.ts",
+					"passed": 36,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/cli/services/goal-runner.test.ts",
+					"passed": 18,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/cli/commands/pianola-learn.test.ts",
+					"passed": 14,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/cli/commands/pianola-supervise.test.ts",
+					"passed": 4,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/cli/commands/run-playbook.test.ts",
+					"passed": 33,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/cue/cue-autorun-executor.test.ts",
+					"passed": 7,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/cue/cue-cli-executor.test.ts",
+					"passed": 29,
+					"failed": 1,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/cue/cue-executor.test.ts",
+					"passed": 82,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/cue/cue-process-lifecycle.managed.test.ts",
+					"passed": 9,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/cue/cue-process-lifecycle.test.ts",
+					"passed": 94,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/cue/cue-run-router.managed.test.ts",
+					"passed": 26,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/cue/cue-run-router.test.ts",
+					"passed": 37,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/cue/cue-shell-executor.test.ts",
+					"passed": 32,
+					"failed": 1,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/group-chat/output-parser.test.ts",
+					"passed": 35,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/group-chat/spawnGroupChatAgent.test.ts",
+					"passed": 55,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/pianola/pianola-relearn.test.ts",
+					"passed": 3,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/pianola/pianola-supervisor.managed.test.ts",
+					"passed": 16,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/pianola/pianola-supervisor.test.ts",
+					"passed": 31,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/main/services/symphony-runner.test.ts",
+					"passed": 110,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts",
+					"passed": 189,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/shared/maestro-lib/autorun/__tests__/run-control.test.ts",
+					"passed": 10,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/shared/maestro-lib/autorun/__tests__/run-goal.test.ts",
+					"passed": 8,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/shared/maestro-lib/autorun/__tests__/run-playbook.test.ts",
+					"passed": 19,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/shared/maestro-lib/groupchat/__tests__/router.test.ts",
+					"passed": 76,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/shared/maestro-lib/groupchat/__tests__/session-recovery.test.ts",
+					"passed": 40,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/shared/maestro-lib/groupchat/__tests__/spawn.test.ts",
+					"passed": 48,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/shared/maestro-lib/groupchat/__tests__/turn-end.test.ts",
+					"passed": 11,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/shared/maestro-lib/runtime/__tests__/autorun-turns.test.ts",
+					"passed": 15,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/shared/maestro-lib/runtime/__tests__/autorun.test.ts",
+					"passed": 21,
+					"failed": 0,
+					"skipped": 0
+				},
+				{
+					"file": "src/shared/maestro-lib/runtime/__tests__/group-chats.test.ts",
+					"passed": 23,
+					"failed": 0,
+					"skipped": 0
+				}
+			]
+		},
+		"harness": {
+			"command": "node scripts/grok-qualification.mjs --json --no-write",
+			"exit": 0,
+			"configSource": "default-run-state",
+			"totals": {
+				"cases": 48,
+				"admitted": 0,
+				"notRun": 48,
+				"spawned": 0,
+				"paidRequests": 0,
+				"networkContacts": 0
+			},
+			"capabilities": {
+				"isolationPreflight": true,
+				"atomicSpendAdmission": true,
+				"offlineExecutor": true,
+				"caseExecutor": true,
+				"discoveryExecutor": true,
+				"sshExecutor": true,
+				"consumerLegs": true,
+				"sessionLegs": true,
+				"sessionConsumers": true,
+				"utilityLegs": true,
+				"cheapUtilityLegs": true
+			}
+		},
+		"cases": [
+			{
+				"caseId": "E09:native-headless:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "consumers",
+						"owner": "GT1-11-11E"
+					}
+				]
+			},
+			{
+				"caseId": "E09:native-headless:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "consumers",
+						"owner": "GT1-11-11E"
+					}
+				]
+			},
+			{
+				"caseId": "E09:acp-stdio:local",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "consumers",
+						"owner": "GT1-11-11E"
+					}
+				]
+			},
+			{
+				"caseId": "E09:acp-stdio:ssh",
+				"classes": ["paid"],
+				"outcome": "not-run",
+				"reasons": [
+					"live-authorization-absent",
+					"credential-reference-absent",
+					"binary-unpinned",
+					"auto-update-not-disabled",
+					"allowed-roots-absent",
+					"host-isolation-unqualified",
+					"endpoints-unapproved",
+					"ssh-target-unapproved",
+					"models-unselected",
+					"live-limits-unset",
+					"spend-guarantee-absent",
+					"spend-bounds-undeclared",
+					"isolation-undeclared"
+				],
+				"unevaluated": [
+					{
+						"id": "consumers",
+						"owner": "GT1-11-11E"
+					}
+				]
+			}
+		],
+		"claims": [
+			{
+				"claim": "Task, document, headless and goal-driven Auto Run on a Grok agent",
+				"rows": ["S10", "S11", "S12", "P29", "P38", "C-supportsBatchMode"],
+				"cases": "E09 (paid; fixture turn plus utility legs)",
+				"implemented": "E09 runs its token turn and the six utility legs, then leaves `consumers` not-evaluated (owner GT1-11-11E); no leg drives the production document processor, the CLI batch processor or runPlaybook, or the goal runner over a Grok turn, observes a task checked only after a successful turn, a failed or cancelled turn leaving the document unchanged (restoreTasksCheckedByFailedTurn), the selected profile and effort in the launch, the query source, progress counts, child cleanup or the History record; deterministic batch-processor, run-playbook (CLI and library), goal-runner, run-goal, run-control, runtime autorun/autorun-turns and useGoalRunner suites only",
+				"gap": "Auto Run legs: task/document run on a synthetic owned document, headless playbook, goal iteration; completion only after success, failure/cancel leaves boxes unticked, no effect replayed, profile/effort/query source in the plan, children reaped, History entry written",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Cue desktop and headless dispatch (event, prompt, shell and CLI actions)",
+				"rows": ["S13", "P30"],
+				"cases": "none",
+				"implemented": "no leg fires a Cue subscription whose target is a Grok agent through the run router and process lifecycle (desktop) or the standalone engine (headless), observing ownership/query source, the selected profile and effort, completion, a stop that reaps the child, or the activity record; Cue shell and CLI actions spawn no provider and are covered only deterministically; deterministic cue-process-lifecycle (plain and managed), cue-executor, cue-run-router (plain and managed), cue-shell-executor, cue-cli-executor, cue-autorun-executor and cue-standalone-engine suites only",
+				"gap": "Cue legs: a synthetic owned cue.yaml prompt subscription on the Grok agent run through the desktop router/lifecycle and the standalone engine, completion and cancellation with the child reaped, shell/CLI actions attributed to the same pipeline, no duplicate dispatch",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Group chat participant and moderator continuation on Grok",
+				"rows": ["S14", "P31", "C-supportsGroupChatModeration", "META-04"],
+				"cases": "none",
+				"implemented": "no leg routes a group chat round to a Grok participant (spawnGroupChatAgent, output parser, turn-end by provider) and resumes the same participant session on the next round; moderator creation over Grok is refused by the production flag (blocker grok-groupchat-moderation-refused), so the honest moderator observation is that refusal with nothing spawned, which nothing observes natively; deterministic output-parser, spawnGroupChatAgent, groupchat turn-end/router/spawn/session-recovery and runtime group-chats suites only (group-chat-router.test.ts excluded: 4 pre-existing failures, readOnlyMode and SSH)",
+				"gap": "group chat legs: two rounds to a Grok participant with the native session resumed and the reply routed once, moderator-on-Grok refused before spawn, cancellation reaps the participant child",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Symphony contribution workflow on a Grok agent",
+				"rows": ["S15", "P31"],
+				"cases": "none",
+				"implemented": "no leg runs the Symphony runner over an owned synthetic repository with a Grok agent; the selected-config handoff is still pending (blocker symphony-selected-config-handoff-pending) and every clone/push/PR effect is held by the repository ceiling, so a native leg could only observe the local run with effects refused; deterministic symphony-runner suite only",
+				"gap": "Symphony leg: local owned repository, Grok agent with the selected profile/effort, completion recorded, clone/push/PR refused or stubbed with zero network effect",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Pianola dispatch, supervised children and transcript learning",
+				"rows": ["S16", "S17", "P31"],
+				"cases": "none",
+				"implemented": "no leg selects a Grok agent through the Pianola orchestrator, supervises its child (supervisor admission, stale detection, cleanup) or mines an owned Grok transcript through pianola-learn; fresh-session config is absent (blocker pianola-fresh-session-config-absent) and permission decisions are not recorded (grok-permission-decisions-unrecorded); deterministic pianola-supervisor (plain and managed), pianola-relearn, pianola-supervise and pianola-learn suites only",
+				"gap": "Pianola legs: dispatch to a Grok agent with supervision and child cleanup, transcript learning over an owned E09 history only, no real Maestro data dir",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Context-window and metadata consumers across workflow turns (META-07)",
+				"rows": ["META-07"],
+				"cases": "none",
+				"implemented": "no workflow leg records the context window reported for a Grok workflow turn; accounting is GT1-11-11F, the workflow-side reading has no leg; deterministic run-agent-turn suite only",
+				"gap": "each workflow leg records the context window and usage the consumer displayed for its turn",
+				"outcome": "not-run"
+			},
+			{
+				"claim": "Qualification harness completeness (P43)",
+				"rows": ["P43"],
+				"cases": "all families",
+				"implemented": "the harness enumerates 48 cases; E09 names the workflow consumers as not-evaluated and no family or leg drives an orchestration consumer",
+				"gap": "the legs above",
+				"outcome": "not-run"
+			}
+		],
+		"observed": {
+			"querySources": [],
+			"selectedProfiles": [],
+			"efforts": [],
+			"completions": [],
+			"cancellations": [],
+			"childCleanups": [],
+			"records": [],
+			"documentsTicked": [],
+			"documentsRestored": [],
+			"groupChatRounds": [],
+			"moderatorRefusals": [],
+			"symphonyRuns": [],
+			"pianolaDispatches": [],
+			"learnedTranscripts": [],
+			"duplicateEffects": []
+		},
+		"ownedFixtures": {
+			"documents": 0,
+			"cuePipelines": 0,
+			"repositories": 0,
+			"assertionsEvaluated": 0
+		},
+		"productionInstall": {
+			"sha256": "5c8a688251bf61e35370b828b6a353b0a20fcc3f64000de8a91d426039f29cec",
+			"executed": false,
+			"modified": false
+		},
+		"findings": [
+			{
+				"id": "A11-F22",
+				"classification": "harness-gap",
+				"anchors": [
+					"scripts/grok-qualification/paid-fixtures.ts:450",
+					"scripts/grok-qualification/paid-fixtures.ts:453",
+					"scripts/grok-qualification/harness.ts:1104"
+				],
+				"consequence": "The workflow-consumer cases this VERIFY must observe are not implemented: run-state maps E09 to GT1-11-11E, but E09 records `consumers` (desktop/library/CLI/workflow consumers) as not-evaluated with owner GT1-11-11E, and no family or leg drives task/document/headless/goal Auto Run, Cue desktop or headless dispatch, group chat participant or moderator continuation, Symphony, or Pianola dispatch/supervision/learning through a production consumer. E09 already spends its 10 turns at the 10-turn per-case ceiling, so workflow legs also need their own bounded allowance on the shared ledger. GT1-11-11E is a VERIFY packet and may not add harness code, so even with every run-state prerequisite these claims could not be observed.",
+				"rows": [
+					"P29",
+					"P30",
+					"P31",
+					"P38",
+					"P43",
+					"C-supportsBatchMode",
+					"C-supportsGroupChatModeration",
+					"S10",
+					"S11",
+					"S12",
+					"S13",
+					"S14",
+					"S15",
+					"S16",
+					"S17",
+					"META-04",
+					"META-07"
+				],
+				"blocker": "grok-workflow-consumer-cases-unimplemented",
+				"repairTasks": ["GT1-11-11E1", "GT1-11-11E2", "GT1-11-11E3", "GT1-11-11E4"]
+			}
+		],
+		"blockerUpdates": [
+			{
+				"id": "grok-workflow-consumer-cases-unimplemented",
+				"finding": "A11-F22",
+				"taskId": "GT1-11-11E",
+				"change": "added",
+				"addedTo": [
+					"P29",
+					"P30",
+					"P31",
+					"P38",
+					"P43",
+					"C-supportsBatchMode",
+					"C-supportsGroupChatModeration",
+					"S10",
+					"S11",
+					"S12",
+					"S13",
+					"S14",
+					"S15",
+					"S16",
+					"S17",
+					"META-04",
+					"META-07"
+				],
+				"evidenceRef": "Plans/grok-tier1/evidence/11-native-workflows.md"
 			}
 		],
 		"liveCalls": 0,
