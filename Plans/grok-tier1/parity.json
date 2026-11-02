@@ -44682,16 +44682,15 @@
 			{
 				"owner": "unassigned-image-large-prompt-legs",
 				"harnessLines": [],
-				"fixtureLines": [
-					"scripts/grok-qualification/paid-fixtures.ts:1165",
-					"scripts/grok-qualification/paid-fixtures.ts:1170"
-				],
+				"fixtureLines": ["scripts/grok-qualification/paid-fixtures.ts (E03 sessionLegs)"],
 				"route": "native-headless",
 				"recordedInParityBeforeAudit": false,
 				"triageTask": "GT1-11-14P4",
 				"note": "missed by the GT1-11-14 inventory (fixture file, not harness.ts); found by GT1-11-14P4",
 				"resolvedOwner": "GT1-11-14P4F",
-				"resolution": "task"
+				"resolution": "task",
+				"closedBy": "GT1-11-14P4F",
+				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
 			}
 		],
 		"e01SshCases": [
@@ -45068,6 +45067,22 @@
 					"killed": 11,
 					"total": 11
 				},
+				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
+			},
+			{
+				"id": "unassigned-image-large-prompt-legs",
+				"taskId": "GT1-11-14P4F",
+				"change": "implementation-repaired",
+				"rows": 0,
+				"closedOwner": "GT1-11-14P4F",
+				"repairedBy": ["GT1-11-14P4F"],
+				"residualsClosed": 0,
+				"legs": ["image-fresh", "image-resumed", "large-prompt"],
+				"mutants": {
+					"killed": 11,
+					"total": 11
+				},
+				"residual": ["live-authorization-absent (run-state live inputs; every case not-run)"],
 				"evidenceRef": "Plans/grok-tier1/evidence/11.md"
 			}
 		],

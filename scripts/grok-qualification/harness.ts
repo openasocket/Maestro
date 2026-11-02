@@ -351,7 +351,12 @@ import {
 	GrokAcpRequestError,
 	GrokAcpTransportError,
 } from '../../src/shared/maestro-lib/grok/acp-protocol';
-import { GROK_ACP_ARGS, grokSteeringAvailability } from '../../src/shared/maestro-lib/grok/route';
+import {
+	beginGrokAcpNegotiation,
+	GROK_ACP_ARGS,
+	grokSteeringAvailability,
+} from '../../src/shared/maestro-lib/grok/route';
+import type { AcpPromptBlock } from '../../src/shared/maestro-lib/launch/image-refs';
 import {
 	applyAgentConfigOverrides,
 	buildAgentArgs,
@@ -417,6 +422,8 @@ import {
 	type CrossProviderDirectionSpec,
 	type CrossProviderPeer,
 	fixtureTurnsFor,
+	ARGV_ARGUMENT_LIMIT_BYTES,
+	E03_IMAGE_SUPPORT,
 	PAID_FIXTURES,
 	type PaidFixture,
 	type PaidFixtureTurn,
@@ -8215,6 +8222,164 @@ const runContinuationLeg: SessionLegRunner = async (spec, s, r, home) => {
 	return sent.uncertainWhy;
 };
 
+/**
+ * E03's input legs (GT1-11-14P4F). Native: the turn is planned by the production
+ * launch planner (`buildAgentLaunchPlan()`), an image as an ordered ACP block after
+ * the text under the harness host's admitted bounds (`E03_IMAGE_SUPPORT`), the large
+ * prompt as text, into an owned `--prompt-file` written exclusively before the spawn
+ * and removed after it. The argv names that file and never the prompt, the file holds
+ * exactly the planned blocks, a fresh leg starts its own session and a resumed one
+ * continues the fixture's. Before an image leg sends, the planner must refuse the same
+ * image with no admitted bounds, writing nothing. ACP: an image leg is refused unsent
+ * by the production route negotiation (the port carries no images); the large prompt
+ * goes out as one session/prompt frame carrying it exactly.
+ */
+const runInputLeg: SessionLegRunner = async (spec, s, r) => {
+	const t = spec.turns[0];
+	const input = spec.input ?? { images: [], resume: false };
+	const failures: string[] = [];
+	const mainId = s.mainTurns[0]?.sessionId ?? null;
+	if (!mainId) return closeLeg(r, ['session-id-missing'], '', null);
+	const resumeId = input.resume ? mainId : null;
+	const bytes = Buffer.byteLength(t.prompt);
+	if (!input.images.length && bytes <= ARGV_ARGUMENT_LIMIT_BYTES)
+		failures.push(`prompt-within-argv:${bytes}`);
+	const blocks: AcpPromptBlock[] = [
+		{ type: 'text', text: t.prompt },
+		...input.images.map((i) => ({ type: 'image' as const, data: i.data, mimeType: i.mimeType })),
+	];
+	if (s.c.route === 'acp-stdio') {
+		if (input.images.length) {
+			const route = beginGrokAcpNegotiation(
+				{
+					requested: 'acp-stdio',
+					permissionMode: 'readonly',
+					consent: 'none',
+					imageCount: input.images.length,
+					resume: input.resume,
+				},
+				{
+					executable: { path: 'pinned' },
+					agentVersion: null,
+					platform: `${process.platform}-${process.arch}`,
+					account: s.accountRoot ?? '',
+					host: 'local',
+					configGeneration: 'qualify-e03',
+					target: 'local',
+					native: { qualified: true },
+				}
+			);
+			const missing = route.ok ? [] : [...route.missing];
+			r.observed = { route: s.c.route, refused: missing };
+			if (missing.join() !== 'acp-images')
+				failures.push(`acp-images-not-refused:${missing.join(',') || 'accepted'}`);
+			return closeLeg(r, failures, 'refused unsent: the ACP port carries no images', null);
+		}
+		const frames: string[] = [];
+		const sent = await sendSessionTurn(s, r, t, resumeId, { onFrame: (f) => frames.push(f) });
+		if (!sent.run) return closeLeg(r, failures, '', sent.uncertainWhy);
+		const prompts = frames
+			.map((f) => JSON.parse(f) as { method?: string; params?: { prompt?: unknown } })
+			.filter((f) => f.method === 'session/prompt');
+		r.observed = { route: s.c.route, promptBytes: bytes, sessionId: sent.run.turn.sessionId };
+		if (prompts.length !== 1 || canonicalJson(prompts[0].params?.prompt) !== canonicalJson(blocks))
+			failures.push(`prompt-frame:${prompts.length}`);
+		if (!turnSucceeded(sent.run)) failures.push('turn-failed');
+		return closeLeg(r, failures, `${bytes} prompt bytes in one session/prompt`, sent.uncertainWhy);
+	}
+	const def = getAgentDefinition('grok');
+	const dir = path.join(s.cwd, '.qualify-e03-prompts');
+	const native = s.nativeArgv('', resumeId);
+	const args = native.slice(0, native.length - (def?.promptArgs?.('').length ?? 0));
+	const plan = (admitted: boolean) =>
+		buildAgentLaunchPlan({
+			surface: 'cli',
+			agent: def,
+			command: 'grok',
+			args,
+			cwd: s.cwd,
+			...(input.images.length
+				? {
+						promptBlocks: blocks,
+						hasImages: true,
+						...(admitted
+							? {
+									embeddedImageSupport: {
+										...E03_IMAGE_SUPPORT,
+										mimeTypes: [...E03_IMAGE_SUPPORT.mimeTypes],
+									},
+								}
+							: {}),
+					}
+				: { prompt: t.prompt }),
+			promptFileDestination: {
+				owner: 'local',
+				path: path.join(dir, `maestro-prompt-${randomUUID()}.json`),
+			},
+			readOnlyMode: true,
+			isWindowsHost: isWindows(),
+		});
+	if (input.images.length) {
+		const unadmitted = plan(false);
+		if (unadmitted.ok || unadmitted.reason !== 'prompt-delivery-refused')
+			failures.push('unadmitted-image-planned');
+		if (fs.existsSync(dir)) failures.push('refusal-wrote-file');
+	}
+	const planned = plan(true);
+	if (!planned.ok) return closeLeg(r, [...failures, `plan:${planned.reason}`], '', null);
+	const p = planned.plan;
+	if (p.target.kind !== 'local' || p.prompt.via !== 'file')
+		return closeLeg(r, [...failures, `prompt-via-${p.prompt.via}`], '', null);
+	const artifact = p.prompt.artifact;
+	const argvMax = Math.max(...p.args.map((a) => Buffer.byteLength(a)));
+	if (argValue(p.args, '--prompt-file') !== artifact.path) failures.push('prompt-file-arg');
+	if (p.args.includes('-p') || p.args.some((a) => a.includes('QUALIFY-')) || argvMax > 4096)
+		failures.push('prompt-in-argv');
+	if (argValue(p.args, '--resume') !== resumeId) failures.push('resume-arg');
+	let carried: unknown = null;
+	try {
+		carried = JSON.parse(artifact.content);
+	} catch {
+		carried = null;
+	}
+	if (canonicalJson(carried) !== canonicalJson({ type: 'acp', content: blocks }))
+		failures.push('prompt-file-content');
+	if (failures.length) return closeLeg(r, failures, '', null);
+	let sent: Awaited<ReturnType<typeof sendSessionTurn>>;
+	try {
+		fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+		fs.writeFileSync(artifact.path, artifact.content, {
+			encoding: artifact.encoding,
+			mode: artifact.mode,
+			flag: artifact.flag,
+		});
+		sent = await sendSessionTurn(s, r, t, resumeId, { argv: p.args });
+	} catch (e) {
+		return closeLeg(r, [`prompt-file-unwritable:${errorText(e)}`], '', null);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+	const id = sent.run?.turn.sessionId ?? null;
+	r.observed = {
+		route: s.c.route,
+		promptVia: 'file',
+		promptBytes: bytes,
+		fileBytes: Buffer.byteLength(artifact.content),
+		argvMax,
+		images: input.images.map((i) => ({
+			mimeType: i.mimeType,
+			sha256: createHash('sha256').update(Buffer.from(i.data, 'base64')).digest('hex'),
+		})),
+		resumed: resumeId,
+		sessionId: id,
+	};
+	if (!sent.run) return closeLeg(r, failures, '', sent.uncertainWhy);
+	if (!turnSucceeded(sent.run)) failures.push('turn-failed');
+	if (input.resume ? id !== mainId : !id || id === mainId)
+		failures.push(input.resume ? 'new-native-id' : 'fresh-turn-resumed');
+	return closeLeg(r, failures, `${bytes} prompt bytes through --prompt-file`, sent.uncertainWhy);
+};
+
 const SESSION_LEG_RUNNERS: Record<SessionLegId, SessionLegRunner> = {
 	cancellation: runCancellationLeg,
 	'invalid-resume': runInvalidResumeLeg,
@@ -8223,6 +8388,9 @@ const SESSION_LEG_RUNNERS: Record<SessionLegId, SessionLegRunner> = {
 	'native-mutation-refused': runMutationRefusedLeg,
 	'export-payload': runExportPayloadLeg,
 	'exact-continuation': runContinuationLeg,
+	'image-fresh': runInputLeg,
+	'image-resumed': runInputLeg,
+	'large-prompt': runInputLeg,
 };
 
 /**

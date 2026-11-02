@@ -194,7 +194,9 @@ import {
 	type QualificationConfig,
 } from '../../../scripts/grok-qualification/harness';
 import {
+	ARGV_ARGUMENT_LIMIT_BYTES,
 	CROSS_PROVIDER_DIRECTIONS,
+	E03_SYNTHETIC_IMAGE,
 	PAID_FIXTURES,
 	POLICY_LEGS,
 	TRANSLATION_FAULT_ASSERTIONS,
@@ -4321,7 +4323,8 @@ describe('GT1-11-09 qualification harness', () => {
 			| 'compactfail'
 			| 'dropreply'
 			| 'handoffsame'
-			| 'violate';
+			| 'violate'
+			| 'blind';
 		let sha = '';
 		/**
 		 * The native Grok stand-in (never a real Grok): it keeps its history
@@ -4337,18 +4340,22 @@ describe('GT1-11-09 qualification harness', () => {
 			"const fs = process.getBuiltinModule('fs');",
 			"const path = process.getBuiltinModule('path');",
 			"const cp = process.getBuiltinModule('child_process');",
-			"const { randomUUID } = process.getBuiltinModule('crypto');",
+			"const { randomUUID, createHash } = process.getBuiltinModule('crypto');",
 			`const MODE = fs.readFileSync(${JSON.stringify(MODE_FILE)}, 'utf8').trim();`,
 			'const argv = process.argv.slice(2);',
 			'const at = (f) => { const i = argv.indexOf(f); return i >= 0 ? argv[i + 1] : null; };',
-			"const prompt = at('-p') || '';",
+			// The production planner's ACP JSON prompt file (GT1-11-14P4F): its text blocks are the prompt.
+			"const file = at('--prompt-file');",
+			"const blocks = file ? JSON.parse(fs.readFileSync(file, 'utf8')).content : [];",
+			"const images = blocks.filter((b) => b.type === 'image').map((b) => ({ mimeType: b.mimeType, sha256: createHash('sha256').update(Buffer.from(b.data, 'base64')).digest('hex') }));",
+			"const prompt = at('-p') || blocks.filter((b) => b.type === 'text').map((b) => b.text).join('');",
 			"const model = at('-m');",
 			"const resume = at('--resume');",
 			"const cwd = fs.realpathSync(at('--cwd') || process.cwd());",
 			'const home = process.env.GROK_HOME;',
 			"const dir = (sid) => path.join(home, 'sessions', encodeURIComponent(cwd), sid);",
 			"const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');",
-			`fs.appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ resume, prompt: prompt.slice(0, 120) + ' ... ' + prompt.slice(-200) }) + '\\n');`,
+			`fs.appendFileSync(${JSON.stringify(LOG)}, JSON.stringify({ resume, prompt: prompt.slice(0, 120) + ' ... ' + prompt.slice(-200), file, images, bytes: Buffer.byteLength(prompt), argvMax: Math.max(...argv.map((a) => Buffer.byteLength(a))) }) + '\\n');`,
 			"const keep = (sid, type, content) => { if (MODE === 'nohistory') return; fs.mkdirSync(dir(sid), { recursive: true }); fs.appendFileSync(path.join(dir(sid), 'chat_history.jsonl'), JSON.stringify({ type, content }) + '\\n'); };",
 			'const end = (sid) => ({',
 			"  type: 'end', stopReason: 'end_turn', requestId: 'req-synthetic', sessionId: sid, total_cost_usd: 0.001,",
@@ -4357,6 +4364,7 @@ describe('GT1-11-09 qualification harness', () => {
 			'});',
 			'const tokens = prompt.match(/QUALIFY-[A-Z0-9-]+-OK/g) || [];',
 			"let reply = tokens.length ? tokens[tokens.length - 1] : '';",
+			"if (images.length && MODE !== 'blind') reply = reply.replace('-COLOR-', '-RED-');",
 			"if (prompt.includes('final OK with HANDOFF')) reply = reply.slice(0, -2) + 'HANDOFF';",
 			"const held = (sid) => fs.existsSync(path.join(dir(sid), 'chat_history.jsonl'));",
 			"if (resume && !held(resume) && MODE !== 'substitute' && MODE !== 'nohistory') {",
@@ -4401,7 +4409,14 @@ describe('GT1-11-09 qualification harness', () => {
 			'',
 		].join('\n');
 		const standIn = (mode: Mode) => fs.writeFileSync(MODE_FILE, mode);
-		const turnsLogged = (): Array<{ resume: string | null; prompt: string }> =>
+		const turnsLogged = (): Array<{
+			resume: string | null;
+			prompt: string;
+			file?: string | null;
+			images?: Array<{ mimeType: string; sha256: string }>;
+			bytes?: number;
+			argvMax?: number;
+		}> =>
 			fs.existsSync(LOG)
 				? fs
 						.readFileSync(LOG, 'utf8')
@@ -4468,7 +4483,7 @@ describe('GT1-11-09 qualification harness', () => {
 		const CAPS: HarnessCapabilities = { ...ALL_CAPS, sessionLegs: true, sessionConsumers: true };
 		let ledgerSeq = 0;
 		const execute = async (
-			family: 'E04' | 'E05',
+			family: 'E03' | 'E04' | 'E05',
 			mode: Mode,
 			opts: {
 				caps?: HarnessCapabilities;
@@ -4869,7 +4884,7 @@ describe('GT1-11-09 qualification harness', () => {
 			afterAll(() => {
 				if (fs.existsSync(ACP_BIN)) fs.chmodSync(ACP_BIN, 0o755);
 			});
-			const acp = async (family: 'E04' | 'E05', mode: Mode) => {
+			const acp = async (family: 'E03' | 'E04' | 'E05', mode: Mode) => {
 				fs.rmSync(CANCELS, { force: true });
 				const config = sessionConfig({
 					binary: { path: `${REL}/bin/grok-acp`, sha256: acpSha, version: '0.0.0-synthetic' },
@@ -4963,6 +4978,78 @@ describe('GT1-11-09 qualification harness', () => {
 				for (const f of ['new-native-id', 'session-created:1'])
 					expect(cont.assertion.detail, f).toContain(f);
 			}, 60_000);
+
+			describe('E03 input legs (GT1-11-14P4F)', () => {
+				const IMAGE_SHA = createHash('sha256')
+					.update(Buffer.from(E03_SYNTHETIC_IMAGE.data, 'base64'))
+					.digest('hex');
+				const PROMPTS = path.join(ROOT, 'home', '.qualify-e03-prompts');
+				const ownersOf = (leg: Leg) => [
+					...leg.assertions.map((a) => a.owner),
+					...leg.sessionLegs.map((l) => l.assertion.owner),
+					...leg.reasons.map((r) => r.owner),
+				];
+				const logged = (token: string) => turnsLogged().filter((t) => t.prompt.includes(token));
+
+				it('native: fresh and resumed images and a prompt above argv reach the stand-in only through the planned prompt file', async () => {
+					const { leg } = await execute('E03', 'ok');
+					expect(leg.status, JSON.stringify(leg.sessionLegs)).toBe('passed');
+					expect(leg.sessionLegs.map((l) => [l.leg, l.status])).toEqual([
+						['image-fresh', 'passed'],
+						['image-resumed', 'passed'],
+						['large-prompt', 'passed'],
+					]);
+					expect(ownersOf(leg)).not.toContain('GT1-11-14P4F');
+					expect(leg.assertions.map((a) => a.id)).not.toContain('images');
+					expect(leg.spawned).toBe(5);
+					const main = leg.turns[0].sessionId;
+					const [fresh] = logged('QUALIFY-E03-FRESH-COLOR-OK');
+					const [resumed] = logged('QUALIFY-E03-RESUMED-COLOR-OK');
+					const [large] = logged('QUALIFY-E03-LARGE-OK');
+					for (const t of [fresh, resumed, large]) {
+						expect(path.dirname(t.file ?? '')).toBe(PROMPTS);
+						expect(t.argvMax).toBeLessThan(4096);
+					}
+					expect(fresh).toMatchObject({
+						resume: null,
+						images: [{ mimeType: 'image/png', sha256: IMAGE_SHA }],
+					});
+					expect(resumed).toMatchObject({
+						resume: main,
+						images: [{ mimeType: 'image/png', sha256: IMAGE_SHA }],
+					});
+					expect(large.images).toEqual([]);
+					expect(large.bytes).toBeGreaterThan(ARGV_ARGUMENT_LIMIT_BYTES);
+					expect(session(leg, 'image-fresh').observed.sessionId).not.toBe(main);
+					expect(session(leg, 'image-resumed').observed.sessionId).toBe(main);
+					expect(session(leg, 'large-prompt').observed).toMatchObject({ promptVia: 'file' });
+					expect(fs.existsSync(PROMPTS)).toBe(false);
+				});
+
+				it('native: a child that never saw the image fails both image legs on the reply', async () => {
+					const { leg } = await execute('E03', 'blind');
+					expect(session(leg, 'image-fresh').assertion.detail).toBe('turn-failed');
+					expect(session(leg, 'image-resumed').assertion.detail).toBe('turn-failed');
+					expect(session(leg, 'large-prompt').status).toBe('passed');
+					expect(leg.status).toBe('failed');
+				});
+
+				it('ACP: image legs are refused unsent by the production route; the large prompt is one exact session/prompt', async () => {
+					const leg = await acp('E03', 'ok');
+					expect(ownersOf(leg)).not.toContain('GT1-11-14P4F');
+					for (const id of ['image-fresh', 'image-resumed']) {
+						const l = session(leg, id);
+						expect(l.status, JSON.stringify(l)).toBe('passed');
+						expect(l.observed.refused).toEqual(['acp-images']);
+						expect([l.spawned, l.turns.length]).toEqual([0, 0]);
+					}
+					expect(logged('COLOR-OK')).toEqual([]);
+					const large = session(leg, 'large-prompt');
+					expect(large.status, JSON.stringify(large)).toBe('passed');
+					expect(logged('QUALIFY-E03-LARGE-OK')).toHaveLength(1);
+					expect(leg.status).toBe('passed');
+				});
+			});
 
 			describe('ACP session consumer legs (GT1-11-14P4C)', () => {
 				const CONSUMERS = ['context-handoff', 'agent-creation', 'template-dispatch'];

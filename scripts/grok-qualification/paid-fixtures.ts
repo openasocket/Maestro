@@ -25,6 +25,11 @@
  * plus one continuation turn (E05). The harness runs them after the fixture
  * turns on the same reservation, each within its own `maxTurns`.
  *
+ * E03 (GT1-11-14P4F) names three input legs as session legs: a fresh and a
+ * resumed turn carrying the synthetic image (`E03_SYNTHETIC_IMAGE`) and one
+ * prompt above the largest single argv argument (`ARGV_ARGUMENT_LIMIT_BYTES`),
+ * each delivered through the production prompt-file planner.
+ *
  * E09 (GT1-11-11D1) also names utility legs (`UtilityLegSpec`): the user
  * messages the production onboarding and inline wizard services and the
  * feedback interview send over Grok, after the fixture turn, on the same
@@ -239,7 +244,10 @@ export type SessionLegId =
 	| 'compaction-retry'
 	| 'native-mutation-refused'
 	| 'export-payload'
-	| 'exact-continuation';
+	| 'exact-continuation'
+	| 'image-fresh'
+	| 'image-resumed'
+	| 'large-prompt';
 
 export interface SessionLegSpec {
 	id: SessionLegId;
@@ -249,7 +257,48 @@ export interface SessionLegSpec {
 	maxTurns: number;
 	/** True when the leg sends turns (and so needs a local launch: native argv, or an ACP session/new or session/load). */
 	sends: boolean;
+	/** An input leg (E03): the images its one turn carries, and whether it resumes the fixture session. */
+	input?: { images: ReadonlyArray<{ mimeType: string; data: string }>; resume: boolean };
 }
+
+/** A synthetic 16x16 solid red PNG (79 bytes): no person, text or real content. */
+export const E03_SYNTHETIC_IMAGE = Object.freeze({
+	mimeType: 'image/png',
+	data: 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAIAAACQkWg2AAAAFklEQVR42mP4z8BAEmIY1TCqYfhqAACQ+f8B8u7oVwAAAABJRU5ErkJggg==',
+});
+/** The image bounds the harness host admits for an E03 turn: caller policy, not a native Grok limit. */
+export const E03_IMAGE_SUPPORT = Object.freeze({
+	mimeTypes: Object.freeze(['image/png']),
+	maxCount: 1,
+	maxBytesPerImage: 4096,
+	maxTotalBytes: 4096,
+});
+/** The largest single argv argument a supported host passes (Linux MAX_ARG_STRLEN); Windows is smaller. */
+export const ARGV_ARGUMENT_LIMIT_BYTES = 128 * 1024;
+
+/** An image turn: the reply token names the image color, which only the image carries. */
+const imageTurn = (label: string): PaidFixtureTurn => ({
+	prompt:
+		'Do not use any tool. Look at the attached image. Reply with exactly this token and nothing ' +
+		`else, with COLOR replaced by the one English color name of the image in uppercase: QUALIFY-${label}-COLOR-OK`,
+	expect: `QUALIFY-${label}-RED-OK`,
+});
+
+/** ASCII filler past the argv bound, then one token request. */
+const largeTurn = (): PaidFixtureTurn => {
+	const token = 'QUALIFY-E03-LARGE-OK';
+	let filler = '';
+	// ASCII, so length is bytes: past the bound by a margin no accounting of argv overhead closes.
+	for (let i = 0; filler.length <= ARGV_ARGUMENT_LIMIT_BYTES + 4096; i++)
+		filler += `synthetic filler line ${String(i).padStart(6, '0')}, ignore it.\n`;
+	return {
+		prompt:
+			'Ignore the synthetic filler lines below.\n' +
+			filler +
+			`Do not use any tool. Reply with exactly this token and nothing else: ${token}`,
+		expect: token,
+	};
+};
 
 /** A turn long enough to be stopped mid-stream before its token. */
 const longTurn = (label: string): PaidFixtureTurn => {
@@ -306,6 +355,27 @@ const EXPORT_PAYLOAD_LEG: SessionLegSpec = {
 	turns: [],
 	maxTurns: 0,
 	sends: false,
+};
+const IMAGE_FRESH_LEG: SessionLegSpec = {
+	id: 'image-fresh',
+	turns: [imageTurn('E03-FRESH')],
+	maxTurns: 1,
+	sends: true,
+	input: { images: [E03_SYNTHETIC_IMAGE], resume: false },
+};
+const IMAGE_RESUMED_LEG: SessionLegSpec = {
+	id: 'image-resumed',
+	turns: [imageTurn('E03-RESUMED')],
+	maxTurns: 1,
+	sends: true,
+	input: { images: [E03_SYNTHETIC_IMAGE], resume: true },
+};
+const LARGE_PROMPT_LEG: SessionLegSpec = {
+	id: 'large-prompt',
+	turns: [largeTurn()],
+	maxTurns: 1,
+	sends: true,
+	input: { images: [], resume: false },
 };
 const CONTINUATION_LEG: SessionLegSpec = {
 	id: 'exact-continuation',
@@ -1155,22 +1225,9 @@ export const PAID_FIXTURES: Readonly<Record<string, PaidFixture>> = Object.freez
 		assertions: ['colliding-native-ids'],
 		accountTurns: { A: [turn('E01A', 1)], B: [turn('E01B', 1)] },
 	}),
-	E03: fixture(
-		'E03',
-		[turn('E03', 1, UNICODE_PREAMBLE), turn('E03', 2)],
-		[
-			{
-				id: 'images',
-				detail: 'fresh and resumed images',
-				owner: 'GT1-11-14P4F',
-			},
-			{
-				id: 'large-prompt',
-				detail: 'prompt above the argv size',
-				owner: 'GT1-11-14P4F',
-			},
-		]
-	),
+	E03: fixture('E03', [turn('E03', 1, UNICODE_PREAMBLE), turn('E03', 2)], [], {
+		sessionLegs: [IMAGE_FRESH_LEG, IMAGE_RESUMED_LEG, LARGE_PROMPT_LEG],
+	}),
 	E04: fixture('E04', [turn('E04', 1), turn('E04', 2)], [], {
 		sessionLegs: [CANCELLATION_LEG, INVALID_RESUME_LEG, STEERING_LEG, COMPACTION_LEG],
 	}),
