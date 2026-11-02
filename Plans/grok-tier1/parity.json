@@ -4024,7 +4024,7 @@
 		},
 		"phase12-repository-checks": {
 			"path": "Plans/grok-tier1/evidence/12-checks.json",
-			"sourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
+			"sourceCommit": "6efbd8b6697097fadcc9d687dda964bfaf2ad076",
 			"provenance": "repository-checks",
 			"acceptanceRun": false,
 			"status": "fail",
@@ -17949,7 +17949,12 @@
 					"code": "branch-regression",
 					"missingPrerequisite": "GT1-12-05 (12-checks.json at 6d574a72f): npm run test fails 24 of 64286; 22 failures in 10 files pass at the RC base 882d658a8 and are Grok-branch regressions (serveSpawn x2, cross-agent-router.managed x4, assemble-parity x3, ptyKill x1, cue-cli-executor x1, cue-shell-executor x1, cue-process-lifecycle x1, resumeTabVisibility x4, inlineWizard lifecycleActions x2, EncoreTab hooks x3). Repair the product or correct each test with a recorded justification (GT1-12-06A), then rerun GT1-12-05. Not waived.",
 					"affectedRows": ["P46"],
-					"evidenceRef": "phase12-repository-checks"
+					"evidenceRef": "phase12-repository-checks",
+					"status": "resolved",
+					"resolvedBy": "GT1-12-06A",
+					"repairCommit": "6efbd8b66",
+					"resolvedByEvidenceRef": "phase12-repository-checks",
+					"resolution": "12-checks.json rerun at 6efbd8b66: none of the 22 cases fails (unit 3 of 64286: remote-worktree-paths x2, environmental and failing at the RC base; cue-file-watcher-missing-base x1, an intermittent full-suite flake untouched by the branch, passing in isolation). One product fix (assembleTurn names the tab's provider session in the system prompt, as the desktop does) and 19 test corrections (plus the library F6 unit following the desktop rule) where the branch deliberately changed the contract; reasons per case in evidence/12.md#gt1-12-06a. The receipt is repository checks, not an acceptance run, so the validator still reads this resolution unproven and P46 stays incomplete; the unit gate stays failing on the environmental cases."
 				}
 			],
 			"phase": "12",
@@ -46147,6 +46152,32 @@
 			"rowStatusChanges": false,
 			"capabilityChanges": false,
 			"applicabilityChanges": false
+		},
+		"unitRegressionRepair": {
+			"taskId": "GT1-12-06A",
+			"recordedAt": "2026-11-02",
+			"repairCommit": "6efbd8b6697097fadcc9d687dda964bfaf2ad076",
+			"branchRegressionsBefore": 22,
+			"branchRegressionsAfter": 0,
+			"unitAfter": {
+				"tests": 64286,
+				"failed": 3,
+				"failures": [
+					{
+						"file": "src/__tests__/main/cue/cue-file-watcher-missing-base.test.ts",
+						"failed": 1,
+						"cause": "intermittent under the full suite (same-tick folder creation saw 2 events instead of 1); the file and src/main/cue/cue-file-watcher.ts are untouched by the Grok branch, it passed in the GT1-12-05 full run at 6d574a72f and passes 19 of 19 in isolation three times at the receipt commit. Not a branch regression; not waived."
+					},
+					{
+						"file": "src/__tests__/main/utils/remote-worktree-paths.test.ts",
+						"failed": 2,
+						"cause": "pre-existing at the RC base 882d658a8 (2 of 2); environmental: a real git commit in the fixture exits null under the commit-signing configuration of this host (memory: RC branch baseline). Not waived."
+					}
+				]
+			},
+			"productFixes": ["src/shared/maestro-lib/turns/assemble.ts (assemble-parity x3)"],
+			"testCorrections": 19,
+			"evidenceRef": "phase12-repository-checks"
 		}
 	}
 }

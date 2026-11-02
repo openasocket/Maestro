@@ -1,8 +1,17 @@
 {
 	"schemaVersion": 1,
 	"taskId": "GT1-12-05",
-	"recordedAt": "2026-11-02T18:04:45.245Z",
-	"sourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
+	"rerun": {
+		"taskId": "GT1-12-06A",
+		"reason": "Every GT1-12-05 check rerun at the GT1-12-06A repair commit (Working/gt1-12-05/run.mjs, same commands and overrides). The 22 Grok-branch unit regressions GT1-12-05 recorded at 6d574a72f pass (1 product fix in assembleTurn, 19 test corrections (plus the library F6 unit following the desktop rule) where the branch deliberately changed the contract; per-case reasons in evidence/12.md).",
+		"previousSourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
+		"previousUnit": {
+			"failed": 24,
+			"branchRegressions": 22
+		}
+	},
+	"recordedAt": "2026-11-02T18:30:47.840Z",
+	"sourceCommit": "6efbd8b6697097fadcc9d687dda964bfaf2ad076",
 	"executionRoot": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
 	"branch": "auto-run-feature/grok-cli-integration",
 	"status": "fail",
@@ -10,7 +19,7 @@
 		"ref": "feature/mega-maestro-v1.1.0-rc",
 		"commit": "882d658a8cfb8c538d59eae3d8cb041724b9d1f5",
 		"mergeBase": "0a56e0fa1c18e25a8e8a70dfc37378ae7d076b4f",
-		"aheadBehind": "582/10",
+		"aheadBehind": "585/10",
 		"classificationRun": "node node_modules/vitest/vitest.mjs run <the 11 failing unit files> in /Users/dr3/dev-shit/Maestro at the base commit: 1 failed file (remote-worktree-paths, 2 tests), 10 passed; vitest.integration.config.ts group-chat.integration: 1 failed of 6."
 	},
 	"environment": {
@@ -38,15 +47,15 @@
 				"run",
 				"src/__tests__/scripts/verify-grok-tier1.test.ts"
 			],
-			"sourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
-			"startedAt": "2026-11-02T18:03:05.416Z",
-			"finishedAt": "2026-11-02T18:03:05.960Z",
-			"durationSeconds": 0.544,
+			"sourceCommit": "6efbd8b6697097fadcc9d687dda964bfaf2ad076",
+			"startedAt": "2026-11-02T18:16:29.298Z",
+			"finishedAt": "2026-11-02T18:16:29.837Z",
+			"durationSeconds": 0.539,
 			"exitCode": 0,
 			"signal": null,
 			"status": "pass",
 			"log": "tmp/grok-tier1-final/validator.log",
-			"logSha256": "e4db171cfabd859b295ebf8f6e3fed348d1595ad87643ce3fa3afd859e5288a7",
+			"logSha256": "fab57f4d1f397642a49c5a8a5700da05c414288acf06783826f885d0d535d439",
 			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
 			"summary": {
 				"files": 1,
@@ -57,17 +66,17 @@
 		{
 			"id": "lint",
 			"command": ["npm", "run", "lint"],
-			"sourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
-			"startedAt": "2026-11-02T18:03:05.962Z",
-			"finishedAt": "2026-11-02T18:03:24.198Z",
-			"durationSeconds": 18.236,
+			"sourceCommit": "6efbd8b6697097fadcc9d687dda964bfaf2ad076",
+			"startedAt": "2026-11-02T18:16:29.839Z",
+			"finishedAt": "2026-11-02T18:16:48.370Z",
+			"durationSeconds": 18.531,
 			"exitCode": 2,
 			"signal": null,
 			"status": "fail",
 			"log": "tmp/grok-tier1-final/lint.log",
 			"logSha256": "aa4f4c17dfcf89b86f3ae32fc667e5b9b57ff1defd7382fd6e3b01260fb8041d",
 			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
-			"diagnostic": "tsconfig.lint.json: src/main/plugins/plugin-host-handlers.ts(1196,76) TS2339 dispatcher on RequestInit, the same failure as 01-baseline-checks.json (pre-existing, not waived). npm run lint stops there; the two later legs run on their own at 3886a5fd0 (same source as the receipt commit apart from committed .sloptimize caches) exit 0.",
+			"diagnostic": "tsconfig.lint.json: src/main/plugins/plugin-host-handlers.ts(1196,76) TS2339 dispatcher on RequestInit, the same failure as 01-baseline-checks.json (pre-existing, not waived). npm run lint stops there; the two later legs run on their own at the receipt commit (GT1-12-06A, Working/gt1-12-06a/tsc-legs.mjs) exit 0.",
 			"separateLegs": {
 				"tsconfig.main.json": {
 					"command": [
@@ -78,7 +87,7 @@
 						"--noEmit"
 					],
 					"exitCode": 0,
-					"seconds": 5.704
+					"seconds": 5.454
 				},
 				"tsconfig.cli.json": {
 					"command": [
@@ -89,17 +98,17 @@
 						"--noEmit"
 					],
 					"exitCode": 0,
-					"seconds": 5.858
+					"seconds": 4.628
 				}
 			}
 		},
 		{
 			"id": "lint-eslint",
 			"command": ["npm", "run", "lint:eslint"],
-			"sourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
-			"startedAt": "2026-11-02T18:03:24.198Z",
-			"finishedAt": "2026-11-02T18:03:56.696Z",
-			"durationSeconds": 32.498,
+			"sourceCommit": "6efbd8b6697097fadcc9d687dda964bfaf2ad076",
+			"startedAt": "2026-11-02T18:16:48.370Z",
+			"finishedAt": "2026-11-02T18:17:20.563Z",
+			"durationSeconds": 32.193,
 			"exitCode": 0,
 			"signal": null,
 			"status": "pass",
@@ -110,10 +119,10 @@
 		{
 			"id": "docs-verify",
 			"command": ["npm", "run", "docs:verify"],
-			"sourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
-			"startedAt": "2026-11-02T18:03:56.697Z",
-			"finishedAt": "2026-11-02T18:03:56.940Z",
-			"durationSeconds": 0.243,
+			"sourceCommit": "6efbd8b6697097fadcc9d687dda964bfaf2ad076",
+			"startedAt": "2026-11-02T18:17:20.564Z",
+			"finishedAt": "2026-11-02T18:17:20.811Z",
+			"durationSeconds": 0.247,
 			"exitCode": 0,
 			"signal": null,
 			"status": "pass",
@@ -131,173 +140,35 @@
 				"--reporter=json",
 				"--outputFile.json=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-final/unit.json"
 			],
-			"sourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
-			"startedAt": "2026-11-02T17:51:43.688Z",
-			"finishedAt": "2026-11-02T18:01:00.287Z",
-			"durationSeconds": 556.599,
+			"sourceCommit": "6efbd8b6697097fadcc9d687dda964bfaf2ad076",
+			"startedAt": "2026-11-02T18:17:20.811Z",
+			"finishedAt": "2026-11-02T18:26:28.976Z",
+			"durationSeconds": 548.165,
 			"exitCode": 1,
 			"signal": null,
 			"status": "fail",
 			"log": "tmp/grok-tier1-final/unit.log",
-			"logSha256": "e05ad62b0d409a8a10de0524d4226c71960cf4cb121bf7ad5a62e5fff90877a2",
+			"logSha256": "db7e95a740fc77192612297c5d7fa99362d82a97deedc5c23c1246734b5a386c",
 			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
 			"summary": {
 				"report": "tmp/grok-tier1-final/unit.json",
 				"files": 2601,
-				"failedFiles": 11,
+				"failedFiles": 2,
 				"tests": 64286,
-				"passed": 64153,
-				"failed": 24,
+				"passed": 64174,
+				"failed": 3,
 				"skipped": 109,
 				"todo": 0,
 				"failures": [
 					{
-						"file": "src/__tests__/renderer/turns/assemble-parity.test.ts",
+						"file": "src/__tests__/main/cue/cue-file-watcher-missing-base.test.ts",
 						"failed": [
 							{
-								"name": "assembleTurn parity with the desktop Codex, resumed, read-only",
-								"message": "AssertionError: expected '# Maestro System Context\\n\\nYou are *…' to be '# Maestro System Context\\n\\nYou are *…' // Object.is equality"
-							},
-							{
-								"name": "assembleTurn parity with the desktop Codex, resumed, full access",
-								"message": "AssertionError: expected '# Maestro System Context\\n\\nYou are *…' to be '# Maestro System Context\\n\\nYou are *…' // Object.is equality"
-							},
-							{
-								"name": "assembleTurn parity with the desktop Claude Code, standard permission mode, agent model",
-								"message": "AssertionError: expected '# Maestro System Context\\n\\nYou are *…' to be '# Maestro System Context\\n\\nYou are *…' // Object.is equality"
+								"name": "cue-file-watcher with a missing static folder fires for a file written in the same tick the folder is created",
+								"message": "AssertionError: expected [ { …(5) }, { …(5) } ] to have a length of 1 but got 2"
 							}
 						],
-						"classification": "passes at the RC base 882d658a8 and fails here, also in isolation: a regression on the Grok branch (the ten RC-only commits touch only maestro-lib managed/run/binding and host-managed, none of this subject). Earlier phases recorded it failing at the branch HEAD of the time (09.md, 08.md, 11.md)."
-					},
-					{
-						"file": "src/__tests__/renderer/hooks/agent/resumeTabVisibility.test.tsx",
-						"failed": [
-							{
-								"name": "Session List Quick Resume tab visibility shows the existing tab (hidden=false, loaded=true)",
-								"message": "AssertionError: expected \"vi.fn()\" to be called once, but got 0 times"
-							},
-							{
-								"name": "Session List Quick Resume tab visibility shows the existing tab (hidden=false, loaded=false)",
-								"message": "AssertionError: expected \"vi.fn()\" to be called once, but got 0 times"
-							},
-							{
-								"name": "Session List Quick Resume tab visibility shows the existing tab (hidden=true, loaded=true)",
-								"message": "AssertionError: expected \"vi.fn()\" to be called once, but got 0 times"
-							},
-							{
-								"name": "Session List Quick Resume tab visibility shows the existing tab (hidden=true, loaded=false)",
-								"message": "AssertionError: expected \"vi.fn()\" to be called once, but got 0 times"
-							}
-						],
-						"classification": "passes at the RC base 882d658a8 and fails here, also in isolation: a regression on the Grok branch (the ten RC-only commits touch only maestro-lib managed/run/binding and host-managed, none of this subject). Earlier phases recorded it failing at the branch HEAD of the time (09.md, 08.md, 11.md)."
-					},
-					{
-						"file": "src/__tests__/renderer/hooks/batch/inlineWizard/lifecycleActions.test.tsx",
-						"failed": [
-							{
-								"name": "inline wizard lifecycle actions ends an explicit tab and returns its previous UI state",
-								"message": "TypeError: Cannot read properties of undefined (reading 'current')"
-							},
-							{
-								"name": "inline wizard lifecycle actions resets the current tab without touching another tab",
-								"message": "TypeError: Cannot read properties of undefined (reading 'current')"
-							}
-						],
-						"classification": "passes at the RC base 882d658a8 and fails here, also in isolation: a regression on the Grok branch (the ten RC-only commits touch only maestro-lib managed/run/binding and host-managed, none of this subject). Earlier phases recorded it failing at the branch HEAD of the time (09.md, 08.md, 11.md)."
-					},
-					{
-						"file": "src/__tests__/renderer/components/Settings/tabs/EncoreTab/hooks.test.tsx",
-						"failed": [
-							{
-								"name": "EncoreTab hooks useDirectorNotesAgentState persists custom path, args, and env vars on blur",
-								"message": "AssertionError: expected \"vi.fn()\" to be called with arguments: [ { provider: 'claude-code', …(4) } ]"
-							},
-							{
-								"name": "EncoreTab hooks useDirectorNotesAgentState wires env var and agent config callbacks to the shared configuration hook",
-								"message": "AssertionError: expected \"vi.fn()\" to be called with arguments: [ { OLD_KEY: 'old', FOO: 'bar' } ]"
-							},
-							{
-								"name": "EncoreTab hooks useDirectorNotesAgentState keeps a single unnamed row when Add is pressed twice",
-								"message": "AssertionError: expected \"vi.fn()\" to be called with arguments: [ { FOO: 'bar', '': '' } ]"
-							}
-						],
-						"classification": "passes at the RC base 882d658a8 and fails here, also in isolation: a regression on the Grok branch (the ten RC-only commits touch only maestro-lib managed/run/binding and host-managed, none of this subject). Earlier phases recorded it failing at the branch HEAD of the time (09.md, 08.md, 11.md)."
-					},
-					{
-						"file": "src/__tests__/main/cross-agent/cross-agent-router.managed.test.ts",
-						"failed": [
-							{
-								"name": "access: a consult never widens what its initiator may do a consulted agent asking a third is that consult child: the chain deepens and read-only holds against the write switch",
-								"message": "AssertionError: expected undefined to be true // Object.is equality"
-							},
-							{
-								"name": "access: a consult never widens what its initiator may do a named read-only initiator keeps its consult read-only against the write switch",
-								"message": "AssertionError: expected undefined to be true // Object.is equality"
-							},
-							{
-								"name": "access: a consult never widens what its initiator may do a writable consult stays writable when nothing narrows it",
-								"message": "AssertionError: expected undefined to be false // Object.is equality"
-							},
-							{
-								"name": "standalone: unchanged a bare process manager spawns the consult as before, still carrying the lineage and no admission",
-								"message": "AssertionError: expected undefined to be true // Object.is equality"
-							}
-						],
-						"classification": "passes at the RC base 882d658a8 and fails here, also in isolation: a regression on the Grok branch (the ten RC-only commits touch only maestro-lib managed/run/binding and host-managed, none of this subject). Earlier phases recorded it failing at the branch HEAD of the time (09.md, 08.md, 11.md)."
-					},
-					{
-						"file": "src/__tests__/main/cue/cue-cli-executor.test.ts",
-						"failed": [
-							{
-								"name": "cue-cli-executor stopProcess uses taskkill /t /f on Windows instead of POSIX signals",
-								"message": "AssertionError: expected \"vi.fn()\" to be called with arguments: [ 'taskkill', …(2) ]"
-							}
-						],
-						"classification": "passes at the RC base 882d658a8 and fails here, also in isolation: a regression on the Grok branch (the ten RC-only commits touch only maestro-lib managed/run/binding and host-managed, none of this subject). Earlier phases recorded it failing at the branch HEAD of the time (09.md, 08.md, 11.md)."
-					},
-					{
-						"file": "src/__tests__/main/cue/cue-process-lifecycle.process.test.ts",
-						"failed": [
-							{
-								"name": "runProcess against a real process returns raw stdout for an agent whose output is not parsed",
-								"message": "AssertionError: expected { accounting: { …(10) }, …(7) } to be null"
-							}
-						],
-						"classification": "passes at the RC base 882d658a8 and fails here, also in isolation: a regression on the Grok branch (the ten RC-only commits touch only maestro-lib managed/run/binding and host-managed, none of this subject). Earlier phases recorded it failing at the branch HEAD of the time (09.md, 08.md, 11.md)."
-					},
-					{
-						"file": "src/__tests__/main/cue/cue-shell-executor.test.ts",
-						"failed": [
-							{
-								"name": "cue-shell-executor stopProcess uses taskkill /t /f on Windows instead of POSIX signals",
-								"message": "AssertionError: expected \"vi.fn()\" to be called with arguments: [ 'taskkill', …(2) ]"
-							}
-						],
-						"classification": "passes at the RC base 882d658a8 and fails here, also in isolation: a regression on the Grok branch (the ten RC-only commits touch only maestro-lib managed/run/binding and host-managed, none of this subject). Earlier phases recorded it failing at the branch HEAD of the time (09.md, 08.md, 11.md)."
-					},
-					{
-						"file": "src/__tests__/main/process-manager/ProcessManager.ptyKill.test.ts",
-						"failed": [
-							{
-								"name": "ProcessManager PTY kill on Windows (MAESTRO-XZ) still kills the whole tree via taskkill when a real pid is known",
-								"message": "AssertionError: expected \"vi.fn()\" to be called with arguments: [ 'taskkill', …(2) ]"
-							}
-						],
-						"classification": "passes at the RC base 882d658a8 and fails here, also in isolation: a regression on the Grok branch (the ten RC-only commits touch only maestro-lib managed/run/binding and host-managed, none of this subject). Earlier phases recorded it failing at the branch HEAD of the time (09.md, 08.md, 11.md)."
-					},
-					{
-						"file": "src/__tests__/main/process-manager/ProcessManager.serveSpawn.test.ts",
-						"failed": [
-							{
-								"name": "ProcessManager managed admission at the sink private prompt artifact admission (GT1-02-10E0T) captures remote identity without changing the admitted private request (GT1-02-10E1T)",
-								"message": "AssertionError: expected false to be true // Object.is equality"
-							},
-							{
-								"name": "ProcessManager managed admission at the sink private prompt artifact admission (GT1-02-10E0T) preserves the resumed artifact through admitted, cwd and environment copies",
-								"message": "AssertionError: expected { pid: -1, success: false, …(1) } to deeply equal { pid: 4242, success: true }"
-							}
-						],
-						"classification": "passes at the RC base 882d658a8 and fails here, also in isolation: a regression on the Grok branch (the ten RC-only commits touch only maestro-lib managed/run/binding and host-managed, none of this subject). Earlier phases recorded it failing at the branch HEAD of the time (09.md, 08.md, 11.md)."
+						"classification": "intermittent under the full suite (same-tick folder creation saw 2 events instead of 1); the file and src/main/cue/cue-file-watcher.ts are untouched by the Grok branch, it passed in the GT1-12-05 full run at 6d574a72f and passes 19 of 19 in isolation three times at the receipt commit. Not a branch regression; not waived."
 					},
 					{
 						"file": "src/__tests__/main/utils/remote-worktree-paths.test.ts",
@@ -327,15 +198,15 @@
 				"--reporter=json",
 				"--outputFile.json=/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration/tmp/grok-tier1-final/integration.json"
 			],
-			"sourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
-			"startedAt": "2026-11-02T18:01:00.296Z",
-			"finishedAt": "2026-11-02T18:01:05.461Z",
-			"durationSeconds": 5.165,
+			"sourceCommit": "6efbd8b6697097fadcc9d687dda964bfaf2ad076",
+			"startedAt": "2026-11-02T18:26:28.984Z",
+			"finishedAt": "2026-11-02T18:26:34.029Z",
+			"durationSeconds": 5.045,
 			"exitCode": 1,
 			"signal": null,
 			"status": "fail",
 			"log": "tmp/grok-tier1-final/integration.log",
-			"logSha256": "6121f31c84294004e41ff2ccf91dc9cfa1d01311844adc93eb44bd110242d140",
+			"logSha256": "9b9514052c0b459921ba4e6ee3348bd389e8fc845dca6ddbd29c4a1cb926ed5f",
 			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration",
 			"summary": {
 				"report": "tmp/grok-tier1-final/integration.json",
@@ -363,71 +234,71 @@
 		{
 			"id": "build-main",
 			"command": ["npm", "run", "build:main"],
-			"sourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
-			"startedAt": "2026-11-02T18:03:56.941Z",
-			"finishedAt": "2026-11-02T18:04:04.636Z",
-			"durationSeconds": 7.695,
+			"sourceCommit": "6efbd8b6697097fadcc9d687dda964bfaf2ad076",
+			"startedAt": "2026-11-02T18:26:34.030Z",
+			"finishedAt": "2026-11-02T18:26:41.848Z",
+			"durationSeconds": 7.818,
 			"exitCode": 0,
 			"signal": null,
 			"status": "pass",
 			"log": "tmp/grok-tier1-final/build-main.log",
-			"logSha256": "f81974e415e3bcc1f4b4815da917f13d5b82054a5b6bb92a3de42acb793c5ada",
+			"logSha256": "a1130529942c69431f50c2bf232c3b420017562b70e42d067f6940877eaa4b7c",
 			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration"
 		},
 		{
 			"id": "build-renderer",
 			"command": ["npm", "run", "build:renderer"],
-			"sourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
-			"startedAt": "2026-11-02T18:04:04.637Z",
-			"finishedAt": "2026-11-02T18:04:08.698Z",
-			"durationSeconds": 4.061,
+			"sourceCommit": "6efbd8b6697097fadcc9d687dda964bfaf2ad076",
+			"startedAt": "2026-11-02T18:26:41.848Z",
+			"finishedAt": "2026-11-02T18:26:45.754Z",
+			"durationSeconds": 3.906,
 			"exitCode": 0,
 			"signal": null,
 			"status": "pass",
 			"log": "tmp/grok-tier1-final/build-renderer.log",
-			"logSha256": "700f3f958b29a87473408ee778cf1f0943a9e2235d9ed06529cf005372d7cd63",
+			"logSha256": "0b463489b7194a03aaaddc4fedaab1ff21dc3dccbaff88848603454dbe884c01",
 			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration"
 		},
 		{
 			"id": "build-web-desktop",
 			"command": ["npm", "run", "build:web-desktop"],
-			"sourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
-			"startedAt": "2026-11-02T18:04:08.699Z",
-			"finishedAt": "2026-11-02T18:04:14.227Z",
-			"durationSeconds": 5.528,
+			"sourceCommit": "6efbd8b6697097fadcc9d687dda964bfaf2ad076",
+			"startedAt": "2026-11-02T18:26:45.756Z",
+			"finishedAt": "2026-11-02T18:26:51.113Z",
+			"durationSeconds": 5.357,
 			"exitCode": 0,
 			"signal": null,
 			"status": "pass",
 			"log": "tmp/grok-tier1-final/build-web-desktop.log",
-			"logSha256": "1a25f66fd53ff5d2a97b2ccc05b0d1790cfd4ef3b30b89b56919247be65a4a35",
+			"logSha256": "4a7ea77805cbfcdb5fa81a01029bb4f089103f87f011f33abba62b1be1f83a75",
 			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration"
 		},
 		{
 			"id": "build-cli",
 			"command": ["npm", "run", "build:cli"],
-			"sourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
-			"startedAt": "2026-11-02T18:04:14.228Z",
-			"finishedAt": "2026-11-02T18:04:14.735Z",
-			"durationSeconds": 0.507,
+			"sourceCommit": "6efbd8b6697097fadcc9d687dda964bfaf2ad076",
+			"startedAt": "2026-11-02T18:26:51.113Z",
+			"finishedAt": "2026-11-02T18:26:51.640Z",
+			"durationSeconds": 0.527,
 			"exitCode": 0,
 			"signal": null,
 			"status": "pass",
 			"log": "tmp/grok-tier1-final/build-cli.log",
-			"logSha256": "b193e1d7b9c53b56a371df95cc620aa481aef616eb745855e3803d593b47f952",
+			"logSha256": "ea5ea724b7afa9ec982ffddb9b8b86997020e50bc91ab2fb931c723feca85cf8",
 			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration"
 		},
 		{
 			"id": "build-maestro-lib",
 			"command": ["npm", "run", "build:maestro-lib"],
-			"sourceCommit": "6d574a72f659b8fdc1a3cb8571153f40e3e5e191",
-			"startedAt": "2026-11-02T18:04:14.735Z",
-			"finishedAt": "2026-11-02T18:04:16.892Z",
-			"durationSeconds": 2.157,
+			"sourceCommit": "6efbd8b6697097fadcc9d687dda964bfaf2ad076",
+			"startedAt": "2026-11-02T18:26:51.640Z",
+			"finishedAt": "2026-11-02T18:26:53.809Z",
+			"durationSeconds": 2.169,
 			"exitCode": 0,
 			"signal": null,
 			"status": "pass",
 			"log": "tmp/grok-tier1-final/build-maestro-lib.log",
-			"logSha256": "573cc5ce7979f662af08bc8a9c4332afbee7bdfafcd7970bc8efbac92767fd26",
+			"logSha256": "8a2ba5a68f0ca56ba43840e5dc82b214b62b758e105fe8f53abe9c1ddd44bca0",
 			"cwd": "/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration"
 		},
 		{
