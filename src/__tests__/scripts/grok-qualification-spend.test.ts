@@ -109,6 +109,8 @@ const ALL_CAPS: HarnessCapabilities = {
 	caseExecutor: true,
 	// Off: discovery runs in its own block (GT1-11-11A4); these suites decide admission only.
 	discoveryExecutor: false,
+	// Off: SSH legs run in their own block (GT1-11-11A4); these suites decide admission only.
+	sshExecutor: false,
 };
 
 /** The fake budget provider: a fully authorized worst-case-reservation config. */

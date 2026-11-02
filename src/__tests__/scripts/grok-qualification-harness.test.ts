@@ -113,6 +113,8 @@ const ALL_CAPS: HarnessCapabilities = {
 	caseExecutor: true,
 	// Off: discovery runs in its own block (GT1-11-11A4); these suites decide admission only.
 	discoveryExecutor: false,
+	// Off: SSH legs run in their own block (GT1-11-11A4); here an SSH leg stays GT1-11-11A3's gap.
+	sshExecutor: false,
 };
 /** A secret-shaped value the shared redactor recognizes; synthetic, never a credential. */
 const FAKE_TOKEN = `ghp_${'A1b2C3d4E5'.repeat(4).slice(0, 36)}`;
@@ -183,8 +185,9 @@ describe('GT1-11-09 qualification harness', () => {
 					expect(r.id).toMatch(/^[a-z0-9:-]+$/);
 					expect(r.kind).toBeTruthy();
 				}
-				// The discovery (GT1-11-11A1) and paid (GT1-11-11P1) executors cover local Grok-only legs; the rest stay unimplemented.
-				const uncovered = c.target === 'ssh' || c.family === 'E11';
+				// The discovery (GT1-11-11A1) and paid (GT1-11-11P1) executors cover Grok-only legs, local and
+				// SSH (GT1-11-11A3); the cross-provider and SSH two-account identity legs stay unimplemented.
+				const uncovered = c.family === 'E11' || (c.target === 'ssh' && c.family === 'E01');
 				if (uncovered) expect(c.reasons.map((r) => r.id)).toContain('case-executor-unimplemented');
 				else expect(c.reasons.map((r) => r.id)).not.toContain('case-executor-unimplemented');
 				expect([c.spawned, c.paidRequests, c.networkContacts]).toEqual([0, 0, 0]);
@@ -1185,12 +1188,17 @@ describe('GT1-11-09 qualification harness', () => {
 				operatorHome: OPERATOR_HOME,
 				timeoutMs: 5000,
 			});
-		const exec = (cfg: QualificationConfig, id = 'E02:acp-stdio:local') =>
+		const exec = (
+			cfg: QualificationConfig,
+			id = 'E02:acp-stdio:local',
+			caps?: HarnessCapabilities
+		) =>
 			executeOfflineLeg(offlineLegCase(caseOf(id)), cfg, {
 				workspace: WORKSPACE,
 				operatorHome: OPERATOR_HOME,
 				timeoutMs: 5000,
 				lifetime: createCaseLifetime(1),
+				capabilities: caps,
 			});
 		const spawnCalls = () => spawnSpies[0].mock.calls as unknown as Array<[string, string[], any]>;
 		const expectNoSpawn = () => {
@@ -1221,16 +1229,15 @@ describe('GT1-11-09 qualification harness', () => {
 			});
 			expect(receipt.totals).toMatchObject({ spawned: 0, paidRequests: 0, networkContacts: 0 });
 			const owners: Record<string, string> = {
-				'E02:ssh': 'GT1-11-11A3',
-				'E07:ssh': 'GT1-11-11A3/unassigned-ssh-paid-executor',
-				'E03:ssh': 'unassigned-ssh-paid-executor',
+				'E01:ssh': 'unassigned-ssh-identity-inspection',
 				'E11:local': 'GT1-11-13',
 			};
 			for (const c of receipt.cases) {
 				const executor = c.reasons.find((r) => r.id === 'case-executor-unimplemented');
 				const key = `${c.family}:${c.target}`;
 				if (owners[key]) expect(executor?.owner, c.caseId).toBe(owners[key]);
-				if (['E02:local', 'E03:local', 'E07:local'].includes(key))
+				// The SSH legs have their executor (GT1-11-11A3); only the missing inputs refuse them.
+				if (['E02:local', 'E03:local', 'E07:local', 'E02:ssh', 'E03:ssh', 'E07:ssh'].includes(key))
 					expect(executor, c.caseId).toBeUndefined();
 				expect(executor?.owner).not.toBe('GT1-11-10');
 				if (c.family !== 'E02') {
@@ -1387,7 +1394,14 @@ describe('GT1-11-09 qualification harness', () => {
 				],
 				['not grok', (c) => (c.providers = ['codex' as never]), 'provider-not-authorized'],
 				['wrong pin', (c) => (c.binary.sha256 = 'b'.repeat(64)), 'binary-hash-mismatch'],
-				['ssh', () => undefined, 'offline-executor-local-only', 'E02:acp-stdio:ssh'],
+				[
+					'ssh executor off',
+					() => undefined,
+					'offline-executor-local-only',
+					'E02:acp-stdio:ssh',
+					{ ...OFFLINE_CAPS, sshExecutor: false },
+				],
+				['ssh unapproved', () => undefined, 'ssh-target-unapproved', 'E02:acp-stdio:ssh'],
 				['not E02', () => undefined, 'offline-leg-absent', 'E03:acp-stdio:local'],
 				[
 					'executor off',
@@ -1425,12 +1439,26 @@ describe('GT1-11-09 qualification harness', () => {
 		it('the executor re-checks before spawn: a hash mismatch, unpinned, updated, remote or mutable binary never starts', async () => {
 			const sha = standIn('ok');
 			const checks: Array<
-				[string, (c: ReturnType<typeof offlineConfig>) => void, string, string?]
+				[
+					string,
+					(c: ReturnType<typeof offlineConfig>) => void,
+					string,
+					string?,
+					HarnessCapabilities?,
+				]
 			> = [
 				['hash', (c) => (c.binary.sha256 = 'c'.repeat(64)), 'binary-hash-mismatch-at-spawn'],
 				['unpinned', (c) => (c.binary.version = null), 'binary-unpinned'],
 				['update', (c) => (c.autoUpdateDisabled = false), 'auto-update-not-disabled'],
-				['ssh', () => undefined, 'offline-executor-local-only', 'E02:acp-stdio:ssh'],
+				[
+					'ssh executor off',
+					() => undefined,
+					'offline-executor-local-only',
+					'E02:acp-stdio:ssh',
+					{ ...OFFLINE_CAPS, sshExecutor: false },
+				],
+				// On, an SSH leg with no planned remote root never falls back to the local binary.
+				['ssh unplannable', () => undefined, 'offline-launch-unplannable', 'E02:acp-stdio:ssh'],
 				['absent', (c) => (c.binary.path = `${REL}/bin/absent`), 'binary-unreadable'],
 				[
 					'no isolation',
@@ -1448,10 +1476,10 @@ describe('GT1-11-09 qualification harness', () => {
 					'offline-home-absent',
 				],
 			];
-			for (const [label, flip, want, id] of checks) {
+			for (const [label, flip, want, id, caps] of checks) {
 				const cfg = offlineConfig(sha);
 				flip(cfg);
-				const r = await exec(cfg, id);
+				const r = await exec(cfg, id, caps);
 				expect(ids(r), label).toEqual([want]);
 				expect([r.spawned, r.probes.length], label).toEqual([0, 0]);
 			}
@@ -2336,8 +2364,9 @@ describe('GT1-11-09 qualification harness', () => {
 				resolveSecret: SECRET,
 			});
 			const owners: Record<string, string> = {
-				'E03:native-headless:ssh': 'unassigned-ssh-paid-executor',
-				'E03:acp-stdio:ssh': 'unassigned-ssh-paid-executor',
+				// Re-owned from `unassigned-ssh-paid-executor`: with the SSH executor off the leg is GT1-11-11A3's.
+				'E03:native-headless:ssh': 'GT1-11-11A3',
+				'E03:acp-stdio:ssh': 'GT1-11-11A3',
 				'E07:native-headless:local': 'GT1-11-11A1',
 				'E02:acp-stdio:local': 'GT1-11-11A1',
 			};

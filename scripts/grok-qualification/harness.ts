@@ -7,10 +7,23 @@
  * case and writes one structured receipt per run. It never reads a credential
  * and never contacts an endpoint. A case is only ever handed to an executor
  * after every admission input is present AND every harness capability it needs
- * is implemented; an SSH leg (GT1-11-11A3 for discovery) and a cross-provider
- * paid leg have no executor yet, so those record `not-run` with
+ * is implemented; a cross-provider paid leg and an SSH two-account identity
+ * verdict have no executor yet, so those record `not-run` with
  * machine-readable reasons. Default execution, with no configuration,
  * therefore makes zero spawns, zero paid requests and zero network contacts.
+ *
+ * SSH legs (GT1-11-11A3): the offline, discovery and paid executors run an SSH
+ * case on the approved disposable host its config names. The remote is
+ * resolved through the production `resolveSshLaunchTarget()` and every launch
+ * is built by `wrapSpawnWithSsh()`; an unresolved remote refuses with
+ * `sshUnresolvedRemoteMessage` and nothing ever falls back to a local spawn.
+ * The ssh client must resolve to the pinned client file, runs under the owned
+ * boundary home with host-key checking pinned on and no agent forwarding, and
+ * before any Grok child (and again after the leg) one bounded verification
+ * over the same connection reports the remote host name, the remote binary's
+ * sha256 and the owned remote roots, which must match the pin and exist as
+ * real directories. Each ssh connection is an owned child and a counted
+ * network contact; the observed remote host is recorded per leg.
  *
  * Paid execution (GT1-11-11P1): an admitted local Grok-only paid case is
  * handed to `executePaidCase`, which re-checks admission and preflight,
@@ -139,6 +152,16 @@ import {
 } from '../../src/shared/maestro-lib/grok/acp-protocol';
 import { GROK_ACP_ARGS } from '../../src/shared/maestro-lib/grok/route';
 import { checkCustomPath } from '../../src/shared/maestro-lib/launch/path-prober';
+import {
+	resolveSshLaunchTarget,
+	type SshRemoteSettingsStore,
+} from '../../src/shared/maestro-lib/launch/ssh-remote-resolver';
+import {
+	sshUnresolvedRemoteMessage,
+	wrapSpawnWithSsh,
+} from '../../src/shared/maestro-lib/launch/ssh-spawn-wrapper';
+import { validateSshOption } from '../../src/shared/sshOptions';
+import type { AgentSshRemoteConfig, SshRemoteConfig } from '../../src/shared/types';
 import { fixtureTurnsFor, PAID_FIXTURES, type PaidFixture } from './paid-fixtures';
 import { isPathAtOrUnderRoot } from '../../src/shared/worktreePaths';
 import { stopProcess } from '../../src/shared/maestro-lib/control/termination';
@@ -177,10 +200,15 @@ export const HARNESS_CAPABILITIES = {
 	caseExecutor: true,
 	/**
 	 * The local discovery executor (GT1-11-11A1): only the authorized
-	 * `DISCOVERY_OPERATIONS` of the case route, never a prompt. An SSH discovery
-	 * leg stays `case-executor-unimplemented` (GT1-11-11A3).
+	 * `DISCOVERY_OPERATIONS` of the case route, never a prompt.
 	 */
 	discoveryExecutor: true,
+	/**
+	 * SSH legs of the offline, discovery and paid executors (GT1-11-11A3): the
+	 * production SSH wrap to an approved disposable host, never a local
+	 * fallback. Off, every SSH leg stays not-run owned by GT1-11-11A3.
+	 */
+	sshExecutor: true,
 } as const;
 export type HarnessCapabilities = { [K in keyof typeof HARNESS_CAPABILITIES]: boolean };
 
@@ -248,6 +276,26 @@ export interface QualificationConfig {
 	 * under the runs root, that must resolve to the pinned binary itself.
 	 */
 	binaryResolution?: { customPath: string | null } | null;
+	/**
+	 * Approved disposable SSH hosts by `allowedSshTargets` name (GT1-11-11A3).
+	 * A target with no entry does not resolve, and its legs refuse unspawned.
+	 */
+	sshRemotes?: Record<string, SshRemoteDeclaration> | null;
+	/** The local ssh client the production builder must resolve to, pinned by sha256. */
+	sshClient?: { path: string | null; sha256: string | null } | null;
+}
+
+/** One approved disposable SSH host (GT1-11-11A3). */
+export interface SshRemoteDeclaration {
+	host: string;
+	port: number;
+	username: string;
+	/** An owned local identity file under the allowed roots; empty uses the owned boundary home's `.ssh`. */
+	privateKeyPath: string;
+	/** Absolute remote path of the pinned binary, inside the target's owned remote root. */
+	binaryPath: string;
+	/** Extra `ssh -o` options merged over the production defaults (transport-only; see `SSH_PINNED_OPTIONS`). */
+	sshOptions?: Record<string, string>;
 }
 
 export interface SpendBounds {
@@ -438,10 +486,12 @@ export interface DiscoveryLegReceipt {
 	/** Each owned child: argv, exit and stream digests. */
 	spawns: OfflineProbeResult[];
 	spawned: number;
-	/** Requests handed to a running child; each may reach the endpoint. */
+	/** Requests handed to a running child (each may reach the endpoint), plus an SSH leg's host connections. */
 	networkContacts: number;
 	/** Always 0: discovery never sends a prompt. */
 	paidRequests: 0;
+	/** What an SSH leg observed of its remote; null on a local leg. */
+	remote: SshLegObservation | null;
 }
 
 /** One credential-free offline probe of the pinned binary; output is kept as digests only. */
@@ -473,9 +523,14 @@ export interface OfflineLegReceipt {
 	};
 	probes: OfflineProbeResult[];
 	spawned: number;
-	/** Always 0: the leg runs under deny-all egress with no endpoint and no credential. */
-	networkContacts: 0;
+	/**
+	 * 0 on a local leg (deny-all egress, no endpoint, no credential); an SSH leg
+	 * counts its connections to the approved host, never a provider endpoint.
+	 */
+	networkContacts: number;
 	cleanup: { ownedProcesses: number; stopped: number };
+	/** What an SSH leg observed of its remote; null on a local leg. */
+	remote: SshLegObservation | null;
 }
 
 export interface BudgetLedger {
@@ -717,6 +772,20 @@ export function validateConfig(config: QualificationConfig, workspace: string): 
 		!isPathAtOrUnderRoot(path.resolve(workspace, customPath).replace(/\\/g, '/'), runsRoot)
 	)
 		add('binaryResolution.customPath', 'custom-path-outside-runs');
+	for (const [target, remote] of Object.entries(config.sshRemotes ?? {})) {
+		if (!config.allowedSshTargets.includes(target))
+			add(`sshRemotes.${target}`, 'ssh-remote-unapproved');
+		if (
+			remote.privateKeyPath?.trim() &&
+			!isPathAtOrUnderRoot(
+				path.resolve(workspace, remote.privateKeyPath).replace(/\\/g, '/'),
+				runsRoot
+			)
+		)
+			add(`sshRemotes.${target}.privateKeyPath`, 'ssh-identity-outside-runs');
+	}
+	if (config.sshClient?.sha256 && !/^[0-9a-f]{64}$/.test(config.sshClient.sha256))
+		add('sshClient.sha256', 'not-a-sha256');
 	return problems;
 }
 
@@ -2134,38 +2203,58 @@ export function releaseReservation(
 	return r;
 }
 
-/** No playbook task owns an SSH paid executor yet; a later IMPLEMENT takes this owner over. */
-export const SSH_PAID_EXECUTOR_OWNER = 'unassigned-ssh-paid-executor';
+/** The SSH legs of every executor are GT1-11-11A3's (re-owned from `unassigned-ssh-paid-executor`). */
+export const SSH_EXECUTOR_OWNER = 'GT1-11-11A3';
+/** Kept for callers of the earlier name; the SSH paid leg is now GT1-11-11A3's. */
+export const SSH_PAID_EXECUTOR_OWNER = SSH_EXECUTOR_OWNER;
+/**
+ * No playbook task owns the two-account identity verdict over remote homes:
+ * `colliding-native-ids` inspects local homes only, so an SSH E01 case stays
+ * not-run rather than pass with the verdict unevaluated.
+ */
+export const SSH_IDENTITY_INSPECTION_OWNER = 'unassigned-ssh-identity-inspection';
+/** No playbook task owns resolving the binary on a remote host through the production detector. */
+export const SSH_BINARY_RESOLUTION_OWNER = 'unassigned-ssh-binary-resolution';
 
 /**
- * The legs of a case no bound executor covers, each with its owner. The paid
- * executor covers local Grok-only paid legs over either route; nothing else.
+ * The legs of a case no bound executor covers, each with its owner. The
+ * discovery and paid executors cover local and (with `sshExecutor`) SSH
+ * Grok-only legs over either route, except the SSH two-account identity verdict.
  */
 export function paidExecutorGaps(
 	c: QualificationCase,
 	capabilities: HarnessCapabilities
 ): Array<{ detail: string; owner: string }> {
 	const gaps: Array<{ detail: string; owner: string }> = [];
+	const sshOff = c.target === 'ssh' && !capabilities.sshExecutor;
 	if (c.classes.includes('discovery')) {
 		if (!capabilities.discoveryExecutor)
 			gaps.push({
 				detail: 'no discovery executor is bound to an admitted tuple',
 				owner: 'GT1-11-11A1',
 			});
-		else if (c.target !== 'local')
+		else if (sshOff)
 			gaps.push({
-				detail: 'the discovery executor launches local legs only',
-				owner: 'GT1-11-11A3',
+				detail: 'the SSH leg executor is off; discovery launches local legs only',
+				owner: SSH_EXECUTOR_OWNER,
 			});
 	}
 	if (c.classes.includes('paid')) {
 		if (!capabilities.caseExecutor)
 			gaps.push({ detail: 'no paid executor is bound to an admitted tuple', owner: 'GT1-11-11P1' });
 		else {
-			if (c.target !== 'local')
+			if (sshOff)
 				gaps.push({
-					detail: 'the paid executor launches local legs only',
-					owner: SSH_PAID_EXECUTOR_OWNER,
+					detail: 'the SSH leg executor is off; the paid executor launches local legs only',
+					owner: SSH_EXECUTOR_OWNER,
+				});
+			else if (
+				c.target === 'ssh' &&
+				PAID_FIXTURES[c.family]?.assertions.includes('colliding-native-ids')
+			)
+				gaps.push({
+					detail: 'the colliding-native-ids verdict inspects local homes only',
+					owner: SSH_IDENTITY_INSPECTION_OWNER,
 				});
 			if (c.providers.some((p) => p !== 'grok'))
 				gaps.push({ detail: 'the paid executor runs Grok legs only', owner: 'GT1-11-13' });
@@ -2293,8 +2382,8 @@ export function admitCase(
 			});
 	}
 	// The offline-inspection leg has its own executor (runOfflineLeg). The discovery
-	// (GT1-11-11A1) and paid (GT1-11-11P1) executors cover local Grok-only legs; an
-	// SSH leg has no executor yet, and a cross-provider leg is GT1-11-13's.
+	// (GT1-11-11A1) and paid (GT1-11-11P1) executors cover Grok-only legs, an SSH
+	// one through the SSH leg (GT1-11-11A3); a cross-provider leg is GT1-11-13's.
 	const gaps = paidExecutorGaps(c, capabilities);
 	if (gaps.length)
 		add({
@@ -2304,6 +2393,529 @@ export function admitCase(
 			owner: gaps.map((g) => g.owner).join('/'),
 		});
 	return reasons;
+}
+
+// ---------------------------------------------------------------------------
+// SSH legs (GT1-11-11A3)
+// ---------------------------------------------------------------------------
+
+/** One launch exactly as spawned: the command, its argv, the local cwd and the whole env. */
+export interface SpawnSpec {
+	command: string;
+	args: string[];
+	cwd: string;
+	env: Record<string, string>;
+}
+
+/** A local leg spawns the pinned file itself under the planned environment. */
+function localSpawn(
+	file: string,
+	argv: readonly string[],
+	env: Record<string, string>,
+	cwd: string
+): SpawnSpec {
+	return { command: file, args: [...argv], cwd, env };
+}
+
+type SpawnRefusal = { refused: string; detail: string };
+/** Builds the spawn of one Grok argv for a leg; an SSH leg's goes through the production wrap. */
+type LegLauncher = (argv: readonly string[]) => Promise<SpawnSpec | SpawnRefusal>;
+
+const sshReason = (id: string, detail: string, kind: AdmissionReason['kind']): AdmissionReason => ({
+	id,
+	kind,
+	detail,
+	owner: SSH_EXECUTOR_OWNER,
+});
+
+/**
+ * ssh options every SSH leg pins over the production defaults: the disposable
+ * host's key must already be in the owned home's known_hosts (no accept-new),
+ * no agent is consulted or forwarded and no shared master connection is
+ * reused. A declaration may set none of these.
+ */
+export const SSH_PINNED_OPTIONS: Readonly<Record<string, string>> = Object.freeze({
+	StrictHostKeyChecking: 'yes',
+	ForwardAgent: 'no',
+	IdentityAgent: 'none',
+	ControlMaster: 'no',
+	ControlPath: 'none',
+	PermitLocalCommand: 'no',
+});
+/** Options that would run a local command or read host keys from outside the owned home. */
+const SSH_REFUSED_OPTIONS = new Set(
+	[
+		'ProxyCommand',
+		'LocalCommand',
+		'KnownHostsCommand',
+		'UserKnownHostsFile',
+		'GlobalKnownHostsFile',
+		...Object.keys(SSH_PINNED_OPTIONS),
+	].map((k) => k.toLowerCase())
+);
+
+/** One bounded check of the remote over the leg's own connection. */
+export interface SshVerification {
+	/** `before` the first Grok child, or `after` the leg. */
+	phase: 'before' | 'after';
+	exitCode: number | null;
+	timedOut: boolean;
+	spawnError: string | null;
+	/** `uname -n` as the remote reported it. */
+	host: string | null;
+	/** sha256 of the remote binary as the remote computed it. */
+	sha256: string | null;
+	/** `readonly`, `writable`, `symlink` or `missing`. */
+	binary: string | null;
+	paths: Array<{ path: string; expect: 'dir' | 'file'; state: string }>;
+	/** `id` or `id:detail`; empty when the remote matched the pin and the owned roots. */
+	problems: string[];
+}
+
+export interface SshLegObservation {
+	/** The approved target name (`allowedSshTargets[0]`). */
+	target: string;
+	/** `user@host:port` the leg connects to; null when no declaration resolved. */
+	destination: string | null;
+	/** The host name the remote itself reported; null until a verification ran. */
+	observedHost: string | null;
+	client: { path: string | null; sha256: string | null };
+	remoteBinary: string | null;
+	verifications: SshVerification[];
+	/** Verification connections opened (owned ssh children, each a network contact to the host). */
+	connections: number;
+}
+
+export interface SshLegPlan {
+	target: string;
+	declaration: SshRemoteDeclaration;
+	remoteRoot: string;
+	sessionSsh: AgentSshRemoteConfig;
+	store: SshRemoteSettingsStore;
+	client: { path: string; real: string; sha256: string };
+	/** The local ssh client's whole env: the owned boundary home, the client's own directory, C locale. */
+	clientEnv: Record<string, string>;
+	/** The local cwd of the ssh client (the owned boundary home, never the operator's). */
+	localCwd: string;
+}
+
+function sshObservationShell(config: QualificationConfig): SshLegObservation {
+	const target = config.allowedSshTargets[0] ?? '';
+	const decl = target ? config.sshRemotes?.[target] : undefined;
+	return {
+		target,
+		destination: decl
+			? `${decl.username ? `${decl.username}@` : ''}${decl.host}:${decl.port}`
+			: null,
+		observedHost: null,
+		client: { path: config.sshClient?.path ?? null, sha256: null },
+		remoteBinary: decl?.binaryPath ?? null,
+		verifications: [],
+		connections: 0,
+	};
+}
+
+/**
+ * Resolve the SSH leg of a case before anything spawns: the approved target
+ * through the production `resolveSshLaunchTarget()` over a store holding only
+ * the declared remote, the remote binary inside the owned remote root, an
+ * owned identity file, transport-only options, the owned boundary home the
+ * client runs under, and the pinned ssh client. Every problem is listed.
+ */
+export function planSshLeg(
+	c: QualificationCase,
+	config: QualificationConfig,
+	ctx: { workspace: string; operatorHome: string },
+	kind: AdmissionReason['kind']
+): { plan: SshLegPlan; reasons: AdmissionReason[] } | { plan: null; reasons: AdmissionReason[] } {
+	const reasons: AdmissionReason[] = [];
+	const add = (id: string, detail: string) => reasons.push(sshReason(id, detail, kind));
+	if (c.target !== 'ssh') add('ssh-leg-not-ssh', c.target);
+	const target = config.allowedSshTargets[0] ?? null;
+	if (!target) add('ssh-target-unapproved', 'allowedSshTargets');
+	const decl = target ? config.sshRemotes?.[target] : undefined;
+	const sessionSsh: AgentSshRemoteConfig = { enabled: true, remoteId: target };
+
+	const options: Record<string, string> = {};
+	if (decl && target) {
+		for (const [key, value] of Object.entries(decl.sshOptions ?? {})) {
+			if (validateSshOption(key, value)) add('ssh-option-invalid', key);
+			else if (SSH_REFUSED_OPTIONS.has(key.trim().toLowerCase())) add('ssh-option-refused', key);
+			else options[key.trim()] = value;
+		}
+		if (typeof decl.host !== 'string' || !decl.host.trim() || /[\s@]|^-/.test(decl.host))
+			add('ssh-host-invalid', target);
+		if (decl.username && /[\s@:]|^-/.test(decl.username)) add('ssh-username-invalid', target);
+		if (!Number.isInteger(decl.port) || decl.port < 1 || decl.port > 65535)
+			add('ssh-port-invalid', target);
+	}
+	const remote: SshRemoteConfig | null =
+		decl && target
+			? {
+					id: target,
+					name: target,
+					host: decl.host,
+					port: decl.port,
+					username: decl.username ?? '',
+					privateKeyPath: decl.privateKeyPath?.trim()
+						? path.resolve(ctx.workspace, decl.privateKeyPath)
+						: '',
+					sshOptions: { ...options, ...SSH_PINNED_OPTIONS },
+					enabled: true,
+					useSshConfig: false,
+				}
+			: null;
+	const store: SshRemoteSettingsStore = { getSshRemotes: () => (remote ? [remote] : []) };
+	if (target) {
+		const resolved = resolveSshLaunchTarget(store, sessionSsh);
+		if (resolved.kind !== 'remote')
+			add(
+				'ssh-remote-unresolved',
+				resolved.kind === 'unresolved' ? resolved.message : sshUnresolvedRemoteMessage(sessionSsh)
+			);
+	}
+
+	// The remote binary is a fixed absolute file inside the owned remote root.
+	const rootDecl = target ? config.isolation?.remoteRoots[target] : undefined;
+	const remoteRoot = rootDecl ? path.posix.normalize(rootDecl.root) : null;
+	if (!remoteRoot || !path.posix.isAbsolute(remoteRoot) || remoteRoot === '/')
+		add('remote-root-absent', target ?? 'none');
+	else if (decl) {
+		const bin = decl.binaryPath ?? '';
+		if (
+			!path.posix.isAbsolute(bin) ||
+			bin.includes('~') ||
+			path.posix.normalize(bin) !== bin ||
+			bin === remoteRoot ||
+			!isPathAtOrUnderRoot(bin, remoteRoot)
+		)
+			add('remote-binary-outside-root', bin || 'binaryPath');
+	}
+	if (rootDecl && (!config.binary.sha256 || rootDecl.binarySha256 !== config.binary.sha256))
+		add('remote-binary-hash-mismatch', target ?? 'none');
+
+	// The client's identity and home are owned paths, never the operator's ~/.ssh.
+	const roots = config.allowedRoots.map((r) => path.resolve(ctx.workspace, r));
+	if (decl?.privateKeyPath?.trim()) {
+		const key = path.resolve(ctx.workspace, decl.privateKeyPath);
+		if (!underAny('local', key, roots)) add('ssh-identity-outside-owned-roots', 'privateKeyPath');
+		else if (!fs.existsSync(key) || !fs.statSync(key).isFile())
+			add('ssh-identity-absent', 'privateKeyPath');
+	}
+	const declaredHome = config.isolation?.boundary?.actualHome;
+	const home = declaredHome ? path.resolve(ctx.workspace, declaredHome) : null;
+	if (
+		!home ||
+		!roots.length ||
+		!underAny('local', home, roots) ||
+		isPathAtOrUnderRoot(normalizeFor('local', ctx.operatorHome), normalizeFor('local', home))
+	)
+		add('ssh-client-home-unowned', 'isolation.boundary.actualHome');
+	else if (!fs.existsSync(home) || !fs.statSync(home).isDirectory())
+		add('ssh-client-home-absent', 'isolation.boundary.actualHome');
+
+	// The pinned local ssh client.
+	let client: SshLegPlan['client'] | null = null;
+	const clientPath = config.sshClient?.path
+		? path.resolve(ctx.workspace, config.sshClient.path)
+		: null;
+	if (!clientPath || !config.sshClient?.sha256) add('ssh-client-unpinned', 'sshClient');
+	else {
+		const seen = inspectExecutable(clientPath);
+		if (!seen.regular) add('ssh-client-unreadable', 'sshClient.path');
+		else if (seen.sha256 !== config.sshClient.sha256)
+			add('ssh-client-hash-mismatch', 'sshClient.sha256');
+		else client = { path: clientPath, real: fs.realpathSync(clientPath), sha256: seen.sha256 };
+	}
+
+	if (reasons.length || !client || !home || !remoteRoot || !decl || !target)
+		return { plan: null, reasons };
+	return {
+		plan: {
+			target,
+			declaration: decl,
+			remoteRoot,
+			sessionSsh,
+			store,
+			client,
+			clientEnv: { HOME: home, PATH: path.dirname(client.real), LC_ALL: 'C' },
+			localCwd: home,
+		},
+		reasons,
+	};
+}
+
+/**
+ * Build the spawn of one remote command through the production
+ * `wrapSpawnWithSsh()`. The wrap degrades to the LOCAL command when the remote
+ * does not resolve; that is refused with `sshUnresolvedRemoteMessage`, never
+ * run. The ssh command it resolved must be the pinned client file (a bare
+ * `ssh` PATH fallback or another install refuses), and only the inline form is
+ * accepted: nothing rides the ssh child's stdin but the Grok protocol itself.
+ */
+export async function buildSshSpawn(
+	plan: SshLegPlan,
+	command: string,
+	argv: readonly string[],
+	remoteEnv: Record<string, string>,
+	remoteCwd: string
+): Promise<SpawnSpec | SpawnRefusal> {
+	const wrapped = await wrapSpawnWithSsh(
+		{
+			command,
+			args: [...argv],
+			cwd: remoteCwd,
+			customEnvVars: { ...remoteEnv },
+			agentBinaryName: command,
+		},
+		plan.sessionSsh,
+		plan.store
+	);
+	if (!wrapped.sshRemoteUsed)
+		return {
+			refused: 'ssh-remote-unresolved',
+			detail: sshUnresolvedRemoteMessage(plan.sessionSsh),
+		};
+	if (wrapped.sshStdinScript !== undefined || wrapped.prompt !== undefined)
+		return { refused: 'ssh-stdin-launch-unsupported', detail: command };
+	let real: string | null = null;
+	try {
+		real = path.isAbsolute(wrapped.command) ? fs.realpathSync(wrapped.command) : null;
+	} catch {
+		real = null;
+	}
+	if (!real || real !== plan.client.real || inspectExecutable(real).sha256 !== plan.client.sha256)
+		return { refused: 'ssh-client-resolution-mismatch', detail: wrapped.command };
+	return {
+		command: plan.client.real,
+		args: [...wrapped.args],
+		cwd: plan.localCwd,
+		env: { ...plan.clientEnv },
+	};
+}
+
+/**
+ * The remote verification: POSIX sh only, no quoting games, prints the host
+ * name, the remote binary's state and sha256, and each owned path's state
+ * (`symlink` is never followed and never counts as a directory).
+ */
+const SSH_VERIFY_SCRIPT = [
+	'b=$1',
+	'shift',
+	'echo "host=$(uname -n)"',
+	'if [ -L "$b" ]; then echo "binary=symlink"',
+	'elif [ ! -f "$b" ]; then echo "binary=missing"',
+	'else',
+	'h=$( { sha256sum "$b" 2>/dev/null || shasum -a 256 "$b" 2>/dev/null; } | { read -r x rest; echo "$x"; } )',
+	'echo "sha256=$h"',
+	'if [ -w "$b" ]; then echo "binary=writable"; else echo "binary=readonly"; fi',
+	'fi',
+	'for e in "$@"; do',
+	'k=${e%%:*}',
+	'p=${e#*:}',
+	'if [ -L "$p" ]; then s=symlink; elif [ -d "$p" ]; then s=dir; elif [ -f "$p" ]; then s=file; else s=missing; fi',
+	'echo "path=$k:$s:$p"',
+	'done',
+].join('\n');
+
+/** Read a verification's stdout against the pin and the owned paths it must report. */
+export function parseSshVerification(
+	stdout: string,
+	expect: { sha256: string | null; paths: Array<{ path: string; expect: 'dir' | 'file' }> }
+): Pick<SshVerification, 'host' | 'sha256' | 'binary' | 'paths' | 'problems'> {
+	let host: string | null = null;
+	let sha256: string | null = null;
+	let binary: string | null = null;
+	const paths: SshVerification['paths'] = [];
+	for (const raw of stdout.split(/\r?\n/)) {
+		const line = raw.trim();
+		if (line.startsWith('host=')) host = line.slice(5).trim() || null;
+		else if (line.startsWith('sha256=')) {
+			const h = line.slice(7).trim();
+			sha256 = /^[0-9a-f]{64}$/.test(h) ? h : null;
+		} else if (line.startsWith('binary=')) binary = line.slice(7).trim() || null;
+		else if (line.startsWith('path=')) {
+			const [k, state, ...rest] = line.slice(5).split(':');
+			paths.push({ path: rest.join(':'), expect: k === 'd' ? 'dir' : 'file', state: state ?? '' });
+		}
+	}
+	const problems: string[] = [];
+	if (!host) problems.push('remote-host-unreported');
+	if (binary !== 'readonly') problems.push(`remote-binary-${binary ?? 'unreported'}`);
+	else if (!expect.sha256 || sha256 !== expect.sha256) problems.push('remote-binary-hash-mismatch');
+	for (const want of expect.paths) {
+		const got = paths.find((p) => p.path === want.path && p.expect === want.expect);
+		if (!got) problems.push(`remote-path-unreported:${want.path}`);
+		else if (got.state !== want.expect) problems.push(`remote-path-${got.state}:${want.path}`);
+	}
+	return { host, sha256, binary, paths, problems };
+}
+
+/** The owned remote paths a launch relies on: the root, home, account home and temp dir, and the auth file. */
+function sshLaunchPaths(
+	plan: SshLegPlan,
+	launch: PlannedLaunch
+): Array<{ path: string; expect: 'dir' | 'file' }> {
+	const dirs = [
+		plan.remoteRoot,
+		launch.expectation.home,
+		launch.expectation.accountRoot,
+		launch.env.TMPDIR,
+	].filter((p): p is string => Boolean(p));
+	const out: Array<{ path: string; expect: 'dir' | 'file' }> = [
+		...new Set(dirs.map((d) => path.posix.normalize(d))),
+	].map((p) => ({ path: p, expect: 'dir' as const }));
+	if (launch.credentialMode === 'file' && launch.expectation.authPath)
+		out.push({ path: path.posix.normalize(launch.expectation.authPath), expect: 'file' });
+	return out;
+}
+
+/** Run one verification as an owned ssh child; never throws. */
+async function verifySshRemote(
+	plan: SshLegPlan,
+	paths: Array<{ path: string; expect: 'dir' | 'file' }>,
+	phase: SshVerification['phase'],
+	pinned: string | null,
+	opts: { lifetime: CaseLifetime; timeoutMs: number; graceMs: number }
+): Promise<{ verification: SshVerification; connected: boolean }> {
+	const verification: SshVerification = {
+		phase,
+		exitCode: null,
+		timedOut: false,
+		spawnError: null,
+		host: null,
+		sha256: null,
+		binary: null,
+		paths: [],
+		problems: [],
+	};
+	const argv = [
+		'-c',
+		SSH_VERIFY_SCRIPT,
+		'grok-qualification-verify',
+		plan.declaration.binaryPath,
+		...paths.map((p) => `${p.expect === 'dir' ? 'd' : 'f'}:${p.path}`),
+	];
+	const spec = await buildSshSpawn(
+		plan,
+		'/bin/sh',
+		argv,
+		{ PATH: '/usr/bin:/bin', LC_ALL: 'C' },
+		plan.remoteRoot
+	);
+	if ('refused' in spec) {
+		verification.problems.push(`${spec.refused}:${spec.detail}`);
+		return { verification, connected: false };
+	}
+	const { result, stdoutHead } = await runOfflineProbe(
+		`ssh-verify-${phase}`,
+		spec,
+		spec.args,
+		opts.timeoutMs,
+		opts.graceMs,
+		opts.lifetime
+	);
+	verification.exitCode = result.exitCode;
+	verification.timedOut = result.timedOut;
+	verification.spawnError = result.spawnError;
+	const connected = !(result.spawnError !== null && NEVER_RAN_SPAWN_ERRORS.has(result.spawnError));
+	if (result.spawnError) verification.problems.push(`ssh-spawn-failed:${result.spawnError}`);
+	else if (result.timedOut) verification.problems.push('ssh-verification-timeout');
+	else if (result.stdout.truncated) verification.problems.push('ssh-verification-unbounded');
+	else if (result.exitCode === 255) verification.problems.push('ssh-connection-failed');
+	else if (result.exitCode !== 0)
+		verification.problems.push(`ssh-verification-failed:exit ${result.exitCode}`);
+	else Object.assign(verification, parseSshVerification(stdoutHead, { sha256: pinned, paths }));
+	return { verification, connected };
+}
+
+/** A verification problem as a reason (`id:detail` splits at the first colon). */
+function sshProblemReason(problem: string, kind: AdmissionReason['kind']): AdmissionReason {
+	const i = problem.indexOf(':');
+	return sshReason(i < 0 ? problem : problem.slice(0, i), i < 0 ? '' : problem.slice(i + 1), kind);
+}
+
+/**
+ * Prepare the SSH leg of one planned launch: plan it, refuse a secret-name
+ * credential (its value would ride the ssh command line; an SSH leg takes a
+ * file reference under the owned remote root), verify the remote before any
+ * Grok child, and hand back the launcher plus the after-leg re-verification.
+ */
+async function prepareSshLeg(
+	c: QualificationCase,
+	config: QualificationConfig,
+	launch: PlannedLaunch,
+	ctx: {
+		workspace: string;
+		operatorHome: string;
+		lifetime: CaseLifetime;
+		graceMs: number;
+		timeoutMs: number;
+	},
+	kind: AdmissionReason['kind']
+): Promise<{
+	observation: SshLegObservation;
+	reasons: AdmissionReason[];
+	launcher: LegLauncher | null;
+	reverify: () => Promise<SshVerification | null>;
+}> {
+	const observation = sshObservationShell(config);
+	const none = async () => null;
+	const planned = planSshLeg(c, config, ctx, kind);
+	const reasons = [...planned.reasons];
+	if (launch.credentialMode === 'secret-name')
+		reasons.push(
+			sshReason(
+				'ssh-secret-credential-unsupported',
+				'a secret value would ride the ssh command line; use a file reference under the owned remote root',
+				kind
+			)
+		);
+	if (launch.target !== 'ssh') reasons.push(sshReason('ssh-launch-not-ssh', launch.target, kind));
+	// Never a silent refusal: a leg with no plan always names why.
+	if (!planned.plan && !reasons.length)
+		reasons.push(sshReason('ssh-leg-unplannable', c.caseId, kind));
+	if (!planned.plan || reasons.length)
+		return { observation, reasons, launcher: null, reverify: none };
+	const plan = planned.plan;
+	observation.client = { path: plan.client.path, sha256: plan.client.sha256 };
+	const paths = sshLaunchPaths(plan, launch);
+	const timeoutMs = Math.min(ctx.timeoutMs, HARNESS_CEILINGS.offlineProbeSeconds * 1000);
+	const verify = async (phase: SshVerification['phase']) => {
+		const { verification, connected } = await verifySshRemote(
+			plan,
+			paths,
+			phase,
+			config.binary.sha256,
+			{ lifetime: ctx.lifetime, timeoutMs, graceMs: ctx.graceMs }
+		);
+		if (connected) observation.connections++;
+		observation.verifications.push(verification);
+		if (verification.host) observation.observedHost ??= verification.host;
+		return verification;
+	};
+	const before = await verify('before');
+	if (before.problems.length)
+		return {
+			observation,
+			reasons: before.problems.map((p) => sshProblemReason(p, kind)),
+			launcher: null,
+			reverify: none,
+		};
+	const remoteCwd = launch.expectation.home;
+	return {
+		observation,
+		reasons: [],
+		launcher: (argv) =>
+			buildSshSpawn(plan, plan.declaration.binaryPath, argv, launch.env, remoteCwd),
+		reverify: async () => {
+			const after = await verify('after');
+			// The remote that answered after the leg must be the one that answered before it.
+			if (after.host && before.host && after.host !== before.host)
+				after.problems.push(`remote-host-changed:${after.host}`);
+			return after;
+		},
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -2357,13 +2969,15 @@ export function admitOfflineLeg(
 		add({ id: 'allowed-roots-absent', kind: 'admission-input', detail: 'allowedRoots' });
 	if (!config.isolationReceipt)
 		add({ id: 'host-isolation-unqualified', kind: 'admission-input', detail: 'isolationReceipt' });
-	if (c.target !== 'local')
+	if (c.target === 'ssh' && !capabilities.sshExecutor)
 		add({
 			id: 'offline-executor-local-only',
 			kind: 'harness-capability',
-			detail: 'the offline executor launches local binaries only',
-			owner: 'GT1-11-11A',
+			detail: 'the SSH leg executor is off; the offline executor launches local binaries only',
+			owner: SSH_EXECUTOR_OWNER,
 		});
+	if (c.target === 'ssh' && !config.allowedSshTargets.length)
+		add({ id: 'ssh-target-unapproved', kind: 'admission-input', detail: 'allowedSshTargets' });
 	if (!capabilities.isolationPreflight)
 		add({
 			id: 'isolation-preflight-unimplemented',
@@ -2422,10 +3036,10 @@ type CaseLifetime = ReturnType<typeof createCaseLifetime>;
 /** Run one offline probe as an owned child with a wall-clock bound; never throws. */
 function runOfflineProbe(
 	probe: string,
-	file: string,
+	/** What to spawn: the pinned file itself (`localSpawn`), or the ssh client the SSH wrap built. */
+	spec: SpawnSpec,
+	/** The Grok argv the receipt records (the spec's args on a local leg). */
 	argv: readonly string[],
-	env: Record<string, string>,
-	cwd: string,
 	timeoutMs: number,
 	graceMs: number,
 	lifetime: CaseLifetime,
@@ -2462,10 +3076,10 @@ function runOfflineProbe(
 		};
 		let child: ChildProcess;
 		try {
-			// Absolute pinned file, no shell, only the planned environment (never process.env).
-			child = spawn(file, [...argv], {
-				cwd,
-				env,
+			// Absolute pinned file (or pinned ssh client), no shell, only the planned environment (never process.env).
+			child = spawn(spec.command, [...spec.args], {
+				cwd: spec.cwd,
+				env: spec.env,
 				shell: false,
 				stdio: ['ignore', 'pipe', 'pipe'],
 				windowsHide: true,
@@ -2502,14 +3116,17 @@ export interface OfflineExecutionContext {
 	/** Per-probe wall-clock bound, already clamped to the ceiling. */
 	timeoutMs: number;
 	lifetime: CaseLifetime;
+	/** What the harness can do; an SSH leg needs `sshExecutor` (defaults to `HARNESS_CAPABILITIES`). */
+	capabilities?: HarnessCapabilities;
 }
 
 /**
- * The bounded offline executor. Re-checks what it relies on (pin, local
- * target, disabled update, a credential-free validated launch), re-hashes the
- * binary and refuses before any spawn on a mismatch, then runs only the
- * `OFFLINE_PROBES` argv, one owned child at a time. Callers hand it only an
- * admitted leg; a refusal here still never spawns.
+ * The bounded offline executor. Re-checks what it relies on (pin, disabled
+ * update, a credential-free validated launch), re-hashes the binary (locally,
+ * or on an SSH leg through the remote verification) and refuses before any
+ * spawn on a mismatch, then runs only the `OFFLINE_PROBES` argv, one owned
+ * child at a time. Callers hand it only an admitted leg; a refusal here still
+ * never spawns a Grok child.
  */
 export async function executeOfflineLeg(
 	c: QualificationCase,
@@ -2520,6 +3137,7 @@ export async function executeOfflineLeg(
 	probes: OfflineProbeResult[];
 	binary: OfflineLegReceipt['binary'];
 	spawned: number;
+	remote: SshLegObservation | null;
 }> {
 	const reasons: AdmissionReason[] = [];
 	const probes: OfflineProbeResult[] = [];
@@ -2530,22 +3148,29 @@ export async function executeOfflineLeg(
 		versionPinned: config.binary.version,
 		versionObserved: null,
 	};
+	let remote: SshLegObservation | null = null;
 	const refuse = (id: string, detail: string) => {
 		reasons.push(offlineReason(id, detail));
-		return { reasons, probes, binary, spawned: 0 };
+		return { reasons, probes, binary, spawned: 0, remote };
 	};
 	if (!config.binary.path || !config.binary.sha256 || !config.binary.version)
 		return refuse('binary-unpinned', 'binary.path/sha256/version');
-	if (c.target !== 'local') return refuse('offline-executor-local-only', c.target);
+	const ssh = c.target === 'ssh';
+	if (ssh && !(ctx.capabilities ?? HARNESS_CAPABILITIES).sshExecutor) {
+		reasons.push(sshReason('offline-executor-local-only', c.target, 'offline-execution'));
+		return { reasons, probes, binary, spawned: 0, remote };
+	}
 	if (!config.autoUpdateDisabled) return refuse('auto-update-not-disabled', 'autoUpdateDisabled');
 
 	const file = path.resolve(ctx.workspace, config.binary.path);
-	const atSpawn = inspectExecutable(file);
-	binary.sha256AtSpawn = atSpawn.sha256;
-	if (!atSpawn.regular) return refuse('binary-unreadable', 'binary.path');
-	if (atSpawn.sha256 !== config.binary.sha256)
-		return refuse('binary-hash-mismatch-at-spawn', 'binary.sha256');
-	if (!atSpawn.readOnly) return refuse('binary-mutable', 'binary.path');
+	if (!ssh) {
+		const atSpawn = inspectExecutable(file);
+		binary.sha256AtSpawn = atSpawn.sha256;
+		if (!atSpawn.regular) return refuse('binary-unreadable', 'binary.path');
+		if (atSpawn.sha256 !== config.binary.sha256)
+			return refuse('binary-hash-mismatch-at-spawn', 'binary.sha256');
+		if (!atSpawn.readOnly) return refuse('binary-mutable', 'binary.path');
+	}
 
 	const plan = planIsolatedLaunch(
 		offlineLegCase(c),
@@ -2559,24 +3184,49 @@ export async function executeOfflineLeg(
 	const report = validateLaunchEnvironment(plan.env, plan.expectation);
 	if (report.reasons.length) {
 		reasons.push(...report.reasons);
-		return { reasons, probes, binary, spawned: 0 };
+		return { reasons, probes, binary, spawned: 0, remote };
 	}
-	const cwd = plan.expectation.home;
-	if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
-		return refuse('offline-home-absent', 'isolation.boundary.actualHome');
-	fs.mkdirSync(plan.env.TMPDIR, { recursive: true, mode: 0o700 });
-
-	const real = fs.realpathSync(file);
 	const graceMs = Math.max(1, Math.min(config.limits.cleanupSeconds, 5)) * 1000;
+
+	let launcher: LegLauncher;
+	let reverify: (() => Promise<SshVerification | null>) | null = null;
+	if (!ssh) {
+		const cwd = plan.expectation.home;
+		if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
+			return refuse('offline-home-absent', 'isolation.boundary.actualHome');
+		fs.mkdirSync(plan.env.TMPDIR, { recursive: true, mode: 0o700 });
+		const real = fs.realpathSync(file);
+		launcher = async (argv) => localSpawn(real, argv, plan.env, cwd);
+	} else {
+		const prepared = await prepareSshLeg(
+			c,
+			config,
+			plan,
+			{ ...ctx, graceMs, timeoutMs: ctx.timeoutMs },
+			'offline-execution'
+		);
+		remote = prepared.observation;
+		binary.sha256AtSpawn = remote.verifications[0]?.sha256 ?? null;
+		if (!prepared.launcher || prepared.reasons.length) {
+			reasons.push(...prepared.reasons);
+			return { reasons, probes, binary, spawned: 0, remote };
+		}
+		launcher = prepared.launcher;
+		reverify = prepared.reverify;
+	}
+
 	let spawned = 0;
 	let versionHead: string | null = null;
 	for (const [name, argv] of Object.entries(OFFLINE_PROBES)) {
+		const spec = await launcher(argv);
+		if ('refused' in spec) {
+			reasons.push(sshReason(spec.refused, spec.detail, 'offline-execution'));
+			break;
+		}
 		const { result, stdoutHead } = await runOfflineProbe(
 			name,
-			real,
+			spec,
 			argv,
-			plan.env,
-			cwd,
 			ctx.timeoutMs,
 			graceMs,
 			ctx.lifetime
@@ -2589,13 +3239,23 @@ export async function executeOfflineLeg(
 		else if (result.stdout.truncated || result.stderr.truncated)
 			reasons.push(offlineReason('probe-output-unbounded', name));
 		else if (result.exitCode !== 0) reasons.push(offlineReason('probe-exit-nonzero', name));
-		// The binary must stay byte-identical across every probe.
-		binary.sha256After = inspectExecutable(file).sha256;
-		if (binary.sha256After !== config.binary.sha256) {
-			reasons.push(offlineReason('binary-changed-during-probe', name));
-			break;
+		// The local binary must stay byte-identical across every probe.
+		if (!ssh) {
+			binary.sha256After = inspectExecutable(file).sha256;
+			if (binary.sha256After !== config.binary.sha256) {
+				reasons.push(offlineReason('binary-changed-during-probe', name));
+				break;
+			}
 		}
 		if (reasons.length) break;
+	}
+	// The remote binary and roots, re-verified once after the probes over the same target.
+	if (reverify && spawned > 0) {
+		const after = await reverify();
+		binary.sha256After = after?.sha256 ?? null;
+		if (after) reasons.push(...after.problems.map((p) => sshProblemReason(p, 'offline-execution')));
+		if (binary.sha256After !== config.binary.sha256 && !reasons.length)
+			reasons.push(offlineReason('binary-changed-during-probe', 'remote'));
 	}
 	if (versionHead !== null) {
 		binary.versionObserved = parseProbeVersion(versionHead);
@@ -2606,7 +3266,7 @@ export async function executeOfflineLeg(
 				reasons.push(offlineReason('binary-version-mismatch', 'binary.version'));
 		}
 	}
-	return { reasons, probes, binary, spawned };
+	return { reasons, probes, binary, spawned, remote };
 }
 
 /** Admit, preflight and (only when nothing refuses) execute the offline leg of one case. */
@@ -2639,15 +3299,18 @@ export async function runOfflineLeg(
 		spawned: 0,
 		networkContacts: 0,
 		cleanup: { ownedProcesses: 0, stopped: 0 },
+		remote: null,
 	};
 	if (reasons.length) return receipt;
 	const lifetime = createCaseLifetime(config.limits.cleanupSeconds);
 	try {
-		const run = await executeOfflineLeg(leg, config, { ...ctx, lifetime });
+		const run = await executeOfflineLeg(leg, config, { ...ctx, lifetime, capabilities });
 		receipt.reasons = run.reasons;
 		receipt.probes = run.probes;
 		receipt.binary = run.binary;
 		receipt.spawned = run.spawned;
+		receipt.remote = run.remote;
+		receipt.networkContacts = run.remote?.connections ?? 0;
 		receipt.status = run.spawned === 0 ? 'not-run' : run.reasons.length ? 'failed' : 'passed';
 	} finally {
 		receipt.cleanup = await lifetime.cleanup();
@@ -2723,6 +3386,15 @@ export async function runBinaryResolutionLeg(
 			...preflightCase(leg, config, { workspace: ctx.workspace, operatorHome: ctx.operatorHome })
 				.reasons
 		);
+	// The leg resolves LOCAL files through the production rule; a remote resolution has no owner yet.
+	if (c.target === 'ssh')
+		reasons.push({
+			id: 'binary-resolution-local-only',
+			kind: 'offline-execution',
+			detail:
+				'the binary-resolution leg reads local files only; an SSH leg is not resolved remotely',
+			owner: SSH_BINARY_RESOLUTION_OWNER,
+		});
 	const customPath = config.binaryResolution?.customPath ?? null;
 	if (!customPath)
 		reasons.push(resolutionReason('binary-resolution-undeclared', 'binaryResolution.customPath'));
@@ -3004,6 +3676,7 @@ function discoveryLegShell(
 		spawned: 0,
 		networkContacts: 0,
 		paidRequests: 0,
+		remote: null,
 	};
 }
 
@@ -3021,11 +3694,13 @@ async function executeDiscoveryLeg(
 	operations: string[]
 ): Promise<DiscoveryLegReceipt> {
 	const receipt = discoveryLegShell(c, config, account);
-	const refuse = (id: string, detail: string) => {
-		receipt.reasons.push(discoveryReason(id, detail));
+	const refuse = (id: string, detail: string, owner?: string) => {
+		receipt.reasons.push(discoveryReason(id, detail, owner));
 		return receipt;
 	};
-	if (c.target !== 'local') return refuse('discovery-executor-local-only', c.target);
+	const ssh = c.target === 'ssh';
+	if (ssh && !ctx.capabilities.sshExecutor)
+		return refuse('discovery-executor-local-only', c.target, SSH_EXECUTOR_OWNER);
 
 	// The planned isolated launch with the selected account's credential reference only.
 	const launch = planIsolatedLaunch(
@@ -3038,7 +3713,10 @@ async function executeDiscoveryLeg(
 	);
 	if (!launch || launch.credentialMode === 'none')
 		return refuse('discovery-launch-unplannable', account);
-	const credential = resolveLaunchCredential(launch, config, account, ctx.resolveSecret);
+	// An SSH leg's auth file lives under the owned remote root; the remote verification checks it.
+	const credential = ssh
+		? { env: { ...launch.env } }
+		: resolveLaunchCredential(launch, config, account, ctx.resolveSecret);
 	if ('refused' in credential) return refuse(credential.refused, credential.detail);
 	const env = credential.env;
 	const report = validateLaunchEnvironment(env, launch.expectation);
@@ -3048,34 +3726,66 @@ async function executeDiscoveryLeg(
 	}
 	receipt.launch = { credentialMode: launch.credentialMode, keys: report.keys };
 	const cwd = launch.expectation.home;
-	if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
+	if (!ssh && (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory()))
 		return refuse('discovery-home-absent', 'isolation.boundary.actualHome');
 
-	// The immutable pinned binary, re-hashed immediately before the spawn.
 	const file = path.resolve(ctx.workspace, config.binary.path ?? '');
-	const atSpawn = inspectExecutable(file);
-	receipt.binary.sha256AtSpawn = atSpawn.sha256;
-	if (!config.binary.path || !atSpawn.regular) return refuse('binary-unreadable', 'binary.path');
-	if (atSpawn.sha256 !== config.binary.sha256)
-		return refuse('binary-hash-mismatch-at-spawn', 'binary.sha256');
-	if (!atSpawn.readOnly) return refuse('binary-mutable', 'binary.path');
-	fs.mkdirSync(env.TMPDIR, { recursive: true, mode: 0o700 });
-
-	const real = fs.realpathSync(file);
 	const graceMs = Math.max(1, Math.min(config.limits.cleanupSeconds, 5)) * 1000;
 	const ceilingMs = HARNESS_CEILINGS.discoverySeconds * 1000;
 	const legMs = positiveFinite(ctx.timeoutMs) ? Math.min(ctx.timeoutMs, ceilingMs) : ceilingMs;
+	let launcher: LegLauncher;
+	let reverify: (() => Promise<SshVerification | null>) | null = null;
+	if (!ssh) {
+		// The immutable pinned binary, re-hashed immediately before the spawn.
+		const atSpawn = inspectExecutable(file);
+		receipt.binary.sha256AtSpawn = atSpawn.sha256;
+		if (!config.binary.path || !atSpawn.regular) return refuse('binary-unreadable', 'binary.path');
+		if (atSpawn.sha256 !== config.binary.sha256)
+			return refuse('binary-hash-mismatch-at-spawn', 'binary.sha256');
+		if (!atSpawn.readOnly) return refuse('binary-mutable', 'binary.path');
+		fs.mkdirSync(env.TMPDIR, { recursive: true, mode: 0o700 });
+		const real = fs.realpathSync(file);
+		launcher = async (argv) => localSpawn(real, argv, env, cwd);
+	} else {
+		// The remote binary and owned remote roots, verified over the leg's own target before any spawn.
+		const prepared = await prepareSshLeg(
+			c,
+			config,
+			launch,
+			{
+				workspace: ctx.workspace,
+				operatorHome: ctx.operatorHome,
+				lifetime: ctx.lifetime,
+				graceMs,
+				timeoutMs: legMs,
+			},
+			'discovery-execution'
+		);
+		receipt.remote = prepared.observation;
+		receipt.host = prepared.observation.observedHost ?? receipt.host;
+		receipt.networkContacts += prepared.observation.connections;
+		receipt.binary.sha256AtSpawn = prepared.observation.verifications[0]?.sha256 ?? null;
+		if (!prepared.launcher || prepared.reasons.length) {
+			receipt.reasons.push(...prepared.reasons);
+			return receipt;
+		}
+		launcher = prepared.launcher;
+		reverify = prepared.reverify;
+	}
 	const evidence: string[] = [];
 	let credentialExercised = false;
 
 	if (c.route === 'native-headless') {
 		const started = Date.now();
+		const spec = await launcher(NATIVE_MODEL_CATALOG_ARGV);
+		if ('refused' in spec) {
+			receipt.reasons.push(sshReason(spec.refused, spec.detail, 'discovery-execution'));
+			return receipt;
+		}
 		const { result, stdoutHead, stderrHead } = await runOfflineProbe(
 			'native-model-catalog',
-			real,
+			spec,
 			NATIVE_MODEL_CATALOG_ARGV,
-			env,
-			cwd,
 			legMs,
 			graceMs,
 			ctx.lifetime
@@ -3125,9 +3835,13 @@ async function executeDiscoveryLeg(
 			durationMs: Date.now() - started,
 		});
 	} else {
+		const spec = await launcher(GROK_ACP_ARGS);
+		if ('refused' in spec) {
+			receipt.reasons.push(sshReason(spec.refused, spec.detail, 'discovery-execution'));
+			return receipt;
+		}
 		const run = await runAcpDiscovery({
-			file: real,
-			env,
+			spec,
 			cwd,
 			operations,
 			graceMs,
@@ -3145,7 +3859,17 @@ async function executeDiscoveryLeg(
 		credentialExercised = run.credentialExercised;
 	}
 
-	receipt.binary.sha256After = inspectExecutable(file).sha256;
+	if (!reverify) receipt.binary.sha256After = inspectExecutable(file).sha256;
+	else {
+		const opened = receipt.remote?.connections ?? 0;
+		const after = await reverify();
+		receipt.networkContacts += (receipt.remote?.connections ?? 0) - opened;
+		receipt.binary.sha256After = after?.sha256 ?? null;
+		if (after)
+			receipt.reasons.push(
+				...after.problems.map((p) => sshProblemReason(p, 'discovery-execution'))
+			);
+	}
 	if (receipt.binary.sha256After !== config.binary.sha256)
 		receipt.reasons.push(discoveryReason('binary-changed-during-leg', 'binary.path'));
 	receipt.auth = classifyDiscoveryAuth({
@@ -3171,8 +3895,9 @@ async function executeDiscoveryLeg(
  * written; `session/prompt` is never sent. The leg deadline stops the child.
  */
 async function runAcpDiscovery(args: {
-	file: string;
-	env: Record<string, string>;
+	/** The `agent stdio` launch: the pinned file, or the ssh client the SSH wrap built. */
+	spec: SpawnSpec;
+	/** The cwd the agent sees (the remote home on an SSH leg). */
 	cwd: string;
 	operations: string[];
 	graceMs: number;
@@ -3201,9 +3926,9 @@ async function runAcpDiscovery(args: {
 	const err = streamDigest();
 	let child: ChildProcess;
 	try {
-		child = spawn(args.file, [...GROK_ACP_ARGS], {
-			cwd: args.cwd,
-			env: args.env,
+		child = spawn(args.spec.command, [...args.spec.args], {
+			cwd: args.spec.cwd,
+			env: args.spec.env,
 			shell: false,
 			stdio: ['pipe', 'pipe', 'pipe'],
 			windowsHide: true,
@@ -3509,6 +4234,8 @@ export interface PaidLegReceipt {
 	spawned: number;
 	/** Turns handed to a running child; each is at least one provider request. */
 	paidRequests: number;
+	/** What an SSH leg observed of its remote (its connections are network contacts); null on a local leg. */
+	remote: SshLegObservation | null;
 }
 
 export interface PaidExecutionContext {
@@ -3834,11 +4561,15 @@ async function executePaidLeg(
 		settlement: null,
 		spawned: 0,
 		paidRequests: 0,
+		remote: null,
 	};
 	const refuse = (id: string, detail: string, owner?: string) => {
 		receipt.reasons.push(paidReason(id, detail, owner));
 		return receipt;
 	};
+	const ssh = c.target === 'ssh';
+	if (ssh && !ctx.capabilities.sshExecutor)
+		return refuse('paid-executor-local-only', c.target, SSH_EXECUTOR_OWNER);
 	const legTurns = fixtureTurnsFor(fixture, account);
 	const effortCase = fixture.assertions.includes('effort-and-gateway');
 	const effort = effortCase ? (config.selection?.effort?.trim() ?? '') || null : null;
@@ -3853,14 +4584,17 @@ async function executePaidLeg(
 	// An effort case with nothing selected could only pass on the model default: refuse it unsent.
 	if (effortCase && !effort) return refuse('effort-unselected', 'selection.effort', 'GT1-11-11A2');
 
-	// The immutable pinned binary, re-hashed before anything is reserved or spawned.
+	// The immutable pinned binary, re-hashed before anything is reserved or spawned
+	// (an SSH leg's remote binary is verified over its target below, before the reservation).
 	const file = path.resolve(ctx.workspace, config.binary.path ?? '');
-	const atSpawn = inspectExecutable(file);
-	receipt.binary.sha256AtSpawn = atSpawn.sha256;
-	if (!config.binary.path || !atSpawn.regular) return refuse('binary-unreadable', 'binary.path');
-	if (atSpawn.sha256 !== config.binary.sha256)
-		return refuse('binary-hash-mismatch-at-spawn', 'binary.sha256');
-	if (!atSpawn.readOnly) return refuse('binary-mutable', 'binary.path');
+	if (!ssh) {
+		const atSpawn = inspectExecutable(file);
+		receipt.binary.sha256AtSpawn = atSpawn.sha256;
+		if (!config.binary.path || !atSpawn.regular) return refuse('binary-unreadable', 'binary.path');
+		if (atSpawn.sha256 !== config.binary.sha256)
+			return refuse('binary-hash-mismatch-at-spawn', 'binary.sha256');
+		if (!atSpawn.readOnly) return refuse('binary-mutable', 'binary.path');
+	}
 
 	// The planned isolated launch with the selected account's credential reference only.
 	const launch = planIsolatedLaunch(
@@ -3882,7 +4616,10 @@ async function executePaidLeg(
 			kind: ref.kind,
 			reference: ref.kind === 'file' ? ref.path : ref.name,
 		};
-	const credential = resolveLaunchCredential(launch, config, account, ctx.resolveSecret);
+	// An SSH leg's auth file lives under the owned remote root; the remote verification checks it.
+	const credential = ssh
+		? { env: { ...launch.env } }
+		: resolveLaunchCredential(launch, config, account, ctx.resolveSecret);
 	if ('refused' in credential) return refuse(credential.refused, credential.detail);
 	const env = credential.env;
 	for (const key of GROK_GATEWAY_ENV)
@@ -3902,9 +4639,39 @@ async function executePaidLeg(
 	}
 	receipt.launch = { credentialMode: launch.credentialMode, keys: report.keys };
 	const cwd = launch.expectation.home;
-	if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
-		return refuse('paid-home-absent', 'isolation.boundary.actualHome');
-	fs.mkdirSync(env.TMPDIR, { recursive: true, mode: 0o700 });
+	const graceMs = Math.max(1, Math.min(config.limits.cleanupSeconds, 5)) * 1000;
+	let launcher: LegLauncher;
+	let reverify: (() => Promise<SshVerification | null>) | null = null;
+	if (!ssh) {
+		if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
+			return refuse('paid-home-absent', 'isolation.boundary.actualHome');
+		fs.mkdirSync(env.TMPDIR, { recursive: true, mode: 0o700 });
+		const real = fs.realpathSync(file);
+		launcher = async (argv) => localSpawn(real, argv, env, cwd);
+	} else {
+		// The remote binary and owned remote roots, verified before anything is reserved.
+		const prepared = await prepareSshLeg(
+			c,
+			config,
+			launch,
+			{
+				workspace: ctx.workspace,
+				operatorHome: ctx.operatorHome,
+				lifetime: ctx.lifetime,
+				graceMs,
+				timeoutMs: HARNESS_CEILINGS.offlineProbeSeconds * 1000,
+			},
+			'paid-execution'
+		);
+		receipt.remote = prepared.observation;
+		receipt.binary.sha256AtSpawn = prepared.observation.verifications[0]?.sha256 ?? null;
+		if (!prepared.launcher || prepared.reasons.length) {
+			receipt.reasons.push(...prepared.reasons);
+			return receipt;
+		}
+		launcher = prepared.launcher;
+		reverify = prepared.reverify;
+	}
 
 	// Reserve before any dispatch.
 	const primary = config.allowedModels[0];
@@ -3921,6 +4688,7 @@ async function executePaidLeg(
 			endpoint: config.allowedEndpoints[0] ?? '',
 			models,
 			target: c.target,
+			sshTarget: ssh ? (config.allowedSshTargets[0] ?? null) : null,
 			plan,
 		},
 		ctx.now()
@@ -3932,8 +4700,6 @@ async function executePaidLeg(
 	const reservation = reserved.reservation;
 	receipt.reservationId = reservation.id;
 
-	const real = fs.realpathSync(file);
-	const graceMs = Math.max(1, Math.min(config.limits.cleanupSeconds, 5)) * 1000;
 	const ceilingMs = HARNESS_CEILINGS.caseSeconds * 1000;
 	const turnMs = () =>
 		Math.min(
@@ -3950,7 +4716,8 @@ async function executePaidLeg(
 			receipt.reasons.push(paidReason('reservation-deadline-passed', `turn ${n}`));
 			return false;
 		}
-		if (inspectExecutable(file).sha256 !== config.binary.sha256) {
+		// Local: re-hashed per turn. SSH: the remote was verified read-only and pinned before the leg and is re-verified after it.
+		if (!ssh && inspectExecutable(file).sha256 !== config.binary.sha256) {
 			receipt.reasons.push(paidReason('binary-hash-mismatch-at-spawn', `turn ${n}`));
 			return false;
 		}
@@ -4006,6 +4773,12 @@ async function executePaidLeg(
 				...(resumeId ? (def?.resumeArgs?.(resumeId) ?? []) : []),
 				...(def?.promptArgs?.(prompt) ?? []),
 			];
+			// Built before the turn is counted: a refused wrap leaves the turn unsent and uncounted.
+			const spec = await launcher(argvFor(t.prompt));
+			if ('refused' in spec) {
+				receipt.reasons.push(sshReason(spec.refused, spec.detail, 'paid-execution'));
+				break;
+			}
 			if (!admitTurn(n)) break;
 			const parser = new GrokOutputParser();
 			const reply = replyCollector(t.expect);
@@ -4037,10 +4810,8 @@ async function executePaidLeg(
 			};
 			const { result } = await runOfflineProbe(
 				`turn-${n}`,
-				real,
+				spec,
 				argvFor(t.prompt),
-				env,
-				cwd,
 				turnMs(),
 				graceMs,
 				ctx.lifetime,
@@ -4090,20 +4861,29 @@ async function executePaidLeg(
 			}
 		}
 	} else {
-		const run = await runAcpPaidTurns({
-			file: real,
-			env,
-			cwd,
-			model: primary,
-			effort,
-			fixture,
-			turns: legTurns,
-			graceMs,
-			lifetime: ctx.lifetime,
-			turnMs,
-			admitTurn,
-			calls: () => callsDrawn,
-		});
+		const spec = await launcher(GROK_ACP_ARGS);
+		const run =
+			'refused' in spec
+				? {
+						turns: [],
+						spawned: 0,
+						sent: 0,
+						reasons: [sshReason(spec.refused, spec.detail, 'paid-execution')],
+						uncertainWhy: null,
+					}
+				: await runAcpPaidTurns({
+						spec,
+						cwd,
+						model: primary,
+						effort,
+						fixture,
+						turns: legTurns,
+						graceMs,
+						lifetime: ctx.lifetime,
+						turnMs,
+						admitTurn,
+						calls: () => callsDrawn,
+					});
 		receipt.turns = run.turns;
 		receipt.spawned = run.spawned;
 		receipt.paidRequests = run.sent;
@@ -4158,7 +4938,13 @@ async function executePaidLeg(
 		reason: settled.settlement?.reason ?? '',
 	};
 
-	receipt.binary.sha256After = inspectExecutable(file).sha256;
+	if (!reverify) receipt.binary.sha256After = inspectExecutable(file).sha256;
+	else {
+		const after = await reverify();
+		receipt.binary.sha256After = after?.sha256 ?? null;
+		if (after)
+			receipt.reasons.push(...after.problems.map((p) => sshProblemReason(p, 'paid-execution')));
+	}
 	if (receipt.binary.sha256After !== config.binary.sha256)
 		receipt.reasons.push(paidReason('binary-changed-during-leg', 'binary.path'));
 	receipt.assertions = evaluatePaidAssertions(fixture, {
@@ -4190,8 +4976,9 @@ async function executePaidLeg(
  * reports no settled charge here, so a sent turn's cost stays unknown.
  */
 async function runAcpPaidTurns(args: {
-	file: string;
-	env: Record<string, string>;
+	/** The `agent stdio` launch: the pinned file, or the ssh client the SSH wrap built. */
+	spec: SpawnSpec;
+	/** The cwd the agent sees (the remote home on an SSH leg). */
 	cwd: string;
 	model: string;
 	/** The selected effort; set through session/set_config_option and acknowledged before any prompt. */
@@ -4217,9 +5004,9 @@ async function runAcpPaidTurns(args: {
 	let uncertainWhy: string | null = null;
 	let child: ChildProcess;
 	try {
-		child = spawn(args.file, [...GROK_ACP_ARGS], {
-			cwd: args.cwd,
-			env: args.env,
+		child = spawn(args.spec.command, [...args.spec.args], {
+			cwd: args.spec.cwd,
+			env: args.spec.env,
 			shell: false,
 			stdio: ['pipe', 'pipe', 'pipe'],
 			windowsHide: true,
@@ -4620,6 +5407,7 @@ export async function executePaidCase(
 		settlement: null,
 		spawned: 0,
 		paidRequests: 0,
+		remote: null,
 	});
 	if (reasons.length || !fixture) return accounts.map(refused);
 	// What each owned home listed before the legs: the colliding-ID verdict judges only what they added.
@@ -4841,18 +5629,25 @@ export async function runQualification(options: RunOptions): Promise<{
 		const paid = c.classes.includes('paid');
 		const plan = paid && capabilities.atomicSpendAdmission ? planCaseReservation(c, config) : null;
 		const held = ledger.reservations.filter((r) => r.caseId === c.caseId);
+		// Each SSH verification is an owned ssh child and a connection to the approved host.
+		const sshConnections = [...discoveryLegs, ...paidLegs].reduce(
+			(n, l) => n + (l.remote?.connections ?? 0),
+			0
+		);
 		receipts.push({
 			...c,
 			status: reasons.length ? 'not-run' : 'admitted',
 			reasons,
 			spawned:
 				discoveryLegs.reduce((n, l) => n + l.spawned, 0) +
-				paidLegs.reduce((n, l) => n + l.spawned, 0),
+				paidLegs.reduce((n, l) => n + l.spawned, 0) +
+				sshConnections,
 			paidRequests: paidLegs.reduce((n, l) => n + l.paidRequests, 0),
-			// A lower bound: each request a running child was handed may reach the provider.
+			// A lower bound: each request a running child was handed may reach the provider;
+			// a discovery leg's count already carries its SSH connections.
 			networkContacts:
 				discoveryLegs.reduce((n, l) => n + l.networkContacts, 0) +
-				paidLegs.reduce((n, l) => n + l.paidRequests, 0),
+				paidLegs.reduce((n, l) => n + l.paidRequests + (l.remote?.connections ?? 0), 0),
 			pricing: c.classes.includes('paid') ? config.allowedModels.map(pricingProvenance) : [],
 			budget: {
 				reservedUsd: held.reduce((s, r) => s + (r.state === 'held' ? r.holdUsd : 0), 0),
@@ -4905,9 +5700,16 @@ export async function runQualification(options: RunOptions): Promise<{
 			cases: receipts.length,
 			admitted: receipts.filter((r) => r.status === 'admitted').length,
 			notRun: receipts.filter((r) => r.status === 'not-run').length,
-			spawned: receipts.reduce((n, r) => n + r.spawned + (r.offlineLeg?.spawned ?? 0), 0),
+			spawned: receipts.reduce(
+				(n, r) =>
+					n + r.spawned + (r.offlineLeg?.spawned ?? 0) + (r.offlineLeg?.remote?.connections ?? 0),
+				0
+			),
 			paidRequests: receipts.reduce((n, r) => n + r.paidRequests, 0),
-			networkContacts: receipts.reduce((n, r) => n + r.networkContacts, 0),
+			networkContacts: receipts.reduce(
+				(n, r) => n + r.networkContacts + (r.offlineLeg?.networkContacts ?? 0),
+				0
+			),
 		},
 		cases: receipts,
 	});
