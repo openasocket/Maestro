@@ -61,6 +61,25 @@
  * every gateway the child received names an approved origin) and stops before
  * any prompt on a rejected or unacknowledged choice, never downgrading.
  *
+ * Synthetic resources (GT1-11-11B1): a resource fixture (E08) runs only when
+ * the isolation declares hooks, MCP and plugins `synthetic-owned`. Before the
+ * reservation, `materializeSyntheticResources` writes the fixture's resources
+ * inside the case's owned roots only (a fresh directory under the first
+ * allowed root plus one config file in the owned account home that
+ * `GROK_CONFIG_PATH` names; never the operator's or boundary home) and hashes
+ * each one: a user skill taking an argument, an unselected and a disabled
+ * skill, a selected project rule naming a reply token, and a local stdio MCP
+ * stand-in (no network) behind an enabled, a disabled, a failing-handshake and
+ * an OAuth entry with no credential. The leg runs in the synthetic project and
+ * evaluates `advertised-matches-executed`, `rule-applied`, `mcp-paths`,
+ * `no-implicit-effect` and `resume-trust-state` from the catalog it saw, the
+ * reply tokens, the stand-in's own start/call records, the reaped MCP pids,
+ * stray files and re-hashed resources. The paid argv keeps its read-only
+ * flags: whether the pinned binary admits the stand-in tool call under them is
+ * what a live run observes. An SSH resource leg has no materializer and stays
+ * not-run (`unassigned-ssh-resource-legs`); Maestro plugin broker dispatch of
+ * a native tool stays unevaluated (`unassigned-plugin-broker-native-leg`).
+ *
  * Offline inspection (GT1-11-10A): the offline-inspection leg of a case (E02)
  * is admitted and recorded as its own receipt entry, independently of
  * discovery. It needs the pinned binary, disabled auto-update, owned roots, the
@@ -162,7 +181,13 @@ import {
 } from '../../src/shared/maestro-lib/launch/ssh-spawn-wrapper';
 import { validateSshOption } from '../../src/shared/sshOptions';
 import type { AgentSshRemoteConfig, SshRemoteConfig } from '../../src/shared/types';
-import { fixtureTurnsFor, PAID_FIXTURES, type PaidFixture } from './paid-fixtures';
+import {
+	fixtureTurnsFor,
+	PAID_FIXTURES,
+	type PaidFixture,
+	type SyntheticResourceSet,
+} from './paid-fixtures';
+import { parse as parseToml, stringify as stringifyToml } from 'smol-toml';
 import { isPathAtOrUnderRoot } from '../../src/shared/worktreePaths';
 import { stopProcess } from '../../src/shared/maestro-lib/control/termination';
 import { getAgentCapabilities } from '../../src/shared/maestro-lib/providers/capabilities';
@@ -4182,7 +4207,13 @@ export interface PaidTurnResult {
 	sessionId: string | null;
 	terminal: 'success' | 'failure' | 'none';
 	/** The reply is kept as a digest; only whether the expected token appeared is recorded. */
-	reply: { sha256: string; bytes: number; tokenSeen: boolean };
+	reply: {
+		sha256: string;
+		bytes: number;
+		tokenSeen: boolean;
+		/** Each further token the turn expected (`alsoExpect`), seen or not; absent when none was. */
+		tokens?: Record<string, boolean>;
+	};
 	/** The model the turn reported (native usage) or the session acknowledged (ACP). */
 	model: string | null;
 	/**
@@ -4236,6 +4267,8 @@ export interface PaidLegReceipt {
 	paidRequests: number;
 	/** What an SSH leg observed of its remote (its connections are network contacts); null on a local leg. */
 	remote: SshLegObservation | null;
+	/** The synthetic resources a resource leg materialized and what it observed of them; null otherwise. */
+	resources: ResourceLegReceipt | null;
 }
 
 export interface PaidExecutionContext {
@@ -4291,7 +4324,7 @@ export function paidCallsPerTurn(
 }
 
 /** Bounded reply text plus a digest of all of it; the text never leaves memory. */
-function replyCollector(expect: string) {
+function replyCollector(expect: string, also: readonly string[] = []) {
 	const hash = createHash('sha256');
 	let bytes = 0;
 	let kept = '';
@@ -4302,7 +4335,14 @@ function replyCollector(expect: string) {
 			bytes += b.length;
 			if (kept.length < PAID_REPLY_BYTES) kept += text.slice(0, PAID_REPLY_BYTES - kept.length);
 		},
-		result: () => ({ sha256: hash.digest('hex'), bytes, tokenSeen: kept.includes(expect) }),
+		result: () => ({
+			sha256: hash.digest('hex'),
+			bytes,
+			tokenSeen: kept.includes(expect),
+			...(also.length
+				? { tokens: Object.fromEntries(also.map((t) => [t, kept.includes(t)])) }
+				: {}),
+		}),
 	};
 }
 
@@ -4365,6 +4405,8 @@ export function evaluatePaidAssertions(
 		gateways?: Record<string, string>;
 		selectedGateways?: string[];
 		approvedEndpoints?: string[];
+		/** What a resource leg materialized and observed (resource fixtures only). */
+		resources?: ResourceLegReceipt | null;
 	}
 ): PaidAssertionOutcome[] {
 	const { turns } = observed;
@@ -4480,6 +4522,13 @@ export function evaluatePaidAssertions(
 				);
 				break;
 			}
+			case 'advertised-matches-executed':
+			case 'rule-applied':
+			case 'mcp-paths':
+			case 'no-implicit-effect':
+			case 'resume-trust-state':
+				out.push(evaluateResourceAssertion(id, fixture, observed));
+				break;
 		}
 	}
 	for (const u of fixture.unevaluated)
@@ -4492,6 +4541,735 @@ const delay = (ms: number) =>
 	new Promise<void>((resolve) => {
 		setTimeout(resolve, ms).unref();
 	});
+
+/** Schema of the synthetic resource manifest a resource leg records (GT1-11-11B1). */
+export const SYNTHETIC_RESOURCES_SCHEMA = 'grok-synthetic-resources/v1';
+/** The account config file a resource leg points `GROK_CONFIG_PATH` at, inside the owned account home. */
+export const RESOURCE_CONFIG_FILE = 'qualify-resources.toml';
+/** Bounds of one resource-log or directory read; past either, the leg cannot vouch for what ran. */
+export const RESOURCE_SCAN_LIMITS = Object.freeze({ entries: 2048, bytes: 1024 * 1024 });
+/** No playbook task owns materializing synthetic resources under an owned remote root. */
+export const SSH_RESOURCE_LEGS_OWNER = 'unassigned-ssh-resource-legs';
+
+/**
+ * The local stdio MCP stand-in the enabled, disabled, failing and OAuth entries
+ * run (no network, no dependency): every start, call and exit is appended to
+ * the leg's own sentinel directory with the pid, the parent pid and the leg
+ * nonce, so the harness reads what ran from the stand-in's records rather than
+ * from the agent's account of it. Only env var NAMES that look like an
+ * authorization are recorded, never a value.
+ */
+export const MCP_STAND_IN_SOURCE = [
+	"'use strict';",
+	"const fs = require('fs');",
+	"const path = require('path');",
+	'const arg = (k) => { const i = process.argv.indexOf(k); return i > 0 ? process.argv[i + 1] : null; };',
+	"const server = arg('--server'); const mode = arg('--mode'); const dir = arg('--log'); const nonce = arg('--nonce'); const tool = arg('--tool');",
+	"const log = (file, o) => fs.appendFileSync(path.join(dir, file), JSON.stringify(Object.assign({ server: server, pid: process.pid, ppid: process.ppid, nonce: nonce }, o)) + '\\n');",
+	'const authEnv = Object.keys(process.env).filter((k) => /OAUTH|BEARER|AUTHORIZATION|ACCESS_TOKEN|REFRESH_TOKEN/i.test(k)).sort();',
+	"log('events.jsonl', { event: 'start', mode: mode, authEnv: authEnv });",
+	"process.on('exit', () => { try { log('events.jsonl', { event: 'exit' }); } catch (e) {} });",
+	"if (mode === 'fail') { process.stderr.write('synthetic handshake failure\\n'); process.exit(1); }",
+	"const send = (o) => process.stdout.write(JSON.stringify(Object.assign({ jsonrpc: '2.0' }, o)) + '\\n');",
+	"let buf = '';",
+	"process.stdin.on('data', (d) => { buf += d; let k; while ((k = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, k); buf = buf.slice(k + 1); let m; try { m = JSON.parse(line); } catch (e) { continue; } handle(m); } });",
+	"process.stdin.on('end', () => process.exit(0));",
+	'function handle(m) {',
+	'\tif (m.id === undefined || m.id === null) return;',
+	"\tif (m.method === 'initialize') {",
+	"\t\tif (mode === 'oauth') { log('events.jsonl', { event: 'auth-refused' }); return send({ id: m.id, error: { code: -32001, message: 'authorization required (synthetic stand-in, no credential)' } }); }",
+	"\t\treturn send({ id: m.id, result: { protocolVersion: (m.params && m.params.protocolVersion) || '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: server, version: '0.0.0' } } });",
+	'\t}',
+	"\tif (m.method === 'tools/list') return send({ id: m.id, result: { tools: [{ name: tool, description: 'Record one qualification sentinel.', inputSchema: { type: 'object', properties: { source: { type: 'string' }, value: { type: 'string' } }, required: ['source', 'value'] } }] } });",
+	"\tif (m.method === 'tools/call') {",
+	'\t\tconst a = (m.params && m.params.arguments) || {};',
+	"\t\tlog('events.jsonl', { event: 'call', tool: m.params && m.params.name });",
+	"\t\tlog('sentinels.jsonl', { source: String(a.source), value: String(a.value), tool: m.params && m.params.name });",
+	"\t\treturn send({ id: m.id, result: { content: [{ type: 'text', text: 'recorded' }] } });",
+	'\t}',
+	"\tif (m.method === 'ping') return send({ id: m.id, result: {} });",
+	"\tsend({ id: m.id, error: { code: -32601, message: 'method not found' } });",
+	'}',
+	'',
+].join('\n');
+
+export interface SyntheticResourceEntry {
+	id: string;
+	kind: 'skill' | 'rule' | 'mcp-server' | 'mcp-stand-in' | 'config';
+	/** Absolute path of the materialized file (for an MCP server, the config that declares it). */
+	path: string;
+	sha256: string;
+	/** Selected by the case: the skill, the rule, the enabled server (and the config and stand-in they need). */
+	selected: boolean;
+	state:
+		| 'selected'
+		| 'unselected'
+		| 'enabled'
+		| 'disabled'
+		| 'failing-handshake'
+		| 'oauth-unauthenticated';
+}
+
+export interface SyntheticResourceManifest {
+	schema: typeof SYNTHETIC_RESOURCES_SCHEMA;
+	/** The owned directory every resource but the account config lives in. */
+	root: string;
+	/** The leg's working directory (the project the rule belongs to). */
+	projectDir: string;
+	sentinelDir: string;
+	/** `GROK_CONFIG_PATH` of the leg: inside the owned account home. */
+	configPath: string;
+	/** Random per leg; every stand-in record carries it. */
+	nonce: string;
+	entries: SyntheticResourceEntry[];
+}
+
+export interface ObservedCommand {
+	name: string;
+	/** The entry advertises an input (takes an argument). */
+	hasInput: boolean;
+	hint: string | null;
+}
+
+export interface ResourceTurnObservation {
+	turn: number;
+	/** The last command catalog the leg saw up to the end of this turn; null when none was observed. */
+	catalog: ObservedCommand[] | null;
+	sentinels: Array<{ source: string; value: string; server: string; pid: number | null }>;
+	mcpEvents: Array<{
+		event: string;
+		server: string;
+		pid: number | null;
+		ppid: number | null;
+		nonce: string | null;
+		authEnv: string[];
+	}>;
+	/** Resource names the turn's own output named (agent output, never the prompt). */
+	mentions: string[];
+	/** A log line that was not a stand-in record, or a log past its bound. */
+	problems: string[];
+}
+
+export interface ResourceLegReceipt {
+	manifest: SyntheticResourceManifest;
+	turns: ResourceTurnObservation[];
+	/** MCP stand-in pids that started, and those still alive after the leg's grace. */
+	reaped: { pids: number[]; alive: number[] };
+	/** Files that appeared in the project or sentinel directories beyond the stand-in logs. */
+	strayFiles: string[];
+	/** Materialized resources whose bytes changed during the leg. */
+	mutated: string[];
+	problems: string[];
+}
+
+const sha256Of = (text: string | Buffer) => createHash('sha256').update(text).digest('hex');
+
+function writeOwned(file: string, content: string, mode = 0o600): string {
+	fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+	fs.writeFileSync(file, content, { mode, flag: 'wx' });
+	return sha256Of(content);
+}
+
+const skillBody = (
+	name: string,
+	description: string,
+	argumentHint: string | null,
+	tool: string,
+	server: string
+) =>
+	[
+		'---',
+		`name: ${name}`,
+		`description: ${description}`,
+		...(argumentHint ? [`argument-hint: "${argumentHint}"`] : []),
+		'---',
+		'',
+		`Call the \`${tool}\` tool of the \`${server}\` MCP server exactly once, with \`source\` set to \`${name}\` and \`value\` set to the argument you were given ($ARGUMENTS), verbatim. Do nothing else for this skill.`,
+		'',
+	].join('\n');
+
+/**
+ * Materialize a resource fixture's synthetic resources for one leg, inside the
+ * case's owned roots only: a fresh directory under the first allowed root (the
+ * skills, the MCP stand-in, the sentinel directory and the project with its
+ * selected rule) plus one config file inside the owned account home that
+ * `GROK_CONFIG_PATH` names. Never the operator's home, the boundary home or a
+ * project the operator owns; an account config already present is merged only
+ * when it declares no skills, MCP servers, plugins or hooks of its own (an
+ * unknown resource there would be an effect the case did not select). Every
+ * file is hashed into the manifest.
+ */
+export function materializeSyntheticResources(
+	c: QualificationCase,
+	config: QualificationConfig,
+	launch: PlannedLaunch,
+	fixture: PaidFixture,
+	leg: string
+): { manifest: SyntheticResourceManifest } | { refused: string; detail: string } {
+	const set = fixture.resources;
+	if (!set) return { refused: 'resources-undeclared', detail: fixture.family };
+	if (c.target !== 'local') return { refused: 'resources-ssh-unmaterialized', detail: c.target };
+	const iso = config.isolation;
+	const notOwned = (['mcp', 'plugins', 'hooks'] as const).filter(
+		(k) => iso?.resources[k] !== 'synthetic-owned'
+	);
+	if (!iso || notOwned.length)
+		return {
+			refused: 'resources-not-synthetic-owned',
+			detail: notOwned.map((k) => `isolation.resources.${k}`).join(','),
+		};
+	const { roots, accountRoot, operatorHome, home } = launch.expectation;
+	if (!roots.length) return { refused: 'resources-root-undeclared', detail: 'allowedRoots' };
+	const root = path.join(
+		roots[0],
+		'synthetic-resources',
+		`${c.caseId.replace(/[^A-Za-z0-9._-]/g, '_')}-${leg}`
+	);
+	if (!underAny('local', root, roots))
+		return { refused: 'resources-outside-roots', detail: 'allowedRoots' };
+	for (const [p, why] of [
+		[operatorHome, 'operator-home'],
+		[home, 'boundary-home'],
+		[accountRoot, 'account-home'],
+	] as const)
+		if (isPathAtOrUnderRoot(normalizeFor('local', p), normalizeFor('local', root)))
+			return { refused: 'resources-root-overlaps', detail: why };
+	// A previous run's leftovers are this harness's own: removed whole, never followed through a link.
+	const prior = fs.existsSync(root) ? fs.lstatSync(root) : null;
+	if (prior?.isSymbolicLink()) return { refused: 'resources-root-symlink', detail: root };
+	if (prior) fs.rmSync(root, { recursive: true, force: true });
+	fs.mkdirSync(root, { recursive: true, mode: 0o700 });
+	const realRoot = fs.realpathSync(root);
+	if (!roots.some((r) => fs.existsSync(r) && isPathAtOrUnderRoot(realRoot, fs.realpathSync(r))))
+		return { refused: 'resources-root-escapes', detail: root };
+
+	const configPath = path.join(accountRoot, RESOURCE_CONFIG_FILE);
+	const realAccount = fs.existsSync(accountRoot) ? fs.realpathSync(accountRoot) : null;
+	if (!realAccount || !roots.some((r) => isPathAtOrUnderRoot(realAccount, fs.realpathSync(r))))
+		return { refused: 'resources-account-home-unowned', detail: 'isolation.accountRoots' };
+	if (fs.existsSync(configPath)) {
+		if (fs.lstatSync(configPath).isSymbolicLink())
+			return { refused: 'resources-config-symlink', detail: configPath };
+		fs.unlinkSync(configPath);
+	}
+	// The account's own config: merged only when it holds no resource of its own.
+	const accountConfig = path.join(accountRoot, 'config.toml');
+	let base: Record<string, unknown> = {};
+	if (fs.existsSync(accountConfig)) {
+		if (fs.lstatSync(accountConfig).isSymbolicLink())
+			return { refused: 'resources-account-config-symlink', detail: accountConfig };
+		try {
+			base = parseToml(fs.readFileSync(accountConfig, 'utf8')) as Record<string, unknown>;
+		} catch {
+			return { refused: 'resources-account-config-unreadable', detail: accountConfig };
+		}
+		const own = ['skills', 'mcp_servers', 'plugins', 'hooks', 'disabled_mcp_servers'].filter(
+			(k) => k in base
+		);
+		if (own.length)
+			return { refused: 'resources-account-config-not-synthetic', detail: own.join(',') };
+	}
+
+	const nonce = randomUUID();
+	const skills = path.join(root, 'skills');
+	const projectDir = path.join(root, 'project');
+	const sentinelDir = path.join(root, 'sentinels');
+	const standIn = path.join(root, 'mcp', 'stand-in.cjs');
+	fs.mkdirSync(sentinelDir, { recursive: true, mode: 0o700 });
+	const entries: SyntheticResourceEntry[] = [];
+	const add = (e: Omit<SyntheticResourceEntry, 'sha256'>, content: string) =>
+		entries.push({ ...e, sha256: writeOwned(e.path, content) });
+	const { mcp } = set;
+	add(
+		{
+			id: `skill:${set.skill.name}`,
+			kind: 'skill',
+			path: path.join(skills, set.skill.name, 'SKILL.md'),
+			selected: true,
+			state: 'selected',
+		},
+		skillBody(
+			set.skill.name,
+			'Record the given token through the qualification stand-in tool.',
+			set.skill.argumentHint,
+			mcp.tool,
+			mcp.enabled
+		)
+	);
+	for (const [name, state] of [
+		[set.unselectedSkill, 'unselected'],
+		[set.disabledSkill, 'disabled'],
+	] as const)
+		add(
+			{
+				id: `skill:${name}`,
+				kind: 'skill',
+				path: path.join(skills, name, 'SKILL.md'),
+				selected: false,
+				state,
+			},
+			skillBody(name, 'A synthetic skill this case never selects.', null, mcp.tool, mcp.enabled)
+		);
+	add(
+		{
+			id: `rule:${set.rule.file}`,
+			kind: 'rule',
+			path: path.join(projectDir, '.grok', 'rules', set.rule.file),
+			selected: true,
+			state: 'selected',
+		},
+		`# Qualification rule\n\nEnd every reply with this token on its own line: ${set.rule.token}\n`
+	);
+	add(
+		{ id: 'mcp:stand-in', kind: 'mcp-stand-in', path: standIn, selected: true, state: 'selected' },
+		MCP_STAND_IN_SOURCE
+	);
+	const server = (
+		name: string,
+		mode: string,
+		enabled: boolean,
+		extra: Record<string, unknown> = {}
+	) => ({
+		command: process.execPath,
+		args: [
+			standIn,
+			'--server',
+			name,
+			'--mode',
+			mode,
+			'--log',
+			sentinelDir,
+			'--nonce',
+			nonce,
+			'--tool',
+			mcp.tool,
+		],
+		enabled,
+		startup_timeout_sec: 10,
+		tool_timeout_sec: 10,
+		...extra,
+	});
+	const toml = stringifyToml({
+		...base,
+		skills: { paths: [skills], disabled: [set.disabledSkill] },
+		mcp_servers: {
+			[mcp.enabled]: server(mcp.enabled, 'tool', true),
+			[mcp.disabled]: server(mcp.disabled, 'tool', false),
+			[mcp.failing]: server(mcp.failing, 'fail', true),
+			[mcp.oauth]: server(mcp.oauth, 'oauth', true, {
+				oauth_client_id: 'qualify-synthetic-client',
+				oauth_scopes: ['qualify'],
+			}),
+		},
+	});
+	const configSha = writeOwned(configPath, `${toml}\n`);
+	entries.push({
+		id: 'config:account',
+		kind: 'config',
+		path: configPath,
+		sha256: configSha,
+		selected: true,
+		state: 'selected',
+	});
+	for (const [name, state, selected] of [
+		[mcp.enabled, 'enabled', true],
+		[mcp.disabled, 'disabled', false],
+		[mcp.failing, 'failing-handshake', false],
+		[mcp.oauth, 'oauth-unauthenticated', false],
+	] as const)
+		entries.push({
+			id: `mcp:${name}`,
+			kind: 'mcp-server',
+			path: configPath,
+			sha256: configSha,
+			selected,
+			state,
+		});
+	return {
+		manifest: {
+			schema: SYNTHETIC_RESOURCES_SCHEMA,
+			root,
+			projectDir,
+			sentinelDir,
+			configPath,
+			nonce,
+			entries,
+		},
+	};
+}
+
+/** Remove what a resource leg wrote into the owned account home; the rest stays as the leg's evidence. */
+export function removeAccountResourceConfig(manifest: SyntheticResourceManifest): void {
+	try {
+		if (fs.existsSync(manifest.configPath) && !fs.lstatSync(manifest.configPath).isSymbolicLink())
+			fs.unlinkSync(manifest.configPath);
+	} catch {
+		// Best effort: the file is inside the owned account home either way.
+	}
+}
+
+/** A command catalog carried by one raw record (an ACP `available_commands_update`, or the same shape natively). */
+export function commandCatalogOf(raw: unknown): ObservedCommand[] | null {
+	const rec = (o: unknown) =>
+		o && typeof o === 'object' && !Array.isArray(o) ? (o as Record<string, unknown>) : null;
+	const r = rec(raw);
+	const params = rec(r?.params);
+	const candidates = [r, rec(r?.update), params, rec(params?.update)];
+	for (const c of candidates) {
+		const list = c?.availableCommands ?? c?.available_commands;
+		if (!Array.isArray(list)) continue;
+		return list.flatMap((entry) => {
+			const e = rec(entry);
+			const name = typeof e?.name === 'string' ? e.name.replace(/^\//, '') : null;
+			if (!name) return [];
+			const input = rec(e?.input);
+			return [
+				{
+					name,
+					hasInput: Boolean(input),
+					hint: typeof input?.hint === 'string' ? input.hint : null,
+				},
+			];
+		});
+	}
+	return null;
+}
+
+/** Read stand-in records from a log, from a line offset; bounded, never through a link. */
+function readStandInLog(
+	file: string,
+	from: number
+): { records: Array<Record<string, unknown>>; lines: number; problems: string[] } {
+	const problems: string[] = [];
+	if (!fs.existsSync(file)) return { records: [], lines: 0, problems };
+	const st = fs.lstatSync(file);
+	if (st.isSymbolicLink() || !st.isFile())
+		return { records: [], lines: 0, problems: [`log-not-owned:${path.basename(file)}`] };
+	if (st.size > RESOURCE_SCAN_LIMITS.bytes)
+		return { records: [], lines: 0, problems: [`log-unbounded:${path.basename(file)}`] };
+	const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+	const records: Array<Record<string, unknown>> = [];
+	for (const line of lines.slice(from)) {
+		try {
+			const r = JSON.parse(line) as unknown;
+			if (r && typeof r === 'object' && !Array.isArray(r))
+				records.push(r as Record<string, unknown>);
+			else problems.push(`log-line-unparsed:${path.basename(file)}`);
+		} catch {
+			problems.push(`log-line-unparsed:${path.basename(file)}`);
+		}
+	}
+	return { records, lines: lines.length, problems };
+}
+
+/** Relative paths of the regular files under a directory; bounded, links are reported, never followed. */
+function listOwnedFiles(dir: string): { files: string[]; problem: string | null } {
+	const files: string[] = [];
+	if (!fs.existsSync(dir)) return { files, problem: null };
+	const stack = [dir];
+	let entries = 0;
+	while (stack.length) {
+		const d = stack.pop()!;
+		for (const name of fs.readdirSync(d)) {
+			if (++entries > RESOURCE_SCAN_LIMITS.entries) return { files, problem: 'scan-unbounded' };
+			const p = path.join(d, name);
+			const st = fs.lstatSync(p);
+			if (st.isSymbolicLink()) files.push(`${path.relative(dir, p)} (symlink)`);
+			else if (st.isDirectory()) stack.push(p);
+			else files.push(path.relative(dir, p));
+		}
+	}
+	return { files: files.sort(), problem: null };
+}
+
+/**
+ * Per-leg resource observer: log offsets per turn, the latest command
+ * catalog, the resource names the agent's own output named, and (after the
+ * leg) reaping, stray files and changed resources.
+ */
+function createResourceObserver(manifest: SyntheticResourceManifest, set: SyntheticResourceSet) {
+	const names = [
+		set.skill.name,
+		set.unselectedSkill,
+		set.disabledSkill,
+		set.mcp.enabled,
+		set.mcp.disabled,
+		set.mcp.failing,
+		set.mcp.oauth,
+	];
+	const projectBefore = listOwnedFiles(manifest.projectDir).files;
+	let offsets = { events: 0, sentinels: 0 };
+	let catalog: ObservedCommand[] | null = null;
+	let mentions = new Set<string>();
+	const receipt: ResourceLegReceipt = {
+		manifest,
+		turns: [],
+		reaped: { pids: [], alive: [] },
+		strayFiles: [],
+		mutated: [],
+		problems: [],
+	};
+	const num = (v: unknown) => (typeof v === 'number' && Number.isInteger(v) ? v : null);
+	const str = (v: unknown) => (typeof v === 'string' ? v : '');
+	return {
+		receipt,
+		/** One raw output record of the agent (a native line or an ACP notification frame). */
+		observe(raw: unknown, text: string) {
+			const found = commandCatalogOf(raw);
+			if (found) catalog = found;
+			const bounded = text.slice(0, 64 * 1024);
+			for (const n of names) if (bounded.includes(n)) mentions.add(n);
+		},
+		/** Text the agent wrote outside the record stream (native stderr head). */
+		observeText(text: string) {
+			for (const n of names) if (text.includes(n)) mentions.add(n);
+		},
+		endTurn(turn: number) {
+			const ev = readStandInLog(path.join(manifest.sentinelDir, 'events.jsonl'), offsets.events);
+			const se = readStandInLog(
+				path.join(manifest.sentinelDir, 'sentinels.jsonl'),
+				offsets.sentinels
+			);
+			offsets = { events: ev.lines, sentinels: se.lines };
+			receipt.turns.push({
+				turn,
+				catalog: catalog ? catalog.map((c) => ({ ...c })) : null,
+				sentinels: se.records.map((r) => ({
+					source: str(r.source),
+					value: str(r.value),
+					server: str(r.server),
+					pid: num(r.pid),
+				})),
+				mcpEvents: ev.records.map((r) => ({
+					event: str(r.event),
+					server: str(r.server),
+					pid: num(r.pid),
+					ppid: num(r.ppid),
+					nonce: typeof r.nonce === 'string' ? r.nonce : null,
+					authEnv: Array.isArray(r.authEnv) ? r.authEnv.filter((k) => typeof k === 'string') : [],
+				})),
+				mentions: [...mentions].sort(),
+				problems: [...ev.problems, ...se.problems],
+			});
+			mentions = new Set();
+		},
+		/** After the leg's children were stopped: reaping (bounded by `graceMs`), stray files, changed bytes. */
+		async finish(graceMs: number) {
+			const pids = [
+				...new Set(
+					receipt.turns.flatMap((t) =>
+						t.mcpEvents.filter((e) => e.event === 'start' && e.pid !== null).map((e) => e.pid!)
+					)
+				),
+			].sort((a, b) => a - b);
+			const alive = (pid: number) => {
+				try {
+					process.kill(pid, 0);
+					return true;
+				} catch (e) {
+					return (e as NodeJS.ErrnoException).code === 'EPERM';
+				}
+			};
+			const until = Date.now() + graceMs;
+			let living = pids.filter(alive);
+			while (living.length && Date.now() < until) {
+				await delay(50);
+				living = living.filter(alive);
+			}
+			receipt.reaped = { pids, alive: living };
+			const project = listOwnedFiles(manifest.projectDir);
+			const sentinels = listOwnedFiles(manifest.sentinelDir);
+			for (const p of [project.problem, sentinels.problem]) if (p) receipt.problems.push(p);
+			receipt.strayFiles = [
+				...project.files.filter((f) => !projectBefore.includes(f)).map((f) => `project/${f}`),
+				...sentinels.files
+					.filter((f) => f !== 'events.jsonl' && f !== 'sentinels.jsonl')
+					.map((f) => `sentinels/${f}`),
+			];
+			receipt.mutated = manifest.entries
+				.filter((e, i, all) => all.findIndex((x) => x.path === e.path) === i)
+				.filter((e) => {
+					try {
+						return sha256Of(fs.readFileSync(e.path)) !== e.sha256;
+					} catch {
+						return true;
+					}
+				})
+				.map((e) => e.id);
+		},
+	};
+}
+
+type ResourceAssertionId =
+	| 'advertised-matches-executed'
+	| 'rule-applied'
+	| 'mcp-paths'
+	| 'no-implicit-effect'
+	| 'resume-trust-state';
+
+/**
+ * One resource assertion of a resource fixture, from what the leg observed:
+ * the catalog, the reply tokens, the stand-in's own records, the reaped pids,
+ * stray files and the re-hashed resources. Nothing here reads a declaration:
+ * an absent observation fails.
+ */
+export function evaluateResourceAssertion(
+	id: ResourceAssertionId,
+	fixture: PaidFixture,
+	observed: {
+		route: Route;
+		turns: PaidTurnResult[];
+		account?: 'A' | 'B';
+		resources?: ResourceLegReceipt | null;
+	}
+): PaidAssertionOutcome {
+	const res = observed.resources ?? null;
+	const set = fixture.resources;
+	const legTurns = fixtureTurnsFor(fixture, observed.account ?? 'A');
+	const verdict = (failures: string[], ok: string): PaidAssertionOutcome => ({
+		id,
+		outcome: failures.length ? 'failed' : 'passed',
+		detail: failures.length ? [...new Set(failures)].join('; ') : ok,
+	});
+	if (!res || !set) return verdict(['resources-unobserved'], '');
+	const failures: string[] = [];
+	const complete =
+		res.turns.length === legTurns.length && observed.turns.length === legTurns.length;
+	if (!complete) failures.push(`turns-observed:${res.turns.length}/${legTurns.length}`);
+	const all = res.turns.flatMap((t) => t.sentinels);
+	const events = res.turns.flatMap((t) => t.mcpEvents.map((e) => ({ ...e, turn: t.turn })));
+	const starts = (server: string) =>
+		events.filter((e) => e.event === 'start' && e.server === server);
+	const { mcp } = set;
+	for (const t of res.turns) for (const p of t.problems) failures.push(`${p}:T${t.turn}`);
+	switch (id) {
+		case 'advertised-matches-executed': {
+			legTurns.forEach((ft, i) => {
+				if (!ft.invoke) return;
+				const n = i + 1;
+				const t = res.turns.find((x) => x.turn === n);
+				if (!t) return;
+				const entry = t.catalog?.find((c) => c.name === ft.invoke!.command) ?? null;
+				if (!t.catalog) failures.push(`catalog-unobserved:T${n}`);
+				else if (!entry) failures.push(`not-advertised:${ft.invoke.command}:T${n}`);
+				else if (entry.hasInput !== (ft.invoke.argument !== ''))
+					failures.push(`argument-semantics:${ft.invoke.command}:T${n}`);
+				const mine = t.sentinels.filter((s) => s.source === ft.invoke!.command);
+				if (mine.length !== 1) failures.push(`sentinel-count:${mine.length}:T${n}`);
+				else if (mine[0].value !== ft.invoke.argument) failures.push(`sentinel-value:T${n}`);
+				else if (mine[0].server !== mcp.enabled) failures.push(`sentinel-server:T${n}`);
+			});
+			return verdict(
+				failures,
+				`${legTurns.filter((t) => t.invoke).length} invocations advertised with an input and executed once each`
+			);
+		}
+		case 'rule-applied': {
+			const rule = res.manifest.entries.find((e) => e.kind === 'rule' && e.selected);
+			if (!rule) failures.push('rule-provenance-absent');
+			observed.turns.forEach((t) => {
+				if (!t.reply.tokens?.[set.rule.token]) failures.push(`rule-token-missing:T${t.turn}`);
+			});
+			return verdict(
+				failures,
+				rule
+					? `${path.relative(res.manifest.root, rule.path)} sha256 ${rule.sha256.slice(0, 12)} applied on every turn`
+					: ''
+			);
+		}
+		case 'mcp-paths': {
+			const calls = events.filter((e) => e.event === 'call' && e.server === mcp.enabled);
+			const lineage = calls.filter((c) =>
+				starts(mcp.enabled).some(
+					(s) => s.pid === c.pid && s.nonce === res.manifest.nonce && s.ppid !== process.pid
+				)
+			);
+			if (!calls.length) failures.push(`enabled-not-called:${mcp.enabled}`);
+			else if (lineage.length !== calls.length)
+				failures.push(`call-without-lineage:${mcp.enabled}`);
+			if (starts(mcp.disabled).length) failures.push(`disabled-started:${mcp.disabled}`);
+			// At most one attempt per agent process: each native turn is one process, an ACP leg is one.
+			for (const name of [mcp.failing, mcp.oauth]) {
+				const s = starts(name);
+				const perTurn = res.turns.map((t) => s.filter((e) => e.turn === t.turn).length);
+				if (observed.route === 'native-headless' ? perTurn.some((k) => k > 1) : s.length > 1)
+					failures.push(`retried:${name}`);
+				if (events.some((e) => e.server === name && e.event === 'call'))
+					failures.push(`refused-server-called:${name}`);
+				if (!res.turns.some((t) => t.mentions.includes(name)))
+					failures.push(`refusal-not-visible:${name}`);
+			}
+			if (starts(mcp.oauth).some((e) => e.authEnv.length))
+				failures.push(`credential-offered:${mcp.oauth}`);
+			if (res.reaped.alive.length) failures.push(`mcp-child-unreaped:${res.reaped.alive.length}`);
+			return verdict(
+				failures,
+				`${calls.length} call(s) with lineage; ${res.reaped.pids.length} MCP child(ren) reaped`
+			);
+		}
+		case 'no-implicit-effect': {
+			const expected = legTurns
+				.filter((t) => t.invoke)
+				.map((t) => `${t.invoke!.command}|${t.invoke!.argument}`);
+			for (const s of all)
+				if (!expected.includes(`${s.source}|${s.value}`))
+					failures.push(
+						s.source === set.unselectedSkill || s.source === set.disabledSkill
+							? `unselected-resource-ran:${s.source}`
+							: `undeclared-sentinel:${s.source || 'unnamed'}`
+					);
+			const known = new Set(
+				res.manifest.entries.filter((e) => e.kind === 'mcp-server').map((e) => e.id.slice(4))
+			);
+			for (const e of events)
+				if (!known.has(e.server) || (e.nonce !== null && e.nonce !== res.manifest.nonce))
+					failures.push(`undeclared-server:${e.server || 'unnamed'}`);
+			for (const f of res.strayFiles) failures.push(`stray-file:${f}`);
+			for (const m of res.mutated) failures.push(`resource-mutated:${m}`);
+			for (const p of res.problems) failures.push(p);
+			return verdict(failures, `${all.length} sentinel(s), all declared; no stray file or change`);
+		}
+		case 'resume-trust-state': {
+			if (legTurns.length < 2) return verdict(['single-turn'], '');
+			const restricted: Array<[string, (n: number) => boolean]> = [
+				[`mcp:${mcp.disabled}`, (n) => !starts(mcp.disabled).some((e) => e.turn === n)],
+				[
+					`skill:${set.disabledSkill}`,
+					(n) =>
+						!res.turns
+							.find((t) => t.turn === n)
+							?.sentinels.some((s) => s.source === set.disabledSkill),
+				],
+				[
+					`mcp:${mcp.oauth}`,
+					(n) =>
+						!events.some(
+							(e) =>
+								e.turn === n &&
+								e.server === mcp.oauth &&
+								(e.event === 'call' || e.authEnv.length > 0)
+						),
+				],
+				[
+					`mcp:${mcp.failing}`,
+					(n) =>
+						!events.some((e) => e.turn === n && e.server === mcp.failing && e.event === 'call'),
+				],
+			];
+			for (const [rid, held] of restricted) {
+				if (!res.turns.some((t) => t.turn === 1)) break;
+				if (!held(1)) failures.push(`restricted-state-absent-T1:${rid}`);
+				else
+					for (const t of res.turns.filter((x) => x.turn > 1))
+						if (!held(t.turn)) failures.push(`re-enabled-after-resume:${rid}:T${t.turn}`);
+			}
+			return verdict(
+				failures,
+				`${restricted.length} restricted resources held across ${res.turns.length} turns`
+			);
+		}
+	}
+}
 
 /**
  * The child environment of a credentialed launch: the planned env with a
@@ -4542,6 +5320,25 @@ async function executePaidLeg(
 	fixture: PaidFixture,
 	plan: ReservationPlan
 ): Promise<PaidLegReceipt> {
+	const hold: { manifest: SyntheticResourceManifest | null } = { manifest: null };
+	try {
+		return await runPaidLeg(c, config, ctx, account, legName, fixture, plan, hold);
+	} finally {
+		// The account-home config is the one resource outside the leg's own directory.
+		if (hold.manifest) removeAccountResourceConfig(hold.manifest);
+	}
+}
+
+async function runPaidLeg(
+	c: QualificationCase,
+	config: QualificationConfig,
+	ctx: PaidExecutionContext,
+	account: 'A' | 'B',
+	legName: string | null,
+	fixture: PaidFixture,
+	plan: ReservationPlan,
+	hold: { manifest: SyntheticResourceManifest | null }
+): Promise<PaidLegReceipt> {
 	const { ledger } = ctx;
 	const receipt: PaidLegReceipt = {
 		leg: legName ?? 'main',
@@ -4562,6 +5359,7 @@ async function executePaidLeg(
 		spawned: 0,
 		paidRequests: 0,
 		remote: null,
+		resources: null,
 	};
 	const refuse = (id: string, detail: string, owner?: string) => {
 		receipt.reasons.push(paidReason(id, detail, owner));
@@ -4622,6 +5420,21 @@ async function executePaidLeg(
 		: resolveLaunchCredential(launch, config, account, ctx.resolveSecret);
 	if ('refused' in credential) return refuse(credential.refused, credential.detail);
 	const env = credential.env;
+	// A resource fixture's synthetic resources, materialized in owned roots before anything is reserved.
+	let observer: ReturnType<typeof createResourceObserver> | null = null;
+	if (fixture.resources) {
+		const made = materializeSyntheticResources(c, config, launch, fixture, receipt.leg);
+		if ('refused' in made)
+			return refuse(
+				made.refused,
+				made.detail,
+				made.refused === 'resources-ssh-unmaterialized' ? SSH_RESOURCE_LEGS_OWNER : 'GT1-11-11B1'
+			);
+		hold.manifest = made.manifest;
+		env.GROK_CONFIG_PATH = made.manifest.configPath;
+		observer = createResourceObserver(made.manifest, fixture.resources);
+		receipt.resources = observer.receipt;
+	}
 	for (const key of GROK_GATEWAY_ENV)
 		if (env[key]) {
 			let origin: string;
@@ -4638,12 +5451,14 @@ async function executePaidLeg(
 		return receipt;
 	}
 	receipt.launch = { credentialMode: launch.credentialMode, keys: report.keys };
-	const cwd = launch.expectation.home;
+	const home = launch.expectation.home;
+	// A resource leg runs in its synthetic project (where the selected rule lives).
+	const cwd = hold.manifest?.projectDir ?? home;
 	const graceMs = Math.max(1, Math.min(config.limits.cleanupSeconds, 5)) * 1000;
 	let launcher: LegLauncher;
 	let reverify: (() => Promise<SshVerification | null>) | null = null;
 	if (!ssh) {
-		if (!fs.existsSync(cwd) || !fs.statSync(cwd).isDirectory())
+		if (!fs.existsSync(home) || !fs.statSync(home).isDirectory())
 			return refuse('paid-home-absent', 'isolation.boundary.actualHome');
 		fs.mkdirSync(env.TMPDIR, { recursive: true, mode: 0o700 });
 		const real = fs.realpathSync(file);
@@ -4781,7 +5596,7 @@ async function executePaidLeg(
 			}
 			if (!admitTurn(n)) break;
 			const parser = new GrokOutputParser();
-			const reply = replyCollector(t.expect);
+			const reply = replyCollector(t.expect, t.alsoExpect);
 			const decoder = new StringDecoder('utf8');
 			let pending = '';
 			// One object, so the closure's writes are not narrowed away at the reads below.
@@ -4793,6 +5608,15 @@ async function executePaidLeg(
 				effort: null,
 			};
 			const onLine = (line: string) => {
+				if (observer) {
+					let raw: unknown = null;
+					try {
+						raw = JSON.parse(line);
+					} catch {
+						raw = null;
+					}
+					observer.observe(raw, line);
+				}
 				const ev = parser.parseJsonLine(line);
 				if (!ev) return;
 				if ((ev.type === 'result' || ev.type === 'error') && ev.terminal)
@@ -4808,7 +5632,7 @@ async function executePaidLeg(
 					}
 				}
 			};
-			const { result } = await runOfflineProbe(
+			const { result, stderrHead } = await runOfflineProbe(
 				`turn-${n}`,
 				spec,
 				argvFor(t.prompt),
@@ -4843,6 +5667,10 @@ async function executePaidLeg(
 				reply: reply.result(),
 				callsRecorded: callsDrawn,
 			});
+			if (observer) {
+				observer.observeText(stderrHead);
+				observer.endTurn(n);
+			}
 			if (neverRan) {
 				receipt.reasons.push(paidReason('paid-spawn-failed', result.spawnError ?? ''));
 				break;
@@ -4883,6 +5711,7 @@ async function executePaidLeg(
 						turnMs,
 						admitTurn,
 						calls: () => callsDrawn,
+						observe: observer,
 					});
 		receipt.turns = run.turns;
 		receipt.spawned = run.spawned;
@@ -4947,6 +5776,8 @@ async function executePaidLeg(
 	}
 	if (receipt.binary.sha256After !== config.binary.sha256)
 		receipt.reasons.push(paidReason('binary-changed-during-leg', 'binary.path'));
+	// Every child of the leg has been stopped: reaping, stray files and changed resources.
+	if (observer) await observer.finish(graceMs);
 	receipt.assertions = evaluatePaidAssertions(fixture, {
 		route: c.route,
 		turns: receipt.turns,
@@ -4958,6 +5789,7 @@ async function executePaidLeg(
 		gateways: receipt.gateways,
 		selectedGateways: Object.keys(config.selection?.gateways ?? {}),
 		approvedEndpoints: config.allowedEndpoints,
+		resources: receipt.resources,
 	});
 	receipt.status =
 		receipt.spawned === 0
@@ -4991,6 +5823,11 @@ async function runAcpPaidTurns(args: {
 	turnMs: () => number;
 	admitTurn: (n: number) => boolean;
 	calls: () => Record<BillableCallKind, number>;
+	/** A resource leg's observer: every agent notification of the session, and each turn's end. */
+	observe?: {
+		observe(raw: unknown, text: string): void;
+		endTurn(turn: number): void;
+	} | null;
 }): Promise<{
 	turns: PaidTurnResult[];
 	reasons: AdmissionReason[];
@@ -5035,6 +5872,14 @@ async function runAcpPaidTurns(args: {
 		),
 		onNotification: (message) => {
 			const params = (message.params ?? {}) as Record<string, unknown>;
+			// The agent's own frames of this session (or before session/new answered), never the prompt echo.
+			const echo = ((params.update ?? {}) as Record<string, unknown>).sessionUpdate;
+			if (
+				args.observe &&
+				echo !== 'user_message_chunk' &&
+				(params.sessionId === undefined || !sessionId || params.sessionId === sessionId)
+			)
+				args.observe.observe(message, JSON.stringify(message));
 			if (message.method !== 'session/update' || !sessionId || params.sessionId !== sessionId)
 				return;
 			const update = (params.update ?? {}) as Record<string, unknown>;
@@ -5144,7 +5989,7 @@ async function runAcpPaidTurns(args: {
 		const t = args.turns[i];
 		if (!args.admitTurn(n)) break;
 		if (i > 0) window = { out: streamDigest(), err: streamDigest(), started: Date.now() };
-		reply = replyCollector(t.expect);
+		reply = replyCollector(t.expect, t.alsoExpect);
 		let stopReason: unknown = null;
 		let failure: string | null = null;
 		let timedOut = false;
@@ -5179,6 +6024,7 @@ async function runAcpPaidTurns(args: {
 			usage: { costUsd: null, status: 'absent' },
 			callsRecorded: args.calls(),
 		});
+		args.observe?.endTurn(n);
 		if (failure || unbounded) {
 			uncertainWhy = timedOut
 				? 'turn-timeout'
@@ -5408,6 +6254,7 @@ export async function executePaidCase(
 		spawned: 0,
 		paidRequests: 0,
 		remote: null,
+		resources: null,
 	});
 	if (reasons.length || !fixture) return accounts.map(refused);
 	// What each owned home listed before the legs: the colliding-ID verdict judges only what they added.
