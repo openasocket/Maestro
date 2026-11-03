@@ -271,7 +271,7 @@ Leave **Model** and **Reasoning Effort** empty to use Grok's own defaults. Maest
 - **Full Access** runs headless (`--always-approve`). Grok approves every tool call itself.
 - **Read-Only** runs headless in plan mode with every shell command denied (`--permission-mode plan --deny 'Bash(*)'`). The model can still read and search files. How completely Grok contains writes in this mode has not been qualified.
 - **Standard** runs through `grok agent stdio` (the Agent Client Protocol). Each tool approval Grok asks for appears as an in-app prompt on that tab; only an explicit **Allow** approves it, and Deny, a timeout, Stop, or the process exiting all deny. Standard mode is local only: a Standard-mode Grok agent on an SSH remote is refused, so run remote Grok agents in Full Access or Read-Only.
-- Grok's headless mode has no way to ask you a question mid-turn, so ask-back questions only work in Standard mode.
+- Grok cannot answer ask-back questions in Maestro yet, on either route. A headless turn has no channel for a question, and a question raised over the ACP route is shown as an unavailable notice rather than a prompt you can answer.
 
 ### Prompts, images and resume
 
