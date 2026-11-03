@@ -4180,6 +4180,30 @@
 			"acceptanceRun": false,
 			"status": "not-certified",
 			"affectedRows": ["P47", "P48"]
+		},
+		"phase13-verification": {
+			"path": "Plans/grok-tier1/evidence/13.md#gt1-13-15-verify-phase-13-re-verification",
+			"sourceCommit": "742004ac84290cea9810c475f7beb446dd7e3469",
+			"provenance": "deterministic-reverification",
+			"acceptanceRun": false,
+			"status": "not-certified",
+			"affectedRows": [
+				"C-supportsStandardPermissionMode",
+				"P34",
+				"C-usesCombinedContextWindow",
+				"C-supportsReadOnlyMode",
+				"C-supportsAppendSystemPrompt",
+				"C-supportsGroupChatModeration",
+				"C-supportsProjectMemory"
+			]
+		},
+		"phase13-delivery": {
+			"path": "Plans/grok-tier1/HANDOFF.md#derived-readiness",
+			"sourceCommit": "742004ac84290cea9810c475f7beb446dd7e3469",
+			"provenance": "delivery-reconciliation",
+			"acceptanceRun": false,
+			"status": "not-certified",
+			"affectedRows": ["P47", "P48"]
 		}
 	},
 	"sourceCatalog": {
@@ -5314,6 +5338,30 @@
 		"F283": {
 			"path": "CLAUDE-AGENTS.md",
 			"sha256": "6cce94af6856f748d70011b16b8dfed09c5dba8d4d3b8675fac3b0c1cb73c2a5"
+		},
+		"F284": {
+			"path": "src/__tests__/fixtures/grok/help-1.0.70/grok--help.txt",
+			"sha256": "90e7432419efc161095f0c5f616b8f11324357136eb81c05dc726579373de5c4"
+		},
+		"F285": {
+			"path": "src/__tests__/fixtures/grok/help-1.0.70/grok-help.txt",
+			"sha256": "11ada6059790901c18167931472c7f23c02e4eb9a19e643701d52212bd9f77b3"
+		},
+		"F286": {
+			"path": "src/__tests__/fixtures/grok/help-1.0.70/grok-agent--help.txt",
+			"sha256": "756bb072a5809c8939d2fba7d7f90153cd87c09f25b74e1ef042b6a68729d9c7"
+		},
+		"F287": {
+			"path": "src/__tests__/fixtures/grok/help-1.0.70/grok-agent-stdio--help.txt",
+			"sha256": "4af7d221bab85165eaab9a453713007435fec29dcd003f5e3a5fcfe76c47c0b4"
+		},
+		"F288": {
+			"path": "src/__tests__/fixtures/grok/help-1.0.70/version.txt",
+			"sha256": "a6d1a7b05b0bfed71026e3faa86ad980272559dc05babc849d092bf6a5b0d161"
+		},
+		"F289": {
+			"path": "src/shared/maestro-lib/providers/grok-flag-ledger.ts",
+			"sha256": "fac517ccc38c226abdf1ae2104b0214de3680abfb53087e357512d7c6eae21e8"
 		}
 	},
 	"rows": [
@@ -14785,7 +14833,8 @@
 				"GT1-07-11 verification: ACP permission requests route through the desktop consent port and the portable ManagedTurnAuthority.effects; unmanaged portable standard turns refuse consent-port. Preventive effect classification is phase09. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-10-16 verification at d99faa724: phase 10 groups interaction pass 137/137; cli pass 81/81; web pass 427/427; liteNative not-run. Parity against the comparator baseline: consent relay answers only the owning request on desktop, web-desktop and Lite bridges; gap: positive ask-back answered by a person stays unsupported (acp-question-negotiation) while Claude Code answers its question tool; headless questions settle as an explicit capability gap and only permission:respond is a consent reply. Fixtures, fake processes and generated plans only; no binary version tested. Phase 11 cases GT1-11-12, GT1-11-07, GT1-11-11, GT1-11-11C linked, not run. See Plans/grok-tier1/evidence/10.md GT1-10-16.",
 				"GT1-11-12 verification at 4ef249699: native negative policy cases (denied writes, outside-root and symlink access, shell, network and in-process egress, MCP/meta-tools/subagents/hooks, read-only/no-tools violations, unknown effects, stale approvals, revocation, prohibited model routes, endpoint substitution, custody/enrollment/attribution) not-run (run-state live prerequisites absent; case logic missing, A11-F29). Live stays not-run. See Plans/grok-tier1/evidence/11-policy-native.md.",
-				"GT1-13-01 (acaf7fd12c1abd8235f914c6f35049e55c39c689): Standard is reachable from ordinary surfaces (capability declared); permission requests go to the desktop consent session. Positive ask-back stays unsupported and the Grok Standard tooltip says so (evidence/13.md)."
+				"GT1-13-01 (acaf7fd12c1abd8235f914c6f35049e55c39c689): Standard is reachable from ordinary surfaces (capability declared); permission requests go to the desktop consent session. Positive ask-back stays unsupported and the Grok Standard tooltip says so (evidence/13.md).",
+				"GT1-13-15 VERIFY (742004ac8): Standard reaches GrokAcpSpawner locally and is refused on SSH before any probe (acp-remote-route); the Standard-mode docs disagreement the audit found is closed (flag, tooltip and docs agree). Ask-back stays unanswerable (acp-question-negotiation:P34 open). Lanes stay not-run."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -14811,7 +14860,8 @@
 				"phase09VerificationPath": "Plans/grok-tier1/evidence/09.md",
 				"phase09BlockersPath": "Plans/grok-tier1/evidence/09-blockers.json",
 				"phase10DeterministicEvidenceRef": "phase10-verification",
-				"phase10ReconciliationRef": "phase10-reconciliation"
+				"phase10ReconciliationRef": "phase10-reconciliation",
+				"phase13EvidenceRef": "phase13-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18032,9 +18082,10 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"observation": "Grok and Antigravity beta; Claude/Codex absent. Do not remove Grok until evidence-led tier1Ready.",
-				"implementationEvidenceRef": "phase12-delivery",
+				"implementationEvidenceRef": "phase13-delivery",
 				"phase12EvidenceRef": "phase12-delivery",
-				"decision": "beta-preserved-not-certified"
+				"decision": "beta-preserved-not-certified",
+				"phase13EvidenceRef": "phase13-delivery"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18121,9 +18172,10 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"implementationEvidenceRef": "phase12-delivery",
+				"implementationEvidenceRef": "phase13-delivery",
 				"phase12EvidenceRef": "phase12-delivery",
-				"decision": "handoff-delivered-not-certified"
+				"decision": "handoff-delivered-not-certified",
+				"phase13EvidenceRef": "phase13-delivery"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18524,7 +18576,8 @@
 				"GT1-11-14C at dd53218a8: rerun through production registry selection (production digest 068efe87eb60 unchanged, no candidate override on this row's cases); focused capability and consumer suites 20 files 1811/1811; every native case not-run (run-state lacks 17 live prerequisites, 0 admitted, 0 spawned). Live proof moves to GT1-12-06.",
 				"GT1-13-05 (7766a8e437dc77094f3f0c4b1df25c3f94c7123f): --sandbox decided offline and left unwired. grok 1.0.70 writes docs/user-guide/18-sandbox.md into GROK_HOME naming the built-in profiles off, workspace, devbox, read-only, strict (read-only: read everywhere, write only GROK_HOME and temp dirs, child network blocked on Linux only); an isolated `grok --sandbox read-only inspect --json` logged ProfileApplied enforced:true restrict_network:true on macos/seatbelt, an unknown name refuses to start, and inspect itself reports no sandbox field. Not appended to readOnlyArgs: a session's profile is fixed for life and a resume naming another is refused, and saved sessions record sandbox_profile \"off\", so a read-only turn on an existing tab would fail and a full turn on a read-only session would stay write-confined; a built-in profile that cannot apply also fails open. Recorded in GROK_CAPABILITY_EVIDENCE.flagDecisions['--sandbox']; env.ts unchanged (the managed ceiling reads readOnlyArgs). Settling probe: a live `grok --resume <off-session> --sandbox read-only` turn, plus a Maestro per-session profile record before any wiring. The readiness gate external:grok-readonly-cli-enforcement-unqualified stays open; not promoted.",
 				"GT1-13-07 (96ad762caee8e81d90a0a8fcfd829440949aaedf): the read-only argv (--permission-mode plan, --deny) is asserted present in the 1.0.70 help fixture with plan among the --permission-mode values, and GROK_FLAG_LEDGER records --sandbox unused (GT1-13-05). Help presence is not containment; the readiness gate stays open.",
-				"GT1-13-10 (d5a5f815ca637e023efb398e40b3584b089dd508): inherited vendor configuration. Every Maestro-owned Grok launch now sets grok's ten documented compat overrides false (GROK_COMPAT_ISOLATION_ENV_VARS as defaultEnvVars and readOnlyEnvOverrides), and grok inspect --json then reports those cells off (source env) with Claude skills and hooks disabled. Claude's permission files are NOT isolable on 1.0.70: ~/.claude/settings.local.json stays a permission source with every cell off, and no cell, env var or config key reaches it. grokReadOnlyIsolationProblem() (src/main/agents/grok-inspect-probe.ts) refuses the read-only composition by naming each inherited file on an observed report, but runProviderProbe refuses Grok probes, so no launch consults it yet. The read-only containment claim is unchanged; pins GT1-13-11; not promoted."
+				"GT1-13-10 (d5a5f815ca637e023efb398e40b3584b089dd508): inherited vendor configuration. Every Maestro-owned Grok launch now sets grok's ten documented compat overrides false (GROK_COMPAT_ISOLATION_ENV_VARS as defaultEnvVars and readOnlyEnvOverrides), and grok inspect --json then reports those cells off (source env) with Claude skills and hooks disabled. Claude's permission files are NOT isolable on 1.0.70: ~/.claude/settings.local.json stays a permission source with every cell off, and no cell, env var or config key reaches it. grokReadOnlyIsolationProblem() (src/main/agents/grok-inspect-probe.ts) refuses the read-only composition by naming each inherited file on an observed report, but runProviderProbe refuses Grok probes, so no launch consults it yet. The read-only containment claim is unchanged; pins GT1-13-11; not promoted.",
+				"GT1-13-15 VERIFY (742004ac8): --sandbox read-only decided and left unwired (7766a8e43, session-fixed profile); the ten compat cells are isolated on every launch (d5a5f815c, re-probed: 10 cells env-disabled, 12 Claude skills disabled), but grok 1.0.70 still loads ~/.claude/settings.local.json permission rules with no native off switch, and probeGrokInspect answers probe-refused until runProviderProbe admits a Grok probe. Needs the real binary under a qualified probe lifetime. Lanes stay not-run."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -18533,7 +18586,9 @@
 			"currentEvidence": {
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
-				"evidenceRef": "phase01-audit"
+				"evidenceRef": "phase01-audit",
+				"phase13EvidenceRef": "phase13-verification",
+				"phase13HelpFixtureSources": ["F284", "F285", "F286", "F287", "F288", "F289"]
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -18698,7 +18753,8 @@
 				"The standard-permission flag remains omitted. The shared ACP request port has passing fail-closed synthetic coverage, but production consent channels and preventive native effect coverage remain unqualified; output-only headless streams cannot answer approvals.",
 				"GT1-07-11 verification: Standard mode now reaches ACP with real consent channels on desktop; portable runs need ManagedTurnAuthority.effects. Not qualified natively. Phase07 focused suites at 1cb47e62b: 44 files, 3224 passed, 16 failed (all pre-existing CLI agent-spawner cases), phase07-verification. Native/live qualification is not-run; whole-row status is not promoted.",
 				"GT1-13-01 (acaf7fd12c1abd8235f914c6f35049e55c39c689): the flag is now declared true with a GROK_CAPABILITY_EVIDENCE.retained basis, so the composer offers Standard for a local Grok tab and the plan reaches GrokAcpSpawner; a Standard turn on an SSH remote is refused in handle-spawn before the launch-scope probe (acp-remote-route). Deterministic pins are GT1-13-02; native consent proof and live evidence stay not-run, so the row is not promoted (evidence/13.md).",
-				"GT1-13-02: ComposerOptionsSheet, ToolbarControls, useSessionCrud, AgentConfigPanel, process.test.ts (SSH refused before spawn, acp-remote-route) and process-manager.test.ts (local standard routed to GrokAcpSpawner) pin the declaration; renderer and handler cases fail on ef0fa1846, the sink routing pin predates it (evidence/13.md). Deterministic status is reconciled by GT1-13-15."
+				"GT1-13-02: ComposerOptionsSheet, ToolbarControls, useSessionCrud, AgentConfigPanel, process.test.ts (SSH refused before spawn, acp-remote-route) and process-manager.test.ts (local standard routed to GrokAcpSpawner) pin the declaration; renderer and handler cases fail on ef0fa1846, the sink routing pin predates it (evidence/13.md). Deterministic status is reconciled by GT1-13-15.",
+				"GT1-13-15 VERIFY (742004ac8): the declaration (acaf7fd12) and its pins (8bbb68460) re-verified after the base merge 742004ac8; phase-13 touched suites 1713/1713 in 18 files; the implementation claim now names phase13-verification. Static and deterministic lanes stay not-run (no acceptance run); native consent and live stay not-run."
 			],
 			"implementation": "implemented",
 			"static": "not-run",
@@ -18713,7 +18769,9 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase07DeterministicEvidenceRef": "phase07-verification",
-				"phase07ReconciliationRef": "phase07-reconciliation"
+				"phase07ReconciliationRef": "phase07-reconciliation",
+				"phase13EvidenceRef": "phase13-verification",
+				"implementationEvidenceRef": "phase13-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -22525,7 +22583,8 @@
 				"GT1-08-21 verification: phase 08 packets groupChat, cue; verdicts GT1-08-12 participant/synthesis pass; GT1-08-12 moderation refused-by-capability; GT1-08-12 pass. Parity against the comparator baseline: gap: rejected while Claude Code and Codex are accepted (release blocker). Synthetic records through real consumers over fake processes; no binary version tested. Phase 11 live cases GT1-11-11, GT1-11-11E linked, not run. See Plans/grok-tier1/evidence/08.md GT1-08-21.",
 				"GT1-11-11E verification at 4abddb11a: native workflow-consumer cases (task/document/headless/goal Auto Run, Cue desktop/headless dispatch, group chat participant/moderator continuation, Symphony, Pianola dispatch/supervision/learning) not-run (run-state live prerequisites absent; case logic missing, A11-F22). Live stays not-run. See Plans/grok-tier1/evidence/11-native-workflows.md.",
 				"GT1-11-14C at dd53218a8: A11-F43, the E08/E09 receipts still carry a candidate override for this flag after the registry was finalized false; no executor reads it (production selection held), retirement owned by GT1-11-14C1/14C2.",
-				"GT1-13-08 (a681137ce1ba74eb28c003a842f153b2c72d01ff): the picker-visibility gap in the first limitation is closed. GroupChatModal lists a detected provider whose capabilities declare supportsGroupChatModeration false (Grok) as a disabled option with the reason and never selects it (auto-select, fallback, submit); maestro-cli group-chat start --moderator grok refuses with exit 1 before the bridge is contacted. Modal, CLI and storage share groupChatModeratorRefusal() in src/shared/group-chat-types.ts. The flag itself stays false; Grok moderation remains unsupported. Pins GT1-13-09; not promoted."
+				"GT1-13-08 (a681137ce1ba74eb28c003a842f153b2c72d01ff): the picker-visibility gap in the first limitation is closed. GroupChatModal lists a detected provider whose capabilities declare supportsGroupChatModeration false (Grok) as a disabled option with the reason and never selects it (auto-select, fallback, submit); maestro-cli group-chat start --moderator grok refuses with exit 1 before the bridge is contacted. Modal, CLI and storage share groupChatModeratorRefusal() in src/shared/group-chat-types.ts. The flag itself stays false; Grok moderation remains unsupported. Pins GT1-13-09; not promoted.",
+				"GT1-13-15 VERIFY (742004ac8): the modal no longer offers grok as moderator and the CLI refuses before spawn (a681137ce, pinned by 3041e05a4); the flag stays omitted. Lanes stay not-run."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22536,7 +22595,8 @@
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
 				"phase08DeterministicEvidenceRef": "phase08-verification",
-				"phase08ReconciliationRef": "phase08-reconciliation"
+				"phase08ReconciliationRef": "phase08-reconciliation",
+				"phase13EvidenceRef": "phase13-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -22892,7 +22952,8 @@
 				"GT1-11-11F verification at 72630fa55: native accounting cases (E06 accounting legs usage-capture, child-usage, fault-retry and consumer legs turn-recorder, desktop-recording, stats-readers, cue-attribution, context-window, quota-unavailable) not-run (run-state live prerequisites absent). Live stays not-run. See Plans/grok-tier1/evidence/11-native-accounting.md.",
 				"GT1-13-03 (669766008bf386214c010a1efb0df960812d597a): readGrokModelsCache in src/main/agents/detector.ts reads the account's $GROK_HOME/models_cache.json (ids, info.context_window, reasoning_efforts values only; never identity, auth_method, origin or the per-model api_key/env_key/api_base_url) into AgentCapabilitiesSnapshot.accountModelContextWindows keyed by resolveAgentAccountKey, and getContextWindowForAgent returns it for grok only when the selection names that account and the configured (or observed default) model, else 0. No caller passes a selection yet, so the gauge stays unknown until GT1-13-03A; usesCombinedContextWindow stays false and the row is not promoted (evidence/13.md).",
 				"GT1-13-03A (33dcaf23a6cabaeb6e6ca0944ebd8d7b060aa247): resolveGrokContextSelection in src/renderer/utils/contextUsage.ts names the tab, agent or provider-level model and the account key from effectiveAgentCustomEnvVars plus resolveAgentAccountKey; buildContextTimelinePoint passes it to getContextWindowForAgent, so a local Grok tab whose account cache names its model gets a window and a gauge percentage, while another account, an uncached model, a remote agent, or unsettled provider inputs stay 0. recordTurn, CLI send, getAgentContextWindow and group chat pass no selection and keep 0. Pinned by GT1-13-04; not promoted.",
-				"GT1-13-04 (aea8215b7c6a5370a36235b7bd6eb0a0c6ee5270): pinned with a sanitized grok 1.0.70 models_cache.json fixture (src/__tests__/fixtures/grok/models_cache-1.0.70.json, identity/auth/origin/keys null): detector reader and discovery cases (cache menus without an owned observation, no window for an unlisted model, missing/malformed file unknown with a debug log and the account entry dropped, ACP observation wins the menus), getContextWindowForAgent scoping cases, and a contextUsage 20 percent case; the new cases fail with the sources at 8bbb68460. Deterministic only, no live run; not promoted."
+				"GT1-13-04 (aea8215b7c6a5370a36235b7bd6eb0a0c6ee5270): pinned with a sanitized grok 1.0.70 models_cache.json fixture (src/__tests__/fixtures/grok/models_cache-1.0.70.json, identity/auth/origin/keys null): detector reader and discovery cases (cache menus without an owned observation, no window for an unlisted model, missing/malformed file unknown with a debug log and the account entry dropped, ACP observation wins the menus), getContextWindowForAgent scoping cases, and a contextUsage 20 percent case; the new cases fail with the sources at 8bbb68460. Deterministic only, no live run; not promoted.",
+				"GT1-13-15 VERIFY (742004ac8): the account models_cache.json window (669766008, 33dcaf23a, pinned by aea8215b7 with the sanitized 1.0.70 fixture) re-verified; DEFAULT_CONTEXT_WINDOWS.grok stays 0 as the unknown fallback. Lanes stay not-run."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -22905,7 +22966,8 @@
 				"phase03EvidenceRef": "phase03-reconciliation",
 				"phase03DeterministicEvidenceRef": "phase03-reverification",
 				"phase10DeterministicEvidenceRef": "phase10-verification",
-				"phase10ReconciliationRef": "phase10-reconciliation"
+				"phase10ReconciliationRef": "phase10-reconciliation",
+				"phase13EvidenceRef": "phase13-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23043,7 +23105,8 @@
 			"limitations": [
 				"Native append/rules remain disabled. Canonical first-turn embedding/resume skipping and tab-naming artifact handoff have scoped deterministic evidence. Native prompt compliance and cross-attempt utility retries remain phase11 and GT1-08-14E/14F/21 respectively.",
 				"GT1-13-06 (995700bdb1c2085263f7b40d2a7c4d055e950773): --rules decided unused, so supportsAppendSystemPrompt stays false and the embed-then-skip-on-resume delivery is unchanged. Its semantics match the planner (grok 1.0.70 user guide 12-project-rules.md: appended in a human_rules block, never replacing; prompt_context.json stores no rules). The planner does not match: it emits the literal --append-system-prompt and, on a local Windows host, --append-system-prompt-file, which grok has no form of; grok agent stdio (the ACP route of Standard turns) takes no --rules; and the capability is per provider, not per route. --json-schema is unused and a utility-turn candidate only (it implies --output-format json; candidate sites generateTabName and the Quick Chat route question through groomContext). --system-prompt-override is unused on purpose (it replaces grok's prompt verbatim). Recorded in GROK_CAPABILITY_EVIDENCE.flagDecisions; not promoted.",
-				"GT1-13-07 (96ad762caee8e81d90a0a8fcfd829440949aaedf): GROK_FLAG_LEDGER records --rules, --json-schema and --system-prompt-override as unused against the version-stamped 1.0.70 help fixture (src/__tests__/fixtures/grok/help-1.0.70, scripts/refresh-grok-help-fixture.mjs); grok-help-fixture.test.ts fails if a release adds an undecided option or drops an emitted flag. Deterministic only; not promoted."
+				"GT1-13-07 (96ad762caee8e81d90a0a8fcfd829440949aaedf): GROK_FLAG_LEDGER records --rules, --json-schema and --system-prompt-override as unused against the version-stamped 1.0.70 help fixture (src/__tests__/fixtures/grok/help-1.0.70, scripts/refresh-grok-help-fixture.mjs); grok-help-fixture.test.ts fails if a release adds an undecided option or drops an emitted flag. Deterministic only; not promoted.",
+				"GT1-13-15 VERIFY (742004ac8): --rules (alias of --append-system-prompt), --json-schema and --system-prompt-override decided unused (995700bdb); the 1.0.70 help fixture and flag ledger (96ad762ca, sources F284, F285, F286, F287, F288, F289) pin the decision. Lanes stay not-run."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23053,7 +23116,9 @@
 				"provenance": "source-supported",
 				"sourceRevisionRef": "sourceCommit",
 				"evidenceRef": "phase01-audit",
-				"phase02EvidenceRef": "phase02-reconciliation"
+				"phase02EvidenceRef": "phase02-reconciliation",
+				"phase13EvidenceRef": "phase13-verification",
+				"phase13HelpFixtureSources": ["F284", "F285", "F286", "F287", "F288", "F289"]
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -23166,9 +23231,9 @@
 				"src/main/ipc/handlers/memory.ts"
 			],
 			"ownerTasks": {
-				"implementation": ["GT1-05-07", "GT1-06-06", "GT1-11-14A"],
-				"test": ["GT1-05-08", "GT1-06-08", "GT1-11-14B"],
-				"verification": ["GT1-05-13", "GT1-06-12", "GT1-11-14C", "GT1-11-11B"],
+				"implementation": ["GT1-05-07", "GT1-06-06", "GT1-11-14A", "GT1-13-12"],
+				"test": ["GT1-05-08", "GT1-06-08", "GT1-11-14B", "GT1-13-13"],
+				"verification": ["GT1-05-13", "GT1-06-12", "GT1-11-14C", "GT1-11-11B", "GT1-13-15"],
 				"live": ["GT1-11-13", "GT1-11-11B"],
 				"finalAcceptance": ["GT1-12-06"]
 			},
@@ -23180,7 +23245,9 @@
 				"Distinguish Grok native rules/memory from Maestro bound project knowledge; false flag is not universal memory absence.",
 				"GT1-05-07 provides a truthful native-memory refusal and preserves explicit Maestro-bound knowledge with configured-host, entry-path and redacted-error guards; native discovery/binding and deterministic/live qualification remain pending.",
 				"GT1-05-14 reconciliation: phase05 deterministic suites pass at 4e89e0ad8 (43 files, 3331 tests, phase05-reverification). Scoped outcomes are in phase05Reconciliation.outcomes; unsupported operations stay unsupported, native/live qualification is not-run and this whole row is not promoted.",
-				"GT1-11-13 verification at 9ffa9b3e7: native cross-provider translation (per-provider admission, staged-session resume, fact recall, tool/resource resolution, rule/skill/memory discovery, repeated Grok-Claude-Grok and Grok-Codex-Grok round trips, apply interruption and rollback) not-run for all 8 declared direction/version pairs (run-state live and cross-provider prerequisites absent; case logic missing, A11-F31). Directions stay unverified. See Plans/grok-tier1/evidence/11-translation-native.md."
+				"GT1-11-13 verification at 9ffa9b3e7: native cross-provider translation (per-provider admission, staged-session resume, fact recall, tool/resource resolution, rule/skill/memory discovery, repeated Grok-Claude-Grok and Grok-Codex-Grok round trips, apply interruption and rollback) not-run for all 8 declared direction/version pairs (run-state live and cross-provider prerequisites absent; case logic missing, A11-F31). Directions stay unverified. See Plans/grok-tier1/evidence/11-translation-native.md.",
+				"GT1-13-12 (355e4a50c): parseGrokPromptContext() reads $GROK_HOME/sessions/<id>/prompt_context.json (memory_v2_enabled, global and workspace memory paths, agents_md_files) into nativeMetadata.nativeMemory; GT1-13-13 (99d59423f) pins it with a 1.0.70 fixture. Read-only metadata; Maestro does not write Grok memory.",
+				"GT1-13-15 VERIFY (742004ac8): prompt_context.json native memory facts are read into GrokSessionStorage nativeMetadata.nativeMemory (355e4a50c, pinned by 99d59423f); supportsProjectMemory stays unset by decision. Lanes stay not-run."
 			],
 			"implementation": "pending",
 			"static": "not-run",
@@ -23193,7 +23260,8 @@
 				"phase05NativeMemoryBoundaryEvidenceRef": "phase05-native-memory-boundary",
 				"phase05MemoryBoundaryTestEvidenceRef": "phase05-memory-boundary-tests",
 				"phase05DeterministicEvidenceRef": "phase05-reverification",
-				"phase05ReconciliationRef": "phase05-reconciliation"
+				"phase05ReconciliationRef": "phase05-reconciliation",
+				"phase13EvidenceRef": "phase13-verification"
 			},
 			"evidenceApplicability": {
 				"static": {
@@ -46266,5 +46334,102 @@
 		},
 		"outcome": "not-certified",
 		"note": "implementation is implemented for both delivery rows (the decision and the report exist at the current fingerprint); no lane passes because no acceptance run exists, and deliveryComplete stays false because tier1Ready is false. Nothing is waived."
+	},
+	"phase13Verification": {
+		"taskId": "GT1-13-15",
+		"recordedAt": "2026-11-03",
+		"sourceCommit": "742004ac84290cea9810c475f7beb446dd7e3469",
+		"evidenceRef": "phase13-verification",
+		"deliveryEvidenceRef": "phase13-delivery",
+		"rows": [
+			"C-supportsStandardPermissionMode",
+			"P34",
+			"C-usesCombinedContextWindow",
+			"C-supportsReadOnlyMode",
+			"C-supportsAppendSystemPrompt",
+			"C-supportsGroupChatModeration",
+			"C-supportsProjectMemory"
+		],
+		"helpFixtureSources": ["F284", "F285", "F286", "F287", "F288", "F289"],
+		"checks": {
+			"repository": {
+				"receipt": "Plans/grok-tier1/evidence/12-checks.json",
+				"command": "node Working/gt1-13-15/run.mjs",
+				"results": {
+					"validator": 0,
+					"lint": 2,
+					"lint-eslint": 0,
+					"docs-verify": 0,
+					"unit": 1,
+					"integration": 1,
+					"build-main": 0,
+					"build-renderer": 0,
+					"build-web-desktop": 0,
+					"build-cli": 0,
+					"build-maestro-lib": 0
+				}
+			},
+			"static": {
+				"tscLint": 2,
+				"tscMain": 0,
+				"tscCli": 0,
+				"eslint": 0,
+				"prettier": 0,
+				"docsVerify": 0,
+				"staticSuites": {
+					"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/agents/agent-completeness.test.ts src/__tests__/main/agents/capabilities.test.ts src/__tests__/shared/maestro-lib/managed/contracts.test.ts src/__tests__/renderer/services/contextGroomer.test.ts src/__tests__/main/ipc/handlers/agents.test.ts src/__tests__/renderer/hooks/agent/useKnownAuthDirs.test.ts src/__tests__/main/agents/path-prober.test.ts src/__tests__/renderer/components/Settings/searchableSettings.test.ts",
+					"exit": 0,
+					"files": 8,
+					"passed": 572,
+					"total": 572,
+					"failed": 0
+				}
+			},
+			"deterministic": {
+				"phase13Touched": {
+					"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/cli/commands/group-chat.test.ts src/__tests__/main/agents/capabilities.test.ts src/__tests__/main/agents/detector.test.ts src/__tests__/main/agents/grok-inspect-probe.test.ts src/__tests__/main/ipc/handlers/process.test.ts src/__tests__/main/process-manager.test.ts src/__tests__/main/storage/grok-session-storage.test.ts src/__tests__/main/utils/agent-args.test.ts src/__tests__/renderer/components/GroupChatModals.test.tsx src/__tests__/renderer/components/InputArea/ComposerOptionsSheet.test.tsx src/__tests__/renderer/components/InputArea/components/ToolbarControls.test.tsx src/__tests__/renderer/components/shared/AgentConfigPanel.test.tsx src/__tests__/renderer/hooks/useSessionCrud.test.ts src/__tests__/renderer/utils/contextUsage.test.ts src/__tests__/shared/agentConstants.test.ts src/__tests__/shared/maestro-lib/launch/launch-plan-secrets.test.ts src/__tests__/shared/maestro-lib/launch/launch-plan.test.ts src/__tests__/shared/maestro-lib/providers/grok-help-fixture.test.ts",
+					"exit": 0,
+					"files": 18,
+					"passed": 1713,
+					"total": 1713,
+					"failed": 0
+				},
+				"contextTranslation": {
+					"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/provider-translation-service.test.ts src/__tests__/shared/maestro-lib/translation-adapters.test.ts src/__tests__/shared/maestro-lib/translation-native.test.ts src/__tests__/main/utils/context-groomer.test.ts src/__tests__/main/ipc/handlers/context-groom.test.ts src/__tests__/renderer/services/providerTranslation.test.ts src/__tests__/renderer/services/contextCompaction.test.ts src/__tests__/renderer/utils/contextExtractor.test.ts src/__tests__/renderer/utils/contextWindowResolver.test.ts",
+					"exit": 0,
+					"files": 9,
+					"passed": 297,
+					"total": 297,
+					"failed": 0
+				},
+				"pass2Workflows": {
+					"command": "node node_modules/vitest/vitest.mjs run --reporter=json src/__tests__/main/group-chat/output-parser.test.ts src/shared/maestro-lib/groupchat/__tests__/turn-end.test.ts src/__tests__/cli/services/agent-spawner.test.ts src/__tests__/shared/maestro-lib/grok/acp-turn.test.ts src/__tests__/shared/maestro-lib/turns/run-agent-turn.test.ts",
+					"exit": 0,
+					"files": 5,
+					"passed": 642,
+					"total": 642,
+					"failed": 0
+				}
+			},
+			"inspectProbe": {
+				"command": "node Working/gt1-13-10/probe.mjs before|after (ten GROK_{CLAUDE,CURSOR}_*_ENABLED=false)",
+				"before": {
+					"exit": 0,
+					"compatCellsDisabled": 0,
+					"claudeSkills": "12 enabled",
+					"permissionSources": ["<HOME>/.claude/settings.local.json (settings)"],
+					"rulesLoaded": 3
+				},
+				"after": {
+					"exit": 0,
+					"compatCellsDisabled": 10,
+					"claudeSkills": "12 disabled",
+					"permissionSources": ["<HOME>/.claude/settings.local.json (settings)"],
+					"rulesLoaded": 3
+				}
+			}
+		},
+		"outcome": "not-certified",
+		"note": "Phase 13 closed six code-audit gaps and merged the RC base tip; every touched row keeps its lanes not-run because no acceptance run exists, and the global gates are unchanged in kind. Nothing is waived."
 	}
 }
