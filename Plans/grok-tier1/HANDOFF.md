@@ -42,10 +42,11 @@ disagree, readiness.json wins and this file is stale.
 | Item               | Value                                                                                                                                                                       |
 | ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Execution checkout | `/Users/dr3/dev-shit/worktrees/auto-run-feature/grok-cli-integration` (registered worktree agent `404dfe62`)                                                                |
-| Branch             | `auto-run-feature/grok-cli-integration` (local only: never pushed, no PR, no merge, no version bump)                                                                        |
+| Branch             | `auto-run-feature/grok-cli-integration`, pushed to `origin` (`openasocket/Maestro`) on 2026-11-03; no merge, no version bump                                                |
+| Pull request       | [openasocket/Maestro#1](https://github.com/openasocket/Maestro/pull/1) into `feature/mega-maestro-v1.1.0-rc`, opened 2026-11-03; the first CI run the branch has had        |
 | Base               | RC tip `882d658a8cfb8c538d59eae3d8cb041724b9d1f5` merged by GT1-13-14 (merge commit `742004ac8`); it is now the merge-base with `feature/mega-maestro-v1.1.0-rc` (0 behind) |
-| Branch commits     | 615 not on the RC tip (HEAD is recorded in [Derived readiness](#derived-readiness))                                                                                         |
-| Diff vs RC tip     | 649 files (584 under `src/`, 297 of them tests; 48 under `Plans/grok-tier1`), +256,268 / -5,727 lines at `742004ac8`; most added lines are JSON evidence and fixtures       |
+| Branch commits     | 621 not on the RC tip: 616 playbook commits through GT1-13-15, four PR-preparation commits (`997b92fa3`, `b2027b5e5`, `b490f90b2`, `992d8c5fa`) and this handoff update     |
+| Diff vs RC tip     | 651 files (584 under `src/`, 297 of them tests; 48 under `Plans/grok-tier1`), +256,569 / -5,729 lines at `992d8c5fa`; most added lines are JSON evidence and fixtures       |
 
 Reproduce: `git diff --stat 882d658a8..auto-run-feature/grok-cli-integration`.
 
