@@ -641,8 +641,8 @@ export function AgentConfigPanel({
 		<div className={spacing}>
 			{agent.id === 'grok' && (
 				<p className="text-xs" style={{ color: theme.colors.textDim }}>
-					Grok uses headless streaming. ACP and Standard permission prompts are unavailable in
-					Maestro. {getPermissionModeTooltip('readonly', agent.id)} Select the account through the
+					Full Access uses headless streaming. {getPermissionModeTooltip('standard', agent.id)}{' '}
+					{getPermissionModeTooltip('readonly', agent.id)} Select the account through the
 					environment variables below; model and effort discovery follows that selection.
 				</p>
 			)}

@@ -4884,6 +4884,7 @@ describe('process IPC handlers', () => {
 					args: ['--cwd', cwd],
 					sessionCustomEnvVars,
 					sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+					permissionMode: 'full',
 					...overrides,
 				}
 			);
@@ -5298,6 +5299,7 @@ describe('process IPC handlers', () => {
 						agentSessionId: 'native-collision',
 						sessionCustomEnvVars: { GROK_HOME: account },
 						sessionSshRemoteConfig: { enabled: true, remoteId: 'remote-1' },
+						permissionMode: 'full',
 						...overrides,
 					}
 				);

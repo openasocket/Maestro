@@ -101,7 +101,7 @@ export function getPermissionModeTooltip(
 	agentId?: AgentId | string
 ): string {
 	if (agentId === 'grok' && mode === 'standard') {
-		return 'Standard permissions are unavailable for Grok in Maestro. Headless streaming cannot show tool approval or ask-back prompts; the ACP approval route is not connected.';
+		return 'Standard: Grok runs over its local ACP route (grok agent stdio). Each tool approval arrives as an in-app prompt. Ask-back questions cannot be answered yet; they show as an unavailable notice. Not available on SSH remotes (refused before anything starts) or under management.';
 	}
 	switch (mode) {
 		case 'full':

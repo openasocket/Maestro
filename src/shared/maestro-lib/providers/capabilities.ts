@@ -58,6 +58,8 @@ export const GROK_CAPABILITY_EVIDENCE = Object.freeze({
 			'GrokSessionStorage reads chat_history.jsonl; scoped extraction pinned by phase04 fixtures',
 		supportsWizard:
 			'streaming-json text deltas carry the structured reply; phase05 deterministic suites, native wizard cases not-run',
+		supportsStandardPermissionMode:
+			'GT1-13-01: a standard plan runs on GrokAcpSpawner (runsOnGrokAcpRoute); each ACP permission request is asked of the person through the permission relay consent session (GT1-07-02A, grokConsentAuthority) and only allow_once is selected; ACP request port suites pin it deterministically, live round trip not-run. Local target only: SSH is refused before spawn (acp-remote-route), managed hosts refuse the grok-acp route',
 	}),
 	withheld: Object.freeze({
 		supportsImageInput:
@@ -559,6 +561,7 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 		supportsContextExport: true, // Verified: session storage reads full transcripts (chat_history.jsonl), same export path as siblings
 		supportsWizard: true, // Streaming-json text deltas carry structured JSON wizard replies; discovery uses --always-approve + --max-turns 8 + --no-subagents (not plan - plan blocks read/fetch needed for discovery)
 		supportsGroupChatModeration: false, // Conservative default: moderation flow not yet exercised
+		supportsStandardPermissionMode: true, // Retained (GROK_CAPABILITY_EVIDENCE): ACP stdio route with in-app approvals, local target only
 		usesJsonLineOutput: true, // Verified: streaming-json is JSONL (one JSON object per line); also gates CLI batch spawning (spawnJsonLineAgent)
 		usesCombinedContextWindow: false, // Conservative default: on-disk signals.json reports a single contextTokensUsed but gauge math is unverified
 		supportsAppendSystemPrompt: false, // Native rules/append aliases remain unqualified; embed once and skip on resume

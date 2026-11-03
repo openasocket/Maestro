@@ -390,7 +390,9 @@ describe('agent-capabilities', () => {
 	// table; nothing here forces a value, so a promotion without evidence fails.
 	describe('Grok finalized registry (GT1-11-14B)', () => {
 		const grok = AGENT_CAPABILITIES.grok;
-		const capabilityKeys = Object.keys(DEFAULT_CAPABILITIES);
+		// supportsStandardPermissionMode is optional (absent from DEFAULT_CAPABILITIES)
+		// but is a claim like any other, so it needs a basis too (GT1-13-01).
+		const capabilityKeys = [...Object.keys(DEFAULT_CAPABILITIES), 'supportsStandardPermissionMode'];
 
 		it('records a basis for every retained flag and withholds the rest', () => {
 			const retained = Object.keys(GROK_CAPABILITY_EVIDENCE.retained);
@@ -449,6 +451,7 @@ describe('agent-capabilities', () => {
 					'supportsResume',
 					'supportsSessionId',
 					'supportsSessionStorage',
+					'supportsStandardPermissionMode',
 					'supportsStreaming',
 					'supportsThinkingDisplay',
 					'supportsUsageStats',

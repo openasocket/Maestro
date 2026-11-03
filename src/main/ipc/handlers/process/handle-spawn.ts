@@ -61,6 +61,7 @@ import {
 	validateGrokNativeCommand,
 	type GrokNativeCommandRefusal,
 } from '../../../../shared/maestro-lib/grok/acp-turn';
+import { GROK_ACP_PORT_SUPPORT } from '../../../../shared/maestro-lib/grok/route';
 import { generateUUID } from '../../../../shared/uuid';
 import { QUERY_USER_ENV_VAR } from '../../../../shared/webLogin';
 import { getActingUser } from '../../../web-server/auth/acting-user';
@@ -958,6 +959,33 @@ async function handleProcessSpawnImpl(
 			cleanupPluginRunProof();
 			return { success: false, pid: 0 };
 		}
+	}
+
+	// Standard permission mode (Grok): the plan runs on the ACP stdio route,
+	// whose permission requests are answered through the local consent
+	// session. That port has no remote transport (GROK_ACP_PORT_SUPPORT.remote,
+	// the selector's `acp-remote-route` gap), so an SSH turn is refused here,
+	// before the launch-scope probe or any remote write, instead of inside the
+	// spawner after them. Never downgraded to headless streaming.
+	if (
+		config.toolType === 'grok' &&
+		isSshEnabled &&
+		launchPermission?.requested === 'standard' &&
+		!GROK_ACP_PORT_SUPPORT.remote
+	) {
+		logger.error('Grok standard permission mode is not supported over SSH', LOG_CONTEXT, {
+			sessionId: config.sessionId,
+			gap: 'acp-remote-route',
+		});
+		reportSpawnRefusal(
+			deps,
+			config.sessionId,
+			'Standard permission mode is not available for Grok over SSH (acp-remote-route): ' +
+				'tool approvals run over the local ACP route only. Switch this agent to Full Access ' +
+				'or Read-Only, or disable SSH. Nothing was started.'
+		);
+		cleanupPluginRunProof();
+		return { success: false, pid: 0 };
 	}
 
 	// ========================================================================
