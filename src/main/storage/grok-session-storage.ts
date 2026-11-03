@@ -5,6 +5,9 @@
  *   ~/.grok/sessions/<percent-encoded-cwd>/<session-uuid>/
  *     summary.json       - session metadata (id, cwd, title, timestamps, counts)
  *     chat_history.jsonl - the transcript (system/user/assistant/tool_result/reasoning records)
+ *     usage.json         - token and cost ledger (grok 1.x)
+ *     prompt_context.json - inputs the system prompt was rendered from; only the
+ *                          memory and AGENTS.md facts are read (parseGrokPromptContext)
  *
  * The first-level folder name is the session's working directory with `/`
  * percent-encoded as `%2F`, so project filtering happens on directory names
@@ -233,6 +236,120 @@ export function parseGrokUsageFile(content: string | null) {
 		byModel,
 		accounting,
 	};
+}
+
+type GrokNativeMemory = NonNullable<
+	NonNullable<AgentSessionInfo['nativeMetadata']>['nativeMemory']
+>;
+
+const MAX_PROMPT_CONTEXT_AGENTS_FILES = 256;
+const MAX_PROMPT_CONTEXT_PATH_LENGTH = 4096;
+const MAX_PROMPT_CONTEXT_LABEL_LENGTH = 64;
+
+/**
+ * Confine one reported path to the given roots. Returns undefined when the
+ * value is not a path, null when it is one that must be dropped. A root that
+ * is not absolute (a remote `~` account) confines nothing, so every path under
+ * it is dropped rather than guessed at. Relative paths resolve against the
+ * first root only when `relativeBase` is given.
+ */
+function confineGrokReportedPath(
+	value: unknown,
+	roots: readonly string[],
+	isRemote: boolean,
+	relativeBase?: string
+): string | null | undefined {
+	if (typeof value !== 'string' || !value.trim()) return undefined;
+	if (value.length > MAX_PROMPT_CONTEXT_PATH_LENGTH || value.includes('\0')) return null;
+	const api = isRemote ? path.posix : path;
+	let candidate = value;
+	if (!api.isAbsolute(candidate)) {
+		if (!relativeBase || !api.isAbsolute(relativeBase)) return null;
+		candidate = api.join(relativeBase, candidate);
+	}
+	const resolved = api.resolve(candidate);
+	for (const root of roots) {
+		if (!root || !api.isAbsolute(root)) continue;
+		const relative = api.relative(api.resolve(root), resolved);
+		if (
+			relative === '' ||
+			(relative !== '..' && !relative.startsWith(`..${api.sep}`) && !api.isAbsolute(relative))
+		) {
+			return resolved;
+		}
+	}
+	return null;
+}
+
+function boundedLabel(value: unknown): string | undefined {
+	return typeof value === 'string' &&
+		value.length > 0 &&
+		value.length <= MAX_PROMPT_CONTEXT_LABEL_LENGTH
+		? value
+		: undefined;
+}
+
+/**
+ * Observed native-memory facts from a session's prompt_context.json (grok
+ * 1.0.70: memory_v2_enabled, memory_global_path, memory_workspace_path,
+ * agents_md_files, prompt_mode, is_non_interactive). Memory paths must lie
+ * under the account root, AGENTS.md paths under the account or project root;
+ * anything else is dropped and counted. Never reads the files it names.
+ * Returns null for absent, malformed or non-object content.
+ */
+export function parseGrokPromptContext(
+	content: string | null,
+	roots: { accountRoot: string; projectRoot: string; isRemote: boolean }
+): GrokNativeMemory | null {
+	if (!content?.trim()) return null;
+	let parsed: unknown;
+	try {
+		parsed = parseJsonWithBom(content);
+	} catch (error) {
+		if (error instanceof SyntaxError || error instanceof RangeError) return null;
+		throw error;
+	}
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+	const record = parsed as Record<string, unknown>;
+	const { accountRoot, projectRoot, isRemote } = roots;
+	const facts: GrokNativeMemory = { droppedPaths: 0 };
+	const keep = (value: string | null | undefined): string | undefined => {
+		if (value === null) facts.droppedPaths += 1;
+		return value ?? undefined;
+	};
+	if (typeof record.memory_v2_enabled === 'boolean') {
+		facts.memoryEnabled = record.memory_v2_enabled;
+	}
+	const globalMemoryPath = keep(
+		confineGrokReportedPath(record.memory_global_path, [accountRoot], isRemote)
+	);
+	if (globalMemoryPath) facts.globalMemoryPath = globalMemoryPath;
+	const workspaceMemoryPath = keep(
+		confineGrokReportedPath(record.memory_workspace_path, [accountRoot], isRemote)
+	);
+	if (workspaceMemoryPath) facts.workspaceMemoryPath = workspaceMemoryPath;
+	if (Array.isArray(record.agents_md_files)) {
+		// 1.0.70 sessions observed so far record an empty list; accept a bare
+		// path or an object carrying `path`, the two shapes the field could take.
+		const files: string[] = [];
+		for (const entry of record.agents_md_files.slice(0, MAX_PROMPT_CONTEXT_AGENTS_FILES)) {
+			const raw =
+				entry && typeof entry === 'object' && !Array.isArray(entry)
+					? (entry as Record<string, unknown>).path
+					: entry;
+			const file = keep(
+				confineGrokReportedPath(raw, [projectRoot, accountRoot], isRemote, projectRoot)
+			);
+			if (file && !files.includes(file)) files.push(file);
+		}
+		facts.agentsMdFiles = files;
+	}
+	const promptMode = boundedLabel(record.prompt_mode);
+	if (promptMode) facts.promptMode = promptMode;
+	if (typeof record.is_non_interactive === 'boolean') {
+		facts.nonInteractive = record.is_non_interactive;
+	}
+	return facts;
 }
 
 /** A tool call entry on an assistant transcript record. */
@@ -907,6 +1024,36 @@ export class GrokSessionStorage extends BaseSessionStorage {
 				usageRead.source.reason ??= 'invalid-usage';
 			}
 			nativeMetadata.sources!['usage.json'] = usageRead.source;
+			// Read only for a session that lists, after the three-file comparison:
+			// the prompt inputs are written once per process build and are optional
+			// (older sessions predate them), so an absent file never marks the
+			// snapshot as changing. The cross-file reason below still applies to it.
+			const promptContextRead = await this.readSessionFile(
+				this.joinPath(sshConfig, sessionDir, 'prompt_context.json'),
+				sshConfig
+			);
+			if (promptContextRead.source.status === 'available') {
+				const nativeMemory = parseGrokPromptContext(promptContextRead.content, {
+					accountRoot: sshConfig ? path.posix.dirname(sessionsDir) : path.dirname(sessionsDir),
+					projectRoot: cwd,
+					isRemote: Boolean(sshConfig),
+				});
+				if (nativeMemory) {
+					nativeMetadata.nativeMemory = nativeMemory;
+				} else {
+					promptContextRead.source.status = 'partial';
+					promptContextRead.source.reason = 'invalid-prompt-context';
+					logger.debug(`Grok session ${sessionId} has malformed prompt_context.json`, LOG_CONTEXT);
+				}
+			}
+			// A missing file (read as unreadable) adds no source: the session lists
+			// exactly as it did before the file existed. Any other outcome is shown.
+			if (
+				promptContextRead.source.status !== 'unavailable' ||
+				promptContextRead.source.reason !== 'unreadable'
+			) {
+				nativeMetadata.sources!['prompt_context.json'] = promptContextRead.source;
+			}
 			// Grok commits each file separately, with no shared commit marker. Even
 			// two identical samples cannot bind usage or summary to this transcript.
 			// Preserve stronger per-file failure reasons while disclosing that limit

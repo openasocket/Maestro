@@ -85,6 +85,22 @@ export interface AgentSessionInfo {
 		summary?: Record<string, unknown>;
 		/** Individual file observations, not an atomic cross-file snapshot. */
 		sources?: Record<string, NonNullable<SessionMessagesResult['source']>>;
+		/**
+		 * Grok: what the session's prompt_context.json records about native memory
+		 * and the AGENTS.md files its system prompt was rendered from. Observed
+		 * facts only: no file content is read, and a path outside the account or
+		 * project root is dropped (counted in droppedPaths). Absent when the file
+		 * is missing or malformed.
+		 */
+		nativeMemory?: {
+			memoryEnabled?: boolean;
+			globalMemoryPath?: string;
+			workspaceMemoryPath?: string;
+			agentsMdFiles?: string[];
+			promptMode?: string;
+			nonInteractive?: boolean;
+			droppedPaths: number;
+		};
 	};
 	inputTokens: number;
 	outputTokens: number;

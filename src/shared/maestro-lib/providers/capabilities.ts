@@ -83,6 +83,16 @@ export const GROK_CAPABILITY_EVIDENCE = Object.freeze({
 			'GT1-13-10: grok inspect --json reports projectTrusted false for an untrusted folder (the Maestro checkout included); --add-dir is refused there. Maestro grants no trust (no --trust) and records the observed value only.',
 	}),
 	/**
+	 * Project memory (GT1-13-12): what a listed session now shows of Grok's
+	 * native memory versus what still keeps supportsProjectMemory false.
+	 */
+	projectMemory: Object.freeze({
+		observed:
+			"GT1-13-12: GrokSessionStorage (src/main/storage/grok-session-storage.ts, parseGrokPromptContext) reads each session's prompt_context.json as a fourth bounded source beside summary.json, chat_history.jsonl and usage.json, and exposes nativeMetadata.nativeMemory: memory_v2_enabled, memory_global_path and memory_workspace_path (kept only under the account root), agents_md_files (kept only under the account or project root; relative entries resolve against the project), prompt_mode and is_non_interactive. File contents are never read; a dropped path is counted, a malformed file marks the source partial (invalid-prompt-context) and the session still lists. Real 1.0.70 sessions record memory_v2_enabled true with memory paths under GROK_HOME/memory-v2 and an empty agents_md_files list, so the entry shape for a loaded AGENTS.md is accepted as a bare path or an object with path, unobserved.",
+		unverified:
+			'supportsProjectMemory stays false: the facts are a per-session record of what the prompt was built from, not a binding. Unverified: that the workspace memory directory Grok picks (memory-v2/workspaces/<slug>) is stable for a Maestro agent cwd and account, that a Maestro-owned launch under an isolated GROK_HOME reads and writes the same scope a person sees, and any live case writing a memory in one turn and reading it back in a resumed one. Rules (AGENTS.md) and translated knowledge do not certify it.',
+	}),
+	/**
 	 * Decisions on native 1.0.70 flags Maestro could emit but does not, each
 	 * with its offline basis. GT1-13-07 folds these into the decided-flags ledger.
 	 */
@@ -592,7 +602,7 @@ export const AGENT_CAPABILITIES: Record<string, AgentCapabilities> = {
 		usesJsonLineOutput: true, // Verified: streaming-json is JSONL (one JSON object per line); also gates CLI batch spawning (spawnJsonLineAgent)
 		usesCombinedContextWindow: false, // Conservative default: on-disk signals.json reports a single contextTokensUsed but gauge math is unverified
 		supportsAppendSystemPrompt: false, // --rules decided unused (GROK_CAPABILITY_EVIDENCE.flagDecisions, GT1-13-06): no file form, no ACP form; embed once and skip on resume
-		supportsProjectMemory: false, // Native legacy/v2 memory exists; selected account/workspace binding is unverified. Rules and translated knowledge do not certify it.
+		supportsProjectMemory: false, // Native legacy/v2 memory exists and prompt_context.json facts are observed per session (GROK_CAPABILITY_EVIDENCE.projectMemory, GT1-13-12); selected account/workspace binding is unverified. Rules and translated knowledge do not certify it.
 		supportsAdditionalDirectories: false, // See GROK_DIRECTORY_GRANT_SUPPORT; no qualified native root-grant builder
 	},
 };

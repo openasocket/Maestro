@@ -1811,7 +1811,8 @@ describe('GrokSessionStorage - SSH remote', () => {
 				});
 				expect(remoteFs.readFileRemote).toHaveBeenCalledTimes(6);
 				expect(samples).toBe(2);
-				expect(remoteFs.statRemote).toHaveBeenCalledTimes(disconnect ? 11 : 12);
+				// One more stat per listed session: the absent prompt_context.json (GT1-13-12).
+				expect(remoteFs.statRemote).toHaveBeenCalledTimes(disconnect ? 12 : 13);
 				if (disconnect)
 					expect(captureException).toHaveBeenCalledExactlyOnceWith(
 						expect.objectContaining({ message: 'Connection reset by peer' }),
@@ -2236,7 +2237,11 @@ describe('GrokSessionStorage - SSH remote', () => {
 		]) {
 			expect(
 				Object.keys(fixture.files).includes(file) ||
-					ids.some((id) => file === path.posix.join(fixture.cwdDir, id, 'usage.json'))
+					ids.some((id) =>
+						['usage.json', 'prompt_context.json'].some(
+							(name) => file === path.posix.join(fixture.cwdDir, id, name)
+						)
+					)
 			).toBe(true);
 		}
 	});
@@ -2328,7 +2333,7 @@ describe('GrokSessionStorage - SSH remote', () => {
 		expect(peak).toBeGreaterThan(1);
 		expect(peak).toBeLessThanOrEqual(REMOTE_SESSION_READ_CONCURRENCY);
 		expect(active).toBe(0);
-		expect(remoteFs.statRemote).toHaveBeenCalledTimes(ids.length * 10);
+		expect(remoteFs.statRemote).toHaveBeenCalledTimes(ids.length * 11);
 		expect(remoteFs.readFileRemote).toHaveBeenCalledTimes(ids.length * 4);
 	});
 
@@ -2358,6 +2363,7 @@ describe('GrokSessionStorage - SSH remote', () => {
 				[`sessions/${encoded}/${escapedId}/summary.json`, summaryJson(id, cwd)],
 				[`sessions/${encoded}/${escapedId}/chat_history.jsonl`, chatHistoryJsonl()],
 				[`sessions/${encoded}/${escapedId}/usage.json`, undefined],
+				[`sessions/${encoded}/${escapedId}/prompt_context.json`, undefined],
 			] as const) {
 				const token = `${escapedRoot.slice(0, -1)}/${suffix}${escapedRoot.slice(-1)}`;
 				if (!suffix.includes(escapedId)) {
@@ -2410,7 +2416,7 @@ describe('GrokSessionStorage - SSH remote', () => {
 			expect(await new GrokSessionStorage(accountDir).listSessions(cwd, sshConfig)).toEqual([
 				expect.objectContaining({ sessionId: id, projectPath: cwd, messageCount: 3 }),
 			]);
-			expect(deps.execSsh).toHaveBeenCalledTimes(16);
+			expect(deps.execSsh).toHaveBeenCalledTimes(17);
 			expect(captureException).not.toHaveBeenCalled();
 		}
 	);
